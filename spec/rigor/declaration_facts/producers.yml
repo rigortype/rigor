@@ -421,6 +421,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#record_def_node: grandfathered
     Rigor::Inference::ScopeIndexer#record_def_visibility: grandfathered
     Rigor::Inference::ScopeIndexer#record_deferred_def: grandfathered
+    Rigor::Inference::ScopeIndexer#record_definer_name_row: 'issue #2184, adds a deferred-range row naming the literal first argument of a define_method / define_singleton_method call (or the same call through send) on any receiver, with no owner and no side, so a by-name reader (RebindingBlockCallees, the defines: edge) sees a body no def table holds; it reads the call as written and decides no owner, side or nesting'
     Rigor::Inference::ScopeIndexer#record_envelope: grandfathered
     Rigor::Inference::ScopeIndexer#record_eval_declarations?: grandfathered
     Rigor::Inference::ScopeIndexer#record_extend_call: grandfathered

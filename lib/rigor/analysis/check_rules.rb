@@ -3102,7 +3102,8 @@ module Rigor
           return true if rows.nil?
 
           offset = call_node.location.start_offset
-          rows.none? { |(start, finish, name, _kind, _owner)| !name.nil? && start <= offset && offset < finish }
+          # A row with no side (a `def` in a block, a `define_method` name) is a block's range or no range at all.
+          rows.none? { |(start, finish, _name, kind, _owner)| !kind.nil? && start <= offset && offset < finish }
         end
 
         SINGLETON_WILDCARD_SLOT = %i[singleton *].freeze

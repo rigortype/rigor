@@ -79,6 +79,27 @@ RSpec.describe "call.unresolved-toplevel in a rebinding callee's block — incre
     expect(warm).to eq(fires)
   end
 
+  # Issue #2184 — spellings no def table holds: a `define_singleton_method` name and a `def` inside a block reach the
+  # `defines:` edge through their deferred-range rows, and a `method_missing` through the edge its own read records.
+  it "re-checks the caller when a file starts or stops giving the name a body no def table holds" do
+    other = File.join(lib, "other.rb")
+    File.write(other, "class Other\nend\n")
+    expect(warm).to eq(fires)
+
+    [
+      "Other.define_singleton_method(:define) { |&blk| instance_exec(&blk) }\n",
+      "class Other\n  [1].each do\n    def self.define(&blk) = instance_exec(&blk)\n  end\nend\n",
+      "class Other\n  def self.method_missing(*, &blk) = instance_exec(&blk)\nend\n"
+    ].each do |source|
+      File.write(other, source)
+      expect(cold_run(config)).to eq([]), source
+      expect(warm).to eq([]), source
+
+      File.write(other, "class Other\nend\n")
+      expect(warm).to eq(fires), source
+    end
+  end
+
   # Nothing else asks about `each` here (Array's RBS answers the dispatch), so only the rule's own `defines:` edge
   # can bring this caller back.
   it "re-checks a caller whose callee no project file defined until an edit adds a rebinding one" do

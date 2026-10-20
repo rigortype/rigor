@@ -416,3 +416,12 @@ original WD3 framing left implicit.
   silences every block passed to an `each`; that
   false negative is cheaper than reading one receiver's class and
   missing the definition Ruby dispatches to.
+- 2026-10-21 — the same reading covers definitions no def table
+  holds: a `define_singleton_method` / `define_method` name, a
+  `def` inside a block or a method body, and a `method_missing`,
+  which answers for every name; the block of a `define_method` /
+  `define_singleton_method` call is a method body and is not judged
+  as top level either
+  ([#2184](https://github.com/rigortype/rigor/issues/2184)). A
+  project whose `method_missing` hands its block on, `super`
+  included, silences the rule in every block.

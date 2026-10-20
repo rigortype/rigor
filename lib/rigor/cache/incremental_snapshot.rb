@@ -182,7 +182,10 @@ module Rigor
       # 41: issue #1583 — the payload gains `discovery_digests`, the packed digest of each file a run over path
       # arguments discovered without analysing, which a recheck compares to re-baseline when one moved. A pre-41
       # blob carries none; the gate rejects it and the next run is cold.
-      SCHEMA = 41
+      # 42: issue #2184 — a `deferred_ranges` row for a `def` inside a block now carries the method's name, and a
+      # literal-named `define_method` / `define_singleton_method` call adds a row. A pre-42 bundle carries neither,
+      # so a warm run would report a top-level block call that a cold run declines.
+      SCHEMA = 42
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.

@@ -29,9 +29,12 @@ module Rigor
       #   run.
       #
       # A callee name the project gives a method without a readable `def` (`attr_*`, `alias_method`,
-      # `define_method`), or patches through `pre_eval:`, cannot be read and declines too. So does a `send` /
-      # `__send__` / `public_send` whose method name is not a literal. A callee no project file defines keeps the
-      # rule's old answer: Rigor reads only the project's own bodies here.
+      # `define_method`, `define_singleton_method` on any receiver, a `def` written inside a block), or patches
+      # through `pre_eval:`, cannot be read and declines too. So does a `send` / `__send__` / `public_send` whose
+      # method name is not a literal. Issue #2184 — a project `method_missing` that may hand its block on answers
+      # for every name, since Ruby reaches it for any name the receiver lacks; and the block of a `define_method` /
+      # `define_singleton_method` call is a method body, run under whatever receives the method. A callee no project
+      # file defines keeps the rule's old answer otherwise: Rigor reads only the project's own bodies here.
       module RebindingBlockCallees
         SEND_CALLS = %i[send __send__ public_send].freeze
         # Reading the block through these runs it with its own `self`, or does not run it.
@@ -41,6 +44,9 @@ module Rigor
         PREDICATE_PARENTS = [Prism::IfNode, Prism::UnlessNode, Prism::WhileNode, Prism::UntilNode].freeze
         # `proc { … }`, `lambda { … }` and `Proc.new { … }` passed with `&` are the block of the call they go to.
         PROC_LITERAL_CALLS = %i[proc lambda].freeze
+        # Core methods whose block becomes a method body, run under the method's receiver.
+        METHOD_BODY_BLOCK_CALLS = %i[define_method define_singleton_method].freeze
+        private_constant :METHOD_BODY_BLOCK_CALLS
         private_constant :SEND_CALLS, :PLAIN_PROC_CALLS, :BINDING_CALLS, :PREDICATE_PARENTS, :PROC_LITERAL_CALLS
 
         # The calls in one file that pass a literal block, each with the offsets that block's body spans, plus the
@@ -129,8 +135,12 @@ module Rigor
 
         def callee_may_rebind?(block_call, scope, sites)
           name = callee_name(block_call)
-          return true if name.nil?
+          return true if name.nil? || METHOD_BODY_BLOCK_CALLS.include?(name)
 
+          answer(name, scope, sites) || answer(:method_missing, scope, sites)
+        end
+
+        def answer(name, scope, sites)
           answers = sites.answers
           return answers[name] if answers.key?(name)
 
@@ -183,7 +193,8 @@ module Rigor
         # A def table keeps one body per class and side, so a second `def` of the name for the same slot (in a
         # sibling file, whose order is not load order, or in the other arm of an `if`) is one the tables never
         # showed, and so is a `def` whose class and side the tables hold no slot for. Every `def` outside a deferred
-        # body has a named row in the deferred-range table; a `module_function` row stands for both sides.
+        # body has a named row in the deferred-range table; a `module_function` row stands for both sides. A row with
+        # no side (a `def` inside a block, a `define_singleton_method` name) counts under a nil side, which no slot has.
         def unread_definition?(rows, slots)
           return false if rows.nil?
 

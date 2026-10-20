@@ -163,6 +163,21 @@ RSpec.describe "def.method-visibility-mismatch on singleton calls (#1984)", type
     RUBY
   end
 
+  # Issue #2184 — a `def` inside a block now names its deferred-range row, with no side; the call in its body still
+  # counts as load time. Ruby: `ALL = build` runs `Mapped2.new` before `private_class_method :new` and returns.
+  it "is quiet on a call in a def inside a block that the class body calls while it loads" do
+    expect(mismatches(<<~RUBY)).to eq([])
+      class Mapped2
+        def initialize(n); end
+        [1].each do
+          def self.build = Mapped2.new(1)
+        end
+        ALL = build
+        private_class_method :new
+      end
+    RUBY
+  end
+
   # Ruby: `self.class` may be a subclass that makes the name public again, so `VSub.new.copy` and
   # `Square.new.describe` return normally; `VBase.new` from a constant raises NoMethodError and is reported.
   it "reports only a constant receiver, not self.class" do

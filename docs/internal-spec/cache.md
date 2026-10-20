@@ -1019,7 +1019,7 @@ never in. A session that cannot reuse an existing snapshot therefore
 declines rather than running a baseline — nothing it computed could warm
 the next keystroke anyway.
 
-### `Payload` (current `SCHEMA = 41`)
+### `Payload` (current `SCHEMA = 42`)
 
 ```
 Payload :: Data[
@@ -1064,7 +1064,10 @@ narrowing a reader earned while no file defined the name must go when one
 starts to, and come back when the last one stops. Its producer diffs each
 changed, added or removed file's defined names
 (`ScopeIndexer.defined_method_names` over the `methods`, `def_nodes` and
-`singleton_def_nodes` tables) between the file's seed bundle and the
+`singleton_def_nodes` tables, plus the named `deferred_ranges` rows with no
+side: a `def` inside a block and a literal-named `define_method` /
+`define_singleton_method` call, [#2184](https://github.com/rigortype/rigor/issues/2184))
+between the file's seed bundle and the
 recheck scan (`Incremental.changed_defined_names`), and fires the key for
 every name that appeared in or vanished from a file. The appeared-symbol
 diff the `method:` and `toplevel:` keys use cannot stand in for it: it

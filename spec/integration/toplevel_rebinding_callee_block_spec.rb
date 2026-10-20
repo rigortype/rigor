@@ -35,6 +35,28 @@ RSpec.describe "call.unresolved-toplevel inside a block a project callee rebinds
           def self.calls(&b) = b.call
           def self.guarded(&b) = (b.call if b)
         def self.anded(&b) = b && b.call
+        def self.probe(&b) = (b.call if b.arity.zero? && !b.lambda? && b.parameters.empty? && !b.nil? && !!b)
+        def self.trip(&b) = b === nil
+        def self.idx(&b) = b[]
+        def self.yld(&b) = b.yield
+
+        def self.unl(&b)
+          return unless b
+
+          b.call
+        end
+
+        def self.unt(&b)
+          until b; end
+          b.call
+        end
+
+        def self.whl(&b)
+          while b
+            break
+          end
+          b.call
+        end
           def self.other(&b) = Target.new.instance_exec(&b)
 
           def self.cond(flag, &b)
@@ -86,6 +108,13 @@ RSpec.describe "call.unresolved-toplevel inside a block a project callee rebinds
 
       def with_ext(&b) = Ext.module_eval(&b)
         def top_helper = :top_helper
+        def top_yield = yield
+
+        class Coll
+          def helper = :coll_helper
+          def each_item = yield
+          def with_rebind(&b) = instance_exec(&b)
+        end
     RUBY
   end
 
@@ -102,6 +131,13 @@ RSpec.describe "call.unresolved-toplevel inside a block a project callee rebinds
       "Ext.calls { helper }",
       "Ext.guarded { helper }",
       "Ext.anded { helper }",
+      "Ext.probe { helper }",
+      "Ext.trip { helper }",
+      "Ext.idx { helper }",
+      "Ext.yld { helper }",
+      "Ext.unl { helper }",
+      "Ext.unt { helper }",
+      "Ext.whl { helper }",
       "Ext.other { helper }",
       "Ext.cond(true) { helper }",
       "Ext.send(:me) { helper }",
@@ -118,6 +154,10 @@ RSpec.describe "call.unresolved-toplevel inside a block a project callee rebinds
       "Ext.al { helper }",
       "Ext.ix(&-> { helper })",
       "Ext.ix(&proc { helper })",
+      "Ext.ix(&Proc.new { helper })",
+      "top_yield { helper }",
+      "Coll.new.each_item { helper }",
+      "Coll.new.with_rebind { helper }",
       "Kid.dsl { helper }",
       "Kid2.dsl { helper }",
       "Rec.new(:a) { helper }",
@@ -181,7 +221,9 @@ RSpec.describe "call.unresolved-toplevel inside a block a project callee rebinds
 
     # Non-vacuity: Ruby rebinds most rows and leaves `self` as main on the plain-call ones.
     plain = ["Ext.yields { helper }", "Ext.calls { helper }", "Ext.guarded { helper }", "Ext.anded { helper }",
-             "Ext.public_send(:yields) { helper }", "[1].each { helper }", "helper"]
+             "Ext.probe { helper }", "Ext.trip { helper }", "Ext.idx { helper }", "Ext.yld { helper }",
+             "Ext.unl { helper }", "Ext.unt { helper }", "Ext.whl { helper }", "top_yield { helper }",
+             "Coll.new.each_item { helper }", "Ext.public_send(:yields) { helper }", "[1].each { helper }", "helper"]
     expect(expected).to match_array(plain.map { |row| ["use.rb", line_of(row)] })
     expect(toplevel_lines).to match_array(expected)
   end
@@ -247,5 +289,34 @@ RSpec.describe "call.unresolved-toplevel inside a block a project callee rebinds
                                         "module Ext; def self.helper = :ok; end; p Ext.pdefine { helper }")
     expect([out, status.success?]).to eq([":ok\n", true])
     expect(toplevel_lines("pre_eval" => ["patches/module.rb"])).to eq([["use.rb", 5]])
+  end
+
+  # A `def` written inside a block has a def-table slot but no named row; it must not stand in for a sibling's
+  # unread body. A `module_function` row stands for both sides. Each pair is written in both file orders.
+  it "declines on a sibling pair whatever else defines the name, in either file order" do
+    rebind = "module Ext\n  def self.me(&b) = module_eval(&b)\n  def self.helper = :ok\nend\n"
+    pairs = {
+      "block def" => ["module Ext\n  def self.me = yield\nend\n",
+                      "class Yk\n  [1].each do\n    def self.me = yield\n  end\nend\n"],
+      "module_function" => ["module Ext\n  module_function\n\n  def me = yield\nend\n", nil]
+    }
+    pairs.each do |label, (yields, extra)|
+      [%w[a b], %w[b a]].each do |first, second|
+        FileUtils.rm_rf("lib")
+        FileUtils.mkdir_p("lib")
+        File.write("lib/#{first}.rb", rebind)
+        File.write("lib/#{second}.rb", yields)
+        File.write("lib/c.rb", extra) if extra
+        File.write("lib/use.rb", "Ext.me { helper }\nundefined_ctl\n")
+        expect(toplevel_lines).to eq([["use.rb", 2]]), "#{label}, #{first} then #{second}"
+      end
+    end
+  end
+
+  it "declines on a send whose String name is not valid in its encoding, and keeps the file's other reports" do
+    FileUtils.mkdir_p("lib")
+    File.write("lib/a.rb", "module Ext; def self.helper = :ok; end\nExt.send(\"\\xff\") { helper }\nundefined_ctl\n")
+
+    expect(toplevel_lines).to eq([["a.rb", 3]])
   end
 end

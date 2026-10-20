@@ -43,20 +43,38 @@ module Rigor
         PROC_LITERAL_CALLS = %i[proc lambda].freeze
         private_constant :SEND_CALLS, :PLAIN_PROC_CALLS, :BINDING_CALLS, :PREDICATE_PARENTS, :PROC_LITERAL_CALLS
 
-        # The calls in one file that pass a literal block, each with the offsets that block's body spans. Built on the
-        # first ask, so a file whose would-fire calls all decline earlier never walks.
+        # The calls in one file that pass a literal block, each with the offsets that block's body spans, plus the
+        # file's memo of callee answers. Built on the first ask, so a file whose would-fire calls all decline earlier
+        # never walks. One file is one ADR-46 consumer, so an answer's dependency edges, recorded on its first ask,
+        # hold for every later call in the file that reuses it.
         class Sites
+          attr_reader :answers
+
           def initialize(root)
             @root = root
             @rows = nil
+            @answers = {}
+            @def_rows = nil
           end
 
-          # The block-passing calls whose block contains `node`, outermost first.
+          # The block-passing calls whose block contains `node`. Rows are in start order, so the scan stops at the
+          # first block that starts after `node`.
           def enclosing(node)
             build
             start = node.location.start_offset
             stop = node.location.end_offset
-            @rows.filter_map { |from, to, call| call if start >= from && stop <= to }
+            found = []
+            @rows.each do |from, to, call|
+              break if from > start
+
+              found << call if stop <= to
+            end
+            found
+          end
+
+          # `{name => {[owner, side] => rows}}` over the project's named `def` rows, built once per file.
+          def def_rows(scope)
+            @def_rows ||= RebindingBlockCallees.def_row_counts(scope)
           end
 
           private
@@ -81,7 +99,7 @@ module Rigor
 
         # Does `call_node` sit inside a block that some project definition of its callee may run under another `self`?
         def inside_rebound_block?(call_node, scope, sites)
-          sites.enclosing(call_node).any? { |block_call| callee_may_rebind?(block_call, scope) }
+          sites.enclosing(call_node).any? { |block_call| callee_may_rebind?(block_call, scope, sites) }
         end
 
         # The node whose span is the block `call` passes: its literal block, or a lambda / proc literal passed with `&`.
@@ -106,44 +124,51 @@ module Rigor
           node.name == :new && node.receiver.is_a?(Prism::ConstantReadNode) && node.receiver.name == :Proc
         end
 
-        def callee_may_rebind?(block_call, scope)
+        def callee_may_rebind?(block_call, scope, sites)
           name = callee_name(block_call)
-          name.nil? || project_may_rebind?(name, scope)
+          return true if name.nil?
+
+          answers = sites.answers
+          return answers[name] if answers.key?(name)
+
+          answers[name] = project_may_rebind?(name, scope, sites)
         end
 
         # The method the block reaches: the call's own name, or the literal name a `send` family call dispatches to.
-        # nil when a `send` names its method with anything but a literal.
+        # nil when a `send` names its method with anything but a literal, or with a String that is no valid name.
         def callee_name(call)
           return call.name unless SEND_CALLS.include?(call.name)
 
           first = call.arguments&.arguments&.first
           case first
-          when Prism::SymbolNode, Prism::StringNode then first.unescaped.to_sym
+          when Prism::SymbolNode, Prism::StringNode
+            text = first.unescaped
+            text.to_sym if text.valid_encoding?
           end
         end
 
         # Reads every project table for `name`, so it records a `defines:<name>` edge whichever way it answers (a file
         # that starts or stops defining the name re-checks this one), plus each read body's own method edge through the
         # scope accessors (an edit of that body re-checks this one).
-        def project_may_rebind?(name, scope)
+        def project_may_rebind?(name, scope, sites)
           DependencyRecorder.read_missing(:defines, name) if DependencyRecorder.active?
           return true if patched_anywhere?(name, scope)
 
-          slots = 0
+          slots = Set.new
           readers = {
-            scope.discovered_def_nodes => ->(owner) { instance_def(scope, owner, name) },
-            scope.discovered_singleton_def_nodes => ->(owner) { scope.singleton_def_for(owner, name) }
+            [scope.discovered_def_nodes, :instance] => ->(owner) { instance_def(scope, owner, name) },
+            [scope.discovered_singleton_def_nodes, :singleton] => ->(owner) { scope.singleton_def_for(owner, name) }
           }
-          readers.each do |tables, reader|
+          readers.each do |(tables, side), reader|
             tables.each do |owner, table|
               next unless table.key?(name)
 
-              slots += 1
+              slots << [owner, side]
               node = reader.call(owner)
               return true if !node.is_a?(Prism::DefNode) || def_may_rebind?(node)
             end
           end
-          unread_definition?(name, scope, slots) || bodiless_definition?(name, scope)
+          unread_definition?(sites.def_rows(scope)[name], slots) || bodiless_definition?(name, scope)
         end
 
         def instance_def(scope, owner, name)
@@ -154,14 +179,27 @@ module Rigor
 
         # A def table keeps one body per class and side, so a second `def` of the name for the same slot (in a
         # sibling file, whose order is not load order, or in the other arm of an `if`) is one the tables never
-        # showed. Every `def` outside a deferred body has a row in the deferred-range table, and a `module_function`
-        # row fills both sides: more rows than slots read means a body went unread.
-        def unread_definition?(name, scope, slots)
-          rows = 0
+        # showed, and so is a `def` whose class and side the tables hold no slot for. Every `def` outside a deferred
+        # body has a named row in the deferred-range table; a `module_function` row stands for both sides.
+        def unread_definition?(rows, slots)
+          return false if rows.nil?
+
+          rows.any? { |slot, count| count > 1 || !slots.include?(slot) }
+        end
+
+        def def_row_counts(scope)
+          counts = Hash.new { |hash, name| hash[name] = Hash.new(0) }
           scope.discovered_deferred_ranges.each_value do |list|
-            list.each { |(_start, _stop, row_name, kind, _owner)| rows += (kind == :both ? 2 : 1) if row_name == name }
+            list.each do |(_start, _stop, name, kind, owner)|
+              next if name.nil?
+
+              key = owner || Inference::ScopeIndexer::TOP_LEVEL_DEF_KEY
+              sides = kind == :both ? %i[instance singleton] : [kind]
+              sides.each { |side| counts[name][[key, side]] += 1 }
+            end
           end
-          rows > slots
+          counts.default_proc = nil
+          counts
         end
 
         # A name some class gives a method with no `def` body Rigor holds (`attr_*`, `alias_method`, `define_method`).

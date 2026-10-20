@@ -35,7 +35,8 @@ module Rigor
       #    LocalVariableReadNode. Composite receivers (`expect(foo.bar)`, `expect { ... }.to raise_error`)
       #    fall through.
       # 3. The matcher is one of the recognised forms above (`be_a` / `be_kind_of` / `be_instance_of` /
-      #    `be_an_instance_of` / `be_nil` / `eq(literal)` / `eql(literal)` / `match(/regex/)`).
+      #    `be_an_instance_of` / `be_nil` / `eq(literal)` / `eql(literal)` / `match(/regex/)`, the last a meet
+      #    with the local's members; see `regex_match_type`).
       #
       # ## Equality is the local's own method
       #
@@ -152,10 +153,7 @@ module Rigor
           when :eq, :eql
             equality_type_for_literal_arg(matcher, target_local, negative: negative, scope: scope)
           when :match
-            # `match(/regex/)` narrows x to String. `match("...")` or `match(arbitrary_object)` falls
-            # through — the broader matcher dispatch needs the receiver to be a String, but we can only
-            # assert that for a literal regex.
-            string_type_for_regex_arg(matcher)
+            regex_match_type(matcher, target_local, negative: negative, scope: scope)
           end
         end
 
@@ -293,15 +291,61 @@ module Rigor
           end
         end
 
-        def string_type_for_regex_arg(matcher)
+        # --- `match(/regex/)` (#2033) ---
+        #
+        # RSpec's `match` passes when `expected === actual`, when `actual == expected`, or when `actual` responds to
+        # `match` and `actual.match(expected)` is truthy. `Regexp#===` matches a Symbol by its name, so a Symbol
+        # passes too, and keeps being a Symbol. The positive fact is therefore a meet with the local's members, as
+        # `eq`'s is: a String or Symbol member is kept as it is, and a member of a core class that has no `match` or
+        # `to_str` and whose `==` never equals a Regexp (`nil`, `true`, `false`, the numerics) is dropped, unless the
+        # project defines one of those methods on it. Any other member (a user class, `Object`, `Dynamic`) may pass,
+        # and the analyzer emits no fact. The negative form emits none either: a String that does not match passes
+        # `not_to match`, so nothing leaves the local.
+        REGEX_MATCH_KEPT_CLASSES = %w[String Symbol].freeze
+        REGEX_MATCH_METHODS = %i[match to_str].freeze
+        Ractor.make_shareable(REGEX_MATCH_KEPT_CLASSES)
+        Ractor.make_shareable(REGEX_MATCH_METHODS)
+        private_constant :REGEX_MATCH_KEPT_CLASSES, :REGEX_MATCH_METHODS
+
+        def regex_match_type(matcher, target_local, negative:, scope:)
+          return nil if negative || scope.nil?
+          return nil unless regex_literal_arg?(matcher)
+
+          current = scope.local(target_local)
+          return nil if current.nil?
+
+          members = current.is_a?(Rigor::Type::Union) ? current.members : [current]
+          kept = []
+          members.each do |member|
+            met = regex_match_member(member, scope)
+            return nil if met.equal?(UNDECIDED)
+
+            kept << met unless met.nil?
+          end
+          kept.empty? ? nil : Rigor::Type::Combinator.union(*kept)
+        end
+
+        def regex_literal_arg?(matcher)
           args = matcher.arguments&.arguments || []
-          return nil unless args.size == 1
+          args.size == 1 &&
+            (args.first.is_a?(Prism::RegularExpressionNode) || args.first.is_a?(Prism::InterpolatedRegularExpressionNode))
+        end
 
-          arg = args.first
-          return nil unless arg.is_a?(Prism::RegularExpressionNode) ||
-                            arg.is_a?(Prism::InterpolatedRegularExpressionNode)
+        # The member itself when it may pass, nil when it cannot, UNDECIDED when Rigor cannot tell.
+        def regex_match_member(member, scope)
+          class_name = member_class_name(member)
+          return UNDECIDED if class_name.nil?
+          return member if REGEX_MATCH_KEPT_CLASSES.include?(class_name)
+          return member if project_defines?(class_name, :==, scope)
+          return member if REGEX_MATCH_METHODS.any? { |name| project_defines_anywhere?(class_name, name, scope) }
 
-          Rigor::Type::Combinator.nominal_of("String")
+          nil
+        end
+
+        # Whether the project's source defines `method_name` on `class_name` or any of its ancestors.
+        def project_defines_anywhere?(class_name, method_name, scope)
+          !scope.user_def_through_ancestors(class_name, method_name).first.nil? ||
+            scope.discovered_method_through_ancestors?(class_name, method_name, :instance)
         end
 
         NO_LITERAL = Object.new.freeze

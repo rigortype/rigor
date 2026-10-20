@@ -314,11 +314,14 @@ RSpec.describe "plugins/rigor-rspec" do
     end
 
     context "when matcher is match(/regex/)" do
-      it "narrows x to String for a regex literal arg" do
-        call_node = parse_call_node("expect(x).to match(/\\Afoo\\z/)")
-        fact = plugin.narrowing_facts_for(call_node: call_node, scope: nil).first
+      it "meets a regex literal arg with the local's String and Symbol members" do
+        type = equality_fact_type("expect(x).to match(/\\Afoo\\z/)", union(nominal("String"), constant(nil)))
+        expect(type).to eq(nominal("String"))
+      end
 
-        expect(fact.type).to eq(Rigor::Type::Combinator.nominal_of("String"))
+      it "is silent without a scope, since the local's members decide" do
+        call_node = parse_call_node("expect(x).to match(/\\Afoo\\z/)")
+        expect(plugin.narrowing_facts_for(call_node: call_node, scope: nil)).to be_empty
       end
 
       it "is silent for a non-regex argument" do
@@ -602,6 +605,58 @@ RSpec.describe "plugins/rigor-rspec" do
         patch = "class Integer\n  def eql?(other) = true\nend\n"
         expect(dumped_types(run_case_eq("Integer", "expect(x).to eql(9)\ndump_type(x)\n", patch: patch)))
           .to eq(["Integer"])
+      end
+
+      # Issue #2033 — RSpec's `match` passes when `expected === actual`, and `/a/ === :abc` is true, so a Symbol
+      # subject passes `expect(x).to match(/a/)` and stays a Symbol (rspec-expectations 3.13: `expect(:abc).to
+      # match(/a/)` passes). Only a member that can never pass leaves the local: `/a/ === nil` and `/a/ === 1` are
+      # false, and neither responds to `match`.
+      describe "match(/regex/) (#2033)" do
+        it "keeps a Symbol subject a Symbol" do
+          expect(/a/ === :abc).to be(true)
+          expect(dumped_types(run_case_eq("Symbol", "expect(x).to match(/a/)\ndump_type(x)\nx.to_proc\n")))
+            .to eq(["Symbol"])
+        end
+
+        it "keeps both members of a Symbol | String subject" do
+          expect(dumped_types(run_case_eq("Symbol | String", "expect(x).to match(/a/)\ndump_type(x)\n")))
+            .to eq(["String | Symbol"])
+        end
+
+        it "leaves an untyped subject untyped" do
+          expect(dumped_types(run_case_eq("untyped", "expect(x).to match(/a/)\ndump_type(x)\n")))
+            .to eq(["Dynamic[top]"])
+        end
+
+        it "keeps a String subject a String and removes nil and Integer members" do
+          nothing = nil
+          expect([/a/ === nothing, /a/ === 1, nothing.respond_to?(:match), 1.respond_to?(:match)]).to all(be(false))
+          expect(dumped_types(run_case_eq("String", "expect(x).to match(/a/)\ndump_type(x)\n"))).to eq(["String"])
+          expect(dumped_types(run_case_eq("String?", "expect(x).to match(/a/)\ndump_type(x)\n"))).to eq(["String"])
+          expect(dumped_types(run_case_eq("Symbol | Integer", "expect(x).to match(/a/)\ndump_type(x)\n")))
+            .to eq(["Symbol"])
+        end
+
+        # RSpec's `match` also passes when `actual.match(expected)` is truthy, or `actual == expected`; a member of a
+        # class Rigor cannot rule out keeps the local's type.
+        it "keeps the local's type when a member may define match, to_str or ==" do
+          expect(dumped_types(run_case_eq("Object | nil", "expect(x).to match(/a/)\ndump_type(x)\n")))
+            .to eq(["Object?"])
+          expect(dumped_types(run_case_eq("Object | String", "expect(x).to match(/a/)\ndump_type(x)\n")))
+            .to eq(dumped_types(run_case_eq("Object | String", "dump_type(x)\n")))
+          %w[match to_str ==].each do |method_name|
+            patch = "class NilClass\n  def #{method_name}(other) = true\nend\n"
+            expect(dumped_types(run_case_eq("String?", "expect(x).to match(/a/)\ndump_type(x)\n", patch: patch)))
+              .to eq(["String?"])
+          end
+        end
+
+        # A String that does not match passes `not_to match`, so the negative form removes nothing.
+        it "leaves the local unchanged after not_to match(/regex/)" do
+          expect(/a/ === "b").to be(false)
+          expect(dumped_types(run_case_eq("String", "expect(x).not_to match(/a/)\ndump_type(x)\n")))
+            .to eq(["String"])
+        end
       end
     end
   end

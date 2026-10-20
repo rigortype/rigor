@@ -73,10 +73,11 @@ end
 | `eq(literal)` / `eql(literal)` | meet with `Constant<literal>` (see below) |
 | `be_a(T)` / `be_kind_of(T)` / `be_instance_of(T)` / `be_an_instance_of(T)` | meet with `T` |
 | `be_nil` | narrow to `Constant<nil>` |
-| `match(/regex/)` | narrow to `String` |
+| `match(/regex/)` | keep the `String` and `Symbol` members, remove `nil`, `true`, `false` and numeric members; unchanged when a member may be anything else |
 | `not_to be_nil` / `to_not be_nil` | narrow away from `nil` |
 | `not_to be_a(T)` / `not_to be_kind_of(T)` / `not_to be_instance_of(T)` / `not_to be_an_instance_of(T)` | narrow away from `T` |
 | `not_to eq(literal)` / `not_to eql(literal)` (and `to_not`) | unchanged (see below) |
+| `not_to match(/regex/)` (and `to_not`) | unchanged: a `String` that does not match passes |
 
 Other matchers emit nothing. `be_truthy` is not narrowed, nor is
 `expect { ... }.to raise_error(...)` (the block form), nor an

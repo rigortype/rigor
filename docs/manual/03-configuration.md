@@ -106,6 +106,7 @@ rigor: disable: "call.undefined-methdo" is not a recognized rule id; the suppres
 rigor: disable: "plugin_loader.load-error" names a run-level row, which `disable:` does not reach; use `severity_overrides:` or a baseline
 rigor: disable: "plugin.shoulda-matchers.unknown-column" names no plugin `plugins:` configures; the suppression has no effect
 rigor: severity_overrides: "flow.bogus" is not a recognized rule id; the override has no effect
+rigor: severity_overrides: "undefined-method" is a legacy alias of `call.undefined-method`; the override has no effect, so write `call.undefined-method`
 rigor: bundler.lockfile: "./missing/Gemfile.lock" does not exist
 ```
 

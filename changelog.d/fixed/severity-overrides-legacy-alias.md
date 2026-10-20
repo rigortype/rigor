@@ -1,0 +1,1 @@
+- **[config]** A legacy alias used as a `severity_overrides:` key, such as `undefined-method`, now gets a warning that it has no effect, naming the canonical id. ([#2223](https://github.com/rigortype/rigor/pull/2223))

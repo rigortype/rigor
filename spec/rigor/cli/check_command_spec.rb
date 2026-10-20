@@ -580,6 +580,42 @@ RSpec.describe Rigor::CLI::CheckCommand do
     expect(sig.fetch("path")).to end_with("no_such_sig")
   end
 
+  # #2005 — a legacy alias key names no row, so the CLI says so on STDERR and in JSON `config_warnings`, naming the
+  # canonical id. The alias is not mapped: the override stays inert whatever the run reports.
+  describe "a legacy alias used as a severity_overrides: key" do
+    {
+      "undefined-method" => "call.undefined-method",
+      "wrong-arity" => "call.wrong-arity"
+    }.each do |alias_key, canonical|
+      it "warns on STDERR and in config_warnings that `#{alias_key}` is a legacy alias of `#{canonical}`" do
+        File.write("a.rb", "x = 1\n")
+        File.write(".rigor.yml", "severity_overrides:\n  #{alias_key}: \"off\"\n")
+
+        _status, out, err = run(["--no-cache", "--no-ci-detect", "--no-stats", "--format=json",
+                                 "--config", ".rigor.yml", "a.rb"])
+
+        expect(err).to include("\"#{alias_key}\" is a legacy alias of `#{canonical}`")
+        warning = JSON.parse(out).fetch("config_warnings").find { |w| w["kind"] == "severity_override" }
+        expect(warning).to include("token" => alias_key)
+        expect(warning.fetch("message")).to include("write `#{canonical}`")
+      end
+    end
+
+    it "does not repeat the advice to write the canonical id when the map already has it" do
+      File.write("a.rb", "x = 1\n")
+      File.write(".rigor.yml",
+                 "severity_overrides:\n  undefined-method: \"off\"\n  call.undefined-method: \"warning\"\n")
+
+      _status, out, = run(["--no-cache", "--no-ci-detect", "--no-stats", "--format=json", "--config", ".rigor.yml",
+                           "a.rb"])
+
+      warning = JSON.parse(out).fetch("config_warnings").find { |w| w["kind"] == "severity_override" }
+      expect(warning.fetch("message"))
+        .to include("is a legacy alias of `call.undefined-method`; the override has no effect")
+      expect(warning.fetch("message")).not_to include("so write")
+    end
+  end
+
   # Issue #697 — the interim fix is the warning and nothing else. The `call.undefined-method`
   # row it explains STILL fires: teaching the check rules to recognise this route would be a
   # fourth way for a class to be open-receiver protected, which is #660's question. This

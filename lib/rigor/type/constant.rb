@@ -79,7 +79,10 @@ module Rigor
       # Scalar carriers without RBS Literal support (Float, Range, Rational, Complex, Regexp, Pathname)
       # keep their pre-existing widen-to-class-name behaviour because RBS rejects their literal spellings
       # as syntax errors. `Range` is generic (`Range[out E]`), and a bare `Range` fails `rbs validate`, so
-      # it carries the class of its endpoints, or `untyped` when both are nil (#1891).
+      # it carries the class of its endpoints, or `untyped` when both are nil (#1891). `Set[unchecked out A]` is
+      # generic too, and a set is mutable: the constant's elements are only what it held when it was built, and
+      # `x << "a"` adds a member they do not name. It erases to `Set[untyped]`, as an Array or Hash literal's
+      # element type is widened rather than pinned (#2177).
       def erase_to_rbs
         case value
         when true then "true"
@@ -88,6 +91,7 @@ module Rigor
         when Integer then value.to_s
         when Symbol, String then value.inspect
         when Range then "Range[#{range_element_rbs}]"
+        when ::Set then "Set[untyped]"
         else value.class.name
         end
       end

@@ -54,7 +54,8 @@ RSpec.describe Rigor::Type::StructInstance do
     it "renders the anonymous form tagged Struct" do
       si = described_class.new(members)
       expect(si.describe).to eq("Struct(x: 1, y: \"two\")")
-      expect(si.erase_to_rbs).to eq("Struct")
+      # `Struct[Elem]` is generic; a bare `Struct` fails `rbs validate` (#2177).
+      expect(si.erase_to_rbs).to eq("Struct[untyped]")
     end
 
     it "renders the named form tagged with the class" do

@@ -57,11 +57,17 @@ module Rigor
         Type::Tuple.new(elements)
       end
 
-      def self.elaborate_hash_shape(type, _environment, _arity_cache)
-        # HashShape's element types are read-only on the carrier; rebuilding them would need going through the
-        # per-pair required/optional/read-only machinery. Sig-gen only routes top-level returns through here for
-        # now — nested HashShape elaboration ships as a follow-up if the need surfaces.
-        type
+      # A bare generic in a value position (`{ k: Hash.new }`) fails `rbs validate` as a top-level one does
+      # (#2177), so the values are elaborated too. Only the pairs change; the key policy is carried over.
+      def self.elaborate_hash_shape(type, environment, arity_cache)
+        pairs = type.pairs.transform_values { |value| walk(value, environment, arity_cache) }
+        return type if pairs == type.pairs
+
+        Type::HashShape.new(
+          pairs,
+          required_keys: type.required_keys, optional_keys: type.optional_keys,
+          read_only_keys: type.read_only_keys, extra_keys: type.extra_keys
+        )
       end
 
       def self.generic_arity_for(class_name, environment, cache)

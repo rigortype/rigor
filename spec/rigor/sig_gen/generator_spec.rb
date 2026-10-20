@@ -15,6 +15,16 @@ RSpec.describe Rigor::SigGen::Generator do
     full
   end
 
+  # `rbs validate`'s type check over the core signatures: the error class a written `sig/` would fail with, or nil.
+  def rbs_type_error(rbs)
+    env = (@rbs_core_env ||= RBS::Environment.from_loader(RBS::EnvironmentLoader.new).resolve_type_names)
+    validator = RBS::Validator.new(env: env, resolver: RBS::Resolver::TypeNameResolver.build(env))
+    validator.validate_type(RBS::Parser.parse_type(rbs), context: nil)
+    nil
+  rescue RBS::BaseError => e
+    e.class
+  end
+
   def generator(paths:, signature_paths: nil, plugins: nil)
     configuration = Rigor::Configuration.new(
       Rigor::Configuration::DEFAULTS.merge(
@@ -1354,6 +1364,64 @@ RSpec.describe Rigor::SigGen::Generator do
 
       expect(method.classification).to eq(Rigor::SigGen::Classification::TIGHTER_RETURN)
       expect(method.rbs).to eq("def g: () -> Range[Integer]")
+    end
+
+    # `Set[unchecked out A]` and `Struct[Elem]` are generic, and the bare spellings fail `rbs validate` with
+    # `InvalidTypeApplicationError` (#2177), as a bare `Range` did (#1891). A set is mutable, so its element type
+    # is `untyped` rather than the classes it was built with: the mutated rows return members of another class.
+    # The validator is RBS's own, over the core signatures; the Ruby witness evaluates each body.
+    {
+      "a Set literal" => ["Set[1, 2]", "Set[untyped]", [1, 2]],
+      "an empty Set" => ["Set.new", "Set[untyped]", []],
+      "a Set mutated with <<" => [%(x = Set[1]; x << "a"; x), "Set[untyped]", [1, "a"]],
+      "a Set mutated with merge" => [%(x = Set[1]; x.merge([:s]); x), "Set[untyped]", [1, :s]],
+      "a Set mutated in a block" => [%(x = Set[1]; [2.5].each { |v| x.add(v) }; x), "Set[untyped]", [1, 2.5]],
+      "an anonymous Struct instance" => ["Struct.new(:a).new(1)", "Struct[untyped]", [1]]
+    }.each do |label, (body, expected, runtime_elements)|
+      it "proposes #{expected}, which RBS validates, for #{label} over a declared `-> untyped`" do
+        write_fixture("sig/box.rbs", "class Box\n  def g: () -> untyped\nend\n")
+        path = write_fixture("lib/box.rb", "class Box\n  def g\n    #{body}\n  end\nend\n")
+
+        gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
+        method = gen.run.find { |c| c.method_name == :g }
+
+        expect(eval(body).to_a).to eq(runtime_elements) # rubocop:disable Security/Eval
+        expect(method.classification).to eq(Rigor::SigGen::Classification::TIGHTER_RETURN)
+        expect(method.rbs).to eq("def g: () -> #{expected}")
+        expect(rbs_type_error(expected)).to be_nil
+      end
+    end
+
+    # A Set constant is a nominal, as a Range or a Float is, not a pinned literal (#2177), so it tightens a
+    # declared `-> Object`.
+    it "proposes Set[untyped] for a union of Set literals over a declared `-> Object`" do
+      write_fixture("sig/box.rbs", "class Box\n  def g: () -> Object\nend\n")
+      path = write_fixture("lib/box.rb", "class Box\n  def g = rand(2) == 0 ? Set[1] : Set[2]\nend\n")
+
+      gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
+      method = gen.run.find { |c| c.method_name == :g }
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::TIGHTER_RETURN)
+      expect(method.rbs).to eq("def g: () -> Set[untyped]")
+    end
+
+    # A bare generic in a record value fails `rbs validate` as a top-level one does (#2177).
+    {
+      "an Enumerator over a Set" => ["{ k: Set[1].each }", "{ k: Enumerator[untyped, Set[untyped]] }"],
+      "an empty Hash.new" => ["{ k: Hash.new }", "{ k: Hash[untyped, untyped] }"],
+      "an Enumerator over an empty Hash" => ["{ k: {}.each }",
+                                             "{ k: Enumerator[[untyped, untyped], Hash[untyped, untyped]] }"],
+      "an Enumerator over an empty Array" => ["{ k: [].to_enum }", "{ k: Enumerator[untyped, Array[untyped]] }"],
+      "a Hash-narrowed value" => ["x.is_a?(Hash) ? { k: x } : nil", "(nil | { k: Hash[untyped, untyped] })"]
+    }.each do |label, (body, expected)|
+      it "elaborates the generics in a record value for #{label}" do
+        path = write_fixture("lib/box.rb", "class Box\n  def g(x) = #{body}\nend\n")
+
+        method = generator(paths: [path]).run.find { |c| c.method_name == :g }
+
+        expect(method.rbs).to eq("def g: (untyped) -> #{expected}")
+        expect(rbs_type_error(expected)).to be_nil
+      end
     end
 
     # The boundary of #1891: an `untyped` only the inline reader synthesizes is no word of the author's, so it keeps

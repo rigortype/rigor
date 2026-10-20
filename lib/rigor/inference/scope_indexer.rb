@@ -197,13 +197,25 @@ module Rigor
         # share.
         seeded_scope = seed_struct_fold_safe(seeded_scope, root).with_match_frame(root)
 
-        on_enter = ->(node, scope) { table[node] = scope }
-        StatementEvaluator.new(scope: seeded_scope, on_enter: on_enter,
-                               converged_loop_recording: converged_loop_recording,
-                               widen_clauses: widen_clauses).evaluate(root)
+        evaluate = recording_evaluator(table, converged_loop_recording, widen_clauses)
+        evaluate.call(root, seeded_scope)
 
-        propagate(root, table, seeded_scope)
+        with_unentered_evaluator(evaluate) { propagate(root, table, seeded_scope) }
         table
+      end
+
+      # The `(node, scope, excluded = nil) ->` evaluation that records every node it visits into `table`, except the
+      # nodes in `excluded`: the file's own pass, and each construct {#evaluate_unentered_flow} evaluates in the walk
+      # after it.
+      def recording_evaluator(table, converged_loop_recording, widen_clauses)
+        lambda do |node, scope, excluded = nil|
+          on_enter =
+            if excluded.nil? || excluded.empty? then ->(visited, at) { table[visited] = at }
+            else ->(visited, at) { table[visited] = at unless excluded.include?(visited) }
+            end
+          StatementEvaluator.new(scope: scope, on_enter: on_enter, converged_loop_recording: converged_loop_recording,
+                                 widen_clauses: widen_clauses).evaluate(node)
+        end
       end
 
       # Runs the combined methods/def-nodes descent (one walk of the file), seeds the discovered-methods existence table
@@ -11433,6 +11445,7 @@ module Rigor
             table[node] = parent_scope
             parent_scope
           end
+        evaluate_unentered_flow(node, table, current_scope)
 
         case node
         when Prism::IfNode
@@ -11448,7 +11461,7 @@ module Rigor
           child_scope = entered ? current_scope : closure_scope(node, current_scope)
           node.rigor_each_child { |child| propagate(child, table, child_scope) }
         when Prism::CallNode
-          propagate_call(node, table, current_scope)
+          propagate_call(node, table, current_scope, recorded: recorded)
         when Prism::RescueNode, Prism::EnsureNode
           # Issue #1360 — a clause the evaluator did not enter (a `begin` in a value position) reads `$!`, `$@` and
           # `$?` unbound, not the enclosing clause's; one it entered keeps what it recorded.
@@ -11460,6 +11473,79 @@ module Rigor
         when Prism::PostExecutionNode then propagate_end_body(node, table, current_scope)
         else propagate_children(node, table, current_scope)
         end
+      end
+
+      # Issues #2196 and #2056 — the constructs whose parts run under a narrowing their own condition or left operand
+      # makes, keyed to the part {StatementEvaluator} records first when it enters one.
+      UNENTERED_FLOW_ENTRY = {
+        Prism::AndNode => :left, Prism::OrNode => :left,
+        Prism::IfNode => :predicate, Prism::UnlessNode => :predicate,
+        Prism::WhileNode => :predicate, Prism::UntilNode => :predicate
+      }.freeze
+      private_constant :UNENTERED_FLOW_ENTRY
+
+      UNENTERED_EVALUATOR_KEY = :rigor_scope_index_unentered_evaluator
+      private_constant :UNENTERED_EVALUATOR_KEY
+
+      # Issues #2196 and #2056 — an `&&` / `||` / `and` / `or`, an `if` / `unless` / ternary or a `while` / `until`
+      # in a value position (an array element, a hash value, a call argument, an interpolation, a multi-value
+      # `return`) is typed by `ExpressionTyper` and never entered, so no part of it was recorded and this walk handed
+      # every part one scope. A walk that narrows by the condition's edges cannot follow a write inside the narrowed
+      # part (`[c && (c = c.size; c.even?)]`, `[x || (set!; @x.upcase)]`) nor one inside a block in an earlier
+      # conjunct (`[x.nil? && [1].each { x = "d" } && x.upcase]`). Such a construct is evaluated here instead, from
+      # the scope this walk reached it with, under the index's own recorder, so each part is recorded with the scope
+      # the statement form records it with. What it does not visit (a dead arm) is walked as before.
+      def evaluate_unentered_flow(node, table, current_scope)
+        entry = UNENTERED_FLOW_ENTRY[node.class]
+        return if entry.nil?
+
+        # An entered construct is already recorded; skipping it is a performance guard, not a behaviour.
+        part = node.public_send(entry)
+        return if part.nil? || table.key?(part)
+
+        evaluate = Thread.current[UNENTERED_EVALUATOR_KEY]
+        evaluate&.call(node, current_scope, code_body_nodes(node, current_scope.source_path))
+      end
+
+      # The evaluation of an unentered construct starts with no class frame and no lexical nesting, which only a code
+      # body observes: a `def`, a `class` / `module` / `class << …` body, and the block of a class-creating call
+      # (`Class.new { … }`, `Struct.new`, `Data.define`, `Module.new`) or of a `refine`, whose `def`s and constants
+      # resolve against the class the walk tracks and the evaluation does not. Every node in one is left out of the
+      # recording, so the walk reaches it unrecorded and handles it as it did before #2196 ({#unentered_block_entry},
+      # {#record_class_body_defs}).
+      # Answers nil, allocating nothing, for a construct holding no code body: the common case.
+      def code_body_nodes(node, source_path, acc = nil, inside: false)
+        inside ||= CODE_BODY_NODES.include?(node.class)
+        (acc ||= Set.new.compare_by_identity) << node if inside
+        if !inside && node.is_a?(Prism::CallNode) && class_body_block_call?(node, source_path)
+          acc = code_body_nodes(node.block, source_path, acc, inside: true)
+          node.rigor_each_child do |child|
+            acc = code_body_nodes(child, source_path, acc) unless child.equal?(node.block)
+          end
+          return acc
+        end
+        node.rigor_each_child { |child| acc = code_body_nodes(child, source_path, acc, inside: inside) }
+        acc
+      end
+
+      CODE_BODY_NODES = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
+      private_constant :CODE_BODY_NODES
+
+      def class_body_block_call?(node, source_path)
+        node.block.is_a?(Prism::BlockNode) &&
+          (!AnonymousMetaClass.name_for(node, source_path).nil? || !refine_target(node).nil?)
+      end
+
+      # The evaluation {#evaluate_unentered_flow} runs for the walk of one {#index}, installed for that walk only.
+      # Index walks nest (a rule may re-index a file while another file's walk is suspended), so the outer one is
+      # restored on exit. A `propagate` called directly while an outer index walk is running would record into the
+      # OUTER index's table through it; nothing outside {#index} calls `propagate`.
+      def with_unentered_evaluator(evaluate)
+        outer = Thread.current[UNENTERED_EVALUATOR_KEY]
+        Thread.current[UNENTERED_EVALUATOR_KEY] = evaluate
+        yield
+      ensure
+        Thread.current[UNENTERED_EVALUATOR_KEY] = outer
       end
 
       SELF_OPENING_BODIES = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
@@ -11496,11 +11582,11 @@ module Rigor
       # argument one scope and threads none, so arguments that write keep the call's: an earlier one may rebind the
       # receiver a later one reads (`return y&.concat((y = nil).to_s, y.upcase)`, where the evaluator threads no
       # operand).
-      def propagate_call(node, table, current_scope)
+      def propagate_call(node, table, current_scope, recorded: false)
         block = node.block
         operands =
           OperandEffects.any?(node.arguments) ? current_scope : Narrowing.safe_navigation_scope(node, current_scope)
-        entry = unentered_block_entry(node, block, table, current_scope)
+        entry = unentered_block_entry(node, block, table, current_scope, call_recorded: recorded)
         if entry.equal?(current_scope) && operands.equal?(current_scope)
           node.rigor_each_child { |child| propagate(child, table, current_scope) }
           return
@@ -11524,7 +11610,7 @@ module Rigor
         node.rigor_each_child { |child| propagate(child, table, child_scope) }
       end
 
-      def unentered_block_entry(node, block, table, current_scope)
+      def unentered_block_entry(node, block, table, current_scope, call_recorded: false)
         return current_scope unless block.is_a?(Prism::BlockNode) && !table.key?(block)
 
         narrowing = unentered_block_narrowing(node, current_scope)
@@ -11537,6 +11623,12 @@ module Rigor
           else
             LastLine.block_entry(FreshFrameBlocks.closure_entry(current_scope, block, node), block, node)
           end
+        # Issue #2196 — a class-body block whose call the evaluator recorded but did not enter (one inside a construct
+        # {#evaluate_unentered_flow} evaluated, or a later operand) starts from the scope the call was evaluated in,
+        # which may narrow a captured local the body writes; this walk runs the body's statements from one scope, so
+        # such a local reads `Dynamic[top]` in it: `[c && Class.new { c = c.size; c.even? }]`. A block whose call was
+        # not recorded keeps the enclosing scope as before.
+        entry = widen_condition_writes(block, entry) if call_recorded && class_body_block_call?(node, entry.source_path)
         anonymous = AnonymousMetaClass.name_for(node, current_scope.source_path)
         return unentered_meta_class_body_entry(block, entry, anonymous, table) if anonymous
 

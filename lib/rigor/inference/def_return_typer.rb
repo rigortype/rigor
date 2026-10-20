@@ -156,9 +156,9 @@ module Rigor
         return unless node.is_a?(Prism::Node)
 
         guards[node] = active if node.is_a?(Prism::CallNode) && !active.empty?
-        truthy, rest = truthy_split(node)
+        truthy, predicate, rest = truthy_split(node)
         if truthy
-          collect_truthy_guards(truthy, active + [node.predicate.slice], guards)
+          collect_truthy_guards(truthy, active + [predicate.slice], guards)
           rest.each { collect_truthy_guards(it, active, guards) }
         else
           node.rigor_each_child { collect_truthy_guards(it, active, guards) }
@@ -167,8 +167,8 @@ module Rigor
 
       def truthy_split(node)
         case node
-        when Prism::IfNode then [node.statements, [node.predicate, node.subsequent]]
-        when Prism::UnlessNode then [node.else_clause, [node.predicate, node.statements]]
+        when Prism::IfNode then [node.statements, node.predicate, [node.predicate, node.subsequent]]
+        when Prism::UnlessNode then [node.else_clause, node.predicate, [node.predicate, node.statements]]
         end
       end
 

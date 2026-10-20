@@ -321,9 +321,12 @@ module Rigor
 
     # The test roots a run uses: the declared `test_paths:` as written (already resolved against the
     # config file's directory by {.load}), or — when the key is unset — whichever of
-    # {CONVENTIONAL_TEST_PATHS} is a directory under `root`, as absolute paths. `root` is the directory
-    # the run treats as the project root (the CLI's CWD), as for `signature_paths:` auto-detection.
-    def resolved_test_paths(root: Dir.pwd)
+    # {CONVENTIONAL_TEST_PATHS} is a directory under `root`, as absolute paths. `root` defaults to the
+    # project root: the directory of the config file in use, the one `paths:` and a declared `test_paths:`
+    # resolve against, or the working directory when no config file is used. Auto-detecting against the
+    # working directory found nothing for a run from a subdirectory, or for the MCP server started
+    # elsewhere, though both name the config file (#2078).
+    def resolved_test_paths(root: exclude_base)
       return test_paths unless test_paths.nil?
 
       CONVENTIONAL_TEST_PATHS.map { |dir| File.absolute_path(dir, root) }.select { |dir| File.directory?(dir) }

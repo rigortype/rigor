@@ -108,6 +108,32 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     expect(err).to include("`test_paths:` is empty")
   end
 
+  # #2078 — a run from a subdirectory (or the MCP server, started wherever its client starts it) names the config
+  # file with `--config`, and its roots resolve against that file's directory, not the working directory.
+  describe "from a subdirectory of the project" do
+    def run_in_sub(*argv)
+      FileUtils.mkdir_p(File.join(root, "sub"))
+      Dir.chdir(File.join(root, "sub")) { run(*argv) }
+    end
+
+    it "auto-detects the test roots under the config file's directory" do
+      write("spec/calc_spec.rb", "Calc.new.m(42)\n")
+
+      _status, out, err = run_in_sub
+
+      expect(out).to include("def m: (42) -> 1")
+      expect(err).not_to include("no test roots")
+    end
+
+    it "observes an --observe=PATH typed relative to the working directory (a guard)" do
+      write("spec/calc_spec.rb", "Calc.new.m(42)\n")
+
+      _status, out, = run_in_sub("--observe=../spec")
+
+      expect(out).to include("def m: (42) -> 1")
+    end
+  end
+
   # #1398 — the stderr notes are invisible to `--format=json` consumers (and to the MCP tool), so the same fact
   # is data: a top-level `observation` key, additive to `candidates`.
   describe "the JSON `observation` report" do
@@ -146,7 +172,10 @@ RSpec.describe Rigor::CLI::SigGenCommand do
 
       payload, = observation
 
-      expect(payload.fetch("observation").fetch("paths")).to eq([File.join(File.realpath(root), "test")])
+      # Under the config file's directory as `--config` names it, as a declared root is (#2078), so no longer the
+      # working directory's real path.
+      expect(payload.fetch("observation").fetch("paths")).to eq([File.join(root, "test")])
+      expect(Pathname.new(payload.fetch("observation").fetch("paths").first)).to be_absolute
     end
 
     it "reports --observe=PATH as typed" do

@@ -241,7 +241,8 @@ RSpec.describe Rigor::SigGen::MetaMemberObservation do
   end
 
   it "reads no member off a class that extends a project module defining new" do
-    source = "module Maker\n  def new(*args) = super(*args.map(&:to_s))\nend\nEx = Struct.new(:a) do\n  extend Maker\nend\n"
+    source = "module Maker\n  def new(*args) = super(*args.map(&:to_s))\nend\n" \
+             "Ex = Struct.new(:a) do\n  extend Maker\nend\n"
     expect_untyped({ "lib/shapes.rb" => source }, "Ex.new(1)\n", "Ex")
   end
 

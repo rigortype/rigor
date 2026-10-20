@@ -640,6 +640,7 @@ lib/rigor/sig_gen/generator.rb:
     Rigor::SigGen::Generator#descend_into_namespace?: grandfathered
     Rigor::SigGen::Generator#record_superclass: grandfathered
     Rigor::SigGen::Generator#scan_ivar_param_assignments: grandfathered
+    Rigor::SigGen::Generator#struct_keyword_init_flags: issue #1150 / #1183, reads the literal `keyword_init:` of each `Struct.new` call the file assigns or subclasses, under the same declaration_prefix the ADR-48 layout is keyed by, because the layout's flag cannot tell absent from `false`; it decides only how --params=observed maps a keyword construction, never a declaration's qualified name or context
     Rigor::SigGen::Generator#visibility_excludes?: grandfathered
     Rigor::SigGen::Generator#walk_attr_calls: grandfathered
     Rigor::SigGen::Generator#walk_def_children: >-
@@ -651,6 +652,14 @@ lib/rigor/sig_gen/observation_collector.rb:
   producers:
     Rigor::SigGen::ObservationCollector#enclosing_blocks: issue #1389, cuts the chain of RSpec group / example / hook blocks a `before` ivar binding can reach at any other block or lambda, a class / module / singleton-class body, and a def that is not a direct statement of a group block; it decides only where an RSpec hook's ivars are visible, never a declaration's qualified name or context
     Rigor::SigGen::ObservationCollector#walk_class_decls: grandfathered
+lib/rigor/sig_gen/value_class_override_scan.rb:
+  computes: the `Data.define` / `Struct.new` classes whose constructor or subclassing keeps --params=observed member types `untyped` (#1150, #1183)
+  producers:
+    Rigor::SigGen::ValueClassOverrideScan#collect_module_defs: issue #1150 / #1183, records the instance defs a project module body declares so an `include` / `extend` of it can be checked for `initialize` / `new`; it feeds only sig-gen's member observation, never a declaration's context
+    Rigor::SigGen::ValueClassOverrideScan#index: issue #1150 / #1183, names every class, module and value class across the parsed files for the scan's lexical constant lookup; observation only
+    Rigor::SigGen::ValueClassOverrideScan#note_body_call: issue #1150 / #1183, a `prepend` / `include` / `extend` in a value class's body marks its constructor arguments as unmapped for --params=observed; it writes no mixin table
+    Rigor::SigGen::ValueClassOverrideScan#note_singleton_call: issue #1150 / #1183, the singleton-class twin of note_body_call for `new` / `[]` overrides; it writes no mixin table
+    Rigor::SigGen::ValueClassOverrideScan#scan_declaration?: issue #1150 / #1183, walks class / module / singleton-class bodies with declaration_prefix to find a value class's `initialize` / `new` overrides and subclasses; it decides only which classes sig-gen's member observation keeps `untyped`, never a declaration's qualified name or context
 plugins/rigor-actioncable/lib/rigor/plugin/actioncable/channel_discoverer.rb:
   computes: the ActionCable channel classes and their lexical paths
   producers:

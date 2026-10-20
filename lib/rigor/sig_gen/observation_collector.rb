@@ -49,7 +49,7 @@ module Rigor
       # `untyped`. {MetaMemberObservation} keeps those members `untyped`. A class {ValueClassOverrideScan} reports
       # gets one `ALL_MEMBERS` entry. Like {BRACKET_NEW}, no `def` can collide with it.
       UNMAPPED = :"rigor.unmapped"
-      ALL_MEMBERS = :"*"
+      ALL_MEMBERS = :*
 
       # Calls that may write a member, so an argument list the collector cannot read still taints the class.
       MEMBER_WRITERS = [:initialize, BRACKET_NEW, :with, :[]=, :send, :public_send, :__send__].freeze

@@ -2305,11 +2305,11 @@ module Rigor
         end
       end
 
-      KEYWORD_CONSTRUCTION_SINCE = Gem::Version.new("3.2")
+      KEYWORD_CONSTRUCTION_SINCE = "3.2"
       private_constant :KEYWORD_CONSTRUCTION_SINCE
 
       def keyword_construction_default?
-        Gem::Version.new(@configuration.target_ruby.to_s) >= KEYWORD_CONSTRUCTION_SINCE
+        Gem::Version.new(@configuration.target_ruby.to_s) >= Gem::Version.new(KEYWORD_CONSTRUCTION_SINCE)
       rescue ArgumentError
         false
       end
@@ -2339,8 +2339,9 @@ module Rigor
         return false unless node.is_a?(Prism::CallNode) && node.name == :new
 
         receiver = node.receiver
-        (receiver.is_a?(Prism::ConstantReadNode) || (receiver.is_a?(Prism::ConstantPathNode) && receiver.parent.nil?)) &&
-          receiver.name == :Struct
+        top_level = receiver.is_a?(Prism::ConstantReadNode) ||
+                    (receiver.is_a?(Prism::ConstantPathNode) && receiver.parent.nil?)
+        top_level && receiver.name == :Struct
       end
 
       def keyword_init_flag(call)

@@ -38,15 +38,21 @@ module Rigor
         @known = Set.new
         @module_defs = Hash.new { |hash, name| hash[name] = Set.new }
         @overridden = Set.new
+        @value_classes = Set.new
       end
 
       def overridden
+        # Two passes: a module or a class another file defines must be known before any body naming it is read.
         @roots.each { |root| index(root, []) }
-        @roots.each { |root| scan(root, [], nil) }
-        @overridden.freeze
+        scan_all
+        (@overridden & @value_classes).freeze
       end
 
       private
+
+      def scan_all
+        @roots.each { |root| scan(root, [], nil) }
+      end
 
       # Pass 1: every class / module name, and the instance methods each module body defines.
       def index(node, prefix)
@@ -57,14 +63,24 @@ module Rigor
           child = Source::ConstantPath.declaration_prefix(prefix, node.constant_path)
           if child
             @known << child.join("::")
+            @value_classes << child.join("::") if node.is_a?(Prism::ClassNode) && value_class_call?(node.superclass)
             collect_module_defs(node.body, child.join("::")) if node.is_a?(Prism::ModuleNode)
             index(node.body, child)
             return
           end
         when Prism::ConstantWriteNode
           @known << [*prefix, node.name.to_s].join("::")
+          @value_classes << [*prefix, node.name.to_s].join("::") if value_class_call?(node.value)
         end
         node.rigor_each_child { |c| index(c, prefix) }
+      end
+
+      def value_class_call?(node)
+        return false unless node.is_a?(Prism::CallNode)
+
+        expected = { define: :Data, new: :Struct }[node.name]
+        receiver = node.receiver
+        expected && constant?(receiver) && Source::ConstantPath.qualified_name(receiver) == expected.to_s
       end
 
       def collect_module_defs(node, name)
@@ -81,22 +97,32 @@ module Rigor
       # Pass 2. `owner` is the class whose body `node` sits in, or nil outside one.
       def scan(node, prefix, owner)
         return unless node.is_a?(Prism::Node)
+        return if scan_declaration?(node, prefix, owner)
 
         case node
-        when Prism::ClassNode then return scan_class(node, prefix)
-        when Prism::ModuleNode then return scan_module(node, prefix)
-        when Prism::ConstantWriteNode then return if scan_constant_write(node, prefix)
-        when Prism::SingletonClassNode
-          return scan_singleton(node.body, owner) if owner && node.expression.is_a?(Prism::SelfNode)
-        when Prism::DefNode
-          note_def(node, owner) if owner
-          return
         when Prism::AliasMethodNode
           mark(owner) if owner && alias_names(node).include?(:initialize)
         when Prism::CallNode
-          return if scan_call(node, prefix, owner)
+          return if scan_call?(node, prefix, owner)
         end
         node.rigor_each_child { |c| scan(c, prefix, owner) }
+      end
+
+      # Class, module, singleton-class and `def` nodes, and a value-class constant write with a block: true when the
+      # node was handled whole.
+      def scan_declaration?(node, prefix, owner)
+        case node
+        when Prism::ClassNode then scan_class(node, prefix)
+        when Prism::ModuleNode then scan_module(node, prefix)
+        when Prism::ConstantWriteNode then return scan_constant_write?(node, prefix)
+        when Prism::SingletonClassNode
+          return false unless owner && node.expression.is_a?(Prism::SelfNode)
+
+          scan_singleton(node.body, owner)
+        when Prism::DefNode then note_def(node, owner) if owner
+        else return false
+        end
+        true
       end
 
       def scan_class(node, prefix)
@@ -111,9 +137,9 @@ module Rigor
         scan(node.body, child || prefix, nil)
       end
 
-      # `Const = Data.define(...) do ... end`, `Const = Struct.new(...) do ... end`, `Const = Class.new(Base) do ... end`:
-      # the block is `Const`'s body. True when the block was scanned.
-      def scan_constant_write(node, prefix)
+      # The block of `Const = Data.define(...) do ... end`, `Const = Struct.new(...) do ... end` or
+      # `Const = Class.new(Base) do ... end` is `Const`'s body. True when the block was scanned.
+      def scan_constant_write?(node, prefix)
         call = node.value
         return false unless call.is_a?(Prism::CallNode)
 
@@ -148,7 +174,7 @@ module Rigor
       end
 
       # True when the call was fully handled (its block already scanned).
-      def scan_call(node, prefix, owner)
+      def scan_call?(node, prefix, owner)
         receiver = node.receiver
         if receiver.nil? || receiver.is_a?(Prism::SelfNode)
           note_body_call(node, owner, prefix) if owner

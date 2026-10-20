@@ -298,8 +298,9 @@ module Rigor
         # passes too, and keeps being a Symbol. The positive fact is therefore a meet with the local's members, as
         # `eq`'s is: a String or Symbol member is kept as it is, and a member of a core class that has no `match` or
         # `to_str` and whose `==` never equals a Regexp (`nil`, `true`, `false`, the numerics) is dropped, unless the
-        # project defines one of those methods on it. Any other member (a user class, `Object`, `Dynamic`) may pass,
-        # and the analyzer emits no fact. The negative form emits none either: a String that does not match passes
+        # project defines one of those methods on it or a core ancestor. An `Object`, `BasicObject` or module member
+        # reads `String | Symbol` ({#open_surface_member?}). Any other member (a user class, `Dynamic`) may pass, and
+        # the analyzer emits no fact; so does a subject none of whose members can pass (a `nil` local stays `nil`). The negative form emits none either: a String that does not match passes
         # `not_to match`, so nothing leaves the local.
         REGEX_MATCH_KEPT_CLASSES = %w[String Symbol].freeze
         REGEX_MATCH_METHODS = %i[match to_str].freeze
@@ -333,19 +334,55 @@ module Rigor
 
         # The member itself when it may pass, nil when it cannot, UNDECIDED when Rigor cannot tell.
         def regex_match_member(member, scope)
+          return open_surface_match_member(member, scope) if open_surface_member?(member, scope)
+
           class_name = member_class_name(member)
           return UNDECIDED if class_name.nil?
           return member if REGEX_MATCH_KEPT_CLASSES.include?(class_name)
           return member if project_defines?(class_name, :==, scope)
-          return member if REGEX_MATCH_METHODS.any? { |name| project_defines_anywhere?(class_name, name, scope) }
+          return member if REGEX_MATCH_METHODS.any? { |name| project_defines_on_chain?(class_name, name, scope) }
 
           nil
         end
 
-        # Whether the project's source defines `method_name` on `class_name` or any of its ancestors.
-        def project_defines_anywhere?(class_name, method_name, scope)
-          !scope.user_def_through_ancestors(class_name, method_name).first.nil? ||
-            scope.discovered_method_through_ancestors?(class_name, method_name, :instance)
+        OPEN_SURFACE_CLASS_NAMES = %w[Object BasicObject].freeze
+        Ractor.make_shareable(OPEN_SURFACE_CLASS_NAMES)
+        private_constant :OPEN_SURFACE_CLASS_NAMES
+
+        # An `Object`, `BasicObject` or module member: its instances may be anything, a `to_str` or `match` object
+        # included. It reads `String | Symbol` on the passing edge, as the String it most often is, so a String
+        # method called after the matcher reports nothing; it is kept whole only when the project defines `match` or
+        # `to_str` on it. (`approval-queue.d/regexp-match-open-surface-subject.md`, shared with #2256.)
+        def open_surface_member?(member, scope)
+          return false unless member.is_a?(Rigor::Type::Nominal) && member.type_args.empty?
+
+          OPEN_SURFACE_CLASS_NAMES.include?(member.class_name) ||
+            scope.environment&.rbs_module?(member.class_name) || false
+        end
+
+        def open_surface_match_member(member, scope)
+          return member if REGEX_MATCH_METHODS.any? { |name| project_defines_on_chain?(member.class_name, name, scope) }
+
+          Rigor::Type::Combinator.union(Rigor::Type::Combinator.nominal_of("String"),
+                                        Rigor::Type::Combinator.nominal_of("Symbol"))
+        end
+
+        # Each core class's (and `Object` / `BasicObject` / `Kernel`'s) runtime ancestor chain. The project's
+        # reopenings are looked up along it by name, since the scope's ancestry walk does not cross core classes:
+        # `class Numeric; def to_str` reaches a Float member, `module Kernel; def match` a nil one.
+        CORE_ANCESTOR_CHAINS = [*EQUALITY_CORE_CLASSES, Object, BasicObject, Kernel].to_h do |mod|
+          [mod.name, mod.ancestors.filter_map(&:name).freeze]
+        end.freeze
+        Ractor.make_shareable(CORE_ANCESTOR_CHAINS)
+        private_constant :CORE_ANCESTOR_CHAINS
+
+        # Whether the project's source defines `method_name` on `class_name` or an ancestor, core ones included: a
+        # `def`, an included module, or a `define_method`.
+        def project_defines_on_chain?(class_name, method_name, scope)
+          CORE_ANCESTOR_CHAINS.fetch(class_name, [class_name]).any? do |name|
+            !scope.user_def_through_ancestors(name, method_name).first.nil? ||
+              scope.discovered_method_through_ancestors?(name, method_name, :instance)
+          end
         end
 
         NO_LITERAL = Object.new.freeze

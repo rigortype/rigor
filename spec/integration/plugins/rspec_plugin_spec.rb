@@ -640,15 +640,43 @@ RSpec.describe "plugins/rigor-rspec" do
         # RSpec's `match` also passes when `actual.match(expected)` is truthy, or `actual == expected`; a member of a
         # class Rigor cannot rule out keeps the local's type.
         it "keeps the local's type when a member may define match, to_str or ==" do
-          expect(dumped_types(run_case_eq("Object | nil", "expect(x).to match(/a/)\ndump_type(x)\n")))
-            .to eq(["Object?"])
-          expect(dumped_types(run_case_eq("Object | String", "expect(x).to match(/a/)\ndump_type(x)\n")))
-            .to eq(dumped_types(run_case_eq("Object | String", "dump_type(x)\n")))
+          expect(dumped_types(run_case_eq("Array[Integer] | String", "expect(x).to match(/a/)\ndump_type(x)\n")))
+            .to eq(dumped_types(run_case_eq("Array[Integer] | String", "dump_type(x)\n")))
           %w[match to_str ==].each do |method_name|
             patch = "class NilClass\n  def #{method_name}(other) = true\nend\n"
             expect(dumped_types(run_case_eq("String?", "expect(x).to match(/a/)\ndump_type(x)\n", patch: patch)))
               .to eq(["String?"])
           end
+        end
+
+        it "reads a project definition on a core ancestor or through define_method" do
+          {
+            "class Numeric\n  def to_str = \"1\"\nend\n" => ["Float?", ["Float"]],
+            "module Kernel\n  def match(other) = true\nend\n" => ["String?", ["String?"]],
+            "class NilClass\n  define_method(:match) { |_other| true }\nend\n" => ["String?", ["String?"]]
+          }.each do |patch, (declared, dumped)|
+            expect(dumped_types(run_case_eq(declared, "expect(x).to match(/a/)\ndump_type(x)\n", patch: patch)))
+              .to eq(dumped)
+          end
+        end
+
+        # An Object, BasicObject or module subject reads `String | Symbol` after the matcher, as before #2033, so a
+        # String method called there reports nothing (approval-queue.d/regexp-match-open-surface-subject.md).
+        it "reads an Object, BasicObject or Kernel subject as String | Symbol" do
+          %w[Object BasicObject Kernel Object?].each do |declared|
+            result = run_case_eq(declared, "expect(x).to match(/a/)\ndump_type(x)\nx.length\n")
+            expect(dumped_types(result)).to eq(["String | Symbol"])
+            expect(result.diagnostics.select { |d| d.severity == :error }.map(&:message)).to eq([])
+          end
+          patch = "class Object\n  def match(other) = true\nend\n"
+          expect(dumped_types(run_case_eq("Object", "expect(x).to match(/a/)\ndump_type(x)\n", patch: patch)))
+            .to eq(["Object"])
+        end
+
+        # No member of a `nil` local can pass, so the matcher fails at run time; the analyzer emits no fact rather than
+        # reading the local as `bot`.
+        it "emits no fact for a subject none of whose members can pass" do
+          expect(dumped_types(run_case_eq("nil", "expect(x).to match(/a/)\ndump_type(x)\n"))).to eq(["nil"])
         end
 
         # A String that does not match passes `not_to match`, so the negative form removes nothing.

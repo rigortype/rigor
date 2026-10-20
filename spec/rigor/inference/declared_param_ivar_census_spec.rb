@@ -157,10 +157,10 @@ RSpec.describe "the ADR-58 ivar census types a write from a declared parameter (
       end
     end
 
-    def dumps(plugins: [], plugin_requirer: nil)
+    def dumps(plugins: [], plugin_requirer: nil, libraries: [])
       configuration = Rigor::Configuration.new(
         Rigor::Configuration::DEFAULTS.merge("paths" => %w[lib], "signature_paths" => %w[sig], "workers" => 0,
-                                             "plugins" => plugins)
+                                             "plugins" => plugins, "libraries" => libraries)
       )
       runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil,
                                            plugin_requirer: plugin_requirer)
@@ -258,6 +258,14 @@ RSpec.describe "the ADR-58 ivar census types a write from a declared parameter (
                     "sig/k.rbs" => "class K\n  def initialize: (String x) -> void\nend\n")
 
       expect(dumps).to eq(["dump_type: Dynamic[top]"])
+    end
+
+    it "declines under a stdlib superclass written in Ruby" do
+      write_project("lib/k.rb" => "class K < Logger\n  def initialize(x) = @x = x\n  " \
+                                  "def r = Rigor.dump_type(@x)\nend\n",
+                    "sig/k.rbs" => "class K < Logger\n  def initialize: (String x) -> void\nend\n")
+
+      expect(dumps(libraries: ["logger"])).to eq(["dump_type: Dynamic[top]"])
     end
 
     it "credits under a superclass Ruby ships (control)" do

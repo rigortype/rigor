@@ -3452,7 +3452,24 @@ module Rigor
       # walk worked out for it ({#refine_context}).
       MethodTables = Struct.new(:existence, :envelopes, :refinements, :certainty, :certain, :possible,
                                 :contested_envelopes, :contested_def_nodes, :root, :in_effect, :census,
-                                :refine_text, :literal_seen, :source_bytes, :loose_constants, :block_spans) do
+                                :refine_text, :literal_seen, :source_bytes, :loose_constants, :block_spans,
+                                :definer_offsets) do
+        # Issue #2006 — records that a definer other than an alias (a `def`, `define_method(:x)`, an `attr_*`
+        # reader or writer) wrote the instance method `name` of `class_name` at `node`, and whether it was a `def`.
+        # {ScopeIndexer#apply_alias_def_nodes} reads the last one to tell an alias a later definer replaced.
+        def wrote_definer(class_name, name, node, def_node)
+          (self.definer_offsets ||= {})[[class_name, name]] = [node.location.start_offset, def_node]
+        end
+
+        # Issue #2006 — the last non-alias definer of `[class_name, name]` this walk recorded after byte `offset`:
+        # `:def`, `:other`, or nil when none follows it.
+        def definer_after(class_name, name, offset)
+          written = definer_offsets&.[]([class_name, name])
+          return nil if written.nil? || written.first <= offset
+
+          written.last ? :def : :other
+        end
+
         # {ScopeIndexer.module_refine_target} against this tree's {InEffectRefinements}.
         def refine_target_of(node)
           return nil if ScopeIndexer.refine_target(node).nil?
@@ -4190,7 +4207,9 @@ module Rigor
           anonymous = record_call_node_methods(node, owner_prefix, in_singleton_class, methods_acc.at(node),
                                                source_path)
           unless in_singleton_class
-            supersede_def_nodes(call_superseded_names(node), owner_prefix, def_nodes_acc, methods_acc.at(node))
+            superseded = call_superseded_names(node)
+            supersede_def_nodes(superseded, owner_prefix, def_nodes_acc, methods_acc.at(node))
+            note_call_definers(node, superseded, owner_prefix, methods_acc)
           end
           tables = methods_acc.at(node)
           record_singleton_prepend(node, qualified_prefix, tables,
@@ -4830,6 +4849,7 @@ module Rigor
         accumulator[class_name] ||= {}
         accumulator[class_name][def_node.name] = def_node
         follow_slot_writer(tables, :contested_def_nodes, [class_name, def_node.name], tables.nil? || tables.certain)
+        tables&.wrote_definer(class_name, def_node.name, def_node, true)
         record_anonymous_body_def_as_toplevel(def_node, qualified_prefix, accumulator, tables)
       end
 
@@ -4887,6 +4907,15 @@ module Rigor
         names.each do |name|
           follow_slot_writer(tables, :contested_def_nodes, [class_name, name], false) if slot.key?(name)
         end
+      end
+
+      # Issue #2006 — a `define_method(:x)` or `attr_*` call is a later definer an earlier alias of the name gives way
+      # to ({#apply_alias_def_nodes}); an `alias_method` call is itself the alias, so it notes nothing.
+      def note_call_definers(call_node, names, qualified_prefix, tables)
+        return if names.empty? || qualified_prefix.empty? || call_node.name == :alias_method
+
+        class_name = qualified_prefix.join("::")
+        names.each { |name| tables.wrote_definer(class_name, name, call_node, false) }
       end
 
       # #319 — a `def` inside an anonymous `Class.new` / `Module.new` body ALSO stays in the `<toplevel>` table.
@@ -8783,11 +8812,14 @@ module Rigor
             def_node = class_defs[old_name]
             next unless def_node.is_a?(Prism::DefNode)
 
+            later = tables && alias_map.later_definer(tables, class_name, new_name)
+            # Issue #2006 — a `def` of the name after the alias replaced it, and holds the slot already.
+            next if later == :def
+
             (accumulator[class_name] ||= {})[new_name] = def_node
             next if tables.nil?
 
-            certain = !alias_map.possible?(class_name, new_name) &&
-                      !tables.contested_def_nodes&.include?([class_name, old_name])
+            certain = alias_map.certain_copy?(tables, class_name, [new_name, old_name], later)
             follow_slot_writer(tables, :contested_def_nodes, [class_name, new_name], certain)
           end
         end
@@ -8806,6 +8838,7 @@ module Rigor
         def wrote(class_name, new_name, node)
           return if @certainty.nil?
 
+          (@writers ||= {})[[class_name, new_name]] = node.location.start_offset
           if Certainty.possible?(@certainty, node)
             (@possible ||= Set.new) << [class_name, new_name]
           else
@@ -8815,6 +8848,22 @@ module Rigor
 
         def possible?(class_name, new_name)
           !@possible.nil? && @possible.include?([class_name, new_name])
+        end
+
+        # Whether the copy the alias of `names` (`[new name, old name]`) writes is certain: the alias is certain, the
+        # slot it copies is not contested, and no later definer (`later`, {#later_definer}) replaced it. Issue #2006 —
+        # a later `define_method` / `attr_*` leaves the copy contested, as {ScopeIndexer#supersede_def_nodes} leaves a
+        # replaced `def`.
+        def certain_copy?(tables, class_name, names, later)
+          later.nil? && !possible?(class_name, names.first) &&
+            !tables.contested_def_nodes&.include?([class_name, names.last])
+        end
+
+        # Issue #2006 — the non-alias definer `tables` (the walk's {MethodTables}) recorded for the entry after the
+        # alias that wrote it last ({MethodTables#definer_after}), or nil.
+        def later_definer(tables, class_name, new_name)
+          offset = @writers&.[]([class_name, new_name])
+          offset.nil? ? nil : tables.definer_after(class_name, new_name, offset)
         end
       end
 

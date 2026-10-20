@@ -37,10 +37,20 @@ answer for such a file does not depend on whether it was named on the command li
 modules and constants resolve and its methods exist, but every method contribution is `possible` (ADR-119 WD3), so
 no return type, arity or visibility is read from it. The walk sees one entry point's load graph, and a file it does
 not reach (through `require`, a computed name, Zeitwerk or another entry point) may redefine a method a walked file
-defines; reading the walked body would then report on correct code. What the walk guarantees is therefore: a
-constant a walked file declares is found before an outer one, and a call on a method a walked file defines is not
-reported as undefined. It can still report a call on a constant it previously left unresolved when the constant's
-own signature or an analysed file answers it. The precedent is PR #734's reasoning: a file's
+defines; reading the walked body would then report on correct code. What the walk guarantees is therefore:
+
+- a class, module or constant a walked file declares is found before an outer one of the same name;
+- a call on a method a walked file defines is not reported as undefined;
+- no return type, arity or visibility is read from a walked file's method, so the walk never makes a call's answer
+  more precise than the run without it;
+- a walked file that reopens a class a configured file declares adds existence only: the walked files fold after
+  every configured file and skip each def-node, visibility and parameter slot already written, so a configured
+  file's findings (`rigor check lib/user.rb`) are the same whatever else is on the command line.
+
+Constant VALUE types are still read from walked files, as from any discovered file: `H::LIMIT = 1` in a walked
+file makes `H::LIMIT.upcase` report, which is what the run over the walked file's directory reports. A run can also
+report a call on a constant it previously left unresolved when the constant's own signature or an analysed file
+answers it. The precedent is PR #734's reasoning: a file's
 diagnostics should not depend on what else was on the command line, and widening discovery buys that where
 declining makes the subset run answer a different question.
 

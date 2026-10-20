@@ -9547,7 +9547,11 @@ module Rigor
           physical = buffer ? buffer.resolve(path) : path
           root = Prism.parse(File.read(physical), filepath: path).value
           collect_class_decls(root, [], classes)
-          accumulate_project_index(acc, path, root, uncertain: uncertain.include?(path))
+          if uncertain.include?(path)
+            fold_file_index(acc, without_written_slots(build_file_index(path, root, uncertain: true), acc))
+          else
+            accumulate_project_index(acc, path, root)
+          end
         rescue DeclarationWalk::ContractError
           raise # a broken walk contract, not an unreadable file: skipping it would hide the failure
         rescue StandardError
@@ -9605,6 +9609,8 @@ module Rigor
           physical = buffer ? buffer.resolve(path) : path
           digest = Cache::FileDigest.hexdigest(physical)
           walked = uncertain.include?(path)
+          # A walked file neither reuses nor stores a bundle. Both are guards no spec separates: no bundle is ever
+          # stored for a walked file, so the reuse guard matters only if a path changes role within one session.
           cached = walked ? nil : seed_bundles[path]
           if cached && cached[:digest] == digest
             bundles[path] = cached
@@ -9620,7 +9626,7 @@ module Rigor
             fingerprint = code_fingerprint(source, parsed.comments)
             bundles[path] = build_seed_bundle(file_index, file_classes, digest, fingerprint) unless walked
             classes.merge!(file_classes)
-            fold_file_index(acc, file_index)
+            fold_file_index(acc, walked ? without_written_slots(file_index, acc) : file_index)
           end
         rescue DeclarationWalk::ContractError
           raise # a broken walk contract, not an unreadable file: skipping it would hide the failure
@@ -9638,6 +9644,37 @@ module Rigor
         file_acc = new_def_index_accumulator
         accumulate_project_index(file_acc, path, root, uncertain: uncertain)
         file_acc
+      end
+
+      # Issue #2021 — the single-valued slot tables an `uncertain` file writes, each with its contest sibling.
+      UNCERTAIN_SLOT_TABLES = {
+        def_nodes: :contested_discovered_def_nodes,
+        singleton_def_nodes: :contested_discovered_singleton_def_nodes,
+        method_visibilities: :contested_discovered_method_visibilities,
+        parameter_envelopes: :contested_discovered_parameter_envelopes
+      }.freeze
+
+      # Issue #2021 — an `uncertain` file's isolated index without the slots `acc` already holds. The walked files fold
+      # after every other discovered file, so `acc` holds what the configured (certain) files wrote: a walked reopening
+      # of such a class adds the names it defines (existence) and leaves each written def node, visibility and
+      # envelope, and its contest, as the certain writer left it. Without this, the walked file's possible write was
+      # the slot's last and contested it, and `rigor check lib/user.rb plug/x.rb` withheld what `rigor check
+      # lib/user.rb` reports. A slot no earlier file wrote is taken, contested.
+      def without_written_slots(file_index, acc)
+        siblings = (file_index[:siblings] || {}).dup
+        tables = UNCERTAIN_SLOT_TABLES.to_h do |table, sibling|
+          written = acc[table]
+          kept = {}
+          (file_index[table] || {}).each do |class_name, entries|
+            sitting = written[class_name]
+            entries = entries.reject { |key, _| sitting.key?(key) } if sitting
+            kept[class_name] = entries unless entries.empty?
+          end
+          contests = siblings[sibling]
+          siblings[sibling] = contests.select { |class_name, key| kept[class_name]&.key?(key) }.to_set if contests
+          [table, kept]
+        end
+        file_index.merge(tables).merge(siblings: siblings)
       end
 
       # ADR-85 WD2 — folds a single file's isolated def-index contribution into the cross-file accumulator,

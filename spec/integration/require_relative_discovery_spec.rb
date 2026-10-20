@@ -205,6 +205,8 @@ RSpec.describe "discovery through require_relative outside the configured paths 
   end
 
   it "stops the walk at a target under the configured paths" do
+    # Overlaps the row above under `covered: ->(_) { false }`; this one pins the walk itself, that one the parity
+    # with a run over the configured paths.
     # The run over the configured paths does not follow `mid.rb`'s require_relative out of them, so a walk that
     # passed through it would discover a nearer constant only when `plug.rb` is named.
     write_plug(requires: ['require_relative "../../lib/outer/mid"'])
@@ -238,6 +240,38 @@ RSpec.describe "discovery through require_relative outside the configured paths 
       expect(check(%w[plug/outer/plug.rb]).map(&:first)).to eq([])
       expect(guarded_run(Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil),
                          %w[plug/outer/plug.rb]).diagnostics.map(&:rule)).not_to include("call.wrong-arity")
+    end
+  end
+
+  # A walked file that reopens a configured class adds existence only: the configured file's def, visibility and
+  # parameters stay certain, so a file under `paths:` answers the same whatever else is on the command line (#734).
+  context "when a walked file reopens a configured class with the same defs" do
+    let(:thing) { "class Thing\n  def v = \"s\"\n  def a(x) = x\n\n  private def priv = 1\nend\n" }
+    let(:expected) do
+      [["user.rb", 1, "call.undefined-method"], ["user.rb", 2, "call.wrong-arity"],
+       ["user.rb", 3, "def.method-visibility-mismatch"]]
+    end
+
+    before do
+      write("lib/thing.rb", thing)
+      write("lib/user.rb", "Thing.new.v.no_such\nThing.new.a(1, 2)\nThing.new.priv\n")
+      write("plug/x.rb", "require_relative \"x/patch\"\n")
+      write("plug/x/patch.rb", thing)
+    end
+
+    def user_rules(paths)
+      guarded_run(Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil), paths)
+        .diagnostics.select { |d| d.path.to_s.end_with?("user.rb") }
+        .map { |d| [File.basename(d.path.to_s), d.line, d.rule] }.sort
+    end
+
+    it "reports the configured file's findings in a run over it alone" do
+      # A guard (passes without the fix): the reference answer.
+      expect(user_rules(%w[lib/user.rb])).to eq(expected)
+    end
+
+    it "reports the same findings when the walking file is on the command line too" do
+      expect(user_rules(%w[lib/user.rb plug/x.rb])).to eq(expected)
     end
   end
 
@@ -345,6 +379,17 @@ RSpec.describe "discovery through require_relative outside the configured paths 
       write_plug(requires: [])
       expect(cli("plug/outer/plug.rb")).to eq([["plug.rb", 5]])
       expect(cli("--tmp-file=buf.rb", "--instead-of=plug/outer/plug.rb", "plug/outer/plug.rb")).to eq([])
+    end
+
+    it "re-checks a cached run when a missing required file appears and the configured paths add nothing" do
+      # The walk adds no file and the configured `lib` holds none, so discovery widens to nothing; the missing
+      # target's row must still be recorded.
+      FileUtils.rm_rf("lib")
+      FileUtils.rm_rf("plug/outer/plug")
+      expect(cli("plug/outer/plug.rb")).to eq([["plug.rb", 5]])
+      expect(cli("plug/outer/plug.rb")).to eq([["plug.rb", 5]])
+      write_sibling
+      expect(cli("plug/outer/plug.rb")).to eq([])
     end
 
     it "re-checks a cached run when a missing required file appears" do

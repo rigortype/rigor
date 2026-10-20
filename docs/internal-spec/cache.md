@@ -1295,7 +1295,11 @@ its method contributions `possible` (ADR-119 WD3,
 re-walks it each run and keeps no bundle for it. Its classes, modules and
 constants resolve, and its methods exist, but no return type, arity or
 visibility is read from its bodies, because a file the walk does not reach may
-redefine them.
+redefine them. The walked files fold after every other discovered file and
+skip each def-node, visibility and parameter-envelope slot an earlier file
+wrote, so a walked reopening of a configured class adds existence only and
+leaves the configured file's answer, and its certainty, in place. Constant
+value types are read from walked files as from any other.
 
 A discovered-not-analysed file feeds the index the analysed files resolve
 against, but it has no per-file row, edge or digest of its own. The session

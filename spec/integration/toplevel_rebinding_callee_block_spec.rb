@@ -319,4 +319,13 @@ RSpec.describe "call.unresolved-toplevel inside a block a project callee rebinds
 
     expect(toplevel_lines).to eq([["a.rb", 3]])
   end
+
+  # Its own project: a project `new` elsewhere would decline the `Proc.new` call's own block by name.
+  it "reads a Proc.new literal passed with & as the block of the call it goes to" do
+    FileUtils.mkdir_p("lib")
+    File.write("lib/a.rb", "module Ext\n  def self.helper = :ok\n  def self.ix(&b) = instance_exec(&b)\nend\n")
+    File.write("lib/use.rb", "Ext.ix(&Proc.new { helper })\nundefined_ctl\n")
+
+    expect(toplevel_lines).to eq([["use.rb", 2]])
+  end
 end

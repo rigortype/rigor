@@ -411,6 +411,8 @@ original WD3 framing left implicit.
   `instance_exec(&blk)`, or any other hand-off)
   ([#1817](https://github.com/rigortype/rigor/issues/1817)). The
   callee is read by name, so a same-named method elsewhere that
-  hands its block on silences a callee that only `yield`s; that
+  hands its block on silences a callee that only `yield`s, and a
+  project forwarder such as `def each(&b) = @items.each(&b)`
+  silences every block passed to an `each`; that
   false negative is cheaper than reading one receiver's class and
   missing the definition Ruby dispatches to.

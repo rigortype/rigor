@@ -2471,7 +2471,9 @@ module Rigor
 
       # One evaluation of a loop body from `entry`. Returns `[exit, breaks, values]`: the scope the iteration ends with,
       # the scopes at the `break`s that target the loop ({LoopJumps}), and the values those `break`s carry, read from a
-      # `break`-value sink of the loop's own ({#loop_value}). Every reader of a loop body goes through here — the
+      # `break`-value sink of the loop's own ({#loop_value}); filtering it by the loop's `break`s is defensive, since a
+      # nested loop installs its own sink and a nested block's call evaluates its body under another, so no example
+      # tells the filter apart today. Every reader of a loop body goes through here — the
       # single pass `eval_loop` joins with the pre-loop scope, each pass of its rebind fixpoint, and `eval_for`'s only
       # pass.
       #

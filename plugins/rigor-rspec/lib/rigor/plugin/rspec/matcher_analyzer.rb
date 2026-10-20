@@ -298,8 +298,8 @@ module Rigor
         # passes too, and keeps being a Symbol. The positive fact is therefore a meet with the local's members, as
         # `eq`'s is: a String or Symbol member is kept as it is, and a member of a core class that has no `match` or
         # `to_str` and whose `==` never equals a Regexp (`nil`, `true`, `false`, the numerics) is dropped, unless the
-        # project defines one of those methods on it or a core ancestor. An `Object`, `BasicObject` or module member
-        # reads `String | Symbol` ({#open_surface_member?}). Any other member (a user class, `Dynamic`) may pass, and
+        # project defines one of those methods on it or a core ancestor. An `Object`, `BasicObject`, `Kernel` or
+        # `Comparable` member reads `String | Symbol` ({#module_match_member}); any other module means no fact. Any other member (a user class, `Dynamic`) may pass, and
         # the analyzer emits no fact; so does a subject none of whose members can pass (a `nil` local stays `nil`). The negative form emits none either: a String that does not match passes
         # `not_to match`, so nothing leaves the local.
         REGEX_MATCH_KEPT_CLASSES = %w[String Symbol].freeze
@@ -334,7 +334,8 @@ module Rigor
 
         # The member itself when it may pass, nil when it cannot, UNDECIDED when Rigor cannot tell.
         def regex_match_member(member, scope)
-          return open_surface_match_member(member, scope) if open_surface_member?(member, scope)
+          module_member = module_match_member(member, scope)
+          return module_member unless module_member.nil?
 
           class_name = member_class_name(member)
           return UNDECIDED if class_name.nil?
@@ -346,25 +347,34 @@ module Rigor
         end
 
         OPEN_SURFACE_CLASS_NAMES = %w[Object BasicObject].freeze
+        # The modules String's or Symbol's own ancestry includes (`Kernel`, `Comparable`), read from the running Ruby.
+        STRING_SYMBOL_MODULES = (String.ancestors + Symbol.ancestors).grep_v(Class).filter_map(&:name).uniq.freeze
         Ractor.make_shareable(OPEN_SURFACE_CLASS_NAMES)
-        private_constant :OPEN_SURFACE_CLASS_NAMES
+        Ractor.make_shareable(STRING_SYMBOL_MODULES)
+        private_constant :OPEN_SURFACE_CLASS_NAMES, :STRING_SYMBOL_MODULES
 
-        # An `Object`, `BasicObject` or module member: its instances may be anything, a `to_str` or `match` object
-        # included. It reads `String | Symbol` on the passing edge, as the String it most often is, so a String
-        # method called after the matcher reports nothing; it is kept whole only when the project defines `match` or
-        # `to_str` on it. (`approval-queue.d/regexp-match-open-surface-subject.md`, shared with #2256.)
-        def open_surface_member?(member, scope)
-          return false unless member.is_a?(Rigor::Type::Nominal) && member.type_args.empty?
+        # The meet for an `Object`, `BasicObject` or module member, or nil for any other member. Its instances may be
+        # anything, a `to_str` or `match` object included. A member that declares `match` or `to_str` itself (its
+        # signature, a core ancestor, or the project's source) is kept whole. `Object`, `BasicObject` and a module
+        # String or Symbol includes otherwise read `String | Symbol`, as the String they most often are, so a String
+        # method called after the matcher reports nothing. Any other module is UNDECIDED: a passing value may include
+        # it without being a String. (`approval-queue.d/regexp-match-open-surface-subject.md`, shared with #2256.)
+        def module_match_member(member, scope)
+          return nil unless member.is_a?(Rigor::Type::Nominal) && member.type_args.empty?
 
-          OPEN_SURFACE_CLASS_NAMES.include?(member.class_name) ||
-            scope.environment&.rbs_module?(member.class_name) || false
-        end
-
-        def open_surface_match_member(member, scope)
-          return member if REGEX_MATCH_METHODS.any? { |name| project_defines_on_chain?(member.class_name, name, scope) }
+          name = member.class_name
+          string_like = OPEN_SURFACE_CLASS_NAMES.include?(name) || STRING_SYMBOL_MODULES.include?(name)
+          return nil unless string_like || scope.environment&.rbs_module?(name)
+          return member if REGEX_MATCH_METHODS.any? { |method_name| declares_method?(name, method_name, scope) }
+          return UNDECIDED unless string_like
 
           Rigor::Type::Combinator.union(Rigor::Type::Combinator.nominal_of("String"),
                                         Rigor::Type::Combinator.nominal_of("Symbol"))
+        end
+
+        def declares_method?(name, method_name, scope)
+          project_defines_on_chain?(name, method_name, scope) ||
+            !Rigor::Reflection.instance_method_definition(name, method_name, scope: scope).nil?
         end
 
         # Each core class's (and `Object` / `BasicObject` / `Kernel`'s) runtime ancestor chain. The project's

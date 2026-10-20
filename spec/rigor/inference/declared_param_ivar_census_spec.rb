@@ -216,9 +216,9 @@ RSpec.describe "the ADR-58 ivar census types a write from a declared parameter (
       it "declines a write #{shape} may replace" do
         header = files[:superclass] ? "class K < #{files[:superclass]}" : "class K"
         body = files[:include] ? "  #{files[:include]}\n" : ""
+        ctor = "  def initialize(x)\n    @x = x\n    super() if defined?(super)\n  end\n"
         write_project(files.reject { |key, _| key.is_a?(Symbol) }.merge(
-                        "lib/k.rb" => "#{header}\n#{body}  def initialize(x)\n    @x = x\n    super() if defined?(super)\n  end\n  " \
-                                      "def r = Rigor.dump_type(@x)\nend\n",
+                        "lib/k.rb" => "#{header}\n#{body}#{ctor}  def r = Rigor.dump_type(@x)\nend\n",
                         "sig/k.rbs" => "#{header}\n  def initialize: (String x) -> void\nend\n"
                       ))
         write_project("sig/p.rbs" => "class P\nend\n", "sig/setter.rbs" => "module Setter\nend\n")

@@ -44,4 +44,17 @@ RSpec.describe "Loop value evaluation cost" do
     3.times { scope.type_of(node) }
     expect(count).to eq(1)
   end
+
+  it "types a while loop no break leaves as nil without evaluating it" do
+    scope = Rigor::Scope.empty.with_local(:c, Rigor::Type::Combinator.untyped)
+    node = Prism.parse("while c; c = false; end").value.statements.body.first
+    count = 0
+    allow_any_instance_of(Rigor::Inference::StatementEvaluator) # rubocop:disable RSpec/AnyInstance
+      .to receive(:eval_loop).and_wrap_original do |m, n|
+        count += 1
+        m.call(n)
+      end
+    expect(scope.type_of(node)).to eq(Rigor::Type::Combinator.constant_of(nil))
+    expect(count).to eq(0)
+  end
 end

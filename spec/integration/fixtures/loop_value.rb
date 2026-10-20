@@ -118,6 +118,40 @@ def for_set
   assert_type("Dynamic[top]", r)
 end
 
+# `for_non_empty_pop("a b")` returns ["a"], no longer non-empty-proven; `for_rebound` [1], the array the loop
+# iterated rather than the "s" the body stored in the local; `for_range_call` 1..3, a Range being immutable;
+# `for_set_nominal` the Set.
+def for_non_empty_pop(s)
+  xs = "#{s}".split
+  return if xs.empty?
+
+  r = for w in xs
+    xs.pop
+  end
+  assert_type("Array[String]", r)
+end
+
+def for_rebound
+  a = [1, 2]
+  r = for i in a
+    a.pop
+    a = "s"
+  end
+  assert_type("Array[Integer]", r)
+end
+
+def for_range_call
+  r = for i in 1..3
+    i.to_s
+  end
+  assert_type("1..3", r)
+end
+
+def for_set_nominal
+  r = for i in [1, 2].to_set; end
+  assert_type("Dynamic[top]", r)
+end
+
 # A collection whose `each` is not known to answer itself leaves the value gradual: `for_project` answers nil, what
 # `Bag#each` answers, and `for_dynamic(xs)` whatever `xs.each` does.
 class Bag

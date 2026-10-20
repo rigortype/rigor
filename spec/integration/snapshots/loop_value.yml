@@ -14,14 +14,18 @@ assertions:
   '11': Array[Integer]
   '12': Hash[Dynamic[top] | Symbol, 1 | Dynamic[top]] | Hash[Symbol, Integer]
   '13': Dynamic[top]
-  '14': Dynamic[top]
-  '15': Dynamic[top]
-  '16': '"four"?'
-  '17': ":b?"
-  '18': ":m?"
-  '19': Integer[6..10]?
-  '20': nil
-  '21': nil
-  '22': ":u"
-  '23': ":b?"
-  '24': "[[1], [[1]], nil]"
+  '14': Array[String]
+  '15': Array[Integer]
+  '16': 1..3
+  '17': Dynamic[top]
+  '18': Dynamic[top]
+  '19': Dynamic[top]
+  '20': '"four"?'
+  '21': ":b?"
+  '22': ":m?"
+  '23': Integer[6..10]?
+  '24': nil
+  '25': nil
+  '26': ":u"
+  '27': ":b?"
+  '28': "[[1], [[1]], nil]"

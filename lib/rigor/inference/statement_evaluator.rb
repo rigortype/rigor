@@ -1529,8 +1529,9 @@ module Rigor
       end
 
       # Issue #2211 — a global subject from a `when` test that may rebind it on ({#when_test_rebinds_subject?}): a
-      # method may assign a global, and the statement walk keeps a global's binding past a call, so the clause bodies and the later clauses read it as
-      # `Dynamic[top]`, as the scope index's walk of a value-position `case` reads it
+      # method may assign a global, and the statement walk keeps a global's binding past a call, so the clause
+      # bodies and the later clauses read it as `Dynamic[top]`, as the scope index's walk of a value-position `case`
+      # reads it
       # (`ScopeIndexer#forget_called_subject`). `$g = nil; case $g when String then 1 when reset! then 2 else $g + 1
       # end`, with `reset!` assigning `$g`, is `6` in Ruby. An instance variable a test's call may write is widened by
       # {#run_when_test} instead; any other subject is left as is.

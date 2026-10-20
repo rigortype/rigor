@@ -152,7 +152,8 @@ RSpec.describe "a later definer supersedes an earlier alias for typing (#2006)",
     RUBY
   end
 
-  # Ruby: 2 for both — the attr reader written after the alias answers.
+  # Ruby: 2 for both — the attr reader written after the alias answers. Guard: the attr reader already makes the
+  # read decline.
   it "does not type the name from the aliased def when a later attr_reader replaces it" do
     expect(undefined(<<~RUBY)).to eq([])
       class K
@@ -186,14 +187,19 @@ RSpec.describe "a later definer supersedes an earlier alias for typing (#2006)",
     RUBY
   end
 
-  # Ruby: "y" (control).
+  # Ruby: "y" for both (control).
   it "keeps typing from the aliased def with no later definer" do
-    expect(undefined(<<~RUBY)).to eq([["code.rb", 5, '"y"']])
+    expect(undefined(<<~RUBY)).to eq([["code.rb", 9, '"y"'], ["code.rb", 10, '"y"']])
       class K
         def y = "y"
         alias x y
       end
+      class L
+        def y = "y"
+        alias_method :x, :y
+      end
       K.new.x.even?
+      L.new.x.even?
     RUBY
   end
 end

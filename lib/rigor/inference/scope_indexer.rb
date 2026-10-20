@@ -8809,12 +8809,12 @@ module Rigor
         alias_map.copy_into(history).each { |key| settle_alias_slot(accumulator, tables, key, history[key]) }
       end
 
-      # Writes the new name's slot from its last writer `writes.last` ({#apply_alias_def_nodes}): an alias copy writes
-      # its `def` with its certainty; a later `def` already holds the slot; a later `define_method` / `attr_*`
-      # keeps the latest copy (unless the slot holds a `def`) and contests it.
+      # Writes the new name's slot from its last writer `writes.last` ({#apply_alias_def_nodes}): an alias copy or a
+      # later `def` writes its `def` with its certainty (for the `def`, what the walk wrote already); a later
+      # `define_method` / `attr_*` keeps the latest copy (unless the slot holds a `def`) and contests it.
       def settle_alias_slot(accumulator, tables, (class_name, new_name), writes)
         last = writes.last
-        if last[3] == :alias
+        if last[1]
           (accumulator[class_name] ||= {})[new_name] = last[1]
           follow_slot_writer(tables, :contested_def_nodes, [class_name, new_name], last[2])
         elsif last[1].nil?

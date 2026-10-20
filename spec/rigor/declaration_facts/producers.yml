@@ -445,6 +445,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#record_struct_member_layout: grandfathered
     Rigor::Inference::ScopeIndexer#recording_evaluator: 'builds the per-node scope index''s recording evaluation, for the file and for each construct the walk reaches unentered (#2196, #2056); it records which scope a node is typed under, not what a declaration is'
     Rigor::Inference::ScopeIndexer#seed_operator_only_ivars!: grandfathered
+    Rigor::Inference::ScopeIndexer#settle_alias_slot: ADR-119 WD3 (#2006), writes an alias copy into the walk's own def-node slot and settles its contest from the new name's last writer in source order (through follow_slot_writer); it takes the owner name the alias map computed and decides no declaration context
     Rigor::Inference::ScopeIndexer#singleton_class_rewrite_tainted?: taints the singleton side of the class a surface call on `singleton_class` or `Const.singleton_class` reshapes (#1752); the owner is the enclosing class the extends walk passes in, or the constant by the eval-receiver lexical rule, and the call decides no other owner or side
     Rigor::Inference::ScopeIndexer#singleton_constant_segments: collects the last segment of every constant write in a `class << …` body for loose_constant_segments; the segments are names a `refine` target is matched against, and it decides no declaration context
     Rigor::Inference::ScopeIndexer#singleton_mixin_recorded?: writes one singleton-side mixin call under the owner the walk passes in; it computes no declaration context

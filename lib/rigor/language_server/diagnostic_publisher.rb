@@ -239,11 +239,13 @@ module Rigor
       def publish_batch(jobs)
         with_tempfiles(jobs) do |bound_jobs|
           bindings = bound_jobs.map { |job| job.fetch(:binding) }
+          @project_context.prepare_discovery_seed
           dispatcher = Analysis::Runner::BufferPoolDispatcher.new(
             configuration: @project_context.configuration,
             cache_store: @project_context.cache_store,
             environment: @project_context.environment,
             prebuilt: @project_context.project_scan,
+            discovery_seed_for: @project_context.method(:discovery_seed_for),
             workers: worker_count
           )
           diagnostics_per_binding = dispatcher.analyze(bindings)
@@ -282,6 +284,7 @@ module Rigor
             collect_stats: false,
             buffer: binding,
             prebuilt: @project_context.project_scan,
+            discovery_seed: @project_context.discovery_seed_for(binding),
             environment: @project_context.environment
           )
           result = runner.run([path])

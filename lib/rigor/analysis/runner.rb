@@ -294,10 +294,11 @@ module Rigor
       #   worker continues to build its own Environment.
       # @param discovery_seed — issue #260 — opt-in cross-file discovery tables, keyed by
       #   {Scope::DiscoveryIndex} slot name, seeded onto every per-file scope through
-      #   `project_scope_seed_tables`. The ONE deliberate exception to "a `prebuilt:` runner carries no
-      #   discovery tables": {Protection::DiagnosticOracle} threads the table set Tier 2's site filter already
-      #   judges anchors against, so a site admitted because a sibling-file class resolved is also a site the
-      #   oracle can kill at. nil (the default) leaves the prebuilt/LSP contract byte-identical.
+      #   `project_scope_seed_tables`. A `prebuilt:` runner computes no discovery tables of its own, so this is
+      #   how one learns the project: {Protection::DiagnosticOracle} threads the table set Tier 2's site filter
+      #   already judges anchors against, and (issue #2147, ADR-124) the LSP's per-buffer publish threads
+      #   `LanguageServer::ProjectContext#discovery_seed_for`, so a class another file declares is not an
+      #   external ancestor there. nil (the default) seeds nothing.
       # @param no_tolerated_effects — ADR-103 WD1 / #385 — `rigor check --no-tolerated-effects`.
       #   Judges effect envelopes as if `effects.tolerated:` were empty. A judgment-time switch only: the
       #   run, its collection and its cache identity are unchanged.
@@ -1808,13 +1809,12 @@ module Rigor
       end
 
       # Internal: builds the deferred cross-file discovery tables at most once per run and adopts them.
-      # Memoised on `@project_discovery_done` (reset at the start of `#run`). No-op under `@prebuilt` — the
-      # LSP path deliberately seeds an empty project scope from a snapshot that carries no discovery tables,
-      # so forcing a build there would change that contract. A caller that DOES want cross-file knowledge under
-      # `prebuilt:` supplies it explicitly through `discovery_seed:` (issue #260) rather than by re-walking the
-      # project here. Called eagerly from `#run` for the recording /
-      # subset (ADR-46) modes and lazily from `#assemble_run_diagnostics` on the analysis path, so a warm
-      # cache HIT (which never assembles) never pays the double parse.
+      # Memoised on `@project_discovery_done` (reset at the start of `#run`). No-op under `@prebuilt`: the
+      # snapshot carries no discovery tables, and a per-request re-walk of the project is what `prebuilt:` exists
+      # to avoid. A caller that wants cross-file knowledge under `prebuilt:` supplies it through `discovery_seed:`
+      # (issue #260), as the LSP publish does since issue #2147 (ADR-124). Called eagerly from `#run` for the
+      # recording / subset (ADR-46) modes and lazily from `#assemble_run_diagnostics` on the analysis path, so a
+      # warm cache HIT (which never assembles) never pays the double parse.
       def ensure_project_discovery(expansion)
         return if @prebuilt
         return if @project_discovery_done

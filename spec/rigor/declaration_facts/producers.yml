@@ -287,6 +287,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#build_method_visibility_tables: the grandfathered visibility walk's entry point, moved from build_discovered_method_visibilities (now a projection of it) so the walk also returns ADR-119 WD3's contested visibility slots; it starts the walk at the top level with the same default and adds no context of its own
     Rigor::Inference::ScopeIndexer#census_scan: ADR-121 WD7's census over a def or refine body the method walk does not descend; a nested def, class, module or singleton class only moves the module a `refine` there is charged to to the wildcard, so it derives no declaration context
     Rigor::Inference::ScopeIndexer#class_method_visibility_parts: issue #1984, the private_class_method / public_class_method twin of visibility_call_parts; it maps the call name to its visibility in the walk's own spellings (receiverless, self., send) and derives no context
+    Rigor::Inference::ScopeIndexer#code_body_nodes: collects the nodes inside the code bodies of a construct the per-node scope walk evaluates unentered, which its recording leaves to the walk (#2196); it decides which nodes a recording skips, not what a declaration is
     Rigor::Inference::ScopeIndexer#collect_alias_map_block_call?: grandfathered
     Rigor::Inference::ScopeIndexer#collect_alias_map_declaration: grandfathered
     Rigor::Inference::ScopeIndexer#collect_alias_map_meta_new?: grandfathered

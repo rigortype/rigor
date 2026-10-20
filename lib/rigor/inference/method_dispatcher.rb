@@ -1071,8 +1071,8 @@ module Rigor
         return false if scope.nil?
 
         !ExternalAncestorResolution.resolve(receiver_type.class_name, context.method_name, :instance,
-                                             scope: scope, environment: environment,
-                                             record_dependencies: false).nil?
+                                            scope: scope, environment: environment,
+                                            record_dependencies: false).nil?
       end
 
       # True when the call node carries an explicit receiver that is not the literal `self`.

@@ -11513,15 +11513,16 @@ module Rigor
       # resolve against the class the walk tracks and the evaluation does not. Every node in one is left out of the
       # recording, so the walk reaches it unrecorded and handles it as it did before #2196 ({#unentered_block_entry},
       # {#record_class_body_defs}).
-      def code_body_nodes(node, source_path, acc = Set.new.compare_by_identity, inside: false)
+      # Answers nil, allocating nothing, for a construct holding no code body: the common case.
+      def code_body_nodes(node, source_path, acc = nil, inside: false)
         inside ||= CODE_BODY_NODES.include?(node.class)
-        acc << node if inside
-        if node.is_a?(Prism::CallNode) && !inside && class_body_block_call?(node, source_path)
-          code_body_nodes(node.block, source_path, acc, inside: true)
-          node.rigor_each_child { |child| code_body_nodes(child, source_path, acc) unless child.equal?(node.block) }
+        (acc ||= Set.new.compare_by_identity) << node if inside
+        if !inside && node.is_a?(Prism::CallNode) && class_body_block_call?(node, source_path)
+          acc = code_body_nodes(node.block, source_path, acc, inside: true)
+          node.rigor_each_child { |child| acc = code_body_nodes(child, source_path, acc) unless child.equal?(node.block) }
           return acc
         end
-        node.rigor_each_child { |child| code_body_nodes(child, source_path, acc, inside: inside) }
+        node.rigor_each_child { |child| acc = code_body_nodes(child, source_path, acc, inside: inside) }
         acc
       end
 

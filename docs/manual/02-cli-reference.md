@@ -150,6 +150,19 @@ truncation explicit. `--trace` records fail-soft fallbacks,
 after the rows of a line table in text output. The editor-mode
 `--tmp-file` / `--instead-of` pair is accepted as on `check`.
 
+A class or constant that another project file declares reads as
+`rigor check` types it (`singleton(User)`) when a bare
+`rigor check --incremental` has left a snapshot for the project:
+`type-of` folds the cross-file declarations from that snapshot's
+per-file bundles, re-reading any file whose bytes changed since,
+and never writes it. With no reusable snapshot (none yet, or one a
+change made unusable, for example a changed configuration, lockfile, `sig/`, `pre_eval:`
+file or required feature, an engine upgrade, or a snapshot written
+for other roots) the probe types the one file on its own, so such a name reads
+`Dynamic[top]`, and it prints nothing about it. Only those
+declarations are shared: the types `check` infers for an unannotated
+parameter are not.
+
 A template a plugin compiles into Ruby (an ERB view under
 `rigor-actionpack`) is probed the way `rigor check` analyses
 it: the compiled Ruby is typed under the view's declared
@@ -174,7 +187,9 @@ and is probed as plain Ruby, parse error included.
 
 The four probe commands — `type-of`, `type-scan`, `trace` and
 `annotate` — build their environment fresh on every invocation
-and never read or write the persistent cache. That is why none
+and never read or write the persistent cache (apart from the
+read-only snapshot lookup `type-of` makes for the project's
+declarations, above). That is why none
 of them takes `--no-cache`: the flag would have nothing to skip.
 A probe therefore types against the environment `rigor check
 --no-cache` analyses with. The environment a cached (default)

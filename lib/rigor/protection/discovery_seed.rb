@@ -3,6 +3,9 @@
 require_relative "../inference/parameter_inference_collector"
 require_relative "../inference/scope_indexer"
 require_relative "../inference/project_seed_tables"
+require_relative "../cache/incremental_snapshot"
+require_relative "../analysis/path_expansion"
+require_relative "../analysis/buffer_binding"
 
 module Rigor
   module Protection
@@ -84,6 +87,53 @@ module Rigor
         sources = index.fetch(:def_index).fetch(:constant_sources)
         tables = tables.merge(constant_sources: sources) if constant_sources && !sources.empty?
         tables.freeze
+      end
+
+      # Issue #512 — the seed a one-shot probe (`rigor type-of`) can afford: the cross-file discovery tables for
+      # the configured paths, folded from the per-file bundles a prior `rigor check --incremental` left in the
+      # persistent snapshot, with `buffer`'s file (and any file whose bytes moved since) re-walked. A probe has
+      # no business re-parsing the project — that is what made the first attempt cost twice a single-file probe —
+      # so when there is no reusable snapshot this answers nil and the caller keeps its single-file scope. It
+      # never writes the snapshot.
+      #
+      # The snapshot is reused only under the fingerprint a bare `rigor check --incremental` writes (roots = the
+      # configured paths, the plain run mode): any other fingerprint, a different engine, configuration,
+      # lockfile or `sig/` included, is a miss.
+      #
+      # @param configuration — the probe's loaded configuration.
+      # @param buffer — the editor binding, or nil.
+      # @return frozen seed tables, or nil when the snapshot cannot seed this project.
+      def from_snapshot(configuration:, buffer: nil)
+        paths = Analysis::PathExpansion.configured_files(configuration)
+        return nil if paths.empty?
+
+        bundles = snapshot_bundles(configuration)
+        return nil if bundles.nil? || bundles.empty?
+
+        tables_for_buffer(paths: respell_for_buffer(paths, buffer), bundles: bundles, buffer: buffer,
+                          constant_sources: true)
+      end
+
+      # The configured file list with the entry that reaches `buffer`'s file respelled as the buffer's logical
+      # path: the binding substitutes bytes only for a path spelled exactly as its logical path, while the
+      # configured paths may be relative or reach the file through a symlink. `real_paths` is the memoised
+      # `BufferBinding.real_path` of each entry when the caller keeps one.
+      def respell_for_buffer(paths, buffer, real_paths: nil)
+        return paths if buffer.nil?
+
+        real = Analysis::BufferBinding.real_path(buffer.logical_path)
+        paths.each_with_index.map do |path, index|
+          entry_real = real_paths ? real_paths[index] : Analysis::BufferBinding.real_path(path)
+          entry_real == real ? buffer.logical_path : path
+        end
+      end
+
+      def snapshot_bundles(configuration)
+        fingerprint = Cache::IncrementalSnapshot.fingerprint(configuration: configuration, roots: configuration.paths)
+        return nil if fingerprint.nil?
+
+        loaded = Cache::IncrementalSnapshot.new(root: configuration.cache_path).load_any(fingerprints: [fingerprint])
+        loaded&.last&.seed_bundles
       end
 
       # The whole-project discovery tables, from the single-walk combined pass (one parse per file) that

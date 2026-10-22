@@ -159,7 +159,8 @@ RSpec.describe "a callee chain that mutates an argument floors it (#2104)" do
 
   it "keeps the true positive when the def mutates a different parameter through its callee" do
     expect(diagnostics(<<~RUBY)).to eq(undefined_upcase)
-      def stripes(acc, other = []) = (poke(other); acc.size)
+      def stripes(acc, other = []) = (poke(other); peek(acc))
+      def peek(acc) = acc.size
       def poke(acc) = (acc[0] = "x")
     RUBY
   end
@@ -178,6 +179,16 @@ RSpec.describe "a callee chain that mutates an argument floors it (#2104)" do
         def poke(acc) = acc.size
       end
       def stripes(acc) = Other.new.instance_exec { poke(acc) }
+      def poke(acc) = (acc[0] = "x")
+    RUBY
+  end
+
+  it "does not read a self-call inside a Class.new block as a hand-off" do
+    expect(diagnostics(<<~RUBY)).to eq(undefined_upcase)
+      class Other
+        def self.poke(acc) = acc.size
+      end
+      def stripes(acc) = Class.new(Other) { poke(acc) }
       def poke(acc) = (acc[0] = "x")
     RUBY
   end

@@ -60,7 +60,7 @@ module Rigor
         report_path_errors(path_errors, options)
 
         observation_roots = observation_roots(configuration, options)
-        observations = collect_observations(configuration, options, observation_roots)
+        observations = collect_observations(configuration, options, observation_roots, paths)
         generator = SigGen::Generator.new(configuration: configuration, paths: paths,
                                           observations: observations,
                                           include_private: options.fetch(:include_private),
@@ -325,7 +325,11 @@ module Rigor
       # specified, observe the project's test roots: `test_paths:`, or whichever of `spec/` and `test/` exist. With no
       # root at all the run still succeeds, but says so — otherwise every parameter stays `untyped` with nothing
       # naming the reason.
-      def collect_observations(configuration, options, observe_paths)
+      #
+      # The collector pre-indexes the classes of the paths the run generates for as well as the configured ones, so
+      # a call site on a class named only on the command line (`sig-gen ../lib` from a subdirectory, where no
+      # config file is discovered and the default `paths:` resolve under the subdirectory) attaches (#2078).
+      def collect_observations(configuration, options, observe_paths, paths)
         return {} if options.fetch(:params) != "observed"
 
         if observe_paths.empty?
@@ -333,7 +337,8 @@ module Rigor
         else
           warn_missing_test_roots(observe_paths)
         end
-        SigGen::ObservationCollector.new(configuration: configuration, paths: observe_paths).collect
+        SigGen::ObservationCollector.new(configuration: configuration, paths: observe_paths,
+                                         source_paths: (configuration.paths + paths).uniq).collect
       end
 
       # The roots `--params=observed` reads: `--observe=PATH...` when given, else the project's test roots.

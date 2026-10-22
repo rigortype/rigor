@@ -77,6 +77,23 @@ plugins:
   `--fail-on=warning` run — regenerate with `rigor baseline
   regenerate`.
 
+## Instance variable writes across actions
+
+The plugin tells the engine that a mailer runs one action per instance
+([ADR-125](../../adr/125-per-invocation-classes.md)). Its manifest lists
+`ActionMailer::Base` in `per_invocation_classes:`, and the callback macros
+(`before_action` and the rest) and `helper_method` in
+`per_invocation_non_action_macros:`, so a method those name is not an action.
+
+So [`def.ivar-write-mismatch`](../04-diagnostics.md#rule-def-ivar-write-mismatch)
+stays silent when `welcome` assigns `@items = [1, 2]` and `digest` assigns
+`@items = { a: 1 }`. It still reports two divergent writes in the same action,
+and a divergence that involves a private or protected helper, `initialize`, or a
+callback target or `helper_method` that a macro in the same file names.
+
+A method after a bare `protected` is not an action, so it is no longer checked
+for a view template, the same as one after a bare `private`.
+
 ## Plugin internals
 
 The mailer/concern discoverer, the cached `:mailer_index` producer,

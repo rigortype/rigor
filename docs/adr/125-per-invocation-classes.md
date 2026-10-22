@@ -2,7 +2,7 @@
 
 Status: **Accepted, 2026-10-22.** The maintainer chose this design (option A) for v0.4.6 on #575. Two
 manifest fields, the `Registry` aggregates, the narrowed `def.ivar-write-mismatch` and rigor-actionpack's
-declarations land together for #575. rigor-actionmailer's declaration is the follow-up #2308.
+declarations land together for #575. rigor-actionmailer's declaration followed in #2308.
 
 Archetype: deliberative. Stakes: mid. The change is additive to the plugin contract and only ever
 withholds a finding, but it widens what plugins can say to an engine rule.
@@ -124,7 +124,7 @@ the declarations state.
   - actions defined in a module, such as an `ActiveSupport::Concern` included into a controller, because
     the writes belong to the module;
   - a controller on `ActionController::Metal`, which is not declared.
-- rigor-actionmailer (a mailer instance also serves one action) adopts the fields in #2308 without an
+- rigor-actionmailer (a mailer instance also serves one action) adopted the fields in #2308 without an
   engine change.
 - The manifest's `to_h` gains two keys, so each plugin's cache identity moves once.
 

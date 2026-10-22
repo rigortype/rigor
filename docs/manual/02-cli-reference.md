@@ -979,6 +979,11 @@ loaded from (a `path:` line in text, a `"path"` key in JSON), so
 if a stale installed gem is shadowing a newer checkout's bundled
 plugin copy the mismatch is visible at a glance.
 
+A plugin that declares `per_invocation_classes:` or
+`per_invocation_non_action_macros:` ([ADR-125](../adr/125-per-invocation-classes.md))
+also gets a line for each in text, and a key in JSON (an empty
+array when it declares none).
+
 ```sh
 rigor plugins [--format=text|json] [--strict] [--capabilities] [--config=PATH]
 ```

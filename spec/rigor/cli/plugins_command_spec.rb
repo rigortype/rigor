@@ -259,6 +259,39 @@ RSpec.describe Rigor::CLI::PluginsCommand do
     end
   end
 
+  context "with a per-invocation-class plugin (ADR-125)" do
+    before do
+      require "rigor-actionmailer"
+      Rigor::Plugin.register(Rigor::Plugin::Actionmailer) unless Rigor::Plugin.registered_for("actionmailer")
+    end
+
+    it "surfaces per_invocation_classes and per_invocation_non_action_macros in the text output" do
+      File.write(".rigor.yml", "paths: [.]\nplugins:\n  - gem: rigor-actionmailer\n    id: actionmailer\n")
+      status, out, = run([])
+      expect(status).to eq(0)
+      expect(out).to include("per_invocation_classes: ActionMailer::Base")
+      expect(out).to match(/per_invocation_non_action_macros: before_action, .*helper_method$/)
+    end
+
+    it "surfaces both fields in the JSON output" do
+      File.write(".rigor.yml", "paths: [.]\nplugins:\n  - gem: rigor-actionmailer\n    id: actionmailer\n")
+      _, out, = run(["--format", "json"])
+      plugin = JSON.parse(out)["plugins"].first
+      expect(plugin["per_invocation_classes"]).to eq(["ActionMailer::Base"])
+      expect(plugin["per_invocation_non_action_macros"]).to include("before_action", "helper_method")
+    end
+
+    it "prints neither line for a plugin that declares none, and an empty list in JSON" do
+      File.write(".rigor.yml", "paths: [.]\nplugins:\n  - gem: rigor-activerecord\n    id: activerecord\n")
+      _, text, = run([])
+      expect(text).not_to include("per_invocation")
+      _, out, = run(["--format", "json"])
+      plugin = JSON.parse(out)["plugins"].first
+      expect(plugin["per_invocation_classes"]).to eq([])
+      expect(plugin["per_invocation_non_action_macros"]).to eq([])
+    end
+  end
+
   context "with --capabilities (ADR-37 extension-protocol catalogue)" do
     before do
       require "rigor-actionpack"

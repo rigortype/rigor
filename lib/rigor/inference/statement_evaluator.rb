@@ -188,6 +188,40 @@ module Rigor
       RETURN_SINK_KEY = :rigor_return_sink
       private_constant :RETURN_SINK_KEY
 
+      # Thread-local flag: set while a side pass ({.provisional_returns}) re-types part of a body from a scope other
+      # than the one the statement walk holds, so the `return`s it reaches are filed as provisional ({ReturnSink}).
+      PROVISIONAL_RETURNS_KEY = :rigor_provisional_returns
+      private_constant :PROVISIONAL_RETURNS_KEY
+
+      # The `return` sink {.with_return_sink} installs. Issue #2299 — a `return` the statement walk records is typed
+      # with its real bindings; one a side pass records ({.provisional_returns}) may read a name the pass skipped the
+      # binding of as `Dynamic[top]`. A provisional record of a `ReturnNode` therefore yields to the walk's record of
+      # the SAME node, and stands only where the walk never reaches that node: a block in expression position (a call
+      # argument, an array element, a chain receiver, a `return` value, an endless-def body), whose tail the side pass
+      # is the only walk to type.
+      class ReturnSink
+        def initialize
+          @types = []
+          @recorded = Set.new.compare_by_identity
+          @provisional = []
+        end
+
+        def record(node, type)
+          if Thread.current[PROVISIONAL_RETURNS_KEY]
+            @provisional << [node, type]
+          else
+            @types << type
+            @recorded << node
+          end
+        end
+
+        # The walk's records, then each provisional record whose node the walk did not record.
+        def types
+          @types + @provisional.filter_map { |node, type| type unless @recorded.include?(node) }
+        end
+      end
+      private_constant :ReturnSink
+
       # Thread-local sink (an Array of `[NextNode, Type]`) collecting the value each `next` carries out of the block it
       # leaves, so `ExpressionTyper#type_block_body` can join those arms into the block's value type. Issue #841: the
       # block-return pass modelled only the fall-through tail, so `ops.all? { |o| next false unless o; true }` read as
@@ -315,27 +349,30 @@ module Rigor
       # method-return type.
       def self.with_return_sink
         previous = Thread.current[RETURN_SINK_KEY]
-        sink = []
+        previous_provisional = Thread.current[PROVISIONAL_RETURNS_KEY]
+        sink = ReturnSink.new
         Thread.current[RETURN_SINK_KEY] = sink
+        Thread.current[PROVISIONAL_RETURNS_KEY] = nil
         begin
           result = yield
         ensure
           Thread.current[RETURN_SINK_KEY] = previous
+          Thread.current[PROVISIONAL_RETURNS_KEY] = previous_provisional
         end
-        [result, sink]
+        [result, sink.types]
       end
 
-      # Runs `block` with the `return` sink cleared, restoring it on exit: a side pass that re-types part of a
-      # body from a scope other than the one the statement walk holds must not file its `return`s as the method's.
-      # Issue #2299 — {ExpressionTyper#type_block_body}'s tail-only answer types `return r if r` without the
-      # `r = yield e` before it, so `r` read `Dynamic[top]` and that went into the enclosing method's return type.
-      def self.without_return_sink
-        previous = Thread.current[RETURN_SINK_KEY]
-        Thread.current[RETURN_SINK_KEY] = nil
+      # Runs `block` with the `return`s it reaches filed as provisional ({ReturnSink}), restoring the previous state
+      # on exit. Issue #2299 — {ExpressionTyper#type_block_body}'s tail-only answer types `return r if r` without the
+      # `r = yield e` before it, so `r` read `Dynamic[top]` and that went into the enclosing method's return type
+      # although the statement walk of the same block recorded `r` with its real binding.
+      def self.provisional_returns
+        previous = Thread.current[PROVISIONAL_RETURNS_KEY]
+        Thread.current[PROVISIONAL_RETURNS_KEY] = true
         begin
           yield
         ensure
-          Thread.current[RETURN_SINK_KEY] = previous
+          Thread.current[PROVISIONAL_RETURNS_KEY] = previous
         end
       end
 
@@ -6443,7 +6480,7 @@ module Rigor
       # inferred.
       def eval_return(node)
         sink = Thread.current[RETURN_SINK_KEY]
-        sink << jump_value_type(node) if sink
+        sink&.record(node, jump_value_type(node))
         [Type::Combinator.bot, scope]
       end
 

@@ -535,10 +535,9 @@ module Rigor
       # The question is asked HERE, of the same two tiers `resolve` consults and in the same order, rather
       # than reconstructed in the veto: a name this reports as answered is a name the dispatch really would
       # resolve, and no plugin knowledge moves into the engine's veto. The tiers are the gated
-      # `dynamic_return` walk and the ADR-16 synthetic-method index (Tier C `heredoc_templates` emissions
-      # today; the Tier B `Plugin::Macro::TraitRegistry` explosions share that table but cannot populate it
-      # until #476 threads a real environment into the pre-pass that builds it, so no trait member reaches
-      # this predicate in production yet — it will when #476 lands, with no change here).
+      # `dynamic_return` walk and the ADR-16 synthetic-method index (Tier C `heredoc_templates` emissions and
+      # the Tier B `Plugin::Macro::TraitRegistry` explosions, which share that table; since #476 the pre-pass
+      # explodes a trait module whenever the project's RBS declares it).
       #
       # It is a predicate, not a type: the veto's job is to stop the top-level bind, after which the call
       # falls through to the ordinary dispatch chain and the tier that answered here answers there too. The

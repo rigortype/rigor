@@ -273,6 +273,7 @@ module Rigor
         @effect_collections = runner.effect_collections_by_path
         @effects_identity = current_effects_identity
         @effect_plugin_digest = effect_plugin_digest_of(runner)
+        @synthetic_surface_digest = synthetic_surface_digest_of(runner)
         @cache = per_file(runner.per_file_diagnostics)
         @plugin_reads = plugin_reads_of(runner, @analyzed)
         @plugin_disclosures = RunDisclosureLedger.from(runner.analysis_disclosures.slice(*@analyzed))
@@ -301,7 +302,9 @@ module Rigor
         affected = affected_closure(changed, added, removed, param_files, param_pairs)
         affected, analyze_set, runner, merged, reused =
           run_settled_closure(affected, [current, previous, removed], fresh_params)
-        return rebaseline_recheck(changed, added, removed) if served_effects_stale?(runner, reused)
+        if served_effects_stale?(runner, reused) || synthetic_surface_moved?(runner, reused)
+          return rebaseline_recheck(changed, added, removed)
+        end
 
         absorb(runner, current, analyze_set, removed)
         @param_table = fresh_params
@@ -1066,6 +1069,7 @@ module Rigor
       def restore_plugin_records(payload)
         @plugin_reads = payload.plugin_reads
         @plugin_disclosures = RunDisclosureLedger.load(payload.plugin_disclosures)
+        @synthetic_surface_digest = payload.synthetic_surface_digest # the plugin-built ADR-16 index (PR #2286 M1)
       end
 
       # ADR-46 slice 3 / issue #644 — the structural tier's negative-edge state: the per-consumer missed
@@ -1093,6 +1097,7 @@ module Rigor
           effects_identity: @effects_identity,
           run_level_rows: @run_level_rows,
           effect_plugin_digest: @effect_plugin_digest,
+          synthetic_surface_digest: @synthetic_surface_digest,
           plugin_reads: @plugin_reads,
           plugin_disclosures: @plugin_disclosures.to_h,
           discovery_digests: @discovery_digests
@@ -1220,6 +1225,7 @@ module Rigor
         # Issues #796 / #794 — the recheck's own snapshots already carry the replayed rows folded together
         # with anything its closure demanded for itself, so this is the same union the next run replays.
         @run_level_rows = runner.run_level_rows
+        @synthetic_surface_digest = synthetic_surface_digest_of(runner)
         refresh_return_summaries(runner, analyze_set)
         refresh_effect_collections(runner, analyze_set)
       end
@@ -1674,6 +1680,21 @@ module Rigor
         return false if reused.empty? || @effect_collections.empty?
 
         effect_plugin_digest_of(runner) != @effect_plugin_digest
+      end
+
+      # PR #2286 review M1 — whether the ADR-16 synthetic-method index `runner` built differs from the one the
+      # served files were analysed under. The index comes from class-body DSL calls (`devise :confirmable`,
+      # a Tier C `attribute`), which no declaration signature records and no dependency edge names, so a file
+      # that dispatched through a synthesised member is not in the closure of the edit that removed it. The
+      # comparison waits for the run because the index is built by its pre-pass; a move re-analyses the project.
+      def synthetic_surface_moved?(runner, reused)
+        return false if reused.empty?
+
+        synthetic_surface_digest_of(runner) != @synthetic_surface_digest
+      end
+
+      def synthetic_surface_digest_of(runner)
+        runner.synthetic_method_index&.surface_digest
       end
 
       # The answer {#recheck} gives when {#served_effects_stale?}: a full baseline, reported as a recheck that

@@ -56,6 +56,13 @@ whatever class includes the concern.
   nothing, and the model's `valid_password?` and friends stay as they
   were. `plugins/rigor-devise/demo/sig/devise.rbs` is a minimal
   example.
+- **Your own definitions win.** A method the model defines itself
+  (`def`, `alias_method`, `attr_*`, `define_method`, `delegate`), or
+  that a module of your project it includes or prepends defines, is
+  left to that definition rather than typed from the Devise module.
+  This holds even for a module included before the `devise` call,
+  which Devise's module would override at runtime. Only the module's
+  own public methods are contributed.
 - **Instance methods only.** Per-module `ClassMethods` (e.g.
   `User.reset_password_by_token`) are not yet synthesised.
 - **Controller helpers deferred.** `current_user` /

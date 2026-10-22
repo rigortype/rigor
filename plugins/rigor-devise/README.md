@@ -120,9 +120,10 @@ Always-included regardless of selection:
 ## Running the demo
 
 The demo provides minimal RBS stubs locally
-(`demo/sig/devise.rbs`). A real project depending on Devise
-would consume the upstream gem's RBS through rigor's
-Bundler-awareness path.
+(`demo/sig/devise.rbs`). The `devise` gem ships no RBS and Rigor
+bundles none for `Devise::Models::*`, so a real project supplies
+these signatures itself (`signature_paths:` or an `rbs collection`);
+a strategy module with no signature contributes nothing.
 
 ```sh
 cd demo

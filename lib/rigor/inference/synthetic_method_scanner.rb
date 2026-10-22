@@ -8,6 +8,7 @@ require_relative "../source/literals"
 require_relative "../source/node_children"
 require_relative "synthetic_method"
 require_relative "synthetic_method_index"
+require_relative "synthetic_method_scanner/project_members"
 
 module Rigor
   module Inference
@@ -79,9 +80,15 @@ module Rigor
                                               none_mention_registry_method?(sources, registries)
 
         asts = parse_sources(sources)
+        entries, class_names = collect_all_entries(asts, templates, registries, nested_templates, environment,
+                                                   fact_store)
+        SyntheticMethodIndex.new(entries: decline_project_declared(entries, asts), class_names: class_names)
+      end
+
+      # The match + emit walk over every parsed file: `[entries, class_names]`.
+      def collect_all_entries(asts, templates, registries, nested_templates, environment, fact_store)
         hierarchy = build_hierarchy(asts)
         concern_index = build_concern_index(asts)
-
         entries = []
         class_names = []
         asts.each do |path, ast|
@@ -95,8 +102,19 @@ module Rigor
           end
           collect_nested_class_entries(entries, class_names, nested_templates, ast, path) unless nested_templates.empty?
         end
+        [entries, class_names]
+      end
 
-        SyntheticMethodIndex.new(entries: entries, class_names: class_names)
+      # PR #2286 review S1 — a Tier B entry whose name the class itself declares, or a project module it includes
+      # or prepends declares, is dropped: Ruby answers that call from the project's member, ahead of the module
+      # the registry included ({ProjectMembers}). Tier C entries (no `origin_module`) are left as they were.
+      def decline_project_declared(entries, asts)
+        return entries unless entries.any? { |entry| entry.provenance[:origin_module] }
+
+        members = ProjectMembers.new(asts)
+        entries.reject do |entry|
+          entry.provenance[:origin_module] && members.declares?(entry.class_name, entry.method_name)
+        end
       end
 
       # Aggregates `(plugin_id, template)` pairs across every plugin's `manifest.heredoc_templates` in registration
@@ -558,13 +576,17 @@ module Rigor
       # module is not in the RBS env (silent skip — the synthetic emit produces nothing rather than fabricating method
       # names).
       #
-      # RBS builds a module's instance definition over `Object`: `Kernel#puts`, `Object#hash`, ActiveSupport's
-      # `Object#blank?`, the pretty-printer's mixin all appear in `Devise::Models::Recoverable`'s method table
-      # beside its own members. They are not the module's contribution, and synthesising them would put ~200
-      # entries on every including class, answering `user.to_s` from the tier ABOVE the class's own `def` (a
-      # project override of `to_s` or `as_json` would be typed by `Object`'s signature). A method whose
-      # defining owner is the one `Object`'s own table names is therefore skipped; a module that re-declares
-      # one keeps it. A definition that carries no owner (the specs' stubs) keeps every name.
+      # RBS builds a module's instance definition over its self types, or over `Object` when it declares none:
+      # `Kernel#puts`, `Object#hash`, the pretty-printer's mixin — and, for `module Devise::Models::X :
+      # ActiveRecord::Base`, every `ActiveRecord::Base` method (`save`, `update`) — appear in its method table
+      # beside its own members. They are not what including the module adds, and synthesising them would answer
+      # the class's own or inherited methods from the module's view of them. A method is kept only when its
+      # defining owner is the module itself or one of the module's own ancestors (its `include` / `prepend`
+      # chain, which `definition.ancestors` lists without the self types or `Object`).
+      #
+      # A non-public method is skipped: the tier answers a call by name, and a private module method answered
+      # for `user.secret` would silence the call Ruby rejects. A definition that carries no owner (the specs'
+      # stubs) keeps every name.
       def module_instance_method_names(module_name, environment)
         return [] if environment.nil?
 
@@ -574,12 +596,13 @@ module Rigor
         definition = loader.instance_definition(module_name)
         return [] if definition.nil?
 
-        object_methods = nil
+        own_ancestors = nil
         definition.methods.filter_map do |name, method|
           next name unless method.respond_to?(:defined_in)
+          next unless method.public?
 
-          object_methods ||= loader.instance_definition("Object")&.methods || {}
-          name unless object_methods[name]&.defined_in == method.defined_in
+          own_ancestors ||= definition.ancestors.ancestors.to_set { |ancestor| ancestor.name.to_s }
+          name if own_ancestors.include?(method.defined_in.to_s)
         end
       rescue StandardError
         []

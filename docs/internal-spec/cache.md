@@ -1053,7 +1053,7 @@ never in. A session that cannot reuse an existing snapshot therefore
 declines rather than running a baseline — nothing it computed could warm
 the next keystroke anyway.
 
-### `Payload` (current `SCHEMA = 42`)
+### `Payload` (current `SCHEMA = 44`)
 
 ```
 Payload :: Data[
@@ -1070,7 +1070,8 @@ Payload :: Data[
   effect_plugin_digest,                       # #1898 the plugin effect-fact digest the collections were stamped under
   plugin_reads,                               # #1553 path -> the plugin reads its last analysis made (see below)
   discovery_digests,                          # #1583 discovered-not-analysed path -> packed stat digest (see below)
-  plugin_disclosures                          # #2020 path -> the run-scoped plugin rows its last analysis registered (see below)
+  plugin_disclosures,                         # #2020 path -> the run-scoped plugin rows its last analysis registered (see below)
+  synthetic_surface_digest                    # PR #2286 the ADR-16 synthetic-method index the cache was built under (see below)
 ]
 ```
 
@@ -1300,7 +1301,8 @@ discovery-index pairs (ADR-119 WD1, [`inference-engine.md`](inference-engine.md)
 § "Discovery Index"), every one empty until a producer admits a possible fact;
 `40` added `plugin_reads` ([#1553](https://github.com/rigortype/rigor/issues/1553), below);
 `41` added `discovery_digests` ([#1583](https://github.com/rigortype/rigor/issues/1583), below);
-`43` added `plugin_disclosures` ([#2020](https://github.com/rigortype/rigor/issues/2020), below).
+`43` added `plugin_disclosures` ([#2020](https://github.com/rigortype/rigor/issues/2020), below);
+`44` added `synthetic_surface_digest` ([#2286](https://github.com/rigortype/rigor/pull/2286), below).
 A blob from an older schema mismatches the `SCHEMA` gate and loads as `nil` — a
 clean cold rebuild, never a migration.
 
@@ -1512,6 +1514,20 @@ String, Array, Hash or Set (which `==` ignores too), modules an object was
 extended with, and the hidden fields a C-implemented class keeps outside
 `instance_variables` other than an exception's message, backtrace and cause
 (`NameError#name` reaches the digest only through the message).
+
+### `synthetic_surface_digest` — the synthetic-method index ([#2286](https://github.com/rigortype/rigor/pull/2286))
+
+The ADR-16 synthetic-method index (`SyntheticMethodScanner`, [`macro-substrate.md`](macro-substrate.md))
+is built from class-body DSL calls — `devise :confirmable`, a Tier C `attribute :name, T`. No
+declaration signature records those calls and no dependency edge names the file that wrote one, so
+an edit that adds or removes `devise` leaves the model declaration-stable and its consumers outside
+the closure. `synthetic_surface_digest` is `SyntheticMethodIndex#surface_digest` at the run the
+cache was built under: every `(kind, class, method)` row in first-wins order with its return type,
+Tier B `origin_module` and plugin id, plus the synthesised class names; nil for the empty index.
+The call site's path and line are left out, so an edit that only moves the `devise` line keeps it.
+A recheck compares its own runner's digest after the run (the index is built by the run's pre-pass)
+and re-baselines when it moved and the recheck served any file, which `--incremental` reports as
+cold. The comparison is the same in pool mode: the coordinator builds the index.
 
 ### `return_summaries` — semantic propagation gates ([ADR-89](../adr/89-semantic-propagation-gates.md))
 

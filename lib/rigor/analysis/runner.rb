@@ -77,7 +77,10 @@ module Rigor
                   # this and serves reused files from it without re-stamping: a run-level row is regenerated
                   # every run wherever it is positioned, and slicing the run's full stream by path cached the
                   # file-positioned ones (`effect.annotations-unchecked`, `source-rbs-*`).
-                  :per_file_diagnostics
+                  :per_file_diagnostics,
+                  # PR #2286 review M1 — the ADR-16 index this run's pre-pass built; `IncrementalSession` digests it
+                  # to tell when a class-body DSL edit moved what a served file's dispatch read.
+                  :synthetic_method_index
 
       # Issues #796 / #794 — the two run-level rows a NARROWED run cannot re-derive from the files it
       # analyses: the `definition-build-failed` set (whose producer is the analysis's own demand, and #696

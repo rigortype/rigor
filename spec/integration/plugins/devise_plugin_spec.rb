@@ -25,6 +25,7 @@ RSpec.describe "rigor-devise integration" do
       module ActiveRecord
         class Base
           def self.devise: (*Symbol) -> void
+          def save: () -> bool
         end
       end
 
@@ -58,6 +59,19 @@ RSpec.describe "rigor-devise integration" do
 
           module Timeoutable
             def timedout?: (Time) -> bool
+          end
+
+          module Validatable
+            def password_required?: () -> bool
+          end
+
+          module Confirmable
+            def confirmed?: () -> bool
+            def confirm: () -> bool
+          end
+
+          module Omniauthable : ActiveRecord::Base
+            def from_omniauth?: () -> bool
           end
         end
       end
@@ -185,6 +199,87 @@ RSpec.describe "rigor-devise integration" do
       )
 
       expect(result.diagnostics.map(&:rule).map(&:to_s)).to include("call.wrong-arity")
+    end
+
+    # PR #2286 review S1 — Ruby answers a member the model declares, or a project module it includes after
+    # `devise`, ahead of the Devise module; the synthetic tier used to answer them from the module's RBS. The
+    # model's undeclared `send_reset_password_instructions` is the positive control (still `bool`).
+    describe "a member the project declares on the model" do
+      let(:shadowing_demo) do
+        <<~RUBY
+          class ApplicationRecord < ActiveRecord::Base
+          end
+
+          module PasswordPolicy
+            def password_required?
+              "policy"
+            end
+          end
+
+          class User < ApplicationRecord
+            devise :database_authenticatable, :validatable, :confirmable, :recoverable
+            include PasswordPolicy
+
+            def confirmed?
+              :yes
+            end
+            alias_method :confirm, :confirmed?
+
+            def valid_password?(a, b)
+              a == b
+            end
+          end
+        RUBY
+      end
+
+      let(:shadowing_consumer) do
+        <<~RUBY
+          def probe
+            u = User.new
+            u.password_required?.upcase
+            u.confirmed?.to_proc
+            u.confirm.to_proc
+            u.valid_password?("x")
+            u.send_reset_password_instructions.no_such_bool_method
+          end
+        RUBY
+      end
+
+      def consumer_rows(result)
+        result.diagnostics.select { |d| d.path.end_with?("consumer.rb") }.to_h { |d| [d.line, d.rule.to_s] }
+      end
+
+      it "answers each from the project's member, and the model's own arity check stands" do
+        rows = consumer_rows(run_under_plugin(demo: shadowing_demo, consumer: shadowing_consumer))
+
+        expect(rows.fetch(3, nil)).to be_nil # PasswordPolicy#password_required? -> String
+        expect(rows.fetch(4, nil)).to be_nil # User#confirmed? -> Symbol
+        expect(rows.fetch(5, nil)).to be_nil # alias_method :confirm
+        expect(rows.fetch(6, nil)).to eq("call.wrong-arity") # User#valid_password?(a, b)
+        expect(rows.fetch(7, nil)).to eq("call.undefined-method") # Recoverable, undeclared by the project
+      end
+    end
+
+    # PR #2286 review M2 — RBS builds `module Omniauthable : ActiveRecord::Base` over `ActiveRecord::Base`, so its
+    # definition lists `save`. Ruby answers `save` from `ApplicationRecord`, which the module sits ahead of but
+    # does not define it in; the module's own `from_omniauth?` is the positive control.
+    it "does not synthesise a self-typed module's view of its self type's methods" do
+      result = run_under_plugin(
+        demo: <<~RUBY,
+          class ApplicationRecord < ActiveRecord::Base
+            def save
+              :saved
+            end
+          end
+
+          class User < ApplicationRecord
+            devise :omniauthable
+          end
+        RUBY
+        consumer: "def probe\n  u = User.new\n  u.save.to_proc\n  u.from_omniauth?.no_such_bool_method\nend\n"
+      )
+
+      expect(result.diagnostics.map { |d| [d.line, d.rule.to_s] }).to eq([[4, "call.undefined-method"]])
     end
 
     it "synthesises nothing for a model the project never declares with `devise`" do

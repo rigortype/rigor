@@ -270,6 +270,125 @@ RSpec.describe Rigor::Inference::SyntheticMethodScanner do
       expect(sm.provenance[:trait_method]).to eq("devise")
     end
 
+    # PR #2286 review S1 — Ruby answers a name the class body declares, or a project module it includes or
+    # prepends declares, ahead of the module `devise` included. Each form here declines its one name; the
+    # module's undeclared `update_with_password` is the positive control.
+    describe "a name the project declares on the class" do
+      def scan_user(**files)
+        registry = Rigor::Plugin::Registry.new(plugins: [devise_plugin.new(services: services)])
+        _, paths = write_files(files.transform_keys(&:to_s))
+        described_class.scan(plugin_registry: registry, paths: paths, environment: environment_with_devise_modules)
+      end
+
+      it "declines a name the class body defines, aliases or delegates, in any reopening" do
+        index = scan_user(
+          "user.rb" => <<~RUBY,
+            class User < ApplicationRecord
+              devise :database_authenticatable, :recoverable
+              def valid_password?(a, b) = a == b
+              alias_method :authenticatable_method, :valid_password?
+            end
+          RUBY
+          "user_reopened.rb" => "class User\n  attr_accessor :send_reset_password_instructions\nend\n"
+        )
+
+        expect(index.lookup_instance("User", :update_with_password).size).to eq(1)
+        expect(index.lookup_instance("User", :valid_password?)).to be_empty
+        expect(index.lookup_instance("User", :authenticatable_method)).to be_empty
+        expect(index.lookup_instance("User", :send_reset_password_instructions)).to be_empty
+      end
+
+      it "declines a name a project module the class includes or prepends declares, through its own includes" do
+        index = scan_user(
+          "policy.rb" => <<~RUBY,
+            module Auth
+              module Policy
+                include Inner
+                def valid_password?(pw) = true
+              end
+            end
+            module Inner; def send_reset_password_instructions = nil; end
+            module Prepended; def authenticatable_method = nil; end
+          RUBY
+          "user.rb" => <<~RUBY
+            class User < ApplicationRecord
+              devise :database_authenticatable, :recoverable
+              include Auth::Policy
+              prepend Prepended
+            end
+          RUBY
+        )
+
+        expect(index.lookup_instance("User", :update_with_password).size).to eq(1)
+        expect(index.lookup_instance("User", :valid_password?)).to be_empty
+        expect(index.lookup_instance("User", :send_reset_password_instructions)).to be_empty
+        expect(index.lookup_instance("User", :authenticatable_method)).to be_empty
+      end
+
+      it "keeps a name another class declares" do
+        index = scan_user(
+          "user.rb" => "class User < ApplicationRecord\n  devise :database_authenticatable\nend\n",
+          "admin.rb" => "class Admin\n  def valid_password?(a, b) = true\nend\n"
+        )
+
+        expect(index.lookup_instance("User", :valid_password?).size).to eq(1)
+      end
+    end
+
+    # PR #2286 review M2 / m3 — against a real RBS environment. RBS builds a module's instance definition over its
+    # self type (`ActiveRecord::Base`, whose `save` it then lists) or over `Object` without one; neither is what
+    # including the module adds. A private module method is not callable on the includer by name.
+    describe "against a real RBS definition" do
+      def real_environment(rbs)
+        dir, = write_files("sig/devise_fixture.rbs" => rbs)
+        Rigor::Environment.for_project(signature_paths: [File.join(dir, "sig")])
+      end
+
+      let(:rbs) do
+        <<~RBS
+          module ActiveRecord
+            class Base
+              def save: () -> bool
+            end
+          end
+          module DeviseFixture
+            module Models
+              module Helpers
+                def helper_method: () -> Integer
+              end
+              module Authenticatable
+                def authenticatable_method: () -> String
+              end
+              module DatabaseAuthenticatable : ActiveRecord::Base
+                include Helpers
+                def valid_password?: (String) -> bool
+                private def secret_token: () -> String
+              end
+            end
+          end
+        RBS
+      end
+
+      def scan_real
+        registry = Rigor::Plugin::Registry.new(plugins: [devise_plugin.new(services: services)])
+        _, paths = write_files(
+          "user.rb" => "class User < ActiveRecord::Base\n  devise :database_authenticatable\nend\n"
+        )
+        described_class.scan(plugin_registry: registry, paths: paths, environment: real_environment(rbs))
+      end
+
+      it "keeps the module's own and its included modules' public methods only" do
+        index = scan_real
+
+        expect(index.lookup_instance("User", :valid_password?).size).to eq(1)
+        expect(index.lookup_instance("User", :helper_method).size).to eq(1)
+        expect(index.lookup_instance("User", :authenticatable_method).size).to eq(1)
+        expect(index.lookup_instance("User", :save)).to be_empty
+        expect(index.lookup_instance("User", :hash)).to be_empty
+        expect(index.lookup_instance("User", :secret_token)).to be_empty
+      end
+    end
+
     it "silently skips unknown trait symbols (design decision (2))" do
       registry = Rigor::Plugin::Registry.new(plugins: [devise_plugin.new(services: services)])
       _, paths = write_files(

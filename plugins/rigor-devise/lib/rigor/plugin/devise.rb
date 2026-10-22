@@ -33,9 +33,11 @@ module Rigor
     # - `:authenticatable` — always-included base module
     #
     # The substrate's pre-pass scanner consults each module's RBS via `Environment::RbsLoader#instance_definition`
-    # to enumerate method names. A user project providing real Devise via Bundler will see methods like
-    # `valid_password?`, `send_reset_password_instructions`, etc. resolve through the synthetic-method
-    # tier without `call.undefined-method`.
+    # to enumerate method names, so it names only what the project's RBS declares. The `devise` gem ships no
+    # RBS and Rigor bundles none for `Devise::Models::*`: a project supplies those signatures (`signature_paths:`
+    # or an `rbs collection`), and only then do `valid_password?`, `send_reset_password_instructions`, etc.
+    # resolve through the synthetic-method tier. A name the model defines itself, or a project module it
+    # includes or prepends defines, is left to the project's definition.
     #
     # ## Precision tier
     #

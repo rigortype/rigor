@@ -280,9 +280,16 @@ RBS-known `receiver_constraint` (`ActiveRecord::Base`) through the environment's
 ordering. Those are the only two reads (`Runner::ScanEnvironment#rbs_loader`,
 `#class_ordering`). The run's own environment cannot be the source, because it stores the
 scan's output (`synthetic_method_index:`); but the loader never consults that index, so
-the pre-pass builds a **separate environment without the index** — same libraries,
-signature paths, plugin signatures, bundle / collection axes and required features, no
-reporters — and the real environment is built afterwards with it.
+the pre-pass builds a **separate environment without the index** — the configuration's
+libraries, signature paths, bundle / collection axes and required features, the loaded
+plugin registry, the project's source files, no reporters — and the real environment is
+built afterwards with it. It is not guaranteed to resolve the same RBS universe as the
+run's environment: the `source_rbs_synthesizer`s run again for it; in pool mode the
+coordinator never ran plugin `#prepare`, so a plugin signature that `#prepare` produces is
+absent from it; and the language server's environment is built without `source_files:`.
+A module one of these declares and the other does not is exploded in one and not the
+other — the scan then emits nothing for it, or the dispatcher's promotion through
+`origin_module` finds no method and answers `Dynamic[top]`.
 
 - The build is **lazy**: it happens on the first question a matching call site asks. A
   project whose files never write a registry's `method_name` (no `devise`) parses nothing
@@ -296,6 +303,36 @@ reporters — and the real environment is built afterwards with it.
   invent method names the project's RBS does not declare.
 - `SyntheticMethodScanner.scan(environment: nil)` still answers the empty index for a
   registry-only scan; it is the answer for a caller that has no environment.
+
+### Which trait-module methods Tier B synthesises
+
+A trait module's RBS instance definition lists more than including the module adds.
+The scanner MUST keep a method only when all of these hold:
+
+- Its defining owner (`defined_in`) is the module itself or one of the module's own
+  ancestors — its `include` / `prepend` chain. RBS builds a module's definition over its
+  self types (`module Devise::Models::X : ActiveRecord::Base` lists every
+  `ActiveRecord::Base` method) or over `Object` without one (`Kernel#puts`, `Object#hash`);
+  neither is the module's contribution, and synthesising them answers the class's own or
+  inherited method from the module's view of it.
+- It is public. The tier answers a call by name; a private module method answered for
+  `user.secret` would silence the call Ruby rejects.
+- The project does not declare the name on the class (PR #2286 review S1). Ruby looks a
+  method up on the class before any module it includes, and a project module the class
+  includes or prepends after `devise` sits ahead of the Devise module. A name counts as
+  declared when any reopening of the class body writes `def`, `alias` / `alias_method`,
+  `attr_*`, `define_method` or `delegate` for it, or when a project module the class
+  includes or prepends (followed through that module's own `include` / `prepend`, matched
+  by name or `::`-suffix) does. The order of an `include` relative to the `devise` call is
+  not consulted: a module included before the call sits behind the Devise module at
+  runtime, but the name is declined anyway. Declining sends the call to the tiers below,
+  which answer it as they did before Tier B was reachable; it never answers from the
+  module. Because the entry is never emitted, `call.wrong-arity`'s stand-down for a name
+  in the synthetic index (`SourceArity#project_patched?`) does not reach the class's own
+  `def`. Tier C has the same ordering question and does not apply this rule.
+
+The index is digested for `--incremental` (`synthetic_surface_digest`,
+[`cache.md`](cache.md)): an edit that moves it re-analyses the project.
 
 ## Nested-class tier — `NestedClassTemplate` (`nested_class_templates:`, ADR-36)
 

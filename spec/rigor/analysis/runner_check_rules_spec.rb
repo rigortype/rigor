@@ -1964,6 +1964,46 @@ RSpec.describe Rigor::Analysis::Runner do
         end
       end
 
+      # Issue #2071 — the `else` after clauses that cover a subject typed `IO` or `File` still runs for an idiomatic
+      # stand-in that is not a subclass: under Ruby 4.0.5 `StringIO.new` reaches the `else` after `when IO`, and
+      # `Tempfile.new` after `when File` or `when IO, StringIO, Object` (a `Delegator`, so not an `Object`, though
+      # stdlib RBS declares it a `File`).
+      {
+        "after `when IO` (StringIO.new)" => "case io\nwhen IO then 1\nelse 2\nend",
+        "after `in IO` (StringIO.new)" => "case io\nin IO then 1\nelse 2\nend",
+        "after `when IO, StringIO` (Tempfile.new)" => "case io\nwhen IO, StringIO then 1\nelse 2\nend",
+        "after `when File` (Tempfile.new)" => "f = File.new(__FILE__)\ncase f\nwhen File then 1\nelse 2\nend",
+        "after `when IO` on a File (Tempfile.new)" => "f = File.new(__FILE__)\ncase f\nwhen IO then 1\nelse 2\nend",
+        "after `when IO, nil` on `IO | nil` (StringIO.new)" =>
+          "m = ARGV.empty? ? io : nil\ncase m\nwhen IO, nil then 1\nelse 2\nend",
+        "after `when IO, Object` (Tempfile.new)" => "case io\nwhen IO, Object then 1\nelse 2\nend",
+        "after `when IO, StringIO, Kernel` (Tempfile.new)" => "case io\nwhen IO, StringIO, Kernel then 1\nelse 2\nend",
+        "after `when IO, Delegator` (StringIO.new)" => "case io\nwhen IO, Delegator then 1\nelse 2\nend"
+      }.each do |label, body|
+        it "does not report the `else` #{label}" do
+          diags = clause_diags(analyze(prior_exhaustion_source(body)))
+          expect(diags.map(&:message)).not_to include(include("unreachable `else'"))
+        end
+      end
+
+      # Ruby 4.0.5 never runs these `else`s: a literal is exactly its class, a class with no listed stand-in is read as
+      # typed, and clauses naming an ancestor of every stand-in match them.
+      {
+        "a String literal" => "lit = \"a\"\ncase lit\nwhen String then 1\nelse 2\nend",
+        "an Integer" => "n = Integer(ARGV.first)\ncase n\nwhen Integer then 1\nelse 2\nend",
+        "`when IO, StringIO, Tempfile`" => "case io\nwhen IO, StringIO, Tempfile then 1\nelse 2\nend",
+        "`when IO, Enumerable, Delegator`" => "case io\nwhen IO, Enumerable, Delegator then 1\nelse 2\nend",
+        "`when IO, BasicObject`" => "case io\nwhen IO, BasicObject then 1\nelse 2\nend",
+        "a String subject" => "s = String.new\ncase s\nwhen String then 1\nelse 2\nend",
+        "`in IO`, `in StringIO => s`, `in Tempfile => t`" =>
+          "case io\nin IO then 1\nin StringIO => s then s\nin Tempfile => t then t\nelse 2\nend"
+      }.each do |label, body|
+        it "still reports the `else` after #{label}" do
+          diags = clause_diags(analyze(prior_exhaustion_source(body)))
+          expect(diags.map(&:message)).to contain_exactly(include("unreachable `else'"))
+        end
+      end
+
       it "does not fire on non-constant clauses (`when nil` / ranges are out of WD1 scope)" do
         result = analyze(<<~RUBY)
           x = 1

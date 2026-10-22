@@ -53,6 +53,24 @@ module Rigor
         # `else`-only.
         DEFENSIVE_EXIT_CALLS = %i[raise fail throw abort exit].freeze
 
+        # Issue #2071 — core classes whose idiomatic stand-ins are not their subclasses: a `StringIO` answers the
+        # IO protocol without being an `IO`, and a `Tempfile` delegates to a `File` without being one (or an `IO`).
+        # A subject Rigor types as one of these classes (`$stdout` by idiom, ADR-117) may hold such a stand-in,
+        # which no `when IO` / `in File` matches, so the `else` still runs for it.
+        DUCK_STAND_INS = {
+          "IO" => %w[StringIO Tempfile].freeze,
+          "File" => %w[Tempfile].freeze
+        }.freeze
+
+        # Each stand-in's ancestors as Ruby 4.0.5 has them (`StringIO.ancestors`, `Tempfile.ancestors` without the
+        # anonymous `DelegateClass` entries): a clause naming one matches the stand-in. Written out rather than read
+        # from RBS, which declares `class Tempfile < File`; a `Tempfile` is a `Delegator`, so neither `Object` nor
+        # `Kernel` matches it.
+        STAND_IN_ANCESTORS = {
+          "StringIO" => %w[StringIO Enumerable Object Kernel BasicObject].freeze,
+          "Tempfile" => %w[Tempfile Delegator BasicObject].freeze
+        }.freeze
+
         # @!attribute kind
         #   @return `:disjoint` (this clause's type is disjoint
         #     from the still-possible subject), `:prior_exhaustion` (an
@@ -137,7 +155,40 @@ module Rigor
             end
             coverage.record(clause)
           end
+          return if stand_in_reaches_else?(node, entry_type)
+
           collect_else(node.else_clause, subject.name, keyword)
+        end
+
+        # Issue #2071 — whether the subject, as the `case` binds it, has a `Nominal` member of a {DUCK_STAND_INS}
+        # class with a stand-in no clause names an ancestor of ({STAND_IN_ANCESTORS}). `io = STDOUT; case io when IO
+        # then … else … end` runs the `else` for a `StringIO`, which the type `IO` stands for in idiomatic Ruby; a
+        # literal subject is a `Constant`, not a `Nominal`, and keeps its verdict. Asked of the `else` only: a dead
+        # `when` has its own evidence rules (#1429, #1485).
+        def stand_in_reaches_else?(node, entry_type)
+          members = entry_type.is_a?(Type::Union) ? entry_type.members : [entry_type]
+          stand_ins = members.flat_map do |member|
+            member.is_a?(Type::Nominal) ? DUCK_STAND_INS.fetch(member.class_name.delete_prefix("::"), []) : []
+          end
+          return false if stand_ins.empty?
+
+          named = clause_class_names(node)
+          stand_ins.any? { |stand_in| named.none? { |name| STAND_IN_ANCESTORS.fetch(stand_in).include?(name) } }
+        end
+
+        # The classes the clauses name as bare constants (`when A, B`, `in A`, `in A => x`).
+        def clause_class_names(node)
+          node.conditions.flat_map do |clause|
+            patterns = clause.is_a?(Prism::WhenNode) ? clause.conditions : [bare_pattern(clause.pattern)]
+            patterns.filter_map do |pattern|
+              entry = @scope_index[pattern]
+              entry && Inference::Narrowing.lexical_class_name(pattern, entry)
+            end
+          end
+        end
+
+        def bare_pattern(pattern)
+          pattern.is_a?(Prism::CapturePatternNode) ? pattern.value : pattern
         end
 
         def entry_subject_type(case_node, subject_name)

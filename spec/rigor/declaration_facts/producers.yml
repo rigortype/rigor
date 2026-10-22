@@ -51,6 +51,11 @@ lib/rigor/analysis/dependency_source_inference/walker.rb:
     Rigor::Analysis::DependencySourceInference::Walker#collect_bound_constants: qualifies a constant write by the lexical nesting of the class and module headers around it, as walk_node qualifies a def, so a refine key is matched by the name the write binds rather than by its last segment (#1814); it records no declaration fact
     Rigor::Analysis::DependencySourceInference::Walker#walk_node: grandfathered
     Rigor::Analysis::DependencySourceInference::Walker#walk_refine_declarations: a dispatcher over a refine body; it hands each nested class or module back to walk_node under the prefix it was given and derives no declaration context itself
+lib/rigor/analysis/edit_replay.rb:
+  computes: the class/module skeleton text the --verify-incremental-edits replay substitutes for a file (#1967)
+  producers:
+    Rigor::Analysis::EditReplay#declarations: 'issue #1967, copies the source spelling of each nested class and module header into the skeleton edit the verify gate replays through an editor buffer; it reads no declaration fact, feeds no analysis, and derives no declaration context'
+    Rigor::Analysis::EditReplay#header_of: 'issue #1967, renders one class or module header (constant path and superclass, as written) for that skeleton edit; it derives no declaration context'
 lib/rigor/analysis/incremental.rb:
   computes: the dependency keys an --incremental recheck fires from the per-file tables the indexer already wrote
   producers:

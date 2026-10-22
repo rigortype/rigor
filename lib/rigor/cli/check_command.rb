@@ -3,6 +3,7 @@
 require "fileutils"
 require "json"
 require "optionparser"
+require "tempfile"
 
 require_relative "../configuration"
 require_relative "../config_audit"
@@ -11,6 +12,7 @@ require_relative "../analysis/rule_catalog"
 # The baseline filter runs on EVERY exit path — including the ADR-87 WD4 cache-HIT fast path, which skips
 # `load_check_dependencies` — so it must be a load-time require. It pulls only YAML, never the engine.
 require_relative "../analysis/baseline"
+require_relative "../analysis/edit_replay"
 require_relative "command"
 require_relative "options"
 require_relative "diagnostic_formats"
@@ -272,8 +274,83 @@ module Rigor
         incremental = session.reanalyze_subset(subset).map(&:to_h)
         full = verify_full_diagnostics(configuration, paths, collect_stats: options.fetch(:stats)).map(&:to_h)
 
-        report_verify_incremental(incremental, full, subset_size: subset.size, total: analyzed.size,
-                                                     format: options.fetch(:format))
+        status = report_verify_incremental(incremental, full, subset_size: subset.size, total: analyzed.size,
+                                                              format: options.fetch(:format))
+        return status unless status.zero? && options.fetch(:verify_incremental_edits).positive?
+
+        verify_edit_replays(session, configuration, paths, options)
+      end
+
+      # Issue #1967 — the partition check above re-analyses an unchanged tree, so every served row is still right and a
+      # missing invalidation edge goes unseen. Here each of `--verify-incremental-edits` sampled files is edited through
+      # an editor buffer (never on disk) by each of {Analysis::EditReplay.edits} — emptied, then reduced to its
+      # `class` / `module` skeleton — and the warm recheck of the baseline ({IncrementalSession#replay_edit}) must equal
+      # a full analysis of the edited tree: a dependent the recheck failed to re-analyse is served from the baseline and
+      # differs. A run in which every replay declined compared nothing, so it fails rather than report OK.
+      def verify_edit_replays(session, configuration, paths, options)
+        sample = edit_replay_sample(session.analyzed_files, options.fetch(:verify_incremental_edits))
+        replayed = 0
+        declined = 0
+        sample.each do |path|
+          Analysis::EditReplay.edits(File.read(path)).each do |edit|
+            incremental, full = replay_edit(session, configuration, paths, path, edit)
+            next declined += 1 if incremental.nil?
+
+            replayed += 1
+            next if incremental == full
+
+            return report_edit_replay_mismatch(path, edit, incremental, full)
+          end
+        end
+        report_edit_replays(replayed, declined, options.fetch(:format))
+      end
+
+      def report_edit_replay_mismatch(path, edit, incremental, full)
+        @err.puts("rigor: --verify-incremental FAILED — the recheck after #{edit.label} #{path} " \
+                  "differs from a full run.")
+        return report_verify_order_mismatch(incremental, full) if incremental.tally == full.tally
+
+        report_verify_set_mismatch(incremental, full, header: false)
+      end
+
+      # `count` files spread evenly over the analysed list, so a small count still reaches both ends of it.
+      def edit_replay_sample(analyzed, count)
+        return analyzed if count >= analyzed.size
+
+        Array.new(count) { |index| analyzed[index * analyzed.size / count] }
+      end
+
+      # The warm recheck's rows and a full run's, both with `path` replaced by `edit`; `[nil, nil]` when the recheck
+      # declined.
+      def replay_edit(session, configuration, paths, path, edit)
+        Tempfile.create(["rigor-verify-edit-", ".rb"]) do |file|
+          file.write(edit.source)
+          file.close
+          buffer = Analysis::BufferBinding.new(logical_path: path, physical_path: file.path)
+          recheck = session.replay_edit(buffer)
+          return [nil, nil] if recheck.nil?
+
+          # `analyze_only:` with the buffer selects editor mode option B, a whole-project run reading the buffer at
+          # its logical path; the buffer alone would analyse that one file.
+          runner = Analysis::Runner.new(configuration: configuration, cache_store: nil, collect_stats: false,
+                                        buffer: buffer, analyze_only: session.analyzed_files.to_set)
+          full = paths ? runner.run(paths) : runner.run
+          [recheck.diagnostics.map(&:to_h), full.diagnostics.map(&:to_h)]
+        end
+      end
+
+      def report_edit_replays(replayed, declined, format)
+        if replayed.zero? && declined.positive?
+          @err.puts("rigor: --verify-incremental FAILED — every edit replay (#{declined}) declined, " \
+                    "since the recheck would have been a full analysis, so no edit was compared.")
+          return 1
+        end
+
+        line = "rigor: --verify-incremental OK — #{replayed} edits replayed (files emptied and reduced to their " \
+               "class/module skeleton), every recheck matches full"
+        line = "#{line}; #{declined} declined (the recheck would have been a full analysis)" if declined.positive?
+        side_output(format).puts(line)
+        0
       end
 
       # ADR-46 — cross-process incremental analysis (`--incremental`). Derives the global fingerprint cheaply (no RBS
@@ -490,10 +567,10 @@ module Rigor
         end
       end
 
-      def report_verify_set_mismatch(incremental, full)
+      def report_verify_set_mismatch(incremental, full, header: true)
         only_incremental = multiset_difference(incremental, full)
         only_full = multiset_difference(full, incremental)
-        @err.puts("rigor: --verify-incremental FAILED — incremental and full diagnostics differ.")
+        @err.puts("rigor: --verify-incremental FAILED — incremental and full diagnostics differ.") if header
         @err.puts("  incremental-only: #{only_incremental.size}, full-only: #{only_full.size}")
         (only_incremental + only_full).first(10).each do |hash|
           @err.puts("    #{diagnostic_location(hash)}")
@@ -643,6 +720,9 @@ module Rigor
           # the rest from the per-file cache, and asserts the merged diagnostics are byte-identical to a full
           # `--no-cache` run. Exits non-zero on any mismatch. Off by default.
           verify_incremental: false,
+          # Issue #1967 — the number of files `--verify-incremental` replays an edit on (each emptied through an editor
+          # buffer) after the partition check. 0 replays none.
+          verify_incremental_edits: 0,
           # ADR-46 — cross-process incremental analysis. With a disk snapshot of the prior run's per-file diagnostics +
           # dependency graph, re-analyzes only the changed closure and serves the rest from the snapshot. Off by
           # default.
@@ -719,6 +799,15 @@ module Rigor
           opts.on("--verify-incremental",
                   "assert incremental analysis matches a full run, then exit") do
             options[:verify_incremental] = true
+          end
+          opts.on("--verify-incremental-edits=N", Integer,
+                  "with --verify-incremental, also replay 2 edits (empty, class/module skeleton) on N files") do |value|
+            if value.negative?
+              raise OptionParser::InvalidArgument, "--verify-incremental-edits=#{value} (must be 0 or more)"
+            end
+
+            options[:verify_incremental] = true
+            options[:verify_incremental_edits] = value
           end
           opts.on("--incremental",
                   "re-analyze only files changed since the last run (cross-process cache)") do

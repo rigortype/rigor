@@ -1639,6 +1639,30 @@ end
           expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
         end
       end
+
+      # Issue #1967 item 2 — only a clause that reads `$@` asks whether the program defines `backtrace`, so a rescue
+      # that never reads it records no edge and stays out of the closure (net-ssh: 28 files re-checked for 3 readers).
+      it "does not re-check a rescue that never reads $@ when another file defines backtrace (workers: #{workers})" do
+        skip "fork is unavailable on this platform" if workers.positive? && !Process.respond_to?(:fork)
+        Dir.mktmpdir do |dir|
+          d = File.join(dir, "d.rb")
+          r = File.join(dir, "r.rb")
+          b = File.join(dir, "b.rb")
+          File.write(d, "def bt\n  begin\n    1\n  rescue\n    $@.zzz\n  end\nend\n")
+          File.write(r, "def quiet\n  begin\n    1\n  rescue => e\n    e.message\n  end\nend\n")
+          File.write(b, "class Placeholder\nend\n")
+          session = described_class.new(configuration: configuration(dir), environment: shared_environment,
+                                        workers: workers)
+          guarded_baseline(session)
+
+          File.write(b, "class Other\n  def backtrace = nil\nend\n")
+          recheck = guarded_recheck(session)
+
+          expect(recheck.affected).to include(d)
+          expect(recheck.affected).not_to include(r)
+          expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+        end
+      end
     end
   end
 

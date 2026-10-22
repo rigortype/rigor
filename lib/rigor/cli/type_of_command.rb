@@ -17,7 +17,7 @@ require_relative "type_of_template_probe"
 require_relative "command"
 require_relative "options"
 require_relative "../project_environment"
-require_relative "coverage_scan"
+require_relative "type_of_project_scope"
 
 module Rigor
   class CLI
@@ -89,7 +89,7 @@ module Rigor
       def execute(targets:, options:, buffer: nil)
         configuration = Configuration.load(options.fetch(:config))
         environment = project_environment(targets.map(&:file).uniq, configuration, buffer)
-        base_scope = CoverageScan.probe_scope(environment: environment, configuration: configuration, buffer: buffer)
+        base_scope = TypeOfProjectScope.build(environment: environment, configuration: configuration, buffer: buffer)
 
         results_by_target = Array.new(targets.length)
         targets.each_with_index.group_by { |target, _index| target.file }.each do |file, indexed_targets|

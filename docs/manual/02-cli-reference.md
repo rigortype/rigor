@@ -155,9 +155,10 @@ A class or constant that another project file declares reads as
 `rigor check --incremental` has left a snapshot for the project:
 `type-of` folds the cross-file declarations from that snapshot's
 per-file bundles, re-reading any file whose bytes changed since,
-and never writes it. With no reusable snapshot (none yet, a changed
-configuration, lockfile or `sig/`, or a snapshot written for other
-roots) the probe types the one file on its own, so such a name reads
+and never writes it. With no reusable snapshot (none yet, or one a
+change made unusable, for example a changed configuration, lockfile, `sig/`, `pre_eval:`
+file or required feature, an engine upgrade, or a snapshot written
+for other roots) the probe types the one file on its own, so such a name reads
 `Dynamic[top]`, and it prints nothing about it. Only those
 declarations are shared: the types `check` infers for an unannotated
 parameter are not.

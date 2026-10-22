@@ -885,7 +885,13 @@ full run, so the snapshot can never wedge or stale an analysis.
    an occasional `--explain` run neither reads nor evicts the warm plain snapshot, and the
    reverse ([#1867](https://github.com/rigortype/rigor/issues/1867)). The language server
    and `Protection::MutationCache#load_snapshot` have no run mode and stay on the plain
-   file. Snapshot files are not budgeted or pruned by `Cache::Store`; they stay until
+   file. `rigor type-of` is a third reader ([#512](https://github.com/rigortype/rigor/issues/512)): it
+   loads the plain snapshot under the fingerprint of a bare `check --incremental`
+   (roots = the configured paths) and folds only its `seed_bundles` into the probe's discovery
+   tables, through the same digest check as an incremental recheck, so a file whose bytes
+   moved (or the editor buffer's) is re-walked. It is read-only, never writes the snapshot, and
+   on any miss (no snapshot, fingerprint mismatch, no bundles) keeps the single-file scope without a
+   message. Snapshot files are not budgeted or pruned by `Cache::Store`; they stay until
    `--clear-cache`.
    A mismatch drops the snapshot.
 

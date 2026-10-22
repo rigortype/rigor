@@ -26,10 +26,10 @@ RSpec.describe "rigor type-of over a project (#512)" do
     Rigor::CLI::CheckCommand.new(argv: argv, out: StringIO.new, err: StringIO.new).run
   end
 
-  def type_of(position)
+  def type_of(position, *flags)
     out = StringIO.new
     err = StringIO.new
-    status = Rigor::CLI::TypeOfCommand.new(argv: [position], out: out, err: err).run
+    status = Rigor::CLI::TypeOfCommand.new(argv: [*flags, position], out: out, err: err).run
     [status, out.string.lines.grep(/\Atype:/).first.to_s.sub("type:", "").strip, err.string]
   end
 
@@ -63,6 +63,33 @@ RSpec.describe "rigor type-of over a project (#512)" do
       _status, type, = type_of("lib/controller.rb:1:1")
 
       expect(type).to eq("singleton(Account)")
+    end
+  end
+
+  # The editor buffer stands in for lib/user.rb: the seed must read the buffer's bytes, not the file's.
+  context "with a warm snapshot and an editor buffer" do
+    before do
+      write("lib/c2.rb", "x = User.current\nx\n")
+      warm_snapshot
+      write("buf.rb", "class User\n  def self.current = \"s\"\nend\n")
+    end
+
+    it "folds the buffer's declarations in place of the file's" do
+      _status, type, = type_of("lib/c2.rb:2:1", "--tmp-file", "buf.rb", "--instead-of", "lib/user.rb")
+
+      expect(type).to eq('"s"')
+    end
+
+    it "matches the configured file when the buffer is named by an absolute path" do
+      _status, type, = type_of("lib/c2.rb:2:1", "--tmp-file", "buf.rb", "--instead-of", File.expand_path("lib/user.rb"))
+
+      expect(type).to eq('"s"')
+    end
+
+    it "answers from the file on disk without a buffer (control)" do
+      _status, type, = type_of("lib/c2.rb:2:1")
+
+      expect(type).to eq("1")
     end
   end
 

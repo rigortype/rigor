@@ -486,4 +486,5 @@ whole_index:
 - lib/rigor/analysis/worker_session.rb
 - lib/rigor/cli/coverage_mutation.rb
 - lib/rigor/cli/coverage_scan.rb
+- lib/rigor/cli/type_of_project_scope.rb
 - lib/rigor/inference/parameter_inference_collector.rb

@@ -80,7 +80,9 @@ module Rigor
       def unresolved_holders(fresh, analyzed, stale, removed)
         return Set.new if stale.empty?
 
-        registered = analyzed.flat_map { |path| Array(fresh[path]).map { |record| RunDisclosureCredit.identity(record) } }
+        registered = analyzed.flat_map do |path|
+          Array(fresh[path]).map { |record| RunDisclosureCredit.identity(record) }
+        end
         unresolved = stale - registered
         return Set.new if unresolved.empty?
 

@@ -299,18 +299,8 @@ module Rigor
         fresh_params = fresh_param_table(current, changed, added, removed)
         param_files, param_pairs = param_seed_invalidation(fresh_params)
         affected = affected_closure(changed, added, removed, param_files, param_pairs)
-        forced, analyze_set = forced_analyze_set(affected, current)
-        runner, merged, reused = run_closure(analyze_set, current, previous, forced, fresh_params)
-        # Issue #2020 — a stale run-scoped key whose chosen refresher registered nothing (a parse error, a plugin that
-        # raised, a hook that did not run) is decided by its other holders, so they join and the closure runs again.
-        fallback = @plugin_disclosures.unresolved_holders(runner.analysis_disclosures, analyze_set, @stale_disclosures,
-                                                          removed.to_set)
-        unless fallback.empty?
-          affected = (affected | fallback).freeze
-          @stale_plugin_readers |= fallback
-          forced, analyze_set = forced_analyze_set(affected, current)
-          runner, merged, reused = run_closure(analyze_set, current, previous, forced, fresh_params)
-        end
+        affected, analyze_set, runner, merged, reused =
+          run_settled_closure(affected, [current, previous, removed], fresh_params)
         return rebaseline_recheck(changed, added, removed) if served_effects_stale?(runner, reused)
 
         absorb(runner, current, analyze_set, removed)
@@ -318,6 +308,23 @@ module Rigor
         recheck_result(merged, [changed, added, removed], affected: affected, reused: reused.to_set, runner: runner,
                                                           stale_readers: @stale_plugin_readers)
       end
+
+      # {#recheck}'s narrowed run. Issue #2020 — a stale run-scoped key whose chosen refresher registered nothing (a
+      # parse error, a plugin that raised, an edit that took the notice out of its text) is decided by its other
+      # holders, so they join the closure and it runs again. Returns `[affected, analyze_set, runner, merged, reused]`.
+      def run_settled_closure(affected, (current, previous, removed), fresh_params)
+        forced, analyze_set = forced_analyze_set(affected, current)
+        runner, merged, reused = run_closure(analyze_set, current, previous, forced, fresh_params)
+        fallback = @plugin_disclosures.unresolved_holders(runner.analysis_disclosures, analyze_set, @stale_disclosures,
+                                                          removed.to_set)
+        return [affected, analyze_set, runner, merged, reused] if fallback.empty?
+
+        affected = (affected | fallback).freeze
+        @stale_plugin_readers |= fallback
+        forced, analyze_set = forced_analyze_set(affected, current)
+        [affected, analyze_set, *run_closure(analyze_set, current, previous, forced, fresh_params)]
+      end
+      private :run_settled_closure
 
       # One narrowed run of {#recheck}'s closure: the runner, its merged rows, and the files it served. The freshly
       # collected table is handed to the runner so the run seeds from the SAME table the diff was decided on (and the

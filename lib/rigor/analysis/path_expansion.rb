@@ -62,6 +62,17 @@ module Rigor
         reject_excluded(RootedGlob.glob(dir, RUBY_GLOB), exclude_patterns, base: base)
       end
 
+      # The configured project files, expanded as `rigor check` expands its configured paths: a directory globs,
+      # any other entry (a file, or a path that does not exist) is kept verbatim and left to the reader to skip.
+      # The file list a cross-file discovery seed is folded over ({Protection::DiscoverySeed}).
+      def configured_files(configuration)
+        Array(configuration.paths).flat_map do |path|
+          next [path] unless File.directory?(path)
+
+          directory_files(path, configuration.exclude_patterns, base: configuration.exclude_base)
+        end
+      end
+
       # `exclude_patterns` are matched with `File.fnmatch?` WITHOUT `FNM_PATHNAME`, so `**`/`*` span separators
       # (the patterns behave like substring globs) — the exact semantics the Runner's directory glob applies.
       #

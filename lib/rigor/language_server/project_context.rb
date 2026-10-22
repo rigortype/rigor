@@ -269,21 +269,13 @@ module Rigor
 
       # The configured project files, expanded as `rigor check` expands its configured paths.
       def discovery_paths
-        @discovery_paths ||= Array(@configuration.paths).flat_map do |path|
-          next [path] unless File.directory?(path)
-
-          Analysis::PathExpansion.directory_files(path, @configuration.exclude_patterns,
-                                                  base: @configuration.exclude_base)
-        end.freeze
+        @discovery_paths ||= Analysis::PathExpansion.configured_files(@configuration).freeze
       end
 
       # Every entry that reaches the buffer's file is respelled, so a file configured under two roots (`lib` and a
       # symlink to it) is not folded from disk through the second.
       def discovery_paths_for(buffer)
-        real = Rigor::Analysis::BufferBinding.real_path(buffer.logical_path)
-        discovery_paths.each_with_index.map do |path, index|
-          discovery_real_paths[index] == real ? buffer.logical_path : path
-        end
+        Protection::DiscoverySeed.respell_for_buffer(discovery_paths, buffer, real_paths: discovery_real_paths)
       end
 
       def discovery_real_paths

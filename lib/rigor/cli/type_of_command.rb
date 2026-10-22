@@ -17,6 +17,7 @@ require_relative "type_of_template_probe"
 require_relative "command"
 require_relative "options"
 require_relative "../project_environment"
+require_relative "../protection/discovery_seed"
 
 module Rigor
   class CLI
@@ -88,7 +89,7 @@ module Rigor
       def execute(targets:, options:, buffer: nil)
         configuration = Configuration.load(options.fetch(:config))
         environment = project_environment(targets.map(&:file).uniq, configuration, buffer)
-        base_scope = Scope.empty(environment: environment)
+        base_scope = project_scope(environment, configuration, buffer)
 
         results_by_target = Array.new(targets.length)
         targets.each_with_index.group_by { |target, _index| target.file }.each do |file, indexed_targets|
@@ -223,6 +224,18 @@ module Rigor
         patched = ProjectEnvironment.project_patched_methods(configuration, buffer: buffer)
         ProjectEnvironment.build(configuration: configuration, source_files: files, project_patched_methods: patched,
                                  feature_sources: ProjectEnvironment.buffer_sources(buffer))
+      end
+
+      # Issue #512 — a class another project file declares must not read `Dynamic`. The scope carries the
+      # project's cross-file discovery tables when a prior `rigor check --incremental` left a snapshot to fold
+      # them from ({Protection::DiscoverySeed.from_snapshot}); otherwise it stays the single-file scope this
+      # command always had, because re-parsing the project for one probe costs more than the probe.
+      def project_scope(environment, configuration, buffer)
+        scope = Scope.empty(environment: environment)
+        seed = Protection::DiscoverySeed.from_snapshot(configuration: configuration, buffer: buffer)
+        return scope if seed.nil? || seed.empty?
+
+        scope.with_discovery(scope.discovery.with(**seed))
       end
 
       def file_exists?(file)

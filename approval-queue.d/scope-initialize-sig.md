@@ -18,7 +18,7 @@
 
 ## Decision
 
-All 19 keywords are added, typed as their readers. The re-audit moves 20 `Scope` rows to generated or parameter intent: the residue pin for `sig/rigor/scope.rbs` goes 65 to 45, and the `# sig-gen gap: #1154` markers on the ten rows that became generated-equal (and the stale `# authored:` note on `published_constant_sourced`) are removed. Four #1154 markers stay (`match_frame`, `match_rebinding_closure?`, `last_line_closure?`, `declaration_sourced_global_copies`), the last with a corrected reason. No row moved the wrong way.
+All 19 keywords are added, typed as their readers. `declared_refinements:` and its reader are `Array[String | Symbol]`, since the list can hold `InEffectRefinements::UNKNOWN`. Plainly: the parameter types were copied from the very readers they now earn, so the rows that left residue are parameter intent echoed through #1154, not types proved from a body. The re-audit moves 20 `Scope` rows to generated or parameter intent, and the residue pin for `sig/rigor/scope.rbs` goes 65 to 45. The `# sig-gen gap: #1154` markers on ten rows that became generated-equal or parameter intent are removed (`constant_narrowing` and `published_constant_sourced?` are parameter intent, the rest generated). Three Set readers (`published_constant_sourced`, `declaration_sourced`, `struct_fold_safe_locals`) carry `# authored:` notes: the audit compares an un-elaborated type, but `rigor sig-gen --print` still proposes `Set[untyped]` (#2177), tracked in [#2317](https://github.com/rigortype/rigor/issues/2317). Four #1154 markers stay (`match_frame`, `match_rebinding_closure?`, `last_line_closure?`, `declaration_sourced_global_copies`), the last with a corrected reason. No row moved the wrong way.
 
 ## To undo
 

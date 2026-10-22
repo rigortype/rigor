@@ -355,7 +355,9 @@ SIG_PROVENANCE_RESIDUE = {
   # the ivar it seeds, so those readers (`local_origins`, `ivar_origins`, `void_origins`, `plugin_typed_calls`,
   # `optimistic_*`, `indexed_narrowings`, `method_chain_narrowings`, `struct_fold_safe_locals`, `lexical_nesting`,
   # `declaration_sourced`, and the predicates over them) render and match, or classify as parameter intent. The
-  # `# sig-gen gap: #1154` markers on the rows that became generated-equal are gone too.
+  # `# sig-gen gap: #1154` markers on the rows that became generated-equal or parameter intent are gone too. The
+  # three Set readers (`published_constant_sourced`, `declaration_sourced`, `struct_fold_safe_locals`) carry `# authored:`
+  # notes instead: sig-gen proposes `Set[untyped]` for them (#2177, #2317), and a marker does not move this count.
   "sig/rigor/scope.rbs" => 45,
   "sig/rigor/sig_gen/skip_reason_catalog.rbs" => 8,
   "sig/rigor/source.rbs" => 4,

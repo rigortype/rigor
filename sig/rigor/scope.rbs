@@ -24,6 +24,8 @@ module Rigor
     attr_reader indexed_narrowings: Hash[IndexedKey, Type::t]
     attr_reader method_chain_narrowings: Hash[ChainKey, Type::t]
     attr_reader source_path: String?
+    # authored: the element is a `Symbol` by contract; a Set's element type stays `untyped` in sig-gen (#2177, #2317), so the generator
+    # would never propose it.
     attr_reader struct_fold_safe_locals: Set[Symbol]
     attr_reader opaque_block_self: bool
     # Issue #1759 — `:refinement` (REFINEMENT_BLOCK_SELF) directly in a `refine X do … end` block body.
@@ -37,7 +39,7 @@ module Rigor
     # Issue #1446 — the classes a class guard narrowed a `bot` receiver to.
     attr_reader bot_guard_classes: Hash[[Symbol, Symbol | String], Array[String]]
     # Issue #1667 — the modules a plugin-declared refined block runs under, in declaration order.
-    attr_reader declared_refinements: Array[String]
+    attr_reader declared_refinements: Array[String | Symbol]
 
     # ADR-53 Track A — the seed-time discovery tables live on the
     # DiscoveryIndex; Scope keeps per-table readers as delegates.
@@ -206,7 +208,7 @@ module Rigor
 
     def self.empty: (?environment: Environment, ?source_path: String?) -> Scope
 
-    def initialize: (environment: Environment, locals: Hash[Symbol, Type::t], ?fact_store: Analysis::FactStore, ?self_type: Type::t?, ?ivars: Hash[Symbol, Type::t], ?cvars: Hash[Symbol, Type::t], ?globals: Hash[Symbol, Type::t], ?discovery: DiscoveryIndex, ?source_path: String?, ?opaque_block_self: bool, ?block_self_unknown: bool | :refinement, ?singleton_class_body: bool, ?dynamic_origins: Hash[untyped, Symbol], ?indexed_narrowings: Hash[IndexedKey, Type::t], ?method_chain_narrowings: Hash[ChainKey, Type::t], ?declaration_sourced: Set[[Symbol, Symbol] | [Symbol, Symbol, Symbol]], ?published_constant_sourced: Set[[Symbol, Symbol]], ?struct_fold_safe_locals: Set[Symbol], ?lexical_nesting: Array[String]?, ?local_origins: Hash[Symbol, Symbol], ?ivar_origins: Hash[Symbol, Symbol], ?void_origins: Hash[untyped, Inference::VoidOrigin], ?plugin_typed_calls: Hash[untyped, bool], ?optimistic_origins: Hash[untyped, Symbol], ?optimistic_locals: Hash[Symbol, Symbol | Inference::OptimisticOrigin::BoundMark], ?optimistic_ivars: Hash[Symbol, Symbol | Inference::OptimisticOrigin::BoundMark], ?repeated_or_writes: Hash[untyped, bool], ?match_frame: untyped, ?constant_narrowings: Hash[String, Type::t], ?guard_records: Hash[[Symbol, Symbol | String], Type::t], ?bot_guard_classes: Hash[[Symbol, Symbol | String], Array[String]], ?declared_refinements: Array[String]) -> void
+    def initialize: (environment: Environment, locals: Hash[Symbol, Type::t], ?fact_store: Analysis::FactStore, ?self_type: Type::t?, ?ivars: Hash[Symbol, Type::t], ?cvars: Hash[Symbol, Type::t], ?globals: Hash[Symbol, Type::t], ?discovery: DiscoveryIndex, ?source_path: String?, ?opaque_block_self: bool, ?block_self_unknown: bool | :refinement, ?singleton_class_body: bool, ?dynamic_origins: Hash[untyped, Symbol], ?indexed_narrowings: Hash[IndexedKey, Type::t], ?method_chain_narrowings: Hash[ChainKey, Type::t], ?declaration_sourced: Set[[Symbol, Symbol] | [Symbol, Symbol, Symbol]], ?published_constant_sourced: Set[[Symbol, Symbol]], ?struct_fold_safe_locals: Set[Symbol], ?lexical_nesting: Array[String]?, ?local_origins: Hash[Symbol, Symbol], ?ivar_origins: Hash[Symbol, Symbol], ?void_origins: Hash[untyped, Inference::VoidOrigin], ?plugin_typed_calls: Hash[untyped, bool], ?optimistic_origins: Hash[untyped, Symbol], ?optimistic_locals: Hash[Symbol, Symbol | Inference::OptimisticOrigin::BoundMark], ?optimistic_ivars: Hash[Symbol, Symbol | Inference::OptimisticOrigin::BoundMark], ?repeated_or_writes: Hash[untyped, bool], ?match_frame: untyped, ?constant_narrowings: Hash[String, Type::t], ?guard_records: Hash[[Symbol, Symbol | String], Type::t], ?bot_guard_classes: Hash[[Symbol, Symbol | String], Array[String]], ?declared_refinements: Array[String | Symbol]) -> void
     def with_source_path: (String? path) -> Scope
     def with_struct_fold_safe: (Set[Symbol] locals) -> Scope
     def with_lexical_nesting: (Array[String]? chain) -> Scope
@@ -256,10 +258,14 @@ module Rigor
     def forget_guard_narrowing_of: (untyped kind, untyped name) -> Scope
     def without_constant_narrowings_named: (untyped name) -> Scope
     def constant_narrowing: (String key) -> Type::t?
+    # authored: the element is `[Symbol, Symbol]` by contract; a Set's element type stays `untyped` in sig-gen (#2177, #2317), so the generator
+    # would never propose it.
     def published_constant_sourced: () -> Set[[Symbol, Symbol]]
     def published_constant_sourced?: (Symbol kind, String | Symbol name) -> bool
     def with_published_constant_mark: (Symbol kind, String | Symbol name) -> Scope
     # Issue #1362 — a `[:global_copy, local, global]` record rides beside the `(kind, name)` refs.
+    # authored: the element is a `[Symbol, Symbol]` or `[Symbol, Symbol, Symbol]` tuple by contract; a Set's element type stays `untyped` in sig-gen (#2177, #2317), so the generator
+    # would never propose it.
     def declaration_sourced: () -> Set[[Symbol, Symbol] | [Symbol, Symbol, Symbol]]
     def seed_declaration_sourced_ivar: (String | Symbol name, Type::t type) -> Scope
     def seed_declaration_sourced_global: (String | Symbol name, Type::t type) -> Scope

@@ -801,7 +801,7 @@ module Rigor
             options[:verify_incremental] = true
           end
           opts.on("--verify-incremental-edits=N", Integer,
-                  "with --verify-incremental, also replay two edits (empty, class/module skeleton) on N files") do |value|
+                  "with --verify-incremental, also replay 2 edits (empty, class/module skeleton) on N files") do |value|
             if value.negative?
               raise OptionParser::InvalidArgument, "--verify-incremental-edits=#{value} (must be 0 or more)"
             end

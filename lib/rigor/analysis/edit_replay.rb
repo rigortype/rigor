@@ -4,8 +4,8 @@ require "prism"
 
 module Rigor
   module Analysis
-    # Issue #1967 — the edits `rigor check --verify-incremental-edits` replays on each sampled file, as the text an editor
-    # buffer stands in for it with ({IncrementalSession#replay_edit}).
+    # Issue #1967 — the edits `rigor check --verify-incremental-edits` replays on each sampled file, as the text an
+    # editor buffer stands in for it with ({IncrementalSession#replay_edit}).
     #
     # - `emptied` — the file with nothing in it. Every declaration and definition it makes disappears, so the replay
     #   exercises the edges a removed declaration fires.
@@ -15,8 +15,8 @@ module Rigor
     #   method's symbol) can put a reader into the closure. Emptying alone never exercises them: the broader key it
     #   fires re-checks the reader anyway.
     #
-    # Neither replays an addition. A skeleton identical to the file, or with no declaration (where it is the emptied
-    # file again), is not replayed.
+    # Neither replays an addition. A skeleton identical to the file, or with no declaration (the emptied file again, or
+    # a file that does not parse), is not replayed.
     module EditReplay
       Edit = Data.define(:label, :source)
 
@@ -25,40 +25,39 @@ module Rigor
       # The edits to replay for `source`, in order.
       def edits(source)
         emptied = Edit.new(label: "emptying", source: "")
-        skeleton = skeleton(source)
-        return [emptied] if skeleton.nil? || skeleton.empty? || skeleton == source
+        reduced = skeleton(source)
+        return [emptied] if reduced.empty? || reduced == source
 
-        [emptied, Edit.new(label: "reducing to its class/module skeleton", source: skeleton)]
+        [emptied, Edit.new(label: "reducing to its class/module skeleton", source: reduced)]
       end
 
-      # `source`'s `class` / `module` declarations, nested, with their bodies dropped; nil when it does not parse.
+      # `source`'s `class` / `module` declarations, nested, with their bodies dropped; "" when it does not parse or
+      # declares nothing.
       def skeleton(source)
         result = Prism.parse(source)
-        return nil unless result.success?
+        return "" unless result.success?
 
-        lines = []
-        declarations(result.value.statements, 0, lines)
+        lines = declarations(result.value.statements, 0)
         lines.empty? ? "" : "#{lines.join("\n")}\n"
       end
 
-      def declarations(statements, depth, lines)
-        return unless statements.is_a?(Prism::StatementsNode)
+      # The skeleton lines of the declarations directly in `statements`, indented `depth` levels.
+      def declarations(statements, depth)
+        return [] unless statements.is_a?(Prism::StatementsNode)
 
-        statements.body.each do |node|
-          header = header_of(node) or next
-          lines << "#{'  ' * depth}#{header}"
-          declarations(node.body, depth + 1, lines)
-          lines << "#{'  ' * depth}end"
+        statements.body.flat_map do |node|
+          next [] unless node.is_a?(Prism::ClassNode) || node.is_a?(Prism::ModuleNode)
+
+          indent = "  " * depth
+          ["#{indent}#{header_of(node)}", *declarations(node.body, depth + 1), "#{indent}end"]
         end
       end
 
       def header_of(node)
-        case node
-        when Prism::ClassNode
-          superclass = node.superclass ? " < #{node.superclass.slice}" : ""
-          "class #{node.constant_path.slice}#{superclass}"
-        when Prism::ModuleNode then "module #{node.constant_path.slice}"
-        end
+        return "module #{node.constant_path.slice}" if node.is_a?(Prism::ModuleNode)
+
+        superclass = node.superclass
+        superclass ? "class #{node.constant_path.slice} < #{superclass.slice}" : "class #{node.constant_path.slice}"
       end
       private_class_method :declarations, :header_of
     end

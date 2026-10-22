@@ -263,8 +263,6 @@ module Rigor
           "signature_paths" => row[:signature_paths].map do |sp|
             { "path" => sp[:path], "exists" => sp[:exists], "rbs_files" => sp[:rbs_files] }
           end,
-          "open_receivers" => row[:open_receivers],
-          "owns_receivers" => row[:owns_receivers],
           "produces" => row[:produces],
           "consumes" => row[:consumes],
           "block_as_methods" => row[:block_as_methods],
@@ -279,12 +277,14 @@ module Rigor
           "dynamic_return_receivers" => row[:dynamic_return_receivers],
           "narrowing_facts_methods" => row[:narrowing_facts_methods],
           "load_error" => row[:load_error]
-        }.merge(per_invocation_json(row))
+        }.merge(receiver_json(row))
       end
 
-      # ADR-125 — additive keys; an empty array when the plugin declares none.
-      def per_invocation_json(row)
+      # ADR-125 — the per-invocation keys are additive; an empty array when the plugin declares none.
+      def receiver_json(row)
         {
+          "open_receivers" => row[:open_receivers],
+          "owns_receivers" => row[:owns_receivers],
           "per_invocation_classes" => row[:per_invocation_classes],
           "per_invocation_non_action_macros" => row[:per_invocation_non_action_macros]
         }

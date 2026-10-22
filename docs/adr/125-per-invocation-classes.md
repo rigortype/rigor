@@ -54,7 +54,8 @@ callback macro (`before_action`, `after_action`, `around_action` and their `prep
     names a class the project declares (`MyApp::ActionController::Base`).
   - A truncated chain does not match.
 - **Actions.** The collector records each write's enclosing method, its visibility, and the names the
-  declared macros spell in a class body of the same file. A write is in an action when its method is
+  declared macros spell in a class body of the same file: Symbol and String arguments and an inline
+  `def` (`helper_method def current_user`). A write is in an action when its method is
   public and no such macro names it.
 - **Rule semantics.** A divergent write W is withheld when W sits in an action and every conflicting write
   (non-nil, a different concrete class) sits in a *different* action of the same class.
@@ -84,10 +85,16 @@ the declarations state.
 - **WD2 — an unsettled visibility is not public.** A slot the discovery table lacks or contests (#2013),
   and `initialize` / `respond_to_missing?` and the other implicitly private hooks, are treated as shared by
   every invocation. An unproved premise keeps the finding.
-- **WD3 — a companion field, not a value object.** A per-class value object (`{ class:, macros: }`) would
-  be a second spelling of the class list, the kind of duplication
-  [ADR-60](60-pre-freeze-plugin-contract-consolidation.md) removed. Tying the macros to the same
-  manifest's classes keeps one plugin's macros off another plugin's classes.
+- **WD3 — a companion field, not a value object.** The precedent weighed against is
+  [ADR-38](38-additional-initializers.md)'s `additional_initializers:`, a list of
+  `{ receiver_constraint:, methods: }` value objects. The question it answers per entry is "which methods
+  of this class". Here the macros are a property of the framework the plugin models, the same for every
+  class it declares, so one list per manifest says it once. The field is tied to its manifest's
+  classes, so one plugin's macros never apply to another plugin's classes. A value object stays available
+  if a plugin ever needs different macros per class.
+- **WD3a — the name says `macros`, not `methods`.** ADR-38's `methods:` lists the methods that are
+  initializers. These entries are not the non-action methods; they are the class-body calls whose
+  arguments name them. `per_invocation_non_action_macros` keeps that indirection visible.
 - **WD4 — a narrowing of one rule, not a general suppression hook.** The fields feed
   `def.ivar-write-mismatch` alone. A general "plugin declines engine rule X" hook is out of scope (#575).
 
@@ -107,8 +114,10 @@ the declarations state.
 - **Known silent cases.** Neither is reported:
   - an action that calls another action (`def show; index; @roles = {…}; end`), because both methods are
     actions;
-  - a public callback target or `helper_method` named by a macro in another file (a reopening, or
-    `ApplicationController`), because macro arguments are read from the file that holds the writes.
+  - a public callback target or `helper_method` named by a macro in another file (a reopening, a concern,
+    or `ApplicationController`), because macro arguments are read from the file that holds the writes;
+  - a public method a callback reaches through a block or lambda (`before_action -> { load_roles }`),
+    because only literal names count: a Symbol, a String or an inline `def`.
 - **Known limits that keep firing.** These are conservative:
   - a private helper that genuinely runs in only one action (proving helper reach, option A2 in #575, is
     deferred);

@@ -128,8 +128,8 @@ RSpec.describe "a callee chain that mutates an argument floors it (#2104)" do
   end
 
   it "keeps the literal shape through a recursive chain that never mutates, and terminates" do
-    # With the closure's visited check removed, this run took about a minute and still answered the same diagnostics,
-    # so the time is the assertion that the closure terminates.
+    # With the closure's visited check removed this example spins until something interrupts it, and an interrupted
+    # run can still answer the same diagnostics, so the time is the assertion that the closure terminates.
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     expect(diagnostics(<<~RUBY)).to eq(undefined_upcase)
       def stripes(acc) = walk(acc, 3)

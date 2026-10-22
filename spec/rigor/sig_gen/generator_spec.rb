@@ -516,6 +516,40 @@ RSpec.describe Rigor::SigGen::Generator do
     end
   end
 
+  # Issue #1153 — an empty-collection early return types its arm `[]`, and the union keeps that beside a sibling
+  # `Array[E]` arm. `[]` is an `Array[E]` for every `E`, so the signature drops it; a `[]` beside anything but an
+  # `Array` arm, or alone, is information the declaration keeps.
+  describe "an empty-literal early return beside an Array arm" do
+    def rbs_of(body, name)
+      path = write_fixture("lib/walker.rb", "class Walker\n#{body}\nend\n")
+      generator(paths: [path]).run.find { it.method_name == name }.rbs
+    end
+
+    it "absorbs the empty tuple into the Array arm" do
+      rbs = rbs_of(<<~RUBY, :walk)
+        def walk(table)
+          return [] if table.empty?
+
+          names = []
+          names.concat(table[0])
+          names.uniq
+        end
+      RUBY
+
+      expect(rbs).to eq("def walk: (untyped) -> Array[untyped]")
+    end
+
+    it "keeps a lone empty tuple" do
+      expect(rbs_of("def none = []", :none)).to eq("def none: () -> []")
+    end
+
+    it "keeps the empty tuple beside another tuple arm" do
+      rbs = rbs_of("def pair(x)\n return [] if x.nil?\n [1, 2]\nend", :pair)
+
+      expect(rbs).to eq("def pair: (untyped) -> ([1, 2] | [])")
+    end
+  end
+
   # Ruby keeps the last definition of a name, so sig-gen writes one entry per method slot: a `def` and an
   # `attr_reader` of the same name, or a `module_function` name redefined after a reset, gave RBS a duplicate
   # method definition (#2008, #2023). Each example builds the written declaration with RBS's DefinitionBuilder

@@ -1380,7 +1380,22 @@ module Rigor
       # different method (issue #1382). Delegates to {Rigor::Inference::DefReturnTyper} — the same body-typing +
       # explicit-return-union the `rigor annotate` def-line annotator uses.
       def infer_return_type(def_node, scope_index)
-        Inference::DefReturnTyper.call(def_node, scope_index, keep_lookup_nil: true)
+        absorb_empty_tuple(Inference::DefReturnTyper.call(def_node, scope_index, keep_lookup_nil: true))
+      end
+
+      # Issue #1153 — an empty-collection early return (`return [] if table.empty?`) types its arm `[]`, which the
+      # engine's union keeps beside a sibling `Array[E]` arm on purpose (the empty tuple is a distinct shape). A
+      # signature has no use for the distinction: `[]` is an `Array[E]` for every `E`, so `Array[E] | []` is just
+      # `Array[E]`, and the leftover `[]` arm made the proposal read as if the empty literal pinned the element.
+      # Absorbed only beside an `Array` nominal; a lone `[]`, or one beside another tuple (`[1, 2] | []`), is
+      # untouched, since each of those is information the declaration should keep.
+      def absorb_empty_tuple(type)
+        return type unless type.is_a?(Type::Union)
+
+        empties, rest = type.members.partition { |member| member.is_a?(Type::Tuple) && member.elements.empty? }
+        return type if empties.empty? || rest.none? { |member| member.is_a?(Type::Nominal) && member.class_name == "Array" }
+
+        Type::Combinator.union(*rest)
       end
 
       def dynamic_top?(type)

@@ -194,6 +194,10 @@ RSpec.describe "ADR-67 WD6 check-walk parameter inference" do
       RBS
     end
 
+    let(:lines) do
+      run_with_signature(derived_source, shouter_rbs).select { |d| d.rule == "call.undefined-method" }.map(&:line)
+    end
+
     def run_with_signature(source, rbs)
       Dir.mktmpdir("rigor-2189") do |dir|
         Dir.mkdir(File.join(dir, "sig"))
@@ -206,10 +210,6 @@ RSpec.describe "ADR-67 WD6 check-walk parameter inference" do
         runner = Rigor::Analysis::Runner.new(configuration: config, cache_store: nil)
         return guarded_run(runner, [path]).diagnostics
       end
-    end
-
-    let(:lines) do
-      run_with_signature(derived_source, shouter_rbs).select { |d| d.rule == "call.undefined-method" }.map(&:line)
     end
 
     it "declines on an array literal element read back" do

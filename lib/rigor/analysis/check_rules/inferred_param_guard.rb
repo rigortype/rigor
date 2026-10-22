@@ -46,19 +46,28 @@ module Rigor
           case node
           when Prism::LocalVariableReadNode, Prism::InstanceVariableReadNode then scope.inferred_param?(node.name)
           when Prism::CallNode then rooted?(node.receiver, scope, depth + 1)
-          when Prism::ArrayNode then node.elements.any? { |element| rooted?(element, scope, depth + 1) }
-          when Prism::HashNode, Prism::KeywordHashNode
-            node.elements.any? { |element| rooted?(element, scope, depth + 1) }
-          when Prism::AssocNode then rooted?(node.key, scope, depth + 1) || rooted?(node.value, scope, depth + 1)
-          # Value-combining forms: the produced value is a union of the operands, so it is a lower bound when
-          # ANY operand is inferred-parameter-rooted (`cps[i] - x rescue -1`, `a && param.foo`, `param || b`).
-          # Declining on the whole expression is FP-safe by the same lower-bound argument.
+          when Prism::ArrayNode, Prism::HashNode, Prism::KeywordHashNode, Prism::AssocNode
+            literal_rooted?(node, scope, depth + 1)
+          else combining_rooted?(node, scope, depth + 1)
+          end
+        end
+
+        # An array or hash literal is rooted when any element is: the engine reads the element back precisely.
+        def literal_rooted?(node, scope, depth)
+          parts = node.is_a?(Prism::AssocNode) ? [node.key, node.value] : node.elements
+          parts.any? { |part| rooted?(part, scope, depth) }
+        end
+
+        # Value-combining forms: the produced value is a union of the operands, so it is a lower bound when ANY
+        # operand is inferred-parameter-rooted (`cps[i] - x rescue -1`, `a && param.foo`, `param || b`). Declining
+        # on the whole expression is FP-safe by the same lower-bound argument.
+        def combining_rooted?(node, scope, depth)
+          case node
           when Prism::RescueModifierNode
-            rooted?(node.expression, scope, depth + 1) || rooted?(node.rescue_expression, scope, depth + 1)
-          when Prism::AndNode, Prism::OrNode
-            rooted?(node.left, scope, depth + 1) || rooted?(node.right, scope, depth + 1)
-          when Prism::ParenthesesNode then rooted?(last_statement(node.body), scope, depth + 1)
-          when Prism::StatementsNode then rooted?(node.body.last, scope, depth + 1)
+            rooted?(node.expression, scope, depth) || rooted?(node.rescue_expression, scope, depth)
+          when Prism::AndNode, Prism::OrNode then rooted?(node.left, scope, depth) || rooted?(node.right, scope, depth)
+          when Prism::ParenthesesNode then rooted?(last_statement(node.body), scope, depth)
+          when Prism::StatementsNode then rooted?(node.body.last, scope, depth)
           else false
           end
         end

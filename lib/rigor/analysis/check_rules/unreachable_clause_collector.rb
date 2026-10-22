@@ -53,6 +53,19 @@ module Rigor
         # `else`-only.
         DEFENSIVE_EXIT_CALLS = %i[raise fail throw abort exit].freeze
 
+        # Issue #2071 — core classes whose idiomatic stand-ins are not their subclasses: a `StringIO` answers the
+        # IO protocol without being an `IO`, a `Tempfile` delegates to a `File` without being one (or an `IO`),
+        # and a `Pathname` stands in for a path `String`. A subject Rigor types as one of these classes may hold
+        # such a stand-in, which no `when IO` / `in String` matches, so the `else` still runs for it.
+        DUCK_STAND_INS = {
+          "IO" => %w[StringIO Tempfile].freeze,
+          "File" => %w[Tempfile].freeze,
+          "String" => %w[Pathname].freeze
+        }.freeze
+
+        # The classes every object is: a clause naming one matches a stand-in too.
+        UNIVERSAL_CLASSES = %w[Object BasicObject Kernel].freeze
+
         # @!attribute kind
         #   @return `:disjoint` (this clause's type is disjoint
         #     from the still-possible subject), `:prior_exhaustion` (an
@@ -137,7 +150,55 @@ module Rigor
             end
             coverage.record(clause)
           end
+          return if stand_in_reaches_else?(node, entry_type, scope)
+
           collect_else(node.else_clause, subject.name, keyword)
+        end
+
+        # Issue #2071 — whether the subject, as the `case` binds it, has a `Nominal` member of a {DUCK_STAND_INS}
+        # class with a stand-in no clause names (the stand-in itself or a class above it). `io = STDOUT; case io
+        # when IO then … else … end` runs the `else` for a `StringIO`, which the type `IO` stands for in idiomatic
+        # Ruby; a literal subject (`"a"`) is a `Constant`, not a `Nominal`, and keeps its verdict. Asked of the
+        # `else` only: a dead `when` has its own evidence rules (#1429, #1485).
+        def stand_in_reaches_else?(node, entry_type, scope)
+          members = entry_type.is_a?(Type::Union) ? entry_type.members : [entry_type]
+          pairs = members.flat_map do |member|
+            next [] unless member.is_a?(Type::Nominal)
+
+            base = member.class_name.delete_prefix("::")
+            DUCK_STAND_INS.fetch(base, []).map { |stand_in| [base, stand_in] }
+          end
+          return false if pairs.empty?
+
+          named = clause_class_names(node)
+          pairs.any? { |base, stand_in| named.none? { |name| covers_stand_in?(name, base, stand_in, scope) } }
+        end
+
+        # Whether a clause naming `name` matches `stand_in`: the stand-in itself, a class every object is, or a class
+        # RBS places above the stand-in and not above `base`. The last test leaves out what RBS gets wrong about a
+        # stand-in: stdlib RBS declares `class Tempfile < File`, while Ruby's `Tempfile` is a `Delegator`, so `when
+        # File` (or `IO`) does not match one.
+        def covers_stand_in?(name, base, stand_in, scope)
+          return true if name == stand_in || UNIVERSAL_CLASSES.include?(name)
+          return false if scope.nil? || name == base
+
+          environment = scope.environment
+          environment.class_ordering(stand_in, name) == :subclass && environment.class_ordering(base, name) != :subclass
+        end
+
+        # The classes the clauses name as bare constants (`when A, B`, `in A`, `in A => x`).
+        def clause_class_names(node)
+          node.conditions.flat_map do |clause|
+            patterns = clause.is_a?(Prism::WhenNode) ? clause.conditions : [bare_pattern(clause.pattern)]
+            patterns.filter_map do |pattern|
+              entry = @scope_index[pattern]
+              entry && Inference::Narrowing.lexical_class_name(pattern, entry)
+            end
+          end
+        end
+
+        def bare_pattern(pattern)
+          pattern.is_a?(Prism::CapturePatternNode) ? pattern.value : pattern
         end
 
         def entry_subject_type(case_node, subject_name)

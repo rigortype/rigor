@@ -1393,9 +1393,8 @@ module Rigor
         return type unless type.is_a?(Type::Union)
 
         empties, rest = type.members.partition { |member| member.is_a?(Type::Tuple) && member.elements.empty? }
-        return type if empties.empty? || rest.none? { |member| member.is_a?(Type::Nominal) && member.class_name == "Array" }
-
-        Type::Combinator.union(*rest)
+        array_arm = rest.any? { |member| member.is_a?(Type::Nominal) && member.class_name == "Array" }
+        empties.empty? || !array_arm ? type : Type::Combinator.union(*rest)
       end
 
       def dynamic_top?(type)

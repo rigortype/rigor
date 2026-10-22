@@ -21,6 +21,14 @@ module Rigor
       # - the direct receiver / subject: `param.foo`, `case param`
       # - an indexed element: `param[i] - x` (the `-` receiver is the `[]` call whose root is `param`)
       # - any method chain: `param.foo.bar`, `param.foo(arg).baz`, `param.key?(:x)`
+      # - an array or hash literal holding the parameter (issue #2189): `[param].first.upcase`,
+      #   `{a: param}[:a].upcase`. The engine reads such an element back precisely, so the read is the
+      #   parameter's lower bound again; any other call on the literal declines too, the FP-safe direction.
+      # - an instance variable the same method wrote from such a value (issue #2189): `@x = param; @x.upcase`.
+      #   This one IS a scope mark — {Inference::StatementEvaluator#eval_ivar_write} stamps `:inferred_param`
+      #   under the ivar's `@`-prefixed name, which no local can spell — because the write and the read are
+      #   separate statements. The mark is method-local: the class-ivar census that seeds a sibling method's
+      #   ivars types the write's RHS without the inference seed, so a cross-method read is not a lower bound.
       #
       # Every value derived from an inferred parameter by dispatch is itself a lower bound, so firing against it
       # is an FP by the same construction. No-op on a normal `check` run — `Scope#inferred_param?` is false
@@ -36,8 +44,13 @@ module Rigor
           return false if node.nil? || depth > MAX_DEPTH
 
           case node
-          when Prism::LocalVariableReadNode then scope.inferred_param?(node.name)
+          when Prism::LocalVariableReadNode, Prism::InstanceVariableReadNode then scope.inferred_param?(node.name)
           when Prism::CallNode then rooted?(node.receiver, scope, depth + 1)
+          when Prism::ArrayNode then node.elements.any? { |element| rooted?(element, scope, depth + 1) }
+          when Prism::HashNode, Prism::KeywordHashNode
+            node.elements.any? { |element| rooted?(element, scope, depth + 1) }
+          when Prism::AssocNode then rooted?(node.key, scope, depth + 1) || rooted?(node.value, scope, depth + 1)
+          when Prism::SplatNode, Prism::AssocSplatNode then rooted?(literal_operand(node), scope, depth + 1)
           # Value-combining forms: the produced value is a union of the operands, so it is a lower bound when
           # ANY operand is inferred-parameter-rooted (`cps[i] - x rescue -1`, `a && param.foo`, `param || b`).
           # Declining on the whole expression is FP-safe by the same lower-bound argument.
@@ -49,6 +62,10 @@ module Rigor
           when Prism::StatementsNode then rooted?(node.body.last, scope, depth + 1)
           else false
           end
+        end
+
+        def literal_operand(node)
+          node.is_a?(Prism::SplatNode) ? node.expression : node.value
         end
 
         def last_statement(body)

@@ -680,7 +680,19 @@ module Rigor
         # stamped by {#seed_instance_ivars}.
         bound = bound.with_published_constant_mark(:ivar, node.name) if
           published_constant_copy?(node.value, rhs_type, post_rhs)
-        [rhs_type, bound]
+        [rhs_type, mark_inferred_param_ivar(bound, node)]
+      end
+
+      # Issue #2189 — the ivar twin of {#bind_local_write}'s ADR-67 WD6b stamp: `@x = param; @x.upcase` reads the
+      # parameter's open-call-site lower bound back, so the ivar carries the `:inferred_param` mark under its
+      # `@`-prefixed name and {Analysis::CheckRules::InferredParamGuard} declines on the read. A write from any
+      # other RHS clears it. Method-local only: the class-ivar census seeding a sibling method types the RHS
+      # without the inference seed, so no lower bound crosses the method boundary to guard.
+      def mark_inferred_param_ivar(bound, node)
+        return bound.with_inferred_param_mark(node.name) if
+          Analysis::CheckRules::InferredParamGuard.rooted?(node.value, scope)
+
+        bound.without_inferred_param_mark(node.name)
       end
 
       def eval_cvar_write(node)

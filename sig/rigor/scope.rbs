@@ -305,8 +305,6 @@ module Rigor
     def inferred_param?: (String | Symbol name) -> bool
     def forget_match_globals: () -> Scope
     def untyped_match_globals: () -> Scope
-    # sig-gen gap: #1154 — the reader over the `@globals` ivar `initialize` assigns from a parameter reaches
-    # `untyped`, so the `bool` is hand-written.
     def match_globals_bound?: () -> bool
     def with_match_frame: (untyped body, ?untyped parameters) -> Scope
     # sig-gen gap: #1154 — the frame reader over an ivar assigned in `initialize` from a parameter reaches
@@ -314,8 +312,6 @@ module Rigor
     def match_rebinding_closure?: () -> bool
     def forget_last_line: () -> Scope
     def untyped_last_line: () -> Scope
-    # sig-gen gap: #1154 — the reader over the `@globals` ivar `initialize` assigns from a parameter reaches
-    # `untyped`, so the `bool` is hand-written.
     def last_line_bound?: () -> bool
     # sig-gen gap: #1154 — the frame reader over the `@match_frame` ivar `initialize` assigns from a parameter
     # reaches `untyped`, so the `bool` is hand-written.

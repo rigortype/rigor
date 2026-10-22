@@ -44,6 +44,7 @@ require_relative "scope_indexer/mixin_accumulator"
 require_relative "scope_indexer/certainty"
 require_relative "scope_indexer/member_layouts_collector"
 require_relative "scope_indexer/declared_ivar_types"
+require_relative "scope_indexer/declared_param_writes"
 
 module Rigor
   module Inference
@@ -119,8 +120,11 @@ module Rigor
       # `declared_ivar_types:` — whether an RBS-declared ivar type replaces the census's join of the writes (#1406).
       # `rigor sig-gen` passes false: it proposes what the code says, and reading a declaration back would make a row
       # count as generated only because it is declared.
+      # `ivar_writer_scope:` — the scope whose project tables the #1154 declared-parameter credit reads to find the
+      # ivar writers outside this file ({DeclaredParamWrites}); defaults to `default_scope`. `rigor sig-gen` indexes
+      # each file under an unseeded scope, so it passes one carrying the project's tables.
       def index(root, default_scope:, converged_loop_recording: false, widen_clauses: false, # rubocop:disable Metrics/AbcSize
-                declared_ivar_types: true)
+                declared_ivar_types: true, ivar_writer_scope: nil)
         # Slice A-declarations. Build the declaration overrides first so every scope handed to the StatementEvaluator
         # already carries the table; structural sharing through `Scope#with_local` / `#with_fact` / `#with_self_type`
         # propagates it across every derived scope.
@@ -142,7 +146,9 @@ module Rigor
 
         # Slice 7 phase 2. Pre-pass over every class/module body to collect the per-class ivar accumulator. Seeded after
         # declared_types so the rvalue typer in the pre-pass can see declaration overrides.
-        class_ivars = build_class_ivar_index(root, seeded_scope, declared_ivar_types: declared_ivar_types)
+        class_ivars = DeclaredParamWrites.with_writer_scope(ivar_writer_scope) do
+          build_class_ivar_index(root, seeded_scope, declared_ivar_types: declared_ivar_types)
+        end
         seeded_scope = seeded_scope.with_discovery(seeded_scope.discovery.with(class_ivars: class_ivars))
 
         # Slice 7 phase 6. Same pre-pass shape for cvars (per class) and globals (program-wide). Globals are also
@@ -1046,8 +1052,11 @@ module Rigor
         # nodes to skip; soundness is post-domination at the top statement level, so dropping the nil never hides a real
         # runtime-nil read.
         dead_writes = dead_transient_nil_writes(def_node.body, class_name, method_assign_effects)
+        # #1154 — an `@x = x` from a declared parameter records the parameter's declared type.
+        declared = DeclaredParamWrites::EMPTY
+        declared = DeclaredParamWrites.collect(def_node, class_name, body_scope) unless singleton
         gather_ivar_writes(def_node.body, body_scope, class_name, accumulator,
-                           EMPTY_GUARDED_IVARS, mutated_ivars, dead_writes)
+                           EMPTY_GUARDED_IVARS, mutated_ivars, dead_writes, declared)
 
         # B2.3 — collect per-method evidence for the read-before- write nil contribution. The accumulator-level decision
         # ("is this ivar truly read-before-write across the class lifetime?") is finalised at
@@ -1363,14 +1372,14 @@ module Rigor
       private_constant :TAIL_VALUE_DEPTH_CAP
       private_constant :EMPTY_GUARDED_IVARS
 
-      def gather_ivar_writes(node, scope, class_name, accumulator, guarded_ivars = EMPTY_GUARDED_IVARS,
-                             mutated_ivars = nil, dead_writes = nil)
+      def gather_ivar_writes(node, scope, class_name, accumulator, guarded_ivars = EMPTY_GUARDED_IVARS, # rubocop:disable Metrics/ParameterLists
+                             mutated_ivars = nil, dead_writes = nil, declared = DeclaredParamWrites::EMPTY)
         return unless node.is_a?(Prism::Node)
 
         if node.is_a?(Prism::InstanceVariableWriteNode)
           unless dead_writes&.include?(node.object_id)
             record_ivar_write(node, scope, class_name, accumulator,
-                              guarded: guarded_ivars.include?(node.name))
+                              guarded: guarded_ivars.include?(node.name), declared: declared[node])
           end
         else
           record_compound_ivar_write(node, scope, class_name, accumulator)
@@ -1393,12 +1402,12 @@ module Rigor
 
         if node.is_a?(Prism::IfNode) || node.is_a?(Prism::UnlessNode)
           walk_conditional_ivar_writes(node, scope, class_name, accumulator, guarded_ivars,
-                                       mutated_ivars, dead_writes)
+                                       mutated_ivars, dead_writes, declared)
           return
         end
 
         node.rigor_each_child do |c|
-          gather_ivar_writes(c, scope, class_name, accumulator, guarded_ivars, mutated_ivars, dead_writes)
+          gather_ivar_writes(c, scope, class_name, accumulator, guarded_ivars, mutated_ivars, dead_writes, declared)
         end
       end
 
@@ -1474,22 +1483,22 @@ module Rigor
       # init; end` would otherwise be marked too — but that pattern (write @x in the else of `if @x`) is a separate
       # idiom whose surrounding reads of `@x` would then surface a nil-receiver FP. The ELSE branch is left ungarded so
       # those reads continue to type as they did before this fix.
-      def walk_conditional_ivar_writes(node, scope, class_name, accumulator, guarded_ivars,
-                                       mutated_ivars = nil, dead_writes = nil)
+      def walk_conditional_ivar_writes(node, scope, class_name, accumulator, guarded_ivars, # rubocop:disable Metrics/ParameterLists
+                                       mutated_ivars = nil, dead_writes = nil, declared = DeclaredParamWrites::EMPTY)
         then_guards = then_body_guarded_ivars(node)
         then_guarded = then_guards.empty? ? guarded_ivars : (guarded_ivars | then_guards)
 
         gather_ivar_writes(node.predicate, scope, class_name, accumulator, guarded_ivars,
-                           mutated_ivars, dead_writes)
+                           mutated_ivars, dead_writes, declared)
         if node.statements
           gather_ivar_writes(node.statements, scope, class_name, accumulator, then_guarded,
-                             mutated_ivars, dead_writes)
+                             mutated_ivars, dead_writes, declared)
         end
         branch = node.is_a?(Prism::IfNode) ? node.subsequent : node.else_clause
         return unless branch
 
         gather_ivar_writes(branch, scope, class_name, accumulator, guarded_ivars,
-                           mutated_ivars, dead_writes)
+                           mutated_ivars, dead_writes, declared)
       end
 
       # Returns the set of ivar names that, in the THEN body of this conditional, are statically known to be in a nil /
@@ -1966,8 +1975,8 @@ module Rigor
         assigns.include?(target)
       end
 
-      def record_ivar_write(node, scope, class_name, accumulator, guarded: false)
-        rvalue_type = scope.type_of(node.value)
+      def record_ivar_write(node, scope, class_name, accumulator, guarded: false, declared: nil)
+        rvalue_type = declared || scope.type_of(node.value)
 
         # `@x = nil unless @x` / `@y = false unless @y` — follow-up to the polarity-aware defensive-init guard fix
         # (ROADMAP § Future cycles — "Defensive ivar-init with nil / false rvalue"). When the rvalue is itself a falsey
@@ -10409,7 +10418,15 @@ module Rigor
         census.writes.each do |name, descriptor|
           (acc[:constant_writes][name] ||= {})[path] = descriptor
         end
-        acc[:global_write_census].merge(census.write_census.census)
+        acc[:global_write_census].merge(attribute_own_writes(census.write_census.census, path))
+      end
+
+      # #1154 — tags each `[:own_write, class, ivar]` entry with the file that records it, so a reader of the merged
+      # census can tell a second file writing the same ivar of the same class (`UnseenIvarWriters`).
+      def attribute_own_writes(census, path)
+        return census unless census.any? { |entry| entry.first == :own_write }
+
+        census.to_set { |entry| entry.first == :own_write ? [*entry, path].freeze : entry }
       end
 
       # Folds one file's Data + Struct member-layout tables into the cross-file accumulator (kept out of
@@ -10532,8 +10549,12 @@ module Rigor
                                      singleton_cref: false)
         return unless node.is_a?(Prism::Node)
 
+        # #1154 — the class whose instance `def`s the ivar-writer census credits; none under `class << self`.
+        ivar_owner = census_ivar_owner(qualified_prefix, self_owner, singleton_cref)
         case node
         when Prism::SingletonClassNode
+          # #1154 — a `class << self` inside an instance `def` opens the instance's singleton class.
+          tables.write_census.visit(node, top_level: qualified_prefix.empty?, owner: ivar_owner)
           return walk_census_singleton_class(node, qualified_prefix, tables, self_owner,
                                              meta_owner, singleton_cref)
         when Prism::ClassNode, Prism::ModuleNode
@@ -10541,7 +10562,7 @@ module Rigor
                                          singleton_cref)
         else
           census_constant_write(node, qualified_prefix, tables, self_owner, singleton_cref: singleton_cref)
-          tables.write_census.visit(node, top_level: qualified_prefix.empty?)
+          tables.write_census.visit(node, top_level: qualified_prefix.empty?, owner: ivar_owner)
         end
 
         rebound = rebound_block_self(node, qualified_prefix, nil, meta_owner, self_owner)
@@ -10571,6 +10592,16 @@ module Rigor
           walk_constant_write_census(child, qualified_prefix, tables, owner, child_meta_owner,
                                      singleton_cref: singleton_cref)
         end
+      end
+
+      # #1154 — the class whose instance `def`s the ivar-writer census credits: the class a `Struct.new` /
+      # `Data.define` / `Class.new` constant or a `K.class_eval` block opens (`self_owner`), else the lexical class;
+      # none under `class << self` or an opaque block. The prefix Array is joined only when an entry is recorded.
+      def census_ivar_owner(qualified_prefix, self_owner, singleton_cref)
+        return self_owner if self_owner.is_a?(String)
+        return nil if self_owner || singleton_cref || qualified_prefix.empty?
+
+        qualified_prefix
       end
 
       # Under an unnameable cref a bare/`self::` header pushes `#<singleton>::Name` — still

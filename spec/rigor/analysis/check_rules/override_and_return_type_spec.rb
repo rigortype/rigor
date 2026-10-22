@@ -264,8 +264,8 @@ RSpec.describe "return-type and Liskov override rules", type: :runner do
     # #541 seeds an `attr_writer` ivar as the hand-written setter's `@x = v` seeds it, so a writer-only
     # ivar read before any write is `Dynamic[top] | nil`, and its `nil` fails a declared `-> Integer`. Since #1406
     # the RBS `attr_writer x: Integer` declares `@x`, and the declaration replaces that join, so `Attr` no longer
-    # reports. The hand-written setter declares no ivar, so its `@x = v` still seeds `Dynamic[top]` and the
-    # read-before-write `nil` still fails.
+    # reports. The hand-written setter declares no ivar; since #1154 its `@x = v` records its declared `Integer`, and
+    # the read-before-write `nil` still fails as `Integer?`.
     describe "a writer-backed ivar against a declared reader return (#541, #1406)" do
       it "reports the hand-written setter, not the declared attr writer" do
         result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
@@ -291,7 +291,7 @@ RSpec.describe "return-type and Liskov override rules", type: :runner do
             def x_value: () -> Integer
           end
         RBS
-        message = "return-type mismatch on `x_value': declared Integer, inferred Dynamic[top]?"
+        message = "return-type mismatch on `x_value': declared Integer, inferred Integer?"
         expect(return_diags(result).map { |d| [d.line, d.message] }).to eq([[10, message]])
       end
     end

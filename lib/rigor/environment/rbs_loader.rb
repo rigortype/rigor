@@ -1903,9 +1903,23 @@ module Rigor
         @state[:core_stdlib_classes] ||= build_core_stdlib_classes
       end
 
-      def build_core_stdlib_classes
+      # Issue #1154 — the subset of {#core_stdlib_classes} whose primary declaration is in `core/` alone: the classes
+      # the interpreter implements, as opposed to a stdlib library written in Ruby (`Logger` rewrites `@level` in
+      # its `initialize`). Same attribution, same cache behaviour.
+      def core_class?(class_name)
+        (@state[:core_classes] ||= build_core_stdlib_classes(CORE_ROOTS)).include?(class_name.to_s.delete_prefix("::"))
+      end
+
+      CORE_ROOTS = begin
+        [::RBS::EnvironmentLoader::DEFAULT_CORE_ROOT].compact.map { |root| "#{root}/".freeze }.freeze
+      rescue StandardError
+        [].freeze
+      end
+      private_constant :CORE_ROOTS
+
+      def build_core_stdlib_classes(roots = CORE_STDLIB_ROOTS)
         environment = env
-        return Set.new.freeze if environment.nil? || CORE_STDLIB_ROOTS.empty?
+        return Set.new.freeze if environment.nil? || roots.empty?
 
         names = environment.class_decls.each_with_object(Set.new) do |(rbs_name, entry), acc|
           decl = self.class.primary_decl_for(entry)
@@ -1914,7 +1928,7 @@ module Rigor
           path = self.class.declaration_buffer_name(decl)
           next if path.nil?
 
-          acc << rbs_name.to_s.delete_prefix("::") if CORE_STDLIB_ROOTS.any? { |root| path.start_with?(root) }
+          acc << rbs_name.to_s.delete_prefix("::") if roots.any? { |root| path.start_with?(root) }
         end
         names.freeze
       rescue ::RBS::BaseError

@@ -2371,6 +2371,66 @@ RSpec.describe Rigor::SigGen::Generator do
     end
   end
 
+  # #1154 — the census types `@x = x` with the declared parameter type, so the reader over it is no longer skipped.
+  describe "#run on an attr_reader over an ivar a declared constructor parameter assigns (#1154)" do
+    def reader_rbs(rbs, extra_write = "")
+      write_fixture("sig/box.rbs", rbs)
+      path = write_fixture("lib/box.rb", <<~RUBY)
+        class Box
+          attr_reader :x
+
+          def initialize(x)
+            @x = x
+          end
+          #{extra_write}
+        end
+      RUBY
+      generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")]).run.find { |c| c.method_name == :x }
+    end
+
+    it "generates the declared parameter type" do
+      expect(reader_rbs("class Box\n  def initialize: (String x) -> void\nend\n").rbs).to eq("def x: () -> String")
+    end
+
+    it "joins a nil a second write stores" do
+      candidate = reader_rbs("class Box\n  def initialize: (String x) -> void\nend\n", "def reset = @x = nil")
+
+      expect(candidate.rbs).to eq("def x: () -> (String | nil)")
+    end
+
+    it "skips the reader when another file writes the ivar from outside" do
+      write_fixture("sig/box.rbs", "class Box\n  def initialize: (String x) -> void\nend\n")
+      path = write_fixture("lib/box.rb", "class Box\n  attr_reader :x\n\n  def initialize(x)\n    @x = x\n  end\nend\n")
+      poke = write_fixture("lib/poke.rb", "def poke(o) = o.instance_variable_set(:@x, 2)\n")
+
+      candidates = generator(paths: [path, poke], signature_paths: [File.join(tmpdir, "sig")]).run
+      candidate = candidates.find { |c| c.method_name == :x }
+
+      expect(candidate.skip_reason).to eq(:untyped_return)
+    end
+
+    it "skips the reader when a file outside the requested paths writes the ivar too" do
+      write_fixture("sig/box.rbs", "class Box\n  def initialize: (String x) -> void\nend\n")
+      path = write_fixture("lib/box.rb", "class Box\n  attr_reader :x\n\n  def initialize(x)\n    @x = x\n  end\nend\n")
+      write_fixture("lib/box_reset.rb", "class Box\n  def reset(v) = @x = v\nend\n")
+      configuration = Rigor::Configuration.new(
+        Rigor::Configuration::DEFAULTS.merge("paths" => [File.join(tmpdir, "lib")],
+                                             "signature_paths" => [File.join(tmpdir, "sig")])
+      )
+
+      candidates = described_class.new(configuration: configuration, paths: [path]).run
+      candidate = candidates.find { |c| c.method_name == :x }
+
+      expect(candidate.skip_reason).to eq(:untyped_return)
+    end
+
+    it "still skips the reader when a second write is untyped" do
+      candidate = reader_rbs("class Box\n  def initialize: (String x) -> void\nend\n", "def set(v) = @x = v")
+
+      expect(candidate.skip_reason).to eq(:untyped_return)
+    end
+  end
+
   describe "#run with observations (--params=observed)" do
     it "renders observed argument types when an observation matches the method's required arity" do
       path = write_fixture("lib/box.rb", "class Box\n  def greet(name)\n    \"hi\"\n  end\nend\n")

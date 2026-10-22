@@ -177,9 +177,7 @@ module Rigor
 
       class LayeredDefNestings
         def initialize: (Hash[untyped, Array[String]] file, Scope::DiscoveryIndex::def_nestings seed) -> void
-        # sig-gen gap: #1154 — the layers are `initialize` parameters, so the read through them reaches `untyped`.
         def []: (untyped def_node) -> Array[String]?
-        # sig-gen gap: #1154 — the layers are `initialize` parameters, so `empty?` over them reaches `untyped`.
         def empty?: () -> bool
       end
     end

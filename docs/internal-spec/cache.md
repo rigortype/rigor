@@ -1053,7 +1053,7 @@ never in. A session that cannot reuse an existing snapshot therefore
 declines rather than running a baseline — nothing it computed could warm
 the next keystroke anyway.
 
-### `Payload` (current `SCHEMA = 44`)
+### `Payload` (current `SCHEMA = 45`)
 
 ```
 Payload :: Data[
@@ -1302,7 +1302,8 @@ discovery-index pairs (ADR-119 WD1, [`inference-engine.md`](inference-engine.md)
 `40` added `plugin_reads` ([#1553](https://github.com/rigortype/rigor/issues/1553), below);
 `41` added `discovery_digests` ([#1583](https://github.com/rigortype/rigor/issues/1583), below);
 `43` added `plugin_disclosures` ([#2020](https://github.com/rigortype/rigor/issues/2020), below);
-`44` added `synthetic_surface_digest` ([#2286](https://github.com/rigortype/rigor/pull/2286), below).
+`44` added `synthetic_surface_digest` ([#2286](https://github.com/rigortype/rigor/pull/2286), below);
+`45` added the ivar-writer rows (`ivar_set`, `ivar_set_class`, `own_write`) to each seed bundle's `global_write_census` ([#1154](https://github.com/rigortype/rigor/issues/1154)).
 A blob from an older schema mismatches the `SCHEMA` gate and loads as `nil` — a
 clean cold rebuild, never a migration.
 

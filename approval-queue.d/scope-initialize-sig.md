@@ -1,6 +1,6 @@
 # Declare every keyword of Scope#initialize in the sig, and retire the #1154 markers that follow
 
-- **PR:** [#PRNUM](https://github.com/rigortype/rigor/pull/PRNUM)
+- **PR:** [#2316](https://github.com/rigortype/rigor/pull/2316)
 - **Issue:** [#2313](https://github.com/rigortype/rigor/issues/2313)
 - **Class:** gate-row
 - **Precedent:** [#2311](https://github.com/rigortype/rigor/pull/2311)

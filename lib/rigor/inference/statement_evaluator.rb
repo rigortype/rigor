@@ -2882,10 +2882,16 @@ module Rigor
         continuation = join_with_nil_injection(post_coll, body_scope)
         pre_existing, body_first = loop_body_local_writes(node.statements, post_coll)
         continuation = for_exit(node, post_coll, join_break_scopes(continuation, breaks, pre_existing + body_first))
-        continuation = MutationWidening.widen_element_aliases(
-          node.collection, node.statements, MutationWidening.parameter_names(node.index), continuation
-        )
+        continuation = widen_for_elements(node, continuation)
         [for_value(node, coll_type, continuation, values), continuation]
+      end
+
+      # Issue #2262 — the variables the collection reads, past a body that mutates an element in place: `for x in a;
+      # x << 2; end` leaves `a[0]` holding what the literal's shape did not.
+      def widen_for_elements(node, scope)
+        DeepErasure.widen_element_aliases(
+          node.collection, node.statements, DeepErasure.parameter_names(node.index), scope
+        )
       end
 
       # Issue #2128 — a `for` body has no rebind fixpoint, so its only pass enters with every loop-carried local at its
@@ -2953,7 +2959,7 @@ module Rigor
         types = [coll_type]
         name = for_collection_variable(node)
         types << CapturedLocals.bound_type(continuation, name) if name
-        deep = MutationWidening.element_mutation?(node.statements, MutationWidening.parameter_names(node.index))
+        deep = DeepErasure.element_mutation?(node.statements, DeepErasure.parameter_names(node.index))
         Type::Combinator.union(*types.compact.map { |type| shape_erased_collection(type, deep: deep) })
       end
 
@@ -2978,8 +2984,8 @@ module Rigor
       # base. A Range is immutable and keeps its value.
       def shape_erased_collection(type, deep: false)
         # A body that mutates an element in place changes the shapes one level down too, which `each` answers
-        # as the elements' own objects ({MutationWidening.widen_deep}).
-        return MutationWidening.widen_deep(type) if deep && !(type.is_a?(Type::Constant) && type.value.is_a?(Range))
+        # as the elements' own objects ({DeepErasure.widen}).
+        return DeepErasure.widen(type) if deep && !(type.is_a?(Type::Constant) && type.value.is_a?(Range))
 
         case type
         when Type::Tuple then MutationWidening.widen_tuple(type)

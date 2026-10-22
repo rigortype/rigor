@@ -409,6 +409,16 @@ module Rigor
         @per_invocation_classes_set.include?(class_name.to_s.delete_prefix("::"))
       end
 
+      # ADR-125 — the macros whose arguments name a non-entry-point method on a descendant of the declared
+      # per-invocation class `class_name`: the union of `per_invocation_non_action_macros:` over the manifests
+      # that declare that class. An empty Set for a class no manifest declares.
+      def per_invocation_non_action_macros(class_name)
+        @per_invocation_macros.fetch(class_name.to_s.delete_prefix("::"), EMPTY_MACROS)
+      end
+
+      EMPTY_MACROS = Set.new.freeze
+      private_constant :EMPTY_MACROS
+
       # ADR-28 — flat, ordered list of every loaded plugin's path-scoped method-protocol contracts, in
       # plugin registration order. Read from each plugin's `#protocol_contracts` (which the manifest backs
       # by default but a plugin MAY override to fold in per-project config). Consumed by
@@ -479,10 +489,24 @@ module Rigor
         @rbs_complete_extends_set = @rbs_complete_extends.to_set.freeze
         @per_invocation_classes = aggregate_class_names(manifests, :per_invocation_classes)
         @per_invocation_classes_set = @per_invocation_classes.to_set.freeze
+        @per_invocation_macros = compile_per_invocation_macros(manifests)
         @type_node_resolvers = manifests.flat_map { |m| m&.type_node_resolvers || [] }.freeze
         @protocol_contracts = @plugins.flat_map { |p| safe_protocol_contracts(p) }.freeze
         @contracts_by_path = {}
         @effect_memo = {}
+      end
+
+      # ADR-125 — declared class name => frozen Set of the non-action macros its declaring manifests list.
+      def compile_per_invocation_macros(manifests)
+        table = Hash.new { |hash, key| hash[key] = Set.new }
+        manifests.each do |manifest|
+          next if manifest.nil?
+
+          manifest.per_invocation_classes.each do |name|
+            table[name].merge(manifest.per_invocation_non_action_macros)
+          end
+        end
+        table.to_h { |name, macros| [name, macros.freeze] }.freeze
       end
 
       # The shared shape of `open_receivers:` / `rbs_complete_ancestors:` — a flat uniq'd class-name list

@@ -42,14 +42,21 @@ no-op rather than erroring.
 | `plugin.actionpack.unknown-permit-key` | error | a literal `permit(:key)` is a near-miss (edit distance ≤ 2) of a real column but not one — a likely typo (with a did-you-mean). A key nothing like any column (a legitimate virtual attribute) does not fire |
 
 The plugin also tells the engine that a controller runs one action
-per instance: its manifest lists `ActionController::Base` and
-`ActionController::API` in `per_invocation_classes:`
-([ADR-125](../../adr/125-per-invocation-classes.md)). So
-`def.ivar-write-mismatch` stays silent when `index` assigns
+per instance ([ADR-125](../../adr/125-per-invocation-classes.md)).
+Its manifest lists `ActionController::Base` and
+`ActionController::API` in `per_invocation_classes:`. It also lists
+the callback macros (`before_action` and the rest) and
+`helper_method` in `per_invocation_non_action_macros:`, so a method
+those name is not an action.
+
+So `def.ivar-write-mismatch` stays silent when `index` assigns
 `@roles = Role.sorted.to_a` and `permissions` assigns
 `@roles = Role.sorted`. It still reports a divergence that involves
-a private or protected helper, a non-public `before_action` target,
-`initialize`, or two writes in the same action.
+a private or protected helper, a callback target, a
+`helper_method`, `initialize`, or two writes in the same action. It
+also still reports on actions defined in a concern module and on
+`ActionController::Metal` controllers. An action that calls another
+action is not reported.
 
 Filter and render resolution honours nested-module controller
 qualification (`module Admin; class WidgetsController` resolves

@@ -27,7 +27,7 @@ end
 # `#per_invocation_class?` tests.
 class RigorPluginRegistrySpecPerInvocationPlugin < Rigor::Plugin::Base
   manifest(id: "registry-spec-per-invocation-plugin", version: "0.0.1",
-           per_invocation_classes: ["ActionController::Base"])
+           per_invocation_classes: ["ActionController::Base"], per_invocation_non_action_macros: [:before_action])
 end
 
 # ADR-43 WD4 — a named plugin class declaring `rbs_complete_ancestors:`, for the
@@ -258,6 +258,8 @@ RSpec.describe Rigor::Plugin::Registry do
       expect(registry.per_invocation_class?("::ActionController::Base")).to be(true)
       expect(registry.per_invocation_class?("ApplicationController")).to be(false)
       expect(registry.per_invocation_class?(nil)).to be(false)
+      expect(registry.per_invocation_non_action_macros("ActionController::Base")).to eq(Set[:before_action])
+      expect(registry.per_invocation_non_action_macros("ApplicationController")).to eq(Set[])
     end
   end
 

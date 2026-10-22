@@ -38,42 +38,54 @@ module Rigor
         # `def` that sits directly in a class / module body, never one nested in another `def`. On the
         # shared full DFS that prune becomes the `:inside_def` gate; the enclosing class / module name stack
         # the legacy walk threaded as `qualified_prefix` is now `context.qualified_prefix`.
-        NODE_CLASSES = [Prism::DefNode].freeze
+        #
+        # ADR-125 — the walk also visits class-body `CallNode`s (a `def` body is gated off), to record the
+        # macro calls whose literal arguments name a method (`before_action :load_roles`).
+        NODE_CLASSES = [Prism::DefNode, Prism::CallNode].freeze
         RULE_WALK_GATES = %i[inside_def detached_ivar_facet].freeze
 
         # Returns `Hash[class_name (String) => Hash[ivar_name (Symbol) => Array<{node:, type:, declared:,
-        # method_name:, visibility:, per_invocation:}>]]`. Empty when the tree has no qualifying writes.
+        # method_name:, visibility:, per_invocation:, action:}>]]`. Empty when the tree has no qualifying writes.
         # `declared` is the translated type of the class's RBS declaration of the ivar — an `@x: T` member or
         # the slot an `attr_*` member implies, own or inherited — and nil when the RBS declares none.
         #
         # ADR-125 — `method_name` is the enclosing `def`'s name and `visibility` its instance visibility
         # (`:public` / `:protected` / `:private`, or nil when the discovery table has no settled answer).
         # `per_invocation` is whether the class is, or descends from, a class a loaded plugin declares in
-        # `per_invocation_classes:`.
+        # `per_invocation_classes:`. `action` is whether the enclosing method is one of that class's entry
+        # points: public, and named by none of the declaring plugin's `per_invocation_non_action_macros:` in a
+        # class body of this file (`before_action :load_roles`, `helper_method :current_roles`).
         def initialize(scope_index)
           @scope_index = scope_index
           @accumulator = {}
           @per_invocation = {}
+          @macro_arguments = {}
         end
 
         # Legacy single-collector walk — kept as the oracle the ADR-53 Track B equivalence harness compares
         # {RuleWalk} against; deleted when Track B completes.
         def collect(root)
           walk(root, [])
-          @accumulator.transform_values(&:freeze).freeze
+          results
         end
 
         # {RuleWalk} entry point: the legacy walk's per-`def` logic, invoked at each class-/module-body `def`
         # under the shared traversal contract. `collect_def_writes`' verbatim body reads the enclosing class
         # prefix from `context.qualified_prefix`.
-        def visit(def_node, context)
-          collect_def_writes(def_node, context.qualified_prefix)
+        def visit(node, context)
+          if node.is_a?(Prism::CallNode)
+            record_macro_call(node, context.qualified_prefix)
+          else
+            collect_def_writes(node, context.qualified_prefix)
+          end
         end
 
         # The accumulated result, frozen the same way `#collect` returns it — used by {RuleWalk}-driven
         # callers after the walk completes.
         def results
-          @accumulator.transform_values(&:freeze).freeze
+          @accumulator.to_h do |class_name, writes_by_ivar|
+            [class_name, writes_by_ivar.transform_values { |writes| with_actions(class_name, writes) }.freeze]
+          end.freeze
         end
 
         private
@@ -94,9 +106,42 @@ module Rigor
           when Prism::DefNode
             collect_def_writes(node, qualified_prefix)
             return
+          when Prism::CallNode
+            record_macro_call(node, qualified_prefix)
           end
 
           node.rigor_each_child { |child| walk(child, qualified_prefix) }
+        end
+
+        # A receiverless (or `self.`) call in a class body, with the method names its literal Symbol / String
+        # arguments spell. Kept for every such call: which macro names count is the registry's answer, read
+        # once per class when the writes are finalised.
+        def record_macro_call(call_node, qualified_prefix)
+          return if qualified_prefix.empty?
+          return unless call_node.receiver.nil? || call_node.receiver.is_a?(Prism::SelfNode)
+
+          names = (call_node.arguments&.arguments || []).filter_map do |argument|
+            argument.unescaped.to_sym if argument.is_a?(Prism::SymbolNode) || argument.is_a?(Prism::StringNode)
+          end
+          return if names.empty?
+
+          ((@macro_arguments[qualified_prefix.join("::")] ||= {})[call_node.name] ||= []).concat(names)
+        end
+
+        # Each write with `action` set (see {#initialize}). A frozen copy, so `#results` stays repeatable.
+        def with_actions(class_name, writes)
+          macros = @per_invocation[class_name]
+          excluded = macros ? non_action_names(class_name, macros) : nil
+          writes.map do |write|
+            action = !excluded.nil? && write[:visibility] == :public && !excluded.include?(write[:method_name])
+            write.merge(action: action).freeze
+          end.freeze
+        end
+
+        def non_action_names(class_name, macros)
+          (@macro_arguments[class_name] || {}).each_with_object(Set.new) do |(macro, names), set|
+            set.merge(names) if macros.include?(macro)
+          end
         end
 
         def collect_def_writes(def_node, qualified_prefix)
@@ -127,7 +172,7 @@ module Rigor
           @accumulator[class_name][node.name] << {
             node: node, type: rvalue_type, declared: declared, method_name: method_name,
             visibility: method_visibility(scope, class_name, method_name),
-            per_invocation: per_invocation_class?(scope, class_name)
+            per_invocation: !per_invocation_macros(scope, class_name).nil?
           }
         end
 
@@ -141,43 +186,56 @@ module Rigor
           scope.discovered_method_visibility(class_name, method_name)
         end
 
-        # ADR-125 — whether `class_name` is, or descends from, a class a loaded plugin declares per-invocation.
-        # Read off the class's instance {Scope::ResolutionChain}, so a project superclass chain
+        # ADR-125 — when `class_name` is, or descends from, a class a loaded plugin declares per-invocation, the
+        # non-action macros its declaring manifests list (a Set, possibly empty); nil otherwise. Read off the
+        # class's instance {Scope::ResolutionChain}, so a project superclass chain
         # (`UsersController < ApplicationController < ActionController::Base`) is followed as Ruby resolves it.
         # A project entry matches by name. An external superclass matches through the first of its candidate
-        # spellings the environment knows, by name or by an RBS-known `:subclass` ordering; when the
+        # spellings the environment knows, by name or by an RBS-known `:equal` / `:subclass` ordering. When the
         # environment knows none of them (rigor-actionpack leaves `ActionController::Base` undeclared on
-        # purpose), a candidate that is literally a declared name matches. An ambiguous spelling (no
-        # candidates) and a truncated chain answer false: the carve-out only ever withholds a finding, so an
+        # purpose), a candidate that is literally a declared name matches, unless some candidate names a class
+        # the project itself declares: then the spelling may resolve there instead. An ambiguous spelling (no
+        # candidates) and a truncated chain answer nil: the carve-out only ever withholds a finding, so an
         # unproved descent keeps the rule firing. Memoised per class.
-        def per_invocation_class?(scope, class_name)
+        def per_invocation_macros(scope, class_name)
           return @per_invocation[class_name] if @per_invocation.key?(class_name)
 
-          @per_invocation[class_name] = descends_from_per_invocation?(scope, class_name)
+          @per_invocation[class_name] = matched_per_invocation_macros(scope, class_name)
         end
 
-        def descends_from_per_invocation?(scope, class_name)
+        def matched_per_invocation_macros(scope, class_name)
           environment = scope.environment
           registry = environment&.plugin_registry
-          return false if registry.nil? || registry.per_invocation_classes.empty?
+          return nil if registry.nil? || registry.per_invocation_classes.empty?
 
           chain = Scope::ResolutionChain.for(scope, class_name, :instance, :methods)
-          return false if chain.truncated?
+          return nil if chain.truncated?
 
-          chain.search(scope) { |entry| per_invocation_entry?(entry, registry, environment) || nil } ? true : false
+          declared = chain.search(scope) { |entry| matched_declarations(entry, registry, scope) }
+          declared&.each_with_object(Set.new) { |name, set| set.merge(registry.per_invocation_non_action_macros(name)) }
         end
 
-        def per_invocation_entry?(entry, registry, environment)
-          return registry.per_invocation_class?(entry.name.to_s) unless entry.external?
-          return false unless entry.superclass_edge
+        # The declared per-invocation names `entry` matches, or nil (so {ResolutionChain#search} moves on).
+        def matched_declarations(entry, registry, scope)
+          return (registry.per_invocation_class?(entry.name.to_s) ? [entry.name.to_s] : nil) unless entry.external?
+          return nil unless entry.superclass_edge
 
+          environment = scope.environment
           names = entry.candidates.map { |name| name.to_s.delete_prefix("::") }
           known = names.find { |name| environment.class_known?(name) }
-          return names.any? { |name| registry.per_invocation_class?(name) } if known.nil?
+          return literal_declarations(names, registry, scope) if known.nil?
 
-          registry.per_invocation_classes.any? do |declared|
+          matched = registry.per_invocation_classes.select do |declared|
             %i[equal subclass].include?(environment.class_ordering(known, declared))
           end
+          matched.empty? ? nil : matched
+        end
+
+        def literal_declarations(names, registry, scope)
+          return nil if names.any? { |name| scope.discovered_classes.key?(name) }
+
+          matched = names.select { |name| registry.per_invocation_class?(name) }
+          matched.empty? ? nil : matched
         end
 
         def declared_ivar(scope, class_name, ivar_name)

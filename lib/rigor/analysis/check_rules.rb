@@ -458,20 +458,21 @@ module Rigor
       end
 
       # ADR-125 — a divergent write is never live together with the writes it conflicts with when the class
-      # serves one public method per instance (a plugin-declared per-invocation class, e.g. a Rails
-      # controller: one action per request) and every conflicting write — non-nil, of a concrete class other
-      # than this write's — sits in a DIFFERENT public method of the same class. A conflicting write in a
-      # private or protected helper, a callback target that is not public, `initialize`, or the same method
-      # keeps the finding: those run inside the same invocation. Which helper each action reaches is not
-      # proved here.
+      # serves one entry point per instance (a plugin-declared per-invocation class, e.g. a Rails controller:
+      # one action per request) and every conflicting write — non-nil, of a concrete class other than this
+      # write's — sits in a DIFFERENT action of the same class. An action is a public method no declared
+      # non-action macro names (`before_action :x`, `helper_method :y`); {IvarWriteCollector} decides it. A
+      # conflicting write in a private or protected helper, a callback target, a `helper_method`,
+      # `initialize`, or the same method keeps the finding. Which helper each action reaches is not proved
+      # here.
       def separate_invocations?(write, write_class, writes)
-        return false unless write[:per_invocation] && write[:visibility] == :public
+        return false unless write[:action]
 
         writes.all? do |other|
           other_class = ivar_class_for(other[:type])
           next true if other_class.nil? || other_class == "NilClass" || other_class == write_class
 
-          other[:visibility] == :public && other[:method_name] != write[:method_name]
+          other[:action] && other[:method_name] != write[:method_name]
         end
       end
 

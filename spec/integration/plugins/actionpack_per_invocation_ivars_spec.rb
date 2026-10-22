@@ -22,7 +22,7 @@ RSpec.describe "def.ivar-write-mismatch on per-invocation classes (ADR-125)" do
   after { Rigor::Plugin.unregister! }
 
   # The `def.ivar-write-mismatch` rows of a run over `files` (relative path => source), as `[file basename, line]`.
-  def mismatches(files, plugins: %w[rigor-actionpack])
+  def mismatches(files, plugins: %w[rigor-actionpack], signature_paths: nil)
     Dir.mktmpdir do |dir|
       files.each do |relative, source|
         path = File.join(dir, relative)
@@ -30,7 +30,10 @@ RSpec.describe "def.ivar-write-mismatch on per-invocation classes (ADR-125)" do
         File.write(path, source)
       end
       configuration = Rigor::Configuration.new(
-        Rigor::Configuration::DEFAULTS.merge("paths" => [File.join(dir, "app")], "plugins" => plugins)
+        Rigor::Configuration::DEFAULTS.merge(
+          "paths" => [File.join(dir, "app")], "plugins" => plugins,
+          "signature_paths" => signature_paths&.map { |path| File.join(dir, path) }
+        )
       )
       Dir.chdir(dir) do
         runner = Rigor::Analysis::Runner.new(
@@ -162,5 +165,128 @@ RSpec.describe "def.ivar-write-mismatch on per-invocation classes (ADR-125)" do
       end
     RUBY
     expect(mismatches(files)).to eq([["roles.rb", 8]])
+  end
+
+  it "still reports a public helper_method whose write diverges from an action's" do
+    files = controller(<<~RUBY)
+      helper_method :current_roles
+
+      def index
+        @roles = [1, 2]
+        current_roles
+      end
+
+      def current_roles
+        @roles = { a: 1 }
+      end
+    RUBY
+    expect(mismatches(files)).to eq([["roles.rb", 10]])
+  end
+
+  it "still reports a public before_action target whose write diverges from an action's" do
+    files = controller(<<~RUBY)
+      before_action :load_roles
+
+      def index
+        @roles = [1, 2]
+      end
+
+      def load_roles
+        @roles = { a: 1 }
+      end
+    RUBY
+    expect(mismatches(files)).to eq([["roles.rb", 9]])
+  end
+
+  it "still reports an action whose visibility a conditional define_method leaves unsettled" do
+    files = controller(<<~RUBY)
+      def index
+        @roles = [1, 2]
+      end
+
+      def show
+        @roles = { a: 1 }
+      end
+      define_method(:show) { nil } if ENV["X"]
+    RUBY
+    expect(mismatches(files)).to eq([["roles.rb", 7]])
+  end
+
+  it "still reports a controller whose superclass spelling names a project-declared class" do
+    files = { "app/controllers/roles.rb" => <<~RUBY }
+      module MyApp
+        module ActionController
+          class Base
+          end
+        end
+
+        class RolesController < ActionController::Base
+          def index
+            @roles = [1, 2]
+          end
+
+          def permissions
+            @roles = { a: 1 }
+          end
+        end
+      end
+    RUBY
+    expect(mismatches(files)).to eq([["roles.rb", 13]])
+  end
+
+  context "when the project's RBS declares the controller hierarchy" do
+    let(:signature) do
+      { "sig/action_controller.rbs" => <<~RBS }
+        module ActionController
+          class Metal
+          end
+
+          class Base < Metal
+          end
+        end
+
+        class AdminBase < ActionController::Base
+        end
+      RBS
+    end
+
+    it "is silent on a controller whose RBS-known superclass is a declared class" do
+      files = controller(<<~RUBY, superclass: "ActionController::Base").merge(signature)
+        def index
+          @roles = [1, 2]
+        end
+
+        def show
+          @roles = { a: 1 }
+        end
+      RUBY
+      expect(mismatches(files, signature_paths: ["sig"])).to eq([])
+    end
+
+    it "is silent on a controller whose RBS-known superclass is a subclass of a declared class" do
+      files = controller(<<~RUBY, superclass: "AdminBase").merge(signature)
+        def index
+          @roles = [1, 2]
+        end
+
+        def show
+          @roles = { a: 1 }
+        end
+      RUBY
+      expect(mismatches(files, signature_paths: ["sig"])).to eq([])
+    end
+
+    it "still reports a controller on ActionController::Metal, which is not declared per-invocation" do
+      files = controller(<<~RUBY, superclass: "ActionController::Metal").merge(signature)
+        def index
+          @roles = [1, 2]
+        end
+
+        def show
+          @roles = { a: 1 }
+        end
+      RUBY
+      expect(mismatches(files, signature_paths: ["sig"])).to eq([["roles.rb", 7]])
+    end
   end
 end

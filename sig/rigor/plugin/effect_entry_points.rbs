@@ -4,11 +4,11 @@ module Rigor
     # framework entry points (ADR-103 WD6). Frozen value object; {#globs} are deduplicated and
     # sorted in `initialize`.
     class EffectEntryPoints
-      # sig-gen gap: #1154 — `to_s`-normalized in `initialize` from the `name:` parameter.
+      # sig-gen gap: #2321 — `to_s`-normalized in `initialize` from the `name:` parameter.
       attr_reader name: String
-      # sig-gen gap: #1154 — deduplicated/sorted/frozen in `initialize` from `globs:`.
+      # sig-gen gap: #2321 — deduplicated/sorted/frozen in `initialize` from `globs:`.
       attr_reader globs: Array[String]
-      # sig-gen gap: #1154 — `to_s`-normalized in `initialize` from `why:`.
+      # sig-gen gap: #2321 — `to_s`-normalized in `initialize` from `why:`.
       attr_reader why: String
 
       def initialize: (name: untyped, globs: untyped, ?why: untyped) -> void

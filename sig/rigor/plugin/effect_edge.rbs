@@ -7,15 +7,15 @@ module Rigor
       # The closed set of framework-edge strategies the engine implements.
       TARGETS: Array[Symbol]
 
-      # sig-gen gap: #1154 — validated/normalized in `initialize` from the parameter of the same
-      # name, so sig-gen proposes the raw parameter shape.
+      # sig-gen gap: #2312 — `initialize` stores what the private `validate_receiver!` helper returns for the
+      # parameter of the same name; the helper's parameters are undeclared.
       attr_reader receiver: String
-      # sig-gen gap: #1154 — `to_sym`-normalized from the `method:` parameter.
+      # sig-gen gap: #2321 — `to_sym`-normalized from the `method:` parameter.
       attr_reader method: Symbol?
       attr_reader singleton: bool
-      # sig-gen gap: #1154 — validated against `TARGETS` in `initialize`.
+      # sig-gen gap: #2312 — validated against `TARGETS` by the private `validate_target!` helper, whose parameters are undeclared.
       attr_reader target: (:activerecord_callbacks | :perform_now | :mailer_body)
-      # sig-gen gap: #1154 — `to_s`-normalized from the `why:` parameter.
+      # sig-gen gap: #2312 — `to_s`-normalized from the `why:` parameter.
       attr_reader why: String
 
       def initialize: (receiver: untyped, target: untyped, why: untyped, ?method: untyped,

@@ -46,13 +46,13 @@ module Rigor
       def self.empty: (?String? path) -> FileCollection
 
       attr_reader path: String?
-      # sig-gen gap: #1154 — `{ "Class#m" => Summary }`.
+      # sig-gen gap: #2312 — `{ "Class#m" => Summary }`, through the private `freeze_table` helper, whose parameters are undeclared.
       attr_reader summaries: Hash[String, Summary]
-      # sig-gen gap: #1154 — `{ "Class#m" => [Edge] }`, sorted and de-duplicated.
+      # sig-gen gap: #2312 — `{ "Class#m" => [Edge] }`, sorted and de-duplicated.
       attr_reader edges: Hash[String, Array[Edge]]
-      # sig-gen gap: #1154 — `{ class_name => superclass_name }`, `OPAQUE_ANCESTOR` included.
+      # sig-gen gap: #2312 — `{ class_name => superclass_name }`, `OPAQUE_ANCESTOR` included.
       attr_reader superclasses: Hash[String, String]
-      # sig-gen gap: #1154 — `{ class_name => [module_name] }`, include/prepend merged.
+      # sig-gen gap: #2312 — `{ class_name => [module_name] }`, include/prepend merged.
       attr_reader includes: Hash[String, Array[String]]
 
       def initialize: (?path: String?, ?summaries: Hash[String, Summary],

@@ -5,12 +5,12 @@ module Rigor
     # immediate superclass. Bundled plugins only — `Effects::PluginFacts` enforces it. Frozen value
     # object.
     class EffectAncestry
-      # sig-gen gap: #1154 — validated in `initialize` from the parameter of the same name
-      # (`to_s`-normalized, frozen), so sig-gen proposes the raw parameter shape.
+      # sig-gen gap: #2312 — `initialize` stores what the private `validate_class_name!` helper returns for the
+      # parameter of the same name (`to_s`-normalized, frozen); the helper's parameters are undeclared.
       attr_reader child: String
-      # sig-gen gap: #1154 — same shape as `child`.
+      # sig-gen gap: #2312 — same shape as `child`.
       attr_reader parent: String
-      # sig-gen gap: #1154 — same shape; `why:` is required and validated non-empty.
+      # sig-gen gap: #2312 — same shape; `why:` is required and validated non-empty.
       attr_reader why: String
 
       def initialize: (child: untyped, parent: untyped, why: untyped) -> void

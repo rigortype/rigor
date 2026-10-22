@@ -66,8 +66,9 @@ module Rigor
 
       # Always an Array of Bucket — `initialize` freezes what it is given and every caller hands it
       # Bucket instances (parse_row rows, from_diagnostics groups, `without`'s reject, or `[]`).
-      # sig-gen gap: #1154 — an `attr_reader` over an ivar assigned in `initialize` from a parameter
-      # is skipped (untyped return); the element type is hand-written.
+      # sig-gen gap: #2321 — `initialize` assigns `buckets.freeze`, an expression derived from the
+      # parameter rather than a bare read of it, so the reader is skipped (untyped return) and the element type
+      # is hand-written.
       attr_reader buckets: Array[Bucket]
 
       # `project_root` is `Pathname.new`'d, so a `Pathname` is accepted as well as a `String`

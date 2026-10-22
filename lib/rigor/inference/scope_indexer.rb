@@ -7634,7 +7634,8 @@ module Rigor
         return record_module_function(node, current_class, accumulator, in_singleton) if node.name == :module_function
 
         taint_opaque_eval(node, current_class, accumulator)
-        return if singleton_class_rewrite_tainted?(node, qualified_prefix, current_class, accumulator)
+        return if singleton_class_rewrite_tainted?(node, qualified_prefix, current_class, accumulator,
+                                                   in_singleton: in_singleton)
 
         kind, _arguments, via_send = mixin_call_view(node)
         return if kind.nil?
@@ -7642,7 +7643,8 @@ module Rigor
         effects = mixin_effects(node, kind, qualified_prefix, current_class, accumulator, in_singleton: in_singleton)
                   .select { |_owner, side| side == :extend || in_singleton }
         return if effects.empty?
-        return if !via_send && singleton_mixin_recorded?(node, kind, current_class, accumulator, in_singleton)
+        return if !via_send && singleton_mixin_recorded?(node, kind, qualified_prefix, current_class, accumulator,
+                                                         in_singleton)
 
         effects.each { |owner, side| accumulator.taint(owner, side) }
       end
@@ -7657,7 +7659,7 @@ module Rigor
       # but only where it is a direct statement (a top-level statement, or one of a direct declaration body or of a
       # block that runs there once): there the methods walk records those marks under the same owner. In a method
       # body, a hook or a conditional it may run on a receiver or at a time the marks cannot place, so it still taints.
-      def singleton_class_rewrite_tainted?(node, qualified_prefix, current_class, accumulator)
+      def singleton_class_rewrite_tainted?(node, qualified_prefix, current_class, accumulator, in_singleton: false)
         receiver = node.receiver
         return false unless singleton_class_of_receiver?(receiver) && surface_rewriting_call?(node)
         return false if singleton_class_named_call?(node) && accumulator.direct?(node)
@@ -7665,8 +7667,31 @@ module Rigor
         owner = singleton_class_owner(node, receiver.receiver, qualified_prefix, current_class)
         return false if owner.nil?
 
+        # Inside `class << self` a bare `singleton_class` is the singleton's own singleton, one level up from the
+        # owner's extend side, so that call stays a taint.
+        up_level = in_singleton && lexical_self_receiver?(receiver.receiver)
+        return true if !up_level && singleton_class_include_recorded?(node, owner, accumulator)
+
         accumulator.taint(owner, :extend)
         true
+      end
+
+      # Issue #2094 — `Float.singleton_class.include(Ext)` (or `prepend`, which the extend table cannot order, so the
+      # edge is unpositioned as every receiver-form edge is) puts `Ext` on the singleton side as `Float.extend(Ext)`
+      # does, the fold #915 gives `class << self; include M`. A `send` spelling or an argument that is not a constant
+      # stays a taint.
+      def singleton_class_include_recorded?(node, owner, accumulator)
+        return false unless %i[include prepend].include?(node.name)
+
+        arguments = node.arguments&.arguments || []
+        return false if arguments.empty? || arguments.any? { |arg| Source::ConstantPath.qualified_name(arg).nil? }
+
+        !record_extend_targets(node, owner, accumulator).empty?
+      end
+
+      # A bare or `self.` receiver: the lexical `self`.
+      def lexical_self_receiver?(receiver)
+        receiver.nil? || receiver.is_a?(Prism::SelfNode)
       end
 
       # A bare, `self.` or constant receiver's `singleton_class` call.
@@ -7727,11 +7752,27 @@ module Rigor
 
       # Records the singleton-side edges of a receiverless `extend` (or, inside `class << self`, `include` /
       # `prepend`). False when it recorded nothing.
-      def singleton_mixin_recorded?(node, kind, current_class, accumulator, in_singleton)
-        return false unless current_class && node.receiver.nil?
+      def singleton_mixin_recorded?(node, kind, qualified_prefix, current_class, accumulator, in_singleton)
+        return receiver_extend_recorded?(node, kind, qualified_prefix, accumulator) if node.receiver
+        return false unless current_class
         return false unless in_singleton ? MIXIN_CALL_NAMES.include?(kind) : kind == :extend
 
         !record_extend_targets(node, current_class, accumulator).empty?
+      end
+
+      # Issue #2094 — the receiver form, `Float.extend(Ext)`: the singleton twin of #1722's `Integer.include(Ext)`,
+      # filed under the class the constant receiver names ({#prepend_call_receiver}) and, like that form,
+      # unpositioned wherever it is written ({MixinAccumulator#note}). A `self` argument names the receiver, not the
+      # enclosing class, so a call with one stays a taint. A constant receiver names the same class inside
+      # `class << self`, so the walk's singleton flag does not matter here.
+      def receiver_extend_recorded?(node, kind, qualified_prefix, accumulator)
+        return false if kind != :extend
+        return false if (node.arguments&.arguments || []).any?(Prism::SelfNode)
+
+        owner = prepend_call_receiver(node, qualified_prefix)
+        return false if owner.nil?
+
+        !record_extend_targets(node, owner, accumulator).empty?
       end
 
       # The table stores search order, not call order: a later `extend` statement prepends its module

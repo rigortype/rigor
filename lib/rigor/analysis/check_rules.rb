@@ -970,7 +970,8 @@ module Rigor
         # ({RbsReceiverSurface}). Last for {#ancestry_declares_method?}'s reason: it walks the class graph.
         def rbs_ancestor_may_answer?(class_name, method_name, scope, kind)
           if kind == :singleton
-            RbsReceiverSurface.singleton_hook?(scope, class_name)
+            RbsReceiverSurface.singleton_hook?(scope, class_name) ||
+              RbsReceiverSurface.singleton_mixin_may_answer?(scope, class_name, method_name)
           else
             RbsReceiverSurface.ancestor_may_answer?(scope, class_name, method_name)
           end

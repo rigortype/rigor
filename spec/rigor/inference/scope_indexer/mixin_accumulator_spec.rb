@@ -206,10 +206,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer::MixinAccumulator do
       "include(Module.new { include B })" => :include,
       "send(:extend, B)" => :extend,
       "self.extend B" => :extend,
-      "extend helper" => :extend,
-      "C.extend(B)" => :extend,
-      "singleton_class.include B" => :extend,
-      "self.singleton_class.prepend B" => :extend
+      "extend helper" => :extend
     }.each do |statement, side|
       it "taints the #{side} side of the owner for `#{statement}`" do
         source = "class C\n  include A\n  extend E\n  #{statement}\nend\n"
@@ -219,6 +216,25 @@ RSpec.describe Rigor::Inference::ScopeIndexer::MixinAccumulator do
         expect(table.keys - [side]).to eq([]) unless statement.include?("A, helper")
         expect(index_of(source).fetch(:includes)).to include("C" => include("A"))
       end
+    end
+
+    # Issue #2094 — the constant-receiver and `singleton_class` forms record their module on the extend side,
+    # unpositioned, rather than tainting it.
+    ["C.extend(B)", "singleton_class.include B", "self.singleton_class.prepend B"].each do |statement|
+      it "records `#{statement}` on the extend side, unpositioned" do
+        source = "class C\n  include A\n  extend E\n  #{statement}\nend\n"
+        table = unpositioned(source).fetch("C")
+
+        expect(table.fetch(:extend)).to eq(["B"])
+        expect(index_of(source).fetch(:extends)).to include("C" => include("B", "E"))
+      end
+    end
+
+    it "taints, rather than records, `singleton_class.include B` inside `class << self`" do
+      source = "class C\n  class << self\n    singleton_class.include B\n  end\nend\n"
+
+      expect(unpositioned(source).fetch("C").fetch(:extend)).to include("*")
+      expect(index_of(source).fetch(:extends).fetch("C", [])).not_to include("B")
     end
 
     it "taints the enclosing class for a call on a hook parameter", :aggregate_failures do

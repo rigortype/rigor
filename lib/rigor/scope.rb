@@ -1563,7 +1563,8 @@ module Rigor
     #
     # This is EVIDENCE FOR a singleton ancestor, never against one: the walk sees only what a constant
     # argument to a receiverless `extend` (or, since #915, a receiverless `include` / `prepend` inside a
-    # `class << self` body) written inside a declaration body spells, so a runtime `Widget.extend(m)` and an
+    # `class << self` body) written inside a declaration body spells, or, since #2094, `Widget.extend(M)` and
+    # `Widget.singleton_class.include(M)` with a constant receiver, so a runtime `Widget.extend(m)` and an
     # `extend` in a file outside the analysed set are both absent from it, as is an `extend` declared only
     # in RBS — that one reaches the same consumer through `Environment#singleton_extended_modules` instead.
     # Its one consumer ({Inference::Narrowing.narrow_class}) therefore reads it

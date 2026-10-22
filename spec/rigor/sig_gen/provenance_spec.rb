@@ -210,7 +210,7 @@ SIG_PROVENANCE_RESIDUE = {
   # Data members sig-gen cannot infer, but the declared type is `untyped` anyway, so no gap marker
   # applies; they pin as unmarked residue. The typed members and both constructors are #1150-marked.
   "sig/rigor/analysis/project_scan.rbs" => 3,
-  # -1 (#1154): an ivar a declared parameter assigns now reads that type, so 1 row over it render.
+  # -1 (#1154): an ivar a declared parameter assigns now reads that type, so 1 row over it renders.
   "sig/rigor/ast.rbs" => 0,
   "sig/rigor/cache.rbs" => 2,
   "sig/rigor/cli/diff_command.rbs" => 1,
@@ -264,6 +264,7 @@ SIG_PROVENANCE_RESIDUE = {
   "sig/rigor/effects/taint_cause.rbs" => 0,
   # -3 (#1153): an empty-collection early return no longer leaves a stray `[]` arm beside an `Array[E]` arm,
   # so the declared `Array[...]` now matches what sig-gen proposes.
+  # -3 (#1154): an ivar a declared parameter assigns now reads that type, so 3 more rows over it render.
   "sig/rigor/environment.rbs" => 33,
   # -1 (#1429): a value-position `case` now types each arm under the subject's `when` narrowing, so
   # `ExpressionTyper#type_of_virtual`'s `when AST::TypeNode then node.type` arm reads `node` as the node class
@@ -297,7 +298,7 @@ SIG_PROVENANCE_RESIDUE = {
   # caller, so sig-gen generates what the two hand-written declarations say.
   "sig/rigor/plugin/io_boundary.rbs" => 2,
   "sig/rigor/plugin/load_error.rbs" => 3,
-  # -1 (#1154): an ivar a declared parameter assigns now reads that type, so 1 row over it render.
+  # -1 (#1154): an ivar a declared parameter assigns now reads that type, so 1 row over it renders.
   "sig/rigor/plugin/loader.rbs" => 1,
   # -2 (#1181 slices): `additional_initializers` and `protocol_contracts` tightened to
   # `Array[Plugin::AdditionalInitializer]` / `Array[Plugin::ProtocolContract]` and marked #1154.
@@ -341,18 +342,22 @@ SIG_PROVENANCE_RESIDUE = {
   # `Scope::ResolutionChain#search`, whose value is whatever its block returns, which sig-gen does not render.
   # The three rows move from `declared_divergent` to `unrenderable` and stay residue; the declarations are
   # unchanged and still true.
-  # -43 (#1154): an ivar a declared parameter assigns now reads that type, so 43 rows over it render (35 when the
-  # PR was written; 8 more once the engine changes landed on master since read the ivar-typed parameters).
+  # -35 (#1154): an ivar a declared parameter assigns now reads that type, so 35 rows over it render. A further
+  # -8 (`local`, `ivar`, `cvar`, `global`, `user_def_site_for`, `user_singleton_def_site_for`, `superclass_of`,
+  # `includes_of`) come from master's sig-gen fixes, not from this change: they already rendered as
+  # `declared_divergent` (dropping `| nil` or adding `| []`) and match the declaration since #2249 (the lookup
+  # keeps its nil) and #2298 (the empty early return is absorbed).
   "sig/rigor/scope.rbs" => 69,
   "sig/rigor/sig_gen/skip_reason_catalog.rbs" => 8,
   "sig/rigor/source.rbs" => 4,
   "sig/rigor/testing.rbs" => 4,
-  # -1 (#1154): an ivar a declared parameter assigns now reads that type, so 1 row over it render.
+  # -1 (#1154): an ivar a declared parameter assigns now reads that type, so 1 row over it renders.
   "sig/rigor/trinary.rbs" => 4,
   # -3 (#1429): a value-position `case` now types each arm under the subject's `when` narrowing, so the
   # `when Constant then type.value.is_a?(String)` arms of `Combinator#literal_string_compatible?`,
   # `#non_empty_string_compatible?` and `#non_zero_int_compatible?` read `type` as the carrier the `when` names
   # rather than `untyped`, and each `bool` return renders.
+  # -14 (#1154): an ivar a declared parameter assigns now reads that type, so 14 more rows over it render.
   "sig/rigor/type.rbs" => 192
 }.freeze
 

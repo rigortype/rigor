@@ -14,8 +14,6 @@
 - 1148  # sig-gen skips a reader written as an endless def (untyped return)
 - 1149  # sig-gen types a `tbl[key] || FROZEN_EMPTY` fallback arm untyped
 - 1150  # sig-gen assigns no type to a `Data.define` member read
-- 1151  # sig-gen types an `attr_reader` over a frozen Set literal untyped
-- 1152  # sig-gen types `Set#include?` over a tuple key untyped
 - 1153  # sig-gen proposes `Array[untyped] | []` off an empty-table early return
 - 1154  # sig-gen types an `attr_reader` over an ivar assigned from an `initialize` parameter untyped
 - 1155  # sig-gen skips a memoized `||=` reader (the slot read cannot prove the memoized value)

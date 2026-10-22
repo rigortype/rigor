@@ -1,0 +1,1 @@
+- **[engine]** A `return` that only a later iteration of a `while`, `until` or `for` loop reaches, or a later run of a block passed to a project method that yields more than once, now joins the method's inferred return type, so a caller's test on that method is no longer reported as an always-truthy condition. ([#2250](https://github.com/rigortype/rigor/pull/2250))

@@ -46,6 +46,7 @@ require_relative "operand_effects"
 require_relative "operand_walk"
 require_relative "optimistic_origin"
 require_relative "loop_value_record"
+require_relative "project_yielder"
 require_relative "return_barrier"
 require_relative "repeated_or_writes"
 require_relative "rewrite_mutation"
@@ -2378,7 +2379,7 @@ module Rigor
         # fixpoint slice A uses for non-escaping block captures. Seed: a pre-existing local seeds with its
         # post-predicate binding; a local FIRST assigned inside the body seeds with `nil` so the 0-iteration path
         # degrades it to `T | nil`, matching the nil-injection treatment.
-        break_pass = jumps.breaks && { entry: nil, arms: [], values: [] }
+        break_pass = { entry: nil, arms: [], values: [] } if jumps.breaks || later_pass_returns?(node.statements)
         result = loop_rebind_fixpoint(node, post_pred, names, body_first, jumps, break_pass)
         # Display-path re-record: the fixpoint's body re-evaluations fire `on_enter` with the cap-N INTERMEDIATE
         # assumptions, so the last-visit-wins scope index would annotate loop-body lines with stale pre-convergence
@@ -2548,6 +2549,16 @@ module Rigor
 
         entry = loop_pass_entry(node, post_pred, converged, body_first, jumps)
         loop_iteration(node.statements, entry, jumps, recorded: false).drop(1)
+      end
+
+      # Issue #2128 — whether a pass from the converged bindings must run for the `return`s in a loop body: a method's
+      # return sink is active and the body holds a `return` that exits the method ({ReturnBarrier.exits_method?}). A
+      # `return` whose condition reads a loop-carried local (`return false if seen > 3` after `seen += 1`) is dead in
+      # every capped fixpoint pass, which runs from a value-pinned assumption (`seen` at most `3`), and only the pass
+      # from the widened binding reaches it ({#loop_break_arms}); without it the method inferred `true` and a
+      # caller's test on it folded always-truthy on correct code.
+      def later_pass_returns?(statements)
+        !Thread.current[RETURN_SINK_KEY].nil? && ReturnBarrier.exits_method?(statements)
       end
 
       # Joins each `break` arm's body-written local bindings into the loop continuation, so a `break`-path binding the
@@ -2788,11 +2799,7 @@ module Rigor
       # expression is the collection's `each` value joined with every `break` value ({#for_value}, issue #1216).
       def eval_for(node)
         coll_type, post_coll = sub_eval(node.collection, scope)
-        element_type = for_iteration_element_type(coll_type)
-        # Issue #1359 — a body that may set `$_` runs again after it ran, as a `while` body does ({#eval_loop}).
-        body_entry = LastLine.forget_if_set(bind_for_index(node.index, element_type, post_coll), node.statements)
-        body_entry = forget_guard_for_body(node, post_coll, body_entry)
-        body_entry = loop_content_entry(node.statements, post_coll, body_entry)
+        body_entry = for_body_entry(node, for_iteration_element_type(coll_type), post_coll)
 
         if node.statements.nil?
           return [for_value(node, coll_type, post_coll, NO_BREAK_ARMS),
@@ -2804,10 +2811,35 @@ module Rigor
         # the only continuation and the only source of `break` arms).
         jumps = loop_jumps(node.statements)
         body_scope, breaks, values = loop_iteration(node.statements, body_entry, jumps)
+        values += later_for_pass_values(node.statements, body_entry, body_scope, jumps)
         continuation = join_with_nil_injection(post_coll, body_scope)
         pre_existing, body_first = loop_body_local_writes(node.statements, post_coll)
         continuation = for_exit(node, post_coll, join_break_scopes(continuation, breaks, pre_existing + body_first))
         [for_value(node, coll_type, continuation, values), continuation]
+      end
+
+      # Issue #2128 — a `for` body has no rebind fixpoint, so its only pass enters with every loop-carried local at its
+      # pre-loop binding, and a `return` or `break` whose condition needs a later iteration (`n = 0; for x in xs;
+      # return :f if (n += 1) > 2; end`) was never reached. When the body holds such a jump (a `break`, or a `return`
+      # that exits the method while a return sink is active, {#later_pass_returns?}), one more unrecorded pass runs
+      # with each local and instance variable the body rebinds at its value-pinned widening
+      # (`Type::Combinator.widen_value_pinned`) of its entry binding joined with the first pass's exit, a binding that
+      # covers what any iteration enters with, as the `while` fixpoint's widened binding does. The `return`s it
+      # reaches join the method's return type as any pass's do, and the `break` values it collects are returned for
+      # the loop's value ({#for_value}). The pass records no scope, and the continuation keeps the first pass's
+      # answer.
+      def later_for_pass_values(statements, body_entry, body_scope, jumps)
+        return NO_BREAK_ARMS unless jumps.breaks || later_pass_returns?(statements)
+
+        names, body_first = loop_rebound_names(statements, body_entry)
+        bindings = (names - body_first).filter_map do |name|
+          joined = [body_entry, body_scope].filter_map { |s| CapturedLocals.bound_type(s, name) }
+          [name, Type::Combinator.widen_value_pinned(Type::Combinator.union(*joined))] unless joined.empty?
+        end
+        return NO_BREAK_ARMS if bindings.empty?
+
+        entry = bindings.reduce(body_entry) { |acc, (name, type)| bind_capture(acc, name, type) }
+        loop_iteration(statements, entry, jumps, recorded: false)[2]
       end
 
       # The core collections whose `each` with a block answers its receiver.
@@ -2893,6 +2925,14 @@ module Rigor
         when Type::Union then type.members.all? { |member| each_answers_self?(member) }
         else false
         end
+      end
+
+      # The scope a `for` body enters with: the index bound to the element. Issue #1359 — a body that may set `$_` runs
+      # again after it ran, as a `while` body does ({#eval_loop}).
+      def for_body_entry(node, element_type, post_coll)
+        body_entry = LastLine.forget_if_set(bind_for_index(node.index, element_type, post_coll), node.statements)
+        body_entry = forget_guard_for_body(node, post_coll, body_entry)
+        loop_content_entry(node.statements, post_coll, body_entry)
       end
 
       # Issue #1429 — a `for` body runs after the collection's `each`, which may be a project method, and after itself.
@@ -4551,6 +4591,11 @@ module Rigor
       # The fresh `next`, `break`-value and `break`-scope sinks are defensive: every consumer of those sinks filters by
       # jump-node identity, so no example tells them apart from the outer sinks today. So is the `rescue`: a raise here
       # keeps the arms the earlier passes collected rather than taking out the method.
+      #
+      # Issue #2127 — a block passed to a project method whose body may run it more than once
+      # ({ProjectYielder.may_run_block_repeatedly?}) gets the same pass. No write-back runs for such a call, so its
+      # continuation holds each rebound capture at `Dynamic[top]` ({#drop_captured_narrowing}), and the pass reads it
+      # so: `seen = 0; yielder { return :ret if (seen += 1) > 1 }` reaches the `return`.
       def collect_repeated_block_returns(call_node, post_scope)
         return if Thread.current[RETURN_SINK_KEY].nil?
 
@@ -4574,16 +4619,19 @@ module Rigor
       end
 
       # Whether `block` is an ordinary block (not a return barrier or a class-body block) whose body may `return` from
-      # the method and which `call_node` may run more than once: {#repeating_block_class}'s rule, or `Kernel#loop`,
-      # which that rule leaves out and which runs its block until it breaks or raises. The barrier, refinement and
+      # the method and which `call_node` may run more than once: {#repeating_block_class}'s rule, `Kernel#loop`, which
+      # that rule leaves out and which runs its block until it breaks or raises, or a project method whose body may
+      # run it more than once ({ProjectYielder.may_run_block_repeatedly?}, issue #2127). The barrier, refinement and
       # anonymous-class checks are defensive guards: no such call repeats under that rule today.
       def repeated_block_return_candidate?(call_node, block)
         return false unless block.is_a?(Prism::BlockNode)
         return false unless ReturnBarrier.exits_method?(block.body)
         return false if return_barrier_block?(call_node) || refined_class_context(call_node)
         return false if AnonymousMetaClass.name_for(call_node, scope.source_path)
+        return true if BlockCallTiming.kernel_loop?(call_node) || !repeating_block_class(call_node).nil?
 
-        BlockCallTiming.kernel_loop?(call_node) || !repeating_block_class(call_node).nil?
+        receiver_type = block_call_receiver_type(call_node)
+        !receiver_type.nil? && ProjectYielder.may_run_block_repeatedly?(call_node, receiver_type, scope)
       end
 
       # ADR-56 slice A. For a `:non_escaping` block, fold the continuation binding of every outer local the body can
@@ -5657,12 +5705,7 @@ module Rigor
       # receiver is the one the block-return pass asks about: the explicit receiver, or the implicit `self`
       # (`Object` at the top level).
       def repeating_block_class(call_node)
-        receiver_type =
-          if call_node.receiver
-            explicit_receiver_type(call_node)
-          else
-            operand_scope.self_type || operand_scope.environment.nominal_for_name("Object")
-          end
+        receiver_type = block_call_receiver_type(call_node)
         return nil if receiver_type.nil?
 
         method_name = call_node.name
@@ -5674,6 +5717,13 @@ module Rigor
         repeats ? classification : nil
       rescue StandardError
         nil
+      end
+
+      # The receiver a block-carrying call dispatches on: its explicit receiver's type, else `self`, else `Object`.
+      def block_call_receiver_type(call_node)
+        return explicit_receiver_type(call_node) if call_node.receiver
+
+        operand_scope.self_type || operand_scope.environment.nominal_for_name("Object")
       end
 
       # The binding each outer local or ivar the body rebinds ({CapturedLocals.writes}) from a sentinel seed — `nil` or

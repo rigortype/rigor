@@ -25,6 +25,7 @@ RSpec.describe "rigor-devise integration" do
       module ActiveRecord
         class Base
           def self.devise: (*Symbol) -> void
+          def save: () -> bool
         end
       end
 
@@ -59,6 +60,19 @@ RSpec.describe "rigor-devise integration" do
           module Timeoutable
             def timedout?: (Time) -> bool
           end
+
+          module Validatable
+            def password_required?: () -> bool
+          end
+
+          module Confirmable
+            def confirmed?: () -> bool
+            def confirm: () -> bool
+          end
+
+          module Omniauthable : ActiveRecord::Base
+            def from_omniauth?: () -> bool
+          end
         end
       end
     RBS
@@ -66,7 +80,7 @@ RSpec.describe "rigor-devise integration" do
 
   let(:demo_source) do
     <<~RUBY
-      class ApplicationRecord
+      class ApplicationRecord < ActiveRecord::Base
       end
 
       class User < ApplicationRecord
@@ -131,6 +145,151 @@ RSpec.describe "rigor-devise integration" do
       "expected Devise module methods to resolve cross-file via the substrate; " \
       "got: #{undefined.map(&:message).inspect}"
     )
+  end
+
+  # Issue #476 — the example above cannot tell the tier from its absence: its receivers are untyped parameters,
+  # so nothing fires either way. These receive a `User`, so the call's type is decided by the synthetic
+  # tier: Tier B redispatches `valid_password?` on `Devise::Models::DatabaseAuthenticatable` and answers its
+  # authored `bool`. The pre-pass used to hand the scanner no environment, which made the index empty and
+  # the answer `Dynamic[top]` — silent here.
+  describe "end to end through the Runner (#476)" do
+    let(:typed_consumer_source) do
+      <<~RUBY
+        def authenticate(password)
+          user = User.new
+          user.valid_password?(password).no_such_bool_method
+        end
+      RUBY
+    end
+
+    it "resolves a synthesised method to the strategy module's authored return type" do
+      result = run_under_plugin(demo: demo_source, consumer: typed_consumer_source)
+
+      undefined = result.diagnostics.select { |d| d.rule.to_s == "call.undefined-method" }
+      expect(undefined.map(&:message)).to contain_exactly(a_string_matching(/`no_such_bool_method' for bool/))
+    end
+
+    it "raises no diagnostic on the synthesised call itself" do
+      result = run_under_plugin(
+        demo: demo_source,
+        consumer: "def authenticate(password)\n  User.new.valid_password?(password)\nend\n"
+      )
+
+      expect(result.diagnostics).to be_empty
+    end
+
+    # RBS builds a module's instance definition over `Object`. Without the owner filter the scanner put every
+    # `Object` / `Kernel` method on `User` (`hash`, `to_s`, `puts` ...), and the arity rule treats a name in the
+    # synthetic index as possibly rewritten by a plugin and stands down: the wrong call below went unreported.
+    it "does not mute the arity check of the model's own override of an Object method" do
+      result = run_under_plugin(
+        demo: <<~RUBY,
+          class ApplicationRecord < ActiveRecord::Base
+          end
+
+          class User < ApplicationRecord
+            devise :database_authenticatable
+
+            def hash
+              1
+            end
+          end
+        RUBY
+        consumer: "def digest\n  User.new.hash(1, 2, 3)\nend\n"
+      )
+
+      expect(result.diagnostics.map(&:rule).map(&:to_s)).to include("call.wrong-arity")
+    end
+
+    # PR #2286 review S1 — Ruby answers a member the model declares, or a project module it includes after
+    # `devise`, ahead of the Devise module; the synthetic tier used to answer them from the module's RBS. The
+    # model's undeclared `send_reset_password_instructions` is the positive control (still `bool`).
+    describe "a member the project declares on the model" do
+      let(:shadowing_demo) do
+        <<~RUBY
+          class ApplicationRecord < ActiveRecord::Base
+          end
+
+          module PasswordPolicy
+            def password_required?
+              "policy"
+            end
+          end
+
+          class User < ApplicationRecord
+            devise :database_authenticatable, :validatable, :confirmable, :recoverable
+            include PasswordPolicy
+
+            def confirmed?
+              :yes
+            end
+            alias_method :confirm, :confirmed?
+
+            def valid_password?(a, b)
+              a == b
+            end
+          end
+        RUBY
+      end
+
+      let(:shadowing_consumer) do
+        <<~RUBY
+          def probe
+            u = User.new
+            u.password_required?.upcase
+            u.confirmed?.to_proc
+            u.confirm.to_proc
+            u.valid_password?("x")
+            u.send_reset_password_instructions.no_such_bool_method
+          end
+        RUBY
+      end
+
+      def consumer_rows(result)
+        result.diagnostics.select { |d| d.path.end_with?("consumer.rb") }.to_h { |d| [d.line, d.rule.to_s] }
+      end
+
+      it "answers each from the project's member, and the model's own arity check stands" do
+        rows = consumer_rows(run_under_plugin(demo: shadowing_demo, consumer: shadowing_consumer))
+
+        expect(rows.fetch(3, nil)).to be_nil # PasswordPolicy#password_required? -> String
+        expect(rows.fetch(4, nil)).to be_nil # User#confirmed? -> Symbol
+        expect(rows.fetch(5, nil)).to be_nil # alias_method :confirm
+        expect(rows.fetch(6, nil)).to eq("call.wrong-arity") # User#valid_password?(a, b)
+        expect(rows.fetch(7, nil)).to eq("call.undefined-method") # Recoverable, undeclared by the project
+      end
+    end
+
+    # PR #2286 review M2 — RBS builds `module Omniauthable : ActiveRecord::Base` over `ActiveRecord::Base`, so its
+    # definition lists `save`. Ruby answers `save` from `ApplicationRecord`, which the module sits ahead of but
+    # does not define it in; the module's own `from_omniauth?` is the positive control.
+    it "does not synthesise a self-typed module's view of its self type's methods" do
+      result = run_under_plugin(
+        demo: <<~RUBY,
+          class ApplicationRecord < ActiveRecord::Base
+            def save
+              :saved
+            end
+          end
+
+          class User < ApplicationRecord
+            devise :omniauthable
+          end
+        RUBY
+        consumer: "def probe\n  u = User.new\n  u.save.to_proc\n  u.from_omniauth?.no_such_bool_method\nend\n"
+      )
+
+      expect(result.diagnostics.map { |d| [d.line, d.rule.to_s] }).to eq([[4, "call.undefined-method"]])
+    end
+
+    it "synthesises nothing for a model the project never declares with `devise`" do
+      result = run_under_plugin(
+        demo: "class ApplicationRecord < ActiveRecord::Base\nend\n\nclass User < ApplicationRecord\nend\n",
+        consumer: typed_consumer_source
+      )
+
+      expect(result.diagnostics.select { |d| d.message.include?("no_such_bool_method") }).to be_empty
+    end
   end
 
   def run_under_plugin(demo:, consumer:)

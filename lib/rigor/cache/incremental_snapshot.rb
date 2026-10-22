@@ -188,7 +188,11 @@ module Rigor
       # 43: issue #2020 — the payload gains `plugin_disclosures`, the run-scoped plugin rows each analysed file's
       # last analysis registered, which a recheck replays for the files it serves. A pre-43 blob carries none, so
       # its rechecks would drop every such row; the gate rejects it and the next run is cold.
-      SCHEMA = 43
+      # 44: PR #2286 review M1 — the payload gains `synthetic_surface_digest`, the ADR-16 synthetic-method index's
+      # {Rigor::Inference::SyntheticMethodIndex#surface_digest} at the run the cache was built under, which a recheck
+      # compares to re-baseline when a class-body DSL edit moved it. A pre-44 blob carries none; the gate rejects it
+      # and the next run is cold.
+      SCHEMA = 44
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.
@@ -259,12 +263,15 @@ module Rigor
                             :missing, :class_decls, :constant_decls, :seed_bundles, :plugin_fact_digest,
                             :return_summaries, :param_table,
                             :effect_collections, :effects_identity, :run_level_rows,
-                            :effect_plugin_digest, :plugin_reads, :discovery_digests, :plugin_disclosures) do
+                            :effect_plugin_digest, :plugin_reads, :discovery_digests, :plugin_disclosures,
+                            :synthetic_surface_digest) do
         # `effect_plugin_digest` defaults to nil so a payload built without it (an older caller, a spec fixture)
         # reads as "unknown", which the session treats as moved. `plugin_reads` defaults to no reads, and
         # `discovery_digests` to no discovery-only files, and `plugin_disclosures` (#2020) to no replayed rows.
+        # `synthetic_surface_digest` defaults to nil, the empty index's digest: a run that builds a non-empty one
+        # reads it as moved.
         def initialize(effect_plugin_digest: nil, plugin_reads: {}, discovery_digests: {}, plugin_disclosures: {},
-                       **rest)
+                       synthetic_surface_digest: nil, **rest)
           super
         end
       end
@@ -477,7 +484,8 @@ module Rigor
           effect_plugin_digest: data[:effect_plugin_digest],
           plugin_reads: data[:plugin_reads] || {},
           plugin_disclosures: data.fetch(:plugin_disclosures, {}),
-          discovery_digests: data.fetch(:discovery_digests, {})
+          discovery_digests: data.fetch(:discovery_digests, {}),
+          synthetic_surface_digest: data[:synthetic_surface_digest]
         )
       end
       private :payload_from
@@ -504,9 +512,8 @@ module Rigor
           effects_identity: payload.effects_identity,
           run_level_rows: payload.run_level_rows,
           effect_plugin_digest: payload.effect_plugin_digest,
-          plugin_reads: payload.plugin_reads,
-          plugin_disclosures: payload.plugin_disclosures,
-          discovery_digests: payload.discovery_digests
+          plugin_reads: payload.plugin_reads, plugin_disclosures: payload.plugin_disclosures,
+          discovery_digests: payload.discovery_digests, synthetic_surface_digest: payload.synthetic_surface_digest
         )
         # #1507 — every `--incremental` run that analysed anything rewrites this whole blob, so its deflate is
         # on the edit path; see {Store::DEFLATE_LEVEL}.

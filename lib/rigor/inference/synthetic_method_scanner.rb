@@ -8,6 +8,7 @@ require_relative "../source/literals"
 require_relative "../source/node_children"
 require_relative "synthetic_method"
 require_relative "synthetic_method_index"
+require_relative "synthetic_method_scanner/project_members"
 
 module Rigor
   module Inference
@@ -64,17 +65,30 @@ module Rigor
         nested_templates = collect_nested_class_templates(plugin_registry)
         return SyntheticMethodIndex::EMPTY if templates.empty? && registries.empty? && nested_templates.empty?
         # Tier B alone cannot emit without an environment: every trait entry — the direct route and the
-        # concern-re-targeted one — funnels through `module_instance_method_names`, whose first line
-        # answers `[]` for a nil environment. The production pre-pass passes `environment: nil` (#476),
-        # so a project whose only contributing plugin registers trait registries (rigor-devise on a
-        # Rails app) would otherwise pay a whole-project parse to build a provably empty index. This
-        # gate mirrors that nil guard and MUST be removed in the change that threads a real environment.
+        # concern-re-targeted one — funnels through `module_instance_method_names`, whose first line answers `[]`
+        # for a nil environment. The production pre-pass hands Tier B a (lazy) environment since #476, so this
+        # gate now guards the direct callers that pass none (a spec, a probe): a registry-only scan with
+        # no environment would otherwise pay a whole-project parse to build a provably empty index. It mirrors
+        # that nil guard and goes with it.
         return SyntheticMethodIndex::EMPTY if environment.nil? && templates.empty? && nested_templates.empty?
 
-        asts = parse_paths(paths, buffer: buffer)
+        sources = read_sources(paths, buffer: buffer)
+        # With only trait registries contributing, a project that never writes a registry's method name (no
+        # `devise` anywhere) cannot produce an entry: a call node named `devise` needs the text `devise` in its
+        # file. Skip the parse (the dominant cost) then, and the environment build it would have asked for.
+        return SyntheticMethodIndex::EMPTY if templates.empty? && nested_templates.empty? &&
+                                              none_mention_registry_method?(sources, registries)
+
+        asts = parse_sources(sources)
+        entries, class_names = collect_all_entries(asts, templates, registries, nested_templates, environment,
+                                                   fact_store)
+        SyntheticMethodIndex.new(entries: decline_project_declared(entries, asts), class_names: class_names)
+      end
+
+      # The match + emit walk over every parsed file: `[entries, class_names]`.
+      def collect_all_entries(asts, templates, registries, nested_templates, environment, fact_store)
         hierarchy = build_hierarchy(asts)
         concern_index = build_concern_index(asts)
-
         entries = []
         class_names = []
         asts.each do |path, ast|
@@ -88,8 +102,19 @@ module Rigor
           end
           collect_nested_class_entries(entries, class_names, nested_templates, ast, path) unless nested_templates.empty?
         end
+        [entries, class_names]
+      end
 
-        SyntheticMethodIndex.new(entries: entries, class_names: class_names)
+      # PR #2286 review S1 — a Tier B entry whose name the class itself declares, or a project module it includes
+      # or prepends declares, is dropped: Ruby answers that call from the project's member, ahead of the module
+      # the registry included ({ProjectMembers}). Tier C entries (no `origin_module`) are left as they were.
+      def decline_project_declared(entries, asts)
+        return entries unless entries.any? { |entry| entry.provenance[:origin_module] }
+
+        members = ProjectMembers.new(asts)
+        entries.reject do |entry|
+          entry.provenance[:origin_module] && members.declares?(entry.class_name, entry.method_name)
+        end
       end
 
       # Aggregates `(plugin_id, template)` pairs across every plugin's `manifest.heredoc_templates` in registration
@@ -249,13 +274,29 @@ module Rigor
         call_node.arguments&.arguments&.first
       end
 
-      def parse_paths(paths, buffer: nil)
+      # `path => source text` (nil when the file cannot be read), reading an editor buffer's in-flight bytes
+      # for the logical path it is bound to.
+      def read_sources(paths, buffer: nil)
         paths.to_h do |path|
           physical = buffer ? buffer.resolve(path) : path
-          source = File.read(physical)
-          [path, Prism.parse(source, filepath: path).value]
+          [path, File.read(physical)]
         rescue StandardError
           [path, nil]
+        end
+      end
+
+      def parse_sources(sources)
+        sources.to_h do |path, source|
+          [path, source.nil? ? nil : Prism.parse(source, filepath: path).value]
+        rescue StandardError
+          [path, nil]
+        end
+      end
+
+      def none_mention_registry_method?(sources, registries)
+        names = registries.map { |(_plugin_id, registry)| registry.method_name.to_s }
+        sources.each_value.none? do |source|
+          !source.nil? && names.any? { |name| source.include?(name) }
         end
       end
 
@@ -534,6 +575,18 @@ module Rigor
       # Returns the Symbol method-name list defined on `module_name`'s RBS instance definition. Empty Array when the
       # module is not in the RBS env (silent skip — the synthetic emit produces nothing rather than fabricating method
       # names).
+      #
+      # RBS builds a module's instance definition over its self types, or over `Object` when it declares none:
+      # `Kernel#puts`, `Object#hash`, the pretty-printer's mixin — and, for `module Devise::Models::X :
+      # ActiveRecord::Base`, every `ActiveRecord::Base` method (`save`, `update`) — appear in its method table
+      # beside its own members. They are not what including the module adds, and synthesising them would answer
+      # the class's own or inherited methods from the module's view of them. A method is kept only when its
+      # defining owner is the module itself or one of the module's own ancestors (its `include` / `prepend`
+      # chain, which `definition.ancestors` lists without the self types or `Object`).
+      #
+      # A non-public method is skipped: the tier answers a call by name, and a private module method answered
+      # for `user.secret` would silence the call Ruby rejects. A definition that carries no owner (the specs'
+      # stubs) keeps every name.
       def module_instance_method_names(module_name, environment)
         return [] if environment.nil?
 
@@ -543,7 +596,14 @@ module Rigor
         definition = loader.instance_definition(module_name)
         return [] if definition.nil?
 
-        definition.methods.keys
+        own_ancestors = nil
+        definition.methods.filter_map do |name, method|
+          next name unless method.respond_to?(:defined_in)
+          next unless method.public?
+
+          own_ancestors ||= definition.ancestors.ancestors.to_set { |ancestor| ancestor.name.to_s }
+          name if own_ancestors.include?(method.defined_in.to_s)
+        end
       rescue StandardError
         []
       end

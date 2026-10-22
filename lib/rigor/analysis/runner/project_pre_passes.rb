@@ -11,6 +11,8 @@ require_relative "../project_scan"
 require_relative "../worker_session"
 require_relative "../template_units"
 require_relative "../template_unit_collector"
+require_relative "../../project_environment"
+require_relative "scan_environment"
 
 module Rigor
   module Analysis
@@ -100,7 +102,7 @@ module Rigor
           synthetic_method_index = Inference::SyntheticMethodScanner.scan(
             plugin_registry: plugin_registry,
             paths: expansion.fetch(:files),
-            environment: nil,
+            environment: scan_environment(plugin_registry, dependency_source_index, expansion),
             fact_store: shared_fact_store(plugin_registry),
             buffer: @buffer
           )
@@ -302,6 +304,37 @@ module Rigor
         end
 
         private
+
+        # Issue #476 — the environment the Tier B (trait registry) half of the synthetic-method scan reads, or
+        # nil when no loaded plugin registers a trait registry (the scan then has no use for one, and Tier C's
+        # template and nested-class lanes behave exactly as they did). The view is lazy ({ScanEnvironment}): it
+        # builds an {Environment} on the first question a matching call site asks. That environment is built
+        # WITHOUT `synthetic_method_index:` — the index is this scan's output and only the run's real
+        # environment stores it; the loader never reads it — and without the diagnostic reporters, which the
+        # run's real environment attaches (a second set here would double-report). Every input that decides
+        # what the loader resolves (libraries, signature paths, plugin signatures, the bundle / collection
+        # axes, required features) is the one the real build passes, so the module a trait names resolves to
+        # the same RBS the dispatcher later promotes against.
+        def scan_environment(plugin_registry, dependency_source_index, expansion)
+          return nil if plugin_registry.nil? || plugin_registry.empty?
+          return nil unless plugin_registry.plugins.any? { |plugin| plugin.manifest.trait_registries.any? }
+
+          files = expansion.fetch(:files)
+          ScanEnvironment.new do
+            Environment.for_project(
+              libraries: @configuration.libraries,
+              signature_paths: @configuration.signature_paths,
+              cache_store: @cache_store,
+              plugin_registry: plugin_registry,
+              dependency_source_index: dependency_source_index,
+              source_files: files,
+              required_features: ProjectEnvironment.required_features(
+                @configuration, files, sources: ProjectEnvironment.buffer_sources(@buffer)
+              ),
+              **ProjectEnvironment.dependency_discovery_options(@configuration)
+            )
+          end
+        end
 
         def trust_refusals(registry, baseline)
           registry.plugins.filter_map do |plugin|

@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "digest"
+
 require_relative "synthetic_method"
 
 module Rigor
@@ -65,7 +67,28 @@ module Rigor
         { "entries" => entries.map(&:to_h), "class_names" => class_names }
       end
 
+      # What a dispatch can read from the index, digested (nil for the empty index): each key's rows in their
+      # first-wins order, with the return type and the Tier B `origin_module` the dispatcher promotes through,
+      # and the synthesised class names. The rest of the provenance (the call site's path and line) is left
+      # out, so an edit that only moves the `devise` line keeps the digest. `IncrementalSession` compares it
+      # across runs (PR #2286 review M1): the index is built from class-body calls that no declaration
+      # signature records, so a recheck that sees it move cannot trust its served files.
+      def surface_digest
+        return nil if empty?
+
+        rows = entries.each_with_index
+                      .sort_by { |entry, index| [entry.kind.to_s, entry.class_name, entry.method_name.to_s, index] }
+                      .map { |entry, _| surface_row(entry) }
+        Digest::SHA256.hexdigest((rows + class_names.sort.map { |name| "class\x1f#{name}" }).join("\x00"))
+      end
+
       EMPTY_ROW = [].freeze
+
+      def surface_row(entry)
+        [entry.kind, entry.class_name, entry.method_name, entry.return_type,
+         entry.provenance[:origin_module], entry.provenance[:plugin_id]].join("\x1f")
+      end
+      private :surface_row
 
       def bucket(entries, kind)
         h = {}

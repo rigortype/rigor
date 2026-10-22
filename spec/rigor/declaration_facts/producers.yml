@@ -616,6 +616,13 @@ lib/rigor/inference/synthetic_method_scanner.rb:
     Rigor::Inference::SyntheticMethodScanner#walk_class_decls: grandfathered
     Rigor::Inference::SyntheticMethodScanner#walk_classes: grandfathered
     Rigor::Inference::SyntheticMethodScanner#walk_module_decls: grandfathered
+lib/rigor/inference/synthetic_method_scanner/project_members.rb:
+  computes: the instance-method names a project class or a project module it includes or prepends declares, which a trait registry's synthesised entries must not shadow
+  producers:
+    Rigor::Inference::SyntheticMethodScanner::ProjectMembers: 'PR #2286 review S1, the names a class body or a project mixin declares, read only to decline a Tier B synthetic entry; it keys each class with SyntheticMethodScanner#class_name_from so the names match the entries the scanner keyed, records no declaration fact and derives no declaration context'
+    Rigor::Inference::SyntheticMethodScanner::ProjectMembers#collect_call: 'PR #2286 review S1, the names a class body or a project mixin declares, read only to decline a Tier B synthetic entry; it keys each class with SyntheticMethodScanner#class_name_from so the names match the entries the scanner keyed, records no declaration fact and derives no declaration context'
+    Rigor::Inference::SyntheticMethodScanner::ProjectMembers#collect_members: 'PR #2286 review S1, the names a class body or a project mixin declares, read only to decline a Tier B synthetic entry; it keys each class with SyntheticMethodScanner#class_name_from so the names match the entries the scanner keyed, records no declaration fact and derives no declaration context'
+    Rigor::Inference::SyntheticMethodScanner::ProjectMembers#walk_namespaces: 'PR #2286 review S1, the names a class body or a project mixin declares, read only to decline a Tier B synthetic entry; it keys each class with SyntheticMethodScanner#class_name_from so the names match the entries the scanner keyed, records no declaration fact and derives no declaration context'
 lib/rigor/language_server/document_symbol_provider.rb:
   computes: the editor outline of classes, modules and defs
   producers:

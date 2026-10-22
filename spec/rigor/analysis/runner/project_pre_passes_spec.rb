@@ -132,6 +132,94 @@ RSpec.describe Rigor::Analysis::Runner::ProjectPrePasses do
     end
   end
 
+  # Issue #476 — the synthetic-method scan's Tier B half reads the RBS universe, so the pre-pass hands it a
+  # lazily built environment. These pin the three promises that make that safe.
+  describe "#run — the Tier B scan environment (#476)" do
+    let(:trait_plugin) do
+      Class.new(Rigor::Plugin::Base) do
+        manifest(
+          id: "prepass-trait",
+          version: "0.1.0",
+          trait_registries: [
+            Rigor::Plugin::Macro::TraitRegistry.new(
+              receiver_constraint: "TierBBase", method_name: :traited, symbol_arg_position: :rest,
+              modules_by_symbol: { one: "TierBMod" }
+            )
+          ]
+        )
+      end
+    end
+
+    def run_prepass(dir, plugin_class, sources)
+      stub_const("ProjectPrePassesSpecTierBPlugin", plugin_class)
+      files = sources.map do |name, text|
+        File.join(dir, name).tap { |path| File.write(path, text) }
+      end
+      File.write(File.join(dir, "mods.rbs"), <<~RBS)
+        class TierBBase
+        end
+
+        module TierBMod
+          def from_mod: () -> Integer
+        end
+      RBS
+      configuration = Rigor::Configuration.new(
+        "paths" => [dir], "plugins" => ["rigor-prepass-trait"], "signature_paths" => [dir]
+      )
+      requirer = lambda do |_name|
+        Rigor::Plugin.register(plugin_class)
+        true
+      end
+      Dir.chdir(dir) do
+        build_pre_passes(configuration: configuration, plugin_requirer: requirer).run(expansion: { files: files })
+      end
+    end
+
+    it "explodes a trait module against the project's RBS, so the index carries the synthesised method" do
+      Dir.mktmpdir do |dir|
+        result = run_prepass(dir, trait_plugin, "a.rb" => "class Widget < TierBBase\n  traited :one\nend\n")
+
+        expect(result.synthetic_method_index.lookup_instance("Widget", :from_mod).size).to eq(1)
+      end
+    end
+
+    it "builds no environment when no file names the registry's method" do
+      Dir.mktmpdir do |dir|
+        allow(Rigor::Environment).to receive(:for_project).and_call_original
+
+        result = run_prepass(dir, trait_plugin, "a.rb" => "class Widget < TierBBase\nend\n")
+
+        expect(result.synthetic_method_index).to be_empty
+        expect(Rigor::Environment).not_to have_received(:for_project)
+      end
+    end
+
+    # Tier C templates read no environment today (a project class whose chain ends at an RBS-known class that is
+    # not the template's own constraint is declined). The Tier B environment must not change that, so a plugin
+    # with only templates gets none: the call below would ask for one if it were handed over.
+    it "builds none when the only contributing plugin is a Tier C template" do
+      Dir.mktmpdir do |dir|
+        template_plugin = Class.new(Rigor::Plugin::Base) do
+          manifest(
+            id: "prepass-trait", version: "0.1.0",
+            heredoc_templates: [
+              Rigor::Plugin::Macro::HeredocTemplate.new(
+                receiver_constraint: "TierBBase", method_name: :traited, symbol_arg_position: 0,
+                emit: [{ name: "\#{name}", returns: "Object" }]
+              )
+            ]
+          )
+        end
+        allow(Rigor::Environment).to receive(:for_project).and_call_original
+
+        result = run_prepass(dir, template_plugin, "a.rb" => "class Widget < Elsewhere\n  traited :one\nend\n")
+
+        expect(result.synthetic_method_index).to be_empty
+        expect(Rigor::Environment).not_to have_received(:for_project)
+      end
+    end
+  end
+
   describe "#discover / #discover_from_bundles / #build_discovery" do
     # rubocop:disable-next RSpec/ExampleLength
     it "builds every Discovery slot from the matching def_index key, without transposing any of the slots" do

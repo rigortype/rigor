@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "prism"
+require_relative "../../source/literals"
 
 module Rigor
   module Inference

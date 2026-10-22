@@ -89,7 +89,8 @@ module Rigor
       def execute(targets:, options:, buffer: nil)
         configuration = Configuration.load(options.fetch(:config))
         environment = project_environment(targets.map(&:file).uniq, configuration, buffer)
-        base_scope = CoverageScan.snapshot_seeded_scope(environment: environment, configuration: configuration, buffer: buffer)
+        base_scope = CoverageScan.snapshot_seeded_scope(environment: environment, configuration: configuration,
+                                                        buffer: buffer)
 
         results_by_target = Array.new(targets.length)
         targets.each_with_index.group_by { |target, _index| target.file }.each do |file, indexed_targets|

@@ -58,7 +58,7 @@ module Rigor
                        definition_build_failures_snapshot:, hkt_scan_failure_snapshot:,
                        conformance_results_snapshot:, signature_standdowns_snapshot: -> { [] },
                        vendored_standdowns_snapshot: -> { [] }, pooled_run_disclosures: -> { [] },
-                       pooled_trust_refusals: -> { [] })
+                       served_run_disclosures: -> { [] }, pooled_trust_refusals: -> { [] })
           @configuration = configuration
           @rbs_extended_reporter = rbs_extended_reporter
           @boundary_cross_reporter = boundary_cross_reporter
@@ -79,6 +79,8 @@ module Rigor
           # Issue #1051 — reader for the pool coordinator's de-duplicated run-scoped disclosure table.
           # Empty on a sequential run, where `plugin_registry`'s own instances are the ones that registered.
           @pooled_run_disclosures_reader = pooled_run_disclosures
+          # Issue #2020 — reader for the rows an incremental recheck replays for the files it served unanalysed.
+          @served_run_disclosures_reader = served_run_disclosures
           # Issue #1900 — reader for the pool coordinator's summed trust-refusal table. Empty on a
           # sequential run, where `plugin_registry`'s own boundaries made every read.
           @pooled_trust_refusals_reader = pooled_trust_refusals
@@ -1116,12 +1118,14 @@ module Rigor
         end
 
         # Issue #1051 — the run-scoped plugin disclosures ({Plugin::Base#disclose_once}), the run's
-        # project-global notices about its own inputs. Two sources feed one table:
+        # project-global notices about its own inputs. Three sources feed one table:
         #
         # - the coordinator-side registry, which is where a SEQUENTIAL run's `#prepare` and per-file hooks
         #   ran; and
         # - `pooled_run_disclosures`, the pool coordinator's already-de-duplicated collection from the
-        #   pre-fork parent session and every worker payload.
+        #   pre-fork parent session and every worker payload; and
+        # - `served_run_disclosures` (#2020), the rows an incremental recheck replays for the files it served
+        #   from cache, since their per-file hooks did not run.
         #
         # Both are keyed `[plugin id, key]` and the first registration of a pair wins, so a run emits one
         # row per pair no matter how many plugin instances (workers) reached it — the #1051 bug, where a
@@ -1182,6 +1186,10 @@ module Rigor
             end
           rescue StandardError
             next
+          end
+          # Issue #2020 — last, so a row this run registered afresh wins over the replay of the same key.
+          Array(@served_run_disclosures_reader.call).each do |record|
+            records[[record[:plugin_id], record[:key]]] ||= record
           end
           records.values
         end

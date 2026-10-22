@@ -1035,7 +1035,8 @@ Payload :: Data[
   run_level_rows,                             # the two run-level rows a narrowed run replays (see below)
   effect_plugin_digest,                       # #1898 the plugin effect-fact digest the collections were stamped under
   plugin_reads,                               # #1553 path -> the plugin reads its last analysis made (see below)
-  discovery_digests                           # #1583 discovered-not-analysed path -> packed stat digest (see below)
+  discovery_digests,                          # #1583 discovered-not-analysed path -> packed stat digest (see below)
+  plugin_disclosures                          # #2020 path -> the run-scoped plugin rows its last analysis registered (see below)
 ]
 ```
 
@@ -1263,7 +1264,8 @@ seed bundle a `siblings` Hash, the `possible_*` / `contested_*` halves of the
 discovery-index pairs (ADR-119 WD1, [`inference-engine.md`](inference-engine.md)
 § "Discovery Index"), every one empty until a producer admits a possible fact;
 `40` added `plugin_reads` ([#1553](https://github.com/rigortype/rigor/issues/1553), below);
-`41` added `discovery_digests` ([#1583](https://github.com/rigortype/rigor/issues/1583), below).
+`41` added `discovery_digests` ([#1583](https://github.com/rigortype/rigor/issues/1583), below);
+`43` added `plugin_disclosures` ([#2020](https://github.com/rigortype/rigor/issues/2020), below).
 A blob from an older schema mismatches the `SCHEMA` gate and loads as `nil` — a
 clean cold rebuild, never a migration.
 
@@ -1332,6 +1334,57 @@ empty and the check globs nothing. A session over arguments pays one extra
 glob of the configured paths and one `File::Stat` per discovered file on
 each warm run, plus the discovery fold over those files that the widened
 recheck now makes (seed-bundle served, no re-parse of an unchanged file).
+
+### `plugin_disclosures` — run-scoped plugin rows a recheck replays ([#2020](https://github.com/rigortype/rigor/issues/2020))
+
+A plugin registers a run-scoped row (`Plugin::Base#disclose_once`, or a
+positioned batch through `#emit_once`) from `#prepare` or from a per-file hook.
+`#prepare` runs on every recheck, but a per-file hook runs only for the files
+the recheck analyses, so before #2020 a recheck that analysed nothing dropped
+every row registered from a hook, and the next unchanged run reported none of them.
+
+- **Record.** While a file is analysed, every `#disclose_once` / `#emit_once`
+  call is attributed to it (`Analysis::RunDisclosureCredit`), a repeat of a key
+  the plugin already registered included: the in-tree disclosers memoise the
+  input a notice is about and re-register it from each file's hook, and
+  crediting only the first file would lose the row once that file is removed.
+  `plugin_disclosures` holds `Analysis::RunDisclosureLedger#to_h`: `files` maps
+  each analysed file to those records, tagged with their plugin id, one per
+  `[plugin id, key]`; `reads` maps each `[plugin id, key]` to every row the
+  registering plugin's boundary held when it was last registered, including
+  the reads `#prepare` made. A batch registered empty is not recorded.
+- **Replay.** A recheck hands the records of every file it serves from cache to
+  the runner, which emits them beside this run's own registrations,
+  de-duplicated by `[plugin id, key]`, with the row this run registered winning.
+  A `--verify-incremental` partition replays them the same way.
+- **Staleness.** A recheck validates each `[plugin id, key]`'s rows, and for
+  every one with a row that no longer validates it puts ONE live registering
+  file (the first by path, never a removed one) into the closure and withholds
+  the key's replays. When that file registers the key, every other file that
+  held it takes that record. When it registers nothing (an edit took the
+  notice out of its text, the file no longer parses, the plugin raised), the
+  recheck runs the closure again with every other live holder of the key
+  added, and the key is dropped only if none of them registers it. A fixed
+  input therefore stops being reported on the warm run. A re-analysed file's
+  records are replaced by this run's; a removed file's are dropped.
+  Re-analysing one registrant rather than all of them keeps an edit to an
+  input the plugin read (one view template, under rigor-rails-i18n's view
+  batch) from re-analysing every file that registered the key.
+- **Bounds.** One shape stays unsound: a key whose registration or record
+  depends both on an input the plugin read and on the registering file's own
+  text. When the input changes and the chosen file still registers the key,
+  the other holders take its record even where, re-analysed, they would
+  register another record or none, until each is re-analysed itself. A key
+  that depends on the file's text alone is not affected: a holder that stops
+  registering it is the edited file, re-analysed in any case, and the second
+  pass settles the others. `#disclose_once` asks a key not to vary between
+  workers, which rules this shape out for a plugin that keeps the contract.
+  Only inputs read through the plugin's boundary are tracked: state a plugin
+  carries across files (`@seen ||= …`) or an input it reads around the
+  boundary (`ENV`, a direct `File.read`) can leave a replayed row that never
+  clears. Both are contract misuse (ADR-2).
+- **Pool.** Each fork worker records its files' records and marshals them back
+  beside its plugin reads.
 
 ### `plugin_reads` — plugin reads in the closure ([#1553](https://github.com/rigortype/rigor/issues/1553))
 
@@ -1623,6 +1676,13 @@ carries when it builds one, and none of them depends on which files were analyse
 — so there is nothing for a replay to add, and caching one would be caching a
 diagnostic rather than an unobservable input. A new row joins this section only if
 it fails that test.
+
+A plugin's run-scoped rows fail it when a per-file hook registered them: which
+files were analysed decides whether the hook ran. They do not join this section,
+since their freshness is per file, not per fingerprint. They are replayed per file
+through `plugin_disclosures` (above), whose records go stale with the boundary
+reads the registering plugin had made. A row a plugin registers in `#prepare`
+passes the test and stays uncached.
 
 The replay is supplied to a NARROWED run only (a recheck's closure, an empty
 closure, a `--verify-incremental` partition); a full run derives both for itself and

@@ -1057,8 +1057,8 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       coordinator = described_class.allocate
       session = instance_double(
         Rigor::Analysis::WorkerSession, analyze: [], drain_reporters: {}, drain_dependencies: {},
-                                        drain_analysis_reads: {}, drain_run_disclosures: [],
-                                        drain_trust_refusals: []
+                                        drain_analysis_reads: {}, drain_analysis_disclosures: {},
+                                        drain_run_disclosures: [], drain_trust_refusals: []
       )
       allow(Rigor::Runtime::Jit).to receive(:rearm_after_fork)
       allow(coordinator).to receive(:exit!)
@@ -1070,8 +1070,8 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
         expect(Rigor::Runtime::Jit).to have_received(:rearm_after_fork)
         expect(coordinator).to have_received(:exit!).with(0)
         expect(Marshal.load(File.binread(out_path))) # rubocop:disable Security/MarshalLoad
-          .to eq(results: { "a.rb" => [] }, reporters: {}, dependencies: {}, analysis_reads: {}, disclosures: [],
-                 refusals: [])
+          .to eq(results: { "a.rb" => [] }, reporters: {}, dependencies: {}, analysis_reads: {},
+                 analysis_disclosures: {}, disclosures: [], refusals: [])
       end
     end
 

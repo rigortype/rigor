@@ -185,7 +185,10 @@ module Rigor
       # 42: issue #2184 — a `deferred_ranges` row for a `def` inside a block now carries the method's name, and a
       # literal-named `define_method` / `define_singleton_method` call adds a row. A pre-42 bundle carries neither,
       # so a warm run would report a top-level block call that a cold run declines.
-      SCHEMA = 42
+      # 43: issue #2020 — the payload gains `plugin_disclosures`, the run-scoped plugin rows each analysed file's
+      # last analysis registered, which a recheck replays for the files it serves. A pre-43 blob carries none, so
+      # its rechecks would drop every such row; the gate rejects it and the next run is cold.
+      SCHEMA = 43
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.
@@ -247,16 +250,21 @@ module Rigor
       # `effect_collections` (nil when collection was off). A plugin stamps its attributions and edges into a file's
       # collection, and `effects_identity` is plugin-blind (it is compared before any plugin loads), so the session
       # compares this one after the recheck has loaded them.
+      # Issue #2020 — `plugin_disclosures` is {Analysis::RunDisclosureLedger#to_h}: `files`, each analysed file's
+      # run-scoped plugin rows ({Plugin::Base#disclose_once} / {Plugin::Base#emit_once}) from its last analysis, which a
+      # recheck replays for the files it serves, and `reads`, the boundary rows per `[plugin id, key]` that make one
+      # stale.
       Payload = Data.define(:cache, :sources, :digests, :analyzed,
                             :symbol_sources, :ancestry_sources, :symbol_fingerprints,
                             :missing, :class_decls, :constant_decls, :seed_bundles, :plugin_fact_digest,
                             :return_summaries, :param_table,
                             :effect_collections, :effects_identity, :run_level_rows,
-                            :effect_plugin_digest, :plugin_reads, :discovery_digests) do
+                            :effect_plugin_digest, :plugin_reads, :discovery_digests, :plugin_disclosures) do
         # `effect_plugin_digest` defaults to nil so a payload built without it (an older caller, a spec fixture)
         # reads as "unknown", which the session treats as moved. `plugin_reads` defaults to no reads, and
-        # `discovery_digests` to no discovery-only files.
-        def initialize(effect_plugin_digest: nil, plugin_reads: {}, discovery_digests: {}, **rest)
+        # `discovery_digests` to no discovery-only files, and `plugin_disclosures` (#2020) to no replayed rows.
+        def initialize(effect_plugin_digest: nil, plugin_reads: {}, discovery_digests: {}, plugin_disclosures: {},
+                       **rest)
           super
         end
       end
@@ -468,6 +476,7 @@ module Rigor
           run_level_rows: data[:run_level_rows],
           effect_plugin_digest: data[:effect_plugin_digest],
           plugin_reads: data[:plugin_reads] || {},
+          plugin_disclosures: data.fetch(:plugin_disclosures, {}),
           discovery_digests: data.fetch(:discovery_digests, {})
         )
       end
@@ -496,6 +505,7 @@ module Rigor
           run_level_rows: payload.run_level_rows,
           effect_plugin_digest: payload.effect_plugin_digest,
           plugin_reads: payload.plugin_reads,
+          plugin_disclosures: payload.plugin_disclosures,
           discovery_digests: payload.discovery_digests
         )
         # #1507 — every `--incremental` run that analysed anything rewrites this whole blob, so its deflate is

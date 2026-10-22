@@ -13,6 +13,7 @@ require_relative "../cache/incremental_snapshot"
 require_relative "run_cache_key"
 require_relative "path_expansion"
 require_relative "require_relative_closure"
+require_relative "run_disclosure_credit"
 require_relative "../plugin"
 require_relative "../plugin/source_rbs_synthesis_reporter"
 require_relative "../rbs_extended/reporter"
@@ -108,6 +109,13 @@ module Rigor
       def analysis_reads
         pooled = @pool_coordinator.collected_analysis_reads
         pooled.empty? ? @analysis_reads : @analysis_reads.merge(pooled)
+      end
+
+      # Issue #2020 — `{path => [run-disclosure record]}`, the run-scoped rows each analysed file's plugin hooks
+      # registered ({RunDisclosureCredit}), sequential and pooled alike; empty unless `record_dependencies:`.
+      def analysis_disclosures
+        pooled = @pool_coordinator.collected_analysis_disclosures
+        pooled.empty? ? @analysis_disclosures : @analysis_disclosures.merge(pooled)
       end
 
       # ADR-103 — the run's propagated effect graph, or {Effects::EffectTable.empty} when collection did
@@ -311,7 +319,7 @@ module Rigor
                      seed_bundles: nil, collect_seed_bundles: false, param_inferred_types: nil,
                      discovery_seed: nil, no_tolerated_effects: false,
                      restored_run_level_rows: nil, served_per_file_diagnostics: nil, served_effect_collections: nil,
-                     on_file_indexed: nil)
+                     served_run_disclosures: nil, on_file_indexed: nil)
         @configuration = configuration
         # ADR-113 WD2 — `rigor lens` reads a target's seeded index here: called with `(path, parse_result, scope,
         # index)` for every file this process indexes, after its rules ran and inside the run window, so the reader
@@ -329,6 +337,9 @@ module Rigor
         # effect graph this run closes (and the envelope pass judges) spans the whole project, not just the closure.
         # Never part of {#effect_collections_by_path}, which stays what THIS run collected. Empty on every other run.
         @served_effect_collections = served_effect_collections || {}
+        # Issue #2020 — the run-scoped plugin rows ({RunDisclosureCredit}) those unanalysed files registered when
+        # they were last analysed, emitted beside this run's own registrations. Empty on every other run.
+        @served_run_disclosures = served_run_disclosures || []
         @explain = explain
         @cache_store = enforce_read_only_cache(cache_store, buffer)
         @plugin_requirer = plugin_requirer
@@ -384,6 +395,7 @@ module Rigor
         # rows as they stood around the per-file loop; see {#incremental_slot_rows}. Recorded only by a
         # dependency-recording (incremental) run.
         @analysis_reads = {}
+        @analysis_disclosures = {}
         @pre_analysis_plugin_rows = nil
         @post_analysis_plugin_rows = nil
         # Memoised activation decision for the `call.self-undefined-method` rule (nil = not yet computed).
@@ -523,6 +535,16 @@ module Rigor
         end
       end
 
+      # ADR-45 WD2 (#1507) / #2020 — the per-run reset of what each file's analysis is credited with: its plugin
+      # reads, its run-scoped plugin registrations, and the boundary rows around the per-file loop.
+      def reset_analysis_attribution
+        @analysis_reads = {}
+        @analysis_disclosures = {}
+        @pre_analysis_plugin_rows = nil
+        @post_analysis_plugin_rows = nil
+      end
+      private :reset_analysis_attribution
+
       def run_analysis(paths)
         Inference::MethodDispatcher::FileFolding.fold_platform_specific_paths =
           @configuration.fold_platform_specific_paths
@@ -550,9 +572,7 @@ module Rigor
         # #788 — the per-file reader is assigned only on the analysis (miss) path; reset it here so a run the
         # ADR-45 result cache serves does not answer with the previous run's rows.
         @per_file_diagnostics = [].freeze
-        @analysis_reads = {}
-        @pre_analysis_plugin_rows = nil
-        @post_analysis_plugin_rows = nil
+        reset_analysis_attribution
         # ADR-84 WD2 — roll the return-memo bucket: a fresh frozen token per run makes every per-file scope
         # of THIS run share one memo bucket while entries from any earlier run in this process (stale after
         # an edit) become unreachable.
@@ -2165,6 +2185,7 @@ module Rigor
           hkt_scan_failure_snapshot: -> { @snapshots.hkt_scan_failure },
           conformance_results_snapshot: -> { @snapshots.conformance_results },
           pooled_run_disclosures: -> { @pool_coordinator.collected_run_disclosures },
+          served_run_disclosures: -> { @served_run_disclosures },
           pooled_trust_refusals: -> { @pool_coordinator.collected_trust_refusals }
         )
       end
@@ -2638,13 +2659,18 @@ module Rigor
         @pre_analysis_plugin_rows ||= plugin_boundary_rows
         reads = []
         diagnostics = nil
-        record = Plugin::IoBoundary.attributing(reads) do
-          DependencyRecorder.record_for(path) do
-            diagnostics = analyze_with_effects(path, environment)
+        record = nil
+        # Issue #2020 — and every run-scoped row its analysis registered, with the registering plugins' reads.
+        disclosures = RunDisclosureCredit.collect do
+          record = Plugin::IoBoundary.attributing(reads) do
+            DependencyRecorder.record_for(path) do
+              diagnostics = analyze_with_effects(path, environment)
+            end
           end
         end
         @file_dependencies[path] = record
         @analysis_reads[path] = reads unless reads.empty?
+        @analysis_disclosures[path] = disclosures unless disclosures.empty?
         diagnostics
       end
 

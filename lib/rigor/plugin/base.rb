@@ -8,6 +8,7 @@ require "prism"
 require_relative "manifest"
 require_relative "node_context"
 require_relative "../analysis/diagnostic"
+require_relative "../analysis/run_disclosure_credit"
 require_relative "../cache/engine_source"
 # `producer generation_cap:` defaults to (and validates against) `Cache::Store::UNBOUNDED_GENERATIONS`, and a
 # plugin class body can be evaluated before anything else pulled the cache layer in.
@@ -780,11 +781,12 @@ module Rigor
       # that differs between workers.
       def disclose_once(key, message:, severity: :info, rule: "load-error")
         id = key.to_s
-        return nil if run_registration_taken?(id, batch: false)
-
-        @run_disclosures[id] = {
-          key: id, message: message.to_s, severity: severity.to_sym, rule: rule.to_s
-        }.freeze
+        unless run_registration_taken?(id, batch: false)
+          @run_disclosures[id] = {
+            key: id, message: message.to_s, severity: severity.to_sym, rule: rule.to_s
+          }.freeze
+        end
+        attribute_run_registration(id)
         nil
       end
 
@@ -816,14 +818,15 @@ module Rigor
       # raises `ArgumentError`, which the engine reports as this plugin's `runtime-error`.
       def emit_once(key, diagnostics)
         id = key.to_s
-        return nil if run_registration_taken?(id, batch: true)
+        unless run_registration_taken?(id, batch: true)
+          batch = Array(diagnostics).map do |row|
+            next row.dup.freeze if row.is_a?(Rigor::Analysis::Diagnostic)
 
-        batch = Array(diagnostics).map do |row|
-          next row.dup.freeze if row.is_a?(Rigor::Analysis::Diagnostic)
-
-          raise ArgumentError, "emit_once expects Rigor::Analysis::Diagnostic rows, got #{row.class}"
+            raise ArgumentError, "emit_once expects Rigor::Analysis::Diagnostic rows, got #{row.class}"
+          end
+          @run_disclosures[id] = { key: id, diagnostics: batch.freeze }.freeze
         end
-        @run_disclosures[id] = { key: id, diagnostics: batch.freeze }.freeze
+        attribute_run_registration(id)
         nil
       end
 
@@ -846,6 +849,18 @@ module Rigor
         raise ArgumentError, "run-scoped key #{id.inspect} is already registered as #{taken}; use a distinct key"
       end
       private :run_registration_taken?
+
+      # Issue #2020 — hands every call, a repeat of a key already registered included, to the engine's per-file
+      # attribution ({Analysis::RunDisclosureCredit}), so an `--incremental` recheck can replay the row for a file
+      # it serves from cache. A repeat counts because a discloser memoises the input its notice is about and
+      # re-registers the notice from each file's hook. A batch registered empty adds nothing to replay.
+      def attribute_run_registration(id)
+        record = @run_disclosures[id]
+        return if record.nil? || record[:diagnostics]&.empty?
+
+        Analysis::RunDisclosureCredit.attribute(self, record)
+      end
+      private :attribute_run_registration
 
       # Boilerplate-reduction helper (review §1.3): the "did you mean …?" suggestion every
       # diagnostic-emitting plugin otherwise hand-rolls. Returns the closest of `candidates` to `name` via

@@ -351,7 +351,12 @@ SIG_PROVENANCE_RESIDUE = {
   # absorbed beside the `Hash` arm (the Hash analogue of #2298), so both render and match. `opaque_block_self` and
   # `opaque_block_self?` read an ivar `initialize` assigns from a parameter; the `initialize` declaration now names
   # that keyword (and `block_self_unknown:` / `singleton_class_body:`), so they render (#1154's mechanism).
-  "sig/rigor/scope.rbs" => 65,
+  # -20 (#2313): `initialize` now declares every keyword the Ruby `initialize` takes, each typed as the reader over
+  # the ivar it seeds, so those readers (`local_origins`, `ivar_origins`, `void_origins`, `plugin_typed_calls`,
+  # `optimistic_*`, `indexed_narrowings`, `method_chain_narrowings`, `struct_fold_safe_locals`, `lexical_nesting`,
+  # `declaration_sourced`, and the predicates over them) render and match, or classify as parameter intent. The
+  # `# sig-gen gap: #1154` markers on the rows that became generated-equal are gone too.
+  "sig/rigor/scope.rbs" => 45,
   "sig/rigor/sig_gen/skip_reason_catalog.rbs" => 8,
   "sig/rigor/source.rbs" => 4,
   "sig/rigor/testing.rbs" => 4,

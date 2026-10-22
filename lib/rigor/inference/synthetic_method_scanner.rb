@@ -64,14 +64,21 @@ module Rigor
         nested_templates = collect_nested_class_templates(plugin_registry)
         return SyntheticMethodIndex::EMPTY if templates.empty? && registries.empty? && nested_templates.empty?
         # Tier B alone cannot emit without an environment: every trait entry — the direct route and the
-        # concern-re-targeted one — funnels through `module_instance_method_names`, whose first line
-        # answers `[]` for a nil environment. The production pre-pass passes `environment: nil` (#476),
-        # so a project whose only contributing plugin registers trait registries (rigor-devise on a
-        # Rails app) would otherwise pay a whole-project parse to build a provably empty index. This
-        # gate mirrors that nil guard and MUST be removed in the change that threads a real environment.
+        # concern-re-targeted one — funnels through `module_instance_method_names`, whose first line answers `[]`
+        # for a nil environment. The production pre-pass hands Tier B a (lazy) environment since #476, so this
+        # gate now guards the direct callers that pass none (a spec, a probe): a registry-only scan with
+        # no environment would otherwise pay a whole-project parse to build a provably empty index. It mirrors
+        # that nil guard and goes with it.
         return SyntheticMethodIndex::EMPTY if environment.nil? && templates.empty? && nested_templates.empty?
 
-        asts = parse_paths(paths, buffer: buffer)
+        sources = read_sources(paths, buffer: buffer)
+        # With only trait registries contributing, a project that never writes a registry's method name (no
+        # `devise` anywhere) cannot produce an entry: a call node named `devise` needs the text `devise` in its
+        # file. Skip the parse (the dominant cost) then, and the environment build it would have asked for.
+        return SyntheticMethodIndex::EMPTY if templates.empty? && nested_templates.empty? &&
+                                              none_mention_registry_method?(sources, registries)
+
+        asts = parse_sources(sources)
         hierarchy = build_hierarchy(asts)
         concern_index = build_concern_index(asts)
 
@@ -249,13 +256,29 @@ module Rigor
         call_node.arguments&.arguments&.first
       end
 
-      def parse_paths(paths, buffer: nil)
+      # `path => source text` (nil when the file cannot be read), reading an editor buffer's in-flight bytes
+      # for the logical path it is bound to.
+      def read_sources(paths, buffer: nil)
         paths.to_h do |path|
           physical = buffer ? buffer.resolve(path) : path
-          source = File.read(physical)
-          [path, Prism.parse(source, filepath: path).value]
+          [path, File.read(physical)]
         rescue StandardError
           [path, nil]
+        end
+      end
+
+      def parse_sources(sources)
+        sources.to_h do |path, source|
+          [path, source.nil? ? nil : Prism.parse(source, filepath: path).value]
+        rescue StandardError
+          [path, nil]
+        end
+      end
+
+      def none_mention_registry_method?(sources, registries)
+        names = registries.map { |(_plugin_id, registry)| registry.method_name.to_s }
+        sources.each_value.none? do |source|
+          !source.nil? && names.any? { |name| source.include?(name) }
         end
       end
 
@@ -534,6 +557,14 @@ module Rigor
       # Returns the Symbol method-name list defined on `module_name`'s RBS instance definition. Empty Array when the
       # module is not in the RBS env (silent skip — the synthetic emit produces nothing rather than fabricating method
       # names).
+      #
+      # RBS builds a module's instance definition over `Object`: `Kernel#puts`, `Object#hash`, ActiveSupport's
+      # `Object#blank?`, the pretty-printer's mixin all appear in `Devise::Models::Recoverable`'s method table
+      # beside its own members. They are not the module's contribution, and synthesising them would put ~200
+      # entries on every including class, answering `user.to_s` from the tier ABOVE the class's own `def` (a
+      # project override of `to_s` or `as_json` would be typed by `Object`'s signature). A method whose
+      # defining owner is the one `Object`'s own table names is therefore skipped; a module that re-declares
+      # one keeps it. A definition that carries no owner (the specs' stubs) keeps every name.
       def module_instance_method_names(module_name, environment)
         return [] if environment.nil?
 
@@ -543,7 +574,13 @@ module Rigor
         definition = loader.instance_definition(module_name)
         return [] if definition.nil?
 
-        definition.methods.keys
+        object_methods = nil
+        definition.methods.filter_map do |name, method|
+          next name unless method.respond_to?(:defined_in)
+
+          object_methods ||= loader.instance_definition("Object")&.methods || {}
+          name unless object_methods[name]&.defined_in == method.defined_in
+        end
       rescue StandardError
         []
       end

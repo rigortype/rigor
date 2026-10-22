@@ -66,7 +66,7 @@ RSpec.describe "rigor-devise integration" do
 
   let(:demo_source) do
     <<~RUBY
-      class ApplicationRecord
+      class ApplicationRecord < ActiveRecord::Base
       end
 
       class User < ApplicationRecord
@@ -131,6 +131,70 @@ RSpec.describe "rigor-devise integration" do
       "expected Devise module methods to resolve cross-file via the substrate; " \
       "got: #{undefined.map(&:message).inspect}"
     )
+  end
+
+  # Issue #476 — the example above cannot tell the tier from its absence: its receivers are untyped parameters,
+  # so nothing fires either way. These receive a `User`, so the call's type is decided by the synthetic
+  # tier: Tier B redispatches `valid_password?` on `Devise::Models::DatabaseAuthenticatable` and answers its
+  # authored `bool`. The pre-pass used to hand the scanner no environment, which made the index empty and
+  # the answer `Dynamic[top]` — silent here.
+  describe "end to end through the Runner (#476)" do
+    let(:typed_consumer_source) do
+      <<~RUBY
+        def authenticate(password)
+          user = User.new
+          user.valid_password?(password).no_such_bool_method
+        end
+      RUBY
+    end
+
+    it "resolves a synthesised method to the strategy module's authored return type" do
+      result = run_under_plugin(demo: demo_source, consumer: typed_consumer_source)
+
+      undefined = result.diagnostics.select { |d| d.rule.to_s == "call.undefined-method" }
+      expect(undefined.map(&:message)).to contain_exactly(a_string_matching(/`no_such_bool_method' for bool/))
+    end
+
+    it "raises no diagnostic on the synthesised call itself" do
+      result = run_under_plugin(
+        demo: demo_source,
+        consumer: "def authenticate(password)\n  User.new.valid_password?(password)\nend\n"
+      )
+
+      expect(result.diagnostics).to be_empty
+    end
+
+    # RBS builds a module's instance definition over `Object`. Without the owner filter the scanner put every
+    # `Object` / `Kernel` method on `User` (`hash`, `to_s`, `puts` ...), and the arity rule treats a name in the
+    # synthetic index as possibly rewritten by a plugin and stands down: the wrong call below went unreported.
+    it "does not mute the arity check of the model's own override of an Object method" do
+      result = run_under_plugin(
+        demo: <<~RUBY,
+          class ApplicationRecord < ActiveRecord::Base
+          end
+
+          class User < ApplicationRecord
+            devise :database_authenticatable
+
+            def hash
+              1
+            end
+          end
+        RUBY
+        consumer: "def digest\n  User.new.hash(1, 2, 3)\nend\n"
+      )
+
+      expect(result.diagnostics.map(&:rule).map(&:to_s)).to include("call.wrong-arity")
+    end
+
+    it "synthesises nothing for a model the project never declares with `devise`" do
+      result = run_under_plugin(
+        demo: "class ApplicationRecord < ActiveRecord::Base\nend\n\nclass User < ApplicationRecord\nend\n",
+        consumer: typed_consumer_source
+      )
+
+      expect(result.diagnostics.select { |d| d.message.include?("no_such_bool_method") }).to be_empty
+    end
   end
 
   def run_under_plugin(demo:, consumer:)

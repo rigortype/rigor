@@ -272,6 +272,31 @@ floor: the synthesised methods replay the included modules' authored RBS
 return types (ADR-5 robustness — the substrate does not fabricate
 precision it was not given).
 
+### Tier B pre-pass environment
+
+Exploding a trait module needs the project's RBS: the scanner reads the module's instance
+definition through the RBS loader, and decides whether a project class descends from an
+RBS-known `receiver_constraint` (`ActiveRecord::Base`) through the environment's class
+ordering. Those are the only two reads (`Runner::ScanEnvironment#rbs_loader`,
+`#class_ordering`). The run's own environment cannot be the source, because it stores the
+scan's output (`synthetic_method_index:`); but the loader never consults that index, so
+the pre-pass builds a **separate environment without the index** — same libraries,
+signature paths, plugin signatures, bundle / collection axes and required features, no
+reporters — and the real environment is built afterwards with it.
+
+- The build is **lazy**: it happens on the first question a matching call site asks. A
+  project whose files never write a registry's `method_name` (no `devise`) parses nothing
+  and builds no environment; the scan reads each file's text and returns the empty index
+  when no file mentions the name.
+- The environment is built only when a loaded plugin registers a trait registry; Tier C
+  and the nested-class tier read none.
+- It is **fail-soft**: a build that raises answers "no loader" / `:unknown`, so Tier B emits
+  nothing, as it did with no environment. A trait module absent from the RBS (a project
+  that supplies no `Devise::Models::*` signatures) is skipped silently; the tier cannot
+  invent method names the project's RBS does not declare.
+- `SyntheticMethodScanner.scan(environment: nil)` still answers the empty index for a
+  registry-only scan; it is the answer for a caller that has no environment.
+
 ## Nested-class tier — `NestedClassTemplate` (`nested_class_templates:`, ADR-36)
 
 Where Tier C synthesises *methods*, this tier synthesises *nested

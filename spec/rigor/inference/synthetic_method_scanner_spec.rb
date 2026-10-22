@@ -211,10 +211,11 @@ RSpec.describe Rigor::Inference::SyntheticMethodScanner do
       env
     end
 
-    # The #476 interim gate: every trait entry funnels through `module_instance_method_names`, whose
+    # The nil-environment gate: every trait entry funnels through `module_instance_method_names`, whose
     # first line answers [] for a nil environment, so a registry-only scan with no environment is
-    # provably empty — and must not pay a whole-project read + parse to say so. The example above is
-    # this one's positive control: the same registry with an environment emits.
+    # provably empty — and must not pay a whole-project read + parse to say so. The example below
+    # ("explodes always_included ...") is this one's positive control: the same registry with an
+    # environment emits.
     it "reads no file when only trait registries contribute and there is no environment" do
       registry = Rigor::Plugin::Registry.new(plugins: [devise_plugin.new(services: services)])
       _, paths = write_files(
@@ -226,6 +227,23 @@ RSpec.describe Rigor::Inference::SyntheticMethodScanner do
 
       expect(index).to be_empty
       expect(Prism).not_to have_received(:parse)
+    end
+
+    # Issue #476 — the production pre-pass now hands Tier B an environment, so the nil gate no longer spares
+    # a project that merely LOADS rigor-devise. A call node named `devise` needs the text `devise` in its
+    # file, so a project that never writes it parses nothing and never asks the environment anything.
+    it "parses nothing and asks the environment nothing when no file names a registry's method" do
+      registry = Rigor::Plugin::Registry.new(plugins: [devise_plugin.new(services: services)])
+      _, paths = write_files("user.rb" => "class User < ActiveRecord::Base\n  has_many :posts\nend\n")
+      allow(Prism).to receive(:parse)
+      env = environment_with_devise_modules
+      allow(env).to receive(:class_ordering)
+
+      index = described_class.scan(plugin_registry: registry, paths: paths, environment: env)
+
+      expect(index).to be_empty
+      expect(Prism).not_to have_received(:parse)
+      expect(env).not_to have_received(:class_ordering)
     end
 
     it "explodes always_included + per-symbol modules' instance methods into the index" do

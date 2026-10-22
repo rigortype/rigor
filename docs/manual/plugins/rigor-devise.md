@@ -48,6 +48,14 @@ whatever class includes the concern.
 
 ## Limitations
 
+- **Needs RBS for the Devise modules.** The methods come from the
+  strategy modules' signatures (`Devise::Models::DatabaseAuthenticatable`
+  and the rest), which Rigor does not bundle and the `devise` gem does
+  not ship. Supply them through `signature_paths:` (or a
+  `rbs collection`); a strategy module with no signature contributes
+  nothing, and the model's `valid_password?` and friends stay as they
+  were. `plugins/rigor-devise/demo/sig/devise.rbs` is a minimal
+  example.
 - **Instance methods only.** Per-module `ClassMethods` (e.g.
   `User.reset_password_by_token`) are not yet synthesised.
 - **Controller helpers deferred.** `current_user` /

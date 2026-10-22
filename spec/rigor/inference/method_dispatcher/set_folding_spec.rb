@@ -11,7 +11,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::SetFolding do
   end
 
   # The element joins a `Dynamic[top]` floor (see `SetFolding.typed_set`).
-  def set_of(element)
+  def typed_set_of(element)
     Rigor::Type::Combinator.nominal_of(
       "Set", type_args: [Rigor::Type::Combinator.union(element, Rigor::Type::Combinator.untyped)]
     )
@@ -52,7 +52,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::SetFolding do
 
     it "types a non-Constant argument by element rather than folding (#2278)" do
       result = fold(:[], c(:a), Rigor::Type::Combinator.nominal_of("Symbol"))
-      expect(result).to eq(set_of(Rigor::Type::Combinator.nominal_of("Symbol")))
+      expect(result).to eq(typed_set_of(Rigor::Type::Combinator.nominal_of("Symbol")))
     end
   end
 
@@ -81,7 +81,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::SetFolding do
     it "types a tuple with a non-Constant element by element rather than folding (#2278)" do
       non_const = Rigor::Type::Combinator.nominal_of("Integer")
       arg = tuple(c(1), non_const)
-      expect(fold(:new, arg)).to eq(set_of(non_const))
+      expect(fold(:new, arg)).to eq(typed_set_of(non_const))
     end
 
     it "declines when the single argument is not a Tuple" do

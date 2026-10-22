@@ -17,8 +17,10 @@ RSpec.describe "Set element types", type: :runner do
   end
 
   def errors(source)
-    analyze(%(require "rigor/testing"\ninclude Rigor::Testing\nx = ARGV.first.to_s\nys = [1, 2].select { |e| e > ARGV.size }\n#{source})).diagnostics
-      .select { |d| d.severity == :error }.map(&:qualified_rule)
+    prelude = %(require "rigor/testing"\ninclude Rigor::Testing\nx = ARGV.first.to_s\n) +
+              "ys = [1, 2].select { |e| e > ARGV.size }\n"
+    diagnostics = analyze(prelude + source).diagnostics
+    diagnostics.select { |d| d.severity == :error }.map(&:qualified_rule)
   end
 
   it "types Set[...] over non-constant members as the union of their widened classes" do
@@ -38,7 +40,8 @@ RSpec.describe "Set element types", type: :runner do
   end
 
   it "keeps the element type through freeze and dup" do
-    expect(dumped("dump_type(Set[x].freeze)\ndump_type(Set[x].dup)")).to eq(["Set[Dynamic[top] | String]", "Set[Dynamic[top] | String]"])
+    expected = ["Set[Dynamic[top] | String]"] * 2
+    expect(dumped("dump_type(Set[x].freeze)\ndump_type(Set[x].dup)")).to eq(expected)
   end
 
   # Positive control: an all-constant Set still folds to its value carrier.
@@ -66,7 +69,8 @@ RSpec.describe "Set element types", type: :runner do
       "replace" => "s = Set[x]\ns.replace([1])\ns.each { |e| e.fdiv(2) }",
       "clear then <<" => "s = Set.new(ARGV)\ns.clear\ns << 1\ns.each { |e| e.fdiv(2) }",
       "map!" => "s = Set[x]\ns.map! { |e| e.size }\ns.each { |e| e.fdiv(2) }",
-      "a callee that fills it" => "def fill(set) = (set.clear; set << 42)\ns = Set[x]\nfill(s)\ns.each { |v| v.fdiv(2) }",
+      "a callee that fills it" =>
+        "def fill(set) = (set.clear; set << 42)\ns = Set[x]\nfill(s)\ns.each { |v| v.fdiv(2) }",
       "tap" => "s = Set[x].tap { |q| q << 1 }\ns.each { |v| v.fdiv(2) }",
       "union" => "s = Set[x] | Set[1]\ns.find { |e| e.is_a?(Integer) }&.fdiv(2)"
     }.each do |label, body|

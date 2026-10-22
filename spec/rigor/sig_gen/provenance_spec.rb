@@ -341,8 +341,9 @@ SIG_PROVENANCE_RESIDUE = {
   # `Scope::ResolutionChain#search`, whose value is whatever its block returns, which sig-gen does not render.
   # The three rows move from `declared_divergent` to `unrenderable` and stay residue; the declarations are
   # unchanged and still true.
-  # -35 (#1154): an ivar a declared parameter assigns now reads that type, so 35 rows over it render.
-  "sig/rigor/scope.rbs" => 77,
+  # -43 (#1154): an ivar a declared parameter assigns now reads that type, so 43 rows over it render (35 when the
+  # PR was written; 8 more once the engine changes landed on master since read the ivar-typed parameters).
+  "sig/rigor/scope.rbs" => 69,
   "sig/rigor/sig_gen/skip_reason_catalog.rbs" => 8,
   "sig/rigor/source.rbs" => 4,
   "sig/rigor/testing.rbs" => 4,

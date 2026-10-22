@@ -1,0 +1,3 @@
+- **[engine]** A `each` block that mutates an element in place no longer leaves the receiver's shape stale, which drew a false `flow.always-truthy-condition` on `a = [[1]]; a.each { |x| x << 2 }; a[0].size == 2`. ([#2285](https://github.com/rigortype/rigor/pull/2285))
+  - The receiver's variables now drop their shapes at every depth when the block calls a mutator on a block parameter (`it` and `_1` included) or on an index chain rooted at one. A block that only reads the element, or mutates an unrelated local, keeps the precise shape.
+  - An alias of the parameter (`y = x`) and an element passed to a call are not followed.

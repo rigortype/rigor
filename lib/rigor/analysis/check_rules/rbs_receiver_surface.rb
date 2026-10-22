@@ -3,6 +3,7 @@
 require_relative "../../reflection"
 require_relative "../dependency_recorder"
 require_relative "../../inference/singleton_hook_decline"
+require_relative "../../inference/object_mixins"
 
 module Rigor
   module Analysis
@@ -64,6 +65,43 @@ module Rigor
                 scope.discovered_method?(name, MISSING_HOOK, :singleton)
             else
               scope.known_user_class?(name) && hook_on_chain?(scope, name)
+            end
+          end
+        end
+
+        # Issue #2094 — the singleton side's twin of {.ancestor_may_answer?}: a module the class or an RBS superclass
+        # `extend`s (in its body, as `Float.extend(Ext)`, or as `Float.singleton_class.include(Ext)`) may answer
+        # `method_name` on the class object, read as {.mixin_defines?} / {.external_may_answer?} read an instance-side
+        # mixin. Only each level's own singleton segment is read: the class's further singleton ancestors are the
+        # RBS superclasses this walk visits in turn, and `Class` / `Module` are {.singleton_hook?}'s.
+        def singleton_mixin_may_answer?(scope, class_name, method_name)
+          singleton_class_names(scope, class_name).any? do |name|
+            DependencyRecorder.read_last_segment(:class, name) if DependencyRecorder.active?
+
+            extends_answer?(scope, name, method_name, open_mixins: !OBJECT_ROOTS.include?(name))
+          end
+        end
+
+        def singleton_class_names(scope, class_name)
+          loader = scope.environment&.rbs_loader
+          pairs = loader ? loader.singleton_ancestors_for(class_name.to_s) : []
+          names = pairs.filter_map { |kind, name| name if kind == :singleton }
+          names.empty? ? [class_name.to_s] : names
+        end
+
+        def extends_answer?(scope, name, method_name, open_mixins:)
+          chain = Scope::ResolutionChain.for(scope, name, :singleton, :methods)
+          return true if chain.truncated?
+          # A mixin call the indexer could not record (`Integer.extend(m)`, `Symbol.singleton_class.send(:include,
+          # M)`) leaves the side tainted: some module the tables do not name may answer any name.
+          return true if open_mixins && chain.wildcard_mixin?
+
+          entries = chain.level_count.zero? ? chain.entries : chain.level_entries(0)
+          entries.any? do |entry|
+            if entry.external?
+              external_may_answer?(scope, entry, method_name, open_mixins)
+            else
+              entry.name != name && mixin_defines?(scope, entry, method_name, open_mixins)
             end
           end
         end
@@ -132,18 +170,43 @@ module Rigor
           if Rigor::Reflection.rbs_class_known?(owner, scope: scope)
             scope.discovered_method?(owner, method_name, :instance)
           else
-            project_defines?(scope, owner, method_name) ||
-              (open_mixins && Inference::SingletonHookDecline.entry_hook_capable?(scope, entry))
+            project_defines?(scope, owner, method_name) || macro_names?(scope, owner, method_name) ||
+              (open_mixins && (Inference::SingletonHookDecline.entry_hook_capable?(scope, entry) ||
+                               open_extend?(scope, owner)))
           end
         end
 
+        # Issue #2094 — a class-body macro of the module names the method ({Inference::ObjectMixins.macro_named?}).
+        # Answers the named method only, so it holds on `Object`, `Kernel` and `BasicObject` too, where a module
+        # that defines the name answers.
+        def macro_names?(scope, owner, method_name)
+          Inference::ObjectMixins.macro_named?(scope, owner, method_name)
+        end
+
+        # Issue #2094 — the module `extend`s a module whose surface is open: one neither RBS nor the project declares
+        # (a gem's DSL with no signatures), or a project module {Inference::SingletonHookDecline} reads as
+        # hook-capable. Any macro the module's body calls may come from it and define any name, and its `extended`
+        # hook may too, so the module answers any name, the reading an undeclared `include` already gets. A chain cut
+        # at its budget may hold such a module past the cut.
+        def open_extend?(scope, owner)
+          chain = Scope::ResolutionChain.for(scope, owner, :singleton, :methods)
+          return true if chain.truncated?
+
+          entries = chain.level_count.zero? ? chain.entries : chain.level_entries(0)
+          entries.any? { |extended| Inference::SingletonHookDecline.entry_hook_capable?(scope, extended) }
+        end
+
         # An external the project declares (a module with no `def`, which the chain does not hold as a project entry)
-        # is known, and answers only through RBS.
+        # is known, and answers through RBS, or through what its own body's macros and `extend`s may define (issue
+        # #2094: {.macro_names?} and {.open_extend?}, asked of each candidate the project declares).
         def external_may_answer?(scope, entry, method_name, open_mixins)
           candidates = entry.candidates
           return open_mixins if candidates.empty?
           return true if candidates.any? do |candidate|
             Rigor::Reflection.instance_method_definition(candidate, method_name, scope: scope)
+          end
+          return true if candidates.any? do |candidate|
+            macro_names?(scope, candidate, method_name) || (open_mixins && open_extend?(scope, candidate))
           end
 
           open_mixins && candidates.none? { |candidate| declared?(scope, candidate) }

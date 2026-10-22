@@ -123,8 +123,13 @@ module Rigor
       # all.
       def answer_for_entry(scope, entry, method_name)
         unless entry.external?
-          return source_defines?(scope, entry.name, method_name) ? [:source, entry.name] : nil
+          defines = source_defines?(scope, entry.name, method_name) || macro_named?(scope, entry.name, method_name)
+          return defines ? [:source, entry.name] : nil
         end
+
+        # Issue #2094 — a project module with no `def` is held as an external; a macro of its body may name it.
+        named = entry.candidates.find { |candidate| macro_named?(scope, candidate, method_name) }
+        return [:source, named] if named
 
         entry.candidates.each do |candidate|
           definition = Rigor::Reflection.instance_method_definition(candidate, method_name, scope: scope)
@@ -136,6 +141,13 @@ module Rigor
         [:opaque, entry.raw.to_s]
       end
       private_class_method :answer_for_entry
+
+      # Issue #2094 — whether a class-body macro of `owner` was handed `method_name` as a literal
+      # (`dsl_method :xdyn`, `def_delegators :@target, :xdyn`). The indexer files every such name as an opaque
+      # envelope, since what the macro defines under it is unknown, so the module may define the name.
+      def macro_named?(scope, owner, method_name)
+        scope.parameter_envelopes_of(owner).key?([:instance, method_name.to_sym])
+      end
 
       def private_definition?(definition)
         definition.respond_to?(:accessibility) && definition.accessibility == :private

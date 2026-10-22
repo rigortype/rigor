@@ -7,7 +7,8 @@
 # 2. `C.include(M)` / `C.prepend(M)` / `C.send(:include, M)` outside the class body, or a mixin of an RBS ancestor;
 # 3. singleton methods given to the object a local holds (`s.extend(M)`, `define_singleton_method`,
 #    `s.singleton_class.class_eval`, `s.instance_eval { def }`, `class << s`);
-# 4. a value typed `String` through a signature that holds a project subclass defining the method.
+# 4. a value typed `String` through a signature that holds a project subclass defining the method;
+# 5. a mixed-in project module that extends a DSL Rigor cannot read, or hands a macro the name (#2094).
 #
 # Each row runs the fixture under Ruby and under `rigor check`. Every call is a `t(:label) { ... }` line, so a firing
 # maps back to its label. A label Ruby answers in some world (an `env` the row lists) must stay silent; a label Ruby
@@ -32,6 +33,16 @@ RSpec.describe "call.undefined-method on core receivers the program extends (#17
     end
 
     def sentinel = 1.succ(1)
+  RUBY
+
+  # Issue #2094 — a gem DSL Rigor has no RBS for, kept outside `lib/` so the analysis never sees it.
+  some_gem = <<~RUBY
+    module SomeGem
+      module Dsl
+        def dsl_method(name) = define_method(name) { 1 }
+        def self.extended(base) = base.define_method(:from_hook) { 2 }
+      end
+    end
   RUBY
 
   rows = {
@@ -478,6 +489,218 @@ RSpec.describe "call.undefined-method on core receivers the program extends (#17
         #{helper}
         t(:str) { "s".zzz }
         t(:ctl_array) { [1].zzz }
+      RUBY
+    },
+    "a project module calling an unknown gem DSL macro, mixed into String" => {
+      # Ruby raises on `other`, but a module that extends a DSL Rigor cannot read may define any name.
+      declines: %w[other],
+      "vendor/some_gem.rb" => some_gem,
+      "ext.rb" => <<~RUBY,
+        module OnlyExt
+          dsl_method :sib
+        end
+      RUBY
+      "main.rb" => <<~RUBY
+        require_relative "../vendor/some_gem"
+        module OnlyExt
+          extend SomeGem::Dsl
+          dsl_method :xdyn
+        end
+        require_relative "ext"
+        String.include(OnlyExt)
+        # A module with a `def` of its own is a project entry of the chain, not an external one.
+        module WithDef
+          extend SomeGem::Dsl
+          def own = 1
+        end
+        Array.include(WithDef)
+        #{helper}
+        t(:named) { "s".xdyn }
+        t(:sibling_named) { "s".sib }
+        t(:hook) { "s".from_hook }
+        t(:other) { "s".other_name }
+        t(:def_hook) { [1].from_hook }
+        t(:ctl_int) { 1.xdyn }
+      RUBY
+    },
+    "an unknown gem DSL extended under an if" => {
+      env: [{}, { "DSL" => "1" }],
+      "vendor/some_gem.rb" => some_gem,
+      "main.rb" => <<~RUBY
+        require_relative "../vendor/some_gem"
+        module CondExt
+          extend SomeGem::Dsl if ENV["DSL"]
+        end
+        Symbol.include(CondExt)
+        #{helper}
+        t(:hook) { :a.from_hook }
+        t(:ctl_int) { 1.from_hook }
+      RUBY
+    },
+    "a literal-named macro from a module RBS knows, mixed into Integer" => {
+      "main.rb" => <<~RUBY
+        require "forwardable"
+        module Named
+          extend Forwardable
+          def_delegators :to_s, :upcase
+        end
+        Integer.include(Named)
+        module NamedDef
+          extend Forwardable
+          def_delegators :to_s, :downcase
+          def own = 1
+        end
+        Integer.include(NamedDef)
+        #{helper}
+        t(:named) { 1.upcase }
+        t(:def_named) { 1.downcase }
+        t(:ctl_not_named) { 1.not_named }
+      RUBY
+    },
+    "an unknown gem DSL in a module mixed into Object" => {
+      "vendor/some_gem.rb" => some_gem,
+      "main.rb" => <<~RUBY
+        require_relative "../vendor/some_gem"
+        module TopMac
+          extend SomeGem::Dsl
+          dsl_method :top_named
+        end
+        include TopMac
+        module TopDef
+          extend SomeGem::Dsl
+          dsl_method :top_def_named
+          def own_top = 1
+        end
+        include TopDef
+        #{helper}
+        t(:named) { 1.top_named }
+        t(:def_named) { 1.top_def_named }
+        t(:ctl_other) { 1.zzz_top }
+      RUBY
+    },
+    "a module extending an unknown gem DSL, mixed into a class object's singleton side" => {
+      "vendor/some_gem.rb" => some_gem,
+      "main.rb" => <<~RUBY
+        require "forwardable"
+        require_relative "../vendor/some_gem"
+        module Ext2
+          extend SomeGem::Dsl
+          dsl_method :ext2
+        end
+        Float.extend(Ext2)
+        module Ext3
+          extend SomeGem::Dsl
+        end
+        Symbol.singleton_class.include(Ext3)
+        module Plain2
+          def pl = 1
+        end
+        Rational.extend(Plain2)
+        class Rational
+          def inst_only = 1
+        end
+        module Named4
+          extend Forwardable
+          def_delegators :to_s, :upcase
+        end
+        Complex.extend(Named4)
+        #{helper}
+        t(:named) { Float.ext2 }
+        t(:hook) { Float.from_hook }
+        t(:singleton_class_include) { Symbol.from_hook }
+        t(:plain) { Rational.pl }
+        t(:ctl_plain_other) { Rational.zzz }
+        t(:ctl_instance_only) { Rational.inst_only }
+        t(:rbs_extend_named) { Complex.upcase }
+        t(:ctl_rbs_extend_other) { Complex.nope }
+        t(:ctl_other_class) { Integer.ext2 }
+      RUBY
+    },
+    "a singleton mixin the indexer cannot record, or records from class << self" => {
+      # `singleton_class.include` inside `class << self` reaches the singleton's own singleton; the walk taints
+      # Float's extend side for it, so `Float.si` declines although Ruby raises.
+      declines: %w[up_level],
+      "main.rb" => <<~RUBY
+        module Plain5
+          def pl5 = 1
+        end
+        module SI5
+          def si5 = 1
+        end
+        m = Plain5
+        Integer.extend(m)
+        Complex.singleton_class.include(SI5, m)
+        module SelfExt
+          def se = 1
+          Rational.extend(self)
+        end
+        class Holder
+          class << self
+            String.extend(Plain5)
+          end
+        end
+        class Float
+          class << self
+            singleton_class.include(SI5)
+          end
+        end
+        #{helper}
+        t(:local_argument) { Integer.pl5 }
+        t(:mixed_arguments) { Complex.pl5 }
+        t(:self_argument) { Rational.se }
+        t(:in_class_singleton_body) { String.pl5 }
+        t(:ctl_in_class_singleton_body) { String.zzz5 }
+        t(:up_level) { Float.si5 }
+        t(:ctl_untouched) { Range.zzz5 }
+      RUBY
+    },
+    "an open module extended onto Object, read only for the names it defines" => {
+      "vendor/some_gem.rb" => some_gem,
+      "main.rb" => <<~RUBY
+        require_relative "../vendor/some_gem"
+        module OpenMod
+          extend SomeGem::Dsl
+          dsl_method :obj_named
+        end
+        Object.extend(OpenMod)
+        #{helper}
+        t(:named) { Float.obj_named }
+        t(:ctl_other) { Float.zzz_obj }
+      RUBY
+    },
+    "an unknown module included into Module, which is not a module's own extend" => {
+      "vendor/some_gem.rb" => some_gem,
+      "main.rb" => <<~RUBY
+        require_relative "../vendor/some_gem"
+        class Module
+          include SomeGem::Dsl
+        end
+        module Plain3
+          def own3 = 1
+        end
+        String.include(Plain3)
+        #{helper}
+        t(:own) { "s".own3 }
+        t(:ctl_other) { "s".zzz_mod }
+      RUBY
+    },
+    "an extend chain deeper than the resolution budget" => {
+      # Past the budget the chain may hold an open module, so every name declines.
+      declines: %w[deep_instance deep_singleton],
+      "deep.rb" => (0..101).reverse_each.map do |i|
+        "module Deep#{i}\n#{"  include Deep#{i + 1}\n" if i < 101}end\n"
+      end.join,
+      "main.rb" => <<~RUBY
+        require_relative "deep"
+        module DeepExt
+          extend Deep0
+          def own = 1
+        end
+        String.include(DeepExt)
+        Float.extend(Deep0)
+        #{helper}
+        t(:deep_instance) { "s".zzz_deep }
+        t(:deep_singleton) { Float.zzz_deep }
       RUBY
     },
     "literal and shape receivers beside project subclasses" => {

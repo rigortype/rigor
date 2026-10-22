@@ -153,10 +153,10 @@ module Rigor
         def per_invocation_class?(scope, class_name)
           return @per_invocation[class_name] if @per_invocation.key?(class_name)
 
-          @per_invocation[class_name] = compute_per_invocation(scope, class_name)
+          @per_invocation[class_name] = descends_from_per_invocation?(scope, class_name)
         end
 
-        def compute_per_invocation(scope, class_name)
+        def descends_from_per_invocation?(scope, class_name)
           environment = scope.environment
           registry = environment&.plugin_registry
           return false if registry.nil? || registry.per_invocation_classes.empty?

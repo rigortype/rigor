@@ -13,13 +13,15 @@
 ## Options and trade-offs
 
 - **Fold the snapshot's seed bundles, full tables (taken).** Same tables `check` seeds, so answers agree with `check`. Needs a prior `rigor check --incremental`. Measured warm: redmine (352 files) 1.2s to 1.7-1.9s; Rigor's own `lib` (609 files, a dense file) 1.7s to 4.1s. The seed itself costs about 0.2-0.4s (fingerprint, snapshot load, fold); the rest is the engine now doing the cross-file inference `check` does for that file.
-- **Seed only class and constant tables.** About +0.4s, but a class known without its method tables lets the RBS `Class`/`Object` tiers answer a method the project overrides (`def self.name`), a confident wrong type. Rejected on the false-positive discipline.
+- **Seed only class and constant tables.** About +0.4s, but a probe then loses every method, ancestry and visibility table: `User.new.label` (a `def` in a sibling file) reads `Dynamic[top]` where the full seed reads `"u"` (probed). Worse, a table half-present is a hazard in general: a class known without the tables that say what it overrides leaves the RBS tiers to answer for it, which can be a confident wrong type rather than a miss. I found no small probe that shows the wrong type today, so this is a general-terms rejection on the false-positive discipline.
 - **Parse the project when no snapshot exists.** The withdrawn approach.
 
 ## Decision
 
 Full tables, snapshot only, silent fallback. The "few hundred ms" target is not met on dense files; correctness over `check` parity was preferred to a partial seed (ADR-5, false positives outrank). Not applied: the ADR-67 parameter-inference seed, and the `uncertain:` re-walk set (same as the LSP seed).
 
+Gate row: `lib/rigor/cli/type_of_project_scope.rb` is added to `whole_index` in `admission_census.yml`, authorised by the coordinator. The seed is the full `ProjectSeedTables` fold, so contested siblings travel with their members; the scope builder moved out of `CoverageScan` into its own module so the row names the real consumer.
+
 ## To undo
 
-Make `CoverageScan.probe_scope` return `Scope.empty(environment:)`. The docs paragraph in `docs/manual/02-cli-reference.md` and the changelog fragment go with it.
+Make `TypeOfProjectScope.build` return `Scope.empty(environment:)`, or delete the module and its census row. The docs paragraph in `docs/manual/02-cli-reference.md` and the changelog fragment go with it.

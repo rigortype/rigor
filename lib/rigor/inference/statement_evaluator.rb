@@ -4449,11 +4449,22 @@ module Rigor
 
       # The parameters `def_node` mutates itself, from either channel: those escape-mutated inside a block (which may
       # run later / repeatedly) AND those mutated directly in the method body during the call itself
-      # (`declaration[:prefix] = v`).
+      # (`declaration[:prefix] = v`). A property of the def's AST alone, so it is memoised per def node for the thread
+      # ({#def_census}) rather than per evaluator: a chain reads its callees' census from every evaluator that floors a
+      # call into it.
       def own_content_parameters(def_node)
-        cache = (@own_mutated_param_cache ||= {}.compare_by_identity)
-        cache[def_node] ||= escaped_content_parameters(def_node).merge(direct_content_parameters(def_node))
+        def_census(:own, def_node) { escaped_content_parameters(def_node).merge(direct_content_parameters(def_node)) }
       end
+
+      # Issue #2104 — the per-thread memo of a census that reads nothing but `def_node`'s AST, under `kind`.
+      def def_census(kind, def_node)
+        table = (Thread.current[DEF_CENSUS_KEY] ||= ObjectSpace::WeakKeyMap.new)
+        entry = (table[def_node] ||= {})
+        entry.fetch(kind) { entry[kind] = yield }
+      end
+
+      DEF_CENSUS_KEY = :rigor_callee_def_census
+      private_constant :DEF_CENSUS_KEY
 
       # Issue #2104 — the {CalleeMutationChain::Edge}s along which `def_node` hands one of its parameters, unchanged, to
       # a self-call resolving to a user def: a positional argument or a keyword value that reads the parameter itself
@@ -4480,16 +4491,22 @@ module Rigor
       end
 
       # Yields each self-call in `def_node`'s body that hands on one of `slots`' parameters, with
-      # {#forwarded_parameters}' answer for it.
-      def each_forwarding_call(def_node, slots)
+      # {#forwarded_parameters}' answer for it. The calls are an AST property, memoised per def node ({#def_census}).
+      def each_forwarding_call(def_node, slots, &)
         return if slots.empty?
 
+        def_census(:forwards, def_node) { forwarding_calls(def_node, slots) }.each(&)
+      end
+
+      def forwarding_calls(def_node, slots)
+        calls = []
         each_node_in_method_scope(def_node.body, 0) do |descendant, depth|
           next unless self_dispatch_call?(descendant)
 
           forwarded = forwarded_parameters(descendant, slots, depth)
-          yield descendant, forwarded unless forwarded.empty?
+          calls << [descendant, forwarded] unless forwarded.empty?
         end
+        calls.empty? ? NO_FORWARDS : calls
       end
 
       NO_FORWARDS = [].freeze

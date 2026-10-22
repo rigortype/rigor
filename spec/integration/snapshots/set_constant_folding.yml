@@ -11,7 +11,7 @@ locals:
   _to_a: "[:a, :b, :c]"
   _union: Set[:a, :b, :c, :d]
   arr_dyn: "[1, Integer]"
-  s_dynamic: Set[Integer]
+  s_dynamic: Set[Dynamic[top] | Integer]
 assertions:
   '1': Set[]
   '2': Set[:a, :b, :c]

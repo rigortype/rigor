@@ -63,7 +63,7 @@ module Rigor
           return fold_tuple(arg) if arg.is_a?(Type::Tuple)
 
           element = nominal_element(arg)
-          element ? typed_set([element], widen: false) : nil
+          element ? typed_set([element]) : nil
         rescue StandardError
           nil
         end
@@ -84,13 +84,16 @@ module Rigor
           arg.type_args.first
         end
 
-        # `Nominal[Set, [element]]`: a set is mutable, so the element is widened off value pins and literal
-        # containers as an `Array.new` fill is, never pinned to what it was built with.
-        def typed_set(types, widen: true)
+        # `Nominal[Set, [E]]`, `E` the members widened as an `Array.new` fill is (value pins dropped, a literal
+        # container widened to its nominal) joined with a `Dynamic[top]` floor. The floor is the conservative half:
+        # nothing widens a Set's element when the program mutates it (`add`, `<<`, `merge`, `replace`, `clear`
+        # then `<<`, a callee that fills it), so the classes the set was built with are not a claim about what it
+        # holds later, and a read of the element must not report on them (#2278).
+        def typed_set(types)
           return nil if types.empty?
 
-          members = widen ? types.map { |t| MethodDispatcher.array_new_element(t) } : types
-          Type::Combinator.nominal_of("Set", type_args: [Type::Combinator.union(*members)])
+          members = types.map { |t| MethodDispatcher.array_new_element(t) }
+          Type::Combinator.nominal_of("Set", type_args: [Type::Combinator.union(*members, Type::Combinator.untyped)])
         end
 
         def block_given?(call_node)

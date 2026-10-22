@@ -1,6 +1,6 @@
 # Close #1151 and #1152 as superseded and re-point their gap markers at #1154
 
-- **PR:** [#0000](https://github.com/rigortype/rigor/pull/0000)
+- **PR:** [#2283](https://github.com/rigortype/rigor/pull/2283)
 - **Issue:** [#1151](https://github.com/rigortype/rigor/issues/1151)
 - **Class:** scope
 - **Precedent:** [#2177](https://github.com/rigortype/rigor/issues/2177)

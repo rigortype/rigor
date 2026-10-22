@@ -1,3 +1,3 @@
-- **[inference]** `Set[x, y]` and `Set.new(array)` over non-constant members now carry their widened element classes (`Set[String | Dynamic[top]]`) instead of `Set[Dynamic[top]]`, `.freeze` and `.dup` keep them, and `Set.new(enum) { ... }` no longer folds to the argument's own elements ([#2278](https://github.com/rigortype/rigor/issues/2278)).
+- **[inference]** `Set[x, y]` and `Set.new(array)` over non-constant members now carry their widened element classes (`Set[String | Dynamic[top]]`) instead of `Set[Dynamic[top]]` (`Set[x]`) or a bare `Set` (`Set.new(array)`), `.freeze` and `.dup` keep them, and `Set.new(enum) { ... }` no longer folds to the argument's own elements ([#2278](https://github.com/rigortype/rigor/issues/2278)).
   - The element keeps a `Dynamic[top]` member because nothing widens a Set's element when the program mutates it.
   - `rigor sig-gen` still writes `Set[untyped]` for every Set, since a set is mutable.

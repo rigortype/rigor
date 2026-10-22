@@ -72,7 +72,7 @@ RSpec.describe "Set element types", type: :runner do
       "a callee that fills it" =>
         "def fill(set) = (set.clear; set << 42)\ns = Set[x]\nfill(s)\ns.each { |v| v.fdiv(2) }",
       "tap" => "s = Set[x].tap { |q| q << 1 }\ns.each { |v| v.fdiv(2) }",
-      "union" => "s = Set[x] | Set[1]\ns.find { |e| e.is_a?(Integer) }&.fdiv(2)"
+      "union" => "s = Set[x] | Set[1]\ns.each { |e| e.fdiv(2) }"
     }.each do |label, body|
       it "does not report a read after #{label}" do
         expect(errors("1.upcase\n#{body}")).to eq(%w[call.undefined-method])
@@ -84,6 +84,6 @@ RSpec.describe "Set element types", type: :runner do
   # a comparison reads always-falsey.
   it "drops the value pins of a nominal Array argument's element" do
     expect(dumped("ys = [1, 2].select { |e| e > n }\ndump_type(Set.new(ys))")).to eq(["Set[Dynamic[top] | Integer]"])
-    expect(errors("s = Set.new(ys)\ns << 3\nputs 1 if s.max == 3")).to eq([])
+    expect(errors("n = ARGV.size\nys = [1, 2].select { |e| e > n }\ns = Set.new(ys)\ns << 3\nputs 1 if s.max == 3")).to eq([])
   end
 end

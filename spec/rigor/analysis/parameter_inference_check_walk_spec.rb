@@ -175,12 +175,25 @@ RSpec.describe "ADR-67 WD6 check-walk parameter inference" do
           end
         end
 
+        class KeyedGreeter
+          def via_keyword_hash(name)
+            [a: name].first[:a].upcase
+          end
+
+          def via_hash_key(name)
+            {name => 1}.keys.first.upcase
+          end
+        end
+
         g = Greeter.new
         g.via_array(1)
         g.via_ivar(1)
         g.via_hash(1)
         g.via_rewritten_ivar(1)
         g.store(1)
+        k = KeyedGreeter.new
+        k.via_keyword_hash(1)
+        k.via_hash_key(1)
       RUBY
     end
 
@@ -233,6 +246,14 @@ RSpec.describe "ADR-67 WD6 check-walk parameter inference" do
     # lower bound and never fired. Pinned so a census that starts reading the seed shows up here.
     it "does not report a sibling method's read of an ivar written from an inferred parameter" do
       expect(lines).not_to include(26)
+    end
+
+    it "declines on a keyword-hash element of an array literal read back" do
+      expect(lines).not_to include(47)
+    end
+
+    it "declines on a hash literal key read back" do
+      expect(lines).not_to include(51)
     end
 
     it "still reports the same derivations on a parameter a signature declares" do

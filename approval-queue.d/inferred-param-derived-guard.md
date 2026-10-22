@@ -38,7 +38,17 @@ direction. A guard example
 (`spec/rigor/analysis/parameter_inference_check_walk_spec.rb`, "does not report a sibling method's
 read …") fails if the census ever starts reading the inference seed, and option (a) for
 cross-method ivars becomes necessary then. `@x ||= name`, operator writes, multiple assignment and
-splats in literals are unchanged: #2189 did not name them.
+splats in literals do not stamp the mark: #2189 did not name them.
+
+Accepted losses, all under `parameter_inference:` only, all in the withholding direction:
+
+- `InferredParamGuard.rooted?` is shared with `AlwaysTruthyConditionCollector`, so
+  `if {a: name}.key?(:a)` no longer reports `flow.always-truthy-condition`.
+- A parameter that appears only as a hash key roots the whole literal, so `{name => 1}[1].upcase`
+  declines although the value read back is the literal `1`.
+- The ivar mark is sticky like the local one: only a plain `@x = rhs` clears it. After
+  `@x = name`, a rebind through multiple assignment (`@x, @y = 5, 6`), `rescue => @x` or
+  `for @x in [5]` keeps the mark, so a later true positive on `@x` is withheld.
 
 ## To undo
 

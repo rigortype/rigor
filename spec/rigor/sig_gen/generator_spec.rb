@@ -1736,7 +1736,8 @@ RSpec.describe Rigor::SigGen::Generator do
       "a reader over a frozen Set literal constant" => "LIT"
     }.each do |label, body|
       it "proposes Set[untyped] for #{label}" do
-        path = write_fixture("lib/box.rb", "class Box\n  LIT = Set[[:a, :b]].freeze\n  def g\n    #{body}\n  end\nend\n")
+        path = write_fixture("lib/box.rb",
+                             "class Box\n  LIT = Set[[:a, :b]].freeze\n  def g\n    #{body}\n  end\nend\n")
 
         method = generator(paths: [path]).run.find { |c| c.method_name == :g }
 

@@ -45,9 +45,7 @@ module Rigor
         def fold_bracket(args, call_node = nil)
           return nil if splatted?(call_node)
 
-          if args.all?(Type::Constant)
-            return Type::Combinator.constant_of(::Set.new(args.map(&:value)))
-          end
+          return Type::Combinator.constant_of(::Set.new(args.map(&:value))) if args.all?(Type::Constant)
 
           typed_set(args)
         rescue StandardError
@@ -102,7 +100,7 @@ module Rigor
         def splatted?(call_node)
           return false unless call_node.respond_to?(:arguments)
 
-          (call_node.arguments&.arguments || []).any? { |a| a.is_a?(Prism::SplatNode) }
+          (call_node.arguments&.arguments || []).any?(Prism::SplatNode)
         end
       end
     end

@@ -426,6 +426,28 @@ RSpec.describe "call.unresolved-toplevel inside a block a project callee rebinds
     expect(toplevel_lines).to match_array(expected)
   end
 
+  # The receiver check must hold on every member of a union, and a receiverless call asks main's own class.
+  it "consults method_missing for a union member that lacks the callee and for a receiverless call main lacks" do
+    uses = ['recv = ENV["X"] ? [1] : Ext; recv.each { helper }', "send(:anything) { helper }", "undefined_ctl"]
+    write_files(
+      "ext.rb" => <<~RUBY,
+        module Ext
+          def self.helper = :ok
+          def self.method_missing(*, &b) = module_eval(&b)
+        end
+
+        class Object
+          def method_missing(name, *, &b) = b ? Ext.module_eval(&b) : super
+        end
+      RUBY
+      "use.rb" => "#{uses.join("\n")}\n"
+    )
+
+    expected = use_lines(uses, "undefined_ctl")
+    expect(ruby_lines(%w[ext.rb])).to match_array(expected)
+    expect(toplevel_lines).to match_array(expected)
+  end
+
   it "declines on any callee when a project method_missing may hand its block on" do
     uses = ["Ext.anything { helper }", "helper", "undefined_ctl"]
     rebinds = "module Ext\n  def self.helper = :ok\n  def self.method_missing(*, &b) = module_eval(&b)\nend\n"

@@ -318,7 +318,7 @@ module Rigor
     def enqueue_ancestors: (String current, Array[String] queue, Hash[untyped, untyped] name_memo, ?mixins: bool) -> void
     def ancestor_name_candidates: (String | Symbol subclass_qualified, String | Symbol raw_ancestor) -> Array[String]
 
-    # sig-gen gap: #160 — sig-gen skips the method (sig.skipped.untyped-return): its non-decline arm is the result of
+    # sig-gen gap: #2312 — sig-gen skips the method (sig.skipped.untyped-return): its non-decline arm is the result of
     # the private helper `ambiguous_ancestor_resolutions_of`, whose parameters are untyped, so the arm is `untyped`.
     def ambiguous_ancestor_resolutions: (String | Symbol subclass_qualified, String | Symbol raw_ancestor) -> Array[String]
 

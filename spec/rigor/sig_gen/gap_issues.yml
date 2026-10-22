@@ -18,3 +18,4 @@
 - 1183  # sig-gen emits Struct.new member readers/writers (and the keyword_init ctor) untyped
 - 2302  # sig-gen types an empty array literal grown by `concat` / `<<` as `Array[untyped]`
 - 2309  # sig-gen keeps a `Set[untyped]` fallback arm beside `Set[E]` (`lookup || Set.new.freeze`)
+- 2312  # sig-gen skips a method whose non-decline arm calls a private helper with untyped parameters

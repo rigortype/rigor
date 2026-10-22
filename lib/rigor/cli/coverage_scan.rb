@@ -72,6 +72,18 @@ module Rigor
         base.with_discovery(base.discovery.with(**seed))
       end
 
+      # Issue #512 — the scope `rigor type-of` probes with: single-file, plus the cross-file tables a prior
+      # `rigor check --incremental` left in the snapshot ({Protection::DiscoverySeed.from_snapshot}) when there are
+      # any. A probe never re-parses the project for its seed, so without a reusable snapshot this is the bare
+      # `Scope.empty` it always was.
+      def snapshot_seeded_scope(environment:, configuration:, buffer: nil)
+        base = Scope.empty(environment: environment)
+        seed = Protection::DiscoverySeed.from_snapshot(configuration: configuration, buffer: buffer)
+        return base if seed.nil? || seed.empty?
+
+        base.with_discovery(base.discovery.with(**seed))
+      end
+
       # Parses one file and feeds the scan result (or a parse-error record) into `accumulator`. `scanner` /
       # `accumulator` are a matched pair — a `PrecisionScanner` + `CoverageAccumulator`, or a `ProtectionScanner` +
       # `ProtectionAccumulator` — both of which respond to `scan(node)` and `absorb(path, result)`.

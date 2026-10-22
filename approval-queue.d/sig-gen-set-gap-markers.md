@@ -2,8 +2,8 @@
 
 - **PR:** [#2283](https://github.com/rigortype/rigor/pull/2283)
 - **Issue:** [#1151](https://github.com/rigortype/rigor/issues/1151)
-- **Class:** scope
-- **Precedent:** [#2177](https://github.com/rigortype/rigor/issues/2177)
+- **Class:** gate-row
+- **Precedent:** [#2219](https://github.com/rigortype/rigor/pull/2219)
 - **Decided:** 2026-10-22
 
 ## Background
@@ -28,13 +28,13 @@ could not be inferred from an empty seed in any case.
 - Reverse #2177 for frozen Sets: unsound for mutated sets and still would not touch these rows. Rejected by
   the coordinator.
 - Keep the markers: they cite two issues whose stated mechanism is wrong.
-- Re-point both markers at #1154 and close #1151/#1152 (taken).
+- Re-point the predicate marker at #1154, mark the reader `# authored:`, and close #1151/#1152 (taken).
 
 ## Decision
 
-Both markers cite #1154, the real mechanism, and the two allow-list rows are removed. #1151 and #1152 close as
-superseded by #2177 and #1154. The `[Symbol, Symbol]` element of the reader remains an authored narrowing, noted
-in the marker text.
+The predicate marker cites #1154, the real mechanism. The reader becomes an `# authored:` row: even once #1154 is fixed
+sig-gen would emit `Set[untyped]` (#2177, landed in #2219), so the declared `Set[[Symbol, Symbol]]` is a deliberate
+narrowing. The two allow-list rows are removed. #1151 and #1152 close as superseded by #2177 and #1154.
 
 ## To undo
 

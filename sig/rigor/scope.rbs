@@ -279,8 +279,8 @@ module Rigor
     def without_constant_narrowings_named: (untyped name) -> Scope
     # sig-gen gap: #1154 — the table reader over an ivar `initialize` assigns from a parameter reaches `untyped`.
     def constant_narrowing: (String key) -> Type::t?
-    # sig-gen gap: #1154 — the reader's ivar is assigned in `initialize` from a parameter (default: an empty frozen Set), so it
-    # reaches `untyped`; the `[Symbol, Symbol]` element is authored, since a Set's element type stays `untyped` (#2177).
+    # authored: the element is `[Symbol, Symbol]` by contract; a Set's element type stays `untyped` in sig-gen (#2177), so the generator
+    # would never propose it, even once the parameter-assigned ivar types (#1154).
     def published_constant_sourced: () -> Set[[Symbol, Symbol]]
     # sig-gen gap: #1154 — `include?` is sent to that parameter-assigned ivar, whose type is `untyped`, so the `bool` is hand-written.
     def published_constant_sourced?: (Symbol kind, String | Symbol name) -> bool

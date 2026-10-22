@@ -10,6 +10,13 @@ RSpec.describe Rigor::Inference::MethodDispatcher::SetFolding do
     Rigor::Type::Tuple.new(elements)
   end
 
+  # The element joins a `Dynamic[top]` floor (see `SetFolding.typed_set`).
+  def typed_set_of(element)
+    Rigor::Type::Combinator.nominal_of(
+      "Set", type_args: [Rigor::Type::Combinator.union(element, Rigor::Type::Combinator.untyped)]
+    )
+  end
+
   def fold(method_name, *arg_types)
     described_class.try_dispatch(cc(
                                    receiver: set_singleton,
@@ -43,8 +50,9 @@ RSpec.describe Rigor::Inference::MethodDispatcher::SetFolding do
       expect(result.value).to eq(Set["hello", 42, :sym])
     end
 
-    it "declines when any argument is non-Constant" do
-      expect(fold(:[], c(:a), Rigor::Type::Combinator.nominal_of("Symbol"))).to be_nil
+    it "types a non-Constant argument by element rather than folding (#2278)" do
+      result = fold(:[], c(:a), Rigor::Type::Combinator.nominal_of("Symbol"))
+      expect(result).to eq(typed_set_of(Rigor::Type::Combinator.nominal_of("Symbol")))
     end
   end
 
@@ -70,10 +78,10 @@ RSpec.describe Rigor::Inference::MethodDispatcher::SetFolding do
       expect(result.value).to eq(Set.new)
     end
 
-    it "declines when the tuple contains a non-Constant element" do
+    it "types a tuple with a non-Constant element by element rather than folding (#2278)" do
       non_const = Rigor::Type::Combinator.nominal_of("Integer")
       arg = tuple(c(1), non_const)
-      expect(fold(:new, arg)).to be_nil
+      expect(fold(:new, arg)).to eq(typed_set_of(non_const))
     end
 
     it "declines when the single argument is not a Tuple" do
@@ -108,6 +116,30 @@ RSpec.describe Rigor::Inference::MethodDispatcher::SetFolding do
 
     it "declines for an unsupported method" do
       expect(fold(:nope, c(:a))).to be_nil
+    end
+  end
+
+  # The block decline has two independent sources, each pinned apart: the dispatcher's block type (a caller with no
+  # call node) and the call node's own block (a caller with no block type). A block maps the elements, so the
+  # argument's are not the set's.
+  describe "Set.new with a block (#2278)" do
+    let(:constants) { tuple(c(1), c(2)) }
+
+    it "declines on the block type alone" do
+      result = described_class.try_dispatch(cc(receiver: set_singleton, method_name: :new, args: [constants],
+                                               block_type: Rigor::Type::Combinator.nominal_of("String")))
+      expect(result).to be_nil
+    end
+
+    it "declines on the call node's block alone" do
+      node = Prism.parse("Set.new([1, 2]) { |v| v.to_s }").value.statements.body.first
+      result = described_class.try_dispatch(cc(receiver: set_singleton, method_name: :new, args: [constants],
+                                               call_node: node))
+      expect(result).to be_nil
+    end
+
+    it "still folds without a block" do
+      expect(fold(:new, constants)).to be_a(Rigor::Type::Constant)
     end
   end
 end

@@ -1297,7 +1297,7 @@ module Rigor
         range_lift = range_new_lift(receiver_type.class_name, arg_types)
         return range_lift if range_lift
 
-        set_lift = set_new_lift(receiver_type.class_name, arg_types)
+        set_lift = set_new_lift(receiver_type.class_name, arg_types, context)
         return set_lift if set_lift
 
         hash_lift = hash_new_lift(receiver_type.class_name, arg_types, context&.call_node)
@@ -1653,19 +1653,10 @@ module Rigor
       # are given or the single argument is a `Tuple` whose every element is a `Constant[T]`.
       # Mirrors `SetFolding#fold_new` but lives here so the `:new` path in
       # `try_meta_introspection` can reach it before the RBS tier answers `Nominal[Set]`.
-      def set_new_lift(class_name, arg_types)
+      def set_new_lift(class_name, arg_types, context = nil)
         return nil unless class_name == "Set"
-        return Type::Combinator.constant_of(::Set.new) if arg_types.empty?
-        return nil if arg_types.size > 1
 
-        arg = arg_types.first
-        return nil unless arg.is_a?(Type::Tuple)
-        return nil unless arg.elements.all?(Type::Constant)
-
-        values = arg.elements.map(&:value)
-        Type::Combinator.constant_of(::Set.new(values))
-      rescue StandardError
-        nil
+        SetFolding.fold_new(arg_types, context&.call_node, context&.block_type)
       end
 
       # `Regexp.new(pattern)` / `Regexp.new(pattern, opts)` — folds to `Constant[Regexp]` when

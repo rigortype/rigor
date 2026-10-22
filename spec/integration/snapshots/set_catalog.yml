@@ -1,11 +1,11 @@
 ---
 locals:
-  s: Set
+  s: Set[Dynamic[top] | Integer]
 assertions:
   '1': non-negative-int
   '2': non-negative-int
   '3': bool
   '4': bool
   '5': bool
-  '6': Set
-  '7': Set
+  '6': Set[Dynamic[top] | Integer]
+  '7': Set[Dynamic[top] | Integer]

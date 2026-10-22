@@ -36,10 +36,10 @@ assert_type("bool", s.member?(4))
 # internal table through a helper (`set_copy`,
 # `set_reset_table_with_type`) the regex did not follow. The
 # blocklist keeps the fold inert and the RBS tier answers with
-# `Nominal[Set]` instead.
-assert_type("Set", s.compare_by_identity)
+# `Nominal[Set, [Integer | Dynamic[top]]]` instead.
+assert_type("Set[Dynamic[top] | Integer]", s.compare_by_identity)
 
 # Bang mutators on a Nominal[Set] return `self` per RBS — the
 # catalog never folds them (universal bang block) and the RBS
 # projection answers `Set`.
-assert_type("Set", s.clear)
+assert_type("Set[Dynamic[top] | Integer]", s.clear)

@@ -31,7 +31,7 @@ RSpec.describe "index `||=` bound to a local (memoization idiom)", type: :runner
     RUBY
   end
 
-  it "types the second level of a two-level memo table as the rvalue" do
+  it "types the second level of a two-level memo table as the rvalue (guard: value position already did)" do
     # Runtime: the leaf is the new `Object`.
     expect(dumped_type(<<~RUBY)).to eq("Object")
       class Memo

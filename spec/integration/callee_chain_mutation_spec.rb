@@ -94,10 +94,19 @@ RSpec.describe "a callee chain that mutates an argument floors it (#2104)" do
     RUBY
   end
 
-  it "floors an argument forwarded and mutated inside iterator blocks (the XXH3 shape)" do
+  it "floors an argument forwarded from inside an iterator block" do
     expect(diagnostics(<<~RUBY)).to eq([])
       def stripes(acc) = 2.times { |s| poke(acc, s) }
-      def poke(acc, s) = 2.times { |i| acc[i] = "x" * s }
+      def poke(acc, s) = (acc[0] = "x" * s)
+    RUBY
+  end
+
+  it "does not yet count a mutation inside a callee's non-escaping block (the remaining XXH3 gap)" do
+    # Pins a decision, not a wish: the bare-collection floor this would apply fires `def.return-type-mismatch` on
+    # haml's `AttributeCompiler#compile`, so the census leaves it out until the floor can keep the element type.
+    expect(diagnostics(<<~RUBY)).to eq(undefined_upcase)
+      def stripes(acc) = poke(acc)
+      def poke(acc) = 2.times { |i| acc[i] = "x" }
     RUBY
   end
 

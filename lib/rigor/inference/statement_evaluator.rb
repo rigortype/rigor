@@ -4448,8 +4448,8 @@ module Rigor
       end
 
       # The parameters `def_node` mutates itself, from either channel: those escape-mutated inside a block (which may
-      # run later / repeatedly) AND those mutated in the method body during the call itself (`declaration[:prefix] =
-      # v`, or `acc[i] = v` inside an `n.times` block).
+      # run later / repeatedly) AND those mutated directly in the method body during the call itself
+      # (`declaration[:prefix] = v`).
       def own_content_parameters(def_node)
         cache = (@own_mutated_param_cache ||= {}.compare_by_identity)
         cache[def_node] ||= escaped_content_parameters(def_node).merge(direct_content_parameters(def_node))
@@ -4575,11 +4575,15 @@ module Rigor
         positions.slice(*mutated)
       end
 
-      # The `{ name => slot }` parameters whose CONTENT the callee mutates while the call runs — `param[k] = v` /
-      # `param << x` in the method body, or in a block in it (issue #2104: `n.times { |i| acc[i] = v }` mutates `acc`
-      # before the call returns, whether or not the block escapes). Memoised per def node. A read counts only at the
-      # depth of the block it sits in, so a block-local or block parameter that merely shadows the parameter's name is
-      # not the parameter, and we never floor a caller argument the callee did not actually mutate.
+      # The `{ name => slot }` parameters whose CONTENT the callee mutates directly in its method body — a top-level
+      # `param[k] = v` / `param << x`, outside a nested block. Memoised per def node. The block-nested case is
+      # `escaped_content_parameters`'s job; walking only outside nested blocks / defs / lambdas here means a matching
+      # parameter-name read is genuinely at method scope (depth 0) rather than a block-local of the same name that
+      # merely shadows the parameter — so we never floor a caller argument the callee did not actually mutate.
+      #
+      # A mutation inside a NON-escaping block (`n.times { |i| acc[i] = v }`) is not counted: the bare-collection floor
+      # it would apply turned haml's `AttributeCompiler#compile` (a `temple` array a helper fills in a `times` block,
+      # returned against a declared tuple) into a `def.return-type-mismatch` (af3efef33, and again under #2104).
       def direct_content_parameters(def_node)
         cache = (@direct_param_cache ||= {}.compare_by_identity)
         cache[def_node] ||= compute_direct_content_parameters(def_node)
@@ -4590,11 +4594,25 @@ module Rigor
         return {} if positions.empty?
 
         mutated = Set.new
-        each_node_in_method_scope(def_node.body, 0) do |descendant, depth|
-          name, = content_mutation_target(descendant) { |r| r.is_a?(Prism::LocalVariableReadNode) && r.depth == depth }
+        each_node_outside_nested_scopes(def_node.body) do |descendant|
+          name, = content_mutation_target(descendant) { |r| r.is_a?(Prism::LocalVariableReadNode) && r.depth.zero? }
           mutated << name if !name.nil? && positions.key?(name)
         end
         positions.slice(*mutated)
+      end
+
+      # Yields every node reachable from `body` without crossing into a nested block / def / lambda — i.e. the nodes
+      # that execute in the method's own scope. A local-variable read found here has depth 0 relative to the method, so
+      # a content mutation whose receiver is a positional-parameter name is a genuine mutation of that parameter.
+      def each_node_outside_nested_scopes(node, &)
+        return if node.nil?
+
+        yield node
+        node.rigor_each_child do |child|
+          next if child.is_a?(Prism::BlockNode) || child.is_a?(Prism::DefNode) || child.is_a?(Prism::LambdaNode)
+
+          each_node_outside_nested_scopes(child, &)
+        end
       end
 
       # Yields every node reachable from `node` with the number of blocks it sits in: a read of the method's own local

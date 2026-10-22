@@ -119,8 +119,8 @@ module Rigor
         # the default expression pair, so routing the or-writes here adds the body entry and nothing else.
         Prism::ConstantOrWriteNode => :eval_constant_write,
         Prism::ConstantPathOrWriteNode => :eval_constant_write,
-        Prism::IfNode => :eval_if,
-        Prism::UnlessNode => :eval_unless,
+        Prism::IfNode => :eval_recorded_if,
+        Prism::UnlessNode => :eval_recorded_unless,
         Prism::ElseNode => :eval_else,
         Prism::CaseNode => :eval_case,
         Prism::CaseMatchNode => :eval_case,
@@ -2278,6 +2278,22 @@ module Rigor
       def eval_repeating_for(node) = ReflectiveIvarWrite.in_repeating_body { eval_for(node) }
 
       # A loop's evaluation, with its value recorded for `ExpressionTyper#type_of_loop` ({LoopValueRecord}).
+      # A conditional's evaluation, recorded when it evaluated a loop ({LoopValueRecord.conditional}): the typer
+      # types a conditional that holds a loop again from the scope it was evaluated from, and the loop in its branch
+      # is evaluated from a branch scope no record matches.
+      def eval_recorded_if(node) = record_conditional_value(node) { eval_if(node) }
+
+      def eval_recorded_unless(node) = record_conditional_value(node) { eval_unless(node) }
+
+      # The "evaluated a loop" gate is a memory-only guard: recording every conditional would give the same answers, at
+      # the cost of a retained scope per `if` node, so no behavioural example pins it.
+      def record_conditional_value(node)
+        before = LoopValueRecord.loops_evaluated
+        result = yield
+        LoopValueRecord.conditional(node, scope, result.first) unless LoopValueRecord.loops_evaluated == before
+        result
+      end
+
       def eval_recorded_loop(node) = record_loop_value(node, eval_loop(node))
 
       def eval_recorded_for(node) = record_loop_value(node, eval_repeating_for(node))
@@ -2868,7 +2884,16 @@ module Rigor
         continuation = join_with_nil_injection(post_coll, body_scope)
         pre_existing, body_first = loop_body_local_writes(node.statements, post_coll)
         continuation = for_exit(node, post_coll, join_break_scopes(continuation, breaks, pre_existing + body_first))
+        continuation = widen_for_elements(node, continuation)
         [for_value(node, coll_type, continuation, values), continuation]
+      end
+
+      # Issue #2262 — the variables the collection reads, past a body that mutates an element in place: `for x in a;
+      # x << 2; end` leaves `a[0]` holding what the literal's shape did not.
+      def widen_for_elements(node, scope)
+        DeepErasure.widen_element_aliases(
+          node.collection, node.statements, DeepErasure.parameter_names(node.index), scope
+        )
       end
 
       # Issue #2128 — a `for` body has no rebind fixpoint, so its only pass enters with every loop-carried local at its
@@ -2936,7 +2961,8 @@ module Rigor
         types = [coll_type]
         name = for_collection_variable(node)
         types << CapturedLocals.bound_type(continuation, name) if name
-        Type::Combinator.union(*types.compact.map { |type| shape_erased_collection(type) })
+        deep = DeepErasure.element_mutation?(node.statements, DeepErasure.parameter_names(node.index))
+        Type::Combinator.union(*types.compact.map { |type| shape_erased_collection(type, deep: deep) })
       end
 
       def for_may_mutate?(part)
@@ -2958,7 +2984,11 @@ module Rigor
 
       # `type` with each `Tuple` / `HashShape` / literal Array or Hash dropped to its nominal, each refinement to its
       # base. A Range is immutable and keeps its value.
-      def shape_erased_collection(type)
+      def shape_erased_collection(type, deep: false)
+        # A body that mutates an element in place changes the shapes one level down too, which `each` answers
+        # as the elements' own objects ({DeepErasure.widen}).
+        return DeepErasure.widen(type) if deep && !(type.is_a?(Type::Constant) && type.value.is_a?(Range))
+
         case type
         when Type::Tuple then MutationWidening.widen_tuple(type)
         when Type::HashShape then MutationWidening.widen_hash_shape(type)

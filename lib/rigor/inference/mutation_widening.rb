@@ -7,6 +7,7 @@ require_relative "../source/node_children"
 require_relative "content_join"
 require_relative "hash_lookup_mutation"
 require_relative "mutation_rejoin"
+require_relative "deep_erasure"
 require_relative "receiver_alias"
 require_relative "refinement_mutation"
 require_relative "rewrite_mutation"
@@ -200,12 +201,15 @@ module Rigor
       # `Prism::BlockNode`s — each block is processed by its own `eval_call`.
       def widen_after_block(call_node:, outer_scope:)
         block = call_node.block
+        return DeepErasure.widen_symbol_proc(call_node, outer_scope) if DeepErasure.symbol_proc_mutation?(block)
         return outer_scope unless block.is_a?(Prism::BlockNode)
 
         body = block.body
         return outer_scope if body.nil?
 
-        walk_for_outer_mutations(body, outer_scope)
+        scope = walk_for_outer_mutations(body, outer_scope)
+        names = DeepErasure.parameter_names(block.parameters)
+        DeepErasure.widen_element_aliases(call_node.receiver, block.body, names, scope)
       end
 
       def walk_for_outer_mutations(node, scope)
@@ -257,7 +261,6 @@ module Rigor
                                                 Prism::ClassVariableReadNode => %i[cvar with_cvar],
                                                 Prism::GlobalVariableReadNode => %i[global with_global]
                                               })
-      private_constant :ALIAS_ACCESSORS
 
       def widen_alias_read(method_name, read, scope, values: :widen, arg_types: NO_ARG_TYPES)
         getter, builder = ALIAS_ACCESSORS[read.class]

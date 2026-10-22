@@ -9,27 +9,44 @@ module Rigor
     # the receiver of (`(while …).itself`), each narrowing and rule that types that operand. Each such typing of a
     # loop nested in another loop re-ran the inner loop's passes, once more per level of nesting.
     #
-    # The record is reused only for a scope equal to the one the loop was evaluated from, so it answers exactly what
-    # an evaluation would. It lives in a per-thread map whose keys are held weakly, so a record goes when its parse
-    # tree does.
+    # The record is reused only for the very scope object the loop was evaluated from, so it answers exactly what an
+    # evaluation would. It is not compared with `Scope#==`, which ignores several fields (`match_frame`,
+    # `declared_refinements`, `struct_fold_safe_locals`, the opaque-block flags, `lexical_nesting`, the origins tables,
+    # `discovery`): across the cost spec's 10933 reads every match was an identity match, and `lib/` read no record at
+    # all (issue #2262). It lives in a per-thread map whose keys are held weakly, so a record goes when its parse tree
+    # does.
     module LoopValueRecord
       KEY = :rigor_loop_value_record
       private_constant :KEY
 
       module_function
 
+      COUNT_KEY = :rigor_loop_value_count
+      private_constant :COUNT_KEY
+
       def record(node, scope, type)
+        Thread.current[COUNT_KEY] = loops_evaluated + 1
+        conditional(node, scope, type)
+      end
+
+      # How many loops this thread has evaluated, so a conditional can tell whether its evaluation held one.
+      def loops_evaluated = Thread.current[COUNT_KEY] || 0
+
+      # The same record for a conditional that evaluated a loop in a branch: `id(c ? (while …) : 0)` types the
+      # conditional again from the scope it was evaluated from, and each typing evaluated the loop again from a
+      # branch scope of its own, which multiplied the passes of every loop nested in it (issue #2262).
+      def conditional(node, scope, type)
         (Thread.current[KEY] ||= ObjectSpace::WeakKeyMap.new)[node] = [scope, type]
         type
       end
 
-      # The recorded value of `node` evaluated from a scope equal to `scope`, or nil.
+      # The recorded value of `node` evaluated from `scope` itself, or nil.
       def fetch(node, scope)
         slot = Thread.current[KEY]&.[](node)
         return nil if slot.nil?
 
         recorded, type = slot
-        recorded.equal?(scope) || recorded == scope ? type : nil
+        recorded.equal?(scope) ? type : nil
       end
     end
   end

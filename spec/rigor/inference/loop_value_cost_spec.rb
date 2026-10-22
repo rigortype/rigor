@@ -10,7 +10,10 @@ require "prism"
 loop_spellings = {
   "a call argument" => ->(inner) { "(while c; y = id(#{inner}); break 2 if y; c = false; end)" },
   "a write's value" => ->(inner) { "(while c; y = id(z = #{inner}); break 2 if y; c = false; end)" },
-  "a call receiver" => ->(inner) { "(while c; y = id(#{inner}.itself); break 2 if y; c = false; end)" }
+  "a call receiver" => ->(inner) { "(while c; y = id(#{inner}.itself); break 2 if y; c = false; end)" },
+  # Issue #2262 — the loop sits in a ternary's branch, which is typed again from the scope it was evaluated from.
+  "a ternary branch" => ->(inner) { "(while c; y = id(c ? #{inner} : 0); break 2 if y; c = false; end)" },
+  "an unless modifier" => ->(inner) { "(while c; y = id((#{inner} unless !c)); break 2 if y; c = false; end)" }
 }.freeze
 
 RSpec.describe "Loop value evaluation cost" do

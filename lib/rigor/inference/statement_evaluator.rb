@@ -2868,6 +2868,9 @@ module Rigor
         continuation = join_with_nil_injection(post_coll, body_scope)
         pre_existing, body_first = loop_body_local_writes(node.statements, post_coll)
         continuation = for_exit(node, post_coll, join_break_scopes(continuation, breaks, pre_existing + body_first))
+        continuation = MutationWidening.widen_element_aliases(
+          node.collection, node.statements, MutationWidening.parameter_names(node.index), continuation
+        )
         [for_value(node, coll_type, continuation, values), continuation]
       end
 
@@ -2936,7 +2939,8 @@ module Rigor
         types = [coll_type]
         name = for_collection_variable(node)
         types << CapturedLocals.bound_type(continuation, name) if name
-        Type::Combinator.union(*types.compact.map { |type| shape_erased_collection(type) })
+        deep = MutationWidening.element_mutation?(node.statements, MutationWidening.parameter_names(node.index))
+        Type::Combinator.union(*types.compact.map { |type| shape_erased_collection(type, deep: deep) })
       end
 
       def for_may_mutate?(part)
@@ -2958,7 +2962,11 @@ module Rigor
 
       # `type` with each `Tuple` / `HashShape` / literal Array or Hash dropped to its nominal, each refinement to its
       # base. A Range is immutable and keeps its value.
-      def shape_erased_collection(type)
+      def shape_erased_collection(type, deep: false)
+        # A body that mutates an element in place changes the shapes one level down too, which `each` answers
+        # as the elements' own objects ({MutationWidening.widen_deep}).
+        return MutationWidening.widen_deep(type) if deep && !(type.is_a?(Type::Constant) && type.value.is_a?(Range))
+
         case type
         when Type::Tuple then MutationWidening.widen_tuple(type)
         when Type::HashShape then MutationWidening.widen_hash_shape(type)

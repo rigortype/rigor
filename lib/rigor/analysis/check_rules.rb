@@ -1498,12 +1498,27 @@ module Rigor
         # overlay open receiver ({GEM_OVERLAY_OPEN_RECEIVERS}) whose
         # bundled directory this run actually loaded, a core-overlay
         # open receiver ({CORE_OVERLAY_OPEN_RECEIVERS}), or a
-        # Rigor-synthesized stub type (see `RbsLoader#synthesized_type_names`).
+        # Rigor-synthesized stub type (see `RbsLoader#synthesized_type_names`),
+        # or a project-only reopen of a Ruby library class whose own RBS
+        # did not load ({#ruby_library_reopen?}).
         def unbounded_receiver_surface?(class_name, scope)
           bare_name = class_name.to_s.sub(/\A::/, "")
           open_receiver?(class_name, scope) || synthesized_stub_receiver?(class_name, scope) ||
             CORE_OVERLAY_OPEN_RECEIVERS.include?(bare_name) ||
-            (GEM_OVERLAY_OPEN_RECEIVERS.include?(bare_name) && gem_overlay_loaded?(scope))
+            (GEM_OVERLAY_OPEN_RECEIVERS.include?(bare_name) && gem_overlay_loaded?(scope)) ||
+            ruby_library_reopen?(class_name, scope)
+        end
+
+        # Issue #2174 — `class Matrix` reopened with one `#:`-annotated method, and no `matrix` signatures
+        # loaded, gives Matrix a declaration holding only that method ({RbsLoader#ruby_library_reopen?}).
+        # `Matrix.identity(2)` is correct Ruby, so the class's surface is treated as open: `call.undefined-method`
+        # declines on it, and a signature it only inherits (`Object#initialize` for `Matrix.new(rows)`) stops
+        # deciding arity and argument types. Methods the project's own declaration lists stay checked.
+        def ruby_library_reopen?(class_name, scope)
+          loader = scope.environment&.rbs_loader
+          return false if loader.nil? || !loader.respond_to?(:ruby_library_reopen?)
+
+          loader.ruby_library_reopen?(class_name)
         end
 
         def open_receiver?(class_name, scope)

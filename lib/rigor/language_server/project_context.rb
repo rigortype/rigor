@@ -60,6 +60,7 @@ module Rigor
         @primed_key = nil
         @buffer_sources = {}
         @disk_feature_files = nil
+        @disk_sig_names = nil
         @environment_features = nil
         @generation = 0
         @environment = nil
@@ -195,9 +196,14 @@ module Rigor
       # file.
       def required_features
         disk = (@disk_feature_files ||= Environment::RequiredFeatures.feature_files(@configuration))
-        found = disk.reject { |path, _| @buffer_sources.key?(path) }.values.flatten
-        found += @buffer_sources.values.flat_map { |source| Environment::RequiredFeatures.features_of(source) }
-        found.uniq.sort.freeze
+        scanned = disk.reject { |path, _| @buffer_sources.key?(path) }.values
+        scanned += @buffer_sources.values.map { |source| Environment::RequiredFeatures.scan_source(source) }
+        features = scanned.flat_map(&:first).uniq
+        names = scanned.flat_map(&:last).to_set
+        names.merge(@disk_sig_names ||= Environment::RequiredFeatures.sig_names(
+          Environment::RequiredFeatures.configured_sig_paths(@configuration)
+        ))
+        Environment::RequiredFeatures.relevant(features, names).sort.freeze
       end
 
       # Drops every cached collaborator and bumps the generation. The next reader rebuilds from scratch.
@@ -215,6 +221,7 @@ module Rigor
         @environment = nil
         @environment_features = nil
         @disk_feature_files = nil
+        @disk_sig_names = nil
         @project_scan = nil
         @discovery_paths = nil
         @discovery_real_paths = nil

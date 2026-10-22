@@ -88,6 +88,18 @@ module Rigor
           @forwarded_block == name
         end
 
+        # Issue #1157 — whether a call's `&expr` block argument hands on the block THIS method was called with: the
+        # anonymous `&` of a method that declares an anonymous `&` parameter, or {#forwarded_block?} for `&name`.
+        # Anything else (`&:sym`, a proc made here, a rebound name) is a block of this frame's own making.
+        def forwards_block?(block_argument)
+          expression = block_argument.expression
+          case expression
+          when nil then anonymous_block_parameter?
+          when Prism::LocalVariableReadNode then forwarded_block?(expression.name)
+          else false
+          end
+        end
+
         # The scan of `node` under `scope`, kept while `scope`'s local and instance-variable tables are the same
         # objects: a lookup argument's answer reads them ({MatchRebinding.may_match?}), and a rebuild that leaves
         # them alone passes the same tables on. `kind` keeps another reading of the same node apart (issue #1365:
@@ -123,6 +135,13 @@ module Rigor
           return nil if name.nil? || binds_local?(@body, name)
 
           name
+        end
+
+        # True when the method declares a bare `&` parameter, which only an anonymous `&` argument can read.
+        def anonymous_block_parameter?
+          parameters = @parameters
+          block = parameters.is_a?(Prism::ParametersNode) ? parameters.block : nil
+          !block.nil? && block.name.nil?
         end
 
         # The method's own `&block` parameter's name, or nil.

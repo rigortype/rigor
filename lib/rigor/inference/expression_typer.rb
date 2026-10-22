@@ -12,6 +12,7 @@ require_relative "../source/node_walker"
 require_relative "../analysis/self_call_resolution_recorder"
 require_relative "block_call_timing"
 require_relative "block_repetition"
+require_relative "project_yielder"
 require_relative "block_parameter_binder"
 require_relative "method_parameter_binder"
 require_relative "body_fixpoint"
@@ -3329,19 +3330,32 @@ module Rigor
         cache = class_graph_buckets[:yields]
         return cache[def_node] if cache.key?(def_node)
 
-        cache[def_node] = yield_reachable?(def_node.body)
+        cache[def_node] = yield_reachable?(def_node.body, def_node.parameters&.block&.name)
       end
 
-      def yield_reachable?(node)
+      def yield_reachable?(node, block_name)
         return false if node.nil?
-        return true if node.is_a?(Prism::YieldNode)
+        return true if node.is_a?(Prism::YieldNode) || forwards_block_argument?(node, block_name)
 
         node.rigor_each_child do |child|
           next if YIELD_BOUNDARY_NODES.include?(child.class)
 
-          return true if yield_reachable?(child)
+          return true if yield_reachable?(child, block_name)
         end
         false
+      end
+
+      # Issue #1157 — a call that hands on its method's block (`&`, or `&blk` naming the block parameter) reaches the
+      # caller's block as a `yield` does. Whether `blk` is still the method's own block (not rebound or shadowed) is
+      # decided where it is typed ({#forwarded_block_return_type}); this only keeps the call-site dimension for a def
+      # that might.
+      def forwards_block_argument?(node, block_name)
+        block = node.respond_to?(:block) ? node.block : nil
+        return false unless block.is_a?(Prism::BlockArgumentNode)
+
+        expression = block.expression
+        expression.nil? || (!block_name.nil? && expression.is_a?(Prism::LocalVariableReadNode) &&
+                            expression.name == block_name)
       end
 
       # The candidate-frame memo path: consult the current run generation's bucket, and on a miss compute
@@ -4339,9 +4353,13 @@ module Rigor
 
       # Whether the call may run its block more than once, so a later run reads a captured binding an earlier
       # run rebound — the premise of laying the #587 (b) binding ({#captured_block_bindings}) under the block.
-      # {BlockRepetition.may_repeat?} holds the rule, which the statement pass shares (issue #1412).
+      # {BlockRepetition.may_repeat?} holds the rule, which the statement pass shares (issue #1412). Issue #2301 — a
+      # project callee that hands the block on ({ProjectYielder.hands_block_on?}) also counts: the block's value is what
+      # the forward's target `yield`s, and that target may run it many times, so a captured local the block rebinds must
+      # not read its entry binding.
       def block_may_repeat?(call_node, receiver_type)
-        BlockRepetition.may_repeat?(method_name: call_node.name, receiver_type: receiver_type, scope: scope)
+        BlockRepetition.may_repeat?(method_name: call_node.name, receiver_type: receiver_type, scope: scope) ||
+          ProjectYielder.hands_block_on?(call_node, receiver_type, scope)
       end
 
       EMPTY_BREAK_ARMS = [].freeze
@@ -4437,8 +4455,20 @@ module Rigor
           )
           type_block_body(block_arg, entry, captured: captured)
         when Prism::BlockArgumentNode
-          symbol_block_return_type(block_arg, expected)
+          forwarded_block_return_type(block_arg) || symbol_block_return_type(block_arg, expected)
         end
+      end
+
+      # Issue #1157 — `&` / `&blk` hands the callee the block this method was itself called with, so the callee's
+      # `yield` is worth what the CALLER's block returns: the value {.current_yield_value_type} already holds for
+      # this frame (the one a `yield` written here reads). Without it a name resolver that passes its block on
+      # (`def walk(x, &) = first_hit(x, &)`) read as `Dynamic[top]` through the forward and was skipped by
+      # `sig-gen`. Nil when the argument is not a forwarded block or the call site passed no block.
+      def forwarded_block_return_type(block_arg)
+        frame = scope.match_frame
+        return nil unless frame&.forwards_block?(block_arg)
+
+        ExpressionTyper.current_yield_value_type
       end
 
       # The scope a block body is typed under: the surrounding scope plus the parameter bindings the receiving
@@ -4535,6 +4565,14 @@ module Rigor
       # A failure in the re-answer falls back to the plain tail-only answer, for the reason
       # {#threaded_block_body_type} gives: a raise reaching `block_return_type_for` would report "no block".
       def tail_only_block_body_type(body, block_scope, captured)
+        StatementEvaluator.provisional_returns { tail_only_block_body_type_unrecorded(body, block_scope, captured) }
+      end
+
+      # Issue #2299 — the tail alone, typed from `block_scope`, is not the walk the method's returns are collected
+      # from: a `return` in it reads a name the skipped prefix binds as unbound. Its records are provisional
+      # ({StatementEvaluator.provisional_returns}): the statement walk's record of the same `return` replaces one,
+      # and one stands only for a block the walk never enters (a block in expression position).
+      def tail_only_block_body_type_unrecorded(body, block_scope, captured)
         return block_scope.type_of(body) unless block_body_threading_suppressed? && body.is_a?(Prism::StatementsNode)
 
         answered =

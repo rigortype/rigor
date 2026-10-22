@@ -119,8 +119,8 @@ module Rigor
         # the default expression pair, so routing the or-writes here adds the body entry and nothing else.
         Prism::ConstantOrWriteNode => :eval_constant_write,
         Prism::ConstantPathOrWriteNode => :eval_constant_write,
-        Prism::IfNode => :eval_if,
-        Prism::UnlessNode => :eval_unless,
+        Prism::IfNode => :eval_recorded_if,
+        Prism::UnlessNode => :eval_recorded_unless,
         Prism::ElseNode => :eval_else,
         Prism::CaseNode => :eval_case,
         Prism::CaseMatchNode => :eval_case,
@@ -2278,6 +2278,20 @@ module Rigor
       def eval_repeating_for(node) = ReflectiveIvarWrite.in_repeating_body { eval_for(node) }
 
       # A loop's evaluation, with its value recorded for `ExpressionTyper#type_of_loop` ({LoopValueRecord}).
+      # A conditional's evaluation, recorded when it evaluated a loop ({LoopValueRecord.conditional}): the typer
+      # types a conditional that holds a loop again from the scope it was evaluated from, and the loop in its branch
+      # is evaluated from a branch scope no record matches.
+      def eval_recorded_if(node) = record_conditional_value(node) { eval_if(node) }
+
+      def eval_recorded_unless(node) = record_conditional_value(node) { eval_unless(node) }
+
+      def record_conditional_value(node)
+        before = LoopValueRecord.loops_evaluated
+        result = yield
+        LoopValueRecord.conditional(node, scope, result.first) unless LoopValueRecord.loops_evaluated == before
+        result
+      end
+
       def eval_recorded_loop(node) = record_loop_value(node, eval_loop(node))
 
       def eval_recorded_for(node) = record_loop_value(node, eval_repeating_for(node))

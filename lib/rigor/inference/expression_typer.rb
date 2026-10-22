@@ -1051,7 +1051,7 @@ module Rigor
       # optimistic-carrier decline) and one terminating-arm rule, and cannot drift apart again. Only the
       # value is read; the post-scope belongs to whichever walk owns the statement.
       def type_of_conditional(node)
-        scope.evaluate(node, tracer: tracer).first
+        LoopValueRecord.fetch(node, scope) || scope.evaluate(node, tracer: tracer).first
       end
 
       def type_of_else(node)

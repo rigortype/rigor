@@ -21,7 +21,21 @@ module Rigor
 
       module_function
 
+      COUNT_KEY = :rigor_loop_value_count
+      private_constant :COUNT_KEY
+
       def record(node, scope, type)
+        Thread.current[COUNT_KEY] = loops_evaluated + 1
+        conditional(node, scope, type)
+      end
+
+      # How many loops this thread has evaluated, so a conditional can tell whether its evaluation held one.
+      def loops_evaluated = Thread.current[COUNT_KEY] || 0
+
+      # The same record for a conditional that evaluated a loop in a branch: `id(c ? (while …) : 0)` types the
+      # conditional again from the scope it was evaluated from, and each typing evaluated the loop again from a
+      # branch scope of its own, which multiplied the passes of every loop nested in it (issue #2262).
+      def conditional(node, scope, type)
         (Thread.current[KEY] ||= ObjectSpace::WeakKeyMap.new)[node] = [scope, type]
         type
       end

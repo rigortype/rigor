@@ -18,7 +18,6 @@
 - 1152  # sig-gen types `Set#include?` over a tuple key untyped
 - 1153  # sig-gen proposes `Array[untyped] | []` off an empty-table early return
 - 1154  # sig-gen types an `attr_reader` over an ivar assigned from an `initialize` parameter untyped
-- 1155  # sig-gen skips a memoized `||=` reader (the slot read cannot prove the memoized value)
 - 1157  # sig-gen skips a block-taking name resolver whose decline paths return `nil`
 - 1167  # sig-gen skips a predicate whose body reads an attribute off its untyped node parameter (Dynamic receiver)
 - 1183  # sig-gen emits Struct.new member readers/writers (and the keyword_init ctor) untyped

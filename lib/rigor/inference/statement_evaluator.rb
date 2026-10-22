@@ -933,7 +933,11 @@ module Rigor
                                         arg_types: index_write_arg_types(node, result_type))
         post = post.with_indexed_narrowing(*address, result_type) if address
 
-        [result_type, forget_rebound_specials(post, node)]
+        # The value the expression yields is the memoizing reading when the slot read is wholly gradual
+        # ({#index_compound_write_value}, #1155): `x = (tbl[k] ||= {})` binds `x` to the rvalue, as the
+        # value-position typer does, so a chain `x[j] ||= v` off it reads a table and not `Dynamic | {}`. The
+        # widening and the narrowing record above keep the stored (union) type.
+        [index_compound_write_value(node), forget_rebound_specials(post, node)]
       end
 
       # `h[k] &&= v` / `h[k] += v`. Neither had a handler, so both fell to `evaluate`'s default — typed as a pure

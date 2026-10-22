@@ -426,12 +426,12 @@ RSpec.describe "sig/ provenance (ADR-107 G3)" do
     end
 
     it "reads the gap marker off the member's RBS comment" do
-      rbs = "class Widget\n  # sig-gen gap: #1155 — the wider declaration is deliberate.\n  " \
+      rbs = "class Widget\n  # sig-gen gap: #1149 — the wider declaration is deliberate.\n  " \
             "def n: () -> Numeric\nend\n"
       row = audit_fixture(ruby: "class Widget\n  def n\n    4.2\n  end\nend\n", rbs: rbs)
             .find { |r| r.declaration.method_name == "n" }
       expect(row).to be_marked
-      expect(row.declaration.marker).to eq("1155")
+      expect(row.declaration.marker).to eq("1149")
     end
 
     it "reads the authored marker off the member's RBS comment and counts the row as marked" do

@@ -298,6 +298,48 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(candidates.find { |c| c.method_name == :default }.rbs).to eq("def self.default: () -> App")
     end
 
+    it "types a singleton factory that memoizes through a class-ivar table (#1155)" do
+      path = write_fixture("lib/result.rb", <<~RUBY)
+        class Result
+          def initialize(key, tag) = (@pair = [key, tag])
+
+          class << self
+            def yes(tag) = cached(1, tag)
+
+            private
+
+            def cached(key, tag)
+              by_key = (@cache[key] ||= {})
+              by_key[tag] ||= new(key, tag)
+            end
+          end
+
+          @cache = {}
+        end
+      RUBY
+
+      candidates = generator(paths: [path]).run
+
+      expect(candidates.find { |c| c.method_name == :yes }.rbs).to eq("def self.yes: (untyped) -> Result")
+    end
+
+    it "still skips a memo table reader whose rvalue is not a construction it can type (control)" do
+      path = write_fixture("lib/memo.rb", <<~RUBY)
+        class Memo
+          def self.fetch(key)
+            by_key = (@cache[key] ||= {})
+            by_key[key] ||= unknown_helper(key)
+          end
+
+          @cache = {}
+        end
+      RUBY
+
+      candidates = generator(paths: [path]).run
+
+      expect(candidates.find { |c| c.method_name == :fetch }.skip_reason).to eq(:untyped_return)
+    end
+
     it "never declares an instance method's `||= raise` guard as returning bot" do
       # The concern's ivar is written by whatever includes it; `token` by the `attr_writer`.
       path = write_fixture("lib/guards.rb", <<~RUBY)

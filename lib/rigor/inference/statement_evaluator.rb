@@ -933,7 +933,40 @@ module Rigor
                                         arg_types: index_write_arg_types(node, result_type))
         post = post.with_indexed_narrowing(*address, result_type) if address
 
-        [result_type, forget_rebound_specials(post, node)]
+        # The value the expression yields takes the memoizing reading ({#index_compound_write_value}, #1155) for a
+        # fresh container or construction rvalue, with a container's literal precision erased
+        # ({#memo_bound_value}).
+        [memo_bound_value(node, result_type), forget_rebound_specials(post, node)]
+      end
+
+      # What `x = (tbl[k] ||= v)` binds `x` to. Where {#index_compound_write_value} reads the memoizing idiom, the
+      # slot may hold ANY earlier value of the table, so `x` is the rvalue only as far as its CLASS is known: a
+      # `{}` / `[]` rvalue (a shape or tuple) erases to `Hash[untyped, untyped]` / `Array[untyped]`, because the
+      # stored table is not empty after the first store (`entry[:name].upcase` is no call on nil), and a
+      # construction (`new(...)`, a nominal) is kept. Every other rvalue (a Constant, a union) keeps the stored
+      # `Dynamic | v`, since a literal would read the slot as freshly created at every later read.
+      def memo_bound_value(node, stored)
+        return stored unless node.is_a?(Prism::IndexOrWriteNode)
+
+        value = index_compound_write_value(node)
+        return stored if value == stored
+
+        erased = erase_memo_container(value)
+        erased || stored
+      end
+
+      def erase_memo_container(type)
+        any = Type::Combinator.untyped
+        case type
+        when Type::HashShape then Type::Combinator.nominal_of("Hash", type_args: [any, any])
+        when Type::Tuple then Type::Combinator.nominal_of("Array", type_args: [any])
+        when Type::Nominal
+          case type.class_name
+          when "Hash" then Type::Combinator.nominal_of("Hash", type_args: [any, any])
+          when "Array" then Type::Combinator.nominal_of("Array", type_args: [any])
+          else type
+          end
+        end
       end
 
       # `h[k] &&= v` / `h[k] += v`. Neither had a handler, so both fell to `evaluate`'s default — typed as a pure

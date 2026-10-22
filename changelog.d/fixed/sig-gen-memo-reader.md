@@ -1,0 +1,2 @@
+- **[engine]** `rigor sig-gen` now types a factory that memoizes through a nested `||=` table (`by_key = (@cache[key] ||= {}); by_key[tag] ||= new(...)`), instead of skipping it as `sig.skipped.untyped-return`. ([#1155](https://github.com/rigortype/rigor/issues/1155))
+  - A local bound to a memoizing `x[k] ||= v` takes the class of a `new(...)` rvalue, and `Hash[untyped, untyped]` / `Array[untyped]` for a `{}` / `[]` rvalue; any other rvalue keeps `untyped | v`, so a slot another call filled is not read as freshly created.

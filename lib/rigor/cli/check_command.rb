@@ -12,6 +12,7 @@ require_relative "../analysis/rule_catalog"
 # The baseline filter runs on EVERY exit path — including the ADR-87 WD4 cache-HIT fast path, which skips
 # `load_check_dependencies` — so it must be a load-time require. It pulls only YAML, never the engine.
 require_relative "../analysis/baseline"
+require_relative "../analysis/edit_replay"
 require_relative "command"
 require_relative "options"
 require_relative "diagnostic_formats"
@@ -281,29 +282,35 @@ module Rigor
       end
 
       # Issue #1967 — the partition check above re-analyses an unchanged tree, so every served row is still right and a
-      # missing invalidation edge goes unseen. Here each of `--verify-incremental-edits` sampled files is emptied
-      # through an editor buffer (never on disk), and the warm recheck of the baseline
-      # ({IncrementalSession#replay_edit}) must equal a full analysis of the edited tree: a dependent the recheck
-      # failed to re-analyse is served from the baseline and differs. Emptying a file removes everything it defines,
-      # so this replays the removal direction of every edge the file is a source of; it does not replay an addition.
+      # missing invalidation edge goes unseen. Here each of `--verify-incremental-edits` sampled files is edited through
+      # an editor buffer (never on disk) by each of {Analysis::EditReplay.edits} — emptied, then reduced to its
+      # `class` / `module` skeleton — and the warm recheck of the baseline ({IncrementalSession#replay_edit}) must equal
+      # a full analysis of the edited tree: a dependent the recheck failed to re-analyse is served from the baseline and
+      # differs. A run in which every replay declined compared nothing, so it fails rather than report OK.
       def verify_edit_replays(session, configuration, paths, options)
         sample = edit_replay_sample(session.analyzed_files, options.fetch(:verify_incremental_edits))
+        replayed = 0
         declined = 0
         sample.each do |path|
-          incremental, full = replay_emptied(session, configuration, paths, path)
-          if incremental.nil?
-            declined += 1
-            next
+          Analysis::EditReplay.edits(File.read(path)).each do |edit|
+            incremental, full = replay_edit(session, configuration, paths, path, edit)
+            next declined += 1 if incremental.nil?
+
+            replayed += 1
+            next if incremental == full
+
+            return report_edit_replay_mismatch(path, edit, incremental, full)
           end
-          next if incremental.tally == full.tally && incremental == full
-
-          @err.puts("rigor: --verify-incremental FAILED — the recheck after emptying #{path} differs from a full run.")
-          return report_verify_order_mismatch(incremental, full) if incremental.tally == full.tally
-
-          return report_verify_set_mismatch(incremental, full, header: false)
         end
-        side_output(options.fetch(:format)).puts(edit_replay_summary(sample.size, declined))
-        0
+        report_edit_replays(replayed, declined, options.fetch(:format))
+      end
+
+      def report_edit_replay_mismatch(path, edit, incremental, full)
+        @err.puts("rigor: --verify-incremental FAILED — the recheck after #{edit.label} #{path} " \
+                  "differs from a full run.")
+        return report_verify_order_mismatch(incremental, full) if incremental.tally == full.tally
+
+        report_verify_set_mismatch(incremental, full, header: false)
       end
 
       # `count` files spread evenly over the analysed list, so a small count still reaches both ends of it.
@@ -313,9 +320,11 @@ module Rigor
         Array.new(count) { |index| analyzed[index * analyzed.size / count] }
       end
 
-      # The warm recheck's rows and a full run's, both with `path` emptied; `[nil, nil]` when the recheck declined.
-      def replay_emptied(session, configuration, paths, path)
+      # The warm recheck's rows and a full run's, both with `path` replaced by `edit`; `[nil, nil]` when the recheck
+      # declined.
+      def replay_edit(session, configuration, paths, path, edit)
         Tempfile.create(["rigor-verify-edit-", ".rb"]) do |file|
+          file.write(edit.source)
           file.close
           buffer = Analysis::BufferBinding.new(logical_path: path, physical_path: file.path)
           recheck = session.replay_edit(buffer)
@@ -330,11 +339,18 @@ module Rigor
         end
       end
 
-      def edit_replay_summary(count, declined)
-        replayed = count - declined
-        line = "rigor: --verify-incremental OK — #{replayed} edits replayed (each file emptied), " \
-               "every recheck matches full"
-        declined.zero? ? line : "#{line}; #{declined} declined (the recheck would have been a full analysis)"
+      def report_edit_replays(replayed, declined, format)
+        if replayed.zero? && declined.positive?
+          @err.puts("rigor: --verify-incremental FAILED — every edit replay (#{declined}) declined, " \
+                    "since the recheck would have been a full analysis, so no edit was compared.")
+          return 1
+        end
+
+        line = "rigor: --verify-incremental OK — #{replayed} edits replayed (files emptied and reduced to their " \
+               "class/module skeleton), every recheck matches full"
+        line = "#{line}; #{declined} declined (the recheck would have been a full analysis)" if declined.positive?
+        side_output(format).puts(line)
+        0
       end
 
       # ADR-46 — cross-process incremental analysis (`--incremental`). Derives the global fingerprint cheaply (no RBS
@@ -785,7 +801,7 @@ module Rigor
             options[:verify_incremental] = true
           end
           opts.on("--verify-incremental-edits=N", Integer,
-                  "with --verify-incremental, also replay an edit (emptying the file) on N sampled files") do |value|
+                  "with --verify-incremental, also replay two edits (empty, class/module skeleton) on N files") do |value|
             if value.negative?
               raise OptionParser::InvalidArgument, "--verify-incremental-edits=#{value} (must be 0 or more)"
             end

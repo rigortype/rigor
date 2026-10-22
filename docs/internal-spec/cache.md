@@ -987,13 +987,21 @@ right and a missing invalidation edge cannot show
 partition: for each of `N` files spread over the analysed list,
 `IncrementalSession#replay_edit` rechecks the baseline, handed over as a
 Marshal copy of the snapshot a `--incremental` run would save, with the
-file emptied through an editor buffer (editor mode option B, never on
+file replaced through an editor buffer (editor mode option B, never on
 disk), and the rows must equal, as a multiset and in order, a full run of
-the same buffered tree (`analyze_only:` every analysed file). A replay the
-recheck declines as option B does is counted, not compared. Emptying
-removes everything the file defines, so the replay exercises the removal
-direction of every edge the file is a source of; an addition is not
-replayed.
+the same buffered tree (`analyze_only:` every analysed file). Each file
+is replayed under the two edits `Analysis::EditReplay.edits` builds: the
+file emptied, and the file reduced to its `class` / `module` declarations
+with every body statement dropped (skipped when identical to the file or
+empty). Emptying removes every declaration, so the class-level keys a
+removed declaration fires re-check most readers and mask a finer missing
+edge. The skeleton keeps the declarations, so only the finer edges
+(`refinement:`, `visibility:`, `defines:`, a method's symbol) can put a
+reader into the closure: #2163's dropped `refinement:` edge passes the
+emptying replay and fails the skeleton one. No addition and no
+body-preserving edit is replayed. A replay the recheck declines as option
+B does is counted, not compared, and a run in which every replay declined
+fails.
 
 Case 1 therefore fails the gate as an order mismatch or a set mismatch,
 depending on the partition: a recheck that reproduces the duplicate or the

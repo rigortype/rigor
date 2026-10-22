@@ -254,7 +254,10 @@ output looks right, but it acted on the wrong input or measured the wrong thing.
   but says nothing about warm latency; and `--verify-incremental`'s "N/M files re-analyzed" is a fixed half
   of the tree, not an edit's closure (#1526). For the same reason a plain `--verify-incremental` OK proves
   nothing about invalidation edges (#1967): it replays no edit. Only a warm-against-cold comparison after an
-  edit does — a session spec that edits between baseline and recheck, or `--verify-incremental-edits=N`. The cold tools (`bench-perf`, the A/Bs) all pass `--no-cache` and
+  edit does — a session spec that edits between baseline and recheck, or `--verify-incremental-edits=N`, which
+  replays exactly two edits per sampled file (emptied, and reduced to its class/module skeleton) and so covers
+  only edges a removal fires; an edge that only an addition or a body-preserving edit exercises is not tested.
+  On `lib` each sampled file costs about 55–60 s. The cold tools (`bench-perf`, the A/Bs) all pass `--no-cache` and
   say nothing about a warm run.
 - **In a CPU profile, prefer vernier to stackprof.** stackprof's `:cpu` mode charges samples taken inside a long C
   call (Prism's parse) to the next interrupt check. During #1507 that made `IO.read` read as ~460 ms and

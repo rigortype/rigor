@@ -1,3 +1,3 @@
-- **[cli]** `rigor check --verify-incremental-edits=N` replays an edit on `N` sampled files and checks that each warm recheck matches a full analysis of the edited tree. ([#2272](https://github.com/rigortype/rigor/pull/2272))
-  - Each file is emptied in memory through an editor buffer, never on disk.
+- **[cli]** `rigor check --verify-incremental-edits=N` replays two edits on each of `N` sampled files and checks that each warm recheck matches a full analysis of the edited tree. ([#2272](https://github.com/rigortype/rigor/pull/2272))
+  - Each file is emptied, then reduced to its `class` / `module` declarations, in memory through an editor buffer, never on disk.
   - A plain `--verify-incremental` re-analyses an unchanged tree, so it cannot show an edit that fails to re-check a file it affects.

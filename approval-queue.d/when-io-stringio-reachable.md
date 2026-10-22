@@ -1,6 +1,6 @@
 # A trailing else after clauses covering an IO, File or String subject is not reported dead
 
-- **PR:** none
+- **PR:** [#2274](https://github.com/rigortype/rigor/pull/2274)
 - **Issue:** [#2071](https://github.com/rigortype/rigor/issues/2071)
 - **Class:** open-choice
 - **Precedent:** [ADR-117](../docs/adr/117-standard-streams-typed-by-idiom.md)

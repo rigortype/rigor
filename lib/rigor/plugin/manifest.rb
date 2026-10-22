@@ -207,10 +207,10 @@ module Rigor
 
       # ADR-125 — `per_invocation_classes:` names the framework classes whose every instance serves exactly one
       # entry point, so ivar writes in two distinct entry points of a descendant are never live together.
-      # `per_invocation_non_action_macros:` names the class-body macros whose Symbol, String or inline-`def` arguments name a
-      # public method that is NOT an entry point (`before_action :load`, `helper_method :current_user`); they
-      # apply to this manifest's own `per_invocation_classes:`, so a list without classes is refused. Validated
-      # and assigned in one call, because `#initialize` is at its line budget.
+      # `per_invocation_non_action_macros:` names the class-body macros whose Symbol, String or inline-`def`
+      # arguments name a public method that is NOT an entry point (`before_action :load`, `helper_method
+      # :current_user`); they apply to this manifest's own `per_invocation_classes:`, so a list without classes
+      # is refused. Validated and assigned in one call, because `#initialize` is at its line budget.
       def assign_per_invocation_classes(names, macros)
         validate_array_of!("per_invocation_classes", names, "non-empty String") do |name|
           name.is_a?(String) && !name.empty?

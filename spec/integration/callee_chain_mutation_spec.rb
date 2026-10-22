@@ -81,6 +81,19 @@ RSpec.describe "a callee chain that mutates an argument floors it (#2104)" do
     RUBY
   end
 
+  it "floors an argument the caller passes with the keyword shorthand" do
+    expect(diagnostics(<<~RUBY, call: "poke(acc:)")).to eq([])
+      def poke(acc:) = (acc[0] = "x")
+    RUBY
+  end
+
+  it "floors an argument forwarded after a splat, whose position says nothing about its parameter" do
+    expect(diagnostics(<<~RUBY)).to eq([])
+      def stripes(acc) = poke(*[], acc)
+      def poke(acc, n = 0) = (acc[0] = "x")
+    RUBY
+  end
+
   it "floors an argument forwarded and mutated inside iterator blocks (the XXH3 shape)" do
     expect(diagnostics(<<~RUBY)).to eq([])
       def stripes(acc) = 2.times { |s| poke(acc, s) }

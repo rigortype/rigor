@@ -19,6 +19,10 @@ module Rigor
       # the parameter it binds there.
       Edge = Data.define(:name, :slot, :callee, :callee_slot)
 
+      # The `callee_slot` of an argument whose parameter the call does not show (one after a splat): any mutated
+      # parameter of the callee may be the one it binds.
+      ANY_SLOT = Object.new.freeze
+
       MAX_DEFS = 16
 
       module_function
@@ -65,14 +69,19 @@ module Rigor
             def_edges.each do |edge|
               next if census.key?(edge.name)
 
-              callee = mutated[edge.callee]
-              next unless callee&.value?(edge.callee_slot)
+              next unless binds_mutated?(mutated[edge.callee], edge.callee_slot)
 
               census[edge.name] = edge.slot
               changed = true
             end
           end
         end
+      end
+
+      def binds_mutated?(census, slot)
+        return false if census.nil?
+
+        slot.equal?(ANY_SLOT) ? !census.empty? : census.value?(slot)
       end
     end
   end

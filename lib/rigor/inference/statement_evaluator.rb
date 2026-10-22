@@ -4458,8 +4458,7 @@ module Rigor
       # Issue #2104 — the {CalleeMutationChain::Edge}s along which `def_node` hands one of its parameters, unchanged, to
       # a self-call resolving to a user def: a positional argument or a keyword value that reads the parameter itself
       # (not a block-local shadowing it), in the method body or a block in it. The callee resolves in this evaluator's
-      # class, the receiver's class at every hop of a self-call chain. A call with a splat or `...` is skipped: its
-      # positions do not line up with the callee's. Memoised per def node.
+      # class, the receiver's class at every hop of a self-call chain. Memoised per def node.
       def forwarding_edges(def_node)
         cache = (@forwarding_edge_cache ||= {}.compare_by_identity)
         cache[def_node] ||= compute_forwarding_edges(def_node)
@@ -4497,20 +4496,21 @@ module Rigor
       private_constant :NO_FORWARDS
 
       # `[[parameter_name, callee_slot], ...]` for the arguments of `call_node` that read one of `slots`' parameters at
-      # `depth`, the block nesting the call sits at: a read of the method's own parameter there has that depth.
+      # `depth`, the block nesting the call sits at: a read of the method's own parameter there has that depth. Past a
+      # splat or `...` an argument's index says nothing about the parameter it binds, so a positional read in such a
+      # call binds {CalleeMutationChain::ANY_SLOT}, which any mutated slot of the callee matches.
       def forwarded_parameters(call_node, slots, depth)
         args = call_node.arguments
         return NO_FORWARDS unless args.is_a?(Prism::ArgumentsNode)
 
         list = args.arguments
-        return NO_FORWARDS if list.any? { |a| a.is_a?(Prism::SplatNode) || a.is_a?(Prism::ForwardingArgumentsNode) }
-
+        spread = list.any? { |a| a.is_a?(Prism::SplatNode) || a.is_a?(Prism::ForwardingArgumentsNode) }
         forwarded = []
         list.each_with_index do |argument, index|
           if argument.is_a?(Prism::KeywordHashNode)
             forwarded.concat(forwarded_keywords(argument, slots, depth))
           elsif (name = parameter_read_name(argument, slots, depth))
-            forwarded << [name, index]
+            forwarded << [name, spread ? CalleeMutationChain::ANY_SLOT : index]
           end
         end
         forwarded

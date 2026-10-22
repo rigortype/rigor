@@ -193,13 +193,12 @@ def true_value(flag)
    end]
 end
 
-# Once `when Array` and `when nil` cover `[raw]` or `nil`, the `else` is dead and reports, as it does when spelled
-# `when NilClass`. `dead_else("a")` returns 1 and `dead_else(nil)` 2. (A `String?` subject would not report: a
-# `Pathname` stands in for a `String`, #2071.)
+# Once `when String` and `when nil` cover `String?`, the `else` is dead and reports, as it does when spelled
+# `when NilClass`. `dead_else("a")` returns 1 and `dead_else(nil)` 2.
 def dead_else(raw)
-  x = raw ? [raw] : nil
+  x = raw ? String(raw) : nil
   case x
-  when Array then 1
+  when String then 1
   when nil then 2
   else 3 # GENUINE-UNREACHABLE
   end

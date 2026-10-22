@@ -1,0 +1,2 @@
+- **[engine]** `rigor sig-gen` now types a factory that memoizes through a nested `||=` table (`by_key = (@cache[key] ||= {}); by_key[tag] ||= new(...)`), instead of skipping it as `sig.skipped.untyped-return`. ([#1155](https://github.com/rigortype/rigor/issues/1155))
+  - A local bound to a memoizing `x[k] ||= v` takes the rvalue, as the same expression in value position already did.

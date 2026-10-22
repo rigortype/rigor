@@ -4483,9 +4483,12 @@ module Rigor
           callee = resolve_self_callee_def(call_node)
           next if callee.nil?
 
+          callee_slots = content_parameter_slots(callee)
           forwarded.each do |name, callee_slot|
-            edges << CalleeMutationChain::Edge.new(name: name, slot: slots[name], callee: callee,
-                                                   callee_slot: callee_slot)
+            names = bound_parameter_names(callee_slots, callee_slot)
+            next if names.empty?
+
+            edges << CalleeMutationChain::Edge.new(name: name, slot: slots[name], callee: callee, callee_names: names)
           end
         end
         edges.empty? ? NO_FORWARDS : edges
@@ -4514,24 +4517,39 @@ module Rigor
       private_constant :NO_FORWARDS
 
       # `[[parameter_name, callee_slot], ...]` for the arguments of `call_node` that read one of `slots`' parameters at
-      # `depth`, the block nesting the call sits at: a read of the method's own parameter there has that depth. Past a
-      # splat or `...` an argument's index says nothing about the parameter it binds, so a positional read in such a
-      # call binds {CalleeMutationChain::ANY_SLOT}, which any mutated slot of the callee matches.
+      # `depth`, the block nesting the call sits at: a read of the method's own parameter there has that depth. An
+      # argument after a splat or `...` has an index that says nothing about the parameter it binds, so it binds
+      # {ANY_SLOT}, any positional parameter of the callee; one before the first splat keeps its index.
       def forwarded_parameters(call_node, slots, depth)
         args = call_node.arguments
         return NO_FORWARDS unless args.is_a?(Prism::ArgumentsNode)
 
-        list = args.arguments
-        spread = list.any? { |a| a.is_a?(Prism::SplatNode) || a.is_a?(Prism::ForwardingArgumentsNode) }
+        spread = false
         forwarded = []
-        list.each_with_index do |argument, index|
+        args.arguments.each_with_index do |argument, index|
           if argument.is_a?(Prism::KeywordHashNode)
             forwarded.concat(forwarded_keywords(argument, slots, depth))
+          elsif argument.is_a?(Prism::SplatNode) || argument.is_a?(Prism::ForwardingArgumentsNode)
+            spread = true
           elsif (name = parameter_read_name(argument, slots, depth))
-            forwarded << [name, spread ? CalleeMutationChain::ANY_SLOT : index]
+            forwarded << [name, spread ? ANY_SLOT : index]
           end
         end
         forwarded
+      end
+
+      # The `callee_slot` of an argument whose parameter the call does not show (one after a splat).
+      ANY_SLOT = :__any_positional__
+      private_constant :ANY_SLOT
+
+      # The names of the callee's parameters (`callee_slots`, {#content_parameter_slots}) an argument bound to `slot`
+      # may reach: the one at that slot, or every positional one for {ANY_SLOT}.
+      def bound_parameter_names(callee_slots, slot)
+        if slot == ANY_SLOT
+          callee_slots.filter_map { |name, at| name if at.is_a?(Integer) }
+        else
+          callee_slots.filter_map { |name, at| name if at == slot }
+        end
       end
 
       def forwarded_keywords(hash_node, slots, depth)
@@ -4635,16 +4653,38 @@ module Rigor
 
       # Yields every node reachable from `node` with the number of blocks it sits in: a read of the method's own local
       # there has that depth. A nested def or lambda is not entered: a def has no access to the method's locals, and a
-      # lambda body is not run by the call.
+      # lambda body is not run by the call. Nor is the block of a call that runs it on another `self`
+      # ({#self_rebinding_block_call?}): a self-call there is not a call on the method's receiver.
       def each_node_in_method_scope(node, depth, &)
         return if node.nil?
 
         yield node, depth
+        rebinding = self_rebinding_block_call?(node)
         node.rigor_each_child do |child|
           next if child.is_a?(Prism::DefNode) || child.is_a?(Prism::LambdaNode)
 
-          each_node_in_method_scope(child, child.is_a?(Prism::BlockNode) ? depth + 1 : depth, &)
+          if child.is_a?(Prism::BlockNode)
+            each_node_in_method_scope(child, depth + 1, &) unless rebinding
+          else
+            each_node_in_method_scope(child, depth, &)
+          end
         end
+      end
+
+      # The calls whose block runs with `self` bound to something other than the method's receiver — the receiver of
+      # an `instance_eval` / `class_exec` / …, a method `define_method` or `define_singleton_method` defines (run
+      # later, on whatever receives it), or the class `Class.new` / `Module.new` / `Struct.new` / `Data.define`
+      # builds ({AnonymousMetaClass.block_form_receiver}).
+      SELF_REBINDING_BLOCK_CALLS = Set[
+        :instance_eval, :instance_exec, :class_eval, :class_exec, :module_eval, :module_exec, :define_method,
+        :define_singleton_method
+      ].freeze
+      private_constant :SELF_REBINDING_BLOCK_CALLS
+
+      def self_rebinding_block_call?(node)
+        return false unless node.is_a?(Prism::CallNode) && node.block.is_a?(Prism::BlockNode)
+
+        SELF_REBINDING_BLOCK_CALLS.include?(node.name) || !AnonymousMetaClass.block_form_receiver(node).nil?
       end
 
       # A receiver-independent over-approximation of `ClosureEscapeAnalyzer`'s non-escaping verdict, used when scanning

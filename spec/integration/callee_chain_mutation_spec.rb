@@ -119,12 +119,76 @@ RSpec.describe "a callee chain that mutates an argument floors it (#2104)" do
     RUBY
   end
 
-  it "floors an argument a chain hands past the read cap, whose end it cannot see" do
-    chain = (1..20).map { |i| "def hop#{i}(acc) = hop#{i + 1}(acc)" }
-    expect(diagnostics(<<~RUBY)).to eq([])
+  it "does not floor an argument a chain hands past the read cap, even when its end mutates it" do
+    # Pins a decision: past `CalleeMutationChain::MAX_NODES` a hand-off reads as none, as an unresolved callee does.
+    chain = (1..40).map { |i| "def hop#{i}(acc) = hop#{i + 1}(acc)" }
+    expect(diagnostics(<<~RUBY)).to eq(undefined_upcase)
       def stripes(acc) = hop1(acc)
       #{chain.join("\n")}
-      def hop21(acc) = acc.size
+      def hop41(acc) = (acc[0] = "x")
+    RUBY
+  end
+
+  it "keeps the true positive when the def hands sixteen other parameters' worth of calls elsewhere" do
+    calls = (1..16).map { |i| "n#{i}(node)" }.join("; ")
+    leaves = (1..16).map { |i| "def n#{i}(x) = x" }
+    expect(diagnostics(<<~RUBY)).to eq(undefined_upcase)
+      def stripes(acc, node = 1) = (#{calls}; peek(acc))
+      #{leaves.join("\n")}
+      def peek(acc) = acc.size
+    RUBY
+  end
+
+  it "keeps the true positive through an eighteen-leaf fan-out that never mutates" do
+    calls = (1..18).map { |i| "leaf#{i}(acc)" }.join("; ")
+    leaves = (1..18).map { |i| "def leaf#{i}(acc) = acc.size" }
+    expect(diagnostics(<<~RUBY)).to eq(undefined_upcase)
+      def stripes(acc) = (#{calls})
+      #{leaves.join("\n")}
+    RUBY
+  end
+
+  it "keeps the true positive through a seventeen-deep chain that never mutates" do
+    chain = (1..17).map { |i| "def hop#{i}(acc) = hop#{i + 1}(acc)" }
+    expect(diagnostics(<<~RUBY)).to eq(undefined_upcase)
+      def stripes(acc) = hop1(acc)
+      #{chain.join("\n")}
+      def hop18(acc) = acc.size
+    RUBY
+  end
+
+  it "keeps the true positive when the def mutates a different parameter through its callee" do
+    expect(diagnostics(<<~RUBY)).to eq(undefined_upcase)
+      def stripes(acc, other = []) = (poke(other); acc.size)
+      def poke(acc) = (acc[0] = "x")
+    RUBY
+  end
+
+  it "binds an argument before a splat by its index" do
+    expect(diagnostics(<<~RUBY)).to eq(undefined_upcase)
+      EXTRA = [[]].freeze
+      def stripes(acc) = helper(acc, *EXTRA)
+      def helper(a, b) = (b << 1)
+    RUBY
+  end
+
+  it "does not read a self-call inside an instance_exec block as a hand-off" do
+    expect(diagnostics(<<~RUBY)).to eq(undefined_upcase)
+      class Other
+        def poke(acc) = acc.size
+      end
+      def stripes(acc) = Other.new.instance_exec { poke(acc) }
+      def poke(acc) = (acc[0] = "x")
+    RUBY
+  end
+
+  it "does not read a self-call inside a class_exec block as a hand-off" do
+    expect(diagnostics(<<~RUBY)).to eq(undefined_upcase)
+      class Other
+        def self.poke(acc) = acc.size
+      end
+      def stripes(acc) = Other.class_exec { poke(acc) }
+      def poke(acc) = (acc[0] = "x")
     RUBY
   end
 

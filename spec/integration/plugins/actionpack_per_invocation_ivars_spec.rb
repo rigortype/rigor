@@ -40,7 +40,7 @@ RSpec.describe "def.ivar-write-mismatch on per-invocation classes (ADR-125)" do
             true
           end
         )
-        runner.run.diagnostics.select { |d| d.rule == "def.ivar-write-mismatch" }
+        guarded_run(runner).diagnostics.select { |d| d.rule == "def.ivar-write-mismatch" }
               .map { |d| [File.basename(d.path), d.line] }
       end
     end

@@ -26,7 +26,6 @@ class Rigor::Plugin::Manifest
   def consumes: () -> Array[Rigor::Plugin::Manifest::Consumption]
   def owns_receivers: () -> Array[String]
   def open_receivers: () -> Array[String]
-  def per_invocation_classes: () -> Array[String]
   def rbs_complete_ancestors: () -> Array[String]
   def type_node_resolvers: () -> Array[Rigor::Plugin::TypeNodeResolver]
   def block_as_methods: () -> untyped

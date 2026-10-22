@@ -268,7 +268,7 @@ module Rigor
       #   {Environment::RbsLoader} so constant lookups (and, in later v0.0.9 slices, other reflection
       #   artefacts) consult the cache. Pass `nil` (the default) to skip caching for this environment.
       # rubocop:disable-next Metrics/MethodLength, Metrics/ParameterLists
-      def for_project(root: Dir.pwd, libraries: [], signature_paths: nil, cache_store: nil,
+      def for_project(root: Dir.pwd, libraries: [], signature_paths: nil, cache_store: nil, # rubocop:disable Metrics/AbcSize
                       plugin_registry: nil, dependency_source_index: nil,
                       rbs_extended_reporter: nil, boundary_cross_reporter: nil,
                       source_rbs_synthesis_reporter: nil,
@@ -364,7 +364,9 @@ module Rigor
           # Issue #610 — the plugin-contributed subset is loaded LAST and may stand down against a colliding
           # generic arity. Only the bundled plugins' own `sig/` is deferred: the user's `signature_paths:`,
           # the bundle walk and `rbs collection install` all stay authoritative.
-          deferred_signature_paths: plugin_sig_paths
+          deferred_signature_paths: plugin_sig_paths,
+          project_signature_paths: resolved_paths,
+          required_features: required_features || RequiredFeatures.scan(source_files, sig_paths: resolved_paths)
         )
         # Issues #824 / #1075 — the rows ADR-112 WD5's consistency rule reports for members the project's
         # own `sig/` and an inline source both declare: an error per contradiction (or per refinement that

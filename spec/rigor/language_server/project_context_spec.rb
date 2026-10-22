@@ -88,6 +88,25 @@ RSpec.describe Rigor::LanguageServer::ProjectContext do
       expect(prime_loaded?(context.environment)).to be(false)
     end
 
+    # Issue #2174 — a shipped feature counts only when it can open a class the project declares.
+    it "keeps the environment when a buffer requires a library no project class is named for" do
+      context.environment
+      expect { context.note_buffers(path => "require 'json'\np 12\n") }.not_to change(context, :generation)
+    end
+
+    it "rebuilds it when the required library declares a class the project reopens" do
+      File.write("lib/m.rb", "class Matrix\nend\n")
+      context.environment
+      expect { context.note_buffers(path => "require 'matrix'\np 12\n") }.to change(context, :generation).by(1)
+    end
+
+    it "rebuilds it when the required library declares a class only the project's signatures reopen" do
+      FileUtils.mkdir_p("sig")
+      File.write("sig/ripper.rbs", "class Ripper\nend\n")
+      context.environment
+      expect { context.note_buffers(path => "require 'ripper'\np 12\n") }.to change(context, :generation).by(1)
+    end
+
     it "reads a buffer in place of its file on disk" do
       File.write("lib/a.rb", "require 'prime'\n")
       context.note_buffers(path => "p 12\n")

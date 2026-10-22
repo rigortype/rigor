@@ -120,4 +120,28 @@ RSpec.describe Rigor::Environment::RequiredFeatures do
     expect(described_class.tokens([], %w[prime json])).to eq(["rigor-vendored:prime"])
     expect(described_class.active_dirs(%w[json rigor-vendored:prime])).to eq(%w[prime])
   end
+
+  # Issue #2174 — a feature Ruby ships is found too, but only the listed ones become library tokens.
+  describe "shipped features" do
+    it "finds a shipped feature and ignores one on a whole-line comment" do
+      expect(described_class.features_of(%(require "matrix"\n))).to eq(%w[matrix])
+      expect(described_class.features_of(%(# require "matrix"\n))).to be_empty
+      expect(described_class.features_of(%(require "not_a_ruby_library"\n))).to be_empty
+    end
+
+    it "makes a token of a listed feature only" do
+      expect(described_class.tokens(%w[matrix prime], [])).to eq(["rigor-vendored:prime"])
+    end
+
+    it "reads the names a header spells, rooted or inside an rbs-inline comment block" do
+      expect(described_class.declared_names("class ::Matrix\nend\n")).to eq(%w[Matrix])
+      expect(described_class.declared_names("# @rbs!\n#   class Matrix\n#   end\n")).to eq(%w[Matrix])
+      expect(described_class.declared_names("module Net::SMTP\nend\n")).to eq(%w[Net SMTP])
+    end
+
+    it "keeps a shipped feature only when its library declares a name the project declares" do
+      expect(described_class.relevant(%w[json matrix prime], %w[Foo])).to eq(%w[prime])
+      expect(described_class.relevant(%w[json matrix prime], %w[Matrix])).to eq(%w[matrix prime])
+    end
+  end
 end

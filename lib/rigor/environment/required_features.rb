@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../analysis/path_expansion"
+require_relative "../rooted_glob"
 
 module Rigor
   class Environment
@@ -42,6 +43,36 @@ module Rigor
       # anything.
       PATTERN = /(?:(?<![\w.$@])|(?<=Kernel\.))require[ \t]*\(?[ \t]*(["'])(#{FEATURE_ALTERNATION})\1/
 
+      # Issue #2174 — the gems Ruby 4.0 bundles (its `gems/bundled_gems` list, which an installation does not
+      # keep): installed beside the interpreter, but loaded only by an explicit `require`. Gems installed later
+      # into the same directory are deliberately not read from it.
+      BUNDLED_GEMS = %w[
+        abbrev base64 benchmark bigdecimal csv debug drb fiddle getoptlong irb logger matrix minitest mutex_m
+        net-ftp net-imap net-pop net-smtp nkf observer ostruct power_assert prime pstore racc rake rbs rdoc readline
+        reline repl_type_completor resolv-replace rexml rinda rss syslog test-unit typeprof win32ole
+      ].freeze
+
+      # Issue #2174 — the first path segments of the features Ruby ships: the `.rb` files and directories of the
+      # interpreter's library directory, the extensions and directories of its architecture directory, and the
+      # bundled gems' names (`net-ftp` → `net`). Read once, at load time and on the main Ractor, since
+      # `RbConfig::CONFIG` is not shareable; empty when the directories cannot be read.
+      SHIPPED_SEGMENTS = begin
+        require "rbconfig"
+        segments = Set.new
+        [RbConfig::CONFIG["rubylibdir"], RbConfig::CONFIG["archdir"]].compact.each do |dir|
+          next unless File.directory?(dir)
+
+          Dir.children(dir).each { |entry| segments << entry.sub(/\.(?:rb|so|bundle|dll)\z/, "") }
+        end
+        BUNDLED_GEMS.each { |name| segments << name.split("-").first }
+        segments.to_set(&:freeze).freeze
+      rescue StandardError
+        Set.new.freeze
+      end
+
+      # A `require` of any literal feature, read as {PATTERN} reads one; {.features_of} keeps those Ruby ships.
+      ANY_FEATURE = %r{(?:(?<![\w.$@])|(?<=Kernel\.))require[ \t]*\(?[ \t]*(["'])([\w-]+(?:/[\w-]+)*)\1}
+
       module_function
 
       # The features a run over `configuration` requires: every file under the configured paths, plus
@@ -53,42 +84,92 @@ module Rigor
       def for_configuration(configuration, extra_files = [], sources: {})
         files = Analysis::PathExpansion.ruby_files(configuration.paths, configuration.exclude_patterns,
                                                    base: configuration.exclude_base)
-        scan(files + Array(extra_files).map(&:to_s), sources: sources)
+        scan(files + Array(extra_files).map(&:to_s), sources: sources,
+                                                     sig_paths: configured_sig_paths(configuration))
       rescue StandardError
         []
+      end
+
+      # The project signature roots the environment loads: the configured `signature_paths:`, else `./sig` when it
+      # exists (`Environment.project_signature_roots`, which this leaf file does not load).
+      def configured_sig_paths(configuration)
+        configured = configuration.signature_paths
+        return Array(configured).map(&:to_s) if configured
+
+        File.directory?("sig") ? ["sig"] : []
       end
 
       # @param files — source paths (Strings or Pathnames); an unreadable one contributes nothing.
       # @param sources — path => source text, scanned instead of the file; its paths are scanned even when
       #   `files` does not list them.
-      # @return the sorted, frozen features some file requires.
-      def scan(files, sources: {})
+      # @param sig_paths — the project's signature roots, whose `.rbs` declaration headers count as the project's
+      #   own names ({.relevant}).
+      # @return the sorted, frozen features some file requires, a shipped one kept only when {.relevant}.
+      def scan(files, sources: {}, sig_paths: [])
         sources = sources.to_h { |path, text| [File.expand_path(path.to_s), text] }
         paths = (Array(files).map { |path| source_key(File.expand_path(path.to_s), sources) } + sources.keys).uniq
         found = Set.new
+        names = Set.new
         paths.each do |path|
-          break if found.size == VENDORED_DIRS.size
-
-          found.merge(sources.key?(path) ? features_of(sources[path]) : memoized_features_in(path))
+          features, declared = sources.key?(path) ? scan_source(sources[path]) : memoized_scan_in(path)
+          found.merge(features)
+          names.merge(declared)
         end
         prune_memo(paths)
-        found.to_a.sort.freeze
+        relevant(found, names.merge(sig_names(sig_paths))).sort.freeze
       end
 
-      # @return path (absolute) => the features that file requires, for every file under the configured paths
-      #   that requires any. A long-lived reader (the language server) keeps this and overlays its open buffers.
+      # @return path (absolute) => `[features, declared names]` ({.scan_source}) for every file under the
+      #   configured paths that has either. A long-lived reader (the language server) keeps this, overlays its open
+      #   buffers and passes the union to {.relevant}.
       def feature_files(configuration)
         listed = Analysis::PathExpansion.ruby_files(configuration.paths, configuration.exclude_patterns,
                                                     base: configuration.exclude_base)
         files = listed.map { |path| File.expand_path(path.to_s) }
         result = files.each_with_object({}) do |path, acc|
-          features = memoized_features_in(path)
-          acc[path] = features unless features.empty?
+          scanned = memoized_scan_in(path)
+          acc[path] = scanned unless scanned.all?(&:empty?)
         end
         prune_memo(files)
         result
       rescue StandardError
         {}
+      end
+
+      # Issue #2174 — `features` with each shipped feature kept only when one of `names` (constant names the
+      # project's source or signatures declare a class or module under) is a root the feature's library declares
+      # ({RubyLibraryRoots}). Only such a feature can open a class (`RbsLoader#ruby_library_reopen?` asks it of a
+      # class every declaration of which is the project's), so dropping the rest changes no diagnostic, and keeps a
+      # `require "json"` edit in a project that reopens no library class out of the incremental snapshot's
+      # fingerprint and the language server's environment key. The listed features ({VENDORED_DIRS}) are kept.
+      def relevant(features, names)
+        return features.to_a if features.all? { |feature| VENDORED_DIRS.key?(feature) }
+
+        segments = names.empty? ? EMPTY_SEGMENTS : library_segments(names)
+        features.select { |feature| VENDORED_DIRS.key?(feature) || segments.include?(feature.split("/").first) }
+      end
+
+      # The feature segments of the libraries that declare one of `names` as a root. Loaded lazily: the roots read
+      # the `rbs` stdlib tree, which a run with no shipped `require` never needs.
+      def library_segments(names)
+        require_relative "ruby_library_roots"
+        roots = RubyLibraryRoots.shared
+        names.each_with_object(Set.new) { |name, acc| acc.merge(roots.fetch(name, EMPTY_SEGMENTS)) }
+      end
+
+      EMPTY_SEGMENTS = [].freeze
+
+      # The constant names the `.rbs` files under `sig_paths` declare a class or module under.
+      def sig_names(sig_paths)
+        Array(sig_paths).each_with_object(Set.new) do |root, acc|
+          next unless File.directory?(root.to_s)
+
+          RootedGlob.glob(root.to_s, "**/*.rbs").each do |path|
+            acc.merge(declared_names(File.binread(path)))
+          rescue SystemCallError, IOError
+            next
+          end
+        end
       end
 
       # Paths are compared expanded, so a relative `--instead-of=lib/a.rb` replaces the configured
@@ -114,8 +195,8 @@ module Rigor
       # build; a long-lived language server on every rebuild), so on the main Ractor each file's answer is kept
       # against its stat and the file is re-read only when the stat moved. A non-main Ractor may not touch the
       # module's state and reads the file every time.
-      def memoized_features_in(path)
-        return features_in(path) unless Ractor.current == Ractor.main
+      def memoized_scan_in(path)
+        return scan_in(path) unless Ractor.current == Ractor.main
 
         stat = File.stat(path)
         stamp = [stat.mtime.to_r, stat.ctime.to_r, stat.size, stat.ino]
@@ -123,12 +204,14 @@ module Rigor
         cached = memo[path]
         return cached.last if cached && cached.first == stamp
 
-        features = features_in(path)
-        memo[path] = [stamp, features]
-        features
+        scanned = scan_in(path)
+        memo[path] = [stamp, scanned]
+        scanned
       rescue SystemCallError
-        []
+        NOTHING
       end
+
+      NOTHING = [[].freeze, [].freeze].freeze
 
       # Keeps the memo to the files the latest scan was asked about, so a long-lived language server holds one
       # entry per project file rather than one per file it ever saw.
@@ -139,28 +222,51 @@ module Rigor
         @memo.select! { |path, _| keep.include?(path) }
       end
 
-      # @return the features one file requires.
-      def features_in(path)
-        features_of(File.binread(path))
+      # @return `[features, declared names]` for one file ({.scan_source}).
+      def scan_in(path)
+        scan_source(File.binread(path))
       rescue SystemCallError, IOError
-        []
+        NOTHING
       end
 
-      # @return the features `source` requires.
+      # @return `[features, declared names]`: what {.features_of} reads, and the constant names a `class` or
+      # `module` header in `source` spells, each segment on its own (`class Net::SMTP` gives `Net` and `SMTP`).
+      def scan_source(source)
+        [features_of(source), declared_names(source)].freeze
+      end
+
+      # A header on a line of its own, or inside a comment (an rbs-inline `# @rbs!` block declares
+      # `#   class Matrix`). Over-matching a comment only keeps more features.
+      HEADER = /^[ \t]*(?:#[ \t]*)?(?:class|module)[ \t]+(?:::)?([A-Z]\w*(?:::[A-Z]\w*)*)/
+
+      def declared_names(source)
+        bytes = source.b
+        return [] unless bytes.include?("class") || bytes.include?("module")
+
+        bytes.scan(HEADER).flat_map { |(name)| name.split("::") }
+             .uniq.map { |name| name.dup.force_encoding(Encoding::UTF_8).freeze }.freeze
+      end
+
+      # @return the features `source` requires: the listed ones ({VENDORED_DIRS}), and, for issue #2174, every
+      # feature Ruby ships ({SHIPPED_SEGMENTS}), which `RbsLoader#ruby_library_reopen?` reads to tell a reopened
+      # library class from a project class of the same name. Only the listed ones become library tokens.
       def features_of(source)
-        # A plain substring test first: almost no file mentions any listed feature, and it is far cheaper than
-        # the regexp on a file that does not.
-        return [] unless VENDORED_DIRS.each_key.any? { |feature| source.include?(feature) }
+        # A plain substring test first: a file with no `require` at all is the common case, and it is far cheaper
+        # than the regexp on a file that has none.
+        return [] unless source.include?("require")
 
         bytes = source.b
         named = []
         position = 0
-        while (match = PATTERN.match(bytes, position))
+        while (match = ANY_FEATURE.match(bytes, position))
           named << match[2] unless commented?(bytes, match.begin(0))
           position = match.end(0)
         end
-        # The table's own frozen keys, so the result is shareable across Ractors whatever the source's encoding.
-        VENDORED_DIRS.each_key.select { |feature| named.include?(feature) }
+        # The table's own frozen keys, and frozen copies of the rest, so the result is shareable across Ractors
+        # whatever the source's encoding.
+        listed = VENDORED_DIRS.each_key.select { |feature| named.include?(feature) }
+        shipped = named.select { |feature| SHIPPED_SEGMENTS.include?(feature.split("/").first) }
+        (listed + shipped.map { |feature| feature.dup.force_encoding(Encoding::UTF_8).freeze }).uniq
       end
 
       # Whether the match at `offset` sits on a line whose first non-blank character is `#`: a whole-line comment.
@@ -176,7 +282,8 @@ module Rigor
       # The library tokens for `features` and for any listed feature the configuration's `libraries:` names.
       def tokens(features, configured_libraries)
         configured = Array(configured_libraries).map(&:to_s).select { |name| VENDORED_DIRS.key?(name) }
-        (Array(features) | configured).sort.map { |feature| token(feature) }
+        listed = Array(features).select { |feature| VENDORED_DIRS.key?(feature) }
+        (listed | configured).sort.map { |feature| token(feature) }
       end
 
       def token(feature)

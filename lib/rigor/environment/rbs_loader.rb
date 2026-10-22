@@ -10,6 +10,7 @@ require_relative "member_consistency"
 require_relative "required_features"
 require_relative "gated_signature_guard"
 require_relative "gated_signature_plan"
+require_relative "ruby_library_roots"
 require_relative "../rooted_glob"
 
 module Rigor
@@ -1653,9 +1654,10 @@ module Rigor
       #   arity. Read back by the env-cache producer, which rebuilds the env from the loader's readers on
       #   a miss — a list it cannot read is a stand-down that runs only on a `--no-cache` build.
       def initialize(libraries: [], signature_paths: [], cache_store: nil, virtual_rbs: [],
-                     deferred_signature_paths: [])
+                     deferred_signature_paths: [], project_signature_paths: [], required_features: [])
         @libraries = libraries.map(&:to_s).freeze
         @signature_paths = signature_paths.map { |p| Pathname(p) }.freeze
+        assign_reopen_inputs(project_signature_paths, required_features)
         # Issue #610 — the subset of `signature_paths:` a bundled PLUGIN contributed. Loaded last and
         # allowed to stand down against a colliding generic arity ({.add_deferred_signatures}). Every entry
         # is also in `@signature_paths`, so the env cache descriptor already digests these files.
@@ -1811,12 +1813,75 @@ module Rigor
       def inline_only_entry?(entry, virtual_names, project_files)
         return false if virtual_names.empty?
 
+        project_authored_entry?(entry, virtual_names, project_files)
+      end
+      private :inline_only_entry?
+
+      # Every declaration of `entry` sits in a project `sig/` file or in RBS synthesized from the project's
+      # source; a declaration whose buffer cannot be attributed fails the test.
+      def project_authored_entry?(entry, virtual_names, project_files)
         buffers = self.class.entry_declarations(entry).map { |decl| self.class.declaration_buffer_name(decl) }
         return false if buffers.empty? || buffers.any?(&:nil?)
 
         buffers.all? { |name| virtual_names.include?(name) || project_files.include?(File.absolute_path(name)) }
       end
-      private :inline_only_entry?
+      private :project_authored_entry?
+
+      # Issue #2174 — true when every RBS declaration of `class_name` is the project's own (rbs-inline `#:`
+      # annotations, or a file under the configured `signature_paths:`) and its root constant belongs to a library
+      # Ruby ships ({RubyLibraryRoots}) that the project's source requires ({RequiredFeatures.features_of}). Such
+      # a declaration reopens a library class whose real signatures did not load (`class Matrix` with one
+      # annotated method beside `require "matrix"`, and no `matrix` RBS), so it lists only the methods the
+      # project added: the class's surface is not enumerable from it, and a call it omits is not evidence of an
+      # undefined method. A library whose RBS did load contributes a declaration of its own (core, stdlib, a gem's
+      # `sig/`, an rbs collection, a plugin's `sig/`), which takes the class out of this predicate. A project
+      # class that shares a required library's root name declines too; that is the accepted cost.
+      def ruby_library_reopen?(class_name)
+        name = class_name.to_s.delete_prefix("::")
+        return false if @required_features.empty? || !project_authored_classes.include?(name)
+
+        segments = ruby_library_roots[name.split("::").first]
+        !segments.nil? && @required_features.any? { |feature| segments.include?(feature.split("/").first) }
+      end
+
+      def ruby_library_roots
+        @state[:ruby_library_roots] ||= RubyLibraryRoots.shared
+      end
+
+      # Issue #2174 — the subset of `signature_paths:` the user configured (every entry is also in
+      # `@signature_paths`), and the features the project's source requires: read only by
+      # {#ruby_library_reopen?}.
+      def assign_reopen_inputs(project_signature_paths, required_features)
+        @project_signature_paths = project_signature_paths.map { |p| Pathname(p) }.freeze
+        @required_features = required_features.map { |feature| feature.to_s.dup.freeze }.freeze
+      end
+      private :assign_reopen_inputs
+      private :ruby_library_roots
+
+      # The class / module names every one of whose declarations is the project's own
+      # ({#project_authored_entry?}, which {#inline_only_entry?} asks behind its inline-only gate).
+      def project_authored_classes
+        @state[:project_authored_classes] ||= build_project_authored_classes
+      end
+      private :project_authored_classes
+
+      def build_project_authored_classes
+        environment = env
+        return Set.new.freeze if environment.nil?
+
+        # Only the user's configured `signature_paths:`: `@signature_paths` also holds plugin, gem-shipped,
+        # rbs-collection and overlay directories, whose declarations are a library's own.
+        project_files = self.class.project_sig_files(@project_signature_paths)
+        virtual_names = @virtual_rbs.to_set(&:first)
+        return Set.new.freeze if project_files.empty? && virtual_names.empty?
+
+        environment.class_decls.each_with_object(Set.new) do |(rbs_name, entry), acc|
+          acc << rbs_name.to_s.delete_prefix("::") if project_authored_entry?(entry, virtual_names, project_files)
+        end.freeze
+      rescue ::RBS::BaseError
+        Set.new.freeze
+      end
+      private :build_project_authored_classes
 
       # Issue #527 — the class / module names whose PRIMARY declaration lives in the `rbs` gem's own
       # `core/` or `stdlib/` tree, top-level prefix stripped.

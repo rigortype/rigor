@@ -120,8 +120,12 @@ module Rigor
           return if qualified_prefix.empty?
           return unless call_node.receiver.nil? || call_node.receiver.is_a?(Prism::SelfNode)
 
+          # A literal with bytes no Symbol can hold (`before_action "\xff"`, #1821) names no method; skip it.
           names = (call_node.arguments&.arguments || []).filter_map do |argument|
-            argument.unescaped.to_sym if argument.is_a?(Prism::SymbolNode) || argument.is_a?(Prism::StringNode)
+            next unless argument.is_a?(Prism::SymbolNode) || argument.is_a?(Prism::StringNode)
+
+            text = argument.unescaped
+            text.to_sym if text.valid_encoding?
           end
           return if names.empty?
 

@@ -505,7 +505,8 @@ module Rigor
         return unless hash.is_a?(Prism::KeywordHashNode)
 
         pair = hash.elements.find do |element|
-          element.is_a?(Prism::AssocNode) && element.key.is_a?(Prism::SymbolNode) && element.key.unescaped.to_sym == name
+          element.is_a?(Prism::AssocNode) && element.key.is_a?(Prism::SymbolNode) &&
+            element.key.unescaped.to_sym == name
         end
         pair&.value
       end

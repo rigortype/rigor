@@ -43,7 +43,7 @@ RSpec.describe "a callee chain that mutates an argument floors it (#2104)" do
     Dir.mktmpdir("rigor-callee-chain-") { |dir| Dir.chdir(dir) { example.run } }
   end
 
-  undefined_upcase = [[8, "call.undefined-method"]].freeze
+  let(:undefined_upcase) { [[8, "call.undefined-method"]] }
 
   it "floors an argument a two-level chain mutates" do
     expect(diagnostics(<<~RUBY)).to eq([])
@@ -153,31 +153,31 @@ RSpec.describe "a callee chain that mutates an argument floors it (#2104)" do
       def poke(acc) = (acc[0] = "x")
     RUBY
   end
-end
 
-RSpec.describe "the content-mutated parameter effects surface (#2104)" do
-  it "reports a mutated keyword parameter by its keyword, after the positions" do
-    def_node = Prism.parse(<<~RUBY).value.statements.body.first
-      def fill(a, b, into:, also:)
-        a << 1
-        also << 1
-        into[0] = 1
-      end
-    RUBY
-    evaluator = Rigor::Inference::StatementEvaluator.new(scope: Rigor::Scope.empty)
-    expect(evaluator.content_mutated_parameter_positions(def_node)).to eq([0, :also, :into])
+  describe "the content-mutated parameter effects surface" do
+    it "reports a mutated keyword parameter by its keyword, after the positions" do
+      def_node = Prism.parse(<<~RUBY).value.statements.body.first
+        def fill(a, b, into:, also:)
+          a << 1
+          also << 1
+          into[0] = 1
+        end
+      RUBY
+      evaluator = Rigor::Inference::StatementEvaluator.new(scope: Rigor::Scope.empty)
+      expect(evaluator.content_mutated_parameter_positions(def_node)).to eq([0, :also, :into])
+    end
   end
-end
 
-RSpec.describe "the effects surface counts a forwarded parameter without resolving the callee (#2104)" do
-  it "reports a parameter handed on to a self-call the empty scope cannot resolve" do
-    def_node = Prism.parse(<<~RUBY).value.statements.body.first
-      def stripes(acc, n, kept)
-        poke(n, acc)
-        kept.size
-      end
-    RUBY
-    evaluator = Rigor::Inference::StatementEvaluator.new(scope: Rigor::Scope.empty)
-    expect(evaluator.content_mutated_parameter_positions(def_node)).to eq([0, 1])
+  describe "the effects surface for a forwarded parameter" do
+    it "reports a parameter handed on to a self-call the empty scope cannot resolve" do
+      def_node = Prism.parse(<<~RUBY).value.statements.body.first
+        def stripes(acc, n, kept)
+          poke(n, acc)
+          kept.size
+        end
+      RUBY
+      evaluator = Rigor::Inference::StatementEvaluator.new(scope: Rigor::Scope.empty)
+      expect(evaluator.content_mutated_parameter_positions(def_node)).to eq([0, 1])
+    end
   end
 end

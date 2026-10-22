@@ -6,6 +6,7 @@ require_relative "../inference/project_seed_tables"
 require_relative "../cache/incremental_snapshot"
 require_relative "../analysis/path_expansion"
 require_relative "../analysis/buffer_binding"
+require_relative "../scope"
 
 module Rigor
   module Protection
@@ -112,6 +113,17 @@ module Rigor
 
         tables_for_buffer(paths: respell_for_buffer(paths, buffer), bundles: bundles, buffer: buffer,
                           constant_sources: true)
+      end
+
+      # Issue #512 — the single-file scope over `environment`, carrying the {#from_snapshot} tables when there are
+      # any. A class another project file declares then reads as `rigor check` types it; without a reusable
+      # snapshot the scope is the bare one a probe always had.
+      def snapshot_scope(environment, configuration, buffer: nil)
+        scope = Scope.empty(environment: environment)
+        seed = from_snapshot(configuration: configuration, buffer: buffer)
+        return scope if seed.nil? || seed.empty?
+
+        scope.with_discovery(scope.discovery.with(**seed))
       end
 
       # The configured file list with the entry that reaches `buffer`'s file respelled as the buffer's logical

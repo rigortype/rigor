@@ -126,9 +126,11 @@ module Rigor
           ((@macro_arguments[qualified_prefix.join("::")] ||= {})[call_node.name] ||= []).concat(names)
         end
 
-        # A Symbol / String literal's name. A literal with bytes no Symbol can hold (`before_action "\xff"`,
-        # #1821) names no method, so it answers nil.
+        # A Symbol / String literal's name, or the name of a `def` passed inline (`helper_method def
+        # current_user … end`). A literal with bytes no Symbol can hold (`before_action "\xff"`, #1821) names no
+        # method, so it answers nil.
         def literal_method_name(argument)
+          return argument.name if argument.is_a?(Prism::DefNode) && argument.receiver.nil?
           return nil unless argument.is_a?(Prism::SymbolNode) || argument.is_a?(Prism::StringNode)
 
           text = argument.unescaped

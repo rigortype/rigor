@@ -198,6 +198,82 @@ RSpec.describe "def.ivar-write-mismatch on per-invocation classes (ADR-125)" do
     expect(mismatches(files)).to eq([["roles.rb", 9]])
   end
 
+  it "still reports a helper_method declared inline around its def" do
+    files = controller(<<~RUBY)
+      def index
+        @roles = [1, 2]
+        current_roles
+      end
+
+      helper_method def current_roles
+        @roles = { a: 1 }
+      end
+    RUBY
+    expect(mismatches(files)).to eq([["roles.rb", 8]])
+  end
+
+  it "still reports a helper_method declared through a self. receiver" do
+    files = controller(<<~RUBY)
+      self.helper_method :current_roles
+
+      def index
+        @roles = [1, 2]
+      end
+
+      def current_roles
+        @roles = { a: 1 }
+      end
+    RUBY
+    expect(mismatches(files)).to eq([["roles.rb", 9]])
+  end
+
+  it "still reports a before_action target named by a String" do
+    files = controller(<<~RUBY)
+      before_action "load_roles"
+
+      def index
+        @roles = [1, 2]
+      end
+
+      def load_roles
+        @roles = { a: 1 }
+      end
+    RUBY
+    expect(mismatches(files)).to eq([["roles.rb", 9]])
+  end
+
+  it "is silent when a macro the plugin does not declare names an action" do
+    files = controller(<<~RUBY)
+      track_usage :permissions
+
+      def index
+        @roles = [1, 2]
+      end
+
+      def permissions
+        @roles = { a: 1 }
+      end
+    RUBY
+    expect(mismatches(files)).to eq([])
+  end
+
+  # Issue #1821's shape: a literal no Symbol can hold names no method, and must not crash the collector.
+  it "does not raise on a macro argument with invalid bytes, with or without the plugin" do
+    body = <<~RUBY
+      before_action "\\xff"
+
+      def index
+        @roles = [1, 2]
+      end
+
+      def show
+        @roles = { a: 1 }
+      end
+    RUBY
+    expect(mismatches(controller(body))).to eq([])
+    expect(mismatches(controller(body), plugins: [])).to eq([["roles.rb", 9]])
+  end
+
   it "still reports an action whose visibility a conditional define_method leaves unsettled" do
     files = controller(<<~RUBY)
       def index

@@ -225,7 +225,9 @@ SIG_PROVENANCE_RESIDUE = {
   "sig/rigor/effects/effect_table.rbs" => 5,
   # -1 (#1181 collection-side slice): `Envelope#tolerates?` reads `Summary::TRIVIAL_BOUND`, and
   # `Summary` being declared lets sig-gen resolve the reference it could not name before.
-  "sig/rigor/effects/envelope.rbs" => 1,
+  # -1 (#1153): an empty-collection early return no longer leaves a stray `[]` arm beside an `Array[E]` arm,
+  # so the declared `Array[...]` now matches what sig-gen proposes.
+  "sig/rigor/effects/envelope.rbs" => 0,
   "sig/rigor/effects/envelope_index.rbs" => 2,
   # New file (#1181 collection-side slice): `Edge` members/constructors are #1150-marked and the
   # five attr_readers #1154-marked; the sole unmarked row is `empty?` (unrenderable).
@@ -257,7 +259,9 @@ SIG_PROVENANCE_RESIDUE = {
   # the bundle tables — not parameters — so they pin unmarked beside `trivial?` (unrenderable).
   "sig/rigor/effects/summary.rbs" => 3,
   "sig/rigor/effects/taint_cause.rbs" => 0,
-  "sig/rigor/environment.rbs" => 39,
+  # -3 (#1153): an empty-collection early return no longer leaves a stray `[]` arm beside an `Array[E]` arm,
+  # so the declared `Array[...]` now matches what sig-gen proposes.
+  "sig/rigor/environment.rbs" => 36,
   # -1 (#1429): a value-position `case` now types each arm under the subject's `when` narrowing, so
   # `ExpressionTyper#type_of_virtual`'s `when AST::TypeNode then node.type` arm reads `node` as the node class
   # and its return renders.
@@ -281,7 +285,9 @@ SIG_PROVENANCE_RESIDUE = {
   # -1 (#1529 auditor fix): the join is now kind-aware. `Base#manifest` (instance, the no-arg reader) used to
   # join the singleton `def manifest(**fields)` candidate first-wins and read as unrenderable; it now joins its
   # own instance candidate, which is generated-equivalent.
-  "sig/rigor/plugin/base.rbs" => 20,
+  # -3 (#1153): an empty-collection early return no longer leaves a stray `[]` arm beside an `Array[E]` arm,
+  # so the declared `Array[...]` now matches what sig-gen proposes.
+  "sig/rigor/plugin/base.rbs" => 17,
   "sig/rigor/plugin/blueprint.rbs" => 3,
   "sig/rigor/plugin/fact_store.rbs" => 2,
   # -2 (#720): `file?` / `directory?` are `probe(path) { … }`, and the block's `bool` now reaches the
@@ -303,14 +309,18 @@ SIG_PROVENANCE_RESIDUE = {
   # `effect_contributions` readers are unmarked residue — `compile_aggregates` /
   # `compile_effect_contributions` build the ivars with `flat_map`/`filter_map` (memoised for the
   # latter), not from `initialize` parameters, so no gap issue covers them;
-  # `contracts_for_path` is declared-divergent (sig-gen infers the `path.nil?` `[]` arm
-  # separately). `Contribution`'s members and constructors are #1150-marked.
-  "sig/rigor/plugin/registry.rbs" => 13,
+  # `contracts_for_path` left residue under #1153 (its `path.nil?` `[]` arm is now absorbed).
+  # `Contribution`'s members and constructors are #1150-marked.
+  # -1 (#1153): an empty-collection early return no longer leaves a stray `[]` arm beside an `Array[E]` arm,
+  # so the declared `Array[...]` now matches what sig-gen proposes.
+  "sig/rigor/plugin/registry.rbs" => 12,
   # -1 (#1181 slice): `read_effect_envelope` now returns `Effects::Envelope?`, which sig-gen proves
   # through the `build_*_envelope` helpers — no longer residue. -1 (#1390): `read_return_type_override`'s
   # block `return` now reaches its inferred return, which matches the declared `Type::t?`.
   "sig/rigor/rbs_extended.rbs" => 21,
-  "sig/rigor/reflection.rbs" => 8,
+  # -1 (#1153): an empty-collection early return no longer leaves a stray `[]` arm beside an `Array[E]` arm,
+  # so the declared `Array[...]` now matches what sig-gen proposes.
+  "sig/rigor/reflection.rbs" => 7,
   # +1 (#1412): `singleton_def_through_ancestors` walks `until queue.empty?; current = queue.shift; …;
   # enqueue_ancestors(current, queue, …)`. The loop body now enters with `queue` at its unknown-store
   # widening, and a callee store floors it to `Array[untyped]`, as straight-line code after the same call

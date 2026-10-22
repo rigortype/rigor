@@ -1,0 +1,2 @@
+- **[sig-gen]** An empty-collection early return (`return [] if table.empty?`) no longer leaves a stray `[]` arm beside an `Array[E]` arm, so `Array[String] | []` is proposed as `Array[String]`. ([#2298](https://github.com/rigortype/rigor/pull/2298))
+  - A lone `[]` return, and `[]` beside a non-`Array` arm such as a `String`, are proposed as before.

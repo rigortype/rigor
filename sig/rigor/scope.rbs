@@ -361,8 +361,8 @@ module Rigor
     def data_member_layout: (String | Symbol class_name) -> Array[Symbol]?
     def struct_member_layout: (String | Symbol class_name) -> { members: Array[Symbol], keyword_init: bool }?
     def includes_of: (String | Symbol class_name) -> Array[String]
-    # sig-gen gap: #1153 — sig-gen proposes `Array[untyped] | []` off the empty-table early return, so the
-    # element type is hand-written, matching {#includes_of}.
+    # sig-gen gap: #2302 — `names = []` grown by `concat` reads `Array[untyped]`, so the element type is
+    # hand-written, matching {#includes_of}.
     def singleton_extends_of: (String | Symbol class_name) -> Array[String]
     def indexed_narrowing: (Symbol receiver_kind, String | Symbol receiver_name, untyped key) -> Type::t?
     def with_indexed_narrowing: (Symbol receiver_kind, String | Symbol receiver_name, untyped key, Type::t type) -> Scope

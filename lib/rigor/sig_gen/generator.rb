@@ -471,17 +471,19 @@ module Rigor
         base_scope.with_discovery(base_scope.discovery.with(**@ivar_writer_tables))
       end
 
+      # #1406 — sig-gen keeps the census's own answer: a declared ivar type read back would echo the declaration.
+      def index_file(root, base_scope)
+        Inference::ScopeIndexer.index(
+          root, default_scope: base_scope, ivar_writer_scope: ivar_writer_scope(base_scope), declared_ivar_types: false
+        )
+      end
+
       def analyse_file(path, environment)
         source = File.read(path)
         parse_result = Prism.parse(source, filepath: path, version: @configuration.target_ruby)
         return [] if parse_result.errors.any?
 
-        base_scope = Scope.empty(environment: environment)
-        writers = ivar_writer_scope(base_scope)
-        # #1406 — sig-gen keeps the census's own answer: a declared ivar type read back would echo the declaration.
-        scope_index = Inference::ScopeIndexer.index(
-          parse_result.value, default_scope: base_scope, ivar_writer_scope: writers, declared_ivar_types: false
-        )
+        scope_index = index_file(parse_result.value, Scope.empty(environment: environment))
 
         reset_file_maps
         @meta_layouts = collect_meta_layouts(scope_index)

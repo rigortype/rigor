@@ -9,9 +9,12 @@ module Rigor
     # the receiver of (`(while …).itself`), each narrowing and rule that types that operand. Each such typing of a
     # loop nested in another loop re-ran the inner loop's passes, once more per level of nesting.
     #
-    # The record is reused only for a scope equal to the one the loop was evaluated from, so it answers exactly what
-    # an evaluation would. It lives in a per-thread map whose keys are held weakly, so a record goes when its parse
-    # tree does.
+    # The record is reused only for the very scope object the loop was evaluated from, so it answers exactly what an
+    # evaluation would. It is not compared with `Scope#==`, which ignores several fields (`match_frame`,
+    # `declared_refinements`, `struct_fold_safe_locals`, the opaque-block flags, `lexical_nesting`, the origins tables,
+    # `discovery`): across the cost spec's 10933 reads every match was an identity match, and `lib/` read no record at
+    # all (issue #2262). It lives in a per-thread map whose keys are held weakly, so a record goes when its parse tree
+    # does.
     module LoopValueRecord
       KEY = :rigor_loop_value_record
       private_constant :KEY
@@ -23,13 +26,13 @@ module Rigor
         type
       end
 
-      # The recorded value of `node` evaluated from a scope equal to `scope`, or nil.
+      # The recorded value of `node` evaluated from `scope` itself, or nil.
       def fetch(node, scope)
         slot = Thread.current[KEY]&.[](node)
         return nil if slot.nil?
 
         recorded, type = slot
-        recorded.equal?(scope) || recorded == scope ? type : nil
+        recorded.equal?(scope) ? type : nil
       end
     end
   end

@@ -47,7 +47,9 @@ RSpec.describe "Set element types", type: :runner do
     expect(out.join).not_to include("Set[1, 2]")
   end
 
+  # `Set[0, *xs]` holds the members of `xs`; reading the splat's array as one more member would add a class the set
+  # does not hold. The call stays at the RBS tier's answer.
   it "does not read a splat as one member" do
-    expect(dumped("dump_type(Set[*ARGV])")).not_to eq(["Set[Array[String]]"])
+    expect(dumped("xs = [x, n]\ndump_type(Set[0, *xs])")).to eq(["Set[Dynamic[top]]"])
   end
 end

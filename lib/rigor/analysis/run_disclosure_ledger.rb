@@ -16,15 +16,19 @@ module Rigor
     # notice from every file's hook, so crediting the rows to every registering file would re-analyse all of them on
     # any edit to an input the plugin read (one view edit re-analysed 400 of 400 files in an app with one i18n view
     # row). Instead a recheck finds the identities whose rows went stale, re-analyses ONE live registering file for
-    # each (the first by path), withholds those identities' replays, and afterwards gives every other registering file
-    # the record that file registered this run, or drops the identity from them when it registered none.
+    # each (the first by path), and withholds those identities' replays. When that file registers the identity, every
+    # other holder takes its record. When it registers nothing — the edit took the notice out of its text, it no
+    # longer parses, the plugin raised — the recheck cannot tell whether the identity is gone, so it runs again with
+    # every other live holder of the identity analysed ({#unresolved_holders}), and the identity is dropped only if
+    # none of them registers it either.
     #
-    # That rests on the identity being file-independent, which {Plugin::Base#disclose_once} asks of a key (it must not
-    # vary between workers). A plugin whose registration of one key depends both on an input it read and on the
-    # registering file's own text breaks it: when the input changes so that the re-analysed file stops registering the
-    # key while another holder would still register it, the key is dropped from that holder until it is re-analysed.
-    # Only inputs read through the plugin's boundary are tracked; state a plugin carries across files, or an input it
-    # reads around the boundary (`ENV`, a direct `File.read`), can leave a replayed row that never clears.
+    # One shape stays unsound: a key whose registration or record depends both on an input the plugin read and on the
+    # registering file's own text. When the input changes and the chosen file still registers the key, the other
+    # holders take its record even where, re-analysed, they would register another record or none, until each is
+    # re-analysed itself. {Plugin::Base#disclose_once} asks a key not to vary between workers, which rules it out for a
+    # plugin that keeps the contract. Only inputs read through the plugin's boundary are tracked; state a plugin carries
+    # across files, or an input it reads around the boundary (`ENV`, a direct `File.read`), can leave a replayed row
+    # that never clears.
     class RunDisclosureLedger
       attr_reader :files, :reads
 
@@ -70,7 +74,26 @@ module Rigor
         holders.values.to_set
       end
 
-      # The records to replay for `paths`, without the `stale` identities.
+      # The live holders, outside `analyzed`, of every `stale` identity no file in `analyzed` registered in `fresh`:
+      # the files that must be analysed when the chosen refresher registered nothing. Analysing every one of them
+      # settles the identity, since every holder has then decided it afresh.
+      def unresolved_holders(fresh, analyzed, stale, removed)
+        return Set.new if stale.empty?
+
+        registered = analyzed.flat_map { |path| Array(fresh[path]).map { |record| RunDisclosureCredit.identity(record) } }
+        unresolved = stale - registered
+        return Set.new if unresolved.empty?
+
+        @files.each_with_object(Set.new) do |(path, records), holders|
+          next if removed.include?(path) || analyzed.include?(path)
+
+          holders << path if records.any? { |record| unresolved.include?(RunDisclosureCredit.identity(record)) }
+        end
+      end
+
+      # The records to replay for `paths`, without the `stale` identities. Unpinned defence: a stale identity's replay
+      # cannot reach the output today, since a refresher that registers it wins over the replay and one that does not
+      # sends every holder into the second pass.
       def served(paths, stale = Set.new)
         @files.values_at(*paths).compact.flatten(1).reject do |record|
           stale.include?(RunDisclosureCredit.identity(record))

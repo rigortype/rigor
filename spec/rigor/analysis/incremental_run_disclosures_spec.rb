@@ -33,6 +33,8 @@ RSpec.describe "IncrementalSession: run-scoped plugin disclosures replay on a re
   end
 
   let(:cache_root) { File.join(Dir.pwd, ".rigor", "cache") }
+  # Callables each `incremental_run` hands its fresh session to before running it.
+  let(:session_hooks) { [] }
 
   let(:notice_plugin) do
     Class.new(Rigor::Plugin::Base) do
@@ -101,6 +103,7 @@ RSpec.describe "IncrementalSession: run-scoped plugin disclosures replay on a re
       configuration: configuration, cache_store: Rigor::Cache::Store.new(root: cache_root),
       plugin_requirer: requirer, workers: workers
     )
+    session_hooks.each { |hook| hook.call(session) }
     diagnostics, warm = guarded_run_incremental(
       session, snapshot: Rigor::Cache::IncrementalSnapshot.new(root: cache_root), fingerprint: fingerprint
     )
@@ -156,8 +159,14 @@ RSpec.describe "IncrementalSession: run-scoped plugin disclosures replay on a re
         expect(notices(diagnostics)).to be_empty
       end
 
-      it "reports the new message when the input changes but stays broken" do
+      it "reports the new message when the input changes but stays broken, and on the rerun after" do
         diagnostics, = recheck_after(workers: workers) { write("state.txt", "worse\n") }
+        expect(notices(diagnostics)).to eq(["notice: state is worse"])
+        diagnostics, affected = recheck_after(workers: workers) { nil }
+        expect(affected).to be_empty
+        expect(notices(diagnostics)).to eq(["notice: state is worse"])
+        # The other holders took the refreshed record, so it survives the refresher's removal.
+        diagnostics, = recheck_after(workers: workers) { FileUtils.rm_f("lib/alpha.rb") }
         expect(notices(diagnostics)).to eq(["notice: state is worse"])
       end
     end
@@ -230,6 +239,52 @@ RSpec.describe "IncrementalSession: run-scoped plugin disclosures replay on a re
     diagnostics, affected = recheck_after { source("alpha", "legacyx") }
     expect(affected).to eq(Set["lib/alpha.rb"])
     expect(notices(diagnostics)).to eq(["notice: legacyx code present"])
+  end
+
+  # The first holder by path is the one chosen to refresh a stale key. When it registers nothing, the key's other
+  # holders decide it, in a second pass over the closure.
+  describe "a stale key whose chosen refresher registers nothing" do
+    it "keeps a batch when the chosen file stops parsing in the same edit as the input" do
+      write("state.txt", "view-a\n")
+      write("views/a.erb", "p\n")
+      incremental_run
+      diagnostics, affected = recheck_after do
+        write("lib/alpha.rb", "class Alpha\n  def go = (\nend\n")
+        write("views/a.erb", "q\n")
+      end
+      expect(affected).to include("lib/bravo.rb", "lib/charlie.rb")
+      expect(notices(diagnostics)).to eq(["notice: view-a q", "notice: state is view-a"])
+    end
+
+    it "keeps a key the chosen file's edit took out of its text when another holder still registers it" do
+      write("state.txt", "fine\n")
+      source("alpha", "legacy")
+      source("bravo", "legacy")
+      incremental_run
+      diagnostics, = recheck_after do
+        source("alpha", "1")
+        write("state.txt", "fine \n")
+      end
+      expect(notices(diagnostics)).to eq(["notice: legacy code present"])
+    end
+
+    it "never chooses a removed file, so one pass over the closure settles the key" do
+      incremental_run
+      passes = 0
+      session_hooks << lambda do |session|
+        allow(session).to receive(:run_closure).and_wrap_original do |method, *args|
+          passes += 1
+          method.call(*args)
+        end
+      end
+      diagnostics, affected = recheck_after do
+        FileUtils.rm_f("lib/alpha.rb")
+        write("state.txt", "worse\n")
+      end
+      expect(passes).to eq(1)
+      expect(affected).to include("lib/bravo.rb")
+      expect(notices(diagnostics)).to eq(["notice: state is worse"])
+    end
   end
 
   it "records no batch registered empty" do

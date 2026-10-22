@@ -300,14 +300,17 @@ module Rigor
         param_files, param_pairs = param_seed_invalidation(fresh_params)
         affected = affected_closure(changed, added, removed, param_files, param_pairs)
         forced, analyze_set = forced_analyze_set(affected, current)
-        reused = (current & previous) - analyze_set.to_a
-        # The freshly collected table is handed to the runner so the run seeds from the SAME table the diff
-        # was decided on (and the collector runs once per recheck, not twice). The reused files' cached rows
-        # go in too, so the runner lists them in the full run's file order (#1524).
-        runner = build_runner(analyze_only: analyze_set, record_dependencies: true,
-                              param_inferred_types: fresh_params, **forced_target_options(forced),
-                              restored_run_level_rows: @run_level_rows, **served_state(reused))
-        merged = run_runner(runner).diagnostics
+        runner, merged, reused = run_closure(analyze_set, current, previous, forced, fresh_params)
+        # Issue #2020 — a stale run-scoped key whose chosen refresher registered nothing (a parse error, a plugin that
+        # raised, a hook that did not run) is decided by its other holders, so they join and the closure runs again.
+        fallback = @plugin_disclosures.unresolved_holders(runner.analysis_disclosures, analyze_set, @stale_disclosures,
+                                                          removed.to_set)
+        unless fallback.empty?
+          affected = (affected | fallback).freeze
+          @stale_plugin_readers |= fallback
+          forced, analyze_set = forced_analyze_set(affected, current)
+          runner, merged, reused = run_closure(analyze_set, current, previous, forced, fresh_params)
+        end
         return rebaseline_recheck(changed, added, removed) if served_effects_stale?(runner, reused)
 
         absorb(runner, current, analyze_set, removed)
@@ -315,6 +318,19 @@ module Rigor
         recheck_result(merged, [changed, added, removed], affected: affected, reused: reused.to_set, runner: runner,
                                                           stale_readers: @stale_plugin_readers)
       end
+
+      # One narrowed run of {#recheck}'s closure: the runner, its merged rows, and the files it served. The freshly
+      # collected table is handed to the runner so the run seeds from the SAME table the diff was decided on (and the
+      # collector runs once per recheck, not twice). The reused files' cached rows go in too, so the runner lists them
+      # in the full run's file order (#1524).
+      def run_closure(analyze_set, current, previous, forced, fresh_params)
+        reused = (current & previous) - analyze_set.to_a
+        runner = build_runner(analyze_only: analyze_set, record_dependencies: true,
+                              param_inferred_types: fresh_params, **forced_target_options(forced),
+                              restored_run_level_rows: @run_level_rows, **served_state(reused))
+        [runner, run_runner(runner).diagnostics, reused]
+      end
+      private :run_closure
 
       # Editor mode option B (#146) — a whole-project recheck with the editor's buffer substituted for one
       # file, for the CLI's `--incremental --tmp-file=X --instead-of=Y`. Returns the {Recheck} when the

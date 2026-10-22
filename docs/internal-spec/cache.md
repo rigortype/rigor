@@ -1359,20 +1359,28 @@ every row registered from a hook, and the next unchanged run reported none of th
   A `--verify-incremental` partition replays them the same way.
 - **Staleness.** A recheck validates each `[plugin id, key]`'s rows, and for
   every one with a row that no longer validates it puts ONE live registering
-  file (the first by path) into the closure and withholds the key's replays.
-  After the run, every other file that held the key takes the record that file
-  registered, or drops the key when it registered none, so a fixed input stops
-  being reported on the warm run. A re-analysed file's records are replaced by
-  this run's; a removed file's are dropped. Re-analysing one registrant rather
-  than all of them keeps an edit to an input the plugin read (one view
-  template, under rigor-rails-i18n's view batch) from re-analysing every file
-  that registered the key.
-- **Bounds.** The refresh relies on a key being file-independent, which
-  `#disclose_once` asks of it. A plugin whose registration of one key depends
-  both on an input it read and on the registering file's own text can lose the
-  key from a holder that would still register it, until that holder is
-  re-analysed. Only inputs read through the plugin's boundary are tracked: state
-  a plugin carries across files (`@seen ||= …`) or an input it reads around the
+  file (the first by path, never a removed one) into the closure and withholds
+  the key's replays. When that file registers the key, every other file that
+  held it takes that record. When it registers nothing (an edit took the
+  notice out of its text, the file no longer parses, the plugin raised), the
+  recheck runs the closure again with every other live holder of the key
+  added, and the key is dropped only if none of them registers it. A fixed
+  input therefore stops being reported on the warm run. A re-analysed file's
+  records are replaced by this run's; a removed file's are dropped.
+  Re-analysing one registrant rather than all of them keeps an edit to an
+  input the plugin read (one view template, under rigor-rails-i18n's view
+  batch) from re-analysing every file that registered the key.
+- **Bounds.** One shape stays unsound: a key whose registration or record
+  depends both on an input the plugin read and on the registering file's own
+  text. When the input changes and the chosen file still registers the key,
+  the other holders take its record even where, re-analysed, they would
+  register another record or none, until each is re-analysed itself. A key
+  that depends on the file's text alone is not affected: a holder that stops
+  registering it is the edited file, re-analysed in any case, and the second
+  pass settles the others. `#disclose_once` asks a key not to vary between
+  workers, which rules this shape out for a plugin that keeps the contract.
+  Only inputs read through the plugin's boundary are tracked: state a plugin
+  carries across files (`@seen ||= …`) or an input it reads around the
   boundary (`ENV`, a direct `File.read`) can leave a replayed row that never
   clears. Both are contract misuse (ADR-2).
 - **Pool.** Each fork worker records its files' records and marshals them back

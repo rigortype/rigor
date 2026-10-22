@@ -61,7 +61,7 @@ file as the method. Actions defined in a concern module and
 Two shapes stay silent because their macros are not listed: a public
 method named by `rescue_from X, with: :handler` or by `layout :method_name`
 counts as an action, as does one a lambda callback
-(`before_action -> { load_roles }`) reaches.
+(`before_action -> { load_roles }`) reaches ([#2320](https://github.com/rigortype/rigor/issues/2320) tracks the fix).
 
 These shapes stay silent:
 

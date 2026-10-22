@@ -120,7 +120,7 @@ the declarations state.
     because only literal names count: a Symbol, a String or an inline `def`;
   - a public method named by `rescue_from X, with: :handler` or `layout :method_name`, because neither macro
     is in `per_invocation_non_action_macros:`. It counts as an action, though it runs inside whichever
-    action raised or rendered.
+    action raised or rendered (follow-up: #2320).
 - **Known limits that keep firing.** These are conservative:
   - a private helper that genuinely runs in only one action (proving helper reach, option A2 in #575, is
     deferred);

@@ -43,8 +43,9 @@ RSpec.describe Rigor::Inference::MethodDispatcher::SetFolding do
       expect(result.value).to eq(Set["hello", 42, :sym])
     end
 
-    it "declines when any argument is non-Constant" do
-      expect(fold(:[], c(:a), Rigor::Type::Combinator.nominal_of("Symbol"))).to be_nil
+    it "types a non-Constant argument by element rather than folding (#2278)" do
+      result = fold(:[], c(:a), Rigor::Type::Combinator.nominal_of("Symbol"))
+      expect(result).to eq(Rigor::Type::Combinator.nominal_of("Set", type_args: [Rigor::Type::Combinator.nominal_of("Symbol")]))
     end
   end
 
@@ -70,10 +71,10 @@ RSpec.describe Rigor::Inference::MethodDispatcher::SetFolding do
       expect(result.value).to eq(Set.new)
     end
 
-    it "declines when the tuple contains a non-Constant element" do
+    it "types a tuple with a non-Constant element by element rather than folding (#2278)" do
       non_const = Rigor::Type::Combinator.nominal_of("Integer")
       arg = tuple(c(1), non_const)
-      expect(fold(:new, arg)).to be_nil
+      expect(fold(:new, arg)).to eq(Rigor::Type::Combinator.nominal_of("Set", type_args: [non_const]))
     end
 
     it "declines when the single argument is not a Tuple" do

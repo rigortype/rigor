@@ -22,9 +22,7 @@ Two smaller calls rode along. A registry-only scan returns the empty index when 
 
 (a), with the text prefilter and the `Object` filter, as the smallest change that makes the tier reachable and says nothing more than the project's RBS declares. The environment is built only when a loaded plugin registers a trait registry, so Tier C and the nested-class tier are unchanged. Tier B still emits nothing for a module the project's RBS does not declare, which is the case for every real Devise project today (the gem ships no RBS and Rigor bundles none); bundling `Devise::Models::*` signatures is a separate decision this PR does not take. No default changes for a project that does not load a trait-registry plugin.
 
-## Round-1 review calls
-
-The adversarial review's fixes left four calls open; each took the conservative side.
+**Round-1 review calls.** The adversarial review's fixes left four calls open; each took the conservative side.
 
 - **Shadowing (S1): decline at the scanner, ignoring `include` order.** A Tier B entry is not emitted for a name the class body declares (`def`, `alias` / `alias_method`, `attr_*`, `define_method`, `delegate`, any reopening) or a project module it includes or prepends declares (through that module's own mixins, matched by name or `::`-suffix). Ruby lets a module included *before* `devise` lose to the Devise module; the scanner declines it anyway rather than model MRO order, so the call falls to the tiers that answered it before Tier B was reachable. Alternative: a dispatcher-side guard consulting the discovered-method tables first, which keeps the index honest for `plugin_member_answers?` and the arity rule only if each consumer learns the same rule. Undo: drop `decline_project_declared`.
 - **Module surface (M2, m3).** A trait-module method is kept only when its `defined_in` is the module or one of its own `include` / `prepend` ancestors, and only when public. This replaces the `Object`-owner filter and covers self-typed modules. Keeping private methods with their visibility was the alternative; skipping says less.

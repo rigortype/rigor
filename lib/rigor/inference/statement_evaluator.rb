@@ -14,6 +14,7 @@ require_relative "block_call_timing"
 require_relative "block_repetition"
 require_relative "block_parameter_binder"
 require_relative "body_fixpoint"
+require_relative "callee_mutation_chain"
 require_relative "captured_locals"
 require_relative "dynamic_origin"
 require_relative "error_info"
@@ -454,19 +455,28 @@ module Rigor
         [type, fall_through, join_jump_scopes(fall_through, sink, JumpTargets.of(body, Prism::NextNode))]
       end
 
-      # ADR-89 WD2 — the sorted positions of the positional parameters whose CONTENT `def_node` mutates
+      # ADR-89 WD2 — the sorted slots of the parameters (positional, then keyword) whose CONTENT `def_node` mutates
       # (`callee_content_mutated_parameters`, the ADR-56 arg-flooring surface a caller consumes). A per-def
       # static property of the AST — this is a pure exposure of the existing private computation (it never
       # reads the scope), so the incremental session can compute it on any `StatementEvaluator` (an empty
       # scope suffices), persist it in a return summary, and re-check a callee's symbol dependents when it
       # moves (a caller's arg flooring changes even if the callee's return does not).
+      #
+      # Issue #2104 — a mutated keyword parameter reports its keyword symbol, after the positions. A parameter the
+      # def hands on to a self-call counts whether or not the callee resolves: the session's empty scope resolves no
+      # callee, and without it an edit that starts or stops forwarding a parameter to a mutating callee would leave
+      # the effects equal and the callers' floors stale.
       def content_mutated_parameter_positions(def_node)
-        callee_content_mutated_parameters(def_node).values.uniq.sort
+        slots = content_parameter_slots(def_node)
+        census = callee_content_mutated_parameters(def_node).values
+        each_forwarding_call(def_node, slots) { |_, forwarded| census += forwarded.map { |name, _| slots[name] } }
+        positions, keywords = census.uniq.partition { |slot| slot.is_a?(Integer) }
+        positions.sort + keywords.sort
       end
 
-      # The local-variable reads among `call_node`'s positional arguments whose matching parameter the callee
-      # content-mutates, when `call_node` is a self-dispatch call resolving to a user def in this evaluator's scope
-      # (`callee_content_mutated_parameters`); empty for any other call. These are the locals the straight-line
+      # The local-variable reads among `call_node`'s arguments (positional, or a keyword's value) whose parameter the
+      # callee content-mutates, when `call_node` is a self-dispatch call resolving to a user def in this evaluator's
+      # scope (`callee_content_mutated_parameters`); empty for any other call. These are the locals the straight-line
       # callee floor ({#widen_callee_escaped_argument_captures}) floors after the call, and the ones
       # {CapturedLocals.content_mutations} reports as a block's callee-mutated captures.
       def content_mutated_arguments(call_node)
@@ -482,10 +492,23 @@ module Rigor
         return NO_ARGUMENT_READS if mutated.empty?
 
         argument_nodes = call_node.arguments.arguments
-        mutated.values.uniq.filter_map do |index|
-          argument = argument_nodes[index]
+        mutated.values.uniq.filter_map do |slot|
+          argument = slot.is_a?(Symbol) ? keyword_argument(argument_nodes, slot) : argument_nodes[slot]
+          argument = argument.value if argument.is_a?(Prism::ImplicitNode)
           argument if argument.is_a?(Prism::LocalVariableReadNode)
         end
+      end
+
+      # The value `argument_nodes` pass for the keyword `name` (`poke(acc: a)`), or nil.
+      def keyword_argument(argument_nodes, name)
+        hash = argument_nodes.last
+        return unless hash.is_a?(Prism::KeywordHashNode)
+
+        pair = hash.elements.find do |element|
+          element.is_a?(Prism::AssocNode) && element.key.is_a?(Prism::SymbolNode) &&
+            element.key.unescaped.to_sym == name
+        end
+        pair&.value
       end
 
       NO_ARGUMENT_READS = [].freeze
@@ -4414,13 +4437,137 @@ module Rigor
         end
       end
 
-      # The `{ name => position }` positional parameters whose content the callee mutates, from either channel: those
-      # escape-mutated inside a block (which may run later / repeatedly) AND those mutated directly in the method body
-      # during the call itself (`declaration[:prefix] = v`). Both leave the caller's argument binding stale after the
-      # call, so both floor it. Memoised per def node (the merge is otherwise recomputed at every call site).
+      # The `{ name => slot }` parameters whose content the callee mutates, a slot being a positional index or a
+      # keyword symbol: those it mutates itself ({#own_content_parameters}) and, issue #2104, those it passes on to a
+      # self-call whose callee mutates them, through any number of such hand-offs ({CalleeMutationChain}). Each leaves
+      # the caller's argument binding stale after the call, so each floors it. Memoised per def node (the closure is
+      # otherwise recomputed at every call site).
       def callee_content_mutated_parameters(def_node)
         cache = (@callee_mutated_param_cache ||= {}.compare_by_identity)
-        cache[def_node] ||= escaped_content_parameters(def_node).merge(direct_content_parameters(def_node))
+        cache[def_node] ||= CalleeMutationChain.close(def_node, own: method(:own_content_parameters),
+                                                                edges: method(:forwarding_edges))
+      end
+
+      # The parameters `def_node` mutates itself, from either channel: those escape-mutated inside a block (which may
+      # run later / repeatedly) AND those mutated directly in the method body during the call itself
+      # (`declaration[:prefix] = v`). A property of the def's AST alone, so it is memoised per def node for the thread
+      # ({#def_census}) rather than per evaluator: a chain reads its callees' census from every evaluator that floors a
+      # call into it.
+      def own_content_parameters(def_node)
+        def_census(:own, def_node) { escaped_content_parameters(def_node).merge(direct_content_parameters(def_node)) }
+      end
+
+      # Issue #2104 — the per-thread memo of a census that reads nothing but `def_node`'s AST, under `kind`.
+      def def_census(kind, def_node)
+        table = (Thread.current[DEF_CENSUS_KEY] ||= ObjectSpace::WeakKeyMap.new)
+        entry = (table[def_node] ||= {})
+        entry.fetch(kind) { entry[kind] = yield }
+      end
+
+      DEF_CENSUS_KEY = :rigor_callee_def_census
+      private_constant :DEF_CENSUS_KEY
+
+      # Issue #2104 — the {CalleeMutationChain::Edge}s along which `def_node` hands one of its parameters, unchanged, to
+      # a self-call resolving to a user def: a positional argument or a keyword value that reads the parameter itself
+      # (not a block-local shadowing it), in the method body or a block in it. The callee resolves in this evaluator's
+      # class, the receiver's class at every hop of a self-call chain. Memoised per def node.
+      def forwarding_edges(def_node)
+        cache = (@forwarding_edge_cache ||= {}.compare_by_identity)
+        cache[def_node] ||= compute_forwarding_edges(def_node)
+      end
+
+      def compute_forwarding_edges(def_node)
+        slots = content_parameter_slots(def_node)
+        edges = []
+        each_forwarding_call(def_node, slots) do |call_node, forwarded|
+          callee = resolve_self_callee_def(call_node)
+          next if callee.nil?
+
+          callee_slots = content_parameter_slots(callee)
+          forwarded.each do |name, callee_slot|
+            names = bound_parameter_names(callee_slots, callee_slot)
+            next if names.empty?
+
+            edges << CalleeMutationChain::Edge.new(name: name, slot: slots[name], callee: callee, callee_names: names)
+          end
+        end
+        edges.empty? ? NO_FORWARDS : edges
+      end
+
+      # Yields each self-call in `def_node`'s body that hands on one of `slots`' parameters, with
+      # {#forwarded_parameters}' answer for it. The calls are an AST property, memoised per def node ({#def_census}).
+      def each_forwarding_call(def_node, slots, &)
+        return if slots.empty?
+
+        def_census(:forwards, def_node) { forwarding_calls(def_node, slots) }.each(&)
+      end
+
+      def forwarding_calls(def_node, slots)
+        calls = []
+        each_node_in_method_scope(def_node.body, 0) do |descendant, depth|
+          next unless self_dispatch_call?(descendant)
+
+          forwarded = forwarded_parameters(descendant, slots, depth)
+          calls << [descendant, forwarded] unless forwarded.empty?
+        end
+        calls.empty? ? NO_FORWARDS : calls
+      end
+
+      NO_FORWARDS = [].freeze
+      private_constant :NO_FORWARDS
+
+      # `[[parameter_name, callee_slot], ...]` for the arguments of `call_node` that read one of `slots`' parameters at
+      # `depth`, the block nesting the call sits at: a read of the method's own parameter there has that depth. An
+      # argument after a splat or `...` has an index that says nothing about the parameter it binds, so it binds
+      # {ANY_SLOT}, any positional parameter of the callee; one before the first splat keeps its index.
+      def forwarded_parameters(call_node, slots, depth)
+        args = call_node.arguments
+        return NO_FORWARDS unless args.is_a?(Prism::ArgumentsNode)
+
+        spread = false
+        forwarded = []
+        args.arguments.each_with_index do |argument, index|
+          if argument.is_a?(Prism::KeywordHashNode)
+            forwarded.concat(forwarded_keywords(argument, slots, depth))
+          elsif argument.is_a?(Prism::SplatNode) || argument.is_a?(Prism::ForwardingArgumentsNode)
+            spread = true
+          elsif (name = parameter_read_name(argument, slots, depth))
+            forwarded << [name, spread ? ANY_SLOT : index]
+          end
+        end
+        forwarded
+      end
+
+      # The `callee_slot` of an argument whose parameter the call does not show (one after a splat).
+      ANY_SLOT = :__any_positional__
+      private_constant :ANY_SLOT
+
+      # The names of the callee's parameters (`callee_slots`, {#content_parameter_slots}) an argument bound to `slot`
+      # may reach: the one at that slot, or every positional one for {ANY_SLOT}.
+      def bound_parameter_names(callee_slots, slot)
+        if slot == ANY_SLOT
+          callee_slots.filter_map { |name, at| name if at.is_a?(Integer) }
+        else
+          callee_slots.filter_map { |name, at| name if at == slot }
+        end
+      end
+
+      def forwarded_keywords(hash_node, slots, depth)
+        hash_node.elements.filter_map do |pair|
+          next unless pair.is_a?(Prism::AssocNode) && pair.key.is_a?(Prism::SymbolNode)
+
+          name = parameter_read_name(pair.value, slots, depth)
+          [name, pair.key.unescaped.to_sym] if name
+        end
+      end
+
+      # The parameter `node` reads when it is a read of one of `slots`' names at `depth` (a keyword shorthand
+      # `poke(acc:)` wraps the read in an `ImplicitNode`), else nil.
+      def parameter_read_name(node, slots, depth)
+        node = node.value if node.is_a?(Prism::ImplicitNode)
+        return unless node.is_a?(Prism::LocalVariableReadNode) && node.depth == depth
+
+        node.name if slots.key?(node.name)
       end
 
       # The user def a self-dispatch `node` resolves to in the enclosing class, or nil. Reuses the discovery index
@@ -4439,7 +4586,7 @@ module Rigor
         node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode)
       end
 
-      # The set of `[name, position]` parameters of `def_node` whose content a block in the body escape-mutates.
+      # The set of `[name, slot]` parameters of `def_node` whose content a block in the body escape-mutates.
       # Memoised per def node (the body walk is otherwise repeated at every call site). A parameter is "escape- mutated"
       # when a `param[k] = v` / `param << x` mutation on it appears inside a block whose receiving call is not proven
       # non-escaping.
@@ -4449,7 +4596,7 @@ module Rigor
       end
 
       def compute_escaped_content_parameters(def_node)
-        positions = positional_parameter_positions(def_node)
+        positions = content_parameter_slots(def_node)
         return {} if positions.empty?
 
         mutated = Set.new
@@ -4464,18 +4611,22 @@ module Rigor
         positions.slice(*mutated)
       end
 
-      # The `{ name => position }` positional parameters whose CONTENT the callee mutates directly in its method body —
-      # a top-level `param[k] = v` / `param << x`, outside a nested block. Memoised per def node. The block-nested case
-      # is `escaped_content_parameters`'s job; walking only outside nested blocks / defs / lambdas here means a matching
+      # The `{ name => slot }` parameters whose CONTENT the callee mutates directly in its method body — a top-level
+      # `param[k] = v` / `param << x`, outside a nested block. Memoised per def node. The block-nested case is
+      # `escaped_content_parameters`'s job; walking only outside nested blocks / defs / lambdas here means a matching
       # parameter-name read is genuinely at method scope (depth 0) rather than a block-local of the same name that
       # merely shadows the parameter — so we never floor a caller argument the callee did not actually mutate.
+      #
+      # A mutation inside a NON-escaping block (`n.times { |i| acc[i] = v }`) is not counted: the bare-collection floor
+      # it would apply turned haml's `AttributeCompiler#compile` (a `temple` array a helper fills in a `times` block,
+      # returned against a declared tuple) into a `def.return-type-mismatch` (af3efef33, and again under #2104).
       def direct_content_parameters(def_node)
         cache = (@direct_param_cache ||= {}.compare_by_identity)
         cache[def_node] ||= compute_direct_content_parameters(def_node)
       end
 
       def compute_direct_content_parameters(def_node)
-        positions = positional_parameter_positions(def_node)
+        positions = content_parameter_slots(def_node)
         return {} if positions.empty?
 
         mutated = Set.new
@@ -4500,6 +4651,43 @@ module Rigor
         end
       end
 
+      # Yields every node reachable from `node` with the number of blocks it sits in: a read of the method's own local
+      # there has that depth. A nested def or lambda is not entered: a def has no access to the method's locals, and a
+      # lambda body is not run by the call. Nor is the block of a {#self_rebinding_block_call?}: a self-call there
+      # either runs on another `self`, or runs later as a method body, so the walk leaves it out.
+      def each_node_in_method_scope(node, depth, &)
+        return if node.nil?
+
+        yield node, depth
+        rebinding = self_rebinding_block_call?(node)
+        node.rigor_each_child do |child|
+          next if child.is_a?(Prism::DefNode) || child.is_a?(Prism::LambdaNode)
+
+          if child.is_a?(Prism::BlockNode)
+            each_node_in_method_scope(child, depth + 1, &) unless rebinding
+          else
+            each_node_in_method_scope(child, depth, &)
+          end
+        end
+      end
+
+      # The calls whose block the hand-off walk leaves out. In an `instance_eval` / `class_exec` / … block, and in a
+      # `Class.new` / `Module.new` / `Struct.new` / `Data.define` block ({AnonymousMetaClass.block_form_receiver}),
+      # `self` is another object, so a self-call there is not a call on the method's receiver. A `define_method` or
+      # `define_singleton_method` block keeps an instance of the class as `self`, but it is a method body that runs
+      # later, if ever, so leaving it out is the conservative reading: a hand-off it holds is not one the call makes.
+      SELF_REBINDING_BLOCK_CALLS = Set[
+        :instance_eval, :instance_exec, :class_eval, :class_exec, :module_eval, :module_exec, :define_method,
+        :define_singleton_method
+      ].freeze
+      private_constant :SELF_REBINDING_BLOCK_CALLS
+
+      def self_rebinding_block_call?(node)
+        return false unless node.is_a?(Prism::CallNode) && node.block.is_a?(Prism::BlockNode)
+
+        SELF_REBINDING_BLOCK_CALLS.include?(node.name) || !AnonymousMetaClass.block_form_receiver(node).nil?
+      end
+
       # A receiver-independent over-approximation of `ClosureEscapeAnalyzer`'s non-escaping verdict, used when scanning
       # a callee body where the block- owning call's receiver TYPE is not available. A call whose method name is a known
       # structural iterator (`each` / `map` / `tap` / …) runs its block synchronously and does not retain it, so its
@@ -4520,18 +4708,20 @@ module Rigor
         SYNTACTIC_NON_ESCAPING_BLOCK_METHODS.include?(call_node.name)
       end
 
-      # `{ name => position }` for the required / optional positional parameters of a def. Keyword / rest / block
-      # parameters are skipped — the boundary-escape idiom passes a plain positional collection.
-      def positional_parameter_positions(def_node)
+      # `{ name => slot }` for the parameters a caller's argument binds by name or position: the required / optional
+      # positional ones (slot: their index) and, issue #2104, the keyword ones (slot: the keyword symbol). Rest, post
+      # and block parameters are skipped.
+      def content_parameter_slots(def_node)
         params = def_node.parameters
         return {} if params.nil?
 
         ordered = (params.requireds || []) + (params.optionals || [])
-        positions = {}
+        slots = {}
         ordered.each_with_index do |param, index|
-          positions[param.name] = index if param.respond_to?(:name)
+          slots[param.name] = index if param.respond_to?(:name)
         end
-        positions
+        (params.keywords || []).each { |param| slots[param.name] = param.name }
+        slots
       end
 
       # True when at least one argument of `node` is a bare local-variable read (positional or keyword value) bound in
@@ -4547,9 +4737,10 @@ module Rigor
             scope.locals.key?(arg.name)
           when Prism::KeywordHashNode
             arg.elements.any? do |pair|
-              pair.is_a?(Prism::AssocNode) &&
-                pair.value.is_a?(Prism::LocalVariableReadNode) &&
-                scope.locals.key?(pair.value.name)
+              next false unless pair.is_a?(Prism::AssocNode)
+
+              value = pair.value.is_a?(Prism::ImplicitNode) ? pair.value.value : pair.value
+              value.is_a?(Prism::LocalVariableReadNode) && scope.locals.key?(value.name)
             end
           else
             false

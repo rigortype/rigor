@@ -230,7 +230,7 @@ SIG_PROVENANCE_RESIDUE = {
   # New file (#1181 collection-side slice): `Edge` members/constructors are #1150-marked and the
   # five attr_readers #1154-marked; the sole unmarked row is `empty?` (unrenderable).
   "sig/rigor/effects/file_collection.rbs" => 1,
-  "sig/rigor/effects/label.rbs" => 5,
+  "sig/rigor/effects/label.rbs" => 4,
   "sig/rigor/effects/label_set.rbs" => 8,
   "sig/rigor/effects/method_key.rbs" => 3,
   "sig/rigor/effects/origin.rbs" => 0,
@@ -336,7 +336,7 @@ SIG_PROVENANCE_RESIDUE = {
   # `when Constant then type.value.is_a?(String)` arms of `Combinator#literal_string_compatible?`,
   # `#non_empty_string_compatible?` and `#non_zero_int_compatible?` read `type` as the carrier the `when` names
   # rather than `untyped`, and each `bool` return renders.
-  "sig/rigor/type.rbs" => 208
+  "sig/rigor/type.rbs" => 206
 }.freeze
 
 module SigProvenanceSpecHelpers

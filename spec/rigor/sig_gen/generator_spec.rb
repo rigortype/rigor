@@ -562,6 +562,59 @@ RSpec.describe Rigor::SigGen::Generator do
     end
   end
 
+  # Issue #1149 — the Hash analogue: a frozen empty fallback (`table[key] || {}`, `return {} if ...`) types its
+  # arm `{}`, which is a `Hash[K, V]` for every `K, V`. Absorbed only beside a `Hash` nominal and only when the
+  # shape is the empty closed one; the Array case above must not absorb it, nor this one absorb `[]`.
+  describe "an empty-hash early return beside a Hash arm" do
+    def rbs_of(body, name)
+      path = write_fixture("lib/walker.rb", "class Walker\n#{body}\nend\n")
+      generator(paths: [path]).run.find { it.method_name == name }.rbs
+    end
+
+    it "absorbs the empty hash shape into the Hash arm" do
+      rbs = rbs_of("def h(x)\n return {} if x.nil?\n ENV.to_h\nend", :h)
+
+      expect(rbs).to eq("def h: (untyped) -> Hash[untyped, untyped]")
+    end
+
+    it "keeps a lone empty hash shape" do
+      expect(rbs_of("def none = {}", :none)).to eq("def none: () -> {}")
+    end
+
+    it "keeps the empty hash shape beside a non-Hash nominal arm" do
+      rbs = rbs_of("def s\n return {} if rand > 0.5\n ENV.keys.first.to_s\nend", :s)
+
+      expect(rbs).to eq("def s: () -> (String | {})")
+    end
+
+    it "keeps the empty hash shape beside an Array arm, and the empty tuple beside a Hash arm" do
+      expect(rbs_of("def a(x)\n return {} if x.nil?\n ENV.keys\nend", :a))
+        .to eq("def a: (untyped) -> (Array[String] | {})")
+      expect(rbs_of("def b(x)\n return [] if x.nil?\n ENV.to_h\nend", :b))
+        .to eq("def b: (untyped) -> (Hash[untyped, untyped] | [])")
+    end
+
+    it "keeps a non-empty hash shape beside a Hash arm" do
+      rbs = rbs_of("def t(x)\n return { a: 1 } if x.nil?\n ENV.to_h\nend", :t)
+
+      expect(rbs).to eq("def t: (untyped) -> (Hash[untyped, untyped] | { a: 1 })")
+    end
+
+    it "keeps an open empty hash shape beside a Hash arm" do
+      hash = Rigor::Type::Combinator.nominal_of("Hash", type_args: [Rigor::Type::Combinator.untyped, Rigor::Type::Combinator.untyped])
+      open_empty = Rigor::Type::HashShape.new({}, extra_keys: :open)
+      union = Rigor::Type::Combinator.union(hash, open_empty)
+
+      expect(generator(paths: []).send(:absorb_empty_literals, union)).to equal(union)
+    end
+
+    it "keeps the empty hash shape beside another shape arm" do
+      rbs = rbs_of("def pair(x)\n return {} if x.nil?\n { a: 1 }\nend", :pair)
+
+      expect(rbs).to eq("def pair: (untyped) -> ({ a: 1 } | {})")
+    end
+  end
+
   # Ruby keeps the last definition of a name, so sig-gen writes one entry per method slot: a `def` and an
   # `attr_reader` of the same name, or a `module_function` name redefined after a reset, gave RBS a duplicate
   # method definition (#2008, #2023). Each example builds the written declaration with RBS's DefinitionBuilder

@@ -347,7 +347,11 @@ SIG_PROVENANCE_RESIDUE = {
   # `includes_of`) come from master's sig-gen fixes, not from this change: they already rendered as
   # `declared_divergent` (dropping `| nil` or adding `| []`) and match the declaration since #2249 (the lookup
   # keeps its nil) and #2298 (the empty early return is absorbed).
-  "sig/rigor/scope.rbs" => 69,
+  # -4 (#1148, #1149): `class_cvars_for` and `class_ivars_for` end `Hash[...] | {}`, and the empty `{}` arm is now
+  # absorbed beside the `Hash` arm (the Hash analogue of #2298), so both render and match. `opaque_block_self` and
+  # `opaque_block_self?` read an ivar `initialize` assigns from a parameter; the `initialize` declaration now names
+  # that keyword (and `block_self_unknown:` / `singleton_class_body:`), so they render (#1154's mechanism).
+  "sig/rigor/scope.rbs" => 65,
   "sig/rigor/sig_gen/skip_reason_catalog.rbs" => 8,
   "sig/rigor/source.rbs" => 4,
   "sig/rigor/testing.rbs" => 4,

@@ -6,8 +6,8 @@ require "rigor/analysis/edit_replay"
 # Issue #1967 — the edits `--verify-incremental-edits` replays on a sampled file.
 RSpec.describe Rigor::Analysis::EditReplay do
   describe ".skeleton" do
-    it "keeps nested class and module headers, superclasses included, and drops every body statement" do
-      source = <<~RUBY
+    let(:nested_source) do
+      <<~RUBY
         require "set"
 
         module Outer
@@ -29,8 +29,10 @@ RSpec.describe Rigor::Analysis::EditReplay do
           refine(String) { def x = 1 }
         end
       RUBY
+    end
 
-      expect(described_class.skeleton(source)).to eq(<<~RUBY)
+    let(:nested_skeleton) do
+      <<~RUBY
         module Outer
           class Base < Struct.new(:a)
           end
@@ -42,6 +44,10 @@ RSpec.describe Rigor::Analysis::EditReplay do
         class Top
         end
       RUBY
+    end
+
+    it "keeps nested class and module headers, superclasses included, and drops every body statement" do
+      expect(described_class.skeleton(nested_source)).to eq(nested_skeleton)
     end
 
     it "answers empty for a file that declares nothing or does not parse" do

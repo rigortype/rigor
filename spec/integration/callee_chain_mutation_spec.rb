@@ -127,11 +127,15 @@ RSpec.describe "a callee chain that mutates an argument floors it (#2104)" do
     RUBY
   end
 
-  it "keeps the literal shape through a recursive chain that never mutates" do
+  it "keeps the literal shape through a recursive chain that never mutates, and terminates" do
+    # With the closure's visited check removed, this run took about a minute and still answered the same diagnostics,
+    # so the time is the assertion that the closure terminates.
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     expect(diagnostics(<<~RUBY)).to eq(undefined_upcase)
       def stripes(acc) = walk(acc, 3)
       def walk(acc, n) = n.zero? ? acc.size : walk(acc, n - 1)
     RUBY
+    expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < 20
   end
 
   it "does not read a block parameter that shadows the forwarded parameter as the parameter" do

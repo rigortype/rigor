@@ -21,4 +21,4 @@
 - 2321  # sig-gen leaves an ivar assigned from an expression derived from an `initialize` parameter (`dup.freeze`, `to_sym`, `map`) untyped
 - 2322  # `filter_map` answers `Array[untyped]` with a typed receiver and block
 - 2323  # sig-gen cannot type `Inference::MatchRebinding::Frame`, so `Scope`'s `match_frame` and its closure predicates are hand-written
-- 2325  # sig-gen cannot type a reader whose constructor or helper parameter is declared `untyped` or undeclared (coercion-facing inputs)
+- 2326  # an ivar `Hash.new` memo store slot (`@state[:k] ||= build`) reads as `Dynamic[top]`, so the reader over it is skipped

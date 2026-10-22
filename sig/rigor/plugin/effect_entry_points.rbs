@@ -4,13 +4,16 @@ module Rigor
     # framework entry points (ADR-103 WD6). Frozen value object; {#globs} are deduplicated and
     # sorted in `initialize`.
     class EffectEntryPoints
-      # sig-gen gap: #2325 — `initialize` declares `name:` `untyped` (coercion-facing, looks deliberate: it takes
+      # sig-gen gap: #2321 — `initialize` declares `name:` `untyped` (input `untyped`, looks deliberate; a declared
+      # type is authoring intent tracked by #2325, and only then does this row generate; coercion-facing: it takes
       # anything that answers `to_s`), so no input type reaches the reader.
       attr_reader name: String
-      # sig-gen gap: #2325 — `globs:` is `untyped` (coercion-facing, looks deliberate: `Array(globs)`, each `to_s`),
+      # sig-gen gap: #2321 — `globs:` is `untyped` (input `untyped`, looks deliberate; a declared type is authoring
+      # intent tracked by #2325, and only then does this row generate; coercion-facing: `Array(globs)`, each `to_s`),
       # deduplicated and sorted in `initialize`.
       attr_reader globs: Array[String]
-      # sig-gen gap: #2325 — `why:` is `untyped` (coercion-facing, looks deliberate: `to_s`).
+      # sig-gen gap: #2321 — `why:` is `untyped` (input `untyped`, looks deliberate; a declared type is authoring
+      # intent tracked by #2325, and only then does this row generate; coercion-facing: `to_s`).
       attr_reader why: String
 
       def initialize: (name: untyped, globs: untyped, ?why: untyped) -> void

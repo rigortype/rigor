@@ -81,7 +81,7 @@ module Rigor
       def singleton_extended_module_names: (String | Symbol class_name) -> Array[String]
       def constant_type: (String name) -> Type::t?
       def constant_names: () -> Array[String]
-      # sig-gen gap: #160 — the answer is `global_declarations[name.to_sym]&.first`, a lookup in the loader's memo
+      # sig-gen gap: #2326 — the answer is `global_declarations[name.to_sym]&.first`, a lookup in the loader's memo
       # hash `@state`, which sig-gen skips as untyped.
       def global_type: (String | Symbol name) -> Type::t?
       def each_known_class_name: () { (String name) -> void } -> void

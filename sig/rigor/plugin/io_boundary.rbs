@@ -8,9 +8,10 @@ class Rigor::Plugin::IoBoundary
   # Records a `:names` glob row (membership only); a caller needing a match's content `read_file`s it. A `..`
   # segment, a brace or a backslash in `pattern` raises `AccessDeniedError`.
   def glob: (untyped root, untyped pattern) -> Array[String]
-  # sig-gen gap: #2325 — the proposal leaves both string fields untyped. `nearest_root` comes from `@policy`, a bare
-  # assignment of the `policy:` parameter, declared `untyped` above (the policy's own `initialize` is all `untyped`);
-  # `first_path` comes from `@first_refused_path`, written from `record_refusal(path)`, whose parameter is undeclared.
+  # sig-gen gap: #2312 — the proposal leaves both string fields untyped. `nearest_root` comes from `@policy`, a bare
+  # assignment of the `policy:` parameter, declared `untyped` above (a `TrustPolicy`; typing it is authoring work,
+  # tracked by #2325); `first_path` comes from `@first_refused_path`, written from the private `record_refusal(path)`,
+  # whose parameter is undeclared.
   def refusal_summary: () -> { count: Integer, first_path: String?, nearest_root: String? }?
   def open_url: (untyped url) -> String
   # Returns a frozen `Rigor::Cache::Descriptor` (no RBS yet -> untyped).

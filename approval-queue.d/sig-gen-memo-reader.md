@@ -1,4 +1,4 @@
-# The statement form of a memoizing index `||=` yields the rvalue but records the stored union
+# The statement form of a memoizing index `||=` yields the rvalue's class, with literal precision erased
 
 - **PR:** [#2288](https://github.com/rigortype/rigor/pull/2288)
 - **Issue:** [#1155](https://github.com/rigortype/rigor/issues/1155)
@@ -8,17 +8,18 @@
 
 ## Background
 
-`x = (tbl[k] ||= {})` bound `x` to `Dynamic[top] | {}` while the value-position typer already read the memoizing `||=` as the rvalue. Aligning the statement handler's yielded value fixes #1155, but the handler also records the result as an indexed narrowing and feeds the `[]=` widening, and the issue did not say whether those should take the rvalue too.
+`x = (tbl[k] ||= {})` bound `x` to `Dynamic[top] | {}` in the statement handler, while the value-position typer read the memoizing `||=` as the rvalue. The internal spec had explicitly kept `Dynamic[top] | v` for the statement handler. Aligning the two fixes #1155 but reverses that earlier design, and the first attempt (yield the literal rvalue) made later reads treat the slot as freshly created: `entry[:name].upcase` reported a call on nil (review of PR #2288).
 
 ## Options and trade-offs
 
-- Yield the memo reading and keep the stored union for the widening and narrowing record: a later plain read of the slot is unchanged, so no new certainty is introduced beyond the binding the value-position typer already gave.
-- Yield and record the rvalue everywhere: simpler, but a later `tbl[k]` would read the rvalue alone for a slot the analyzer has no evidence about, a wider change than the issue needs.
+- Keep the statement handler's union: no false positives, but a nested memo table's reader stays `untyped` and sig-gen skips it (#1155 stays open).
+- Yield the literal rvalue: fixes sig-gen but spreads error-level false positives into ordinary memo code, since the slot may hold what another call stored.
+- Yield the rvalue's class with literal precision erased (taken): a `new(...)` / nominal rvalue binds as itself, `{}` / `[]` become `Hash[untyped, untyped]` / `Array[untyped]`, and any other rvalue (Constant, union) keeps `Dynamic | v`. This introduces new certainty only about the class of a fresh construction or container, and none about its contents.
 
 ## Decision
 
-The first option: the conservative one, as it changes only the yielded value.
+The third option, per the coordinator's ruling in the PR review. The widening and the narrowing record keep the stored union. The spec paragraph in `inference-engine.md` now records the reversal and the erase rule.
 
 ## To undo
 
-Revert the one-line change in `StatementEvaluator#eval_index_or_write` and restore the three `sig/rigor/type.rbs` markers and the `1155` allow-list row.
+Revert `StatementEvaluator#memo_bound_value` to yield the stored type, and restore the three `sig/rigor/type.rbs` markers and the `1155` allow-list row.

@@ -16,9 +16,10 @@ RSpec.describe "index `||=` bound to a local (memoization idiom)", type: :runner
     end.first
   end
 
-  it "binds the local to the rvalue when the slot read is wholly gradual" do
-    # Runtime: the slot is absent, so `x` is the new `{}`.
-    expect(dumped_type(<<~RUBY)).to eq("{}")
+  it "binds the local to the rvalue's class when the slot read is wholly gradual" do
+    # Runtime: the slot is absent, so `x` is the new `{}`; the literal shape is erased because the table is not
+    # empty after the first store.
+    expect(dumped_type(<<~RUBY)).to eq("Hash[Dynamic[top], Dynamic[top]]")
       class Memo
         class << self
           def table(key)
@@ -55,5 +56,34 @@ RSpec.describe "index `||=` bound to a local (memoization idiom)", type: :runner
         dump_type(x)
       end
     RUBY
+  end
+
+  # S1 (PR #2288 review): the rvalue's literal precision must not leak into later reads of a slot another call filled.
+  describe "later reads of the bound local (no false positives)" do
+    def diagnostics_for(body)
+      analyze(body).diagnostics.reject { |d| d.severity.to_s == "info" }.map { |d| [d.rule, d.message] }
+    end
+
+    {
+      "a hash filled elsewhere" => <<~RUBY,
+        class Registry
+          def initialize = (@by_owner = {})
+          def register(owner, name) = ((@by_owner[owner] ||= {})[:name] = name)
+          def name_of(owner)
+            entry = (@by_owner[owner] ||= {})
+            entry[:name].upcase
+          end
+        end
+      RUBY
+      "an array memo" => "def top(ctx)\n  stack = ctx[:stack] ||= []\n  stack.last.size\nend\n",
+      "a scalar rvalue" => "def a(h, k)\n  x = (h[k] ||= 1)\n  x.upcase\nend\n",
+      "a nested scalar" => "def b(h, k)\n  x = (h[k] ||= {})\n  y = (x[:j] ||= 1)\n  y.upcase\nend\n",
+      "an array first" => "def c(h, k)\n  x = (h[k] ||= [])\n  x.first.upcase\nend\n",
+      "a symbol rvalue" => "def d(h, k)\n  x = (h[k] ||= :a)\n  1 if x == :b\nend\n"
+    }.each do |label, source|
+      it "reports nothing for #{label}" do
+        expect(diagnostics_for(source)).to eq([])
+      end
+    end
   end
 end

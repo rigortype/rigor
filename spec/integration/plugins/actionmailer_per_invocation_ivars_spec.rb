@@ -179,6 +179,23 @@ RSpec.describe "def.ivar-write-mismatch on mailers (ADR-125)" do
     expect(mismatches(files)).to eq([["user_mailer.rb", 9]])
   end
 
+  %w[before_deliver after_deliver around_deliver].each do |macro|
+    it "still reports a public #{macro} target whose write diverges from an action's" do
+      files = mailer(<<~RUBY)
+        #{macro} :record_delivery
+
+        def welcome
+          @status = "str"
+        end
+
+        def record_delivery
+          @status = [1, 2]
+        end
+      RUBY
+      expect(mismatches(files)).to eq([["user_mailer.rb", 9]])
+    end
+  end
+
   it "still reports a public helper_method whose write diverges from an action's" do
     files = mailer(<<~RUBY)
       helper_method :current_items

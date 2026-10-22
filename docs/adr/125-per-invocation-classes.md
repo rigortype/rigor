@@ -117,7 +117,10 @@ the declarations state.
   - a public callback target or `helper_method` named by a macro in another file (a reopening, a concern,
     or `ApplicationController`), because macro arguments are read from the file that holds the writes;
   - a public method a callback reaches through a block or lambda (`before_action -> { load_roles }`),
-    because only literal names count: a Symbol, a String or an inline `def`.
+    because only literal names count: a Symbol, a String or an inline `def`;
+  - a public method named by `rescue_from X, with: :handler` or `layout :method_name`, because neither macro
+    is in `per_invocation_non_action_macros:`. It counts as an action, though it runs inside whichever
+    action raised or rendered.
 - **Known limits that keep firing.** These are conservative:
   - a private helper that genuinely runs in only one action (proving helper reach, option A2 in #575, is
     deferred);

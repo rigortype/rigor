@@ -58,6 +58,11 @@ target or `helper_method`, when the macro naming it sits in the same
 file as the method. Actions defined in a concern module and
 `ActionController::Metal` controllers keep reporting too.
 
+Two shapes stay silent because their macros are not listed: a public
+method named by `rescue_from X, with: :handler` or by `layout :method_name`
+counts as an action, as does one a lambda callback
+(`before_action -> { load_roles }`) reaches.
+
 These shapes stay silent:
 
 - a public method named only by a macro in another file or a

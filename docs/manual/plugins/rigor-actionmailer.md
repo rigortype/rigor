@@ -91,8 +91,21 @@ stays silent when `welcome` assigns `@items = [1, 2]` and `digest` assigns
 and a divergence that involves a private or protected helper, `initialize`, or a
 callback target or `helper_method` that a macro in the same file names.
 
-A method after a bare `protected` is not an action, so it is no longer checked
-for a view template, the same as one after a bare `private`.
+The callback macros include `before_deliver`, `after_deliver` and
+`around_deliver`, which run on the action's own instance.
+
+Two shapes stay silent because their macros are not listed: a public
+method named by `rescue_from X, with: :handler` or by `layout :method_name`
+counts as an action, as does one a lambda callback
+(`before_action -> { load_roles }`) reaches.
+
+Visibility is read in source order, as Rails builds `action_methods` from the
+public instance methods. A method that ends up protected or private is not an
+action: it follows a bare `protected` or `private`, is named by `private :x` or
+`protected :x`, or is defined inline (`private def x`). `public :x` or
+`public def x` makes it one again. So it is no longer checked for a view
+template, and calling it (`UserMailer.helper`) reports `unknown-action` at
+error severity, as Rails raises `NoMethodError` for it.
 
 ## Plugin internals
 

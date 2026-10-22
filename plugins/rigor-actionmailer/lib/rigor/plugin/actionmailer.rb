@@ -69,11 +69,13 @@ module Rigor
         per_invocation_classes: ["ActionMailer::Base"],
         # A public method these macros name is a callback or a view helper, not an action: it runs inside
         # whichever action triggers it (AbstractController::Callbacks / Helpers), so its writes stay compared with
-        # every action's. Same list as rigor-actionpack.
+        # every action's. The actionpack list, plus the `*_deliver` callbacks (ActionMailer::Callbacks), which run
+        # on the action's own instance.
         per_invocation_non_action_macros: %i[
           before_action prepend_before_action append_before_action skip_before_action
           after_action prepend_after_action append_after_action skip_after_action
           around_action prepend_around_action append_around_action skip_around_action
+          before_deliver after_deliver around_deliver
           helper_method
         ],
         # ADR-103 WD10 (#387) — see {Effects} for what each row is and why.

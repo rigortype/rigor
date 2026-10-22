@@ -9,6 +9,7 @@
 lib/rigor/analysis/check_rules.rb:
   computes: the visibility of a method and its override, for the def.method-visibility-mismatch and override rules
   producers:
+    Rigor::Analysis::CheckRules#separate_invocations?: 'ADR-125 (#575), the def.ivar-write-mismatch carve-out on a per-invocation class; it compares the visibility IvarWriteCollector#method_visibility recorded with :public and derives no declaration context'
     Rigor::Analysis::CheckRules.instance_visibility_mismatch: 'the instance-side half of the grandfathered visibility_mismatch_diagnostic, split out by issue #1984; its visibility comparisons are the grandfathered method''s, and it adds the method_missing / respond_to_missing? decline; it reads the recorded visibility through Scope and DefinerResolution and derives no declaration context'
     Rigor::Analysis::CheckRules.private_recorded_names: 'issue #1984, the set of names some class records :private (either side), the table-only gate the singleton visibility rule asks before reading a chain; it derives no declaration context'
     Rigor::Analysis::CheckRules.singleton_visibility_mismatch: 'issue #1984, the singleton-side half of visibility_mismatch_diagnostic; it compares DefinerResolution''s singleton-side :visibility answer with :private and derives no declaration context'
@@ -18,6 +19,7 @@ lib/rigor/analysis/check_rules/ivar_write_collector.rb:
   producers:
     Rigor::Analysis::CheckRules::IvarWriteCollector: grandfathered
     Rigor::Analysis::CheckRules::IvarWriteCollector#gather_writes: grandfathered
+    Rigor::Analysis::CheckRules::IvarWriteCollector#method_visibility: 'ADR-125 (#575), the enclosing def''s visibility for the per-invocation carve-out; it reads Scope#discovered_method_visibility and the contested mark, answers :private for the implicitly private lifecycle hooks Ruby fixes, and derives no declaration context'
     Rigor::Analysis::CheckRules::IvarWriteCollector#walk: grandfathered
 lib/rigor/analysis/check_rules/lexical_method_sites.rb:
   computes: where a singleton def on a local is in scope

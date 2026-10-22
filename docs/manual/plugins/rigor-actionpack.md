@@ -41,6 +41,16 @@ no-op rather than erroring.
 | `plugin.actionpack.permit-call` | info | a `params.require(:m).permit(:key, …)` chain resolved to a known model; keys matched against its columns |
 | `plugin.actionpack.unknown-permit-key` | error | a literal `permit(:key)` is a near-miss (edit distance ≤ 2) of a real column but not one — a likely typo (with a did-you-mean). A key nothing like any column (a legitimate virtual attribute) does not fire |
 
+The plugin also tells the engine that a controller runs one action
+per instance: its manifest lists `ActionController::Base` and
+`ActionController::API` in `per_invocation_classes:`
+([ADR-125](../../adr/125-per-invocation-classes.md)). So
+`def.ivar-write-mismatch` stays silent when `index` assigns
+`@roles = Role.sorted.to_a` and `permissions` assigns
+`@roles = Role.sorted`. It still reports a divergence that involves
+a private or protected helper, a non-public `before_action` target,
+`initialize`, or two writes in the same action.
+
 Filter and render resolution honours nested-module controller
 qualification (`module Admin; class WidgetsController` resolves
 views under `admin/widgets/…`) and silences gem-shipped parent

@@ -894,6 +894,7 @@ a plugin declaring none of them is a plain per-file analyzer:
 | `nested_class_templates` | `Array<Plugin::Macro::NestedClassTemplate>` | Nested-subclass emission from an enum-shaped block DSL (`variant <Const>, <Type>`); the macro-substrate tier that mints classes, not just methods (ADR-36). Spec'd in [`macro-substrate.md`](macro-substrate.md). |
 | `hkt_registrations`, `hkt_definitions` | `Array` | Lightweight-HKT type-function registrations (ADR-20). |
 | `additional_initializers` | `Array<AdditionalInitializer>` | `{ receiver_constraint:, methods:, block_methods: }` entries declaring which non-`initialize` methods on a class (and its subclasses) also establish ivar state — `methods:` for `def`-form (`def setup`), `block_methods:` for call-with-block form (`before { … }`, `let(:x) { … }`); at least one must be non-empty. Feeds `ScopeIndexer`'s read-before-write nil soundness gate (ADR-38). |
+| `per_invocation_classes` | `Array<String>` | Class names whose every instance serves exactly one public-method entry point, so ivar writes in two distinct public methods of a descendant are never live together ([ADR-125](../adr/125-per-invocation-classes.md)). A leading `::` is dropped. `Registry#per_invocation_classes` aggregates them and `Registry#per_invocation_class?` answers exact-name membership. `def.ivar-write-mismatch` reads the field: see _Per-invocation classes_ below. `rigor-actionpack` declares `ActionController::Base` and `ActionController::API`. |
 | `effect_root` | `String?` matching `/\A[a-z][a-z0-9_]*\z/` | The effect-label root this plugin asks to open ([ADR-103](../adr/103-effect-labels.md) WD2). Granted only to a first-party bundled plugin; see _Effect contributions_ below. |
 | `effect_labels` | `Array<String>` | Effect labels this plugin registers into the run's vocabulary (ADR-103 WD2). |
 | `effect_attributions` | `Array<EffectAttribution>` | What a call into the framework this plugin models does (ADR-103 WD6 / WD10). |
@@ -904,6 +905,30 @@ a plugin declaring none of them is a plain per-file analyzer:
 `#validate_config(config)` returns an array of error strings; the
 loader converts a non-empty result into a `LoadError`. Each extension
 field carries its own validation in `Manifest#initialize`.
+
+#### Per-invocation classes — `per_invocation_classes` ([ADR-125](../adr/125-per-invocation-classes.md), issue #575)
+
+A class is *per-invocation* when it is, or descends from, a name some loaded plugin lists in
+`per_invocation_classes:`. Descent is read off the class's instance `Scope::ResolutionChain`, so a
+project superclass chain (`RolesController < ApplicationController < ActionController::Base`) counts. A
+project ancestor matches by name. An external superclass matches through the first of its candidate
+spellings the environment knows, by name or by an RBS `:subclass` ordering; when the environment knows
+none of them, a candidate that is literally a declared name matches. A truncated chain or an ambiguous
+spelling is not per-invocation.
+
+`def.ivar-write-mismatch` withholds a divergent write W when all of these hold:
+
+1. W's class is per-invocation.
+2. W sits in a public instance method. `initialize` and the other implicitly private lifecycle hooks are
+   never public, and a method whose visibility the discovery table does not settle (absent or contested)
+   is not public.
+3. Every conflicting write of the same ivar in the same class (non-nil, a concrete class other than W's)
+   sits in a public method whose name differs from W's method.
+
+Everything else reports as before. A conflicting write in a private or protected helper, in a callback
+target that is not public, in `initialize`, or in W's own method keeps the finding. A public method that
+is also a `before_action` target counts as an action. The rule does not work out which helpers an action
+reaches.
 
 #### Effect contributions — `effect_root` / `effect_labels` / `effect_attributions` / `effect_edges` / `effect_entry_points` / `effect_ancestry` ([ADR-103](../adr/103-effect-labels.md), issue #387)
 
@@ -1555,6 +1580,9 @@ following are now in place and are documented in their own specs:
   framework lifecycle methods (`setup`, `after_initialize`, DI
   setters) so an ivar set there and read in a sibling method is not
   widened with `nil`.
+- **Per-invocation classes.** `per_invocation_classes:`
+  ([ADR-125](../adr/125-per-invocation-classes.md)) narrows
+  `def.ivar-write-mismatch`; the contract is below.
 - **Target-library invocation** ([ADR-39](../adr/39-plugin-target-library-invocation.md), Accepted).
   Plugins may invoke a trusted target library's pure, allow-listed
   methods directly (`Plugin::Inflector` over the real

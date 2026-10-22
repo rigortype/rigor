@@ -138,6 +138,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-122 | [Precision-monotonic RBS refinement and layout-stable code emission](122-precision-monotonic-rbs-refinement.md) | Proposed (addresses #1487, #1488, and #1489) |
 | ADR-123 | [Merge-queue landing and post-hoc approval](123-merge-queue-and-post-hoc-approval.md) | Accepted (merge-queue ruleset on `master` enabled 2026-10-19; approval queue and its release gate landed with the ADR) |
 | ADR-124 | [The editor publish seeds cross-file discovery](124-editor-publish-cross-file-discovery.md) | Accepted (implemented in #2164; follow-ups for the limits it lists) |
+| ADR-125 | [Plugin-declared per-invocation classes](125-per-invocation-classes.md) | Accepted (implemented for #575; rigor-actionmailer adoption is a follow-up) |
 
 ## Adding a New ADR
 

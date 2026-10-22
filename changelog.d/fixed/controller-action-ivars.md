@@ -1,0 +1,4 @@
+- **[rigor-actionpack]** `def.ivar-write-mismatch` no longer fires on writes in two different actions of a controller. ([#2307](https://github.com/rigortype/rigor/pull/2307))
+  - Rails runs one action per controller instance, so those writes are never live together. A divergence against a private or protected helper, `initialize`, or another write in the same action still reports, and so does one against a callback target or `helper_method` that a macro in the same file names.
+  - A public method named only by a macro in another file or a concern, or reached through a lambda callback, counts as an action, and an action that calls another action is not reported.
+  - Plugins declare such classes through the new `per_invocation_classes:` and `per_invocation_non_action_macros:` manifest fields (ADR-125). rigor-actionpack lists `ActionController::Base` and `ActionController::API`, and the callback macros plus `helper_method`.

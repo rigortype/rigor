@@ -706,7 +706,11 @@ module Rigor
             "Writes are in a singleton body — `def self.foo` or a `class << self` def — those track " \
             "separately.",
             "Writes are in a `def` inside an anonymous-class factory block (`Class.new do … end`, " \
-            "`Module.new`, `Struct.new`, `Data.define`): that body defines another class."
+            "`Module.new`, `Struct.new`, `Data.define`): that body defines another class.",
+            "The class descends from a plugin-declared per-invocation class (ADR-125; rigor-actionpack declares " \
+            "`ActionController::Base` / `ActionController::API`), and the write and every conflicting write sit " \
+            "in different actions: public methods no callback macro or `helper_method` names. One action runs " \
+            "per instance."
           ],
           suppression: "`# rigor:disable ivar-write-mismatch` on the offending write.",
           severity_authored: :error,

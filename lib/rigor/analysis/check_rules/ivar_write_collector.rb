@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "rule_walk"
+require_relative "../../scope/resolution_chain"
 require_relative "../../source/constant_path"
 require_relative "../../source/node_children"
 
@@ -37,36 +38,54 @@ module Rigor
         # `def` that sits directly in a class / module body, never one nested in another `def`. On the
         # shared full DFS that prune becomes the `:inside_def` gate; the enclosing class / module name stack
         # the legacy walk threaded as `qualified_prefix` is now `context.qualified_prefix`.
-        NODE_CLASSES = [Prism::DefNode].freeze
+        #
+        # ADR-125 — the walk also visits class-body `CallNode`s (a `def` body is gated off), to record the
+        # macro calls whose literal arguments name a method (`before_action :load_roles`).
+        NODE_CLASSES = [Prism::DefNode, Prism::CallNode].freeze
         RULE_WALK_GATES = %i[inside_def detached_ivar_facet].freeze
 
-        # Returns `Hash[class_name (String) => Hash[ivar_name (Symbol) => Array<{node:, type:, declared:}>]]`.
-        # Empty when the tree has no qualifying writes. `declared` is the translated type of the class's RBS
-        # declaration of the ivar — an `@x: T` member or the slot an `attr_*` member implies, own or
-        # inherited — and nil when the RBS declares none.
+        # Returns `Hash[class_name (String) => Hash[ivar_name (Symbol) => Array<{node:, type:, declared:,
+        # method_name:, visibility:, per_invocation:, action:}>]]`. Empty when the tree has no qualifying writes.
+        # `declared` is the translated type of the class's RBS declaration of the ivar — an `@x: T` member or
+        # the slot an `attr_*` member implies, own or inherited — and nil when the RBS declares none.
+        #
+        # ADR-125 — `method_name` is the enclosing `def`'s name and `visibility` its instance visibility
+        # (`:public` / `:protected` / `:private`, or nil when the discovery table has no settled answer).
+        # `per_invocation` is whether the class is, or descends from, a class a loaded plugin declares in
+        # `per_invocation_classes:`. `action` is whether the enclosing method is one of that class's entry
+        # points: public, and named by none of the declaring plugin's `per_invocation_non_action_macros:` in a
+        # class body of this file (`before_action :load_roles`, `helper_method :current_roles`).
         def initialize(scope_index)
           @scope_index = scope_index
           @accumulator = {}
+          @per_invocation = {}
+          @macro_arguments = {}
         end
 
         # Legacy single-collector walk — kept as the oracle the ADR-53 Track B equivalence harness compares
         # {RuleWalk} against; deleted when Track B completes.
         def collect(root)
           walk(root, [])
-          @accumulator.transform_values(&:freeze).freeze
+          results
         end
 
         # {RuleWalk} entry point: the legacy walk's per-`def` logic, invoked at each class-/module-body `def`
         # under the shared traversal contract. `collect_def_writes`' verbatim body reads the enclosing class
         # prefix from `context.qualified_prefix`.
-        def visit(def_node, context)
-          collect_def_writes(def_node, context.qualified_prefix)
+        def visit(node, context)
+          if node.is_a?(Prism::CallNode)
+            record_macro_call(node, context.qualified_prefix)
+          else
+            collect_def_writes(node, context.qualified_prefix)
+          end
         end
 
         # The accumulated result, frozen the same way `#collect` returns it — used by {RuleWalk}-driven
         # callers after the walk completes.
         def results
-          @accumulator.transform_values(&:freeze).freeze
+          @accumulator.to_h do |class_name, writes_by_ivar|
+            [class_name, writes_by_ivar.transform_values { |writes| with_actions(class_name, writes) }.freeze]
+          end.freeze
         end
 
         private
@@ -87,9 +106,51 @@ module Rigor
           when Prism::DefNode
             collect_def_writes(node, qualified_prefix)
             return
+          when Prism::CallNode
+            record_macro_call(node, qualified_prefix)
           end
 
           node.rigor_each_child { |child| walk(child, qualified_prefix) }
+        end
+
+        # A receiverless (or `self.`) call in a class body, with the method names its literal Symbol / String
+        # arguments spell. Kept for every such call: which macro names count is the registry's answer, read
+        # once per class when the writes are finalised.
+        def record_macro_call(call_node, qualified_prefix)
+          return if qualified_prefix.empty?
+          return unless call_node.receiver.nil? || call_node.receiver.is_a?(Prism::SelfNode)
+
+          names = (call_node.arguments&.arguments || []).filter_map { |argument| literal_method_name(argument) }
+          return if names.empty?
+
+          ((@macro_arguments[qualified_prefix.join("::")] ||= {})[call_node.name] ||= []).concat(names)
+        end
+
+        # A Symbol / String literal's name, or the name of a `def` passed inline (`helper_method def
+        # current_user … end`). A literal with bytes no Symbol can hold (`before_action "\xff"`, #1821) names no
+        # method, so it answers nil.
+        def literal_method_name(argument)
+          return argument.name if argument.is_a?(Prism::DefNode) && argument.receiver.nil?
+          return nil unless argument.is_a?(Prism::SymbolNode) || argument.is_a?(Prism::StringNode)
+
+          text = argument.unescaped
+          text.valid_encoding? ? text.to_sym : nil
+        end
+
+        # Each write with `action` set (see {#initialize}). A frozen copy, so `#results` stays repeatable.
+        def with_actions(class_name, writes)
+          macros = @per_invocation[class_name]
+          excluded = macros ? non_action_names(class_name, macros) : nil
+          writes.map do |write|
+            action = !excluded.nil? && write[:visibility] == :public && !excluded.include?(write[:method_name])
+            write.merge(action: action).freeze
+          end.freeze
+        end
+
+        def non_action_names(class_name, macros)
+          (@macro_arguments[class_name] || {}).each_with_object(Set.new) do |(macro, names), set|
+            set.merge(names) if macros.include?(macro)
+          end
         end
 
         def collect_def_writes(def_node, qualified_prefix)
@@ -97,19 +158,19 @@ module Rigor
           return if def_node.receiver.is_a?(Prism::SelfNode)
 
           class_name = qualified_prefix.join("::")
-          gather_writes(def_node.body, class_name)
+          gather_writes(def_node.body, class_name, def_node.name)
         end
 
-        def gather_writes(node, class_name)
+        def gather_writes(node, class_name, method_name)
           return unless node.is_a?(Prism::Node)
 
-          record_write(node, class_name) if node.is_a?(Prism::InstanceVariableWriteNode)
+          record_write(node, class_name, method_name) if node.is_a?(Prism::InstanceVariableWriteNode)
           return if BARRIER_NODES.any? { |klass| node.is_a?(klass) }
 
-          node.rigor_each_child { |child| gather_writes(child, class_name) }
+          node.rigor_each_child { |child| gather_writes(child, class_name, method_name) }
         end
 
-        def record_write(node, class_name)
+        def record_write(node, class_name, method_name)
           scope = @scope_index[node]
           return if scope.nil?
 
@@ -117,7 +178,73 @@ module Rigor
           declared = declared_ivar(scope, class_name, node.name)
           @accumulator[class_name] ||= {}
           @accumulator[class_name][node.name] ||= []
-          @accumulator[class_name][node.name] << { node: node, type: rvalue_type, declared: declared }
+          @accumulator[class_name][node.name] << {
+            node: node, type: rvalue_type, declared: declared, method_name: method_name,
+            visibility: method_visibility(scope, class_name, method_name),
+            per_invocation: !per_invocation_macros(scope, class_name).nil?
+          }
+        end
+
+        # The enclosing `def`'s instance visibility, or nil when it is not a settled fact: a slot the
+        # discovery table does not hold, or one a later `define_method` / alias / unplaceable write contests
+        # (#2013). `initialize` and the other lifecycle hooks are private whatever the table says.
+        def method_visibility(scope, class_name, method_name)
+          return :private if CheckRules::IMPLICITLY_PRIVATE_METHODS.include?(method_name)
+          return nil if scope.discovery.contested?(:discovered_method_visibilities, [class_name, method_name])
+
+          scope.discovered_method_visibility(class_name, method_name)
+        end
+
+        # ADR-125 — when `class_name` is, or descends from, a class a loaded plugin declares per-invocation, the
+        # non-action macros its declaring manifests list (a Set, possibly empty); nil otherwise. Read off the
+        # class's instance {Scope::ResolutionChain}, so a project superclass chain
+        # (`UsersController < ApplicationController < ActionController::Base`) is followed as Ruby resolves it.
+        # A project entry matches by name. An external superclass matches through the first of its candidate
+        # spellings the environment knows, by name or by an RBS-known `:equal` / `:subclass` ordering. When the
+        # environment knows none of them (rigor-actionpack leaves `ActionController::Base` undeclared on
+        # purpose), a candidate that is literally a declared name matches, unless some candidate names a class
+        # the project itself declares: then the spelling may resolve there instead. An ambiguous spelling (no
+        # candidates) and a truncated chain answer nil: the carve-out only ever withholds a finding, so an
+        # unproved descent keeps the rule firing. Memoised per class.
+        def per_invocation_macros(scope, class_name)
+          return @per_invocation[class_name] if @per_invocation.key?(class_name)
+
+          @per_invocation[class_name] = matched_per_invocation_macros(scope, class_name)
+        end
+
+        def matched_per_invocation_macros(scope, class_name)
+          environment = scope.environment
+          registry = environment&.plugin_registry
+          return nil if registry.nil? || registry.per_invocation_classes.empty?
+
+          chain = Scope::ResolutionChain.for(scope, class_name, :instance, :methods)
+          return nil if chain.truncated?
+
+          declared = chain.search(scope) { |entry| matched_declarations(entry, registry, scope) }
+          declared&.each_with_object(Set.new) { |name, set| set.merge(registry.per_invocation_non_action_macros(name)) }
+        end
+
+        # The declared per-invocation names `entry` matches, or nil (so {ResolutionChain#search} moves on).
+        def matched_declarations(entry, registry, scope)
+          return (registry.per_invocation_class?(entry.name.to_s) ? [entry.name.to_s] : nil) unless entry.external?
+          return nil unless entry.superclass_edge
+
+          environment = scope.environment
+          names = entry.candidates.map { |name| name.to_s.delete_prefix("::") }
+          known = names.find { |name| environment.class_known?(name) }
+          return literal_declarations(names, registry, scope) if known.nil?
+
+          matched = registry.per_invocation_classes.select do |declared|
+            %i[equal subclass].include?(environment.class_ordering(known, declared))
+          end
+          matched.empty? ? nil : matched
+        end
+
+        def literal_declarations(names, registry, scope)
+          return nil if names.any? { |name| scope.discovered_classes.key?(name) }
+
+          matched = names.select { |name| registry.per_invocation_class?(name) }
+          matched.empty? ? nil : matched
         end
 
         def declared_ivar(scope, class_name, ivar_name)

@@ -18,6 +18,8 @@ lib/rigor/analysis/check_rules/ivar_write_collector.rb:
   producers:
     Rigor::Analysis::CheckRules::IvarWriteCollector: grandfathered
     Rigor::Analysis::CheckRules::IvarWriteCollector#gather_writes: grandfathered
+    Rigor::Analysis::CheckRules::IvarWriteCollector#with_actions: 'ADR-125 (#575), whether each write sits in an action of a per-invocation class; it compares the visibility #method_visibility recorded with :public and the names the declared non-action macros list, and derives no declaration context'
+    Rigor::Analysis::CheckRules::IvarWriteCollector#method_visibility: 'ADR-125 (#575), the enclosing def''s visibility for the per-invocation carve-out; it reads Scope#discovered_method_visibility and the contested mark, answers :private for the implicitly private lifecycle hooks Ruby fixes, and derives no declaration context'
     Rigor::Analysis::CheckRules::IvarWriteCollector#walk: grandfathered
 lib/rigor/analysis/check_rules/lexical_method_sites.rb:
   computes: where a singleton def on a local is in scope

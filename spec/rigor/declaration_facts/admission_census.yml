@@ -35,6 +35,7 @@ members:
   discovered_classes:
     reads:
     - lib/rigor/analysis/check_rules.rb
+    - lib/rigor/analysis/check_rules/ivar_write_collector.rb
     - lib/rigor/analysis/check_rules/rbs_receiver_surface.rb
     - lib/rigor/analysis/check_rules/shadowed_rescue_collector.rb
     - lib/rigor/analysis/check_rules/source_arity.rb
@@ -199,6 +200,7 @@ members:
   discovered_method_visibilities:
     reads:
     - lib/rigor/analysis/check_rules.rb
+    - lib/rigor/analysis/check_rules/ivar_write_collector.rb
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/definer_resolution.rb
     copies:
@@ -208,6 +210,8 @@ members:
       - paired_copy
       lib/rigor/analysis/check_rules.rb:
       - existence
+      lib/rigor/analysis/check_rules/ivar_write_collector.rb:
+      - consults_contested
       lib/rigor/analysis/runner.rb:
       - paired_copy
       lib/rigor/inference/definer_resolution.rb:

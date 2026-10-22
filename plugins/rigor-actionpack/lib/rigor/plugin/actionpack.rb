@@ -146,6 +146,19 @@ module Rigor
           # `sig/action_view.rbs` so the name resolves, open so the helper surface stays lenient.
           "ActionView::Base"
         ],
+        # ADR-125 (#575) — Rails instantiates a fresh controller per request and runs exactly one action on
+        # it, so ivar writes in two different public actions are never live together and
+        # `def.ivar-write-mismatch` stops comparing them. Neither root has a signature (see `sig/action_controller.rbs`
+        # for why); the rule matches an undeclared superclass by its written name.
+        per_invocation_classes: ["ActionController::Base", "ActionController::API"],
+        # A public method these macros name is a callback or a view helper, not an action: it runs inside
+        # whichever action triggers it, so its writes stay compared with every action's (#575's A1 decision).
+        per_invocation_non_action_macros: %i[
+          before_action prepend_before_action append_before_action skip_before_action
+          after_action prepend_after_action append_after_action skip_after_action
+          around_action prepend_around_action append_around_action skip_around_action
+          helper_method
+        ],
         # ADR-103 WD10 / WD14 (#387) — see {Effects} for what each row is and why.
         effect_root: "rails",
         effect_labels: %w[

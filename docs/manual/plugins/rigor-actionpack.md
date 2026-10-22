@@ -41,6 +41,31 @@ no-op rather than erroring.
 | `plugin.actionpack.permit-call` | info | a `params.require(:m).permit(:key, …)` chain resolved to a known model; keys matched against its columns |
 | `plugin.actionpack.unknown-permit-key` | error | a literal `permit(:key)` is a near-miss (edit distance ≤ 2) of a real column but not one — a likely typo (with a did-you-mean). A key nothing like any column (a legitimate virtual attribute) does not fire |
 
+The plugin also tells the engine that a controller runs one action
+per instance ([ADR-125](../../adr/125-per-invocation-classes.md)).
+Its manifest lists `ActionController::Base` and
+`ActionController::API` in `per_invocation_classes:`. It also lists
+the callback macros (`before_action` and the rest) and
+`helper_method` in `per_invocation_non_action_macros:`, so a method
+those name is not an action.
+
+So `def.ivar-write-mismatch` stays silent when `index` assigns
+`@roles = Role.sorted.to_a` and `permissions` assigns
+`@roles = Role.sorted`. It still reports a divergence that involves
+a private or protected helper, `initialize`, or two writes in the
+same action. It also still reports one that involves a callback
+target or `helper_method`, when the macro naming it sits in the same
+file as the method. Actions defined in a concern module and
+`ActionController::Metal` controllers keep reporting too.
+
+These shapes stay silent:
+
+- a public method named only by a macro in another file or a
+  concern, such as `ApplicationController`;
+- a public method a lambda callback reaches
+  (`before_action -> { load_roles }`);
+- an action that calls another action.
+
 Filter and render resolution honours nested-module controller
 qualification (`module Admin; class WidgetsController` resolves
 views under `admin/widgets/…`) and silences gem-shipped parent

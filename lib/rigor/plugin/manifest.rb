@@ -56,7 +56,7 @@ module Rigor
                   :hkt_registrations, :hkt_definitions, :signature_paths, :protocol_contracts,
                   :source_rbs_synthesizer, :additional_initializers,
                   :effect_root, :effect_labels, :effect_attributions, :effect_edges, :effect_entry_points,
-                  :effect_ancestry
+                  :effect_ancestry, :per_invocation_classes, :per_invocation_non_action_macros
 
       # #392 — the project-relative globs whose files this plugin compiles into {TemplateUnit}s. Purely a
       # CLAIM: the engine globs these, reads each match's bytes and offers them to
@@ -74,7 +74,8 @@ module Rigor
         hkt_registrations: [], hkt_definitions: [], signature_paths: [], protocol_contracts: [],
         source_rbs_synthesizer: nil, additional_initializers: [],
         effect_root: nil, effect_labels: [], effect_attributions: [], effect_edges: [],
-        effect_entry_points: [], effect_ancestry: [], template_globs: []
+        effect_entry_points: [], effect_ancestry: [], template_globs: [], per_invocation_classes: [],
+        per_invocation_non_action_macros: []
       )
         validate_id!(id)
         validate_version!(version)
@@ -109,6 +110,7 @@ module Rigor
         assign_additional_initializers(additional_initializers)
         assign_effect_fields(effect_root, effect_labels, effect_attributions, effect_edges,
                              effect_entry_points, effect_ancestry, template_globs)
+        assign_per_invocation_classes(per_invocation_classes, per_invocation_non_action_macros)
         freeze
       end
 
@@ -202,6 +204,28 @@ module Rigor
         @template_globs = globs.map { |glob| glob.to_s.dup.freeze }.uniq.freeze
       end
       private :assign_template_globs
+
+      # ADR-125 — `per_invocation_classes:` names the framework classes whose every instance serves exactly one
+      # entry point, so ivar writes in two distinct entry points of a descendant are never live together.
+      # `per_invocation_non_action_macros:` names the class-body macros whose Symbol, String or inline-`def`
+      # arguments name a public method that is NOT an entry point (`before_action :load`, `helper_method
+      # :current_user`); they apply to this manifest's own `per_invocation_classes:`, so a list without classes
+      # is refused. Validated and assigned in one call, because `#initialize` is at its line budget.
+      def assign_per_invocation_classes(names, macros)
+        validate_array_of!("per_invocation_classes", names, "non-empty String") do |name|
+          name.is_a?(String) && !name.empty?
+        end
+        validate_array_of!("per_invocation_non_action_macros", macros, "Symbol/non-empty String") do |macro|
+          macro.is_a?(Symbol) || (macro.is_a?(String) && !macro.empty?)
+        end
+        if names.empty? && !macros.empty?
+          raise ArgumentError, "per_invocation_non_action_macros needs per_invocation_classes to apply to"
+        end
+
+        @per_invocation_classes = names.map { |name| name.to_s.delete_prefix("::").dup.freeze }.uniq.freeze
+        @per_invocation_non_action_macros = macros.map(&:to_sym).uniq.freeze
+      end
+      private :assign_per_invocation_classes
       # rubocop:enable Metrics/ParameterLists, Metrics/AbcSize
 
       public
@@ -258,7 +282,9 @@ module Rigor
           "effect_edges" => effect_edges.map(&:to_h),
           "effect_entry_points" => effect_entry_points.map(&:to_h),
           "effect_ancestry" => effect_ancestry.map(&:to_h),
-          "template_globs" => template_globs
+          "template_globs" => template_globs,
+          "per_invocation_classes" => per_invocation_classes,
+          "per_invocation_non_action_macros" => per_invocation_non_action_macros.map(&:to_s)
         }
       end
 

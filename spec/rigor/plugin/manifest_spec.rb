@@ -290,6 +290,43 @@ RSpec.describe Rigor::Plugin::Manifest do
       expect(m.to_h["open_receivers"]).to eq(%w[ActiveRecord::Relation])
     end
 
+    it "accepts per_invocation_classes as an Array of class-name Strings (ADR-125)" do
+      m = described_class.new(id: "ap", version: "0.1.0",
+                              per_invocation_classes: ["ActionController::Base", "::ActionController::API"])
+      expect(m.per_invocation_classes).to eq(%w[ActionController::Base ActionController::API])
+      expect(m.per_invocation_classes).to be_frozen
+      expect(m.to_h["per_invocation_classes"]).to eq(%w[ActionController::Base ActionController::API])
+    end
+
+    it "defaults per_invocation_classes to an empty array" do
+      expect(described_class.new(id: "ap", version: "0.1.0").per_invocation_classes).to eq([])
+    end
+
+    it "rejects a per_invocation_classes value that is not an Array of non-empty Strings" do
+      [[:Foo], [""], "ActionController::Base"].each do |bad|
+        expect do
+          described_class.new(id: "ap", version: "0.1.0", per_invocation_classes: bad)
+        end.to raise_error(ArgumentError, /per_invocation_classes/)
+      end
+    end
+
+    it "accepts per_invocation_non_action_macros beside per_invocation_classes (ADR-125)" do
+      m = described_class.new(id: "ap", version: "0.1.0", per_invocation_classes: ["ActionController::Base"],
+                              per_invocation_non_action_macros: [:before_action, "helper_method"])
+      expect(m.per_invocation_non_action_macros).to eq(%i[before_action helper_method])
+      expect(m.to_h["per_invocation_non_action_macros"]).to eq(%w[before_action helper_method])
+    end
+
+    it "rejects per_invocation_non_action_macros without per_invocation_classes, or with a bad entry" do
+      expect do
+        described_class.new(id: "ap", version: "0.1.0", per_invocation_non_action_macros: [:before_action])
+      end.to raise_error(ArgumentError, /per_invocation_non_action_macros/)
+      expect do
+        described_class.new(id: "ap", version: "0.1.0", per_invocation_classes: ["ActionController::Base"],
+                            per_invocation_non_action_macros: [""])
+      end.to raise_error(ArgumentError, /per_invocation_non_action_macros/)
+    end
+
     it "accepts rbs_complete_ancestors as an Array of class-name Strings (ADR-43 WD4)" do
       m = described_class.new(
         id: "graphql", version: "0.1.0",

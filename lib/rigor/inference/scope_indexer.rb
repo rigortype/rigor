@@ -11622,11 +11622,14 @@ module Rigor
       end
 
       # Issues #2196 and #2056 — the constructs whose parts run under a narrowing their own condition or left operand
-      # makes, keyed to the part {StatementEvaluator} records first when it enters one.
+      # makes, keyed to the part {StatementEvaluator} records first when it enters one. Issue #2214 — a `&&=` on a
+      # variable runs its value under the variable's truthy narrowing (`[c &&= c + 1]`).
       UNENTERED_FLOW_ENTRY = {
         Prism::AndNode => :left, Prism::OrNode => :left,
         Prism::IfNode => :predicate, Prism::UnlessNode => :predicate,
-        Prism::WhileNode => :predicate, Prism::UntilNode => :predicate
+        Prism::WhileNode => :predicate, Prism::UntilNode => :predicate,
+        Prism::LocalVariableAndWriteNode => :value, Prism::InstanceVariableAndWriteNode => :value,
+        Prism::ClassVariableAndWriteNode => :value, Prism::GlobalVariableAndWriteNode => :value
       }.freeze
       private_constant :UNENTERED_FLOW_ENTRY
 

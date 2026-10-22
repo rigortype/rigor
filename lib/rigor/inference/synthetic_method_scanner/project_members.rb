@@ -29,9 +29,11 @@ module Rigor
       # is matched to a project module by name or by `::`-suffix, again widening only what is declined.
       class ProjectMembers
         # The calls that name members through their literal arguments, and the suffixes each name takes.
-        SUFFIXES_BY_CALL = {
-          attr_reader: [""], attr: [""], attr_writer: ["="], attr_accessor: ["", "="], delegate: [""]
-        }.freeze
+        SUFFIXES_BY_CALL = Ractor.make_shareable(
+          {
+            attr_reader: [""], attr: [""], attr_writer: ["="], attr_accessor: ["", "="], delegate: [""]
+          }
+        )
         NAME_ARG_CALLS = %i[define_method alias_method].freeze
         MIXIN_CALLS = %i[include prepend].freeze
 

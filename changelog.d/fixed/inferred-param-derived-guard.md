@@ -1,0 +1,2 @@
+- **[engine]** Under `parameter_inference:`, a call on an array or hash literal holding an inferred parameter, or on an instance variable the same method wrote from one, no longer reports against the parameter's call-site type. ([#2279](https://github.com/rigortype/rigor/pull/2279))
+  - `[name].first.upcase`, `{a: name}[:a].upcase` and `@x = name; @x.upcase` are the same open-call-site lower bound as `name`, so the rules that already declined on `name` decline there too; a parameter a signature declares still reports.

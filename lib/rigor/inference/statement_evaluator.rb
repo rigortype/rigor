@@ -325,6 +325,20 @@ module Rigor
         [result, sink]
       end
 
+      # Runs `block` with the `return` sink cleared, restoring it on exit: a side pass that re-types part of a
+      # body from a scope other than the one the statement walk holds must not file its `return`s as the method's.
+      # Issue #2299 — {ExpressionTyper#type_block_body}'s tail-only answer types `return r if r` without the
+      # `r = yield e` before it, so `r` read `Dynamic[top]` and that went into the enclosing method's return type.
+      def self.without_return_sink
+        previous = Thread.current[RETURN_SINK_KEY]
+        Thread.current[RETURN_SINK_KEY] = nil
+        begin
+          yield
+        ensure
+          Thread.current[RETURN_SINK_KEY] = previous
+        end
+      end
+
       # Runs `block` with a fresh `next` sink installed, then yields the collected `[NextNode, Type]` pairs to the
       # caller. Stacks like the return sink, and for the same reason: a block body evaluated inside another block body's
       # evaluation must not spill its arms into the outer collection. Used by `ExpressionTyper#type_block_body` to join

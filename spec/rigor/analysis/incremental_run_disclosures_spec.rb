@@ -46,11 +46,14 @@ RSpec.describe "IncrementalSession: run-scoped plugin disclosures replay on a re
         @state ||= read_state("state.txt")
         disclose_once(:state, message: "notice: state is #{@state}", severity: :warning) if @state != "fine"
         disclose_once(:prepared, message: "notice: prepared is #{@prepared}", severity: :warning) if @prepared != "fine"
-        disclose_once(:legacy, message: "notice: legacy code present", severity: :info) if root.slice.include?("legacy")
+        legacy = root.slice[/legacy\w*/]
+        disclose_once(:legacy, message: "notice: #{legacy} code present", severity: :info) if legacy
+        emit_once(:empty, [])
         if @state.start_with?("view")
+          @view ||= read_state("views/a.erb")
           emit_once(:views, [Rigor::Analysis::Diagnostic.new(path: "views/a.erb", line: 2, column: 1,
-                                                             message: "notice: #{@state}", severity: :warning,
-                                                             rule: "view")])
+                                                             message: "notice: #{@state} #{@view}",
+                                                             severity: :warning, rule: "view")])
         end
         []
       end
@@ -207,6 +210,8 @@ RSpec.describe "IncrementalSession: run-scoped plugin disclosures replay on a re
       expect(notices(diagnostics)).to be_empty
     end
 
+    # A guard: a removed file is never among the files a recheck serves, so no line of the fix makes it fail;
+    # `RunDisclosureLedger#forget` only keeps the snapshot from carrying the removed file's records.
     it "drops it once that file is removed" do
       diagnostics, = recheck_after { FileUtils.rm_f("lib/bravo.rb") }
       expect(notices(diagnostics)).to be_empty
@@ -215,13 +220,47 @@ RSpec.describe "IncrementalSession: run-scoped plugin disclosures replay on a re
     end
   end
 
+  # Two files register the key, each with its own text in the message (contract misuse, but the run must still
+  # answer as a cold one, where the first file analysed registers it).
+  it "lets the row a re-analysed file registers win over the replay of the same key" do
+    write("state.txt", "fine\n")
+    source("alpha", "legacy")
+    source("bravo", "legacy")
+    incremental_run
+    diagnostics, affected = recheck_after { source("alpha", "legacyx") }
+    expect(affected).to eq(Set["lib/alpha.rb"])
+    expect(notices(diagnostics)).to eq(["notice: legacyx code present"])
+  end
+
+  it "records no batch registered empty" do
+    incremental_run
+    payload = Rigor::Cache::IncrementalSnapshot.new(root: cache_root).load(fingerprint: fingerprint)
+    keys = payload.plugin_disclosures.fetch(:files).values.flatten(1).map { |record| record[:key] }
+    expect(keys).to include("state")
+    expect(keys).not_to include("empty")
+  end
+
   describe "a positioned batch (#emit_once)" do
-    before { write("state.txt", "view-a\n") }
+    before do
+      write("state.txt", "view-a\n")
+      write("views/a.erb", "p\n")
+    end
 
     it "replays the batch on a rerun with nothing changed" do
       incremental_run
       diagnostics, = recheck_after { nil }
-      expect(notices(diagnostics)).to eq(["notice: view-a", "notice: state is view-a"])
+      expect(notices(diagnostics)).to eq(["notice: view-a p", "notice: state is view-a"])
+    end
+
+    # Every file registers the batch, but only one of them is re-analysed to refresh it.
+    it "re-analyses one registering file, not every one, when an input the batch read is edited" do
+      incremental_run
+      diagnostics, affected = recheck_after { write("views/a.erb", "q\n") }
+      expect(affected).to eq(Set["lib/alpha.rb"])
+      expect(notices(diagnostics)).to eq(["notice: view-a q", "notice: state is view-a"])
+      diagnostics, affected = recheck_after { nil }
+      expect(affected).to be_empty
+      expect(notices(diagnostics)).to eq(["notice: view-a q", "notice: state is view-a"])
     end
 
     it "drops the batch once its input stops producing it" do

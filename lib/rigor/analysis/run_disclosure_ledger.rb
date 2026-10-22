@@ -1,0 +1,130 @@
+# frozen_string_literal: true
+
+require_relative "run_disclosure_credit"
+
+module Rigor
+  module Analysis
+    # Issue #2020 — the `--incremental` session's record of the run-scoped plugin rows ({Plugin::Base#disclose_once},
+    # {Plugin::Base#emit_once}) each analysed file's hooks registered, so a recheck can replay them for the files it
+    # serves from cache.
+    #
+    # - `files` maps a path to its records as the aggregator replays them, one per `[plugin id, key]` identity.
+    # - `reads` maps an identity to the registering plugin's boundary rows when it was last registered
+    #   ({RunDisclosureCredit}), `#prepare`'s reads included.
+    #
+    # Staleness is per identity, not per file. A plugin memoises the input a notice is about and re-registers the
+    # notice from every file's hook, so crediting the rows to every registering file would re-analyse all of them on
+    # any edit to an input the plugin read (one view edit re-analysed 400 of 400 files in an app with one i18n view
+    # row). Instead a recheck finds the identities whose rows went stale, re-analyses ONE live registering file for
+    # each (the first by path), withholds those identities' replays, and afterwards gives every other registering file
+    # the record that file registered this run, or drops the identity from them when it registered none.
+    #
+    # That rests on the identity being file-independent, which {Plugin::Base#disclose_once} asks of a key (it must not
+    # vary between workers). A plugin whose registration of one key depends both on an input it read and on the
+    # registering file's own text breaks it: when the input changes so that the re-analysed file stops registering the
+    # key while another holder would still register it, the key is dropped from that holder until it is re-analysed.
+    # Only inputs read through the plugin's boundary are tracked; state a plugin carries across files, or an input it
+    # reads around the boundary (`ENV`, a direct `File.read`), can leave a replayed row that never clears.
+    class RunDisclosureLedger
+      attr_reader :files, :reads
+
+      def initialize(files: {}, reads: {})
+        @files = files
+        @reads = reads
+      end
+
+      # The ledger a baseline builds from `fresh` (`{path => [record with :reads]}`, `Runner#analysis_disclosures`).
+      def self.from(fresh)
+        new.tap { |ledger| ledger.absorb(fresh, fresh.keys, Set.new) }
+      end
+
+      def self.load(data)
+        data.is_a?(Hash) ? new(files: data.fetch(:files, {}), reads: data.fetch(:reads, {})) : new
+      end
+
+      def to_h
+        { files: @files, reads: @reads }
+      end
+
+      # The identities with a boundary row that no longer validates under `fresh_row` (a row → Boolean predicate).
+      def stale_identities(&fresh_row)
+        verdicts = {}
+        @reads.each_with_object(Set.new) do |(identity, rows), stale|
+          stale << identity if rows.any? { |row| !verdicts.fetch(row) { verdicts[row] = fresh_row.call(row) } }
+        end
+      end
+
+      # One live registering file per stale identity, the first by path, skipping `removed`.
+      def refreshers(stale, removed)
+        return Set.new if stale.empty?
+
+        holders = {}
+        @files.each do |path, records|
+          next if removed.include?(path)
+
+          records.each do |record|
+            identity = RunDisclosureCredit.identity(record)
+            holders[identity] = [holders[identity], path].compact.min if stale.include?(identity)
+          end
+        end
+        holders.values.to_set
+      end
+
+      # The records to replay for `paths`, without the `stale` identities.
+      def served(paths, stale = Set.new)
+        @files.values_at(*paths).compact.flatten(1).reject do |record|
+          stale.include?(RunDisclosureCredit.identity(record))
+        end
+      end
+
+      # Folds a run's registrations in: every path in `analyzed` takes this run's records (or none), every identity
+      # this run registered takes this run's rows, and each `stale` identity is refreshed or dropped in the files the
+      # run did not analyse. Identities no file holds any more lose their rows.
+      def absorb(fresh, analyzed, stale)
+        registered = {}
+        analyzed.each do |path|
+          records = Array(fresh[path])
+          records.each { |record| registered[RunDisclosureCredit.identity(record)] ||= record }
+          store(path, records.map { |record| RunDisclosureCredit.replayable(record) })
+        end
+        registered.each { |identity, record| @reads[identity] = record[:reads] }
+        refresh_unanalysed(stale, registered, analyzed.to_set)
+        prune
+      end
+
+      def forget(path)
+        @files.delete(path)
+      end
+
+      private
+
+      def refresh_unanalysed(stale, registered, analyzed)
+        return if stale.empty?
+
+        @files.each_key.to_a.each do |path|
+          next if analyzed.include?(path)
+
+          store(path, @files[path].filter_map do |record|
+            identity = RunDisclosureCredit.identity(record)
+            next record unless stale.include?(identity)
+
+            registered[identity] && RunDisclosureCredit.replayable(registered[identity])
+          end)
+        end
+      end
+
+      def store(path, records)
+        records.empty? ? @files.delete(path) : @files[path] = records.freeze
+      end
+
+      # Unpinned hygiene: an identity no file holds is never replayed, so keeping its rows changes no answer; pruning
+      # them keeps a stale row from re-analysing a file for nothing and the snapshot from growing.
+      def prune
+        held = @files.each_value.flat_map do |records|
+          records.map { |record| RunDisclosureCredit.identity(record) }
+        end.to_set
+        @reads.select! { |identity, _| held.include?(identity) }
+      end
+    end
+  end
+end

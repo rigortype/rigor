@@ -8,21 +8,22 @@ module Rigor
     #
     # A replayed row must go stale with the inputs it is about, and the reads those inputs came from are credited to
     # one file at most: a plugin memoises the input (a locale index, a routes table), so the first file to trigger
-    # the read is the only one credited with it, and a read in `#prepare` is credited to none. So a file that
-    # registered a row is also credited with every read the registering plugin's boundary holds once the file is
-    # analysed, `#prepare`'s included. A change to any of them then puts the file back into the closure, where its
-    # hook decides afresh. That over-credits, which only ever re-analyses a file sooner.
+    # the read is the only one credited with it, and a read in `#prepare` is credited to none. So each record also
+    # carries, under `:reads`, every row the registering plugin's boundary holds once the file is analysed,
+    # `#prepare`'s included. {IncrementalSession} keeps those rows per `[plugin id, key]`, not per file: when one goes
+    # stale it re-analyses one registering file and drops the key's replays, rather than re-analysing every file that
+    # registered it. Only inputs read through the boundary are covered.
     module RunDisclosureCredit
       ATTRIBUTION_KEY = :rigor_run_disclosure_attribution
       private_constant :ATTRIBUTION_KEY
 
       module_function
 
-      # Runs the block with run-scoped registrations attributed, appends the registering plugins' boundary rows to
-      # `reads`, and returns the file's records — each a run-disclosure record tagged with its `plugin_id`, one per
-      # `[plugin id, key]` — frozen and Marshal-clean. A thread variable, as {Plugin::IoBoundary.attributing} uses,
-      # so a registration from inside an `Enumerator` still lands.
-      def collect(reads)
+      # Runs the block with run-scoped registrations attributed and returns the file's records — each a run-disclosure
+      # record tagged with its `plugin_id` and carrying the registering plugin's boundary rows as `:reads`, one per
+      # `[plugin id, key]` — frozen and Marshal-clean. A thread variable, as {Plugin::IoBoundary.attributing} uses, so a
+      # registration from inside an `Enumerator` still lands.
+      def collect
         registrations = []
         previous = Thread.current.thread_variable_get(ATTRIBUTION_KEY)
         Thread.current.thread_variable_set(ATTRIBUTION_KEY, registrations)
@@ -31,7 +32,7 @@ module Rigor
         ensure
           Thread.current.thread_variable_set(ATTRIBUTION_KEY, previous)
         end
-        credit(registrations, reads)
+        credit(registrations)
       end
 
       # Called by {Plugin::Base#disclose_once} and {Plugin::Base#emit_once} for every call, a repeat included.
@@ -40,12 +41,24 @@ module Rigor
         nil
       end
 
-      def credit(registrations, reads)
+      def credit(registrations)
         return [].freeze if registrations.empty?
 
-        registrations.map(&:first).uniq(&:object_id).each { |plugin| reads.concat(boundary_rows(plugin)) }
-        registrations.map { |plugin, record| record.merge(plugin_id: plugin_id(plugin)).freeze }
-                     .uniq { |record| [record[:plugin_id], record[:key]] }.freeze
+        reads = {}
+        registrations.map do |plugin, record|
+          rows = reads[plugin.object_id] ||= boundary_rows(plugin).freeze
+          record.merge(plugin_id: plugin_id(plugin), reads: rows).freeze
+        end.uniq { |record| identity(record) }.freeze
+      end
+
+      # The de-duplication identity a record shares with every other registration of its key.
+      def identity(record)
+        [record[:plugin_id], record[:key]]
+      end
+
+      # The record as the aggregator replays it, without the rows that decide whether it is stale.
+      def replayable(record)
+        record.except(:reads).freeze
       end
 
       # The boundary's file and listing rows, read without triggering its lazy initializer: a plugin that never

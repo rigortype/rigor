@@ -1348,22 +1348,33 @@ every row registered from a hook, and the next unchanged run reported none of th
   the plugin already registered included: the in-tree disclosers memoise the
   input a notice is about and re-register it from each file's hook, and
   crediting only the first file would lose the row once that file is removed.
-  `plugin_disclosures` maps each analysed file to those records, tagged with
-  their plugin id, one per `[plugin id, key]`. A batch registered empty is not
-  recorded.
+  `plugin_disclosures` holds `Analysis::RunDisclosureLedger#to_h`: `files` maps
+  each analysed file to those records, tagged with their plugin id, one per
+  `[plugin id, key]`; `reads` maps each `[plugin id, key]` to every row the
+  registering plugin's boundary held when it was last registered, including
+  the reads `#prepare` made. A batch registered empty is not recorded.
 - **Replay.** A recheck hands the records of every file it serves from cache to
   the runner, which emits them beside this run's own registrations,
   de-duplicated by `[plugin id, key]`, with the row this run registered winning.
   A `--verify-incremental` partition replays them the same way.
-- **Staleness.** A file that registered a row is also credited, in
-  `plugin_reads`, with every row the registering plugin's boundary holds once
-  the file is analysed, including the reads `#prepare` made. The input a notice
-  is about is therefore one of every registering file's reads, and a change to
-  it puts all of them back into the closure, where the hook decides afresh.
-  A re-analysed file's records are replaced by this run's, so a fixed input
-  stops being reported on the warm run. A removed file's records are
-  dropped. The cost is over-inclusion: while a plugin keeps a row registered,
-  an edit to any input it read re-analyses every file that registered it.
+- **Staleness.** A recheck validates each `[plugin id, key]`'s rows, and for
+  every one with a row that no longer validates it puts ONE live registering
+  file (the first by path) into the closure and withholds the key's replays.
+  After the run, every other file that held the key takes the record that file
+  registered, or drops the key when it registered none, so a fixed input stops
+  being reported on the warm run. A re-analysed file's records are replaced by
+  this run's; a removed file's are dropped. Re-analysing one registrant rather
+  than all of them keeps an edit to an input the plugin read (one view
+  template, under rigor-rails-i18n's view batch) from re-analysing every file
+  that registered the key.
+- **Bounds.** The refresh relies on a key being file-independent, which
+  `#disclose_once` asks of it. A plugin whose registration of one key depends
+  both on an input it read and on the registering file's own text can lose the
+  key from a holder that would still register it, until that holder is
+  re-analysed. Only inputs read through the plugin's boundary are tracked: state
+  a plugin carries across files (`@seen ||= …`) or an input it reads around the
+  boundary (`ENV`, a direct `File.read`) can leave a replayed row that never
+  clears. Both are contract misuse (ADR-2).
 - **Pool.** Each fork worker records its files' records and marshals them back
   beside its plugin reads.
 
@@ -1661,9 +1672,9 @@ it fails that test.
 A plugin's run-scoped rows fail it when a per-file hook registered them: which
 files were analysed decides whether the hook ran. They do not join this section,
 since their freshness is per file, not per fingerprint. They are replayed per file
-through `plugin_disclosures` (above), whose records go stale with the registering
-file's plugin reads. A row a plugin registers in `#prepare` passes the test and
-stays uncached.
+through `plugin_disclosures` (above), whose records go stale with the boundary
+reads the registering plugin had made. A row a plugin registers in `#prepare`
+passes the test and stays uncached.
 
 The replay is supplied to a NARROWED run only (a recheck's closure, an empty
 closure, a `--verify-incremental` partition); a full run derives both for itself and

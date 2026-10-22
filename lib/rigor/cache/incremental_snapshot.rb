@@ -250,9 +250,10 @@ module Rigor
       # `effect_collections` (nil when collection was off). A plugin stamps its attributions and edges into a file's
       # collection, and `effects_identity` is plugin-blind (it is compared before any plugin loads), so the session
       # compares this one after the recheck has loaded them.
-      # Issue #2020 — `plugin_disclosures` maps an analysed file to the run-scoped plugin rows
-      # ({Plugin::Base#disclose_once} / {Plugin::Base#emit_once}) its last analysis registered, which a recheck replays
-      # for the files it serves; see {Analysis::RunDisclosureCredit} for why they go stale with the file's plugin reads.
+      # Issue #2020 — `plugin_disclosures` is {Analysis::RunDisclosureLedger#to_h}: `files`, each analysed file's
+      # run-scoped plugin rows ({Plugin::Base#disclose_once} / {Plugin::Base#emit_once}) from its last analysis, which a
+      # recheck replays for the files it serves, and `reads`, the boundary rows per `[plugin id, key]` that make one
+      # stale.
       Payload = Data.define(:cache, :sources, :digests, :analyzed,
                             :symbol_sources, :ancestry_sources, :symbol_fingerprints,
                             :missing, :class_decls, :constant_decls, :seed_bundles, :plugin_fact_digest,

@@ -174,7 +174,7 @@ module Rigor
         reads = []
         record = nil
         # Issue #2020 — and the run-scoped rows it registered, as `Runner#analyze_file` keeps them.
-        disclosures = RunDisclosureCredit.collect(reads) do
+        disclosures = RunDisclosureCredit.collect do
           record = Plugin::IoBoundary.attributing(reads) do
             DependencyRecorder.record_for(path) { diagnostics = analyze_with_effects(path) }
           end

@@ -2661,7 +2661,7 @@ module Rigor
         diagnostics = nil
         record = nil
         # Issue #2020 — and every run-scoped row its analysis registered, with the registering plugins' reads.
-        disclosures = RunDisclosureCredit.collect(reads) do
+        disclosures = RunDisclosureCredit.collect do
           record = Plugin::IoBoundary.attributing(reads) do
             DependencyRecorder.record_for(path) do
               diagnostics = analyze_with_effects(path, environment)

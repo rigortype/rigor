@@ -3,7 +3,7 @@
 - **PR:** [#2307](https://github.com/rigortype/rigor/pull/2307)
 - **Issue:** [#575](https://github.com/rigortype/rigor/issues/575)
 - **Class:** gate-row
-- **Precedent:** [#2061](https://github.com/rigortype/rigor/pull/2061) (producers.yml); [#1617](https://github.com/rigortype/rigor/pull/1617) (the census `consults_contested` class)
+- **Precedent:** [#2061](https://github.com/rigortype/rigor/pull/2061)
 - **Decided:** 2026-10-22
 
 ## Background

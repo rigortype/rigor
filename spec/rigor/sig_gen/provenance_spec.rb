@@ -309,8 +309,8 @@ SIG_PROVENANCE_RESIDUE = {
   # `effect_contributions` readers are unmarked residue — `compile_aggregates` /
   # `compile_effect_contributions` build the ivars with `flat_map`/`filter_map` (memoised for the
   # latter), not from `initialize` parameters, so no gap issue covers them;
-  # `contracts_for_path` is declared-divergent (sig-gen infers the `path.nil?` `[]` arm
-  # separately). `Contribution`'s members and constructors are #1150-marked.
+  # `contracts_for_path` left residue under #1153 (its `path.nil?` `[]` arm is now absorbed).
+  # `Contribution`'s members and constructors are #1150-marked.
   # -1 (#1153): an empty-collection early return no longer leaves a stray `[]` arm beside an `Array[E]` arm,
   # so the declared `Array[...]` now matches what sig-gen proposes.
   "sig/rigor/plugin/registry.rbs" => 12,

@@ -14,8 +14,8 @@
 - 1148  # sig-gen skips a reader written as an endless def (untyped return)
 - 1149  # sig-gen types a `tbl[key] || FROZEN_EMPTY` fallback arm untyped
 - 1150  # sig-gen assigns no type to a `Data.define` member read
-- 1153  # sig-gen proposes `Array[untyped] | []` off an empty-table early return
 - 1154  # sig-gen types an `attr_reader` over an ivar assigned from an `initialize` parameter untyped
 - 1157  # sig-gen skips a block-taking name resolver whose decline paths return `nil`
 - 1167  # sig-gen skips a predicate whose body reads an attribute off its untyped node parameter (Dynamic receiver)
 - 1183  # sig-gen emits Struct.new member readers/writers (and the keyword_init ctor) untyped
+- 2302  # sig-gen types an empty array literal grown by `concat` / `<<` as `Array[untyped]`

@@ -543,6 +543,18 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(rbs_of("def none = []", :none)).to eq("def none: () -> []")
     end
 
+    it "keeps the empty tuple beside a non-Array nominal arm" do
+      rbs = rbs_of("def s\n return [] if rand > 0.5\n ENV.keys.first.to_s\nend", :s)
+
+      expect(rbs).to eq("def s: () -> (String | [])")
+    end
+
+    it "keeps a non-empty tuple beside an Array arm" do
+      rbs = rbs_of("def t(x)\n return [1, 2] if x.nil?\n ENV.keys\nend", :t)
+
+      expect(rbs).to eq("def t: (untyped) -> (Array[String] | [1, 2])")
+    end
+
     it "keeps the empty tuple beside another tuple arm" do
       rbs = rbs_of("def pair(x)\n return [] if x.nil?\n [1, 2]\nend", :pair)
 

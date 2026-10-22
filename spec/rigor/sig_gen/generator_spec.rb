@@ -600,6 +600,14 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(rbs).to eq("def t: (untyped) -> (Hash[untyped, untyped] | { a: 1 })")
     end
 
+    it "keeps an open empty hash shape beside a Hash arm" do
+      hash = Rigor::Type::Combinator.nominal_of("Hash", type_args: [Rigor::Type::Combinator.untyped, Rigor::Type::Combinator.untyped])
+      open_empty = Rigor::Type::HashShape.new({}, extra_keys: :open)
+      union = Rigor::Type::Combinator.union(hash, open_empty)
+
+      expect(generator(paths: []).send(:absorb_empty_literals, union)).to equal(union)
+    end
+
     it "keeps the empty hash shape beside another shape arm" do
       rbs = rbs_of("def pair(x)\n return {} if x.nil?\n { a: 1 }\nend", :pair)
 

@@ -16,11 +16,12 @@ RSpec.describe "Set element types", type: :runner do
     end
   end
 
+  # Errors and warnings: an always-falsey condition is a warning.
   def errors(source)
     prelude = %(require "rigor/testing"\ninclude Rigor::Testing\nx = ARGV.first.to_s\n) +
               "ys = [1, 2].select { |e| e > ARGV.size }\n"
     diagnostics = analyze(prelude + source).diagnostics
-    diagnostics.select { |d| d.severity == :error }.map(&:qualified_rule)
+    diagnostics.reject { |d| d.severity == :info }.map(&:qualified_rule)
   end
 
   it "types Set[...] over non-constant members as the union of their widened classes" do
@@ -84,6 +85,11 @@ RSpec.describe "Set element types", type: :runner do
   # a comparison reads always-falsey.
   it "drops the value pins of a nominal Array argument's element" do
     expect(dumped("ys = [1, 2].select { |e| e > n }\ndump_type(Set.new(ys))")).to eq(["Set[Dynamic[top] | Integer]"])
-    expect(errors("n = ARGV.size\nys = [1, 2].select { |e| e > n }\ns = Set.new(ys)\ns << 3\nputs 1 if s.max == 3")).to eq([])
+  end
+
+  # Reads falsey only when BOTH the widening and the floor are gone: either one alone keeps the element open.
+  it "reports nothing for a comparison against a value added after a nominal Array argument" do
+    source = "n = ARGV.size\nys = [1, 2].select { |e| e > n }\ns = Set.new(ys)\ns << 3\nputs 1 if s.max == 3"
+    expect(errors(source)).to eq([])
   end
 end

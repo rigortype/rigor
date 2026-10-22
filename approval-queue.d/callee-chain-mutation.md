@@ -1,4 +1,4 @@
-# Close the callee floor over self-call hand-offs, count a hand-off the closure cannot read as a mutation, and keep an unresolved self-call silent
+# Close the callee floor over self-call hand-offs of the same parameter, and read a hand-off it cannot follow as none
 
 - **PR:** [#2295](https://github.com/rigortype/rigor/pull/2295)
 - **Issue:** [#2104](https://github.com/rigortype/rigor/issues/2104)
@@ -15,16 +15,22 @@ session's effects surface should record now that a def's census depends on other
 
 ## Options and trade-offs
 
-- **Bound.** A depth bound alone misses a mutation one hop past it. A per-root least fixpoint costs one graph walk
-  per def. Chosen: a least fixpoint over at most 16 defs per closure (`CalleeMutationChain::MAX_DEFS`). A recursive
-  or mutually recursive chain then terminates, and a cycle with no mutation on it mutates nothing.
-- **A hand-off into a def past the cap.** Reading it as no mutation keeps the literal shape, which is the
-  false-positive direction. Reading it as a mutation loses only precision. Chosen: mutation.
-- **A self-call that resolves to no def in the class** (inherited, mixed in, `method_missing`). Reading it as a
-  mutation would floor every argument a method passes to an inherited helper, which the one-level floor (#68) has
-  never done. Chosen: no hand-off, the same reading the one-level floor gives it.
-- **A positional argument after a splat or `...`.** Its index says nothing about the parameter it binds. Chosen:
-  it can bind any mutated parameter of the callee.
+- **Graph and bound.** A first cut walked every hand-off of every parameter of every def it reached, up to 16 defs,
+  and counted a hand-off past the cap as a mutation. Review showed that sixteen calls handing an unrelated parameter
+  elsewhere, an 18-leaf fan-out, or a 17-deep chain with no mutation all exhausted the cap. Each then floored the
+  argument to `Array[Dynamic[top]]`, which fails a declared tuple: a new false positive, and about 300 roots in
+  Rigor's own `lib` hit the cap. Chosen: a parameter-flow graph. A node is one parameter of one def, the walk follows
+  only the hand-offs of that parameter, and it takes the least fixpoint over at most 32 nodes
+  (`CalleeMutationChain::MAX_NODES`). Recursive chains terminate, and a cycle with no mutation on it mutates nothing.
+- **A hand-off to a node past the cap.** Reading it as a mutation floors on evidence the walk never saw, which is
+  the false positive above. Reading it as none keeps the literal shape, which is the same answer the one-level floor
+  (#68) gives a callee it cannot resolve, and it misses a mutation more than 32 nodes down. Chosen: none.
+- **A self-call that resolves to no def in the class** (inherited, mixed in, `method_missing`). Chosen: no hand-off,
+  as #68 reads it.
+- **A self-call inside a block that runs on another `self`** (`instance_exec`, `class_exec`, `define_method`,
+  `Class.new { … }`, …). It does not call the method's receiver. Chosen: not a hand-off.
+- **A positional argument after a splat or `...`.** Its index says nothing about the parameter it binds. Chosen: it
+  may bind any positional parameter of the callee. An argument before the first splat keeps its index.
 - **Keyword parameters.** The census was positional only. Chosen: keyword parameters join it under their keyword,
   on the one-level floor too, because a keyword hand-off needs the callee's keyword slot.
 - **The incremental effects surface** (`content_mutated_parameter_positions`). The session's empty scope resolves no
@@ -34,8 +40,11 @@ session's effects surface should record now that a def's census depends on other
 
 ## Decision
 
-Each choice above is the option that cannot keep a stale literal shape where the census can see the hand-off. None
-of them floors an argument that the one-level floor of #68 would keep.
+Where the walk can see a hand-off of the parameter to a mutating callee, the argument is floored. Where it cannot
+(past the cap, an unresolved callee, a block on another `self`), the argument keeps its literal shape, as under
+#68. The new floors are the only new ones: a chain the walk reads to a mutation. The floor only removes a literal
+shape, so it can remove a finding but cannot add one, except that a floored array no longer matches a declared tuple.
+herb and haml show no new rows.
 
 ## To undo
 

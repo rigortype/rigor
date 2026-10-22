@@ -455,7 +455,7 @@ module Rigor
         [type, fall_through, join_jump_scopes(fall_through, sink, JumpTargets.of(body, Prism::NextNode))]
       end
 
-      # ADR-89 WD2 — the sorted positions of the positional parameters whose CONTENT `def_node` mutates
+      # ADR-89 WD2 — the sorted slots of the parameters (positional, then keyword) whose CONTENT `def_node` mutates
       # (`callee_content_mutated_parameters`, the ADR-56 arg-flooring surface a caller consumes). A per-def
       # static property of the AST — this is a pure exposure of the existing private computation (it never
       # reads the scope), so the incremental session can compute it on any `StatementEvaluator` (an empty
@@ -474,9 +474,9 @@ module Rigor
         positions.sort + keywords.sort
       end
 
-      # The local-variable reads among `call_node`'s positional arguments whose matching parameter the callee
-      # content-mutates, when `call_node` is a self-dispatch call resolving to a user def in this evaluator's scope
-      # (`callee_content_mutated_parameters`); empty for any other call. These are the locals the straight-line
+      # The local-variable reads among `call_node`'s arguments (positional, or a keyword's value) whose parameter the
+      # callee content-mutates, when `call_node` is a self-dispatch call resolving to a user def in this evaluator's
+      # scope (`callee_content_mutated_parameters`); empty for any other call. These are the locals the straight-line
       # callee floor ({#widen_callee_escaped_argument_captures}) floors after the call, and the ones
       # {CapturedLocals.content_mutations} reports as a block's callee-mutated captures.
       def content_mutated_arguments(call_node)

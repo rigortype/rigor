@@ -129,7 +129,7 @@ RSpec.describe "a callee chain that mutates an argument floors it (#2104)" do
     RUBY
   end
 
-  it "keeps the true positive when the def hands sixteen other parameters' worth of calls elsewhere" do
+  it "keeps the true positive when the def hands a different parameter to sixteen other methods" do
     calls = (1..16).map { |i| "n#{i}(node)" }.join("; ")
     leaves = (1..16).map { |i| "def n#{i}(x) = x" }
     expect(diagnostics(<<~RUBY)).to eq(undefined_upcase)

@@ -12,10 +12,13 @@
 - 1007  # sig-gen infers `nil` for a method whose real value is an opaque instance_exec'd plugin block
 - 1008  # a Hash mutated by a called method keeps its empty-seed shape
 - 1150  # sig-gen assigns no type to a `Data.define` member read
-- 1154  # sig-gen types an `attr_reader` over an ivar assigned from an `initialize` parameter untyped
 - 1157  # sig-gen skips a block-taking name resolver whose decline paths return `nil`
 - 1167  # sig-gen skips a predicate whose body reads an attribute off its untyped node parameter (Dynamic receiver)
 - 1183  # sig-gen emits Struct.new member readers/writers (and the keyword_init ctor) untyped
 - 2302  # sig-gen types an empty array literal grown by `concat` / `<<` as `Array[untyped]`
 - 2309  # sig-gen keeps a `Set[untyped]` fallback arm beside `Set[E]` (`lookup || Set.new.freeze`)
 - 2312  # sig-gen skips a method whose non-decline arm calls a private helper with untyped parameters
+- 2321  # sig-gen leaves an ivar assigned from an expression derived from an `initialize` parameter (`dup.freeze`, `to_sym`, `map`) untyped
+- 2322  # `filter_map` answers `Array[untyped]` with a typed receiver and block
+- 2323  # sig-gen cannot type `Inference::MatchRebinding::Frame`, so `Scope`'s `match_frame` and its closure predicates are hand-written
+- 2326  # an ivar `Hash.new` memo store slot (`@state[:k] ||= build`) reads as `Dynamic[top]`, so the reader over it is skipped

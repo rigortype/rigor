@@ -23,26 +23,27 @@ module Rigor
         def self.[]: (index: Integer, type_name: String) -> instance | (Integer index, String type_name) -> instance
       end
 
-      # sig-gen gap: #1154 — `attr_reader` rows over ivars assigned in `initialize`; each is
-      # validated/normalized first (`dup.freeze`/`to_sym`/truthiness collapse/coerce), so the
-      # stored types are hand-written.
+      # sig-gen gap: #2321 — `attr_reader` rows over ivars `initialize` assigns from expressions derived
+      # from its parameters (`dup.freeze`/`to_sym`), so the stored types are hand-written.
       attr_reader path_glob: String
 
-      # sig-gen gap: #1154 — as above (`to_sym` normalizes the accepted Symbol|String).
+      # sig-gen gap: #2321 — as above (`to_sym` normalizes the accepted Symbol|String).
       attr_reader method_name: Symbol
 
       # `singleton ? true : false` collapses any truthy input to bool — sig-gen already infers
-      # `false | true`, so this row is generated-equivalent rather than a #1154 gap.
+      # `false | true`, so this row is generated-equivalent rather than a gap.
       attr_reader singleton: bool
 
-      # sig-gen gap: #1154 — as above (`coerce_param_types` guarantees `Array[ParamType]`).
+      # sig-gen gap: #2312 — `initialize` stores what the private `coerce_param_types` helper returns, whose
+      # parameters are undeclared (it guarantees `Array[ParamType]`).
       attr_reader param_types: Array[ParamType]
 
-      # sig-gen gap: #1154 — as above (nil or a non-empty `dup.freeze`d String).
+      # sig-gen gap: #2321 — as above (nil or a non-empty `dup.freeze`d String).
       attr_reader return_type_name: String?
 
-      # sig-gen gap: #1154 — as above (`VALID_SEVERITIES.include?(to_sym)` bounds the stored value
-      # to the three declared literals).
+      # sig-gen gap: #2321 — as above (`VALID_SEVERITIES.include?(to_sym)` bounds the stored value
+      # to the three declared literals; a derived-write credit would generate `Symbol`, not the literal union, so
+      # this row needs the declared literals kept as intent).
       attr_reader severity: :error | :warning | :info
 
       # `method_name`/`severity` accept String too (both are `to_sym`'d); `param_types` entries are

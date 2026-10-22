@@ -31,8 +31,6 @@ module Rigor
     def nominal_for_name: (String | Symbol name) -> Type::Nominal?
     def singleton_for_name: (String | Symbol name) -> Type::Singleton?
     def constant_for_name: (String | Symbol name) -> Type::t?
-    # sig-gen gap: #1154 — the answer comes through `rbs_loader`, an `attr_reader` over an ivar assigned in
-    # `initialize` from a parameter, which reaches `untyped`.
     def global_for_name: (String | Symbol name, ?builtin: bool) -> Type::t?
     def class_known?: (String | Symbol name) -> bool
     def rbs_module?: (String | Symbol name) -> bool
@@ -57,7 +55,8 @@ module Rigor
       attr_reader libraries: Array[String]
       attr_reader signature_paths: Array[String | _ToPath]
       attr_reader cache_store: untyped?
-      # sig-gen gap: #160 — sig-gen emits no `attr_reader` for the loader's readers; typed as the initializer stores it.
+      # sig-gen gap: #160 — sig-gen emits no `attr_reader` for the loader's readers; typed as the initializer stores
+      # it.
       attr_reader deferred_signature_paths: Array[Pathname]
 
       def self.default: () -> RbsLoader
@@ -82,6 +81,9 @@ module Rigor
       def singleton_extended_module_names: (String | Symbol class_name) -> Array[String]
       def constant_type: (String name) -> Type::t?
       def constant_names: () -> Array[String]
+      # sig-gen gap: #2326 — the answer is `global_declarations[name.to_sym]&.first`, a lookup in the loader's memo
+      # hash `@state`, which sig-gen skips as untyped.
+      def global_type: (String | Symbol name) -> Type::t?
       def each_known_class_name: () { (String name) -> void } -> void
                               | () -> ::Enumerator[String, void]
     end

@@ -1397,21 +1397,37 @@ module Rigor
       # different method (issue #1382). Delegates to {Rigor::Inference::DefReturnTyper} — the same body-typing +
       # explicit-return-union the `rigor annotate` def-line annotator uses.
       def infer_return_type(def_node, scope_index)
-        absorb_empty_tuple(Inference::DefReturnTyper.call(def_node, scope_index, keep_lookup_nil: true))
+        absorb_empty_literals(Inference::DefReturnTyper.call(def_node, scope_index, keep_lookup_nil: true))
       end
 
       # Issue #1153 — an empty-collection early return (`return [] if table.empty?`) types its arm `[]`, which the
       # engine's union keeps beside a sibling `Array[E]` arm on purpose (the empty tuple is a distinct shape). A
       # signature has no use for the distinction: `[]` is an `Array[E]` for every `E`, so `Array[E] | []` is just
       # `Array[E]`, and the leftover `[]` arm made the proposal read as if the empty literal pinned the element.
-      # Absorbed only beside an `Array` nominal; a lone `[]`, or one beside another tuple (`[1, 2] | []`), is
-      # untouched, since each of those is information the declaration should keep.
-      def absorb_empty_tuple(type)
+      # Issue #1149 — the same holds for the empty closed hash shape `{}` (a frozen empty fallback,
+      # `table[key] || EMPTY`) beside a `Hash[K, V]` nominal. Each empty literal is absorbed only beside its OWN
+      # nominal: a `[]` beside a `Hash` arm, or a `{}` beside an `Array` arm, is untouched. A lone empty literal,
+      # one beside another tuple / shape (`[1, 2] | []`), an open `{ ... }` shape, and a non-empty shape are
+      # untouched too, since each of those is information the declaration should keep.
+      def absorb_empty_literals(type)
         return type unless type.is_a?(Type::Union)
 
-        empties, rest = type.members.partition { |member| member.is_a?(Type::Tuple) && member.elements.empty? }
-        array_arm = rest.any? { |member| member.is_a?(Type::Nominal) && member.class_name == "Array" }
-        empties.empty? || !array_arm ? type : Type::Combinator.union(*rest)
+        kept = type.members.reject { |member| absorbed_empty_literal?(member, type.members) }
+        kept.size == type.members.size ? type : Type::Combinator.union(*kept)
+      end
+
+      def absorbed_empty_literal?(member, members)
+        if member.is_a?(Type::Tuple) && member.elements.empty?
+          nominal_arm?(members, "Array")
+        elsif member.is_a?(Type::HashShape) && member.pairs.empty? && member.closed?
+          nominal_arm?(members, "Hash")
+        else
+          false
+        end
+      end
+
+      def nominal_arm?(members, class_name)
+        members.any? { |member| member.is_a?(Type::Nominal) && member.class_name == class_name }
       end
 
       def dynamic_top?(type)

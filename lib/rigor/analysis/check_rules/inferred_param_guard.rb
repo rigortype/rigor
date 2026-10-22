@@ -50,7 +50,6 @@ module Rigor
           when Prism::HashNode, Prism::KeywordHashNode
             node.elements.any? { |element| rooted?(element, scope, depth + 1) }
           when Prism::AssocNode then rooted?(node.key, scope, depth + 1) || rooted?(node.value, scope, depth + 1)
-          when Prism::SplatNode, Prism::AssocSplatNode then rooted?(literal_operand(node), scope, depth + 1)
           # Value-combining forms: the produced value is a union of the operands, so it is a lower bound when
           # ANY operand is inferred-parameter-rooted (`cps[i] - x rescue -1`, `a && param.foo`, `param || b`).
           # Declining on the whole expression is FP-safe by the same lower-bound argument.
@@ -62,10 +61,6 @@ module Rigor
           when Prism::StatementsNode then rooted?(node.body.last, scope, depth + 1)
           else false
           end
-        end
-
-        def literal_operand(node)
-          node.is_a?(Prism::SplatNode) ? node.expression : node.value
         end
 
         def last_statement(body)

@@ -174,6 +174,60 @@ RSpec.describe "plugins/rigor-actionmailer" do
       expect(missing.map(&:message).grep(/set_instance|helper_method/)).to be_empty
     end
 
+    it "skips methods that follow a bare `protected` (not dispatchable as mailer actions)" do
+      files = {
+        "app/mailers/admin_mailer.rb" => <<~RUBY,
+          class AdminMailer < ApplicationMailer
+            def daily_report
+              mail subject: "report"
+            end
+
+            protected
+
+            def shared_setup
+              @instance = "x"
+            end
+          end
+        RUBY
+        "app/views/admin_mailer/daily_report.html.erb" => "Hello\n"
+      }
+      result = run_plugin(
+        source: "# noop\n",
+        files: files,
+        paths: ["app/mailers/admin_mailer.rb"]
+      )
+      missing = plugin_diagnostics(result).select { |d| d.rule == "missing-view" }
+      expect(missing.map(&:message).grep(/shared_setup/)).to be_empty
+    end
+
+    it "keeps a method after `protected` then `public` as an action" do
+      files = {
+        "app/mailers/admin_mailer.rb" => <<~RUBY
+          class AdminMailer < ApplicationMailer
+            protected
+
+            def shared_setup
+              @instance = "x"
+            end
+
+            public
+
+            def weekly_report
+              mail subject: "report"
+            end
+          end
+        RUBY
+      }
+      result = run_plugin(
+        source: "# noop\n",
+        files: files,
+        paths: ["app/mailers/admin_mailer.rb"]
+      )
+      missing = plugin_diagnostics(result).select { |d| d.rule == "missing-view" }
+      expect(missing.map(&:message).grep(/weekly_report/)).not_to be_empty
+      expect(missing.map(&:message).grep(/shared_setup/)).to be_empty
+    end
+
     it "skips methods named explicitly as before_action callback targets" do
       files = {
         "app/mailers/admin_mailer.rb" => <<~RUBY,

@@ -52,13 +52,30 @@ module Rigor
         # Bumped 2026-09-02 (#621) — mailer keys are de-rooted at the producer and a reopened class's
         # actions are UNIONed rather than clobbered, so a cached 0.4.0 index can be missing actions this
         # version knows about.
-        version: "0.5.0",
+        #
+        # Bumped 2026-10-23 (#2308) — a method after a bare `protected` is no longer an action, so a cached 0.5.0
+        # index can list protected helpers as actions (and as missing-view candidates).
+        version: "0.5.1",
         description: "Validates ActionMailer call shape and view template existence.",
         config_schema: {
           "mailer_search_paths" => { kind: :array, default: ["app/mailers"] },
           "mailer_base_classes" => { kind: :array, default: %w[ApplicationMailer ActionMailer::Base] },
           "views_root" => { kind: :string, default: "app/views" }
         },
+        # ADR-125 (#575, #2308) — a mailer instance serves exactly one action (`Mailer.welcome(...)` builds a
+        # fresh instance and runs that one method), so ivar writes in two different public actions are never live
+        # together and `def.ivar-write-mismatch` stops comparing them. `ActionMailer::Base` has no signature here;
+        # the rule matches an undeclared superclass by its written name.
+        per_invocation_classes: ["ActionMailer::Base"],
+        # A public method these macros name is a callback or a view helper, not an action: it runs inside
+        # whichever action triggers it (AbstractController::Callbacks / Helpers), so its writes stay compared with
+        # every action's. Same list as rigor-actionpack.
+        per_invocation_non_action_macros: %i[
+          before_action prepend_before_action append_before_action skip_before_action
+          after_action prepend_after_action append_after_action skip_after_action
+          around_action prepend_around_action append_around_action skip_around_action
+          helper_method
+        ],
         # ADR-103 WD10 (#387) — see {Effects} for what each row is and why.
         effect_root: "rails",
         effect_labels: ["rails.actionmailer.deliver"],

@@ -216,8 +216,8 @@ module Rigor
         # - `initialize`
         # - methods starting with `_` (Ruby convention for private/internal)
         # - `def self.<name>` (singleton-side)
-        # - methods after a bare `private` (or `public` → `private` transition) — these are internal
-        #   helpers, not actions
+        # - methods after a bare `private` or `protected` (until a `public` switches back) — these are
+        #   internal helpers, not actions: a mailer action is dispatched only when public
         # - methods named as a `private :foo` argument
         # - methods named as a callback target (`before_action :name`, `after_action`, `around_action`)
         #
@@ -239,7 +239,7 @@ module Rigor
             next [] if node.receiver.is_a?(Prism::SelfNode)
             next [] if node.name == :initialize
             next [] if node.name.to_s.start_with?("_")
-            next [] if visibility == :private
+            next [] unless visibility == :public
             next [] if private_names.include?(node.name)
             next [] if callback_names.include?(node.name)
 

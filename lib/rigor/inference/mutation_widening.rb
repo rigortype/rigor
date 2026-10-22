@@ -201,6 +201,7 @@ module Rigor
       # `Prism::BlockNode`s — each block is processed by its own `eval_call`.
       def widen_after_block(call_node:, outer_scope:)
         block = call_node.block
+        return DeepErasure.widen_symbol_proc(call_node, outer_scope) if DeepErasure.symbol_proc_mutation?(block)
         return outer_scope unless block.is_a?(Prism::BlockNode)
 
         body = block.body

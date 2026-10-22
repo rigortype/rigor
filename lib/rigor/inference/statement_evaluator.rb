@@ -2285,6 +2285,8 @@ module Rigor
 
       def eval_recorded_unless(node) = record_conditional_value(node) { eval_unless(node) }
 
+      # The "evaluated a loop" gate is a memory-only guard: recording every conditional would give the same answers, at
+      # the cost of a retained scope per `if` node, so no behavioural example pins it.
       def record_conditional_value(node)
         before = LoopValueRecord.loops_evaluated
         result = yield

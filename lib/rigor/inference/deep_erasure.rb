@@ -36,14 +36,17 @@ module Rigor
       ].freeze
       ELEMENT_WRITE_NODES = [
         Prism::IndexOperatorWriteNode, Prism::IndexOrWriteNode, Prism::IndexAndWriteNode,
-        Prism::CallOperatorWriteNode, Prism::CallOrWriteNode, Prism::CallAndWriteNode
+        Prism::CallOperatorWriteNode, Prism::CallOrWriteNode, Prism::CallAndWriteNode,
+        Prism::IndexTargetNode, Prism::CallTargetNode
       ].freeze
       private_constant :ELEMENT_PARAMETER_NODES, :ELEMENT_WRITE_NODES
 
       # True when `body` mutates in place a value that a name in `names` (a loop's element) holds: a mutator
       # (`MutationWidening::SHAPE_MUTATORS`) called on a read or an index chain rooted at it (`x << 1`,
-      # `x[0].push(1)`, `x[0] = 1`), or an operator write on one (`x[0] += 1`). The parameters of a block inside the
-      # body count too (`x.each { |y| y << 1 }` mutates an element of `x`). It does not follow an alias (`y = x`) or
+      # `x[0].push(1)`, `x[0] = 1`), or an operator write on one (`x[0] += 1`). Every name a block or a
+      # `for` inside the body binds counts as an element too (`x.each { |y| y << 1 }`, `for c in x; c << 1; end`),
+      # and so does `it` / `_1` wherever it is read, and an accumulator parameter (`inject([]) { |acc, e| acc << e }`):
+      # the rule is wider than "an element", which only loses precision. It does not follow an alias (`y = x`) or
       # an element passed to a call (`add(x)`), which the straight-line widening does not either.
       def element_mutation?(body, names)
         return false if body.nil?
@@ -62,7 +65,13 @@ module Rigor
       end
 
       def nested_parameter_names(body)
-        Source::NodeWalker.each(body).flat_map { |node| node.is_a?(Prism::BlockNode) ? parameter_names(node.parameters) : [] }
+        Source::NodeWalker.each(body).flat_map do |node|
+          case node
+          when Prism::BlockNode then parameter_names(node.parameters)
+          when Prism::ForNode then parameter_names(node.index)
+          else []
+          end
+        end
       end
 
       def element_mutation_site?(node, names)
@@ -90,8 +99,20 @@ module Rigor
       def widen_element_aliases(receiver, body, names, scope)
         return scope unless element_mutation?(body, names)
 
+        widen_receiver(receiver, scope)
+      end
+
+      def widen_receiver(receiver, scope)
         ReceiverAlias.candidates(receiver).reduce(scope) { |acc, read| widen_read(read, acc) }
       end
+
+      # `a.each(&:strip!)`: a block argument naming a mutator mutates every element it is handed.
+      def symbol_proc_mutation?(block)
+        block.is_a?(Prism::BlockArgumentNode) && block.expression.is_a?(Prism::SymbolNode) &&
+          MutationWidening::SHAPE_MUTATORS.include?(block.expression.unescaped.to_sym)
+      end
+
+      def widen_symbol_proc(call_node, scope) = widen_receiver(call_node.receiver, scope)
 
       def widen_read(read, scope)
         getter, builder = MutationWidening::ALIAS_ACCESSORS[read.class]

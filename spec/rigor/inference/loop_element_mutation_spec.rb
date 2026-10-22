@@ -78,4 +78,72 @@ RSpec.describe "a loop body that mutates an element in place", type: :runner do
       RUBY
     end
   end
+
+  describe "a nested loop or a symbol proc" do
+    it "does not fold through a nested for loop's index" do
+      expect(flow_rules(<<~RUBY)).to eq([])
+        a = [[[1]]]
+        for r in a; for c in r; c << 2; end; end
+        puts(a[0][0].size == 1 ? :y : :n)
+      RUBY
+    end
+
+    it "does not fold through a for loop's index inside a block" do
+      expect(flow_rules(<<~RUBY)).to eq([])
+        a = [[[1]]]
+        a.each { |r| for c in r; c << 2; end }
+        puts(a[0][0].size == 1 ? :y : :n)
+      RUBY
+    end
+
+    it "does not fold the value of a for loop that holds a nested for loop" do
+      expect(flow_rules(<<~RUBY)).to eq([])
+        r = for x in [[[1]]]; for c in x; c << 2; end; end
+        puts(r[0][0].size == 1 ? :y : :n)
+      RUBY
+    end
+
+    it "does not fold through a nested block's parameter" do
+      expect(flow_rules(<<~RUBY)).to eq([])
+        a = [[[1]]]
+        a.each { |r| r.each { |c| c << 2 } }
+        puts(a[0][0].size == 1 ? :y : :n)
+      RUBY
+    end
+
+    it "does not fold through a mutator named by a symbol proc" do
+      expect(flow_rules(<<~RUBY)).to eq([])
+        a = [" s "]
+        a.each(&:strip!)
+        puts(a[0].size == 3 ? :y : :n)
+        b = [[1]]
+        b.each(&:clear)
+        puts(b[0].size == 1 ? :y : :n)
+      RUBY
+    end
+
+    it "keeps the precise shape for a symbol proc that does not mutate" do
+      expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+        a = [[1]]
+        a.each(&:size)
+        puts(a[0].size == 1 ? :y : :n)
+      RUBY
+    end
+
+    it "does not fold through a multi-target index store on an element" do
+      expect(flow_rules(<<~RUBY)).to eq([])
+        h = [{ a: 1 }]
+        h.each { |x| x[:b], _y = 2, 3 }
+        puts(h[0].size == 1 ? :y : :n)
+      RUBY
+    end
+
+    it "keeps the precise shape when a nested for loop only reads" do
+      expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+        a = [[[1]]]
+        for r in a; for c in r; c.size; end; end
+        puts(a[0][0].size == 1 ? :y : :n)
+      RUBY
+    end
+  end
 end

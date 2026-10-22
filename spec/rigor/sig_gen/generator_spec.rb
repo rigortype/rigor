@@ -1725,6 +1725,25 @@ RSpec.describe Rigor::SigGen::Generator do
       end
     end
 
+    # Issue #2278 — the engine now types `Set[...]` over non-constant members precisely, and keeps it through
+    # `.freeze`; sig-gen still writes `Set[untyped]` (#2177), and a reader over a frozen Set constant is proposed
+    # rather than skipped as `untyped`.
+    {
+      "a frozen Set over non-constant members" => "Set[ARGV.size, ARGV.first].freeze",
+      "a Set built from an array of non-constant members" => "Set.new([ARGV.size, ARGV.first])",
+      "a Set holding a literal container" => "Set[[ARGV.size, :b]]",
+      "a reader over a frozen Set literal constant" => "LIT"
+    }.each do |label, body|
+      it "proposes Set[untyped] for #{label}" do
+        path = write_fixture("lib/box.rb", "class Box\n  LIT = Set[[:a, :b]].freeze\n  def g\n    #{body}\n  end\nend\n")
+
+        method = generator(paths: [path]).run.find { |c| c.method_name == :g }
+
+        expect(method.classification).to eq(Rigor::SigGen::Classification::NEW_METHOD)
+        expect(method.rbs).to eq("def g: () -> Set[untyped]")
+      end
+    end
+
     # A Set constant is a nominal, as a Range or a Float is, not a pinned literal (#2177), so it tightens a
     # declared `-> Object`.
     it "proposes Set[untyped] for a union of Set literals over a declared `-> Object`" do

@@ -37,7 +37,17 @@ module Rigor
         end
       end
 
+      # A set is mutable, so the classes the engine reads off its construction (`Set[x]`, `Set.new(xs)`) are not
+      # a contract: `x = Set[1]; x << "a"; x` holds a String. A written `Set` therefore keeps `untyped` for its
+      # element, as a Set constant does (#2177), however precisely the engine typed it.
+      SET_ELEMENT_UNTYPED = "Set"
+      private_constant :SET_ELEMENT_UNTYPED
+
       def self.elaborate_nominal(type, environment, arity_cache)
+        if type.class_name == SET_ELEMENT_UNTYPED && type.type_args.size == 1
+          return Type::Combinator.nominal_of(type.class_name, type_args: [Type::Combinator.untyped])
+        end
+
         elaborated_args = type.type_args.map { |arg| walk(arg, environment, arity_cache) }
         return Type::Combinator.nominal_of(type.class_name, type_args: elaborated_args) if elaborated_args.any?
 

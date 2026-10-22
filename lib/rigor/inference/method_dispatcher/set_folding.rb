@@ -35,42 +35,74 @@ module Rigor
           return nil unless SingletonFolding.receiver?(receiver, "Set")
 
           case method_name
-          when :[] then fold_bracket(args)
-          when :new then fold_new(args)
+          when :[] then fold_bracket(args, context.call_node)
+          when :new then fold_new(args, context.call_node, context.block_type)
           end
         end
 
-        # `Set["a", "b", "c"]` — all positional args must be Constant.
-        def fold_bracket(args)
-          values = args.map do |a|
-            return nil unless a.is_a?(Type::Constant)
+        # `Set["a", "b", "c"]` — all positional args must be Constant to fold to a value. Otherwise the
+        # element type is the union of the arguments, widened off their literal pins (#2278).
+        def fold_bracket(args, call_node = nil)
+          return nil if splatted?(call_node)
 
-            a.value
+          if args.all?(Type::Constant)
+            return Type::Combinator.constant_of(::Set.new(args.map(&:value)))
           end
 
-          Type::Combinator.constant_of(::Set.new(values))
+          typed_set(args)
         rescue StandardError
           nil
         end
 
-        # `Set.new` / `Set.new(tuple_of_constants)`.
-        def fold_new(args)
+        # `Set.new` / `Set.new(enum)`. A call with a block declines: the block maps each element
+        # (`Set.new([1, 2], &:to_s)` holds `"1"` and `"2"`), so the argument's elements are not the set's.
+        def fold_new(args, call_node = nil, block_type = nil)
+          return nil if block_type || block_given?(call_node) || splatted?(call_node)
           return Type::Combinator.constant_of(::Set.new) if args.empty?
           return nil if args.size > 1
 
           arg = args.first
-          values = case arg
-                   when Type::Tuple
-                     return nil unless arg.elements.all?(Type::Constant)
+          return fold_tuple(arg) if arg.is_a?(Type::Tuple)
 
-                     arg.elements.map(&:value)
-                   else
-                     return nil
-                   end
-
-          Type::Combinator.constant_of(::Set.new(values))
+          element = nominal_element(arg)
+          element ? typed_set([element], widen: false) : nil
         rescue StandardError
           nil
+        end
+
+        def fold_tuple(tuple)
+          if tuple.elements.all?(Type::Constant)
+            return Type::Combinator.constant_of(::Set.new(tuple.elements.map(&:value)))
+          end
+
+          typed_set(tuple.elements)
+        end
+
+        # The element of an `Array[T]` / `Set[T]` argument, or nil for any other carrier.
+        def nominal_element(arg)
+          return nil unless arg.is_a?(Type::Nominal) && %w[Array Set].include?(arg.class_name)
+          return nil unless arg.type_args.size == 1
+
+          arg.type_args.first
+        end
+
+        # `Nominal[Set, [element]]`: a set is mutable, so the element is widened off value pins and literal
+        # containers as an `Array.new` fill is, never pinned to what it was built with.
+        def typed_set(types, widen: true)
+          return nil if types.empty?
+
+          members = widen ? types.map { |t| MethodDispatcher.array_new_element(t) } : types
+          Type::Combinator.nominal_of("Set", type_args: [Type::Combinator.union(*members)])
+        end
+
+        def block_given?(call_node)
+          call_node.respond_to?(:block) && !call_node.block.nil?
+        end
+
+        def splatted?(call_node)
+          return false unless call_node.respond_to?(:arguments)
+
+          (call_node.arguments&.arguments || []).any? { |a| a.is_a?(Prism::SplatNode) }
         end
       end
     end

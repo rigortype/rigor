@@ -22,9 +22,7 @@
 
 The named-mutator rule, identity matching, and the loop-gated conditional record. The `for` value's existing one-level rule is unchanged for a body that mutates nothing at the element level (a call on the collection or an alias still drops one level). The precedent is #2242, which chose the same conservative side for the `for` value (say less where the engine cannot back a claim) and bounded the cost with the record.
 
-## Accepted losses
-
-The detector treats every name a nested block or `for` binds, `it` / `_1` read anywhere, and an accumulator parameter as an element name. Narrowing to blocks rooted at an element, and to the element position of `each_with_object` / `inject`, was not clean (it needs the call's block-parameter positions per method), so these keep the wider rule, which only loses precision: `each_with_object({}) { |x, h| h[x] = 1 }`, `inject([]) { |acc, x| acc << x }` and `out.each { |o| o << x }` over a collection of nested shapes drop those shapes. Zero rows changed on the herb corpus.
+**Accepted losses.** The detector treats every name a nested block or `for` binds, `it` / `_1` read anywhere, and an accumulator parameter as an element name. Narrowing to blocks rooted at an element, and to the element position of `each_with_object` / `inject`, was not clean (it needs the call's block-parameter positions per method), so these keep the wider rule, which only loses precision: `each_with_object({}) { |x, h| h[x] = 1 }`, `inject([]) { |acc, x| acc << x }` and `out.each { |o| o << x }` over a collection of nested shapes drop those shapes. Zero rows changed on the herb corpus.
 
 ## To undo
 

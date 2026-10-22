@@ -5080,7 +5080,7 @@ module Rigor
       # nested `def` or block inside its body is still a range the containment half needs.
       # `def_owner_prefix` is the eval-body override described on {#walk_methods_and_def_nodes}:
       # an explicit owner for def rows while declarations stay lexical (`[]` = ownerless).
-      def walk_deferred_ranges(node, qualified_prefix, in_singleton_class, inside_deferred, # rubocop:disable Metrics/ParameterLists
+      def walk_deferred_ranges(node, qualified_prefix, in_singleton_class, inside_deferred, # rubocop:disable Metrics/ParameterLists, Metrics/MethodLength
                                mf_offsets, ranges, def_owner_prefix = nil, singleton_cref: false,
                                defs_singleton: false)
         return unless node.is_a?(Prism::Node)
@@ -5116,9 +5116,32 @@ module Rigor
                                       singleton_cref: singleton_cref)
         end
 
+        record_definer_name_row(node, ranges) if node.is_a?(Prism::CallNode)
         walk_deferred_children(node, qualified_prefix, in_singleton_class, inside_deferred,
                                mf_offsets, ranges, def_owner_prefix, singleton_cref: singleton_cref,
                                                                      defs_singleton: defs_singleton)
+      end
+
+      DEFINER_NAME_CALLS = Set[:define_method, :define_singleton_method, :alias_method].freeze
+      DEFINER_SEND_CALLS = Set[:send, :__send__, :public_send].freeze
+      private_constant :DEFINER_NAME_CALLS, :DEFINER_SEND_CALLS
+
+      # Issue #2184 — a `define_method` / `define_singleton_method` / `alias_method` call with a literal (new) name,
+      # on any receiver and through `send` too, records an ownerless, kindless row over the name literal: no owner or
+      # side is claimed, so no ordering scan matches it and the literal contains no call. It only tells a by-name
+      # reader that the project gives the name a body no def table holds. A computed name records nothing.
+      def record_definer_name_row(node, ranges)
+        arguments = node.arguments&.arguments || []
+        if DEFINER_SEND_CALLS.include?(node.name)
+          return unless DEFINER_NAME_CALLS.include?(literal_method_name(arguments.first))
+
+          arguments = arguments.drop(1)
+        end
+        return unless DEFINER_NAME_CALLS.include?(node.name) || DEFINER_SEND_CALLS.include?(node.name)
+
+        argument = arguments.first
+        name = literal_method_name(argument)
+        ranges << [argument.location.start_offset, argument.location.end_offset, name, nil, nil] if name
       end
 
       # The `def` arm of {#walk_deferred_ranges}: records the range row — singleton-side when the
@@ -5631,7 +5654,9 @@ module Rigor
                               mf_offsets, ranges)
         start = def_node.location.start_offset
         if inside_deferred
-          ranges << [start, def_node.location.end_offset, nil, nil, nil]
+          # Issue #2184 — the def installs at invocation under a `self` the walk does not know, so the row names the
+          # method but claims no owner or side.
+          ranges << [start, def_node.location.end_offset, def_node.name, nil, nil]
           return
         end
 
@@ -9308,6 +9333,9 @@ module Rigor
         %i[methods def_nodes singleton_def_nodes].each do |key|
           file_index[key]&.each_value { |table| names.merge(table.keys) }
         end
+        # Issue #2184 — a named deferred-range row with no side (a `def` in a block, a `define_singleton_method`) is a
+        # definition no table above holds.
+        file_index[:deferred_ranges]&.each_value { |rows| rows.each { |row| names << row[2] if row[2] && row[3].nil? } }
         names.freeze
       end
 

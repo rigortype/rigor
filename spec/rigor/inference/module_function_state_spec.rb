@@ -497,7 +497,8 @@ RSpec.describe Rigor::Inference::ModuleFunctionState do
       singleton_def_nodes: indexer.build_discovered_singleton_def_nodes(root)
                                   .transform_values { |table| table.transform_values { |node| label(node) } },
       deferred_ranges: indexer.build_deferred_ranges(root).filter_map do |start, _end, name, kind, owner|
-        [name, line_of(probe, start), kind, owner] if name
+        # Def rows only: a row with no side (#2184's `def` in a block, `define_method` name) is not one.
+        [name, line_of(probe, start), kind, owner] if kind
       end,
       extends: indexer.build_discovered_extends(root)
     }
@@ -927,7 +928,7 @@ RSpec.describe Rigor::Inference::ModuleFunctionState do
     it "records the answers in the tables" do
       root = Prism.parse(source).value
       indexer = Rigor::Inference::ScopeIndexer
-      rows = indexer.build_deferred_ranges(root).filter_map { |row| row.values_at(2, 3, 4) if row[2] }
+      rows = indexer.build_deferred_ranges(root).filter_map { |row| row.values_at(2, 3, 4) if row[3] }
 
       expect(indexer.build_discovered_singleton_def_nodes(root)).to eq({})
       expect(rows).to eq([[:a, :both, "Nested"], [:c, :both, "Nested"]])

@@ -1226,20 +1226,20 @@ module Rigor
           # body is morally a class body, so ADR-34 stays silent there — including on a genuinely
           # undefined name inside the block. Ranges are computed once per file.
           return nil if call_inside_receiver_eval_ranges?(eval_ranges, call_node)
-          return nil if lexically_declined_toplevel_call?(call_node, scope, lexical_sites)
+          return nil if lexically_declined_toplevel_call?(call_node, scope, lexical_sites, scope_index)
 
           build_unresolved_toplevel_diagnostic(path, call_node)
         end
 
         # The `call.unresolved-toplevel` declines that read the file's syntax, asked last because they walk it.
-        def lexically_declined_toplevel_call?(call_node, scope, lexical_sites)
+        def lexically_declined_toplevel_call?(call_node, scope, lexical_sites, scope_index = nil)
           # ADR-121 WD7 — a refinement of `Object` (or one Rigor cannot read) in effect here may define the name.
           return true if refined_method_in_effect?("Object", call_node, scope, :instance, lexical_sites)
           return false if lexical_sites.nil?
 
           # Issue #1817 — a block handed to a project method that may `module_eval` / `instance_exec` it runs under
           # another `self`, so a call in it is not a top-level one ({RebindingBlockCallees}).
-          RebindingBlockCallees.inside_rebound_block?(call_node, scope, lexical_sites.block_calls)
+          RebindingBlockCallees.inside_rebound_block?(call_node, scope, lexical_sites.block_calls, scope_index)
         end
 
         # Issue #1383 — RBS core declares `main`'s private singleton methods on
@@ -3102,7 +3102,8 @@ module Rigor
           return true if rows.nil?
 
           offset = call_node.location.start_offset
-          rows.none? { |(start, finish, name, _kind, _owner)| !name.nil? && start <= offset && offset < finish }
+          # A row with no side (a `def` in a block, a `define_method` name) is a block's range or no range at all.
+          rows.none? { |(start, finish, _name, kind, _owner)| !kind.nil? && start <= offset && offset < finish }
         end
 
         SINGLETON_WILDCARD_SLOT = %i[singleton *].freeze

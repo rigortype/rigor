@@ -29,9 +29,12 @@ module Rigor
       #   run.
       #
       # A callee name the project gives a method without a readable `def` (`attr_*`, `alias_method`,
-      # `define_method`), or patches through `pre_eval:`, cannot be read and declines too. So does a `send` /
-      # `__send__` / `public_send` whose method name is not a literal. A callee no project file defines keeps the
-      # rule's old answer: Rigor reads only the project's own bodies here.
+      # `define_method`, `define_singleton_method` on any receiver, a `def` written inside a block), or patches
+      # through `pre_eval:`, cannot be read and declines too. So does a `send` / `__send__` / `public_send` whose
+      # method name is not a literal. Issue #2184 — a project `method_missing` that may hand its block on answers
+      # for every name, since Ruby reaches it for any name the receiver lacks; and the block of a `define_method` /
+      # `define_singleton_method` call is a method body, run under whatever receives the method. A callee no project
+      # file defines keeps the rule's old answer otherwise: Rigor reads only the project's own bodies here.
       module RebindingBlockCallees
         SEND_CALLS = %i[send __send__ public_send].freeze
         # Reading the block through these runs it with its own `self`, or does not run it.
@@ -41,6 +44,9 @@ module Rigor
         PREDICATE_PARENTS = [Prism::IfNode, Prism::UnlessNode, Prism::WhileNode, Prism::UntilNode].freeze
         # `proc { … }`, `lambda { … }` and `Proc.new { … }` passed with `&` are the block of the call they go to.
         PROC_LITERAL_CALLS = %i[proc lambda].freeze
+        # Core methods whose block becomes a method body, run under the method's receiver.
+        METHOD_BODY_BLOCK_CALLS = %i[define_method define_singleton_method].freeze
+        private_constant :METHOD_BODY_BLOCK_CALLS
         private_constant :SEND_CALLS, :PLAIN_PROC_CALLS, :BINDING_CALLS, :PREDICATE_PARENTS, :PROC_LITERAL_CALLS
 
         # The calls in one file that pass a literal block, each with the offsets that block's body spans, plus the
@@ -101,8 +107,8 @@ module Rigor
         module_function
 
         # Does `call_node` sit inside a block that some project definition of its callee may run under another `self`?
-        def inside_rebound_block?(call_node, scope, sites)
-          sites.enclosing(call_node).any? { |block_call| callee_may_rebind?(block_call, scope, sites) }
+        def inside_rebound_block?(call_node, scope, sites, scope_index = nil)
+          sites.enclosing(call_node).any? { |block_call| callee_may_rebind?(block_call, scope, sites, scope_index) }
         end
 
         # The node whose span is the block `call` passes: its literal block, or a lambda / proc literal passed with `&`.
@@ -127,10 +133,57 @@ module Rigor
           node.name == :new && node.receiver.is_a?(Prism::ConstantReadNode) && node.receiver.name == :Proc
         end
 
-        def callee_may_rebind?(block_call, scope, sites)
+        def callee_may_rebind?(block_call, scope, sites, scope_index = nil)
           name = callee_name(block_call)
-          return true if name.nil?
+          return true if name.nil? || METHOD_BODY_BLOCK_CALLS.include?(name)
+          return true if answer(name, scope, sites)
+          # Ruby reaches `method_missing` only for a name the receiver lacks.
+          return false if resolves_on_receiver?(block_call, name, scope, scope_index)
 
+          answer(:method_missing, scope, sites)
+        end
+
+        # Whether the receiver's type names a class whose RBS or project table gives it `name`, on every member of a
+        # union. A receiverless call at the top level asks `Object`, `main`'s class. Any other type cannot say.
+        def resolves_on_receiver?(block_call, name, scope, scope_index)
+          receiver = block_call.receiver
+          return scope.toplevel? && class_defines?("Object", :instance, name, scope) if receiver.nil?
+
+          receiver_scope = scope_index&.[](receiver) || scope
+          type_resolves?(receiver_scope.type_of(receiver), name, scope)
+        rescue StandardError
+          false
+        end
+
+        def type_resolves?(type, name, scope)
+          case type
+          when Type::Union then type.members.all? { |member| type_resolves?(member, name, scope) }
+          when Type::Singleton then class_defines?(type.class_name, :singleton, name, scope)
+          else
+            class_name = receiver_class_name(type)
+            !class_name.nil? && class_defines?(class_name, :instance, name, scope)
+          end
+        end
+
+        def receiver_class_name(type)
+          case type
+          when Type::Nominal, Type::StructInstance, Type::DataInstance then type.class_name&.to_s
+          when Type::Tuple then "Array"
+          when Type::HashShape then "Hash"
+          when Type::Constant then type.value.class.name
+          end
+        end
+
+        def class_defines?(class_name, side, name, scope)
+          rbs = if side == :singleton
+                  Rigor::Reflection.singleton_method_definition(class_name, name, scope: scope)
+                else
+                  Rigor::Reflection.instance_method_definition(class_name, name, scope: scope)
+                end
+          !rbs.nil? || scope.discovered_method?(class_name, name, side)
+        end
+
+        def answer(name, scope, sites)
           answers = sites.answers
           return answers[name] if answers.key?(name)
 
@@ -183,7 +236,8 @@ module Rigor
         # A def table keeps one body per class and side, so a second `def` of the name for the same slot (in a
         # sibling file, whose order is not load order, or in the other arm of an `if`) is one the tables never
         # showed, and so is a `def` whose class and side the tables hold no slot for. Every `def` outside a deferred
-        # body has a named row in the deferred-range table; a `module_function` row stands for both sides.
+        # body has a named row in the deferred-range table; a `module_function` row stands for both sides. A row with
+        # no side (a `def` inside a block, a `define_singleton_method` name) counts under a nil side, which no slot has.
         def unread_definition?(rows, slots)
           return false if rows.nil?
 

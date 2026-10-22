@@ -184,6 +184,37 @@ RSpec.describe "call.unresolved-toplevel inside a block a project callee rebinds
       end
     RUBY
   end
+  let(:definer_callees) do
+    <<~RUBY
+      module Ext
+        def self.helper = :ok
+        def self.yields = yield
+      end
+
+      class Tgt
+        def helper = :ok
+      end
+
+      Ext.define_singleton_method(:dsm) { |&b| module_eval(&b) }
+      Ext.singleton_class.define_method(:sdm) { |&b| module_eval(&b) }
+      Ext.singleton_class.send(:define_method, :snd) { |&b| module_eval(&b) }
+      Ext.define_singleton_method(:dsp, proc { |&b| module_eval(&b) })
+      Ext.singleton_class.alias_method :aka, :dsm
+      Ext.singleton_class.send(:alias_method, :aka2, :dsm)
+
+      module Cond
+        def self.helper = :ok
+        def self.define = yield
+      end
+      Cond.define_singleton_method(:define) { |&b| module_eval(&b) } if ENV["REBIND"]
+    RUBY
+  end
+  let(:definer_uses) do
+    ["Ext.dsm { helper }", "Ext.sdm { helper }", "Ext.snd { helper }", "Ext.dsp { helper }",
+     "Ext.aka { helper }", "Ext.aka2 { helper }",
+     "Cond.define { helper }", "Ext.define_singleton_method(:inner) { helper }; Ext.inner",
+     "Tgt.define_method(:im) { helper }; Tgt.new.im", "Ext.yields { helper }", "helper", "undefined_ctl"]
+  end
 
   def write_project
     FileUtils.mkdir_p("lib")
@@ -327,6 +358,148 @@ RSpec.describe "call.unresolved-toplevel inside a block a project callee rebinds
     File.write("lib/use.rb", "Ext.ix(&Proc.new { helper })\nundefined_ctl\n")
 
     expect(toplevel_lines).to eq([["use.rb", 2]])
+  end
+
+  # Issue #2184 — the callee files load in `order`, then each line of lib/use.rb runs at the top level. Returns the
+  # use.rb lines that raised NameError for `helper` or `undefined_ctl`; any other error fails the witness.
+  def ruby_lines(order, env = {})
+    File.write("witness.rb", <<~RUBY)
+      #{env.map { |key, value| "ENV[#{key.inspect}] = #{value.inspect}" }.join("\n")}
+      #{order.map { |file| "require_relative #{"lib/#{file}".inspect}" }.join("\n")}
+      File.readlines(File.join(__dir__, "lib", "use.rb"), chomp: true).each_with_index do |row, index|
+        eval(row, TOPLEVEL_BINDING)
+      rescue NameError => e
+        raise unless %i[helper undefined_ctl].include?(e.name)
+
+        puts index + 1
+      end
+    RUBY
+    out, err, status = RubyRun.capture("witness.rb")
+    raise "witness failed: #{err}" unless status.success?
+
+    out.split.map { |line| ["use.rb", Integer(line)] }
+  end
+
+  def write_files(files)
+    FileUtils.rm_rf("lib")
+    FileUtils.mkdir_p("lib")
+    files.each { |name, source| File.write("lib/#{name}", source) }
+  end
+
+  def use_lines(uses, *picked) = picked.map { |row| ["use.rb", uses.index(row) + 1] }
+
+  it "declines on a callee only define_singleton_method or define_method names, and in such a call's block" do
+    uses = definer_uses
+    write_files(
+      "ext.rb" => definer_callees,
+      "use.rb" => "#{uses.join("\n")}\n"
+    )
+
+    # The statement that may not run decides `Cond.define`: Ruby raises without it and runs the block with it.
+    controls = use_lines(uses, "Ext.yields { helper }", "helper", "undefined_ctl")
+    expect(ruby_lines(%w[ext.rb])).to match_array(controls + use_lines(uses, "Cond.define { helper }"))
+    expect(ruby_lines(%w[ext.rb], "REBIND" => "1")).to match_array(controls)
+    # ext.rb:13 is `module_eval` in the proc `dsp` is defined from, a block passed as a value, which #2186 covers.
+    expect(toplevel_lines).to match_array(controls + [["ext.rb", 13]])
+  end
+
+  # Ruby reaches a method_missing only for a name the receiver lacks: `Array#each` and `Integer#times` are RBS
+  # methods, so a project method_missing, here one that passes its block on through `super`, cannot run their blocks.
+  it "keeps reporting in a block whose callee resolves on its receiver, whatever method_missing the project has" do
+    uses = ["[1, 2].each { |x| helper }", "2.times { helper }", "Ext.anything { helper }", "undefined_ctl"]
+    write_files(
+      "ext.rb" => <<~RUBY,
+        class Config
+          def method_missing(name, *args) = name == :foo ? 1 : super
+        end
+
+        module Ext
+          def self.helper = :ok
+          def self.method_missing(*, &b) = module_eval(&b)
+        end
+      RUBY
+      "use.rb" => "#{uses.join("\n")}\n"
+    )
+
+    expected = use_lines(uses, "[1, 2].each { |x| helper }", "2.times { helper }", "undefined_ctl")
+    expect(ruby_lines(%w[ext.rb])).to match_array(expected)
+    expect(toplevel_lines).to match_array(expected)
+  end
+
+  # The receiver check must hold on every member of a union, and a receiverless call asks main's own class.
+  it "consults method_missing for a union member that lacks the callee and for a receiverless call main lacks" do
+    uses = ['recv = ENV["X"] ? [1] : Ext; recv.each { helper }', "send(:anything) { helper }", "undefined_ctl"]
+    write_files(
+      "ext.rb" => <<~RUBY,
+        module Ext
+          def self.helper = :ok
+          def self.method_missing(*, &b) = module_eval(&b)
+        end
+
+        class Object
+          def method_missing(name, *, &b) = b ? Ext.module_eval(&b) : super
+        end
+      RUBY
+      "use.rb" => "#{uses.join("\n")}\n"
+    )
+
+    expected = use_lines(uses, "undefined_ctl")
+    expect(ruby_lines(%w[ext.rb])).to match_array(expected)
+    expect(toplevel_lines).to match_array(expected)
+  end
+
+  it "declines on any callee when a project method_missing may hand its block on" do
+    uses = ["Ext.anything { helper }", "helper", "undefined_ctl"]
+    rebinds = "module Ext\n  def self.helper = :ok\n  def self.method_missing(*, &b) = module_eval(&b)\nend\n"
+    write_files("ext.rb" => rebinds, "use.rb" => "#{uses.join("\n")}\n")
+    expected = use_lines(uses, "helper", "undefined_ctl")
+    expect(ruby_lines(%w[ext.rb])).to match_array(expected)
+    expect(toplevel_lines).to match_array(expected)
+
+    # Positive control: a method_missing that only yields runs the block under main.
+    write_files("ext.rb" => rebinds.sub("module_eval(&b)", "yield"), "use.rb" => "#{uses.join("\n")}\n")
+    expected = use_lines(uses, *uses)
+    expect(ruby_lines(%w[ext.rb])).to match_array(expected)
+    expect(toplevel_lines).to match_array(expected)
+  end
+
+  # A `def` inside a block or a method body names no slot of its own: when a sibling's `def` holds the table slot,
+  # the rule still must not read that sibling as the only body. File order is not load order. Pool mode folds the
+  # same rows.
+  it "declines on a callee a def inside a block or a method body defines, whichever sibling holds the slot" do
+    uses = ["Ext.me { helper }", "Ext.setup; Ext.later { helper }", "Ext.other { helper }", "undefined_ctl"]
+    write_files(
+      "a.rb" => <<~RUBY,
+        class Ext
+          def self.helper = :ok
+
+          [1].each do
+            def self.me(&b) = module_eval(&b)
+          end
+
+          def self.setup
+            def self.later(&b) = module_eval(&b)
+          end
+        end
+      RUBY
+      "b.rb" => "class Ext\n  def self.me = yield\n  def self.other = yield\nend\n",
+      "use.rb" => "#{uses.join("\n")}\n"
+    )
+
+    controls = use_lines(uses, "Ext.other { helper }", "undefined_ctl")
+    expect(ruby_lines(%w[b.rb a.rb])).to match_array(controls)
+    expect(ruby_lines(%w[a.rb b.rb])).to match_array(controls + use_lines(uses, "Ext.me { helper }"))
+    expect(toplevel_lines).to match_array(controls)
+    expect(toplevel_lines("workers" => 2)).to match_array(controls)
+  end
+
+  # The conservative reading: a top-level `define_method` defines a private method of Object, which Ruby may call on
+  # main or on any other object, so the rule cannot prove the block runs under main and declines.
+  it "declines in a top-level define_method block even where Ruby calls the method on main" do
+    write_files("use.rb" => "define_method(:tdm) { helper }\nsend(:tdm)\nundefined_ctl\n")
+
+    expect(ruby_lines([])).to eq([["use.rb", 2], ["use.rb", 3]])
+    expect(toplevel_lines).to eq([["use.rb", 3]])
   end
 
   # A block call chained on, or passed into, another block call: the enclosing rebinding block starts before the

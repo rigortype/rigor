@@ -995,11 +995,16 @@ file emptied, and the file reduced to its `class` / `module` declarations
 with every body statement dropped (skipped when identical to the file or
 empty). Emptying removes every declaration, so the class-level keys a
 removed declaration fires re-check most readers and mask a finer missing
-edge. The skeleton keeps the declarations, so only the finer edges
-(`refinement:`, `visibility:`, `defines:`, a method's symbol) can put a
-reader into the closure: #2163's dropped `refinement:` edge passes the
-emptying replay and fails the skeleton one. No addition and no
-body-preserving edit is replayed. A replay the recheck declines as option
+edge. The skeleton keeps the declarations, so a finer edge can be what
+puts a reader into the closure: #2163's dropped `refinement:` edge
+passes the emptying replay and fails the skeleton one. Not every finer
+edge is reached, because dropping a body still moves a broader key for
+some of them. A dropped `visibility:` read is one: #2161's
+`module_function :two` to `private :two` swap (and the reverse) serves a
+stale answer, yet passes both edits, since only an edit that keeps a body
+while changing it exposes it
+([#2277](https://github.com/rigortype/rigor/issues/2277)). No addition and
+no body-changing edit is replayed. A replay the recheck declines as option
 B does is counted, not compared, and a run in which every replay declined
 fails.
 

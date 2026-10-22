@@ -177,8 +177,8 @@ RSpec.describe Rigor::CLI do
   end
 
   # #2134's override shape: `vis.rb` reopens `Parent` only to make `foo` private, so `Child`'s private override reduces
-  # nothing. Only the `visibility:` edge re-checks `child.rb` when `vis.rb` changes, whether it is emptied or reduced
-  # to `class Parent; end`, so the first edit already fails.
+  # nothing. With the `visibility:` reads dropped, emptying `vis.rb` already fails. This does not show the skeleton edit
+  # covers the edge: #2161's `module_function` / `private` swap passes both edits with it dropped (#2277).
   describe "with the method-visibility fixture" do
     before do
       File.write("lib/parent.rb", "class Parent\n  def foo = 1\nend\n")
@@ -186,7 +186,7 @@ RSpec.describe Rigor::CLI do
       File.write("lib/vis.rb", "class Parent\n  private :foo\nend\n")
     end
 
-    it "fails on the skeleton edit when the visibility edge is not recorded" do
+    it "fails on the emptying edit when the visibility edge is not recorded" do
       drop_edge(:visibility)
 
       status, _out, err = verify("--verify-incremental-edits", "3")

@@ -11,12 +11,14 @@ module Rigor
     #   exercises the edges a removed declaration fires.
     # - `skeleton` — the file's `class` / `module` declarations, nested as written, with every body statement dropped
     #   (methods, `refine` blocks, visibility calls, mixins, constants). The declarations stay, so the class-level keys
-    #   a removed declaration fires stay quiet, and only the finer edges (`refinement:`, `visibility:`, `defines:`, a
-    #   method's symbol) can put a reader into the closure. Emptying alone never exercises them: the broader key it
-    #   fires re-checks the reader anyway.
+    #   a removed declaration fires stay quiet, and a finer edge such as #2163's `refinement:` is what puts a reader
+    #   into the closure. Emptying alone does not exercise that one: the broader key it fires re-checks the reader
+    #   anyway. Not every finer edge is reached: dropping a body still moves a broader key for some of them. A
+    #   `visibility:` edge is one (#2161's `module_function :two` to `private :two` swap passes both edits with the
+    #   edge removed), and only an edit that changes a body while keeping it (#2277) would test it.
     #
-    # Neither replays an addition. A skeleton identical to the file, or with no declaration (the emptied file again, or
-    # a file that does not parse), is not replayed.
+    # Neither replays an addition or a body-changing edit. A skeleton identical to the file, or with no declaration
+    # (the emptied file again, or a file that does not parse), is not replayed.
     module EditReplay
       Edit = Data.define(:label, :source)
 

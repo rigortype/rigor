@@ -1,0 +1,1 @@
+- **[engine]** A method that passes its own block on (`g(x, &)` or `g(x, &blk)`) now gives the callee's `yield` the caller's block type, and a block-return pass no longer files a `return` it typed without the statements before it into the enclosing method's return type, so such helpers no longer read `untyped`. ([#2301](https://github.com/rigortype/rigor/pull/2301))

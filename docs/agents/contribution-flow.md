@@ -189,8 +189,9 @@ Once the change is implemented and `make verify-changed` passes:
 
 Work regularly needs a decision nobody has made yet: a gate row, a reading the issue left open, a
 part of an issue to defer. Make the ones below the line yourself, following precedent, land them,
-and record each for the user to ratify at release time; stop and ask before landing only the
-serious ones. The reasoning is [ADR-123](../adr/123-merge-queue-and-post-hoc-approval.md).
+and record each for the user to ratify, at release time or earlier in batches when a long release
+window lets the queue grow ([`approval-queue.d/`](../../approval-queue.d/README.md)); stop and ask
+before landing only the serious ones. The reasoning is [ADR-123](../adr/123-merge-queue-and-post-hoc-approval.md).
 
 **Serious — ask the user first; the PR stays Draft until they answer:**
 
@@ -211,8 +212,9 @@ serious ones. The reasoning is [ADR-123](../adr/123-merge-queue-and-post-hoc-app
   pull request" steps 3 and 5);
 - a `ready-for-human` issue, or anything the user said to bring back to them.
 
-**Everything else — decide, land, record.** Follow the closest precedent: a ratified entry, a
-merged PR whose decision the user approved, or an ADR. An entry still waiting in the queue is not
+**Everything else — decide, land, record.** Follow the closest precedent: a ratified decision (the
+merged PR an entry came from, once a `Ratify approval queue entries` PR or release commit deleted
+it), a merged PR whose decision the user approved, or an ADR. An entry still waiting in the queue is not
 a precedent. Where none fits and the decision is not serious, take your own recommendation and say
 it sets a precedent; a `gate-row` never sets one, because a gate row without a precedent is
 serious. Then add an entry under

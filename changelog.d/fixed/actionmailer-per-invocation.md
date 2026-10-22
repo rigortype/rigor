@@ -1,0 +1,3 @@
+- **[rigor-actionmailer]** `def.ivar-write-mismatch` no longer fires on writes in two different actions of a mailer, and a method after a bare `protected` is no longer treated as a mailer action. ([#2318](https://github.com/rigortype/rigor/pull/2318))
+  - A mailer instance runs one action, so those writes are never live together. A divergence against a private or protected helper, `initialize`, another write in the same action, or a callback target or `helper_method` that a macro in the same file names still reports.
+  - `rigor plugins` now lists a plugin's `per_invocation_classes:` and `per_invocation_non_action_macros:` (text lines and JSON keys).

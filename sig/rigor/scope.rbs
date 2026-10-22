@@ -279,10 +279,10 @@ module Rigor
     def without_constant_narrowings_named: (untyped name) -> Scope
     # sig-gen gap: #1154 — the table reader over an ivar `initialize` assigns from a parameter reaches `untyped`.
     def constant_narrowing: (String key) -> Type::t?
-    # sig-gen gap: #1151 — an `attr_reader` over a frozen Set literal types `untyped`, as the sibling
-    # `declaration_sourced` row does.
+    # authored: the element is `[Symbol, Symbol]` by contract; a Set's element type stays `untyped` in sig-gen (#2177), so the generator
+    # would never propose it, even once the parameter-assigned ivar types (#1154).
     def published_constant_sourced: () -> Set[[Symbol, Symbol]]
-    # sig-gen gap: #1152 — `Set#include?` over a tuple key types `untyped`, so the `bool` is hand-written.
+    # sig-gen gap: #1154 — `include?` is sent to that parameter-assigned ivar, whose type is `untyped`, so the `bool` is hand-written.
     def published_constant_sourced?: (Symbol kind, String | Symbol name) -> bool
     def with_published_constant_mark: (Symbol kind, String | Symbol name) -> Scope
     # Issue #1362 — a `[:global_copy, local, global]` record rides beside the `(kind, name)` refs.

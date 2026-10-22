@@ -1,0 +1,4 @@
+- **[macros]** A trait-registry plugin such as `rigor-devise` now contributes its synthetic methods: `user.valid_password?` resolves to the strategy module's `bool` when the project's RBS declares the module. ([#2286](https://github.com/rigortype/rigor/pull/2286))
+  - The project pre-pass used to give the synthetic-method scan no RBS environment, so these plugins never emitted anything.
+  - The `devise` gem ships no RBS and Rigor bundles none for `Devise::Models::*`; supply them through `signature_paths:` or an `rbs collection`.
+  - A project that loads `rigor-devise` but never writes `devise` parses nothing for it. One that does pays the whole-project parse the scan needs (about 0.45 s on mastodon).

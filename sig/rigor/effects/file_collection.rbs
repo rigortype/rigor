@@ -46,7 +46,8 @@ module Rigor
       def self.empty: (?String? path) -> FileCollection
 
       attr_reader path: String?
-      # sig-gen gap: #2312 — `{ "Class#m" => Summary }`, through the private `freeze_table` helper, whose parameters are undeclared.
+      # sig-gen gap: #2312 — `{ "Class#m" => Summary }`, through the private `freeze_table` helper, whose parameters
+      # are undeclared.
       attr_reader summaries: Hash[String, Summary]
       # sig-gen gap: #2312 — `{ "Class#m" => [Edge] }`, sorted and de-duplicated.
       attr_reader edges: Hash[String, Array[Edge]]

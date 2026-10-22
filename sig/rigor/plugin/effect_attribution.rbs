@@ -15,28 +15,34 @@ module Rigor
       # The taint causes a plugin row may name — a closed subset of `Effects::TaintCause::ALL`.
       TAINT_CAUSES: Array[String]
 
-      # sig-gen gap: #2312 — `initialize` stores what the private `validate_receiver!` helper returns for the
-      # parameter of the same name (`to_s`-coerced, frozen); the helper's parameters are undeclared.
+      # sig-gen gap: #2325 — `receiver:` is `untyped` (coercion-facing, looks deliberate: `to_s`), and `initialize`
+      # stores the private `validate_receiver!` helper's result (#2312).
       attr_reader receiver: String
-      # sig-gen gap: #2321 — `to_sym`-normalized from the `method:` parameter.
+      # sig-gen gap: #2325 — `method:` is `untyped` (coercion-facing, looks deliberate: `String | Symbol`), stored as
+      # `method.to_sym`.
       attr_reader method: Symbol
       attr_reader singleton: bool
-      # sig-gen gap: #2312 — `Array()`-normalized, deduplicated and frozen from `labels:`.
+      # sig-gen gap: #2325 — `labels:` is `untyped` (coercion-facing, looks deliberate: `Array()` of anything
+      # answering `to_s`), stored from the private `normalize_labels` helper (#2312).
       attr_reader labels: Array[String]
-      # sig-gen gap: #2321 — `to_s`-normalized from the `narrow:` parameter.
+      # sig-gen gap: #2325 — `narrow:` is `untyped` (coercion-facing, looks deliberate: `to_s`, nil kept).
       attr_reader narrow: String?
       attr_reader discharge: bool
-      # sig-gen gap: #2312 — `to_s`-normalized from the `within:` parameter.
+      # sig-gen gap: #2325 — `within:` is `untyped` (coercion-facing, looks deliberate: `to_s`), stored from the
+      # private `validate_within!` helper (#2312).
       attr_reader within: String?
       attr_reader on_result: bool
-      # sig-gen gap: #2312 — `to_s`-normalized from the `taint:` parameter.
+      # sig-gen gap: #2325 — `taint:` is `untyped` (coercion-facing, looks deliberate: `to_s`), stored from the
+      # private `validate_taint!` helper (#2312).
       attr_reader taint: String?
-      # sig-gen gap: #2321 — `to_s`-normalized from the `callee:` parameter.
+      # sig-gen gap: #2325 — `callee:` is `untyped` (coercion-facing, looks deliberate: `to_s`, nil kept).
       attr_reader callee: String?
-      # sig-gen gap: #2312 — normalized from the `callee_fallbacks:` parameter.
+      # sig-gen gap: #2325 — `callee_fallbacks:` is `untyped` (looks deliberate: a Hash of coercible names), stored
+      # from the private `validate_callee_fallbacks!` helper (#2312).
       attr_reader callee_fallbacks: Hash[String, Array[String]]?
       attr_reader responds: bool
-      # sig-gen gap: #2312 — `to_s`-normalized from the `why:` parameter.
+      # sig-gen gap: #2325 — `why:` is `untyped` (coercion-facing, looks deliberate: `to_s`), stored from the private
+      # `validate_why!` helper (#2312).
       attr_reader why: String
 
       # The coercion-facing constructor: every parameter is `to_s`/`to_sym`/`Array()`-normalized,

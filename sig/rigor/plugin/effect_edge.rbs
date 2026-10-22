@@ -7,15 +7,18 @@ module Rigor
       # The closed set of framework-edge strategies the engine implements.
       TARGETS: Array[Symbol]
 
-      # sig-gen gap: #2312 — `initialize` stores what the private `validate_receiver!` helper returns for the
-      # parameter of the same name; the helper's parameters are undeclared.
+      # sig-gen gap: #2325 — `receiver:` is `untyped` (coercion-facing, looks deliberate: `to_s`), and `initialize`
+      # stores the result of the private `validate_receiver!` helper (#2312).
       attr_reader receiver: String
-      # sig-gen gap: #2321 — `to_sym`-normalized from the `method:` parameter.
+      # sig-gen gap: #2325 — `method:` is `untyped` (coercion-facing, looks deliberate: `String | Symbol | nil`),
+      # stored as `method&.to_sym`.
       attr_reader method: Symbol?
       attr_reader singleton: bool
-      # sig-gen gap: #2312 — validated against `TARGETS` by the private `validate_target!` helper, whose parameters are undeclared.
+      # sig-gen gap: #2325 — `target:` is `untyped` (looks deliberate: a Symbol or String checked against `TARGETS`),
+      # stored from the private `validate_target!` helper (#2312).
       attr_reader target: (:activerecord_callbacks | :perform_now | :mailer_body)
-      # sig-gen gap: #2312 — `to_s`-normalized from the `why:` parameter.
+      # sig-gen gap: #2325 — `why:` is `untyped` (coercion-facing, looks deliberate: `to_s`), stored from the private
+      # `validate_why!` helper (#2312).
       attr_reader why: String
 
       def initialize: (receiver: untyped, target: untyped, why: untyped, ?method: untyped,

@@ -271,9 +271,8 @@ module Rigor
     def seed_declaration_sourced_global: (String | Symbol name, Type::t type) -> Scope
     def with_global_copy_marks: (String | Symbol name, Array[String | Symbol] globals) -> Scope
     def without_local_declaration_marks: (String | Symbol name) -> Scope
-    # sig-gen gap: #2322 — the records come out of `@declaration_sourced`, an ivar assigned in `initialize` from a
-    # parameter; its set now types, but the `ref[2]` read off the tuple-union element still reaches `untyped`
-    # (sig-gen infers `Array[untyped]`).
+    # sig-gen gap: #2322 — the records come out of `@declaration_sourced`, whose set now types; `ref[2]` reads as
+    # `Symbol?`, but the `filter_map` over it answers `Array[untyped]`.
     def declaration_sourced_global_copies: (String | Symbol name) -> Array[Symbol]
     def with_declaration_sourced_local: (String | Symbol name, Type::t type) -> Scope
     def with_local_declaration_mark: (String | Symbol name) -> Scope

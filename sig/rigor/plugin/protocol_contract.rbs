@@ -31,18 +31,19 @@ module Rigor
       attr_reader method_name: Symbol
 
       # `singleton ? true : false` collapses any truthy input to bool — sig-gen already infers
-      # `false | true`, so this row is generated-equivalent rather than a #1154 gap.
+      # `false | true`, so this row is generated-equivalent rather than a gap.
       attr_reader singleton: bool
 
-      # sig-gen gap: #2312 — `initialize` stores what the private `coerce_param_types` helper returns, whose parameters are
-      # undeclared (it guarantees `Array[ParamType]`).
+      # sig-gen gap: #2312 — `initialize` stores what the private `coerce_param_types` helper returns, whose
+      # parameters are undeclared (it guarantees `Array[ParamType]`).
       attr_reader param_types: Array[ParamType]
 
       # sig-gen gap: #2321 — as above (nil or a non-empty `dup.freeze`d String).
       attr_reader return_type_name: String?
 
       # sig-gen gap: #2321 — as above (`VALID_SEVERITIES.include?(to_sym)` bounds the stored value
-      # to the three declared literals).
+      # to the three declared literals; a derived-write credit would generate `Symbol`, not the literal union, so
+      # this row needs the declared literals kept as intent).
       attr_reader severity: :error | :warning | :info
 
       # `method_name`/`severity` accept String too (both are `to_sym`'d); `param_types` entries are

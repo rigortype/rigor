@@ -33,14 +33,16 @@ module Rigor
       def self.load_file: (untyped path) -> Registry
 
       attr_reader vocabulary_version: Integer
-      # sig-gen gap: #2321 — every declared label, sorted; implied ancestors are recognised by
-      # {#known?} but not listed here.
+      # sig-gen gap: #2325 — `labels:` is declared `Array[untyped]` (coercion-facing, looks deliberate:
+      # `map(&:to_s)`); every declared label, sorted. Implied ancestors are recognised by {#known?} but not listed
+      # here.
       attr_reader labels: Array[String]
       # The roots of the vocabulary — the outermost segments {#with} treats as already owned.
       # Unmarked residue: `@roots` is computed from `@known` in `initialize`, not assigned from a
-      # parameter, so #1154 does not cover it.
+      # parameter, so no parameter credit applies.
       attr_reader roots: Array[String]
-      # sig-gen gap: #2321 — one line per root, from the data file's `descriptions:`.
+      # sig-gen gap: #2325 — `descriptions:` is declared `Hash[untyped, untyped]` (coercion-facing, looks deliberate:
+      # keys and texts `to_s`'d); one line per root, from the data file's `descriptions:`.
       attr_reader descriptions: Hash[String, String]
 
       def initialize: (vocabulary_version: Integer, labels: Array[untyped],

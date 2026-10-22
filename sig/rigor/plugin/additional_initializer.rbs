@@ -4,9 +4,9 @@ module Rigor
     # the read-before-write nil soundness gate does not widen their ivars. See
     # lib/rigor/plugin/additional_initializer.rb for the full contract.
     class AdditionalInitializer
-      # sig-gen gap: #2321 — `attr_reader` rows over ivars `initialize` assigns from expressions derived
-      # from its parameters are skipped (untyped return); the constructor validates `receiver_constraint` is a non-empty
-      # String and normalizes both lists with `map(&:to_sym)`, so the stored types are hand-written.
+      # sig-gen gap: #2321 — `attr_reader` rows over ivars `initialize` assigns from expressions derived from its
+      # parameters are skipped (untyped return); the constructor validates `receiver_constraint` is a non-empty String
+      # and normalizes both lists with `map(&:to_sym)`, so the stored types are hand-written.
       attr_reader receiver_constraint: String
 
       # sig-gen gap: #2321 — as above.

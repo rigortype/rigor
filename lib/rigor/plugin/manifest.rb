@@ -56,7 +56,7 @@ module Rigor
                   :hkt_registrations, :hkt_definitions, :signature_paths, :protocol_contracts,
                   :source_rbs_synthesizer, :additional_initializers,
                   :effect_root, :effect_labels, :effect_attributions, :effect_edges, :effect_entry_points,
-                  :effect_ancestry
+                  :effect_ancestry, :per_invocation_classes
 
       # #392 — the project-relative globs whose files this plugin compiles into {TemplateUnit}s. Purely a
       # CLAIM: the engine globs these, reads each match's bytes and offers them to
@@ -74,7 +74,7 @@ module Rigor
         hkt_registrations: [], hkt_definitions: [], signature_paths: [], protocol_contracts: [],
         source_rbs_synthesizer: nil, additional_initializers: [],
         effect_root: nil, effect_labels: [], effect_attributions: [], effect_edges: [],
-        effect_entry_points: [], effect_ancestry: [], template_globs: []
+        effect_entry_points: [], effect_ancestry: [], template_globs: [], per_invocation_classes: []
       )
         validate_id!(id)
         validate_version!(version)
@@ -109,6 +109,7 @@ module Rigor
         assign_additional_initializers(additional_initializers)
         assign_effect_fields(effect_root, effect_labels, effect_attributions, effect_edges,
                              effect_entry_points, effect_ancestry, template_globs)
+        assign_per_invocation_classes(per_invocation_classes)
         freeze
       end
 
@@ -202,6 +203,19 @@ module Rigor
         @template_globs = globs.map { |glob| glob.to_s.dup.freeze }.uniq.freeze
       end
       private :assign_template_globs
+
+      # ADR-125 — `per_invocation_classes:` names the framework classes whose every instance serves exactly one
+      # public-method entry point (a Rails controller runs one action per request), so ivar writes in two
+      # distinct public methods of a descendant are never live together. A class name String, matched against
+      # class ancestry by `def.ivar-write-mismatch`. Validated and assigned in one call, because `#initialize`
+      # is at its line budget.
+      def assign_per_invocation_classes(names)
+        validate_array_of!("per_invocation_classes", names, "non-empty String") do |name|
+          name.is_a?(String) && !name.empty?
+        end
+        @per_invocation_classes = names.map { |name| name.to_s.delete_prefix("::").dup.freeze }.uniq.freeze
+      end
+      private :assign_per_invocation_classes
       # rubocop:enable Metrics/ParameterLists, Metrics/AbcSize
 
       public
@@ -258,7 +272,8 @@ module Rigor
           "effect_edges" => effect_edges.map(&:to_h),
           "effect_entry_points" => effect_entry_points.map(&:to_h),
           "effect_ancestry" => effect_ancestry.map(&:to_h),
-          "template_globs" => template_globs
+          "template_globs" => template_globs,
+          "per_invocation_classes" => per_invocation_classes
         }
       end
 

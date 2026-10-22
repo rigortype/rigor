@@ -397,6 +397,18 @@ module Rigor
         @rbs_complete_extends_set.include?(class_name.to_s)
       end
 
+      # ADR-125 — the aggregate class names declared across loaded plugins as per-invocation (manifest
+      # `per_invocation_classes:`): each instance of a descendant serves exactly one public-method entry point.
+      # `per_invocation_class?` is the exact-name membership predicate; `def.ivar-write-mismatch` walks a
+      # class's ancestry and asks it of each ancestor.
+      attr_reader :per_invocation_classes
+
+      def per_invocation_class?(class_name)
+        return false if class_name.nil?
+
+        @per_invocation_classes_set.include?(class_name.to_s.delete_prefix("::"))
+      end
+
       # ADR-28 — flat, ordered list of every loaded plugin's path-scoped method-protocol contracts, in
       # plugin registration order. Read from each plugin's `#protocol_contracts` (which the manifest backs
       # by default but a plugin MAY override to fold in per-project config). Consumed by
@@ -465,6 +477,8 @@ module Rigor
         @rbs_complete_ancestors_set = @rbs_complete_ancestors.to_set.freeze
         @rbs_complete_extends = aggregate_class_names(manifests, :rbs_complete_extends)
         @rbs_complete_extends_set = @rbs_complete_extends.to_set.freeze
+        @per_invocation_classes = aggregate_class_names(manifests, :per_invocation_classes)
+        @per_invocation_classes_set = @per_invocation_classes.to_set.freeze
         @type_node_resolvers = manifests.flat_map { |m| m&.type_node_resolvers || [] }.freeze
         @protocol_contracts = @plugins.flat_map { |p| safe_protocol_contracts(p) }.freeze
         @contracts_by_path = {}

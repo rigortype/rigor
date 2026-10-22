@@ -146,6 +146,11 @@ module Rigor
           # `sig/action_view.rbs` so the name resolves, open so the helper surface stays lenient.
           "ActionView::Base"
         ],
+        # ADR-125 (#575) — Rails instantiates a fresh controller per request and runs exactly one action on
+        # it, so ivar writes in two different public actions are never live together and
+        # `def.ivar-write-mismatch` stops comparing them. Neither root has a signature (see `sig/action_controller.rbs`
+        # for why); the rule matches an undeclared superclass by its written name.
+        per_invocation_classes: ["ActionController::Base", "ActionController::API"],
         # ADR-103 WD10 / WD14 (#387) — see {Effects} for what each row is and why.
         effect_root: "rails",
         effect_labels: %w[

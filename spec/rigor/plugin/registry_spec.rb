@@ -23,6 +23,13 @@ class RigorPluginRegistrySpecOpenPlugin < Rigor::Plugin::Base
            open_receivers: ["ActiveRecord::Relation"])
 end
 
+# ADR-125 — a named plugin class declaring `per_invocation_classes:`, for the `Registry#per_invocation_classes` /
+# `#per_invocation_class?` tests.
+class RigorPluginRegistrySpecPerInvocationPlugin < Rigor::Plugin::Base
+  manifest(id: "registry-spec-per-invocation-plugin", version: "0.0.1",
+           per_invocation_classes: ["ActionController::Base"])
+end
+
 # ADR-43 WD4 — a named plugin class declaring `rbs_complete_ancestors:`, for the
 # `Registry#rbs_complete_ancestors` / `#rbs_complete_ancestor?` tests.
 class RigorPluginRegistrySpecRbsAncestorPlugin < Rigor::Plugin::Base
@@ -234,6 +241,23 @@ RSpec.describe Rigor::Plugin::Registry do
       expect(registry.open_receiver?("ActiveRecord::Relation")).to be(true)
       expect(registry.open_receiver?("String")).to be(false)
       expect(registry.open_receiver?(nil)).to be(false)
+    end
+  end
+
+  describe "#per_invocation_classes / #per_invocation_class? (ADR-125)" do
+    it "is empty when no plugin declares per_invocation_classes" do
+      expect(described_class::EMPTY.per_invocation_classes).to eq([])
+      expect(described_class::EMPTY.per_invocation_class?("ActionController::Base")).to be(false)
+    end
+
+    it "aggregates declared per_invocation_classes and answers exact-name membership" do
+      registry = described_class.new(plugins: [RigorPluginRegistrySpecPerInvocationPlugin.new(services: services)])
+
+      expect(registry.per_invocation_classes).to eq(%w[ActionController::Base])
+      expect(registry.per_invocation_class?("ActionController::Base")).to be(true)
+      expect(registry.per_invocation_class?("::ActionController::Base")).to be(true)
+      expect(registry.per_invocation_class?("ApplicationController")).to be(false)
+      expect(registry.per_invocation_class?(nil)).to be(false)
     end
   end
 

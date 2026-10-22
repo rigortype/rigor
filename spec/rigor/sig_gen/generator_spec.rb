@@ -1725,9 +1725,10 @@ RSpec.describe Rigor::SigGen::Generator do
       end
     end
 
-    # Issue #2278 — the engine now types `Set[...]` over non-constant members precisely, and keeps it through
-    # `.freeze`; sig-gen still writes `Set[untyped]` (#2177), and a reader over a frozen Set constant is proposed
-    # rather than skipped as `untyped`.
+    # Issue #2278 — the engine now types `Set[...]` over non-constant members precisely, and sig-gen must still write
+    # `Set[untyped]` (#2177) rather than the classes. These rows are GUARDS for the elaborator's Set rule: sig-gen's
+    # output for them was already `Set[untyped]` before #2278 (a bare `Set` elaborates the same way), and they fail
+    # only if the elaborator stops widening a precisely typed Set.
     {
       "a frozen Set over non-constant members" => "Set[ARGV.size, ARGV.first].freeze",
       "a Set built from an array of non-constant members" => "Set.new([ARGV.size, ARGV.first])",

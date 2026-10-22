@@ -119,6 +119,15 @@ RSpec.describe "a callee chain that mutates an argument floors it (#2104)" do
     RUBY
   end
 
+  it "floors an argument a 25-def chain mutates at its end, inside the read cap" do
+    chain = (1..24).map { |i| "def hop#{i}(acc) = hop#{i + 1}(acc)" }
+    expect(diagnostics(<<~RUBY)).to eq([])
+      def stripes(acc) = hop1(acc)
+      #{chain.join("\n")}
+      def hop25(acc) = (acc[0] = "x")
+    RUBY
+  end
+
   it "does not floor an argument a chain hands past the read cap, even when its end mutates it" do
     # Pins a decision: past `CalleeMutationChain::MAX_NODES` a hand-off reads as none, as an unresolved callee does.
     chain = (1..40).map { |i| "def hop#{i}(acc) = hop#{i + 1}(acc)" }

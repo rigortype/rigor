@@ -4653,8 +4653,8 @@ module Rigor
 
       # Yields every node reachable from `node` with the number of blocks it sits in: a read of the method's own local
       # there has that depth. A nested def or lambda is not entered: a def has no access to the method's locals, and a
-      # lambda body is not run by the call. Nor is the block of a call that runs it on another `self`
-      # ({#self_rebinding_block_call?}): a self-call there is not a call on the method's receiver.
+      # lambda body is not run by the call. Nor is the block of a {#self_rebinding_block_call?}: a self-call there
+      # either runs on another `self`, or runs later as a method body, so the walk leaves it out.
       def each_node_in_method_scope(node, depth, &)
         return if node.nil?
 
@@ -4671,10 +4671,11 @@ module Rigor
         end
       end
 
-      # The calls whose block runs with `self` bound to something other than the method's receiver — the receiver of
-      # an `instance_eval` / `class_exec` / …, a method `define_method` or `define_singleton_method` defines (run
-      # later, on whatever receives it), or the class `Class.new` / `Module.new` / `Struct.new` / `Data.define`
-      # builds ({AnonymousMetaClass.block_form_receiver}).
+      # The calls whose block the hand-off walk leaves out. In an `instance_eval` / `class_exec` / … block, and in a
+      # `Class.new` / `Module.new` / `Struct.new` / `Data.define` block ({AnonymousMetaClass.block_form_receiver}),
+      # `self` is another object, so a self-call there is not a call on the method's receiver. A `define_method` or
+      # `define_singleton_method` block keeps an instance of the class as `self`, but it is a method body that runs
+      # later, if ever, so leaving it out is the conservative reading: a hand-off it holds is not one the call makes.
       SELF_REBINDING_BLOCK_CALLS = Set[
         :instance_eval, :instance_exec, :class_eval, :class_exec, :module_eval, :module_exec, :define_method,
         :define_singleton_method

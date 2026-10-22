@@ -24,11 +24,14 @@ session's effects surface should record now that a def's census depends on other
   (`CalleeMutationChain::MAX_NODES`). Recursive chains terminate, and a cycle with no mutation on it mutates nothing.
 - **A hand-off to a node past the cap.** Reading it as a mutation floors on evidence the walk never saw, which is
   the false positive above. Reading it as none keeps the literal shape, which is the same answer the one-level floor
-  (#68) gives a callee it cannot resolve, and it misses a mutation more than 32 nodes down. Chosen: none.
+  (#68) gives a callee it cannot resolve, and it misses a mutation past the first 32 parameter nodes read breadth
+  first, including a wide fan-out of one parameter. Chosen: none.
 - **A self-call that resolves to no def in the class** (inherited, mixed in, `method_missing`). Chosen: no hand-off,
   as #68 reads it.
-- **A self-call inside a block that runs on another `self`** (`instance_exec`, `class_exec`, `define_method`,
-  `Class.new { … }`, …). It does not call the method's receiver. Chosen: not a hand-off.
+- **A self-call inside a block that runs on another `self`** (`instance_exec`, `class_exec`, `Class.new { … }`, …).
+  It does not call the method's receiver. Chosen: not a hand-off. A `define_method` / `define_singleton_method`
+  block keeps an instance of the class as `self`, but it is a method body that runs later, if ever. Chosen,
+  conservatively: not a hand-off either.
 - **A positional argument after a splat or `...`.** Its index says nothing about the parameter it binds. Chosen: it
   may bind any positional parameter of the callee. An argument before the first splat keeps its index.
 - **Keyword parameters.** The census was positional only. Chosen: keyword parameters join it under their keyword,
@@ -41,7 +44,7 @@ session's effects surface should record now that a def's census depends on other
 ## Decision
 
 Where the walk can see a hand-off of the parameter to a mutating callee, the argument is floored. Where it cannot
-(past the cap, an unresolved callee, a block on another `self`), the argument keeps its literal shape, as under
+(past the cap, an unresolved callee, a block on another `self` or a `define_method` body), the argument keeps its literal shape, as under
 #68. The new floors are the only new ones: a chain the walk reads to a mutation. The floor only removes a literal
 shape, so it can remove a finding but cannot add one, except that a floored array no longer matches a declared tuple.
 herb and haml show no new rows.

@@ -76,7 +76,7 @@ module Rigor
       # `rigor check --incremental` left in the snapshot ({Protection::DiscoverySeed.from_snapshot}) when there are
       # any. A probe never re-parses the project for its seed, so without a reusable snapshot this is the bare
       # `Scope.empty` it always was.
-      def snapshot_seeded_scope(environment:, configuration:, buffer: nil)
+      def probe_scope(environment:, configuration:, buffer: nil)
         base = Scope.empty(environment: environment)
         seed = Protection::DiscoverySeed.from_snapshot(configuration: configuration, buffer: buffer)
         return base if seed.nil? || seed.empty?

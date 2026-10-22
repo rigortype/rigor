@@ -72,7 +72,7 @@ RSpec.describe "forwarded block yield type", type: :runner do
     end
 
     it "answers each call site through the forward with its own block" do
-      answers = %w['a' 1 :x].map { |value| dumped_type("#{helpers}dump_type(M.anon([1]) { |_| #{value} })") }
+      answers = ["'a'", "1", ":x"].map { |value| dumped_type("#{helpers}dump_type(M.anon([1]) { |_| #{value} })") }
       expect(answers).to eq([%("a"?), "1?", ":x?"])
     end
 

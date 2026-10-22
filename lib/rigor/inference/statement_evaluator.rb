@@ -1461,7 +1461,10 @@ module Rigor
           after
         end
         body_entry = reduce_scopes_with_nil_injection(test_exits)
-        return [Narrowing.apply_when_regex_globals(conditions, body_entry), after, true] if rebound
+        if rebound
+          body_entry, after = [body_entry, after].map { |s| forget_called_global_subject(subject, s) }
+          return [Narrowing.apply_when_regex_globals(conditions, body_entry), after, true]
+        end
 
         [Narrowing.case_when_scopes(subject, conditions, body_entry).first,
          Narrowing.case_when_scopes(subject, conditions, after).last, false]
@@ -1508,16 +1511,21 @@ module Rigor
       # reads: its binding moved, the test writes it, or — for an instance variable — a call in the test may write
       # it ({InterveningIvarReset.may_write?}), or — for a global or constant — the test may run code that rebinds
       # one ({GuardRebinding.may_rebind?}).
+      #
+      # A subject that writes a local or instance variable (`case (@x = v)`) is read as that variable, as
+      # {Narrowing.case_when_scopes} narrows it (issue #2211). For such an instance variable the binding test above
+      # answers first (the test's call widens it in {#run_when_test}), so its `may_write?` arm is a guard.
       def when_test_rebinds_subject?(subject, condition, before, after)
+        subject = case_subject_variable(subject)
         name = case_subject_name(subject)
         return false if name.nil?
         return true unless case_subject_binding(subject, before) == case_subject_binding(subject, after)
         return true if OperandEffects.written_variables(condition).include?(name)
 
         case subject
-        when Prism::InstanceVariableReadNode
+        when Prism::InstanceVariableReadNode, Prism::InstanceVariableWriteNode
           InterveningIvarReset.may_write?(condition, name, before, run_lambdas: true)
-        when Prism::LocalVariableReadNode
+        when Prism::LocalVariableReadNode, Prism::LocalVariableWriteNode
           false
         else
           body = when_lambda_body(condition)
@@ -1525,9 +1533,29 @@ module Rigor
         end
       end
 
+      # Issue #2211 — a global subject from a `when` test that may rebind it on ({#when_test_rebinds_subject?}): a
+      # method may assign a global, and the statement walk keeps a global's binding past a call, so the clause
+      # bodies and the later clauses read it as `Dynamic[top]`, as the scope index's walk of a value-position `case`
+      # reads it
+      # (`ScopeIndexer#forget_called_subject`). `$g = nil; case $g when String then 1 when reset! then 2 else $g + 1
+      # end`, with `reset!` assigning `$g`, is `6` in Ruby. An instance variable a test's call may write is widened by
+      # {#run_when_test} instead; any other subject is left as is.
+      def forget_called_global_subject(subject, scope)
+        return scope unless subject.is_a?(Prism::GlobalVariableReadNode)
+
+        scope.with_global(subject.name, Type::Combinator.untyped)
+      end
+
+      # The subject node the rebinding test reads: a parenthesised one unwrapped, and a local or instance variable
+      # write kept as the variable it writes.
+      def case_subject_variable(subject)
+        Narrowing.unwrap_case_subject(subject)
+      end
+
       def case_subject_name(subject)
         case subject
-        when Prism::LocalVariableReadNode, Prism::InstanceVariableReadNode, Prism::GlobalVariableReadNode
+        when Prism::LocalVariableReadNode, Prism::InstanceVariableReadNode, Prism::GlobalVariableReadNode,
+             Prism::LocalVariableWriteNode, Prism::InstanceVariableWriteNode
           subject.name
         when Prism::ConstantReadNode, Prism::ConstantPathNode
           Narrowing.constant_key(subject)
@@ -1536,8 +1564,8 @@ module Rigor
 
       def case_subject_binding(subject, scope)
         case subject
-        when Prism::LocalVariableReadNode then scope.local(subject.name)
-        when Prism::InstanceVariableReadNode then scope.ivar(subject.name)
+        when Prism::LocalVariableReadNode, Prism::LocalVariableWriteNode then scope.local(subject.name)
+        when Prism::InstanceVariableReadNode, Prism::InstanceVariableWriteNode then scope.ivar(subject.name)
         when Prism::GlobalVariableReadNode then scope.global(subject.name)
         else scope.constant_narrowing(Narrowing.constant_key(subject))
         end

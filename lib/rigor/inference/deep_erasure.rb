@@ -1,5 +1,11 @@
 # frozen_string_literal: true
 
+require "prism"
+require_relative "../type"
+require_relative "../source/node_walker"
+require_relative "mutation_rejoin"
+require_relative "receiver_alias"
+
 module Rigor
   module Inference
     # A loop hands its collection's own elements to its body (issue #2262), so a body that mutates one in place

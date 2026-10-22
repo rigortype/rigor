@@ -28,6 +28,9 @@ git ls-tree --name-only origin/master approval-queue.d/   # README.md alone mean
 ```
 
 1. **Empty** (only `README.md`): say so in one line and go on to the branch.
+   Entries the user ratified earlier in a long window are already gone: a
+   `Ratify approval queue entries` PR deleted them on `master`
+   (`approval-queue.d/README.md`), so only what remains is reported here.
 2. **Otherwise, report every entry in the user's language** — the language
    they write to you in, not the repository's English. Read each file from
    `origin/master` and, per entry, give its decision, PR, class and precedent,

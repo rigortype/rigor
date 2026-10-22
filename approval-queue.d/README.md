@@ -8,10 +8,14 @@ approval queue"; the reasoning is [ADR-123](../docs/adr/123-merge-queue-and-post
 - **One file per decision**, `approval-queue.d/<slug>.md`, added by the PR that carries the
   decision (the branch name makes a good slug; add a suffix when one PR carries several). One file
   each keeps parallel PRs from conflicting, as `changelog.d/` does.
-- **Ratification happens at release.** `/rigor-release-prep` reports every entry to the maintainer
-  and asks them to ratify, revise or revert it. A ratified entry is deleted in the release branch;
-  a revised or reverted one is deleted by the PR that changes the decision. A release ships only
-  when this directory holds nothing but this README.
+- **Ratification happens at release, or earlier in batches.** `/rigor-release-prep` reports every
+  entry to the maintainer and asks them to ratify, revise or revert it. When a release window runs
+  long and the queue grows, the agent asks the maintainer to ratify the queue in batches before
+  then, and deletes the ratified entries on `master` in a PR titled `Ratify approval queue entries`
+  whose body lists each entry's title and PR link; that PR is the record of the ratification. At
+  release, a ratified entry is deleted in the release branch the same way. A revised or reverted
+  entry is deleted by the PR that changes the decision. A release ships only when this directory
+  holds nothing but this README.
 - **Gate**: `spec/docs/approval_queue_spec.rb` checks the format below and fails a `release/**`
   pull request while any entry remains; CI's change detection fails any run, the merge queue's
   included, that changes `lib/rigor/version.rb` while an entry remains.

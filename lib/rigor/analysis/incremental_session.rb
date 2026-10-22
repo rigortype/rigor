@@ -1165,8 +1165,7 @@ module Rigor
           @digests[path] = pack_digest(path)
           fresh_reads.key?(path) ? @plugin_reads[path] = fresh_reads[path] : @plugin_reads.delete(path)
         end
-        @plugin_disclosures.absorb(runner.analysis_disclosures, analyze_set, @stale_disclosures)
-        @stale_disclosures = Set.new
+        absorb_disclosures(runner, analyze_set)
         forget_unbound_digests
         absorb_dependency_graph(runner)
         # Issues #796 / #794 — the recheck's own snapshots already carry the replayed rows folded together
@@ -1596,6 +1595,13 @@ module Rigor
         { served_per_file_diagnostics: @cache.slice(*reused),
           served_effect_collections: @effect_collections.slice(*reused),
           served_run_disclosures: @plugin_disclosures.served(reused, @stale_disclosures) }
+      end
+
+      # Issue #2020 — folds the run's run-scoped registrations into the ledger, refreshing the keys this recheck found
+      # stale. Extracted to keep {#absorb} under its ABC budget.
+      def absorb_disclosures(runner, analyze_set)
+        @plugin_disclosures.absorb(runner.analysis_disclosures, analyze_set, @stale_disclosures)
+        @stale_disclosures = Set.new
       end
 
       # Issue #2020 — the run-scoped plugin rows whose reads went stale ({RunDisclosureLedger}): one registering file

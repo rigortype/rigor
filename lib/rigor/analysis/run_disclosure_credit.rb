@@ -44,11 +44,12 @@ module Rigor
       def credit(registrations)
         return [].freeze if registrations.empty?
 
-        reads = {}
-        registrations.map do |plugin, record|
-          rows = reads[plugin.object_id] ||= boundary_rows(plugin).freeze
+        reads = {}.compare_by_identity
+        records = registrations.map do |plugin, record|
+          rows = reads[plugin] ||= boundary_rows(plugin).freeze
           record.merge(plugin_id: plugin_id(plugin), reads: rows).freeze
-        end.uniq { |record| identity(record) }.freeze
+        end
+        records.uniq { |record| identity(record) }.freeze
       end
 
       # The de-duplication identity a record shares with every other registration of its key.

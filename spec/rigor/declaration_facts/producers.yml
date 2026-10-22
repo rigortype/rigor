@@ -708,11 +708,12 @@ plugins/rigor-actioncable/lib/rigor/plugin/actioncable/channel_discoverer.rb:
 plugins/rigor-actionmailer/lib/rigor/plugin/actionmailer/mailer_discoverer.rb:
   computes: the mailer classes and the actions their modules contribute
   producers:
+    Rigor::Plugin::Actionmailer::MailerDiscoverer: 'issue #2308, the VISIBILITY_KEYWORDS constant naming the three visibility calls #scan_visibility reads; the discoverer is a plugin-side syntactic scan of the mailer class body, not a DeclarationWalk consumer, and it replaces the grandfathered #next_visibility and #collect_visibility_and_callbacks'
+    Rigor::Plugin::Actionmailer::MailerDiscoverer#apply_visibility_call: 'issue #2308, applies one receiverless public/private/protected call (bare, a Symbol argument or an inline def) to the visibility each mailer method ends with; it replaces the grandfathered #next_visibility and reads the class body syntactically because the plugin runs before and outside the discovery table'
     Rigor::Plugin::Actionmailer::MailerDiscoverer#collect_action_defs: grandfathered
     Rigor::Plugin::Actionmailer::MailerDiscoverer#collect_includes: grandfathered
     Rigor::Plugin::Actionmailer::MailerDiscoverer#collect_module_actions: grandfathered
-    Rigor::Plugin::Actionmailer::MailerDiscoverer#collect_visibility_and_callbacks: grandfathered
-    Rigor::Plugin::Actionmailer::MailerDiscoverer#next_visibility: grandfathered
+    Rigor::Plugin::Actionmailer::MailerDiscoverer#scan_visibility: 'issue #2308, reads a mailer class body in source order and returns each def with the visibility it ends with, so public :x after protected counts as an action as Rails'' action_methods does; it replaces the grandfathered #collect_visibility_and_callbacks and works on the unevaluated syntax the plugin sees'
     Rigor::Plugin::Actionmailer::MailerDiscoverer#walk_for_mailers: grandfathered
 plugins/rigor-actionpack/lib/rigor/plugin/actionpack/analyzer.rb:
   computes: the name of the controller enclosing a node

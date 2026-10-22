@@ -216,9 +216,10 @@ module Rigor
         # - `initialize`
         # - methods starting with `_` (Ruby convention for private/internal)
         # - `def self.<name>` (singleton-side)
-        # - methods after a bare `private` (or `public` → `private` transition) — these are internal
-        #   helpers, not actions
-        # - methods named as a `private :foo` argument
+        # - methods that are not public at the end of the class body, read in source order: after a bare
+        #   `private` / `protected` (until a `public` switches back), named by `private :foo` /
+        #   `protected :foo`, or defined inline (`private def foo`) — Rails builds `action_methods` from the
+        #   public instance methods. `public :foo` after a `protected` section makes `foo` an action again.
         # - methods named as a callback target (`before_action :name`, `after_action`, `around_action`)
         #
         # Pre-fix, Mastodon's `AdminMailer#process_params` / `set_instance` / `set_locale` /
@@ -227,64 +228,80 @@ module Rigor
         CALLBACK_DECLARATIONS = %i[before_action after_action around_action].freeze
         private_constant :CALLBACK_DECLARATIONS
 
+        VISIBILITY_KEYWORDS = %i[public private protected].freeze
+        private_constant :VISIBILITY_KEYWORDS
+
         def collect_action_defs(body)
           return [] if body.nil?
 
-          private_names, callback_names = collect_visibility_and_callbacks(body)
-          visibility = :public
+          callback_names = collect_callback_names(body)
+          def_nodes, final_visibility = scan_visibility(body)
 
-          body.compact_child_nodes.flat_map do |node|
-            visibility = next_visibility(node, visibility)
-            next [] unless node.is_a?(Prism::DefNode)
-            next [] if node.receiver.is_a?(Prism::SelfNode)
-            next [] if node.name == :initialize
-            next [] if node.name.to_s.start_with?("_")
-            next [] if visibility == :private
-            next [] if private_names.include?(node.name)
-            next [] if callback_names.include?(node.name)
+          def_nodes.select do |node|
+            next false if node.receiver.is_a?(Prism::SelfNode)
+            next false if node.name == :initialize
+            next false if node.name.to_s.start_with?("_")
+            next false if callback_names.include?(node.name)
 
-            [node]
+            # Rails builds `action_methods` from the PUBLIC instance methods, so only a method whose final
+            # visibility is public is an action.
+            final_visibility[node.name] == :public
           end
         end
 
-        # First pass over the class body: collect (a) names passed to `private :foo` / `protected :foo`
-        # (explicit visibility-on-existing-method form), and (b) Symbol arguments to callback
-        # declarations (`before_action :setup`, etc.).
-        def collect_visibility_and_callbacks(body)
-          private_names = []
-          callback_names = []
-
+        # Symbol arguments to callback declarations (`before_action :setup`, etc.).
+        def collect_callback_names(body)
+          names = []
           body.rigor_each_child do |node|
-            next unless node.is_a?(Prism::CallNode) && node.receiver.nil?
+            next unless node.is_a?(Prism::CallNode) && node.receiver.nil? && CALLBACK_DECLARATIONS.include?(node.name)
 
-            args = (node.arguments&.arguments || []).filter_map do |arg|
-              Rigor::Source::Literals.symbol(arg)
-            end
-            next if args.empty?
-
-            case node.name
-            when :private, :protected then private_names.concat(args)
-            when *CALLBACK_DECLARATIONS then callback_names.concat(args)
+            (node.arguments&.arguments || []).each do |arg|
+              symbol = Rigor::Source::Literals.symbol(arg)
+              names << symbol if symbol
             end
           end
-
-          [private_names.to_set, callback_names.to_set]
+          names.to_set
         end
 
-        # Returns the new visibility scope state after observing `node`. Bare `private` / `protected` /
-        # `public` switch state; the `private :foo` arg-bearing form does NOT (already handled by
-        # `collect_visibility_and_callbacks`).
-        def next_visibility(node, current)
-          return current unless node.is_a?(Prism::CallNode)
-          return current unless node.receiver.nil?
-          return current unless (args = node.arguments&.arguments).nil? || args.empty?
+        # Walks the class body in source order and returns `[def_nodes, final_visibility]`: every `def` the body
+        # spells (a direct statement or the inline argument of a visibility call, `private def x`), and the
+        # visibility each method name ends with. A bare `public` / `private` / `protected` sets the default for
+        # the defs after it; `private :x` / `public :x` / `protected def x` set that one method, whichever side of
+        # its `def` they fall on in the source, and the last statement to name a method wins.
+        def scan_visibility(body)
+          def_nodes = []
+          final_visibility = {}
+          default = :public
 
-          case node.name
-          when :private then :private
-          when :protected then :protected
-          when :public then :public
-          else current
+          body.compact_child_nodes.each do |node|
+            case node
+            when Prism::DefNode
+              def_nodes << node
+              final_visibility[node.name] = default
+            when Prism::CallNode
+              default = apply_visibility_call(node, default, def_nodes, final_visibility)
+            end
           end
+
+          [def_nodes, final_visibility]
+        end
+
+        # Applies one receiverless `public` / `private` / `protected` call and returns the (possibly new) default.
+        def apply_visibility_call(node, default, def_nodes, final_visibility)
+          return default unless node.receiver.nil? && VISIBILITY_KEYWORDS.include?(node.name)
+
+          args = node.arguments&.arguments || []
+          return node.name if args.empty?
+
+          args.flat_map { |arg| arg.is_a?(Prism::ArrayNode) ? arg.elements : [arg] }.each do |arg|
+            if arg.is_a?(Prism::DefNode)
+              def_nodes << arg
+              final_visibility[arg.name] = node.name
+            elsif (name = Rigor::Source::Literals.symbol_or_string(arg))
+              final_visibility[name] = node.name
+            end
+          end
+          default
         end
 
         def build_class_entry(class_name, file_path, def_nodes, includes = [], module_actions = {})

@@ -103,6 +103,66 @@ RSpec.describe "plugins/rigor-actionmailer" do
     end
   end
 
+  # Rails builds `action_methods` from the public instance methods, so the final visibility of each name,
+  # read in source order, decides whether `Mailer.name` is an action.
+  describe "visibility in source order" do
+    let(:mailer) do
+      {
+        "app/mailers/vis_mailer.rb" => <<~RUBY
+          class VisMailer < ApplicationMailer
+            def plain; mail; end
+            def later_private; mail; end
+            private :later_private
+
+            protected
+
+            def reopened; mail; end
+            public :reopened
+            def stays_protected; mail; end
+
+            private
+
+            public def inline_public; mail; end
+            def stays_private; mail; end
+            private def inline_private; mail; end
+
+            public
+
+            def back_public; mail; end
+            protected def inline_protected; mail; end
+          end
+        RUBY
+      }
+    end
+
+    def unknown_actions(names, files)
+      source = names.map { |name| "VisMailer.#{name}\n" }.join
+      result = run_plugin(source: source, files: files)
+      plugin_diagnostics(result).select { |d| d.rule == "unknown-action" }.map { |d| d.message[/VisMailer\.(\w+)/, 1] }
+    end
+
+    it "treats a method made public after a protected section as an action" do
+      expect(unknown_actions(%w[reopened], mailer)).to eq([])
+    end
+
+    it "treats an inline `public def` after a private section as an action" do
+      expect(unknown_actions(%w[inline_public], mailer)).to eq([])
+    end
+
+    it "treats a `public` section after private as public again" do
+      expect(unknown_actions(%w[back_public plain], mailer)).to eq([])
+    end
+
+    it "does not treat a public def made private by a later `private :x` as an action" do
+      expect(unknown_actions(%w[later_private], mailer)).to eq(%w[later_private])
+    end
+
+    it "does not treat protected or private methods, bare or inline, as actions" do
+      names = %w[stays_protected stays_private inline_private inline_protected]
+      expect(unknown_actions(names, mailer)).to match_array(names)
+    end
+  end
+
   describe "unknown-action diagnostics" do
     it "flags a call to an action that the mailer does not define" do
       result = run_plugin(
@@ -172,6 +232,60 @@ RSpec.describe "plugins/rigor-actionmailer" do
       )
       missing = plugin_diagnostics(result).select { |d| d.rule == "missing-view" }
       expect(missing.map(&:message).grep(/set_instance|helper_method/)).to be_empty
+    end
+
+    it "skips methods that follow a bare `protected` (not dispatchable as mailer actions)" do
+      files = {
+        "app/mailers/admin_mailer.rb" => <<~RUBY,
+          class AdminMailer < ApplicationMailer
+            def daily_report
+              mail subject: "report"
+            end
+
+            protected
+
+            def shared_setup
+              @instance = "x"
+            end
+          end
+        RUBY
+        "app/views/admin_mailer/daily_report.html.erb" => "Hello\n"
+      }
+      result = run_plugin(
+        source: "# noop\n",
+        files: files,
+        paths: ["app/mailers/admin_mailer.rb"]
+      )
+      missing = plugin_diagnostics(result).select { |d| d.rule == "missing-view" }
+      expect(missing.map(&:message).grep(/shared_setup/)).to be_empty
+    end
+
+    it "keeps a method after `protected` then `public` as an action" do
+      files = {
+        "app/mailers/admin_mailer.rb" => <<~RUBY
+          class AdminMailer < ApplicationMailer
+            protected
+
+            def shared_setup
+              @instance = "x"
+            end
+
+            public
+
+            def weekly_report
+              mail subject: "report"
+            end
+          end
+        RUBY
+      }
+      result = run_plugin(
+        source: "# noop\n",
+        files: files,
+        paths: ["app/mailers/admin_mailer.rb"]
+      )
+      missing = plugin_diagnostics(result).select { |d| d.rule == "missing-view" }
+      expect(missing.map(&:message).grep(/weekly_report/)).not_to be_empty
+      expect(missing.map(&:message).grep(/shared_setup/)).to be_empty
     end
 
     it "skips methods named explicitly as before_action callback targets" do

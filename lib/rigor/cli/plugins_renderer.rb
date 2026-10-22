@@ -185,9 +185,23 @@ module Rigor
         lines = []
         lines << "        open_receivers: #{row[:open_receivers].join(', ')}" if row[:open_receivers].any?
         lines << "        owns_receivers: #{row[:owns_receivers].join(', ')}" if row[:owns_receivers].any?
+        lines.concat(per_invocation_lines(row))
         lines << "        produces: #{row[:produces].join(', ')}" if row[:produces].any?
         lines << "        consumes: #{row[:consumes].join(', ')}" if row[:consumes].any?
         lines.concat(narrow_protocol_lines(row))
+        lines
+      end
+
+      # ADR-125 — the per-invocation classes a plugin vouches for, and the macros whose arguments name a method that is
+      # not one of their actions.
+      def per_invocation_lines(row)
+        lines = []
+        if row[:per_invocation_classes].any?
+          lines << "        per_invocation_classes: #{row[:per_invocation_classes].join(', ')}"
+        end
+        if row[:per_invocation_non_action_macros].any?
+          lines << "        per_invocation_non_action_macros: #{row[:per_invocation_non_action_macros].join(', ')}"
+        end
         lines
       end
 
@@ -249,8 +263,6 @@ module Rigor
           "signature_paths" => row[:signature_paths].map do |sp|
             { "path" => sp[:path], "exists" => sp[:exists], "rbs_files" => sp[:rbs_files] }
           end,
-          "open_receivers" => row[:open_receivers],
-          "owns_receivers" => row[:owns_receivers],
           "produces" => row[:produces],
           "consumes" => row[:consumes],
           "block_as_methods" => row[:block_as_methods],
@@ -265,6 +277,16 @@ module Rigor
           "dynamic_return_receivers" => row[:dynamic_return_receivers],
           "narrowing_facts_methods" => row[:narrowing_facts_methods],
           "load_error" => row[:load_error]
+        }.merge(receiver_json(row))
+      end
+
+      # ADR-125 — the per-invocation keys are additive; an empty array when the plugin declares none.
+      def receiver_json(row)
+        {
+          "open_receivers" => row[:open_receivers],
+          "owns_receivers" => row[:owns_receivers],
+          "per_invocation_classes" => row[:per_invocation_classes],
+          "per_invocation_non_action_macros" => row[:per_invocation_non_action_macros]
         }
       end
 

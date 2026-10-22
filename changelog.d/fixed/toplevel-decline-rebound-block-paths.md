@@ -1,0 +1,4 @@
+- **[engine]** `call.unresolved-toplevel` no longer reports a bare call inside a block that a project method may run under another `self` when the block reaches it through a local (`blk = proc { … }; Ext.define(&blk)`), through a Method object (`Ext.method(:define).call { … }`), or from a heredoc opened inside the block. ([#2265](https://github.com/rigortype/rigor/pull/2265))
+  - A proc held in a local and passed to `instance_exec`, `instance_eval`, `class_eval` or the rest of that family no longer reports either.
+  - A callee that reaches its block through `Kernel.eval`, `send(:binding)` or a string `instance_eval` now counts as one that may run it under another `self`.
+  - A proc value Rigor cannot follow to the call that runs it, such as one stored or passed as an ordinary argument, no longer reports; a proc called in place (`proc { … }.call`) still does.

@@ -215,6 +215,48 @@ RSpec.describe "call.unresolved-toplevel inside a block a project callee rebinds
      "Cond.define { helper }", "Ext.define_singleton_method(:inner) { helper }; Ext.inner",
      "Tgt.define_method(:im) { helper }; Tgt.new.im", "Ext.yields { helper }", "helper", "undefined_ctl"]
   end
+  let(:value_callees) do
+    <<~RUBY
+      module Ext
+        def self.helper = :ok
+        def self.me(&b) = module_eval(&b)
+        def self.yields = yield
+        def self.store(pr) = (@pr = pr)
+        def self.run_stored = instance_exec(&@pr)
+        def self.a(&b) = instance_eval("module_eval(&b)")
+        def self.c(&b) = module_eval(&send(:binding).local_variable_get(:b))
+        def self.d(&b) = Kernel.eval("Ext.module_eval(&b)")
+        def self.lv(&b) = module_eval(&proc {}.method(:binding).call.local_variable_get(:b))
+        def self.cs(&b) = send(:"ev\#{"al"}", "module_eval(&b)")
+      end
+
+      class Svc
+        def self.call = yield
+      end
+    RUBY
+  end
+
+  # Each row, and whether Ruby raises NameError on it: a block reached through a local, a Method object, a core
+  # receiver-eval method or a callee's string eval runs under another `self`; a proc called in place, a callee that
+  # only yields, a `call` that is a plain method, and `Class.new` do not.
+  let(:value_rows) do
+    {
+      "blk = proc { helper }; Ext.me(&blk)" => false, "Ext.method(:me).call { helper }" => false,
+      "Ext.method(:me).to_proc.call { helper }" => false,
+      "Ext.singleton_class.instance_method(:me).bind_call(Ext) { helper }" => false,
+      "m = Ext.method(:me); m.call { helper }" => false,
+      "st = proc { helper }; Ext.store(st); Ext.run_stored" => false,
+      "b1 = proc { helper }; Ext.instance_exec(&b1)" => false, "b2 = proc { helper }; Ext.instance_eval(&b2)" => false,
+      "b3 = proc { helper }; Ext.class_eval(&b3)" => false, "b4 = proc { helper }; Ext.module_exec(&b4)" => false,
+      "Ext.a { helper }" => false, "Ext.c { helper }" => false, "Ext.d { helper }" => false,
+      "Ext.lv { helper }" => false, "Ext.cs { helper }" => false,
+      "def far = binding; f = proc { helper }; Ext.yields(&f)" => true,
+      "plain = proc { helper }; plain.call" => true, "proc { helper }.call" => true, "-> { helper }.()" => true,
+      "y = proc { helper }; Ext.yields(&y)" => true, "c = proc { helper }; Class.new(&c)" => true,
+      "Ext.method(:yields).call { helper }" => true, "Ext.method(:yields).to_proc.call { helper }" => true,
+      "Svc.call { helper }" => true, "Ext.yields { helper }" => true, "helper" => true, "undefined_ctl" => true
+    }
+  end
 
   def write_project
     FileUtils.mkdir_p("lib")
@@ -399,8 +441,7 @@ RSpec.describe "call.unresolved-toplevel inside a block a project callee rebinds
     controls = use_lines(uses, "Ext.yields { helper }", "helper", "undefined_ctl")
     expect(ruby_lines(%w[ext.rb])).to match_array(controls + use_lines(uses, "Cond.define { helper }"))
     expect(ruby_lines(%w[ext.rb], "REBIND" => "1")).to match_array(controls)
-    # ext.rb:13 is `module_eval` in the proc `dsp` is defined from, a block passed as a value, which #2186 covers.
-    expect(toplevel_lines).to match_array(controls + [["ext.rb", 13]])
+    expect(toplevel_lines).to match_array(controls)
   end
 
   # Ruby reaches a method_missing only for a name the receiver lacks: `Array#each` and `Integer#times` are RBS
@@ -500,6 +541,37 @@ RSpec.describe "call.unresolved-toplevel inside a block a project callee rebinds
 
     expect(ruby_lines([])).to eq([["use.rb", 2], ["use.rb", 3]])
     expect(toplevel_lines).to eq([["use.rb", 3]])
+  end
+
+  # Issue #2186 — a block reached through a variable, a Method object or a string eval in the callee.
+  it "declines in a block passed through a variable, a Method object, or a callee's string eval" do
+    uses = value_rows.keys
+    write_files("ext.rb" => value_callees, "use.rb" => "#{uses.join("\n")}\n")
+
+    expected = use_lines(uses, *value_rows.select { |_row, raises| raises }.keys)
+    expect(ruby_lines(%w[ext.rb])).to match_array(expected)
+    expect(toplevel_lines).to match_array(expected)
+  end
+
+  # A `binding` in the scope that holds the proc may hand it anywhere; one in another method does not.
+  it "declines on a proc whose own scope reads locals by name" do
+    uses = ["b = proc { helper }; Ext.me(&binding.local_variable_get(:b))", "undefined_ctl"]
+    write_files("ext.rb" => value_callees, "use.rb" => "#{uses.join("\n")}\n")
+
+    expect(ruby_lines(%w[ext.rb])).to eq([["use.rb", 2]])
+    expect(toplevel_lines).to eq([["use.rb", 2]])
+  end
+
+  # Prism ends the block at its `}`; the heredoc's body, and its interpolation, come after it.
+  # Only the heredoc's body joins the block: a call after the block on the opening line still reports.
+  it "declines in a heredoc that opens inside a rebinding block" do
+    source = "p(Ext.me { <<~X }); undefined_ctl rescue nil\n  \#{helper}\nX\nundefined_ctl\n"
+    write_files("ext.rb" => value_callees, "use.rb" => source)
+    File.write("witness.rb", "require_relative \"lib/ext\"\n#{source.sub("undefined_ctl\n", '')}")
+
+    out, _err, status = RubyRun.capture("witness.rb")
+    expect([out, status.success?]).to eq(["\"ok\\n\"\n", true])
+    expect(toplevel_lines).to eq([["use.rb", 1], ["use.rb", 4]])
   end
 
   # A block call chained on, or passed into, another block call: the enclosing rebinding block starts before the

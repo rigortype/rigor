@@ -120,16 +120,19 @@ module Rigor
           return if qualified_prefix.empty?
           return unless call_node.receiver.nil? || call_node.receiver.is_a?(Prism::SelfNode)
 
-          # A literal with bytes no Symbol can hold (`before_action "\xff"`, #1821) names no method; skip it.
-          names = (call_node.arguments&.arguments || []).filter_map do |argument|
-            next unless argument.is_a?(Prism::SymbolNode) || argument.is_a?(Prism::StringNode)
-
-            text = argument.unescaped
-            text.to_sym if text.valid_encoding?
-          end
+          names = (call_node.arguments&.arguments || []).filter_map { |argument| literal_method_name(argument) }
           return if names.empty?
 
           ((@macro_arguments[qualified_prefix.join("::")] ||= {})[call_node.name] ||= []).concat(names)
+        end
+
+        # A Symbol / String literal's name. A literal with bytes no Symbol can hold (`before_action "\xff"`,
+        # #1821) names no method, so it answers nil.
+        def literal_method_name(argument)
+          return nil unless argument.is_a?(Prism::SymbolNode) || argument.is_a?(Prism::StringNode)
+
+          text = argument.unescaped
+          text.valid_encoding? ? text.to_sym : nil
         end
 
         # Each write with `action` set (see {#initialize}). A frozen copy, so `#results` stays repeatable.

@@ -1,1 +1,0 @@
-- **[engine]** `rigor check --incremental` now re-checks a singleton call on a module that `extend`s itself when another file swaps a `private :name` for a `module_function :name` on that module, or back, instead of serving the previous verdict. ([#2200](https://github.com/rigortype/rigor/pull/2200))

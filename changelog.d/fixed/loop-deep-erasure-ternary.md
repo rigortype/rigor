@@ -1,1 +1,0 @@
-- **[engine]** A loop nested in a ternary branch or `unless` modifier inside another loop (`id(c ? (while …) : 0)`, eight deep) is no longer evaluated again for each typing of the conditional, which took minutes. ([#2285](https://github.com/rigortype/rigor/pull/2285))

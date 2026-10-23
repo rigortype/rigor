@@ -1,1 +1,0 @@
-- **[rigor sig-gen]** `rigor sig-gen` now writes a `Set` return as `Set[untyped]`, an anonymous `Struct` return as `Struct[untyped]` and a bare generic inside a record value with `untyped` arguments, instead of the bare names that `rbs validate` rejects ([#2219](https://github.com/rigortype/rigor/pull/2219)).

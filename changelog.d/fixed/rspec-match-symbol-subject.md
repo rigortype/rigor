@@ -1,1 +1,0 @@
-- **[plugins]** rigor-rspec no longer narrows the subject of `expect(x).to match(/regex/)` to `String`: a Symbol subject stays a Symbol and an untyped one stays untyped, and `expect(x).not_to match(/regex/)` no longer reads a String subject as `bot`. ([#2258](https://github.com/rigortype/rigor/pull/2258))

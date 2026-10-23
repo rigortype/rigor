@@ -1,2 +1,0 @@
-- **[cli]** `rigor type-of` types a class or constant another project file declares as `rigor check` does, instead of `Dynamic[top]`. ([#2281](https://github.com/rigortype/rigor/pull/2281))
-  - The declarations come from the snapshot a bare `rigor check --incremental` left; with no reusable snapshot the probe types the one file on its own, as before.

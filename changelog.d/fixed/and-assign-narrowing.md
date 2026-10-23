@@ -1,1 +1,0 @@
-- **[engine]** `x &&= v` now reads `x` as truthy inside `v`, as `x && (x = v)` does, so `c &&= c + 1` on a value that may be nil no longer reports a possible nil receiver, in statement and value position alike. ([#2253](https://github.com/rigortype/rigor/pull/2253))

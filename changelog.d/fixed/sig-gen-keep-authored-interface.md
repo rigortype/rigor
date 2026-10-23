@@ -1,2 +1,0 @@
-- **[rigor sig-gen]** `rigor sig-gen --overwrite` no longer replaces a declared return that only translates like `untyped` with the body's type ([#2234](https://github.com/rigortype/rigor/pull/2234)).
-  - An interface return (`-> _ToS`, a project `interface _Taker[T]`), a `self`, `instance` or `class` return, an intersection such as `(_ToS & _Plain)`, and an alias of `untyped` are kept; only a return written `untyped` is proposed over.

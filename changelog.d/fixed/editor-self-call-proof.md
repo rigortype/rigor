@@ -1,1 +1,0 @@
-- **[editor]** The language server's per-buffer diagnostics now see the classes and methods other project files declare, so they no longer report editor-only errors such as a `call.wrong-arity` on a project subclass of `SyntaxError` and now show the cross-file diagnostics `rigor check` already reported. ([#2164](https://github.com/rigortype/rigor/pull/2164))

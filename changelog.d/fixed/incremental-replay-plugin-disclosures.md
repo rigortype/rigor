@@ -1,3 +1,0 @@
-- **[cli]** An unchanged `rigor check --incremental` rerun now reports the run-scoped plugin rows a cold run reports, such as rigor-rails-i18n's `load-error` for a broken locale file. ([#2268](https://github.com/rigortype/rigor/pull/2268))
-  - Before, a recheck that analysed no file dropped every row a plugin registered from its per-file hook, under `--cache-stats` or `--workers 2`.
-  - The replayed row goes away on the warm run once the input it is about is fixed.

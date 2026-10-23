@@ -1,2 +1,0 @@
-- **[engine]** An `--incremental` recheck after a `backtrace` method appears or disappears now re-checks only the files whose `rescue` clauses read `$@`. ([#2272](https://github.com/rigortype/rigor/pull/2272))
-  - Before, it re-checked every file with a `rescue`.

@@ -1,1 +1,0 @@
-- **[engine]** `0.0` and `-0.0` are now distinct members of a union, so `1.0 / (flag ? 0.0 : -0.0)` is `-Infinity | Infinity` and a sign test on it no longer reports `flow.always-truthy-condition`. ([#2252](https://github.com/rigortype/rigor/pull/2252))

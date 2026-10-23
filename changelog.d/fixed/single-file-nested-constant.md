@@ -1,1 +1,0 @@
-- **[check]** Checking a file outside the configured `paths:` on its own now reads the files it loads with `require_relative`, so a nested constant declared in a sibling file is no longer resolved to a same-named outer constant and reported as `call.undefined-method`. ([#2236](https://github.com/rigortype/rigor/pull/2236))

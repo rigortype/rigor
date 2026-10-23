@@ -1,1 +1,0 @@
-- **[engine]** `/re/ === x` and `case x when /re/` now keep a subject whose class defines `to_str` on the match arm, where it read as `Dynamic[top]` for a String subclass or `to_str` class that has no signature, and as `bot` for a class whose signature declares `to_str`. ([#2256](https://github.com/rigortype/rigor/pull/2256))

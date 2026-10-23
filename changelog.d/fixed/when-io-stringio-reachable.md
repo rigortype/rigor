@@ -1,1 +1,0 @@
-- **[engine]** `flow.unreachable-clause` no longer reports the `else` after `when IO` (or `when File`) on a subject a `StringIO` or `Tempfile` can stand in for, such as `io = STDOUT; case io when IO then 1 else 2 end`. ([#2274](https://github.com/rigortype/rigor/pull/2274))

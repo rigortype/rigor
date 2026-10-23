@@ -1,1 +1,0 @@
-- **[editor]** Saving a file now refreshes the diagnostics of other open, unsaved buffers that read it, and a watched-file or configuration change refreshes every open buffer, instead of leaving markers computed against the old files. ([#2175](https://github.com/rigortype/rigor/pull/2175))

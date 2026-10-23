@@ -1,4 +1,0 @@
-- **[rigor sig-gen]** `rigor sig-gen` now writes one entry for a method defined twice in a class, the definition Ruby keeps, instead of a duplicate `def` that RBS rejects ([#2239](https://github.com/rigortype/rigor/pull/2239)).
-  - A `def x` and an `attr_reader :x` keep the later one; a `module_function` method redefined after a reset keeps its singleton copy as `def self.x`, written once.
-  - A `Data.define` or `Struct.new` member redefined by a `def` is written once, as the `def`.
-  - When a redefinition may not run (under a condition, in a block or lambda, or after an uncertain reset), nothing is written for that method.

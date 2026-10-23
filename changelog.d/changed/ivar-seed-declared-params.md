@@ -1,1 +1,0 @@
-- **[engine]** An instance variable assigned from a method parameter (`@x = x`) now takes the parameter's declared type from `sig/` or an inline `# @rbs` / `#:` annotation, in `rigor check` as well as `rigor sig-gen`, so readers of the field are typed and can report what the declared type rules out. ([#2199](https://github.com/rigortype/rigor/pull/2199))

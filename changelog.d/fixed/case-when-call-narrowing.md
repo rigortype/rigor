@@ -1,2 +1,0 @@
-- **[engine]** A `case` reads as its statement form in a value position such as an array element, so a write in an arm is read where it runs, and a `when` test that calls a method no longer leaves a global subject read as the value it held before. ([#2260](https://github.com/rigortype/rigor/pull/2260))
-  - `case (x = v) when String then x.upcase end` now narrows `x` in each clause, as a bare `case x` does.

@@ -4501,19 +4501,20 @@ module Rigor
       end
 
       # Issue #2104 — the per-thread memo of a census that also resolves self-calls ({#resolve_self_callee_def}), so it
-      # reads, besides `def_node`'s AST, the class self-calls resolve in and the def table they resolve through. Those
-      # two key it: the table by identity (one slot, as a file's analysis reads one table; a scope indexed for another
-      # file replaces it), the class by name. A run builds hundreds of thousands of evaluators, and a per-evaluator memo
-      # alone recomputed each closure and each def's edges about thirty times over (#2295's cost on the release gate).
+      # reads, besides `def_node`'s AST, the class self-calls resolve in and the discovery index whose def table they
+      # resolve through. Those two key it: the index by identity, as it is immutable (one slot, as a file's analysis
+      # reads one index; a scope indexed for another file replaces it), the class by name. A run builds hundreds of
+      # thousands of evaluators, and a per-evaluator memo alone recomputed each closure and each def's edges about
+      # thirty times over (#2295's cost on the release gate).
       #
       # While a dependency recorder is active the memo is bypassed: a resolution records an ADR-46 read in the file
       # and in each capture window open at the time, and a hit would leave that read out of them.
       def resolved_census(kind, def_node)
         return yield if Analysis::DependencyRecorder.active?
 
-        def_nodes = scope.discovered_def_nodes
+        discovery = scope.discovery
         slot = Thread.current[RESOLVED_CENSUS_KEY]
-        slot = Thread.current[RESOLVED_CENSUS_KEY] = [def_nodes, {}] unless slot&.first.equal?(def_nodes)
+        slot = Thread.current[RESOLVED_CENSUS_KEY] = [discovery, {}] unless slot&.first.equal?(discovery)
         by_class = (slot.last[kind] ||= {})
         class_name = enclosing_class_name_for(scope.self_type)
         by_def = (by_class[class_name] ||= {}.compare_by_identity)

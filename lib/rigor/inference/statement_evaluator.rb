@@ -4492,12 +4492,36 @@ module Rigor
       # keyword symbol: those it mutates itself ({#own_content_parameters}) and, issue #2104, those it passes on to a
       # self-call whose callee mutates them, through any number of such hand-offs ({CalleeMutationChain}). Each leaves
       # the caller's argument binding stale after the call, so each floors it. Memoised per def node (the closure is
-      # otherwise recomputed at every call site).
+      # otherwise recomputed at every call site), and across evaluators by {#resolved_census}.
       def callee_content_mutated_parameters(def_node)
         cache = (@callee_mutated_param_cache ||= {}.compare_by_identity)
-        cache[def_node] ||= CalleeMutationChain.close(def_node, own: method(:own_content_parameters),
-                                                                edges: method(:forwarding_edges))
+        cache[def_node] ||= resolved_census(:close, def_node) do
+          CalleeMutationChain.close(def_node, own: method(:own_content_parameters), edges: method(:forwarding_edges))
+        end
       end
+
+      # Issue #2104 — the per-thread memo of a census that also resolves self-calls ({#resolve_self_callee_def}), so it
+      # reads, besides `def_node`'s AST, the class self-calls resolve in and the def table they resolve through. Those
+      # two key it: the table by identity (one slot, as a file's analysis reads one table; a scope indexed for another
+      # file replaces it), the class by name. A run builds hundreds of thousands of evaluators, and a per-evaluator memo
+      # alone recomputed each closure and each def's edges about thirty times over (#2295's cost on the release gate).
+      #
+      # While a dependency recorder is active the memo is bypassed: a resolution records an ADR-46 read in the file
+      # and in each capture window open at the time, and a hit would leave that read out of them.
+      def resolved_census(kind, def_node)
+        return yield if Analysis::DependencyRecorder.active?
+
+        def_nodes = scope.discovered_def_nodes
+        slot = Thread.current[RESOLVED_CENSUS_KEY]
+        slot = Thread.current[RESOLVED_CENSUS_KEY] = [def_nodes, {}] unless slot&.first.equal?(def_nodes)
+        by_class = (slot.last[kind] ||= {})
+        class_name = enclosing_class_name_for(scope.self_type)
+        by_def = (by_class[class_name] ||= {}.compare_by_identity)
+        by_def.fetch(def_node) { by_def[def_node] = yield }
+      end
+
+      RESOLVED_CENSUS_KEY = :rigor_callee_resolved_census
+      private_constant :RESOLVED_CENSUS_KEY
 
       # The parameters `def_node` mutates itself, from either channel: those escape-mutated inside a block (which may
       # run later / repeatedly) AND those mutated directly in the method body during the call itself
@@ -4521,10 +4545,11 @@ module Rigor
       # Issue #2104 — the {CalleeMutationChain::Edge}s along which `def_node` hands one of its parameters, unchanged, to
       # a self-call resolving to a user def: a positional argument or a keyword value that reads the parameter itself
       # (not a block-local shadowing it), in the method body or a block in it. The callee resolves in this evaluator's
-      # class, the receiver's class at every hop of a self-call chain. Memoised per def node.
+      # class, the receiver's class at every hop of a self-call chain. Memoised per def node, and across evaluators by
+      # {#resolved_census}.
       def forwarding_edges(def_node)
         cache = (@forwarding_edge_cache ||= {}.compare_by_identity)
-        cache[def_node] ||= compute_forwarding_edges(def_node)
+        cache[def_node] ||= resolved_census(:edges, def_node) { compute_forwarding_edges(def_node) }
       end
 
       def compute_forwarding_edges(def_node)

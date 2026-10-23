@@ -1,1 +1,0 @@
-- **[engine]** A project module mixed into a core class no longer makes `call.undefined-method` report the methods it gets from a gem DSL Rigor has no RBS for: a module that `extend`s such a DSL, or hands one of its macros the method's name (`dsl_method :name`), now counts as possibly defining it. ([#2269](https://github.com/rigortype/rigor/pull/2269))

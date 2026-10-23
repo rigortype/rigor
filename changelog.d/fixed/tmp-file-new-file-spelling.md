@@ -1,1 +1,0 @@
-- **[editor]** `rigor check --tmp-file T --instead-of F F` accepts a new buffer file whose argument spells its path differently from `--instead-of`, such as a relative path or one through a symlink, instead of reporting it as missing. ([#2227](https://github.com/rigortype/rigor/pull/2227))

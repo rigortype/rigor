@@ -1,1 +1,0 @@
-- **[engine]** A `define_method(:x)` or an alias written after a private `def x` no longer makes `def.override-visibility-reduced` report the replaced `def`, and one in another file no longer makes `def.method-visibility-mismatch` report a call to `x`. ([#2237](https://github.com/rigortype/rigor/pull/2237))

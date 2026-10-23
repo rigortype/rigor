@@ -1,1 +1,0 @@
-- **[engine]** A class reopened only in the project's own RBS (rbs-inline `#:` annotations or `sig/`) whose name belongs to a library Ruby ships and the project requires, such as `class Matrix` beside `require "matrix"` without the matrix signatures, no longer reports `call.undefined-method` for the library's own methods. ([#2264](https://github.com/rigortype/rigor/pull/2264))

@@ -1,1 +1,0 @@
-- **[editor]** With `pre_eval:` configured, the language server's per-buffer diagnostics now see the project's literal constants and retract a `pre_eval:` constant another file also assigns, as `rigor check` does, instead of reporting a call on the wrong constant type. ([#2180](https://github.com/rigortype/rigor/pull/2180))

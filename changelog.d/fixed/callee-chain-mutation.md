@@ -1,3 +1,0 @@
-- **[engine]** A collection handed to a method that passes it on to another method that mutates it is no longer read as its literal shape after the call, so `acc = INIT.dup; stripes(acc); acc[0].upcase` no longer reports `call.undefined-method` for the original element when `stripes` calls a `poke(acc)` that replaces it. ([#2295](https://github.com/rigortype/rigor/pull/2295))
-  - The hand-off can go through several methods in the same class, including recursive ones, and through keyword arguments. A hand-off past the first 32 parameter nodes the analysis reads breadth first, including a wide fan-out of one parameter, keeps the literal shape.
-  - A method that passes the collection on from inside an iterator block (`n.times { poke(acc) }`) counts too.

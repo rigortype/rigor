@@ -1,4 +1,0 @@
-- **[engine]** A method that passes its own block on (`g(x, &)` or `g(x, &blk)`) now gives the callee's `yield` the caller's block type, so such helpers no longer read `untyped`. ([#2301](https://github.com/rigortype/rigor/pull/2301))
-  - The forward reaches an RBS-declared callee too: `def m(arr, &) = arr.map(&)` called with `{ "a" }` is `Array["a"]`.
-  - A block passed to a project method that hands its block on is treated as one that may run more than once.
-  - A `return` the block-return pass types without the statements before it no longer widens the enclosing method's return type where the full walk of the block records the same `return`.

@@ -1,1 +1,0 @@
-- **[plugins]** `rigor-dry-types`, `rigor-activejob`, `rigor-sidekiq` and `rigor-typelizer` watch a configured path whose name holds `[`, `]`, `{`, `}`, `*` or `?` as that file, not as a pattern that matches a different one. ([#2220](https://github.com/rigortype/rigor/pull/2220))

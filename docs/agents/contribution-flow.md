@@ -145,7 +145,8 @@ Once the change is implemented and `make verify-changed` passes:
    findings join this triage.
 3. **Triage.** For a PR that changes the engine, read the "Engine allocations (advisory)" job's summary
    too: it stays green when it warns, so `gh pr checks` does not show it. A warning is a finding, fixed
-   or answered with the reason in a PR comment like any other. Fix correctness defects and test gaps.
+   or answered with the reason in a PR comment like any other; a delta above 1% holds the PR until it
+   is cut or an approval-queue entry accepts it ([`parallel-lanes.md`](parallel-lanes.md) step 6). Fix correctness defects and test gaps.
    Fix text and nits without calling for another round. File scope expansion as issues rather than
    growing the PR. Answer a finding you reject with the reason in a PR comment; rejecting a *severe*
    finding is a serious decision (§ "Decisions and the approval queue"), so the PR stays Draft.

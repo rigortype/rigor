@@ -201,6 +201,99 @@ RSpec.describe "Rigor::Analysis::Runner with Ractor pool (Phase 4b)" do
       expect(outcome).to eq(:built)
     end
 
+    # Issue #1956 — the same construction, now with bundled plugins. A worker materialises each plugin and
+    # reads its class-level declarations (`dynamic_returns`, `producers`, `node_rules`, the
+    # node-file-context block, `narrowing_facts_rules`, the manifest, and rigor-ffi's binding-recognizer
+    # table); each holds author Procs, so each read raised `Ractor::IsolationError` until the coordinator
+    # shared them on the main Ractor first. One session in one Ractor, for the reason given above.
+    it "materialises bundled plugins inside a non-main Ractor once their declarations are shared (#1956)" do # rubocop:disable RSpec/ExampleLength
+      require "rigor/analysis/worker_session"
+      %w[rigor-ffi rigor-dry-schema rigor-rbnacl].each do |gem_name|
+        lib = File.expand_path("../../../plugins/#{gem_name}/lib", __dir__)
+        $LOAD_PATH.unshift(lib) unless $LOAD_PATH.include?(lib)
+        require gem_name
+      end
+      # A manifest-borne callable is the author's to make shareable; a lambda is not, until shared.
+      synthesizing = Class.new(Rigor::Plugin::Base) do
+        manifest(id: "pool-synthesizer", version: "0.1.0", source_rbs_synthesizer: ->(*) {})
+      end
+      stub_const("RunnerPoolSynthesizerPlugin", synthesizing)
+      classes = [Rigor::Plugin::FFI, Rigor::Plugin::DrySchema, Rigor::Plugin::RbNaCl, synthesizing]
+      classes.each { |klass| klass.send(:share_declarations_for_ractors!) }
+      Rigor::Environment::ClassRegistry.default
+      configuration = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS)
+      blueprints = classes.map { |klass| Rigor::Plugin::Blueprint.new(klass_name: klass) }.freeze
+
+      outcome = Ractor.new(configuration, blueprints) do |shareable_configuration, shareable_blueprints|
+        Rigor::Analysis::WorkerSession.new(
+          configuration: shareable_configuration, cache_store: nil, plugin_blueprints: shareable_blueprints
+        )
+        shareable_blueprints.each do |blueprint|
+          klass = Object.const_get(blueprint.klass_name)
+          [klass.manifest, klass.producers, klass.node_rules, klass.node_file_context_block,
+           klass.dynamic_returns, klass.narrowing_facts_rules]
+        end
+        Rigor::Plugin::FFI.binding_recognizers.map(&:name)
+      rescue Exception => e # rubocop:disable Lint/RescueException
+        "#{e.class}: #{e.message}".freeze
+      end.value
+
+      expect(outcome).to eq([:sodium_function])
+    ensure
+      Rigor::Plugin.unregister!
+    end
+
+    # Issue #1956 — a declaration Proc that touches an outer local cannot be isolated: one that reads an
+    # unshareable local makes `Ractor.make_shareable` raise `Ractor::IsolationError`, one that assigns a local
+    # makes it raise `ArgumentError`. The coordinator finds either on the main Ractor, before any worker spawns,
+    # and declines the pool with a row naming the plugin; the run is analysed sequentially rather than crashing.
+    {
+      "reads an unshareable outer local" => :read,
+      "assigns an outer local" => :write
+    }.each do |shape, kind|
+      it "declines the Ractor pool with a pool-degraded row when a plugin block #{shape} (#1956)" do # rubocop:disable RSpec/ExampleLength
+        original = ENV.fetch("RIGOR_POOL_BACKEND", nil)
+        ENV["RIGOR_POOL_BACKEND"] = "ractor"
+        Rigor::Plugin.unregister!
+        captured = +"unshareable"
+        calls = 0
+        plugin_class = Class.new(Rigor::Plugin::Base) do
+          manifest(id: "pool-unshareable", version: "0.1.0")
+          if kind == :read
+            dynamic_return(methods: [:never_called]) { |_call_node, _scope| captured.then { nil } }
+          else
+            dynamic_return(methods: [:never_called]) { |_call_node, _scope| (calls += 1).then { nil } }
+          end
+        end
+        stub_const("RunnerPoolUnshareablePlugin", plugin_class)
+
+        Dir.mktmpdir do |dir|
+          path = File.join(dir, "code.rb")
+          File.write(path, "x = 1\n")
+          configuration = Rigor::Configuration.new("paths" => [path], "plugins" => ["rigor-pool-unshareable"])
+          requirer = lambda do |_name|
+            Rigor::Plugin.register(plugin_class)
+            true
+          end
+          result = Dir.chdir(dir) do
+            runner = Rigor::Analysis::Runner.new(
+              configuration: configuration,
+              cache_store: Rigor::Cache::Store.new(root: File.join(dir, ".rigor")),
+              plugin_requirer: requirer, workers: 2
+            )
+            guarded_run(runner)
+          end
+
+          degraded = result.diagnostics.select { |d| d.rule == "pool-degraded" }
+          expect(degraded.size).to eq(1)
+          expect(degraded.first.message).to include("RunnerPoolUnshareablePlugin", "cannot share")
+        end
+      ensure
+        Rigor::Plugin.unregister!
+        original.nil? ? ENV.delete("RIGOR_POOL_BACKEND") : (ENV["RIGOR_POOL_BACKEND"] = original)
+      end
+    end
+
     it "preserves original path order even when workers complete out of order" do
       Dir.mktmpdir do |dir|
         # Each file emits a parse-error diagnostic so the per-file output is deterministic; the resulting diagnostic

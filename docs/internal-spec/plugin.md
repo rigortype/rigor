@@ -1522,6 +1522,26 @@ reachable. The durable requirement on plugin code is therefore:
   never once per run, and each worker's `fact_store` is rebuilt
   rather than shipped across the boundary. Mutable plugin state
   therefore never crosses a boundary; only the frozen Blueprint does.
+- **The plugin class's declarations are shared before a Ractor worker
+  spawns.** A materialised instance reads its class's DSL declarations
+  (`manifest`, `producers`, `node_rules`, `node_file_context_block`,
+  `dynamic_returns`, `narrowing_facts_rules`) from class instance
+  variables, and these hold the author's blocks. A non-main Ractor may
+  read a class ivar only when its value is `Ractor.shareable?`, and may
+  not write one. So the Ractor coordinator, on the main Ractor and
+  before it spawns a worker, fills each memoised snapshot and passes it
+  to `Ractor.make_shareable` for every loaded plugin class
+  ([#1956](https://github.com/rigortype/rigor/issues/1956)). rigor-ffi
+  shares its binding-recognizer table the same way. `make_shareable`
+  isolates each block in place. Three shapes of block cannot be isolated:
+  one that reads an outer local variable holding an unshareable value and
+  one whose `self` is unshareable (both raise `Ractor::IsolationError`),
+  and one that assigns an outer local variable (it raises
+  `ArgumentError`). For any of them the coordinator declines
+  the pool before any worker spawns, with a `pool-degraded` row naming
+  the plugin class, and analyses the run sequentially. The fork backend
+  and `--workers 0` never share declarations, so their blocks are
+  unchanged.
 - **Documented exception:** `Environment::Reflection` (the internal
   read-side carrier backing the public `Rigor::Reflection` facade) is
   frozen but **not** `Ractor.shareable?` — its backing tables transit

@@ -26,10 +26,11 @@ coordinator keeps these in its own loop and spawns an agent only for implementat
 
 - **Premise checks** (step 1), before any lane starts. A batch of independent issues can be swept by
   one read-only agent that reports a table, which is cheaper than a lane that starts and stops.
-- **Small edits after review**: wording, marker text, a PR body. Make them yourself on the lane's
+- **Small edits after review**: wording in docs and a PR body. Make them yourself on the lane's
   branch by step 7's procedure, only while the lane is idle and has pushed everything, rather than
   resuming the lane for one line. That procedure's temporary worktree has no bundle and runs no
-  `verify-changed`, so a code edit goes back to the lane; once the lane has ended, make it in the
+  `verify-changed`, so a code or comment edit in a checked file (a `# sig-gen gap:` marker
+  included) goes back to the lane; once the lane has ended, make it in the
   lane's own worktree and push with `bin/lane-push`. Never rewrite a lane's pushed history: a squash
   or rebase makes the lane's next `bin/lane-push` refuse.
 - **Rulings, issues and landing**: decide open choices, file scope expansion, run `bin/land-pr`.
@@ -93,26 +94,27 @@ a decision needs it.
    the skill falls back on `AGENTS.md`, which ends a change at its landing: every command through
    `nix develop --command`; never `make verify`, `make check` or the whole suite; `references/`
    read-only; push only with `bin/lane-push`; never `gh pr ready`, a merge or `bin/land-pr`; no version
-   bump or `CHANGELOG.md` edit; and "if the skill does not load, read `.claude/skills/rigor-lane/SKILL.md`
-   with `git show origin/master:.claude/skills/rigor-lane/SKILL.md`; if that fails, stop and report". Settle the decisions you can foresee before the lane starts, per
-   contribution-flow.md § "Decisions and the approval queue".
+   bump, `CHANGELOG.md` edit or `rake release`; commit with the configured identity, never `--author=`
+   or `GIT_*`; and "if the skill does not load, read it with
+   `git show origin/master:.claude/skills/rigor-lane/SKILL.md`; if that fails, stop and report".
+   Settle the decisions you can foresee before the lane starts, per contribution-flow.md § "Decisions
+   and the approval queue".
 6. **Review when the Draft PR lands**, with the [reviewer contract](#reviewer-contract), and triage
-   per contribution-flow.md step 3, including the "Engine allocations (advisory)" summary. A PR whose
-   allocation delta is above `pr_allocations_pct` (`bench/thresholds.yml`) does not land until you have
-   its attribution and either the lane cuts the cost or an approval-queue entry accepts it, stating the
-   window's accepted total against the release band in the same file. Accepting a delta that would put
-   that total over the release band is serious: two accepted per-PR deltas already reach it. #2295's
-   +31% passed as an advisory warning and surfaced only at the v0.4.6 release gate, where #2329 had to
-   win it back. Send each fix back to the
-   lane that wrote the change with SendMessage, so it keeps its context; do not start a fresh fixer,
-   which re-derives what the lane knew. Route a severe fix in intricate logic to the strongest model by
-   resuming the lane on it only when the lane already runs that model. Delta rounds go to the same
-   reviewer with SendMessage and follow contribution-flow.md steps 4–5: three rounds at most; after
-   round 3, a narrow severe finding with a conservative fix lands only through one fix-only delta
-   check that finds nothing severe, and a non-converging design goes to the user. When a lane stops
-   at a gate or an open choice, decide it per contribution-flow.md § "Decisions and the approval
-   queue" and send the lane the decision with its approval-queue entry to commit; only a serious
-   decision goes to the user.
+   per contribution-flow.md step 3, including the "Engine allocations (advisory)" summary. A PR
+   whose allocation delta is above `pr_allocations_pct` (`bench/thresholds.yml`) does not land until
+   you have its attribution and either the lane cuts the cost or an approval-queue entry accepts it.
+   Accepting one when the release gate's measurement (`make bench-perf` against
+   `bench/baseline.json`) would then exceed its band is on contribution-flow.md's serious list.
+   #2295's +31% passed as an advisory warning and surfaced only at the v0.4.6 release gate, where
+   #2329 had to win it back. Send each fix back to the lane that wrote the change with SendMessage,
+   so it keeps its context; do not start a fresh fixer, which re-derives what the lane knew. Route a
+   severe fix in intricate logic to the strongest model by resuming the lane on it only when the
+   lane already runs that model. Delta rounds go to the same reviewer with SendMessage and follow
+   contribution-flow.md steps 4–5: three rounds at most; after round 3, a narrow severe finding with
+   a conservative fix lands only through one fix-only delta check that finds nothing severe, and a
+   non-converging design goes to the user. When a lane stops at a gate or an open choice, decide it
+   per contribution-flow.md § "Decisions and the approval queue" and send the lane the decision with
+   its approval-queue entry to commit; only a serious decision goes to the user.
 7. **Land through the merge queue** with `bin/land-pr N <reviewed-head-sha>` in the background, as
    soon as the PR may land (contribution-flow.md step 6 and § "GitHub and git traps"); it refuses
    when `master` has no queue, and a PR behind `master` then waits for the user. It is the PR's
@@ -167,11 +169,12 @@ carries the base commit, the PR and its issue, the Environment bullet of the `ri
 - **Name the class, not one instance.** When a finding is one spelling of a wider shape (every
   `self`-changing block, every reader of one table), say so and list each instance found, so the
   lane fixes the class in one round instead of one spelling per round.
-- **Report** opening with one line, `Severe N | Moderate N | Minor N | Nit N`, and a one-line verdict,
-  then the findings ranked severe / moderate / minor / nit, each with a concrete failure scenario (for an engine change, the input and the wrong
-  output) and marked *introduced* or *pre-existing* (reproduced on the base commit), scope expansion
-  listed separately, and a plain statement of whether anything severe remains. Severity is defined
-  in contribution-flow.md § "Landing a pull request"; a pre-existing finding is filed, not fixed in
-  the PR, unless the PR's change makes it reachable more often.
+- **Report** opening with one line, `Severe N | Moderate N | Minor N | Nit N`, and a one-line
+  verdict, then the findings ranked severe / moderate / minor / nit, each with a concrete failure
+  scenario (for an engine change, the input and the wrong output) and marked *introduced* or
+  *pre-existing* (reproduced on the base commit), scope expansion listed separately, and a plain
+  statement of whether anything severe remains. Severity is defined in contribution-flow.md §
+  "Landing a pull request"; a pre-existing finding is filed, not fixed in the PR, unless the PR's
+  change makes it reachable more often.
 - A delta round re-checks every earlier finding with its original repro, then hunts for regressions
   the fix introduced.

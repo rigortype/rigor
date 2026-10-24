@@ -144,19 +144,19 @@ Once the change is implemented and `make verify-changed` passes:
    brief is the reviewer contract in [`parallel-lanes.md`](parallel-lanes.md). A PR that changes a skill
    also runs the `waza` review in [`skill-authoring.md`](skill-authoring.md) at the same time; its
    findings join this triage.
-3. **Triage.** For a PR that changes the engine, read the "Engine allocations (advisory)" job's summary
-   too: it stays green when it warns, so `gh pr checks` does not show it. A warning is a finding, fixed
-   or answered with the reason in a PR comment like any other; a delta above `pr_allocations_pct`
-   (`bench/thresholds.yml`) holds the PR until it is cut or the session landing it accepts it in an
-   approval-queue entry ([`parallel-lanes.md`](parallel-lanes.md) step 6 has the release-band rule). Fix correctness defects and test gaps.
-   Fix text and nits without calling for another round. File scope expansion as issues rather than
-   growing the PR. Answer a finding you reject with the reason in a PR comment; rejecting a *severe*
-   finding is a serious decision (§ "Decisions and the approval queue"), so the PR stays Draft.
-   Severity is the reviewer's ranking, not
-   the implementer's. Severe means what AGENTS.md's false-positive rule weighs: a diagnostic on correct
-   code, a wrong inferred type, a crash, a gate that passes without checking, or guidance that would
-   lead an agent into a wrong irreversible or gate-skipping action (a merge, a push, a publish, a
-   skipped gate). Imprecise or unclear wording is not severe.
+3. **Triage.** For a PR that changes the engine, read the "Engine allocations (advisory)" job's
+   summary too: it stays green when it warns, so `gh pr checks` does not show it. A warning is a
+   finding, fixed or answered with the reason in a PR comment like any other; a delta above
+   `pr_allocations_pct` (`bench/thresholds.yml`) holds the PR until it is cut or the session landing
+   it accepts it in an approval-queue entry; accepting one past the release gate's band is serious
+   (§ "Decisions and the approval queue"). Fix correctness defects and test gaps. Fix text and nits
+   without calling for another round. File scope expansion as issues rather than growing the PR.
+   Answer a finding you reject with the reason in a PR comment; rejecting a *severe* finding is a
+   serious decision (§ "Decisions and the approval queue"), so the PR stays Draft. Severity is the
+   reviewer's ranking, not the implementer's. Severe means what AGENTS.md's false-positive rule
+   weighs: a diagnostic on correct code, a wrong inferred type, a crash, a gate that passes without
+   checking, or guidance that would lead an agent into a wrong irreversible or gate-skipping action
+   (a merge, a push, a publish, a skipped gate). Imprecise or unclear wording is not severe.
 4. **Another round only if this round's fixes addressed a severe defect or changed behaviour.** Make it a
    delta review of the fix commits: re-check each prior finding and hunt for regressions the fix
    introduced. In the September 2026 review logs (167 PRs), 63% of the severe defects found in
@@ -206,6 +206,9 @@ before landing only the serious ones. The reasoning is [ADR-123](../adr/123-merg
   configuration key, the plugin API;
 - a new cache format, native code, or a new runtime dependency (ADR-31);
 - a new ADR decision, or an amendment that reverses an Accepted one;
+- accepting a per-PR allocation delta above `pr_allocations_pct` (`bench/thresholds.yml`) when the
+  release gate's measurement (`make bench-perf` against `bench/baseline.json`) would then exceed its
+  band;
 - a gate that checks less: deleting or loosening a check, skipping the review, `--no-verify`
   without a pre-existing issue, or an allow-list row or a residue pin moving up where no precedent
   of the same kind exists (the same gate file, for the same kind of reason);

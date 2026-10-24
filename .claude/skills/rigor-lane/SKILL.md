@@ -37,8 +37,8 @@ brief that contradicts this skill wins for that lane.
   run one heavy job at a time.
 - **Commits.** Use the configured identity: never `--author=` or `GIT_AUTHOR_*`/`GIT_COMMITTER_*`. Add
   no tool attribution trailers. A fix of an external report carries the reporter's `Co-Authored-By`
-  trailer from the brief on every fix commit, the fragment included
-  (`docs/agents/contribution-flow.md` § "Branches and pull requests").
+  trailer from the brief on every fix commit, the fragment included, and the fragment ends with
+  `thank you @handle!` (`docs/agents/contribution-flow.md` § "Branches and pull requests").
 - **Gate.** `make verify-changed </dev/null` in the foreground, re-run after the last edit. Never `make
   verify`, `make check` or the whole suite. A change to dispatch, scope resolution or the discovery
   tables also runs `spec/rigor/scope/ancestry_walker_detection_spec.rb` and

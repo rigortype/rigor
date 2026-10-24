@@ -10,6 +10,7 @@ a changelog entry. It is the conditional detail pointed to by `AGENTS.md`.
 - Do not wrap paragraphs or list items in GitHub-rendered Markdown: GitHub turns single newlines into
   `<br>`. Tables, headings, and fenced code keep their own lines.
 - Version-bump commits use `Bump up version to x.y.z`.
+- An issue, PR body or comment an agent writes opens with a one-line note that an AI agent wrote it.
 - A PR or issue body says what the change does and why, as a commit message would. It does not
   narrate how the PR was assembled (one PR or a stack, which tool, why a rebase).
 
@@ -145,8 +146,9 @@ Once the change is implemented and `make verify-changed` passes:
    findings join this triage.
 3. **Triage.** For a PR that changes the engine, read the "Engine allocations (advisory)" job's summary
    too: it stays green when it warns, so `gh pr checks` does not show it. A warning is a finding, fixed
-   or answered with the reason in a PR comment like any other; a delta above 1% holds the PR until it
-   is cut or an approval-queue entry accepts it ([`parallel-lanes.md`](parallel-lanes.md) step 6). Fix correctness defects and test gaps.
+   or answered with the reason in a PR comment like any other; a delta above `pr_allocations_pct`
+   (`bench/thresholds.yml`) holds the PR until it is cut or the session landing it accepts it in an
+   approval-queue entry ([`parallel-lanes.md`](parallel-lanes.md) step 6 has the release-band rule). Fix correctness defects and test gaps.
    Fix text and nits without calling for another round. File scope expansion as issues rather than
    growing the PR. Answer a finding you reject with the reason in a PR comment; rejecting a *severe*
    finding is a serious decision (§ "Decisions and the approval queue"), so the PR stays Draft.
@@ -181,7 +183,8 @@ Once the change is implemented and `make verify-changed` passes:
    expected outcome, or every decision the PR embodies made under § "Decisions and the approval
    queue" below. A PR need not contain the latest `master` to be queued; the queue tests the merged
    result. Re-push it (`bin/lane-push`) only when it is `CONFLICTING`, which starts no CI and
-   cannot enter the queue, or when the queue drops it. A PR that changes a skill also needs its
+   cannot enter the queue, or when the queue drops it. A PR held by step 3's allocation rule stays
+   Draft until that hold is resolved. A PR that changes a skill also needs its
    `waza` review comment; until one is posted it stays Draft. A PR carrying a serious decision
    stays Draft until the user makes it. A skill with its own landing rule (`rigor-release-prep`,
    `rigor-dependency-update`) keeps that rule; the review in steps 2–5 still runs.

@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# Gates `bin/lane-push`, the one push path the lane contract allows (docs/agents/parallel-lanes.md).
+# Gates `bin/lane-push`, the one push path the lane contract allows (.claude/skills/rigor-lane/SKILL.md).
 #
 # Each example runs the shipped script in a scratch clone of a scratch bare remote, with a stand-in
 # `bin/verify-changed` whose exit status the example chooses. The clone sets `push.default=tracking`, the

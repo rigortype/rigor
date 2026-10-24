@@ -13,7 +13,8 @@
   trees (`rigor-plugin-author`). Each `SKILL.md`'s `description:` is what routes to it, so keep no
   catalogue here. Authoring either: [`docs/agents/skill-authoring.md`](docs/agents/skill-authoring.md).
 - A subagent does not inherit this contract. The Flake mandate, the `references/` read-only rule, no
-  local full gates, and the release gate bind it too — put them in the prompt, or it will run
+  local full gates, and the release gate bind it too — put them in the prompt (a lane brief carries the
+  floor in parallel-lanes.md step 5 and loads the `rigor-lane` skill), or it will run
   `bundle` on the host and `make verify` alongside every other session. Subagent batch, lane or
   reviewer brief: [`docs/agents/parallel-lanes.md`](docs/agents/parallel-lanes.md).
 - **Auto memory is clone-wide, not worktree-scoped.** It keys off the git repository, so a parallel

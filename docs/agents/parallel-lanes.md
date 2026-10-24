@@ -15,8 +15,9 @@ reshaping code, and lanes that collided or started on a premise master had alrea
 
 ## What stays in the main loop
 
-The v0.4.6 window (October 2026, about 40 PRs) measured what a subagent buys. Independent review
-found a severe false-positive regression in five PRs the implementer had missed, and lanes on
+The v0.4.6 window (October 2026; one coordinator's share was about 40 of the window's 76 PRs)
+measured what a subagent buys. Independent review found a severe defect the implementer had missed in
+five PRs (#2286, #2288, #2290, #2295, #2301), and lanes on
 disjoint issues ran in parallel; both earn their own context. Everything else lost fidelity in the
 hand-off: lanes started on premises master had already fixed, the coordinator's rewrite of a finding
 into a fix brief carried its own mistakes, a fresh fixer agent lost the implementer's context, and
@@ -25,9 +26,12 @@ coordinator keeps these in its own loop and spawns an agent only for implementat
 
 - **Premise checks** (step 1), before any lane starts. A batch of independent issues can be swept by
   one read-only agent that reports a table, which is cheaper than a lane that starts and stops.
-- **Small edits after review**: wording, marker text, a PR body, a missing `require_relative`, a
-  commit squash. Make them yourself on the lane's branch (step 7 has the procedure) rather than
-  resuming the lane for one line.
+- **Small edits after review**: wording, marker text, a PR body. Make them yourself on the lane's
+  branch by step 7's procedure, only while the lane is idle and has pushed everything, rather than
+  resuming the lane for one line. That procedure's temporary worktree has no bundle and runs no
+  `verify-changed`, so a code edit goes back to the lane; once the lane has ended, make it in the
+  lane's own worktree and push with `bin/lane-push`. Never rewrite a lane's pushed history: a squash
+  or rebase makes the lane's next `bin/lane-push` refuse.
 - **Rulings, issues and landing**: decide open choices, file scope expansion, run `bin/land-pr`.
 
 Keep what comes back short. Lanes report in the shape the `rigor-lane` skill gives and reviewers in
@@ -85,13 +89,21 @@ a decision needs it.
    comes back unless the brief says so), the reporter's name, email and handle for a fix of an
    external report, and a first line telling it to load the
    [`rigor-lane`](../../.claude/skills/rigor-lane/SKILL.md) skill. Do not paste the contract; the
-   skill is the one copy. Settle the decisions you can foresee before the lane starts, per
+   skill is the one copy. Every brief still carries this floor inline, because a lane that cannot load
+   the skill falls back on `AGENTS.md`, which ends a change at its landing: every command through
+   `nix develop --command`; never `make verify`, `make check` or the whole suite; `references/`
+   read-only; push only with `bin/lane-push`; never `gh pr ready`, a merge or `bin/land-pr`; no version
+   bump or `CHANGELOG.md` edit; and "if the skill does not load, read `.claude/skills/rigor-lane/SKILL.md`
+   with `git show origin/master:.claude/skills/rigor-lane/SKILL.md`; if that fails, stop and report". Settle the decisions you can foresee before the lane starts, per
    contribution-flow.md § "Decisions and the approval queue".
 6. **Review when the Draft PR lands**, with the [reviewer contract](#reviewer-contract), and triage
    per contribution-flow.md step 3, including the "Engine allocations (advisory)" summary. A PR whose
-   allocation delta is above 1% does not land until you have its attribution and either the lane cuts
-   the cost or an approval-queue entry accepts it: #2295's +31% passed as an advisory warning and
-   surfaced only at the v0.4.6 release gate, where #2329 had to win it back. Send each fix back to the
+   allocation delta is above `pr_allocations_pct` (`bench/thresholds.yml`) does not land until you have
+   its attribution and either the lane cuts the cost or an approval-queue entry accepts it, stating the
+   window's accepted total against the release band in the same file. Accepting a delta that would put
+   that total over the release band is serious: two accepted per-PR deltas already reach it. #2295's
+   +31% passed as an advisory warning and surfaced only at the v0.4.6 release gate, where #2329 had to
+   win it back. Send each fix back to the
    lane that wrote the change with SendMessage, so it keeps its context; do not start a fresh fixer,
    which re-derives what the lane knew. Route a severe fix in intricate logic to the strongest model by
    resuming the lane on it only when the lane already runs that model. Delta rounds go to the same

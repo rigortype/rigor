@@ -111,7 +111,7 @@ module Rigor
       end
 
       def build_signature(call_node, root, path, bytes, line, character)
-        scope_index = build_scope_index(root, path)
+        scope_index = build_scope_index(root, path, bytes)
         receiver_node = call_node.receiver
         return nil if receiver_node.nil?
 
@@ -197,8 +197,8 @@ module Rigor
         end
       end
 
-      def build_scope_index(root, _path)
-        scope = Scope.empty(environment: @project_context.environment)
+      def build_scope_index(root, path, bytes)
+        scope = @project_context.seeded_scope_for(path: path, bytes: bytes)
         Inference::ScopeIndexer.index(root, default_scope: scope)
       end
 

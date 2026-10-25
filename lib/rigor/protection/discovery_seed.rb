@@ -4,6 +4,7 @@ require_relative "../inference/parameter_inference_collector"
 require_relative "../inference/scope_indexer"
 require_relative "../inference/project_seed_tables"
 require_relative "../cache/incremental_snapshot"
+require_relative "../cache/file_digest"
 require_relative "../analysis/path_expansion"
 require_relative "../analysis/buffer_binding"
 
@@ -107,11 +108,40 @@ module Rigor
         paths = Analysis::PathExpansion.configured_files(configuration)
         return nil if paths.empty?
 
-        bundles = snapshot_bundles(configuration)
+        payload = snapshot_payload(configuration)
+        bundles = payload&.seed_bundles
         return nil if bundles.nil? || bundles.empty?
 
-        tables_for_buffer(paths: respell_for_buffer(paths, buffer), bundles: bundles, buffer: buffer,
-                          constant_sources: true)
+        spelled = respell_for_buffer(paths, buffer)
+        tables = tables_for_buffer(paths: spelled, bundles: bundles, buffer: buffer, constant_sources: true)
+        with_snapshot_param_table(tables, payload.param_table, configuration,
+                                  paths: spelled, bundles: bundles, buffer: buffer)
+      end
+
+      # Issue #2282 — under `parameter_inference: true` the snapshot also carries the call-site parameter table the
+      # writing run seeded its analysis from (`param_table`, ADR-67 WD6c), so a probe reads `@v = v` as `check`
+      # does. The table is whole-project (a callee's parameter type comes from callers in other files), so it is
+      # only as fresh as every file: it rides along ONLY when the fold re-walked nothing, that is, every path is a
+      # snapshot bundle with an unchanged digest and no path was added, removed or replaced by the editor buffer.
+      # Otherwise it is dropped, as {Analysis::IncrementalSession#fresh_param_table} recomputes rather than reuses
+      # it. Absent when the gate is off or the table is empty, which keeps the bundle-only seed.
+      def with_snapshot_param_table(tables, param_table, configuration, paths:, bundles:, buffer:)
+        return tables unless configuration.parameter_inference
+        return tables if param_table.nil? || param_table.empty?
+        return tables unless snapshot_current?(paths, bundles, buffer)
+
+        tables.merge(param_inferred_types: param_table).freeze
+      end
+
+      def snapshot_current?(paths, bundles, buffer)
+        return false unless paths.size == bundles.size
+
+        paths.all? do |path|
+          cached = bundles[path]
+          cached && cached[:digest] == Cache::FileDigest.hexdigest(buffer ? buffer.resolve(path) : path)
+        end
+      rescue SystemCallError
+        false
       end
 
       # The configured file list with the entry that reaches `buffer`'s file respelled as the buffer's logical
@@ -128,12 +158,21 @@ module Rigor
         end
       end
 
-      def snapshot_bundles(configuration)
+      # The bare single-file scope, or that scope with `seed`'s tables folded in. The one place `rigor type-of` and the
+      # language server's editor queries (#2282) fold a seed into a scope.
+      def seeded_scope(environment:, seed:)
+        base = Scope.empty(environment: environment)
+        return base if seed.nil? || seed.empty?
+
+        base.with_discovery(base.discovery.with(**seed))
+      end
+
+      def snapshot_payload(configuration)
         fingerprint = Cache::IncrementalSnapshot.fingerprint(configuration: configuration, roots: configuration.paths)
         return nil if fingerprint.nil?
 
         loaded = Cache::IncrementalSnapshot.new(root: configuration.cache_path).load_any(fingerprints: [fingerprint])
-        loaded&.last&.seed_bundles
+        loaded&.last
       end
 
       # The whole-project discovery tables, from the single-walk combined pass (one parse per file) that

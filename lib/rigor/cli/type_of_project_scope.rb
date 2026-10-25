@@ -16,11 +16,8 @@ module Rigor
       module_function
 
       def build(environment:, configuration:, buffer: nil)
-        base = Scope.empty(environment: environment)
         seed = Protection::DiscoverySeed.from_snapshot(configuration: configuration, buffer: buffer)
-        return base if seed.nil? || seed.empty?
-
-        base.with_discovery(base.discovery.with(**seed))
+        Protection::DiscoverySeed.seeded_scope(environment: environment, seed: seed)
       end
     end
   end

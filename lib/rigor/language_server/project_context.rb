@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "tempfile"
+
 require_relative "../environment"
 require_relative "../project_environment"
 require_relative "../cache/store"
@@ -130,6 +132,22 @@ module Rigor
       def discovery_seed_for(buffer)
         Protection::DiscoverySeed.tables_for_buffer(paths: discovery_paths_for(buffer), bundles: discovery_bundles,
                                                     buffer: buffer, constant_sources: true)
+      end
+
+      # Issue #2282 — the base scope an editor query (hover, completion, signature help) probes with: the same
+      # cross-file discovery seed the diagnostic publisher hands its `Runner` ({#discovery_seed_for}), so a constant
+      # or method another file defines answers what `rigor check` would. The seed fold reads the buffer through a
+      # {Analysis::BufferBinding}, so `bytes` is staged in a tempfile for the call. An empty seed (no configured
+      # files, or nothing discovered) leaves the bare single-file scope every query used before.
+      def seeded_scope_for(path:, bytes:)
+        seed = Tempfile.create(["rigor-lsp-query-", ".rb"]) do |tmp|
+          # Staged as the publisher stages them; the seed's job is to withhold the stale on-disk declarations of
+          # this file, so an empty-bytes stage is not observable by design.
+          tmp.write(bytes)
+          tmp.flush
+          discovery_seed_for(Analysis::BufferBinding.new(logical_path: path, physical_path: tmp.path))
+        end
+        Protection::DiscoverySeed.seeded_scope(environment: environment, seed: seed)
       end
 
       # Builds what {#discovery_seed_for} reads once per generation, so a fork batch's children inherit it instead

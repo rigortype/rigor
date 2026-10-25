@@ -887,9 +887,12 @@ full run, so the snapshot can never wedge or stale an analysis.
    and `Protection::MutationCache#load_snapshot` have no run mode and stay on the plain
    file. `rigor type-of` is a third reader ([#512](https://github.com/rigortype/rigor/issues/512)): it
    loads the plain snapshot under the fingerprint of a bare `check --incremental`
-   (roots = the configured paths) and folds only its `seed_bundles` into the probe's discovery
-   tables, through the same digest check as an incremental recheck, so a file whose bytes
-   moved (or the editor buffer's) is re-walked. It is read-only, never writes the snapshot, and
+   (roots = the configured paths) and folds its `seed_bundles` into the probe's discovery
+   tables through the same digest check as an incremental recheck, so a file whose bytes
+   moved (or the editor buffer's) is re-walked. Under `parameter_inference: true` it also seeds
+   `param_inferred_types` from the snapshot's `param_table` ([#2282](https://github.com/rigortype/rigor/issues/2282)),
+   but only while every configured file still matches its bundle digest and no buffer differs from the snapshot: the table is
+   whole-project, so a single moved file drops it rather than serving a stale type. It is read-only, never writes the snapshot, and
    on any miss (no snapshot, fingerprint mismatch, no bundles) keeps the single-file scope without a
    message. Snapshot files are not budgeted or pruned by `Cache::Store`; they stay until
    `--clear-cache`.

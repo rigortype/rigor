@@ -45,6 +45,7 @@ require_relative "scope_indexer/certainty"
 require_relative "scope_indexer/member_layouts_collector"
 require_relative "scope_indexer/declared_ivar_types"
 require_relative "scope_indexer/declared_param_writes"
+require_relative "scope_indexer/constant_ivar_value"
 
 module Rigor
   module Inference
@@ -533,8 +534,11 @@ module Rigor
         # consulted by `dead_transient_nil_writes` so a ctor that reassigns `@x` indirectly through an unconditional
         # same-class method call (`mask!`) credits the overwrite. Built once per program here, memoised by class.
         method_assign_effects = build_method_assign_effects(root)
+        # #2291 — an `@x = LIT` write reads the file's constant table, built on the first such write.
+        accumulator[CONSTANT_IVAR_VALUES] = ConstantIvarValue.new(root, default_scope)
         walk_class_ivars(root, [], default_scope, accumulator, mutated_ivars,
                          read_before_write, init_writes, method_assign_effects)
+        accumulator.delete(CONSTANT_IVAR_VALUES)
         reflective_opaque = accumulator.delete(REFLECTIVE_OPAQUE_CLASSES)
         exempt_class_body_writes!(init_writes, accumulator.delete(DEFINE_METHOD_WRITES) || {})
         merge_held_ivar_writes!(accumulator)
@@ -1990,7 +1994,8 @@ module Rigor
       end
 
       def record_ivar_write(node, scope, class_name, accumulator, guarded: false, declared: nil)
-        rvalue_type = declared || scope.type_of(node.value)
+        rvalue_type = declared || accumulator[CONSTANT_IVAR_VALUES]&.type_of(node.value, scope) ||
+                      scope.type_of(node.value)
 
         # `@x = nil unless @x` / `@y = false unless @y` — follow-up to the polarity-aware defensive-init guard fix
         # (defensive ivar-init with a nil / false rvalue). When the rvalue is itself a falsey
@@ -2196,7 +2201,9 @@ module Rigor
       CLASS_BODY_WRITES = :class_body_writes
       # The classes a computed-name `instance_variable_set` may write any ivar of ({#record_reflective_ivar_write}).
       REFLECTIVE_OPAQUE_CLASSES = :reflective_opaque_classes
-      private_constant :DEFINE_METHOD_WRITES, :CLASS_BODY_WRITES, :REFLECTIVE_OPAQUE_CLASSES
+      # The census's {ConstantIvarValue}, which {#record_ivar_write} reads.
+      CONSTANT_IVAR_VALUES = :constant_ivar_values
+      private_constant :DEFINE_METHOD_WRITES, :CLASS_BODY_WRITES, :REFLECTIVE_OPAQUE_CLASSES, :CONSTANT_IVAR_VALUES
 
       # Unions `type` into the class-ivar accumulator for `(class_name, ivar_name)`. Shared by the single-write and
       # multi-write (parallel-assignment) collectors.

@@ -96,9 +96,7 @@ module Rigor
         # Every branch that can run must be rooted; an absent branch is `nil`, never rooted. The predicate is
         # typed only when the branches disagree, so a conditional that never mentions a parameter costs nothing.
         def conditional_rooted?(node, scope, depth)
-          when_truthy, when_falsey = node.is_a?(Prism::IfNode) ? [node.statements, node.subsequent] : [node.else_clause, node.statements]
-          truthy_rooted = rooted?(when_truthy, scope, depth)
-          falsey_rooted = rooted?(when_falsey, scope, depth)
+          truthy_rooted, falsey_rooted = arms(node).map { |arm| rooted?(arm, scope, depth) }
           return truthy_rooted if truthy_rooted == falsey_rooted
 
           case predicate_certainty(node.predicate, scope)
@@ -106,6 +104,11 @@ module Rigor
           when :falsey then falsey_rooted
           else false
           end
+        end
+
+        # `[runs when the predicate is truthy, runs when it is falsey]`.
+        def arms(node)
+          node.is_a?(Prism::IfNode) ? [node.statements, node.subsequent] : [node.else_clause, node.statements]
         end
 
         # The arm certainty `StatementEvaluator#branch_certainty` elides on: a decidable version guard, else the

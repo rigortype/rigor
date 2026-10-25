@@ -3,7 +3,7 @@
 require "tempfile"
 
 require_relative "../environment"
-require_relative "../scope"
+require_relative "../cli/type_of_project_scope"
 require_relative "../project_environment"
 require_relative "../cache/store"
 require_relative "../analysis/runner"
@@ -141,15 +141,12 @@ module Rigor
       # {Analysis::BufferBinding}, so `bytes` is staged in a tempfile for the call. An empty seed (no configured
       # files, or nothing discovered) leaves the bare single-file scope every query used before.
       def seeded_scope_for(path:, bytes:)
-        base = Scope.empty(environment: environment)
         seed = Tempfile.create(["rigor-lsp-query-", ".rb"]) do |tmp|
           tmp.write(bytes)
           tmp.flush
           discovery_seed_for(Analysis::BufferBinding.new(logical_path: path, physical_path: tmp.path))
         end
-        return base if seed.empty?
-
-        base.with_discovery(base.discovery.with(**seed))
+        CLI::TypeOfProjectScope.seeded(environment: environment, seed: seed)
       end
 
       # Builds what {#discovery_seed_for} reads once per generation, so a fork batch's children inherit it instead

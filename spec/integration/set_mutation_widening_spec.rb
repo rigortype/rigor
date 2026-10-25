@@ -76,16 +76,18 @@ RSpec.describe "Set mutation widening", type: :runner do
     end
   end
 
-  # Each body is correct Ruby; none may report. `1.upcase` is the positive control.
+  # Each body is correct Ruby; none may report. `1.upcase` is the positive control. The read goes through `to_a.first`
+  # because that is the read a constant-folded Set answers by element: `Set["a"].to_a.first.fdiv(2)` reports, where an
+  # `each` block over it binds an untyped parameter.
   describe "a read after the mutation" do
     {
-      "clear then << on a constant set" => "f = Set[\"a\"]\nf.clear\nf << 1\nf.map { |v| v.fdiv(2) }",
+      "clear then << on a constant set" => "f = Set[\"a\"]\nf.clear\nf << 1\nf.to_a.first.fdiv(2)",
       "a comparison against an added value" => "c = Set[1, 2]\nc << 3\nputs 1 if c.max == 3",
       "a membership test for an added value" => "c = Set[1, 2]\nc.merge([3])\nputs 1 if c.include?(3)",
-      "a callee that fills it" => "def add_to(q) = q << 1.5\nu = Set[\"a\"]\nadd_to(u)\nu.each { |v| v.floor }",
+      "a callee that fills it" => "def add_to(q) = q << 1.5\nu = Set[\"a\"]\nadd_to(u)\nu.to_a.first.floor",
       "a loop that fills it" => "l = Set[\"a\"]\ni = 0\nwhile i < 3\n  l.clear\n  l << i\n  i += 1\nend\n" \
-                                "l.each { |v| v.fdiv(2) }",
-      "a block that fills it" => "w = Set[\"a\"]\n[1].each { |i| w.clear; w << i }\nw.each { |v| v.fdiv(2) }"
+                                "l.to_a.first.fdiv(2)",
+      "a block that fills it" => "w = Set[\"a\"]\n[1].each { |i| w.clear; w << i }\nw.to_a.first.fdiv(2)"
     }.each do |label, body|
       it "does not report after #{label}" do
         expect(errors("1.upcase\n#{body}")).to eq(%w[call.undefined-method])
@@ -104,7 +106,7 @@ RSpec.describe "Set mutation widening", type: :runner do
           end
 
           def use
-            @s.each { |v| v.fdiv(2) }
+            @s.to_a.first.fdiv(2)
             puts 1 if @s.include?(1)
           end
         end

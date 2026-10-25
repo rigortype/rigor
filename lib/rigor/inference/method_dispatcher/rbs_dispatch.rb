@@ -8,6 +8,7 @@ require_relative "../rbs_type_translator"
 require_relative "../external_ancestor_resolution"
 require_relative "../void_origin"
 require_relative "../optimistic_origin"
+require_relative "argument_distribution"
 require_relative "overload_selector"
 require_relative "self_substitute"
 
@@ -1089,6 +1090,13 @@ module Rigor
             )
             return nil if candidates.empty?
 
+            if candidates.size == 1 && !keywords_last && method_definition.method_types.size > 1
+              distributed = distributed_argument_return(method_definition, candidates.first, self_type, instance_type,
+                                                        type_vars, args, block_type, scope, call_node, call_site,
+                                                        environment)
+              return distributed unless distributed.equal?(NOT_DISTRIBUTED)
+            end
+
             record_dispatch_provenance(method_definition, candidates.first, scope, call_node, call_site)
             join_candidate_returns(
               candidates,
@@ -1168,6 +1176,64 @@ module Rigor
 
               [arg_types, matches]
             end
+          end
+
+          # Issue #2379 — a positional argument selects its overload per runtime value, as the receiver does
+          # (`dispatch` distributes a union receiver). Selecting once for the whole argument took the first overload
+          # it `maybe`-matched: `Integer#+` with an `Integer | Float` argument read `(Integer) -> Integer`, and with a
+          # `Numeric` one as well. So a precise union argument selects per member ({ArgumentDistribution.lists}; a
+          # member no overload takes keeps the first-overload fallback, as a non-matching argument does), and a
+          # nominal argument wider than the selected overload's parameter takes every overload the strict pass
+          # matches ({OverloadSelector.contested_matches}). The returns join as a plain union. When every list selects
+          # `chosen` alone the call answers {NOT_DISTRIBUTED} and reads as before, so a precise argument keeps its
+          # answer; so does a call holding an imprecise argument (the #521 join owns it) or a splat.
+          # rubocop:disable Metrics/ParameterLists
+          def distributed_argument_return(method_definition, chosen, self_type, instance_type, type_vars, args,
+                                          block_type, scope, call_node, call_site, environment)
+            # rubocop:enable Metrics/ParameterLists
+            return NOT_DISTRIBUTED if args.empty? || ImpreciseArgument.any_in?(args, false)
+            return NOT_DISTRIBUTED if splat_indices(call_node, args)
+
+            lists = ArgumentDistribution.lists(args)
+            return NOT_DISTRIBUTED if lists.nil? && !args.any?(Type::Nominal)
+
+            selector_self = self_type.is_a?(Type::Dynamic) ? self_type.static_facet : self_type
+            per_list = (lists || [args]).map do |arg_types|
+              picked = if arg_types.equal?(args)
+                         chosen
+                       else
+                         OverloadSelector.select(method_definition, arg_types: arg_types, self_type: selector_self,
+                                                                    instance_type: instance_type, type_vars: type_vars,
+                                                                    block_required: !block_type.nil?,
+                                                                    environment: environment)
+                       end
+              matches = OverloadSelector.contested_matches(
+                method_definition, picked, arg_types: arg_types, self_type: selector_self,
+                                           instance_type: instance_type, type_vars: type_vars,
+                                           block_required: !block_type.nil?, environment: environment
+              ) || [picked]
+              [arg_types, matches]
+            end
+            return NOT_DISTRIBUTED if per_list.all? { |_, matches| matches.size == 1 && matches.first.equal?(chosen) }
+
+            overloads = per_list.flat_map(&:last).uniq
+            if overloads.size == 1
+              record_dispatch_provenance(method_definition, overloads.first, scope, call_node, call_site)
+            end
+            returns = per_list.flat_map do |arg_types, matches|
+              matches.map do |method_type|
+                join_candidate_returns(
+                  [method_type],
+                  method_definition: method_definition,
+                  self_type: self_type, instance_type: instance_type, type_vars: type_vars,
+                  args: arg_types, block_type: block_type, scope: scope, call_node: call_node, call_site: call_site,
+                  alias_expander: environment.rbs_loader
+                )
+              end
+            end
+            return nil if returns.any?(&:nil?)
+
+            Type::Combinator.union(*returns.uniq)
           end
 
           def join_distributed_returns(returns, keywords)

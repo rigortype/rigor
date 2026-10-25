@@ -75,6 +75,7 @@ module Rigor
 
         def leaf_class?(class_name, environment)
           return false if environment.nil? || environment.rbs_module?(class_name)
+          # A guard: a validated RBS signature names no unknown class, so this answers only for a broken environment.
           return false unless environment.class_known?(class_name)
 
           loader = environment.rbs_loader

@@ -168,6 +168,12 @@ RSpec.describe "the ADR-58 ivar census types a write from a declared parameter (
     expect(recorded).to eq("Dynamic[Array[Dynamic[top]] | [Dynamic[top]]]")
   end
 
+  it "records a module-typed argument as the census did before" do
+    recorded = k_census("def initialize(x) = @x = Array(x)", "def initialize: (Comparable x) -> void")
+
+    expect(recorded).to eq("Dynamic[Array[Dynamic[top]] | [Dynamic[top]]]")
+  end
+
   it "records a lambda value as the census did before (a guard: a lambda's own type never reads the parameter)" do
     expect(k_census("def initialize(x) = @x = -> { x }", "def initialize: (Symbol x) -> void")).to eq("Proc")
   end

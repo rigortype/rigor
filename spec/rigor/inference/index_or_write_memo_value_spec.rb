@@ -19,9 +19,10 @@ RSpec.describe "index `||=` in value position (memoization idiom)", type: :runne
 
   describe "an untyped receiver whose slot an earlier call may have filled" do
     {
-      # Runtime: `h = {k: {name: "s"}}` returns "S".
+      # Runtime: `h = {k: {name: "s"}}` returns "S". Guard: the stored `Dynamic[top] | {}` is silent too; the
+      # erasure is pinned by the dumped-type example below.
       "a hash rvalue" => "def a(h, k) = (h[k] ||= {})[:name].upcase\n",
-      # Runtime: `h = {k: ["ab"]}` returns 2.
+      # Runtime: `h = {k: ["ab"]}` returns 2. Guard, as for the hash rvalue.
       "an array rvalue" => "def b(h, k) = (h[k] ||= []).last.size\n",
       # Runtime: `h = {k: "s"}` returns "S".
       "an integer rvalue" => "def c(h, k) = (h[k] ||= 1).upcase\n",

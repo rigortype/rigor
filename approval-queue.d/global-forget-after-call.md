@@ -23,6 +23,11 @@ The maintainer ratified the policy on #2314: forget a global's binding after a c
 
 The by-name search is the narrowest reading that meets every acceptance row and the brief's edge table, reads less wherever it cannot prove the call stays clear of a writer (the AGENTS.md false-positive rule), and keeps #2260's unresolved-callee policy. Moving the `case` site follows from the brief's "the two sites must agree".
 
+Two routine changes ride with it, accepted by the coordinator:
+
+- **Gate rows in `spec/rigor/declaration_facts/admission_census.yml`.** `lib/rigor/inference/global_writer_reach.rb` reads `discovered_def_nodes` and `discovered_singleton_def_nodes`, justified `existence`: it reads only their keys to build a method-name index, and resolves each node through `Scope#user_def_for` / `#singleton_def_for`, which record the cross-file edge. Rows of the same kind on the same tables already exist. It also reads `discovered_global_write_census`, which has no `contested_*` sibling and needs no justification.
+- **`IncrementalSnapshot::SCHEMA` 45 → 46.** The seed bundles' `global_write_census` gains the `[:global_writer, …]` entries, and a pre-46 bundle carries none of them. Without the bump, a warm run would keep a global's binding where a cold run forgets it. The precedent is the earlier schema bumps (`7d19e3ec2`).
+
 ## To undo
 
-Drop `forget_reached_globals` from `StatementEvaluator#rebind_statement_specials`, restore the global arm of `#when_test_rebinds_subject?` to `GuardRebinding.may_rebind?`, and remove `GlobalWriterReach` and the census's `[:global_writer, …]` entries (bumping `IncrementalSnapshot::SCHEMA` again). `spec/integration/global_binding_after_call_spec.rb` pins every row.
+Drop `forget_reached_globals` from `StatementEvaluator#rebind_statement_specials`, restore the global arm of `#when_test_rebinds_subject?` to `GuardRebinding.may_rebind?`, and remove `GlobalWriterReach` and the census's `[:global_writer, …]` entries (bumping `IncrementalSnapshot::SCHEMA` again), and drop its `admission_census.yml` rows. `spec/integration/global_binding_after_call_spec.rb` pins every row.

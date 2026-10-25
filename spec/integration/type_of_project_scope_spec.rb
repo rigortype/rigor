@@ -139,6 +139,29 @@ RSpec.describe "rigor type-of over a project (#512)" do
       expect(type).to eq("Dynamic[top]")
     end
 
+    it "drops the table once the callers left the project (a removed file)" do
+      warm_snapshot
+      FileUtils.rm("lib/caller.rb")
+      _status, type, = type_of("lib/box.rb:3:5")
+      expect(type).to eq("Dynamic[top]")
+    end
+
+    it "drops the table under an editor buffer named by an absolute path" do
+      warm_snapshot
+      write("buf.rb", "Box.new.put(\"s\")\n")
+      caller_path = File.expand_path("lib/caller.rb")
+      _status, type, = type_of("lib/box.rb:3:5", "--tmp-file", "buf.rb", "--instead-of", caller_path)
+      expect(type).to eq("Dynamic[top]")
+    end
+
+    it "keeps the table under a buffer whose bytes equal the snapshot's (control)" do
+      warm_snapshot
+      write("buf.rb", File.read("lib/caller.rb"))
+      caller_path = File.expand_path("lib/caller.rb")
+      _status, type, = type_of("lib/box.rb:3:5", "--tmp-file", "buf.rb", "--instead-of", caller_path)
+      expect(type).to eq("Integer")
+    end
+
     it "drops the table under an editor buffer" do
       warm_snapshot
       write("buf.rb", "Box.new.put(\"s\")\n")

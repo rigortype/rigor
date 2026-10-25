@@ -163,8 +163,8 @@ for other roots) the probe types the one file on its own, so such a name reads
 `parameter_inference: true`, the types `check` infers for an
 unannotated parameter come from the same snapshot (its recorded
 call-site table), so `@v = v` reads as `check` types it, but only
-while no project file has changed since the snapshot (nor is an
-editor buffer bound); once any file differs, or with the setting off
+while no project file has changed since the snapshot (an editor
+buffer whose bytes differ from the snapshot counts as a change); once any file differs, or with the setting off
 or no snapshot, those types are not shared.
 
 A template a plugin compiles into Ruby (an ERB view under

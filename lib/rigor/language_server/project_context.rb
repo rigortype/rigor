@@ -141,6 +141,8 @@ module Rigor
       # files, or nothing discovered) leaves the bare single-file scope every query used before.
       def seeded_scope_for(path:, bytes:)
         seed = Tempfile.create(["rigor-lsp-query-", ".rb"]) do |tmp|
+          # Staged as the publisher stages them; the seed's job is to withhold the stale on-disk declarations of
+          # this file, so an empty-bytes stage is not observable by design.
           tmp.write(bytes)
           tmp.flush
           discovery_seed_for(Analysis::BufferBinding.new(logical_path: path, physical_path: tmp.path))

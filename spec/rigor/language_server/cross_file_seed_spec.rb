@@ -16,7 +16,7 @@ RSpec.describe "LSP editor queries over a project (#2282)" do
     Rigor::LanguageServer::ProjectContext.new(configuration: Rigor::Configuration.new("paths" => paths))
   end
   let(:paths) { [lib] }
-  let(:uri) { "file://#{File.join(lib, "main.rb")}" }
+  let(:uri) { "file://#{File.join(lib, 'main.rb')}" }
 
   before do
     FileUtils.mkdir_p(lib)

@@ -159,9 +159,11 @@ and never writes it. With no reusable snapshot (none yet, or one a
 change made unusable, for example a changed configuration, lockfile, `sig/`, `pre_eval:`
 file or required feature, an engine upgrade, or a snapshot written
 for other roots) the probe types the one file on its own, so such a name reads
-`Dynamic[top]`, and it prints nothing about it. Only those
-declarations are shared: the types `check` infers for an unannotated
-parameter are not.
+`Dynamic[top]`, and it prints nothing about it. With
+`parameter_inference: true`, the types `check` infers for an
+unannotated parameter come from the same snapshot (its recorded
+call-site table), so `@v = v` reads as `check` types it; with the
+setting off, or no snapshot, they do not.
 
 A template a plugin compiles into Ruby (an ERB view under
 `rigor-actionpack`) is probed the way `rigor check` analyses

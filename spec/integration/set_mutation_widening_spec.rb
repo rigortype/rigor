@@ -51,6 +51,11 @@ RSpec.describe "Set mutation widening", type: :runner do
       expect(dumped("s = Set[n]\ns.merge([x])\ndump_type(s)")).to eq(["Set[Dynamic[top] | Integer | String]"])
     end
 
+    it "widens each set member of a union" do
+      expected = ["Set[Dynamic[top] | Integer | String] | Set[Dynamic[top] | String | Symbol]"]
+      expect(dumped("s = n > 0 ? Set[1] : Set[:a]\ns << x\ndump_type(s)")).to eq(expected)
+    end
+
     # Positive control: the precise RBS answer is a claim the seam does not grow, as for `Array#dup` on ARGV.
     it "leaves a precise Set[String] untouched" do
       expect(dumped("s = ARGV.to_set\ns << 1\ndump_type(s)")).to eq(["Set[String]"])
@@ -95,7 +100,7 @@ RSpec.describe "Set mutation widening", type: :runner do
 
           def reset
             @s.clear
-            @s << 1
+            @s.add(1)
           end
 
           def use

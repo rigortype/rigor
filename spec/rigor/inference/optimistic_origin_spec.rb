@@ -129,6 +129,45 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
     end
   end
 
+  # Issue #2306. A miss reaches the join after a truthiness test through the falsey edge, the implicit `else`
+  # of an `if` with none, so that edge keeps the mark and the join keeps the arm that holds it. The truthy edge
+  # proves the value non-nil and drops it.
+  describe "keeps the mark on the falsey edge of a truthiness test" do
+    def mark_after(source)
+      _, post = evaluate_with({ h: hash_of("x", "y"), c: Rigor::Type::Combinator.nominal_of("Integer") }, source)
+      [post.optimistic_local(:v), post.optimistic_ivar(:@v)].compact.first
+    end
+
+    {
+      "an `if` with no else" => "v = h[key]\nif v then c end",
+      "a modifier `if` over `&&`" => "v = h[key]\nc if v && c",
+      "an `unless` with no else" => "v = h[key]\nunless v then c end",
+      "an `if` with an empty else" => "v = h[key]\nif v\nelse\nend",
+      "an `if` whose arm raises" => "v = h[key]\nif v then raise \"x\" end",
+      "a nested `if`" => "v = h[key]\nif v\n  if c then 1 end\nend",
+      "an assignment in the condition" => "if (v = h[key]) then c end",
+      "an instance variable" => "@v = h[key]\nif @v then c end"
+    }.each do |label, source|
+      it "after #{label}" do
+        expect(mark_after(source)).to eq(described_class::IMPLICITLY_RETURNS_NIL)
+      end
+    end
+
+    it "drops it on the truthy edge and keeps it on the falsey edge" do
+      _, post = evaluate_with({ h: hash_of("x", "y") }, "v = h[key]")
+      predicate = Prism.parse("v", scopes: [[:v]]).value.statements.body.first
+      truthy, falsey = Rigor::Inference::Narrowing.predicate_scopes(predicate, post)
+
+      expect(post.optimistic_local(:v)).to eq(described_class::IMPLICITLY_RETURNS_NIL)
+      expect(truthy.optimistic_local(:v)).to be_nil
+      expect(falsey.optimistic_local(:v)).to eq(described_class::IMPLICITLY_RETURNS_NIL)
+    end
+
+    it "is cleared by a rebinding in the arm a miss takes (a guard: the write drops it)" do
+      expect(mark_after("v = h[key]\nv = \"d\" unless v")).to be_nil
+    end
+  end
+
   # Issue #313. The mark attaches to a value, but every consumer reads a predicate *expression*, and the
   # guard people actually write is `v.nil?` rather than the bare carrier. Each of these shapes folded to an
   # unmarked `Constant` before the derivation, so the elision deleted the branch the program takes on a miss.

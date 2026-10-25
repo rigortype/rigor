@@ -359,7 +359,9 @@ SIG_PROVENANCE_RESIDUE = {
   # three Set readers (`published_constant_sourced`, `declaration_sourced`,
   # `struct_fold_safe_locals`) carry `# authored:`
   # notes instead: sig-gen proposes `Set[untyped]` for them (#2177, #2317), and a marker does not move this count.
-  "sig/rigor/scope.rbs" => 45,
+  # -2 (#2306): a truthiness test no longer drops the optimistic mark on its falsey edge, so `data_member_layout`
+  # and `struct_member_layout` regenerate with the `?` their declarations carry.
+  "sig/rigor/scope.rbs" => 43,
   "sig/rigor/sig_gen/skip_reason_catalog.rbs" => 8,
   "sig/rigor/source.rbs" => 4,
   "sig/rigor/testing.rbs" => 4,

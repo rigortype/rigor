@@ -968,12 +968,22 @@ module Rigor
         end
 
         def analyse_local_read(node, scope)
-          current = scope.local(node.name)
+          local_truthiness_edges(node.name, scope)
+        end
+
+        # The falsey edge is where an optimistic lookup's miss lands (ADR-101, issue #2306): `Scope#with_local`
+        # drops the issue #286 mark as a write does, so the edge re-takes the one `scope` holds. Without it the
+        # join after `if v; …; end` with no `else` lost the mark on both arms and read `v` as nil-free, although
+        # a miss reaches that join through the implicit else. The truthy edge proves the value non-nil, so it
+        # keeps dropping the mark.
+        def local_truthiness_edges(name, scope)
+          current = scope.local(name)
           return nil if current.nil?
 
+          falsey = scope.with_local(name, narrow_falsey(current))
           [
-            scope.with_local(node.name, narrow_truthy(current)),
-            scope.with_local(node.name, narrow_falsey(current))
+            scope.with_local(name, narrow_truthy(current)),
+            OptimisticOrigin.carry_local_mark(scope, falsey, name, nil)
           ]
         end
 
@@ -987,13 +997,7 @@ module Rigor
         # holds the just-bound value; the narrowing contract on the surrounding `if` is the
         # same.
         def analyse_local_write(node, scope)
-          current = scope.local(node.name)
-          return nil if current.nil?
-
-          [
-            scope.with_local(node.name, narrow_truthy(current)),
-            scope.with_local(node.name, narrow_falsey(current))
-          ]
+          local_truthiness_edges(node.name, scope)
         end
 
         # Truthy guard on an instance variable. Covers both the bare read — `if @ivar`, the
@@ -1007,9 +1011,11 @@ module Rigor
           current = scope.ivar(node.name)
           return nil if current.nil?
 
+          # The falsey edge keeps the optimistic mark, as {#local_truthiness_edges} explains.
+          falsey = scope.with_ivar(node.name, narrow_falsey(current))
           [
             scope.with_ivar(node.name, narrow_truthy(current)),
-            scope.with_ivar(node.name, narrow_falsey(current))
+            OptimisticOrigin.carry_ivar_mark(scope, falsey, node.name, nil)
           ]
         end
 

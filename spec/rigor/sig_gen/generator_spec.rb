@@ -429,6 +429,19 @@ RSpec.describe Rigor::SigGen::Generator do
       "an ivar bound to a lookup" => ["@v = h[k]\n    @v", "(String | nil)", nil],
       "a local ||=" => ["x = nil\n    x ||= a.first", "(String | nil)", nil],
       "an ivar ||=" => ["@z = nil\n    @z ||= a.first", "(String | nil)", nil],
+      "a local an `if` with no else tested (#2306)" => ["x = h[k]\n    if x\n      c\n    end\n    x", "(String | nil)",
+                                                        nil],
+      "a local a modifier `if` over `&&` tested (#2306)" => ["x = h[k]\n    c if x && c\n    x", "(String | nil)", nil],
+      "a local an `unless` with no else tested (#2306)" => ["x = h[k]\n    unless x\n      c\n    end\n    x",
+                                                            "(String | nil)", nil],
+      "a local an `if` with an empty else tested (#2306)" => ["x = h[k]\n    if x\n    else\n    end\n    x",
+                                                              "(String | nil)", nil],
+      "a local a nested `if` tested (#2306)" => ["x = h[k]\n    if x\n      if c\n        c\n      end\n    end\n    x",
+                                                 "(String | nil)", nil],
+      "an ivar an `if` with no else tested (#2306)" => ["@v = h[k]\n    if @v\n      c\n    end\n    @v",
+                                                        "(String | nil)", nil],
+      "a local rebound when the lookup misses (proven; a guard: the write drops the mark)" =>
+        ["x = h[k]\n    x = \"d\" unless x\n    x", "String", "d"],
       "a truthiness-guarded local (proven)" => ["v = h[k]\n    v ? v : \"d\"", "String", "d"],
       "a nil?-guarded local (proven)" => ["v = h[k]\n    v.nil? ? \"d\" : v", "String", "d"],
       "an emptiness-guarded Array#first (proven)" => ["a.empty? ? \"z\" : a.first", "String", "z"],
@@ -483,6 +496,22 @@ RSpec.describe Rigor::SigGen::Generator do
         expect(box.new.g({ k: "v" }, :k, ["x"], true, &block)).to be_nil
         expect(method.rbs).to eq("def g: #{params} -> (String | nil)")
       end
+    end
+
+    # #2306 — only a miss gets past the raising arm, so the return is `nil`, which sig-gen declines to write over
+    # `untyped`; it used to read the bare falsey narrowing and propose `-> bot`.
+    it "reads the nil a miss returns past an `if` whose arm raises" do
+      params = "(Hash[Symbol, String] h, Symbol k)"
+      write_fixture("sig/box.rbs", "class Box\n  def g: #{params} -> untyped\nend\n")
+      path = write_fixture("lib/box.rb",
+                           "class Box\n  def g(h, k)\n    x = h[k]\n    raise \"x\" if x\n    x\n  end\nend\n")
+      box = Module.new.tap { it.module_eval(File.read(path)) }.const_get(:Box)
+
+      method = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")]).run.find { it.method_name == :g }
+
+      expect(box.new.g({}, :k)).to be_nil
+      expect(method.inferred_return.describe).to eq("nil")
+      expect(method.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
     end
 
     it "keeps the nil an &&= binding hands on" do

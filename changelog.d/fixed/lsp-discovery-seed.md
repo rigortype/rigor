@@ -1,0 +1,2 @@
+- **[lsp]** Hover, completion and signature help read the project's cross-file declarations, and `rigor type-of` applies the parameter-inference table, so they answer what `rigor check` does. ([#2377](https://github.com/rigortype/rigor/pull/2377))
+  - A constant or method another file defines no longer reads as `Dynamic` in the editor; `type-of` takes the call-site parameter types from a warm `check --incremental` snapshot under `parameter_inference: true`.

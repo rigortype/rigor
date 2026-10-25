@@ -1,0 +1,3 @@
+- **[inference]** A block passed to a project method that yields inside a loop or iterator is typed as possibly running more than once. ([#2364](https://github.com/rigortype/rigor/pull/2364))
+  - `b = last_val([1, 2, 3]) { count += 1 }` used to read `count` at its entry binding, so `b == 3` was reported always falsey on correct code.
+  - A project method that yields once keeps the precise single-run value.

@@ -40,7 +40,7 @@ A statement call that may reach a project method writing a process-wide global e
 - the call's receiver resolves to no class (a `Dynamic` value), so it may run any method; or
 - following every call by method name, through every project `def` of that name on any class and transitively, meets a method that writes it: a `def`, or a `define_method` block under the literal name it defines. A `send` or `public_send` naming its method by a literal follows that name, and one naming it by a computed value, or an `eval`, reaches. A name no project `def` defines follows `method_missing`.
 
-A write at the top level or in a class body runs where it is written, so no call reaches it. A `case` whose `when` test may reach a writer of its global subject ends the subject's binding the same way ([Control-flow analysis](control-flow-analysis.md), [#2211](https://github.com/rigortype/rigor/issues/2211)).
+A write at the top level or in a class body runs where it is written, so no call reaches it. A global a guard narrowed before the call keeps the union its restore reads instead ([A narrowing](#a-narrowing)): `return unless $sep; reset_sep; $sep.length` still reports when `$sep` may be `nil`. A `case` whose `when` test may reach a writer of its global subject ends the subject's binding the same way ([Control-flow analysis](control-flow-analysis.md), [#2211](https://github.com/rigortype/rigor/issues/2211)).
 
 The gaps:
 

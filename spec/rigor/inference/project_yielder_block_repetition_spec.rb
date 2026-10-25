@@ -40,13 +40,15 @@ RSpec.describe "project yielder block repetition", type: :runner do
     RUBY
   end
 
+  # The last two are guards: the #2301 hand-off rule already covered a `&blk` forward, and a `while` callee's
+  # return already read wide before this change; they pin that the ProjectYielder rule keeps both.
   {
     "a callee that yields inside an iterator block" => "Y.last_val([1, 2, 3])",
-    "a forward through a named &blk" => "Y.named([1, 2, 3])",
-    "a callee that yields inside while" => "Y.with_while",
     "a callee that yields inside times" => "Y.with_times",
     "a callee that yields inside each_with_index" => "Y.with_index([1, 2, 3])",
-    "an instance-method callee" => "K.new.last_val([1, 2, 3])"
+    "an instance-method callee" => "K.new.last_val([1, 2, 3])",
+    "a forward through a named &blk (guard)" => "Y.named([1, 2, 3])",
+    "a callee that yields inside while (guard)" => "Y.with_while"
   }.each do |callee, call|
     it "reports nothing on the value of a block #{callee} runs repeatedly" do
       source = "#{helpers}count = 0\na = #{call} { |_| count += 1 }\nputs 'three' if a == 3\n"

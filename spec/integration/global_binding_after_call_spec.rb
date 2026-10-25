@@ -186,6 +186,80 @@ RSpec.describe "a global's binding past a call that may reach its writer (#2314)
     USE
   end
 
+  it "keeps a global past a call that reaches none of the methods a define_method block defines" do
+    # NoMethodError
+    expect(undefined("a.rb" => <<~RUBY)).to eq([["a.rb", 7]])
+      class Box
+        define_method(:dmw) { $dk = 1 }
+        def other = 1
+      end
+      $dk = nil
+      Box.new.other
+      $dk + 1
+    RUBY
+  end
+
+  it "follows a block argument's Symbol to the method it names" do
+    # 2
+    expect(undefined("a.rb" => <<~RUBY)).to eq([])
+      class W
+        def touch = ($bt = 1)
+      end
+      $bt = nil
+      [W.new].each(&:touch)
+      $bt + 1
+    RUBY
+  end
+
+  it "follows the operator a compound write calls" do
+    # 2
+    expect(undefined("a.rb" => <<~RUBY)).to eq([])
+      class Counter
+        def +(other) = ($op = 1)
+      end
+      def bump(c) = (c += 1)
+      $op = nil
+      bump(Counter.new)
+      $op + 1
+    RUBY
+  end
+
+  it "follows the each a for loop calls" do
+    # 2
+    expect(undefined("a.rb" => <<~RUBY)).to eq([])
+      class Coll
+        def each = ($fe = 1)
+      end
+      def walk(xs) = (for x in xs; end)
+      $fe = nil
+      walk(Coll.new)
+      $fe + 1
+    RUBY
+  end
+
+  it "reaches any writer from an eval" do
+    # 2
+    expect(undefined("a.rb" => <<~RUBY)).to eq([])
+      def w = ($ev = 1)
+      def run(code) = eval(code)
+      $ev = nil
+      run("w")
+      $ev + 1
+    RUBY
+  end
+
+  it "follows a name no project def defines to method_missing" do
+    # 2
+    expect(undefined("a.rb" => <<~RUBY)).to eq([])
+      class MM
+        def method_missing(*) = ($mm = 1)
+      end
+      $mm = nil
+      MM.new.undefined_thing
+      $mm + 1
+    RUBY
+  end
+
   # Known gap: `alias $ay $ax` makes the two one variable, and the census keys a writer by the name it spells.
   it "keeps an aliased global a method writes under its other name" do
     # 2 in Ruby; still reported

@@ -763,16 +763,25 @@ module Rigor
           end
 
           widen_member_for_lookup_mutators(member, observed_methods)
-        when Type::Constant
-          # `@s = +"ab"` in one method and `@s << "c"` in another: without this arm the seed stayed pinned at every
-          # other method's entry, and `@s == "ab"` folded always-truthy on a receiver that holds `"abc"`.
-          return member unless StringMutation.constant?(member) &&
-                               observed_methods.any? { |m| StringMutation::MUTATORS.include?(m) }
-
-          Type::Combinator.nominal_of("String")
+        when Type::Constant then widen_constant_for_observed_mutators(member, observed_methods)
         else
           member
         end
+      end
+
+      # `@s = +"ab"` in one method and `@s << "c"` in another: without this arm the seed stayed pinned at every other
+      # method's entry, and `@s == "ab"` folded always-truthy on a receiver that holds `"abc"`. A constant-folded Set
+      # (`@s = Set["a"]`, then `@s.clear; @s << 1` elsewhere — issue #2294) takes the untyped floor the Tuple arm takes.
+      def widen_constant_for_observed_mutators(member, observed_methods)
+        if SetMutation.constant?(member)
+          return member unless observed_methods.any? { |m| SetMutation::MUTATORS.include?(m) }
+
+          return Type::Combinator.nominal_of("Set", type_args: [Type::Combinator.untyped])
+        end
+        return member unless StringMutation.constant?(member) &&
+                             observed_methods.any? { |m| StringMutation::MUTATORS.include?(m) }
+
+        Type::Combinator.nominal_of("String")
       end
 
       # A `HashShape` ivar seed some method gave a default, a default proc or identity keys, and no method stored
@@ -1443,11 +1452,19 @@ module Rigor
         method_name, receiver = mutation_target(node)
         return if method_name.nil?
         return unless receiver.is_a?(Prism::InstanceVariableReadNode)
-        return unless MutationWidening::SHAPE_MUTATORS.include?(method_name)
+        return unless ivar_census_mutator?(method_name)
 
         per_class = (mutated_ivars[class_name] ||= {})
         per_ivar = (per_class[receiver.name] ||= Set.new)
         per_ivar << method_name
+      end
+
+      # The Set-only names (`add`, `merge`, … — issue #2294) are recorded here rather than in `SHAPE_MUTATORS`, which
+      # every scan reads by name alone: there `merge` would make `Hash#merge`, which returns a new Hash, a mutation of
+      # its receiver. The census is safe to over-collect, since {#widen_member_for_observed_mutators} reads each name
+      # against the table of the carrier it widens.
+      def ivar_census_mutator?(method_name)
+        MutationWidening::SHAPE_MUTATORS.include?(method_name) || SetMutation::MUTATORS.include?(method_name)
       end
 
       # `[mutator name, receiver node]` for a node that mutates its receiver, `nil` otherwise.

@@ -24,7 +24,8 @@ module Rigor
       # replacement, and the seed it would otherwise keep beside it is gone.
       REPLACED = Ractor.make_shareable({
                                          "Array" => { map!: [0], collect!: [0], flatten!: [0], replace: [0] },
-                                         "Hash" => { transform_keys!: [0], transform_values!: [1], replace: [0, 1] }
+                                         "Hash" => { transform_keys!: [0], transform_values!: [1], replace: [0, 1] },
+                                         "Set" => { map!: [0], collect!: [0], flatten!: [0], replace: [0] }
                                        })
 
       # Mutators that store values nothing describes BESIDE values they may keep: `fill(x, start)` leaves the slots

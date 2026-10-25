@@ -147,7 +147,7 @@ RSpec.describe "rigor type-of over a project (#512)" do
     end
 
     it "drops the table under an editor buffer named by an absolute path (absolute configured paths)" do
-      write(".rigor.yml", "paths:\n  - #{File.expand_path("lib")}\nparameter_inference: true\n")
+      write(".rigor.yml", "paths:\n  - #{File.expand_path('lib')}\nparameter_inference: true\n")
       warm_snapshot
       write("buf.rb", "Box.new.put(\"s\")\n")
       caller_path = File.expand_path("lib/caller.rb")
@@ -156,7 +156,7 @@ RSpec.describe "rigor type-of over a project (#512)" do
     end
 
     it "keeps the table under a buffer whose bytes equal the snapshot's (control)" do
-      write(".rigor.yml", "paths:\n  - #{File.expand_path("lib")}\nparameter_inference: true\n")
+      write(".rigor.yml", "paths:\n  - #{File.expand_path('lib')}\nparameter_inference: true\n")
       warm_snapshot
       write("buf.rb", File.read("lib/caller.rb"))
       caller_path = File.expand_path("lib/caller.rb")

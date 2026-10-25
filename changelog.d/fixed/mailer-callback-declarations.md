@@ -1,0 +1,3 @@
+- **[rigor-actionmailer]** A mailer method named by `prepend_`/`append_` callbacks, `before_deliver`/`after_deliver`/`around_deliver` or `helper_method` is no longer treated as an action, so it no longer gets a `missing-view` warning. ([#2344](https://github.com/rigortype/rigor/pull/2344))
+  - The discoverer now reads the manifest's non-action macro list instead of its own three callbacks. A `skip_*` callback still does not remove a method from the action set.
+  - A `def` after a bare `module_function` in a mailer concern is no longer an action.

@@ -148,6 +148,8 @@ RSpec.describe "the ADR-58 ivar census types a write from a declared parameter (
         ["def initialize(a, b) = @x = a + [b, 1.5].max", "def initialize: (Integer a, Integer b) -> void"],
       "a union argument built by a predicate ternary" =>
         ["def initialize(a, b) = @x = a + (b.zero? ? 0 : b.to_f)", "def initialize: (Integer a, Integer b) -> void"],
+      "a splat argument" =>
+        ["def initialize(a, b) = @x = a.push(*b)", "def initialize: (Array[Integer] a, Array[Integer] b) -> void"],
       "a keyword parameter whose default is outside its declared type" =>
         ["def initialize(x: nil) = @x = x&.to_s", "def initialize: (?x: Integer) -> void"],
       "a union argument of another operator" =>
@@ -202,6 +204,22 @@ RSpec.describe "the ADR-58 ivar census types a write from a declared parameter (
 
   it "records a lambda value as the census did before (a guard: a lambda's own type never reads the parameter)" do
     expect(k_census("def initialize(x) = @x = -> { x }", "def initialize: (Symbol x) -> void")).to eq("Proc")
+  end
+
+  describe "the leaf-class test fails closed (#2321)" do
+    def leaf?(superclass_names)
+      loader = instance_double(Rigor::Environment::RbsLoader, superclass_names: superclass_names)
+      environment = instance_double(Rigor::Environment, rbs_module?: false, class_known?: true, rbs_loader: loader)
+      Rigor::Inference::ScopeIndexer::DerivedParamValue.leaf_class?("Integer", environment)
+    end
+
+    it "reads no class as a leaf when the RBS superclass set could not be read" do
+      expect([leaf?(nil), leaf?(Set.new)]).to eq([false, false])
+    end
+
+    it "reads a class absent from a read set as a leaf (control)" do
+      expect(leaf?(Set["Numeric"])).to be(true)
+    end
   end
 
   describe "a declined write records what it did before" do

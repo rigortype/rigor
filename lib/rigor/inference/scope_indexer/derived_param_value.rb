@@ -20,8 +20,8 @@ module Rigor
       #   `yield(…)`), typed under the parameter bindings, whose type is anything but a literal or an instance of a
       #   class no RBS class names as its superclass: the engine picks the first overload such an argument matches
       #   (`Integer#+` given `Integer | Float` answers `Integer`), not the join of every overload it may reach. A
-      #   receiver dispatches per member and is not declined. A splat, keyword, forwarded or block argument declines
-      #   too.
+      #   receiver dispatches per member and is not declined. A splat or keyword argument types as neither, so it
+      #   declines too.
       module DerivedParamValue
         module_function
 
@@ -39,17 +39,10 @@ module Rigor
 
           if value.is_a?(Prism::CallNode) || value.is_a?(Prism::SuperNode) || value.is_a?(Prism::YieldNode)
             arguments = value.arguments&.arguments || []
-            return true if arguments.any? { |argument| overload_sensitive_node?(argument, bound) }
+            return true if arguments.any? { |argument| overload_sensitive?(bound.type_of(argument), bound) }
           end
           value.rigor_each_child { |child| return true if overload_sensitive_argument?(child, bound) }
           false
-        end
-
-        def overload_sensitive_node?(argument, bound)
-          return true if argument.is_a?(Prism::SplatNode) || argument.is_a?(Prism::KeywordHashNode) ||
-                         argument.is_a?(Prism::BlockArgumentNode) || argument.is_a?(Prism::ForwardingArgumentsNode)
-
-          overload_sensitive?(bound.type_of(argument), bound)
         end
 
         def carries_dynamic?(type)

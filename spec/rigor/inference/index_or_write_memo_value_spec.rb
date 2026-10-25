@@ -26,7 +26,8 @@ RSpec.describe "index `||=` in value position (memoization idiom)", type: :runne
       "an array rvalue" => "def b(h, k) = (h[k] ||= []).last.size\n",
       # Runtime: `h = {k: "s"}` returns "S".
       "an integer rvalue" => "def c(h, k) = (h[k] ||= 1).upcase\n",
-      # Runtime: `h = {k: :b}` returns true (guard: did not reproduce on master).
+      # Runtime: `h = {k: :b}` returns 1. The ternary reports an always-falsey condition when the literal reading is
+      # restored.
       "a symbol rvalue" => "def d(h, k) = ((h[k] ||= :a) == :b) ? 1 : 2\n"
     }.each do |label, source|
       it "reports nothing for #{label}" do
@@ -45,6 +46,18 @@ RSpec.describe "index `||=` in value position (memoization idiom)", type: :runne
     it "keeps a parameterised nominal rvalue as itself" do
       # A construction keeps the #1155 reading; erased, sig-gen would propose `Array[untyped]` for a memo reader.
       expect(dumped_type("def e(h, k) = dump_type(h[k] ||= ENV.keys)\n")).to eq("Array[String]")
+    end
+  end
+
+  describe "a Data or Struct construction rvalue on an untyped receiver" do
+    it "keeps a Data instance as itself" do
+      expect(dumped_type("Point = Data.define(:x)\ndef a(h, k) = dump_type(h[k] ||= Point.new(x: 1))\n"))
+        .to eq("Point(x: 1)")
+    end
+
+    it "keeps a Struct instance as itself" do
+      expect(dumped_type("Pair = Struct.new(:a)\ndef b(h, k) = dump_type(h[k] ||= Pair.new(1))\n"))
+        .to eq("Pair(a: 1)")
     end
   end
 

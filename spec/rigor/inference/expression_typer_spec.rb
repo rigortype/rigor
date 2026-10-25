@@ -2395,9 +2395,10 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
 
     it "keeps the slot at a site a block-return pass marked as repeated" do
       # An earlier run of the block may have filled the slot, so its gradual type is no memo's.
-      node = parse_expression("@cache[:k] ||= 7")
+      # A construction rvalue: a literal `7` on this untracked receiver reads `7 | Dynamic[top]` marked or not (#2292).
+      node = parse_expression("@cache[:k] ||= Object.new")
       bound = scope.with_ivar(:@cache, Rigor::Type::Combinator.untyped).with_repeated_or_writes([node])
-      expect(bound.type_of(node).describe).to eq("7 | Dynamic[top]")
+      expect(bound.type_of(node).describe).to eq("Dynamic[top] | Object")
     end
 
     it "keeps the memo reading at an unmarked site of the same text (control)" do

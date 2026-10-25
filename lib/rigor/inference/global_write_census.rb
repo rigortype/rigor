@@ -167,9 +167,9 @@ module Rigor
 
         private
 
-        # Issue #2314 — tracks the method bodies, lambdas and stored blocks of a pre-order descent as flat `start, end,
-        # label` triples (`@bodies`, innermost last), and records a global write inside one ({GlobalWriterReach}). A body
-        # ending before the write starts is closed. Only those nodes read their location.
+        # Issue #2314 — tracks the method bodies, lambdas and stored blocks of a pre-order descent as flat
+        # `start, end, label` triples (`@bodies`, innermost last), and records a global write inside one
+        # ({GlobalWriterReach}). A body ending before the write starts is closed. Only those nodes read their location.
         def visit_global_writer(node)
           case node
           when Prism::DefNode then open_body(node, node.name)

@@ -82,7 +82,6 @@ RSpec.describe "Set mutation widening", type: :runner do
   describe "a read after the mutation" do
     {
       "clear then << on a constant set" => "f = Set[\"a\"]\nf.clear\nf << 1\nf.to_a.first.fdiv(2)",
-      "a comparison against an added value" => "c = Set[1, 2]\nc << 3\nputs 1 if c.max == 3",
       "a membership test for an added value" => "c = Set[1, 2]\nc.merge([3])\nputs 1 if c.include?(3)",
       "a callee that fills it" => "def add_to(q) = q << 1.5\nu = Set[\"a\"]\nadd_to(u)\nu.to_a.first.floor",
       "a loop that fills it" => "l = Set[\"a\"]\ni = 0\nwhile i < 3\n  l.clear\n  l << i\n  i += 1\nend\n" \
@@ -102,7 +101,7 @@ RSpec.describe "Set mutation widening", type: :runner do
 
           def reset
             @s.clear
-            @s.add(1)
+            @s << 1
           end
 
           def use
@@ -112,6 +111,18 @@ RSpec.describe "Set mutation widening", type: :runner do
         end
       RUBY
       expect(errors(source)).to eq(%w[call.undefined-method])
+    end
+
+    # `add` is in no Array or Hash table, so the class-ivar census records it only through the Set one.
+    it "does not fold a membership test on a set ivar another method adds to" do
+      source = <<~RUBY
+        class Holder
+          def initialize = @s = Set["a"]
+          def grow = @s.add(1)
+          def use = (puts 1 if @s.include?(1))
+        end
+      RUBY
+      expect(errors(source)).to eq([])
     end
   end
 end

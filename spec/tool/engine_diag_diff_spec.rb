@@ -63,6 +63,37 @@ RSpec.describe "tool/engine_diag_diff.rb" do
     end
   end
 
+  describe ".resolve_targets" do
+    let(:configured) { { "config" => "/c/.rigor.yml", "declared" => true, "paths" => ["/c/app", "/c/lib"] } }
+    let(:silent) { { "config" => nil, "declared" => false, "paths" => ["/c/lib"] } }
+
+    it "measures an explicit --target as given, without reading the corpus configuration" do
+      expect(EngineDiagDiff.resolve_targets(["lib"], nil)).to eq(targets: ["lib"], source: :explicit)
+    end
+
+    it "measures the corpus configuration's paths: when no --target is given" do
+      expect(EngineDiagDiff.resolve_targets([],
+                                            configured)).to eq(targets: ["/c/app", "/c/lib"], source: "/c/.rigor.yml")
+    end
+
+    it "falls back to lib, and says so, when the configuration names no paths:" do
+      expect(EngineDiagDiff.resolve_targets([], silent)).to eq(targets: ["lib"], source: :fallback)
+    end
+
+    it "falls back to lib when paths: is declared but empty" do
+      expect(EngineDiagDiff.resolve_targets([],
+                                            configured.merge("paths" => []))).to eq(targets: ["lib"], source: :fallback)
+    end
+
+    it "names the source of each target list in its first output line" do
+      expect(EngineDiagDiff.describe_targets(targets: ["lib"],
+                                             source: :explicit)).to eq("Measuring targets: lib (--target)")
+      expect(EngineDiagDiff.describe_targets(targets: ["lib"], source: :fallback)).to include("falling back to lib")
+      expect(EngineDiagDiff.describe_targets(targets: %w[app lib], source: "/c/.rigor.yml"))
+        .to eq("Measuring targets: app, lib (no --target; the corpus configuration /c/.rigor.yml paths:)")
+    end
+  end
+
   describe ".report" do
     let(:entry) do
       { "base" => "abc1234def", "path" => "a.rb", "line" => 1, "column" => 1, "message" => "m",

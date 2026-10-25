@@ -45,6 +45,11 @@
 #                                 [--rule RULE] [--adjudication FILE] [--require-base-rows N]
 #                                 [--require-rows-in PATH:N]... [--summary FILE]
 #   ruby tool/engine_diag_diff.rb --measure ENGINE_DIR CORPUS_DIR TARGET...   # internal: one fresh-process run
+#   ruby tool/engine_diag_diff.rb --corpus-paths ENGINE_DIR CORPUS_DIR        # internal: the corpus config's paths:
+#
+# Targets: each `--target` as given. With none, the corpus configuration's `paths:` (read by the head engine's own
+# loader, as `rigor check` reads them), and `lib` only when that configuration names no `paths:`. The first line of
+# the output says which, so a Rails corpus cannot silently measure `lib` alone.
 
 require "fileutils"
 require "json"
@@ -100,7 +105,11 @@ module EngineDiagDiff
 
   # The diagnostics of a `--format json` document, as keyed rows in a total order.
   def rows(document)
-    document.fetch("diagnostics").map { |hash| KEY_FIELDS.map { |field| hash[field] } }.sort_by do |path, line, column, rule, message|
+    document.fetch("diagnostics").map do |hash|
+      KEY_FIELDS.map do |field|
+        hash[field]
+      end
+    end.sort_by do |path, line, column, rule, message|
       [path.to_s, line.to_i, column.to_i, rule.to_s, message.to_s]
     end
   end
@@ -148,7 +157,10 @@ module EngineDiagDiff
 
     missing = (ADJUDICATION_KEY + %w[base]).reject { |key| entry.key?(key) }
     raise ArgumentError, "#{label}: missing #{missing.join(', ')}" unless missing.empty?
-    raise ArgumentError, "#{label}: verdict must be one of #{VERDICTS.join(' | ')}" unless VERDICTS.include?(entry["verdict"])
+    unless VERDICTS.include?(entry["verdict"])
+      raise ArgumentError,
+            "#{label}: verdict must be one of #{VERDICTS.join(' | ')}"
+    end
     raise ArgumentError, "#{label}: a reason is required" if entry["reason"].to_s.strip.empty?
 
     entry
@@ -163,7 +175,11 @@ module EngineDiagDiff
     added_pairs, added_open = pair(added, index, [ADDED_VERDICT])
     used = (removed + added).map { |row| row_key(row) }
     { removed: removed_pairs, added: added_pairs, unadjudicated_removed: removed_open,
-      unadjudicated_added: added_open, stale: entries.reject { |entry| used.include?(ADJUDICATION_KEY.map { |key| entry[key] }) } }
+      unadjudicated_added: added_open, stale: entries.reject do |entry|
+                                         used.include?(ADJUDICATION_KEY.map do |key|
+                                           entry[key]
+                                         end)
+                                       end }
   end
 
   def pair(rows, index, verdicts)
@@ -198,18 +214,25 @@ module EngineDiagDiff
     verdicts = adjudicate(changes[:removed], changes[:added], current)
     problems = problems_for(base, head, verdicts, rule, require_base_rows, floors)
     floored = entries.select { |entry| floors.any? { |path, _| entry["path"].to_s.start_with?(path) } }
-    problems << "#{floored.size} adjudication entr(ies) under a floored path, which cannot be adjudicated away" unless floored.empty?
-    { text: render(base, head, changes, verdicts, rule, problems, base_sha: base_sha, ignored: ignored), ok: problems.empty? }
+    unless floored.empty?
+      problems << "#{floored.size} adjudication entr(ies) under a floored path, which cannot be adjudicated away"
+    end
+    { text: render(base, head, changes, verdicts, rule, problems, base_sha: base_sha, ignored: ignored),
+      ok: problems.empty? }
   end
 
   def problems_for(base, head, verdicts, rule, require_base_rows, floors)
     name = rule || "diagnostic"
     problems = []
-    problems << "the base has #{base.size} #{name} row(s), fewer than the required #{require_base_rows}" if base.size < require_base_rows
+    if base.size < require_base_rows
+      problems << "the base has #{base.size} #{name} row(s), fewer than the required #{require_base_rows}"
+    end
     floors.each do |path, count|
       { "base" => base, "head" => head }.each do |side, rows|
         held = rows.count { |row| row[0].to_s.start_with?(path) }
-        problems << "the #{side} has #{held} #{name} row(s) under #{path}, fewer than the required #{count}" if held < count
+        if held < count
+          problems << "the #{side} has #{held} #{name} row(s) under #{path}, fewer than the required #{count}"
+        end
       end
     end
     unless verdicts[:unadjudicated_removed].empty?
@@ -218,7 +241,9 @@ module EngineDiagDiff
     unless verdicts[:unadjudicated_added].empty?
       problems << "#{verdicts[:unadjudicated_added].size} added row(s) without a named-mechanism adjudication"
     end
-    problems << "#{verdicts[:stale].size} adjudication entr(ies) match no removed or added row" unless verdicts[:stale].empty?
+    unless verdicts[:stale].empty?
+      problems << "#{verdicts[:stale].size} adjudication entr(ies) match no removed or added row"
+    end
     problems
   end
 
@@ -226,16 +251,20 @@ module EngineDiagDiff
     lines = ["### Diagnostic differential#{" (`#{rule}`)" if rule}", "",
              "Base #{base.size} row(s), head #{head.size}: #{changes[:removed].size} removed, " \
              "#{changes[:added].size} added.", "Merge base (the `base:` of an adjudication entry): `#{base_sha}`.", ""]
-    adjudicated = lambda { |pairs| pairs.map { |row, e| "#{format_row(row)} — #{e['verdict']}: #{e['reason']}" } }
+    adjudicated = ->(pairs) { pairs.map { |row, e| "#{format_row(row)} — #{e['verdict']}: #{e['reason']}" } }
     section(lines, "Removed, adjudicated", adjudicated.call(verdicts[:removed]))
     section(lines, "Removed, NOT adjudicated", verdicts[:unadjudicated_removed].map { |row| format_row(row) })
     section(lines, "Added, adjudicated", adjudicated.call(verdicts[:added]))
     section(lines, "Added, NOT adjudicated (a head firing outside the base's needs a named mechanism)",
             verdicts[:unadjudicated_added].map { |row| format_row(row) })
-    section(lines, "Adjudication entries ignored (other base)", ignored.map { |entry| entry.slice("base", *ADJUDICATION_KEY).to_s })
+    section(lines, "Adjudication entries ignored (other base)", ignored.map do |entry|
+      entry.slice("base", *ADJUDICATION_KEY).to_s
+    end)
     section(lines, "Stale adjudication entries", verdicts[:stale].map { |entry| entry.slice(*ADJUDICATION_KEY).to_s })
     counts = verdicts[:removed].map { |_, entry| entry["verdict"] }.tally
-    lines << "Adjudicated: #{REMOVED_VERDICTS.map { |verdict| "#{counts.fetch(verdict, 0)} #{verdict}" }.join(', ')}, " \
+    lines << "Adjudicated: #{REMOVED_VERDICTS.map do |verdict|
+      "#{counts.fetch(verdict, 0)} #{verdict}"
+    end.join(', ')}, " \
              "#{verdicts[:added].size} #{ADDED_VERDICT}." << ""
     problems.each { |problem| lines << "**FAILED:** #{problem}." }
     lines.join("\n")
@@ -256,6 +285,51 @@ module EngineDiagDiff
     JSON.parse(raw.lines.last)
   end
 
+  # The corpus configuration's `paths:` as the engine's own loader resolves them, in a fresh process: `declared` says
+  # whether the configuration names `paths:` at all, and `paths` are corpus-relative where they lie inside the corpus.
+  # Only ever called in a `--corpus-paths` child.
+  def corpus_paths(engine_dir, corpus_dir)
+    $LOAD_PATH.unshift(File.join(engine_dir, "lib"))
+    require "rigor/configuration"
+    loaded = $LOADED_FEATURES.grep(%r{/rigor/configuration\.rb\z}).first.to_s
+    abort("rigor/configuration loaded from #{loaded}, not #{engine_dir}") unless loaded.start_with?("#{engine_dir}/")
+    Dir.chdir(corpus_dir) do
+      config = Rigor::Configuration.discover
+      declared = config && Rigor::Configuration.load_with_includes(config).fetch("paths", nil)
+      paths = declared.nil? ? [] : Rigor::Configuration.load(config).paths
+      root = "#{Dir.pwd}/"
+      { "config" => config, "declared" => !declared.nil?, "paths" => paths.map { |path| path.delete_prefix(root) } }
+    end
+  end
+
+  def run_corpus_paths(engine_dir, corpus_dir)
+    raw, status = Open3.capture2(RbConfig.ruby, File.expand_path(__FILE__), "--corpus-paths", engine_dir, corpus_dir,
+                                 chdir: ROOT)
+    abort("corpus configuration read for #{engine_dir} failed (#{status.inspect})") unless status.success?
+    JSON.parse(raw.lines.last)
+  end
+
+  # The targets a run measures and where they came from. Pure: `corpus` is {corpus_paths}' answer, needed only when no
+  # `--target` is given.
+  def resolve_targets(explicit, corpus)
+    return { targets: explicit, source: :explicit } unless explicit.empty?
+
+    paths = corpus.fetch("declared") ? corpus.fetch("paths") : []
+    return { targets: paths, source: corpus.fetch("config") } unless paths.empty?
+
+    { targets: ["lib"], source: :fallback }
+  end
+
+  def describe_targets(resolved)
+    targets = resolved.fetch(:targets).join(", ")
+    case resolved.fetch(:source)
+    when :explicit then "Measuring targets: #{targets} (--target)"
+    when :fallback
+      "Measuring targets: #{targets} (no --target, and the corpus configuration names no paths:; falling back to lib)"
+    else "Measuring targets: #{targets} (no --target; the corpus configuration #{resolved.fetch(:source)} paths:)"
+    end
+  end
+
   def run(options)
     entries = load_adjudication(options[:adjudication])
     Dir.mktmpdir("rigor-diag-diff") do |scratch|
@@ -266,9 +340,14 @@ module EngineDiagDiff
       head_dir = File.join(tmp, "head")
       EngineAllocAB.materialise(options.fetch(:base), base_dir, EngineAllocAB::ENGINE_PATHS)
       EngineAllocAB.materialise(options.fetch(:head), head_dir, EngineAllocAB::ENGINE_PATHS)
-      targets = options.fetch(:targets)
+      config = options.fetch(:targets).empty? ? run_corpus_paths(head_dir, corpus) : nil
+      resolved = resolve_targets(options.fetch(:targets), config)
+      puts describe_targets(resolved)
+      targets = resolved.fetch(:targets)
       base_sha = EngineAllocAB.git("rev-parse", options.fetch(:base)).strip
-      result = report(base_sha: base_sha, base_rows: run_child(base_dir, corpus, targets), head_rows: run_child(head_dir, corpus, targets),
+      base_rows = run_child(base_dir, corpus, targets)
+      head_rows = run_child(head_dir, corpus, targets)
+      result = report(base_sha: base_sha, base_rows: base_rows, head_rows: head_rows,
                       rule: options[:rule], entries: entries, require_base_rows: options.fetch(:require_base_rows),
                       floors: options.fetch(:floors))
       puts result[:text]
@@ -282,6 +361,11 @@ if $PROGRAM_NAME == __FILE__
   if ARGV.first == "--measure"
     _, engine_dir, corpus_dir, *targets = ARGV
     puts JSON.generate(EngineDiagDiff.measure(engine_dir, corpus_dir, targets))
+    exit 0
+  end
+  if ARGV.first == "--corpus-paths"
+    _, engine_dir, corpus_dir = ARGV
+    puts JSON.generate(EngineDiagDiff.corpus_paths(engine_dir, corpus_dir))
     exit 0
   end
 
@@ -299,7 +383,6 @@ if $PROGRAM_NAME == __FILE__
     parser.on("--summary PATH") { |v| options[:summary] = v }
   end.parse!
   abort("--base and --head are required") unless options[:base] && options[:head]
-  options[:targets] = ["lib"] if options[:targets].empty?
   abort("--corpus and --corpus-dir are exclusive") if options[:corpus] && options[:corpus_dir]
   exit EngineDiagDiff.run(options)
 end

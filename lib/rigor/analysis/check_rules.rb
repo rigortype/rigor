@@ -1443,14 +1443,16 @@ module Rigor
         end
 
         # ADR-67 WD6b — the argument-position analogue: true when `arg` is rooted at an inferred-parameter
-        # local. The argument-type-mismatch rule declines on it for the same lower-bound reason.
+        # local. The argument-type-mismatch rule declines on it for the same lower-bound reason. `scope` is the
+        # call's, and the receiver and any earlier argument run before `arg` and may rebind what a conditional's
+        # predicate in it reads (`m((c = false; 1), c ? param : "x")`), so a predicate there is never folded.
         def inferred_param_argument?(arg, scope)
-          inferred_param_rooted?(arg, scope)
+          inferred_param_rooted?(arg, scope, fold: false)
         end
 
         # ADR-67 WD6b — see {CheckRules::InferredParamGuard} for the shared root-walk contract.
-        def inferred_param_rooted?(node, scope)
-          InferredParamGuard.rooted?(node, scope)
+        def inferred_param_rooted?(node, scope, fold: true)
+          InferredParamGuard.rooted?(node, scope, fold: fold)
         end
 
         def constant_class_name(value)

@@ -357,6 +357,22 @@ RSpec.describe "ADR-67 WD6 check-walk parameter inference" do
           def shadowed(name) = Array(name).upcase
         end
 
+        class Arguments
+          def earlier_argument(name)
+            c = true
+            Math.hypot((c = false; 1.0), c ? name : "x")
+          end
+
+          def receiver_first(name)
+            c = true
+            (c = false; Math).hypot(1.0, c ? name : "x")
+          end
+
+          def self.Array(x) = 5
+
+          def self.singleton_shadowed(name) = Array(name).upcase
+        end
+
         q = Quiet.new
         [true, false].each do |c|
           q.ternary(nil, c)
@@ -382,6 +398,9 @@ RSpec.describe "ADR-67 WD6 check-walk parameter inference" do
         r.two_arguments(nil)
         r.explicit_receiver(nil)
         Shadow.new.shadowed(nil)
+        Arguments.new.earlier_argument(1.0)
+        Arguments.new.receiver_first(1.0)
+        Arguments.singleton_shadowed(nil)
       RUBY
     end
 
@@ -399,7 +418,7 @@ RSpec.describe "ADR-67 WD6 check-walk parameter inference" do
       RBS
     end
 
-    let(:lines) do
+    let(:diagnostics) do
       Dir.mktmpdir("rigor-2280") do |dir|
         Dir.mkdir(File.join(dir, "sig"))
         File.write(File.join(dir, "sig", "loud.rbs"), loud_rbs)
@@ -409,9 +428,13 @@ RSpec.describe "ADR-67 WD6 check-walk parameter inference" do
           "paths" => [], "parameter_inference" => true, "signature_paths" => [File.join(dir, "sig")]
         )
         runner = Rigor::Analysis::Runner.new(configuration: config, cache_store: nil)
-        guarded_run(runner, [path]).diagnostics.select { |d| d.rule == "call.undefined-method" }.map(&:line)
+        guarded_run(runner, [path]).diagnostics
       end
     end
+
+    let(:lines) { diagnostics.select { |d| d.rule == "call.undefined-method" }.map(&:line) }
+
+    let(:mismatch_lines) { diagnostics.select { |d| d.rule == "call.argument-type-mismatch" }.map(&:line) }
 
     it "declines on a ternary whose branches are both the parameter" do
       expect(lines).not_to include(2)
@@ -503,6 +526,19 @@ RSpec.describe "ADR-67 WD6 check-walk parameter inference" do
 
     it "does not read Array as the conversion when the class defines its own" do
       expect(lines).to include(87)
+    end
+
+    it "does not read Array as the conversion when the singleton class defines its own" do
+      expect(lines).to include(103)
+    end
+
+    # The argument guard runs in the call's scope, after the receiver and earlier arguments have run.
+    it "does not fold an argument's predicate an earlier argument rebinds" do
+      expect(mismatch_lines).to include(93)
+    end
+
+    it "does not fold an argument's predicate the receiver rebinds" do
+      expect(mismatch_lines).to include(98)
     end
   end
 end

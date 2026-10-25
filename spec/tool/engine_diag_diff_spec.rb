@@ -140,7 +140,8 @@ RSpec.describe "tool/engine_diag_diff.rb" do
                                                 "--summary", summary])
 
         expect { EngineDiagDiff.run(options) }
-          .to output(/\AMeasuring targets: app \(no --target; the corpus configuration \.rigor\.yml paths:\)$/).to_stdout
+          .to output(/\AMeasuring targets: app \(no --target; the corpus configuration \.rigor\.yml paths:\)$/)
+          .to_stdout
         expect(EngineDiagDiff).to have_received(:run_child).with(anything, anything, ["app"]).twice
         expect(File.read(summary)).to start_with("Measuring targets: app (no --target;")
       end

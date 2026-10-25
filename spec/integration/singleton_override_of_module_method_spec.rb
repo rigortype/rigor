@@ -51,6 +51,37 @@ RSpec.describe "a project singleton override of a Module method wins on the clas
     RUBY
   end
 
+  # The instance side reaches `Kernel#inspect` / `#to_s`, never the class's singleton `def`.
+  it "keeps String for an instance receiver of a class with singleton inspect / to_s defs" do
+    expect(dumps(<<~RUBY)).to eq(%w[String String])
+      class Gi; def self.inspect = 1; def self.to_s = 2; end
+      Rigor.dump_type(Gi.new.inspect) # "#<Gi>"
+      Rigor.dump_type(Gi.new.to_s) # "#<Gi>"
+    RUBY
+  end
+
+  # A nearer class defining the name without a `def` is the method Ruby calls, so the farther `def` must not answer.
+  it "types the call Dynamic when a nearer class defines the name without a def" do
+    expect(dumps(<<~RUBY)).to eq(["Dynamic[top]"] * 5)
+      class B1; def self.name = nil; def self.to_s = nil; def self.foo = nil; end
+      class S1 < B1; define_singleton_method(:name) { "s" }; end
+      class S2 < B1; singleton_class.define_method(:name) { "s" }; end
+      class S3 < B1; singleton_class.attr_reader :name; end
+      class S4 < B1; define_singleton_method(:to_s) { "s" }; end
+      class S5 < B1; define_singleton_method(:foo) { "s" }; end
+      Rigor.dump_type(S1.name) # "s"
+      Rigor.dump_type(S2.name) # "s"
+      Rigor.dump_type(S3.name) # nil
+      Rigor.dump_type(S4.to_s) # "s"
+      Rigor.dump_type(S5.foo) # "s"
+    RUBY
+    expect(undefined_methods(<<~RUBY)).to eq([])
+      class B1; def self.name = nil; end
+      class S1 < B1; define_singleton_method(:name) { "s" }; end
+      S1.name.upcase
+    RUBY
+  end
+
   # The def may not run, so neither its type nor String alone is the answer.
   it "does not answer String alone for a def behind a condition" do
     expect(dumps(<<~RUBY)).to eq(["Dynamic[top]"])
@@ -64,12 +95,14 @@ RSpec.describe "a project singleton override of a Module method wins on the clas
                    "base.rb" => "class Base3; def self.name = 42; end\n",
                    "other.rb" => "class Other3; def self.name = :other; end\n",
                    "sub.rb" => "class Sub3 < Base3; end\n",
+                   "dyn.rb" => "class Dyn3 < Base3; define_singleton_method(:name) { \"d\" }; end\n",
                    "use.rb" => <<~RUBY
                      class Plain3; end
                      Rigor.dump_type(Base3.name) # 42
                      Rigor.dump_type(Sub3.name) # 42
                      Rigor.dump_type(Plain3.name) # "Plain3"
+                     Rigor.dump_type(Dyn3.name) # "d"
                    RUBY
-                 })).to eq(%w[42 42 String])
+                 })).to eq(["42", "42", "String", "Dynamic[top]"])
   end
 end

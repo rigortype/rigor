@@ -2642,7 +2642,35 @@ module Rigor
         found = scope.singleton_def_through_ancestors(class_name, method_name)
         owner = found.last
         found = [nil, nil] if owner && SingletonExternalAhead.withhold?(scope, class_name, method_name, owner)
+        found = [nil, nil] if found.last && dynamic_singleton_definer_ahead?(class_name, method_name, found.last)
         table[key] = found
+      end
+
+      SINGLETON_WILDCARD_SLOT = %i[singleton *].freeze
+      private_constant :SINGLETON_WILDCARD_SLOT
+
+      # Issue #2284 — a project entry nearer than the `def`'s owner on the singleton chain may define the name
+      # without a `def` (`define_singleton_method(:x)`, `singleton_class.define_method(:x)` or `attr_*`, a computed
+      # name), which the def tables do not hold: `class S < B; define_singleton_method(:x) { "s" }; end` calls S's
+      # block, not `B.x`. Those definers contest the entry's visibility slot whether or not a `def` is recorded
+      # (#1984, #2013), so that contest is the census read here; the farther `def` is withheld and the call types
+      # `Dynamic`.
+      def dynamic_singleton_definer_ahead?(class_name, method_name, owner)
+        discovery = scope.discovery
+        name = method_name.to_sym
+        chain = Scope::ResolutionChain.for(scope, class_name.to_s, :singleton, :methods)
+        chain.entries.each do |entry|
+          next if entry.external?
+          return false if entry.name == owner.to_s
+
+          singleton = entry.side == :singleton
+          Analysis::DependencyRecorder.read_visibility(entry.name, name)
+          return true if discovery.contested?(:discovered_method_visibilities,
+                                              [entry.name, singleton ? [:singleton, name] : name])
+          return true if singleton &&
+                         discovery.contested?(:discovered_method_visibilities, [entry.name, SINGLETON_WILDCARD_SLOT])
+        end
+        false
       end
 
       # The project-side singleton-method band: a `Foo.bar` call resolved against a `class << …` / `def self.…`

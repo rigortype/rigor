@@ -444,11 +444,13 @@ RSpec.describe "sig/ provenance (ADR-107 G3)" do
     end
 
     it "compares a Set return with the `Set[untyped]` sig-gen writes, not the element the engine read (#2177, #2317)" do
-      rows = audit_fixture(ruby: "class Widget\n  def n\n    Set[1]\n  end\nend\n",
-                           rbs: "class Widget\n  def n: () -> Set[Integer]\nend\n")
-             .reject { |row| row.classification == SigProvenanceAuditor::NON_METHOD }
-      expect(rows.map(&:classification)).to eq([SigProvenanceAuditor::DECLARED_DIVERGENT])
-      expect(rows.first.detail).to include("sig-gen infers Set[untyped]")
+      # The reader returns an ivar seeded from the declared `Set[Symbol]` parameter: sig-gen's raw carrier is
+      # `Set[Symbol]`, which equals the declaration, but the spelling it writes is `Set[untyped]`.
+      ruby = "class Widget\n  def initialize(names)\n    @names = names\n  end\n  def n\n    @names\n  end\nend\n"
+      rbs = "class Widget\n  def initialize: (Set[Symbol] names) -> void\n  def n: () -> Set[Symbol]\nend\n"
+      row = audit_fixture(ruby: ruby, rbs: rbs).find { |r| r.declaration.method_name == "n" }
+      expect(row.classification).to eq(SigProvenanceAuditor::DECLARED_DIVERGENT)
+      expect(row.detail).to eq("declared Set[Symbol], sig-gen infers Set[untyped]")
     end
 
     it "calls a Set return declared as sig-gen writes it `generated`" do

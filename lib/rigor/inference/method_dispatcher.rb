@@ -1089,7 +1089,6 @@ module Rigor
 
         scope = context.scope
         return false if scope.nil?
-        return true if scope.discovered_method?(receiver_type.class_name, context.method_name, :singleton)
 
         !scope.singleton_def_through_ancestors(receiver_type.class_name, context.method_name).last.nil?
       end

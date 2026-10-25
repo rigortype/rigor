@@ -113,9 +113,8 @@ module Rigor
         },
         # ADR-13 § "Canonical type-function additions" — five shape-projection type functions
         # that the `rigor-typescript-utility-types` plugin (and any other plugin that ships a
-        # shape-projection vocabulary) maps onto. Phase A handles `HashShape` carriers;
-        # non-shape inputs return the input unchanged (the lossy-projection diagnostic lands
-        # in slice 5).
+        # shape-projection vocabulary) maps onto. Non-shape inputs return the input unchanged;
+        # the Resolver records `dynamic.shape.lossy-projection` for them.
         "pick_of" => lambda { |args|
           return nil unless args.size == 2
 
@@ -148,7 +147,7 @@ module Rigor
       # `Class[range]` — a numeric class head bounded by a Ruby range literal (ADR-109). The
       # builder receives the `Range` value and returns the carrier, or `nil` when the range is
       # empty or its endpoints are not literals of the head class; `nil` surfaces as the ordinary
-      # unresolved-payload diagnostic. `Float` joins this table with the `FloatRange` carrier.
+      # unresolved-payload diagnostic. `Float` builds a `FloatRange` carrier.
       RANGE_HEAD_BUILDERS = {
         "Integer" => lambda { |range|
           lo = range.begin
@@ -186,8 +185,7 @@ module Rigor
       # `Array<Integer>` and returns a `Rigor::Type` (or `nil`). Bounds are signed integer
       # literals. A reversed pair (`min` > `max`) is declined as `nil` like every other shape
       # mismatch, so the caller surfaces `dynamic.rbs-extended.unresolved` at the annotation;
-      # `Type::IntegerRange` raises on it instead, and that `ArgumentError` used to escape as an
-      # `internal analyzer error` that abandoned the whole Ruby file.
+      # `Type::IntegerRange` would raise on it instead, which must not escape the analyzer.
       PARAMETERISED_INT_BUILDERS = {
         "int" => lambda { |bounds|
           return nil unless bounds.size == 2
@@ -276,14 +274,14 @@ module Rigor
       # grammar:
       #
       #   type        := simple_name | parametric
-      #   simple_name := /[a-z][a-z0-9-]*/
+      #   simple_name := /[a-z][a-z0-9_-]*/
       #   parametric  := simple_name '[' type_arg_list ']'
       #                | simple_name '<' int_bound_list '>'
       #   type_arg_list := type_arg (',' type_arg)*
       #   type_arg    := range_literal | type | class_name
       #   class_name  := /[A-Z][A-Za-z0-9_]*(?:::[A-Z][A-Za-z0-9_]*)*/
       #   range_literal := endpoint? ('..' | '...') endpoint?     (at least one side written)
-      #   endpoint    := signed_int | 'nil'
+      #   endpoint    := signed_int | float_literal | 'nil' | 'Float::INFINITY' | 'Float::MAX'
       #   int_bound_list := signed_int (',' signed_int)*
       #   signed_int  := /-?\d+/
       #

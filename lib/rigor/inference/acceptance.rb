@@ -469,9 +469,10 @@ module Rigor
         end
 
         # Returns `other_type` rewritten so its type_args have the same arity as `self_type.type_args`, or
-        # `nil` if no projection is known. Today only the Hash → Enumerable projection is hand-rolled; a
-        # general RBS-driven implementation that consults `definition.ancestors[i].args` for arbitrary
-        # subclass / module-include relations is the principled follow-up.
+        # `nil` if no projection is known. Today the Hash → Enumerable and ArithmeticSequence → Enumerator
+        # projections are hand-rolled; a general RBS-driven implementation that consults
+        # `definition.ancestors[i].args` for arbitrary subclass / module-include relations is the principled
+        # follow-up.
         def project_to_target_arity(self_type, other_type)
           return nil if self_type.type_args.size == other_type.type_args.size
           return nil if self_type.type_args.empty? || other_type.type_args.empty?
@@ -881,8 +882,8 @@ module Rigor
         # `Refined[base, predicate]` accepts another type X when the base accepts the *base* of X *and* X is
         # provably contained in the predicate's value set. The base check is delegated to
         # `accepts(self.base, X.base)` so handlers like `accepts_nominal` see Nominal-vs-Nominal and return
-        # their normal answer (the inner `accepts_nominal` does not register `Refined` / `Difference` as
-        # direct other-shapes — projecting to the base is what makes the comparison meaningful).
+        # their normal answer (`accepts_nominal` projects a `Refined` / `Difference` other onto its base,
+        # which is what makes the comparison meaningful).
         #
         # Provability rules in gradual mode (the conservative analogue of `accepts_difference`):
         #

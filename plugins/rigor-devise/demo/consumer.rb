@@ -4,8 +4,8 @@
 # demo.rb. Without the plugin these would all fall through to `call.undefined-method` (or Dynamic[T] at
 # best via the user-class fallback tier).
 #
-# Slice 3 floor (WD13): the synthesised readers return Dynamic[T]; precise return-type promotion is the
-# slice-6 ceiling. The substrate's job here is making sure the methods resolve at all.
+# The substrate's job here is making sure the methods resolve at all; return types follow the module's
+# RBS when it is authored, and are untyped otherwise.
 
 def authenticate(user, password)
   return :no_password unless user.valid_password?(password)

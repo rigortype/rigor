@@ -173,9 +173,8 @@ module Rigor
       # copies one tag body once, and the second `@author` is the same copy seen from the other end, not a
       # second reading. Only a node OUTSIDE the winning run's own compiled span counts, which is what keeps
       # the busy lines of a real view answerable while the cross-tag repeat (`<%= v %> <%= v.to_s %>`, or
-      # `<%= v %><%= "v" %>` probed at the STRING's `v`) still declines — the family a plugin-exported tag
-      # span would answer instead
-      # (see the PR), and the follow-up this rule is deliberately conservative ahead of.
+      # `<%= v %><%= "v" %>` probed at the STRING's `v`) still declines. That family is what a plugin-exported
+      # tag span would answer instead, and it is the follow-up this rule is deliberately conservative ahead of.
       #
       # `spill` is the nearest NON-BLANK compiled line above this template line's own, where a hoisted
       # leading-text literal lives. Only a string literal the run does NOT contain counts there. A code

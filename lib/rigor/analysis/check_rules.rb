@@ -53,7 +53,7 @@ module Rigor
     #
     # - implicit-self calls (no `node.receiver`) — too noisy
     #   without per-method RBS for every helper in the class.
-    # - dynamic / unknown receivers (`Dynamic[T]`, `Top`, `Union`)
+    # - dynamic / unknown receivers (`Dynamic[T]`, `Top`)
     #   — by definition we cannot enumerate the method set.
     # - shape carriers: `Tuple` → "Array", `HashShape` → "Hash",
     #   `Constant` → the constant's class — `concrete_class_name`
@@ -86,9 +86,8 @@ module Rigor
 
       module_function
 
-      # Yields diagnostics for every unrecognised method call on
-      # a typed receiver in `root`'s subtree. The caller MUST
-      # have already produced `scope_index` through
+      # Returns the diagnostics for `root`'s subtree across the rule
+      # catalogue. The caller MUST have already produced `scope_index` through
       # `Rigor::Inference::ScopeIndexer.index(root, default_scope:)`.
       #
       # @param path — used to populate
@@ -750,7 +749,7 @@ module Rigor
           # branch below because a plugin is consulted ONCE for the whole receiver, union included, so the
           # gate belongs where that one consult is rather than duplicated into each shape's path.
           #
-          # The union side of that placement IS reachable, contrary to what this comment used to say. The
+          # The union side of that placement is reachable. The
           # shape needs a non-nil union of at least two RBS-DECLARED classes — an undeclared arm is an
           # ADR-26 open receiver and `union_arm_blocks_undefined_fire?` bails before the method lookup,
           # which is why the earlier probes read silent and were misread as the gate being unreachable.
@@ -797,13 +796,6 @@ module Rigor
             return union_undefined_method_diagnostic(path, call_node, receiver_type, scope, lexical_sites)
           end
 
-          # ADR-26 — a plugin may declare a class "open": one
-          # known to respond beyond its RBS-declared method
-          # surface (e.g. `ActiveRecord::Relation`, which
-          # delegates an unbounded set of user-defined scopes to
-          # its model). Flagging an undefined method on a class
-          # with an open dynamic surface is unsound, so the rule
-          # skips it.
           # An unbounded receiver surface: either a plugin-declared
           # open receiver (ADR-26 — e.g. `ActiveRecord::Relation`), or
           # a type Rigor synthesized (a missing-namespace module / a
@@ -1342,14 +1334,14 @@ module Rigor
         # (`METACLASS_ARMS`, "a `plugin_class : Class` really holds a `Plugin` subclass with `.manifest`");
         # the scalar rule enumerated `Module`'s own RBS instead and reported them.
         #
-        # Kept beside `unbounded_receiver_surface?` rather than folded into it: that predicate has eight
-        # other callers, and #742 had no evidence that any of them spoke on these receivers.
+        # Kept beside `unbounded_receiver_surface?` rather than folded into it: that predicate has other
+        # callers, and #742 had no evidence that any of them spoke on these receivers.
         #
         # Issue #879 supplied it for exactly one — `call.wrong-arity`, which decided `v.hexdigest(1, 2, 3)`
         # against `Digest::Instance`'s declaration on the same run where `v.no_such_method_zzz` was declined
         # as unenumerable. One receiver, one run, two answers about whether that surface can be read. The
         # reporter could make no other caller speak: `raise` on a module- or `Class`-typed operand is silent,
-        # and `Class`-typed `.new` with a wrong arity is silent too, so the other seven stay on
+        # and `Class`-typed `.new` with a wrong arity is silent too, so the other callers stay on
         # `unbounded_receiver_surface?` until something demonstrates otherwise.
         #
         # Arity takes {#unenumerable_receiver_shape?}, not this whole predicate: ADR-26's open receivers are
@@ -1845,16 +1837,15 @@ module Rigor
         # Slice 7 phase 11 — wrong-arity diagnostic. Fires when
         # an explicit-receiver `Prism::CallNode` resolves to a
         # method whose declared overloads do not admit the
-        # supplied positional argument count. The rule applies
-        # ONLY to the simplest overload shape (single overload,
-        # no `rest_positionals`, no keyword parameters, no
-        # block-required positionals); calls with `*splat`
-        # arguments, keyword arguments, or block-pass arguments
-        # are silently skipped to avoid false positives. The
-        # check piggybacks on the same scope-index lookup used
-        # by `undefined_method_diagnostic`; it returns nil
-        # when the call's receiver / RBS coverage / call shape
-        # disqualifies the rule.
+        # supplied positional argument count (across all
+        # overloads, see {#compute_arity_envelope}). Overloads
+        # with required keyword arguments or trailing positionals
+        # are not checked; calls with `*splat`, keyword, or
+        # block-pass arguments are silently skipped to avoid
+        # false positives. The check piggybacks on the same
+        # scope-index lookup used by `undefined_method_diagnostic`;
+        # it returns nil when the call's receiver / RBS coverage /
+        # call shape disqualifies the rule.
         # rubocop:disable-next Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
         def wrong_arity_diagnostic(path, call_node, scope_index, lexical_sites = nil)
           return nil if call_node.receiver.nil?
@@ -2990,8 +2981,7 @@ module Rigor
         # - Elsif chains (`subsequent` is itself an `IfNode`) ARE flagged — the entire downstream chain is
         #   unreachable when the outer predicate is a constant literal.
         #
-        # Broadening to inferred-constant predicates is queued for a later v0.1.x release once the loop /
-        # mutation gaps named above are closed.
+        # Inferred-constant predicates are the `flow.always-truthy-condition` rule's ({AlwaysTruthyConditionCollector}).
         def unreachable_branch_diagnostic(path, node, scope_index)
           scope = scope_index[node]
           return nil if scope.nil?
@@ -3381,12 +3371,9 @@ module Rigor
         # - Receiver must be Nominal / Singleton / Constant
         #   (the same `concrete_class_name` test).
         # - Method must be in RBS.
-        # - Method must have exactly ONE method type
-        #   (overload). Multi-overload checking is left for
-        #   a follow-up because picking the "intended"
-        #   overload requires the dispatcher's full
-        #   acceptance plumbing.
-        # - The selected overload must have NO
+        # - Overloads: a single method type is checked exactly; with several, an argument is a mismatch only
+        #   when every overload rejects it ({#multi_overload_argument_mismatch}).
+        # - The overload checked must have NO
         #   rest_positionals and NO trailing positionals —
         #   the two shapes under which argument N no longer
         #   binds to positional parameter N. Keyword
@@ -4096,16 +4083,14 @@ module Rigor
         #   OWN declared return, and the sibling override rules gate on `defined_on?` — this one did not.
         #   The inherited-declaration signal belongs to the ADR-35 family, which requires both sides
         #   authored. Decided in ADR-110 WD3.
-        # - Skips methods whose enclosing class isn't a `Type::Singleton` self_type that we can name
-        #   (top-level / module-level methods land outside the rule).
+        # - Skips methods whose enclosing `self` names no class (top-level methods land outside the rule).
         # - Skips methods whose body's last expression is absent or types as `Dynamic[top]` (the
         #   analyzer's fail-soft fallback) — emitting on `Dynamic[top]` would be noise.
         # - Compares the inferred body type against the declared return via `accepts?`:
         #     :yes   → silent
         #     :no    → emit at :error (severity_profile may re-stamp; default `balanced` keeps the
         #              authored severity).
-        #     :maybe → emit at :warning. Promoted to :error under `severity_profile: strict` per ADR-8 §
-        #              "Severity profile".
+        #     :maybe → silent (see {#compare_return}; ADR-8's `strict` promotion is deferred).
         def return_type_mismatch_diagnostic(path, def_node, scope_index)
           return nil if def_node.body.nil?
 

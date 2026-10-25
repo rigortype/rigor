@@ -96,7 +96,7 @@ module Rigor
         end
       end
 
-      # The `rigor-doctor` signal, read exactly as `rigor doctor` itself reads it: an RBS environment that built to
+      # The `rigor-doctor` signal: an RBS environment that built to
       # zero classes (analysis is hollow, so every other count is meaningless), or a `configuration-error` the run
       # already emitted. Checked first — with a broken setup the remaining diagnostics are not evidence of anything.
       def broken_environment?(result)

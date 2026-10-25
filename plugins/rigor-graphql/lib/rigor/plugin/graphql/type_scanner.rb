@@ -23,9 +23,8 @@ module Rigor
         }.freeze
 
         # The base class name a Schema::Object subclass MUST inherit from to be recognised. Match is on
-        # the rightmost segment of the superclass constant chain so both `GraphQL::Schema::Object` and
-        # the locally-aliased `BaseObject = GraphQL::Schema::Object` shape work when the alias's RHS is
-        # the canonical path.
+        # the last two segments of the superclass constant chain (see {#schema_subclass?}), so a locally
+        # aliased base such as `BaseObject = GraphQL::Schema::Object` is not followed.
         SCHEMA_OBJECT_TAIL = "Object"
         SCHEMA_ENUM_TAIL = "Enum"
         SCHEMA_INPUT_OBJECT_TAIL = "InputObject"
@@ -183,7 +182,7 @@ module Rigor
         private_class_method :statement_nodes
 
         # Walks every top-level `value "..."` call inside an enum subclass body and returns the value
-        # names as an Array<String>. Both shapes graphql-ruby accepts work:
+        # names. Both shapes graphql-ruby accepts work:
         #
         #     value "ACTIVE"
         #     value "DISABLED", value: :off, description: "..."
@@ -299,7 +298,7 @@ module Rigor
         end
         private_class_method :parse_field_call
 
-        # Resolves the `Type` positional argument to a `{type: "ClassName", list: bool}` tuple.
+        # Resolves the `Type` positional argument to a `type:` class name and a `list:` flag.
         # ArrayNode forms (`[String]` / `[Types::User]`) unwrap the single element and mark `list: true`.
         # Bare constant refs are not lists. Returns nil for unrecognised shapes (string types `"User"`,
         # Proc lazy types, etc.) so callers drop the field.
@@ -350,8 +349,8 @@ module Rigor
         end
         private_class_method :extract_nullability
 
-        # Returns the constant chain as an Array of String segments (`["GraphQL", "Schema", "Object"]`).
-        # Empty array for unrecognised node kinds.
+        # Returns the constant chain's segments, e.g. `["GraphQL", "Schema", "Object"]`. Empty for
+        # unrecognised node kinds.
         def constant_path_segments(node)
           case node
           when Prism::ConstantReadNode then [node.name.to_s]

@@ -10,7 +10,7 @@ module Rigor
       # Exception is the base of every Ruby error class (RuntimeError, StandardError, KeyError, …). The
       # Init_Exception block in `references/ruby/error.c` registers the entire hierarchy in one pass, so
       # the YAML carries 27 classes — but only the base `Exception` row is wired into `CATALOG_BY_CLASS`
-      # for v0.0.5. A `RuntimeError` receiver hits the Exception arm via `is_a?(Exception)` and the
+      # A `RuntimeError` receiver hits the Exception arm via `is_a?(Exception)` and the
       # catalog answers with the base-class entries; subclass-specific methods (`KeyError#receiver`,
       # `NameError#name`, …) intentionally miss the lookup until a later slice routes per-subclass
       # class_names.

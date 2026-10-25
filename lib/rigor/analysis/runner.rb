@@ -280,8 +280,7 @@ module Rigor
       # @param explain — surface fail-soft fallback events as `:info` diagnostics.
       # @param cache_store — the persistent cache the runner exposes to producers
       #   (`RbsConstantTable` and successors). Pass `nil` to disable caching for this run; the CLI's
-      #   `--no-cache` flag wires `nil` through. v0.0.9 group A slice 1 introduces the surface; later
-      #   slices route real producers through it.
+      #   `--no-cache` flag wires `nil` through.
       # @param workers — ADR-15 Phase 4b — when greater than zero, per-file analysis dispatches
       #   across a pool of N workers. Default `0` keeps the sequential code path bit-for-bit unchanged.
       #   Controlled via the `RIGOR_RACTOR_WORKERS` env var or `.rigor.yml` `parallel.workers:` (Phase 4c,
@@ -352,8 +351,8 @@ module Rigor
         @prebuilt = prebuilt
         @environment_override = environment
         # ADR-46 slice 1 — opt-in cross-file dependency recording. Off by default; when true,
-        # `analyze_file` records each file's cross-file reads into `file_dependencies` (the incremental
-        # cache, a later slice, consumes them).
+        # `analyze_file` records each file's cross-file reads into `file_dependencies`; the incremental
+        # cache consumes them.
         @record_dependencies = record_dependencies
         # ADR-24 slice 4a — opt-in unresolved-implicit-self-call recording. Off by default; when true,
         # `analyze_file` activates the engine choke-point recorder and collects each file's misses into
@@ -768,7 +767,8 @@ module Rigor
       # arg-flooring surface). Only meaningful right after a run populated the memo (baseline / recheck),
       # before the bucket rolls. Keys are held live here; the session Marshals them for the snapshot.
       #
-      # @return `{ [path, "Class#method" | "Class.method"] => { keys:, returns:, effects: } }`.
+      # @return the summaries keyed by `[path, "Class#method"]` (or `"Class.method"`), each holding `keys:`,
+      #   `returns:` and `effects:`.
       def return_summaries
         memo = Inference::ExpressionTyper.harvest_return_memo
         return {} if memo.empty?
@@ -828,7 +828,7 @@ module Rigor
       #
       # @param paths — analysis roots (nil → the configuration's `paths:`).
       # @param specs — each `{ class_name:, method_name:, singleton:, keys: [[receiver, args], …] }`.
-      # @return `{ [class_name, method_name, singleton] => [return_descriptor_or_nil, …] }`.
+      # @return the re-evaluated return descriptors, one per key, keyed by `[class_name, method_name, singleton]`.
       def evaluate_return_types(paths, specs)
         return {} if specs.empty?
 
@@ -1021,17 +1021,12 @@ module Rigor
         nil
       end
 
-      # The write half, run only after a miss, so the block never recomputes anything: it hands over the
-      # collections the analysis just produced — and the table the analysis already closed over them, so
-      # a warm hit re-runs neither the merge nor the fixpoint — validated against the same post-run
-      # dependency descriptor the diagnostics slot records. Fail-soft — a collection that will not
-      # Marshal (which nothing in {Effects::FileCollection} should be, and the fork pool already proves
-      # per file) costs the next run its warm start and nothing else.
-      # The write half, run only after a miss, so neither block recomputes anything. Two entries under one
+      # The write half, run only after a miss, so nothing here recomputes anything. Two entries under one
       # key descriptor and one dependency descriptor (#482): the summary a warm run serves from, and the
       # collections the incremental and fail-soft paths read. The summary is written LAST, so a run
       # interrupted between the two leaves a collections entry that the next run's summary miss simply
-      # re-collects — never a summary whose collections are absent.
+      # re-collects — never a summary whose collections are absent. A collection that will not Marshal
+      # costs the next run its warm start and nothing else.
       def store_effect_collections(descriptor, expansion, rbs_descriptor)
         return if descriptor.nil?
 
@@ -2056,8 +2051,7 @@ module Rigor
       # Editor mode § "Scope choice — option A". Under `buffer:` non-nil the per-file analysis emits
       # diagnostics ONLY for the buffer's logical path; the rest of `paths:` is consumed by the
       # project-wide pre-passes (synthetic methods, project-patched methods, plugin facts) but contributes
-      # no per-file diagnostics. This is the v1 cut before a per-file diagnostic cache exists; option B
-      # (full project + incremental cache) is queued.
+      # no per-file diagnostics. Option B (#146) narrows to the closure instead; see {#target_files}.
       #
       # The buffer's logical path is added to the file list even if it's not under `paths:` — per design §
       # "Failure envelope": "--instead-of=Y with Y not under any paths: directory → treated as a valid
@@ -2520,14 +2514,14 @@ module Rigor
         @discovery_seed ? @discovery_seed.dup : {}
       end
 
-      # Seeds the two OPT-IN pre-pass tables — the ones an ordinary run leaves empty, so they are absent from
-      # the seed entirely unless the project asked for them. Both ride this seed so a pooled `WorkerSession`
-      # scope resolves identically to the sequential path (ADR-15 sequential equivalence).
+      # Seeds the parameter-inference and constant-publication tables, each absent from the seed unless its
+      # opt-in ran, so a pooled `WorkerSession` scope resolves identically to the sequential path (ADR-15
+      # sequential equivalence).
       #
       # - ADR-67 WD6a `param_inferred_types`: the call-site parameter-inference table, populated only when the
       #   `parameter_inference:` gate ran the pre-pass.
-      # - Issue #352 `in_source_constants`: the `pre_eval:` constant publication, populated only when the
-      #   project lists `pre_eval:` files that declare publishable constants.
+      # - Issue #352 `in_source_constants`: the `pre_eval:` constant publication, merged with the project's
+      #   literal constant table (#644, see {#merged_seed_constants}).
       #
       # Extracted to keep {#project_scope_seed_tables} under the complexity budget.
       def seed_opt_in_pre_pass_tables(tables)

@@ -11,7 +11,7 @@ module Rigor
       # Kernel intrinsic shape-folding — precision tier for the `Kernel` module-functions whose return type
       # is a function of the argument's *shape*, not just its class.
       #
-      # Today the only catalogued intrinsic is `Kernel#Array`. The default RBS sig is
+      # `Kernel#Array` is the shape-sensitive fold. Its default RBS sig is
       # `Array(untyped) -> Array[untyped]`, which collapses to `Array[Dynamic[top]]` for every caller. This
       # tier short-circuits with a precise answer when the argument's type lattice tells us what the result
       # element type MUST be:

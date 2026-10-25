@@ -11,9 +11,8 @@ module Rigor
       # placeholder names. The actual translated values are not retained — the analyzer doesn't need them
       # and keeping them would bloat the cache slice.
       class LocaleIndex
-        # `placeholders` is a Hash: `locale_name => Set<String>`. `array_value` is true when at least one
-        # locale's leaf is an Array (used by `l(time, format:)` and similar). `value_kinds` is a Hash:
-        # `locale_name => Symbol` (`:string` / `:array` / `:hash`).
+        # `placeholders` maps each locale name to the `%{var}` placeholder names of its leaf. `value_kinds`
+        # maps each locale name to the leaf's kind (`:string` / `:array` / `:hash` / `:scalar`).
         Entry = Data.define(:dotted_key, :placeholders, :value_kinds) do
           def locales
             placeholders.keys

@@ -14,8 +14,8 @@ module Rigor
       # * `new(str)` / `new(str, opts)` — constructs a Regexp at fold time when the pattern argument is a
       #   `Constant[String]`. The optional second argument may be a `Constant[Integer]` (flag bits), a
       #   `Constant[true/false]` (IGNORECASE shorthand), or absent. Returns `Constant[Regexp]`.
-      # * `compile(str)` / `compile(str, opts)` — `Regexp.compile` is a documented alias of `Regexp.new`
-      #   (same C entry point, `rb_reg_s_new`); shares `fold_new` verbatim.
+      # * `compile(str)` / `compile(str, opts)` — `Regexp.compile` is a documented alias of `Regexp.new`;
+      #   shares `fold_new` verbatim.
       # * `union(*patterns)` / `union(array)` — builds the combined pattern at inference time when every
       #   element is a `Constant[String]` or `Constant[Regexp]`. Delegates to the real `Regexp.union` so the
       #   zero-arg (`/(?!)/`), single-array-argument, and pre-built-Regexp-argument forms all match Ruby's

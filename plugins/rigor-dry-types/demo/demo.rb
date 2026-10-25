@@ -10,7 +10,7 @@
 # `:dry_type_aliases` fact mapping `Types::String` → `String`, `Types::Integer` → `Integer`, etc.
 #
 # At slice 1 the observable change is fact-publication only; the downstream uplift (e.g., promoting
-# `rigor-dry-struct` reader returns from Dynamic[T] to Nominal[String]) lands in a later slice that wires
+# `rigor-dry-struct` reader returns from untyped to `String`) lands in a later slice that wires
 # the fact through the dispatcher.
 
 module Types

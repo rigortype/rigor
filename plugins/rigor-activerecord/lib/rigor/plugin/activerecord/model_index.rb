@@ -29,14 +29,12 @@ module Rigor
       # {Entry} resolves its table from the root model and inherits the chain's declared associations /
       # enums / aliases / scopes / validations / callbacks / macro methods.
       class ModelIndex
-        # `associations` is a frozen `Array<Hash>` where each row carries `{ name:, kind:, target:,
-        # nullable: }`:
+        # `associations` is a frozen list of rows `{ name:, kind:, target:, nullable: }`:
         #
-        # - `name`   — String, the association method name as the user invokes it (`"posts"`).
+        # - `name`   — the association method name as the user invokes it (`"posts"`).
         # - `kind`   — `:singular` (`belongs_to` / `has_one`) or `:collection` (`has_many`).
-        # - `target` — String, the target class name resolved either from an explicit `class_name:`
-        #              option or via {Inflector.classify}.
-        # - `nullable` — Boolean; whether a `:singular` accessor can return `nil`. `has_one` → `true`;
+        # - `target` — the target class name, from an explicit `class_name:` option or via {Inflector.classify}.
+        # - `nullable` — whether a `:singular` accessor can return `nil`. `has_one` → `true`;
         #              `belongs_to` → `false` (required by default since Rails 5) unless `optional: true`
         #              / `required: false`. Meaningless for `:collection` rows.
         #
@@ -71,27 +69,23 @@ module Rigor
 
           def association_names = associations.map { |a| a[:name] }
 
-          # `enums` is `Hash<column_name => Array<value_name>>`.
+          # `enums` maps a column name to its value names.
           def enum?(name) = enums.key?(name.to_s)
           def enum_values(name) = enums.fetch(name.to_s, [])
 
-          # `scopes` is `Array<scope_name>`.
           def scope?(name) = scopes.include?(name.to_s)
 
-          # `validations` is `Array<attribute_name>` covering both `validates :name, ...` and the
-          # `validates_*_of :name, ...` shorthand families.
+          # `validations` covers both `validates :name, ...` and the `validates_*_of :name, ...` shorthand families.
           def validation?(name) = validations.include?(name.to_s)
           def validated_attributes = validations
 
-          # `callbacks` is `Array<{ name:, callback: }>`.
           def callback_targets = callbacks.map { |c| c[:name] }
 
-          # `aliases` is `Hash<alias_name => target_attribute>` populated from `alias_attribute`
-          # declarations.
+          # `aliases` maps an alias name to its target attribute, from `alias_attribute` declarations.
           def alias?(name) = aliases.key?(name.to_s)
           def resolve_alias(name) = aliases[name.to_s]
 
-          # `macro_methods` is `Array<method_name>` — the instance methods a declaration macro installs that
+          # `macro_methods` lists the instance methods a declaration macro installs that
           # none of the sets above already carries (#1049): `delegate`'s names, the Paperclip / Active
           # Storage attachment readers, and an `enum`'s per-value predicates. Names only, with no type: a
           # consumer asks "does this model answer `followers_count`?", which is what a fail-closed check
@@ -312,7 +306,7 @@ module Rigor
           seen.values.map(&:freeze).freeze
         end
 
-        # `Hash<column => Array<value>>` merged across the STI chain; a child redeclaration of the same
+        # Enum value lists merged across the STI chain; a child redeclaration of the same
         # enum column overrides the ancestor's value list.
         def self.merge_enums(chain)
           chain.each_with_object({}) do |row, acc|
@@ -320,7 +314,7 @@ module Rigor
           end.freeze
         end
 
-        # `Hash<alias => target>` merged across the STI chain.
+        # Alias map merged across the STI chain.
         def self.merge_aliases(chain)
           chain.each_with_object({}) do |row, acc|
             (row[:aliases] || {}).each { |name, target| acc[name.to_s] = target.to_s }

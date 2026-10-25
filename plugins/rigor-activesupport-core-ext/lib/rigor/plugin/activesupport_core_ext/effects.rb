@@ -12,7 +12,7 @@ module Rigor
       # the core_ext predicate surface — the single cheapest purity win in a Rails app, per WD10 — is issue
       # #388 and lands in this plugin's shipped RBS, not here (`try` was audited and skipped: it dispatches
       # to whatever method the caller names, so its purity is a fact about the call site, not about `try`).
-      # One row below (`in_time_zone_row`) is #388's own addition: `DateTime#in_time_zone` reads `Time.zone`
+      # The `in_time_zone_rows` group is #388's own addition: `DateTime#in_time_zone` reads `Time.zone`
       # through a default argument, a gap the RBS sweep found but can only fix here.
       #
       # ## The clock

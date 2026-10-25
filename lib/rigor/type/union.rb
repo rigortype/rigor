@@ -49,7 +49,7 @@ module Rigor
         end
       end
 
-      # ADR-1 § "RBS round-trip is lossless" + the value-lattice rule `untyped | T = untyped` (every `T`
+      # ADR-1 § "Erasure Must Be Conservative" + the value-lattice rule `untyped | T = untyped` (every `T`
       # is gradually consistent with `untyped`). When any union member erases to `"untyped"`, the whole
       # union erases to `"untyped"` — the RBS surface has no carrier for "Dynamic-origin alongside a
       # static facet", and the gradual-consistency contract guarantees the substitution is sound at every

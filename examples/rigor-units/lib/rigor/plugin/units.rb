@@ -72,8 +72,7 @@ module Rigor
         float: "Float"
       }.freeze
 
-      # Inverse map — Rigor type → dimension Symbol. Keyed on the nominal class name; non-class carriers (Constant,
-      # IntegerRange) fall through and the contribution declines.
+      # Inverse map — nominal class name → dimension Symbol, used by {#dimension_for_type} for `Nominal` carriers.
       NOMINAL_DIMENSIONS = {
         "Distance" => :distance,
         "Time" => :time,

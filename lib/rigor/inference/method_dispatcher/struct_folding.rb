@@ -14,8 +14,8 @@ module Rigor
       #
       # A `Struct` instance is mutable (`s.x = v`, `s[:x] = v`, escape), so a member map bound to a
       # variable can be invalidated by a later write. A member read folds off a **fresh** instance (the
-      # transient receiver of a `.new(...).x` / `.with(...).x` chain, unmutatable between materialisation
-      # and the read — slices 1+2), off a **fold-safe stored local** the {Inference::StructFoldSafety} scan
+      # transient receiver of a `.new(...).x` chain, unmutatable between materialisation and the read —
+      # slices 1+2), off a **fold-safe stored local** the {Inference::StructFoldSafety} scan
       # proved is never mutated / aliased / escaped (slice 3), or off a **setter-mutated fold-safe local**
       # whose bindings {#apply_setter_writeback} keeps current (slice 4). Any other stored receiver degrades
       # to `Dynamic[top]` rather than fold a possibly-stale value.
@@ -255,8 +255,8 @@ module Rigor
         end
 
         # A member read is foldable when the receiver is either FRESH (the transient result of a
-        # `.new(...)`/`.with(...)` chain, which cannot have been mutated between materialisation and this
-        # read) or a FOLD-SAFE stored local (ADR-48 slice 3 — `StructFoldSafety` proved the binding is
+        # `.new(...)` chain, which cannot have been mutated between materialisation and this read) or a
+        # FOLD-SAFE stored local (ADR-48 slice 3 — `StructFoldSafety` proved the binding is
         # never mutated / aliased / escaped in its scope).
         def foldable_receiver?(context)
           fresh_receiver?(context) || fold_safe_local_receiver?(context) ||
@@ -308,7 +308,7 @@ module Rigor
         end
 
         # A fresh receiver is the result of a chained call that MATERIALISED the struct — `Point.new(1, 2).x`,
-        # `Point[1, 2].x`, `inst.with(x: 9).y`. Not merely a chained call: slices 1-2 read "chained" as
+        # `Point[1, 2].x`. Not merely a chained call: slices 1-2 read "chained" as
         # "cannot have been mutated between materialisation and the read", and a method that hands back its
         # own receiver falsifies that (issue #595):
         #

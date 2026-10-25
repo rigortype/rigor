@@ -167,8 +167,7 @@ module Rigor
 
       # True when a save arrived mid-round and the loop should run once more. Releases ownership otherwise.
       # `next`, not `break`: inside `Mutex#synchronize`'s block, `break` returns from the SYNCHRONIZE call, so
-      # a `break` written here would leave the caller's `loop` spinning forever — which is exactly what it did
-      # before this was split out.
+      # a `break` here would leave the caller's `loop` spinning forever.
       def consume_pending
         @round_lock.synchronize do
           next(@round_running = false) unless @round_pending

@@ -19,8 +19,8 @@ module Rigor
     # the calls in a condition operand, where a narrowing an earlier operand or clause made would otherwise survive
     # them: `if @x.nil? && reset!` read `@x` as `nil` in the body although `reset!` assigns it.
     module InterveningIvarReset
-      # Nodes whose body does not run where it is written, or runs on another `self`: a `def`, and a class or
-      # module body, where `@x` is the class's own instance variable.
+      # Nodes whose body does not run where it is written, or runs on another `self`: a `def`, and a class,
+      # module or `class << …` body, where `@x` is the class's own instance variable.
       NON_RUNNING_NODES = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
       # Issue #1402 — the nodes that run code the program does not show on `self`'s behalf: `yield` runs the
       # method's block, and `super` the superclass's method on `self`.

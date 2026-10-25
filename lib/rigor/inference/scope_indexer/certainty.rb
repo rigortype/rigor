@@ -111,7 +111,6 @@ module Rigor
             node.rigor_each_child { |child| certain(child) }
           end
 
-          # Marks every contribution of the subtree.
           def possible(node)
             return unless node.is_a?(Prism::Node)
 

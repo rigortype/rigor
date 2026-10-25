@@ -409,14 +409,9 @@ module Rigor
             end
           end
 
-          # ADR-39: inflection delegates to the shared `Rigor::Plugin::Inflector`, which calls the real
-          # `ActiveSupport::Inflector` (the authority Rails itself uses to generate helper names) when
-          # available, falling back to a built-in approximation otherwise. This replaces the hand-tuned
-          # AS-replica these methods used to carry — every special case they accreted (`news` uncountable,
-          # `media`→`medium`, `databases`→`database`, `custom_css` ss-preservation,
-          # `async_refresh`→`async_refreshes`) was reverse-engineered `ActiveSupport::Inflector` behaviour,
-          # so the real inflector produces the same result for those and the correct one for the words the
-          # replica never covered.
+          # ADR-39: inflection delegates to the shared `Rigor::Plugin::Inflector`, which uses the real
+          # `ActiveSupport::Inflector` (the authority Rails uses to generate helper names) when available,
+          # and a built-in approximation otherwise.
           def singularize(word)
             Rigor::Plugin::Inflector.singularize(word)
           end
@@ -1286,7 +1281,7 @@ module Rigor
           return nil unless plural
 
           # Rails appends `_index_path` to the index helper name when the singular form of the resource
-          # matches the plural form AND the noun isn't in the canonical UNCOUNTABLE list. The collision
+          # matches the plural form (uncountable nouns included). The collision
           # would otherwise put both the index (`:id`-less) and show (`:id`-bearing) helpers under the same
           # name, and Rails disambiguates by suffixing the index form. Mastodon's `resources
           # :reblogged_by, controller: :reblogged_by_accounts, only: :index` and similar rely on this —
@@ -1432,8 +1427,6 @@ module Rigor
         end
 
         # ADR-39 — delegates to the shared inflector (real `ActiveSupport::Inflector` when available).
-        # Previously a hand-tuned AS-replica kept in sync with `Context#singularize`; both now share the
-        # one authoritative implementation.
         def singularize_word(word)
           Rigor::Plugin::Inflector.singularize(word)
         end

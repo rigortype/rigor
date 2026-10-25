@@ -586,9 +586,9 @@ module Rigor
       # #1071 widens the answer per `respond_to` arm: a unit that spelled a dispatcher renders one
       # conventional `<action>.<fmt>` template per arm rather than one `<action>.html`, so the row is
       # applied once per arm the walk read, each answered outright (a `responds:` row at the arm's own
-      # top level) or degenerate (`any` / `all`) standing its arm's edge down. The `<action>.html`
-      # answer survives only for a dispatcher the walk could not name arms on, or one nested under a
-      # branch — the plain fall-through still exists on the path that skips it.
+      # top level) or degenerate (`any` / `all`) standing its arm's edge down. The `<action>.html` answer
+      # is kept where no arm was read, and beside the arms when the dispatcher is nested under a branch,
+      # because the plain fall-through still exists on the path that skips it.
       def apply_unit_callees
         return if @responded || @singleton || @non_public
         return if @owner_class.nil? || @method_name.nil?
@@ -811,11 +811,9 @@ module Rigor
       #
       # **Unless the syntax named the class** (#463). The `Dynamic` exclusion exists because a projected
       # receiver class is a guess; a written constant path is not one, and {#catalog_target} already
-      # trusts it for the row lookup. Refusing the posture there made the catalogue's reach a function of
-      # whether the bundled rbs happens to ship a signature for the constant: `Net::HTTP.get` proves
-      # `io.net.http` and `Net::IMAP.new` proved nothing, because rbs ships `net-http` and not
-      # `net-imap`. That is why the `Net::FTP` row has never once fired, and why Redmine's IMAP and POP3
-      # pollers proved no network at all.
+      # trusts it for the row lookup. Refusing the posture there made the catalogue's reach depend on
+      # whether the bundled rbs ships a signature for the constant: `Net::HTTP.get` proved `io.net.http`,
+      # while `Net::IMAP.new` proved nothing, because rbs ships `net-http` and not `net-imap`.
       #
       # The site is then **claimed**, and so discharges, like every other catalogue answer. That is not a
       # softening of the `dynamic-receiver` rule but its premise failing: the taint says the class the
@@ -974,12 +972,10 @@ module Rigor
         positional_arity(node).positive?
       end
 
-      # The class the catalogue would look this call up under, as `[owner, singleton, implicit_self]`.
+      # The class the catalogue would look this call up under, as `[owner, singleton, implicit, named]`.
       # Spelled from the syntax where the syntax settles it and from the typer's receiver otherwise;
-      # `[nil, …]` when neither does.
-      # `[owner, singleton, implicit, named]`. `named` says the owner came from a **constant path the
-      # author wrote**, which is what licenses the posture on a receiver the typer could not resolve
-      # ({#posture_allowed?}).
+      # `[nil, …]` when neither does. `named` says the owner came from a **constant path the author wrote**,
+      # which is what licenses the posture on a receiver the typer could not resolve ({#posture_allowed?}).
       def catalog_target(node, record)
         receiver = node.receiver
         return ["Kernel", false, true, false] if receiver.nil? || receiver.is_a?(Prism::SelfNode)

@@ -513,7 +513,7 @@ module Rigor
       Type::Nominal.new(normalized)
     end
 
-    # Returned for `rigor:v1:param: <name> <refinement>`. The parameter name is a Ruby identifier (Symbol); the
+    # Returned for `rigor:v1:param: <name> <refinement>`. The parameter name is a Ruby identifier; the
     # type is any `Rigor::Type` the refinement parser resolves (bare kebab-case name, parameterised form, or
     # `Integer[a..b]` range, or the deprecated `int<a, b>` — the same grammar the `return:` directive accepts).
     ParamOverride = Data.define(:param_name, :type)
@@ -554,7 +554,7 @@ module Rigor
     end
 
     # Convenience reader for call sites that want to look up a single override by parameter name. Returns a
-    # frozen Hash<Symbol, Rigor::Type>; missing keys mean "use the RBS-declared type". Callers MUST treat the
+    # frozen map from parameter name to type; missing keys mean "use the RBS-declared type". Callers MUST treat the
     # hash as read-only.
     def param_type_override_map(method_def, environment: nil)
       overrides = read_param_type_overrides(method_def, environment: environment)
@@ -728,7 +728,6 @@ module Rigor
     NO_EFFECT_LABELS = [].freeze
     private_constant :NO_EFFECT_LABELS
 
-    # Whether `string` is the bare `%a{pure}` annotation.
     def pure_annotation?(string)
       !string.nil? && PURE_ANNOTATION_PATTERN.match?(string)
     end

@@ -16,7 +16,7 @@ module Rigor
       #
       # Scope:
       #
-      # - Recognises the standard six controllers (`:sessions`, `:passwords`, `:confirmations`, `:unlocks`,
+      # - Recognises the standard controllers (`:sessions`, `:passwords`, `:confirmations`, `:unlocks`,
       #   `:registrations`, `:omniauth_callbacks`).
       # - Honours `skip: [...]` to suppress controllers the project disables.
       # - Honours `path: "..."` to remap the URL path (does NOT remap the helper-name prefix — Devise uses
@@ -162,8 +162,7 @@ module Rigor
           OMNIAUTH_SUFFIXES
         end
 
-        # ADR-39 — delegates to the shared inflector (real `ActiveSupport::Inflector` when available),
-        # replacing the tiny AS-replica this module used to duplicate from `RoutesParser`.
+        # ADR-39 — delegates to the shared inflector (real `ActiveSupport::Inflector` when available).
         def singularize(word)
           Rigor::Plugin::Inflector.singularize(word)
         end

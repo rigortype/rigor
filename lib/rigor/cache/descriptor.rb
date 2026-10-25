@@ -10,7 +10,8 @@ module Rigor
   module Cache
     # Cache invalidation descriptor — the typed-slot schema fixed by
     # [`docs/design/20260505-cache-slice-taxonomy.md`](../../../docs/design/20260505-cache-slice-taxonomy.md).
-    # Pure value object: no I/O, no global state, fully immutable after construction. The storage layer
+    # Value object, fully immutable after construction. Filesystem reads happen only in the `FileEntry.stat`,
+    # `FileEntry.kind` and `GlobEntry.compute` builders and in {#fresh?}. The storage layer
     # ([`Rigor::Cache::Store`](store.rb), v0.0.8 slice 2) consumes descriptors but does not extend them.
     #
     # The descriptor has six slots (`files`, `gems`, `plugins`, `configs`, `dependencies`, `globs`); every slot is
@@ -462,10 +463,10 @@ module Rigor
 
       # ADR-45 — re-validates this descriptor's recorded {FileEntry}s against the current filesystem. Used by
       # the record-and-validate run-result cache: a value cached alongside its dependency descriptor is fresh
-      # iff every recorded file still matches. Only `files` are checked — non-file inputs (config / gems /
+      # iff every recorded file still matches. Only `files` and `globs` are checked — non-file inputs (config / gems /
       # version) belong in the cache *key*, not the validated dependency set — so a descriptor carrying any
       # non-file slot is never considered fresh (it was built wrong for this use). ADR-60 WD3 adds `globs`
-      # alongside `files` as a re-validatable slot: a {GlobEntry} is fresh when re-globbing + re-digesting
+      # alongside `files` as a re-validatable slot: a {GlobEntry} is fresh when re-globbing
       # reproduces its recorded value. ADR-45 WD1 (#577): an absence row ({FileEntry.absent}) is fresh
       # while its path is still missing — the negative half of the dependency set.
       def fresh?
@@ -581,8 +582,8 @@ module Rigor
         false
       end
 
-      # ADR-60 WD3 / ADR-87 WD2 — stat-validates the entry's per-file table against the live tree, re-hashing
-      # only stat-moved files. Any failure reads as stale (recompute), never a crash.
+      # ADR-60 WD3 / ADR-87 WD2 — recomputes the entry's signature over the live tree and compares it. Any
+      # failure reads as stale (recompute), never a crash.
       def glob_entry_fresh?(entry)
         GlobEntry.fresh?(entry)
       end

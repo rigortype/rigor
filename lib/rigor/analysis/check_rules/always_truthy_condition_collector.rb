@@ -23,10 +23,11 @@ module Rigor
       #   `BlockNode` ancestors. Mutation tracking through loop bodies is incomplete (`shift = 0; loop {
       #   shift += 7 }` keeps `shift` at `Constant<7>` per the analyzer), so a `Constant<bool>` predicate
       #   inside the loop body is suspect.
-      # - **Defensive predicate calls**: `.nil?` / `.empty?` / `.zero?` / `.any?` / `.none?` / `.all?`. These
-      #   read like the user explicitly checking for a runtime condition that the type system already proves
-      #   can't happen — Rigor's strict-on-returns RBS often disagrees with the user's defensive check (e.g.
-      #   `Module#name` returns `String` per RBS but anonymous classes really do return `nil`). Skipping
+      # - **Defensive predicate calls**: `.nil?` / `.empty?` / `.zero?` / `.any?` / `.none?` / `.all?` /
+      #   `.respond_to?`. These read like the user explicitly checking for a runtime condition that the type
+      #   system already proves can't happen — Rigor's strict-on-returns RBS often disagrees with the user's
+      #   defensive check (e.g. `Module#name` returns `String` per RBS but anonymous classes really do return
+      #   `nil`). Skipping
       #   these forms keeps the rule useful for genuine logic errors without faulting defensive code.
       #
       # Also skipped (so the literal-only `unreachable-branch` rule doesn't double-fire alongside this one):
@@ -53,8 +54,6 @@ module Rigor
         NODE_CLASSES = [Prism::IfNode, Prism::UnlessNode].freeze
         RULE_WALK_GATES = [:loop_or_block].freeze
 
-        # @return one entry per qualifying predicate. Empty when the tree carries no firing
-        #   predicates.
         def initialize(scope_index)
           @scope_index = scope_index
           @results = []

@@ -79,7 +79,7 @@ module Rigor
       attr_reader :unrenderable, :unresolvable_superclasses
 
       # @param paths — files / directories to scan.
-      # @param observations — => Array<Array<Rigor::Type>>}]
+      # @param observations —
       #   ADR-14 slice 3 — per-target-method arg-tuple observations
       #   produced by {ObservationCollector}. An empty Hash (the default)
       #   means "no observations available; emit `untyped` for every
@@ -522,7 +522,7 @@ module Rigor
       # uncertain `module_function` reset may not run, as far as this reading tells. A slot such a definer could
       # still take over from the last certain one is contested, and nothing is written for it.
       #
-      # @return `{ [class_name, kind, method_name] => [[offset, certain], ...] }`.
+      # @return the definers of each slot as `[offset, certain]` pairs, keyed by `[class_name, kind, method_name]`.
       MEMBER_OFFSET = -1
       private_constant :MEMBER_OFFSET
 
@@ -959,8 +959,8 @@ module Rigor
       # `Object#initialize: () -> void`. The mismatch surfaces a `Ruby::MethodParameterMismatch` warning even
       # when `rigor check` itself is clean.
       #
-      # Returning `nil` here causes `classify_def` to skip emission; returning `:emit_stub` causes
-      # `initialize_stub_candidate` to emit a permissive `(<param shape>) -> void` stub matching the runtime
+      # A default constructor is skipped (`classify_def` returns nil for it); a non-trivial one is not, and
+      # {#initialize_stub_candidate} emits a permissive `(<param shape>) -> void` stub matching the runtime
       # parameter list.
       def initialize_excludes?(def_node, kind)
         return false unless kind == :instance
@@ -1520,15 +1520,15 @@ module Rigor
       # about the return. The class's own declaration is kept whole instead: its visibility, the overload's
       # annotations, type parameters, parameters and block, with only the return replaced.
       #
-      # Three shapes are declined (`nil`):
+      # Two shapes are declined (`nil`):
       # - several overloads. The body is typed once, so the inferred return covers every overload together and
       #   says nothing about which overload returns what: collapsing them into one line would drop the
       #   overloads, and giving each the joint return would widen the overloads the author wrote narrower.
       # - a name the class's own `sig/` spells as an `alias`. Its parameters are the aliased method's, and a
       #   proposal would read as a rewrite of that method's line rather than of the alias. An alias only an
       #   ancestor declares takes the override path below, like any other ancestor declaration.
-      # - nothing else: when only an ancestor declares the method, the proposal is a new override on this
-      #   class, and is rendered from the `def`'s own shape like any new method. The ancestor's parameters
+      # - when only an ancestor declares the method, the proposal is a new override on this class, and is
+      #   rendered from the `def`'s own shape like any new method. The ancestor's parameters
       #   describe the ancestor's `def`, not this one, which may take other arguments (ADR-14 clause 2).
       def tighter_return_line(def_node, method_def, class_name, kind, inferred)
         member = signature_member(method_def, class_name)
@@ -2151,8 +2151,8 @@ module Rigor
         end
       end
 
-      # Build a { class_name => { attr_name_sym => Type } } map that records observation-derived types for
-      # ivars assigned directly from `def initialize` parameters. Only populated when `@observations` is
+      # Records the observation-derived types of ivars assigned directly from `def initialize` parameters, keyed
+      # by class name and then attribute name. Only populated when `@observations` is
       # non-empty (i.e. `--params=observed` was supplied). Matches the pattern `@ivar_name = param_name` where
       # `param_name` is a required / optional positional or keyword parameter of `initialize`.
       #
@@ -2285,7 +2285,7 @@ module Rigor
         node.rigor_each_child { |c| collect_init_ivar_obs(c, prefix, result) }
       end
 
-      # Derive { attr_name_sym => Type } for a single `def initialize` by matching `@ivar = param_name`
+      # Derives the observation-derived attribute types of a single `def initialize`, matching `@ivar = param_name`
       # assignments against the available `[class_name, :initialize]` observations.
       def ivar_obs_from_initialize(class_name, def_node)
         obs_list = @observations[[class_name, :initialize]]
@@ -2300,8 +2300,8 @@ module Rigor
         build_ivar_obs_type_map(ivar_to_param, param_index, obs_list)
       end
 
-      # Map `{ ivar_name => param_name }` → `{ attr_name_sym => Type }` by looking up each param's observation
-      # types and unioning them.
+      # Maps `{ ivar_name => param_name }` to attribute types by looking up each param's observation types and
+      # unioning them.
       def build_ivar_obs_type_map(ivar_to_param, param_index, obs_list)
         ivar_to_param.filter_map do |ivar_name, param_name|
           types = collect_param_obs_types(obs_list, param_name, param_index[param_name])

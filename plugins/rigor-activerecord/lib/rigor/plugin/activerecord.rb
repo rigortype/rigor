@@ -59,8 +59,8 @@ module Rigor
     # capital R) is intentional — keeps the constant lookup distinct from `::ActiveRecord` even though the
     # gem name is hyphenated.
     #
-    # Note: this plugin is the seventh worked example. It does NOT require `active_record` at runtime — it
-    # only reads project source, the same way the other examples do. Rigor stays decoupled from Rails.
+    # Note: this plugin does NOT require `active_record` at runtime — it only reads project source, the
+    # same way the other examples do. Rigor stays decoupled from Rails.
     class Activerecord < Rigor::Plugin::Base
       manifest(
         id: "activerecord",
@@ -553,8 +553,9 @@ module Rigor
       end
 
       # Class-side finders + the class-side relation entry points. `find` returns the model, or an Array of
-      # them for two or more ids, or with a block the model or `nil`; `find_by!` returns the model; `find_by` adds the `nil` arm; `where` /
-      # `all` / `order` / `limit` / `none` open a relation. The relation then carries its element type
+      # them for two or more ids, or with a block the model or `nil`; `find_by!` returns the model;
+      # `find_by` adds the `nil` arm; `where` / `all` / `order` / `limit` / `none` open a relation. The
+      # relation then carries its element type
       # through any further chained query method via the bundled `ActiveRecord::Relation` RBS.
       def finder_return_type(call_node, entry, scope)
         case call_node.name

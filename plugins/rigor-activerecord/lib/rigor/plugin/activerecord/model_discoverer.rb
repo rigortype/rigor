@@ -186,27 +186,20 @@ module Rigor
           merge_redeclarations(rows)
         end
 
-        # Collapses the rows that declare the SAME constant into one, so {ModelIndex.build} — which keys
-        # its entries by `class_name` — receives at most one row per model.
+        # Collapses the rows that declare the SAME constant into one, so {ModelIndex.build} (keyed by
+        # `class_name`) receives at most one row per model.
         #
-        # A model is routinely declared more than once: `app/models/user.rb` holds `class User <
-        # ApplicationRecord` and a second file reopens it (`class ::User`, `class User`, or a full
-        # `class User < ApplicationRecord` redeclaration) to add a method. Ruby's own semantics are
-        # ADDITIVE — a reopen contributes what it spells and leaves the rest of the class alone — so the
-        # rows are UNIONed here. Taking the last row instead dropped the real declaration's associations,
-        # scopes, enums, validations, callbacks and `alias_attribute`s whenever the reopen sorted later in
-        # the glob, and `where(<a declared alias>: …)` then surfaced a false `unknown-column` on correct
-        # code; taking the first dropped whatever the reopen added. Neither order loses anything now.
+        # A model is routinely declared more than once (`app/models/user.rb` plus a reopening file). Ruby's
+        # semantics are ADDITIVE, so the rows are UNIONed. Taking the last row dropped the real declaration's
+        # associations, scopes, enums, validations, callbacks and `alias_attribute`s whenever the reopen sorted
+        # later, producing false `unknown-column`s; taking the first dropped what the reopen added.
         #
-        # Merge is by field: the first non-nil `superclass_name` wins (a second declaration is the same
-        # thing, or invalid Ruby); `self.table_name =` is an ASSIGNMENT, so the LATER declaration's
-        # `table_name_override` wins as it does at load time, and when the two declarations disagree the
-        # resolved name is marked computed so no value is pinned — the glob order is not the load order for
-        # two full declarations, and a pinned wrong literal folds `Model.table_name == "…"` on correct code;
-        # `table_name_computed` is otherwise an OR (any computed name in the class makes the resolved one
-        # inexact); name-keyed rows (associations, enums, aliases) let the LAST declaration override an
-        # earlier same-name row exactly as {ModelIndex.merge_named_rows} does across an STI chain, and the
-        # plain lists union.
+        # Merge is by field: the first non-nil `superclass_name` wins. `self.table_name =` is an ASSIGNMENT, so
+        # the later `table_name_override` wins, but when two declarations disagree the name is marked computed
+        # so no value is pinned: glob order is not load order, and a pinned wrong literal would fold
+        # `Model.table_name == "…"` on correct code. `table_name_computed` is otherwise an OR. Name-keyed rows
+        # let the LAST declaration override an earlier same-name row, as {ModelIndex.merge_named_rows} does
+        # across an STI chain; plain lists union.
         def merge_redeclarations(rows)
           return rows if rows.length < 2
 
@@ -459,7 +452,6 @@ module Rigor
             macro_methods: lookup_macro_methods(node.body)
           })
 
-          # Recurse into the body in case nested classes exist.
           walk_for_classes(node.body, [full_name], &) if node.body
         end
 
@@ -869,8 +861,8 @@ module Rigor
 
         # Walks the namespace body's TOP-LEVEL statements only — a decorator declared inside a nested
         # `module`/`class` belongs to THAT namespace, not this one, and must not be attributed here.
-        # Returns `Hash<:prefix|:suffix => { literal: } | { computed: true }>`, only for the names this body
-        # actually mentions. A later statement overrides an earlier one within the SAME body — real Ruby
+        # Returns the decorators keyed by `:prefix` / `:suffix`, only for the names this body actually mentions.
+        # A later statement overrides an earlier one within the SAME body — real Ruby
         # assignment order, not a guess: `mattr_accessor :table_name_prefix` (no `default:`, so `computed:
         # true`) followed two lines down by a real `self.table_name_prefix = "blog_"` folds to the literal.
         #
@@ -1234,8 +1226,8 @@ module Rigor
         end
 
         # Recognised single-instance and collection association DSL methods. The kind drives the eventual
-        # return-type contribution: singular associations narrow to `Nominal[Target] | nil`, plural ones
-        # narrow to `ActiveRecord::Relation[Target]`.
+        # return-type contribution: singular associations narrow to the target or nil, plural ones to a
+        # relation of the target.
         #
         # `composed_of` value-object aggregations and `delegated_type` roles are folded in here too — both
         # accept the association name as a `where` / `find_by` query key, so omitting them turns every
@@ -1336,7 +1328,7 @@ module Rigor
                         association_option(args, "polymorphic") == true
 
           # A polymorphic association has no single static target class — `target` is nil and the flow
-          # contribution declines to narrow rather than inventing a wrong `Nominal[<classified-name>]`.
+          # contribution declines to narrow rather than inventing a wrong class-name target.
           if polymorphic
             target = nil
           else
@@ -1460,8 +1452,7 @@ module Rigor
         end
 
         # `enum status: { active: 0, archived: 1 }` (Rails ≤6) and `enum :status, [:active, :archived]`
-        # (Rails 7+). Returns `Hash<column_name => Array<Symbol>>`. Non-literal forms decline rather than
-        # guess.
+        # (Rails 7+). Non-literal forms decline rather than guess.
         def lookup_enums(body)
           return {} if body.nil?
 
@@ -1516,7 +1507,7 @@ module Rigor
         end
 
         # `scope :active, -> { ... }`. Records the scope name only (the body is intentionally NOT
-        # introspected — the caller contributes `ActiveRecord::Relation[Model]` based on the name alone
+        # introspected — the caller contributes a relation of the model based on the name alone
         # via `class_scope_return_type`).
         def lookup_scopes(body)
           return [] if body.nil?
@@ -1585,8 +1576,7 @@ module Rigor
 
         # `alias_attribute :new_name, :old_name`. Records the mapping so the analyzer accepts the alias
         # as a query key — without it every `where(<alias>: ...)` / `find_by(<alias>: ...)` call surfaces
-        # as a false `unknown-column`. Returns `Hash<alias => target>`; non-Symbol-literal forms decline
-        # rather than guess.
+        # as a false `unknown-column`. Non-Symbol-literal forms decline rather than guess.
         def lookup_aliases(body)
           return {} if body.nil?
 
@@ -1626,7 +1616,7 @@ module Rigor
         # macro and `images`, `images=`, `images_attachments`, `images_blobs` for the collection one — the
         # `has_one_attached` / `has_many_attached` generated-methods surface, none of it column-backed.
         # This is name MEMBERSHIP only, and does not overlap `rigor-activestorage`, which contributes the
-        # accessor's TYPE (`ActiveStorage::Attached::One`) and publishes no fact: a consumer that reads
+        # accessor's type and publishes no fact: a consumer that reads
         # `:model_index` to ask "does this model answer `avatar`?" gets nothing from that plugin, and gets
         # nothing at all when the project does not load it.
         ATTACHMENT_MACROS = {

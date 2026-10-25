@@ -35,7 +35,7 @@ module Rigor
   # (`rbs_extended.*`, `rbs.*`, `dynamic.*`) is left alone, since the engine emits those ids
   # outside the catalogue.
   module ConfigAudit
-    # One config-level finding. `kind` discriminates the source key (`:signature_path`,
+    # One config-level finding. `kind` discriminates the source key (`:unknown_key`, `:signature_path`,
     # `:bundled_plugin_signature_path`, `:library`, `:disabled_rule`, `:severity_override`,
     # `:bundler_bundle_path`, `:bundler_lockfile`, `:rbs_collection_lockfile`); `fields` carries the kind-specific
     # structured data merged into {#to_h} for JSON consumers.

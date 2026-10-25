@@ -43,8 +43,9 @@ module Rigor
       #    otherwise win purely by list position and inject false constants into the flow; they remain
       #    selectable when the argument PROVES the value (strict pass) or when no other overload matches
       #    (step 4's fallback picks the first overload regardless).
-      # 4. If no overload matches at all, fall back to `method_types.first` so existing call sites keep
-      #    their phase 1 / 2b behavior. This preserves the fail-soft invariant of the dispatcher.
+      # 4. If no overload matches at all, fall back to the first overload that does not require a block (else
+      #    `method_types.first`), so existing call sites keep their phase 1 / 2b behavior. This preserves the
+      #    fail-soft invariant of the dispatcher.
       #
       # The selector is intentionally agnostic about the dispatch kind (instance vs singleton). Both kinds
       # share the same arity and acceptance shape; the difference is only in which `Definition` the caller
@@ -64,10 +65,9 @@ module Rigor
         #   like `::Array[Elem]` substitute Elem before the accepts check, instead of degrading the param
         #   to `Array[Dynamic[Top]]`.
         # @param block_required — when `true`, only overloads that declare a block clause are
-        #   considered (Slice 6 phase C sub-phase 1). The fallback also prefers a block-bearing overload
-        #   over `method_types.first`. When `false` (the Slice 4 phase 2c default) the selector behaves
-        #   exactly as before: `find` over arity-compatible overloads, falling back to the first
-        #   declaration.
+        #   considered first (Slice 6 phase C sub-phase 1), and a call none of them matches is retried with
+        #   the block ignored. The fallback prefers an overload that does not require a block over
+        #   `method_types.first`.
         # @return the chosen overload, or nil when the definition has no method
         #   types at all.
         def select(method_definition, **) = select_candidates(method_definition, member_wise: false, **).first

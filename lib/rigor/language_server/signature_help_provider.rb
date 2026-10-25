@@ -25,7 +25,7 @@ module Rigor
     # parses the buffer, locates the enclosing `CallNode`, infers the receiver's type, and returns the
     # method's first overload as a `SignatureInformation`.
     #
-    # Slice C1 (this commit) ships:
+    # Slice C1 ships:
     # - Sentinel patching for `obj.foo(|` so Prism's parse succeeds (mirrors `CompletionProvider`'s slice B4
     #   pattern).
     # - First-overload signature only.

@@ -31,7 +31,7 @@ module Rigor
       #   have_db_index(:col)
       #
       # All look up `:col` against the model's `columns:` (the published `:model_index` fact's flat
-      # `Array<String>` per model — see `Analyzer#column_names`). Unknown columns fire `unknown-column`.
+      # name list per model — see `Analyzer#column_names`). Unknown columns fire `unknown-column`.
       #
       # ### Association matchers
       #
@@ -107,8 +107,7 @@ module Rigor
 
         # A direct matcher invocation is a `CallNode` whose `name` is in `MATCHER_TABLE` and whose first
         # argument is a `SymbolNode`. The chain shape (`should`, `expect(...).to`, `is_expected.to`) is
-        # irrelevant — we always recurse to the inner matcher, so a diagnostic fires on the matcher
-        # regardless of the surrounding chain.
+        # irrelevant: the engine visits the inner matcher call, so the diagnostic fires on it regardless.
         def matcher_invocation?(node)
           node.is_a?(Prism::CallNode) && MATCHER_TABLE.key?(node.name) && symbol_first_arg?(node)
         end
@@ -172,11 +171,10 @@ module Rigor
         end
 
         # `entry` is the published fact's per-model Hash: `{ table:, columns:, associations:, ... }`.
-        # `columns:` is a flat `Array<String>` (`Activerecord#index_to_published_hash`); `associations:` is
-        # `Array<Hash>` with String `:name`, Symbol `:kind` (`:singular` | `:collection`), `:nullable`,
-        # `:polymorphic`, and a `:target` that is a String except on polymorphic rows, where it is nil —
-        # the row shape `ModelDiscoverer#build_association_row` publishes. Only `:name` and `:kind` are
-        # read here.
+        # `columns:` is a flat list of column names (`Activerecord#index_to_published_hash`); `associations:`
+        # is a list of rows with `:name`, `:kind` (`:singular` | `:collection`), `:nullable`, `:polymorphic`,
+        # and a `:target` that is nil on polymorphic rows — the row shape `ModelDiscoverer#build_association_row`
+        # publishes. Only `:name` and `:kind` are read here.
         def column_names(entry) = entry[:columns] || []
         def association_rows(entry) = entry[:associations] || []
         def find_association(entry, name) = association_rows(entry).find { |a| a[:name] == name.to_s }

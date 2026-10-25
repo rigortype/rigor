@@ -53,8 +53,8 @@ require_relative "annotation_location"
 #   differently, and only the latter reaches `marshal_load`), so without the bump a stale blob would keep
 #   reporting the moved position indefinitely.
 #
-# Idempotent: the guard checks `method_defined?(:_dump)` so requiring this file twice (or against an upstream
-# rbs that adds Marshal hooks itself) is a no-op.
+# Idempotent: each hook is defined only when `method_defined?` reports it missing, so requiring this file twice
+# (or against an upstream rbs that adds Marshal hooks itself) is a no-op.
 #
 # `RBS::TypeName` / `RBS::Namespace` carry a second, subtler Marshal hazard, introduced by rbs 4.1's
 # flyweight interning (ruby/rbs#2957): both memoise their `#hash` into an `@hash` ivar, and that value is

@@ -9,8 +9,8 @@ module Rigor
     # This is the static fast path for built-ins; `Environment` falls through to `RbsLoader` for all other
     # names — the two tiers are complementary.
     #
-    # See docs/internal-spec/inference-engine.md for the binding contract (every entry below MUST always be
-    # recognised).
+    # See docs/internal-spec/inference-engine.md for the binding contract (the classes in
+    # `SLICE_1_BUILT_INS` MUST always be recognised).
     class ClassRegistry
       SLICE_1_BUILT_INS = [
         Integer,
@@ -27,7 +27,7 @@ module Rigor
       # Common Ruby core classes that user code routinely names by constant reference. Adding them to the
       # registry lets `nominal_for_name` resolve `Array`, `Hash`, etc. without each call site re-listing
       # them. The static registry is the cheap fast path; `RbsLoader` extends coverage to all other
-      # RBS-declared names (Slice 4, landed).
+      # RBS-declared names.
       SLICE_2_BUILT_INS = [
         Array,
         Hash,

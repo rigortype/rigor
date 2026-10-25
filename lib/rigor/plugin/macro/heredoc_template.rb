@@ -49,10 +49,9 @@ module Rigor
       # Slice 2 ships at the **floor**: each emit row's `name:` is the source of truth for the synthetic
       # method's name (a single `"\#{name}"` placeholder gets interpolated with the literal symbol argument at
       # `symbol_arg_position`). The `returns:` strings are **recorded in the manifest but not resolved**; the
-      # engine emits synthetic methods with `Dynamic[T]` returns plus a `macro.tier_c.unresolved-return`
-      # provenance marker. Precise return-type resolution via ADR-13's `Plugin::TypeNodeResolver` is the
-      # **ceiling**, deferred to a later slice — the `returns:` declarations cost nothing to write today and
-      # unlock precision then.
+      # engine emits synthetic methods with `Dynamic[T]` returns. Precise return-type resolution via ADR-13's
+      # `Plugin::TypeNodeResolver` is the **ceiling**, deferred to a later slice — the `returns:` declarations
+      # cost nothing to write today and unlock precision then.
       #
       # Engine wiring: `Inference::SyntheticMethodScanner` (slice 2b, `synthetic_method_scanner.rb`) consumes
       # `manifest.heredoc_templates`. Worked consumers: `plugins/rigor-dry-struct/` and
@@ -98,7 +97,7 @@ module Rigor
         # `\#{name}` with the call-site literal symbol) and its declared return type. The return type can be
         # a static String (resolved via `Environment#nominal_for_name` per ADR-16 slice 6b) or a
         # per-call-site lookup ({ReturnsFromArg}) — see
-        # [ADR-18](../../../../../docs/adr/18-substrate-per-call-site-return-type.md). When both are nil, the
+        # [ADR-18](../../../../docs/adr/18-substrate-per-call-site-return-type.md). When both are nil, the
         # synthesised method's return type falls back to `Dynamic[Top]`.
         class Emit
           attr_reader :name, :returns, :returns_from_arg
@@ -147,8 +146,7 @@ module Rigor
         #       lookup_via: { plugin_id: "dry-types", fact: :dry_type_aliases }
         #     }
         #
-        # Slice 1 (this file) ships the value class + validation only. The scanner-side arg-position
-        # extraction + fact-store lookup land in slice 2 / 3.
+        # The scanner's `resolve_emit_return_type` does the arg-position extraction and fact-store lookup.
         class ReturnsFromArg
           attr_reader :position, :plugin_id, :fact
 

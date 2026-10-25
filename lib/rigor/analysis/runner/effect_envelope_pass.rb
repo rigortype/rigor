@@ -78,7 +78,7 @@ module Rigor
         LABELS_CONSEQUENCE = "the label is not registered"
         private_constant :LABELS_CONSEQUENCE
 
-        # @param rbs_loader — the run's loader; nil disables the pass.
+        # @param rbs_loader — the run's loader; nil skips the RBS walk, not the configured envelopes.
         # @param effect_table — the propagated graph.
         # @param discovery — forces and returns the cross-file discovery tables as
         #   `[def_sources, singleton_def_sources, class_sources]`. Called only when a finding needs a

@@ -192,15 +192,10 @@ module Rigor
           first.unescaped
         end
 
-        # Pulls the interpolation hash from the call's arguments. The trailing `Hash` argument (or
+        # Pulls the interpolation hash from the call's arguments. The trailing hash argument (or
         # `Prism::KeywordHashNode`) carries both reserved I18n options (`default:`, `scope:`, …) and
-        # interpolation variables. Returns:
-        #   {
-        #     :has_default     => bool,
-        #     :all_keys        => Set<Symbol>     (every assoc key in the hash),
-        #     :non_reserved    => Set<Symbol>     (keys NOT in RESERVED_OPTION_KEYS),
-        #     :hash_node       => Prism::Node (or nil)
-        #   }
+        # interpolation variables. Returns `:has_default`, `:all_keys` (every assoc key), `:non_reserved`
+        # (keys outside RESERVED_OPTION_KEYS) and `:hash_node` (nil when there is no hash argument).
         #
         # Note: a reserved option key (e.g. `count:`) can also serve as an interpolation value when the
         # locale's leaf string has `%{count}`. The analyzer therefore checks the missing-placeholder set

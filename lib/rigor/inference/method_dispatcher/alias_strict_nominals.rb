@@ -7,7 +7,7 @@ module Rigor
         # Canonical RBS-core aliases shipped by `core/builtin.rbs` whose body is `<Nominal> | _DuckType`.
         # Matching an overload against an Integer literal should pick the `(int) -> Array[Elem]` body over
         # the `(string) -> String` body because Integer satisfies `int`'s strict arm and not `string`'s.
-        # The translator collapses both aliases to `Dynamic[Top]` (interfaces are not structurally matched
+        # The translator reads each alias's interface arm as `Dynamic[Top]` (interfaces are not structurally matched
         # yet), so a dedicated pass 1.5 between strict and gradual consults this map to pick the alias
         # whose strict arm matches.
         #

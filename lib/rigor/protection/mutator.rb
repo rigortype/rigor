@@ -138,7 +138,7 @@ module Rigor
       QUOTES = ['"', "'"].freeze
       # Mutating an argument to a universal-equality method is always an equivalent mutant: Ruby's `==` / `<=>`
       # family returns false / nil on a type mismatch rather than raising, so the engine exempts them
-      # (`UNIVERSAL_EQUALITY_METHODS`). Skip them to keep survivors meaningful.
+      # (`UNIVERSAL_EQUALITY`). Skip them to keep survivors meaningful.
       UNIVERSAL_EQUALITY = %w[== != eql? equal? <=>].freeze
 
       # Every operator the mutator knows. Each maps to the diagnostic rule family it is *engineered* to trip when

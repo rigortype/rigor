@@ -85,7 +85,6 @@ module Rigor
             method_names: NAMESPACE_METHODS,
             self_type: "singleton(Grape::API::Instance)"
           ),
-          # `params do ... end` — body `instance_eval`s on a `ParamsScope` instance.
           Rigor::Plugin::Macro::BlockAsMethod.new(
             receiver_constraint: "Grape::API",
             method_names: %i[params],
@@ -121,7 +120,6 @@ module Rigor
             method_names: %i[desc],
             self_type: "Grape::DSL::Desc::ConfigContext"
           ),
-          # Verb bodies run inside `Grape::Endpoint` instances.
           Rigor::Plugin::Macro::BlockAsMethod.new(
             receiver_constraint: "Grape::API",
             method_names: VERB_METHODS,

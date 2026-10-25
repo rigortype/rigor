@@ -9,11 +9,9 @@ module Rigor
     # annotations in shipped `.rbs` files.
     #
     # The registry stores registration metadata (arity, variance, bound) and the definition body
-    # as both a raw String and an evaluable `HktBody` node tree. `HktReducer` (Slice 2a) and
-    # `HktBodyParser` (Slice 2b) are both shipped and reduce `Type::App` instances against the
-    # definition. The carrier never needs to read from the registry because Slice 1's `Type::App`
-    # carries its `bound` directly; the registry exists at this slice solely so the parser
-    # round-trip and downstream slices have a stable target API.
+    # as both a raw String and an evaluable `HktBody` node tree. `HktReducer` and `HktBodyParser`
+    # reduce `Type::App` instances against the definition. The carrier never needs to read from the
+    # registry because `Type::App` carries its `bound` directly.
     #
     # The registry is immutable after construction. Callers that need to extend it (e.g. plugin
     # registrations layered on top of stdlib registrations) MUST build a new registry via `merge`

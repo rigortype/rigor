@@ -135,14 +135,6 @@ module Rigor
         end
       end
 
-      # Walks the on-disk cache rooted at `root` and reports a producer-level inventory. Used by
-      # `rigor check --cache-stats` to surface cache size and per-producer entry counts without depending on
-      # in-process counters (which only reflect the current run).
-      #
-      # @return `{ root:, schema_version:, total_entries:, total_bytes:, producers: [{ id:, entries:,
-      #   bytes: }, ...] }`. When the root does not exist or has no schema-version marker, `schema_version` is
-      #   nil and the producer list is empty.
-      #
       # The `schema_version.txt` marker content. Covers BOTH invalidation axes: the descriptor schema and the
       # on-disk byte layout ({FORMAT_VERSION}, ADR-54). A format bump leaves the old entries permanently
       # unreadable (header mismatch → miss) but, alone, would never reclaim their bytes — they can sit below
@@ -152,6 +144,13 @@ module Rigor
         "#{PAYLOAD_ABI_VERSION}.#{Descriptor::SCHEMA_VERSION}.#{FORMAT_VERSION}"
       end
 
+      # Walks the on-disk cache rooted at `root` and reports a producer-level inventory. Used by
+      # `rigor check --cache-stats` to surface cache size and per-producer entry counts without depending on
+      # in-process counters (which only reflect the current run).
+      #
+      # @return `{ root:, schema_version:, total_entries:, total_bytes:, producers: [{ id:, entries:,
+      #   bytes: }, ...] }`. When the root does not exist or has no schema-version marker, `schema_version` is
+      #   nil and the producer list is empty.
       def self.disk_inventory(root:)
         root_s = root.to_s
         marker = File.join(root_s, "schema_version.txt")
@@ -360,7 +359,8 @@ module Rigor
       # size-based LRU pass below stays gated on `max_bytes:` being configured: it walks all remaining
       # `.entry` files, sorts by mtime ascending (oldest = least recently used), and unlinks from the oldest
       # until the total is at or below the cap. Touch-on-disk-read ({read_entry}) is the cross-process LRU
-      # signal: every disk hit (not in-process-memo hit) updates the mtime so recently-read entries survive
+      # signal: a disk hit (not an in-process-memo hit) updates the mtime when `max_bytes:` is set, so
+      # recently-read entries survive
       # the eviction pass. Any FS error is swallowed — eviction must never break a run.
       def evict!
         return if @read_only
@@ -591,7 +591,8 @@ module Rigor
       # — one check per Store is enough; a benign double-check under a thread race would just repeat
       # idempotent work.
       #
-      # A writable store clears the cache root and rewrites the marker on a stale/missing marker, then reports
+      # A writable store clears the cache root and rewrites the marker on a stale marker (a missing or empty
+      # one is rewritten without clearing), then reports
       # available. A read-only store never touches the root — no mkdir, no marker write, no destructive clear
       # — so it reports available ONLY when the on-disk marker already matches current exactly; a stale or
       # missing marker (e.g. a Rigor upgrade with no writable run yet, as in LSP / editor mode) reports

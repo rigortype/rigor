@@ -30,7 +30,7 @@ module Rigor
     # - every manifest-declared extension surface
     #   (`open_receivers:` / `owns_receivers:` / `produces:` /
     #   `consumes:` / `block_as_methods:` / `heredoc_templates:` /
-    #   `trait_registries:` /
+    #   `trait_registries:` / `per_invocation_classes:` /
     #   `type_node_resolvers:` / `hkt_registrations:` /
     #   `hkt_definitions:` / `protocol_contracts:` /
     #   `source_rbs_synthesizer:`);
@@ -204,7 +204,7 @@ module Rigor
           .merge(load_error: nil)
       end
 
-      # ADR-37 narrow extension protocols. Unlike the 10 declarative manifest fields, these are class-level DSLs
+      # ADR-37 narrow extension protocols. Unlike the declarative manifest fields, these are class-level DSLs
       # (`node_rule` / `dynamic_return` / `narrowing_facts`), so they are read off the plugin class rather than the
       # manifest. The gate values — node types, receiver class names, specified method names — are the greppable,
       # enumerable surface the capability catalogue exposes.

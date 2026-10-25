@@ -18,7 +18,7 @@ module Rigor
       # ## The inference is deliberately narrow
       #
       # Only `@user = Model.find(...)`-shaped assignments contribute, and only for a closed set of
-      # constructors and finders that **cannot return nil** — `find`, `find_by!`, `sole`, `first!`,
+      # constructors and finders that **cannot return nil** — `find`, `find_by!`, `find_sole_by`, `first!`,
       # `last!`, `new`, `create`, `create!`. A seeded type is a claim the engine acts on, and a wrong one
       # is worse than none: seeding `@user` from `find_by` (which returns nil at runtime) would hand the
       # flow rules a non-nil nominal and license folds that draw diagnostics on correct templates — the

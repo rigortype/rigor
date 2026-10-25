@@ -235,8 +235,7 @@ module Rigor
           Type::Combinator.nominal_of(Proc)
         end
 
-        # `singleton(Foo)` is the type of the constant `Foo` itself (the class object). With the
-        # dedicated Singleton type, we map directly to `Singleton[Foo]`.
+        # `singleton(Foo)` is the class object `Foo` itself, which the dedicated Singleton type carries directly.
         def translate_class_singleton(rbs_type, _context)
           Type::Combinator.singleton_of(relative_name(rbs_type.name))
         end

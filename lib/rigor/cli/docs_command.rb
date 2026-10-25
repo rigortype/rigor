@@ -203,8 +203,7 @@ module Rigor
           relative: relative,
           path: path,
           category: category,
-          # Always-unique addresses: the `docs/`-relative path and the prefixed basename. `handbook/03-narrowing` and
-          # `03-narrowing`.
+          # Always-unique addresses: the `docs/`-relative path and the prefixed basename.
           exact_aliases: [relative, base].uniq,
           # The prefix-stripped short name (`narrowing`); ambiguous when two categories carry the same chapter slug
           # (`plugins`).

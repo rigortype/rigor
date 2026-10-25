@@ -13,7 +13,7 @@ module Rigor
     module GatedSignatureGuard
       module_function
 
-      # @param dir — the vendored directory (Pathname).
+      # @param dir — the vendored directory.
       # @return the absolute-less names (`"Prime::PseudoPrimeGenerator"`) of every class and module it declares.
       def type_names(dir)
         RootedGlob.glob(dir, "*.rbs").flat_map do |file|

@@ -24,7 +24,6 @@ module Rigor
       DISCOVERY_SEEDED_MUTATION_SITES = "discovery-seeded-mutation-sites"
 
       # ADR-50 § WD2 — the bleeding-edge feature id gating the Tier-2 dependent-closure kill oracle (#254).
-      # Same reason as above for naming it here rather than inlining the string.
       DEPENDENT_CLOSURE_KILL_ORACLE = "dependent-closure-kill-oracle"
 
       # #264 — the "loud" threshold for a rescued-harness-failure count. Below it, a rescued mutant reads as
@@ -52,8 +51,7 @@ module Rigor
         MeasurementIntegrityWarning.emit(report, err: @err, floor: HARNESS_ERROR_WARN_FLOOR)
       end
 
-      # The cross-file knowledge Tier 2 measures with — the #253 gate, and the ONLY place in this feature that
-      # knows a feature id exists.
+      # The cross-file knowledge Tier 2 measures with, gated on the #253 feature.
       #
       # Returns nil (today's behaviour: an unseeded per-file view on both halves of the measurement) unless the
       # project has adopted `discovery-seeded-mutation-sites`. With it adopted, returns the table set
@@ -81,7 +79,7 @@ module Rigor
         seed.empty? ? nil : seed
       end
 
-      # The kill oracle Tier 2 measures with — the #254 gate, and the only place that feature id is read.
+      # The kill oracle Tier 2 measures with, gated on the #254 feature.
       #
       # Returns nil (today's behaviour: {Protection::DiagnosticOracle}, which re-analyses the mutated file
       # alone) unless the project has adopted `dependent-closure-kill-oracle`. With it adopted, returns the
@@ -204,8 +202,8 @@ module Rigor
         determine_protection_exit(report, options)
       end
 
-      # An explicit `--workers=N` on the fused path cannot be honoured, so say so rather than repeat the bug
-      # this slice fixed (a flag accepted and silently dropped). Only the explicit flag warns — a project-wide
+      # An explicit `--workers=N` on the fused path cannot be honoured, so say so rather than drop it silently. Only the
+      # explicit flag warns — a project-wide
       # `parallel.workers:` or `RIGOR_RACTOR_WORKERS` default is not a request about *this* run.
       def warn_workers_ignored_under_tests(options)
         return unless options[:workers].to_i > 1

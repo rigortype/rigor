@@ -25,7 +25,7 @@ module Rigor
     #   profile, taken from `Configuration::SeverityProfile::PROFILES`.
     # - `evidence_tier` — `:high` / `:medium` / `:low` (or `nil` for informational helpers), Rigor's own
     #   confidence that a firing is a true positive, derived from the rule's firing gates. `:high` rules
-    #   fire only on a concrete, statically- known type with no metaprogramming escape (Rigor's
+    #   fire only on a concrete, statically-known type with no metaprogramming escape (Rigor's
     #   false-positive discipline has already filtered the uncertain cases); `:medium` rules rest on flow /
     #   inference proofs that inherit a documented FP envelope (loop / mutation / RBS-strictness modelling
     #   gaps); `:low` rules are resolution- or coverage-gap signals where a firing often reflects missing
@@ -1120,7 +1120,7 @@ module Rigor
 
       module_function
 
-      # Looks up a rule by canonical id, legacy alias, or family wildcard. Returns an Array<Entry>:
+      # Looks up a rule by canonical id, legacy alias, or family wildcard. Returns the matching entries:
       #
       # - canonical id → 1-element array,
       # - legacy alias → 1-element array (resolved to canonical),

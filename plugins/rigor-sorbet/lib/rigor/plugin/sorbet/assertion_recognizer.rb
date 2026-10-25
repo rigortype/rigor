@@ -21,7 +21,7 @@ module Rigor
       # | `T.unsafe(x)`                | return type ← `Dynamic[top]`            |
       # | `T.reveal_type(expr)`        | return type ← `inferred(expr)` (passes through) |
       # | `T.assert_type!(expr, T)`    | return type ← translated `T` + static subtype check |
-      # | `T.bind(self, T)`            | return type ← `Constant[nil]` + post_return_fact narrowing self to translated `T` |
+      # | `T.bind(self, T)`            | return type ← `Constant[nil]` + `self` narrowing fact |
       #
       # The Sorbet runtime's `T.let` / `T.cast` actually return the inner expression unchanged at runtime;
       # their job is purely to *assert* a static type. From Rigor's static perspective the simplest
@@ -36,7 +36,7 @@ module Rigor
       # `T.reveal_type` is "diagnostic-only" in Sorbet: it passes the value through unchanged at runtime
       # AND surfaces the inferred static type as a build-time message. The recogniser contributes the
       # inferred type (so chained call sites still resolve as if the `T.reveal_type` wrapper weren't
-      # there); the plugin's `diagnostics_for_file` hook surfaces the `plugin.sorbet.reveal-type` `:info`
+      # there); the plugin's node rule surfaces the `plugin.sorbet.reveal-type` `:info`
       # message for human consumption.
       #
       # `T.bind(self, T)` is recognised as block-scope self narrowing. The recogniser returns a
@@ -113,9 +113,9 @@ module Rigor
 
         # `T.assert_type!(expr, T)` shares the typed-assertion contribution shape with `T.cast` (return is
         # the asserted type), so the recogniser delegates the return-type half through
-        # `resolve_typed_assertion`. The static subtype check that distinguishes `assert_type!` from
-        # `cast` lives in the plugin's `diagnostics_for_file` hook (mirroring the absurd-recognizer
-        # pattern: record the call here, emit the diagnostic from the per-file walker).
+        # `resolve_typed_assertion`. The static subtype check that distinguishes `assert_type!` from `cast`
+        # is run by the plugin's `record_assert_type_check`, which records a mismatch for the node rule to
+        # emit (the absurd-recognizer pattern).
         def assert_type_check(call_node, scope)
           return nil if scope.nil?
 
@@ -135,8 +135,7 @@ module Rigor
         # `T.reveal_type(expr)` returns `expr` unchanged at runtime; the Sorbet-side semantics is "make
         # the inferred static type visible to the user." The contribution mirrors `T.must` minus the
         # nil-stripping: the call's return type is the inner expression's inferred type. The companion
-        # diagnostic is emitted by the plugin's `diagnostics_for_file` hook; this method handles the
-        # contribution only.
+        # diagnostic is emitted by a node rule; this method handles the contribution only.
         def resolve_reveal_type(call_node, scope)
           inner = nth_argument(call_node, 0)
           return Rigor::Type::Combinator.untyped if inner.nil? || scope.nil?

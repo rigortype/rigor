@@ -192,8 +192,8 @@ module Rigor
 
         # #2115 — the numeric twin of `STRING_FOLD_BYTE_LIMIT`. A folded Integer (and each Integer part of a
         # folded Rational / Complex) is at most this many bits, the largest bit length whose decimal
-        # rendering still fits in `STRING_FOLD_BYTE_LIMIT` digits: `2 ** 13_605` folds, `2 ** 13_606`
-        # (bit length 13_607) does not. Computing `2 ** 100_000_000` takes Ruby milliseconds, but
+        # rendering still fits in `STRING_FOLD_BYTE_LIMIT` digits: `2 ** 13_606` (bit length 13_607) folds,
+        # `2 ** 13_607` (bit length 13_608) does not. Computing `2 ** 100_000_000` takes Ruby milliseconds, but
         # rendering it in decimal — which describing, sorting and printing the `Constant` does — takes
         # minutes. `**` / `pow` / `<<` / `>>` also check their operands before invoking, so the big value
         # is never computed.
@@ -380,7 +380,7 @@ module Rigor
         # Normalises an input type into one of:
         # - `Array<Object>` for a `Constant` (1-element) or `Union[Constant…]` (n-element) — concrete values
         #   to enumerate.
-        # - `Type::IntegerRange` — bounded interval.
+        # - `Type::IntegerRange` / `Type::FloatRange` — bounded interval.
         # - `nil` — the input shape is not foldable.
         def numeric_set_of(type)
           case type

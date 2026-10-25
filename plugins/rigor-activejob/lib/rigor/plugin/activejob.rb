@@ -13,7 +13,7 @@ module Rigor
     # rigor-activejob — validates `Job.perform_later(...)` / `.perform_now(...)` / `.perform(...)`
     # argument arity against the discovered `#perform` definitions.
     #
-    # Tier 1D of the [Rails plugins roadmap](../../../../docs/design/20260508-rails-plugins-roadmap.md).
+    # Tier 1D of the [Rails plugins roadmap](../../../../../docs/design/20260508-rails-plugins-roadmap.md).
     # Statically discovers ActiveJob subclasses by walking the configured `job_search_paths` and
     # parsing each file with Prism — no `active_job` runtime dependency.
     #

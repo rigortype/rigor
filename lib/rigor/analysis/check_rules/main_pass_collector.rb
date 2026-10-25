@@ -12,16 +12,13 @@ module Rigor
       # decides, with NO loop / block suppression and NO threaded context — so the collector declares no
       # `RULE_WALK_GATES` and ignores the walk's `context`.
       #
-      # The per-node dispatch itself stays in `CheckRules` (the verbatim `case` from `diagnose`'s former inline
-      # walk — only the traversal moved, ADR-53 WD4) and is handed in as a callable built in the `CheckRules`
-      # module context, so its calls to the private diagnostic builders remain implicit-self. The collector
-      # only owns the traversal hook and accumulation. Unlike the fact collectors its `#results` are the
-      # accumulated {Diagnostic}s, in the same emission order the inline `NodeWalker.each` produced them (the
-      # shared walk is the same visit-before-descend DFS over `compact_child_nodes`).
+      # The per-node dispatch stays in `CheckRules` (ADR-53 WD4) and is handed in as a callable built in the
+      # `CheckRules` module context, so its calls to the private diagnostic builders remain implicit-self. The
+      # collector only owns the traversal hook and accumulation; `#results` are the accumulated {Diagnostic}s in
+      # the walk's emission order.
       class MainPassCollector
         # The node classes the main pass branches on. A plain `Prism::IfNode` covers ternaries and postfix `if`
-        # too (the legacy `when Prism::IfNode, Prism::UnlessNode` arm did the same). The three global-write
-        # classes carry issue #1367's `global.*` rules.
+        # too. The global-write classes and `MultiWriteNode` carry issue #1367's `global.*` rules.
         NODE_CLASSES = [
           Prism::CallNode, Prism::DefNode, Prism::IfNode, Prism::UnlessNode,
           Prism::GlobalVariableWriteNode, Prism::GlobalVariableOperatorWriteNode, Prism::MultiWriteNode

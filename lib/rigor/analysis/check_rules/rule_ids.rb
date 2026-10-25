@@ -178,7 +178,7 @@ module Rigor
 
       # Resolves a user-supplied rule token (`undefined-method`, `call.undefined-method`, or the family wildcard
       # `call`) to the set of canonical rule identifiers it disables. Returns `nil` for `"all"` (the existing
-      # wildcard meaning "every rule"), or for unknown tokens.
+      # wildcard meaning "every rule"), and an empty array for an unknown token.
       def self.resolve_rule_token(token)
         return nil if token == "all"
         return [LEGACY_RULE_ALIASES.fetch(token)] if LEGACY_RULE_ALIASES.key?(token)

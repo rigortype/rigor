@@ -18,7 +18,7 @@ module Rigor
     # recompute" lesson applied to self-calls.
     #
     # ADR-24 slice 4 (`call.self-undefined-method`) consumes the recorded misses behind a confidently-closed-class
-    # gate (see `CheckRules` L775). The rule ships `:off` by default — {active?} is false on a normal run, so
+    # gate (see `CheckRules`). The rule ships `:off` by default — {active?} is false on a normal run, so
     # the instrumented choke-point pays a single integer read and records nothing. Recording is purely
     # observational; it never changes a diagnostic.
     #

@@ -229,7 +229,8 @@ module Rigor
         # been measured. Resolved ONCE per process: a failed resolution is as memoised as a successful
         # one, so a project without Erubi does not pay a `$LOAD_PATH` walk per template.
         #
-        # `Isolation.require_with_target_bundle` is [ADR-90](../../../../../../docs/adr/90-target-library-resolution-from-project-bundle.md)'s
+        # `Isolation.require_with_target_bundle` is
+        # [ADR-90](../../../../../../docs/adr/90-target-library-resolution-from-project-bundle.md)'s
         # path — Rigor's own gem env first, then the analysed project's bundle, `$LOAD_PATH` appended and
         # only on a failed require. Erubi is not a Rigor dependency and is never added to one. Any load
         # failure is equally "no Erubi here"; stdlib `ERB` answers the same question, so nothing is

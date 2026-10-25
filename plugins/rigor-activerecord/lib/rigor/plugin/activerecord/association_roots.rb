@@ -20,8 +20,9 @@ module Rigor
       #
       # Declined — no root, never a guess: a polymorphic association (no single target), a non-literal
       # `class_name:` / `**opts`, `anonymous_class:`, a `with_options` group with non-literal options, and a
-      # `through:` association without a literal `class_name:` / `source_type:`. Without them a `through:` target is the SOURCE association's class on the through model, and
-      # that association (declared there, hence in this same index) roots it itself.
+      # `through:` association without a literal `class_name:` / `source_type:`. Without them a `through:`
+      # target is the SOURCE association's class on the through model, and that association (declared
+      # there, hence in this same index) roots it itself.
       #
       # A computed name equal to the owner's own demodulized name declines too (Rails 7.2+ tries `::Name`
       # first; the target is then the owner itself or a top-level class).

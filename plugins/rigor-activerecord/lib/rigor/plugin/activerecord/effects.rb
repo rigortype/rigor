@@ -28,8 +28,8 @@ module Rigor
       #
       # An `ActiveRecord::Base` row reaches `User.find` through the project's own
       # `User < ApplicationRecord < ActiveRecord::Base` lines, so one row covers every model in the app.
-      # That is the whole economy of the framework layer: thirty-odd rows here colour the several thousand
-      # database touches a Rails app performs, and none of them needed a line of application code.
+      # That is the whole economy of the framework layer: a fixed set of rows here colours the several
+      # thousand database touches a Rails app performs, and none of them needed a line of application code.
       module Effects
         BASE = "ActiveRecord::Base"
         RELATION = "ActiveRecord::Relation"

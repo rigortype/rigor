@@ -261,8 +261,8 @@ module Rigor
           end
         end
 
-        # A lockfile is read for its bytes: one absent at the mark must still be absent, one present must still be
-        # there with its change time before the mark.
+        # A lockfile is compared by its presence and change time: one absent at the mark must still be absent, one
+        # present must still be there with a change time before the mark.
         def lockfile_changed?(path)
           return File.exist?(path) unless present_at_mark?(path)
 

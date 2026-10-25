@@ -6,8 +6,7 @@ module Rigor
     # analyzer can convert the exception into a `:plugin_loader` diagnostic without crashing `rigor check`.
     #
     # The policy is documented in [ADR-2 § "Plugin Trust and I/O Policy"](../../../docs/adr/2-extension-api.md).
-    # Slice 2's surface lists `:read_outside_scope` and `:network_disabled` as the two reason codes; future slices
-    # may extend the set.
+    # `reason:` is one of `:read_outside_scope`, `:network_disabled`, `:url_fetch_failed` or `:url_body_too_large`.
     class AccessDeniedError < StandardError
       attr_reader :reason, :resource
 

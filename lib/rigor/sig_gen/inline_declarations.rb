@@ -23,7 +23,7 @@ module Rigor
     class InlineDeclarations
       # One inline-declared method.
       #
-      # - `method_types` — the declared overloads (`RBS::MethodType`, names as written, unresolved).
+      # - `method_types` — the declared overloads, names as written and unresolved.
       # - `annotations` — the annotation strings the author wrote on the member (`deprecated` for
       #   `%a{deprecated}`), without the synthesizer's own `rigor:v1:inferred-*` markers.
       # - `return_inferred` — the author declared the parameters and not the return: rbs-inline defaulted it,

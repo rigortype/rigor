@@ -9,11 +9,9 @@ module Rigor
   # *today's* rules are) and is versioned with the gem, NOT a user-supplied file: the
   # inspectable counterpart to PHPStan's `bleedingEdge` include.
   #
-  # The WD2 foundation slice wired the surface end-to-end (`bleeding_edge:` config, the
-  # `rigor show-bleedingedge` command, the severity-composition hook in
-  # {Configuration::SeverityProfile.resolve}), so a *severity* discipline lands as a single
-  # {FEATURES} entry with no engine plumbing — as the first one,
-  # `reject-unparseable-signatures`, does.
+  # The surface is wired end-to-end (`bleeding_edge:` config, `rigor show-bleedingedge`, the
+  # severity-composition hook in {Configuration::SeverityProfile.resolve}), so a *severity*
+  # discipline is a single {FEATURES} entry with no engine plumbing.
   #
   # A queued change whose effect is not a severity move — a measurement, an algorithm, or a
   # default that changes while every rule keeps its severity — is a `:behaviour` feature
@@ -40,7 +38,6 @@ module Rigor
     # {Configuration#bleeding_edge_active?}.
     KINDS = %i[severity behaviour].freeze
 
-    # The severity map a `:behaviour` feature carries: none.
     NO_SEVERITY_OVERRIDES = {}.freeze
 
     # One queued change.

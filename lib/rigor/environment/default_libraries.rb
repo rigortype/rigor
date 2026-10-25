@@ -2,7 +2,7 @@
 
 module Rigor
   class Environment
-    # Slice A stdlib expansion. Stdlib libraries that `Environment.for_project` loads on top of RBS core
+    # Stdlib libraries that `Environment.for_project` loads on top of RBS core
     # unless the caller passes an explicit `libraries:` array. Each entry MUST be a stdlib library name
     # accepted by `RBS::EnvironmentLoader#has_library?`; unknown libraries MUST fail-soft
     # (`RbsLoader#build_env` already filters through `has_library?`). The default set covers the common

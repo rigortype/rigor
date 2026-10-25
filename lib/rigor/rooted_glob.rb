@@ -20,7 +20,7 @@ module Rigor
 
     module_function
 
-    # @param root — a directory path (String or Pathname), taken literally
+    # @param root — a directory path, taken literally
     # @param pattern — a `Dir.glob` pattern relative to `root`
     # @return the matches spelled under `root`, in `Dir.glob` order; empty when `root` is not a directory
     def glob(root, pattern)

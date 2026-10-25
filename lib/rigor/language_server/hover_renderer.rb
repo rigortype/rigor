@@ -60,9 +60,8 @@ module Rigor
       end
 
       # Renders a `CallNode` hover when the receiver's type can be mapped to a known RBS class and the method
-      # is declared there. Returns nil for shapes the slice-A1 floor doesn't handle (implicit `self`, Union /
-      # Refined / Shape receivers — those land in slices A2-A4 and slice 7); the caller falls back to the
-      # default body.
+      # is declared there. Returns nil for shapes this renderer does not handle (implicit `self`, Union /
+      # Refined / Shape receivers); the caller falls back to the default body.
       def render_call(call_node, return_type, node_scope_lookup)
         receiver_node = call_node.receiver
         return nil if receiver_node.nil?
@@ -133,17 +132,16 @@ module Rigor
         body << "#{return_type.describe}\n"
         body << "```"
         if (doc = rbs_documentation(definition))
-          # Close the code fence first so the comment text renders as prose, then a fresh fenced block isn't
-          # necessary — plain markdown below the code reads better in clients.
+          # The fence is already closed, so the RBS comment renders as plain markdown below the code.
           body << "\n\n---\n\n#{doc}"
         end
         body
       end
 
       # Returns the concatenated text of every RBS comment attached to the method definition, or nil when no
-      # comments exist. `RBS::Definition::Method#comments` is an Array<AST::Comment> with each entry's
-      # `.string` carrying the raw text (newline-terminated `# foo` lines). Multiple comments are joined with a
-      # blank line so each upstream `# Foo bar` paragraph is preserved.
+      # comments exist. `RBS::Definition::Method#comments` is a list of `AST::Comment`s, each with its raw text
+      # in `.string` (newline-terminated `# foo` lines). Multiple comments are joined with a blank line so each
+      # upstream `# Foo bar` paragraph is preserved.
       def rbs_documentation(definition)
         comments = definition.respond_to?(:comments) ? definition.comments : nil
         return nil if comments.nil? || comments.empty?

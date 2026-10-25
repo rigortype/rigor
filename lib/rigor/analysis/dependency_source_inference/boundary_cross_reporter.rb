@@ -25,9 +25,9 @@ module Rigor
           @mutex = Mutex.new
         end
 
-        # @return frozen snapshot of the recorded boundary-cross events. Each entry is a Data
-        #   with `class_name` (String), `method_name` (Symbol), `gem_name` (String), and `rbs_display` (String
-        #   — the authoritative-side type's human-facing form, embedded into the diagnostic message).
+        # @return frozen snapshot of the recorded boundary-cross events. Each entry is a Data with `class_name`,
+        #   `method_name`, `gem_name`, and `rbs_display` (the authoritative-side type's human-facing form, embedded
+        #   into the diagnostic message).
         def entries
           @mutex.synchronize { @entries.dup.freeze }
         end

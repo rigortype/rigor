@@ -144,8 +144,7 @@ module Rigor
 
         def push_diagnostic(node, severity:, message:, rule:)
           # `Analyzer` is a plain class, not a `Plugin::Base` subclass, so it cannot use the `#diagnostic` instance
-          # helper — but `Diagnostic.from_location` is the same public constructor that helper wraps, and it
-          # internalises the 1-based line / column + 1 convention this method used to spell out by hand.
+          # helper. `Diagnostic.from_location` is the public constructor that helper wraps.
           @diagnostics << Rigor::Analysis::Diagnostic.from_location(
             node.location,
             path: @path,

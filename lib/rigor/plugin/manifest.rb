@@ -168,9 +168,8 @@ module Rigor
       end
       private :assign_additional_initializers
 
-      # ADR-103 WD2 / WD6 / WD10 / WD14 — the effect contract's five fields, assigned together and outside
-      # `assign_fields` (which already carries the maximum positional arity).
-      # The six `effect_*` fields validate together, so {#initialize} carries one call rather than six.
+      # ADR-103 WD2 / WD6 / WD10 / WD14 — the six `effect_*` fields validate together here, so {#initialize}
+      # carries one call rather than six.
       def validate_effect_fields!(effect_root, effect_labels, effect_attributions, effect_edges,
                                   effect_entry_points, effect_ancestry)
         validate_effect_root!(effect_root)
@@ -475,10 +474,9 @@ module Rigor
         end
       end
 
-      # ADR-13 slice 2 — `type_node_resolvers:` declares the plugin-supplied `TypeNodeResolver` instances the
-      # parser consults (in slice 3) when an RBS::Extended payload's named- or generic-type head misses the
-      # built-in registry. Slice 2 carries the declarations on the manifest and the registry exposes them in
-      # registration order; the parser integration that actually drives the chain lands in slice 3.
+      # ADR-13 — `type_node_resolvers:` declares the plugin-supplied `TypeNodeResolver` instances the parser
+      # consults when an RBS::Extended payload's named- or generic-type head misses the built-in registry. The
+      # registry exposes them in registration order, and `Environment#build_name_scope` builds the chain.
       def validate_type_node_resolvers!(resolvers)
         validate_array_of!("type_node_resolvers", resolvers, "Rigor::Plugin::TypeNodeResolver instances") do |r|
           r.is_a?(TypeNodeResolver)
@@ -486,8 +484,7 @@ module Rigor
       end
 
       # ADR-16 slice 1a — `block_as_methods:` declares the Tier A substrate entries the plugin contributes.
-      # Slice 1a carries the declarations on the manifest; the engine hook that actually narrows
-      # `Scope#self_type` for matching blocks arrives in a subsequent slice.
+      # The engine hook that narrows `Scope#self_type` for matching blocks is `Inference::MacroBlockSelfType`.
       def validate_block_as_methods!(entries)
         validate_array_of!("block_as_methods", entries, "Rigor::Plugin::Macro::BlockAsMethod instances") do |e|
           e.is_a?(Macro::BlockAsMethod)
@@ -495,8 +492,7 @@ module Rigor
       end
 
       # ADR-16 slice 2a — `heredoc_templates:` declares the Tier C substrate entries (heredoc-template
-      # synthesis on class-level DSL calls). Slice 2a carries the declarations on the manifest; the pre-pass +
-      # `SyntheticMethodIndex` that actually emit synthetic methods arrive in slice 2b.
+      # synthesis on class-level DSL calls). `Inference::SyntheticMethodScanner` emits the synthetic methods.
       def validate_heredoc_templates!(entries)
         validate_array_of!("heredoc_templates", entries, "Rigor::Plugin::Macro::HeredocTemplate instances") do |e|
           e.is_a?(Macro::HeredocTemplate)
@@ -515,8 +511,8 @@ module Rigor
       end
 
       # ADR-16 slice 3a — `trait_registries:` declares the Tier B substrate entries (trait-inlining via
-      # bundled module registry). Slice 3a carries the declarations on the manifest; the scanner + per-method
-      # explosion through `SyntheticMethodIndex` (slice 2b primitive) arrives in slice 3b.
+      # bundled module registry). `Inference::SyntheticMethodScanner#collect_trait_registries` explodes them
+      # per method through `SyntheticMethodIndex`.
       def validate_trait_registries!(entries)
         validate_array_of!("trait_registries", entries, "Rigor::Plugin::Macro::TraitRegistry instances") do |e|
           e.is_a?(Macro::TraitRegistry)

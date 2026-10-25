@@ -8,8 +8,6 @@ module Rigor
     # A tainted summary reads "these effects, and possibly more": the cause says which knowledge the
     # analyzer could not have. Taint never produces a finding — diagnostics read the proven lane
     # only — so this enum is a reporting vocabulary, not a diagnostic one.
-    #
-    # Nothing produces causes yet; the collector of #379 is the first writer.
     module TaintCause
       # Closed and ordered by how it arises: dispatch the analyzer could not resolve first, then
       # attribution it had to take on trust, then the collector's own limits.

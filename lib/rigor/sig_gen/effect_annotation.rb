@@ -82,8 +82,8 @@ module Rigor
       #
       # @param declared — whether the method already carries an authored bound of its own
       #   ({Effects::EnvelopeIndex}); see gate 0.
-      # @return `[Array<String> annotations, Symbol|nil reason]`. An empty
-      #   array with a `nil` reason is "nothing to say about this method".
+      # @return the annotation lines to render, then the reason to report. An empty list with a `nil` reason
+      #   is "nothing to say about this method".
       def decide(entry, envelopes: false, declared: false)
         return [[], :withheld_declared] if declared
         return [[], nil] if entry.nil?
@@ -133,7 +133,7 @@ module Rigor
 
         # @param path — the `.rb` file the def came from, for a `match:`-selected
         #   `effects.envelopes:` entry.
-        # @return `[Array<String>, Symbol|nil]` — see {EffectAnnotation.decide}.
+        # @return the annotation lines and the reason, as {EffectAnnotation.decide} gives them.
         def annotate(class_name:, method_name:, kind:, path: nil)
           key = EffectAnnotation.key_for(class_name, method_name, kind)
           return [[], nil] if key.nil?

@@ -26,7 +26,7 @@ module Rigor
       # `defs`, the typed refined arm's bodies in textual order: `[name, Prism::DefNode]` for a `def` or an alias of
       # an earlier `def`, and `[name, nil]` for any other definer (`define_method`, `attr_*`, `undef`, an alias of a
       # name the body did not define earlier). A later definer replaces an earlier one, as Ruby's method table
-      # keeps the last, so a name whose last definer has no `DefNode` types as `Dynamic[top]`.
+      # keeps the last, so a name whose last definer has no `DefNode` is typed as untyped.
       BodyReading = Struct.new(:names, :complete, :defs)
 
       # Calls on the refinement that define nothing: visibility, with no argument, literal names, a `def`, or an
@@ -182,7 +182,6 @@ module Rigor
         end
       end
 
-      # Classifies a call on the refinement.
       def classify_call(node, reading, latest)
         name = node.name
         arguments = node.arguments&.arguments || []

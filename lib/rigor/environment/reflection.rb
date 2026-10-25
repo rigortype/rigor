@@ -2,21 +2,21 @@
 
 module Rigor
   class Environment
-    # Frozen, `Ractor.shareable?` read-only RBS query facade.
+    # Frozen read-only RBS query facade.
     # [ADR-15](../../../docs/adr/15-ractor-concurrency.md) Phase 2b extracts the read-only surface of
     # {RbsLoader} into this carrier so future Ractor-isolated workers can share one Reflection across the
     # pool while keeping the per-Ractor mutable accelerator state (per-process memo Hashes) where it belongs.
     #
     # Backing tables (all frozen at construction):
     #
-    # - `known_class_names` — `Set<String>` of every class / module / alias name in the loaded RBS
-    #   environment. Top-level prefixed (`"::Hash"`); plain queries normalise via {#normalise}.
-    # - `instance_definitions` — `Hash<String, RBS::Definition>` keyed on `RBS::TypeName#to_s` (top-level
+    # - `known_class_names` — every class / module / alias name in the loaded RBS environment.
+    #   Top-level prefixed (`"::Hash"`); the query methods accept either form.
+    # - `instance_definitions` — `RBS::Definition` per class, keyed on `RBS::TypeName#to_s` (top-level
     #   prefixed).
     # - `singleton_definitions` — same shape, singleton side.
-    # - `type_param_names` — `Hash<String, Array<Symbol>>` of declared type parameters per class.
-    # - `constant_types` — `Hash<String, Rigor::Type>` of translated constant declarations.
-    # - `ancestor_names` — `Hash<String, Array<String>>` of normalised ancestor chains per class.
+    # - `type_param_names` — declared type parameters per class.
+    # - `constant_types` — translated constant declarations.
+    # - `ancestor_names` — normalised ancestor chains per class.
     #
     # Each `Reflection` instance is `frozen?` at construction — every cached table is frozen, `self` is
     # frozen. **NOT** `Ractor.shareable?`: the `instance_definitions` / `singleton_definitions` tables hold

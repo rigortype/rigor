@@ -21,14 +21,12 @@ require_relative "plugin/first_party"
 module Rigor
   module Plugin
     @registered = {}
-    # ADR-88 WD4b — process-global map `gem name (String) => [registered plugin id, ...]`, recorded by the
-    # loader the FIRST time a gem's `require` runs its body and registers plugins. A second in-process
-    # `Loader.load` of the same bare-string (`id:`-less) entry sees `require` return false (the gem is already
-    # loaded, so its `Rigor::Plugin.register` calls do not re-run) and an empty newly-registered delta — the
-    # loader recovers the gem's plugin id(s) from this memo instead of failing with "did not register any
-    # plugin". Populated by {.record_gem_registration}, read by {.ids_for_gem}. This is what makes a second
-    # in-process analysis (the `--verify-incremental` full-run oracle, the incremental session's subset
-    # re-analysis, the LSP's re-loads) load the same plugins the first run did.
+    # ADR-88 WD4b — process-global map `gem name (String) => [plugin id, ...]`, recorded by the loader on a gem's
+    # first `require`. A second in-process `Loader.load` of the same bare-string entry sees `require` return false
+    # and an empty newly-registered delta; the loader then recovers the ids from this memo instead of failing with
+    # "did not register any plugin". Populated by {.record_gem_registration}, read by {.ids_for_gem}. This is what
+    # lets a second in-process analysis (the `--verify-incremental` oracle, the incremental subset re-analysis,
+    # the LSP's re-loads) load the same plugins the first run did.
     @gem_registrations = {}
     @mutex = Mutex.new
 

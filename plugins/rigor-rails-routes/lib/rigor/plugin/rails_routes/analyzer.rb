@@ -124,7 +124,6 @@ module Rigor
           if name
             names << name
           elsif call_node.name == :subject && call_node.arguments.nil?
-            # Bare `subject { ... }` defines `:subject` itself.
             names << "subject"
           end
         end
@@ -201,8 +200,7 @@ module Rigor
         end
 
         def unknown_helper_violation(name, helper_table)
-          # ADR-39 / boilerplate 0c — the shared DidYouMean-backed suggester replaces the hand-rolled
-          # Levenshtein this module used to carry.
+          # ADR-39 / boilerplate 0c — the shared DidYouMean-backed suggester.
           suggestion = Rigor::Plugin::Base.suggest(name, helper_table.names)
           message = "no route helper `#{name}`"
           message += " (did you mean `#{suggestion}`?)" if suggestion

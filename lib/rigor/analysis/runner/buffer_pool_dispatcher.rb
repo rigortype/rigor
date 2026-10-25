@@ -101,8 +101,8 @@ module Rigor
           @min_batch_size = min_batch_size
         end
 
-        # Runs one `Runner#run([binding.logical_path])` per binding and returns `Array<Array<Diagnostic>>` —
-        # one diagnostics array per input binding, IN INPUT ORDER. The parent always absorbs worker results
+        # Runs one `Runner#run([binding.logical_path])` per binding and returns one diagnostics array per
+        # input binding, IN INPUT ORDER. The parent always absorbs worker results
         # re-indexed by POSITION, never keyed on path, so two bindings that happen to share a logical path
         # (should not occur — one dirty buffer per URI — but is not assumed away) can never collide or
         # silently overwrite one another.

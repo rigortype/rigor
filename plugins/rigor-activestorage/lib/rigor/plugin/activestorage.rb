@@ -137,19 +137,14 @@ module Rigor
         nil
       end
 
-      # Issue #1056 — "the attachment index did not load" is a fact about the run's INPUTS, not about the
-      # file being analysed, so both outcomes are registered rather than returned: see
-      # {Plugin::Base#disclose_once} for the channel and the position. Returned from the per-file hook they
-      # carried no once-guard at all — the `.uniq` collapsed repeats within one instance's list, but the
-      # whole list was re-emitted on every analysed file.
+      # Issue #1056 — "the attachment index did not load" is a fact about the run's INPUTS, not the file
+      # being analysed, so it is registered via {Plugin::Base#disclose_once} rather than returned from the
+      # per-file hook (which had no once-guard and re-emitted the list on every file).
       #
-      # The `key`s carry an ordinal prefix because the engine emits a plugin's disclosures in KEY order
-      # (#1051), and a refused read must still precede a discovery failure the way `@load_errors` records
-      # them — `@load_errors` is now keyed by that same string, which also caps it: `#attachment_index`
-      # re-attempts the load per call site, and the old Array appended a fresh interpolated string every
-      # time (the unbounded-growth shape #569 measured at 4.2 M retained strings on Redmine). The key, not
-      # the message, is the identity: a second refusal naming a different path collapses into the first row
-      # rather than adding one — the notice is "the index did not load", said once.
+      # The `key`s carry an ordinal prefix because the engine emits disclosures in KEY order (#1051), and
+      # a refused read must precede a discovery failure. `@load_errors` is keyed by the same string, which
+      # caps it: `#attachment_index` re-attempts the load per call site (#569). The key, not the message,
+      # is the identity, so a second refusal collapses into the first row.
       def disclose_load_errors
         @load_errors.each do |key, message|
           disclose_once(key, message: message, severity: :warning, rule: "load-error")

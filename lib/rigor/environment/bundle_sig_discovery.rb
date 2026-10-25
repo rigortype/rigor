@@ -31,7 +31,7 @@ module Rigor
       # The list is hard-coded for the MVP because it tracks rigor's bundled coverage 1:1. When a new gem is
       # vendored under `data/vendored_gem_sigs/` or added to `DEFAULT_LIBRARIES`, add its name here.
       SKIPPED_GEMS_BY_DEFAULT = Set[
-        # DEFAULT_LIBRARIES (lib/rigor/environment.rb)
+        # DEFAULT_LIBRARIES (lib/rigor/environment/default_libraries.rb)
         "pathname", "optparse", "json", "yaml", "fileutils",
         "tempfile", "tmpdir", "stringio", "forwardable",
         "digest", "securerandom", "uri", "logger", "date",
@@ -100,14 +100,10 @@ module Rigor
         expected_dirs = expected_gem_dirs(locked_gems)
         filtered.select do |sig_dir|
           if git_sourced_layout?(sig_dir)
-            # A git install's directory name carries no resolvable version (see above), so the lockfile
-            # filter can only check the gem NAME, not `(name, version)` — but name alone is not enough: a
-            # gem that used to be `git:`-sourced and has since moved to a released version keeps its old
-            # `bundler/gems/<repo>-<sha>/` directory sitting in the bundle tree until a `bundle clean`, and
-            # its NAME is still present in the lockfile (now via the rubygems entry). Matching on name only
-            # would silently readmit that stale git install — this repo's own `vendor/bundle` had exactly
-            # this after `binpacker` moved from `git:` to a released gem. `locked_gems` must say this name is
-            # CURRENTLY git-sourced, not merely present.
+            # A git install's directory carries no version, so the lockfile filter can only check the gem NAME.
+            # Name alone is not enough: a gem that moved from `git:` to a released version keeps its stale
+            # `bundler/gems/` checkout until `bundle clean`, under a name the lockfile still lists. `locked_gems`
+            # must say this name is CURRENTLY git-sourced, not merely present.
             locked = locked_gems[gem_name_from_sig_path(sig_dir)]
             !!locked&.git_source
           else

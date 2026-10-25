@@ -103,7 +103,7 @@ module Rigor
       # `to_modint` does, while `alias_method :orig_succ, :succ` ahead of a patch's `def succ` is the method
       # Integer already had. An alias whose old name nothing earlier binds records that name as `alias_of`, for the
       # dispatcher to answer with the class's existing method (`alias old_plus +` on Integer), or with
-      # `Dynamic[top]` when nothing knows the name: the alias is still published, since a call to it is not the
+      # an untyped result when nothing knows the name: the alias is still published, since a call to it is not the
       # undefined method a dropped entry would report.
       #
       # Within one file the later binding of a name replaces the earlier, as at runtime: the alias-method-chain

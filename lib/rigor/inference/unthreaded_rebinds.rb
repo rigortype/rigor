@@ -124,9 +124,8 @@ module Rigor
 
       # How a walk position reaches the exit scope: whether a local rebind there is threaded, whether an
       # instance variable's is, whether a class variable's or global's is, the offset below which a rebind
-      # precedes a jump,
-      # whether the position binds targets only (`:multi_assign` under a multi-assign, `:capture` under any
-      # other binding construct, false otherwise), and the locals a nested block shadows.
+      # precedes a jump, whether the position binds targets only (`:multi_assign` under a multi-assign,
+      # `:capture` under any other binding construct, false otherwise), and the locals a nested block shadows.
       Position = Data.define(:local, :ivar, :other, :horizon, :binding, :shadowed)
       private_constant :Position
 

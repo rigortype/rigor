@@ -9,10 +9,9 @@
 # ApplicationRecord; devise :database_authenticatable, :recoverable; end` and synthesises one
 # SyntheticMethod per (User, included module instance method) pair into the SyntheticMethodIndex.
 #
-# Slice 3 floor (WD13): the synthetic methods return `Dynamic[T]` at dispatch — i.e.
-# `user.valid_password?(...)` resolves through the synthetic-method tier and does NOT raise
-# call.undefined-method, but its return type is Dynamic[T] rather than `bool`. Precision promotion
-# (using the module's authored RBS return) is slice-6 ceiling work.
+# Slice 3 floor (WD13): `user.valid_password?(...)` resolves through the synthetic-method tier and does
+# NOT raise call.undefined-method. Its return type is the module's authored RBS return when the stub
+# declares one (see `promote_via_origin_module`), and the untyped floor otherwise.
 
 class ApplicationRecord # rubocop:disable Lint/EmptyClass
 end

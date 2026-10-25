@@ -18,7 +18,7 @@ require_relative "options"
 require_relative "diagnostic_formats"
 require_relative "../ci_detector"
 # ADR-87 WD4 — `coverage_scan` and `check_runner_factory` both pull the inference engine, so they are required
-# lazily (in `compute_coverage` / `build_check_runner`) rather than at load time: an ordinary check whose
+# lazily (in `invoke_check` / `compute_coverage`) rather than at load time: an ordinary check whose
 # result the run-cache probe serves must reach the hit verdict without `rigor/inference` in $LOADED_FEATURES.
 
 module Rigor
@@ -219,10 +219,9 @@ module Rigor
         exit_code
       end
 
-      # ADR-46 — the two incremental-analysis check modes both fully handle the run and return an exit code (so `run`
-      # short-circuits); returns nil for an ordinary check.
-      # A nil return means "not a special mode" — `run` continues with the ordinary check. Editor mode option B
-      # also returns nil when it declines (no reusable snapshot), so the run falls back to single-file scope.
+      # ADR-46 — the two incremental-analysis check modes handle the run and return its exit code, so `run`
+      # short-circuits. Returns nil for an ordinary check, and for editor mode option B when it declines (no reusable
+      # snapshot), so the run falls back to single-file scope.
       def dispatch_special_check_mode(configuration, options, cache_root, buffer)
         if options.fetch(:verify_incremental)
           # The gate compares an incremental recheck against a full-run oracle, and a buffer makes the two
@@ -386,9 +385,7 @@ module Rigor
         return run_editor_mode_option_b(session, snapshot, fingerprint, configuration, options) if buffer
 
         diagnostics, warm = session.run_incremental(snapshot: snapshot, fingerprint: fingerprint)
-        # The banner's file count comes from the session's analyzed set (cold analyses all; a warm recheck's
-        # `@analyzed` advances to the current file set), so a dedicated probe Runner + `Dir.glob` is no longer
-        # built just to size the banner (recon §3 — the analysis tree was expanded three times per recheck).
+        # The banner's file count comes from the session's analyzed set, so no probe Runner is built just to size it.
         # A warm banner reports the recheck's own sets (#1526), which only the session knows.
         report_incremental_run(warm, session.analyzed_files.size, recheck: session.last_recheck)
         emit_incremental_fact_surface_notes(session)
@@ -698,7 +695,7 @@ module Rigor
           no_cache: false,
           stats: true,
           # ADR-15 Phase 4c — when nil, falls back to `RIGOR_RACTOR_WORKERS` then `.rigor.yml` `parallel.workers:` then
-          # 0 (sequential). See `resolve_workers` for the precedence chain.
+          # 0 (sequential). See `CheckRunnerFactory.resolve_workers` for the precedence chain.
           workers: nil,
           tmp_file: nil,
           instead_of: nil,

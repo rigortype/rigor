@@ -296,17 +296,14 @@ module Rigor
         name.start_with?(TOKEN_PREFIX) ? name.delete_prefix(TOKEN_PREFIX) : nil
       end
 
-      # The vendored directory basenames a library list activates.
       def active_dirs(library_names)
         library_names.filter_map { |name| VENDORED_DIRS[feature_of_token(name)] }
       end
 
-      # Whether `dir_basename` is one of the gated directories.
       def gated_dir?(dir_basename)
         VENDORED_DIRS.value?(dir_basename)
       end
 
-      # The feature a gated directory loads for.
       def feature_for_dir(dir_basename)
         VENDORED_DIRS.key(dir_basename)
       end

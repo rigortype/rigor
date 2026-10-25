@@ -39,8 +39,8 @@ module Rigor
     # - `configuration` — Phase 2a ({Rigor::Configuration} is `Ractor.shareable?`).
     # - `cache_store` — the fork backend passes the parent runner's pre-built Store (`cache_store:
     #   @cache_store` in PoolCoordinator); workers share it rather than building their own at `cache_root`.
-    # - `plugin_blueprints` — Phase 3a (`Array<Plugin::Blueprint>` is `Ractor.shareable?`).
-    # - `explain` — Boolean.
+    # - `plugin_blueprints` — Phase 3a (a list of `Plugin::Blueprint` is `Ractor.shareable?`).
+    # - `explain` — a flag.
     # - `synthetic_method_index` / `project_patched_methods` / `project_scope_seed` — optional (default `nil`
     #   / `{}`). NOT `Ractor.shareable?` (the seed tables carry Prism def nodes), so the Ractor pool path
     #   leaves them unset; the fork backend (ADR-15 Amendment), which builds the session pre-fork on the
@@ -109,7 +109,7 @@ module Rigor
         # above: a worker and the parent agree without a flag to keep in sync.
         @effect_attribution = Effects::Attribution.build(configuration.effects_attribution)
         @file_effects = {}
-        # ADR-32 WD4 — full project file list (frozen Array<String>) for env-build-time invocation of any
+        # ADR-32 WD4 — full project file list (frozen) for env-build-time invocation of any
         # loaded plugin's `source_rbs_synthesizer` callable.
         @source_files = source_files
         # #392 — the run's template units, synthesised on the PARENT before the fork and inherited here as
@@ -162,7 +162,7 @@ module Rigor
       end
 
       # Equivalent of {Rigor::Analysis::Runner#analyze_file} + `plugin_emitted_diagnostics` +
-      # `explain_diagnostics`. Returns a flat `Array<Diagnostic>` for the file. Severity profile re-stamping
+      # `explain_diagnostics`. Returns a flat list of diagnostics for the file. Severity profile re-stamping
       # is intentionally NOT applied — that is a per-run aggregate concern handled by the caller. When
       # `record_dependencies:` was set, wraps the analysis in a {DependencyRecorder} window (ADR-46) so the
       # worker captures the file's cross-file reads for {#drain_dependencies}; the recorder's own disabled
@@ -271,7 +271,7 @@ module Rigor
       # definition and never enters the failing build; a diagnostic wired off the parent's loader would
       # appear at `--workers=0` and vanish at `--workers=N`, which is the same "reports less depending on
       # how you ran it" defect the diagnostic exists to end. Draining it out of the workers is what makes
-      # the two paths say the same thing. The payload is `[String, String, String, Array<String>]` tuples —
+      # the two paths say the same thing. The payload is a list of plain tuples —
       # Marshal-clean for the fork backend and shareable for the Ractor one.
       #
       # Issue #784 — `hkt_scan_failure` rides the same channel for the same reason: the PARENT's own

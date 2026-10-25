@@ -1180,15 +1180,6 @@ module Rigor
           refinements
         end
 
-        # Recognised CallNode predicates:
-        # - `recv.nil?` (Slice 6 phase 1, no args, no block)
-        # - unary `!recv` (`name == :!`, no args, no block)
-        # - `recv.is_a?(C)` / `recv.kind_of?(C)` / `recv.instance_of?(C)` with a single
-        #   static-constant argument and no block (Slice 6 phase 2 sub-phase 1).
-        # - `local == literal` / `literal == local` and the `!=` mirror for trusted static
-        #   literals (Slice 6 phase 2 sub-phase 2).
-        # Anything else returns nil so the surrounding analyser falls through to the
-        # no-narrowing fallback.
         # Issue #1223 — `(x = e).nil?`, `(x ||= e).empty?`, `(@x = e).is_a?(C)`. A write's value is the binding
         # it leaves, and a predicate is narrowed in the scope after its receiver ran, so the call narrows the
         # variable exactly as the same call on a read of it would. Every analyser keys its receiver on a read
@@ -2466,10 +2457,10 @@ module Rigor
           narrowed == original ? :relational : :local_binding
         end
 
-        # `recv.is_a?(C)` / `recv.kind_of?(C)` / `recv.instance_of?(C)` narrowing. The receiver
-        # MUST be a `LocalVariableReadNode` (so we have a name to rebind), and the argument
+        # `recv.is_a?(C)` / `recv.kind_of?(C)` / `recv.instance_of?(C)` narrowing. The argument
         # MUST be a single static constant reference (`Foo` or `Foo::Bar`) we can resolve to a
-        # qualified class name. Anything else falls through to "no narrowing".
+        # qualified class name. The receiver is a local, a global, constant or instance variable
+        # ({#receiver_slot}) or a single-hop chain; anything else falls through to "no narrowing".
         def analyse_class_predicate(node, scope, exact:)
           return nil if node.arguments.nil?
           return nil unless node.arguments.arguments.size == 1
@@ -2538,14 +2529,13 @@ module Rigor
           class_predicate_scopes(scope, node.receiver.name, current, class_name, exact: exact)
         end
 
-        # Stable single-hop method-chain narrowing (ROADMAP § Future cycles — "Method-call
-        # receiver narrowing across stable receivers"). When the predicate's receiver is
+        # Stable single-hop method-chain narrowing. When the predicate's receiver is
         # `<local/ivar>.<method>` with no args and no block, record the truthy / falsey
         # narrowing in `Scope#method_chain_narrowings` keyed on the chain address. The
         # dominated body's identical chain reads then observe the narrowed type through
         # `ExpressionTyper#call_type_for`'s lookup.
         #
-        # Heuristic-by-design (ROADMAP § "Soundness gap"): a second call to `x.last` could in
+        # Heuristic-by-design: a second call to `x.last` could in
         # principle return a different value than the first. The chain is dropped on (1)
         # receiver variable rebind (handled inside `Scope#with_local` / `#with_ivar`), and (2)
         # any intervening call against the same root receiver (handled by
@@ -2864,9 +2854,7 @@ module Rigor
         # - For each fact, the corresponding positional argument (matched by parameter name in
         #   the selected overload) MUST be a `Prism::LocalVariableReadNode` for narrowing to
         #   apply.
-        # - When the target is `self`, narrowing applies to the receiver — but the engine does
-        #   not yet narrow `self` itself, so `self`-targeted facts are accepted by the merger
-        #   but currently produce no scope edits.
+        # - When the target is `self`, narrowing applies to the receiver ({#apply_self_fact}).
         def analyse_rbs_extended_contribution(node, scope)
           method_def = resolve_rbs_extended_method(node, scope)
           return nil if method_def.nil?
@@ -3403,8 +3391,8 @@ module Rigor
         # extend record that is structurally incomplete: `Widget.extend(m)` at a call site and an `extend`
         # written in a file outside the analysed set are both invisible to the walk behind
         # {Scope#singleton_extends_of}, and the declaration-side record joined to it below is no more
-        # complete — RBS says nothing about a class it does not declare. A shape that turned this table into a positive
-        # `:subclass` verdict would have to be right about ABSENCE too, and it cannot be. Preserving
+        # complete — RBS says nothing about a class it does not declare. A shape that turned this table
+        # into a positive `:subclass` verdict would have to be right about ABSENCE too, and it cannot be. Preserving
         # `Singleton[C]` would also hand the arm a receiver whose singleton method table has no `clamp` on
         # it, trading the unreachable-clause false positive for an undefined-method one — the same trap
         # #657 recorded on the `Constant` carrier.
@@ -3586,7 +3574,7 @@ module Rigor
           rbs_type.is_a?(RBS::Types::Literal) && rbs_type.literal == value
         end
 
-        # The four receiver shapes with a scope binding the edges can rebind, mirroring
+        # The three receiver shapes with a scope binding the edges can rebind, mirroring
         # `apply_self_fact`. A method chain or arbitrary expression has none, so it reads nil and
         # the caller declines.
         def receiver_binding_type(receiver, scope)
@@ -3696,7 +3684,7 @@ module Rigor
 
         # Walks a call chain down to its `&.` link, collecting the suffix method names applied
         # above it (outermost first). Declines unless the chain bottoms out in a `&.` call on a
-        # direct local / ivar read — those are the two bindings a scope can rewrite — and unless
+        # direct local, instance-variable, global or constant read — the slots a scope can rewrite — and unless
         # every suffix is a bare reader or predicate, since an argument or a block could make the
         # answer depend on something other than the receiver.
         #

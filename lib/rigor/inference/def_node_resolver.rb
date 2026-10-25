@@ -104,7 +104,7 @@ module Rigor
       # is recorded like any other: it is the bundle saying the def is written at the top level, and dropping
       # it would leave the warm path peeling the caller's namespace where a cold run resolves at the top
       # level. Only `nil` — a bundle that recorded nothing for the def — is skipped, and
-      # `Cache::IncrementalSnapshot::SCHEMA` 17 is what keeps a pre-#716 blob (where `nil` MEANT top level)
+      # the `SCHEMA` bump to 17 (`Cache::IncrementalSnapshot`) keeps a pre-#716 blob, where `nil` MEANT top level,
       # from being read as one.
       def self.record_nesting(memo, node, nesting)
         return if node.nil? || nesting.nil?

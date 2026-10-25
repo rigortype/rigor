@@ -102,7 +102,7 @@ module Rigor
 
         # Phase 2 — filter-chain validation for ONE filter-DSL call (`before_action :name`, …). The
         # enclosing controller is read from the node-rule `NodeContext` ancestors, looked up in the
-        # controller index to get the effective method set (including one level of inheritance), and
+        # controller index to get the effective method set (including inherited methods), and
         # each filter name reference is validated against it. Calls outside a known controller
         # contribute nothing.
         #

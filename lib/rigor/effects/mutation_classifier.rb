@@ -32,13 +32,10 @@ module Rigor
       # `foo=`, and deliberately not `==` / `<=` / `!=` / `===`.
       ATTRIBUTE_WRITER = /\A[a-z_][A-Za-z0-9_]*=\z/
 
-      # Every Hash method that mutates its receiver. The widening keeps two tables because they answer two different
-      # questions of a `HashShape` — `MutationWidening::HASH_MUTATORS` changes the pair set,
-      # `HashLookupMutation::MUTATORS` changes what a read of the pairs answers — but either is a write to the
-      # receiver, and that is all this asks: `h.compare_by_identity` raises `FrozenError` on a frozen hash as
-      # `h.clear` does (unless the hash already compares by identity, when it returns before the check), and a
-      # method whose one effect was `@h.compare_by_identity` did not read as mutating while this cited the first
-      # table alone.
+      # Every Hash method that mutates its receiver: the union of two widening tables that answer different
+      # questions of a `HashShape` (the pair set; what a read of the pairs answers). Either is a write to the
+      # receiver, so either counts. `compare_by_identity` lives only in the second, and it raises `FrozenError`
+      # on a frozen hash as `h.clear` does, so a method whose one effect is that call must still read as mutating.
       #
       # `rehash` is in neither table because it changes no read a shape can state: a shape's keys are literals, which
       # a rebuild never merges. It still rebuilds the receiver's table in place, and it is the one name spelt here.

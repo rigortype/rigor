@@ -79,9 +79,8 @@ module Rigor
 
       private
 
-      # Like `rigor check`, fall back to the configured `paths:` when no path is given on the command line
-      # (`coverage` previously required an explicit path — operational friction the two commands should not
-      # differ on). The mutation mode keeps its own git-changed-files default and returns before this.
+      # Like `rigor check`, fall back to the configured `paths:` when no path is given. The mutation mode keeps its own
+      # git-changed-files default and returns before this.
       def resolve_paths(configuration)
         args = @argv.empty? ? configuration.paths : @argv
         collect_paths(args, command_name: "coverage")
@@ -203,7 +202,7 @@ module Rigor
       #   `singleton(Account)` instead of `Dynamic`. Without this, a
       #   single-file scan cannot see a class it does not itself declare,
       #   so every cross-file class-constant dispatch was miscounted as
-      #   unprotected (the model-constant undercount found 2026-07-04).
+      #   unprotected.
       # - `param_inferred_types` (ADR-67 WD3) — an inferred-parameter
       #   receiver (`node.loc` where `node` is a `def compile(node)`
       #   parameter) counts as protected when its call sites resolve to

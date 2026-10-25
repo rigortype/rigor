@@ -15,10 +15,9 @@ module Rigor
                     :class_to_gem, :budget_overrun_strategy, :gem_modes, :refinements, :bound_constants,
                     :bound_segments
 
-        # @param method_catalog — => Symbol}] the flat
-        #   `(class_name, method_name) → :instance | :singleton` table produced by {Walker.walk}, aggregated
-        #   across every resolved gem in the run. The Index itself stays gem-agnostic — the per-gem
-        #   attribution that slice 3's cache descriptor needs lives on `Resolved`, not here.
+        # @param method_catalog — the flat `(class_name, method_name) → CatalogEntry` table produced by
+        #   {Walker.walk}, aggregated across every resolved gem in the run. The Index itself stays gem-agnostic —
+        #   the per-gem attribution that slice 3's cache descriptor needs lives on `Resolved`, not here.
         # @param budget_exceeded — gem names whose {Walker} run hit the per-gem catalog cap
         #   (slice 4). The Runner consumes this list to emit one `dynamic.dependency-source.budget-exceeded`
         #   warning per gem.
@@ -110,10 +109,9 @@ module Rigor
           mode_for(class_name) == :full
         end
 
-        # Looks up the recorded method kind for a `(class_name, method_name)` pair. Returns `:instance` /
-        # `:singleton` when the walker observed a definition under one of the resolved gems' `roots:`, or
-        # `nil` otherwise. Slice 2b-ii enriches this with the inferred return type so the dispatcher tier can
-        # build a `Type::Dynamic` directly from the lookup result.
+        # Looks up the `CatalogEntry` (kind, and the heuristic return type) for a `(class_name, method_name)` pair.
+        # Returns it when the walker observed a definition under one of the resolved gems' `roots:`, or `nil`
+        # otherwise.
         def contribution_for(class_name:, method_name:)
           @method_catalog[[class_name, method_name]]
         end

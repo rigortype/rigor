@@ -7,7 +7,7 @@ module Rigor
   class CLI
     # `rigor plugin` (singular) — discover and read the plugin source bundled with the `rigortype` gem.
     #
-    # Rigor ships ~30 production plugins under `plugins/` and a set of tutorial plugins under `examples/`. When Rigor is
+    # Rigor ships production plugins under `plugins/` and tutorial plugins under `examples/`. When Rigor is
     # installed via `mise` / `gem install` the gem checkout is on disk, so a plugin author (or an AI coding agent
     # following the `rigor-plugin-author` skill) can read a real, working plugin as a worked example — instead of
     # guessing the `Rigor::Plugin::Base` surface from prose. This command outputs the absolute paths so they can be

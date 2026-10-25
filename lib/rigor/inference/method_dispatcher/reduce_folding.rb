@@ -148,7 +148,7 @@ module Rigor
 
         # Runs the actual reduction, guarded by the rescue harness and the magnitude cap. Empty-collection
         # semantics match Ruby: `[].reduce(s, :op) == s` (seed form) and `[].reduce(:op) == nil` (no-seed
-        # form → declines so the nominal fold's no-nil contract stands; see `fold_result`).
+        # form → declines so the nominal fold's no-nil contract stands; see the class comment).
         def execute_constant_reduce(members, operator, seed_value, seed_present)
           result =
             if seed_present

@@ -23,8 +23,7 @@ module Rigor
         @project_context = project_context
       end
 
-      # @return LSP `FoldingRange[]` for the
-      #   buffer, or nil when the URI isn't open / parseable.
+      # @return LSP folding ranges for the buffer, or nil when the URI isn't open / parseable.
       def provide(uri)
         path, entry = buffer_for(uri)
         return nil if entry.nil?

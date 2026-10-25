@@ -11,14 +11,14 @@ module Rigor
     # or the stored values are the receiver's own elements taken apart (`flatten!`).
     #
     # The widening kept the SEED's types for such a site, because nothing it joins describes the new values:
-    # `a = [1]; a.map!(&:to_s)` read `Array[Integer]`, and `a.first.upcase` drew a false
+    # `a = [1]; a.map!(&:to_s)` read as an array of Integers, and `a.first.upcase` drew a false
     # `undefined method 'upcase' for Integer`. The seam cannot see the values, so the answer at each position the
     # mutator writes is gradual — {REPLACED} or {JOINED}, depending on whether the old values can survive it.
     module RewriteMutation
       # Mutators that rewrite EVERY value at the listed type-argument positions, keyed by carrier class: nothing the
-      # seed held there is known to survive, so the position becomes `Dynamic[top]` outright. Keeping the seed beside
+      # seed held there is known to survive, so the position becomes untyped outright. Keeping the seed beside
       # the gradual arm would leave a closed claim about values that are gone — `a = [1, 2]; a.map!(&:to_s)` read
-      # `Array[1 | 2 | Dynamic[top]]`, which a hand-written `-> Array[String]` rejects on correct code, and the kept
+      # the seed's `1 | 2` beside untyped, which a hand-written `-> Array[String]` rejects on correct code, and the kept
       # `1` gated a later `a << "x"` out of the re-join as foreign evidence. `Array#replace` is listed although its
       # argument IS its new content: {MutationWidening#join_added_elements} still joins that evidence after the
       # replacement, and the seed it would otherwise keep beside it is gone.
@@ -29,12 +29,12 @@ module Rigor
 
       # Mutators that store values nothing describes BESIDE values they may keep: `fill(x, start)` leaves the slots
       # before `start`, and `merge!` / `update` leave every key the argument lacks. The listed positions join
-      # `Dynamic[top]` and keep the seed's own arms.
+      # untyped and keep the seed's own arms.
       #
       # `fill` is listed although its no-block form's argument IS its value: the widening cannot see the block, and
       # the arm costs the argument form nothing, since {MutationWidening#join_added_elements} already floors every
       # straight-line store it joins. `merge!` on a `Hash.new(0)` counter opens the value side the default proved
-      # (`Dynamic[top] | Integer`), since the seam cannot tell a merging block or a foreign argument from neither.
+      # (untyped beside `Integer`), since the seam cannot tell a merging block or a foreign argument from neither.
       JOINED = Ractor.make_shareable({
                                        "Array" => { fill: [0] },
                                        "Hash" => { merge!: [0, 1], update: [0, 1] }
@@ -94,8 +94,8 @@ module Rigor
       # Erasing the pinning there buys nothing and costs the #561 guarantee. The erasure exists to stop a stale
       # constant fold (issue #560), and a union carrying `Dynamic` never folds; but the erased form is a CLOSED
       # class a {JOINED} arm then sits beside, and one a hand-written signature pinning the seed rejects — haml's
-      # `-> Array[:multi]` accepts `Array[:multi | Dynamic[top]]`, not `Array[Dynamic[top] | Symbol]`. A {REPLACED}
-      # position discards the pinning either way.
+      # `-> Array[:multi]` accepts the pinned `:multi` joined with untyped, not the erased untyped joined with
+      # `Symbol`. A {REPLACED} position discards the pinning either way.
       #
       # `type` is the widening's pre-state; a `Union` answers `values` and each member asks again as it widens.
       def values_mode(type, method_name, values)

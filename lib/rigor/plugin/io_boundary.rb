@@ -17,7 +17,7 @@ module Rigor
     # scope and feed the cache descriptor; contributions built on top of out-of-scope reads will not
     # invalidate correctly.
     #
-    # Slice 2 ships a minimal surface:
+    # The surface:
     #
     # - `#read_file(path)` — validates against the policy, returns the file's contents, and adds a
     #   digest-keyed {Cache::Descriptor::FileEntry} to the boundary's accumulated descriptor. A read that

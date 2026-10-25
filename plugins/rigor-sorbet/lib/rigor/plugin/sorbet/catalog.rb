@@ -57,7 +57,7 @@ module Rigor
           @entries[key_for(class_name, method_name, kind)]
         end
 
-        # @return frozen mapping `{ include: [...], extend: [...] }`.
+        # @return frozen `:include` / `:extend` buckets of mixed-in module names.
         #   Returns {EMPTY_MIXINS} when no mixins were recorded.
         def mixins_for(class_name)
           @mixins[class_name] || EMPTY_MIXINS

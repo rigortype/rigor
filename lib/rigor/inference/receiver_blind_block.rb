@@ -182,9 +182,9 @@ module Rigor
         parent.nil? || CONSTANT_READS.include?(parent.class)
       end
 
-      # Whether a value of `type` can tell a reader what some hash holds, key by key or as `Hash[K, V]`
+      # Whether a value of `type` can tell a reader what some hash holds, key by key or as its key and value
       # parameters. A read through such a value in an in-place transform's block can be stale by the next
-      # pair. `Dynamic[top]`, a bare `Hash` and a scalar cannot, and neither can a `Hash` whose parameters are
+      # pair. An untyped value, a bare `Hash` and a scalar cannot, and neither can a `Hash` whose parameters are
       # untyped.
       def carries_hash_contents?(type, depth = 0)
         return false if type.nil?

@@ -94,9 +94,9 @@ module Rigor
         # ADR-15 Phase 4b — `plugin_prepare_diagnostics` runs on the coordinator's plugin registry under
         # sequential mode; under pool mode each worker re-runs `prepare` against its own plugin instances,
         # so the pool path drains the first worker's prepare-diagnostic snapshot into the aggregated
-        # diagnostic stream instead (see {#analyze_files_in_pool}). Skipping the coordinator prepare in pool
-        # mode avoids double-running `#prepare` against the coordinator-side plugin instances (which the
-        # pool path never consults for per-file analysis).
+        # diagnostic stream instead (see {PoolCoordinator#analyze_files_in_pool}). Skipping the coordinator
+        # prepare in pool mode avoids double-running `#prepare` against the coordinator-side plugin instances
+        # (which the pool path never consults for per-file analysis).
         def pre_file_diagnostics(expansion)
           # ADR-18 slice 3 — prepare diagnostics are captured earlier in #run (before the synthetic-method
           # scanner) so cross-plugin facts are available to the scanner. We re-surface the captured

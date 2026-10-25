@@ -58,11 +58,9 @@ module Rigor
         node.is_a?(Prism::SingletonClassNode) || (node.is_a?(Prism::CallNode) && node.block.is_a?(Prism::BlockNode))
       end
 
-      # A class body.
       CLASS_BODY = of(:class, false)
       # A `class << self` body: `self` and the definee are both the singleton class.
       SINGLETON_CLASS_BODY = of(:singleton_class, true)
-      # The body of an instance method of the class.
       INSTANCE_METHOD_BODY = of(:instance, false)
       # The top level, where `self` is `main`, an instance of `Object`, and a `def` defines `Object#m`.
       TOP_LEVEL = INSTANCE_METHOD_BODY

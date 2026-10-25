@@ -3,16 +3,16 @@
 module Rigor
   module Plugin
     class Typelizer < Rigor::Plugin::Base
-      # The project's classes (every file of the project's `paths:` and the typelizer `dirs`), as the {SerializerCollector} found them. A frozen value
-      # object the `:serializer_index` producer caches.
+      # The project's classes (every file of the project's `paths:` and the typelizer `dirs`), as the
+      # {SerializerCollector} found them. A frozen value object the `:serializer_index` producer caches.
       #
       # {#roots} answers the one question, conservatively — a wrong "no" costs a missing root, a wrong "yes"
       # hides a dead class.
       class SerializerIndex
         # A class the project declares. `superclass` is the constant as written (`nil` when absent) and
         # `nesting` the `Module.nesting` chain (innermost first) its header was written under, which is where
-        # Ruby resolves that constant. `dsl` is true when its body includes or extends `Typelizer::DSL`; `in_dirs` when a file under the
-        # typelizer `dirs` declares it (only such a class is published as a root).
+        # Ruby resolves that constant. `dsl` is true when its body includes or extends `Typelizer::DSL`;
+        # `in_dirs` when a file under the typelizer `dirs` declares it (only such a class is published as a root).
         ClassEntry = Data.define(:name, :superclass, :nesting, :dsl, :in_dirs)
 
         def initialize(classes:)

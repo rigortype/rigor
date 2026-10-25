@@ -27,10 +27,8 @@ module Rigor
     #
     # The invariant the verify harness (and the spec) assert: `#recheck`'s merged diagnostics are
     # byte-identical to a full `--no-cache` re-analysis of the edited tree, in the same order (#1524; the gate
-    # itself compares sorted sets). This is the `--verify-incremental` acceptance gate, here without disk
-    # persistence or CLI wiring (the cache is in-process). It models the body tier only: an edit that adds /
-    # removes / moves a *file* is outside the analyzed set it maintains and falls to a fresh {#baseline} (the
-    # structural tier is a later slice).
+    # itself compares sorted sets). The `--verify-incremental` gate runs this engine; `#run_incremental` adds the
+    # snapshot persistence that `--incremental` uses.
     # The class-length budget is relaxed: this is one cohesive orchestrator of the incremental state
     # (per-file diagnostics cache, the file-level / symbol-level / negative dependency graphs, and the ADR-85
     # seed bundles), clearer read together than split across micro-classes that would all share the same ivars.
@@ -101,8 +99,8 @@ module Rigor
         # ADR-85 WD2 — per-file discovery seed bundles keyed by logical path. A cold baseline builds them; a
         # warm recheck folds them (re-walking only changed files) and refreshes the set. Ride the snapshot.
         @seed_bundles = {}
-        @cache = {}              # analyzed path => [Diagnostic]
-        @sources = {}            # analyzed path => Set<source path it read from>
+        @cache = {}              # analyzed path => its diagnostics
+        @sources = {}            # analyzed path => the source paths it read from
         @digests = {}            # analyzed path => ADR-87 packed stat-digest entry at last analysis
         # Issue #1583 — discovered-not-analysed path => the same packed entry, for a run over path arguments that
         # #684 widened to the configured `paths:`. Empty on every run over the configured paths.
@@ -110,18 +108,18 @@ module Rigor
         @analyzed = []           # the project files analyzed last round
         @dependents = {}         # inverted @sources (file-level)
         # ADR-46 slice 4 — symbol-granularity tracking.
-        @symbol_sources = {}     # consumer => { source_path => Set<"ClassName#method"> }
-        @ancestry_sources = {}   # consumer => Set<source_path> (class-ancestry deps)
+        @symbol_sources = {}     # consumer => { source_path => the "ClassName#method" symbols it read }
+        @ancestry_sources = {}   # consumer => source paths (class-ancestry deps)
         @symbol_fingerprints = {}  # path => { "ClassName#method" => sha256_hex }
-        @symbol_dependents = {}    # [source, symbol] => Set<consumer>
-        @ancestry_dependents = {}  # source => Set<consumer> (inverted ancestry_sources)
+        @symbol_dependents = {}    # [source, symbol] => consumers
+        @ancestry_dependents = {}  # source => consumers (inverted ancestry_sources)
         # ADR-46 slice 3 — negative (missing) dependencies: a consumer that
         # looked up a name and resolved nothing must be re-checked when that
         # name later appears (e.g. a `call.unresolved-toplevel` whose target
         # is defined by a later edit).
-        @missing = {}              # consumer => Set<"kind:name"> it looked up and missed
-        @negative_dependents = {}  # "kind:name" => Set<consumer> (inverted @missing)
-        @class_decls = {}          # path => Set<qualified class name declared in the file>
+        @missing = {}              # consumer => the "kind:name" keys it looked up and missed
+        @negative_dependents = {}  # "kind:name" => consumers (inverted @missing)
+        @class_decls = {}          # path => qualified class names declared in the file
         # Issue #644 — the value-constant twin: path => { qualified constant name => publication descriptor }.
         # Diffed on a recheck to find every constant whose PUBLISHED answer could have moved, which satisfies
         # the `constant:` edges a reader records at every reference, resolved or not.
@@ -1505,7 +1503,7 @@ module Rigor
       end
 
       # The qualified class/module names declared in the pre-parsed `index` (shared with
-      # {#symbol_fingerprints_from_index}, so the changed set is parsed once). `{ path => Set<class name> }`.
+      # {#symbol_fingerprints_from_index}, so the changed set is parsed once), keyed by path.
       def class_declarations_from_index(index)
         return {} if index.nil?
 

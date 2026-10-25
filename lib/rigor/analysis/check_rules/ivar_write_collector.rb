@@ -44,8 +44,9 @@ module Rigor
         NODE_CLASSES = [Prism::DefNode, Prism::CallNode].freeze
         RULE_WALK_GATES = %i[inside_def detached_ivar_facet].freeze
 
-        # Returns `Hash[class_name (String) => Hash[ivar_name (Symbol) => Array<{node:, type:, declared:,
-        # method_name:, visibility:, per_invocation:, action:}>]]`. Empty when the tree has no qualifying writes.
+        # Groups the writes by class qualified name, then by ivar name. Each write carries `node`, `type`,
+        # `declared`, `method_name`, `visibility`, `per_invocation` and `action`. Empty when the tree has no
+        # qualifying writes.
         # `declared` is the translated type of the class's RBS declaration of the ivar — an `@x: T` member or
         # the slot an `attr_*` member implies, own or inherited — and nil when the RBS declares none.
         #

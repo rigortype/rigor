@@ -31,12 +31,10 @@ module Rigor
         # nodes; the bound exists so a pathological body cannot turn a per-call-site gate into a walk.
         FACTORY_BODY_SCAN_BUDGET = 200
 
-        # Issue #595 / #525 — the ONE materialisation test. Both places that must answer "was this receiver
-        # expression's struct newly built?" go through it: this module's direct member-read gate above, and
-        # `ExpressionTyper`'s caller-side `:self`-grant arm. They had forked answers once (the grant arm was
-        # tightened for #591 while this one still trusted any chained call), so both consumers must share this
-        # one answer. A `.with` call is never a materialisation: the composed `x.dup_self.with(indent: 9)`
-        # shape once slipped through as one, and `Struct#with` no longer exists to fold (#1335).
+        # Issue #595 / #525 — the ONE materialisation test, shared by {StructFolding#fresh_receiver?} and
+        # `ExpressionTyper`'s `:self`-grant arm so the two gates cannot fork. A `.with` call is never a
+        # materialisation: the composed `x.dup_self.with(indent: 9)` shape once slipped through as one, and
+        # `Struct#with` no longer exists (#1335).
         #
         # @param node — the receiver EXPRESSION.
         # @param scope — the scope the factory and ancestor lookups resolve against.

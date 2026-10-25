@@ -74,8 +74,8 @@ module Rigor
           @sources = Set.new
           @missing = Set.new
           # ADR-46 slice 4 — symbol-granularity tracking.
-          # `symbol_sources`: source_path → Set<"ClassName#method"> for method-call deps.
-          # `ancestry_sources`: Set<source_path> for class-ancestry (superclass / include) deps —
+          # `symbol_sources`: source_path → the "ClassName#method" names read from it, for method-call deps.
+          # `ancestry_sources`: the source paths read for class-ancestry (superclass / include) deps —
           # file-granularity by nature (a superclass edge touches the whole class).
           @symbol_sources = Hash.new { |h, k| h[k] = Set.new }
           @ancestry_sources = Set.new
@@ -103,8 +103,8 @@ module Rigor
       end
 
       # Frozen record of one file's cross-file reads.
-      # `symbol_sources`: source_path → frozen Set<"ClassName#method"> (method-call edges).
-      # `ancestry_sources`: frozen Set<source_path> (class-ancestry edges, file-granularity).
+      # `symbol_sources`: source_path → frozen set of "ClassName#method" names (method-call edges).
+      # `ancestry_sources`: frozen set of source paths (class-ancestry edges, file-granularity).
       Record = Data.define(:consumer, :sources, :missing, :symbol_sources, :ancestry_sources)
 
       # ADR-84 WD2 — a replayable, consumer-independent read-set: `reads` is a frozen Set of frozen

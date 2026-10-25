@@ -12,7 +12,7 @@ module Rigor
     # rigor-actioncable — validates ActionCable `<Channel>.broadcast_to(...)` and
     # `ActionCable.server.broadcast(stream_name, ...)` call sites against the discovered channel index.
     #
-    # Tier 3F of the [Rails plugins roadmap](../../../../docs/design/20260508-rails-plugins-roadmap.md).
+    # Tier 3F of the [Rails plugins roadmap](../../../../../docs/design/20260508-rails-plugins-roadmap.md).
     # Statically discovers channel classes by walking `channel_search_paths` and parsing each file with
     # Prism — no `actioncable` runtime dependency.
     #

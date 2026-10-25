@@ -33,8 +33,8 @@ module Rigor
       # type-parameter names (`Array` -> `[:Elem]`, `Hash` -> `[:K, :V]`, ...) to build a substitution map;
       # that map is then threaded through {RbsTypeTranslator} so a return type like `::Array[Elem]`
       # resolves to `Nominal["Array", [Integer]]` rather than degrading the variable to `Dynamic[Top]`.
-      # When arities mismatch (raw receiver, partial generics) the map is left empty and free variables
-      # degrade as before.
+      # A raw receiver, or one with more arguments than the class declares, leaves the map empty and free
+      # variables degrade as before; fewer arguments bind the declared prefix (#1121).
       #
       # Slice 5 phase 1 projects shape-carrying receivers onto their underlying nominal so the existing
       # dispatch + substitution machinery works without duplication: `Tuple[Integer, String]` dispatches as
@@ -44,13 +44,14 @@ module Rigor
       #
       # Remaining limitations:
       #
-      # * Keyword arguments reach `args` only as one trailing hash entry and are not matched against keyword
-      #   parameters, so overloads with required keywords are skipped.
-      # * Method-level type parameters bind only from two positions: the block return type (Slice 6 phase C)
-      #   and a positional parameter whose declared type is EXACTLY a type variable (issue #303 —
+      # * Keyword arguments reach `args` as one trailing hash entry; the selector matches it against keyword
+      #   parameters when the call's last argument is a keyword hash (#1727).
+      # * Method-level type parameters bind from the block return type (Slice 6 phase C) and from a
+      #   positional parameter whose declared type is EXACTLY a type variable (issue #303 —
       #   `def foo[T]: (T) -> T` binds `T` from the first argument, and carries it into a generic return
-      #   such as `-> Array[T]`). A variable reachable only through a container position (`Array[T] arg`),
-      #   a rest positional (`*T`), or a keyword parameter is still unbound and degrades to `Dynamic[Top]`.
+      #   such as `-> Array[T]`), plus a `Range[A]` element (#834). A variable reachable only through other
+      #   container positions (`Array[T] arg`), a rest positional (`*T`), or a keyword parameter is still
+      #   unbound and degrades to `Dynamic[Top]`.
       #   A block-return variable that a parameter also names takes the value class the argument and the
       #   block share once the call passes an argument, or stays unbound when they share none (see
       #   {compose_block_type_vars}).

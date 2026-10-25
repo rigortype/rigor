@@ -34,9 +34,9 @@ module Rigor
     #
     # The synthetic reader's return type is resolved via ADR-18's `returns_from_arg:` fact lookup: the
     # call-site's second argument (`Types::String` etc.) is looked up through the `:dry_type_aliases`
-    # fact published by `rigor-dry-types`, yielding `Nominal[String]` for common cases. When the lookup
-    # misses (e.g. inline method-chain argument whose chain-head isn't currently extracted), the row
-    # falls back to `Dynamic[Top]` silently.
+    # fact published by `rigor-dry-types`, yielding the aliased class (`String`) for common cases. When the
+    # lookup misses (e.g. inline method-chain argument whose chain-head isn't currently extracted), the row
+    # falls back to the untyped floor silently.
     #
     # ## Scope (slice 2c minimum)
     #
@@ -58,8 +58,8 @@ module Rigor
                      "by consuming `rigor-dry-types`'s `:dry_type_aliases` fact.",
         # ADR-9 consumption — the precision-promotion path below uses `:dry_type_aliases` published by
         # `rigor-dry-types`. The fact is optional: when the `rigor-dry-types` plugin isn't loaded, the
-        # `returns_from_arg:` lookup misses and the synthetic readers fall back to `Dynamic[Top]` (the
-        # pre-ADR-18 floor).
+        # `returns_from_arg:` lookup misses and the synthetic readers fall back to the untyped floor (the
+        # pre-ADR-18 behaviour).
         consumes: [{ plugin_id: "dry-types", name: :dry_type_aliases, optional: true }],
         heredoc_templates: [
           Rigor::Plugin::Macro::HeredocTemplate.new(
@@ -69,7 +69,7 @@ module Rigor
             # ADR-18 — the synthetic reader's return type comes from the call site's second argument
             # (`Types::String` etc.), resolved through the `:dry_type_aliases` fact. When the lookup
             # misses (e.g. inline `attribute :tag, Types::String.constrained(...)`, whose receiver chain
-            # head isn't currently extracted), the row falls back to Dynamic[Top].
+            # head isn't currently extracted), the row falls back to the untyped floor.
             emit: [{
               name: "\#{name}",
               returns_from_arg: {

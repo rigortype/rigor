@@ -23,11 +23,9 @@ module Rigor
 
       # @param files — explicit `.rb` file paths to scan.
       #
-      # Issue #513 — the environment is PLUGIN-AWARE (`LanguageServer::ProjectContext`, the same builder
-      # `--protection` uses), not the bare RBS environment this path carried until 2026-09-01. Without the
-      # plugin registry every plugin-typed receiver read `Dynamic` and the precision ratio understated the
-      # engine by ~1.2 points on a Rails target — the defect the protection path documented and fixed for
-      # itself on 2026-07-04, never applied here.
+      # Issue #513 — the environment is plugin-aware (`LanguageServer::ProjectContext`, the same builder
+      # `--protection` uses). A bare RBS environment read every plugin-typed receiver as `Dynamic` and understated
+      # the precision ratio by ~1.2 points on a Rails target.
       def precision_report(files:, configuration:)
         scope = discovery_seeded_scope(
           files: files,

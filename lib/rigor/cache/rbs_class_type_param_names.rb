@@ -6,8 +6,8 @@ require_relative "rbs_cache_producer"
 module Rigor
   module Cache
     # Cache producer that materialises every loaded class's RBS-declared type-parameter names as a
-    # Marshal-clean `Hash<String, Array<Symbol>>` keyed by top-level-stripped class name (e.g. `"Array"` →
-    # `[:Elem]`, `"Hash"` → `[:K, :V]`). Producer id `"rbs.class_type_param_names"`.
+    # Marshal-clean table keyed by top-level-stripped class name (e.g. `"Array"` →
+    # `[:Elem]`, `"Hash"` → `[:K, :V]`).
     #
     # The dispatcher reads type-parameter names every time it builds a substitution map from a receiver's
     # `type_args` into a method's return type — it is one of the hottest reflection lookups during analysis.

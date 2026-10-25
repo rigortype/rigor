@@ -199,16 +199,16 @@ module Rigor
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.
-      # `sources` maps a consumer to the Set of source files it read from.
+      # `sources` maps a consumer to the source files it read from.
       # `digests` maps a file to its content digest at analysis time.
       # `analyzed` is the ordered analyzed-file list.
       # ADR-46 slice 4:
-      # `symbol_sources` maps a consumer to { source_path → Set<"ClassName#method"> }.
-      # `ancestry_sources` maps a consumer to Set<source_path> (class-ancestry deps).
+      # `symbol_sources` maps a consumer to { source_path → the "ClassName#method" names it read }.
+      # `ancestry_sources` maps a consumer to the source paths it read for class ancestry.
       # `symbol_fingerprints` maps a path to { "ClassName#method" => sha256_hex }.
       # ADR-46 slice 3:
-      # `missing` maps a consumer to Set<"kind:name"> it looked up and missed.
-      # `class_decls` maps a path to Set<qualified class name> it declares.
+      # `missing` maps a consumer to the "kind:name" keys it looked up and missed.
+      # `class_decls` maps a path to the qualified class names it declares.
       # Issue #644:
       # `constant_decls` maps a path to that file's constant PUBLICATION CENSUS,
       # `{qualified name => [literal] | :unpublishable}`. The descriptor is what the recheck diffs: a name's

@@ -43,7 +43,7 @@ module Rigor
     # `Rigor::Type::*` carrier: `nil` / `true` / `false` produce `Constant` carriers; `bool`
     # produces the `Constant<true> | Constant<false>` union; `untyped` produces
     # `Combinator.untyped` (i.e. `Dynamic[Top]`). Nominal class names produce raw `Type::Nominal`
-    # carriers (no `name_scope` resolution at this slice — the reducer trusts the name verbatim).
+    # carriers (no `name_scope` resolution; the reducer trusts the name verbatim).
     module HktBodyParser
       class ParseError < StandardError; end
 
@@ -151,10 +151,8 @@ module Rigor
         #     test        := type_expr ("<:" | "==") type_expr
         #
         # Parens delimit a conditional unambiguously — bare `(type_expr)` grouping is not
-        # supported at this slice (no use case yet). Branches can be unions; test sides are
-        # single arms (wrap in `App[my_union, ...]` if you need a union there). `in [opt1, opt2]`
-        # membership tests are programmatically supported via `HktBody::TestMembership` but the
-        # parser does not yet recognise the `in` keyword (no concrete demand yet).
+        # supported (no use case yet). Branches can be unions; test sides are single arms (wrap
+        # in `App[my_union, ...]` if you need a union there).
         def parse_conditional
           expect!(:lparen)
           test = parse_test

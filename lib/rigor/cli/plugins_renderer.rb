@@ -5,7 +5,7 @@ require "json"
 module Rigor
   class CLI
     # Renderer for `rigor plugins`. Produces a human-readable text table and a JSON representation from the same row
-    # shape (the Hash documented on {Rigor::CLI::PluginsCommand#loaded_row}).
+    # shape (the Hash {Rigor::CLI::PluginsCommand#build_rows} returns).
     #
     # The two formats carry the same content; JSON is meant for tooling (SKILLs, CI, editor integrations) while text is
     # for interactive inspection. Rows are printed in the order the loader resolved them.

@@ -19,8 +19,7 @@ module Rigor
     # AND whose method is a known in-place mutator.
     #
     # Closes the **G1 / G2** flow-folding gaps documented at
-    # `docs/notes/20260521-mastodon-cluster4-flow-folding-triage.md` and queued in
-    # [`docs/CURRENT_WORK.md`](../../../docs/CURRENT_WORK.md) § "Flow-folding". The user-visible
+    # `docs/notes/20260521-mastodon-cluster4-flow-folding-triage.md`. The user-visible
     # symptom they shared was a spurious `flow.always-truthy-condition` on a `arr.size == N` /
     # `arr.empty?` / `@arr.empty?` check that follows a loop body or sibling method that mutates
     # `arr` / `@arr` in place.
@@ -196,9 +195,8 @@ module Rigor
       # always safe — it can only LOSE precision — so blindly propagating is sound regardless of
       # whether the block actually runs.
       #
-      # Recurses into nested expression nodes so chained / nested forms (`arr << f(x); arr <<
-      # g(y)`, `arr.push(x) if cond`) are all caught. Does NOT recurse into nested
-      # `Prism::BlockNode`s — each block is processed by its own `eval_call`.
+      # Recurses into every nested node, blocks included, so chained / nested forms (`arr << f(x); arr <<
+      # g(y)`, `arr.push(x) if cond`) are all caught.
       def widen_after_block(call_node:, outer_scope:)
         block = call_node.block
         return DeepErasure.widen_symbol_proc(call_node, outer_scope) if DeepErasure.symbol_proc_mutation?(block)

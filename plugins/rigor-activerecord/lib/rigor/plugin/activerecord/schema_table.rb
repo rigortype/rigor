@@ -21,7 +21,6 @@ module Rigor
           end
         end
 
-        # Map ActiveRecord column types → Ruby class names.
         RUBY_TYPE_MAPPING = {
           string: "String",
           text: "String",

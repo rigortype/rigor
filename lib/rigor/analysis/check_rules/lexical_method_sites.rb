@@ -152,7 +152,6 @@ module Rigor
           end
         end
 
-        # `o.singleton_class`.
         def singleton_class_of_local?(node)
           node.is_a?(Prism::CallNode) && node.name == :singleton_class && node.arguments.nil? &&
             node.receiver.is_a?(Prism::LocalVariableReadNode)

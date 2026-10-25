@@ -7,7 +7,7 @@ module Rigor
   module Cache
     # Cache producer that materialises the set of every RBS-declared class / module / alias name (top-level
     # prefixed, e.g. `"::Math"`) currently loaded into the environment. Marshal-clean — the cache value is a
-    # `Set<String>`.
+    # Set of names.
     #
     # The set lets `RbsLoader#class_known?` answer point lookups in O(1) without re-parsing the name on each
     # call, and lets a warm process skip the env walk entirely (the env still has to be built to enumerate

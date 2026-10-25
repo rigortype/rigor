@@ -105,10 +105,9 @@ module Rigor
           walk(node.body, inner_path, &) if node.body
         end
 
-        # The full constant name a `class` / `module` declaration defines, given the rendered local name
-        # and the enclosing lexical path. A ROOTED local name (`class ::User`) names the top-level constant
-        # whatever the nesting, so the lexical path is dropped and the `::` with it; otherwise the name is
-        # appended to the path (`class User` inside `module Admin` → `Admin::User`).
+        # The full constant name a `class` / `module` declaration defines. A ROOTED local name (`class ::User`)
+        # names the top-level constant whatever the nesting, so the lexical path is dropped; otherwise the
+        # name is appended to it (`class User` inside `module Admin` → `Admin::User`).
         def declared_constant_name(local_name, lexical_path)
           return local_name.delete_prefix("::") if local_name.start_with?("::")
 

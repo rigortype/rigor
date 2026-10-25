@@ -56,8 +56,7 @@ module Rigor
       end
 
       # @param root — the local-variable scope to scan.
-      # @param layout_lookup — a `String -> Array[Symbol] | nil` resolver mapping a constant receiver name to its
-      #   struct member list.
+      # @param layout_lookup — a resolver mapping a constant receiver name to its struct member list.
       # @return the fold-safe local names.
       def fold_safe_locals(root, layout_lookup)
         return EMPTY if root.nil?
@@ -283,8 +282,7 @@ module Rigor
       # `[1].each { s.x = v }; s.x` would read the construction value — verified unsound on #525.
       #
       # `for` shares the enclosing locals rather than opening a scope, so the block rationale does not apply
-      # to it; it is a boundary for the same reason `while` is (below), and this comment previously gave the
-      # wrong reason for it.
+      # to it; it is a boundary for the same reason `while` is (below).
       #
       # `while` / `until` are boundaries because a single static pass cannot model a member setter across
       # ITERATIONS. Issue #597 tried to lift this: `eval_loop` does join the body's exit scope with the
@@ -327,8 +325,8 @@ module Rigor
         return nil unless meta_constant?(call_node.receiver, :Struct)
 
         args = call_node.arguments&.arguments || []
-        # `[0..-2]` cannot return nil for a start of 0, but `Array#[](Range) -> Array[T]?` says it can;
-        # the `|| []` keeps the read well-typed on that worst case.
+        # `[0..-2]` cannot return nil for a start of 0, but the RBS signature of `Array#[]` with a Range says it
+        # can; the `|| []` keeps the read well-typed on that worst case.
         positional = args.last.is_a?(Prism::KeywordHashNode) ? (args[0..-2] || []) : args
         positional = positional[1..] if positional.first.is_a?(Prism::StringNode)
         return nil if positional.nil? || positional.empty?

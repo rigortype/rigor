@@ -280,8 +280,8 @@ module Rigor
 
         # The trailing `else` is dead when every subject value is covered by the `when` clauses — the final
         # falsey scope (recorded on the `else` node) narrows the subject to `bot`. Defensive `else` bodies (a
-        # bare `raise` / `fail` / `throw`) are deliberate guards, not removable dead code, so they are
-        # skipped.
+        # bare `raise` / `fail` / `throw` / `abort` / `exit`) are deliberate guards, not removable dead code, so
+        # they are skipped.
         def collect_else(else_clause, subject_name, keyword)
           return if else_clause.nil? || else_clause.statements.nil?
           return if defensive_else?(else_clause)

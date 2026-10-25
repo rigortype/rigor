@@ -29,7 +29,7 @@ module Rigor
       class VoidValueUseCollector
         # The assignment forms whose `value` slot is a value position. `MultiWriteNode` (destructuring) is
         # intentionally excluded — its `value` is a container the void call would have to be spread through,
-        # not a direct use, so it is out of this slice's FP-narrow scope.
+        # not a direct use, so it is outside the FP-narrow scope.
         WRITE_NODE_CLASSES = [
           Prism::LocalVariableWriteNode, Prism::InstanceVariableWriteNode,
           Prism::ClassVariableWriteNode, Prism::GlobalVariableWriteNode,

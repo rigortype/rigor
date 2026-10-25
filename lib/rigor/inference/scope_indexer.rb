@@ -67,8 +67,8 @@ module Rigor
     # ```
     #
     # Nodes that are not part of the program subtree (e.g. synthesised virtual nodes that the caller looks up after the
-    # fact) yield the `default_scope`. The returned Hash is mutable in principle but callers MUST treat it as read-only;
-    # the indexer itself never exposes a way to update it past construction.
+    # fact) yield the seeded `default_scope`. The returned Hash is mutable in principle but callers MUST treat it as
+    # read-only; the indexer itself never exposes a way to update it past construction.
     # rubocop:disable-next Metrics/ModuleLength
     module ScopeIndexer
       # Issue #644 — the census descriptor for a constant write that publishes no value: an unfoldable or
@@ -109,7 +109,7 @@ module Rigor
       #   `Dynamic[top]`. Off for every other reader, so parameter inference
       #   and sig-gen observe the clause's plain entry.
       # @return identity-comparing
-      #   table whose default value is `default_scope`.
+      #   table whose default value is the seeded `default_scope`.
       # The no-op re-anchoring table (#722 residue 2): shared so the overwhelmingly common
       # nothing-to-re-anchor walk allocates none.
       EMPTY_RENAMES = {}.freeze
@@ -233,9 +233,9 @@ module Rigor
       end
 
       # Runs the combined methods/def-nodes descent (one walk of the file), seeds the discovered-methods existence table
-      # onto `seeded_scope` (merged UNDER the cross-file pre-pass seed `default_scope` carries), and returns `[scope,
-      # file_def_nodes, file_envelopes]` so the caller can thread the def-node and issue #992 envelope tables into
-      # {#merge_project_method_indexes} without walking the file a second time.
+      # onto `seeded_scope` (merged UNDER the cross-file pre-pass seed `default_scope` carries), and returns
+      # `[scope, [file_def_nodes, file_envelopes, file_siblings]]` so the caller can thread the def-node and issue #992
+      # envelope tables into {#merge_project_method_indexes} without walking the file a second time.
       #
       # ADR-119 WD3 — the file's `possible_discovered_methods` folds over the seed's by {#fold_possible_methods}, so a
       # name the file defines certainly is no longer possible and a name only the file's possible contribution
@@ -522,17 +522,16 @@ module Rigor
       # `Prism::ModuleNode` body, descending into each nested `Prism::DefNode`, and typing every
       # `Prism::InstanceVariableWriteNode` rvalue under a scope that carries the appropriate `self_type` for that def
       # (singleton vs instance). The rvalue is typed with NO local bindings — the pre-pass lacks statement-level
-      # threading — so `@x = 1` records `Constant[1]` but `@x = some_local + 1` records `Dynamic[Top]` (since
+      # threading — so `@x = 1` records the value 1 but `@x = some_local + 1` records an unknown value (since
       # `some_local` is unbound at pre-pass time). Multiple writes to the same ivar union via `Type::Combinator.union`.
       def build_class_ivar_index(root, default_scope, declared_ivar_types: true)
         accumulator = {}
         mutated_ivars = {}
         read_before_write = {}
         init_writes = {}
-        # WD3 — per-class summary of `{class_name => {method_name => Set<ivar names definitely assigned non-nil on every
-        # completing path>}}`, consulted by `dead_transient_nil_writes` so a ctor that reassigns `@x` indirectly through
-        # an unconditional same-class method call (`mask!`) credits the overwrite. Built once per program here, memoised
-        # by class.
+        # WD3 — per class, then per method, the ivars the method definitely assigns non-nil on every completing path,
+        # consulted by `dead_transient_nil_writes` so a ctor that reassigns `@x` indirectly through an unconditional
+        # same-class method call (`mask!`) credits the overwrite. Built once per program here, memoised by class.
         method_assign_effects = build_method_assign_effects(root)
         walk_class_ivars(root, [], default_scope, accumulator, mutated_ivars,
                          read_before_write, init_writes, method_assign_effects)
@@ -628,8 +627,8 @@ module Rigor
         end
       end
 
-      # `{class_name => {method_name => Set<ivar name>}}` for methods that hand an ivar back, dropping the empty sets
-      # so the caller's `next if per_class.nil?` skips a whole class in one lookup.
+      # Per class, then per method, the ivars each method hands back, dropping the empty sets so the caller's
+      # `next if per_class.nil?` skips a whole class in one lookup.
       def returned_ivars_by_method(defs)
         defs.each_with_object({}) do |(class_name, methods), acc|
           methods.each do |method_name, def_node|
@@ -717,10 +716,9 @@ module Rigor
       #
       # The widening uses `MutationWidening.widen_for_mutator` — the same primitive
       # `Inference::StatementEvaluator#eval_call` applies for per-method-body widening on a local / ivar receiver. The
-      # class-level pass extends that primitive's reach so a `Tuple`-seeded ivar in `initialize` is observed as
-      # `Nominal[Array]` at the entry of every OTHER method body in the class — closing the cross-method gap noted in
-      # ROADMAP § Future cycles / Type-language / engine ("Tuple / HashShape widening for ivar-seeded literals after
-      # mutation"; Redmine 6.1.2 `Redmine::Views::Builders::Structure` is the canonical worked site).
+      # class-level pass extends that primitive's reach so a `Tuple`-seeded ivar in `initialize` is observed as a plain
+      # `Array` at the entry of every OTHER method body in the class — closing the cross-method gap (Redmine 6.1.2
+      # `Redmine::Views::Builders::Structure` is the canonical worked site).
       #
       # Always-safe: the widening can only LOSE precision; the underlying nominal (`Array` / `Hash`) and the element
       # union are preserved.
@@ -1048,7 +1046,7 @@ module Rigor
         # unconditional statement-level write, OR an `if/else` whose both branches write `@x`), the opening nil is dead
         # — it can never be observed at method exit. Recording it anyway folds a spurious `nil` constituent into the
         # flow-insensitive class-ivar union, which then poisons reads in OTHER methods (e.g. ipaddr `IN4MASK ^
-        # @mask_addr` rejects the resulting `Integer | nil`). The set holds the `object_id`s of the transient write
+        # @mask_addr` rejects the nil-including result). The set holds the `object_id`s of the transient write
         # nodes to skip; soundness is post-domination at the top statement level, so dropping the nil never hides a real
         # runtime-nil read.
         dead_writes = dead_transient_nil_writes(def_node.body, class_name, method_assign_effects)
@@ -1103,7 +1101,7 @@ module Rigor
 
       # The `attr_writer` family arm of {#walk_class_ivars} (#541). A writer declaration is the class's own
       # statement that `@x` takes values from outside, so it contributes what the hand-written untyped setter
-      # `def x=(v) = @x = v` does: `Dynamic[top]`. Without it `@x = nil` in `initialize` was the only write
+      # `def x=(v) = @x = v` does: an untyped value. Without it `@x = nil` in `initialize` was the only write
       # the seed saw, and `if @x` folded always-falsey on a field the class declares assignable. A setter
       # call site (`obj.x = v`) stays out, as ADR-58 WD2 settles; the declaration is class-level evidence
       # in the file the walk reads. `owner` is empty where no class owns an instance-side ivar (a
@@ -1316,9 +1314,9 @@ module Rigor
         # not `InstanceVariableWriteNode`s, so the generic descent below never records them as writes. Left unhandled,
         # an ivar written only via massign in `initialize` stays absent from `init_writes`, and
         # `contribute_read_before_write_nil!` then unions a spurious `nil` into its class-ivar seed — masking a
-        # genuinely-typed `@m` (e.g. `Tuple[]`) as `T | nil` at every sibling read. The RHS runs before any target is
-        # committed, so descend into `value` FIRST (an ivar read there is read-before-write), then mark every ivar
-        # target as written.
+        # genuinely-typed `@m` (e.g. an empty tuple) as nil-including at every sibling read. The RHS runs before any
+        # target is committed, so descend into `value` FIRST (an ivar read there is read-before-write), then mark every
+        # ivar target as written.
         if node.is_a?(Prism::MultiWriteNode)
           detect_read_before_write(node.value, seen_writes, read_first) if node.value
           detect_multi_write_target_writes(node, seen_writes, read_first)
@@ -1391,7 +1389,7 @@ module Rigor
         # `MultiWriteNode` target was silently dropped from the class-ivar union — leaving it to seed as pure `nil`
         # (from a sibling `@cb = nil` ctor write, or absent entirely) and false-fire `if @cb` always-falsey /
         # `@thr.alive?` undefined-for-nil. Record each ivar target with its tuple-position RHS type where the RHS is
-        # array/tuple-shaped, else the unanalyzable floor (the same `Dynamic[top]` a single write to an unknown RHS
+        # array/tuple-shaped, else the unanalyzable floor (the same untyped value a single write to an unknown RHS
         # records — an unanalyzable multi-write means unknown, not nil).
         record_multi_write_ivars(node, scope, class_name, accumulator)
 
@@ -1586,10 +1584,9 @@ module Rigor
       SAME_CLASS_CALL_DEPTH_CAP = 3
       private_constant :SAME_CLASS_CALL_DEPTH_CAP
 
-      # WD3 — builds the per-class definite-assignment summary `{class_name => {method_name => Set<ivar names assigned
-      # non-nil on every completing path>}}`. Used so a ctor's `dead_transient_nil_writes` can credit an indirect
-      # overwrite through an unconditionally-called same-class method (ipaddr's `initialize` reassigns `@mask_addr` via
-      # `mask!`).
+      # WD3 — builds the per-class definite-assignment summary: per class, then per method, the ivars assigned non-nil
+      # on every completing path. Used so a ctor's `dead_transient_nil_writes` can credit an indirect overwrite through
+      # an unconditionally-called same-class method (ipaddr's `initialize` reassigns `@mask_addr` via `mask!`).
       #
       # Each method's set is computed by the same suffix definite-assignment analysis used for the ctor seed, run from
       # the method body's first statement for every ivar the method writes anywhere. Same-class calls inside a method
@@ -1979,7 +1976,7 @@ module Rigor
         rvalue_type = declared || scope.type_of(node.value)
 
         # `@x = nil unless @x` / `@y = false unless @y` — follow-up to the polarity-aware defensive-init guard fix
-        # (ROADMAP § Future cycles — "Defensive ivar-init with nil / false rvalue"). When the rvalue is itself a falsey
+        # (defensive ivar-init with a nil / false rvalue). When the rvalue is itself a falsey
         # Constant, `union(rvalue, Constant[nil])` collapses (for `nil`) or doesn't widen the type's truthiness profile
         # (for `false`) — the predicate `unless @x` then folds to a single `Constant[nil]` / `Constant[false]` and the
         # `flow.always-truthy-condition` / `-always-falsey-` rule false-fires on the no-op-but-documented-default idiom.
@@ -10859,7 +10856,7 @@ module Rigor
       # A {DYNAMIC_TARGET_PREFIX} key is not a name and never publishes; it is expanded by
       # {#apply_dynamic_target_writes} into a retraction over the names it could have written.
       #
-      # @return `[{name => Type}, {name => Set[path]}]`.
+      # @return the value table and the table of source paths per name.
       def finalize_constant_writes(writes)
         values = {}
         sources = {}

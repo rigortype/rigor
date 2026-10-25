@@ -39,12 +39,10 @@ module Rigor
       #   lexical receiver class equals or inherits from this constraint.
       # - `method_name` — Symbol naming the DSL method (e.g. `:devise`).
       # - `symbol_arg_position` — `:rest` (all positional Symbol args are traits, slice 3a's only supported
-      #   form) or a non-negative Integer (the index of a single trait symbol — reserved for future shapes;
-      #   not yet honoured by the scanner).
-      # - `modules_by_symbol` — Hash<Symbol, String>. Maps each recognised trait symbol to a fully-qualified
-      #   module name. Symbols not in the table fall through (silent skip; the scanner emits a
-      #   `macro.tier_b.unknown-trait` `:info` provenance marker per WD9 / WD13).
-      # - `always_included` — Array<String>. Fully-qualified module names that are added to every call site
+      #   form) or a non-negative Integer (the index of a single trait symbol).
+      # - `modules_by_symbol` — Maps each recognised trait symbol to a fully-qualified module name. Symbols not
+      #   in the table are silently skipped.
+      # - `always_included` — Fully-qualified module names that are added to every call site
       #   (even when no symbols match). Mirrors Devise's `always_include` modules.
       #
       # ## Floor / ceiling per ADR-16 WD13
@@ -53,7 +51,7 @@ module Rigor
       # methods into the existing `SyntheticMethodIndex` (slice 2b primitive). The synthesised methods adopt
       # the module's authored RBS return types — Tier B is NOT subject to the Tier C `Dynamic[T]` floor
       # because the source-of-truth (the module's authored RBS) is not a manifest-declared string. Per ADR-5
-      # robustness, the substrate does not fabricate precision; it simply replays the modules's signatures.
+      # robustness, the substrate does not fabricate precision; it simply replays the module's signatures.
       #
       # **Out of scope for slice 3** (deferred follow-ups):
       # - `class_methods_module:` per-trait (Devise's `ClassMethods` extend-pattern); slice 3 covers instance
@@ -106,8 +104,7 @@ module Rigor
         end
 
         # @return fully-qualified module name for the given trait symbol, or nil when the
-        #   registry doesn't know the symbol (caller emits a tier_b.unknown-trait provenance marker and falls
-        #   through).
+        #   registry doesn't know the symbol (the caller skips it).
         def module_for(symbol)
           modules_by_symbol[symbol.to_sym]
         end

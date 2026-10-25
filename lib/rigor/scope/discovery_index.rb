@@ -423,8 +423,8 @@ module Rigor
         struct_member_layouts: EMPTY_TABLE,
         # ADR-67 WD3 — the call-site parameter-inference table, keyed by `[class_name, method_name, kind]` (the
         # same `(class, method, kind)` triple {Inference::ParameterInferenceCollector} records and that
-        # `build_method_entry_scope` reconstructs from the lexical class path). The value is a
-        # `{param_name(Symbol) => Rigor::Type}` map of the union of resolved call-site argument types. Empty on
+        # `build_method_entry_scope` reconstructs from the lexical class path). The value is the
+        # union of resolved call-site argument types per parameter name. Empty on
         # every normal run; only the `coverage --protection` collection pass populates it today, so a `check` run
         # leaves it empty and seeds nothing (byte-identical).
         param_inferred_types: EMPTY_TABLE,
@@ -474,7 +474,6 @@ module Rigor
       # possible fact carries, and a Runner's initial state. Copy it (`dup`) before mutating.
       EMPTY_SIBLINGS = SIBLINGS.each_value.to_h { |sibling| [sibling, EMPTY.public_send(sibling)] }.freeze
 
-      # The all-empty value of a paired member or sibling.
       def self.empty_value(name)
         EMPTY.public_send(name)
       end
@@ -499,7 +498,6 @@ module Rigor
         end
       end
 
-      # Whether `name` is a member or sibling of {SIBLINGS}.
       def self.paired?(name)
         PARTNERS.key?(name)
       end

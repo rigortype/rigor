@@ -46,7 +46,7 @@ module Rigor
       end
 
       # Issue #686 — the count that makes the command exit non-zero, on stdout beside the ratio it qualifies
-      # (the stderr twin in `CoverageMutation#warn_unmeasured_files` carries the explanation).
+      # (the stderr twin in {MeasurementIntegrityWarning} carries the explanation).
       def render_unmeasured_files(report)
         count = report.unmeasured_files
         return if count.zero?

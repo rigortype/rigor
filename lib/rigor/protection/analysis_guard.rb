@@ -8,7 +8,7 @@ module Rigor
     # nothing about the code that was analysed.
     #
     # A named class, not a bare RuntimeError: {MutationScanner#classify} already folds a per-mutant
-    # `StandardError` into the `:harness_error` bucket, and the scanner's file-level rescue must catch THIS
+    # `StandardError` into the `harness_errors` bucket, and the scanner's file-level rescue must catch THIS
     # and nothing else, so the two failure modes stay distinguishable at every site that handles either.
     #
     # Issue #790 — it says WHICH of the two refusals below fired, because they want different recovery. A

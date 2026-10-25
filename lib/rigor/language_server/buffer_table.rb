@@ -13,9 +13,9 @@ module Rigor
     # with no `range`) stays supported — it is still legal under incremental sync and is what `didOpen` and a
     # client-side resync send.
     class BufferTable
-      # @!attribute uri      [String]  the LSP DocumentUri (e.g. `file:///abs/path/lib/foo.rb`).
-      # @!attribute bytes    [String]  the current full text of the buffer.
-      # @!attribute version  [Integer] the monotonically increasing LSP version number.
+      # @!attribute uri — the LSP DocumentUri (e.g. `file:///abs/path/lib/foo.rb`).
+      # @!attribute bytes — the current full text of the buffer.
+      # @!attribute version — the monotonically increasing LSP version number.
       Entry = Data.define(:uri, :bytes, :version)
 
       def initialize

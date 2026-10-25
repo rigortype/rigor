@@ -212,9 +212,7 @@ module Rigor
         # ... end` row's own recursive call (see {#each_block_type_info}). It caps the recursion at ONE
         # level deep: with `nested: true`, {#walk_predicate_chain} declines a FURTHER `each do ... end`
         # rather than recursing again (issue #137 deliberately does not model doubly-nested arrays of
-        # arrays). This also keeps `collect_schema_shape` from calling itself — {#each_block_type_info}
-        # is the only caller that ever passes `nested: true}` — so the call graph has no cycle for the
-        # engine's return-type inference to approximate through.
+        # arrays). The recursion through {#each_block_type_info} is therefore bounded and terminates.
         def collect_schema_shape(block_node, type_aliases, nested:)
           required = {}
           optional = {}

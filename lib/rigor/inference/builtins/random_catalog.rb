@@ -20,8 +20,8 @@ module Rigor
         mutating_selectors: {
           "Random" => Set[
             # `rand_random` -> `random_real` / `random_ulong_limited` advance the MT state on the receiver
-            # (instance #rand) and on `Random::DEFAULT` (singleton .rand). The classifier misses the
-            # indirect mutator.
+            # (instance #rand) and on the process-wide default generator (singleton .rand). The classifier
+            # misses the indirect mutator.
             :rand,
             # `random_bytes` / `random_s_bytes` consume MT output the same way #rand does — every call
             # mutates the underlying generator.

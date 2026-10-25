@@ -38,11 +38,10 @@ module Rigor
       # Dynamic return rule for attached FFI functions
       # Gated on known FFI library receivers and attached function names
       #
-      # Issue #701 — both receiver kinds are declared because the block below already resolved
-      # `Nominal` and `Singleton` alike: `attach_function` installs the binding on the library module
-      # itself (`MyLib.strlen`) and `include`ing that module makes the same name an instance call, so
-      # neither kind is an accident. The kind-aware gate makes that intent explicit rather than relying
-      # on a `receivers:` entry answering for both.
+      # Issue #701 — both receiver kinds are declared because the block below already resolves `Nominal`
+      # and `Singleton` alike: `attach_function` installs the binding on the library module itself
+      # (`MyLib.strlen`), and `include`ing that module makes the same name an instance call. The
+      # kind-aware gate makes that intent explicit rather than relying on one `receivers:` entry for both.
       dynamic_return receivers: -> { both_receiver_kinds(producer_value(:ffi_catalog)&.libraries) },
                      methods: -> { producer_value(:ffi_catalog)&.function_method_names || [] } do |call_node, scope|
         catalog = producer_value(:ffi_catalog)

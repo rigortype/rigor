@@ -14,11 +14,11 @@ module Rigor
       #
       # The contract is a strict floor:
       #
-      # - Last statement is a literal scalar (Integer / Float / Symbol / true / false / nil) → `Constant<value>`.
-      # - Last statement is a String literal → `Nominal[String]` (NOT `Constant<"x">`; a String literal is
-      #   mutable under `# frozen_string_literal: false`, so the analyzer cannot claim object identity).
-      # - Last statement is an Array / Hash literal → `Nominal[Array]` / `Nominal[Hash]` (element-type
-      #   inference stays deferred — too expensive for the heuristic tier).
+      # - Last statement is a literal scalar (Integer / Float / Symbol / true / false / nil) → a constant of it.
+      # - Last statement is a String literal → plain `String`, not a constant (a String literal is mutable under
+      #   `# frozen_string_literal: false`, so the analyzer cannot claim object identity).
+      # - Last statement is an Array / Hash literal → plain `Array` / `Hash` (element-type inference stays
+      #   deferred — too expensive for the heuristic tier).
       # - Last statement is `self` → `nil` (the caller's receiver nominal would be more accurate but the
       #   walker doesn't carry the receiver context; deferred).
       # - Anything else → `nil`.
@@ -55,8 +55,8 @@ module Rigor
         end
         private_class_method :tail_expression
 
-        # The per-shape heuristic. Per the module docstring, immutable scalar literals fold to `Constant<value>`;
-        # mutable container literals (String, Array, Hash) fold to the appropriate Nominal; everything else
+        # The per-shape heuristic. Per the module docstring, immutable scalar literals fold to a constant of their
+        # value; mutable container literals (String, Array, Hash) fold to their plain class; everything else
         # returns nil.
         def literal_return_type(node)
           case node
@@ -72,8 +72,8 @@ module Rigor
         end
         private_class_method :literal_return_type
 
-        # `Prism::SymbolNode#value` returns the Symbol's name as a String. We `.to_sym` it for the Constant
-        # carrier so `:foo` is `Constant<:foo>`, not `Constant<"foo">`.
+        # `Prism::SymbolNode#value` returns the Symbol's name as a String. We `.to_sym` it for the constant so
+        # `:foo` folds to the Symbol `:foo`, not to the String `"foo"`.
         def symbol_constant(node)
           value = node.value
           return nil if value.nil?

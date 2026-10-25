@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
-# Demo controller that triggers each error path rigor-actionpack Phase 4 emits:
+# Demo controller that triggers the error paths the Action Pack plugins report:
 #
-# - unknown-helper (with did-you-mean) — `usres_path` typo.
-# - wrong-helper-arity — `user_path` (arity 1) called with 0 args, and `user_post_path` (arity 2)
-#   called with 1.
+# - unknown-helper (with did-you-mean) — `usres_path` typo. Reported by rigor-rails-routes.
+# - wrong-arity — `user_path` (arity 1) called with 0 args, and `user_post_path` (arity 2)
+#   called with 1. Reported by rigor-rails-routes.
 
 class ErrorsController < ApplicationController
   # Phase 2 — `:authenticate!` is not defined on this controller (or its parent), so the filter

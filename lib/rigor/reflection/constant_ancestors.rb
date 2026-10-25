@@ -228,7 +228,7 @@ module Rigor
     end
     private_class_method :ancestry_unknown_before?
 
-    # Ruby places these after every entry of a chain, so a constant they own is the top level's (step 4).
+    # Ruby places these after every entry of a chain, so a constant they own is the top level's.
     IMPLICIT_ANCESTORS = %w[Object Kernel BasicObject].freeze
     private_constant :IMPLICIT_ANCESTORS
 

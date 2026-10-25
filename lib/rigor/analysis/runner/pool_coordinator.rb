@@ -21,7 +21,7 @@ module Rigor
       # tables into the shared {RunSnapshots}, and merges per-worker reporter drains back into the runner's
       # reporter accumulators.
       #
-      # Sequential-equivalence contract (docs/internal-spec/ worker-session.md): the pool path MUST produce
+      # Sequential-equivalence contract (docs/internal-spec/worker-session.md): the pool path MUST produce
       # the same diagnostics, in the same order, as the sequential path. The coordinator re-orders worker
       # results by original path order and replays per-worker reporter entries through the dedupe-on-record
       # APIs so reporter state matches a single-session run.
@@ -597,18 +597,18 @@ module Rigor
         end
 
         # ADR-15 Phase 4b — Ractor pool around {WorkerSession}. Spawns `@workers` Ractors; each takes the
-        # shareable payload (Configuration, cache_root String, plugin Blueprint Array, explain Boolean) and
+        # shareable payload (configuration, cache root, plugin blueprints, explain flag) and
         # builds its OWN WorkerSession internally. Files are distributed round-robin across the pool; each
         # worker writes back to the main Ractor's mailbox via `Ractor.main.send` with one of three message
         # kinds:
         #
-        # - `[:prepare, diagnostics]` — once at startup, the session's `prepare_diagnostics` snapshot. The
-        #   coordinator keeps the FIRST worker's snapshot only (plugin `#prepare` is deterministic per
+        # - `[:prepare, diagnostics, refusals]` — once at startup, the session's `prepare_diagnostics` snapshot.
+        #   The coordinator keeps the FIRST worker's snapshot only (plugin `#prepare` is deterministic per
         #   plugin, so each worker produces the same diagnostic set; surfacing them once avoids N×
         #   duplication).
-        # - `[:file, path, diagnostics]` — one per analysed file.
-        # - `[:done, drained_reporters]` — once at exit, the per-worker reporter snapshots for end-of-pool
-        #   merge.
+        # - `[:file, path, diagnostics, refusals]` — one per analysed file.
+        # - `[:done, drained_reporters, disclosures]` — once at exit, the per-worker reporter snapshots for
+        #   end-of-pool merge.
         #
         # The Ruby 4.0+ Ractor model uses a single per-Ractor mailbox (no `Ractor.yield`); workers push
         # back via `Ractor.main.send`. The coordinator drains its mailbox via `Ractor.receive` until it has
@@ -705,8 +705,7 @@ module Rigor
           explain = @explain
           # ADR-32 WD4 — the full project file list travels into every Ractor worker so each worker's
           # WorkerSession can invoke loaded plugins' source_rbs_synthesizers at env-build time. The list is
-          # a frozen Array<String>; cheaply shareable. Issue #793 — it IS the full project now
-          # (`source_files`), not the analyzed subset this comment always described.
+          # a frozen list of strings; cheaply shareable.
           shareable_source_files = source_files.map { |path| path.to_s.dup.freeze }.freeze
           features = required_features_for(source_files)
 
@@ -1093,8 +1092,7 @@ module Rigor
         # sequential analysis with a `:warning` `pool-degraded` diagnostic at run start. The actual
         # per-file analysis runs on the coordinator, identical to the default sequential path.
         # @param source_files — issue #793 — the whole project, so this path's environment
-        #   carries the same plugin-synthesized RBS the pool workers' would. It used to build over `[]`,
-        #   i.e. with no synthesized RBS at all, even on a full run.
+        #   carries the same plugin-synthesized RBS the pool workers' would.
         #
         # Issue #1900 — it also runs `#prepare` on the coordinator-side registry it analyses with, BEFORE the
         # environment build as the sequential pre-pass does. A pooled run's pre-pass skips `#prepare` (the

@@ -15,8 +15,8 @@ module Rigor
     # reason has no severity, no profile mapping and no suppression, and forcing it into {RuleCatalog::Entry}
     # would mean inventing four fields that do not apply.
     #
-    # Every id in {Classification::SKIP_DIAGNOSTIC_IDS} MUST have an entry here; the gate is
-    # `spec/rigor/sig_gen/skip_reason_catalog_spec.rb`.
+    # Every id in {Classification::SKIP_DIAGNOSTIC_IDS} MUST have an entry here; the gate is the
+    # `sig.skipped.*` example in `spec/rigor/cli_spec.rb`.
     module SkipReasonCatalog
       class Entry < Data.define(:id, :summary, :explanation, :next_step)
         # Hash-shaped form for `rigor explain --format=json`. String keys, and `kind` distinguishes a skip

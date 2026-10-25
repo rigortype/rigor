@@ -21,7 +21,7 @@ module Rigor
     # cross-plugin fact (ADR-9). Other dry-rb adapter plugins consume this fact:
     #
     # - `rigor-dry-struct` reads it so `attribute :city, Types::String` promotes `address.city` from
-    #   `Dynamic[Top]` to `Nominal[String]` via ADR-18's `returns_from_arg:` fact lookup.
+    #   from an untyped value to `String` via ADR-18's `returns_from_arg:` fact lookup.
     # - `rigor-dry-validation` / `rigor-dry-schema` read it for per-key type recognition in `schema { … }`
     #   / `params { … }` blocks (separate plugin slice).
     #

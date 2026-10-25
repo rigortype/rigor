@@ -26,7 +26,7 @@ module Rigor
     # `spec/rigor/inference/definer_resolution_case_in_spec.rb` fails on a call site of any other shape.
     #
     # It migrates one question at a time: `SourceArity` (C1b) and the relationship lints (C1c) read the instance
-    # side; no production reader reads the singleton side yet (C2-a landed it for C2's typing sites).
+    # side, and `SourceArity`'s visibility check reads the singleton side.
     module DefinerResolution
       Known = Data.define(:answer, :owner)
       UnknownResult = Data.define

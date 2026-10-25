@@ -41,8 +41,7 @@ module Rigor
 
       # Reference to a formal parameter the enclosing `Definition#params` declared. The reducer
       # substitutes this node with the matching positional arg from the `App` being reduced; an
-      # unknown name raises during reduction (the parser, when it ships, MUST reject unknown names
-      # earlier).
+      # unknown name raises during reduction.
       Param = Data.define(:name) do
         def initialize(name:)
           raise ArgumentError, "name must be a Symbol, got #{name.class}" unless name.is_a?(Symbol)

@@ -24,7 +24,7 @@ module Rigor
     # write-back pass — and marks the generic pass's sites there (issue #1336).
     #
     # The mark is per site, not per receiver, because nothing about the receiver's type can say that its slot
-    # was filled: `{}` widens to `Hash[Dynamic[top], Dynamic[top]]`, a bare `Hash.new` is not widened at all, and
+    # was filled: `{}` widens to untyped keys and values, a bare `Hash.new` is not widened at all, and
     # a constant, class variable, attribute reader or nested memo (`(cache[:a] ||= {})[:b] ||= e`) is no binding
     # the fold rebinds. A narrowing or a rebind of the receiver's variable leaves the mark where it is.
     #
@@ -33,7 +33,7 @@ module Rigor
     #
     # - The generic block-return pass types the rvalue from the signature's parameter type, which covers every
     #   run's store, so it marks a site only when the site is not ISOLATED ({.isolated?}): some other store in the
-    #   body may fill its slot with something else. `words.map { |w| pool[w] ||= w }` keeps `Array[String]`.
+    #   body may fill its slot with something else. `words.map { |w| pool[w] ||= w }` keeps its String elements.
     # - The per-element fold types each position's rvalue on its own, so it marks per position ({Marks}). The
     #   first position has no earlier one and is never marked. A later one is marked unless the site is isolated,
     #   sits at the body's own level (not in a nested block or loop), and its key differs from every earlier

@@ -9,8 +9,7 @@ require_relative "unknown_store_widening"
 module Rigor
   module Inference
     # Closes the "`params[:f] ||= []; params[:f] << x`" precision gap surfaced by the Redmine
-    # 6.1.2 `Query#as_params` survey (ROADMAP § Future cycles / Type-language / engine —
-    # "Indexed-collection narrowing through `Hash[k] ||= default`").
+    # 6.1.2 `Query#as_params` survey.
     #
     # After `receiver[key] ||= default` the next read at `receiver[key]` is known non-nil, but
     # Rigor types each `Hash#[]` independently and the subsequent `<<` / `[]=` / other mutator
@@ -206,11 +205,9 @@ module Rigor
         args&.size == 1 ? stable_address(node.receiver, args.first) : nil
       end
 
-      # Companion invalidator for single-hop method-chain narrowings (ROADMAP § Future cycles —
-      # "Method-call receiver narrowing across stable receivers", B2 from the slice's design
-      # notes). Drops every `(receiver, *)` chain narrowing rooted at the call's OUTER stable
-      # receiver — matching the ROADMAP's "any intervening method call against the same
-      # receiver" criterion. A call against `x.last` (the OUTER receiver is a `CallNode`, not a
+      # Companion invalidator for single-hop method-chain narrowings. Drops every `(receiver, *)`
+      # chain narrowing rooted at the call's OUTER stable receiver, for any intervening method call
+      # against the same receiver. A call against `x.last` (the OUTER receiver is a `CallNode`, not a
       # stable root) does NOT drop narrowings keyed on `x`, so the worked-site `x.last << y`
       # pattern correctly preserves the chain narrowing for any further `x.last` read in the same
       # body. Always-safe (only forgets; never invents).

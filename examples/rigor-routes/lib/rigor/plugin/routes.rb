@@ -139,8 +139,7 @@ module Rigor
       end
 
       def unknown_route_diagnostic(path, node, base, kind, table)
-        # ADR-60 WD4 — the shared `DidYouMean::SpellChecker` helper the engine also uses for `NoMethodError` hints,
-        # replacing the hand-rolled Levenshtein table this example used to carry.
+        # ADR-60 WD4 — the shared `DidYouMean::SpellChecker` helper, also used by the engine for `NoMethodError` hints.
         suggestion = self.class.suggest(base, table.names)
         hint = suggestion ? " (did you mean `#{suggestion}_#{kind}`?)" : ""
         diagnostic(

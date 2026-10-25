@@ -62,7 +62,9 @@ module Rigor
 
       # The carrier `type` holds after `method_name` with argument types `arg_types`, or `nil` when the call is not
       # a Set mutator or `type` is not a carrier this seam grows. `nil` also answers a re-join that changed nothing,
-      # so a remover on an already-widened Set does not rebind it.
+      # so a remover on an already-widened Set does not rebind it. That is a guard, not a behaviour: a Set has no
+      # `receiver[key] ||=` slot narrowings for a rebind to drop, so the identical carrier would read the same either
+      # way, and declining only saves rebuilding the scope.
       def widen(type, method_name, arg_types)
         return nil unless MUTATORS.include?(method_name)
 

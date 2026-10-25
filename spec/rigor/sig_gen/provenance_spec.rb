@@ -85,11 +85,13 @@ SIG_PROVENANCE_LISTING_CAP = 200
 # counts them like every other declared lenience the generator protects; `Configuration.discover`'s
 # `String?` has always sat in this bucket for the same reason.
 #
-# 587 -> 590 since #2317. The classifier now compares an inferred return with the spelling sig-gen writes
+# 587 -> 584 since #2317. The classifier now compares an inferred return with the spelling sig-gen writes
 # (`TypeElaborator` applied before `erase_to_rbs`), not the raw carrier. A written `Set` is `Set[untyped]`
 # in sig-gen (#2177), so a `Set[String]` declaration no longer matches the inferred return and reads
-# `declared_divergent`, where a bare `Array` now elaborates to the `Array[untyped]` a declaration already names
-# and reads `generated`. Net +3 unmarked: scope.rbs +5, inference.rbs +1, three collector files -1 each. The
+# `declared_divergent`; each such row that is hand-written carries `# authored:` with its element type, so it
+# stays out of the count (scope.rbs and inference.rbs back to their pre-PR pins). A bare `Array` now elaborates
+# to the `Array[untyped]` a declaration already names and reads `generated`, so three collector files drop
+# to zero (-1 each). Net -3 against the pre-PR total. The
 # per-row reasons are at their pins. This is a gate checking more, not an engine change: no declaration text moved.
 #
 # 666 since #995. `Generator#translate_method_type_return` translated a declared return with no
@@ -279,10 +281,11 @@ SIG_PROVENANCE_RESIDUE = {
   # -1 (#1429): a value-position `case` now types each arm under the subject's `when` narrowing, so
   # `ExpressionTyper#type_of_virtual`'s `when AST::TypeNode then node.type` arm reads `node` as the node class
   # and its return renders.
-  # +1 (#2317): `ScopeIndexer#finalize_constant_writes` declares `Hash[String, Set[String]]` in its parameter, and its
-  # return's `Set[String]` element is elaborated to `Set[untyped]`, so the equivalent row moves from
-  # `parameter_intent` to `declared_divergent`. The declared parameter is unchanged.
-  "sig/rigor/inference.rbs" => 84,
+  # 0 net (#2317): `ScopeIndexer#finalize_constant_writes` returns `Hash[String, Set[String]]` as its second element,
+  # which the elaborator spells `Set[untyped]`, so the row moved from `parameter_intent` to `declared_divergent`.
+  # It is marked `# authored:` with its element type by contract, so the count is back at 83. The declared
+  # parameter is unchanged.
+  "sig/rigor/inference.rbs" => 83,
   "sig/rigor/inference/builtins/method_catalog.rbs" => 1,
   "sig/rigor/inference/void_origin.rbs" => 5,
   "sig/rigor/plugin.rbs" => 3,
@@ -374,13 +377,14 @@ SIG_PROVENANCE_RESIDUE = {
   # notes instead: sig-gen proposes `Set[untyped]` for them (#2177, #2317), and a marker does not move this count.
   # -2 (#2306): a truthiness test no longer drops the optimistic mark on its falsey edge, so `data_member_layout`
   # and `struct_member_layout` regenerate with the `?` their declarations carry.
-  # +5 (#2317): the classifier elaborates an inferred return through `TypeElaborator` before comparing, so a Set
-  # return is compared as `Set[untyped]`, the spelling sig-gen writes (#2177). Five unmarked declarations
-  # `Set[String]` / `Set[Array[untyped]]` / `Hash[String, Set[String]]` now read `declared_divergent`:
+  # 0 net (#2317): the classifier elaborates an inferred return through `TypeElaborator`, so a Set return is
+  # compared as `Set[untyped]`, the spelling sig-gen writes (#2177). Five Set readers that read `generated` before
+  # now read `declared_divergent` and each carries an `# authored:` marker stating its element type by contract:
   # `discovered_global_write_census`, `published_constant_names`, `local_constant_names`,
-  # `discovered_class_sources`, `constant_sources`. The three Set readers already carrying `# authored:`
-  # (`published_constant_sourced`, `declaration_sourced`, `struct_fold_safe_locals`) move class but stay marked.
-  "sig/rigor/scope.rbs" => 48,
+  # `discovered_class_sources`, `constant_sources`. Marked rows are not residue, so the count is back at 43.
+  # The three earlier Set readers (`published_constant_sourced`, `declaration_sourced`, `struct_fold_safe_locals`)
+  # move class the same way and were already marked.
+  "sig/rigor/scope.rbs" => 43,
   "sig/rigor/sig_gen/skip_reason_catalog.rbs" => 8,
   "sig/rigor/source.rbs" => 4,
   "sig/rigor/testing.rbs" => 4,

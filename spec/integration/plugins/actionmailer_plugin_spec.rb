@@ -315,6 +315,124 @@ RSpec.describe "plugins/rigor-actionmailer" do
     end
   end
 
+  # #2319: a method a callback or view-helper macro names is not an action, so it neither counts as one nor
+  # draws a missing-view row. `skip_*` names a callback defined in a parent, so it does not exclude a method.
+  # `module_function` switches later defs to private, as it does on the instance side of a module.
+  describe "callback and helper declarations (#2319)" do
+    def missing_view_messages(files)
+      result = run_plugin(source: "# noop\n", files: files, paths: ["app/mailers/real_mailer.rb"])
+      plugin_diagnostics(result).select { |d| d.rule == "missing-view" }.map(&:message)
+    end
+
+    # Rails dispatches any public instance method, so a callback or helper target is still an action: it
+    # takes arguments and is callable, and only the missing-view check skips it.
+    let(:switch_files) do
+      {
+        "app/mailers/concerns/notify_helpers.rb" => <<~RUBY,
+          module NotifyHelpers
+            def before_switch
+              mail
+            end
+
+            module_function
+
+            def after_switch
+              mail
+            end
+          end
+        RUBY
+        "app/mailers/notify_mailer.rb" => <<~RUBY,
+          class NotifyMailer < ApplicationMailer
+            include NotifyHelpers
+
+            def welcome
+              mail
+            end
+          end
+        RUBY
+        "app/views/notify_mailer/welcome.html.erb" => "Hi\n"
+      }
+    end
+
+    it "keeps a callback or helper_method target callable, and an undefined name still unknown" do
+      files = {
+        "app/mailers/real_mailer.rb" => <<~RUBY
+          class RealMailer < ApplicationMailer
+            before_action :setup_for_render
+            after_deliver :both_action
+            helper_method :h1
+            def both_action = mail(to: "c")
+            def setup_for_render = 1
+            def h1 = 2
+          end
+        RUBY
+      }
+      source = "RealMailer.both_action.deliver_later\nRealMailer.h1\nRealMailer.setup_for_render\n" \
+               "RealMailer.undefined_thing\n"
+      unknown = plugin_diagnostics(run_plugin(source: source, files: files))
+                .select { |d| d.rule == "unknown-action" }.map(&:message)
+      expect(unknown.grep(/`RealMailer\.undefined_thing` is not/)).not_to be_empty
+      expect(unknown.grep(/`RealMailer\.(both_action|h1|setup_for_render)` is not/)).to be_empty
+    end
+
+    it "excludes the prepend_/after_deliver/helper_method targets and still flags a real action with no view" do
+      files = {
+        "app/mailers/real_mailer.rb" => <<~RUBY,
+          class RealMailer < ApplicationMailer
+            prepend_before_action :set_x
+            after_deliver :record_delivery
+            helper_method :fmt
+            def welcome = mail(to: "a")
+            def orphan = mail(to: "b")
+            def set_x = 1
+            def record_delivery = 2
+            def fmt = 3
+          end
+        RUBY
+        "app/views/real_mailer/welcome.html.erb" => "Hi\n"
+      }
+      messages = missing_view_messages(files)
+      expect(messages).to include(a_string_including("RealMailer#orphan"))
+      expect(messages.grep(/set_x|record_delivery|fmt/)).to be_empty
+    end
+
+    it "excludes every non-skip macro the manifest lists, so the discoverer and the manifest cannot diverge" do
+      macros = Rigor::Plugin::Actionmailer.manifest.per_invocation_non_action_macros.map(&:to_s)
+      expect(macros).to include("prepend_before_action", "append_after_action", "around_deliver", "helper_method")
+      targets = macros.reject { |macro| macro.start_with?("skip_") }
+      body = targets.map { |macro| "  #{macro} :cb_#{macro}" }.join("\n")
+      defs = targets.map { |macro| "  def cb_#{macro}\n    mail\n  end" }.join("\n")
+      files = {
+        "app/mailers/real_mailer.rb" => "class RealMailer < ApplicationMailer\n#{body}\n#{defs}\n  " \
+                                        "def orphan\n    mail\n  end\nend\n"
+      }
+      messages = missing_view_messages(files)
+      expect(messages).to include(a_string_including("RealMailer#orphan"))
+      expect(messages.grep(/cb_/)).to be_empty
+    end
+
+    it "does not take a method out of the action set when a skip_ macro names it" do
+      files = {
+        "app/mailers/real_mailer.rb" => <<~RUBY
+          class RealMailer < ApplicationMailer
+            skip_before_action :inherited_check
+            def inherited_check
+              mail
+            end
+          end
+        RUBY
+      }
+      expect(missing_view_messages(files).grep(/inherited_check/)).not_to be_empty
+    end
+
+    it "does not count a def after a bare module_function as an action" do
+      result = run_plugin(source: "NotifyMailer.after_switch\nNotifyMailer.before_switch\n", files: switch_files)
+      unknown = plugin_diagnostics(result).select { |d| d.rule == "unknown-action" }.map(&:message)
+      expect(unknown.grep(/`NotifyMailer\.after_switch` is not/)).not_to be_empty
+      expect(unknown.grep(/`NotifyMailer\.before_switch` is not/)).to be_empty
+    end
+  end
+
   describe "edge cases" do
     it "ignores `.action` calls when the receiver is not a discovered mailer class" do
       result = run_plugin(

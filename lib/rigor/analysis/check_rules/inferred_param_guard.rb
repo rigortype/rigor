@@ -29,6 +29,13 @@ module Rigor
       #   under the ivar's `@`-prefixed name, which no local can spell — because the write and the read are
       #   separate statements. The mark is method-local: the class-ivar census that seeds a sibling method's
       #   ivars types the write's RHS without the inference seed, so a cross-method read is not a lower bound.
+      # - `Array(param)` (issue #2280): the conversion passes the parameter's elements through, so
+      #   `Array(param).first.upcase` reads the lower bound back.
+      # - an `if` / `unless` / ternary whose value is the parameter (issue #2280): `(c ? param : param).upcase`.
+      #   Unlike `&&` / `||`, a branch that does not hold the parameter keeps its diagnostic: the form is rooted
+      #   when every branch that can run is. A predicate the engine folds to one arm (the same certainty
+      #   `StatementEvaluator#eval_if` elides the dead arm on) leaves only that arm to decide, so
+      #   `(c ? param : 1).upcase` declines when `c` folds truthy and reports `Integer` when it folds falsey.
       #
       # Every value derived from an inferred parameter by dispatch is itself a lower bound, so firing against it
       # is an FP by the same construction. No-op on a normal `check` run — `Scope#inferred_param?` is false
@@ -45,11 +52,23 @@ module Rigor
 
           case node
           when Prism::LocalVariableReadNode, Prism::InstanceVariableReadNode then scope.inferred_param?(node.name)
-          when Prism::CallNode then rooted?(node.receiver, scope, depth + 1)
+          when Prism::CallNode then call_rooted?(node, scope, depth + 1)
           when Prism::ArrayNode, Prism::HashNode, Prism::KeywordHashNode, Prism::AssocNode
             literal_rooted?(node, scope, depth + 1)
           else combining_rooted?(node, scope, depth + 1)
           end
+        end
+
+        def call_rooted?(node, scope, depth)
+          return rooted?(node.receiver, scope, depth) unless array_conversion?(node)
+
+          rooted?(node.arguments.arguments.first, scope, depth)
+        end
+
+        # A receiverless `Array(x)` — Kernel#Array with exactly one plain argument and no block.
+        def array_conversion?(node)
+          node.receiver.nil? && node.name == :Array && node.block.nil? &&
+            node.arguments&.arguments&.size == 1
         end
 
         # An array or hash literal is rooted when any element is: the engine reads the element back precisely.
@@ -68,8 +87,35 @@ module Rigor
           when Prism::AndNode, Prism::OrNode then rooted?(node.left, scope, depth) || rooted?(node.right, scope, depth)
           when Prism::ParenthesesNode then rooted?(last_statement(node.body), scope, depth)
           when Prism::StatementsNode then rooted?(node.body.last, scope, depth)
+          when Prism::IfNode, Prism::UnlessNode then conditional_rooted?(node, scope, depth)
+          when Prism::ElseNode then rooted?(node.statements, scope, depth)
           else false
           end
+        end
+
+        # Every branch that can run must be rooted; an absent branch is `nil`, never rooted. The predicate is
+        # typed only when the branches disagree, so a conditional that never mentions a parameter costs nothing.
+        def conditional_rooted?(node, scope, depth)
+          when_truthy, when_falsey = node.is_a?(Prism::IfNode) ? [node.statements, node.subsequent] : [node.else_clause, node.statements]
+          truthy_rooted = rooted?(when_truthy, scope, depth)
+          falsey_rooted = rooted?(when_falsey, scope, depth)
+          return truthy_rooted if truthy_rooted == falsey_rooted
+
+          case predicate_certainty(node.predicate, scope)
+          when :truthy then truthy_rooted
+          when :falsey then falsey_rooted
+          else false
+          end
+        end
+
+        # The arm certainty `StatementEvaluator#branch_certainty` elides on: a decidable version guard, else the
+        # predicate's folded truthiness unless an optimistic carrier props it up.
+        def predicate_certainty(predicate, scope)
+          guard = Inference::VersionGuard.verdict(predicate)
+          return guard if guard
+          return nil unless Inference::OptimisticOrigin.resolve(predicate, scope).nil?
+
+          Inference::Narrowing.predicate_certainty(scope.type_of(predicate))
         end
 
         def last_statement(body)

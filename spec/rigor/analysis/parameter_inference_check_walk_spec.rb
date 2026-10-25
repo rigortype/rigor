@@ -260,4 +260,126 @@ RSpec.describe "ADR-67 WD6 check-walk parameter inference" do
       expect(lines).to include(32, 37, 41)
     end
   end
+
+  # Issue #2280 — a conditional whose branches pass the parameter through, and `Array(param)`, read the same
+  # open-call-site lower bound back, so the guard declines on them as on a direct read. A branch that does not
+  # hold the parameter keeps its diagnostic. `Loud` is the same-file positive control: identical bodies whose
+  # parameter an RBS signature declares `Integer` keep reporting.
+  describe "conditionals and Array() over an inferred parameter" do
+    let(:conditional_source) do
+      <<~RUBY
+        class Quiet
+          def ternary(name, c) = (c ? name : name).upcase
+
+          def if_expression(name, c) = (if c then name else name end).upcase
+
+          def unless_expression(name, c) = (unless c then name else name end).upcase
+
+          def through_local(name, c)
+            x = c ? name : name
+            x.upcase
+          end
+
+          def through_ivar(name, c)
+            @v = if c then name else name end
+            @v.upcase
+          end
+
+          def array_conversion(name) = Array(name).first.upcase
+
+          def mixed_live_param(name, c) = (c ? name : 1).upcase
+
+          def mixed_live_other(name, c) = (c ? name : 1).upcase
+
+          def missing_else(name, c) = (if c then name end).upcase
+        end
+
+        class Loud
+          def ternary(name, c) = (c ? name : name).upcase
+
+          def through_local(name, c)
+            x = c ? name : name
+            x.upcase
+          end
+
+          def array_conversion(name) = Array(name).first.upcase
+        end
+
+        q = Quiet.new
+        q.ternary(nil, true)
+        q.if_expression(nil, true)
+        q.unless_expression(nil, true)
+        q.through_local(nil, true)
+        q.through_ivar(nil, true)
+        q.array_conversion(nil)
+        q.mixed_live_param(nil, true)
+        q.mixed_live_other(nil, false)
+        q.missing_else(nil, false)
+      RUBY
+    end
+
+    let(:loud_rbs) do
+      <<~RBS
+        class Loud
+          def ternary: (Integer name, bool c) -> untyped
+          def through_local: (Integer name, bool c) -> untyped
+          def array_conversion: (Integer name) -> untyped
+        end
+      RBS
+    end
+
+    let(:lines) do
+      Dir.mktmpdir("rigor-2280") do |dir|
+        Dir.mkdir(File.join(dir, "sig"))
+        File.write(File.join(dir, "sig", "loud.rbs"), loud_rbs)
+        path = File.join(dir, "probe.rb")
+        File.write(path, conditional_source)
+        config = Rigor::Configuration.new(
+          "paths" => [], "parameter_inference" => true, "signature_paths" => [File.join(dir, "sig")]
+        )
+        runner = Rigor::Analysis::Runner.new(configuration: config, cache_store: nil)
+        guarded_run(runner, [path]).diagnostics.select { |d| d.rule == "call.undefined-method" }.map(&:line)
+      end
+    end
+
+    it "declines on a ternary whose branches are both the parameter" do
+      expect(lines).not_to include(2)
+    end
+
+    it "declines on an if expression whose branches are both the parameter" do
+      expect(lines).not_to include(4)
+    end
+
+    it "declines on an unless expression whose branches are both the parameter" do
+      expect(lines).not_to include(6)
+    end
+
+    it "declines through a local written from such a conditional" do
+      expect(lines).not_to include(10)
+    end
+
+    it "declines through an ivar written from such a conditional" do
+      expect(lines).not_to include(15)
+    end
+
+    it "declines on Array(param)" do
+      expect(lines).not_to include(18)
+    end
+
+    it "declines when the predicate folds to the parameter's branch" do
+      expect(lines).not_to include(20)
+    end
+
+    it "still reports when the predicate folds to the branch that is not the parameter" do
+      expect(lines).to include(22)
+    end
+
+    it "still reports the nil an absent else branch produces" do
+      expect(lines).to include(24)
+    end
+
+    it "still reports the same shapes on a parameter a signature declares" do
+      expect(lines).to include(28, 32, 35)
+    end
+  end
 end

@@ -84,6 +84,44 @@ RSpec.describe "a project singleton override of a Module method wins on the clas
     RUBY
   end
 
+  # An `extend`ed module's `attr_*` or `define_method`, or its `extended` hook, defines the name Ruby calls ahead of
+  # the superclass's `def`.
+  it "types the call Dynamic when a nearer extended module defines the name without a def" do
+    expect(dumps(<<~RUBY)).to eq(["Dynamic[top]"] * 4 + ["nil"])
+      class Bo; def self.name = nil; end
+      module Em; attr_reader :name; end
+      class E1 < Bo; extend Em; @name = "x"; end
+      module Ea; attr_accessor :name; end
+      class E2 < Bo; extend Ea; self.name = "x"; end
+      module Fw; def self.extended(b) = b.define_singleton_method(:name) { "x" }; end
+      class E3 < Bo; extend Fw; end
+      module Dm; define_method(:name) { "d" }; end
+      class E4 < Bo; extend Dm; end
+      module Plain; def other = 1; end
+      class E5 < Bo; extend Plain; end
+      Rigor.dump_type(E1.name) # "x"
+      Rigor.dump_type(E2.name) # "x"
+      Rigor.dump_type(E3.name) # "x"
+      Rigor.dump_type(E4.name) # "d"
+      Rigor.dump_type(E5.name) # nil
+    RUBY
+    expect(undefined_methods(<<~RUBY)).to eq([])
+      class Bo; def self.name = nil; end
+      module Em; attr_reader :name; end
+      class E1 < Bo; extend Em; @name = "x"; end
+      E1.name.upcase
+    RUBY
+  end
+
+  # A contest farther than the `def`'s owner does not reach the call: the nearer `def` runs.
+  it "keeps a nearer def's type when a farther class defines the name without a def" do
+    expect(dumps(<<~RUBY)).to eq(["5"])
+      class Far; define_singleton_method(:name) { "f" }; end
+      class NearDef < Far; def self.name = 5; end
+      Rigor.dump_type(NearDef.name) # 5
+    RUBY
+  end
+
   # The def may not run, so neither its type nor String alone is the answer.
   it "does not answer String alone for a def behind a condition" do
     expect(dumps(<<~RUBY)).to eq(["Dynamic[top]"])

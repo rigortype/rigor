@@ -2650,27 +2650,34 @@ module Rigor
       private_constant :SINGLETON_WILDCARD_SLOT
 
       # Issue #2284 — a project entry nearer than the `def`'s owner on the singleton chain may define the name
-      # without a `def` (`define_singleton_method(:x)`, `singleton_class.define_method(:x)` or `attr_*`, a computed
-      # name), which the def tables do not hold: `class S < B; define_singleton_method(:x) { "s" }; end` calls S's
-      # block, not `B.x`. Those definers contest the entry's visibility slot whether or not a `def` is recorded
-      # (#1984, #2013), so that contest is the census read here; the farther `def` is withheld and the call types
-      # `Dynamic`.
+      # without a `def`, which the def tables do not hold: `class S < B; define_singleton_method(:x) { "s" }; end`
+      # calls S's block, not `B.x`. The farther `def` is then withheld and the call types `Dynamic`. A class's own
+      # singleton side is read from the visibility-contest census: `define_singleton_method(:x)`,
+      # `singleton_class.define_method(:x)` / `attr_*` and a computed name contest the entry's slot whether or not a
+      # `def` is recorded (#1984, #2013). An `extend`ed module's side is read from `discovered_methods`, which holds
+      # its `attr_*` and `define_method` rows, and the module's `def self.extended` hook may define any name on the
+      # extender, so it withholds too.
       def dynamic_singleton_definer_ahead?(class_name, method_name, owner)
-        discovery = scope.discovery
         name = method_name.to_sym
         chain = Scope::ResolutionChain.for(scope, class_name.to_s, :singleton, :methods)
         chain.entries.each do |entry|
           next if entry.external?
           return false if entry.name == owner.to_s
-
-          singleton = entry.side == :singleton
-          Analysis::DependencyRecorder.read_visibility(entry.name, name)
-          return true if discovery.contested?(:discovered_method_visibilities,
-                                              [entry.name, singleton ? [:singleton, name] : name])
-          return true if singleton &&
-                         discovery.contested?(:discovered_method_visibilities, [entry.name, SINGLETON_WILDCARD_SLOT])
+          return true if entry_defines_without_def?(entry, name)
         end
         false
+      end
+
+      def entry_defines_without_def?(entry, name)
+        unless entry.side == :singleton
+          return scope.discovered_method?(entry.name, name, :instance) ||
+                 !scope.singleton_def_for(entry.name, :extended).nil?
+        end
+
+        discovery = scope.discovery
+        Analysis::DependencyRecorder.read_visibility(entry.name, name)
+        discovery.contested?(:discovered_method_visibilities, [entry.name, [:singleton, name]]) ||
+          discovery.contested?(:discovered_method_visibilities, [entry.name, SINGLETON_WILDCARD_SLOT])
       end
 
       # The project-side singleton-method band: a `Foo.bar` call resolved against a `class << …` / `def self.…`

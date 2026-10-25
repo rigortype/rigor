@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "../type"
+require_relative "block_run_count"
 
 module Rigor
   module Inference
@@ -12,12 +13,12 @@ module Rigor
     # counted as running the block once, and a `return` in the block that only a later run reaches (`each { return
     # false if (seen += 1) > 3 }`) never joined the method's return type.
     #
-    # The later-run `return` pass asks this (`StatementEvaluator#collect_repeated_block_returns`), and so does the
-    # expression-position block-value pass (`ExpressionTyper#block_may_repeat?`, issues #2301 and #2303), which lays
-    # the #587 (b) captured binding under a block that may repeat; the statement pass's block entry scopes and the
-    # ADR-56 write-back keep {BlockRepetition}'s rule. Both askers only widen, so the rule here errs toward
-    # "repeats". The callee repeats when its body, outside a nested `def` (a `yield` in a class
-    # body is a syntax error inside a method):
+    # Only the later-run `return` pass asks {.may_run_block_repeatedly?}
+    # (`StatementEvaluator#collect_repeated_block_returns`); the block's entry scopes and the ADR-56 write-back keep
+    # {BlockRepetition}'s rule. That pass only widens the method's return type, so the rule here errs toward
+    # "repeats". The expression-position block-value pass asks {.block_value_may_repeat?} instead, whose rule
+    # ({BlockRunCount}) errs the other way. The callee repeats when its body, outside a nested `def` (a `yield` in a
+    # class body is a syntax error inside a method):
     #
     # - holds two or more sites that run the block (`yield`, or `call` / `yield` / `===` / `[]` on the `&blk`
     #   parameter), or one inside a loop, a block or a lambda, which may run it many times; or
@@ -39,6 +40,17 @@ module Rigor
         return false unless def_node.is_a?(Prism::DefNode) && def_node.body
 
         repeats?(def_node)
+      rescue StandardError
+        false
+      end
+
+      # Issues #2301 and #2303 — whether the callee may run the block more than once on one path, for the
+      # expression-position block-value pass ({BlockRunCount}). Answers false where the callee does not resolve.
+      def block_value_may_repeat?(call_node, receiver_type, scope)
+        def_node = callee_def(call_node, receiver_type, scope)
+        return false unless def_node.is_a?(Prism::DefNode) && def_node.body
+
+        BlockRunCount.may_repeat?(def_node)
       rescue StandardError
         false
       end

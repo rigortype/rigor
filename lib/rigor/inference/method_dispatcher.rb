@@ -1030,6 +1030,7 @@ module Rigor
         fallback_receiver = user_class_fallback_receiver(receiver_type, environment)
         return nil if fallback_receiver.nil?
         return nil if declared_by_external_ancestor?(receiver_type, environment, context)
+        return nil if project_singleton_definer?(receiver_type, context)
 
         # Preserve the ORIGINAL receiver type as the `self` substitution so `Kernel#dup: () ->
         # self` and other `self`-returning methods route through Object's RBS while still
@@ -1075,6 +1076,22 @@ module Rigor
         memo[key] = !ExternalAncestorResolution.resolve(receiver_type.class_name, context.method_name, :instance,
                                                         scope: scope, environment: environment,
                                                         record_dependencies: false).nil?
+      end
+
+      # Issue #2284 — a class object whose singleton chain holds a project definer of the name (its own `def
+      # self.name`, one a project superclass wrote, an `extend`ed module's `def name`) answers from that definer,
+      # not from `Module#name` / `Class#…` on the `Singleton[Object]` fallback: Ruby's singleton ancestry puts
+      # every project entry ahead of `Class`. The fallback declines so the typer's singleton-body inference
+      # answers the definer's return, or `Dynamic` where the slot is contested and the def may not be the one
+      # that runs.
+      def project_singleton_definer?(receiver_type, context)
+        return false unless receiver_type.is_a?(Type::Singleton)
+
+        scope = context.scope
+        return false if scope.nil?
+        return true if scope.discovered_method?(receiver_type.class_name, context.method_name, :singleton)
+
+        !scope.singleton_def_through_ancestors(receiver_type.class_name, context.method_name).last.nil?
       end
 
       EXTERNAL_ANCESTOR_MEMO_KEY = :__rigor_user_class_fallback_external_ancestor__

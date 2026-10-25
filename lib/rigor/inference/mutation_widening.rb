@@ -108,9 +108,9 @@ module Rigor
       # Every method name {#widen_for_mutator} responds to — the one set a body scan asks "could an
       # in-place call on this name change its binding?" against (issue #587: the block-return
       # threading gate). Derived from the tables rather than spelled out, so the scan and the
-      # widening it predicts cannot drift apart.
-      SHAPE_MUTATORS = (ARRAY_MUTATORS | HASH_MUTATORS | HashLookupMutation::MUTATORS | StringMutation::MUTATORS |
-                        SetMutation::MUTATORS).freeze
+      # widening it predicts cannot drift apart. The Set-only names ({SetMutation::MUTATORS}) stay out: the scans read
+      # a name without its receiver, and `merge` on a Hash returns a new Hash (issue #2294).
+      SHAPE_MUTATORS = (ARRAY_MUTATORS | HASH_MUTATORS | HashLookupMutation::MUTATORS | StringMutation::MUTATORS).freeze
 
       # Methods that return the receiver (or a shallow copy) and cannot mutate it. They must not
       # trigger widening or any other receiver-fact invalidation. The list is intentionally

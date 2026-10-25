@@ -11,9 +11,12 @@
 #2294 makes a Set mutator widen the receiver's element. The widened carrier is the typed Set #2290 builds for a
 non-constant literal, `Set[E | Dynamic[top]]`, with the `Dynamic[top]` floor. That floor is what lets a later store
 re-grow the set; it is also what Array's straight-line join adds (`a = [1]; a << "a"` reads
-`Array[1 | Dynamic[top]]` on master). The issue's acceptance criteria asked that `s = Set[1]; s << "a"; s.each { |v|
-v.upcase }` still report for `Integer`. On master it does, but only because the `<<` was ignored and the set still
-read `Set[1]`. A union carrying `Dynamic[top]` reports no missing method, so after the change it reports nothing.
+`Array[1 | Dynamic[top]]` on master). The issue's acceptance criteria asked that a Set holding `1` and `"a"` still
+report the missing `upcase` for `Integer`. The `each { |v| v.upcase }` spelling the issue wrote reports nothing on
+master either, because a constant-folded Set's `each` binds an untyped block parameter. The spelling that did report
+is `s = Set[1]; s << "a"; s.to_a.first.upcase`: master reported `undefined method 'upcase' for 1`, but only because it
+ignored the `<<` and still read `Set[1]`. A union carrying `Dynamic[top]` reports no missing method, so after the
+change it reports nothing.
 
 ## Options and trade-offs
 
@@ -26,7 +29,7 @@ read `Set[1]`. A union carrying `Dynamic[top]` reports no missing method, so aft
 ## Decision
 
 Keep the floor. False positives outrank the true positive, and the choice matches the Array behaviour and #2290's
-typed-Set floor. The `Set[1]; add("a")` true positive is lost.
+typed-Set floor. The `s = Set[1]; s << "a"; s.to_a.first.upcase` true positive is lost.
 
 ## To undo
 

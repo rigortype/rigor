@@ -47,6 +47,11 @@ RSpec.describe "Set mutation widening", type: :runner do
       expect(dumped("s = Set[n]\ns << x\ns.add(:sym)\ndump_type(s)")).to eq(expected)
     end
 
+    it "joins a Range argument's elements" do
+      expected = ["Set[Dynamic[top] | Integer | String]"] * 2
+      expect(dumped("s = Set[x]\ns.merge(1..3)\ndump_type(s)\nt = Set[x]\nt.merge(1..n)\ndump_type(t)")).to eq(expected)
+    end
+
     it "joins merge's argument elements" do
       expect(dumped("s = Set[n]\ns.merge([x])\ndump_type(s)")).to eq(["Set[Dynamic[top] | Integer | String]"])
     end
@@ -60,6 +65,13 @@ RSpec.describe "Set mutation widening", type: :runner do
     it "leaves a precise Set[String] untouched" do
       expect(dumped("s = ARGV.to_set\ns << 1\ndump_type(s)")).to eq(["Set[String]"])
     end
+  end
+
+  # The Set-only names (`merge`, `add`, ...) are not in-place mutators for every receiver: `Hash#merge` returns a new
+  # Hash, so an iterator calling it on each row leaves the literal rows as they were.
+  it "keeps a Hash literal's shape through Hash#merge in an iterator" do
+    source = "rows = [{ name: \"a\" }, { name: \"b\" }]\nrows.each { |r| puts r.merge(id: 1) }\ndump_type(rows)"
+    expect(dumped(source)).to eq(['[{ name: "a" }, { name: "b" }]'])
   end
 
   describe "set algebra" do

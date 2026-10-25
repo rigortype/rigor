@@ -1452,11 +1452,19 @@ module Rigor
         method_name, receiver = mutation_target(node)
         return if method_name.nil?
         return unless receiver.is_a?(Prism::InstanceVariableReadNode)
-        return unless MutationWidening::SHAPE_MUTATORS.include?(method_name)
+        return unless ivar_census_mutator?(method_name)
 
         per_class = (mutated_ivars[class_name] ||= {})
         per_ivar = (per_class[receiver.name] ||= Set.new)
         per_ivar << method_name
+      end
+
+      # The Set-only names (`add`, `merge`, … — issue #2294) are recorded here rather than in `SHAPE_MUTATORS`, which
+      # every scan reads by name alone: there `merge` would make `Hash#merge`, which returns a new Hash, a mutation of
+      # its receiver. The census is safe to over-collect, since {#widen_member_for_observed_mutators} reads each name
+      # against the table of the carrier it widens.
+      def ivar_census_mutator?(method_name)
+        MutationWidening::SHAPE_MUTATORS.include?(method_name) || SetMutation::MUTATORS.include?(method_name)
       end
 
       # `[mutator name, receiver node]` for a node that mutates its receiver, `nil` otherwise.

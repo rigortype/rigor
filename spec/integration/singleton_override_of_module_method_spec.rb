@@ -116,7 +116,8 @@ RSpec.describe "a project singleton override of a Module method wins on the clas
   # A contest farther than the `def`'s owner does not reach the call: the nearer `def` runs.
   it "keeps a nearer def's type when a farther class defines the name without a def" do
     expect(dumps(<<~RUBY)).to eq(["5"])
-      class Far; define_singleton_method(:name) { "f" }; end
+      class Top; end
+      class Far < Top; define_singleton_method(:name) { "f" }; end
       class NearDef < Far; def self.name = 5; end
       Rigor.dump_type(NearDef.name) # 5
     RUBY

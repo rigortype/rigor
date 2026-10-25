@@ -150,11 +150,16 @@ class SigProvenanceAuditor
     # @param runtime — let the #839 tiers require `root`'s own `lib/` and reflect over it. Off by
     #   default: requiring a tree runs its code, and a fixture tree's `lib/` is written by the
     #   example auditing it.
-    def audit(root:, candidates: nil, configuration: nil, runtime: false)
+    # @param environment — required with `candidates:`: sig-gen's project environment for that run.
+    def audit(root:, candidates: nil, environment: nil, configuration: nil, runtime: false)
+      if candidates && environment.nil?
+        raise ArgumentError, "audit: candidates need environment: (sig-gen's project environment)"
+      end
+
       generated = candidates ? nil : generate(root: root, configuration: configuration)
       classify(declarations(root: root), candidates || generated.candidates,
                sources: SigSourceIndex.build(root: root, runtime: runtime),
-               environment: generated&.environment)
+               environment: candidates ? environment : generated.environment)
     end
 
     # Every member of every `.rbs` under `sig/`, in file then source order.
@@ -178,8 +183,9 @@ class SigProvenanceAuditor
     # `environment:` is the project environment sig-gen built for the run. An inferred return is elaborated
     # through {Rigor::SigGen::TypeElaborator} with it before comparison, so the classifier compares the
     # spelling `rigor sig-gen` writes, not the raw carrier (a bare generic carries no `untyped` parameter
-    # until the elaborator fills it in). Without an environment the raw spelling is compared.
-    def classify(declarations, candidates, sources: SigSourceIndex::NONE, environment: nil)
+    # until the elaborator fills it in). `environment: nil` compares the raw spelling, spelled out so no caller
+    # reaches it by omission; only the unit examples with no sig-gen run pass it.
+    def classify(declarations, candidates, environment:, sources: SigSourceIndex::NONE)
       index = index_candidates(candidates)
       declarations.map { |decl| classify_one(decl, index, sources, environment) }
     end

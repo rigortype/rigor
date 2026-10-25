@@ -12,9 +12,10 @@
 `Set[untyped]` in what sig-gen proposes (#2177), so a hand-written `Set[String]` that matched the raw carrier counted
 as `generated` while sig-gen would have written something else. #2317 made the classifier elaborate the inferred
 return through `TypeElaborator` before comparing, which is the correct gate. It moved six hand-written Set returns
-off `generated`: `scope.rbs` `discovered_global_write_census`, `published_constant_names`, `local_constant_names`,
-`discovered_class_sources` and `constant_sources`, and `inference.rbs` `ScopeIndexer#finalize_constant_writes`
-(its second return element). Each now reads `declared_divergent` and, unmarked, counts against the residue pin.
+off their earlier class: five that read `generated` (`scope.rbs` `discovered_global_write_census`,
+`published_constant_names`, `local_constant_names`, `discovered_class_sources` and `constant_sources`) and one that
+read `parameter_intent` (`inference.rbs` `ScopeIndexer#finalize_constant_writes`, through its second return element).
+Each now reads `declared_divergent` and, unmarked, counts against the residue pin.
 The gate had no decision for that: a residue pin rising, or a marker, is a choice the coordinator owns.
 
 ## Options and trade-offs
@@ -36,11 +37,12 @@ kind, `class_sources` and `constant_sources` hold source paths, and `published_c
 
 Mark the six rows, and return both pins to their pre-PR values (`scope.rbs` 43, `inference.rbs` 83). The
 precedent #2316 fits this closely: the same elaboration gap, the same marker wording, and the same ratchet
-arithmetic. The three collector files that now classify `generated` (`Array` elaborated to `Array[untyped]`) drop
-from 1 to 0 in the same PR, a tightening.
+arithmetic. The three files whose rows now classify `generated` (a bare `Array` elaborated to `Array[untyped]`, the
+spelling the declaration already names) drop from 1 to 0 in the same PR, a tightening.
 
 ## To undo
 
 Remove the six `# authored:` blocks and restore the pins to `scope.rbs` 48 and `inference.rbs` 84. The rows then
-read as residue again. Reverting the classifier change (commits `0197ce558` and `67eecfd2c` on #2365) returns the
-raw comparison, under which the six rows read `generated` again and the markers would be unnecessary.
+read as residue again. Reverting the classifier change in PR #2365 (its commit "Classify sig/ returns on the
+elaborated type sig-gen writes") returns the raw comparison, under which the six rows read `generated` again and
+the markers would be unnecessary.

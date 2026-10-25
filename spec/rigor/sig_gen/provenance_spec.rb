@@ -90,8 +90,8 @@ SIG_PROVENANCE_LISTING_CAP = 200
 # in sig-gen (#2177), so a `Set[String]` declaration no longer matches the inferred return and reads
 # `declared_divergent`; each such row that is hand-written carries `# authored:` with its element type, so it
 # stays out of the count (scope.rbs and inference.rbs back to their pre-PR pins). A bare `Array` now elaborates
-# to the `Array[untyped]` a declaration already names and reads `generated`, so three collector files drop
-# to zero (-1 each). Net -3 against the pre-PR total. The
+# to the `Array[untyped]` a declaration already names and reads `generated`, so the three files whose rows now
+# generate drop to zero (-1 each). Net -3 against the pre-PR total. The
 # per-row reasons are at their pins. This is a gate checking more, not an engine change: no declaration text moved.
 #
 # 666 since #995. `Generator#translate_method_type_return` translated a declared return with no
@@ -208,7 +208,7 @@ SIG_PROVENANCE_RESIDUE = {
   # `[Array[untyped], Integer]` divergence as the sole unmarked row.
   "sig/rigor/analysis/baseline.rbs" => 1,
   # -1 each (#2317): `collect` returns a bare `Array`, which the elaborator now spells `Array[untyped]`, the
-  # declared spelling; both rows classify as generated (the three collector files are the only -1s).
+  # declared spelling; both rows classify as generated (these are the only three files whose rows now generate).
   "sig/rigor/analysis/check_rules/always_truthy_condition_collector.rbs" => 0,
   "sig/rigor/analysis/check_rules/dead_assignment_collector.rbs" => 0,
   "sig/rigor/analysis/dependency_source_inference/gem_resolver.rbs" => 1,
@@ -457,6 +457,8 @@ RSpec.describe "sig/ provenance (ADR-107 G3)" do
       expect(row.detail).to eq("declared Set[Symbol], sig-gen infers Set[untyped]")
     end
 
+    # Control (guard): passes with the elaboration removed. It pins that a declaration already spelled as
+    # sig-gen writes it stays `generated`, so the elaboration must not move it.
     it "calls a Set return declared as sig-gen writes it `generated`" do
       rows = classifications_for(ruby: "class Widget\n  def n\n    Set[1]\n  end\nend\n",
                                  rbs: "class Widget\n  def n: () -> Set[untyped]\nend\n")
@@ -605,7 +607,7 @@ RSpec.describe "sig/ provenance (ADR-107 G3)" do
         path: "sig/widget.rbs", line: 2, class_name: "Widget", method_name: method,
         kind: :instance, typed_params: false, return_rbs: return_rbs, marker: nil
       )
-      SigProvenanceAuditor.classify([declaration], [candidate]).first
+      SigProvenanceAuditor.classify([declaration], [candidate], environment: nil).first
     end
 
     def candidate(classification, **overrides)

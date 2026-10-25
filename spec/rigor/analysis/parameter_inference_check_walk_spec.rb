@@ -315,12 +315,56 @@ RSpec.describe "ADR-67 WD6 check-walk parameter inference" do
           def array_conversion(name) = Array(name).first.upcase
         end
 
+        class Rebound
+          def sequence_local(name)
+            c = true
+            x = (c = false; c ? name : 1)
+            x.upcase
+          end
+
+          def sequence_inline(name)
+            c = true
+            (c = false; c ? name : 1).upcase
+          end
+
+          def and_right(name)
+            c = true
+            ((c = false) || (c ? name : 1)).upcase
+          end
+
+          def literal(name)
+            c = true
+            [c = false, (c ? name : 1)].last.upcase
+          end
+
+          def nested(name)
+            c = true
+            ((c = false) ? 1 : (c ? name : 1)).upcase
+          end
+
+          def two_arguments(name) = Array(name, 1).first.upcase
+
+          def explicit_receiver(name) = Conv.new.Array(name).upcase
+        end
+
+        class Conv
+          def Array(x) = 5
+        end
+
+        class Shadow
+          def Array(x) = 5
+
+          def shadowed(name) = Array(name).upcase
+        end
+
         q = Quiet.new
-        q.ternary(nil, true)
-        q.if_expression(nil, true)
-        q.unless_expression(nil, true)
-        q.through_local(nil, true)
-        q.through_ivar(nil, true)
+        [true, false].each do |c|
+          q.ternary(nil, c)
+          q.if_expression(nil, c)
+          q.unless_expression(nil, c)
+          q.through_local(nil, c)
+          q.through_ivar(nil, c)
+        end
         q.array_conversion(nil)
         q.mixed_live_param(nil, true)
         q.mixed_live_other(nil, false)
@@ -329,6 +373,15 @@ RSpec.describe "ADR-67 WD6 check-walk parameter inference" do
         q.mixed_unless(nil, false)
         q.version_guarded(nil)
         q.optimistic_predicate(2, :zz)
+        r = Rebound.new
+        r.sequence_local(nil)
+        r.sequence_inline(nil)
+        r.and_right(nil)
+        r.literal(nil)
+        r.nested(nil)
+        r.two_arguments(nil)
+        r.explicit_receiver(nil)
+        Shadow.new.shadowed(nil)
       RUBY
     end
 
@@ -416,6 +469,40 @@ RSpec.describe "ADR-67 WD6 check-walk parameter inference" do
 
     it "still reports the same shapes on a parameter a signature declares" do
       expect(lines).to include(38, 42, 45)
+    end
+
+    # A predicate is folded in the scope at the start of the expression, so the guard must not fold one that
+    # earlier code inside the expression rebinds: there the engine reads the rebound value and so must the rule.
+    it "does not fold a predicate a leading statement rebinds, through a local" do
+      expect(lines).to include(52)
+    end
+
+    it "does not fold a predicate a leading statement rebinds, inline" do
+      expect(lines).to include(57)
+    end
+
+    it "does not fold a predicate the left operand of || rebinds" do
+      expect(lines).to include(62)
+    end
+
+    it "does not fold a predicate an earlier literal element rebinds" do
+      expect(lines).to include(67)
+    end
+
+    it "does not fold a predicate nested in an arm of a conditional whose predicate rebinds it" do
+      expect(lines).to include(72)
+    end
+
+    it "does not read Array with two arguments as the conversion" do
+      expect(lines).to include(75)
+    end
+
+    it "does not read an Array call on an explicit receiver as the conversion" do
+      expect(lines).to include(77)
+    end
+
+    it "does not read Array as the conversion when the class defines its own" do
+      expect(lines).to include(87)
     end
   end
 end

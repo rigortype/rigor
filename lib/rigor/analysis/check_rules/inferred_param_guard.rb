@@ -47,57 +47,83 @@ module Rigor
         # length, which is tiny in practice).
         MAX_DEPTH = 64
 
-        def rooted?(node, scope, depth = 0)
+        # `fold` is whether `scope` is still the scope the walked node is evaluated in. The callers pass the scope
+        # at the start of the expression; once the walk passes something evaluated earlier inside it (a leading
+        # statement, the left operand of `&&`, an earlier literal element, a conditional's predicate), that
+        # earlier code may have rebound what a nested predicate reads (`(c = false; c ? param : 1)`), so a
+        # conditional below no longer folds its predicate in `scope`.
+        def rooted?(node, scope, depth = 0, fold = true)
           return false if node.nil? || depth > MAX_DEPTH
 
           case node
           when Prism::LocalVariableReadNode, Prism::InstanceVariableReadNode then scope.inferred_param?(node.name)
-          when Prism::CallNode then call_rooted?(node, scope, depth + 1)
+          when Prism::CallNode then call_rooted?(node, scope, depth + 1, fold)
           when Prism::ArrayNode, Prism::HashNode, Prism::KeywordHashNode, Prism::AssocNode
-            literal_rooted?(node, scope, depth + 1)
-          else combining_rooted?(node, scope, depth + 1)
+            literal_rooted?(node, scope, depth + 1, fold)
+          else combining_rooted?(node, scope, depth + 1, fold)
           end
         end
 
-        def call_rooted?(node, scope, depth)
-          return rooted?(node.receiver, scope, depth) unless array_conversion?(node)
+        def call_rooted?(node, scope, depth, fold)
+          return rooted?(node.receiver, scope, depth, fold) unless array_conversion?(node, scope)
 
-          rooted?(node.arguments.arguments.first, scope, depth)
+          rooted?(node.arguments.arguments.first, scope, depth, fold)
         end
 
-        # A receiverless `Array(x)` — Kernel#Array with exactly one plain argument and no block.
-        def array_conversion?(node)
+        # A receiverless `Array(x)` reaching Kernel#Array: exactly one plain argument, no block, and no project
+        # `Array` on `self`'s class or its project ancestors to bind ahead of Kernel's.
+        def array_conversion?(node, scope)
           node.receiver.nil? && node.name == :Array && node.block.nil? &&
-            node.arguments&.arguments&.size == 1
+            node.arguments&.arguments&.size == 1 && !project_array_method?(scope)
+        end
+
+        def project_array_method?(scope)
+          self_type = scope.self_type
+          case self_type
+          when Type::Nominal then scope.discovered_method_through_ancestors?(self_type.class_name, :Array, :instance)
+          when Type::Singleton
+            scope.discovered_method_through_ancestors?(self_type.class_name, :Array, :singleton)
+          else false
+          end
         end
 
         # An array or hash literal is rooted when any element is: the engine reads the element back precisely.
-        def literal_rooted?(node, scope, depth)
+        def literal_rooted?(node, scope, depth, fold)
           parts = node.is_a?(Prism::AssocNode) ? [node.key, node.value] : node.elements
-          parts.any? { |part| rooted?(part, scope, depth) }
+          parts.each_with_index.any? { |part, index| rooted?(part, scope, depth, fold && index.zero?) }
         end
 
         # Value-combining forms: the produced value is a union of the operands, so it is a lower bound when ANY
         # operand is inferred-parameter-rooted (`cps[i] - x rescue -1`, `a && param.foo`, `param || b`). Declining
         # on the whole expression is FP-safe by the same lower-bound argument.
-        def combining_rooted?(node, scope, depth)
+        def combining_rooted?(node, scope, depth, fold)
           case node
           when Prism::RescueModifierNode
-            rooted?(node.expression, scope, depth) || rooted?(node.rescue_expression, scope, depth)
-          when Prism::AndNode, Prism::OrNode then rooted?(node.left, scope, depth) || rooted?(node.right, scope, depth)
-          when Prism::ParenthesesNode then rooted?(last_statement(node.body), scope, depth)
-          when Prism::StatementsNode then rooted?(node.body.last, scope, depth)
-          when Prism::IfNode, Prism::UnlessNode then conditional_rooted?(node, scope, depth)
-          when Prism::ElseNode then rooted?(node.statements, scope, depth)
+            rooted?(node.expression, scope, depth, fold) || rooted?(node.rescue_expression, scope, depth, false)
+          when Prism::AndNode, Prism::OrNode
+            rooted?(node.left, scope, depth, fold) || rooted?(node.right, scope, depth, false)
+          when Prism::ParenthesesNode then body_rooted?(node.body, scope, depth, fold)
+          when Prism::StatementsNode then body_rooted?(node, scope, depth, fold)
+          when Prism::IfNode, Prism::UnlessNode then conditional_rooted?(node, scope, depth, fold)
+          when Prism::ElseNode then rooted?(node.statements, scope, depth, fold)
           else false
           end
         end
 
+        # A body's value is its last statement; any statement before it runs first.
+        def body_rooted?(body, scope, depth, fold)
+          return rooted?(body, scope, depth, fold) unless body.is_a?(Prism::StatementsNode)
+
+          rooted?(body.body.last, scope, depth, fold && body.body.size == 1)
+        end
+
         # Every branch that can run must be rooted; an absent branch is `nil`, never rooted. The predicate is
         # typed only when the branches disagree, so a conditional that never mentions a parameter costs nothing.
-        def conditional_rooted?(node, scope, depth)
-          truthy_rooted, falsey_rooted = arms(node).map { |arm| rooted?(arm, scope, depth) }
+        # An arm runs after the predicate, so a conditional nested in one never folds.
+        def conditional_rooted?(node, scope, depth, fold)
+          truthy_rooted, falsey_rooted = arms(node).map { |arm| rooted?(arm, scope, depth, false) }
           return truthy_rooted if truthy_rooted == falsey_rooted
+          return false unless fold
 
           case predicate_certainty(node.predicate, scope)
           when :truthy then truthy_rooted
@@ -119,10 +145,6 @@ module Rigor
           return nil unless Inference::OptimisticOrigin.resolve(predicate, scope).nil?
 
           Inference::Narrowing.predicate_certainty(scope.type_of(predicate))
-        end
-
-        def last_statement(body)
-          body.is_a?(Prism::StatementsNode) ? body.body.last : body
         end
       end
     end

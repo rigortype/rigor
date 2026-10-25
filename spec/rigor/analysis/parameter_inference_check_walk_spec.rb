@@ -296,6 +296,12 @@ RSpec.describe "ADR-67 WD6 check-walk parameter inference" do
           def mixed_live_param_else(name, c) = (c ? 1 : name).upcase
 
           def mixed_unless(name, c) = (unless c then name else 1 end).upcase
+
+          def version_guarded(name) = (RUBY_VERSION >= "3.0" ? name : 1).upcase
+
+          def table = {a: "x"}
+
+          def optimistic_predicate(name, k) = (table[k] ? name : 1).upcase
         end
 
         class Loud
@@ -321,6 +327,8 @@ RSpec.describe "ADR-67 WD6 check-walk parameter inference" do
         q.missing_else(nil, false)
         q.mixed_live_param_else(nil, false)
         q.mixed_unless(nil, false)
+        q.version_guarded(nil)
+        q.optimistic_predicate(2, :zz)
       RUBY
     end
 
@@ -330,6 +338,10 @@ RSpec.describe "ADR-67 WD6 check-walk parameter inference" do
           def ternary: (Integer name, bool c) -> untyped
           def through_local: (Integer name, bool c) -> untyped
           def array_conversion: (Integer name) -> untyped
+        end
+
+        class Quiet
+          def table: () -> Hash[Symbol, String]
         end
       RBS
     end
@@ -392,8 +404,18 @@ RSpec.describe "ADR-67 WD6 check-walk parameter inference" do
       expect(lines).not_to include(28)
     end
 
+    it "declines when a version guard decides the parameter's branch" do
+      expect(lines).not_to include(30)
+    end
+
+    # The engine keeps both arms when the predicate's truthiness rests on an optimistic carrier (a Hash read
+    # that omits the miss's nil), so the guard must not read one arm as dead either.
+    it "still reports a conditional whose predicate folds only on an optimistic carrier" do
+      expect(lines).to include(34)
+    end
+
     it "still reports the same shapes on a parameter a signature declares" do
-      expect(lines).to include(32, 36, 39)
+      expect(lines).to include(38, 42, 45)
     end
   end
 end

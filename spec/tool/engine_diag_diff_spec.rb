@@ -108,12 +108,71 @@ RSpec.describe "tool/engine_diag_diff.rb" do
       end
     end
 
+    # The materialise step copies this checkout's lib into each engine directory; `plant` replaces the head copy's
+    # configuration reader, so a read with the wrong engine gives a different answer.
+    def stub_engine_copies(plant: nil)
+      allow(EngineAllocAB).to receive(:materialise) do |_rev, dir, paths|
+        FileUtils.mkdir_p(dir)
+        FileUtils.cp_r(File.join(EngineDiagDiff::ROOT, "lib"), dir) if paths
+        File.write(File.join(dir, "lib", "rigor", "configuration.rb"), plant) if plant && dir.end_with?("/head")
+      end
+    end
+
+    let(:planted_configuration) do
+      <<~RUBY
+        module Rigor
+          class Configuration
+            Planted = Struct.new(:paths)
+            def self.discover
+              ".rigor.yml"
+            end
+            def self.load_with_includes(_path)
+              { "paths" => ["planted"] }
+            end
+            def self.load(_path)
+              Planted.new([File.join(Dir.pwd, "planted")])
+            end
+          end
+        end
+      RUBY
+    end
+
+    def run_with_no_target(base, corpus)
+      summary = File.join(base, "summary.md")
+      allow(EngineDiagDiff).to receive(:run_child).and_return([])
+      options = EngineDiagDiff.parse_options(["--base", "HEAD", "--head", "HEAD", "--corpus-dir", corpus,
+                                              "--summary", summary])
+      [options, summary]
+    end
+
     it "reads paths: with the engine's loader: corpus-relative inside the corpus, absolute outside it" do
       with_corpus(nil) do |base, corpus|
         File.write(File.join(corpus, ".rigor.yml"), "paths:\n  - app\n  - #{corpus}/lib\n  - ../outside\n")
         result = EngineDiagDiff.run_corpus_paths(EngineDiagDiff::ROOT, File.realpath(corpus))
         expect(result).to eq("config" => ".rigor.yml",
                              "paths" => ["app", "lib", File.realpath(File.join(base, "outside"))])
+      end
+    end
+
+    it "keeps a symlinked entry's own name, whether it points inside the corpus or outside it" do
+      with_corpus("paths:\n  - sym_in\n  - sym_out\n") do |base, corpus|
+        FileUtils.mkdir_p(File.join(corpus, "src", "inside"))
+        FileUtils.mkdir_p(File.join(base, "ext"))
+        File.symlink("src/inside", File.join(corpus, "sym_in"))
+        File.symlink("../ext", File.join(corpus, "sym_out"))
+        result = EngineDiagDiff.run_corpus_paths(EngineDiagDiff::ROOT, File.realpath(corpus))
+        expect(result.fetch("paths")).to eq(%w[sym_in sym_out])
+      end
+    end
+
+    it "relativises an entry spelled through a symlink to the corpus root, so the root's real path still matches" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "real", "corpus", "lib"))
+        link = File.join(dir, "link")
+        File.symlink(File.join(dir, "real"), link)
+        File.write(File.join(dir, "real", "corpus", ".rigor.yml"), "paths:\n  - #{link}/corpus/lib\n")
+        result = EngineDiagDiff.run_corpus_paths(EngineDiagDiff::ROOT, File.join(link, "corpus"))
+        expect(result.fetch("paths")).to eq(["lib"])
       end
     end
 
@@ -128,16 +187,32 @@ RSpec.describe "tool/engine_diag_diff.rb" do
       end
     end
 
+    it "falls back to lib, and says so, for a configuration that exists but names no paths:" do
+      with_corpus("plugins: []\n") do |base, corpus|
+        expect(EngineDiagDiff.run_corpus_paths(EngineDiagDiff::ROOT, File.realpath(corpus)))
+          .to eq("config" => ".rigor.yml", "paths" => [])
+        stub_engine_copies
+        options, = run_with_no_target(base, corpus)
+        expect { EngineDiagDiff.run(options) }
+          .to output(/\AMeasuring targets: lib \(no --target, and the corpus configuration names no paths:; falling back to lib\)$/)
+          .to_stdout
+        expect(EngineDiagDiff).to have_received(:run_child).with(anything, anything, ["lib"]).twice
+      end
+    end
+
+    it "reads the configuration with the head engine, so a difference planted in that copy shows" do
+      with_corpus("paths:\n  - app\n") do |base, corpus|
+        stub_engine_copies(plant: planted_configuration)
+        options, = run_with_no_target(base, corpus)
+        expect { EngineDiagDiff.run(options) }.to output(/\AMeasuring targets: planted \(no --target; /).to_stdout
+        expect(EngineDiagDiff).to have_received(:run_child).with(anything, anything, ["planted"]).twice
+      end
+    end
+
     it "measures the configured paths, prints them first, and writes them into the summary" do
       with_corpus("paths:\n  - app\n") do |base, corpus|
-        summary = File.join(base, "summary.md")
-        allow(EngineAllocAB).to receive(:materialise) do |_rev, dir, paths|
-          FileUtils.mkdir_p(dir)
-          FileUtils.cp_r(File.join(EngineDiagDiff::ROOT, "lib"), dir) if paths
-        end
-        allow(EngineDiagDiff).to receive(:run_child).and_return([])
-        options = EngineDiagDiff.parse_options(["--base", "HEAD", "--head", "HEAD", "--corpus-dir", corpus,
-                                                "--summary", summary])
+        stub_engine_copies
+        options, summary = run_with_no_target(base, corpus)
 
         expect { EngineDiagDiff.run(options) }
           .to output(/\AMeasuring targets: app \(no --target; the corpus configuration \.rigor\.yml paths:\)$/)

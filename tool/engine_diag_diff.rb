@@ -274,16 +274,26 @@ module EngineDiagDiff
       config = Rigor::Configuration.discover
       declared = config && Rigor::Configuration.load_with_includes(config).fetch("paths", nil)
       paths = declared.nil? ? [] : Rigor::Configuration.load(config).paths
-      root = "#{Dir.pwd}/"
+      root = Dir.pwd
       { "config" => config, "paths" => paths.map { |path| corpus_relative(path, root) } }
     end
   end
 
-  # An entry inside the corpus as corpus-relative, anything else as its absolute path. The real path is taken first,
-  # so a symlinked spelling (`/tmp` for `/private/tmp`) matches a corpus resolved to its real path.
+  # An entry inside the corpus, spelled as the entry is written (a symlink inside the corpus keeps its own name, and
+  # one pointing outside it is still `app`, as `rigor check` prints it). Inside is decided lexically under `root`, or
+  # by an ancestor of the entry whose realpath is the corpus root, so a corpus reached through a symlink still matches.
+  # The entry itself is never resolved. Anything outside the corpus is its real absolute path.
   def corpus_relative(path, root)
-    real = File.exist?(path) ? File.realpath(path) : File.expand_path(path)
-    real.start_with?(root) ? real.delete_prefix(root) : real
+    return path.delete_prefix("#{root}/") if path.start_with?("#{root}/")
+
+    real_root = File.realpath(root)
+    ancestor = File.dirname(path)
+    until ancestor == File.dirname(ancestor)
+      return path.delete_prefix("#{ancestor}/") if File.exist?(ancestor) && File.realpath(ancestor) == real_root
+
+      ancestor = File.dirname(ancestor)
+    end
+    File.exist?(path) ? File.realpath(path) : File.expand_path(path)
   end
 
   def run_corpus_paths(engine_dir, corpus_dir)

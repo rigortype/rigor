@@ -4,8 +4,8 @@
 # and keeps it through `.freeze` / `.dup`. Before, `Set[x]` answered `Set[Dynamic[top]]` and its `.freeze` the bare
 # `Set`, so a reader over such a value was skipped by `rigor sig-gen` as `untyped`.
 #
-# The element is widened off value pins and literal containers and joined with a `Dynamic[top]` floor: nothing widens
-# a Set's element on mutation, and a set is mutable (#2177), so a read of it must not report on the built-with classes.
+# The element is widened off value pins and literal containers and joined with a `Dynamic[top]` floor: the mutation
+# seams see one store at a time (#2294), so a read of it must not report on the built-with classes.
 require "spec_helper"
 
 RSpec.describe "Set element types", type: :runner do

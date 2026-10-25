@@ -88,9 +88,9 @@ module Rigor
 
         # `Nominal[Set, [E]]`, `E` the members widened as an `Array.new` fill is (value pins dropped, a literal
         # container widened to its nominal) joined with a `Dynamic[top]` floor. The floor is the conservative half:
-        # nothing widens a Set's element when the program mutates it (`add`, `<<`, `merge`, `replace`, `clear`
-        # then `<<`, a callee that fills it), so the classes the set was built with are not a claim about what it
-        # holds later, and a read of the element must not report on them (#2278).
+        # the mutation seams ({SetMutation}, #2294) see one store at a time, so the classes the set was built with
+        # are not a claim about what it holds later, and a read of the element must not report on them (#2278). The
+        # floor is also what lets those seams re-grow the set.
         def typed_set(types)
           return nil if types.empty?
 

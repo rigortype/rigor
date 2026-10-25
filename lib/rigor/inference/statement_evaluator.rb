@@ -28,6 +28,7 @@ require_relative "closure_escape_analyzer"
 require_relative "content_join"
 require_relative "define_method_block_self"
 require_relative "macro_block_self_type"
+require_relative "global_writer_reach"
 require_relative "guard_rebinding"
 require_relative "self_call_ivar_writes"
 require_relative "intervening_ivar_reset"
@@ -1680,6 +1681,11 @@ module Rigor
           InterveningIvarReset.may_write?(condition, name, before, run_lambdas: true)
         when Prism::LocalVariableReadNode, Prism::LocalVariableWriteNode
           false
+        when Prism::GlobalVariableReadNode
+          # Issue #2314 — the question the statement walk asks past a call ({#forget_reached_globals}).
+          body = when_lambda_body(condition)
+          GlobalWriterReach.may_write?(condition, name, before) ||
+            (!body.nil? && GlobalWriterReach.may_write?(body, name, before))
         else
           body = when_lambda_body(condition)
           GuardRebinding.may_rebind?(condition, before) || (!body.nil? && GuardRebinding.may_rebind?(body, before))
@@ -3820,6 +3826,8 @@ module Rigor
       def rebind_statement_specials(node, post_scope)
         post_scope = post_scope.forget_match_globals if rebinds_match_globals?(node, post_scope)
         post_scope = post_scope.forget_last_line if rebinds_last_line?(node, post_scope)
+        # A guard's narrowing an operand's call restored is gone from `post_scope`; the operands' entry has it.
+        guarded = guarded_globals(operand_scope) | guarded_globals(post_scope)
         if post_scope.guard_narrowed? && GuardRebinding.call_may_rebind?(node, operand_scope)
           # Issue #1596 — a self-call proven to write only some instance variables restores only theirs.
           writes = intervening_call_candidate?(node) ? self_call_ivar_writes(node) : nil
@@ -3829,7 +3837,31 @@ module Rigor
                          post_scope.forget_guard_narrowings
                        end
         end
+        post_scope = forget_reached_globals(node, post_scope, guarded)
         forget_rescued_status(LastStatus.after(node, post_scope, scope), node)
+      end
+
+      # The globals a guard narrowed in `scope`.
+      def guarded_globals(scope)
+        return GlobalWriterReach::EMPTY unless scope.guard_narrowed?
+
+        scope.guard_records.each_key.filter_map { |kind, name| name if kind == :global }.to_set
+      end
+
+      # Issue #2314 — `post_scope` with each global a project method may write rebound to `Dynamic[top]` when the
+      # statement call `node` may reach that method ({GlobalWriterReach.may_write?}): `$g = nil; reset!; $g + 1`,
+      # with `reset!` assigning `$g`, is `2` in Ruby. A global no reachable method writes keeps its binding. A
+      # `case` whose `when` test may rebind a global subject reads it the same way ({#when_test_rebinds_subject?}).
+      # A global a guard narrowed before the call (`guarded`) keeps the union issue #1429's restore reads instead.
+      def forget_reached_globals(node, post_scope, guarded)
+        names = GlobalWriterReach.candidates(post_scope, except: guarded)
+        return post_scope if names.empty?
+
+        names.reduce(post_scope) do |acc, name|
+          next acc unless GlobalWriterReach.may_write?(node, name, operand_scope)
+
+          acc.with_global(name, Type::Combinator.untyped)
+        end
       end
 
       # True when the call may rebind this frame's match globals: it is match-capable itself ({#match_capable_call?}),

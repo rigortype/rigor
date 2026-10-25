@@ -5,6 +5,7 @@ require "prism"
 require_relative "../source/constant_path"
 require_relative "../source/node_children"
 require_relative "ivar_writer_census"
+require_relative "stored_block_call"
 
 module Rigor
   module Inference
@@ -29,6 +30,10 @@ module Rigor
     #   `main`), as written. A module RBS does not know may carry any method, so it reaches every class.
     # - the instance-variable writer entries of {IvarWriterCensus} (issue #1154): `[:ivar_set, name]`,
     #   `[:ivar_set_class, class_name]` and `[:own_write, class_name, name, path]`.
+    # - `[:global_writer, name, method]` — issue #2314: a write of the global `name` inside a method body, keyed by
+    #   the `def`'s name (or the literal name a `define_method` block defines), or by nil inside a lambda or a block
+    #   its call keeps to run later ({StoredBlockCall}). A write in a block its call runs at once belongs to the
+    #   enclosing body. A write at the top level or in a class body records nothing. {GlobalWriterReach} reads these.
     #
     # The census is a `Set` of those frozen entries, merged by union across files, the project pre-pass and the
     # `pre_eval:` files. It is recorded inside descents that already visit every node ({Collector#visit}), never
@@ -140,6 +145,7 @@ module Rigor
           @refine_ranges = []
           @ivar_writers = IvarWriterCensus.new(@census)
           @in_effect = in_effect
+          @bodies = []
         end
 
         # A node the collector cannot read must not fail the analysis of its file, nor of every file the pre-pass
@@ -148,6 +154,7 @@ module Rigor
         # the host walk does not track it, or no class owns an instance there).
         def visit(node, top_level:, owner: nil)
           @ivar_writers.visit(node, owner)
+          visit_global_writer(node)
           case node
           when Prism::AliasGlobalVariableNode then visit_global_alias(node)
           when Prism::DefNode then record(node, node.name)
@@ -159,6 +166,43 @@ module Rigor
         end
 
         private
+
+        GLOBAL_WRITE_NODES = [
+          Prism::GlobalVariableWriteNode, Prism::GlobalVariableOrWriteNode, Prism::GlobalVariableAndWriteNode,
+          Prism::GlobalVariableOperatorWriteNode, Prism::GlobalVariableTargetNode
+        ].to_set.freeze
+        BODY = Data.define(:range, :label)
+        private_constant :GLOBAL_WRITE_NODES, :BODY
+
+        # Issue #2314 — tracks the method bodies, lambdas and stored blocks of a pre-order descent as `[range,
+        # label]` (`@bodies`, innermost last), and records a global write inside one ({GlobalWriterReach}). A body
+        # ending before `node` starts is closed.
+        def visit_global_writer(node)
+          start = node.location.start_offset
+          @bodies.pop while !@bodies.empty? && @bodies.last.range.end <= start
+          case node
+          when Prism::DefNode then open_body(node, node.name)
+          when Prism::LambdaNode then open_body(node, nil)
+          when Prism::CallNode then open_stored_block(node)
+          end
+          return unless GLOBAL_WRITE_NODES.include?(node.class)
+
+          body = @bodies.rfind { |candidate| candidate.range.cover?(start) }
+          @census << [:global_writer, node.name, body.label].freeze if body
+        end
+
+        def open_body(node, label)
+          location = node.location
+          @bodies << BODY.new(location.start_offset...location.end_offset, label)
+        end
+
+        def open_stored_block(node)
+          block = node.block
+          return unless block.is_a?(Prism::BlockNode) && StoredBlockCall.stores_block?(node)
+
+          definer = %i[define_method define_singleton_method].include?(node.name)
+          open_body(block, definer ? literal_name(node.arguments&.arguments&.first) : nil)
+        end
 
         def visit_global_alias(node)
           [node.new_name, node.old_name].each do |side|

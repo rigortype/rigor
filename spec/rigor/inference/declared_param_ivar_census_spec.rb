@@ -82,16 +82,24 @@ RSpec.describe "the ADR-58 ivar census types a write from a declared parameter (
       "a call chain" => ["def initialize(x) = @x = x.dup.freeze", "def initialize: (String x) -> void", "String"],
       "a conversion over a union" => ["def initialize(x) = @x = x.to_sym",
                                       "def initialize: (String | Symbol x) -> void", "Symbol"],
-      "a Kernel conversion" => ["def initialize(x) = @x = Array(x)",
-                                "def initialize: (Array[String] | String x) -> void", "Array[String]"],
+      "a Kernel conversion of a class no RBS class extends" =>
+        ["def initialize(x) = @x = Array(x)", "def initialize: (Integer x) -> void", "Array[Integer]"],
+      "an argument of a class no RBS class extends" => ["def initialize(a, b) = @x = a + b",
+                                                        "def initialize: (Integer a, Integer b) -> void", "Integer"],
+      "a union in receiver position" => ["def initialize(a, b) = @x = b + a",
+                                         "def initialize: (Integer a, Integer | Float b) -> void", "Float | Integer"],
       "a map with a symbol block" => ["def initialize(x) = @x = x.map(&:to_s)",
                                       "def initialize: (Array[Symbol] x) -> void", "Array[String]"],
       "a ternary over two parameters" => ["def initialize(f, x, y) = @x = f ? x : y",
                                           "def initialize: (bool f, Integer x, String y) -> void", "Integer | String"],
       "a parenthesised read" => ["def initialize(x) = @x = (x)", "def initialize: (String x) -> void", "String"],
       "a keyword parameter" => ["def initialize(x:) = @x = x.to_sym", "def initialize: (x: String) -> void", "Symbol"],
-      "an optional parameter" => ["def initialize(x = nil) = @x = x&.to_s", "def initialize: (?Symbol? x) -> void",
-                                  "String?"]
+      "an empty Array default" => ["def initialize(x = []) = @x = x.map(&:to_s)",
+                                   "def initialize: (?Array[Symbol] x) -> void", "Array[String]"],
+      "an empty Hash default" => ["def initialize(x: {}) = @x = x.keys",
+                                  "def initialize: (?x: Hash[Symbol, Integer]) -> void", "Array[Symbol]"],
+      "an optional parameter whose default is within its declared type" =>
+        ["def initialize(x = nil) = @x = x&.to_s", "def initialize: (?Symbol? x) -> void", "String?"]
     }.each do |shape, (body, signature, expected)|
       it "for #{shape}" do
         expect(k_census(body, signature)).to eq(expected)
@@ -123,6 +131,22 @@ RSpec.describe "the ADR-58 ivar census types a write from a declared parameter (
                                            "def initialize: (String x) -> void"],
       "a local that is not a parameter" => ["def initialize(x)\ny = x\n@x = y.to_s\nend",
                                             "def initialize: (Integer x) -> void"],
+      "a union argument, whose first matching overload the engine picks" =>
+        ["def initialize(a, b) = @x = a + b", "def initialize: (Integer a, Integer | Float b) -> void"],
+      "a union argument of another operator" =>
+        ["def initialize(a, b) = @x = a * b", "def initialize: (Integer a, Integer | Float b) -> void"],
+      "an argument of a class another RBS class extends" =>
+        ["def initialize(a, b) = @x = a - b", "def initialize: (Integer a, Numeric b) -> void"],
+      "a union index argument" =>
+        ["def initialize(a, i) = @x = a[i]", "def initialize: (Array[Integer] a, Integer | Range[Integer] i) -> void"],
+      "an optional parameter whose default is outside its declared type" =>
+        ["def initialize(x = nil) = @x = x&.to_s", "def initialize: (?Integer x) -> void"],
+      "an optional whose declared type holds untyped" =>
+        ["def initialize(x) = @x = x&.map(&:to_s)", "def initialize: (Array[untyped]? x) -> void"],
+      "a tuple whose declared type holds untyped" =>
+        ["def initialize(x) = @x = x.last", "def initialize: ([untyped, Integer] x) -> void"],
+      "a record whose declared type holds untyped" =>
+        ["def initialize(x) = @x = x[:b]", "def initialize: ({ a: untyped, b: Integer } x) -> void"],
       "a value holding a block, whose own parameters the scan does not bind" =>
         ["def initialize(x) = @x = x.tap { nil }", "def initialize: (String x) -> void"],
       "a value holding a nested def" => ["def initialize(x) = @x = (def m(x) = x\nx.to_s)",
@@ -132,6 +156,12 @@ RSpec.describe "the ADR-58 ivar census types a write from a declared parameter (
         expect(k_census(body, signature)).to eq("Dynamic[top]")
       end
     end
+  end
+
+  it "records a union argument of a Kernel conversion as the census did before" do
+    recorded = k_census("def initialize(x) = @x = Array(x)", "def initialize: (Array[String] | String x) -> void")
+
+    expect(recorded).to eq("Dynamic[Array[Dynamic[top]] | [Dynamic[top]]]")
   end
 
   it "records a lambda value as the census did before (a guard: a lambda's own type never reads the parameter)" do

@@ -6,6 +6,7 @@ require_relative "../../reflection"
 require_relative "../method_parameter_binder"
 require_relative "../global_write_census"
 require_relative "unseen_ivar_writers"
+require_relative "derived_param_value"
 
 module Rigor
   module Inference
@@ -24,9 +25,9 @@ module Rigor
       # - the write's value reads at least one parameter, and every local it reads is a parameter with a declared type.
       #   A bare read (`@x = x`) records that type; an expression over parameters (`@x = x.dup.freeze`,
       #   `@x = Array(x)`, `@x = f ? x : y`, issue #2321) records the value typed with each parameter it reads bound to
-      #   its declared type, unless a parameter it reads holds `untyped` at any depth (`Array[untyped]`, #2325). A
-      #   value that holds a block, a lambda or a nested `def` is not credited: their own parameters are locals the
-      #   scan does not bind;
+      #   its declared type, unless {DerivedParamValue} declines it (a parameter that holds `untyped` at any depth, is
+      #   passed as an overload-sensitive argument, or has a default outside its declared type). A value that holds a
+      #   block, a lambda or a nested `def` is not credited: their own parameters are locals the scan does not bind;
       # - the write is not inside a block or a lambda, so a block parameter of the same name and a block that runs
       #   under another `self` (`instance_eval`, `Class.new`, `define_method`) never borrow the method's parameter;
       # - the method body never writes the parameter, in any form and at any depth (`x = Integer(x)`, `x ||= …`,
@@ -95,7 +96,7 @@ module Rigor
           credited = reads.each_with_object({}.compare_by_identity) do |(write, names), acc|
             next unless names.all? { |name| types.key?(name) }
 
-            type = value_type(write.value, names, types, scope)
+            type = value_type(write.value, names, types, def_node, scope)
             acc[write] = type if type && !UnseenIvarWriters.possible?(writers, class_name, write.name)
           end
           credited.empty? ? EMPTY : credited
@@ -128,12 +129,10 @@ module Rigor
         end
 
         # A bare read takes the declared type itself; an expression over the parameters is typed with each bound to
-        # its declared type. An expression over a parameter whose declared type holds `untyped` at any depth
-        # (`Array[untyped]`) is not credited (#2325): its answer would be built on the parameter the author left
-        # untyped.
-        def value_type(value, names, types, scope)
+        # its declared type, unless {DerivedParamValue} declines it.
+        def value_type(value, names, types, def_node, scope)
           return types[value.name] if value.is_a?(Prism::LocalVariableReadNode)
-          return nil if names.any? { |name| carries_dynamic?(types[name]) }
+          return nil if DerivedParamValue.declined?(value, names, types, def_node, scope)
 
           bound = names.reduce(scope) { |acc, name| acc.with_local(name, types[name]) }
           bound.type_of(value)
@@ -172,18 +171,6 @@ module Rigor
           return true if node.name == :binding
 
           OPAQUE_EVAL_CALLS.include?(node.name) && !(node.arguments&.arguments || []).empty?
-        end
-
-        def carries_dynamic?(type)
-          case type
-          when Type::Dynamic then true
-          when Type::Union, Type::Intersection then type.members.any? { |member| carries_dynamic?(member) }
-          when Type::Nominal then type.type_args.any? { |arg| carries_dynamic?(arg) }
-          when Type::Tuple then type.elements.any? { |element| carries_dynamic?(element) }
-          when Type::HashShape then type.pairs.each_value.any? { |pair_value| carries_dynamic?(pair_value) }
-          when Type::Difference, Type::Refined then carries_dynamic?(type.base)
-          else false
-          end
         end
 
         # The declared, non-`untyped` type of each parameter, or `{}` when a gate declines the method.

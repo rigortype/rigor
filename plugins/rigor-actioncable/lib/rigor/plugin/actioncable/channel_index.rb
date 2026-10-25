@@ -11,8 +11,8 @@ module Rigor
       #   `subscription.perform("action_name", data)`.
       # - `stream_names` — the set of literal-string stream names registered via `stream_from "name"`
       #   calls inside the channel body. Dynamic registrations (`stream_from interpolated_string`) are
-      #   recorded separately as `dynamic_streams: true` so the analyzer can suppress unknown-stream
-      #   warnings on any channel that has at least one dynamic registration.
+      #   recorded separately as `dynamic_streams: true`; when any channel has one, the analyzer suppresses
+      #   unknown-stream warnings for the whole run.
       class ChannelIndex
         Entry = Data.define(:class_name, :file_path, :action_methods, :stream_names, :dynamic_streams) do
           def includes_action?(name)
@@ -59,7 +59,6 @@ module Rigor
           @by_name.keys
         end
 
-        # All literal stream names registered across every discovered channel.
         def all_stream_names
           @entries.flat_map { |e| e.stream_names.to_a }.to_set
         end

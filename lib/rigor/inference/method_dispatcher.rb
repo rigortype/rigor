@@ -204,8 +204,8 @@ module Rigor
         # user-authored RBS overrides substrate synthesis) and ABOVE the dependency-source
         # inference tier so a plugin's declared emit table beats the generic gem-source fallback
         # for the same class. Slice 6a-TierB (origin_module dispatch) lands precise return types
-        # for Tier B emissions; Tier C emissions still return `Dynamic[T]` at this tier (slice 6b
-        # is the Tier C promotion via ADR-13's resolver chain).
+        # for Tier B emissions; Tier C emissions return their manifest `return_type` when the environment
+        # names that class (slice 6b), and `Dynamic[T]` otherwise.
         synthetic_result = try_synthetic_method(
           receiver_type, method_name, arg_types, block_type, environment
         )
@@ -915,8 +915,7 @@ module Rigor
         result || EMPTY_CONTRIBUTIONS
       end
 
-      # Runs the precision tiers (constant fold, shape dispatch, file-path fold, block fold) in
-      # order and returns the first non-nil answer. Each tier owns its own receiver/argument
+      # Runs the precision tiers in order and returns the first non-nil answer. Each tier owns its own receiver/argument
       # shape checks; a tier that does not recognise the receiver returns nil so the next tier
       # can try. The RBS tier sits below this chain and is invoked by the outer `dispatch`
       # method.
@@ -925,7 +924,7 @@ module Rigor
       # (`try_dispatch(CallContext) -> Type?`). Order is significant: ConstantFolding's
       # exact-value folds win first, the stdlib singleton folders sit in the middle (each
       # gates on a distinct `Singleton` receiver, so their relative order is immaterial), and
-      # BlockFolding runs last because its rules only apply to block-taking calls — the cheaper
+      # BlockFolding runs near the end because its rules only apply to block-taking calls — the cheaper
       # arity folds above it filter the common cases first. Adding a precise tier is a one-line
       # append here rather than another link in a hand-written `||` ladder.
       PRECISE_TIERS_HEAD = Ractor.make_shareable([
@@ -1346,8 +1345,8 @@ module Rigor
       # class is representable as the parent's singleton type — its singleton-method surface is
       # the parent's (plus whatever the block defines, which we do not statically track here),
       # so `Singleton[Parent]` lets downstream `klass.some_class_method` resolve. No parent →
-      # `singleton(Object)`. Anything else (dynamic parent, more than one positional, …) falls
-      # back to `Nominal[Class]` via the surrounding `meta_new` tail.
+      # `singleton(Object)` (or the block's anonymous class, #319 below). Anything else (dynamic parent, more
+      # than one positional, …) falls back to `Nominal[Class]` via the surrounding `meta_new` tail.
       # #319 — a `Class.new do ... end` with no parent is NOT `Object`: the block body is a class body, so the
       # class owns whatever that body defines. Answering `Singleton[Object]` handed the call site `Object`'s
       # zero-arity `new` and `Object`'s method surface, so an `initialize(bucket)` written right there produced

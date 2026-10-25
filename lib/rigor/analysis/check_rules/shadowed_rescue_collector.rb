@@ -123,10 +123,9 @@ module Rigor
           @scope_index[node] || @scope_index[node.statements] || @scope_index[node.rescue_clause]
         end
 
-        # Resolves one clause to `{clause:, names: [String, …]}` where `names` are the certified exception
-        # CLASS names it rescues, or nil when the clause is opaque (any entry unresolved / dynamic / splat /
-        # module — the comparisons involving it stay silent). A bare `rescue` names the implicit
-        # `StandardError`.
+        # Resolves one clause to `{clause:, names:}`, where `names` are the certified exception CLASS names it
+        # rescues, or nil when the clause is opaque (any entry unresolved / dynamic / splat / module — the
+        # comparisons involving it stay silent). A bare `rescue` names the implicit `StandardError`.
         def clause_info(clause, prefix, scope)
           exceptions = clause.exceptions
           if exceptions.empty?

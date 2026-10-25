@@ -32,10 +32,12 @@ module Rigor
     class AnnotateCommand < Command
       USAGE = "Usage: rigor annotate [options] FILE"
 
-      # Trailing `#=> …` annotation comment. Matched and stripped before re-annotating so re-running is idempotent —
-      # this follows xmpfilter's convention of owning the `#=>` marker, and also absorbs the older `#=> dump_type:
-      # <type>` spelling (idempotency across re-runs). The leading `\s` requirement keeps a `#=>` inside a string
-      # literal (no preceding whitespace ambiguity aside) from matching mid-expression.
+      # Trailing `#=> …` annotation comment, matched and stripped before re-annotating so re-running is idempotent.
+      # Follows xmpfilter's convention of owning the `#=>` marker, and also absorbs the older `#=> dump_type: <type>`
+      # spelling.
+      # Strips the first `#=>` that is preceded by whitespace and followed by whitespace or the end of the line,
+      # together with that preceding whitespace, through the end of the line. A string literal is not special-cased,
+      # since the pattern does not parse Ruby; `a#=>b` and `x #=>y` are left alone.
       ANNOTATION_PATTERN = /\s+#=>(?:\s.*)?\z/
 
       # Arguments for highlighting through `bat`: the annotated text arrives on stdin, so the language must be explicit;
@@ -225,7 +227,7 @@ module Rigor
         @scope_index = scope_index
       end
 
-      # @return 1-indexed line => type.
+      # @return map of 1-indexed line number to type.
       def collect(program)
         by_line = {}
         each_statement(program) do |statement|

@@ -11,7 +11,7 @@ module Rigor
   module Plugin
     # rigor-actionmailer — validates `Mailer.action(args)` call sites and detects missing view templates.
     #
-    # Tier 1C of the [Rails plugins roadmap](../../../../docs/design/20260508-rails-plugins-roadmap.md).
+    # Tier 1C of the [Rails plugins roadmap](../../../../../docs/design/20260508-rails-plugins-roadmap.md).
     # Statically discovers mailer classes by walking `mailer_search_paths` and parsing each file with
     # Prism — no `action_mailer` runtime dependency.
     #
@@ -38,8 +38,6 @@ module Rigor
     # - Direct-superclass match only.
     # - Action methods are read from the syntactic instance-side `def` list. `define_method` actions are
     #   out of scope.
-    # - Adding a brand-new view file does not invalidate the cache until something the mailer file
-    #   touches changes.
     class Actionmailer < Rigor::Plugin::Base
       manifest(
         id: "actionmailer",

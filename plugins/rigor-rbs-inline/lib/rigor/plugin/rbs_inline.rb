@@ -35,7 +35,8 @@ module Rigor
     class RbsInline < Rigor::Plugin::Base
       # Synthesizer callable invoked once per project Ruby source file by `Environment.for_project` at
       # env-build time. Returns the synthesised RBS source as a String, or `nil` when the file contributes
-      # nothing (no magic comment in the default mode, empty annotation set, parse error per WD6).
+      # nothing (no annotation in the default mode, no magic comment under `require_magic_comment: true`,
+      # or a parse error per WD6).
       class Synthesizer
         # An RDoc directive comment: `#:` followed by a bare word (RDoc allows a hyphen, as in `:call-seq:`)
         # and a closing colon. RDoc predates rbs-inline by about two decades and `#:<name>:` is

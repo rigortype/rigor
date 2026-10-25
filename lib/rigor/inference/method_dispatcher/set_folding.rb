@@ -13,17 +13,19 @@ module Rigor
       #
       # === Supported methods
       #
-      # * `Set[]` — variadic constructor; each argument must be a `Constant[T]`. Returns `Constant[Set]`.
+      # * `Set[]` — variadic constructor. Returns `Constant[Set]` when every argument is a `Constant[T]`, and a
+      #   typed `Set` otherwise.
       # * `Set.new` — zero-argument form; returns `Constant[Set.new]`.
-      # * `Set.new(tuple)` — the argument must be a `Tuple` whose every element is a `Constant[T]`. Returns
-      #   `Constant[Set]`.
+      # * `Set.new(tuple)` — a `Tuple` argument. Returns `Constant[Set]` when every element is a `Constant[T]`,
+      #   and a typed `Set` otherwise.
       #
       # === Non-constant / unsupported cases
       #
       # Returns `nil` (deferring to the next dispatcher tier) when:
       # - the receiver is not `Singleton[Set]`,
       # - the method is not `[]` or `new`,
-      # - any argument is non-constant or structurally opaque.
+      # - the call is splatted or carries a block, or its `new` argument is not a `Tuple` or an `Array` / `Set`
+      #   carrier.
       module SetFolding
         module_function
 

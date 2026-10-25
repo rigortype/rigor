@@ -14,7 +14,7 @@ module Rigor
     # narrows `expect(x).to MATCHER` assertions downstream, and binds `let`/`subject` locals to their
     # inferred return types inside `it` bodies.
     #
-    # Tier 3A of the [Rails plugins roadmap](../../../../docs/design/20260508-rails-plugins-roadmap.md).
+    # Tier 3A of the [Rails plugins roadmap](../../../../../docs/design/20260508-rails-plugins-roadmap.md).
     # Ships four checks:
     #
     # 1. **Duplicate `let` / `subject` declarations** in the same scope (`warning`). RSpec's runtime lets
@@ -44,7 +44,7 @@ module Rigor
     # - **No shared-context resolution.** `include_context`, `shared_context`, and `it_behaves_like` are
     #   recognised as scope-opening calls but their declarations are not pulled into the host scope.
     # - **Constant validation is not done here.** `RSpec.describe SomeClass do` does not validate
-    #   `SomeClass`; the engine's `inference.unresolved-constant` already catches that.
+    #   `SomeClass`; the engine's constant-resolution diagnostics already catch that.
     class Rspec < Rigor::Plugin::Base
       manifest(
         id: "rspec",

@@ -6,8 +6,8 @@ module Rigor
   module Cache
     # Base for the RBS-derived cache producers.
     #
-    # Every producer (`RbsKnownClassNames`, `RbsConstantTable`, `RbsEnvironment`, the ancestor / type-param /
-    # definition tables, …) repeated the identical `fetch` wiring: build the RBS descriptor, then
+    # Every producer (`RbsKnownClassNames`, `RbsConstantTable`, `RbsEnvironment`, the ancestor / type-param
+    # tables, …) repeated the identical `fetch` wiring: build the RBS descriptor, then
     # `store.fetch_or_compute` under the producer's id, yielding to the producer's `compute`. Only the
     # `PRODUCER_ID` constant and the `compute(loader)` body actually differ between producers.
     #

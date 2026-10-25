@@ -22,8 +22,8 @@ module Rigor
       #
       # The parser walks the chain right-to-left, gathering whatever it recognises (`params` / `returns` /
       # `void` / `abstract` / `override` / `overridable` / `final` / `type_parameters` / `checked` /
-      # `on_failure`) into a frozen result hash stored in {MethodSignature}. Modifiers and
-      # `type_parameters` are recorded but not yet acted on.
+      # `on_failure`) into a frozen result hash stored in {MethodSignature}. Modifiers are recorded but not
+      # yet acted on; `type_parameters` is recognised and its payload discarded.
       #
       # The parser is intentionally tolerant — unknown chain nodes degrade to "the rest of the chain is
       # opaque" rather than raising. The plugin emits a diagnostic (`plugin.sorbet.parse-error`) only when

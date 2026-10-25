@@ -67,8 +67,8 @@ module Rigor
           projected_self(class_name, receiver_args)
         end
 
-        # Nil when every argument widens to the bare `Dynamic[top]`: `Hash[untyped, untyped]` says nothing
-        # the raw `Hash` does not.
+        # Nil when every argument widens to untyped: a `Hash` of untyped keys and values says nothing the
+        # raw `Hash` does not.
         def projected_self(class_name, receiver_args)
           type_args = receiver_args.map { |arg| deep_widen(arg) }
           return nil if type_args.all? { |arg| untyped?(arg) }

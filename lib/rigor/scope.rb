@@ -89,7 +89,7 @@ module Rigor
     def discovered_prepends = @discovery.discovered_prepends.transform_values { |names| names.uniq.freeze }.freeze
     def discovered_extends = @discovery.discovered_extends
     def discovered_class_sources = @discovery.discovered_class_sources
-    # Issue #644 — `{qualified constant name => Set[declaring file]}`; seeded only on an ADR-46 recording run.
+    # Issue #644 — `{qualified constant name => declaring files}`; seeded only on an ADR-46 recording run.
     def constant_sources = @discovery.constant_sources
     def published_constant_names = @discovery.published_constant_names
     def local_constant_names = @discovery.local_constant_names
@@ -202,9 +202,9 @@ module Rigor
     #   `:const` allowed; its entry marks presence only.
     IndexedKey = Data.define(:receiver_kind, :receiver_name, :key)
 
-    # Narrowing key for a no-arg / no-block method-call chain `receiver.method_name` (a "single-hop" chain per A1
-    # from the ROADMAP § Future cycles slice). The value of the map at this key is the narrowed type the next read
-    # of the same chain MUST observe — typically the post-`is_a?(C)` narrowing established on a predicate edge.
+    # Narrowing key for a no-arg / no-block method-call chain `receiver.method_name` (a "single-hop" chain).
+    # The value of the map at this key is the narrowed type the next read of the same chain MUST observe —
+    # typically the post-`is_a?(C)` narrowing established on a predicate edge.
     #
     # - `receiver_kind` ∈ `{:local, :ivar}` — the analyzer only tracks chains rooted at a local or instance
     #   variable today (Law-of-Demeter-style single-hop).
@@ -232,7 +232,7 @@ module Rigor
     # through flow transitions and ignored by `==` / `hash`.
     EMPTY_FOLD_SAFE = Set.new.freeze
     # ADR-82 WD1 — provenance propagation across the receiver-node lookup. `local_origins` / `ivar_origins`
-    # map a `name` (Symbol) to the {Inference::DynamicOrigin} cause of the `Dynamic` value currently bound to
+    # map a `name` to the {Inference::DynamicOrigin} cause of the `Dynamic` value currently bound to
     # it, so a downstream dispatch whose receiver is a bare `x` / `@x` read resolves to why that value is
     # dynamic (the cause was recorded on the *assignment*'s rhs node, which the receiver-read node is not).
     # Advisory metadata like {#dynamic_origins}: ignored by `==` / `hash` (never varies a flow decision) and
@@ -681,9 +681,8 @@ module Rigor
 
     # Slice 7 phase 1 — instance/class/global variable bindings. `ivar(name)` / `cvar(name)` / `global(name)`
     # return the type currently bound for the named variable, or `nil` when the variable has not been written in
-    # the analyzed slice of the program. The first cut tracks bindings only within a single method body (each
-    # `def` enters with a fresh binding map), so reads in other methods of the same class fall through to
-    # `Dynamic[Top]`. Cross-method ivar/cvar inference is a follow-up slice.
+    # the analyzed slice of the program. Each `def` enters with a fresh binding map seeded from the class-level
+    # accumulators ({#class_ivars_for}, {#class_cvars_for}).
     def ivar(name)
       @ivars[name.to_sym]
     end
@@ -1186,8 +1185,8 @@ module Rigor
     end
 
     # Slice 7 phase 2 — class-level ivar accumulator. Keyed by the qualified class name (e.g. `"Rigor::Scope"`);
-    # the value is a `Hash[Symbol, Type::t]` of every ivar that appears as a write target inside any def body of
-    # that class. `StatementEvaluator#build_method_entry_scope` seeds the method body's `ivars` map from this
+    # the value maps every ivar that appears as a write target inside any def body of that class to its type.
+    # `StatementEvaluator#build_method_entry_scope` seeds the method body's `ivars` map from this
     # table so a `def get; @x; end` reads the type written in a sibling `def init; @x = 1; end`.
     #
     # `ScopeIndexer` populates the table once at index time through a separate pre-pass over the program. The map
@@ -1207,7 +1206,7 @@ module Rigor
       @discovery.class_cvars[class_name.to_s] || EMPTY_VAR_BINDINGS
     end
 
-    # Slice 7 phase 12 — in-source method discovery. Maps a qualified class name to a `Hash[Symbol, Symbol]` of
+    # Slice 7 phase 12 — in-source method discovery. Maps a qualified class name to a table of
     # `method_name => :instance | :singleton`. Populated by `ScopeIndexer` from every `Prism::DefNode` and
     # recognised `define_method` invocation inside class/module bodies. The `rigor check` undefined-method and
     # wrong-arity rules consult this map to suppress diagnostics for methods the user has defined dynamically,
@@ -1258,7 +1257,7 @@ module Rigor
       per_class && per_class[method_name]
     end
 
-    # v0.0.2 #5 — per-class table mapping `method_name (Symbol) → Prism::DefNode`. Populated by `ScopeIndexer`
+    # v0.0.2 #5 — per-class table mapping `method_name → Prism::DefNode`. Populated by `ScopeIndexer`
     # alongside `discovered_methods` for instance-side defs only (singleton-side and `define_method`-introduced
     # methods do not contribute a static body the engine can re-type). Consumed by `ExpressionTyper` to do
     # inter-procedural return-type inference when the receiver class is user-defined and has no RBS sig.
@@ -1970,7 +1969,7 @@ module Rigor
     EMPTY_PARAMETER_ENVELOPES = {}.freeze
     private_constant :EMPTY_PARAMETER_ENVELOPES
 
-    # v0.1.2 — per-class table mapping `method_name (Symbol) → :public | :private | :protected`. Populated by
+    # v0.1.2 — per-class table mapping `method_name → :public | :private | :protected`. Populated by
     # `ScopeIndexer` for every `def` and `attr_*` member it sees inside a class body, with the visibility taken from
     # a wrapping `private def` / `private attr_reader` call, else the surrounding `private` / `protected` / `public`
     # modifier state, plus any post-hoc `private :name, ...` named-argument calls. Consumed by the
@@ -1989,8 +1988,7 @@ module Rigor
       table[singleton ? [:singleton, method_name.to_sym] : method_name.to_sym]
     end
 
-    # Closes the "`params[:f] ||= []; params[:f] << x`" precision gap (ROADMAP § Type-language / engine —
-    # indexed-collection narrowing through `Hash[k] ||= default`). After `receiver[key] ||= default`, the next
+    # Closes the "`params[:f] ||= []; params[:f] << x`" precision gap. After `receiver[key] ||= default`, the next
     # read at `receiver[key]` is known non-nil; recording the post-`||=` type keyed on
     # `(receiver_kind, receiver_name, literal_key)` lets the ExpressionTyper's `[]` dispatch hand back the
     # narrowed type. Receiver-rebind and `[]=`/mutator invalidation rules are documented at the call sites in
@@ -2021,8 +2019,7 @@ module Rigor
       rebuild(indexed_narrowings: new_table)
     end
 
-    # Closes the "stable receiver method-chain narrowing" gap (ROADMAP § Future cycles / Type-language / engine —
-    # "Method-call receiver narrowing across stable receivers"; 2026-05-28 Redmine survey). After
+    # Closes the "stable receiver method-chain narrowing" gap (2026-05-28 Redmine survey). After
     # `if x.last.is_a?(Array)` the dominated body's `x.last` reads MUST observe the truthy-narrowed type; the same
     # chain reaching the falsey edge observes the negative narrowing.
     #

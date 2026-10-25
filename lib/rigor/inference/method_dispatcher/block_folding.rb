@@ -317,7 +317,7 @@ module Rigor
         end
 
         # Returns the receiver's known finite element count, or nil when the carrier does not pin a size.
-        # Tuple and HashShape are pinned by construction; `Constant<…>` exposes the literal's `.size`. Other
+        # Tuple and HashShape are pinned by construction, and a `Constant` Range by its bounds. Other
         # shapes (Array[T], Range[T], Nominal) decline so the RBS tier widens.
         def finite_size(receiver)
           case receiver

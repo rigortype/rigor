@@ -39,8 +39,8 @@ module Rigor
         SEND_CALLS = %i[send __send__ public_send].freeze
         # Reading the block through these runs it with its own `self`, or does not run it.
         PLAIN_PROC_CALLS = %i[call yield [] === ! arity lambda? parameters nil?].freeze
-        # Calls, on any receiver, that can reach a local by name: a `Binding`, a string `eval`, and the string forms of
-        # the `*_eval` family (with an argument), whose code runs in the caller's scope.
+        # Calls, on any receiver, that can reach a local by name: `binding`, `eval`, `local_variable_get`. The string
+        # forms of the `*_eval` family (`STRING_EVAL_CALLS`, with an argument) run in the caller's scope too.
         BINDING_CALLS = %i[binding eval local_variable_get].freeze
         STRING_EVAL_CALLS = %i[instance_eval class_eval module_eval].freeze
         private_constant :STRING_EVAL_CALLS
@@ -96,7 +96,7 @@ module Rigor
             found
           end
 
-          # `{name => {[owner, side] => rows}}` over the project's named `def` rows, built once per file.
+          # The project's named `def` row counts, keyed by method name and then by owner and side; built once per file.
           def def_rows(scope)
             @def_rows ||= RebindingBlockCallees.def_row_counts(scope)
           end

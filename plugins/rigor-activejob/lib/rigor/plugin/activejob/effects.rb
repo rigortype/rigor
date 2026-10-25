@@ -35,7 +35,7 @@ module Rigor
 
         # Where a Rails app declares its adapter. Per-environment files are read too, because an app that
         # sets the adapter only in `config/environments/production.rb` is common; agreement across every
-        # file that names one is what licenses the narrowing (see {.transport_for}).
+        # file that names one is what licenses the narrowing (see {.detect_adapter}).
         CONFIG_PATHS = ["config/application.rb", "config/environments"].freeze
 
         SETTING = /queue_adapter\s*=\s*[:"']([a-z_]+)["']?/

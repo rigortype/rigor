@@ -37,7 +37,7 @@ module Rigor
     # *remaining* deadline rather than restarting the window; see its own
     # comment for why that distinction is worth the bookkeeping.
     module Jit
-      # Opt-out switch: `RIGOR_DISABLE_YJIT=1` disables both entry points.
+      # Opt-out switch: `RIGOR_DISABLE_YJIT=1` disables every entry point.
       DISABLE_ENV = "RIGOR_DISABLE_YJIT"
 
       # Advanced / calibration override of the {enable_after} deadline, in

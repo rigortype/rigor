@@ -19,7 +19,7 @@ module Rigor
       # branched on, whose declaration the reader's author never opened. A configuration constant read in ten
       # files would put a warning in all ten.
       #
-      # This is [ADR-58](../../../../docs/adr/58-declaration-sourced-ivar-typing.md)'s discipline applied to a
+      # This is [ADR-58](../../../../docs/adr/58-ivar-field-typing.md)'s discipline applied to a
       # different carrier: "a consumer may only ever *withhold* a firing it would otherwise make, so the mark
       # can lose precision but can never manufacture a false positive"
       # (`docs/internal-spec/inference-engine.md` § "Carrier and discipline"). The carrier is deliberately NOT

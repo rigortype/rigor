@@ -20,7 +20,7 @@ module Rigor
     # fact published by `rigor-rails-routes` (ADR-9 cross-plugin API) and validates every implicit-self
     # `*_path` / `*_url` call inside files under `controller_search_paths` (default `app/controllers`).
     #
-    # Tier 2 of the [Rails plugins roadmap](../../../../docs/design/20260508-rails-plugins-roadmap.md).
+    # Tier 2 of the [Rails plugins roadmap](../../../../../docs/design/20260508-rails-plugins-roadmap.md).
     # Phase 1 (strong-parameters → AR column validation), Phase 2 (filter chains), and Phase 3 (render
     # targets) ship as separate slices; each phase composes additively under the same plugin id.
     #
@@ -37,14 +37,10 @@ module Rigor
     #
     # ## What it checks
     #
-    # - **Helper existence** — every `*_path` / `*_url` call inside a controller file is looked up in
-    #   the helper table. Missing entries emit `unknown-helper` with a `DidYouMean` suggestion drawn
-    #   from the table.
-    # - **Helper arity** — the call's positional-argument count is matched against the helper's
-    #   recorded arity (a trailing `KeywordHashNode` like `users_path(format: :json)` is excluded; same
-    #   convention `rigor-rails-routes` uses). Mismatches emit `wrong-helper-arity`.
-    # - **Trace** — recognised helpers also emit a `helper-call` info diagnostic naming the action and
-    #   path, mirroring the trace shape of the upstream plugin.
+    # - **Trace** — recognised `*_path` / `*_url` helpers emit a `helper-call` info diagnostic naming
+    #   the action and path. Unknown helpers (`unknown-helper`) and arity mismatches (`wrong-arity`)
+    #   are reported by `rigor-rails-routes`, which owns the helper table, so this plugin does not
+    #   repeat them.
     #
     # ## Limitations
     #
@@ -475,7 +471,7 @@ module Rigor
       # `ActionController::Parameters` (above), but the chained `params.require(:user).permit(:name)` /
       # `params.permit(...)` calls returned `Dynamic` at the first hop (Parameters ships no bundled RBS,
       # so a call on it resolves lenient-to-Dynamic), leaking every downstream site (`.permit`, `.to_h`,
-      # `.each`) to unprotected. These three methods return another `Parameters`, so gate on a
+      # `.each`) to unprotected. These methods return another `Parameters`, so gate on a
       # `Parameters` receiver and re-type the result as the same lenient nominal — the chain stays a
       # concrete receiver end-to-end and `coverage --protection` counts the sites as protected.
       #
@@ -497,9 +493,9 @@ module Rigor
       # entry FP-safe, because the RBS-less nominal buys leniency on the *method surface* only:
       #
       # - Method-surface rules DO decline on it. `call.undefined-method` bails at
-      #   `Rigor::Reflection.rbs_class_known?` (lib/rigor/analysis/check_rules.rb:720) because Rigor
-      #   ships no RBS for Parameters, and the argument / arity rules gate on the same predicate
-      #   (:1151, :2126). So `params.slice(:a).whatever_rails_adds` never fires, and a scalar-shaped
+      #   `Rigor::Reflection.rbs_class_known?` (lib/rigor/analysis/check_rules.rb) because Rigor
+      #   ships no RBS for Parameters, and the argument / arity rules gate on the same predicate. So
+      #   `params.slice(:a).whatever_rails_adds` never fires, and a scalar-shaped
       #   use of a Parameters-typed value (`.to_i`, `.strip`, string interpolation) resolves lenient
       #   -to-Dynamic rather than to a diagnostic.
       # - **Flow rules do NOT.** Truthiness folding, ternary arm selection and `.nil?` folding key on
@@ -542,7 +538,7 @@ module Rigor
       #   and still carries the chain — `params[:user][:name]` types `Parameters?` and
       #   `params[:user].permit(:name)` types `Parameters`, because the dispatcher strips the nil arm
       #   for the receiver gate. Idiomatic *chained* reads stay silent too: `call.possible-nil-receiver`
-      #   restricts itself to `Prism::LocalVariableReadNode` receivers (`CheckRules#nil_receiver_diagnostic`'s local-read restriction), so
+      #   restricts itself to `Prism::LocalVariableReadNode` receivers (`CheckRules#nil_receiver_diagnostic`), so
       #   `params[:q].strip` cannot fire. What it does fire on is the assigned form — `q = params[:q];
       #   q.strip` — at **error** severity, once per unguarded use. Guarded forms (`return if q.nil?`,
       #   `if q`, `q&.strip`, `|| ""`) all narrow correctly and stay silent, so this is not a broken

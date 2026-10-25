@@ -211,9 +211,8 @@ module Rigor
         cursor
       end
 
-      # `|*rest|` binds an Array of the leftover positional arguments. The expected-types array is
-      # per-position, not per-rest; we cannot reliably pick a single element type for rest, so we default to
-      # `Array[Dynamic[Top]]`. Element-type precision for rest parameters is deferred (demand-gated).
+      # `|*rest|` binds an Array of the leftover positional arguments: `Array[Dynamic[Top]]`, unless an
+      # auto-splat answered a rest type ({BlockAutoSplat}). The expected types are per-position, not per-rest.
       def bind_rest(params_node, bindings)
         rest = params_node.rest
         return unless rest.respond_to?(:name) && rest&.name

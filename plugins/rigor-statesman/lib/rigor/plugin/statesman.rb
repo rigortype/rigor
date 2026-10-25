@@ -11,9 +11,8 @@ module Rigor
     #
     #   1. **Collect pass.** Walk the file once to gather every state name declared inside a
     #      `state_machine do ... end` block (`state :draft`, `state :submitted`, ...).
-    #   2. **Validate pass.** Walk the file again, validating each `transition_to(:sym)` and `event :sym`
-    #      reference against the collected state set. Levenshtein distance ≤ 3 drives the did-you-mean
-    #      suggestions.
+    #   2. **Validate pass.** Walk the file again, validating each `transition_to(:sym)` reference against
+    #      the collected state set. `DidYouMean::SpellChecker` drives the did-you-mean suggestions.
     #
     # Useful for `aasm` / `statesman` / hand-rolled DSLs and any framework where declarations and uses
     # live in the same file. The same skeleton lifts to GraphQL types, ActiveModel validations, route

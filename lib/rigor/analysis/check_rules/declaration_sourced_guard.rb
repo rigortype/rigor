@@ -24,10 +24,10 @@ module Rigor
       # currently declaration-sourced ivar*, so a second hop (`c = @count; d = c`) and an `||=` rewrite land on
       # the plain `with_local` path and carry no mark.
       #
-      # A branch join is NOT one of those cases, contrary to what this comment claimed when it landed: both
-      # arms of `if c then r = @count else r = @count end` stamp `(:local, :r)`, and `join_declaration_sourced`
-      # INTERSECTS, so the mark survives. Only an *asymmetric* join drops it, and by that intersection rather
-      # than by reaching `with_local`. The normative statement — establishment, drop, join and the full list of
+      # A branch join keeps the mark when both arms stamp it: `if c then r = @count else r = @count end` stamps
+      # `(:local, :r)` on each arm, and `join_declaration_sourced` INTERSECTS, so the mark survives. Only an
+      # *asymmetric* join drops it, by that intersection rather than by reaching `with_local`. The normative
+      # statement — establishment, drop, join and the full list of
       # unmarked shapes, each verified against the implementation — is
       # `docs/internal-spec/inference-engine.md` § "Declaration-sourced provenance mark (ADR-58)"; keep this
       # comment subordinate to it.

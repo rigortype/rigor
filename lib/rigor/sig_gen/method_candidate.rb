@@ -15,7 +15,7 @@ module Rigor
     #   ever `skipped` (`sig.skipped.top-level-def`, #1676).
     # - `method_name` — the def's `Symbol` name.
     # - `kind` — `:instance` or `:singleton`.
-    # - `inferred_return` — `Rigor::Type` instance (or `nil` when the inference pass disqualified the def).
+    # - `inferred_return` — the inferred return type (or `nil` when the inference pass disqualified the def).
     # - `declared_return_rbs` — the existing RBS-declared return spelling, or `nil` when no RBS declares the
     #   method.
     # - `declared_rbs` — for an `inline_overwrite`, or a `tighter_return` over the class's own declaration, the

@@ -320,7 +320,7 @@ module Rigor
 
     # Each root is resolved against the physical cwd (where `rigor` reads it from), then written relative to the config
     # dir. With the config at the project root, both sides are the same physical directory, so the roots come out as
-    # they are spelled from it (`lib`, `spec`), which is master's output for the default config.
+    # they are spelled from it (`lib`, `spec`).
     def roots_relative_to(roots, config_dir)
       roots.map { |root| Pathname(File.absolute_path(root)).relative_path_from(config_dir).to_s }
     end

@@ -7,7 +7,7 @@ module Rigor
     # Gemfile.lock parser for target-project bundler awareness (O4 Layer 3, implemented).
     #
     # Parses a target project's `Gemfile.lock` via Bundler's `LockfileParser` and exposes the locked gem set
-    # as a frozen `Hash[String, LockfileResolver::LockedGem]` keyed by gem name. Used by
+    # as a frozen map from gem name to `LockedGem`. Used by
     # {Rigor::Environment::BundleSigDiscovery} as a filter so the discovered `sig/` directories under the
     # bundler install root are limited to gems the project actually declares (and at the version it declared
     # them).

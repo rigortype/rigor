@@ -222,7 +222,7 @@ module Rigor
         discover_skills.find { |s| s.fetch(:name) == name }
       end
 
-      # The `references/*.md` files bundled alongside a skill, sorted so the `NN-` prefixes drive read order.
+      # The `references/*.md` files bundled alongside a skill.
       def reference_files(skill)
         dir = File.join(File.dirname(skill.fetch(:path)), "references")
         return [] unless File.directory?(dir)

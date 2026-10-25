@@ -317,7 +317,7 @@ module Rigor
           end
 
           # `decimal-int-string`'s predicate (`/\A-?\d+\z/`) admits the optional sign, so — unlike the
-          # `IntegerRange#to_s` tier above, which declines a signed range because it cannot yet prove the
+          # `IntegerRange#to_s` tier below, which declines a signed range because it cannot yet prove the
           # sign is absent — a bare `Integer` (sign completely unknown) still reaches it for the base-10
           # case: base 10 is Ruby's default sign-and-digits grammar for every Integer. Any other base,
           # known or not statically known, drops to `non-empty-string`: `to_s(base)` never returns `""`,
@@ -472,7 +472,7 @@ module Rigor
           # leading sign. Base 10 is Ruby's decimal-literal grammar, so the result lifts to
           # `decimal-int-string`. Signed ranges fall through entirely (the result could carry a `-` sign
           # that `decimal-int-string` alone would need a sign proof for, matching the
-          # `Nominal[Integer]` tier's own signed-base-10 carve-out below).
+          # `Nominal[Integer]` tier's own signed-base-10 carve-out above).
           #
           # #1004 — every other base (a different literal, such as 8 or 16, or a value that is not
           # statically known) does NOT lift to `octal-int-string` / `hex-int-string`: those refinements'
@@ -621,10 +621,10 @@ module Rigor
             Type::Combinator.positive_int
           end
 
-          # Predicate-subset projections over a `Refined[base, predicate]` receiver. Today the catalogue is
-          # the String case-normalisation pair: `s.downcase` over a `lowercase-string` receiver folds to
-          # the same carrier (already lowercase), and `s.upcase` lifts a `lowercase-string` to
-          # `uppercase-string`. Symmetric rules apply with the predicates swapped. Numeric-string
+          # Predicate-subset projections over a `Refined[base, predicate]` receiver. The catalogue is
+          # `REFINED_STRING_PROJECTIONS`, led by the String case-normalisation pair: `s.downcase` over a
+          # `lowercase-string` receiver folds to the same carrier (already lowercase), and `s.upcase` lifts a
+          # `lowercase-string` to `uppercase-string`. Symmetric rules apply with the predicates swapped. Numeric-string
           # idempotence over `#downcase` / `#upcase` is also recognised because a numeric string equals its
           # own case-normalisation.
           #
@@ -747,7 +747,7 @@ module Rigor
           # Compute the bounded-integer meet of two or more `IntegerRange` carriers. We compare via the
           # numeric `lower` / `upper` accessors (`-Float::INFINITY` / `Float::INFINITY` for the symbolic
           # ends), then map back to the symbolic-bound representation `IntegerRange.new` expects. The
-          # disjoint-meet case cannot arise from sound member-wise projections in v0.0.4 but is guarded
+          # disjoint-meet case cannot arise from sound member-wise projections but is guarded
           # defensively to keep the carrier total.
           def narrow_integer_ranges(ranges)
             numeric_low = ranges.map(&:lower).max
@@ -1293,7 +1293,8 @@ module Rigor
           end
 
           # `tuple.take(n)` — returns the first n elements as a new Tuple. The argument must be a
-          # `Constant[Integer]`. n <= 0 returns the empty Tuple; n >= size returns the full receiver.
+          # `Constant[Integer]`. `n == 0` returns the empty Tuple, a negative `n` declines, and `n >= size`
+          # returns the full receiver.
           def tuple_take(tuple, _method_name, args)
             n = non_negative_count_arg(args)
             return nil if n.nil?
@@ -1919,7 +1920,7 @@ module Rigor
           # `shape.values_at(:a, :b, ...)` with a list of static keys. Returns a `Tuple` whose per-position
           # values are the per-key value types (`Constant[nil]` for missing keys, mirroring Ruby's runtime
           # behaviour). A computed key takes the nil-bearing step {#hash_dig_step} gives it; the call falls
-          # through when any step does (a computed key on an open shape).
+          # through when any step does (a computed key on an open or empty shape).
           def hash_values_at(shape, _method_name, args)
             return nil if args.empty?
 

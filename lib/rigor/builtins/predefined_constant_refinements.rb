@@ -62,7 +62,7 @@ module Rigor
     # `RBS::VERSION` while Rigor checks itself, rubygems and Bundler internals while it checks
     # CRuby's `lib/` — and that is worse than no answer: identical source would type differently
     # depending on how the analyzer was installed. Removing an ad hoc `Object.const_get` from an
-    # analysis path is the same move ADR-4 § 330 already made for predicate narrowing.
+    # analysis path is the same move ADR-4 already made for predicate narrowing.
     #
     # This module is consulted by `Environment#constant_for_name` BEFORE the RBS
     # constant-type table (widest types) but AFTER in-source constant writes (the user's own

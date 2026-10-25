@@ -7,8 +7,7 @@ module Rigor
     # `Pick[T, "name"]`, `pick_of[Shape, "a" | "b"]`, and downstream
     # plugin resolvers that accept literal key selectors.
     #
-    # ADR-13 follow-up (`docs/CURRENT_WORK.md` engineering item
-    # #2): the RBS::Extended grammar previously could not tokenise
+    # ADR-13 follow-up: the RBS::Extended grammar previously could not tokenise
     # `"name"` inside a type-arg position. The resolver translates
     # this node to a `Type::Constant` carrying the string value.
     # Slice 1 supports double-quoted strings without escape

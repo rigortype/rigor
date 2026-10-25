@@ -14,7 +14,7 @@ module Rigor
     # rigor-rails-routes — validates Rails route-helper calls (`users_path`, `edit_user_path(@user)`, …)
     # against the project's `config/routes.rb`.
     #
-    # Tier 1A of the [Rails plugins roadmap](../../../../docs/design/20260508-rails-plugins-roadmap.md).
+    # Tier 1A of the [Rails plugins roadmap](../../../../../docs/design/20260508-rails-plugins-roadmap.md).
     # Statically interprets the routes DSL via Prism — no `rails` runtime dependency. Recognised v0.1.0
     # surface:
     #

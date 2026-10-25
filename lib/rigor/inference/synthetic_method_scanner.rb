@@ -64,11 +64,10 @@ module Rigor
         registries = collect_trait_registries(plugin_registry)
         nested_templates = collect_nested_class_templates(plugin_registry)
         return SyntheticMethodIndex::EMPTY if templates.empty? && registries.empty? && nested_templates.empty?
-        # Tier B alone cannot emit without an environment: every trait entry — the direct route and the
-        # concern-re-targeted one — funnels through `module_instance_method_names`, whose first line answers `[]`
-        # for a nil environment. The production pre-pass hands Tier B a (lazy) environment since #476, so this
-        # gate now guards the direct callers that pass none (a spec, a probe): a registry-only scan with
-        # no environment would otherwise pay a whole-project parse to build a provably empty index. It mirrors
+        # Tier B alone cannot emit without an environment: every trait entry funnels through
+        # `module_instance_method_names`, which answers `[]` for a nil environment. The production pre-pass always
+        # passes one (#476), so this gate guards the direct callers that pass none (a spec, a probe): a
+        # registry-only scan would otherwise pay a whole-project parse to build a provably empty index. It mirrors
         # that nil guard and goes with it.
         return SyntheticMethodIndex::EMPTY if environment.nil? && templates.empty? && nested_templates.empty?
 
@@ -534,7 +533,7 @@ module Rigor
       #   (resolved through `registry.modules_by_symbol`; unknown
       #   symbols silently skipped per design decision (2)).
       #
-      # Returns an Array<String> of module names in `always_included` order followed by argument order.
+      # Returns the module names: the `always_included` ones first, then those for the symbol arguments in order.
       def resolve_trait_modules(registry, call_node)
         modules = registry.always_included.dup
         positional_symbols(call_node, registry).each do |symbol|

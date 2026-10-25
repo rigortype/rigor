@@ -152,8 +152,8 @@ module Rigor
       def subtype_verdict(left, right)
         return :yes if left == right
 
-        # Both Nominals with different class names AND neither carries Dynamic — `:no`
-        # (statically disjoint). For any other shape pair, `:maybe`.
+        # Two Nominals of different class names are statically disjoint (`:no`); any other shape
+        # pair is `:maybe`.
         return :no if disjoint_nominals?(left, right)
         return :no if disjoint_constants?(left, right)
 

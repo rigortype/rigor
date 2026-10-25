@@ -55,7 +55,7 @@ module Rigor
       #
       # A count rather than the causes themselves (#434). On redmine the cause renderings were 144,771 of
       # the file's 293,276 bytes, on lines up to 821 characters — simultaneously the half a reviewer
-      # cannot read and the half that churns when an unrelated call moves. This file already makes that
+      # cannot read and the half that churns when an unrelated call moves. {SnapshotDiff} already makes that
       # argument about origins ("a record keyed by them would churn on every refactor"); the causes are
       # the same class of thing and were the one place it was not applied. What a reviewer needs from the
       # record is the stable fact that the row is not exhaustive and by how much, which is what a count

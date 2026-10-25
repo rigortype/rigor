@@ -16,11 +16,8 @@ module Rigor
       #
       # No mutation blocklist is needed. The numeric classes expose no foldable bang or indirect-mutator
       # method that the static C classifier mis-attributes (every `:leaf` numeric method is a pure value
-      # computation), so the generic `MethodCatalog` loader — shared with the eighteen other per-class
-      # catalogs — covers it directly. This previously hand-rolled its own `safe_for_folding?` /
-      # `method_entry` / `load_catalog` copy of `MethodCatalog`; folding it onto the shared loader also
-      # picks up alias resolution (e.g. `Integer#magnitude` → `abs`, `Integer#inspect` → `to_s`), which the
-      # old bespoke loader silently dropped.
+      # computation), so the generic `MethodCatalog` loader covers it directly. Using the shared loader
+      # rather than a bespoke copy also gives it alias resolution (e.g. `Integer#magnitude` → `abs`).
       NUMERIC_CATALOG = MethodCatalog.for_topic("numeric")
     end
   end

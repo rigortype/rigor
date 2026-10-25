@@ -40,7 +40,6 @@ module Rigor
           all_args = call_node.arguments&.arguments || []
           return nil if all_args.empty?
 
-          # Strip trailing keyword options hash if present
           pos_args = all_args.grep_v(Prism::KeywordHashNode)
           return nil if pos_args.empty?
 

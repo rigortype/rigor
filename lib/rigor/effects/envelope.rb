@@ -8,7 +8,7 @@ module Rigor
     # An author-declared upper bound on one method's effect labels (ADR-103 WD1; normative in
     # `docs/type-specification/effect-labels.md` § Effect envelopes).
     #
-    # Four facts and one seam:
+    # Its facts:
     #
     # - {#owner_key} — the method key the envelope binds (`Class#m` / `Class.m`). A class-level
     #   envelope is read once and {#rebind}ed onto each method of that class discovery knows.

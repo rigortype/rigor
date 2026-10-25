@@ -149,8 +149,8 @@ module Rigor
 
       # True when `diagnostic` reports a failure inside Rigor that left the run readable but invalid as a
       # measurement of Rigor — see {ANALYZER_DEFECT_RULES}. Orthogonal to {.discards_file_analysis?}: the
-      # user-facing tier reads the run; the Rigor-measuring tier should refuse it (the mutation fuzz does,
-      # the ADR-69 kill oracle does not yet — #790).
+      # user-facing tier reads the run; the Rigor-measuring tier should refuse it (the mutation fuzz and the
+      # ADR-69 kill oracle both do, #790).
       def analyzer_defect?(diagnostic)
         ANALYZER_DEFECT_RULES.include?(diagnostic.rule)
       end

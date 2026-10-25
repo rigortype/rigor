@@ -7,8 +7,8 @@ module Rigor
   class CLI
     # Shared factory for building an {Analysis::Runner} from CLI option hashes + a loaded {Configuration}.
     #
-    # Extracted from {CheckCommand} so that `rigor doctor` and future `describe --deep` can reuse the exact same
-    # runner-setup logic (cache, workers, buffer, explain) without diverging from the primary check path (ADR-77 WD3).
+    # Extracted from {CheckCommand} so that other commands (`rigor doctor`, `rigor skill describe --deep`) reuse the
+    # same runner setup (cache, workers, buffer, explain) instead of diverging from the `rigor check` path (ADR-77 WD3).
     module CheckRunnerFactory
       module_function
 

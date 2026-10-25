@@ -26,13 +26,13 @@ module Rigor
     #
     # ## Composition rules (ADR-2)
     #
-    # - `:return_type` — Intersect via `Type::Combinator.intersection`; collapse to bot raises
-    #   `:return_type_collapse`.
+    # - `:return_type` — Intersect via `Type::Combinator.intersection`; collapse to bot records a
+    #   `:return_type_collapse` conflict.
     # - `:truthy_fact` / `:falsey_fact` / `:post_return_fact` — Edge-local; accumulate while deduping by
     #   payload equality.
     # - `:mutation` / `:invalidation` / `:role` — Union; dedupe by equality.
-    # - `:exception` — Single-valued. Two non-`nil` non-equal exceptional effects raise
-    #   `:exceptional_disagreement`.
+    # - `:exception` — Single-valued. Two non-`nil` non-equal exceptional effects record an
+    #   `:exceptional_disagreement` conflict.
     #
     # ## Cross-tier contradictions
     #

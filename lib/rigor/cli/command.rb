@@ -11,7 +11,7 @@ module Rigor
     # `$stderr`, most not at all). Centralising it here gives one consistent shape and lets a test instantiate a command
     # with just `argv:` (the streams default so a spec can pass a `StringIO` for one and ignore the other).
     #
-    # Subclasses read the `@argv` / `@out` / `@err` ivars directly, as they did before.
+    # Subclasses read the `@argv` / `@out` / `@err` ivars directly.
     class Command
       def initialize(argv:, out: $stdout, err: $stderr)
         @argv = argv

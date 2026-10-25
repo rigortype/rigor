@@ -8,7 +8,7 @@ module Rigor
       #
       # Each row is `{ name:, kind: }`:
       #
-      # - `name` — String, the attachment method name as the user invokes it (`"avatar"`).
+      # - `name` — the attachment method name as the user invokes it (`"avatar"`).
       # - `kind` — `:singular` (`has_one_attached`) or `:collection` (`has_many_attached`).
       class AttachmentIndex
         attr_reader :entries

@@ -25,9 +25,8 @@ module Rigor
     # documents the trust model the boundary enforces.
     #
     # ADR-9 slice 2 adds `fact_store`: the per-run cross-plugin `Plugin::FactStore`. Producer plugins publish
-    # their facts in `#prepare(services)` (slice 3); consumer plugins read in `#diagnostics_for_file` via
-    # `services.fact_store.read(...)`. A fresh `FactStore` instance is constructed per Services when none is
-    # supplied — the runner threads its own instance in once slice 3 wires `#prepare` invocation.
+    # their facts in `#prepare(services)`; consumer plugins read in `#diagnostics_for_file` via
+    # `services.fact_store.read(...)`. A fresh `FactStore` is constructed when none is supplied.
     class Services
       attr_reader :reflection, :type, :configuration, :cache_store, :trust_policy, :fact_store
 

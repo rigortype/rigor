@@ -14,7 +14,7 @@ module Rigor
       # declared types. See {MemberConsistency} for the rule; this class holds the type work.
       #
       # A contradiction is reported only where it is PROVEN: no value, and no call, satisfies both sides.
-      # Everything short of a proof is undecided. Four places carry that burden:
+      # Everything short of a proof is undecided. Five places carry that burden:
       #
       # - {#disjoint?} proves two types share no value, from the RBS hierarchy of Ruby core and stdlib
       #   classes ({RbsProof}) only: two such classes neither of which is an RBS ancestor of the other, or a

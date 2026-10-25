@@ -139,8 +139,6 @@ module Rigor
         runner.run(configuration_for_generation.paths).diagnostics
       end
 
-      # The loaded configuration with only `baseline` disabled (#1777): any other key can change the
-      # diagnostic set, and the baseline must record the set `rigor check` will then report.
       def override_configuration_baseline_off(configuration)
         configuration.without_baseline
       end

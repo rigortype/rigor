@@ -167,8 +167,8 @@ module Rigor
         end
 
         # Walks the channel body recursively (so `stream_from` / `stream_for` calls inside `subscribed`
-        # / helper methods are picked up). Returns `[Array<String>, bool]` — the literal stream names +
-        # whether any dynamic registration was seen.
+        # / helper methods are picked up). Returns the literal stream names and whether any dynamic
+        # registration was seen, as a pair.
         def collect_stream_registrations(node, names: [], dynamic: false)
           return [names, dynamic] if node.nil?
 

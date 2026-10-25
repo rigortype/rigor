@@ -358,7 +358,7 @@ module Rigor
         # signature, a core ancestor, or the project's source) is kept whole. `Object`, `BasicObject` and a module
         # String or Symbol includes otherwise read `String | Symbol`, as the String they most often are, so a String
         # method called after the matcher reports nothing. Any other module is UNDECIDED: a passing value may include
-        # it without being a String. (`approval-queue.d/regexp-match-open-surface-subject.md`, shared with #2256.)
+        # it without being a String. (Decision shared with #2256.)
         def module_match_member(member, scope)
           return nil unless member.is_a?(Rigor::Type::Nominal) && member.type_args.empty?
 

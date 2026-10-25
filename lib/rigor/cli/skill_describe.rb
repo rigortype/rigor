@@ -361,7 +361,7 @@ module Rigor
       end
 
       # The one-line essence of a skill's frontmatter `description`, read live from the SKILL.md so the catalogue can
-      # never go stale relative to the shipped skill. Drops the `Triggers:` / `NOT for` tail and caps the length.
+      # never go stale relative to the shipped skill. Drops the `Triggers:` tail and caps the length.
       def catalog_blurb(path)
         text = frontmatter(path).fetch("description", "").to_s.strip.tr("\n", " ").squeeze(" ")
         head = text.split(/\s*Triggers?:/, 2).first.to_s.strip

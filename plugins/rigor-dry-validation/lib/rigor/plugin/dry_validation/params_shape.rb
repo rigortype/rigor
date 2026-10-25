@@ -44,9 +44,8 @@ module Rigor
         end
 
         # Renders `Foo` / `Foo::Bar` / `::Foo::Bar` as the `::`-joined String {ContractScanner}'s table is
-        # keyed by. Duplicated from rigor-dry-schema's identical helper rather than shared — five lines,
-        # no dependency on anything ELSE in that plugin, and reusing it would need a `registered_for`
-        # guard here too even though this leaf never touches dry-schema's own type/alias machinery.
+        # keyed by. Duplicated from rigor-dry-schema rather than shared: this leaf must not depend on that
+        # plugin, and reusing the helper would need a `registered_for` guard here too.
         def constant_name(node)
           case node
           when Prism::ConstantReadNode then node.name.to_s

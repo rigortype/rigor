@@ -15,12 +15,12 @@ module Rigor
     #   rules `:warning`.
     # - `strict`: Every rule is `:error`. CI-friendly.
     #
-    # The profile resolution order:
+    # The resolution order, first match wins:
     #
-    # 1. Profile-specific entry for the canonical rule id.
-    # 2. The diagnostic's own authored severity (the rule's default).
-    # 3. `:error` (catch-all so an unrecognised rule still emits visibly — the public-API drift spec catches
-    #    the bookkeeping gap separately).
+    # 1. An explicit `severity_overrides:` entry for the row (`resolve`'s `overrides:`).
+    # 2. A bleeding-edge severity override.
+    # 3. The profile's entry for the canonical rule id.
+    # 4. The diagnostic's own authored severity (the rule's default); an unrecognised rule keeps it.
     module SeverityProfile
       VALID_PROFILES = %i[lenient balanced strict].freeze
       VALID_SEVERITIES = %i[error warning info off].freeze

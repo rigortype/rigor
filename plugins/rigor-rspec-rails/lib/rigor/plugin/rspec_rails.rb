@@ -30,7 +30,7 @@ module Rigor
     # - `route_to(...)` / `redirect_to(...)` — needs the routes table from `rigor-rails-routes`
     #   (`:helper_table` cross-plugin fact). Future slice.
     # - `have_enqueued_job(JobClass)` / `have_enqueued_mail(MailerClass)` — class-existence check overlaps
-    #   with engine's `inference.unresolved-constant`; queued behind a decision on which surface owns the
+    #   with the engine's constant-resolution diagnostics; queued behind a decision on which surface owns the
     #   diagnostic.
     # - `have_received(:method)` — overlaps with engine's `call.undefined-method`; same coordination
     #   question.
@@ -44,9 +44,8 @@ module Rigor
         description: "Validates rspec-rails behavioral matchers (have_http_status floor)."
       )
 
-      # ADR-37 — the engine walks each file and hands us every CallNode; the analyzer is now pure per-node
-      # logic. The diagnostic points at the matcher name (`message_loc`), reproducing the previous
-      # `message_loc || location` positioning.
+      # ADR-37 — the engine walks each file and hands us every CallNode; the analyzer is pure per-node
+      # logic. The diagnostic points at the matcher name (`message_loc`).
       node_rule Prism::CallNode do |node, _scope, path|
         violation = HaveHttpStatusAnalyzer.violation_for(node)
         next [] unless violation

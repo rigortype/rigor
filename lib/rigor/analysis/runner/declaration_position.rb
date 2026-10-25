@@ -20,7 +20,7 @@ module Rigor
 
         module_function
 
-        # @return `[path, line]`
+        # @return the path and the one-based line of the finding
         def of(finding)
           location = finding.location
           return [CONFIG_PATH, 1] if location.nil?

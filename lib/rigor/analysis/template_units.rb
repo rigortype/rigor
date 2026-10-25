@@ -293,7 +293,6 @@ module Rigor
         [entry.locals.keys.map(&:to_sym)]
       end
 
-      # The `view:<logical_name>` effect-unit key for a path, or nil.
       # The file whose bytes a unit's path was READ from: the editor's buffer when one is bound to it, the
       # project file otherwise. Read by the run's dependency descriptor, so it digests what the run read.
       def physical_path(path, buffer)

@@ -55,7 +55,7 @@ module Rigor
 
         # A form long enough to suggest generated or accumulated data rather than a literal a reader wrote;
         # past it the folded `Constant[String]` stops being useful in a diagnostic and only costs memory.
-        # Mirrors the byte ceiling `ShapeDispatch`'s own `tuple_join` fold applies for the same reason.
+        # Counts pairs where `ShapeDispatch`'s `tuple_join` fold caps bytes, for the same reason.
         FORM_PAIR_LIMIT = 64
         private_constant :FORM_PAIR_LIMIT
 

@@ -227,8 +227,7 @@ module Rigor
 
         scope = scope_index[return_node] || scope_index[args.first]
         return if scope.nil?
-        # `return a, b` packs into a Tuple at runtime; the MVP only handles the single-value form. Multi-arg
-        # returns contribute no type to keep the implementation focused.
+        # `return a, b` packs into a Tuple at runtime; only the single-value form is typed.
         return unless args.size == 1
 
         type = safe_type_of(scope, args.first)

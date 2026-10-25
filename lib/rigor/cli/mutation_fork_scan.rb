@@ -40,7 +40,7 @@ module Rigor
       # @return one entry per path.
       def run(paths:, scanner:, environment:, configuration:, workers:)
         # Force the full RBS load on the parent so children copy-on-write inherit a warm environment rather
-        # than each rebuilding it after the fork. A no-op on the sequential path but cheap.
+        # than each rebuilding it after the fork. Skipped when the run is sequential.
         environment.rbs_loader&.prewarm if Inference::ForkMap.parallel?([workers, paths.size].min)
 
         payloads = Inference::ForkMap.call(items: paths, workers: workers) do |slice|

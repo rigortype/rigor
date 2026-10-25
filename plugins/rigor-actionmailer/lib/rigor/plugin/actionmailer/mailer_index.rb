@@ -67,7 +67,7 @@ module Rigor
         end
 
         # @param file_path — absolute path of a mailer file (canonicalised — see plugin entry's
-        #   `harvest`)
+        #   `canonical_path`)
         def find_by_file(file_path)
           @entries.find { |entry| entry.file_path == file_path }
         end

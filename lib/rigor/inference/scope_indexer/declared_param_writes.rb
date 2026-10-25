@@ -33,8 +33,8 @@ module Rigor
       # - the class's primary RBS declaration is the project's (`sig/` or rbs-inline), not core, stdlib or a gem's:
       #   a project reopening of a library class (`Thread::SizedQueue#initialize`) would otherwise borrow the
       #   library's parameter type for its own `def`;
-      # - the body neither calls `binding` nor passes code to `eval` / `instance_eval` / `class_eval` /
-      #   `module_eval` / `instance_exec` as an argument, any of which can rewrite the parameter unseen;
+      # - the body neither calls `binding` nor passes code as an argument to an `eval`-family call
+      #   (`OPAQUE_EVAL_CALLS`), any of which can rewrite the parameter unseen;
       # - nothing outside the class's own census may write the ivar ({UnseenIvarWriters}): no project ancestor, and
       #   no other object's code (`o.instance_variable_set(:@x, v)`);
       # - the declared type is not `untyped`, which is what the write already records.

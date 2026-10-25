@@ -69,7 +69,7 @@ module Rigor
       VALIDATION_TRIGGERS = %w[valid? invalid? validate!].freeze
       SINGLETON_SAVE_TRIGGERS = %w[create create!].freeze
 
-      # `initialize` is not a mailer action, and neither is a method a plugin would want double-counted.
+      # `initialize` is not a mailer action.
       NON_ACTION_METHODS = %w[initialize].to_set.freeze
 
       module_function

@@ -378,8 +378,8 @@ module Rigor
         # Builds the {Rigor::Plugin::TrustPolicy} for this run. Trusted gems are the gem-name half of every
         # entry in `Configuration#plugins`. Allowed read roots default to the project root (CWD), the
         # project's signature_paths, and each trusted gem's `Gem::Specification#full_gem_path`, plus any
-        # extras the user listed under `plugins_io.allowed_paths`. Slice 2 keeps `network_policy` `:disabled`
-        # — the only value the configuration accepts today.
+        # extras the user listed under `plugins_io.allowed_paths`. `network_policy` is `plugins_io.network`
+        # (`:disabled` or `:allowlist`).
         def build_trust_policy
           trusted_gems = @configuration.plugins.map { |entry| trusted_gem_name(entry) }.uniq
           roots = [Dir.pwd]

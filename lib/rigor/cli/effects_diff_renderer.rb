@@ -121,7 +121,7 @@ module Rigor
       # method that no longer exists was not defined by it. Such a row renders exactly as it did before
       # this suffix existed.
       #
-      # @return `[relative path, line]` per file, the line nil when that
+      # @return a relative path and line per file, the line nil when that
       #   file spells the key with no `def` — an accessor, or a definition the nesting cannot name.
       def sources_of(symbol)
         Array(@sources[symbol]).map do |path|

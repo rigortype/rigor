@@ -626,8 +626,7 @@ module Rigor
       end
 
       # `name = rvalue` evaluates the rvalue under the entry scope (so earlier assignments in a chained `a = b = expr`
-      # propagate left-to-right) and binds `name` to the result type. Compound assignment forms (`+=` etc.) are deferred
-      # to a follow-up; for now they degrade to "type the rhs, do not rebind" via the default branch in {#evaluate}.
+      # propagate left-to-right) and binds `name` to the result type.
       def eval_local_write(node)
         rhs_type, post_rhs = sub_eval(node.value, scope)
         bound = bind_local_write(node, rhs_type, post_rhs)
@@ -740,8 +739,7 @@ module Rigor
       # Slice 7 phase 1 — instance/class/global variable writes. Each handler evaluates the rvalue under the entry scope
       # and binds the named variable into the post-scope's per-kind binding map. The expression value is the rvalue
       # type, matching Ruby's semantics. Bindings are method-local: a fresh scope is built at every `def` entry through
-      # `build_method_entry_scope`, so writes do not leak across method boundaries until cross-method ivar/cvar tracking
-      # lands.
+      # `build_method_entry_scope`; cross-method ivar and cvar state enters it through the class-level seeds.
       def eval_ivar_write(node)
         rhs_type, post_rhs = sub_eval(node.value, scope)
         # Issue #1446 — a write ends a class guard's narrowing of the variable, as it does a global's.
@@ -980,8 +978,7 @@ module Rigor
       #    narrowing keyed on `(receiver_kind, receiver_name,
       #    literal_key)` when both receiver and key are stable
       #    (see {Inference::IndexedNarrowing}). Unstable shapes
-      #    fall through to "no scope effect", matching the old
-      #    `Prism::IndexOrWriteNode` default-branch behaviour.
+      #    record no narrowing.
       #
       # The expression value is the result type, matching Ruby's semantics: `(x = params[:f] ||= []); x` observes the
       # post-`||=` value, not the rvalue alone.
@@ -1440,7 +1437,7 @@ module Rigor
         sub_eval(node.statements, scope)
       end
 
-      # `case pred; when ...; when ...; else; end` and the pattern- matching variant. The predicate's post-scope is
+      # `case pred; when ...; when ...; else; end` and the pattern-matching variant. The predicate's post-scope is
       # shared with every branch (including the else); branches are evaluated independently and merged with
       # nil-injection so half-bound names degrade to `T | nil`.
       def eval_case(node)
@@ -3133,11 +3130,11 @@ module Rigor
         forget_guard_if_rebinds(body_entry, node.statements)
       end
 
-      # `for x in coll` is semantically `coll.each { |x| ... }`. We ask the method dispatcher for `coll.each`'s expected
-      # block parameter types — that path consults RBS and the iterator dispatch table, which is more precise than the
-      # structural `collection_element_type` fallback (it knows, e.g., that `Hash[K, V]#each` yields `[K, V]` even when
+      # `for x in coll` is semantically `coll.each { |x| ... }`. The structural `collection_element_type` answers first;
+      # only when it is untyped do we ask the method dispatcher for `coll.each`'s expected block parameter types, which
+      # consult RBS and the iterator dispatch table (they know, e.g., that `Hash[K, V]#each` yields `[K, V]` even when
       # the receiver is not a literal Hash carrier in our local lattice). When the dispatcher returns nothing (no
-      # signature, unknown receiver) we fall back to the structural extractor.
+      # signature, unknown receiver) the structural answer stands.
       def for_iteration_element_type(coll_type)
         structural = collection_element_type(coll_type)
         return structural unless structural.equal?(Type::Combinator.untyped)
@@ -3199,7 +3196,7 @@ module Rigor
 
       # Extracts the per-iteration element type from a collection carrier. `Tuple[T1..Tn]` yields the union of its
       # elements; `Nominal[Array, [T]]` and `Nominal[Range, [T]]` yield `T`; `Nominal[Hash, [K, V]]` yields `Tuple[K,
-      # V]` (Hash#each yields `[key, value]` pairs); `IntegerRange` yields `Integer`; `Constant<Range>` reads the
+      # V]` (Hash#each yields `[key, value]` pairs); `IntegerRange` yields `Integer`; a `Range` constant reads the
       # literal range's element class. Anything else falls back to `untyped`.
       def collection_element_type(type)
         case type
@@ -3500,8 +3497,9 @@ module Rigor
 
       # `class << expr; body; end`. When `expr` is `self`, the body defines class methods on the immediate enclosing
       # class — the innermost frame flips to `singleton: true` so a nested `def foo` resolves through `singleton_method`
-      # rather than `instance_method`. For non-`self` expressions we cannot statically resolve the receiver, so we keep
-      # the existing context and accept that nested defs degrade to the `Dynamic[Top]` default.
+      # rather than `instance_method`. For an expression that is neither `self` nor a constant we cannot statically
+      # resolve the receiver, so we keep the existing context and accept that nested defs degrade to the `Dynamic[Top]`
+      # default.
       # Issue #652 — the body INHERITS this evaluator's chain. Ruby pushes the singleton class onto
       # `Module.nesting` and leaves the enclosing entries beneath it, so `class << Other` written inside
       # `module Admin` reads `Admin::Y`: the enclosing rung is live, and only the singleton rung itself
@@ -3760,8 +3758,7 @@ module Rigor
         # B2.2 — intervening method call ivar invalidation. An implicit-self / self-receiver call could mutate any ivar
         # of the enclosing class (we cannot prove purity without an effect system). Reset each ivar whose current local
         # binding has narrowed below the class-ivar seed back to the seed itself, so a subsequent `if @flag` predicate
-        # observes the seed's union (not the pre-call narrowed value). Always-safe (only widens; no new facts). See
-        # [`docs/CURRENT_WORK.md`](../../../docs/CURRENT_WORK.md) § "Flow-folding" — G2 intervening-call case.
+        # observes the seed's union (not the pre-call narrowed value). Always-safe (only widens; no new facts).
         post_scope = invalidate_ivars_for_intervening_call(node, post_scope) if statement_call
         # Issue #1889 — `instance_variable_set` on `self` writes an ivar no write node shows. It runs after the reset
         # above, which would join a literal-name write back into the class seed.
@@ -3917,7 +3914,8 @@ module Rigor
 
       # Returns a scope with each ivar's narrowed local binding widened back to its class-ivar seed value when the call
       # is one that could plausibly mutate ivars on the enclosing class (implicit-self or explicit `self.foo`).
-      # External- receiver calls (`obj.method`) cannot reach the caller's ivars; they pass through unchanged.
+      # External-receiver calls (`obj.method`) cannot reach the caller's ivars; they pass through unchanged, apart from
+      # the literal-block case below.
       # Issue #1596 — where the call is proven to write only some ivars ({#self_call_ivar_writes}), only those widen.
       #
       # Issue #1402 — a proc's call (`blk.call`) is a candidate too, and so is a call on another receiver whose literal
@@ -4119,7 +4117,7 @@ module Rigor
       # `resolve_call_method`); plugins recognising their own synthetic call shapes (e.g. `T.assert_type!`) have no
       # method_def and the parameter facts silently skip — the plugin's own diagnostics_for_file path covers those
       # cases. The full plugin-side parameter-targeting story (PHPStan-style Type-Specifying Extensions on
-      # plugin-recognised calls) lives behind a follow-up slice that introduces `:local` / `:argument_at` target kinds.
+      # plugin-recognised calls) lives behind a follow-up slice that introduces an `:argument_at` target kind.
       def apply_plugin_assertions(call_node, current_scope)
         registry = current_scope.environment&.plugin_registry
         return current_scope if registry.nil? || registry.empty?
@@ -4274,7 +4272,7 @@ module Rigor
       def lookup_post_return_arg(call_node, method_def, target_name)
         # Plugin-source contributions arrive without an authoritative method_def (the plugin recognised the call shape
         # directly). Parameter-targeting falls back to "no narrow" in that case — the wider plugin-side parameter
-        # mapping (`:local` / `:argument_at`) is a follow-up slice.
+        # mapping (`:argument_at`) is a follow-up slice.
         return nil if method_def.nil?
 
         arguments = call_node.arguments&.arguments || []
@@ -4664,7 +4662,7 @@ module Rigor
       end
 
       # The set of `[name, slot]` parameters of `def_node` whose content a block in the body escape-mutates.
-      # Memoised per def node (the body walk is otherwise repeated at every call site). A parameter is "escape- mutated"
+      # Memoised per def node (the body walk is otherwise repeated at every call site). A parameter is "escape-mutated"
       # when a `param[k] = v` / `param << x` mutation on it appears inside a block whose receiving call is not proven
       # non-escaping.
       def escaped_content_parameters(def_node)
@@ -4766,7 +4764,7 @@ module Rigor
       end
 
       # A receiver-independent over-approximation of `ClosureEscapeAnalyzer`'s non-escaping verdict, used when scanning
-      # a callee body where the block- owning call's receiver TYPE is not available. A call whose method name is a known
+      # a callee body where the block-owning call's receiver TYPE is not available. A call whose method name is a known
       # structural iterator (`each` / `map` / `tap` / …) runs its block synchronously and does not retain it, so its
       # captured mutations are not a cross-boundary escape. Any other name (`on`, `subscribe`, `define_method`, an
       # unknown DSL hook) is treated as escaping — sound, since mis-classifying a truly-non-escaping call only floors an
@@ -5021,7 +5019,7 @@ module Rigor
       # ADR-56 slice A. For a `:non_escaping` block, fold the continuation binding of every outer local the body can
       # rebind back into `post_scope`. The binding is a capped fixpoint (cap 3) over the block body re-evaluated under
       # the running per-name assumption, joined with the pre-call binding (kept as a constituent so the 0-iteration path
-      # — `[].each { … }` — stays sound), value-pinned- widened on the final permitted iteration, and floored to
+      # — `[].each { … }` — stays sound), value-pinned widened on the final permitted iteration, and floored to
       # `Dynamic[top]` on non-convergence (matching `drop_captured_narrowing`).
       #
       # The instance variables the body rebinds (`CapturedLocals.writes` with `ivars: true`) outlive the call the same
@@ -5641,7 +5639,7 @@ module Rigor
       end
 
       # ADR-56 slice C (B3). For `recv.each_with_object(memo) { |x, acc| … }` the return is the memo object after the
-      # block has mutated it through the `acc` alias. Compute the joined memo type the same way captured- local content
+      # block has mutated it through the `acc` alias. Compute the joined memo type the same way captured-local content
       # mutations are joined: pre-state = the memo argument's type, added evidence = the content-mutator args on the
       # memo block param. Returns `call_type` unchanged for any other call, a missing block, or a memo whose pre-state
       # is not a collection.

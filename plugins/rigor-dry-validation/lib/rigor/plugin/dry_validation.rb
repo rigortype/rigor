@@ -58,19 +58,16 @@ module Rigor
 
       # ADR-37 dynamic return — refines `NewUserContract.new.call(input).to_h` to the per-contract
       # `HashShape` when {#result_shape_for} finds one. Gated on the method name alone (mirrors
-      # rigor-dry-schema's own `.to_h` rule): the RBS overlay types `Contract#call`'s return as the
-      # generic `Result`, but that alone can't select a PER-CONTRACT shape, so the block does its own
-      # syntactic chain match via {ParamsShape.contract_name} before touching the table. When
-      # rigor-dry-schema isn't loaded, or the chain isn't a Contract call, this returns nil and the RBS
-      # overlay's generic `Hash[Symbol, untyped]` stands.
+      # rigor-dry-schema's `.to_h` rule); the chain match is in {ParamsShape.contract_name}, because the
+      # RBS overlay's generic `Result` cannot select a per-contract shape. Otherwise returns nil and the
+      # overlay's generic hash type stands.
       dynamic_return methods: [:to_h] do |call_node, _scope|
         result_shape_for(call_node)
       end
 
       # ADR-37 slice 1c two-pass — the "collect" half of `dry-validation.rule-key-mismatch`. Reads the
-      # SAME `:dry_type_aliases` fact `#prepare` does (a plain `services.fact_store.read`, not
-      # `#read_fact`'s memoised wrapper — `services` at collect time is the run-wide instance, so an
-      # in-block memo isn't needed here the way it is across many per-call `dynamic_return` invocations).
+      # same `:dry_type_aliases` fact as `#prepare`, straight from `services.fact_store` (no `#read_fact`
+      # memo: `services` here is run-wide, unlike the per-call `dynamic_return` blocks).
       node_file_context do |root, _scope|
         type_aliases = services.fact_store.read(plugin_id: "dry-types", name: :dry_type_aliases) || {}
         ContractScanner.rule_key_issues(root, type_aliases)

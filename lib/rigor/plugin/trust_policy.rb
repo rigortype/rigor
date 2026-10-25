@@ -19,8 +19,8 @@ module Rigor
     # - `trusted_gems`: gem names the user has authorised. Derived from the `plugins:` section of `.rigor.yml`
     #   plus any gems they reach transitively. Used today for documentation and future trust diagnostics.
     # - `allowed_read_roots`: absolute paths plugin code may read from through the {IoBoundary}. The default
-    #   set covers the project root, the project's `signature_paths`, the active `Gemfile.lock`, and each
-    #   trusted gem's `Gem::Specification#full_gem_path`. The user extends this with `.rigor.yml`'s
+    #   set covers the project root, the project's `signature_paths`, and each trusted
+    #   gem's `Gem::Specification#full_gem_path`. The user extends this with `.rigor.yml`'s
     #   `plugins_io.allowed_paths:`.
     # - `network_policy`: one of {VALID_NETWORK_POLICIES}. `:disabled` (default) makes
     #   {IoBoundary#open_url} always raise. `:allowlist` (v0.1.2) consults `allowed_url_hosts` on every fetch —

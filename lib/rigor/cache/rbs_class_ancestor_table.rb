@@ -6,7 +6,7 @@ require_relative "rbs_cache_producer"
 module Rigor
   module Cache
     # Cache producer that materialises the RBS-declared ancestor chain of every loaded class / module into a
-    # Marshal-clean `Hash<String, Array<String>>`. Ancestor names are top-level-stripped (e.g. `"Integer"` not
+    # Marshal-clean table. Ancestor names are top-level-stripped (e.g. `"Integer"` not
     # `"::Integer"`) to match `Environment::RbsHierarchy#normalize_name`.
     #
     # The hierarchy is the substrate behind every `class_ordering` query, which is itself a hot path on the

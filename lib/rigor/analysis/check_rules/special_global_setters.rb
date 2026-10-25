@@ -9,9 +9,9 @@ module Rigor
       # the envelope `global.write-type-mismatch` and `global.readonly-write` judge a write against.
       #
       # The setter is the authority, not the RBS declaration of the global. Where the two differ, the setter wins:
-      # `$;` is declared `Regexp | String | nil`, but its setter also takes any object with `to_str`, and `$stdout` is
-      # declared `IO`, but its setter takes anything that responds to `write`. Each entry names the CRuby function
-      # that enforces it and was confirmed on Ruby 4.0.5, whose error the comment quotes.
+      # `$;` is declared as a Regexp, a String or nil, but its setter also takes any object with `to_str`, and
+      # `$stdout` is declared as an IO, but its setter takes anything that responds to `write`. Each entry names
+      # the CRuby function that enforces it and was confirmed on Ruby 4.0.5, whose error the comment quotes.
       #
       # A special whose setter accepts every value is absent, so a write to it is never checked: `$stdin`
       # (ADR-117 WD2), `$_`, `$VERBOSE` / `$-v` / `$-w`, `$DEBUG` / `$-d` and `$=`. So is `$@`, whose setter raises

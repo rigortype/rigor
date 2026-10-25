@@ -77,10 +77,9 @@ module Rigor
         "inline_declared" => "write"
       },
       # ADR-17 — project-side monkey-patch pre-evaluation. Empty by default; users opt in by listing explicit
-      # files that the analyzer walks before per-file inference so patched-method declarations are visible
-      # across the project (e.g. `lib/core_ext/string_extensions.rb`). Slice 1 plumbing only — listed files
-      # are validated at config-load time (`pre-eval.file-not-found` on a missing path), but the dispatcher
-      # tier consuming the registry lands in slice 2.
+      # files (or globs) that the analyzer walks before per-file inference so patched-method declarations are
+      # visible across the project (e.g. `lib/core_ext/string_extensions.rb`). A missing literal path surfaces
+      # as `pre-eval.file-not-found`.
       "pre_eval" => [],
       # ADR-22 — baseline file path. nil (default) means no baseline is loaded; the `false` literal is
       # treated as the explicit-disable form for `.rigor.yml`-side override of an upstream `.rigor.dist.yml`
@@ -1054,7 +1053,7 @@ module Rigor
       end
     end
 
-    # `target_ruby` is passed to `Prism.parse_file(path, version:)` at the analyser's three parse sites
+    # `target_ruby` is passed as Prism's `version:` option at the analyser's parse sites
     # (`Analysis::Runner`, `CLI::TypeOfCommand`, `CLI::TypeScanCommand`) so projects that target an older
     # Ruby get parse errors for syntax their target doesn't support. Format validation here is loose —
     # accepts any `<major>.<minor>` or `<major>.<minor>.<patch>` form, plus the literal `"latest"`. Prism

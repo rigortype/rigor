@@ -9,8 +9,7 @@ module Rigor
     class Web < Rigor::Plugin::Base
       # The "check" half of the ADR-28 provide-and-check pair.
       #
-      # Walks one analysed file's AST and, for every class defined
-      # in a file matching a contract's `path_glob`, confirms:
+      # For a class defined in a file matching a contract's `path_glob`, confirms:
       #
       # 1. the class defines the contracted method, and
       # 2. that method's inferred return type conforms to the

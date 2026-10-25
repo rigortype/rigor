@@ -206,7 +206,6 @@ module Rigor
         end
       end
 
-      # `presentation` is the Result's optional `enumeration:` / `location_mapper:`.
       def type_result(file, line, column, node, scope_index, options, **presentation)
         tracer = options[:trace] ? Inference::FallbackTracer.new : nil
         type = scope_index[node].type_of(node, tracer: tracer)

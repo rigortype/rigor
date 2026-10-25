@@ -84,27 +84,20 @@ module Rigor
         @factory_search_paths = Array(config.fetch("factory_search_paths")).map(&:to_s)
       end
 
-      # ADR-102 WD3 / #350 — the model classes the factories build, published as `:reachability_references`
-      # rather than as `:reachability_roots`.
+      # ADR-102 WD3 / #350 — the factories' model classes are published as `:reachability_references`,
+      # not `:reachability_roots`.
       #
-      # Both halves of that sentence are load-bearing.
-      #
-      # It is a CONTRIBUTION at all because a factory names its class by a mechanism the constant scan cannot
-      # follow: `factory :user, class: "Admin::User"` is a string, and a bare `factory :user` is FactoryBot's
-      # own constantization of the factory name. Neither leaves a constant node anywhere in the project.
-      #
-      # It is a REFERENCE rather than a root because factories live in the test tree. Rooting them would make
-      # every factoried class production-reachable and erase ADR-102 WD8's "reachable only from tests"
-      # category for exactly the classes it is most likely to be about — a model kept alive by its factory
-      # and its spec and nothing else is the archetype of dead production code with a live test, and that is
-      # the single most actionable row this report produces. Carrying the `:test` role keeps the finding.
+      # It is a contribution because a factory names its class by a mechanism the constant scan cannot
+      # follow (`factory :user, class: "Admin::User"` is a string; a bare `factory :user` is constantized by
+      # FactoryBot). It is a reference rather than a root because factories live in the test tree: rooting
+      # them would make every factoried class production-reachable and erase ADR-102 WD8's "reachable only
+      # from tests" category. The `:test` role keeps that finding.
       def prepare(services)
         index = producer_value(:factory_index)
         return if index.nil? || index.empty?
 
-        # The producer value and the ADR-9 fact are different channels (#921) — `producer_value` is this
-        # plugin's own cached computation, read back via `producer_value` above; `fact_store.publish` is
-        # what makes it visible to another plugin's `read_fact`, which is how rigor-rspec binds
+        # The producer value and the ADR-9 fact are different channels (#921): `fact_store.publish` is what
+        # makes the index visible to another plugin's `read_fact`, as rigor-rspec uses it to bind
         # `create(:name)` to the factory's model class.
         services.fact_store.publish(plugin_id: manifest.id, name: :factory_index, value: index)
 
@@ -118,8 +111,7 @@ module Rigor
 
       # ADR-37 — per-call factory/attribute validation over the engine-owned walk. Each violation carries
       # its own location (the call's message_loc, or the offending attribute key), so it is positioned
-      # via `diagnostic(node, location:)`. No file-level diagnostic remains, so there is no
-      # `diagnostics_for_file`.
+      # via `diagnostic(node, location:)`.
       node_rule Prism::CallNode do |node, _scope, path|
         index = producer_value(:factory_index)
         next [] if index.nil? || index.empty?

@@ -108,9 +108,8 @@ module Rigor
           false
         end
 
-        # Walks the block body collecting `t.<method>(...)` calls. Skips nested blocks (e.g. inside
-        # `if`-conditioned columns) only at the top level — for richer schema constructs the parser falls
-        # back silently.
+        # Walks the block body collecting `t.<method>(...)` calls. It descends through nested constructs
+        # (e.g. `if` branches) but does not recurse into a matched call.
         def collect_column_calls(node, &)
           return if node.nil?
 

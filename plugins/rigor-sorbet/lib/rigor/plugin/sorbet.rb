@@ -42,8 +42,8 @@ module Rigor
     # `IoBoundary`. The catalog is frozen after the first build and consulted by the `dynamic_return` rule
     # at every gated call site. RBI files share the catalog with project-source sigs — both produce
     # `MethodSignature` entries keyed by `(class_name, method_name, kind)`. When a key collides across
-    # files, the last-walked sig wins (ordering is platform-dependent: `Dir.glob` returns directory
-    # entries in filesystem order). Sorbet's full shim-override semantics — `sorbet/rbi/shims/` overriding
+    # files, the last-walked sig wins (`Dir.glob` results are sorted, so the walk order is stable).
+    # Sorbet's full shim-override semantics — `sorbet/rbi/shims/` overriding
     # `sorbet/rbi/gems/` — lands in a later slice once the catalog gains per-source provenance.
     #
     # The plugin emits `plugin.sorbet.parse-error` warnings for malformed sig blocks (no block / empty
@@ -79,12 +79,10 @@ module Rigor
           "rbi_paths" => { kind: :array, default: ["sorbet/rbi"] },
           "enforce_sigil" => { kind: :boolean, default: true }
         },
-        # #1097 — bundled sorbet-runtime DSL surface (`sig/sorbet.rbs`). `sig` itself reaches the
-        # class object through `extend T::Sig` (or the `< T::ImmutableStruct` / `< T::Enum`
-        # family, which carry the edge themselves), which is
-        # why `rbs_complete_extends:` — the extend-edge allow-list — carries `T::Sig` /
-        # `T::Helpers` / `T::Generic`, and `rbs_complete_ancestors:` carries the Struct/Enum family
-        # for the subclass bridge.
+        # #1097 — bundled sorbet-runtime DSL surface (`sig/sorbet.rbs`). `sig` reaches the class object
+        # through `extend T::Sig` (or the `T::Struct` / `T::Enum` family, which carry the edge themselves):
+        # `rbs_complete_extends:` is that extend-edge allow-list, and `rbs_complete_ancestors:` carries the
+        # Struct/Enum family for the subclass bridge.
         signature_paths: ["sig"],
         rbs_complete_extends: %w[T::Sig T::Helpers T::Generic],
         rbs_complete_ancestors: %w[T::Struct T::InexactStruct T::ImmutableStruct T::Enum],
@@ -122,8 +120,7 @@ module Rigor
         @configured_paths = Array(config.fetch("paths", services.configuration.paths)).map(&:to_s)
         @rbi_paths = Array(config.fetch("rbi_paths")).map(&:to_s)
         # Schema default `true` — only files marked `# typed: true` / `:strict` / `:strong` contribute
-        # their sigs. Set to `false` to record every file's sigs regardless of sigil (current behaviour
-        # pre-this-config).
+        # their sigs. Set to `false` to record every file's sigs regardless of sigil.
         @enforce_sigil = config.fetch("enforce_sigil")
         # Per-call-site assertion gating: `@sigil_by_path` (built during catalog harvest) is consulted so
         # `T.let` / `T.cast` / `T.must` / `T.bind` / `T.assert_type!` only fire in files Sorbet itself
@@ -135,20 +132,20 @@ module Rigor
         @parse_errors_by_path = {}
         @catalog_built = false
         # ADR-11 slice 6 — Prism nodes for `T.absurd` calls we observed in the `dynamic_return` rule to be
-        # *reachable* (i.e., their discriminant didn't narrow to `bot`). `diagnostics_for_file` walks the
-        # per-file AST and surfaces these as `plugin.sorbet.absurd-reachable` warnings. Hash is keyed on
-        # the Prism node's `object_id` because the runner only parses each file once per run, so identity
-        # is stable across the two plugin hooks.
+        # *reachable* (i.e., their discriminant didn't narrow to `bot`). The node rule below surfaces these
+        # as `plugin.sorbet.absurd-reachable` warnings. The Hash is keyed by node identity
+        # (`compare_by_identity`) because the runner only parses each file once per run, so identity is
+        # stable across the two plugin hooks.
         @reachable_absurd_nodes = {}.compare_by_identity
         # ADR-11 light follow-up — `T.reveal_type` calls observed in the `dynamic_return` rule, paired
         # with the display string for the inferred type at the call site. Mirrors the absurd-node
-        # compare-by-identity hash; `diagnostics_for_file` surfaces each entry as a
+        # compare-by-identity hash; the node rule below surfaces each entry as a
         # `plugin.sorbet.reveal-type` `:info` diagnostic.
         @reveal_type_calls = {}.compare_by_identity
         # T.bind / T.assert_type! priority slice 1 — `T.assert_type!` calls observed in the
         # `dynamic_return` rule whose static subtype check FAILED, paired with the inferred + asserted
-        # type display strings. Same compare-by-identity discipline. `diagnostics_for_file` walks the
-        # file AST for `T.assert_type!` calls and surfaces matching entries as
+        # type display strings. Same compare-by-identity discipline. The node rule below surfaces matching
+        # entries as
         # `plugin.sorbet.assert-type-mismatch` `:error` diagnostics.
         @assert_type_mismatches = {}.compare_by_identity
       end
@@ -245,7 +242,7 @@ module Rigor
         # analysis treats code after it as unreachable; the legacy contribution's `exceptional: :raises`
         # slot was never consumed on the dispatcher path — only `return_type` survives the merge). When
         # the discriminant *isn't* narrowed to `bot` at this scope, also records the call node so
-        # `diagnostics_for_file` can surface a `plugin.sorbet.absurd-reachable` warning.
+        # the node rule can surface a `plugin.sorbet.absurd-reachable` warning.
         if AbsurdRecognizer.absurd_call?(call_node)
           @reachable_absurd_nodes[call_node] = true unless AbsurdRecognizer.exhaustive?(call_node, scope)
           return Rigor::Type::Combinator.bot
@@ -255,7 +252,7 @@ module Rigor
         # cheaper to recognise (no catalog walk required) and they win over any cataloged signature: the
         # user explicitly asserted the type at the call site. The light follow-up extends the recogniser
         # to `T.must_because` (alias of `T.must`) and `T.reveal_type` (passes the type through; the
-        # human-facing diagnostic is recorded here for `diagnostics_for_file` to emit).
+        # human-facing diagnostic is recorded here for the node rule to emit).
         #
         # Per-call-site sigil gating: with `enforce_sigil: true` (default), assertions only fire in files
         # Sorbet itself would enforce. Files at `# typed: false` (or sigil-less, which Sorbet treats as
@@ -502,8 +499,7 @@ module Rigor
             # ADR-88 WD2 — deterministic fold order matters now that the catalog VALUE is digested into the
             # incremental fact-surface fingerprint: a duplicate `(class, method, kind)` sig's last-wins winner
             # must not vary by machine / run. `Dir.glob` sorts its results by default on Ruby 3.0+, so the fold
-            # order is already stable (the slice-1 comment's "filesystem order" caveat predates that default);
-            # this walk relies on it rather than re-sorting.
+            # order is already stable; this walk relies on it rather than re-sorting.
             Dir.glob("**/*#{ext}", base: absolute).each do |relative|
               harvest_file(canonicalize(File.join(absolute, relative)), catalog, sigil_by_path, parse_errors_by_path)
             end

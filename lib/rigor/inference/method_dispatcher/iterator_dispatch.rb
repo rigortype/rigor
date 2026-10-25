@@ -105,7 +105,7 @@ module Rigor
         #   throws)
         # - `Hash[K, V]` / `HashShape{...}`                 → Tuple[K, V]
         #   (Ruby yields `[key, value]` pairs as the element)
-        # - `Constant<Array>` / `Constant<Range>` / `Constant<Set>`
+        # - `Constant<Array>` / `Constant<Range>`
         #                                                   → corresponding Constant element
         #
         # Receivers we cannot project (Top, Dynamic, unknown nominals, IO, …) decline so the RBS tier still

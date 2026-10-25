@@ -52,11 +52,9 @@ module Rigor
       #   `.rbs` files, plus the virtual entries rbs-inline and plugin `source_rbs` synthesis contribute.
       # @param registry — the vocabulary an unknown label is judged against.
       #
-      # The `ANNOTATION_HINT` routing test runs here, before any parse: a source with no honoured
-      # payload can contribute neither an envelope nor an unresolved report, so a signature tree with
-      # no effect annotation is answered by one regex per file — which is what that hint's own
-      # documentation promises, and what every warm envelope-lane run was paying a full
-      # `RBS::Parser.parse_signature` per file for.
+      # A source with no honoured payload can contribute neither an envelope nor an unresolved report, so the
+      # `ANNOTATION_HINT` test skips it before any parse: one regex per file, not a full
+      # `RBS::Parser.parse_signature`.
       def scan(sources:, registry:)
         reporter = Reporter.new
         methods = {}

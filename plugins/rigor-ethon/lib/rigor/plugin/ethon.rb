@@ -14,7 +14,6 @@ module Rigor
         signature_paths: ["sig"]
       )
 
-      # Option catalogue and return types for Easy methods
       EASY_RETURN_TYPES = {
         perform: -> { Rigor::Type::Combinator.nominal_of("Integer") },
         response_code: -> { Rigor::Type::Combinator.nominal_of("Integer") },

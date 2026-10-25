@@ -42,7 +42,7 @@ module Rigor
         @project_context = project_context
       end
 
-      # @return LSP `CompletionItem[]` or nil
+      # @return LSP completion items, or nil
       #   when the cursor isn't at a position the provider can
       #   enumerate completions for. Returning nil maps to
       #   `result: null` per the LSP spec — clients treat it as
@@ -292,7 +292,7 @@ module Rigor
         Inference::ScopeIndexer.index(root, default_scope: scope)
       end
 
-      # Returns an Array<Hash> of LSP `CompletionItem`s for every public method callable on the receiver.
+      # Returns the LSP completion items for every public method callable on the receiver.
       # Slice B3 extends the slice-B1 floor with:
       # - `Type::Refined` / `Type::Difference` — enumerate the underlying nominal (refinement narrows the
       #   value set, not the method set).
@@ -312,7 +312,7 @@ module Rigor
         end
       end
 
-      # Returns `[{Symbol => RBS::Definition::Method}, :instance | :singleton]` for the receiver. Composite
+      # Returns the receiver's method table with its dispatch kind (`:instance` or `:singleton`). Composite
       # carriers (Union / Intersection / Refined / shape carriers) reduce to instance-method enumeration; the
       # receiver-class label that lands in each CompletionItem's `detail` still comes from each method's own
       # `defs.first.implemented_in`, so the rendered prefix stays accurate per-method.

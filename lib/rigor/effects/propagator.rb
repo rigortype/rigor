@@ -363,7 +363,7 @@ module Rigor
         # dispatch target is spelled under a different key, and this is the rewrite: the same ancestor walk
         # {#resolve_owner} performs, on the instance side, for `initialize`.
         #
-        # Three boundaries, and each of them can only narrow:
+        # Four boundaries, and each of them can only narrow:
         #
         # - a project `def self.new` **wins**. It is the definition `Const.new` actually reaches, and a
         #   constructor that overrides `new` is the case where `#initialize` is not the answer. Resolved

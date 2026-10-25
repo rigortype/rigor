@@ -54,8 +54,8 @@ module Rigor
       # a compaction pass — the incremental path never runs one.
       GENERATION_CAP = RunCacheKey::GENERATION_CAP
 
-      # The stored value. `baseline` and `pinned` (each a {Cache::Descriptor}) and `reads` (`{path =>
-      # Cache::Descriptor}`) are the chain the next writer carries forward, kept apart from the rest of the
+      # The stored value. `baseline` and `pinned` (each a {Cache::Descriptor}) and `reads` (keyed by
+      # path) are the chain the next writer carries forward, kept apart from the rest of the
       # dependency descriptor so it knows which rows are which; their entries are the same objects the descriptor
       # holds, so `Marshal` writes them once. `baseline` and `pinned` hold the rows the last full run recorded for
       # inputs the incremental path does not re-derive on a recheck (the signature tree, the

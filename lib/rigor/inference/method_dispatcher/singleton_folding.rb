@@ -20,7 +20,6 @@ module Rigor
       #
       # Centralising both here keeps the receiver-shape and constant-unwrap knowledge in one place: if
       # `Type::Singleton` or `Type::Constant` ever changes shape, there is a single edit rather than nine.
-      # The per-tier fold bodies stay where they are — only the shared gate moves.
       module SingletonFolding
         module_function
 

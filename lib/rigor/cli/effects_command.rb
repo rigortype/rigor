@@ -222,9 +222,7 @@ module Rigor
 
       # The analysed set is the configured `paths:` **plus** whatever the arguments name — never the
       # arguments alone (#439). An effect summary is transitive over whatever was analysed, so analysing
-      # less does not filter the report, it lowers every answer in it: `rigor effects
-      # app/controllers/issues_controller.rb` used to report `IssuesController#create: [] …?` where the
-      # whole-project run reported four labels and a declared lane, with nothing marking the difference.
+      # less does not filter the report, it lowers every answer in it.
       #
       # The union rather than the configured paths alone, so that pointing the command at a tree the
       # configuration does not cover — which is what every `rigor effects PATH` invocation from outside a

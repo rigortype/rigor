@@ -20,10 +20,8 @@ module Rigor
           @contracts = contracts
         end
 
-        # Per-`ClassNode` check over the engine-owned walk (ADR-37): called once per class node the
-        # `node_rule` in `hanami.rb` dispatches, against every contract whose `path_glob` matches the
-        # file. No cross-class-node state is needed, so the checker ships no `class_nodes` traversal of
-        # its own.
+        # Per-`ClassNode` check over the engine-owned walk (ADR-37): called once per class node by the
+        # `node_rule` in `hanami.rb`, against every contract whose `path_glob` matches the file.
         def check_class(class_node, path:)
           @contracts.filter_map do |contract|
             next unless path_matches?(contract.path_glob, path)

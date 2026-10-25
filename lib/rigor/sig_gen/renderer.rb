@@ -14,8 +14,7 @@ module Rigor
     # - `:print` (default) — RBS skeletons grouped by source file and class declaration, ready for the user to
     #   paste into `sig/<path>.rbs`.
     # - `:diff` — a unified-style diff comparing the existing RBS spelling (if any) against the inferred
-    #   spelling. The MVP renders a minimal "- declared / + inferred" block; full per-file diffing arrives with
-    #   slice 2's `--write` merge.
+    #   spelling, as a minimal "- declared / + inferred" block.
     # - `:json` — machine-readable payload with the same classification table as `:print`, plus every `skipped`
     #   row with its `skip_reason` (#778).
     class Renderer

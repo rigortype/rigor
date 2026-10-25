@@ -36,8 +36,8 @@ module Rigor
         end
 
         def load
-          per_key = {} # dotted_key => { locale => Set<String> }
-          per_key_kinds = {} # dotted_key => { locale => :string|:array|:hash }
+          per_key = {} # dotted_key => { locale => placeholder names }
+          per_key_kinds = {} # dotted_key => { locale => leaf kind }
           locales = Set.new
 
           locale_files.each do |path|
@@ -98,12 +98,9 @@ module Rigor
         # leaves are *not* recorded as entries themselves — only their descendants — but every leaf scalar
         # / array IS recorded.
         #
-        # `breadcrumbs` is a single mutable stack reused across the whole walk (push before recursing, pop
-        # after): for the 530-file / 14 MB Mastodon locale corpus the old
-        # `flat_map { flatten_tree(v, breadcrumbs + [k]) }` shape allocated a fresh breadcrumb Array at
-        # every node plus an intermediate result Array at every level — millions of short-lived objects and
-        # the run's top allocation site. The dotted key is still materialised once per leaf (it has to
-        # be); everything else is now allocation-free traversal.
+        # `breadcrumbs` is one mutable stack reused across the walk (push before recursing, pop after). A
+        # per-node Array allocation was the run's top allocation site on the 530-file Mastodon corpus; only
+        # the dotted key is materialised, once per leaf.
         def each_flattened(node, breadcrumbs, &)
           if node.is_a?(Hash)
             node.each do |k, v|

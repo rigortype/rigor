@@ -99,10 +99,10 @@ module Rigor
         #   `Configuration::Dependencies::Entry`).
         # @param budget — per-gem catalog cap (method-definition count). When unset, defaults
         #   to `UNBOUNDED` for backwards-compatible test paths.
-        # @return frozen wrapper carrying the catalog (`Hash{[class_name, method_name] =>
-        #   :instance | :singleton}`) and a `truncated?` flag set when the walker stopped harvesting because
-        #   the budget was reached. Methods of identical name on the same class with different kinds (rare;
-        #   private API mostly) carry the kind that wins the per-class first walk.
+        # @return frozen wrapper carrying the catalog (keyed by `[class_name, method_name]`, valued by
+        #   {CatalogEntry}) and a `truncated?` flag set when the walker stopped harvesting because the budget was
+        #   reached. Methods of identical name on the same class with different kinds (rare; private API mostly)
+        #   carry the kind that wins the per-class first walk.
         def walk(gem_dir:, roots:, budget: UNBOUNDED)
           harvest = Harvest.new({}, {}, nil, nil, Set.new, Set.new)
           truncated = false

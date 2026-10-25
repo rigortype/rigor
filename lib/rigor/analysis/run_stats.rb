@@ -21,7 +21,7 @@ module Rigor
     #
     # Stats collection is intentionally cheap: wall + RSS are single syscalls, target file count is already
     # in `expand_paths`, gem source-walk uses `Index#class_to_gem.size`, and the RBS class breakdown walks
-    # `class_decl_paths` (a frozen `Hash<String, String>` populated once per environment by the RBS loader;
+    # `class_decl_paths` (a frozen class-name to source-path table populated once per environment by the RBS loader;
     # ~1000-2000 entries × one `String#start_with?`).
     class RunStats
       attr_reader :wall_seconds,
@@ -112,7 +112,7 @@ module Rigor
       # misleading breakdown row.
       CACHED_SENTINEL = "<cached>"
 
-      # Computes `(project_sig, bundled)` counts from a frozen `Hash<class_name => source_path>` snapshot and
+      # Computes `(project_sig, bundled)` counts from a frozen class-name to source-path snapshot and
       # the configured `signature_paths`. `project_sig` is the count of classes whose source path begins
       # with any of the signature path prefixes (after expansion to absolute paths); `bundled` is the
       # remainder.

@@ -18,7 +18,7 @@ module Rigor
     # that happens to have been produced optimistically.
     #
     # Issue #286: the `if` / `unless` branch elision is one consumer of `Narrowing.predicate_certainty`; the
-    # other two are `flow.always-truthy-condition` and the `&&` / `||` `constant_value_polarity` gate, and the
+    # other two are `flow.always-truthy-condition` and `StatementEvaluator#right_operand_dead?`, and the
     # spec passage above binds all three. This channel is what lets a certainty judgment tell the two apart.
     #
     # Issue #313: the mark is attached to a *value* — the call node that produced it, or the local / ivar it

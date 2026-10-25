@@ -87,11 +87,8 @@ module Rigor
         @protocol_contracts || manifest.protocol_contracts
       end
 
-      # ADR-37 — per-class-node validation over the engine-owned walk. Each `Prism::ClassNode` is checked
-      # against every contract independently, so the plugin no longer ships its own `class_nodes`
-      # traversal; `ActionChecker#check_class` keeps the per-class contract logic. (A per-class contract
-      # check is exactly what `node_rule` is for — the return type is void, so no `scope` query is
-      # needed.)
+      # ADR-37 — per-class-node validation over the engine-owned walk; `ActionChecker#check_class` holds the
+      # per-class contract logic. The return type is void, so no `scope` query is needed.
       node_rule Prism::ClassNode do |node, _scope, path|
         contracts = protocol_contracts
         next [] if contracts.empty?

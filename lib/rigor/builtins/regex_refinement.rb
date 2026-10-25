@@ -8,13 +8,11 @@ module Rigor
     # carriers Rigor already ships (`decimal-int-string`, `hex-int-string`,
     # `octal-int-string`, `lowercase-string`, `uppercase-string`, `numeric-string`). See
     # `docs/type-specification/imported-built-in-types.md` for the registry the refinements
-    # come from and `docs/ROADMAP.md` § "v0.1.1 — Planned" Track 1 slice 1 for the binding
-    # scope of this recogniser.
+    # come from.
     #
-    # The intended consumer is `Inference::Narrowing.analyse_match_write`: given `if
-    # /(?<year>\d+)/ =~ str; year; end`, the v0.1.0 baseline narrows `year` to plain `String`;
-    # v0.1.1 introspects the regex source and narrows further to `decimal-int-string`
-    # whenever the named-capture body matches one of the rows in {RULES}.
+    # The consumer is `Inference::Narrowing.analyse_match_write`: given `if /(?<year>\d+)/ =~ str;
+    # year; end`, `year` narrows to `decimal-int-string` when the named-capture body matches a row
+    # in {RULES}, and stays plain `String` otherwise.
     #
     # Recognised body shapes (each row admits the `+` quantifier and the bounded `{n}` /
     # `{n,m}` forms with `n >= 1`):

@@ -83,7 +83,6 @@ module Rigor
           end.to_h
         end
 
-        # Every implicit-self `render` call node under `node`, at any depth.
         def each_render(node, &)
           return unless node.is_a?(Prism::Node)
 

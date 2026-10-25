@@ -20,10 +20,8 @@ module Rigor
         @project_context = project_context
       end
 
-      # @param positions — LSP `Position[]` — each
-      #   `{ line:, character: }` 0-based.
-      # @return one `SelectionRange` per
-      #   position, or nil when the URI / buffer isn't resolvable.
+      # @param positions — LSP positions, each `{ line:, character: }` 0-based.
+      # @return one `SelectionRange` per position, or nil when the URI / buffer isn't resolvable.
       def provide(uri, positions)
         path, entry = buffer_for(uri)
         return nil if entry.nil?

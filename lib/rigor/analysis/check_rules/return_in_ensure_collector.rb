@@ -55,8 +55,7 @@ module Rigor
           collect_ensure_returns(begin_node)
         end
 
-        # Returns `Array<{return_node:}>` — one entry per offending `return`, frozen the same way
-        # `#collect` returns it.
+        # One `{return_node:}` entry per offending `return`, frozen the same way `#collect` returns them.
         def results
           @results.freeze
         end

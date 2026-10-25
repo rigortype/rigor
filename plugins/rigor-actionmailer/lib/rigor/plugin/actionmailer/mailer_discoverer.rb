@@ -19,9 +19,9 @@ module Rigor
       # - Reads the instance-side `def` nodes and records each one as an action method, capturing the
       #   arity envelope.
       # - For each (class, action) pair, attempts to read every candidate view template under
-      #   `app/views/<mailer_underscore>/<action>.{html,text}.erb`. Existing templates feed the
+      #   `app/views/<mailer_underscore>/<action>.{html,text}.{erb,haml,slim}`. Existing templates feed the
       #   IoBoundary's cache descriptor (so the cache invalidates when the template changes); missing
-      #   templates are recorded so the plugin can surface a diagnostic on the mailer class definition.
+      #   templates are recorded so the plugin can surface a diagnostic on the action's `def`.
       #
       # Limitations (intentional for v0.1.0):
       #
@@ -30,9 +30,6 @@ module Rigor
       # - Action methods are read from the syntactic instance-side `def` list. Methods built via
       #   `define_method`, `private`, or non-action helpers (e.g. methods starting with `_`) are out of
       #   scope. The discoverer filters obvious non-actions (`initialize`, names prefixed with `_`).
-      # - Adding a brand-new view file under `app/views/<mailer>/` will NOT invalidate the cached index
-      #   until something the mailer file touches changes. This is the standard read-tracking trade-off
-      #   — only files we successfully read get digested into the descriptor.
       class MailerDiscoverer
         DEFAULT_VIEWS_ROOT = "app/views"
         VIEW_FORMATS = %w[html text].freeze
@@ -56,7 +53,7 @@ module Rigor
           # Two-pass: first collect every module's defs (for the include-following step), then build
           # per-class entries that pull in actions from include'd modules. GitLab's `Notify` mailer
           # derives every action from `Emails::*` concerns under `app/mailers/emails/`.
-          module_actions = {} # module_fqn => Hash<Symbol, ActionEntry>
+          module_actions = {} # fully-qualified module name => its action entries, keyed by method name
           class_visits = []   # collected (class_name, path, def_nodes, includes)
 
           ruby_files_under(@search_paths).each do |path|

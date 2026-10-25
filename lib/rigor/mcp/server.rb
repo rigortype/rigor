@@ -165,7 +165,7 @@ module Rigor
         id = request["id"]
         method_name = request["method"]
 
-        # Notifications carry no `id` and require no response.
+        # A notification carries no `id` and requires no response.
         return nil if id.nil?
 
         case method_name

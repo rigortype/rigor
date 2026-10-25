@@ -1170,7 +1170,7 @@ module Rigor
           end
         end
 
-        # The directive heads a refinement {MemberConsistency.refinement_conflicts} checks, used to skip
+        # The directive heads a refinement {MemberConsistency::Comparator#refinement_conflicts} checks, used to skip
         # parsing an inline source that carries none when no `.rbs` overlaps it. Narrower than `rigor:v1:` on
         # purpose: rbs-inline's output marks every skeleton `%a{rigor:v1:inferred-return}`, so that prefix is
         # in nearly every synthesized source.
@@ -1645,7 +1645,7 @@ module Rigor
       #   `RbsEnvironment`, `RbsKnownClassNames`, `RbsConstantTable`, `RbsClassAncestorTable`, and
       #   `RbsClassTypeParamNames` producers. Pass `nil` (the default) to skip caching; the runner threads
       #   its own Store through here when enabled.
-      # @param virtual_rbs — >] ADR-32 WD4 — `[virtual_filename, rbs_source]` pairs
+      # @param virtual_rbs — ADR-32 WD4 — `[virtual_filename, rbs_source]` pairs
       #   synthesised from project source by a plugin's `Manifest#source_rbs_synthesizer`. Merged into the
       #   env after `signature_paths:` and the vendored stubs. Pass `[]` (the default) when no
       #   synthesizer-emitting plugin is loaded.
@@ -2230,7 +2230,7 @@ module Rigor
       end
 
       # Yields every type-alias declaration loaded into the environment (`type foo = ...`).
-      # Yields `(RBS::TypeName, RBS::Environment::TypeAliasEntry)` pairs.
+      # Yields `[type_name, decl_entry]` pairs.
       def each_type_alias_decl
         return enum_for(:each_type_alias_decl) unless block_given?
         return unless env
@@ -2288,7 +2288,7 @@ module Rigor
         # fail-soft: see #each_class_decl_annotation.
       end
 
-      # Returns a frozen `Hash<String, String>` mapping each loaded class / module name (top-level prefixed)
+      # Returns a frozen mapping from each loaded class / module name (top-level prefixed)
       # to the file path of its FIRST declaration's RBS source. Used by {Rigor::Analysis::RunStats} to
       # attribute the type universe between "project sig/" (paths under the configured `signature_paths`)
       # and "bundled" (everything else — RBS core, stdlib libraries, gem-bundled RBS). Each value is a frozen
@@ -2509,7 +2509,7 @@ module Rigor
       # singleton methods (e.g., `Array.new`) parameterize over the same `Elem` as instance methods.
       #
       # Returns an empty array for non-generic classes and for unknown names (the loader stays fail-soft).
-      # NOTE: in the `rbs` gem, `RBS::Definition#type_params` returns `Array<Symbol>` directly, not the AST
+      # NOTE: in the `rbs` gem, `RBS::Definition#type_params` returns the names directly, not the AST
       # `TypeParam` object (those live on the AST level).
       #
       # When `cache_store` is set, the loader fetches the entire type-parameter-name table once (per
@@ -2811,7 +2811,7 @@ module Rigor
         producer.send(:compute, self)
       end
 
-      # ADR-15 Phase 2b — `Hash<String, Array<String>>` of normalised ancestor chains per class. Consumes
+      # ADR-15 Phase 2b — the normalised ancestor chain of each class. Consumes
       # the existing `RbsClassAncestorTable` producer when `cache_store` is set; falls back to the
       # producer's `compute` otherwise. Used by {#reflection}.
       def ancestor_names_table
@@ -2966,7 +2966,7 @@ module Rigor
         Cache::RbsEnvironment.fetch(loader: self, store: cache_store)
       end
 
-      # Full `Hash<String, RBS::Definition>` tables for the {#prewarm} / {#reflection} consumers (ADR-15
+      # Full tables of `RBS::Definition` per class for the {#prewarm} / {#reflection} consumers (ADR-15
       # Phase 2b/4b.x), which need every definition materialised up front. Built from the (cached) env via
       # `RBS::DefinitionBuilder` — ADR-54 WD1 retired the disk blobs these used to `Marshal.load` (building
       # all definitions from a cached env is faster), so the eager-table cost is now a compute, not a load.
@@ -3214,7 +3214,7 @@ module Rigor
       end
 
       # The third twin of {#warn_about_quarantined_signatures} / {#warn_about_virtual_rbs_collisions}: name,
-      # once per class per PROCESS, a `RBS::DefinitionBuilder` failure caught in
+      # once per class per loader, a `RBS::DefinitionBuilder` failure caught in
       # {#build_instance_definition} / {#build_singleton_definition}'s rescue. Without it, `class_known?`
       # stays true (it only consults {#known_class_names_set}, never a definition build), so every call on
       # the class — real methods and typos alike — silently degrades to `Dynamic[top]`.

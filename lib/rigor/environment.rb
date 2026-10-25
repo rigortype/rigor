@@ -39,7 +39,7 @@ module Rigor
     DEFAULT_PROJECT_SIG_DIR = "sig"
     private_constant :DEFAULT_PROJECT_SIG_DIR
 
-    # `DEFAULT_LIBRARIES` is defined in the light `environment/default_libraries.rb` (required below) so the
+    # `DEFAULT_LIBRARIES` is defined in the light `environment/default_libraries.rb` (required above) so the
     # ADR-87 WD4 boot-slimming probe can read it without loading the inference engine.
 
     # ADR-72 — a Gemfile.lock gem name mapped to the opt-in plugin id that ships the SAME core-ext RBS. When
@@ -265,8 +265,8 @@ module Rigor
       #   `nil` (the default), the canonical project layout `<root>/sig` is used if it exists, otherwise no
       #   signature path is loaded.
       # @param cache_store — persistent cache threaded into the underlying
-      #   {Environment::RbsLoader} so constant lookups (and, in later v0.0.9 slices, other reflection
-      #   artefacts) consult the cache. Pass `nil` (the default) to skip caching for this environment.
+      #   {Environment::RbsLoader} so constant lookups consult the cache. Pass `nil` (the default) to skip
+      #   caching for this environment.
       # rubocop:disable-next Metrics/MethodLength, Metrics/ParameterLists
       def for_project(root: Dir.pwd, libraries: [], signature_paths: nil, cache_store: nil, # rubocop:disable Metrics/AbcSize
                       plugin_registry: nil, dependency_source_index: nil,
@@ -492,7 +492,7 @@ module Rigor
       end
 
       # ADR-72 — resolve the bundled RBS overlay directories to load for this project. A gem is eligible when
-      # it is classified `:missing` (see {missing_rbs_gem_rows}) and its conflicting opt-in plugin twin (if
+      # it is classified `:missing` (see {missing_rows}) and its conflicting opt-in plugin twin (if
       # any) is NOT already reachable. Returns `[Pathname]`, deterministically ordered, or `[]` when no
       # eligible gem.
       #

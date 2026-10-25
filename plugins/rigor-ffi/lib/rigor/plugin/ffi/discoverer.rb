@@ -149,7 +149,6 @@ module Rigor
               end
             end
           when :callback
-            # Issue 4 fix: extract callback definitions
             args = node.arguments&.arguments || []
             if args.size >= 3
               cb_name = Analyzer.extract_symbol(args[0])
@@ -193,7 +192,6 @@ module Rigor
               end
             end
           else
-            # Issue 5 fix: pass mod_name to sub-plugin recognizers
             FFI.binding_recognizers.each do |recognizer|
               facts = recognizer.recognize(node, mod_name)
               Array(facts).each do |fact|

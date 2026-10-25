@@ -35,7 +35,7 @@ module Rigor
       attr_reader :pairs, :required_keys, :optional_keys, :read_only_keys, :extra_keys
 
       # @param pairs — ordered map of
-      #   keys to declared types. Keys MUST be Symbol or String;
+      #   keys to declared types. Keys MUST be one of ALLOWED_KEY_CLASSES;
       #   values MUST be Rigor::Type instances. The hash is duped and
       #   frozen at construction; callers MUST NOT mutate the input
       #   afterwards (mutation does not affect the carrier, but the

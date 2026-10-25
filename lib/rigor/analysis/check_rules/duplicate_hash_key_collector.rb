@@ -36,8 +36,8 @@ module Rigor
         # a Hash literal, loops and blocks included.
         NODE_CLASSES = [Prism::HashNode, Prism::KeywordHashNode].freeze
 
-        # Returns `Array<{hash_node:, key_node:, first_key_node:, key_label:}>` — one entry per LATER
-        # occurrence of a repeated literal key (`key_node` is the repeat the diagnostic points at;
+        # One entry per LATER occurrence of a repeated literal key, carrying `hash_node`, `key_node`,
+        # `first_key_node` and `key_label` (`key_node` is the repeat the diagnostic points at;
         # `first_key_node` is the earliest occurrence its message references). Empty when the tree has no
         # qualifying duplicates.
         def initialize(scope_index)

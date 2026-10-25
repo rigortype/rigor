@@ -35,8 +35,8 @@ module Rigor
         # exactly like the legacy walk.
         NODE_CLASSES = [Prism::DefNode].freeze
 
-        # Returns `Array<{def_class:, def_name:, write_node:}>` — one entry per dead-assignment write. Empty
-        # when the tree has no qualifying writes.
+        # One entry per dead-assignment write, as `{def_node:, write_node:}`. Empty when the tree has no
+        # qualifying writes.
         def initialize(scope_index)
           @scope_index = scope_index
           @results = []

@@ -17,8 +17,8 @@ module Rigor
       #
       #   assert_kind_of(T, x)        →  narrow x to T
       #   assert_instance_of(T, x)    →  narrow x to T
-      #   assert_nil(x)               →  narrow x to Constant<nil>
-      #   assert_equal(literal, x)    →  meet x with Constant<literal> (see "Equality is not identity")
+      #   assert_nil(x)               →  narrow x to nil
+      #   assert_equal(literal, x)    →  meet x with the literal (see "Equality is not identity")
       #   assert_match(regex, x)      →  narrow x to String
       #
       # ### (2) Minitest / Test::Unit `refute_*` / `assert_not_*` (negative) ###
@@ -26,7 +26,7 @@ module Rigor
       #   refute_kind_of(T, x)        →  narrow x AWAY from T
       #   refute_instance_of(T, x)    →  narrow x AWAY from T
       #   refute_nil(x)               →  narrow x AWAY from nil
-      #   refute_equal(literal, x)    →  negative Constant<literal> fact (the engine keeps x unchanged)
+      #   refute_equal(literal, x)    →  negative fact on the literal (the engine keeps x unchanged)
       #
       # Test::Unit's `assert_not_nil(x)` / `assert_not_equal(...)` / `assert_not_kind_of(...)` /
       # `assert_not_instance_of(...)` share the recognizer with `refute_*` (they're aliases).
@@ -35,8 +35,8 @@ module Rigor
       #
       #   _(x).must_be_kind_of(T)     →  narrow x to T
       #   _(x).must_be_instance_of(T) →  narrow x to T
-      #   _(x).must_be_nil            →  narrow x to Constant<nil>
-      #   _(x).must_equal(literal)    →  meet x with Constant<literal> (see "Equality is not identity")
+      #   _(x).must_be_nil            →  narrow x to nil
+      #   _(x).must_equal(literal)    →  meet x with the literal (see "Equality is not identity")
       #   _(x).must_match(regex)      →  narrow x to String
       #
       # The legacy bare `x.must_be_kind_of(T)` form (Minitest < 6.0 monkey-patched onto Object) is
@@ -48,7 +48,7 @@ module Rigor
       #
       #   _(x).wont_be_kind_of(T)     →  narrow x AWAY from T
       #   _(x).wont_be_nil            →  narrow x AWAY from nil
-      #   _(x).wont_equal(literal)    →  negative Constant<literal> fact (the engine keeps x unchanged)
+      #   _(x).wont_equal(literal)    →  negative fact on the literal (the engine keeps x unchanged)
       #
       # ## Equality is not identity
       #

@@ -33,10 +33,9 @@ module Rigor
         # `Coercible::*` (everything-to-target coercion), `Strict::*` (no coercion; raise if mismatch),
         # `Params::*` (HTTP / query-string-style coercion, used by Hanami / Roda / dry-web in request
         # handling), `JSON::*` (JSON-shape coercion). Each category exposes the same set of names as the
-        # canonical shortcuts above, plus a few additions that are category-specific (`Params::Nil`,
-        # `JSON::Symbol`). For Rigor's purposes the underlying class is the same regardless of category —
-        # coercion semantics are a runtime concern. We register every `<module>::<Category>::<Name>`
-        # mapping the upstream gem publishes so call-site references work uniformly.
+        # canonical shortcuts above; only those names are registered here, so a category-specific extra
+        # is not covered. For Rigor's purposes the underlying class is the same regardless of category —
+        # coercion semantics are a runtime concern.
         NESTED_CATEGORIES = %w[Coercible Strict Params JSON].freeze
         private_constant :NESTED_CATEGORIES
 
@@ -229,8 +228,8 @@ module Rigor
 
         # `include Dry.Types()` at the top of the module body is the canonical alias declaration. We
         # accept the call anywhere in the body (some projects guard it with a `if defined?` check). The
-        # argument list must be empty (or a kwargs-only `default: :nominal` style accepted by upstream;
-        # we treat both as "alias-installing").
+        # `Dry.Types(...)` argument list is not inspected: kwargs such as `default: :nominal` install the
+        # aliases too.
         def contains_dry_types_include?(body)
           return false if body.nil?
 

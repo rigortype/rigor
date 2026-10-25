@@ -95,11 +95,10 @@ module Rigor
     # may type in a later round once its own argument resolves). Unresolved call sites do not
     # contribute.
     #
-    # What it does NOT do yet (deferred — the check-wiring slice): feeding the table into the
-    # `check` walk (only `coverage --protection` consumes it today), keyword / optional / rest
-    # / block parameters, inherited-method receivers, top-level helpers, and a rigorous
-    # closed-call-site-set proof (the union is optimistic over resolved sites — acceptable
-    # because the only consumer is the protection metric, which runs no diagnostics).
+    # What it does NOT do yet: typing keyword / optional / rest / block parameters themselves,
+    # inherited-method receivers, top-level helpers, and a rigorous closed-call-site-set proof
+    # (the union is optimistic over resolved sites; the `check` walk tolerates that because an
+    # inferred parameter is only a lower bound, which the in-body rules decline on, WD6b).
     class ParameterInferenceCollector
       EMPTY = {}.freeze
 
@@ -120,7 +119,7 @@ module Rigor
       # @param files — project `.rb` paths to scan for call sites.
       # @param target_ruby — Prism parse target.
       # @param max_rounds — the WD5 fixpoint cap (1 = single-level).
-      # @return => Hash{Symbol => Rigor::Type}}] frozen.
+      # @return the inferred parameter table, frozen.
       def self.collect(files:, environment:, target_ruby: nil, max_rounds: DEFAULT_ROUNDS, workers: 0)
         new(files: files, environment: environment, target_ruby: target_ruby,
             max_rounds: max_rounds, workers: workers).collect

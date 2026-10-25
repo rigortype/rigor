@@ -15,7 +15,8 @@ module Rigor
     #
     # ADR-14 slice 2: the writer parses the target with `RBS::Parser` to find the matching class declaration and
     # inserts new method declarations just before the class's closing `end` keyword. Existing declarations are
-    # NEVER touched unless `--overwrite` is set AND the candidate's classification is `tighter-return`.
+    # NEVER touched unless `--overwrite` is set and the candidate is eligible for replacement (see
+    # {#eligible_for_replacement?}).
     #
     # The slice does NOT re-render the whole file through `RBS::Writer`. That would lose comments / blank-line
     # formatting per upstream design; the byte-range insertion approach taken here preserves untouched
@@ -69,10 +70,7 @@ module Rigor
         grouped.map { |target, group| write_target(target, group) }
       end
 
-      # @param candidates — only
-      #   emittable classifications (new-method /
-      #   tighter-return) are honoured; the caller is
-      #   responsible for filtering.
+      # @param candidates — only emittable classifications are honoured; `write` filters on `EMITTABLE` itself.
       def write(source_path, candidates)
         emittable = candidates.select { |c| EMITTABLE.include?(c.classification) }
         return WriteResult.new(source_path: source_path, target_path: nil, action: :noop) if emittable.empty?
@@ -160,7 +158,7 @@ module Rigor
         render_tree_nodes(tree, kinds, supers, 0)
       end
 
-      # Drains `class_shells` from every candidate; the generator's walker populates the same set on every
+      # Unions `class_shells` across every candidate; the generator's walker populates the same set on every
       # candidate produced from a given file (gap-#3 (e)).
       def collect_class_shells(candidates)
         shells = Set.new
@@ -669,7 +667,7 @@ module Rigor
       # name, slices out the old declaration's source range and substitutes the new RBS one-liner. Members that
       # are not `MethodDefinition`s are left alone.
       #
-      # Two candidate classifications are eligible for replacement under `--overwrite`:
+      # Under `--overwrite`, an inline overwrite is always eligible, and so are two other classifications:
       #
       # 1. `TIGHTER_RETURN` — the classifier already proved the new return type is a strict subtype of the
       #    declared one (with lenience guards passed).

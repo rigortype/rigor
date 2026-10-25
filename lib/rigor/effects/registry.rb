@@ -35,8 +35,8 @@ module Rigor
       # without proposing an unrelated label for a genuinely new spelling.
       SUGGESTION_DISTANCE_CAP = 2
 
-      # The shared registry as shipped. Memoised: the YAML parse is a once-per-process cost, and
-      # nothing consumes the registry yet, so it stays lazy rather than paying at `require "rigor"`.
+      # The shared registry as shipped. Memoised: the YAML parse is a once-per-process cost, so it stays
+      # lazy rather than paying at `require "rigor"`.
       def self.default
         @default ||= load_file(DATA_PATH)
       end

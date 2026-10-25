@@ -6,8 +6,7 @@ module Rigor
       # Per-run frozen index of discovered controllers AND concerns (modules) in
       # `controller_search_paths`. Phase 2 (filter-chain validation) consults the index at every call
       # site to check that `before_action :name` references a method that actually exists on the
-      # controller, its parent (one level of inheritance), or any module the controller or its ancestor
-      # chain transitively `include`s.
+      # controller, any ancestor, or any module the controller or an ancestor transitively `include`s.
       #
       # Real-world example (Mastodon):
       #   AccountsController < ApplicationController
@@ -169,9 +168,6 @@ module Rigor
         # and returning the first candidate that has an entry in the index. When nothing resolves,
         # return the original name unchanged — the caller treats unresolved entries as "gem-shipped
         # concerns we cannot see" (the `unresolved_include?` predicate).
-        #
-        # `name` may already be qualified (`Foo::Bar`); we only try lexical prefixing when the
-        # unqualified first segment doesn't match a top-level entry.
         def resolve_constant_lexically(name, enclosing)
           return nil if name.nil?
 

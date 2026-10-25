@@ -16,7 +16,7 @@ module Rigor
     # non-stores) vs memo-key normalization (collapse arg-granularity thrash — a signature whose distinct-key
     # count far exceeds its body-eval savings).
     #
-    # Three categories, one per guard site:
+    # The cutoff categories, one per guard site:
     #
     # - {RECURSION_GUARD} — `ExpressionTyper#infer_user_method_return` detected a `(receiver, method)` cycle
     #   and returned `Dynamic[top]` (the de-facto recursion-depth budget, effective depth 1).
@@ -27,6 +27,8 @@ module Rigor
     #   fuel and fell back to the plain `(receiver, method)` guard (in-cycle call → `Dynamic[top]`).
     # - {RECURSION_FIXPOINT_CAP} — the fixpoint return-summary iteration (ADR-55 slice 2) hit its 3-evaluation
     #   cap without converging and collapsed the summary to `untyped` (today's behaviour).
+    # - {BLOCK_WRITEBACK_CAP} — the block / loop write-back fixpoint ({BodyFixpoint.converge}) collapsed a
+    #   local that had not converged to `Dynamic[top]`.
     #
     # Enabled only when `RIGOR_BUDGET_TRACE` is set (to any non-empty value) in the environment, or via
     # {enable!} in tests. When disabled, {hit} is a single boolean check and returns immediately, so normal

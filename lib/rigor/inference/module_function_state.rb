@@ -342,7 +342,6 @@ module Rigor
         true
       end
 
-      # The prescan's call arm.
       def prescan_call(node, qualified_prefix, in_singleton_class, offsets, ranges)
         if bare?(node)
           offsets << [node.location.start_offset, :on]

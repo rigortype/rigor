@@ -138,11 +138,9 @@ module Rigor
           raise LoadError, "#{path}: ignored[#{index}] `message:` is not a valid Regexp: #{e.message}"
         end
 
-        # Returns Hash{[file, rule, regex_or_nil] => Array<Diagnostic>}.
-        # In message mode, each unique message gets its own bucket;
-        # in rule mode, every diagnostic for a (file, rule) pair
-        # contributes to a single bucket regardless of message.
-        # File paths are normalised to relative before keying.
+        # Groups diagnostics by [file, rule, regex_or_nil]. In message mode, each unique message gets its own
+        # bucket; in rule mode, every diagnostic for a (file, rule) pair contributes to a single bucket regardless
+        # of message. File paths are normalised to relative before keying.
         def group_for_baseline(diagnostics, match_mode, project_root)
           root = Pathname.new(project_root)
           diagnostics.each_with_object({}) do |diag, into|
@@ -181,11 +179,8 @@ module Rigor
       def initialize(buckets, project_root: Dir.pwd)
         @project_root = Pathname.new(project_root)
         @buckets = buckets.freeze
-        # For each (file, qualified_rule) pair, two arrays:
-        # - rule-ID rows (message_regex == nil)
-        # - message-pattern rows (message_regex != nil)
-        # The matcher walks message-pattern rows first (tighter match takes precedence); diagnostics that
-        # don't match any message row fall through to the rule-ID row if one exists.
+        # Buckets grouped by (file, rule). `claim_bucket_for` splits each group into message-pattern rows, tried
+        # first as the tighter match, and the rule-ID row (message_regex == nil) as the fallback.
         @by_pair = buckets.group_by { |b| [b.file, b.rule] }.freeze
         freeze
       end
@@ -225,7 +220,7 @@ module Rigor
       # - `:within`    — `actual <= count` (silenced by the filter).
       # - `:over`      — `actual > count` (over threshold; surfaced in the regular `rigor check` output).
       # - `:cleared`   — `actual == 0` (the bucket can be pruned).
-      # - `:reducible` — `0 < actual < count` (the bucket's count can be tightened; future `regenerate` slice 5
+      # - `:reducible` — `0 < actual < count` (the bucket's count can be tightened; `rigor baseline regenerate`
       #                  handles this).
       DriftRow = Struct.new(:bucket, :actual_count, :status, keyword_init: true) do
         def delta
@@ -254,8 +249,8 @@ module Rigor
         end
       end
 
-      # Returns a new Baseline with the given buckets dropped. Used by `rigor baseline prune` (slice 2) to
-      # remove cleared buckets (`actual == 0`) from the on-disk file.
+      # Returns a new Baseline with the given buckets dropped. Used by `rigor baseline prune` to remove cleared
+      # buckets (`actual == 0`) from the on-disk file.
       def without(buckets_to_drop)
         dropset = buckets_to_drop.to_set
         self.class.new(buckets.reject { |b| dropset.include?(b) }, project_root: @project_root)

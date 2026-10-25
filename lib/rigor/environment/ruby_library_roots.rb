@@ -28,7 +28,7 @@ module Rigor
     #
     # The directories are resolved at load time, on the main Ractor: `RbConfig::CONFIG` and `Gem.default_dir`
     # read non-shareable constants and raise `Ractor::IsolationError` inside a pool worker. The scan itself runs
-    # lazily (about 0.1 s), memoised per loader, and only for a class about to be reported.
+    # lazily (about 0.1 s), memoised per process, and only for a class about to be reported.
     module RubyLibraryRoots
       STDLIB_ROOT = begin
         ::RBS::Repository::DEFAULT_STDLIB_ROOT.to_s.dup.freeze

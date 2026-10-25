@@ -10,8 +10,9 @@ require_relative "serializer_index"
 module Rigor
   module Plugin
     class Typelizer < Rigor::Plugin::Base
-      # Reads every `.rb` file under the configured typelizer dirs and the project's `paths:` through the plugin's `IoBoundary`, runs a
-      # {SerializerCollector} over each and merges the results into one {SerializerIndex}.
+      # Reads every `.rb` file under the configured typelizer dirs and the project's `paths:` through the
+      # plugin's `IoBoundary`, runs a {SerializerCollector} over each and merges the results into one
+      # {SerializerIndex}.
       class SerializerDiscoverer
         def initialize(io_boundary:, dirs:, project_paths: [])
           @io_boundary = io_boundary

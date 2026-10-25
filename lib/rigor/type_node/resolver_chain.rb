@@ -16,7 +16,7 @@ module Rigor
     # resolver in the chain plus the built-in registry through the
     # same entry point.
     #
-    # Constructed once per `Analysis::Runner.run` from
+    # Built by `Environment#build_name_scope` from
     # `Plugin::Registry#type_node_resolvers`. The chain is
     # immutable and re-entrant; the parser may consult it many
     # times for the same node.

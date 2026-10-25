@@ -139,9 +139,9 @@ module Rigor
         unique.freeze
       end
 
-      # `fact.target` is `Target | Array[Target]` per the carrier contract. Branching with an early return on
-      # the `Array` arm lets type narrowing collapse the post-return value to the bare `Target` case, so the
-      # wrapped tuple is `[Target]` and the union of return paths is exactly `Array[Target]`.
+      # `fact.target` is a Target or an Array of them, per the carrier contract. The early return on the Array arm
+      # lets type narrowing collapse the post-return value to the bare Target case, so the wrapped one-element
+      # Array is what the return paths join into.
       def fact_targets(fact)
         target = fact.target
         return target if target.is_a?(Array)

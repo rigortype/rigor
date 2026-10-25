@@ -245,8 +245,8 @@ module Rigor
       end
 
       # `literal-string` — a `String` that is statically known to come from a source-code literal (or a
-      # composition of literals). v0.0.9 tracks this flow through interpolation `"#{...}"`, leaving
-      # propagation through `+` / `<<` to a later slice. Every `Constant<String>` is implicitly
+      # composition of literals). Interpolation `"#{...}"` and `+` / `*` composition keep
+      # the flow (see {literal_string_compatible?}). Every `Constant<String>` is implicitly
       # literal-string-compatible; the carrier exists for cases where the concrete value is unknown but
       # literal-ness has been established (an RBS::Extended `return: literal-string` annotation, or
       # interpolation over literal-bearing parts).
@@ -433,8 +433,7 @@ module Rigor
       # - `Type::Tuple[A, B, C]` → `Constant<0> | Constant<1> | Constant<2>`.
       # - `Type::Nominal["Hash", [K, V]]` → `K` (untyped if absent).
       # - `Type::Nominal["Array", [E]]` → `non-negative-int`.
-      # - `Type::Constant` whose value is a Hash / Array / Range — project through the literal's
-      #   per-element keys.
+      # - `Type::Constant` wrapping a Range with an Integer begin — `non-negative-int`.
       #
       # Other inputs (`Top`, `Dynamic`, untyped Nominals, `Union`, `Refined`, `Difference`,
       # `Intersection`) project to `top` so the type function always returns a value — callers may narrow
@@ -456,8 +455,7 @@ module Rigor
       # - `Type::Tuple[A, B, C]` → `A | B | C`.
       # - `Type::Nominal["Hash", [K, V]]` → `V` (untyped if absent).
       # - `Type::Nominal["Array", [E]]` → `E` (untyped if absent).
-      # - `Type::Constant` whose value is a Hash / Array / Range — union of `Constant<…>` for each
-      #   element.
+      # - `Type::Constant` wrapping an integer Range — the `IntegerRange` it spans.
       def value_of(type)
         case type
         when HashShape then hash_shape_values(type)
@@ -528,8 +526,7 @@ module Rigor
       # Phase A handles `Type::HashShape` (literal-key K). Phase B (slice 5) extends to `Type::Tuple`
       # (integer-index K) — `pick_of[Tuple[A, B, C], 0 | 2]` evaluates to `Tuple[A, C]`. Non-shape inputs
       # (`Type::Nominal`, etc.) return `type` unchanged ("lossy degradation"; the
-      # `dynamic.shape.lossy-projection` diagnostic that flags the boundary lands when caller-side
-      # diagnostic threading arrives).
+      # `dynamic.shape.lossy-projection` diagnostic that flags the boundary).
       def pick_of(type, keys)
         case type
         when HashShape then hash_shape_pick(type, keys)
@@ -597,8 +594,7 @@ module Rigor
       # site where the projection was authored.
       #
       # `HashShape` and `Tuple` carry shape-level information the projections honour; every other carrier
-      # is lossy. Slice 5b wires diagnostic emission through `RbsExtended` / parser callers; this
-      # predicate stands alone in slice 5 for unit-test coverage and future composition.
+      # is lossy.
       def shape_projection_lossy?(type)
         !type.is_a?(HashShape) && !type.is_a?(Tuple)
       end
@@ -792,9 +788,9 @@ module Rigor
           top
         end
 
-        # `Type::Constant` only carries scalar literals (Integer / Float / String / Symbol / Range /
-        # Rational / Complex / true / false / nil); Array and Hash literals become Tuple / HashShape
-        # carriers earlier in the typer. Range is the only scalar with meaningful key/value projections.
+        # `Type::Constant` only carries scalar literals (`Constant::SCALAR_CLASSES`); Array and Hash literals
+        # become Tuple / HashShape carriers earlier in the typer. Range is the only scalar with meaningful
+        # key/value projections.
         def constant_keys(value)
           return non_negative_int if value.is_a?(Range) && value.begin.is_a?(Integer)
 

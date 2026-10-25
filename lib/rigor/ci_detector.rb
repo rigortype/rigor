@@ -20,7 +20,7 @@ module Rigor
   # non-CLI consumers exist: {Configuration#cache_validation_strict?} resolves the `auto` cache-validation default
   # through it (a fresh CI checkout regenerates every stat tuple, so ADR-87's stat tier cannot work there).
   # Detection is fully testable; callers pass `ENV`.
-  # `RIGOR_CI_DETECT=0` (or `false`/`no`) disables it globally — the seam the spec suite uses for determinism.
+  # `RIGOR_CI_DETECT=0` (or `false`/`no`/`off`) disables it globally — the seam the spec suite uses for determinism.
   module CiDetector
     Platform = Struct.new(:id, :name, :format, :tier, keyword_init: true) do
       def native_stdout? = tier == :native_stdout

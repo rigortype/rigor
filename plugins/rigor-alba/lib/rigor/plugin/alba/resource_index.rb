@@ -37,9 +37,9 @@ module Rigor
           @classes.empty?
         end
 
-        # The classes alba infers for the associations that name no resource, limited to
-        #   those that exist in the project. The block receives each association name and returns alba's
-        #   `classify` of it (the caller owns the inflector; ADR-39).
+        # The classes alba infers for the associations that name no resource, limited to those that exist in
+        # the project. The block receives each association name and returns alba's `classify` of it (the
+        # caller owns the inflector; ADR-39).
         def inferred_roots(&classify)
           roots = @associations.filter_map do |association|
             next unless resource?(association.owner)

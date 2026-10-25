@@ -272,13 +272,10 @@ module Rigor
         end
       end
 
-      # A gem that registers more than one plugin is a meta-gem only when NONE of the ids is its own. The
-      # FFI family (`rigor-sassc`, `rigor-ethon`, `rigor-ffi-rzmq`, `rigor-rbnacl`) each `require "rigor-ffi"`
-      # for the shared binding analyzer, so listing one of them ALONE registered two plugins — its own and
-      # `ffi` — and the meta-gem branch rejected the entry, telling the user to list `rigor-ffi` instead,
-      # which activates the wrong plugin. The failure was load-order dependent (listing `rigor-ffi` first
-      # made the nested require a no-op and the entry loaded), so it never showed up in the suite, where
-      # some earlier example has always loaded `rigor-ffi`.
+      # A gem that registers several plugins is a meta-gem only when NONE of the ids is its own. The FFI family
+      # (`rigor-sassc`, `rigor-ethon`, `rigor-ffi-rzmq`, `rigor-rbnacl`) each `require "rigor-ffi"`, so listing
+      # one alone registered `ffi` too and was wrongly rejected as a meta-gem. The bug was load-order dependent
+      # and hid in the suite, where an earlier example always loaded `rigor-ffi`.
       #
       # `rigor-rails` stays a meta-gem under this rule: it registers eight ids and none of them is `rails`.
       def own_id_among(gem_name, ids)

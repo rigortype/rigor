@@ -115,7 +115,7 @@ module Rigor
         # 3. Inflected from the factory name — `:user` → `"User"`, `:admin_user` → `"AdminUser"`. The
         #    factory name is already singular by FactoryBot convention, so we only need camelization.
         #
-        # Returns a String (the canonical class name).
+        # Returns the canonical class name.
         def factory_model_class(call_node, factory_name)
           explicit = explicit_class_option(call_node)
           return explicit if explicit

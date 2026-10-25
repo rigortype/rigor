@@ -107,8 +107,9 @@ module Rigor
       # difference is worth stating because the two look like the same problem. There, a stale
       # `bundler/gems/` directory left behind by a gem that moved to a released version made the loader
       # load the WRONG SIGNATURES, collapsing the RBS environment. Here the index's whole output is a gem
-      # NAME, so reading a stale checkout of the same gem yields the same answer; and the rubygems lookup
-      # is consulted FIRST in {.build}, so a gem now installed from RubyGems never reaches this map at all.
+      # NAME, so reading a stale checkout of the same gem yields the same answer; and the RubyGems-layout
+      # bundle directory is consulted FIRST in {.build}, so a gem installed from RubyGems at its locked
+      # version never reaches this map.
       def git_gem_dirs(bundle_path)
         return {} if bundle_path.nil?
 

@@ -267,8 +267,7 @@ module Rigor
 
       # textDocument/hover REQUEST. Slice 5 returns either a `Hover` payload (markdown contents wrapping type
       # + erased-RBS info) or nil when no expression is at the queried position. Nil maps to `result: null`
-      # per LSP spec; clients suppress the popup. Returns `MethodNotFound` when no hover_provider is wired
-      # (slice 1-4 behaviour).
+      # per LSP spec; clients suppress the popup. Returns `MethodNotFound` when no hover_provider is wired.
       def handle_hover(params)
         return method_not_found("textDocument/hover") unless @hover_provider
 
@@ -351,7 +350,7 @@ module Rigor
         )
       end
 
-      # textDocument/documentSymbol REQUEST. Returns the `DocumentSymbol[]` outline for the buffer at the
+      # textDocument/documentSymbol REQUEST. Returns the document-symbol outline for the buffer at the
       # requested URI. Returns `MethodNotFound` when no provider is wired.
       def handle_document_symbol(params)
         return method_not_found("textDocument/documentSymbol") unless @document_symbol_provider

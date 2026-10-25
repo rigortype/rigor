@@ -12,7 +12,7 @@ module Rigor
     #
     # `Rigor::Inference::MultiTargetBinder` decomposes a tuple- or array-shaped right-hand side type
     # against a Prism multi-target tree and produces a `name -> Rigor::Type` binding map. The
-    # binder is shared between four surfaces:
+    # binder is shared between five surfaces:
     #
     # 1. `Rigor::Inference::StatementEvaluator#eval_multi_write` for the statement-level `a, b =
     #    rhs` form (`Prism::MultiWriteNode`).

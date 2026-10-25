@@ -31,11 +31,10 @@ module Rigor
       #   behaviour: it always raises). This lets the engine's existing flow analysis treat code after
       #   `T.absurd` as unreachable, matching what users of Sorbet expect.
       # - When the branch is REACHABLE (the discriminant's type isn't `bot`), the recogniser also records
-      #   the call node in a per-plugin set. The plugin's `diagnostics_for_file` later walks the AST for
-      #   `T.absurd` calls and emits a `plugin.sorbet.absurd-reachable` warning at every call_node whose
-      #   object identity matches the recorded set. We rely on the runner only parsing each file once per
-      #   run, so the same Prism node object is seen in both the `dynamic_return` rule and
-      #   `diagnostics_for_file`.
+      #   the call node in a per-plugin set. The plugin's node rule later emits a
+      #   `plugin.sorbet.absurd-reachable` warning for each recorded call node, matched by object identity.
+      #   We rely on the runner only parsing each file once per run, so the same Prism node object is seen
+      #   in both the `dynamic_return` rule and the node rule.
       module AbsurdRecognizer
         # @return true when `call_node` is `T.absurd(x)`.
         def self.absurd_call?(call_node)

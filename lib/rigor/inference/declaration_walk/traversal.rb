@@ -235,7 +235,7 @@ module Rigor
         # A subset of a multi-collector run that its nodes keep asking for, built the first time and reused:
         # each collector alone (a pair in which one declines), the run without each collector (a larger run in
         # which one declines), and the run split by `factory_block` and `lexical_prefix` variant where it mixes
-        # them. `key` is a Symbol for a split, or `[kind, collector]` for the other two.
+        # them. `kind` names the table; `key` is the collector, or the rule's Symbol for a split.
         def subset(kind, collector = nil)
           table = (@subsets[kind] ||= {}.compare_by_identity)
           key = collector || kind

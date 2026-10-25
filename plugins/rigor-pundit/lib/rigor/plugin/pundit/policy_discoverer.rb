@@ -10,7 +10,8 @@ module Rigor
   module Plugin
     class Pundit < Rigor::Plugin::Base
       # Walks the configured policy-search paths via the plugin's `IoBoundary`, parses each `.rb` file with
-      # Prism, and collects classes whose immediate superclass is one of the configured base classes.
+      # Prism, and collects classes whose immediate superclass is one of the configured base classes and
+      # whose name ends in `Policy`.
       #
       # For each discovered policy class, the discoverer collects every instance-side `def name?` predicate
       # method. Non-predicate methods (`initialize`, `resolve`, helper methods) are ignored — Pundit's

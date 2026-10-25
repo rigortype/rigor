@@ -28,13 +28,12 @@ module Rigor
     # a flag threaded into `Scope`: an ADR-2 plugin-facing bypass of dependency recording would produce
     # a silently stale warm cache that no diagnostic diff can show.
     #
-    # There is deliberately NO memo here. The dispatch consumer this module is being extracted FOR does
-    # not exist yet, and a memo keyed on the tables this slice happens to name would be keyed on less
+    # There is deliberately NO memo here. A memo keyed on the tables the walk names would be keyed on less
     # than the walk reads — the ancestor chain resolves names through `known_user_class?`
     # (`discovered_def_nodes`, `discovered_methods`) and `ancestor_name_candidates`
     # (`discovered_header_nestings`). The chain itself is memoised per discovery index
-    # ({Scope::ResolutionChain}); the slice that brings the hot path brings this module's memo, keyed on
-    # what that consumer actually reads.
+    # ({Scope::ResolutionChain}); the dispatch callers in {MethodDispatcher::RbsDispatch} memoise their
+    # own answers, keyed on what they read.
     module ExternalAncestorResolution
       # The owner a name must PRECEDE for its declaration to win an MRO. See {declared_before_object?}.
       OBJECT_OWNER = "Object"

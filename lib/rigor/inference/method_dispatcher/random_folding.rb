@@ -20,7 +20,7 @@ module Rigor
       # (`Errno::EDOM`) and a non-literal argument decline to the RBS envelope. The other argument
       # shapes (`rand`, `rand(n)`, `rand(1.5)`) are deliberately NOT folded: the corpus uses them as its
       # "unknown Integer / Float" oracle, and their intervals belong to a change that replaces that
-      # oracle first. The `Kernel` spelling is folded by {KernelDispatch#try_rand} behind ADR-91's
+      # oracle first. The `Kernel` spelling is folded by {KernelDispatch.try_dispatch} behind ADR-91's
       # ownership gate; this module owns `Singleton[Random]` and the shared interval reading.
       module RandomFolding
         module_function

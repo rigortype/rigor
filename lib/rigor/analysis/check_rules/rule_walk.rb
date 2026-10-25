@@ -10,7 +10,7 @@ module Rigor
     module CheckRules
       # ADR-53 Track B — the engine-owned AST walk that hosts CheckRules' per-node collectors, so a file is
       # traversed once for all of them instead of once per collector (the ADR-52 WD4 model applied to the
-      # built-in rules; this walk and {Plugin::NodeRuleWalk} converge in slice B4).
+      # built-in rules; {Plugin::NodeRuleWalk} drives the same collectors, ADR-53 B4).
       #
       # The walk is a single visit-before-descend DFS over `compact_child_nodes`. It threads the union of the
       # context the hosted collectors need — the per-collector hand-rolled walks each tracked some subset of

@@ -287,17 +287,13 @@ module Rigor
         source_location.respond_to?(:start_line) ? source_location.start_line : nil
       end
 
-      # Issue #785 — routes a declined directive to the per-run reporter. The FIRST arm is the one that
-      # matters: the production reporter is {RbsExtended::Reporter}, whose surface is `record_unresolved` /
-      # `record_lossy_projection` / `record_hkt_error` — it has neither `#record` nor `#<<`, so before this
-      # arm existed every call here fell off the end of the `if` and every malformed HKT directive was
-      # dropped in every real run, while the doc comments claimed an `:info` entry was recorded. The
-      # position is flattened at record time through {RbsExtended::Reporter.position_of}, the one place
-      # every stream flattens through since #805, because the entry has to reach the pool drain channel as
-      # primitives (see {RbsExtended::Reporter}).
+      # Issue #785 — routes a declined directive to the per-run reporter. The first arm matters: the production
+      # {RbsExtended::Reporter} has `record_hkt_error` and neither `#record` nor `#<<`, so before this arm existed
+      # every malformed HKT directive was dropped in real runs. The position is flattened at record time through
+      # {RbsExtended::Reporter.position_of} (see {RbsExtended::Reporter} on why the entry carries primitives).
       #
-      # The `#record` / `#<<` arms stay for the collecting doubles the directive specs and plugin authors
-      # use, which is the contract `scan_rbs_loader`'s `@param reporter [#record, nil]` documents.
+      # The `#record` / `#<<` arms serve the collecting doubles the directive specs and plugin authors use; the
+      # contract is the one `scan_rbs_loader` documents for its `reporter` parameter.
       def record_hkt_error(reporter, message, source_location)
         return if reporter.nil?
 

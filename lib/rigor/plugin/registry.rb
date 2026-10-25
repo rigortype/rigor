@@ -214,7 +214,7 @@ module Rigor
     # tie-breaker.
     #
     # ADR-15 Phase 3 — alongside the instantiated `plugins`, the registry carries `blueprints`: a frozen,
-    # Ractor-shareable `Array<Blueprint>` that records how to re-instantiate the same plugin set in a worker
+    # Ractor-shareable list of {Blueprint} that records how to re-instantiate the same plugin set in a worker
     # Ractor. The eventual Phase 4 pool ships `blueprints` across the boundary and calls {.materialize}
     # per-Ractor; the live `plugins` carriage on the coordinator registry stays unchanged.
     class Registry
@@ -556,8 +556,8 @@ module Rigor
       # Issue #806 — {#safe_manifest} with a receipt. The construction-time aggregates degraded silently
       # when a manifest read raised, so a plugin that contributed nothing looked identical to a plugin that
       # was never asked; the load-error channel is where "a plugin could not be loaded" already lives, and
-      # `Analysis::Runner` turns each entry into one `plugin_loader.load-error` row naming the plugin. The
-      # plugin ref is the CLASS, not `manifest.id`: the manifest is the surface that just failed.
+      # `Analysis::Runner` turns each entry into one `load-error` row (source family `plugin_loader`) naming
+      # the plugin. The plugin ref is the CLASS, not `manifest.id`: the manifest is the surface that just failed.
       def guarded_manifest(plugin, errors)
         plugin.manifest
       rescue StandardError => e

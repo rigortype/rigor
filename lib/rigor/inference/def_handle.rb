@@ -8,7 +8,7 @@ module Rigor
     # file's methods: the file was never parsed this run, so there is no live node to store. A handle records
     # the four things needed to resolve, fingerprint, or scope it without the node:
     #
-    # - `path` + `node_id` — the resolution key. The per-run parse memo ({Scope#resolve_def_handle}) parses the
+    # - `path` + `node_id` — the resolution key. The per-run parse memo ({DefNodeResolver.resolve}) parses the
     #   file once and returns the `Prism::DefNode` whose `node_id` matches (Prism `node_id` is stable across
     #   repeated parses of identical bytes). `name` is the cross-check: a resolved node whose `name` differs
     #   from the handle's forces a fresh walk (bundle/source skew that the digest gate should make impossible —

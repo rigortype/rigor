@@ -190,11 +190,9 @@ module Rigor
         argument = duration_arithmetic_argument(call_node)
         next nil if argument.nil?
 
-        # The ARGUMENT is checked before the receiver: it is the cheaper of the two on the overwhelmingly
-        # common shapes (`i + 1`, `n * 2`), and a call with no Duration operand must cost as little as
-        # possible — this rule is consulted on every `+` / `-` / `*` in the project. The early exit is
-        # what makes the ordering worth anything: an argument that is no Duration operand at all
-        # (`"a" + b`, `list + other`) declines here and never types its receiver on this rule's behalf.
+        # The ARGUMENT is checked before the receiver: it is the cheaper test on the common shapes (`i + 1`,
+        # `n * 2`), and this rule is consulted on every `+` / `-` / `*`. An argument that is no Duration
+        # operand (`"a" + b`, `list + other`) declines here and never types its receiver on this rule's behalf.
         argument_kind = duration_operand_kind(scope&.type_of(argument))
         next nil if argument_kind.nil?
 

@@ -1100,7 +1100,6 @@ module Rigor
           conditions = when_node.respond_to?(:conditions) ? when_node.conditions : []
           body_scope, next_scope = Narrowing.case_when_scopes(node.predicate, conditions, clause_scope)
           certainty = case_when_branch_certainty(subject_type, when_node)
-          # :no — drop the branch
           candidates << case_arm_type(when_node, body_scope) unless certainty == :no
           if certainty == :yes
             reached_yes = true
@@ -1519,9 +1518,8 @@ module Rigor
 
       # Stable single-hop chain narrowing — `receiver.method` after an `is_a?` / `kind_of?` / `instance_of?`
       # predicate established the narrowing on the dominated edge. The call MUST be no-arg + no-block +
-      # rooted at a local-var / ivar read; everything else falls through to the standard dispatcher. ROADMAP
-      # § Future cycles — "Method-call receiver narrowing across stable receivers" — Law-of-Demeter-justified
-      # single-hop scope.
+      # rooted at a local-var / ivar read; everything else falls through to the standard dispatcher. The
+      # single hop is Law-of-Demeter-justified.
       def method_chain_narrowing_for(node)
         return nil unless node.is_a?(Prism::CallNode)
         return nil unless node.block.nil?
@@ -2388,14 +2386,12 @@ module Rigor
       #
       # - the receiver is not `Nominal[T]` for some T;
       # - no def_node is recorded for that class/method (the receiver is foreign or has only an RBS sig);
-      # - the def has no body, or has a parameter shape we cannot bind from the call's positional args;
-      # - the inference is already in progress for this (class, method, signature) tuple — recursion safety
-      #   net.
+      # - the def has no body, or has a parameter shape we cannot bind from the call's positional args.
       # v0.0.3 A — re-types a top-level (or DSL-block-nested) `def` discovered by `ScopeIndexer` under the
       # `TOP_LEVEL_DEF_KEY` sentinel. Mirrors the `infer_user_method_return` shape but uses the current
       # `scope.self_type` (or implicit `Object`) as the receiver carrier so the body's own self is
       # consistent with the call site's. Returns nil when the parameter shape disqualifies the def, when the
-      # body is empty, or when a recursion cycle is detected.
+      # body is empty, or when the inference raises.
       def infer_top_level_user_method(def_node, receiver, arg_types, block_type = nil)
         infer_user_method_return(def_node, receiver, arg_types, yield_type: block_type)
       rescue StandardError
@@ -2442,9 +2438,9 @@ module Rigor
 
       # True when `type` is a concrete value — a `Type::Constant` or a `Type::Tuple` whose elements are
       # (recursively) all value-pinned. ADR-55 slice 1: a value-pinned self-call result is adopted even
-      # inside a class/method body (where WD3 otherwise keeps non-`Bot` returns as `Dynamic[top]`). A
-      # concrete value at a call site is strictly more precise and can never enable an undefined-method or
-      # argument-type false positive — it is FP-neutral by construction.
+      # inside a class/method body (where WD3 otherwise keeps non-`Bot` returns as `Dynamic[top]`). A concrete
+      # value at a call site is strictly more precise and can never enable an undefined-method or argument-type
+      # false positive — it is FP-neutral by construction.
       def fully_value_pinned?(type)
         case type
         when Type::Constant then true
@@ -3898,7 +3894,7 @@ module Rigor
       # Consumes one unit from the thread-local unroll-fuel counter and returns the units that were
       # available *before* this consumption (so a positive return means the extended value-key may be used).
       # Fuel is per-outermost inference entry: at the top level (empty guard stack) it seeds to
-      # `RECURSION_UNROLL_FUEL`, and the `ensure` in `infer_user_method_return` clears it once the stack
+      # `RECURSION_UNROLL_FUEL`, and the `ensure` in `evaluate_guarded_user_method_body` clears it once the stack
       # drains back to empty. On exhaustion (return 0) it records a `RECURSION_UNROLL_FUEL` hit so the caller
       # keeps the plain `(receiver, method)` signature — today's behaviour.
       def unroll_fuel_remaining(stack)
@@ -3961,7 +3957,7 @@ module Rigor
       # to the receiver's nominal type, the project-wide accumulators inherited (so the body sees the same
       # `discovered_classes` / `class_ivars` / etc. the caller does), and the call's `arg_types` bound to
       # the parameters. Returns nil when the binding is truly ambiguous (arity mismatch, trailing `post`
-      # params, `...` forwarding).
+      # params).
       #
       # Issue #524 — the binder is per-PARAMETER, not per-signature. The first iteration declined any def
       # with an optional / rest / keyword / block parameter outright, so ONE `options = {}` default zeroed

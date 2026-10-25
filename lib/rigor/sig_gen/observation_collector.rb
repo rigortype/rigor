@@ -19,9 +19,7 @@ module Rigor
     # Walks the `--observe=PATH...` tree (default: the project's test roots), parses every `.rb` file with `Prism`,
     # scope- indexes it the same way the main generator does, and records the per-call-site argument-type tuples
     # for every `Prism::CallNode` whose receiver types as a `Type::Nominal`. The {Generator} consumes the
-    # resulting map to render `--params=observed` RBS:
-    #
-    # @return => Array<Array<Rigor::Type>>}]
+    # resulting map to render `--params=observed` RBS.
     #
     # ADR-5 clause 2 compliance: the observed union is the MOST PERMISSIVE parameter contract the existing
     # callers prove sufficient — by construction it accepts every type any caller has already passed. The
@@ -29,8 +27,8 @@ module Rigor
     # user opts in.
     #
     # MVP scope:
-    # - Explicit-receiver calls only (`foo.bar(args)`). Implicit-self calls inside class bodies and RSpec-style
-    #   `let` / `subject` bindings ride on slice 5's optional `rigor-rspec` integration.
+    # - Explicit-receiver calls only (`foo.bar(args)`). Implicit-self calls inside class bodies are skipped;
+    #   RSpec `let` / `subject` receivers are resolved from the spec file (ADR-14 slice 5).
     # - Calls whose receiver does not type as a `Type::Nominal` (e.g. `(some_dynamic).bar(...)`) are skipped —
     #   the collector cannot attribute them to a specific class.
     # - A `T | nil` receiver with one `Nominal` / `Singleton` non-nil member counts as that member (#1389).

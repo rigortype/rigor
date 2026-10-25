@@ -9,7 +9,7 @@ module Rigor
     # answer alongside the boundary mode the answer was computed under and an ordered list of textual
     # reasons describing which rules fired.
     #
-    # AcceptsResult is the dual of `SubtypeResult` (Slice 5+). Acceptance answers "is `other` passable to
+    # AcceptsResult is the dual of the planned `SubtypeResult`. Acceptance answers "is `other` passable to
     # `self` at a method-parameter or assignment boundary?", consulting the gradual-typing rules in
     # docs/type-specification/value-lattice.md when `mode` is `:gradual`, and the strict subset relation
     # when `mode` is `:strict`. Phase 2c ships full `:gradual` semantics; `:strict` is reserved for later

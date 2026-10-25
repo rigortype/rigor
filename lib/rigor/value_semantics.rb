@@ -46,16 +46,7 @@ module Rigor
         key = (["self.class"] + fields.map(&:to_s)).join(", ")
 
         # Codegen (not per-call reflection) so the generated `==` / `hash` read fields
-        # directly and run at hand-written speed on the inference hot path. For
-        # `value_fields :class_name, :type_args` the emitted source is:
-        #
-        #   def ==(other)
-        #     other.is_a?(self.class) && class_name == other.class_name && type_args == other.type_args
-        #   end
-        #   alias_method :eql?, :==
-        #   def hash
-        #     [self.class, class_name, type_args].hash
-        #   end
+        # directly and run at hand-written speed on the inference hot path.
         class_eval(<<~RUBY, __FILE__, __LINE__ + 1) # rubocop:disable Style/DocumentDynamicEvalDefinition
           def ==(other)
             other.is_a?(self.class)#{guard}

@@ -26,8 +26,9 @@ module Rigor
     # `spec/rigor/inference/definer_resolution_case_in_spec.rb` fails on a call site of any other shape.
     #
     # It migrates one question at a time: `SourceArity` (C1b, C2-c) asks for the receiver's own side, instance or
-    # singleton, the relationship lints (C1c) read the instance side, and `RefinedDispatch::OwnMethod.certain_owner?`
-    # and `CheckRules` pass the side they hold.
+    # singleton; the override lints (C1c) and the C2 typing sites (`ExpressionTyper#resolve_typing_def_with_owner`,
+    # `StatementEvaluator#own_definer_node`) read the instance side; `RefinedDispatch::OwnMethod.certain_owner?` and
+    # `CheckRules#reached_definer_visibility` pass the side they hold.
     module DefinerResolution
       Known = Data.define(:answer, :owner)
       UnknownResult = Data.define

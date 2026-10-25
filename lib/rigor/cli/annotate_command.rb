@@ -35,9 +35,9 @@ module Rigor
       # Trailing `#=> …` annotation comment, matched and stripped before re-annotating so re-running is idempotent.
       # Follows xmpfilter's convention of owning the `#=>` marker, and also absorbs the older `#=> dump_type: <type>`
       # spelling.
-      # Strips from the first whitespace-preceded `#=>` that is followed by whitespace or the end of the line, through
-      # the end of the line. A string literal is not special-cased, since the pattern does not parse Ruby; `a#=>b`
-      # and `x #=>y` are left alone.
+      # Strips the first `#=>` that is preceded by whitespace and followed by whitespace or the end of the line,
+      # together with that preceding whitespace, through the end of the line. A string literal is not special-cased,
+      # since the pattern does not parse Ruby; `a#=>b` and `x #=>y` are left alone.
       ANNOTATION_PATTERN = /\s+#=>(?:\s.*)?\z/
 
       # Arguments for highlighting through `bat`: the annotated text arrives on stdin, so the language must be explicit;

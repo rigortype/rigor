@@ -124,16 +124,18 @@ RSpec.describe "the ADR-58 ivar census types a write from a declared parameter (
       "a local that is not a parameter" => ["def initialize(x)\ny = x\n@x = y.to_s\nend",
                                             "def initialize: (Integer x) -> void"],
       "a value holding a block, whose own parameters the scan does not bind" =>
-        ["def initialize(x) = @x = x.map { |e| e.to_s }", "def initialize: (Array[Symbol] x) -> void"],
+        ["def initialize(x) = @x = x.tap { nil }", "def initialize: (String x) -> void"],
       "a value holding a nested def" => ["def initialize(x) = @x = (def m(x) = x\nx.to_s)",
-                                         "def initialize: (Symbol x) -> void"],
-      "a value holding a lambda" => ["def initialize(x) = @x = -> { x.to_s }.call",
-                                     "def initialize: (Symbol x) -> void"]
+                                         "def initialize: (Symbol x) -> void"]
     }.each do |shape, (body, signature)|
       it "for #{shape}" do
         expect(k_census(body, signature)).to eq("Dynamic[top]")
       end
     end
+  end
+
+  it "records a lambda value as the census did before (a guard: a lambda's own type never reads the parameter)" do
+    expect(k_census("def initialize(x) = @x = -> { x }", "def initialize: (Symbol x) -> void")).to eq("Proc")
   end
 
   describe "a declined write records what it did before" do

@@ -4,6 +4,7 @@ require_relative "../../type"
 require_relative "../acceptance"
 require_relative "../rbs_type_translator"
 require_relative "alias_strict_nominals"
+require_relative "contested_overloads"
 require_relative "facet_distribution"
 require_relative "imprecise_argument"
 require_relative "keyword_arguments"
@@ -165,31 +166,6 @@ module Rigor
           # (`() -> Enumerator[...]`). Without this, a no-block `[1, 2].filter` would adopt the block
           # overload's `Array[Elem]` return when the call actually yields an `Enumerator`.
           [overloads.find { |mt| !overload_requires_block?(mt) } || overloads.first]
-        end
-
-        # Issue #2379 — every overload a supertype argument may select, when `chosen` won only because a nominal
-        # argument wider than its parameter `maybe`-matched it first: `Integer#-` with a `Numeric` argument matched
-        # `(Integer) -> Integer` by list position although the runtime takes `(Float)`, `(Rational)` or `(Complex)`
-        # for those subclasses. Answers every overload the strict pass matches, in affinity order, or nil when no
-        # argument is wider than `chosen`'s parameter or only one overload matches.
-        # rubocop:disable-next Metrics/ParameterLists -- the selection inputs.
-        def contested_matches(method_definition, chosen, arg_types:, self_type:, instance_type:, type_vars:,
-                              block_required:, environment:)
-          return nil unless arg_types.any?(Type::Nominal)
-
-          shared = { arg_types: arg_types, self_type: self_type, instance_type: instance_type,
-                     type_vars: type_vars, block_required: block_required,
-                     param_overrides: RbsExtended.param_type_override_map(method_definition, environment: environment),
-                     environment: environment, keywords_last: false }
-          return nil unless wider_argument?(chosen, shared)
-
-          overloads = ReceiverAffinity.reorder(method_definition.method_types, self_type: self_type,
-                                                                               environment: environment)
-          matches = overloads.select do |method_type|
-            engages_block_shape?(method_type, block_required) &&
-              strictly_typed_params?(method_type, shared) && overlaps?(method_type, shared)
-          end
-          matches.empty? || (matches.size == 1 && matches.first.equal?(chosen)) ? nil : matches
         end
 
         def overload_has_block?(method_type)
@@ -490,50 +466,6 @@ module Rigor
             return false if strict && result.maybe? && Acceptance.maybe_rests_on_unread_hash?(param_type, arg)
 
             result.yes? || result.maybe?
-          end
-
-          # Whether a nominal argument is strictly wider than the parameter `method_type` binds it to: the parameter
-          # does not take the whole argument, and the argument takes the parameter (`Numeric` against `(Integer)`).
-          def wider_argument?(method_type, shared)
-            fun = method_type.type
-            arg_types = shared[:arg_types]
-            return false unless fun.respond_to?(:required_positionals) && arity_compatible?(fun, arg_types.size)
-
-            params = positional_params_for(fun, arg_types.size)
-            index = -1
-            params.any? do |param|
-              arg = arg_types[index += 1]
-              next false unless arg.is_a?(Type::Nominal)
-
-              param_type = translate_param(param, shared)
-              !param_type.accepts(arg, mode: :gradual).yes? && arg.accepts(param_type, mode: :gradual).yes?
-            end
-          end
-
-          # The strict pass's test with a nominal argument also counting where it takes the parameter: some value of
-          # a `Numeric` reaches `(Float)`.
-          def overlaps?(method_type, shared)
-            fun = method_type.type
-            ok = KeywordArguments.accepted_by?(fun, shared, true) { |*kv| accepts_param?(*kv, shared, true, true) }
-            return false unless ok
-
-            arg_types = shared[:arg_types]
-            return false unless arity_compatible?(fun, arg_types.size)
-
-            each_param_accepts?(positional_params_for(fun, arg_types.size), arg_types) do |param, arg|
-              accepts_param?(param, arg, shared, true) ||
-                (arg.is_a?(Type::Nominal) && arg.accepts(translate_param(param, shared), mode: :gradual).yes?)
-            end
-          end
-
-          def translate_param(param, shared)
-            shared[:param_overrides][param.name] || RbsTypeTranslator.translate(
-              param.type,
-              self_type: shared[:self_type],
-              instance_type: shared[:instance_type],
-              type_vars: shared[:type_vars],
-              alias_expander: shared[:environment]&.rbs_loader
-            )
           end
 
           # Pass 0 (`:proven`) takes a `yes` naming the argument's own class; #1800's keyword proof (`:yes`) any `yes`.

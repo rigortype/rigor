@@ -1090,7 +1090,17 @@ module Rigor
             )
             return nil if candidates.empty?
 
-            if candidates.size == 1 && !keywords_last && method_definition.method_types.size > 1
+            selected_return(candidates, method_definition, self_type, instance_type, type_vars, args, block_type, scope,
+                            call_node, call_site, environment, keywords_last)
+          end
+
+          # The return of the overloads the call selected: per argument value where a union or supertype argument
+          # selects more than `candidates` ({#distributed_argument_return}), else their join.
+          # rubocop:disable Metrics/ParameterLists
+          def selected_return(candidates, method_definition, self_type, instance_type, type_vars, args, block_type,
+                              scope, call_node, call_site, environment, keywords_last)
+            # rubocop:enable Metrics/ParameterLists
+            if candidates.size == 1 && !keywords_last
               distributed = distributed_argument_return(method_definition, candidates.first, self_type, instance_type,
                                                         type_vars, args, block_type, scope, call_node, call_site,
                                                         environment)
@@ -1183,38 +1193,20 @@ module Rigor
           # it `maybe`-matched: `Integer#+` with an `Integer | Float` argument read `(Integer) -> Integer`, and with a
           # `Numeric` one as well. So a precise union argument selects per member ({ArgumentDistribution.lists}; a
           # member no overload takes keeps the first-overload fallback, as a non-matching argument does), and a
-          # nominal argument wider than the selected overload's parameter takes every overload the strict pass
-          # matches ({OverloadSelector.contested_matches}). The returns join as a plain union. When every list selects
+          # nominal argument wider than the selected overload's parameter takes every strictly typed overload it
+          # overlaps ({OverloadSelector.contested_matches}). The returns join as a plain union, and a return that does
+          # not translate declines the call (nil), as the #521 join does. When every list selects
           # `chosen` alone the call answers {NOT_DISTRIBUTED} and reads as before, so a precise argument keeps its
           # answer; so does a call holding an imprecise argument (the #521 join owns it) or a splat.
           # rubocop:disable Metrics/ParameterLists
           def distributed_argument_return(method_definition, chosen, self_type, instance_type, type_vars, args,
                                           block_type, scope, call_node, call_site, environment)
             # rubocop:enable Metrics/ParameterLists
-            return NOT_DISTRIBUTED if args.empty? || ImpreciseArgument.any_in?(args, false)
-            return NOT_DISTRIBUTED if splat_indices(call_node, args)
-
-            lists = ArgumentDistribution.lists(args)
-            return NOT_DISTRIBUTED if lists.nil? && !args.any?(Type::Nominal)
-
-            selector_self = self_type.is_a?(Type::Dynamic) ? self_type.static_facet : self_type
-            per_list = (lists || [args]).map do |arg_types|
-              picked = if arg_types.equal?(args)
-                         chosen
-                       else
-                         OverloadSelector.select(method_definition, arg_types: arg_types, self_type: selector_self,
-                                                                    instance_type: instance_type, type_vars: type_vars,
-                                                                    block_required: !block_type.nil?,
-                                                                    environment: environment)
-                       end
-              matches = OverloadSelector.contested_matches(
-                method_definition, picked, arg_types: arg_types, self_type: selector_self,
-                                           instance_type: instance_type, type_vars: type_vars,
-                                           block_required: !block_type.nil?, environment: environment
-              ) || [picked]
-              [arg_types, matches]
-            end
-            return NOT_DISTRIBUTED if per_list.all? { |_, matches| matches.size == 1 && matches.first.equal?(chosen) }
+            selector = { self_type: self_type.is_a?(Type::Dynamic) ? self_type.static_facet : self_type,
+                         instance_type: instance_type, type_vars: type_vars, block_required: !block_type.nil?,
+                         environment: environment }
+            per_list = argument_distribution_matches(method_definition, chosen, args, call_node, selector)
+            return NOT_DISTRIBUTED if per_list.nil?
 
             overloads = per_list.flat_map(&:last).uniq
             if overloads.size == 1
@@ -1231,9 +1223,31 @@ module Rigor
                 )
               end
             end
-            return nil if returns.any?(&:nil?)
+            returns.any?(&:nil?) ? nil : Type::Combinator.union(*returns.uniq)
+          end
 
-            Type::Combinator.union(*returns.uniq)
+          # Each argument list ({ArgumentDistribution.lists}, or the call's own) with the overloads it selects, or nil
+          # when every list selects `chosen` alone. `selector` holds {OverloadSelector}'s keyword inputs.
+          def argument_distribution_matches(method_definition, chosen, args, call_node, selector)
+            return nil unless distributable_arguments?(method_definition, args, call_node)
+
+            lists = ArgumentDistribution.lists(args)
+            return nil if lists.nil? && args.none?(Type::Nominal)
+
+            per_list = (lists || [args]).map do |arg_types|
+              picked = chosen if arg_types.equal?(args)
+              picked ||= OverloadSelector.select(method_definition, arg_types:, **selector)
+              contested = OverloadSelector.contested_matches(method_definition, picked, arg_types:, **selector)
+              [arg_types, contested || [picked]]
+            end
+            per_list unless per_list.all? { |_, matches| matches.size == 1 && matches.first.equal?(chosen) }
+          end
+
+          # Only a call with overloads to choose between and precise arguments it spells out one by one may select
+          # differently per argument value: an imprecise argument is the #521 join's, a splat hides the positions.
+          def distributable_arguments?(method_definition, args, call_node)
+            method_definition.method_types.size > 1 && !args.empty? &&
+              !ImpreciseArgument.any_in?(args, false) && !splat_indices(call_node, args)
           end
 
           def join_distributed_returns(returns, keywords)

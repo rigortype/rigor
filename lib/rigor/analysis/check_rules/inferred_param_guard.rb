@@ -52,7 +52,7 @@ module Rigor
         # statement, the left operand of `&&`, an earlier literal element, a conditional's predicate), that
         # earlier code may have rebound what a nested predicate reads (`(c = false; c ? param : 1)`), so a
         # conditional below no longer folds its predicate in `scope`.
-        def rooted?(node, scope, depth = 0, fold = true)
+        def rooted?(node, scope, depth = 0, fold: true)
           return false if node.nil? || depth > MAX_DEPTH
 
           case node
@@ -65,9 +65,9 @@ module Rigor
         end
 
         def call_rooted?(node, scope, depth, fold)
-          return rooted?(node.receiver, scope, depth, fold) unless array_conversion?(node, scope)
+          return rooted?(node.receiver, scope, depth, fold: fold) unless array_conversion?(node, scope)
 
-          rooted?(node.arguments.arguments.first, scope, depth, fold)
+          rooted?(node.arguments.arguments.first, scope, depth, fold: fold)
         end
 
         # A receiverless `Array(x)` reaching Kernel#Array: exactly one plain argument, no block, and no project
@@ -90,7 +90,7 @@ module Rigor
         # An array or hash literal is rooted when any element is: the engine reads the element back precisely.
         def literal_rooted?(node, scope, depth, fold)
           parts = node.is_a?(Prism::AssocNode) ? [node.key, node.value] : node.elements
-          parts.each_with_index.any? { |part, index| rooted?(part, scope, depth, fold && index.zero?) }
+          parts.each_with_index.any? { |part, index| rooted?(part, scope, depth, fold: fold && index.zero?) }
         end
 
         # Value-combining forms: the produced value is a union of the operands, so it is a lower bound when ANY
@@ -99,29 +99,30 @@ module Rigor
         def combining_rooted?(node, scope, depth, fold)
           case node
           when Prism::RescueModifierNode
-            rooted?(node.expression, scope, depth, fold) || rooted?(node.rescue_expression, scope, depth, false)
+            rooted?(node.expression, scope, depth, fold: fold) ||
+              rooted?(node.rescue_expression, scope, depth, fold: false)
           when Prism::AndNode, Prism::OrNode
-            rooted?(node.left, scope, depth, fold) || rooted?(node.right, scope, depth, false)
+            rooted?(node.left, scope, depth, fold: fold) || rooted?(node.right, scope, depth, fold: false)
           when Prism::ParenthesesNode then body_rooted?(node.body, scope, depth, fold)
           when Prism::StatementsNode then body_rooted?(node, scope, depth, fold)
           when Prism::IfNode, Prism::UnlessNode then conditional_rooted?(node, scope, depth, fold)
-          when Prism::ElseNode then rooted?(node.statements, scope, depth, fold)
+          when Prism::ElseNode then rooted?(node.statements, scope, depth, fold: fold)
           else false
           end
         end
 
         # A body's value is its last statement; any statement before it runs first.
         def body_rooted?(body, scope, depth, fold)
-          return rooted?(body, scope, depth, fold) unless body.is_a?(Prism::StatementsNode)
+          return rooted?(body, scope, depth, fold: fold) unless body.is_a?(Prism::StatementsNode)
 
-          rooted?(body.body.last, scope, depth, fold && body.body.size == 1)
+          rooted?(body.body.last, scope, depth, fold: fold && body.body.size == 1)
         end
 
         # Every branch that can run must be rooted; an absent branch is `nil`, never rooted. The predicate is
         # typed only when the branches disagree, so a conditional that never mentions a parameter costs nothing.
         # An arm runs after the predicate, so a conditional nested in one never folds.
         def conditional_rooted?(node, scope, depth, fold)
-          truthy_rooted, falsey_rooted = arms(node).map { |arm| rooted?(arm, scope, depth, false) }
+          truthy_rooted, falsey_rooted = arms(node).map { |arm| rooted?(arm, scope, depth, fold: false) }
           return truthy_rooted if truthy_rooted == falsey_rooted
           return false unless fold
 

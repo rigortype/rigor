@@ -45,6 +45,12 @@
 #                                 [--rule RULE] [--adjudication FILE] [--require-base-rows N]
 #                                 [--require-rows-in PATH:N]... [--summary FILE]
 #   ruby tool/engine_diag_diff.rb --measure ENGINE_DIR CORPUS_DIR TARGET...   # internal: one fresh-process run
+#   ruby tool/engine_diag_diff.rb --corpus-paths ENGINE_DIR CORPUS_DIR        # internal: the corpus config's paths:
+#
+# Targets: each `--target` as given. With none, the corpus configuration's `paths:`, read by the head engine's own
+# loader and resolved as `rigor check` resolves them. `lib` only when the configuration names no `paths:`; a null or
+# empty `paths:` also falls back to `lib`, a deliberate difference from `rigor check`, which scans nothing for them.
+# The first output line names the targets and where they came from.
 
 require "fileutils"
 require "json"
@@ -256,6 +262,88 @@ module EngineDiagDiff
     JSON.parse(raw.lines.last)
   end
 
+  # The corpus configuration's `paths:` as the engine's own loader resolves them, in a fresh process. `paths` is []
+  # when the configuration names no `paths:` (or names it null or empty), and an entry inside the corpus is
+  # corpus-relative, as `rigor check` prints it. Only ever called in a `--corpus-paths` child.
+  def corpus_paths(engine_dir, corpus_dir)
+    $LOAD_PATH.unshift(File.join(engine_dir, "lib"))
+    require "rigor/configuration"
+    loaded = $LOADED_FEATURES.grep(%r{/rigor/configuration\.rb\z}).first.to_s
+    abort("rigor/configuration loaded from #{loaded}, not #{engine_dir}") unless loaded.start_with?("#{engine_dir}/")
+    Dir.chdir(corpus_dir) do
+      config = Rigor::Configuration.discover
+      declared = config && Rigor::Configuration.load_with_includes(config).fetch("paths", nil)
+      paths = declared.nil? ? [] : Rigor::Configuration.load(config).paths
+      root = Dir.pwd
+      { "config" => config, "paths" => paths.map { |path| corpus_relative(path, root) } }
+    end
+  end
+
+  # An entry inside the corpus, spelled as the entry is written (a symlink inside the corpus keeps its own name, and
+  # one pointing outside it is still `app`, as `rigor check` prints it). Inside is decided lexically under `root`, or
+  # by an ancestor of the entry whose realpath is the corpus root, so a corpus reached through a symlink still matches.
+  # The entry itself is never resolved. Anything outside the corpus is its real absolute path.
+  def corpus_relative(path, root)
+    return path.delete_prefix("#{root}/") if path.start_with?("#{root}/")
+
+    real_root = File.realpath(root)
+    ancestor = File.dirname(path)
+    until ancestor == File.dirname(ancestor)
+      return path.delete_prefix("#{ancestor}/") if File.exist?(ancestor) && File.realpath(ancestor) == real_root
+
+      ancestor = File.dirname(ancestor)
+    end
+    File.exist?(path) ? File.realpath(path) : File.expand_path(path)
+  end
+
+  def run_corpus_paths(engine_dir, corpus_dir)
+    raw, status = Open3.capture2(RbConfig.ruby, File.expand_path(__FILE__), "--corpus-paths", engine_dir, corpus_dir,
+                                 chdir: ROOT)
+    abort("corpus configuration read for #{engine_dir} failed (#{status.inspect})") unless status.success?
+    JSON.parse(raw.lines.last)
+  end
+
+  # The targets a run measures and where they came from. Pure: `corpus` is {corpus_paths}' answer, read only when no
+  # `--target` is given.
+  def resolve_targets(explicit, corpus)
+    return { targets: explicit, source: :explicit } unless explicit.empty?
+
+    paths = corpus.fetch("paths")
+    return { targets: paths, source: corpus.fetch("config") } unless paths.empty?
+
+    { targets: ["lib"], source: :fallback }
+  end
+
+  def describe_targets(resolved)
+    targets = resolved.fetch(:targets).join(", ")
+    case resolved.fetch(:source)
+    when :explicit then "Measuring targets: #{targets} (--target)"
+    when :fallback
+      "Measuring targets: #{targets} (no --target, and the corpus configuration names no paths:; falling back to lib)"
+    else "Measuring targets: #{targets} (no --target; the corpus configuration #{resolved.fetch(:source)} paths:)"
+    end
+  end
+
+  # The command line as a run's options. An empty `--target` list is kept, not defaulted: {resolve_targets} decides.
+  def parse_options(argv)
+    options = { targets: [], require_base_rows: 0, floors: [] }
+    OptionParser.new do |parser|
+      parser.on("--base REV") { |v| options[:base] = v }
+      parser.on("--head REV") { |v| options[:head] = v }
+      parser.on("--corpus REV") { |v| options[:corpus] = v }
+      parser.on("--corpus-dir DIR") { |v| options[:corpus_dir] = v }
+      parser.on("--target PATH") { |v| options[:targets] << v }
+      parser.on("--rule RULE") { |v| options[:rule] = v }
+      parser.on("--adjudication FILE") { |v| options[:adjudication] = v }
+      parser.on("--require-base-rows N", Integer) { |v| options[:require_base_rows] = v }
+      parser.on("--require-rows-in PATH:N") { |v| options[:floors] << EngineDiagDiff.parse_floor(v) }
+      parser.on("--summary PATH") { |v| options[:summary] = v }
+    end.parse!(argv)
+    abort("--base and --head are required") unless options[:base] && options[:head]
+    abort("--corpus and --corpus-dir are exclusive") if options[:corpus] && options[:corpus_dir]
+    options
+  end
+
   def run(options)
     entries = load_adjudication(options[:adjudication])
     Dir.mktmpdir("rigor-diag-diff") do |scratch|
@@ -266,13 +354,17 @@ module EngineDiagDiff
       head_dir = File.join(tmp, "head")
       EngineAllocAB.materialise(options.fetch(:base), base_dir, EngineAllocAB::ENGINE_PATHS)
       EngineAllocAB.materialise(options.fetch(:head), head_dir, EngineAllocAB::ENGINE_PATHS)
-      targets = options.fetch(:targets)
+      config = options.fetch(:targets).empty? ? run_corpus_paths(head_dir, corpus) : nil
+      resolved = resolve_targets(options.fetch(:targets), config)
+      targets_line = describe_targets(resolved)
+      puts targets_line
+      targets = resolved.fetch(:targets)
       base_sha = EngineAllocAB.git("rev-parse", options.fetch(:base)).strip
       result = report(base_sha: base_sha, base_rows: run_child(base_dir, corpus, targets), head_rows: run_child(head_dir, corpus, targets),
                       rule: options[:rule], entries: entries, require_base_rows: options.fetch(:require_base_rows),
                       floors: options.fetch(:floors))
       puts result[:text]
-      File.write(options[:summary], "#{result[:text]}\n", mode: "a") if options[:summary]
+      File.write(options[:summary], "#{targets_line}\n#{result[:text]}\n", mode: "a") if options[:summary]
       result[:ok] ? 0 : 1
     end
   end
@@ -284,22 +376,11 @@ if $PROGRAM_NAME == __FILE__
     puts JSON.generate(EngineDiagDiff.measure(engine_dir, corpus_dir, targets))
     exit 0
   end
+  if ARGV.first == "--corpus-paths"
+    _, engine_dir, corpus_dir = ARGV
+    puts JSON.generate(EngineDiagDiff.corpus_paths(engine_dir, corpus_dir))
+    exit 0
+  end
 
-  options = { targets: [], require_base_rows: 0, floors: [] }
-  OptionParser.new do |parser|
-    parser.on("--base REV") { |v| options[:base] = v }
-    parser.on("--head REV") { |v| options[:head] = v }
-    parser.on("--corpus REV") { |v| options[:corpus] = v }
-    parser.on("--corpus-dir DIR") { |v| options[:corpus_dir] = v }
-    parser.on("--target PATH") { |v| options[:targets] << v }
-    parser.on("--rule RULE") { |v| options[:rule] = v }
-    parser.on("--adjudication FILE") { |v| options[:adjudication] = v }
-    parser.on("--require-base-rows N", Integer) { |v| options[:require_base_rows] = v }
-    parser.on("--require-rows-in PATH:N") { |v| options[:floors] << EngineDiagDiff.parse_floor(v) }
-    parser.on("--summary PATH") { |v| options[:summary] = v }
-  end.parse!
-  abort("--base and --head are required") unless options[:base] && options[:head]
-  options[:targets] = ["lib"] if options[:targets].empty?
-  abort("--corpus and --corpus-dir are exclusive") if options[:corpus] && options[:corpus_dir]
-  exit EngineDiagDiff.run(options)
+  exit EngineDiagDiff.run(EngineDiagDiff.parse_options(ARGV))
 end

@@ -86,6 +86,8 @@ RSpec.describe "the ADR-58 ivar census types a write from a declared parameter (
         ["def initialize(x) = @x = Array(x)", "def initialize: (Integer x) -> void", "Array[Integer]"],
       "an argument of a class no RBS class extends" => ["def initialize(a, b) = @x = a + b",
                                                         "def initialize: (Integer a, Integer b) -> void", "Integer"],
+      "a literal argument" => ["def initialize(a, b) = @x = a + b", "def initialize: (Integer a, 1 b) -> void",
+                               "Integer"],
       "a union in receiver position" => ["def initialize(a, b) = @x = b + a",
                                          "def initialize: (Integer a, Integer | Float b) -> void", "Float | Integer"],
       "a map with a symbol block" => ["def initialize(x) = @x = x.map(&:to_s)",
@@ -141,6 +143,8 @@ RSpec.describe "the ADR-58 ivar census types a write from a declared parameter (
         ["def initialize(a, i) = @x = a[i]", "def initialize: (Array[Integer] a, Integer | Range[Integer] i) -> void"],
       "an optional parameter whose default is outside its declared type" =>
         ["def initialize(x = nil) = @x = x&.to_s", "def initialize: (?Integer x) -> void"],
+      "an optional parameter whose default the census cannot type" =>
+        ["def initialize(x = compute) = @x = x.to_s", "def initialize: (?Integer x) -> void"],
       "an optional whose declared type holds untyped" =>
         ["def initialize(x) = @x = x&.map(&:to_s)", "def initialize: (Array[untyped]? x) -> void"],
       "a tuple whose declared type holds untyped" =>

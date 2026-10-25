@@ -48,14 +48,11 @@ module Rigor
           end
         end
 
-        # The names of the locals read anywhere inside an argument (or block argument) of a call in `value`.
+        # The names of the locals read anywhere inside an argument of a call in `value`.
         def argument_names(value, names = Set.new)
           return names unless value.is_a?(Prism::Node)
 
-          if CALL_NODES.any? { |klass| value.is_a?(klass) }
-            collect_reads(value.arguments, names)
-            collect_reads(value.block, names) if value.respond_to?(:block)
-          end
+          collect_reads(value.arguments, names) if CALL_NODES.any? { |klass| value.is_a?(klass) }
           value.rigor_each_child { |child| argument_names(child, names) }
           names
         end

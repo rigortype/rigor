@@ -1202,7 +1202,8 @@ module Rigor
 
       # `tr!` / `tr_s!` are typed too: whether they can empty a `non-empty-string` turns on their replacement argument.
       def mutator_arg_types(call_node, current_scope)
-        unless ContentJoin::CONTENT_ADDERS.include?(call_node.name) || StringMutation::TRANSLATORS.include?(call_node.name)
+        unless ContentJoin::CONTENT_ADDERS.include?(call_node.name) || StringMutation::TRANSLATORS.include?(call_node.name) ||
+               SetMutation::CONTENT_ADDERS.include?(call_node.name)
           return MutationWidening::NO_ARG_TYPES
         end
         unless MutationWidening.joinable_receiver?(call_node.receiver, current_scope) ||
@@ -4940,6 +4941,18 @@ module Rigor
                                                   Type::Combinator.untyped])
         elsif arrayish?(type)
           Type::Combinator.nominal_of("Array", type_args: [Type::Combinator.untyped])
+        elsif setish?(type)
+          Type::Combinator.nominal_of("Set", type_args: [Type::Combinator.untyped])
+        end
+      end
+
+      # A `Set` carrier, constant-folded or nominal, for the callee floor above (issue #2294).
+      def setish?(type)
+        case type
+        when Type::Constant then SetMutation.constant?(type)
+        when Type::Nominal then type.class_name == "Set"
+        when Type::Union then type.members.any? { |m| setish?(m) }
+        else false
         end
       end
 

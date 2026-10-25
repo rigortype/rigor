@@ -11,6 +11,7 @@ require_relative "deep_erasure"
 require_relative "receiver_alias"
 require_relative "refinement_mutation"
 require_relative "rewrite_mutation"
+require_relative "set_mutation"
 require_relative "string_mutation"
 
 module Rigor
@@ -107,7 +108,8 @@ module Rigor
       # in-place call on this name change its binding?" against (issue #587: the block-return
       # threading gate). Derived from the tables rather than spelled out, so the scan and the
       # widening it predicts cannot drift apart.
-      SHAPE_MUTATORS = (ARRAY_MUTATORS | HASH_MUTATORS | HashLookupMutation::MUTATORS | StringMutation::MUTATORS).freeze
+      SHAPE_MUTATORS = (ARRAY_MUTATORS | HASH_MUTATORS | HashLookupMutation::MUTATORS | StringMutation::MUTATORS |
+                        SetMutation::MUTATORS).freeze
 
       # Methods that return the receiver (or a shallow copy) and cannot mutate it. They must not
       # trigger widening or any other receiver-fact invalidation. The list is intentionally
@@ -162,10 +164,10 @@ module Rigor
       def shape_carrier?(type)
         case type
         when Type::Tuple, Type::HashShape then true
-        when Type::Constant then StringMutation.constant?(type)
+        when Type::Constant then StringMutation.constant?(type) || SetMutation.constant?(type)
         # A re-openable nominal counts since issue #580: skipping it made the one-way door
         # self-fulfilling, since the arm never saw the arg types it grows from.
-        when Type::Nominal then MutationRejoin.regrowable_carrier?(type)
+        when Type::Nominal then MutationRejoin.regrowable_carrier?(type) || SetMutation.regrowable?(type)
         when Type::Difference then type.removes_empty_witness?
         when Type::Union then type.members.any? { |m| shape_carrier?(m) }
         else false
@@ -291,7 +293,10 @@ module Rigor
         return nil if type.nil?
 
         case type
-        when Type::Nominal then MutationRejoin.widen_nominal(type, method_name, values:, arg_types:)
+        when Type::Nominal
+          return SetMutation.widen(type, method_name, arg_types) if type.class_name == "Set"
+
+          MutationRejoin.widen_nominal(type, method_name, values:, arg_types:)
         when Type::Tuple
           return nil unless ARRAY_MUTATORS.include?(method_name)
 
@@ -301,7 +306,10 @@ module Rigor
 
           join_added_pairs(widen_hash_shape(type, values: values), method_name, arg_types,
                            ContentJoin.hash_shape_key_values(type))
-        when Type::Constant then StringMutation.widen_constant(type, method_name)
+        when Type::Constant
+          return SetMutation.widen(type, method_name, arg_types) if SetMutation.constant?(type)
+
+          StringMutation.widen_constant(type, method_name)
         when Type::Difference
           widen_difference(type, method_name, arg_types: arg_types)
         when Type::Union
@@ -346,7 +354,8 @@ module Rigor
         (ARRAY_MUTATORS.include?(method_name) && ContentJoin.array_residue(member).empty?) ||
           ((HASH_MUTATORS.include?(method_name) || HashLookupMutation::MUTATORS.include?(method_name)) &&
             ContentJoin.hash_residue(member).empty?) ||
-          (StringMutation::MUTATORS.include?(method_name) && StringMutation.constant?(member))
+          (StringMutation::MUTATORS.include?(method_name) && StringMutation.constant?(member)) ||
+          (SetMutation::MUTATORS.include?(method_name) && SetMutation.carrier?(member))
       end
 
       # Joins the element evidence the mutator's own ARGUMENTS introduce into the already-widened

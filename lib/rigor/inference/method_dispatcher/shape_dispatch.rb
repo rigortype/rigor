@@ -194,6 +194,7 @@ module Rigor
           Type::Tuple => :dispatch_tuple,
           Type::HashShape => :dispatch_hash_shape,
           Type::Nominal => :dispatch_nominal_size,
+          Type::Constant => :dispatch_constant_set,
           Type::Difference => :dispatch_difference,
           Type::Refined => :dispatch_refined,
           Type::Intersection => :dispatch_intersection,
@@ -302,7 +303,36 @@ module Rigor
               when :flatten then array_nominal_flatten(nominal, args)
               when :compact then array_nominal_compact(nominal, args)
               end
+            when "Set"
+              set_nominal_algebra(nominal, method_name, args)
             end
+          end
+
+          # The Set algebra that returns a new Set holding both operands' elements (issue #2294). RBS declares each
+          # as `(_Each[A]) -> Set[A]`, the receiver's element alone, so `ARGV.to_set | [1]` read `Set[String]` and a
+          # read of its `1` reported on correct code. The result is `Set[E | F]`, `F` the argument's elements with
+          # their value pins dropped ({SetMutation.element_types}).
+          SET_UNION_ALGEBRA = %i[| union + ^].to_set.freeze
+          private_constant :SET_UNION_ALGEBRA
+
+          def set_nominal_algebra(nominal, method_name, args)
+            return nil unless SET_UNION_ALGEBRA.include?(method_name) && args.size == 1
+
+            receiver = nominal.type_args.size == 1 ? nominal.type_args.first : Type::Combinator.untyped
+            added = Inference::SetMutation.element_types(args.first).map { |t| MethodDispatcher.array_new_element(t) }
+            Type::Combinator.nominal_of("Set", type_args: [Type::Combinator.union(receiver, *added)])
+          end
+
+          # The same algebra on a constant-folded Set whose argument is not constant (two constants fold upstream in
+          # {ConstantFolding}): the receiver's members and the argument's elements, typed as #2290 types a
+          # `Set[...]` literal over non-constant members ({SetFolding.typed_set}).
+          def dispatch_constant_set(constant, method_name, args)
+            return nil unless SET_UNION_ALGEBRA.include?(method_name) && args.size == 1
+            return nil unless Inference::SetMutation.constant?(constant)
+
+            members = constant.value.map { |v| Type::Combinator.constant_of(v) }
+            SetFolding.typed_set(members + Inference::SetMutation.element_types(args.first)) ||
+              Type::Combinator.nominal_of("Set", type_args: [Type::Combinator.untyped])
           end
 
           # `Integer#to_s` / `Integer#inspect` (#993) on a bare `Nominal[Integer]` receiver, ahead of the

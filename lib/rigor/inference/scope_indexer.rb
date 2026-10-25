@@ -764,6 +764,14 @@ module Rigor
 
           widen_member_for_lookup_mutators(member, observed_methods)
         when Type::Constant
+          # `@s = Set["a"]` in one method and `@s.clear; @s << 1` in another (issue #2294): the same untyped floor the
+          # Tuple arm takes, on the Set carrier.
+          if SetMutation.constant?(member)
+            return member unless observed_methods.any? { |m| SetMutation::MUTATORS.include?(m) }
+
+            return Type::Combinator.nominal_of("Set", type_args: [Type::Combinator.untyped])
+          end
+
           # `@s = +"ab"` in one method and `@s << "c"` in another: without this arm the seed stayed pinned at every
           # other method's entry, and `@s == "ab"` folded always-truthy on a receiver that holds `"abc"`.
           return member unless StringMutation.constant?(member) &&

@@ -1,0 +1,3 @@
+- **[sig-gen]** A lookup result tested by an `if` or `unless` with no `else` keeps its `nil` in the proposed return. ([#2359](https://github.com/rigortype/rigor/pull/2359))
+  - `x = h[k]; if x; …; end; x` and the modifier `… if x && c` used to propose the value type alone, although a missing key returns `nil`. Instance variables behave the same way.
+  - A test whose arm raises no longer leads to a `-> bot` proposal; only the miss's `nil` reaches the return there, which sig-gen leaves undeclared.

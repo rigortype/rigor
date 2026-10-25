@@ -60,6 +60,7 @@ module Rigor
         self_write?(node) && literal_name(node).nil?
       end
 
+      # The value argument of a call {.literal_name} names.
       def value_node(node)
         node.arguments.arguments[1]
       end
@@ -83,9 +84,9 @@ module Rigor
       end
 
       # `scope` after `node` runs. A literal name binds that ivar to the value's type (yielded), as `@n = v` does.
-      # Inside a `for` body or a loop predicate ({.in_repeating_body}) the value and untyped are joined into the
+      # Inside a `for` body or a loop predicate ({.in_repeating_body}) the value and `Dynamic[top]` are joined into the
       # current binding instead: nothing widens the single pass's value across iterations there. Any other call joins
-      # untyped into every ivar `scope` binds: any one of them may now hold the value, and joining the
+      # `Dynamic[top]` into every ivar `scope` binds: any one of them may now hold the value, and joining the
       # value's own type would report a method the old value has and the new one lacks. An ivar on its ADR-58
       # declaration seed keeps its mark, which stops a nil in the seed from fuelling a nil-receiver diagnostic.
       def apply(node, scope)

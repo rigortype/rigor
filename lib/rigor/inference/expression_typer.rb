@@ -2437,9 +2437,10 @@ module Rigor
       end
 
       # True when `type` is a concrete value — a `Type::Constant` or a `Type::Tuple` whose elements are
-      # (recursively) all value-pinned. ADR-55 slice 1 adopts a value-pinned self-call result inside a
-      # class/method body. A concrete value at a call site is strictly more precise and can never enable an
-      # undefined-method or argument-type false positive — it is FP-neutral by construction.
+      # (recursively) all value-pinned. ADR-55 slice 1: a value-pinned self-call result is adopted even
+      # inside a class/method body (where WD3 otherwise keeps non-`Bot` returns as `Dynamic[top]`). A concrete
+      # value at a call site is strictly more precise and can never enable an undefined-method or argument-type
+      # false positive — it is FP-neutral by construction.
       def fully_value_pinned?(type)
         case type
         when Type::Constant then true

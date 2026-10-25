@@ -566,7 +566,7 @@ module Rigor
         # attributes a `class_decls` entry to the project by buffer name — still recognises these declarations.
         # Sorted for a deterministic add order (the env feeds the cache, ADR-54).
         #
-        # @param standdowns — issue #1075 — `{signature_path => [[class, method, kind], ...]}`, the members an
+        # @param standdowns — issue #1075 — `{signature_path => Set[[class, method, kind]]}`, the members an
         #   inline declaration displaced because it was the more precise side of a consistent pair
         #   ({MemberConsistency::Resolution#signature_standdowns}). They are removed before the file is added.
         def add_project_signatures(env, signature_paths, deferred_paths = [], standdowns: {})

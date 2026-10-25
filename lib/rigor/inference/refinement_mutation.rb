@@ -15,7 +15,7 @@ module Rigor
     # provably non-empty** is this module's own, and it is a property of the mutator alone.
     #
     # Answering both with "widen to the bare base" was ADR-56 WD2.9's deferred branch (issue #936):
-    # `if xs.any?; xs << "s"` read as a bare array of Strings, though the seed's elements remain — a wrong
+    # `if xs.any?; xs << "s"` read `Array[String]` for an array that holds a String too — a wrong
     # type, not a wide one — and lost a witness an append cannot falsify.
     module RefinementMutation
       # Mutators that CANNOT leave a non-empty receiver empty. Whitelists rather than a table of

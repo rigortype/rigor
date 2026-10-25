@@ -48,10 +48,10 @@ module Rigor
       #
       # Slice 2 ships at the **floor**: each emit row's `name:` is the source of truth for the synthetic
       # method's name (a single `"\#{name}"` placeholder gets interpolated with the literal symbol argument at
-      # `symbol_arg_position`). The `returns:` strings are **recorded in the manifest but not resolved**; the
-      # engine emits synthetic methods with `Dynamic[T]` returns. Precise return-type resolution via ADR-13's
-      # `Plugin::TypeNodeResolver` is the **ceiling**, deferred to a later slice — the `returns:` declarations
-      # cost nothing to write today and unlock precision then.
+      # `symbol_arg_position`). A non-empty `returns:` string is the synthetic method's return type
+      # (`SyntheticMethodScanner#resolve_emit_return_type`), which the dispatcher resolves to a nominal type
+      # through `MethodDispatcher#promote_via_return_type`; with neither `returns:` nor `returns_from_arg:` the
+      # method answers `Dynamic[Top]`. Resolution through ADR-13's `Plugin::TypeNodeResolver` is not wired.
       #
       # Engine wiring: `Inference::SyntheticMethodScanner` (slice 2b, `synthetic_method_scanner.rb`) consumes
       # `manifest.heredoc_templates`. Worked consumers: `plugins/rigor-dry-struct/` and

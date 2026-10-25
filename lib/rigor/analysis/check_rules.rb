@@ -1838,9 +1838,9 @@ module Rigor
         # an explicit-receiver `Prism::CallNode` resolves to a
         # method whose declared overloads do not admit the
         # supplied positional argument count (across all
-        # overloads, see {#compute_arity_envelope}). Overloads
+        # overloads, see {#compute_arity_envelope}). One overload
         # with required keyword arguments or trailing positionals
-        # are not checked; calls with `*splat`, keyword, or
+        # leaves the whole method unchecked; calls with `*splat`, keyword, or
         # block-pass arguments are silently skipped to avoid
         # false positives. The check piggybacks on the same
         # scope-index lookup used by `undefined_method_diagnostic`;

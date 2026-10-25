@@ -134,6 +134,7 @@ module Rigor
         end
       end
 
+      # The read node class for an instance-variable, class-variable or global write class.
       def named_read_class(write_class)
         if INSTANCE_WRITE_NODES.include?(write_class) then Prism::InstanceVariableReadNode
         elsif CLASS_VARIABLE_WRITE_NODES.include?(write_class) then Prism::ClassVariableReadNode

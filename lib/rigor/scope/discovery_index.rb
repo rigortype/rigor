@@ -424,9 +424,8 @@ module Rigor
         # ADR-67 WD3 — the call-site parameter-inference table, keyed by `[class_name, method_name, kind]` (the
         # same `(class, method, kind)` triple {Inference::ParameterInferenceCollector} records and that
         # `build_method_entry_scope` reconstructs from the lexical class path). The value is the
-        # union of resolved call-site argument types per parameter name. Empty on
-        # every normal run; only the `coverage --protection` collection pass populates it today, so a `check` run
-        # leaves it empty and seeds nothing (byte-identical).
+        # union of resolved call-site argument types per parameter name. Empty unless `parameter_inference:` is
+        # on or the `coverage --protection` collection pass runs; a run with neither seeds nothing (byte-identical).
         param_inferred_types: EMPTY_TABLE,
         # ADR-84 WD2 — the run-scope identity token `Analysis::Runner#run_analysis` mints per run (a frozen
         # bare Object) and seeds through `project_scope_seed_tables`. The user-method return memo keys its

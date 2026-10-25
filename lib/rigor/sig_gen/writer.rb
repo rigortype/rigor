@@ -70,7 +70,7 @@ module Rigor
         grouped.map { |target, group| write_target(target, group) }
       end
 
-      # @param candidates — only emittable classifications are honoured; the caller is responsible for filtering.
+      # @param candidates — only emittable classifications are honoured; `write` filters on `EMITTABLE` itself.
       def write(source_path, candidates)
         emittable = candidates.select { |c| EMITTABLE.include?(c.classification) }
         return WriteResult.new(source_path: source_path, target_path: nil, action: :noop) if emittable.empty?

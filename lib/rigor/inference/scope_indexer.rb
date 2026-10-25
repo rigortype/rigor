@@ -522,7 +522,7 @@ module Rigor
       # `Prism::ModuleNode` body, descending into each nested `Prism::DefNode`, and typing every
       # `Prism::InstanceVariableWriteNode` rvalue under a scope that carries the appropriate `self_type` for that def
       # (singleton vs instance). The rvalue is typed with NO local bindings — the pre-pass lacks statement-level
-      # threading — so `@x = 1` records the value 1 but `@x = some_local + 1` records an unknown value (since
+      # threading — so `@x = 1` records `Constant[1]` but `@x = some_local + 1` records `Dynamic[Top]` (since
       # `some_local` is unbound at pre-pass time). Multiple writes to the same ivar union via `Type::Combinator.union`.
       def build_class_ivar_index(root, default_scope, declared_ivar_types: true)
         accumulator = {}
@@ -716,9 +716,9 @@ module Rigor
       #
       # The widening uses `MutationWidening.widen_for_mutator` — the same primitive
       # `Inference::StatementEvaluator#eval_call` applies for per-method-body widening on a local / ivar receiver. The
-      # class-level pass extends that primitive's reach so a `Tuple`-seeded ivar in `initialize` is observed as a plain
-      # `Array` at the entry of every OTHER method body in the class — closing the cross-method gap (Redmine 6.1.2
-      # `Redmine::Views::Builders::Structure` is the canonical worked site).
+      # class-level pass extends that primitive's reach so a `Tuple`-seeded ivar in `initialize` is observed as
+      # `Nominal[Array]` at the entry of every OTHER method body in the class — closing the cross-method gap
+      # (Redmine 6.1.2 `Redmine::Views::Builders::Structure` is the canonical worked site).
       #
       # Always-safe: the widening can only LOSE precision; the underlying nominal (`Array` / `Hash`) and the element
       # union are preserved.
@@ -1046,7 +1046,7 @@ module Rigor
         # unconditional statement-level write, OR an `if/else` whose both branches write `@x`), the opening nil is dead
         # — it can never be observed at method exit. Recording it anyway folds a spurious `nil` constituent into the
         # flow-insensitive class-ivar union, which then poisons reads in OTHER methods (e.g. ipaddr `IN4MASK ^
-        # @mask_addr` rejects the nil-including result). The set holds the `object_id`s of the transient write
+        # @mask_addr` rejects the resulting `Integer | nil`). The set holds the `object_id`s of the transient write
         # nodes to skip; soundness is post-domination at the top statement level, so dropping the nil never hides a real
         # runtime-nil read.
         dead_writes = dead_transient_nil_writes(def_node.body, class_name, method_assign_effects)
@@ -1101,7 +1101,7 @@ module Rigor
 
       # The `attr_writer` family arm of {#walk_class_ivars} (#541). A writer declaration is the class's own
       # statement that `@x` takes values from outside, so it contributes what the hand-written untyped setter
-      # `def x=(v) = @x = v` does: an untyped value. Without it `@x = nil` in `initialize` was the only write
+      # `def x=(v) = @x = v` does: `Dynamic[top]`. Without it `@x = nil` in `initialize` was the only write
       # the seed saw, and `if @x` folded always-falsey on a field the class declares assignable. A setter
       # call site (`obj.x = v`) stays out, as ADR-58 WD2 settles; the declaration is class-level evidence
       # in the file the walk reads. `owner` is empty where no class owns an instance-side ivar (a
@@ -1314,7 +1314,7 @@ module Rigor
         # not `InstanceVariableWriteNode`s, so the generic descent below never records them as writes. Left unhandled,
         # an ivar written only via massign in `initialize` stays absent from `init_writes`, and
         # `contribute_read_before_write_nil!` then unions a spurious `nil` into its class-ivar seed — masking a
-        # genuinely-typed `@m` (e.g. an empty tuple) as nil-including at every sibling read. The RHS runs before any
+        # genuinely-typed `@m` (e.g. `Tuple[]`) as `T | nil` at every sibling read. The RHS runs before any
         # target is committed, so descend into `value` FIRST (an ivar read there is read-before-write), then mark every
         # ivar target as written.
         if node.is_a?(Prism::MultiWriteNode)
@@ -1389,7 +1389,7 @@ module Rigor
         # `MultiWriteNode` target was silently dropped from the class-ivar union — leaving it to seed as pure `nil`
         # (from a sibling `@cb = nil` ctor write, or absent entirely) and false-fire `if @cb` always-falsey /
         # `@thr.alive?` undefined-for-nil. Record each ivar target with its tuple-position RHS type where the RHS is
-        # array/tuple-shaped, else the unanalyzable floor (the same untyped value a single write to an unknown RHS
+        # array/tuple-shaped, else the unanalyzable floor (the same `Dynamic[top]` a single write to an unknown RHS
         # records — an unanalyzable multi-write means unknown, not nil).
         record_multi_write_ivars(node, scope, class_name, accumulator)
 

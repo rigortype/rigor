@@ -67,7 +67,8 @@ module Rigor
         # Tier B alone cannot emit without an environment: every trait entry funnels through
         # `module_instance_method_names`, which answers `[]` for a nil environment. The production pre-pass always
         # passes one (#476), so this gate guards the direct callers that pass none (a spec, a probe): a
-        # registry-only scan would otherwise pay a whole-project parse to build a provably empty index.
+        # registry-only scan would otherwise pay a whole-project parse to build a provably empty index. It mirrors
+        # that nil guard and goes with it.
         return SyntheticMethodIndex::EMPTY if environment.nil? && templates.empty? && nested_templates.empty?
 
         sources = read_sources(paths, buffer: buffer)

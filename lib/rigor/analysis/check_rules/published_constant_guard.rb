@@ -134,9 +134,12 @@ module Rigor
         end
 
         # `foo` / `self.foo` resolve against the enclosing self. Every other receiver resolves through its
-        # inferred TYPE, never its spelling: `Inner.production?` inside `module Outer` is `Outer::Inner`, and a
-        # bare-name key would miss it or read the wrong module (the #635 defect family, fixed in `Narrowing`).
-        # A call-chain receiver is covered too: `KlassConfig.new.production?` types `Nominal[KlassConfig]`.
+        # inferred TYPE, never through the name it was spelled with: `Inner.production?` inside `module Outer`
+        # is `Outer::Inner`, and keying the table on the bare `Inner` both misses that (a new warning on
+        # ordinary code) and, where a top-level `Inner` also exists, reads the WRONG module's methods. That is
+        # the defect family #635 fixed in `Narrowing`, so the engine's own resolver answers it rather than a
+        # walk reimplemented here. Going through the type also covers a call-chain receiver for free —
+        # `KlassConfig.new.production?` types `Nominal[KlassConfig]`, whose instance table is the one to read.
         def resolve_callee(node, scope)
           receiver = node.receiver
           return resolve_self_call(node.name, scope) if receiver.nil? || receiver.is_a?(Prism::SelfNode)

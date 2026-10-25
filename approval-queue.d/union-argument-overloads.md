@@ -28,6 +28,40 @@ The union, joined as a plain (not `Dynamic`) union, as the keyword-value distrib
 whose parameters are all strictly typed count, so an alias- or `untyped`-typed overload does not join on the argument's
 overlap alone.
 
+### Survey firings accepted as `named-mechanism`
+
+`tool/engine_diag_diff.rb` over a private copy of textbringer (rgl: no delta) adds two rows, accepted by the
+coordinator as `named-mechanism` firings (ADR-119 WD2; mechanism: #2379 per-member overload selection):
+
+- `lib/textbringer/keymap.rb:20:25` `call.possible-nil-receiver` — possible nil receiver: `` `size' `` is undefined on
+  NilClass
+- `lib/textbringer/keymap.rb:24:27` `call.possible-nil-receiver` — possible nil receiver: `` `first' `` is undefined on
+  NilClass
+
+The project's own `sig/lib/textbringer/keymap.rbs` declares the key `define_key` passes to `kbd` to admit a Hash, and
+`kbd`'s Hash overload to return `nil`:
+
+```rbs
+def define_key: (Symbol, Symbol) -> Symbol
+              | (String, Symbol) -> Symbol
+              | (Array[untyped], Symbol) -> Symbol
+              | (String, Proc) -> Proc
+              | (Array[untyped], Symbol) -> nil
+              | (Hash[untyped, untyped], Symbol) -> nil
+
+def kbd: (Symbol) -> Array[untyped]
+       | (String) -> Array[untyped]
+       | (Array[untyped]) -> Array[untyped]
+       | (Hash[untyped, untyped]) -> nil
+```
+
+The Hash member of the key now selects the declared `-> nil` arm, so the finding follows the declared contract. At
+runtime `kbd` raises `TypeError` for a Hash, but Rigor does not second-guess a signature the project wrote by reading
+runtime behaviour; the fix on the user's side is to correct the signature. No special case was added for value-pinning
+`-> nil` arms. The signature is tracked upstream (`shugo/textbringer`, added to `sig/` in commit `3f6b0d2`,
+2026-05-25, with the rest of `sig/`); the measured copy is unmodified. With the two rows in an adjudication file the
+tool passes (exit 0, `2 named-mechanism`).
+
 ## To undo
 
 Wrap the join in `Dynamic` in `RbsDispatch#distributed_argument_return`, or drop `OverloadSelector.contested_matches`

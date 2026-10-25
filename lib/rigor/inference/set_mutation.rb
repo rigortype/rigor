@@ -44,6 +44,11 @@ module Rigor
         type.is_a?(Type::Constant) && type.value.is_a?(::Set)
       end
 
+      # True when `type` is a `Set` carrier of either kind, which {#widen} answers for alone.
+      def set?(type)
+        constant?(type) || (type.is_a?(Type::Nominal) && type.class_name == "Set")
+      end
+
       # True when `type` is a `Set` the seams may grow: a constant-folded one, or a typed one carrying a gradual
       # element arm.
       def carrier?(type)

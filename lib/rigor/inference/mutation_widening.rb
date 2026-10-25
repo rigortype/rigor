@@ -76,6 +76,7 @@ module Rigor
     #   ARE also handled** (ivars live in the method-body scope, not the block-local scope).
     #
     # The remaining three items above are demand-gated; see ADR-56.
+    # rubocop:disable-next Metrics/ModuleLength
     module MutationWidening
       # Array mutators that change either the size or the element set of a literal-shape carrier
       # (Tuple). Receiver-mutating methods only — non-mutating siblings (`map` vs `map!`,
@@ -291,12 +292,10 @@ module Rigor
         values = RewriteMutation.values_mode(type, method_name, values)
 
         return nil if type.nil?
+        return SetMutation.widen(type, method_name, arg_types) if SetMutation.set?(type)
 
         case type
-        when Type::Nominal
-          return SetMutation.widen(type, method_name, arg_types) if type.class_name == "Set"
-
-          MutationRejoin.widen_nominal(type, method_name, values:, arg_types:)
+        when Type::Nominal then MutationRejoin.widen_nominal(type, method_name, values:, arg_types:)
         when Type::Tuple
           return nil unless ARRAY_MUTATORS.include?(method_name)
 
@@ -306,10 +305,7 @@ module Rigor
 
           join_added_pairs(widen_hash_shape(type, values: values), method_name, arg_types,
                            ContentJoin.hash_shape_key_values(type))
-        when Type::Constant
-          return SetMutation.widen(type, method_name, arg_types) if SetMutation.constant?(type)
-
-          StringMutation.widen_constant(type, method_name)
+        when Type::Constant then StringMutation.widen_constant(type, method_name)
         when Type::Difference
           widen_difference(type, method_name, arg_types: arg_types)
         when Type::Union

@@ -1202,8 +1202,9 @@ module Rigor
 
       # `tr!` / `tr_s!` are typed too: whether they can empty a `non-empty-string` turns on their replacement argument.
       def mutator_arg_types(call_node, current_scope)
-        unless ContentJoin::CONTENT_ADDERS.include?(call_node.name) || StringMutation::TRANSLATORS.include?(call_node.name) ||
-               SetMutation::CONTENT_ADDERS.include?(call_node.name)
+        name = call_node.name
+        unless ContentJoin::CONTENT_ADDERS.include?(name) || StringMutation::TRANSLATORS.include?(name) ||
+               SetMutation::CONTENT_ADDERS.include?(name)
           return MutationWidening::NO_ARG_TYPES
         end
         unless MutationWidening.joinable_receiver?(call_node.receiver, current_scope) ||

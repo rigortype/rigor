@@ -43,7 +43,8 @@ RSpec.describe "Set mutation widening", type: :runner do
 
   describe "a typed set under a mutator" do
     it "joins each later store's element" do
-      expect(dumped("s = Set[n]\ns << x\ns.add(:sym)\ndump_type(s)")).to eq(["Set[Dynamic[top] | Integer | String | Symbol]"])
+      expected = ["Set[Dynamic[top] | Integer | String | Symbol]"]
+      expect(dumped("s = Set[n]\ns << x\ns.add(:sym)\ndump_type(s)")).to eq(expected)
     end
 
     it "joins merge's argument elements" do

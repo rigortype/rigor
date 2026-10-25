@@ -22,9 +22,6 @@ module Rigor
       #   (`def initialize(x = nil)` under `(?Integer x)`): the value may run on the default, which the binding does not
       #   carry.
       module DerivedParamValue
-        CALL_NODES = [Prism::CallNode, Prism::SuperNode, Prism::YieldNode].freeze
-        private_constant :CALL_NODES
-
         module_function
 
         # Whether the value of a write over the parameters `names`, bound to `types`, is not credited.
@@ -52,7 +49,9 @@ module Rigor
         def argument_names(value, names = Set.new)
           return names unless value.is_a?(Prism::Node)
 
-          collect_reads(value.arguments, names) if CALL_NODES.any? { |klass| value.is_a?(klass) }
+          if value.is_a?(Prism::CallNode) || value.is_a?(Prism::SuperNode) || value.is_a?(Prism::YieldNode)
+            collect_reads(value.arguments, names)
+          end
           value.rigor_each_child { |child| argument_names(child, names) }
           names
         end

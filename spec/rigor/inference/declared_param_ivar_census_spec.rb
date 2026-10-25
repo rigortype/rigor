@@ -75,6 +75,67 @@ RSpec.describe "the ADR-58 ivar census types a write from a declared parameter (
     end
   end
 
+  # Issue #2321 — a write whose value is an expression over declared parameters records that expression's type, with
+  # each parameter it reads bound to its declared type, under the same gates as a bare read.
+  describe "a credited write derived from declared parameters (#2321)" do
+    {
+      "a call chain" => ["def initialize(x) = @x = x.dup.freeze", "def initialize: (String x) -> void", "String"],
+      "a conversion over a union" => ["def initialize(x) = @x = x.to_sym",
+                                      "def initialize: (String | Symbol x) -> void", "Symbol"],
+      "a Kernel conversion" => ["def initialize(x) = @x = Array(x)",
+                                "def initialize: (Array[String] | String x) -> void", "Array[String]"],
+      "a map with a symbol block" => ["def initialize(x) = @x = x.map(&:to_s)",
+                                      "def initialize: (Array[Symbol] x) -> void", "Array[String]"],
+      "a ternary over two parameters" => ["def initialize(f, x, y) = @x = f ? x : y",
+                                          "def initialize: (bool f, Integer x, String y) -> void", "Integer | String"],
+      "a parenthesised read" => ["def initialize(x) = @x = (x)", "def initialize: (String x) -> void", "String"],
+      "a keyword parameter" => ["def initialize(x:) = @x = x.to_sym", "def initialize: (x: String) -> void", "Symbol"],
+      "an optional parameter" => ["def initialize(x = nil) = @x = x&.to_s", "def initialize: (?Symbol? x) -> void",
+                                  "String?"]
+    }.each do |shape, (body, signature, expected)|
+      it "for #{shape}" do
+        expect(k_census(body, signature)).to eq(expected)
+      end
+    end
+
+    it "keeps the bare credit for a parameter whose declared type holds untyped" do
+      signature = "def initialize: (Array[untyped] x) -> void"
+
+      expect(k_census("def initialize(x) = @x = x", signature)).to eq("Array[Dynamic[top]]")
+    end
+
+    it "joins every other write the census records, as a bare read does" do
+      body = "def initialize(x) = @x = x.dup.freeze\ndef reset = @x = 1"
+
+      expect(k_census(body, "def initialize: (String x) -> void")).to eq("1 | String")
+    end
+  end
+
+  describe "a derived write is declined (#2321)" do
+    {
+      "an untyped parameter" => ["def initialize(x) = @x = x.to_s", "def initialize: (untyped x) -> void"],
+      "a parameter whose declared type holds untyped (#2325)" =>
+        ["def initialize(x) = @x = x.map(&:to_s)", "def initialize: (Array[untyped] x) -> void"],
+      "a second parameter that is untyped" =>
+        ["def initialize(x, y) = @x = x + y", "def initialize: (String x, untyped y) -> void"],
+      "an undeclared method" => ["def initialize(x) = @x = x.to_s", "def other: () -> void"],
+      "a parameter the body reassigns" => ["def initialize(x)\nx = 1\n@x = x.to_s\nend",
+                                           "def initialize: (String x) -> void"],
+      "a local that is not a parameter" => ["def initialize(x)\ny = x\n@x = y.to_s\nend",
+                                            "def initialize: (Integer x) -> void"],
+      "a value holding a block, whose own parameters the scan does not bind" =>
+        ["def initialize(x) = @x = x.map { |e| e.to_s }", "def initialize: (Array[Symbol] x) -> void"],
+      "a value holding a nested def" => ["def initialize(x) = @x = (def m(x) = x\nx.to_s)",
+                                         "def initialize: (Symbol x) -> void"],
+      "a value holding a lambda" => ["def initialize(x) = @x = -> { x.to_s }.call",
+                                     "def initialize: (Symbol x) -> void"]
+    }.each do |shape, (body, signature)|
+      it "for #{shape}" do
+        expect(k_census(body, signature)).to eq("Dynamic[top]")
+      end
+    end
+  end
+
   describe "a declined write records what it did before" do
     {
       "a parameter the body reassigns" => ["def initialize(x)\nx = Integer(x)\n@x = x\nend",
@@ -92,8 +153,6 @@ RSpec.describe "the ADR-58 ivar census types a write from a declared parameter (
                                                "def initialize: (String x) -> void"],
       "a write in a block under another self" => ["def initialize(x)\ninstance_eval { @x = x }\nend",
                                                   "def initialize: (String x) -> void"],
-      "an expression over the parameter (a guard: only a bare read is ever credited)" =>
-        ["def initialize(x) = @x = (x)", "def initialize: (String x) -> void"],
       "an undeclared method" => ["def initialize(x) = @x = x", "def other: () -> void"],
       "a rescue reference" => ["def initialize(x)\nbegin\nrescue => x\nend\n@x = x\nend",
                                "def initialize: (String x) -> void"],
@@ -330,6 +389,21 @@ RSpec.describe "the ADR-58 ivar census types a write from a declared parameter (
 
         expect(dumps).to eq(["dump_type: Dynamic[top]"])
       end
+    end
+
+    it "reads a derived write's type in a sibling method" do
+      write_project("lib/k.rb" => "class K\n  def initialize(x) = @x = x.to_sym\nend\n#{reader}",
+                    "sig/k.rbs" => "class K\n  def initialize: (String | Symbol x) -> void\nend\n")
+
+      expect(dumps).to eq(["dump_type: Symbol"])
+    end
+
+    it "declines a derived write a reopening in another file also writes" do
+      write_project("lib/k.rb" => "class K\n  def initialize(x) = @x = x.to_sym\nend\n#{reader}",
+                    "lib/k2.rb" => "class K\n  def reset(v) = @x = v\nend\n",
+                    "sig/k.rbs" => "class K\n  def initialize: (String | Symbol x) -> void\nend\n")
+
+      expect(dumps).to eq(["dump_type: Dynamic[top]"])
     end
 
     it "credits a class another file reopens without writing the ivar" do

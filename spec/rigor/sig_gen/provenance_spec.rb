@@ -188,6 +188,8 @@ SIG_PROVENANCE_LISTING_CAP = 200
 # 707 since #1429. A value-position `case` types each arm under the subject's `when` narrowing, so four rows
 # whose body is a `case … when <Class>` render their return (`inference.rbs` -1, `type.rbs` -3; the reasons are
 # at the pins). The new `Scope` guard rows are sig-gen output or carry the #1154 marker, so they add none.
+# 565 since #2321. The class-ivar census types an ivar assigned an expression over declared parameters, so 19
+# unmarked rows render the declared type (`environment.rbs` -1, `type.rbs` -18; the reasons are at the pins).
 SIG_PROVENANCE_RESIDUE = {
   "sig/prism_node_children.rbs" => 1,
   # +1 (#1181 bound-side slice): `effect_envelopes` is a newly-declared public reader that stays
@@ -277,7 +279,9 @@ SIG_PROVENANCE_RESIDUE = {
   # -3 (#1153): an empty-collection early return no longer leaves a stray `[]` arm beside an `Array[E]` arm,
   # so the declared `Array[...]` now matches what sig-gen proposes.
   # -3 (#1154): an ivar a declared parameter assigns now reads that type, so 3 more rows over it render.
-  "sig/rigor/environment.rbs" => 33,
+  # -1 (#2321): an ivar assigned an expression over a declared parameter now reads that expression's type, so
+  # `RbsLoader#libraries` renders.
+  "sig/rigor/environment.rbs" => 32,
   # -1 (#1429): a value-position `case` now types each arm under the subject's `when` narrowing, so
   # `ExpressionTyper#type_of_virtual`'s `when AST::TypeNode then node.type` arm reads `node` as the node class
   # and its return renders.
@@ -395,7 +399,9 @@ SIG_PROVENANCE_RESIDUE = {
   # `#non_empty_string_compatible?` and `#non_zero_int_compatible?` read `type` as the carrier the `when` names
   # rather than `untyped`, and each `bool` return renders.
   # -14 (#1154): an ivar a declared parameter assigns now reads that type, so 14 more rows over it render.
-  "sig/rigor/type.rbs" => 192
+  # -18 (#2321): an ivar assigned an expression over a declared parameter (`members.freeze`,
+  # `elements.dup.freeze`, `min.zero? ? 0.0 : min`) now reads that expression's type, so 18 more rows over it render.
+  "sig/rigor/type.rbs" => 174
 }.freeze
 
 module SigProvenanceSpecHelpers

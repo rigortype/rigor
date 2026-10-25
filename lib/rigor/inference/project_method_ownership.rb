@@ -72,13 +72,15 @@ module Rigor
       # `Scope` merges each file's discovery with the project pre-pass, so the slot turns over per file, and
       # an ADR-46 dependency the first lookup recorded belongs to the file every later hit serves. Pool
       # workers are separate processes, and a Ractor has its own `Thread.current`. The `:ancestry` bucket
-      # belongs to {ClosureEscapeAnalyzer}'s ancestry step.
+      # belongs to {ClosureEscapeAnalyzer}'s ancestry step. The `:block_runs` bucket belongs to
+      # {BlockRunCount}.
       def memo(scope)
         discovery = scope.discovery
         environment = scope.environment
         slot = Thread.current[MEMO_KEY]
         unless slot && slot[0].equal?(discovery) && slot[1].equal?(environment)
-          slot = [discovery, environment, { instance: {}, singleton: {}, ancestry: {} }]
+          buckets = { instance: {}, singleton: {}, ancestry: {}, block_runs: {}.compare_by_identity }
+          slot = [discovery, environment, buckets]
           Thread.current[MEMO_KEY] = slot
         end
         slot[2]

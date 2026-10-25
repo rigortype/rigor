@@ -50,7 +50,7 @@ module Rigor
         def_node = callee_def(call_node, receiver_type, scope)
         return false unless def_node.is_a?(Prism::DefNode) && def_node.body
 
-        BlockRunCount.may_repeat?(def_node)
+        BlockRunCount.may_repeat?(def_node, scope)
       rescue StandardError
         false
       end

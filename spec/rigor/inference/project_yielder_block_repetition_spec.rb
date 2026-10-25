@@ -32,6 +32,10 @@ RSpec.describe "project yielder block repetition", type: :runner do
         def self.with_index(xs); r = nil; xs.each_with_index { |x, _i| r = yield(x) }; r; end
         def self.once; yield(1); end
         def self.maybe_once(x); yield(x) if x; end
+        def self.nexted(xs); v = nil; xs.each { |x| v = yield(x); next }; v; end
+        def self.called_thrice(&blk); blk.call(0); blk.call(1); yield(2); end
+        def self.looped; i = 0; v = nil; loop { v = yield(i); i += 1; break if i > 2 }; v; end
+        def self.with_while; i = 0; v = nil; while i < 3; v = yield(i); i += 1; end; v; end
       end
 
       class K
@@ -46,8 +50,13 @@ RSpec.describe "project yielder block repetition", type: :runner do
     "a callee that yields inside each_with_index" => "Y.with_index([1, 2, 3])",
     "an instance-method callee" => "K.new.last_val([1, 2, 3])",
     "a forward through a named &blk" => "Y.named([1, 2, 3])",
-    # A guard: a `...` forward does not carry the block's value to the caller today, so nothing observes the count.
-    "a forward through ... (guard)" => "Y.dotted([1, 2, 3])"
+    "a yield before a next in an iterator block" => "Y.nexted([1, 2, 3])",
+    "two blk.call runs before a yield" => "Y.called_thrice",
+    # Guards: nothing observes the count. A `...` forward does not carry the block's value to the caller today, and
+    # the loop's own write-back already widens a local a `loop` or `while` body assigns from `yield`.
+    "a forward through ... (guard)" => "Y.dotted([1, 2, 3])",
+    "a yield inside Kernel#loop (guard)" => "Y.looped",
+    "a yield inside while (guard)" => "Y.with_while"
   }.each do |callee, call|
     it "reports nothing on the value of a block #{callee} runs repeatedly" do
       source = "#{helpers}count = 0\na = #{call} { |_| count += 1 }\nputs 'three' if a == 3\n"
@@ -86,6 +95,15 @@ RSpec.describe "project yielder block repetition", type: :runner do
           def guarded(&blk); return "z" unless blk; yield; end
           def branched(f); if f then yield(1) else yield(2) end; end
           def unlessed(f); unless f then yield(1) else yield(2) end; end
+          def raised(k); if k then yield(1); raise "no" end; yield(2); end
+          def lam; _f = -> { yield(0) }; yield(1); end
+        end
+
+        class Finder
+          def initialize; @xs = [1, 2, 3]; end
+          def use_first_ok; @xs.each { |x| return yield(x) if x > 1 }; raise "none"; end
+          def use_first; @xs.each { |x| return yield(x) }; raise "none"; end
+          def scan; i = 0; while i < 3; return yield(i) if i > 1; i += 1; end; raise "none"; end
         end
         module R; def self.either(f); f ? yield(1) : yield(2); end; end
       RUBY
@@ -109,7 +127,12 @@ RSpec.describe "project yielder block repetition", type: :runner do
       "a &blk read before a yield" => "Lock.new.guarded",
       "if/else arms" => "Lock.new.branched(true)",
       "unless/else arms" => "Lock.new.unlessed(true)",
-      "ternary arms" => "R.either(true)"
+      "ternary arms" => "R.either(true)",
+      "a raise ending the path of an earlier yield" => "Lock.new.raised(false)",
+      "a yield inside a lambda body" => "Lock.new.lam",
+      "a return yield inside an iterator block" => "Finder.new.use_first_ok",
+      "an unconditional return yield inside an iterator block" => "Finder.new.use_first",
+      "a return yield inside while" => "Finder.new.scan"
     }.each do |shape, call|
       it "reports no possible nil receiver on a block value through #{shape}" do
         source = "#{once_helpers}s = 'a'\nr = #{call} { t = s; s = nil; t }\nputs r.upcase\n"
@@ -121,6 +144,11 @@ RSpec.describe "project yielder block repetition", type: :runner do
     it "reports no possible nil receiver through a raise before the yield (guard)" do
       source = "#{once_helpers}s = 'a'\nr = Lock.new.raising(true) { t = s; s = nil; t }\nputs r.upcase\n"
       expect(nil_receiver_lines(source)).to eq([])
+    end
+
+    it "keeps the always-truthy finding through a return yield inside an iterator block" do
+      source = "#{once_helpers}c = 0\nr = Finder.new.use_first_ok { c += 1 }\nputs 'one' if r == 1\n"
+      expect(always_truthy_lines(source)).to eq([once_helpers.lines.size + 3])
     end
 
     it "keeps the always-truthy finding through ternary arms" do

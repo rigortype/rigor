@@ -23,11 +23,8 @@ module Rigor
         def self.[]: (index: Integer, type_name: String) -> instance | (Integer index, String type_name) -> instance
       end
 
-      # sig-gen gap: #2321 — `attr_reader` rows over ivars `initialize` assigns from expressions derived
-      # from its parameters (`dup.freeze`/`to_sym`), so the stored types are hand-written.
       attr_reader path_glob: String
 
-      # sig-gen gap: #2321 — as above (`to_sym` normalizes the accepted Symbol|String).
       attr_reader method_name: Symbol
 
       # `singleton ? true : false` collapses any truthy input to bool — sig-gen already infers
@@ -38,12 +35,11 @@ module Rigor
       # parameters are undeclared (it guarantees `Array[ParamType]`).
       attr_reader param_types: Array[ParamType]
 
-      # sig-gen gap: #2321 — as above (nil or a non-empty `dup.freeze`d String).
       attr_reader return_type_name: String?
 
-      # sig-gen gap: #2321 — as above (`VALID_SEVERITIES.include?(to_sym)` bounds the stored value
-      # to the three declared literals; a derived-write credit would generate `Symbol`, not the literal union, so
-      # this row needs the declared literals kept as intent).
+      # sig-gen gap: #2321 — `initialize` stores `severity.to_sym`, and `VALID_SEVERITIES.include?` bounds the
+      # stored value to the three declared literals; the derived-write credit generates `Symbol`, not the literal
+      # union, so this row keeps the declared literals as intent.
       attr_reader severity: :error | :warning | :info
 
       # `method_name`/`severity` accept String too (both are `to_sym`'d); `param_types` entries are

@@ -574,9 +574,10 @@ lib/rigor/inference/scope_indexer/class_cvars_collector.rb:
   producers:
     Rigor::Inference::ScopeIndexer::ClassCvarsCollector: grandfathered
 lib/rigor/inference/scope_indexer/declared_param_writes.rb:
-  computes: the ivar writes in one instance def whose value is a parameter with a declared type
+  computes: the ivar writes in one instance def whose value reads only parameters with a declared type
   producers:
     Rigor::Inference::ScopeIndexer::DeclaredParamWrites: 'issue #1154, stops its scan of one def body at a nested def, class, module or class << self, whose locals and ivar writes are not the method''s own; the census caller already knows the owning class, and it derives no declaration context'
+    Rigor::Inference::ScopeIndexer::DeclaredParamWrites#parameter_reads: 'issue #2321, declines a write whose value holds a nested def, class, module or class << self, whose locals are not the method''s own; it reads the locals of one value and derives no declaration context'
     Rigor::Inference::ScopeIndexer::DeclaredParamWrites#scan: 'issue #1154, stops its scan of one def body at a nested def, class, module or class << self, whose locals and ivar writes are not the method''s own; the census caller already knows the owning class, and it derives no declaration context'
 lib/rigor/inference/scope_indexer/def_nestings_collector.rb:
   computes: the Module.nesting of each def, as a collector on the shared declaration walk

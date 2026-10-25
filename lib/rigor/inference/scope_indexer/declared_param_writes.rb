@@ -6,6 +6,7 @@ require_relative "../../reflection"
 require_relative "../method_parameter_binder"
 require_relative "../global_write_census"
 require_relative "unseen_ivar_writers"
+require_relative "derived_param_value"
 
 module Rigor
   module Inference
@@ -21,7 +22,13 @@ module Rigor
       # every gate, and {EMPTY} otherwise; an absent write keeps the census's ordinary rvalue typing, so a declined
       # case reads exactly what it read before:
       #
-      # - the write's value is a bare read of the parameter (`@x = x`), not an expression over it;
+      # - the write's value reads at least one parameter, and every local it reads is a parameter with a declared type.
+      #   A bare read (`@x = x`) records that type; an expression over parameters (`@x = x.dup.freeze`,
+      #   `@x = Array(x)`, `@x = f ? x : y`, issue #2321) records the value typed with each parameter it reads bound to
+      #   its declared type, unless {DerivedParamValue} declines it (a parameter that holds `untyped` at any depth or
+      #   has a default outside its declared type, or a call argument whose type may match a narrower overload). A
+      #   value that holds a block, a lambda or a nested `def` is not credited: their own parameters are locals the
+      #   scan does not bind;
       # - the write is not inside a block or a lambda, so a block parameter of the same name and a block that runs
       #   under another `self` (`instance_eval`, `Class.new`, `define_method`) never borrow the method's parameter;
       # - the method body never writes the parameter, in any form and at any depth (`x = Integer(x)`, `x ||= …`,
@@ -82,13 +89,15 @@ module Rigor
           writes = []
           return EMPTY if scan(def_node.body, written, writes, in_block: false) == :opaque
 
-          writes.reject! { |write| written.include?(write.value.name) }
-          return EMPTY if writes.empty?
+          reads = unwritten_reads(writes, written)
+          return EMPTY if reads.empty?
 
           types = declared_types(def_node, class_name, scope)
           writers = writer_scope(scope)
-          credited = writes.each_with_object({}.compare_by_identity) do |write, acc|
-            type = types[write.value.name]
+          credited = reads.each_with_object({}.compare_by_identity) do |(write, names), acc|
+            next unless names.all? { |name| types.key?(name) }
+
+            type = value_type(write.value, names, types, def_node, scope)
             acc[write] = type if type && !UnseenIvarWriters.possible?(writers, class_name, write.name)
           end
           credited.empty? ? EMPTY : credited
@@ -96,7 +105,45 @@ module Rigor
           EMPTY
         end
 
-        # Collects the `@x = local` writes outside every block, and the name of every local the body writes in
+        # `{write => names of the locals its value reads}` for each write whose value reads at least one local and no
+        # local the body writes.
+        def unwritten_reads(writes, written)
+          writes.each_with_object({}.compare_by_identity) do |write, acc|
+            names = parameter_reads(write.value)
+            next if names.nil? || names.empty? || names.any? { |name| written.include?(name) }
+
+            acc[write] = names
+          end
+        end
+
+        # The names of the locals `value` reads, or nil when it holds a block, a lambda or a scope barrier.
+        def parameter_reads(value, names = Set.new)
+          return names unless value.is_a?(Prism::Node)
+          return nil if BLOCK_NODES.any? { |klass| value.is_a?(klass) }
+          return nil if SCOPE_BARRIERS.any? { |klass| value.is_a?(klass) }
+
+          names << value.name if value.is_a?(Prism::LocalVariableReadNode)
+          value.rigor_each_child do |child|
+            return nil if parameter_reads(child, names).nil?
+          end
+          names
+        end
+
+        # A bare read takes the declared type itself; an expression over the parameters is typed with each bound to
+        # its declared type, unless {DerivedParamValue} declines it.
+        def value_type(value, names, types, def_node, scope)
+          return types[value.name] if value.is_a?(Prism::LocalVariableReadNode)
+          return nil if DerivedParamValue.declined?(names, types, def_node, scope)
+
+          bound = names.reduce(scope) { |acc, name| acc.with_local(name, types[name]) }
+          return nil if DerivedParamValue.overload_sensitive_argument?(value, bound)
+
+          bound.type_of(value)
+        rescue StandardError
+          nil
+        end
+
+        # Collects the `@x = …` writes outside every block, and the name of every local the body writes in
         # any form at any depth. A read at depth zero outside a block names the method's own local, which is the
         # parameter when the body never writes the name.
         #
@@ -113,7 +160,7 @@ module Rigor
           when Prism::CallNode
             return :opaque if opaque_call?(node)
           end
-          writes << node if !in_block && local_read_write?(node)
+          writes << node if !in_block && node.is_a?(Prism::InstanceVariableWriteNode)
           inner = in_block || BLOCK_NODES.any? { |klass| node.is_a?(klass) }
           node.rigor_each_child do |child|
             return :opaque if scan(child, written, writes, in_block: inner) == :opaque
@@ -127,10 +174,6 @@ module Rigor
           return true if node.name == :binding
 
           OPAQUE_EVAL_CALLS.include?(node.name) && !(node.arguments&.arguments || []).empty?
-        end
-
-        def local_read_write?(node)
-          node.is_a?(Prism::InstanceVariableWriteNode) && node.value.is_a?(Prism::LocalVariableReadNode)
         end
 
         # The declared, non-`untyped` type of each parameter, or `{}` when a gate declines the method.

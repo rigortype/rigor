@@ -75,6 +75,153 @@ RSpec.describe "the ADR-58 ivar census types a write from a declared parameter (
     end
   end
 
+  # Issue #2321 — a write whose value is an expression over declared parameters records that expression's type, with
+  # each parameter it reads bound to its declared type, under the same gates as a bare read.
+  describe "a credited write derived from declared parameters (#2321)" do
+    {
+      "a call chain" => ["def initialize(x) = @x = x.dup.freeze", "def initialize: (String x) -> void", "String"],
+      "a conversion over a union" => ["def initialize(x) = @x = x.to_sym",
+                                      "def initialize: (String | Symbol x) -> void", "Symbol"],
+      "a Kernel conversion of a class no RBS class extends" =>
+        ["def initialize(x) = @x = Array(x)", "def initialize: (Integer x) -> void", "Array[Integer]"],
+      "an argument of a class no RBS class extends" => ["def initialize(a, b) = @x = a + b",
+                                                        "def initialize: (Integer a, Integer b) -> void", "Integer"],
+      "a literal argument" => ["def initialize(a, b) = @x = a + b", "def initialize: (Integer a, 1 b) -> void",
+                               "Integer"],
+      "a union in receiver position" => ["def initialize(a, b) = @x = b + a",
+                                         "def initialize: (Integer a, Integer | Float b) -> void", "Float | Integer"],
+      "a map with a symbol block" => ["def initialize(x) = @x = x.map(&:to_s)",
+                                      "def initialize: (Array[Symbol] x) -> void", "Array[String]"],
+      "a ternary over two parameters" => ["def initialize(f, x, y) = @x = f ? x : y",
+                                          "def initialize: (bool f, Integer x, String y) -> void", "Integer | String"],
+      "a parenthesised read" => ["def initialize(x) = @x = (x)", "def initialize: (String x) -> void", "String"],
+      "a keyword parameter" => ["def initialize(x:) = @x = x.to_sym", "def initialize: (x: String) -> void", "Symbol"],
+      "an empty Array default" => ["def initialize(x = []) = @x = x.map(&:to_s)",
+                                   "def initialize: (?Array[Symbol] x) -> void", "Array[String]"],
+      "an empty Array default under a union" =>
+        ["def initialize(x = []) = @x = x.to_a", "def initialize: (?(Array[Symbol] | Set[Symbol]) x) -> void",
+         "Array[Symbol]"],
+      "an empty Hash default" => ["def initialize(x: {}) = @x = x.keys",
+                                  "def initialize: (?x: Hash[Symbol, Integer]) -> void", "Array[Symbol]"],
+      "an optional parameter whose default is within its declared type" =>
+        ["def initialize(x = nil) = @x = x&.to_s", "def initialize: (?Symbol? x) -> void", "String?"]
+    }.each do |shape, (body, signature, expected)|
+      it "for #{shape}" do
+        expect(k_census(body, signature)).to eq(expected)
+      end
+    end
+
+    it "keeps the bare credit for a parameter whose declared type holds untyped" do
+      signature = "def initialize: (Array[untyped] x) -> void"
+
+      expect(k_census("def initialize(x) = @x = x", signature)).to eq("Array[Dynamic[top]]")
+    end
+
+    it "joins every other write the census records, as a bare read does" do
+      body = "def initialize(x) = @x = x.dup.freeze\ndef reset = @x = 1"
+
+      expect(k_census(body, "def initialize: (String x) -> void")).to eq("1 | String")
+    end
+  end
+
+  describe "a derived write is declined (#2321)" do
+    {
+      "an untyped parameter" => ["def initialize(x) = @x = x.to_s", "def initialize: (untyped x) -> void"],
+      "a parameter whose declared type holds untyped (#2325)" =>
+        ["def initialize(x) = @x = x.map(&:to_s)", "def initialize: (Array[untyped] x) -> void"],
+      "a second parameter that is untyped" =>
+        ["def initialize(x, y) = @x = x + y", "def initialize: (String x, untyped y) -> void"],
+      "an undeclared method" => ["def initialize(x) = @x = x.to_s", "def other: () -> void"],
+      "a parameter the body reassigns" => ["def initialize(x)\nx = 1\n@x = x.to_s\nend",
+                                           "def initialize: (String x) -> void"],
+      "a local that is not a parameter" => ["def initialize(x)\ny = x\n@x = y.to_s\nend",
+                                            "def initialize: (Integer x) -> void"],
+      "a union argument, whose first matching overload the engine picks" =>
+        ["def initialize(a, b) = @x = a + b", "def initialize: (Integer a, Integer | Float b) -> void"],
+      "a union argument built by a ternary over leaf parameters" =>
+        ["def initialize(a, b) = @x = a + (b > 0 ? b : 0.5)", "def initialize: (Integer a, Integer b) -> void"],
+      "an argument a numeric operator widens" =>
+        ["def initialize(a, b) = @x = a + b ** -1", "def initialize: (Integer a, Integer b) -> void"],
+      "a union argument built from no parameter" =>
+        ["def initialize(a) = @x = a + (rand > 0.5 ? 1 : 1.5)", "def initialize: (Integer a) -> void"],
+      "a union argument built by a call over leaf parameters" =>
+        ["def initialize(a, b) = @x = a + [b, 1.5].max", "def initialize: (Integer a, Integer b) -> void"],
+      "a union argument built by a predicate ternary" =>
+        ["def initialize(a, b) = @x = a + (b.zero? ? 0 : b.to_f)", "def initialize: (Integer a, Integer b) -> void"],
+      "a splat argument" =>
+        ["def initialize(a, b) = @x = a.push(*b)", "def initialize: (Array[Integer] a, Array[Integer] b) -> void"],
+      "a keyword parameter whose default is outside its declared type" =>
+        ["def initialize(x: nil) = @x = x&.to_s", "def initialize: (?x: Integer) -> void"],
+      "a union argument of another operator" =>
+        ["def initialize(a, b) = @x = a * b", "def initialize: (Integer a, Integer | Float b) -> void"],
+      "an argument of a class another RBS class extends" =>
+        ["def initialize(a, b) = @x = a - b", "def initialize: (Integer a, Numeric b) -> void"],
+      "a union index argument" =>
+        ["def initialize(a, i) = @x = a[i]", "def initialize: (Array[Integer] a, Integer | Range[Integer] i) -> void"],
+      "an optional parameter whose default is outside its declared type" =>
+        ["def initialize(x = nil) = @x = x&.to_s", "def initialize: (?Integer x) -> void"],
+      "an optional parameter whose default the census cannot type" =>
+        ["def initialize(x = compute) = @x = x.to_s", "def initialize: (?Integer x) -> void"],
+      "an optional whose declared type holds untyped" =>
+        ["def initialize(x) = @x = x&.map(&:to_s)", "def initialize: (Array[untyped]? x) -> void"],
+      "a tuple whose declared type holds untyped" =>
+        ["def initialize(x) = @x = x.last", "def initialize: ([untyped, Integer] x) -> void"],
+      "a record whose declared type holds untyped" =>
+        ["def initialize(x) = @x = x[:b]", "def initialize: ({ a: untyped, b: Integer } x) -> void"],
+      "a value holding a block, whose own parameters the scan does not bind" =>
+        ["def initialize(x) = @x = x.tap { nil }", "def initialize: (String x) -> void"],
+      "a value holding a nested def" => ["def initialize(x) = @x = (def m(x) = x\nx.to_s)",
+                                         "def initialize: (Symbol x) -> void"]
+    }.each do |shape, (body, signature)|
+      it "for #{shape}" do
+        expect(k_census(body, signature)).to eq("Dynamic[top]")
+      end
+    end
+  end
+
+  it "records a union argument of a Kernel conversion as the census did before" do
+    recorded = k_census("def initialize(x) = @x = Array(x)", "def initialize: (Array[String] | String x) -> void")
+
+    expect(recorded).to eq("Dynamic[Array[Dynamic[top]] | [Dynamic[top]]]")
+  end
+
+  it "records a module-typed argument as the census did before" do
+    recorded = k_census("def initialize(x) = @x = Array(x)", "def initialize: (Comparable x) -> void")
+
+    expect(recorded).to eq("Dynamic[Array[Dynamic[top]] | [Dynamic[top]]]")
+  end
+
+  # A guard: the census types `super` and `yield` as `Dynamic[top]` whatever their arguments, so the decline of a
+  # union argument to either is not observable today; it keeps the write declined if that typing gains precision.
+  it "records a union argument to super or yield as the census did before (a guard)" do
+    source = "class P\nend\nclass K < P\n  def m(a) = @x = super(a > 0 ? a : 0.5)\n  " \
+             "def run(a) = @y = yield(a > 0 ? a : 0.5)\nend\n"
+    rbs = "class P\n  def m: (Integer) -> Integer | (Float) -> Float\nend\nclass K < P\n  " \
+          "def m: (Integer a) -> void\n  def run: (Integer a) { (Integer | Float) -> String } -> void\nend\n"
+
+    expect([census(source, rbs, "K", :@x), census(source, rbs, "K", :@y)]).to eq(["Dynamic[top]", "Dynamic[top]"])
+  end
+
+  it "records a lambda value as the census did before (a guard: a lambda's own type never reads the parameter)" do
+    expect(k_census("def initialize(x) = @x = -> { x }", "def initialize: (Symbol x) -> void")).to eq("Proc")
+  end
+
+  describe "the leaf-class test fails closed (#2321)" do
+    def leaf?(superclass_names)
+      loader = instance_double(Rigor::Environment::RbsLoader, superclass_names: superclass_names)
+      environment = instance_double(Rigor::Environment, rbs_module?: false, class_known?: true, rbs_loader: loader)
+      Rigor::Inference::ScopeIndexer::DerivedParamValue.leaf_class?("Integer", environment)
+    end
+
+    it "reads no class as a leaf when the RBS superclass set could not be read" do
+      expect([leaf?(nil), leaf?(Set.new)]).to eq([false, false])
+    end
+
+    it "reads a class absent from a read set as a leaf (control)" do
+      expect(leaf?(Set["Numeric"])).to be(true)
+    end
+  end
+
   describe "a declined write records what it did before" do
     {
       "a parameter the body reassigns" => ["def initialize(x)\nx = Integer(x)\n@x = x\nend",
@@ -92,8 +239,6 @@ RSpec.describe "the ADR-58 ivar census types a write from a declared parameter (
                                                "def initialize: (String x) -> void"],
       "a write in a block under another self" => ["def initialize(x)\ninstance_eval { @x = x }\nend",
                                                   "def initialize: (String x) -> void"],
-      "an expression over the parameter (a guard: only a bare read is ever credited)" =>
-        ["def initialize(x) = @x = (x)", "def initialize: (String x) -> void"],
       "an undeclared method" => ["def initialize(x) = @x = x", "def other: () -> void"],
       "a rescue reference" => ["def initialize(x)\nbegin\nrescue => x\nend\n@x = x\nend",
                                "def initialize: (String x) -> void"],
@@ -330,6 +475,21 @@ RSpec.describe "the ADR-58 ivar census types a write from a declared parameter (
 
         expect(dumps).to eq(["dump_type: Dynamic[top]"])
       end
+    end
+
+    it "reads a derived write's type in a sibling method" do
+      write_project("lib/k.rb" => "class K\n  def initialize(x) = @x = x.to_sym\nend\n#{reader}",
+                    "sig/k.rbs" => "class K\n  def initialize: (String | Symbol x) -> void\nend\n")
+
+      expect(dumps).to eq(["dump_type: Symbol"])
+    end
+
+    it "declines a derived write a reopening in another file also writes" do
+      write_project("lib/k.rb" => "class K\n  def initialize(x) = @x = x.to_sym\nend\n#{reader}",
+                    "lib/k2.rb" => "class K\n  def reset(v) = @x = v\nend\n",
+                    "sig/k.rbs" => "class K\n  def initialize: (String | Symbol x) -> void\nend\n")
+
+      expect(dumps).to eq(["dump_type: Dynamic[top]"])
     end
 
     it "credits a class another file reopens without writing the ivar" do

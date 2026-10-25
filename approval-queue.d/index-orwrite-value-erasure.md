@@ -20,14 +20,20 @@ erase the literal whenever the slot was wholly `Dynamic`. A slot-keyed rule also
   `call.possible-nil-receiver` (runtime `"b"`, `block_return_scope_threading_spec.rb` :982 and :994), and about
   twenty block-fold and straight-line examples lost their precise answers.
 - Key on the receiver having an untracked (`Dynamic` / `Top`) constituent, #544's `fully_tracked_receiver_type?`:
-  fixes the issue's spellings on an untyped parameter or ivar and keeps the block folds. One level below a local
-  #2288 erased, `(x[:j] ||= 1).upcase` still reads `1`.
+  fixes the issue's spellings on an untyped parameter or ivar and keeps the block folds. Every receiver that is
+  tracked but has an unknown slot keeps the literal reading, and these spellings report at both base and head:
+  `(x[:j] ||= 1).upcase` one level below a local #2288 erased (`x = (h[k] ||= {})`); the inline nest
+  `((h[a] ||= {})[b] ||= {})[:name].upcase`; a receiver declared with a typed key and an untyped value
+  (`Hash[Symbol, untyped]`); and an ivar initialised `@cache = {}` and read in another method.
 - Track a receiver's origin (memo-bound vs widened literal): beyond the issue.
 
 ## Decision
 
-The second option. False positives outrank precision, and the first option added two. The residual is pinned by the
-`RESIDUAL` example in `spec/rigor/inference/index_or_write_memo_value_spec.rb`, so a later change sees it.
+The second option. False positives outrank precision, and the first option added two. The residual spellings above
+are accepted as a pre-existing class, which this change neither adds to nor fixes. They are tracked in
+[#2354](https://github.com/rigortype/rigor/issues/2354), and the local-bind receiver-origin case in
+[#2352](https://github.com/rigortype/rigor/issues/2352). The `RESIDUAL` example in
+`spec/rigor/inference/index_or_write_memo_value_spec.rb` pins the first spelling, so a later change sees it.
 
 ## To undo
 

@@ -65,7 +65,7 @@ module Rigor
                            line: locate_at[0] + 1, character: locate_at[1] + 1)
         return nil if node.nil?
 
-        query = ScopeQuery.new(path: path, bytes: bytes_to_parse)
+        query = ScopeQuery.new(path: path, bytes: bytes_to_parse, index: nil)
         case node
         when Prism::CallNode
           # `hash[:|` patches to `hash[:KEY_SENTINEL]`, an index access call whose argument is the sentinel
@@ -78,7 +78,7 @@ module Rigor
           # The sentinel symbol's NodeLocator hit; walk up via the AST to find the enclosing `[]` call.
           hash_key_completion_for_symbol(node, parse_result.value, query)
         when Prism::ConstantPathNode
-          constant_path_completion_for(node, query)
+          constant_path_completion_for(node)
         end
       end
 
@@ -213,11 +213,11 @@ module Rigor
       # resolves to a class / module FQN; we enumerate every known class whose name is an immediate child of
       # that parent. Top-level constants (`::Foo`) and parent-less paths are not yet supported (queued for
       # slice 6 follow-up).
-      def constant_path_completion_for(const_path_node, query)
+      def constant_path_completion_for(const_path_node)
         parent_fqn = parent_fqn_of(const_path_node)
         return nil if parent_fqn.nil?
 
-        scope = seeded_scope(query)
+        scope = Scope.empty(environment: @project_context.environment) # reads only the environment
         children = enumerate_constant_children(parent_fqn, scope)
         return nil if children.empty?
 
@@ -278,8 +278,10 @@ module Rigor
         }
       end
 
-      # The (path, bytes) a scope query is seeded from: the bytes the parse saw, sentinel splice included.
-      ScopeQuery = Data.define(:path, :bytes)
+      # The (path, bytes) a scope query is seeded from: the bytes the parse saw, sentinel splice included. `index`
+      # memoises the request's scope index, so a `hash[...]` request that falls through from hash-key to method
+      # completion builds it once.
+      ScopeQuery = Struct.new(:path, :bytes, :index)
       private_constant :ScopeQuery
 
       def seeded_scope(query)
@@ -293,8 +295,7 @@ module Rigor
       end
 
       def build_scope_index(root, query)
-        scope = seeded_scope(query)
-        Inference::ScopeIndexer.index(root, default_scope: scope)
+        query.index ||= Inference::ScopeIndexer.index(root, default_scope: seeded_scope(query))
       end
 
       # Returns the LSP completion items for every public method callable on the receiver.

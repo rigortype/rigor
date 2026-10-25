@@ -43,6 +43,20 @@ RSpec.describe "LSP editor queries over a project (#2282)" do
       expect(hover[:contents][:value]).not_to include("Dynamic")
     end
 
+    it "reads the open buffer's declarations, not the file on disk" do
+      m_path = File.join(lib, "m.rb")
+      File.write(m_path, "class Gone\nend\nmodule M\n  def self.h = 1\n  Y = 1\nend\n")
+      m_uri = "file://#{m_path}"
+      # The buffer deleted every declaration the disk copy has, keeping only uses of them.
+      buffer_table.open(uri: m_uri, bytes: "M.h\nM::Y\nGone\n", version: 1)
+
+      hovers = [[0, 2], [1, 3], [2, 1]].map do |line, col|
+        provider(described_class).provide(uri: m_uri, line: line, character: col)
+      end
+
+      expect(hovers.map { |hover| hover[:contents][:value][/Dynamic/] }).to eq(%w[Dynamic Dynamic Dynamic])
+    end
+
     context "with no configured files (empty seed)" do
       let(:paths) { [] }
 

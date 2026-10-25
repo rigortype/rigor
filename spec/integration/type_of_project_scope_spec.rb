@@ -125,7 +125,28 @@ RSpec.describe "rigor type-of over a project (#512)" do
       expect(type).to eq("Integer")
     end
 
-    it "keeps the unseeded answer when the gate is off (control)" do
+    it "drops the table once a caller changed since the snapshot (no stale type)" do
+      warm_snapshot
+      write("lib/caller.rb", "Box.new.put(\"s\")\n")
+      _status, type, = type_of("lib/box.rb:3:5")
+      expect(type).to eq("Dynamic[top]")
+    end
+
+    it "drops the table once a file was added since the snapshot" do
+      warm_snapshot
+      write("lib/extra.rb", "class Extra\nend\n")
+      _status, type, = type_of("lib/box.rb:3:5")
+      expect(type).to eq("Dynamic[top]")
+    end
+
+    it "drops the table under an editor buffer" do
+      warm_snapshot
+      write("buf.rb", "Box.new.put(\"s\")\n")
+      _status, type, = type_of("lib/box.rb:3:5", "--tmp-file", "buf.rb", "--instead-of", "lib/caller.rb")
+      expect(type).to eq("Dynamic[top]")
+    end
+
+    it "keeps the unseeded answer when the gate is off (control, the gate branch is otherwise unreachable)" do
       write(".rigor.yml", "paths:\n  - lib\n")
       warm_snapshot
       _status, type, = type_of("lib/box.rb:3:5")

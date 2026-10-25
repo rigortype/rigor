@@ -136,8 +136,7 @@ module Rigor
         end
 
         # Walks the AST collecting every module's instance-side def nodes by fully-qualified module
-        # name. The same `collect_action_defs` filter applies (private / `_`-prefixed skipped; callback targets
-        # stay actions and carry the view exemption).
+        # name. The same `collect_action_defs` filter applies (private / `_`-prefixed skipped).
         def collect_module_actions(node, lexical_path, accumulator)
           return if node.nil?
 
@@ -148,10 +147,7 @@ module Rigor
 
             full_name = declared_constant_name(local_name, lexical_path)
             if node.body
-              def_nodes, view_exempt = collect_action_defs(node.body)
-              entries = def_nodes.to_h do |def_node|
-                [def_node.name, build_action_entry(def_node, view_exempt: view_exempt.include?(def_node.name))]
-              end
+              entries = collect_action_defs(node.body).first.to_h { |def_node| [def_node.name, build_action_entry(def_node)] }
               # UNIONed, never assigned: a concern module reopened in a second file adds actions rather
               # than replacing the ones the first declaration spelled (same rule as {MailerIndex}'s
               # per-class merge).

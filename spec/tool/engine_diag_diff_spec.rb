@@ -194,7 +194,9 @@ RSpec.describe "tool/engine_diag_diff.rb" do
         stub_engine_copies
         options, = run_with_no_target(base, corpus)
         expect { EngineDiagDiff.run(options) }
-          .to output(/\AMeasuring targets: lib \(no --target, and the corpus configuration names no paths:; falling back to lib\)$/)
+          .to output(
+            /\AMeasuring targets: lib \(no --target, and the corpus configuration names no paths:; falling back to lib\)$/
+          )
           .to_stdout
         expect(EngineDiagDiff).to have_received(:run_child).with(anything, anything, ["lib"]).twice
       end

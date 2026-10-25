@@ -27,6 +27,7 @@ RSpec.describe "project yielder block repetition", type: :runner do
       module Y
         def self.last_val(entries); v = nil; entries.each { |e| v = yield(e) }; v; end
         def self.named(entries, &blk) = last_val(entries, &blk)
+        def self.dotted(...) = last_val(...)
         def self.with_times; r = nil; 3.times { |i| r = yield(i) }; r; end
         def self.with_index(xs); r = nil; xs.each_with_index { |x, _i| r = yield(x) }; r; end
         def self.once; yield(1); end
@@ -39,13 +40,14 @@ RSpec.describe "project yielder block repetition", type: :runner do
     RUBY
   end
 
-  # The last one is a guard: the #2301 hand-off rule already covered a `&blk` forward.
   {
     "a callee that yields inside an iterator block" => "Y.last_val([1, 2, 3])",
     "a callee that yields inside times" => "Y.with_times",
     "a callee that yields inside each_with_index" => "Y.with_index([1, 2, 3])",
     "an instance-method callee" => "K.new.last_val([1, 2, 3])",
-    "a forward through a named &blk (guard)" => "Y.named([1, 2, 3])"
+    "a forward through a named &blk" => "Y.named([1, 2, 3])",
+    # A guard: a `...` forward does not carry the block's value to the caller today, so nothing observes the count.
+    "a forward through ... (guard)" => "Y.dotted([1, 2, 3])"
   }.each do |callee, call|
     it "reports nothing on the value of a block #{callee} runs repeatedly" do
       source = "#{helpers}count = 0\na = #{call} { |_| count += 1 }\nputs 'three' if a == 3\n"

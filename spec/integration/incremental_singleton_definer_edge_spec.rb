@@ -76,4 +76,13 @@ RSpec.describe "incremental edges for a nearer def-less singleton definer (#2284
                          after: "class S1\nend\n",
                          first: [], second: fired)
   end
+
+  it "re-checks the call when an extended module gains an attr_reader" do
+    extend_files = { "lib/base.rb" => "class Bo\n  def self.name = nil\nend\n",
+                     "lib/sub.rb" => "class S1 < Bo\n  extend Em\nend\n",
+                     "lib/use.rb" => "S1.name.upcase\n" }
+    expect_toggle(extend_files, before: "module Em\n  def other = 1\nend\n",
+                                after: "module Em\n  def other = 1\n  attr_reader :name\nend\n",
+                                first: fired, second: [])
+  end
 end

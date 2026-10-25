@@ -2675,7 +2675,7 @@ module Rigor
         end
 
         discovery = scope.discovery
-        Analysis::DependencyRecorder.read_visibility(entry.name, name)
+        # No edge of its own: `singleton_def_through_ancestors`' chain search filed every entry ahead of the owner.
         discovery.contested?(:discovered_method_visibilities, [entry.name, [:singleton, name]]) ||
           discovery.contested?(:discovered_method_visibilities, [entry.name, SINGLETON_WILDCARD_SLOT])
       end

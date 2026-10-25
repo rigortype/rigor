@@ -33,6 +33,11 @@ An accepted conservative cost: the contest also comes from visibility-only calls
 `private_class_method :name` on a nearer subclass makes the farther `def self.name` read `Dynamic` instead of
 its type. This loses precision but cannot produce a false positive.
 
+A second accepted cost: a nearer `define_singleton_method` with a computed name contests that class's singleton
+wildcard slot, so every inherited singleton `def` behind it reads `Dynamic`, including names it never defines.
+`Sw.foo.upcase` therefore loses a true positive when `Sw`'s superclass has `def self.foo = nil`. The census cannot
+say which names a computed definer reaches, so withholding all of them is the conservative reading.
+
 ## To undo
 
 Remove the `expression_typer.rb` reads entry and its `justified` entry from `admission_census.yml`. Then

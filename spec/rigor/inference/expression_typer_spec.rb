@@ -2379,7 +2379,8 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     it "reads a `||=` on an untracked slot as the rvalue (the memoization idiom)" do
       # `def self.local(name) = @local_targets[name] ||= new(...)` — nothing wrote `@local_targets` on any
       # path the analyzer saw. The variable rule's ADR-5 optimism; `Dynamic[top] | rhs` skipped the sig.
-      expect(scope.type_of(parse_expression("@cache[:k] ||= 7")).describe).to eq("7")
+      # A construction rvalue: on this untracked receiver a literal `7` reads `7 | Dynamic[top]` (#2292).
+      expect(scope.type_of(parse_expression("@cache[:k] ||= Object.new")).describe).to eq("Object")
     end
 
     it "reads the nested memo `(@m ||= {})[key] ||= v` as the rvalue" do
@@ -2389,19 +2390,20 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
 
     it "reads a receiver bound to Dynamic the same way, since its slot is just as untracked" do
       bound = scope.with_ivar(:@cache, Rigor::Type::Combinator.untyped)
-      expect(bound.type_of(parse_expression("@cache[:k] ||= 7")).describe).to eq("7")
+      expect(bound.type_of(parse_expression("@cache[:k] ||= Object.new")).describe).to eq("Object")
     end
 
     it "keeps the slot at a site a block-return pass marked as repeated" do
       # An earlier run of the block may have filled the slot, so its gradual type is no memo's.
-      node = parse_expression("@cache[:k] ||= 7")
+      # A construction rvalue: a literal `7` on this untracked receiver reads `7 | Dynamic[top]` marked or not (#2292).
+      node = parse_expression("@cache[:k] ||= Object.new")
       bound = scope.with_ivar(:@cache, Rigor::Type::Combinator.untyped).with_repeated_or_writes([node])
-      expect(bound.type_of(node).describe).to eq("7 | Dynamic[top]")
+      expect(bound.type_of(node).describe).to eq("Dynamic[top] | Object")
     end
 
     it "keeps the memo reading at an unmarked site of the same text (control)" do
-      marked = scope.with_repeated_or_writes([parse_expression("@cache[:k] ||= 7")])
-      expect(marked.type_of(parse_expression("@cache[:k] ||= 7")).describe).to eq("7")
+      marked = scope.with_repeated_or_writes([parse_expression("@cache[:k] ||= Object.new")])
+      expect(marked.type_of(parse_expression("@cache[:k] ||= Object.new")).describe).to eq("Object")
     end
 
     it "gives an operator write on an untracked slot no optimistic reading (control)" do

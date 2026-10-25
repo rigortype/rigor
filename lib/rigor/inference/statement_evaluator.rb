@@ -585,12 +585,24 @@ module Rigor
       # evaluator's statement and write-back passes ({#with_repeated_or_write_marks}), type every run of a repeating
       # body from one entry scope, so its slot's gradual type may be what an EARLIER run stored rather than an
       # absence of evidence.
+      #
+      # On a receiver that is itself untracked (a `Dynamic` / `Top` constituent, the #544 test the narrowing
+      # record takes: a parameter, an unbound ivar), the slot may hold what an earlier call stored, so the reading
+      # keeps the rvalue only as far as its class is known ({#untracked_memo_value}, #2292): read as the fresh
+      # literal, `(h[k] ||= {})[:name].upcase` reported a call on `nil` and `(h[k] ||= 1).upcase` one on `1`. A
+      # tracked receiver keeps the literal, so a block fold over a captured `pool = {}`, whose in-place widening
+      # reads `Hash[Dynamic[top], Dynamic[top]]`, still answers `find { |s| (pool[s] ||= s) == "b" }` as `"b"`.
       def index_compound_write_value(node)
         return index_write_stored_type(node, scope) unless node.is_a?(Prism::IndexOrWriteNode)
 
         current = index_read_type(node, scope)
         rhs = scope.type_of(node.value, tracer: tracer)
-        return rhs if memoizing_index_read?(node, current, rhs)
+        if memoizing_index_read?(node, current, rhs)
+          return rhs if IndexedNarrowing.fully_tracked_receiver_type?(scope.type_of(node.receiver, tracer: tracer))
+
+          memo = untracked_memo_value(rhs)
+          return memo if memo
+        end
 
         index_write_stored_type(node, scope, current: current, rhs: rhs)
       end
@@ -1024,6 +1036,29 @@ module Rigor
 
         erased = erase_memo_container(value)
         erased || stored
+      end
+
+      # The memoizing value on an untracked receiver, or nil when it keeps the stored `Dynamic[top] | v`. A `{}` /
+      # `[]` rvalue (a shape, a tuple, a bare `Hash` / `Array`) erases to `Hash[untyped, untyped]` /
+      # `Array[untyped]`, since the table is not empty after the first store. A construction (a nominal,
+      # parameterised or not, or a `Data` / `Struct` instance, possibly with a `nil` / `false` arm) is kept as the
+      # #1155 reading has it. Anything else carries literal precision (`1`, `:a`, an integer range) and yields nil.
+      def untracked_memo_value(rhs)
+        erased = erase_memo_literal(rhs)
+        return erased if erased
+
+        truthy = Narrowing.narrow_truthy(rhs)
+        members = truthy.is_a?(Type::Union) ? truthy.members : [truthy]
+        rhs if members.all? { |member| MEMO_CONSTRUCTIONS.any? { |klass| member.is_a?(klass) } }
+      end
+
+      MEMO_CONSTRUCTIONS = [Type::Nominal, Type::DataInstance, Type::StructInstance, Type::Dynamic, Type::Top].freeze
+      private_constant :MEMO_CONSTRUCTIONS
+
+      def erase_memo_literal(type)
+        return erase_memo_container(type) unless type.is_a?(Type::Nominal)
+
+        erase_memo_container(type) if type.type_args.empty? && %w[Hash Array].include?(type.class_name)
       end
 
       def erase_memo_container(type)

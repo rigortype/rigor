@@ -27,11 +27,12 @@ express, the meaning of `nil`, an ADR or issue, a false-positive bound, or a dec
 It does not restate a name, type, or signature. The gate is `spec/docs/type_shaped_comments_spec.rb`.
 
 Engine type notation is vocabulary, not a type claim. A comment that explains what Rigor infers, rejects or
-prints may spell `Dynamic[Top]`, `Nominal[Array]` or `Constant[1]`, or quote an RBS example, because the
-notation is what the comment is about. The rule above is about a type attached to a name or signature in
-the code (`@param x [String]`, `Hash<Symbol, Integer>` over a method). A sweep that turns the notation into
-plain words loses the contrast the comment drew: `Array[:multi | Dynamic[top]]` against
-`Array[Dynamic[top] | Symbol]` became "the pinned `:multi` joined with untyped". The comment audit of
+prints may spell `Dynamic[top]`, `Nominal[Array]` or `Constant[1]`, or quote an RBS example, because the
+notation is what the comment is about; the type itself is still learned from Rigor, per § Provenance
+(`rigor type-of`, `rigor annotate`). The rule above is about a type attached to a name or signature in the
+code (`@param x [String]`, `Hash<Symbol, Integer>` over a method). A sweep that turns the notation into
+plain words loses precision: `Array[:multi | Dynamic[top]]` against `Array[Dynamic[top] | Symbol]` became
+"the pinned `:multi` joined with untyped, not the erased untyped joined with `Symbol`". The comment audit of
 [#2338](https://github.com/rigortype/rigor/pull/2338) reverted that rewrite in twelve files and part of a
 thirteenth.
 

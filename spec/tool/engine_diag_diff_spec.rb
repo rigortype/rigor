@@ -1,8 +1,10 @@
 # frozen_string_literal: true
 
-# The diff and adjudication logic of `tool/engine_diag_diff.rb` (ADR-119 WD2). Unit test only, over rows: the
-# sharded test job is a shallow clone, so nothing here archives a revision. Requiring the script defines
-# {EngineDiagDiff} without running an engine.
+# The diff and adjudication logic of `tool/engine_diag_diff.rb` (ADR-119 WD2). Unit test over rows, plus the
+# corpus configuration read (a child process over a tmp corpus, no engine check). Nothing here archives a
+# revision: the materialise step is stubbed, and run_child is stubbed for the run example.
+
+require "fileutils"
 require "spec_helper"
 require "tmpdir"
 
@@ -64,16 +66,16 @@ RSpec.describe "tool/engine_diag_diff.rb" do
   end
 
   describe ".resolve_targets" do
-    let(:configured) { { "config" => "/c/.rigor.yml", "declared" => true, "paths" => ["/c/app", "/c/lib"] } }
-    let(:silent) { { "config" => nil, "declared" => false, "paths" => ["/c/lib"] } }
+    let(:configured) { { "config" => "/c/.rigor.yml", "paths" => ["/c/app", "/c/lib"] } }
+    let(:silent) { { "config" => nil, "paths" => [] } }
 
     it "measures an explicit --target as given, without reading the corpus configuration" do
       expect(EngineDiagDiff.resolve_targets(["lib"], nil)).to eq(targets: ["lib"], source: :explicit)
     end
 
     it "measures the corpus configuration's paths: when no --target is given" do
-      expect(EngineDiagDiff.resolve_targets([],
-                                            configured)).to eq(targets: ["/c/app", "/c/lib"], source: "/c/.rigor.yml")
+      expect(EngineDiagDiff.resolve_targets([], configured))
+        .to eq(targets: ["/c/app", "/c/lib"], source: "/c/.rigor.yml")
     end
 
     it "falls back to lib, and says so, when the configuration names no paths:" do
@@ -81,16 +83,67 @@ RSpec.describe "tool/engine_diag_diff.rb" do
     end
 
     it "falls back to lib when paths: is declared but empty" do
-      expect(EngineDiagDiff.resolve_targets([],
-                                            configured.merge("paths" => []))).to eq(targets: ["lib"], source: :fallback)
+      expect(EngineDiagDiff.resolve_targets([], configured.merge("paths" => [])))
+        .to eq(targets: ["lib"], source: :fallback)
     end
 
     it "names the source of each target list in its first output line" do
-      expect(EngineDiagDiff.describe_targets(targets: ["lib"],
-                                             source: :explicit)).to eq("Measuring targets: lib (--target)")
+      expect(EngineDiagDiff.describe_targets(targets: ["lib"], source: :explicit))
+        .to eq("Measuring targets: lib (--target)")
       expect(EngineDiagDiff.describe_targets(targets: ["lib"], source: :fallback)).to include("falling back to lib")
       expect(EngineDiagDiff.describe_targets(targets: %w[app lib], source: "/c/.rigor.yml"))
         .to eq("Measuring targets: app, lib (no --target; the corpus configuration /c/.rigor.yml paths:)")
+    end
+  end
+
+  describe "reading the corpus configuration, and a run with no --target" do
+    # A tmp corpus with app/ and lib/, and an `outside` sibling of it; `config` is written as .rigor.yml when given.
+    def with_corpus(config)
+      Dir.mktmpdir do |base|
+        corpus = File.join(base, "corpus")
+        %w[app lib].each { |dir| FileUtils.mkdir_p(File.join(corpus, dir)) }
+        FileUtils.mkdir_p(File.join(base, "outside"))
+        File.write(File.join(corpus, ".rigor.yml"), config) if config
+        yield base, corpus
+      end
+    end
+
+    it "reads paths: with the engine's loader: corpus-relative inside the corpus, absolute outside it" do
+      with_corpus(nil) do |base, corpus|
+        File.write(File.join(corpus, ".rigor.yml"), "paths:\n  - app\n  - #{corpus}/lib\n  - ../outside\n")
+        result = EngineDiagDiff.run_corpus_paths(EngineDiagDiff::ROOT, File.realpath(corpus))
+        expect(result).to eq("config" => ".rigor.yml",
+                             "paths" => ["app", "lib", File.realpath(File.join(base, "outside"))])
+      end
+    end
+
+    it "names no paths when there is no configuration file, or paths: is null" do
+      with_corpus(nil) do |_base, corpus|
+        expect(EngineDiagDiff.run_corpus_paths(EngineDiagDiff::ROOT, File.realpath(corpus)))
+          .to eq("config" => nil, "paths" => [])
+      end
+      with_corpus("paths:\n") do |_base, corpus|
+        expect(EngineDiagDiff.run_corpus_paths(EngineDiagDiff::ROOT, File.realpath(corpus)))
+          .to eq("config" => ".rigor.yml", "paths" => [])
+      end
+    end
+
+    it "measures the configured paths, prints them first, and writes them into the summary" do
+      with_corpus("paths:\n  - app\n") do |base, corpus|
+        summary = File.join(base, "summary.md")
+        allow(EngineAllocAB).to receive(:materialise) do |_rev, dir, paths|
+          FileUtils.mkdir_p(dir)
+          FileUtils.cp_r(File.join(EngineDiagDiff::ROOT, "lib"), dir) if paths
+        end
+        allow(EngineDiagDiff).to receive(:run_child).and_return([])
+        options = EngineDiagDiff.parse_options(["--base", "HEAD", "--head", "HEAD", "--corpus-dir", corpus,
+                                                "--summary", summary])
+
+        expect { EngineDiagDiff.run(options) }
+          .to output(/\AMeasuring targets: app \(no --target; the corpus configuration \.rigor\.yml paths:\)$/).to_stdout
+        expect(EngineDiagDiff).to have_received(:run_child).with(anything, anything, ["app"]).twice
+        expect(File.read(summary)).to start_with("Measuring targets: app (no --target;")
+      end
     end
   end
 

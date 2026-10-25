@@ -17,17 +17,7 @@ module Rigor
 
       def build(environment:, configuration:, buffer: nil)
         seed = Protection::DiscoverySeed.from_snapshot(configuration: configuration, buffer: buffer)
-        seeded(environment: environment, seed: seed)
-      end
-
-      # The bare single-file scope, or that scope with `seed`'s tables folded in. Also the one place the language
-      # server's editor queries (#2282) fold a {LanguageServer::ProjectContext#discovery_seed_for} seed, so the
-      # whole-index copy stays recorded against this file alone.
-      def seeded(environment:, seed:)
-        base = Scope.empty(environment: environment)
-        return base if seed.nil? || seed.empty?
-
-        base.with_discovery(base.discovery.with(**seed))
+        Protection::DiscoverySeed.seeded_scope(environment: environment, seed: seed)
       end
     end
   end

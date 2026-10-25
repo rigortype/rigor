@@ -140,6 +140,15 @@ module Rigor
         end
       end
 
+      # The bare single-file scope, or that scope with `seed`'s tables folded in. The one place `rigor type-of` and the
+      # language server's editor queries (#2282) fold a seed into a scope.
+      def seeded_scope(environment:, seed:)
+        base = Scope.empty(environment: environment)
+        return base if seed.nil? || seed.empty?
+
+        base.with_discovery(base.discovery.with(**seed))
+      end
+
       def snapshot_payload(configuration)
         fingerprint = Cache::IncrementalSnapshot.fingerprint(configuration: configuration, roots: configuration.paths)
         return nil if fingerprint.nil?

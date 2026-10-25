@@ -3,7 +3,6 @@
 require "tempfile"
 
 require_relative "../environment"
-require_relative "../cli/type_of_project_scope"
 require_relative "../project_environment"
 require_relative "../cache/store"
 require_relative "../analysis/runner"
@@ -146,7 +145,7 @@ module Rigor
           tmp.flush
           discovery_seed_for(Analysis::BufferBinding.new(logical_path: path, physical_path: tmp.path))
         end
-        CLI::TypeOfProjectScope.seeded(environment: environment, seed: seed)
+        Protection::DiscoverySeed.seeded_scope(environment: environment, seed: seed)
       end
 
       # Builds what {#discovery_seed_for} reads once per generation, so a fork batch's children inherit it instead

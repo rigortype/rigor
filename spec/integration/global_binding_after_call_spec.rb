@@ -161,6 +161,16 @@ RSpec.describe "a global's binding past a call that may reach its writer (#2314)
     RUBY
   end
 
+  it "keeps a global a lambda writes past core and standard-library calls" do
+    # NoMethodError
+    expect(undefined("a.rb" => <<~RUBY)).to eq([["a.rb", 4]])
+      HOOK = -> { $cl = 1 }
+      $cl = nil
+      puts "x"
+      $cl + 1
+    RUBY
+  end
+
   it "keeps a write in the same method past a call that reaches no writer" do
     # NoMethodError: `m_same` writes `$sm`, but `helper` does not reach it
     expect(undefined("a.rb" => <<~RUBY)).to eq([["a.rb", 4]])

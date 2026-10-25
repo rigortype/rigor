@@ -87,7 +87,7 @@ RSpec.describe "a project singleton override of a Module method wins on the clas
   # An `extend`ed module's `attr_*` or `define_method`, or its `extended` hook, defines the name Ruby calls ahead of
   # the superclass's `def`.
   it "types the call Dynamic when a nearer extended module defines the name without a def" do
-    expect(dumps(<<~RUBY)).to eq(["Dynamic[top]"] * 4 + ["nil"])
+    expect(dumps(<<~RUBY)).to eq((["Dynamic[top]"] * 4) + ["nil"])
       class Bo; def self.name = nil; end
       module Em; attr_reader :name; end
       class E1 < Bo; extend Em; @name = "x"; end

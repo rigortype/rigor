@@ -150,7 +150,7 @@ module Rigor
             if node.body
               def_nodes, view_exempt = collect_action_defs(node.body)
               entries = def_nodes.to_h do |def_node|
-                [def_node.name, build_action_entry(def_node, view_exempt.include?(def_node.name))]
+                [def_node.name, build_action_entry(def_node, view_exempt: view_exempt.include?(def_node.name))]
               end
               # UNIONed, never assigned: a concern module reopened in a second file adds actions rather
               # than replacing the ones the first declaration spelled (same rule as {MailerIndex}'s
@@ -310,7 +310,7 @@ module Rigor
 
         def build_class_entry(class_name, file_path, def_nodes, includes = [], module_actions = {}, view_exempt = Set[])
           actions = def_nodes.to_h do |def_node|
-            entry = build_action_entry(def_node, view_exempt.include?(def_node.name))
+            entry = build_action_entry(def_node, view_exempt: view_exempt.include?(def_node.name))
             [entry.method_name, entry]
           end
 
@@ -341,7 +341,7 @@ module Rigor
           )
         end
 
-        def build_action_entry(def_node, view_exempt = false)
+        def build_action_entry(def_node, view_exempt: false)
           parameters = def_node.parameters
           location = def_node.name_loc
 

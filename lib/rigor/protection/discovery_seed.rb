@@ -107,11 +107,23 @@ module Rigor
         paths = Analysis::PathExpansion.configured_files(configuration)
         return nil if paths.empty?
 
-        bundles = snapshot_bundles(configuration)
+        payload = snapshot_payload(configuration)
+        bundles = payload&.seed_bundles
         return nil if bundles.nil? || bundles.empty?
 
-        tables_for_buffer(paths: respell_for_buffer(paths, buffer), bundles: bundles, buffer: buffer,
-                          constant_sources: true)
+        tables = tables_for_buffer(paths: respell_for_buffer(paths, buffer), bundles: bundles, buffer: buffer,
+                                   constant_sources: true)
+        with_snapshot_param_table(tables, payload.param_table, configuration)
+      end
+
+      # Issue #2282 — under `parameter_inference: true` the snapshot also carries the call-site parameter table the
+      # writing run seeded its analysis from (`param_table`, ADR-67 WD6c), so a probe reads `@v = v` as `check`
+      # does. Absent when the gate is off or the table is empty, which keeps the bundle-only seed.
+      def with_snapshot_param_table(tables, param_table, configuration)
+        return tables unless configuration.parameter_inference
+        return tables if param_table.nil? || param_table.empty?
+
+        tables.merge(param_inferred_types: param_table).freeze
       end
 
       # The configured file list with the entry that reaches `buffer`'s file respelled as the buffer's logical
@@ -128,12 +140,12 @@ module Rigor
         end
       end
 
-      def snapshot_bundles(configuration)
+      def snapshot_payload(configuration)
         fingerprint = Cache::IncrementalSnapshot.fingerprint(configuration: configuration, roots: configuration.paths)
         return nil if fingerprint.nil?
 
         loaded = Cache::IncrementalSnapshot.new(root: configuration.cache_path).load_any(fingerprints: [fingerprint])
-        loaded&.last&.seed_bundles
+        loaded&.last
       end
 
       # The whole-project discovery tables, from the single-walk combined pass (one parse per file) that

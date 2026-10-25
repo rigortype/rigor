@@ -108,4 +108,28 @@ RSpec.describe "rigor type-of over a project (#512)" do
       expect(type).to eq("singleton(Local)")
     end
   end
+
+  # Issue #2282 — under `parameter_inference: true` the snapshot's `param_table` seeds the probe, so `@v = v` reads
+  # the call-site-inferred parameter type `rigor check` sees instead of `Dynamic`.
+  context "with parameter_inference on and a warm snapshot" do
+    before do
+      write(".rigor.yml", "paths:\n  - lib\nparameter_inference: true\n")
+      write("lib/box.rb", "class Box\n  def put(v)\n    @v = v\n  end\nend\n")
+      write("lib/caller.rb", "Box.new.put(1)\nBox.new.put(2)\n")
+      write("lib/user.rb", "class User\nend\n")
+    end
+
+    it "types the parameter write as check does" do
+      warm_snapshot
+      _status, type, = type_of("lib/box.rb:3:5")
+      expect(type).to eq("Integer")
+    end
+
+    it "keeps the unseeded answer when the gate is off (control)" do
+      write(".rigor.yml", "paths:\n  - lib\n")
+      warm_snapshot
+      _status, type, = type_of("lib/box.rb:3:5")
+      expect(type).to eq("Dynamic[top]")
+    end
+  end
 end

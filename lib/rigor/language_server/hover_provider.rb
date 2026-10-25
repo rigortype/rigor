@@ -44,7 +44,7 @@ module Rigor
         node = locate_node(source: entry.bytes, root: parse_result.value, line: line + 1, character: character + 1)
         return nil if node.nil?
 
-        scope = base_scope(path)
+        scope = @project_context.seeded_scope_for(path: path, bytes: entry.bytes)
         index = Inference::ScopeIndexer.index(parse_result.value, default_scope: scope)
         node_scope = index[node]
         type = node_scope.type_of(node)
@@ -58,12 +58,6 @@ module Rigor
         Source::NodeLocator.at_position(source: source, root: root, line: line, column: character)
       rescue Source::NodeLocator::OutOfRangeError
         nil
-      end
-
-      def base_scope(_path)
-        # Pulls the Environment from the cached ProjectContext so each hover avoids repeating the RBS-load
-        # build.
-        Scope.empty(environment: @project_context.environment)
       end
     end
   end

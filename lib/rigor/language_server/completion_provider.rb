@@ -65,19 +65,20 @@ module Rigor
                            line: locate_at[0] + 1, character: locate_at[1] + 1)
         return nil if node.nil?
 
+        query = ScopeQuery.new(path: path, bytes: bytes_to_parse)
         case node
         when Prism::CallNode
           # `hash[:|` patches to `hash[:KEY_SENTINEL]`, an index access call whose argument is the sentinel
           # symbol; NodeLocator at the sentinel returns the inner CallNode for `[]`. Hash-key completion wins
           # when the call is an index access on a HashShape carrier; otherwise fall through to method
           # completion.
-          hash_key_completion_for(node, parse_result.value, path) ||
-            method_completion_for(node, parse_result.value, path)
+          hash_key_completion_for(node, parse_result.value, query) ||
+            method_completion_for(node, parse_result.value, query)
         when Prism::SymbolNode
           # The sentinel symbol's NodeLocator hit; walk up via the AST to find the enclosing `[]` call.
-          hash_key_completion_for_symbol(node, parse_result.value, path)
+          hash_key_completion_for_symbol(node, parse_result.value, query)
         when Prism::ConstantPathNode
-          constant_path_completion_for(node, path)
+          constant_path_completion_for(node, query)
         end
       end
 
@@ -141,11 +142,11 @@ module Rigor
         nil
       end
 
-      def method_completion_for(call_node, root, path)
+      def method_completion_for(call_node, root, query)
         receiver_node = call_node.receiver
         return nil if receiver_node.nil? # implicit-self — slice-3 territory of completion
 
-        index = build_scope_index(root, path)
+        index = build_scope_index(root, query)
         receiver_scope = index[receiver_node]
         receiver_type = receiver_scope.type_of(receiver_node)
         method_completions(receiver_type, receiver_scope)
@@ -155,13 +156,13 @@ module Rigor
       # `[]` call AND the receiver's inferred type is a `Type::HashShape`. Returns nil for any other receiver
       # carrier so the dispatcher falls through to method completion (which still surfaces Hash's methods for
       # genuine method calls on a hash receiver).
-      def hash_key_completion_for(call_node, root, path)
+      def hash_key_completion_for(call_node, root, query)
         return nil unless call_node.name == :[]
 
         receiver_node = call_node.receiver
         return nil if receiver_node.nil?
 
-        index = build_scope_index(root, path)
+        index = build_scope_index(root, query)
         receiver_type = index[receiver_node].type_of(receiver_node)
         return nil unless receiver_type.is_a?(Type::HashShape)
 
@@ -171,11 +172,11 @@ module Rigor
       # When NodeLocator returns the sentinel SymbolNode directly (rather than the enclosing CallNode), walk
       # up the AST for the smallest `[]` call containing the symbol's location. Re-walks the root once; cheap
       # for LSP-sized buffers.
-      def hash_key_completion_for_symbol(symbol_node, root, path)
+      def hash_key_completion_for_symbol(symbol_node, root, query)
         call_node = enclosing_index_call(root, symbol_node)
         return nil if call_node.nil?
 
-        hash_key_completion_for(call_node, root, path)
+        hash_key_completion_for(call_node, root, query)
       end
 
       def enclosing_index_call(root, symbol_node)
@@ -212,11 +213,11 @@ module Rigor
       # resolves to a class / module FQN; we enumerate every known class whose name is an immediate child of
       # that parent. Top-level constants (`::Foo`) and parent-less paths are not yet supported (queued for
       # slice 6 follow-up).
-      def constant_path_completion_for(const_path_node, path)
+      def constant_path_completion_for(const_path_node, query)
         parent_fqn = parent_fqn_of(const_path_node)
         return nil if parent_fqn.nil?
 
-        scope = base_scope(path)
+        scope = seeded_scope(query)
         children = enumerate_constant_children(parent_fqn, scope)
         return nil if children.empty?
 
@@ -277,8 +278,12 @@ module Rigor
         }
       end
 
-      def base_scope(_path)
-        Scope.empty(environment: @project_context.environment)
+      # The (path, bytes) a scope query is seeded from: the bytes the parse saw, sentinel splice included.
+      ScopeQuery = Data.define(:path, :bytes)
+      private_constant :ScopeQuery
+
+      def seeded_scope(query)
+        @project_context.seeded_scope_for(path: query.path, bytes: query.bytes)
       end
 
       def locate_node(source:, root:, line:, character:)
@@ -287,8 +292,8 @@ module Rigor
         nil
       end
 
-      def build_scope_index(root, _path)
-        scope = Scope.empty(environment: @project_context.environment)
+      def build_scope_index(root, query)
+        scope = seeded_scope(query)
         Inference::ScopeIndexer.index(root, default_scope: scope)
       end
 

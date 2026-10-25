@@ -129,6 +129,16 @@ class SigProvenanceAuditor
     end
   end
 
+  # One `sig-gen` run's candidates, and the project environment that run built (the elaborator reads
+  # generic arity from it).
+  Generated = Struct.new(:candidates, :environment, keyword_init: true)
+
+  # `Generator#run` keeps the environment it built in `@environment`; this subclass only exposes it.
+  class EnvironmentKeepingGenerator < Rigor::SigGen::Generator
+    def elaboration_environment = @environment
+  end
+  private_constant :Generated, :EnvironmentKeepingGenerator
+
   class << self
     # The whole audit: parse `sig/`, run `sig-gen` over `lib/`, join.
     #
@@ -141,8 +151,10 @@ class SigProvenanceAuditor
     #   default: requiring a tree runs its code, and a fixture tree's `lib/` is written by the
     #   example auditing it.
     def audit(root:, candidates: nil, configuration: nil, runtime: false)
-      classify(declarations(root: root), candidates || generate(root: root, configuration: configuration),
-               sources: SigSourceIndex.build(root: root, runtime: runtime))
+      generated = candidates ? nil : generate(root: root, configuration: configuration)
+      classify(declarations(root: root), candidates || generated.candidates,
+               sources: SigSourceIndex.build(root: root, runtime: runtime),
+               environment: generated&.environment)
     end
 
     # Every member of every `.rbs` under `sig/`, in file then source order.
@@ -157,14 +169,19 @@ class SigProvenanceAuditor
     # would report every one of them as `:no_source`.
     def generate(root:, paths: ["lib"], configuration: nil)
       Dir.chdir(root) do
-        Rigor::SigGen::Generator.new(configuration: configuration || Rigor::Configuration.load(nil),
-                                     paths: paths, observations: {}, include_private: true).run
+        generator = EnvironmentKeepingGenerator.new(configuration: configuration || Rigor::Configuration.load(nil),
+                                                    paths: paths, observations: {}, include_private: true)
+        Generated.new(candidates: generator.run, environment: generator.elaboration_environment)
       end
     end
 
-    def classify(declarations, candidates, sources: SigSourceIndex::NONE)
+    # `environment:` is the project environment sig-gen built for the run. An inferred return is elaborated
+    # through {Rigor::SigGen::TypeElaborator} with it before comparison, so the classifier compares the
+    # spelling `rigor sig-gen` writes, not the raw carrier (a bare generic carries no `untyped` parameter
+    # until the elaborator fills it in). Without an environment the raw spelling is compared.
+    def classify(declarations, candidates, sources: SigSourceIndex::NONE, environment: nil)
       index = index_candidates(candidates)
-      declarations.map { |decl| classify_one(decl, index, sources) }
+      declarations.map { |decl| classify_one(decl, index, sources, environment) }
     end
 
     # `{ "sig/rigor/type.rbs" => 187 }` — unmarked residue per file, the number ADR-107 G3 keeps
@@ -208,14 +225,14 @@ class SigProvenanceAuditor
                        SigSourceIndex::RUNTIME => RUNTIME_DEFINED }.freeze
     private_constant :MISSING_SOURCE
 
-    def classify_one(decl, index, sources)
+    def classify_one(decl, index, sources, environment)
       return Row.new(declaration: decl, classification: NON_METHOD) if decl.kind.nil?
 
       candidate = candidate_for(decl, index)
       return classify_unattributed(decl, sources) if candidate.nil?
 
       case candidate.classification
-      when Rigor::SigGen::Classification::EQUIVALENT then classify_equivalent(decl, candidate)
+      when Rigor::SigGen::Classification::EQUIVALENT then classify_equivalent(decl, candidate, environment)
       when Rigor::SigGen::Classification::TIGHTER_RETURN
         Row.new(declaration: decl, classification: TIGHTER_RETURN,
                 detail: "declared #{candidate.declared_return_rbs}, " \
@@ -248,8 +265,8 @@ class SigProvenanceAuditor
       Row.new(declaration: decl, classification: UNMATCHED, detail: candidate.classification.to_s)
     end
 
-    def classify_equivalent(decl, candidate)
-      inferred = candidate.inferred_return&.erase_to_rbs
+    def classify_equivalent(decl, candidate, environment)
+      inferred = elaborated_return(candidate.inferred_return, environment)
       if candidate.declared_return_rbs == "void"
         # `sig-gen` compared nothing: the declaration is `void`, so there is no value contract to
         # prove (`Generator#declares_void?`). The `void` is read off the candidate rather than the
@@ -264,6 +281,15 @@ class SigProvenanceAuditor
         Row.new(declaration: decl, classification: DECLARED_DIVERGENT,
                 detail: "declared #{candidate.declared_return_rbs}, sig-gen infers #{inferred}")
       end
+    end
+
+    # The spelling `sig-gen` writes for an inferred return: bare generics filled in by
+    # {Rigor::SigGen::TypeElaborator}, then erased. A written `Set` keeps `untyped` for its element (#2177).
+    def elaborated_return(type, environment)
+      return nil if type.nil?
+      return type.erase_to_rbs if environment.nil?
+
+      Rigor::SigGen::TypeElaborator.elaborate(type, environment: environment).erase_to_rbs
     end
 
     def read_signature(file, relative_path)

@@ -83,6 +83,17 @@ a decision needs it.
    an assertion, raising a pin, shaping code for a gate, scope creep), which the `rigor-lane` skill
    names, and its fix-round count matched the middle tier's. Lane wall time is Nix and RSpec, not the
    model.
+
+   A comment-only sweep is contained work but does not check itself. In
+   [#2338](https://github.com/rigortype/rigor/pull/2338) (October 2026) 37 small-model lanes trimmed the
+   comments of 289 files; every lane reported a clean parse and a comment-only diff. An independent review
+   of three shards still found two severe and four moderate errors, all new comments asserting something
+   false about the code (a fold boundary one bit off, a regex note a probe disproved, a constant name
+   "fixed" into a self-reference), and fourteen minor ones. A delta round then caught a severe error in the
+   fix written for the first. A corrected comment is a claim about the code, so the reviewer tests it by
+   running the expression (`2 ** 13_606`, the pattern on the input) rather than by reading. Bound the sweep
+   by what the code confirms, and brief each lane to keep rationale, ADR and issue references and engine
+   notation, and to leave a comment it cannot check.
 5. **Brief the lane** with the issue, its worktree (`bin/rigor-worktree <branch> origin/master`, plus
    `--with-references` when a gate the lane runs reads `references/`; see the
    [`rigor-worktree`](../../.claude/skills/rigor-worktree/SKILL.md) skill), any decision the

@@ -1527,10 +1527,9 @@ module Rigor
       # - a name the class's own `sig/` spells as an `alias`. Its parameters are the aliased method's, and a
       #   proposal would read as a rewrite of that method's line rather than of the alias. An alias only an
       #   ancestor declares takes the override path below, like any other ancestor declaration.
-      # Anything else that declares nothing in this class is not declined: when only an ancestor declares the method,
-      # the proposal is a new override on this class, and is
-      #   rendered from the `def`'s own shape like any new method. The ancestor's parameters
-      #   describe the ancestor's `def`, not this one, which may take other arguments (ADR-14 clause 2).
+      # A method this class does not declare is not declined: when only an ancestor declares it, the proposal is a
+      # new override on this class, rendered from the `def`'s own shape like any new method. The ancestor's
+      # parameters describe the ancestor's `def`, not this one, which may take other arguments (ADR-14 clause 2).
       def tighter_return_line(def_node, method_def, class_name, kind, inferred)
         member = signature_member(method_def, class_name)
         return render_rbs_line(def_node, inferred, class_name, kind) if member.nil?

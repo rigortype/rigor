@@ -25,9 +25,9 @@ module Rigor
     # truth-tested: {UNKNOWN} and {ABSENT} are both truthy, so any other use folds a decline into a firing arm.
     # `spec/rigor/inference/definer_resolution_case_in_spec.rb` fails on a call site of any other shape.
     #
-    # It migrates one question at a time: `SourceArity` (C1b) and the relationship lints (C1c) read the instance
-    # side, and `SourceArity`'s visibility check, the C2 typing sites and `CheckRules` also ask for the singleton
-    # side.
+    # It migrates one question at a time: `SourceArity` (C1b, C2-c) asks for the receiver's own side, instance or
+    # singleton, the relationship lints (C1c) read the instance side, and `RefinedDispatch::OwnMethod.certain_owner?`
+    # and `CheckRules` pass the side they hold.
     module DefinerResolution
       Known = Data.define(:answer, :owner)
       UnknownResult = Data.define

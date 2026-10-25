@@ -2516,7 +2516,7 @@ module Rigor
 
       # Seeds the parameter-inference and constant-publication tables, so a pooled `WorkerSession` scope resolves
       # identically to the sequential path (ADR-15 sequential equivalence). The parameter-inference table is absent
-      # unless its opt-in ran; the constant tables are seeded on every run.
+      # unless its opt-in ran; the constant tables are seeded whenever the run has project constants.
       #
       # - ADR-67 WD6a `param_inferred_types`: the call-site parameter-inference table, populated only when the
       #   `parameter_inference:` gate ran the pre-pass.

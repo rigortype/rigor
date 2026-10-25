@@ -81,7 +81,7 @@ RSpec.describe "project yielder block repetition", type: :runner do
           def matched(k); case k; in Integer then yield(:a) else yield(:b) end; end
           def early(k); return yield(1) if k; yield(2); end
           def raising(k); raise ArgumentError unless k; yield(1); end
-          def guarded(&blk); return unless blk; blk.call; end
+          def guarded(&blk); return "z" unless blk; yield; end
           def branched(f); if f then yield(1) else yield(2) end; end
           def unlessed(f); unless f then yield(1) else yield(2) end; end
         end
@@ -104,7 +104,7 @@ RSpec.describe "project yielder block repetition", type: :runner do
       "case/when arms" => "Lock.new.cased(1)",
       "case/in arms" => "Lock.new.matched(1)",
       "a return yield before a yield" => "Lock.new.early(true)",
-      "a &blk read before its call" => "Lock.new.guarded",
+      "a &blk read before a yield" => "Lock.new.guarded",
       "if/else arms" => "Lock.new.branched(true)",
       "unless/else arms" => "Lock.new.unlessed(true)",
       "ternary arms" => "R.either(true)"

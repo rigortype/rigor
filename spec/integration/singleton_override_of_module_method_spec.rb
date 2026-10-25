@@ -62,18 +62,20 @@ RSpec.describe "a project singleton override of a Module method wins on the clas
 
   # A nearer class defining the name without a `def` is the method Ruby calls, so the farther `def` must not answer.
   it "types the call Dynamic when a nearer class defines the name without a def" do
-    expect(dumps(<<~RUBY)).to eq(["Dynamic[top]"] * 5)
+    expect(dumps(<<~RUBY)).to eq(["Dynamic[top]"] * 6)
       class B1; def self.name = nil; def self.to_s = nil; def self.foo = nil; end
       class S1 < B1; define_singleton_method(:name) { "s" }; end
       class S2 < B1; singleton_class.define_method(:name) { "s" }; end
       class S3 < B1; singleton_class.attr_reader :name; end
       class S4 < B1; define_singleton_method(:to_s) { "s" }; end
       class S5 < B1; define_singleton_method(:foo) { "s" }; end
+      class S6 < B1; NAMES = %i[name].freeze; NAMES.each { |n| define_singleton_method(n) { "s" } }; end
       Rigor.dump_type(S1.name) # "s"
       Rigor.dump_type(S2.name) # "s"
       Rigor.dump_type(S3.name) # nil
       Rigor.dump_type(S4.to_s) # "s"
       Rigor.dump_type(S5.foo) # "s"
+      Rigor.dump_type(S6.name) # "s", computed name
     RUBY
     expect(undefined_methods(<<~RUBY)).to eq([])
       class B1; def self.name = nil; end

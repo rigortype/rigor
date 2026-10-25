@@ -1,0 +1,4 @@
+- **[inference]** A Set's element type now widens when the program adds to the set, so reading what was added no longer reports a false `undefined method` or an always-falsey condition. ([#2360](https://github.com/rigortype/rigor/pull/2360))
+  - Covers `<<`, `add`, `add?`, `merge`, `replace`, `map!` and `clear` on a set built from a `Set[...]` literal or `Set.new`, including through a method it is passed to, a loop, a block or an instance variable another method fills.
+  - `|`, `union`, `+` and `^` now type their result over both operands' elements, so `ARGV.to_set | [1]` holds `Integer` as well as `String`.
+  - A set typed precisely by a signature, such as `ARGV.to_set`, still keeps its declared element when added to, as an Array does.

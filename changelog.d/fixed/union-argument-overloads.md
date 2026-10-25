@@ -1,0 +1,4 @@
+- **[engine]** A method call whose argument is a union or a supertype of the declared parameter types now returns every overload's result it may reach, not only the first overload's. ([#2383](https://github.com/rigortype/rigor/pull/2383))
+  - `Integer + (Integer | Float)` is `Float | Integer` (was `Integer`), and `Integer - Numeric` is `Complex | Float | Integer | Rational`.
+  - `Array[Integer]#[]` at `Integer | Range[Integer]` is `Array[Integer] | Integer | nil`.
+  - A condition such as `(a + b).integer?` is no longer reported as always truthy.

@@ -170,30 +170,31 @@ module Rigor
         GLOBAL_WRITE_NODES = [
           Prism::GlobalVariableWriteNode, Prism::GlobalVariableOrWriteNode, Prism::GlobalVariableAndWriteNode,
           Prism::GlobalVariableOperatorWriteNode, Prism::GlobalVariableTargetNode
-        ].to_set.freeze
-        BODY = Data.define(:range, :label)
-        private_constant :GLOBAL_WRITE_NODES, :BODY
+        ].freeze
+        private_constant :GLOBAL_WRITE_NODES
 
-        # Issue #2314 — tracks the method bodies, lambdas and stored blocks of a pre-order descent as `[range,
+        # Issue #2314 — tracks the method bodies, lambdas and stored blocks of a pre-order descent as `[start, end,
         # label]` (`@bodies`, innermost last), and records a global write inside one ({GlobalWriterReach}). A body
-        # ending before `node` starts is closed.
+        # ending before the write starts is closed. Only those nodes read their location.
         def visit_global_writer(node)
-          start = node.location.start_offset
-          @bodies.pop while !@bodies.empty? && @bodies.last.range.end <= start
           case node
           when Prism::DefNode then open_body(node, node.name)
           when Prism::LambdaNode then open_body(node, nil)
           when Prism::CallNode then open_stored_block(node)
+          when *GLOBAL_WRITE_NODES then record_global_writer(node)
           end
-          return unless GLOBAL_WRITE_NODES.include?(node.class)
+        end
 
-          body = @bodies.rfind { |candidate| candidate.range.cover?(start) }
-          @census << [:global_writer, node.name, body.label].freeze if body
+        def record_global_writer(node)
+          start = node.location.start_offset
+          @bodies.pop while !@bodies.empty? && @bodies.last[1] <= start
+          body = @bodies.rfind { |(from, to, _)| from <= start && start < to }
+          @census << [:global_writer, node.name, body[2]].freeze if body
         end
 
         def open_body(node, label)
           location = node.location
-          @bodies << BODY.new(location.start_offset...location.end_offset, label)
+          @bodies << [location.start_offset, location.end_offset, label]
         end
 
         def open_stored_block(node)

@@ -42,20 +42,20 @@ module Rigor
 
       module_function
 
-      # The globals `scope` binds that some project method may write, other than one already `Dynamic[top]` and
-      # those in `except`. Each bound global's census key is recorded whatever the answer, so a file that starts
-      # writing one re-checks.
-      def candidates(scope, except: EMPTY)
+      # The globals `scope` binds that some project method may write, other than one already `Dynamic[top]`. Each
+      # bound global's census key is recorded whatever the answer, so a file that starts writing one re-checks.
+      def candidates(scope)
         table = writer_table(scope)
-        recording = Analysis::DependencyRecorder.active?
-        return EMPTY if table.empty? && !recording
+        globals = scope.globals
+        if Analysis::DependencyRecorder.active?
+          globals.each_key { |name| record_writers(name) unless FRAME_LOCAL.include?(name) }
+        end
+        return EMPTY if table.empty? || globals.empty?
 
-        scope.globals.select do |name, type|
-          next false if FRAME_LOCAL.include?(name) || type.is_a?(Type::Dynamic) || except.include?(name)
-
-          record_writers(name) if recording
-          table.key?(name)
-        end.keys
+        table.each_key.select do |name|
+          type = globals[name]
+          !type.nil? && !type.is_a?(Type::Dynamic) && !FRAME_LOCAL.include?(name)
+        end
       end
 
       # True when running `node`, typed in `scope`, may reach a project method that writes `name` (see the module

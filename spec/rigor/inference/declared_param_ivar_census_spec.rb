@@ -98,6 +98,9 @@ RSpec.describe "the ADR-58 ivar census types a write from a declared parameter (
       "a keyword parameter" => ["def initialize(x:) = @x = x.to_sym", "def initialize: (x: String) -> void", "Symbol"],
       "an empty Array default" => ["def initialize(x = []) = @x = x.map(&:to_s)",
                                    "def initialize: (?Array[Symbol] x) -> void", "Array[String]"],
+      "an empty Array default under a union" =>
+        ["def initialize(x = []) = @x = x.to_a", "def initialize: (?(Array[Symbol] | Set[Symbol]) x) -> void",
+         "Array[Symbol]"],
       "an empty Hash default" => ["def initialize(x: {}) = @x = x.keys",
                                   "def initialize: (?x: Hash[Symbol, Integer]) -> void", "Array[Symbol]"],
       "an optional parameter whose default is within its declared type" =>
@@ -135,6 +138,18 @@ RSpec.describe "the ADR-58 ivar census types a write from a declared parameter (
                                             "def initialize: (Integer x) -> void"],
       "a union argument, whose first matching overload the engine picks" =>
         ["def initialize(a, b) = @x = a + b", "def initialize: (Integer a, Integer | Float b) -> void"],
+      "a union argument built by a ternary over leaf parameters" =>
+        ["def initialize(a, b) = @x = a + (b > 0 ? b : 0.5)", "def initialize: (Integer a, Integer b) -> void"],
+      "an argument a numeric operator widens" =>
+        ["def initialize(a, b) = @x = a + b ** -1", "def initialize: (Integer a, Integer b) -> void"],
+      "a union argument built from no parameter" =>
+        ["def initialize(a) = @x = a + (rand > 0.5 ? 1 : 1.5)", "def initialize: (Integer a) -> void"],
+      "a union argument built by a call over leaf parameters" =>
+        ["def initialize(a, b) = @x = a + [b, 1.5].max", "def initialize: (Integer a, Integer b) -> void"],
+      "a union argument built by a predicate ternary" =>
+        ["def initialize(a, b) = @x = a + (b.zero? ? 0 : b.to_f)", "def initialize: (Integer a, Integer b) -> void"],
+      "a keyword parameter whose default is outside its declared type" =>
+        ["def initialize(x: nil) = @x = x&.to_s", "def initialize: (?x: Integer) -> void"],
       "a union argument of another operator" =>
         ["def initialize(a, b) = @x = a * b", "def initialize: (Integer a, Integer | Float b) -> void"],
       "an argument of a class another RBS class extends" =>
@@ -172,6 +187,17 @@ RSpec.describe "the ADR-58 ivar census types a write from a declared parameter (
     recorded = k_census("def initialize(x) = @x = Array(x)", "def initialize: (Comparable x) -> void")
 
     expect(recorded).to eq("Dynamic[Array[Dynamic[top]] | [Dynamic[top]]]")
+  end
+
+  # A guard: the census types `super` and `yield` as `Dynamic[top]` whatever their arguments, so the decline of a
+  # union argument to either is not observable today; it keeps the write declined if that typing gains precision.
+  it "records a union argument to super or yield as the census did before (a guard)" do
+    source = "class P\nend\nclass K < P\n  def m(a) = @x = super(a > 0 ? a : 0.5)\n  " \
+             "def run(a) = @y = yield(a > 0 ? a : 0.5)\nend\n"
+    rbs = "class P\n  def m: (Integer) -> Integer | (Float) -> Float\nend\nclass K < P\n  " \
+          "def m: (Integer a) -> void\n  def run: (Integer a) { (Integer | Float) -> String } -> void\nend\n"
+
+    expect([census(source, rbs, "K", :@x), census(source, rbs, "K", :@y)]).to eq(["Dynamic[top]", "Dynamic[top]"])
   end
 
   it "records a lambda value as the census did before (a guard: a lambda's own type never reads the parameter)" do

@@ -25,9 +25,10 @@ module Rigor
       # - the write's value reads at least one parameter, and every local it reads is a parameter with a declared type.
       #   A bare read (`@x = x`) records that type; an expression over parameters (`@x = x.dup.freeze`,
       #   `@x = Array(x)`, `@x = f ? x : y`, issue #2321) records the value typed with each parameter it reads bound to
-      #   its declared type, unless {DerivedParamValue} declines it (a parameter that holds `untyped` at any depth, is
-      #   passed as an overload-sensitive argument, or has a default outside its declared type). A value that holds a
-      #   block, a lambda or a nested `def` is not credited: their own parameters are locals the scan does not bind;
+      #   its declared type, unless {DerivedParamValue} declines it (a parameter that holds `untyped` at any depth or
+      #   has a default outside its declared type, or a call argument whose type may match a narrower overload). A
+      #   value that holds a block, a lambda or a nested `def` is not credited: their own parameters are locals the
+      #   scan does not bind;
       # - the write is not inside a block or a lambda, so a block parameter of the same name and a block that runs
       #   under another `self` (`instance_eval`, `Class.new`, `define_method`) never borrow the method's parameter;
       # - the method body never writes the parameter, in any form and at any depth (`x = Integer(x)`, `x ||= …`,
@@ -132,9 +133,11 @@ module Rigor
         # its declared type, unless {DerivedParamValue} declines it.
         def value_type(value, names, types, def_node, scope)
           return types[value.name] if value.is_a?(Prism::LocalVariableReadNode)
-          return nil if DerivedParamValue.declined?(value, names, types, def_node, scope)
+          return nil if DerivedParamValue.declined?(names, types, def_node, scope)
 
           bound = names.reduce(scope) { |acc, name| acc.with_local(name, types[name]) }
+          return nil if DerivedParamValue.overload_sensitive_argument?(value, bound)
+
           bound.type_of(value)
         rescue StandardError
           nil

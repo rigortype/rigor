@@ -13,23 +13,43 @@ module Rigor
       #
       # - a parameter whose declared type holds `untyped` at any depth (`Array[untyped]`, #2325): the answer is built
       #   on the part the author left untyped;
-      # - a parameter passed as an argument of a call (`a + b`, `a[i]`, `Array(x)`) whose declared type is a union, an
-      #   optional, or anything but a literal or an instance of a class no RBS class names as its superclass: the
-      #   engine picks the first overload such an argument matches (`Integer#+` under `Integer | Float` answers
-      #   `Integer`), not the join of every overload it may reach. A receiver dispatches per member and is not
-      #   declined;
       # - an optional parameter whose default value's type is not within its declared type
       #   (`def initialize(x = nil)` under `(?Integer x)`): the value may run on the default, which the binding does not
-      #   carry.
+      #   carry;
+      # - an argument of any call in the value (`a + b`, `a + (b > 0 ? b : 0.5)`, `a[i]`, `Array(x)`, `super(…)`,
+      #   `yield(…)`), typed under the parameter bindings, whose type is anything but a literal or an instance of a
+      #   class no RBS class names as its superclass: the engine picks the first overload such an argument matches
+      #   (`Integer#+` given `Integer | Float` answers `Integer`), not the join of every overload it may reach. A
+      #   receiver dispatches per member and is not declined. A splat, keyword, forwarded or block argument declines
+      #   too.
       module DerivedParamValue
         module_function
 
-        # Whether the value of a write over the parameters `names`, bound to `types`, is not credited.
-        def declined?(value, names, types, def_node, scope)
-          return true if names.any? { |name| carries_dynamic?(types[name]) }
-          return true if names.any? { |name| default_outside?(def_node, name, types[name], scope) }
+        # Whether a write over the parameters `names`, declared `types`, is not credited for a parameter it reads.
+        def declined?(names, types, def_node, scope)
+          names.any? do |name|
+            carries_dynamic?(types[name]) || default_outside?(def_node, name, types[name], scope)
+          end
+        end
 
-          argument_names(value).any? { |name| names.include?(name) && overload_sensitive?(types[name], scope) }
+        # Whether a call in `value` takes an argument whose type, under the parameter bindings of `bound`, may match an
+        # overload narrower than itself.
+        def overload_sensitive_argument?(value, bound)
+          return false unless value.is_a?(Prism::Node)
+
+          if value.is_a?(Prism::CallNode) || value.is_a?(Prism::SuperNode) || value.is_a?(Prism::YieldNode)
+            arguments = value.arguments&.arguments || []
+            return true if arguments.any? { |argument| overload_sensitive_node?(argument, bound) }
+          end
+          value.rigor_each_child { |child| return true if overload_sensitive_argument?(child, bound) }
+          false
+        end
+
+        def overload_sensitive_node?(argument, bound)
+          return true if argument.is_a?(Prism::SplatNode) || argument.is_a?(Prism::KeywordHashNode) ||
+                         argument.is_a?(Prism::BlockArgumentNode) || argument.is_a?(Prism::ForwardingArgumentsNode)
+
+          overload_sensitive?(bound.type_of(argument), bound)
         end
 
         def carries_dynamic?(type)
@@ -43,24 +63,6 @@ module Rigor
           when Type::Difference, Type::Refined then carries_dynamic?(type.base)
           else false
           end
-        end
-
-        # The names of the locals read anywhere inside an argument of a call in `value`.
-        def argument_names(value, names = Set.new)
-          return names unless value.is_a?(Prism::Node)
-
-          if value.is_a?(Prism::CallNode) || value.is_a?(Prism::SuperNode) || value.is_a?(Prism::YieldNode)
-            collect_reads(value.arguments, names)
-          end
-          value.rigor_each_child { |child| argument_names(child, names) }
-          names
-        end
-
-        def collect_reads(node, names)
-          return unless node.is_a?(Prism::Node)
-
-          names << node.name if node.is_a?(Prism::LocalVariableReadNode)
-          node.rigor_each_child { |child| collect_reads(child, names) }
         end
 
         # Whether an argument of this declared type may match an overload narrower than itself.
@@ -77,8 +79,10 @@ module Rigor
           # A guard: a validated RBS signature names no unknown class, so this answers only for a broken environment.
           return false unless environment.class_known?(class_name)
 
-          loader = environment.rbs_loader
-          !loader.nil? && !loader.superclass_names.include?(class_name.delete_prefix("::"))
+          superclasses = environment.rbs_loader&.superclass_names
+          return false if superclasses.nil? || superclasses.empty?
+
+          !superclasses.include?(class_name.delete_prefix("::"))
         end
 
         # Whether `name` is an optional parameter of `def_node` whose default value's type is not within `declared`.

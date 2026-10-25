@@ -2215,15 +2215,18 @@ module Rigor
       private :mixin_parent
 
       # Issue #2321 — every class name an RBS class declaration names as its superclass, `::`-stripped: a class
-      # absent from the set has no RBS-declared subclass. Empty when the environment is unavailable. Memoised per
-      # loader.
+      # absent from the set has no RBS-declared subclass. `nil` when the environment is unavailable or fails to read,
+      # so a caller cannot mistake an unread environment for one without subclasses. Memoised per loader.
       def superclass_names
-        @state[:superclass_names] ||= build_superclass_names.freeze
+        return @state[:superclass_names] if @state.key?(:superclass_names)
+
+        @state[:superclass_names] = build_superclass_names&.freeze
       end
 
       def build_superclass_names
+        return nil if env.nil?
+
         names = Set.new
-        return names if env.nil?
 
         env.class_decls.each_value do |entry|
           self.class.entry_declarations(entry).each do |decl|
@@ -2233,7 +2236,7 @@ module Rigor
         end
         names
       rescue ::RBS::BaseError
-        Set.new
+        nil
       end
       private :build_superclass_names
 

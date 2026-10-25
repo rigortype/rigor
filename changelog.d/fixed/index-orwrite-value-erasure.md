@@ -1,0 +1,2 @@
+- **[engine]** A memoizing `h[k] ||= {}` / `||= []` / `||= 1` on an untyped receiver no longer reads as the fresh literal, so `(h[k] ||= {})[:name].upcase` is no longer reported as a call on `nil`. ([#2351](https://github.com/rigortype/rigor/pull/2351))
+  - On a receiver typed `untyped`, a `{}` / `[]` rvalue reads as `Hash[untyped, untyped]` / `Array[untyped]` and a literal one as `untyped | v`; a `new(...)` rvalue still reads as itself.

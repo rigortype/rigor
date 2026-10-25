@@ -1,0 +1,2 @@
+- **[inference]** A project `def self.name` (or `class << self` body, superclass override, or `extend`ed module `def`) now types a call on the class object instead of losing to `Module#name`'s `String`. ([#2348](https://github.com/rigortype/rigor/pull/2348))
+  - A conditional override reads `Dynamic` rather than `String`; the same holds for other `Module` / `Class` methods a project overrides on the singleton side, such as `to_s`.

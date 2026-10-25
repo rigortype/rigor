@@ -292,6 +292,10 @@ RSpec.describe "ADR-67 WD6 check-walk parameter inference" do
           def mixed_live_other(name, c) = (c ? name : 1).upcase
 
           def missing_else(name, c) = (if c then name end).upcase
+
+          def mixed_live_param_else(name, c) = (c ? 1 : name).upcase
+
+          def mixed_unless(name, c) = (unless c then name else 1 end).upcase
         end
 
         class Loud
@@ -315,6 +319,8 @@ RSpec.describe "ADR-67 WD6 check-walk parameter inference" do
         q.mixed_live_param(nil, true)
         q.mixed_live_other(nil, false)
         q.missing_else(nil, false)
+        q.mixed_live_param_else(nil, false)
+        q.mixed_unless(nil, false)
       RUBY
     end
 
@@ -378,8 +384,16 @@ RSpec.describe "ADR-67 WD6 check-walk parameter inference" do
       expect(lines).to include(24)
     end
 
+    it "declines when the predicate folds falsey to the parameter's else branch" do
+      expect(lines).not_to include(26)
+    end
+
+    it "declines when an unless predicate folds falsey to the parameter's body" do
+      expect(lines).not_to include(28)
+    end
+
     it "still reports the same shapes on a parameter a signature declares" do
-      expect(lines).to include(28, 32, 35)
+      expect(lines).to include(32, 36, 39)
     end
   end
 end

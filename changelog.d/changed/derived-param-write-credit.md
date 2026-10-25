@@ -1,3 +1,3 @@
 - **[inference]** An instance variable assigned an expression over declared method parameters now reads that expression's type in sibling methods and in `rigor sig-gen`. ([#2375](https://github.com/rigortype/rigor/pull/2375))
   - `@path = path.dup.freeze` under `(String path) -> void` reads `String`, `@name = name.to_sym` under `(String | Symbol name)` reads `Symbol`, and `@labels = labels.map(&:to_s)` under `(Array[Symbol] labels)` reads `Array[String]`.
-  - The write is declined, keeping its previous reading, when a parameter it reads is undeclared or holds `untyped` anywhere in its type, or when the expression holds a block.
+  - The write is declined, keeping its previous reading, when a parameter it reads is undeclared or holds `untyped` anywhere in its type, is passed as a call argument with a union or extensible class type, or has a default outside its declared type, or when the expression holds a block.

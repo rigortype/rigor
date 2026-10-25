@@ -4349,13 +4349,15 @@ module Rigor
 
       # Whether the call may run its block more than once, so a later run reads a captured binding an earlier
       # run rebound — the premise of laying the #587 (b) binding ({#captured_block_bindings}) under the block.
-      # {BlockRepetition.may_repeat?} holds the rule, which the statement pass shares (issue #1412). Issue #2301 — a
-      # project callee that hands the block on ({ProjectYielder.hands_block_on?}) also counts: the block's value is what
-      # the forward's target `yield`s, and that target may run it many times, so a captured local the block rebinds must
-      # not read its entry binding.
+      # {BlockRepetition.may_repeat?} holds the rule, which the statement pass shares (issue #1412). A project callee
+      # whose body may run the block more than once on one path ({ProjectYielder.block_value_may_repeat?}) also
+      # counts: a `yield` in a loop or a core iterator's block (`xs.each { |x| v = yield(x) }`, issue #2303), or a
+      # hand-off (`g(x, &)`, issue #2301), whose target may run it many times, so a captured local the block rebinds
+      # must not read its entry binding. A callee that runs it once per path (`f ? yield(1) : yield(2)`,
+      # `then { yield }`) keeps the single-run value.
       def block_may_repeat?(call_node, receiver_type)
         BlockRepetition.may_repeat?(method_name: call_node.name, receiver_type: receiver_type, scope: scope) ||
-          ProjectYielder.hands_block_on?(call_node, receiver_type, scope)
+          ProjectYielder.block_value_may_repeat?(call_node, receiver_type, scope)
       end
 
       EMPTY_BREAK_ARMS = [].freeze

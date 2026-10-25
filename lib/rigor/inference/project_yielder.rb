@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "../type"
+require_relative "block_run_count"
 
 module Rigor
   module Inference
@@ -12,10 +13,12 @@ module Rigor
     # counted as running the block once, and a `return` in the block that only a later run reaches (`each { return
     # false if (seen += 1) > 3 }`) never joined the method's return type.
     #
-    # Only the later-run `return` pass asks this (`StatementEvaluator#collect_repeated_block_returns`); the block's
-    # entry scopes and the ADR-56 write-back keep {BlockRepetition}'s rule. That pass only widens the method's
-    # return type, so the rule here errs toward "repeats". The callee repeats when its body, outside a nested `def`
-    # (a `yield` in a class body is a syntax error inside a method):
+    # Only the later-run `return` pass asks {.may_run_block_repeatedly?}
+    # (`StatementEvaluator#collect_repeated_block_returns`); the block's entry scopes and the ADR-56 write-back keep
+    # {BlockRepetition}'s rule. That pass only widens the method's return type, so the rule here errs toward
+    # "repeats". The expression-position block-value pass asks {.block_value_may_repeat?} instead, whose rule
+    # ({BlockRunCount}) errs the other way. The callee repeats when its body, outside a nested `def` (a `yield` in a
+    # class body is a syntax error inside a method):
     #
     # - holds two or more sites that run the block (`yield`, or `call` / `yield` / `===` / `[]` on the `&blk`
     #   parameter), or one inside a loop, a block or a lambda, which may run it many times; or
@@ -41,24 +44,15 @@ module Rigor
         false
       end
 
-      # Issue #2301 — whether the callee hands the block it is called with on to another call (`g(x, &)`,
-      # `g(x, &blk)`), outside a nested `def`. The block-return pass types such a forward's target `yield` as the
-      # caller's block ({ExpressionTyper#forwarded_block_return_type}), and the target may run it any number of
-      # times, so the caller's block is typed as one that may repeat. Answers false where the callee does not resolve.
-      def hands_block_on?(call_node, receiver_type, scope)
+      # Issues #2301 and #2303 — whether the callee may run the block more than once on one path, for the
+      # expression-position block-value pass ({BlockRunCount}). Answers false where the callee does not resolve.
+      def block_value_may_repeat?(call_node, receiver_type, scope)
         def_node = callee_def(call_node, receiver_type, scope)
         return false unless def_node.is_a?(Prism::DefNode) && def_node.body
 
-        hand_off_in?(def_node.body, def_node.parameters&.block&.name)
+        BlockRunCount.may_repeat?(def_node, scope)
       rescue StandardError
         false
-      end
-
-      def hand_off_in?(node, block_name)
-        return false if node.is_a?(Prism::DefNode)
-        return true if node.is_a?(Prism::BlockArgumentNode) && forwards_block?(node, block_name)
-
-        node.compact_child_nodes.any? { |child| hand_off_in?(child, block_name) }
       end
 
       # The `def` an instance call on a project class, a singleton call on one, or an implicit-self call to a

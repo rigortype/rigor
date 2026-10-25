@@ -11,7 +11,9 @@ module Rigor
       #   the mailer file)
       # - the list of `(action, location)` pairs whose view templates are missing from `app/views/`
       class MailerIndex
-        ActionEntry = Data.define(:method_name, :min_arity, :max_arity, :def_line, :def_column) do
+        # `view_exempt` marks a callback or `helper_method` target: still an action (Rails dispatches it), but
+        # left out of the missing-view check.
+        ActionEntry = Data.define(:method_name, :min_arity, :max_arity, :def_line, :def_column, :view_exempt) do
           def arity_label
             return "#{min_arity}+" if max_arity == Float::INFINITY
             return min_arity.to_s if min_arity == max_arity

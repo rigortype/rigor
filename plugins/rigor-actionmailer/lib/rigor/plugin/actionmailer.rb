@@ -54,9 +54,9 @@ module Rigor
         # Bumped 2026-10-23 (#2308) — a method after a bare `protected` is no longer an action, so a cached 0.5.0
         # index can list protected helpers as actions (and as missing-view candidates).
         #
-        # Bumped 2026-10-26 (#2319) — a method named by a non-action macro (`prepend_before_action`, `after_deliver`,
-        # `helper_method`, ...) or defined after a bare `module_function` is no longer an action, so a cached 0.5.1
-        # index can list those as actions (and as missing-view candidates).
+        # Bumped 2026-10-26 (#2319) — a method named by a callback or `helper_method` macro (`prepend_before_action`,
+        # `after_deliver`, `helper_method`, ...) no longer draws a missing-view row, and a method defined after a bare
+        # `module_function` is no longer an action, so a cached 0.5.1 index can carry those rows and actions.
         version: "0.5.2",
         description: "Validates ActionMailer call shape and view template existence.",
         config_schema: {

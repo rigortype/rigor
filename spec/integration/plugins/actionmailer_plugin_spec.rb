@@ -324,6 +324,8 @@ RSpec.describe "plugins/rigor-actionmailer" do
       plugin_diagnostics(result).select { |d| d.rule == "missing-view" }.map(&:message)
     end
 
+    # Rails dispatches any public instance method, so a callback or helper target is still an action: it
+    # takes arguments and is callable, and only the missing-view check skips it.
     let(:switch_files) do
       {
         "app/mailers/concerns/notify_helpers.rb" => <<~RUBY,
@@ -350,6 +352,27 @@ RSpec.describe "plugins/rigor-actionmailer" do
         RUBY
         "app/views/notify_mailer/welcome.html.erb" => "Hi\n"
       }
+    end
+
+    it "keeps a callback or helper_method target callable, and an undefined name still unknown" do
+      files = {
+        "app/mailers/real_mailer.rb" => <<~RUBY
+          class RealMailer < ApplicationMailer
+            before_action :setup_for_render
+            after_deliver :both_action
+            helper_method :h1
+            def both_action = mail(to: "c")
+            def setup_for_render = 1
+            def h1 = 2
+          end
+        RUBY
+      }
+      source = "RealMailer.both_action.deliver_later\nRealMailer.h1\nRealMailer.setup_for_render\n" \
+               "RealMailer.undefined_thing\n"
+      unknown = plugin_diagnostics(run_plugin(source: source, files: files))
+                .select { |d| d.rule == "unknown-action" }.map(&:message)
+      expect(unknown.grep(/`RealMailer\.undefined_thing` is not/)).not_to be_empty
+      expect(unknown.grep(/`RealMailer\.(both_action|h1|setup_for_render)` is not/)).to be_empty
     end
 
     it "excludes the prepend_/after_deliver/helper_method targets and still flags a real action with no view" do

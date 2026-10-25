@@ -54,21 +54,21 @@ module Rigor
           # per-class entries that pull in actions from include'd modules. GitLab's `Notify` mailer
           # derives every action from `Emails::*` concerns under `app/mailers/emails/`.
           module_actions = {} # fully-qualified module name => its action entries, keyed by method name
-          class_visits = []   # collected (class_name, path, def_nodes, includes)
+          class_visits = []   # collected (class_name, path, def_nodes, includes, view_exempt)
 
           ruby_files_under(@search_paths).each do |path|
             contents = read_safely(path)
             next if contents.nil?
 
             tree = Prism.parse(contents).value
-            walk_for_mailers(tree, []) do |class_name, def_nodes, includes|
-              class_visits << [class_name, path, def_nodes, includes]
+            walk_for_mailers(tree, []) do |class_name, def_nodes, includes, view_exempt|
+              class_visits << [class_name, path, def_nodes, includes, view_exempt]
             end
             collect_module_actions(tree, [], module_actions)
           end
 
-          entries = class_visits.map do |class_name, path, def_nodes, includes|
-            build_class_entry(class_name, path, def_nodes, includes, module_actions)
+          entries = class_visits.map do |class_name, path, def_nodes, includes, view_exempt|
+            build_class_entry(class_name, path, def_nodes, includes, module_actions, view_exempt)
           end
           MailerIndex.new(entries)
         end
@@ -109,9 +109,9 @@ module Rigor
           full_name = declared_constant_name(class_local_name, lexical_path)
           superclass = strip_root(constant_path_name(node.superclass)) if node.superclass
           if superclass && @base_classes.include?(superclass)
-            def_nodes = collect_action_defs(node.body)
+            def_nodes, view_exempt = collect_action_defs(node.body)
             includes = collect_includes(node.body)
-            yield full_name, def_nodes, includes
+            yield full_name, def_nodes, includes, view_exempt
           end
 
           walk_for_mailers(node.body, [full_name], &) if node.body
@@ -136,8 +136,8 @@ module Rigor
         end
 
         # Walks the AST collecting every module's instance-side def nodes by fully-qualified module
-        # name. The same `collect_action_defs` filter applies (private / `_`-prefixed / callback-target
-        # methods skipped).
+        # name. The same `collect_action_defs` filter applies (private / `_`-prefixed skipped; callback targets
+        # stay actions and carry the view exemption).
         def collect_module_actions(node, lexical_path, accumulator)
           return if node.nil?
 
@@ -148,8 +148,10 @@ module Rigor
 
             full_name = declared_constant_name(local_name, lexical_path)
             if node.body
-              def_nodes = collect_action_defs(node.body)
-              entries = def_nodes.to_h { |def_node| [def_node.name, build_action_entry(def_node)] }
+              def_nodes, view_exempt = collect_action_defs(node.body)
+              entries = def_nodes.to_h do |def_node|
+                [def_node.name, build_action_entry(def_node, view_exempt.include?(def_node.name))]
+              end
               # UNIONed, never assigned: a concern module reopened in a second file adds actions rather
               # than replacing the ones the first declaration spelled (same rule as {MailerIndex}'s
               # per-class merge).
@@ -217,8 +219,9 @@ module Rigor
         #   `private` / `protected` (until a `public` switches back), named by `private :foo` /
         #   `protected :foo`, or defined inline (`private def foo`) — Rails builds `action_methods` from the
         #   public instance methods. `public :foo` after a `protected` section makes `foo` an action again.
-        # - methods named by a non-action macro (`before_action :name`, `prepend_after_action`, `after_deliver`,
-        #   `helper_method`, ...; see {#collect_callback_names})
+        # Methods named by a callback or `helper_method` macro (see {#collect_callback_names}) stay actions:
+        # Rails dispatches any public instance method, so `Mailer.target` still runs. They are returned as the
+        # view-exempt names, which exempt them from the missing-view check only.
         #
         # Pre-fix, Mastodon's `AdminMailer#process_params` / `set_instance` / `set_locale` /
         # `set_important_headers!` all surfaced as missing-view because the bare `private` keyword
@@ -226,28 +229,29 @@ module Rigor
         VISIBILITY_KEYWORDS = %i[public private protected module_function].freeze
         private_constant :VISIBILITY_KEYWORDS
 
+        # Returns `[action_def_nodes, view_exempt_names]`. The view-exempt names are the callback and
+        # `helper_method` targets of the body: they remain actions, and only the missing-view check skips them.
         def collect_action_defs(body)
-          return [] if body.nil?
+          return [[], Set[]] if body.nil?
 
           callback_names = collect_callback_names(body)
           def_nodes, final_visibility = scan_visibility(body)
 
-          def_nodes.select do |node|
+          actions = def_nodes.select do |node|
             next false if node.receiver.is_a?(Prism::SelfNode)
             next false if node.name == :initialize
             next false if node.name.to_s.start_with?("_")
-            next false if callback_names.include?(node.name)
 
             # Rails builds `action_methods` from the PUBLIC instance methods, so only a method whose final
             # visibility is public is an action.
             final_visibility[node.name] == :public
           end
+          [actions, callback_names]
         end
 
         # Symbol arguments to the macros the manifest's `per_invocation_non_action_macros` lists (`before_action
-        # :setup`, `after_deliver :record`, `helper_method :fmt`): each names a method that is not an action. The
-        # `skip_*` forms are left out, since `skip_before_action :x` names a callback a parent defined and does
-        # not take `x` out of this class's action set (#2319).
+        # :setup`, `after_deliver :record`, `helper_method :fmt`). The `skip_*` forms are left out, since
+        # `skip_before_action :x` names a callback a parent defined and does not exempt `x` from anything (#2319).
         def collect_callback_names(body)
           macros = Actionmailer.manifest.per_invocation_non_action_macros.reject { |macro| macro.start_with?("skip_") }
           names = []
@@ -286,29 +290,27 @@ module Rigor
         end
 
         # Applies one receiverless `public` / `private` / `protected` / `module_function` call and returns the
-        # (possibly new) default. `module_function` makes the instance-side copy private (the public copy is a
-        # singleton method, which Rails never dispatches as an action), so it reads as `private` here (#2319).
+        # (possibly new) default.
         def apply_visibility_call(node, default, def_nodes, final_visibility)
           return default unless node.receiver.nil? && VISIBILITY_KEYWORDS.include?(node.name)
 
-          visibility = node.name == :module_function ? :private : node.name
           args = node.arguments&.arguments || []
-          return visibility if args.empty?
+          return node.name if args.empty?
 
           args.flat_map { |arg| arg.is_a?(Prism::ArrayNode) ? arg.elements : [arg] }.each do |arg|
             if arg.is_a?(Prism::DefNode)
               def_nodes << arg
-              final_visibility[arg.name] = visibility
+              final_visibility[arg.name] = node.name
             elsif (name = Rigor::Source::Literals.symbol_or_string(arg))
-              final_visibility[name] = visibility
+              final_visibility[name] = node.name
             end
           end
           default
         end
 
-        def build_class_entry(class_name, file_path, def_nodes, includes = [], module_actions = {})
+        def build_class_entry(class_name, file_path, def_nodes, includes = [], module_actions = {}, view_exempt = Set[])
           actions = def_nodes.to_h do |def_node|
-            entry = build_action_entry(def_node)
+            entry = build_action_entry(def_node, view_exempt.include?(def_node.name))
             [entry.method_name, entry]
           end
 
@@ -328,7 +330,7 @@ module Rigor
             end
           end
 
-          missing_views = actions.keys.reject { |action| view_exists?(class_name, action) }
+          missing_views = actions.reject { |_, entry| entry.view_exempt }.keys.reject { |action| view_exists?(class_name, action) }
 
           MailerIndex::ClassEntry.new(
             class_name: class_name,
@@ -339,7 +341,7 @@ module Rigor
           )
         end
 
-        def build_action_entry(def_node)
+        def build_action_entry(def_node, view_exempt = false)
           parameters = def_node.parameters
           location = def_node.name_loc
 
@@ -348,7 +350,8 @@ module Rigor
               method_name: def_node.name,
               min_arity: 0, max_arity: 0,
               def_line: location.start_line,
-              def_column: location.start_column + 1
+              def_column: location.start_column + 1,
+              view_exempt: view_exempt
             )
           end
 
@@ -361,7 +364,8 @@ module Rigor
             min_arity: required_count,
             max_arity: rest_present ? Float::INFINITY : required_count + optional_count,
             def_line: location.start_line,
-            def_column: location.start_column + 1
+            def_column: location.start_column + 1,
+            view_exempt: view_exempt
           )
         end
 

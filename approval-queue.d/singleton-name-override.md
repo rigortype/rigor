@@ -3,7 +3,7 @@
 - **PR:** [#2348](https://github.com/rigortype/rigor/pull/2348)
 - **Issue:** [#2284](https://github.com/rigortype/rigor/issues/2284)
 - **Class:** gate-row
-- **Precedent:** [#2307](https://github.com/rigortype/rigor/pull/2307), [#1602](https://github.com/rigortype/rigor/pull/1602)
+- **Precedent:** [#2307](https://github.com/rigortype/rigor/pull/2307)
 - **Decided:** 2026-10-26
 
 ## Background

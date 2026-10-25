@@ -260,4 +260,285 @@ RSpec.describe "ADR-67 WD6 check-walk parameter inference" do
       expect(lines).to include(32, 37, 41)
     end
   end
+
+  # Issue #2280 — a conditional whose branches pass the parameter through, and `Array(param)`, read the same
+  # open-call-site lower bound back, so the guard declines on them as on a direct read. A branch that does not
+  # hold the parameter keeps its diagnostic. `Loud` is the same-file positive control: identical bodies whose
+  # parameter an RBS signature declares `Integer` keep reporting.
+  describe "conditionals and Array() over an inferred parameter" do
+    let(:conditional_source) do
+      <<~RUBY
+        class Quiet
+          def ternary(name, c) = (c ? name : name).upcase
+
+          def if_expression(name, c) = (if c then name else name end).upcase
+
+          def unless_expression(name, c) = (unless c then name else name end).upcase
+
+          def through_local(name, c)
+            x = c ? name : name
+            x.upcase
+          end
+
+          def through_ivar(name, c)
+            @v = if c then name else name end
+            @v.upcase
+          end
+
+          def array_conversion(name) = Array(name).first.upcase
+
+          def mixed_live_param(name, c) = (c ? name : 1).upcase
+
+          def mixed_live_other(name, c) = (c ? name : 1).upcase
+
+          def missing_else(name, c) = (if c then name end).upcase
+
+          def mixed_live_param_else(name, c) = (c ? 1 : name).upcase
+
+          def mixed_unless(name, c) = (unless c then name else 1 end).upcase
+
+          def version_guarded(name) = (RUBY_VERSION >= "3.0" ? name : 1).upcase
+
+          def table = {a: "x"}
+
+          def optimistic_predicate(name, k) = (table[k] ? name : 1).upcase
+        end
+
+        class Loud
+          def ternary(name, c) = (c ? name : name).upcase
+
+          def through_local(name, c)
+            x = c ? name : name
+            x.upcase
+          end
+
+          def array_conversion(name) = Array(name).first.upcase
+        end
+
+        class Rebound
+          def sequence_local(name)
+            c = true
+            x = (c = false; c ? name : 1)
+            x.upcase
+          end
+
+          def sequence_inline(name)
+            c = true
+            (c = false; c ? name : 1).upcase
+          end
+
+          def and_right(name)
+            c = true
+            ((c = false) || (c ? name : 1)).upcase
+          end
+
+          def literal(name)
+            c = true
+            [c = false, (c ? name : 1)].last.upcase
+          end
+
+          def nested(name)
+            c = true
+            ((c = false) ? 1 : (c ? name : 1)).upcase
+          end
+
+          def two_arguments(name) = Array(name, 1).first.upcase
+
+          def explicit_receiver(name) = Conv.new.Array(name).upcase
+        end
+
+        class Conv
+          def Array(x) = 5
+        end
+
+        class Shadow
+          def Array(x) = 5
+
+          def shadowed(name) = Array(name).upcase
+        end
+
+        class Arguments
+          def earlier_argument(name)
+            c = true
+            Math.hypot((c = false; 1.0), c ? name : "x")
+          end
+
+          def receiver_first(name)
+            c = true
+            (c = false; Math).hypot(1.0, c ? name : "x")
+          end
+
+          def self.Array(x) = 5
+
+          def self.singleton_shadowed(name) = Array(name).upcase
+        end
+
+        q = Quiet.new
+        [true, false].each do |c|
+          q.ternary(nil, c)
+          q.if_expression(nil, c)
+          q.unless_expression(nil, c)
+          q.through_local(nil, c)
+          q.through_ivar(nil, c)
+        end
+        q.array_conversion(nil)
+        q.mixed_live_param(nil, true)
+        q.mixed_live_other(nil, false)
+        q.missing_else(nil, false)
+        q.mixed_live_param_else(nil, false)
+        q.mixed_unless(nil, false)
+        q.version_guarded(nil)
+        q.optimistic_predicate(2, :zz)
+        r = Rebound.new
+        r.sequence_local(nil)
+        r.sequence_inline(nil)
+        r.and_right(nil)
+        r.literal(nil)
+        r.nested(nil)
+        r.two_arguments(nil)
+        r.explicit_receiver(nil)
+        Shadow.new.shadowed(nil)
+        Arguments.new.earlier_argument(1.0)
+        Arguments.new.receiver_first(1.0)
+        Arguments.singleton_shadowed(nil)
+      RUBY
+    end
+
+    let(:loud_rbs) do
+      <<~RBS
+        class Loud
+          def ternary: (Integer name, bool c) -> untyped
+          def through_local: (Integer name, bool c) -> untyped
+          def array_conversion: (Integer name) -> untyped
+        end
+
+        class Quiet
+          def table: () -> Hash[Symbol, String]
+        end
+      RBS
+    end
+
+    let(:diagnostics) do
+      Dir.mktmpdir("rigor-2280") do |dir|
+        Dir.mkdir(File.join(dir, "sig"))
+        File.write(File.join(dir, "sig", "loud.rbs"), loud_rbs)
+        path = File.join(dir, "probe.rb")
+        File.write(path, conditional_source)
+        config = Rigor::Configuration.new(
+          "paths" => [], "parameter_inference" => true, "signature_paths" => [File.join(dir, "sig")]
+        )
+        runner = Rigor::Analysis::Runner.new(configuration: config, cache_store: nil)
+        guarded_run(runner, [path]).diagnostics
+      end
+    end
+
+    let(:lines) { diagnostics.select { |d| d.rule == "call.undefined-method" }.map(&:line) }
+
+    let(:mismatch_lines) { diagnostics.select { |d| d.rule == "call.argument-type-mismatch" }.map(&:line) }
+
+    it "declines on a ternary whose branches are both the parameter" do
+      expect(lines).not_to include(2)
+    end
+
+    it "declines on an if expression whose branches are both the parameter" do
+      expect(lines).not_to include(4)
+    end
+
+    it "declines on an unless expression whose branches are both the parameter" do
+      expect(lines).not_to include(6)
+    end
+
+    it "declines through a local written from such a conditional" do
+      expect(lines).not_to include(10)
+    end
+
+    it "declines through an ivar written from such a conditional" do
+      expect(lines).not_to include(15)
+    end
+
+    it "declines on Array(param)" do
+      expect(lines).not_to include(18)
+    end
+
+    it "declines when the predicate folds to the parameter's branch" do
+      expect(lines).not_to include(20)
+    end
+
+    it "still reports when the predicate folds to the branch that is not the parameter" do
+      expect(lines).to include(22)
+    end
+
+    it "still reports the nil an absent else branch produces" do
+      expect(lines).to include(24)
+    end
+
+    it "declines when the predicate folds falsey to the parameter's else branch" do
+      expect(lines).not_to include(26)
+    end
+
+    it "declines when an unless predicate folds falsey to the parameter's body" do
+      expect(lines).not_to include(28)
+    end
+
+    it "declines when a version guard decides the parameter's branch" do
+      expect(lines).not_to include(30)
+    end
+
+    # The engine keeps both arms when the predicate's truthiness rests on an optimistic carrier (a Hash read
+    # that omits the miss's nil), so the guard must not read one arm as dead either.
+    it "still reports a conditional whose predicate folds only on an optimistic carrier" do
+      expect(lines).to include(34)
+    end
+
+    it "still reports the same shapes on a parameter a signature declares" do
+      expect(lines).to include(38, 42, 45)
+    end
+
+    # A predicate is folded in the scope at the start of the expression, so the guard must not fold one that
+    # earlier code inside the expression rebinds: there the engine reads the rebound value and so must the rule.
+    it "does not fold a predicate a leading statement rebinds, through a local" do
+      expect(lines).to include(52)
+    end
+
+    it "does not fold a predicate a leading statement rebinds, inline" do
+      expect(lines).to include(57)
+    end
+
+    it "does not fold a predicate the left operand of || rebinds" do
+      expect(lines).to include(62)
+    end
+
+    it "does not fold a predicate an earlier literal element rebinds" do
+      expect(lines).to include(67)
+    end
+
+    it "does not fold a predicate nested in an arm of a conditional whose predicate rebinds it" do
+      expect(lines).to include(72)
+    end
+
+    it "does not read Array with two arguments as the conversion" do
+      expect(lines).to include(75)
+    end
+
+    it "does not read an Array call on an explicit receiver as the conversion" do
+      expect(lines).to include(77)
+    end
+
+    it "does not read Array as the conversion when the class defines its own" do
+      expect(lines).to include(87)
+    end
+
+    it "does not read Array as the conversion when the singleton class defines its own" do
+      expect(lines).to include(103)
+    end
+
+    # The argument guard runs in the call's scope, after the receiver and earlier arguments have run.
+    it "does not fold an argument's predicate an earlier argument rebinds" do
+      expect(mismatch_lines).to include(93)
+    end
+
+    it "does not fold an argument's predicate the receiver rebinds" do
+      expect(mismatch_lines).to include(98)
+    end
+  end
 end

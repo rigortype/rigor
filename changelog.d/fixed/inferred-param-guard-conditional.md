@@ -1,0 +1,3 @@
+- **[engine]** Under `parameter_inference: true`, a conditional whose runnable branches all pass an inferred parameter through, and `Array(param)`, no longer report against the parameter's open-call-site lower bound. ([#2367](https://github.com/rigortype/rigor/pull/2367))
+  - `(c ? name : name).upcase`, the `if` / `unless` expression forms, a local or instance variable written from one, and `Array(name).first.upcase` are guarded like `name.upcase`.
+  - A branch that does not hold the parameter still reports, as does a parameter a signature declares.

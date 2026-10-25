@@ -3826,7 +3826,6 @@ module Rigor
       def rebind_statement_specials(node, post_scope)
         post_scope = post_scope.forget_match_globals if rebinds_match_globals?(node, post_scope)
         post_scope = post_scope.forget_last_line if rebinds_last_line?(node, post_scope)
-        unrestored = post_scope
         if post_scope.guard_narrowed? && GuardRebinding.call_may_rebind?(node, operand_scope)
           # Issue #1596 — a self-call proven to write only some instance variables restores only theirs.
           writes = intervening_call_candidate?(node) ? self_call_ivar_writes(node) : nil
@@ -3836,7 +3835,7 @@ module Rigor
                          post_scope.forget_guard_narrowings
                        end
         end
-        post_scope = forget_reached_globals(node, post_scope, unrestored)
+        post_scope = forget_reached_globals(node, post_scope)
         forget_rescued_status(LastStatus.after(node, post_scope, scope), node)
       end
 
@@ -3848,14 +3847,14 @@ module Rigor
       # statement call `node` may reach that method ({GlobalWriterReach.may_write?}): `$g = nil; reset!; $g + 1`,
       # with `reset!` assigning `$g`, is `2` in Ruby. A global no reachable method writes keeps its binding. A
       # `case` whose `when` test may rebind a global subject reads it the same way ({#when_test_rebinds_subject?}).
-      # A global a guard narrowed before the call keeps the union issue #1429's restore reads instead: `unrestored` is
-      # `post_scope` before that restore, and the operands' entry holds a narrowing an operand's call restored.
-      def forget_reached_globals(node, post_scope, unrestored)
+      # A global a guard narrowed where the operands started keeps the union issue #1429's restore reads instead
+      # (`return unless $sep; puts(reset_sep); $sep.length` reads `$sep` as the union of its seed and `","`).
+      def forget_reached_globals(node, post_scope)
         names = GlobalWriterReach.candidates(post_scope)
         return post_scope if names.empty?
 
         names.reduce(post_scope) do |acc, name|
-          next acc if guard_narrowed_global?(operand_scope, name) || guard_narrowed_global?(unrestored, name)
+          next acc if guard_narrowed_global?(operand_scope, name)
           next acc unless GlobalWriterReach.may_write?(node, name, operand_scope)
 
           acc.with_global(name, Type::Combinator.untyped)

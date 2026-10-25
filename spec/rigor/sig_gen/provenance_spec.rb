@@ -85,6 +85,15 @@ SIG_PROVENANCE_LISTING_CAP = 200
 # counts them like every other declared lenience the generator protects; `Configuration.discover`'s
 # `String?` has always sat in this bucket for the same reason.
 #
+# 587 -> 584 since #2317. The classifier now compares an inferred return with the spelling sig-gen writes
+# (`TypeElaborator` applied before `erase_to_rbs`), not the raw carrier. A written `Set` is `Set[untyped]`
+# in sig-gen (#2177), so a `Set[String]` declaration no longer matches the inferred return and reads
+# `declared_divergent`; each such row that is hand-written carries `# authored:` with its element type, so it
+# stays out of the count (scope.rbs and inference.rbs back to their pre-PR pins). A bare `Array` now elaborates
+# to the `Array[untyped]` a declaration already names and reads `generated`, so the three files whose rows now
+# generate drop to zero (-1 each). Net -3 against the pre-PR total. The
+# per-row reasons are at their pins. This is a gate checking more, not an engine change: no declaration text moved.
+#
 # 666 since #995. `Generator#translate_method_type_return` translated a declared return with no
 # `alias_expander:`, so ANY declared return spelled through a project alias (`Type::t`,
 # `Environment::ordering`, `Inference::closure_classification`), not only a bare `untyped`, degraded
@@ -198,8 +207,10 @@ SIG_PROVENANCE_RESIDUE = {
   # `audit`/`without`/`initialize` tightened to generated/intent, leaving `filter`'s honest
   # `[Array[untyped], Integer]` divergence as the sole unmarked row.
   "sig/rigor/analysis/baseline.rbs" => 1,
-  "sig/rigor/analysis/check_rules/always_truthy_condition_collector.rbs" => 1,
-  "sig/rigor/analysis/check_rules/dead_assignment_collector.rbs" => 1,
+  # -1 each (#2317): `collect` returns a bare `Array`, which the elaborator now spells `Array[untyped]`, the
+  # declared spelling; both rows classify as generated (these are the only three files whose rows now generate).
+  "sig/rigor/analysis/check_rules/always_truthy_condition_collector.rbs" => 0,
+  "sig/rigor/analysis/check_rules/dead_assignment_collector.rbs" => 0,
   "sig/rigor/analysis/dependency_source_inference/gem_resolver.rbs" => 1,
   # -2 (#1092): an RBS `-> self` return keeps the receiver's type arguments, so `FactStore#normalize`
   # and `CheckRules.filter_suppressed` stop inferring the raw `Array`; both now classify as parameter
@@ -216,7 +227,8 @@ SIG_PROVENANCE_RESIDUE = {
   "sig/rigor/cli/diff_command.rbs" => 1,
   "sig/rigor/cli/explain_command.rbs" => 1,
   "sig/rigor/cli/sig_gen_command.rbs" => 2,
-  "sig/rigor/cli/type_scan_command.rbs" => 1,
+  # -1 (#2317): `record_parse_error`'s bare `Array` is spelled `Array[untyped]` by the elaborator, as declared.
+  "sig/rigor/cli/type_scan_command.rbs" => 0,
   # New files (#1181 slice): the bound side of `Effects::*`. Marked rows are #1150 Data members;
   # unmarked residue is the ordinary unrenderable/declared-divergent mix (`label_set.rbs` also pins
   # the `eql?` alias row, `origin.rbs`/`taint_cause.rbs` fully classify).
@@ -269,6 +281,10 @@ SIG_PROVENANCE_RESIDUE = {
   # -1 (#1429): a value-position `case` now types each arm under the subject's `when` narrowing, so
   # `ExpressionTyper#type_of_virtual`'s `when AST::TypeNode then node.type` arm reads `node` as the node class
   # and its return renders.
+  # 0 net (#2317): `ScopeIndexer#finalize_constant_writes` returns `Hash[String, Set[String]]` as its second element,
+  # which the elaborator spells `Set[untyped]`, so the row moved from `parameter_intent` to `declared_divergent`.
+  # It is marked `# authored:` with its element type by contract, so the count is back at 83. The declared
+  # parameter is unchanged.
   "sig/rigor/inference.rbs" => 83,
   "sig/rigor/inference/builtins/method_catalog.rbs" => 1,
   "sig/rigor/inference/void_origin.rbs" => 5,
@@ -361,6 +377,13 @@ SIG_PROVENANCE_RESIDUE = {
   # notes instead: sig-gen proposes `Set[untyped]` for them (#2177, #2317), and a marker does not move this count.
   # -2 (#2306): a truthiness test no longer drops the optimistic mark on its falsey edge, so `data_member_layout`
   # and `struct_member_layout` regenerate with the `?` their declarations carry.
+  # 0 net (#2317): the classifier elaborates an inferred return through `TypeElaborator`, so a Set return is
+  # compared as `Set[untyped]`, the spelling sig-gen writes (#2177). Five Set readers that read `generated` before
+  # now read `declared_divergent` and each carries an `# authored:` marker stating its element type by contract:
+  # `discovered_global_write_census`, `published_constant_names`, `local_constant_names`,
+  # `discovered_class_sources`, `constant_sources`. Marked rows are not residue, so the count is back at 43.
+  # The three earlier Set readers (`published_constant_sourced`, `declaration_sourced`, `struct_fold_safe_locals`)
+  # move class the same way and were already marked.
   "sig/rigor/scope.rbs" => 43,
   "sig/rigor/sig_gen/skip_reason_catalog.rbs" => 8,
   "sig/rigor/source.rbs" => 4,
@@ -421,6 +444,24 @@ RSpec.describe "sig/ provenance (ADR-107 G3)" do
     it "calls a declaration whose return is what sig-gen proves `generated`" do
       rows = classifications_for(ruby: "class Widget\n  def n\n    42\n  end\nend\n",
                                  rbs: "class Widget\n  def n: () -> 42\nend\n")
+      expect(rows).to eq([SigProvenanceAuditor::GENERATED])
+    end
+
+    it "compares a Set return with the `Set[untyped]` sig-gen writes, not the element the engine read (#2177, #2317)" do
+      # The reader returns an ivar seeded from the declared `Set[Symbol]` parameter: sig-gen's raw carrier is
+      # `Set[Symbol]`, which equals the declaration, but the spelling it writes is `Set[untyped]`.
+      ruby = "class Widget\n  def initialize(names)\n    @names = names\n  end\n  def n\n    @names\n  end\nend\n"
+      rbs = "class Widget\n  def initialize: (Set[Symbol] names) -> void\n  def n: () -> Set[Symbol]\nend\n"
+      row = audit_fixture(ruby: ruby, rbs: rbs).find { |r| r.declaration.method_name == "n" }
+      expect(row.classification).to eq(SigProvenanceAuditor::DECLARED_DIVERGENT)
+      expect(row.detail).to eq("declared Set[Symbol], sig-gen infers Set[untyped]")
+    end
+
+    # Control (guard): passes with the elaboration removed. It pins that a declaration already spelled as
+    # sig-gen writes it stays `generated`, so the elaboration must not move it.
+    it "calls a Set return declared as sig-gen writes it `generated`" do
+      rows = classifications_for(ruby: "class Widget\n  def n\n    Set[1]\n  end\nend\n",
+                                 rbs: "class Widget\n  def n: () -> Set[untyped]\nend\n")
       expect(rows).to eq([SigProvenanceAuditor::GENERATED])
     end
 
@@ -566,7 +607,7 @@ RSpec.describe "sig/ provenance (ADR-107 G3)" do
         path: "sig/widget.rbs", line: 2, class_name: "Widget", method_name: method,
         kind: :instance, typed_params: false, return_rbs: return_rbs, marker: nil
       )
-      SigProvenanceAuditor.classify([declaration], [candidate]).first
+      SigProvenanceAuditor.classify([declaration], [candidate], environment: nil).first
     end
 
     def candidate(classification, **overrides)

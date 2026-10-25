@@ -64,14 +64,24 @@ module Rigor
     # authored: the list holds module names and the `InEffectRefinements::UNKNOWN` Symbol; sig-gen reads the delegated
     # return through an unsigned class as untyped.
     def in_effect_refinements: (untyped node, ?Array[String] declared) -> Array[String | Symbol]
+    # authored: the element is an `Array` led by its Symbol kind by contract (`[:defines, name]`, `[:ivar_set, name]`); a Set's element type stays `untyped` in sig-gen (#2177, #2317), so the generator
+    # would never propose it.
     def discovered_global_write_census: () -> Set[Array[untyped]]
     def discovered_includes: () -> Hash[String, Array[String]]
     # Issue #1123 — the instance-ancestor-ORDER table beside the include one.
     def discovered_prepends: () -> Hash[String, Array[String]]
     def discovered_extends: () -> Hash[String, Array[String]]
+    # authored: the element is `String` (a source path) by contract; a Set's element type stays `untyped` in sig-gen (#2177, #2317), so the generator
+    # would never propose it.
     def discovered_class_sources: () -> Hash[String, Set[String]]
+    # authored: the element is `String` (a source path) by contract; a Set's element type stays `untyped` in sig-gen (#2177, #2317), so the generator
+    # would never propose it.
     def constant_sources: () -> Hash[String, Set[String]]
+    # authored: the element is `String` (a constant's last segment) by contract; a Set's element type stays `untyped` in sig-gen (#2177, #2317), so the generator
+    # would never propose it.
     def published_constant_names: () -> Set[String]
+    # authored: the element is `String` (a constant name) by contract; a Set's element type stays `untyped` in sig-gen (#2177, #2317), so the generator
+    # would never propose it.
     def local_constant_names: () -> Set[String]
     # sig-gen gap: #1150 — the `Data.define` table it reads carries no type, so sig-gen skips the return; the shape is hand-written.
     def bound_constant_names: (String name) -> Array[String]

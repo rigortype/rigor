@@ -455,7 +455,6 @@ members:
     copies:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/project_seed_tables.rb
-    - lib/rigor/sig_gen/generator.rb
   patched_line_readers:
     reads:
     - lib/rigor/inference/last_line.rb

@@ -132,6 +132,48 @@ module Rigor
         Plan.new(leading: leading, shells: shells, changed: planner.changed)
       end
 
+      # Issue #2422 — `decls` less every method, attribute or alias another source in `env` already declares on
+      # the same type, member by member, with {.untaken}'s narrowing and its overload-continuation rule. The
+      # member half of {Planner#keep_type} without the header planning: a bundled plugin's deferred signature
+      # file, whose header conflicts stand the whole file down first (`RbsLoader.generic_arity_conflict`). A
+      # declaration with nothing taken is returned as the same object, so a file with no collision loads as it
+      # stands.
+      def without_taken_members(decls, env, namespace = nil)
+        decls.map do |decl|
+          type_declaration?(decl) ? without_taken_type(decl, env, qualify(namespace, decl.name)) : decl
+        end
+      end
+
+      def without_taken_type(decl, env, name)
+        taken = declared_keys(other_declarations(env, name))
+        members = decl.members.filter_map do |member|
+          next without_taken_type(member, env, qualify(name, member.name)) if type_declaration?(member)
+
+          taken.empty? ? member : untaken(member, taken)
+        end
+        return decl if members.size == decl.members.size && members.zip(decl.members).all? { |a, b| a.equal?(b) }
+
+        rebuild(decl, members: members)
+      end
+
+      # Issue #2422 — what {.without_taken_members} left out of the deferred `file` (its parsed `decls`) in the
+      # built `env`, as `[declaration, cause_file]` rows: each method the file declares that its own loaded
+      # declarations do not, with the other source's buffer that declares it. Read off the environment like
+      # {.standdowns}, so a warm run reports what the cold one decided.
+      def member_standdown_rows(env, file, decls)
+        rows = []
+        each_type(decls, nil) do |decl, name|
+          entry = env.class_decls[::RBS::TypeName.parse("::#{name}")]
+          declarations = entry.nil? ? [] : RbsLoader.entry_declarations(entry)
+          own = declarations.select { |other| RbsLoader.declaration_buffer_name(other) == file }
+          next if own.empty?
+
+          others = declarations.reject { |other| own.include?(other) || synthetic?(other) }
+          rows.concat(member_standdowns(decl, name, own, others, true).map { |label, cause, _| [label, cause] })
+        end
+        rows.uniq
+      end
+
       def signature_files(roots)
         roots.flat_map { |root| RootedGlob.glob(root, "*.rbs").sort }
       end

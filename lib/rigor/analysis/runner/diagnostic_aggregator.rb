@@ -34,7 +34,7 @@ module Rigor
         #   - `quarantined_signatures` — the `signature_paths:` files skipped because they do not parse
         #     (`[path, first_error_line]` pairs);
         #   - `signature_standdowns` (#610) — `[path, class_name, existing_arity, incoming_arity,
-        #     existing_file]` tuples;
+        #     existing_file]` tuples, then (#2422) `[path, declaration, nil, nil, cause_file, :member]` ones;
         #   - `vendored_standdowns` (#1713) — `Environment::RbsLoader#vendored_standdowns`;
         #   - `env_build_failure` — `[error_class, first_error_line, conflicting_buffer_names]`, or nil;
         #   - `definition_build_failures` (#696) — `[class_name, error_class, member,
@@ -792,6 +792,8 @@ module Rigor
         end
 
         def build_rbs_plugin_signature_stood_down_diagnostic(entry)
+          return build_rbs_plugin_member_stood_down_diagnostic(entry) if entry[5] == :member
+
           path, class_name, existing_arity, incoming_arity, existing_file = entry
           displaced_by = displacing_source_phrase(existing_file)
           Diagnostic.new(
@@ -807,6 +809,26 @@ module Rigor
                      "loaded. Expected when a bundled plugin and an `rbs collection install` both declare " \
                      "the class; nothing to fix unless you want the plugin's typing back, which needs the " \
                      "other source to stop declaring the class.",
+            severity: :info,
+            rule: "rbs.coverage.plugin-signature-stood-down",
+            source_family: :builtin
+          )
+        end
+
+        # Issue #2422 — one member a loaded plugin signature file left out because another source declares it.
+        def build_rbs_plugin_member_stood_down_diagnostic(entry)
+          path, declaration, _, _, cause_file = entry
+          Diagnostic.new(
+            path: ".rigor.yml",
+            line: 1,
+            column: 1,
+            message: "`#{relative_signature_path(path.to_s)}` (a signature file a plugin contributes) declares " \
+                     "`#{declaration}`, but #{displacing_source_phrase(cause_file)} already declares it. Two " \
+                     "declarations of one method fail the class's definition build, so the plugin's declaration " \
+                     "stood down and calls resolve against the other one; the rest of the plugin's file still " \
+                     "loads. Expected when a bundled plugin and an `rbs collection install` or your own " \
+                     "signatures both declare the method; nothing to fix unless you want the plugin's typing " \
+                     "back, which needs the other source to stop declaring it.",
             severity: :info,
             rule: "rbs.coverage.plugin-signature-stood-down",
             source_family: :builtin

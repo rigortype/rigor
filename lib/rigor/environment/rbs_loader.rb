@@ -187,7 +187,9 @@ module Rigor
           project_files = project_sig_files(signature_paths)
           # Issue #1075 — decided from the inputs before either side enters `env`: the consistency rule may
           # stand the `.rbs` member down, and that has to happen before its file is added.
-          consistency = member_consistency_for(project_files, virtual_rbs)
+          # Issue #2422 — a bundled plugin's deferred files are not the project's: they never take part in the
+          # inline-vs-`.rbs` consistency rule, and stand down to an inline member like to any other source.
+          consistency = member_consistency_for(project_files - project_sig_files(deferred_signature_paths), virtual_rbs)
           add_project_signatures(env, signature_paths, deferred_signature_paths,
                                  standdowns: consistency.signature_standdowns)
           gated_plan&.shells&.each { |source| add_parsed_decls(env, *source) }
@@ -201,6 +203,8 @@ module Rigor
           # Issues #824 / #1075 — every member a `.rbs` file also declares was ranked above; the inline side of
           # each pair the `.rbs` won stands down here ({.add_virtual_rbs}), so the two never collide.
           add_virtual_rbs(env, virtual_rbs, inline_standdowns: consistency.inline_standdowns)
+          # Issues #610 / #2422 — the plugins' files last, so each stands down against every other source.
+          add_deferred_signatures(env, project_sig_files(deferred_signature_paths))
           synthesize_missing_namespaces(env)
           # Issue #777 — resolve-time backstop: also unload colliding PROJECT buffers (class-vs-module /
           # constant redeclarations against bundled RBS). Virtual culprits are preferred when both appear.
@@ -579,7 +583,6 @@ module Rigor
             strip_members!(decls, standdowns[file]) if standdowns.key?(file)
             add_project_parsed_decls(env, buffer, directives, decls)
           end
-          add_deferred_signatures(env, deferred, standdowns)
         end
 
         # Issue #777 — add one project signature transactionally. `RBS::Environment#add_source` appends to
@@ -617,7 +620,14 @@ module Rigor
         # (rigor-activerecord's is `relation.rbs`, declaring exactly `Relation`), so dropping the file drops
         # exactly the conflicting declaration. Splitting a plugin file that mixes a colliding class with
         # innocent ones is the change to make if that ever stops being true.
-        def add_deferred_signatures(env, deferred_files, standdowns = {})
+        #
+        # Issue #2422 — at equal arity the plugin reopens the class, and a method both sources declare fails the
+        # definition build (`DuplicatedMethodDefinitionError`) for the class and everything under it. So the
+        # stand-down reaches members too: each method, attribute or alias another loaded source already declares
+        # on the same class is left out of the plugin's file before it is added
+        # ({GatedSignaturePlan.without_taken_members}, the #1713 member planning), and the rest of the file
+        # loads. {.deferred_member_standdowns} reads what was left out back off the built env.
+        def add_deferred_signatures(env, deferred_files)
           deferred_files.sort.each do |file|
             parsed = parse_signature_file(file)
             next if parsed.nil?
@@ -625,8 +635,7 @@ module Rigor
             buffer, directives, decls = parsed
             next if generic_arity_conflict(env, decls)
 
-            strip_members!(decls, standdowns[file]) if standdowns.key?(file)
-            add_project_parsed_decls(env, buffer, directives, decls)
+            add_project_parsed_decls(env, buffer, directives, GatedSignaturePlan.without_taken_members(decls, env))
           end
         end
 
@@ -645,6 +654,25 @@ module Rigor
 
             conflict = generic_arity_conflict(env, parsed[2])
             conflict && [file, *conflict]
+          end
+        end
+
+        # Issue #2422 — the members {.add_deferred_signatures} left out of each deferred file it loaded, as
+        # `[absolute_path, declaration, nil, nil, cause_file, :member]` — `declaration` reading `Object#acts_like?`
+        # or `Time.at`, `cause_file` the buffer of the source that declares it, or nil when that cannot be named.
+        # Derived from the built env for {.deferred_standdowns}' reason; a file that stood down whole is
+        # {.deferred_standdowns}' row, and one the env does not hold has nothing to read back.
+        def deferred_member_standdowns(env, deferred_paths)
+          return [] if env.nil? || deferred_paths.nil? || deferred_paths.empty?
+
+          loaded = loaded_signature_buffers(env)&.to_set { |buffer| buffer.name.to_s } || Set.new
+          project_sig_files(deferred_paths).sort.flat_map do |file|
+            parsed = loaded.include?(file) ? parse_signature_file(file) : nil
+            next [] if parsed.nil? || generic_arity_conflict(env, parsed[2])
+
+            GatedSignaturePlan.member_standdown_rows(env, file, parsed[2]).sort.map do |label, cause|
+              [file, label, nil, nil, cause, :member]
+            end
           end
         end
 
@@ -1725,8 +1753,14 @@ module Rigor
       # plugin sig collides, which is every project that has not run `rbs collection install` for a gem a
       # bundled plugin also declares. Reported as `rbs.coverage.plugin-signature-stood-down` (`:info`); the
       # same file MUST NOT also appear in {#quarantined_signatures}.
+      #
+      # Issue #2422 — followed by the members a deferred file that did load left out because another source
+      # declares them ({.deferred_member_standdowns}), one row each.
       def signature_standdowns
-        @state[:signature_standdowns] ||= self.class.deferred_standdowns(env, @deferred_signature_paths).freeze
+        @state[:signature_standdowns] ||= (
+          self.class.deferred_standdowns(env, @deferred_signature_paths) +
+          self.class.deferred_member_standdowns(env, @deferred_signature_paths)
+        ).freeze
       end
 
       # Issue #1713 — what stood down from each {RequiredFeatures}-gated vendored directory this loader's library
@@ -2086,7 +2120,8 @@ module Rigor
       def member_consistency(proof: nil)
         key = proof ? :member_consistency_proven : :member_consistency
         @state[key] ||= self.class.member_consistency_for(
-          self.class.project_sig_files(@signature_paths), @virtual_rbs, proof: proof
+          self.class.project_sig_files(@signature_paths) - self.class.project_sig_files(@deferred_signature_paths),
+          @virtual_rbs, proof: proof
         ).records
       end
 

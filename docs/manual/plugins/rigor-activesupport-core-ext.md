@@ -32,6 +32,14 @@ path, no vendoring, no `signature_paths:` wiring.
 > surface. When it is loaded, the auto overlay stands down so the two
 > never double-declare.
 
+If the project also runs `rbs collection install` for `activesupport`,
+or declares a core extension in its own `sig/` or inline RBS, some
+methods are declared twice — `Object#acts_like?`, `Integer#ordinalize`,
+`Time#to_fs` among them. For each such method the plugin's declaration
+stands down and yours is used; the rest of the plugin still loads. The
+run reports one `rbs.coverage.plugin-signature-stood-down` info row
+per method, naming both files.
+
 ## What it covers
 
 Roughly the top ~40 selectors plus their close neighbours, across:

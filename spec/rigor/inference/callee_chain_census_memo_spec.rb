@@ -94,10 +94,6 @@ RSpec.describe "the callee-chain census memo (#2104)" do
           def fwd(acc) = stripes(acc)
         end
       RUBY
-      call = nil
-      Rigor::Source::NodeWalker.each(program) do |node|
-        call ||= node if node.is_a?(Prism::CallNode) && node.name == :stripes
-      end
       fwd_call = nil
       Rigor::Source::NodeWalker.each(program) do |node|
         fwd_call ||= node if node.is_a?(Prism::CallNode) && node.name == :fwd
@@ -140,6 +136,25 @@ RSpec.describe "the callee-chain census memo (#2104)" do
       expect(scope.discovered_def_nodes.values).to all(be_frozen)
       expect(scope.discovered_singleton_def_nodes).to be_frozen
       expect(scope.discovered_singleton_def_nodes.values).to all(be_frozen)
+    end
+
+    it "freezes the singleton hash of a class the file only extends" do
+      seed_program = Prism.parse("module M\n  def x = 1\nend\nclass C\n  def self.y = 2\nend\n").value
+      seed = Rigor::Inference::ScopeIndexer.index(seed_program, default_scope: Rigor::Scope.empty)[seed_program]
+      program = Prism.parse("class C\n  extend M\nend\n").value
+      scope = Rigor::Inference::ScopeIndexer.index(program, default_scope: seed)[program]
+
+      expect(scope.discovered_singleton_def_nodes.fetch("C")).to be_frozen
+    end
+
+    it "keys a discovery by identity: equal values are neither eql? nor hash-equal" do
+      first = Rigor::Scope::DiscoveryIndex::EMPTY.with(run_generation: nil)
+      second = first.with(run_generation: nil)
+
+      expect(second).to eq(first)
+      expect(second).not_to be(first)
+      expect(second).not_to eql(first)
+      expect(second.hash).not_to eq(first.hash)
     end
 
     it "empties the thread slot when a run ends" do

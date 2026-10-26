@@ -433,6 +433,8 @@ module Rigor
                                           extend_unpositioned)
         methods_table = fold_per_file_extends(file_extends, def_nodes, singleton_def_nodes, seeded_scope, siblings,
                                               unpositioned)
+        # The fold also writes the singleton hash of each class this file `extend`s, declared there or not.
+        file_extends.each_key { |owner| singleton_def_nodes[owner]&.freeze }
         freeze_def_tables(def_pair, singleton_pair)
         [extends, methods_table, unpositioned]
       end

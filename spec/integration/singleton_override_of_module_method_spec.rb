@@ -142,7 +142,8 @@ RSpec.describe "a project singleton override of a Module method wins on the clas
       class Sh5 < Top5; end
       class Top6; def self.name = nil; def self.inherited(s) = s.define_singleton_method(:name) { "x" }; end
       class Sh7 < Top5; def self.inherited(s) = super; end
-      class Own < Top6; def self.name = 8; end
+      class TopO; def self.inherited(s) = s.define_singleton_method(:name) { "x" }; end
+      class Own < TopO; def self.name = 8; end
       Rigor.dump_type(Sh5.name) # 7
       Rigor.dump_type(Top6.name) # nil, the hook's own class is not created by it
       Rigor.dump_type(Sh7.name) # 7, its own hook runs for its subclasses only

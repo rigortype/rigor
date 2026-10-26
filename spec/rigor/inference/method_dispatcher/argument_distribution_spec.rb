@@ -26,6 +26,12 @@ RSpec.describe "Union and supertype arguments in overload selection (#2379)", ty
         def wide: (Pick p, 1 | 2 | 3 | 4 | 5 | 6 | 7 | "a" | "b" u) -> untyped
         def narrow: (Pick p, Integer i) -> untyped
         def typed: (Pick p, Array[Numeric] xs) -> untyped
+        def sh: (Pick p, Integer | String | :a | :b | :c | :d | :e | :f | :g u) -> untyped
+        def num: (Pick p, Integer | String | :a | :b | :c | :d | :e | :f | :g u) -> untyped
+        def al: (Pick p, 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | Range[Integer] u) -> untyped
+        def miss_small: (Pick p, Integer | :z u) -> untyped
+        def miss_large: (Pick p, 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | :z u) -> untyped
+        def sh_size: (Pick p, Integer | String | :a | :b | :c | :d | :e | :f | :g u) -> untyped
       end
 
       class Pick
@@ -38,6 +44,16 @@ RSpec.describe "Union and supertype arguments in overload selection (#2379)", ty
                | (Integer) -> :int
         def arr: (Array[Integer]) -> :ai
                | (untyped) -> :any
+        def sh: (Integer) -> Integer
+              | (Integer) -> nil
+              | (String) -> String
+        def num: (Numeric) -> :num
+               | (Integer) -> :int
+               | (String) -> :str
+        def al: (int) -> :int
+              | (Range[Integer]) -> :range
+        def two: (String) -> :s
+               | (Integer) -> :i
       end
     RBS
   end
@@ -70,6 +86,12 @@ RSpec.describe "Union and supertype arguments in overload selection (#2379)", ty
         def wide(p, u) = dump_type(p.one(u))
         def narrow(p, i) = dump_type(p.nar(i))
         def typed(p, xs) = dump_type(p.arr(xs))
+        def sh(p, u) = dump_type(p.sh(u))
+        def num(p, u) = dump_type(p.num(u))
+        def al(p, u) = dump_type(p.al(u))
+        def miss_small(p, u) = dump_type(p.two(u))
+        def miss_large(p, u) = dump_type(p.two(u))
+        def sh_size(p, u) = p.sh(u).size
       end
     RUBY
   end
@@ -102,11 +124,26 @@ RSpec.describe "Union and supertype arguments in overload selection (#2379)", ty
     expect(dumped(13)).to eq("dump_type: Integer")
   end
 
-  # Past eight per-member lists the call reads every overload some value of the arguments may select, rather than
-  # falling back to the first: three by three members is nine lists, and one nine-member union is nine.
-  it "joins every overlapping overload past the per-member list limit" do
-    expect(dumped(23)).to eq("dump_type: :ii | :ss | :yy")
+  # One union argument selects per member however many it has, through the selector itself: the first matching
+  # overload wins (`(Integer) -> nil` after `(Integer) -> Integer` is never taken, nor `(Integer)` after `(Numeric)`),
+  # and the alias pass still reads `(int)`.
+  it "selects per member of one union argument past eight members, by the selector's own rules" do
     expect(dumped(24)).to eq("dump_type: :i | :s")
+    expect(dumped(27)).to eq("dump_type: Integer | String")
+    expect(dumped(28)).to eq("dump_type: :num | :str")
+    expect(dumped(29)).to eq("dump_type: :int | :range")
+    expect(result.diagnostics.map(&:rule)).not_to include("call.possible-nil-receiver")
+  end
+
+  # A member no overload takes keeps the first-overload fallback, with or without eight members to spare.
+  it "lends a member no overload takes the first-overload fallback at any member count" do
+    expect(dumped(30)).to eq("dump_type: :i | :s")
+    expect(dumped(31)).to eq("dump_type: :i | :s")
+  end
+
+  # Two union arguments that combine past eight lists answer `Dynamic[top]`, never the first overload alone.
+  it "answers untyped when union arguments combine past the list limit" do
+    expect(dumped(23)).to eq("dump_type: Dynamic[top]")
   end
 
   # An argument no wider than the selected parameter keeps the one overload: `Integer` is taken by `(Numeric)`.

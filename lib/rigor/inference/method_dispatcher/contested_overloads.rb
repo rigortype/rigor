@@ -12,30 +12,27 @@ module Rigor
         # Issue #2379 — every overload a supertype argument may select, when a nominal argument is wider than the
         # parameter of the overload the call selected, `chosen`: `Integer#-` with a `Numeric` argument matched no
         # overload and took the first, `(Integer) -> Integer`, although the runtime takes `(Float)`, `(Rational)` or
-        # `(Complex)` for those subclasses. Answers {.overlapping_matches}, or nil when no argument is wider than
-        # `chosen`'s parameter or `chosen` is the only overlapping overload.
+        # `(Complex)` for those subclasses. Answers, in affinity order, every strictly typed overload whose every
+        # parameter takes its argument or is taken by a nominal one; nil when no argument is wider than `chosen`'s
+        # parameter or `chosen` is the only such overload.
         # rubocop:disable-next Metrics/ParameterLists -- the selection inputs.
         def contested_matches(method_definition, chosen, arg_types:, self_type:, instance_type:, type_vars:,
                               block_required:, environment:)
           return nil unless arg_types.any?(Type::Nominal)
 
-          shared = overlap_bundle(method_definition, arg_types, self_type, instance_type, type_vars, block_required,
-                                  environment)
+          shared = { arg_types: arg_types, self_type: self_type, instance_type: instance_type,
+                     type_vars: type_vars, block_required: block_required,
+                     param_overrides: RbsExtended.param_type_override_map(method_definition, environment: environment),
+                     environment: environment, keywords_last: false }
           return nil unless wider_argument?(chosen, shared)
 
-          matches = overlapping_overloads(method_definition, shared)
+          overloads = ReceiverAffinity.reorder(method_definition.method_types, self_type: self_type,
+                                                                               environment: environment)
+          matches = overloads.select do |method_type|
+            engages_block_shape?(method_type, block_required) &&
+              strictly_typed_params?(method_type, shared) && overlaps?(method_type, shared)
+          end
           matches.empty? || (matches.size == 1 && matches.first.equal?(chosen)) ? nil : matches
-        end
-
-        # Every overload some value of the arguments may select, in affinity order: each strictly typed overload whose
-        # every parameter takes its argument (for a union argument, one of its members) or is taken by a nominal one.
-        # Linear in the overloads, so it stands in for the per-member lists past their limit
-        # ({ArgumentDistribution.lists}).
-        def overlapping_matches(method_definition, arg_types:, self_type:, instance_type:, type_vars:, block_required:,
-                                environment:)
-          shared = overlap_bundle(method_definition, arg_types, self_type, instance_type, type_vars, block_required,
-                                  environment)
-          overlapping_overloads(method_definition, shared)
         end
 
         class << self
@@ -59,8 +56,8 @@ module Rigor
             end
           end
 
-          # The strict pass's test with a nominal argument also counting where it takes the parameter (some value of
-          # a `Numeric` reaches `(Float)`), and a union argument where one of its members does.
+          # The strict pass's test with a nominal argument also counting where it takes the parameter: some value of
+          # a `Numeric` reaches `(Float)`.
           def overlaps?(method_type, shared)
             fun = method_type.type
             ok = KeywordArguments.accepted_by?(fun, shared, true) { |*kv| accepts_param?(*kv, shared, true, true) }
@@ -70,30 +67,8 @@ module Rigor
             return false unless arity_compatible?(fun, arg_types.size)
 
             each_param_accepts?(positional_params_for(fun, arg_types.size), arg_types) do |param, arg|
-              members = arg.is_a?(Type::Union) ? arg.members : [arg]
-              members.any? { |member| param_overlaps?(param, member, shared) }
-            end
-          end
-
-          def param_overlaps?(param, arg, shared)
-            accepts_param?(param, arg, shared, true) ||
-              (arg.is_a?(Type::Nominal) && arg.accepts(translate_param(param, shared), mode: :gradual).yes?)
-          end
-
-          def overlap_bundle(method_definition, arg_types, self_type, instance_type, type_vars, block_required,
-                             environment)
-            { arg_types: arg_types, self_type: self_type, instance_type: instance_type,
-              type_vars: type_vars, block_required: block_required,
-              param_overrides: RbsExtended.param_type_override_map(method_definition, environment: environment),
-              environment: environment, keywords_last: false }
-          end
-
-          def overlapping_overloads(method_definition, shared)
-            overloads = ReceiverAffinity.reorder(method_definition.method_types, self_type: shared[:self_type],
-                                                                                 environment: shared[:environment])
-            overloads.select do |method_type|
-              engages_block_shape?(method_type, shared[:block_required]) &&
-                strictly_typed_params?(method_type, shared) && overlaps?(method_type, shared)
+              accepts_param?(param, arg, shared, true) ||
+                (arg.is_a?(Type::Nominal) && arg.accepts(translate_param(param, shared), mode: :gradual).yes?)
             end
           end
 

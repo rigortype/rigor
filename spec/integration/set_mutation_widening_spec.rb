@@ -137,4 +137,36 @@ RSpec.describe "Set mutation widening", type: :runner do
       expect(errors(source)).to eq([])
     end
   end
+
+  # Issue #2363 — a Set held one level down, as an Array element or a Hash value, mutated in place. Ruby witnesses
+  # (`ruby -e 'require "set"; ...'`): `arr = [Set["a"]]; arr.each { |e| e.add(1) }; arr.first.include?(1)` is true;
+  # `h = { k: Set["a"] }; h[:k].add(1); h[:k].include?(1)` is true; after `subtract(["a"])`, `include?("a")` is false.
+  describe "a set held inside a collection" do
+    {
+      "add through an iterator" => %(arr = [Set["a"]]\narr.each { |e| e.add(1) }\nputs 1 if arr.first.include?(1)),
+      "merge through an iterator" => %(arr = [Set["a"]]\narr.each { |e| e.merge([1]) }\nputs 1 if arr.first.include?(1)),
+      "subtract through an iterator" =>
+        %(arr = [Set["a"]]\narr.each { |e| e.subtract(["a"]) }\nputs 1 if arr.first.include?("a")),
+      "add through a nested iterator" =>
+        %(nn = [[Set["a"]]]\nnn.each { |i| i.each { |s| s.add(1) } }\nputs 1 if nn.first.first.include?(1)),
+      "add through a for loop" => %(arr = [Set["a"]]\nfor e in arr; e.add(1); end\nputs 1 if arr.first.include?(1)),
+      "add on a hash value" => %(h = { k: Set["a"] }\nh[:k].add(1)\nputs 1 if h[:k].include?(1)),
+      "merge on a string-keyed hash value" => %(h = { "k" => Set["a"] }\nh["k"].merge([1])\nputs 1 if h["k"].include?(1)),
+      "subtract on a hash value" => %(h = { k: Set["a"] }\nh[:k].subtract(["a"])\nputs 1 if h[:k].include?("a"))
+    }.each do |label, source|
+      it "does not fold a membership test after #{label}" do
+        expect(errors(source)).to eq([])
+      end
+    end
+
+    it "widens only the hash value the mutation reached" do
+      source = %(h = { k: Set["a"], n: 1 }\nh[:k].add(1)\ndump_type(h))
+      expect(dumped(source)).to eq(["{ k: Set[Dynamic[top] | Integer | String], n: 1 }"])
+    end
+
+    # The Set gate reads the collection's type: an iterator over Hash rows has no Set element for `merge` to mutate.
+    it "keeps a Hash row tuple through Hash#merge when the rows hold no set" do
+      expect(dumped("rows = [{ a: 1 }]\nrows.each { |r| r.merge(b: 2) }\ndump_type(rows)")).to eq(["[{ a: 1 }]"])
+    end
+  end
 end

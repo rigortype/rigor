@@ -16,6 +16,11 @@ module Rigor
       # with an argument return a sub-ARRAY, not an element, so they are excluded by arity below.
       ELEMENT_READERS = %i[[] first last dig].to_set.freeze
 
+      # A literal Symbol or String key an `[]` / `dig` step selects, which names one value of a `HashShape`
+      # (issue #2363). Against a `Tuple` it selects no statically known position, so it widens every one, as a
+      # non-literal index does.
+      KeyStep = Data.define(:key)
+
       module_function
 
       # Widens an element read through an index / `first` / `last` / `dig` chain rooted at a LOCAL,
@@ -61,7 +66,8 @@ module Rigor
 
       # `[<local read>, [step, …]]` for a chain of element reads rooted at a local variable, or
       # `nil` when the expression is anything else. A step is an Integer position (negative counts
-      # from the end, as Ruby's own indexing does) or `:all` when the index is not a literal.
+      # from the end, as Ruby's own indexing does), a {KeyStep} for a literal Symbol or String key, or `:all`
+      # when the index is anything else.
       #
       # Every mutation site's receiver is asked, and nearly every one is a plain variable read, so a
       # receiver that is no call answers before the step list is allocated.
@@ -104,7 +110,12 @@ module Rigor
       # `:all` stands for "some position, not statically known" — every position is widened, which
       # is the only answer that cannot under-approximate.
       def index_step(node)
-        node.is_a?(Prism::IntegerNode) ? node.value : :all
+        case node
+        when Prism::IntegerNode then node.value
+        when Prism::SymbolNode then KeyStep.new(node.unescaped.to_sym)
+        when Prism::StringNode then KeyStep.new(node.unescaped)
+        else :all
+        end
       end
 
       # The type at `steps` inside `type`, or `nil` when the path does not resolve to a widenable
@@ -116,6 +127,10 @@ module Rigor
         when Type::Tuple
           tuple_positions(type, steps.first).lazy
                                             .filter_map { |i| element_at_path(type.elements[i], steps.drop(1)) }
+                                            .first
+        when Type::HashShape
+          hash_shape_keys(type, steps.first).lazy
+                                            .filter_map { |key| element_at_path(type.pairs[key], steps.drop(1)) }
                                             .first
         when Type::Union
           type.members.lazy.filter_map { |member| element_at_path(member, steps) }.first
@@ -136,6 +151,7 @@ module Rigor
 
         case type
         when Type::Tuple then widen_tuple_path(type, steps, method_name, arg_types, &element_widening)
+        when Type::HashShape then widen_hash_shape_path(type, steps, method_name, arg_types, &element_widening)
         when Type::Union then widen_union_path(type, steps, method_name, arg_types, &element_widening)
         end
       end
@@ -154,6 +170,25 @@ module Rigor
         widened_any ? Type::Tuple.new(elements) : nil
       end
 
+      # A `HashShape` value reached by key: `h = { k: Set["a"] }; h[:k].add(1)` mutates the Set the shape's `:k`
+      # value carries, which widens in place while the keys and their policy survive, as a `Tuple`'s arity does.
+      def widen_hash_shape_path(shape, steps, method_name, arg_types, &)
+        pairs = shape.pairs.dup
+        rest = steps.drop(1)
+        widened_any = false
+        hash_shape_keys(shape, steps.first).each do |key|
+          inner = widen_through_path(pairs[key], rest, method_name, arg_types, &)
+          next if inner.nil?
+
+          pairs[key] = inner
+          widened_any = true
+        end
+        return nil unless widened_any
+
+        Type::HashShape.new(pairs, required_keys: shape.required_keys, optional_keys: shape.optional_keys,
+                                   read_only_keys: shape.read_only_keys, extra_keys: shape.extra_keys)
+      end
+
       def widen_union_path(union, steps, method_name, arg_types, &)
         widened_any = false
         members = union.members.map do |member|
@@ -170,10 +205,21 @@ module Rigor
       # position of THIS tuple, so no widening is justified.
       def tuple_positions(tuple, step)
         size = tuple.elements.size
-        return (0...size).to_a if step == :all
+        return (0...size).to_a if step == :all || step.is_a?(KeyStep)
 
         position = step.negative? ? step + size : step
         position.between?(0, size - 1) ? [position] : []
+      end
+
+      # The keys of `shape` one step selects: its literal key when the shape has it, every key for a step that is
+      # not statically known. An Integer step is a position (`first` / `last`, or an `[]` that would read a
+      # `Tuple`), which names no key here, so it selects nothing and the shape keeps today's reading.
+      def hash_shape_keys(shape, step)
+        case step
+        when :all then shape.pairs.keys
+        when KeyStep then shape.pairs.key?(step.key) ? [step.key] : []
+        else []
+        end
       end
     end
   end

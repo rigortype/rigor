@@ -3108,7 +3108,9 @@ module Rigor
         types = [coll_type]
         name = for_collection_variable(node)
         types << CapturedLocals.bound_type(continuation, name) if name
-        deep = DeepErasure.element_mutation?(node.statements, DeepErasure.parameter_names(node.index))
+        deep = DeepErasure.element_mutation?(node.statements, DeepErasure.parameter_names(node.index)) do
+          DeepErasure.holds_set?(coll_type)
+        end
         Type::Combinator.union(*types.compact.map { |type| shape_erased_collection(type, deep: deep) })
       end
 

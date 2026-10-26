@@ -1,0 +1,3 @@
+- **[sig-gen]** `rigor sig-gen` now reads helpers, ancestors and constants defined in other files of the project, as `rigor check` does, instead of skipping every method that calls one. ([#2300](https://github.com/rigortype/rigor/issues/2300))
+  - On Rigor's own `lib/`, 446 methods that were skipped as `untyped-return` now get a signature (private methods included). On `mail` the gain is 11.
+  - A method whose answer depended on its own file alone can change: `mail`'s `Mail::CommonField#singular?` was written `-> false` although other field classes return `true`, and is now skipped.

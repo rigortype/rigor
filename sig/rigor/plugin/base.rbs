@@ -84,5 +84,6 @@ class Rigor::Plugin::Base
   def effect_ancestry: () -> Array[Rigor::Plugin::EffectAncestry]
   def io_boundary: () -> Rigor::Plugin::IoBoundary
   def cache_for: (untyped producer_id, ?params: untyped, ?descriptor: untyped) -> Proc
+  # authored: returns Rigor::Cache::Descriptor::PluginEntry, which has no RBS declaration yet (#2404); stays `untyped` until it is declared
   def plugin_entry: () -> untyped
 end

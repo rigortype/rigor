@@ -239,7 +239,9 @@ module Rigor
     def global: (String | Symbol name) -> Type::t?
     def local_origin: (String | Symbol name) -> Symbol?
     def ivar_origin: (String | Symbol name) -> Symbol?
+    # sig-gen gap: #2403 — the `Hash#[]` miss in `bound_cause` is lost across the call; sig-gen says `Symbol`.
     def optimistic_local: (String | Symbol name) -> Symbol?
+    # sig-gen gap: #2403 — the `Hash#[]` miss in `bound_cause` is lost across the call; sig-gen says `Symbol`.
     def optimistic_ivar: (String | Symbol name) -> Symbol?
     def optimistic_local_miss: (String | Symbol name) -> Object?
     def optimistic_ivar_miss: (String | Symbol name) -> Object?

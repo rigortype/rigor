@@ -53,6 +53,7 @@ RSpec.describe "filter_map block-return solving", type: :runner do
     expect(dumped_type("ints.filter_map { |i| false }")).to eq("Array[bot]")
   end
 
+  # Guard: the fix passes a Dynamic block type through unchanged, so no removal of it fails this.
   it "keeps the Dynamic[top] element for an untyped block" do
     expect(dumped_type("ints.filter_map { |i| u.foo }")).to eq("Array[Dynamic[top]]")
   end
@@ -69,6 +70,7 @@ RSpec.describe "filter_map block-return solving", type: :runner do
     end
   end
 
+  # Guard: the blockless overload has no block return to solve.
   it "leaves the blockless call an Enumerator" do
     expect(dumped_type("ints.filter_map")).to eq("Enumerator[Integer, Array[Dynamic[top]]]")
   end
@@ -84,6 +86,7 @@ RSpec.describe "filter_map block-return solving", type: :runner do
       .to eq("Array[decimal-int-string] | :stop").or eq(":stop | Array[decimal-int-string]")
   end
 
+  # Guards: these calls never reach the RBS block binder, with or without the fix.
   it "does not apply the core solving to a project class's own filter_map" do
     source = "#{prelude}class Mine\n  def filter_map = 42\nend\ndump_type(Mine.new.filter_map { |x| x })\n"
     expect(dumped(source)).to eq(["42"])

@@ -35,8 +35,10 @@ through the coordinator.
 - `CheckRules#node_collector_driver`, `Plugin::Base#plugin_entry` and `Plugin::IoBoundary#cache_descriptor` keep
   `untyped` under `# authored:` markers. Each returns a class with no RBS declaration yet (#2404). This follows
   `io_boundary.rbs`'s existing "no RBS yet -> untyped" note.
-- Accepted losses, each now skipped (`untyped-return`) and none emitting a wrong contract:
-  `Type::HashShape#erase_to_rbs`, `Type::Intersection#describe` and `Type::Refined#describe`.
+- Accepted losses, each now skipped (`untyped-return`), so none of these three emits a contract:
+  `Type::HashShape#erase_to_rbs`, `Type::Intersection#describe` and `Type::Refined#describe`. That covers the lost
+  rows only. Review found 12 gained rows on `lib/` that are wrong contracts from two engine bugs (#2410, #2411);
+  the stack is held until those land and the rows are re-adjudicated.
 - Eight residue pins move down (566 to 554), and none moves up.
 - Cost accepted. On `lib/` the run is +39 % wall (31.4 to 43.7 s) and +36 % RSS (540 to 733 MB). mail is +27 % and
   kramdown about 0. These are ABBA ×4 medians, and CI's "Engine wall A/B" gives the final wall verdict.

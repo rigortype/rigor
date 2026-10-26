@@ -1500,14 +1500,21 @@ module Rigor
           #
           # A block return spelled as the variable beside falsey arms (`(nil | false | U)`, `U?`) solves the
           # variable from the block's type less those arms ({#strip_falsey_arms}): `filter_map` keeps only
-          # the block's truthy values, so a block answering `String | nil` binds `U` to `String`.
+          # the block's truthy values, so a block answering `String | nil` binds `U` to `String`. The strip
+          # trusts the declared method to discard those values, so a receiver class whose Ruby source
+          # defines the method itself leaves the variable unbound: `def filter_map(&b) = map(&b).compact`
+          # under an `include Enumerable[Integer]` declaration keeps `false`, and `Array[true]` would fold
+          # `b.last == false` always-falsey on correct code.
           def compose_block_type_vars(method_type, type_vars, block_type, args, scope:, call_node:, call_site:)
             return type_vars if block_type.nil?
 
             block_var_name = method_type_block_return_variable(method_type)
             return type_vars if block_var_name.nil?
 
-            block_type = strip_falsey_arms(block_type, block_return_falsey_arms(method_type))
+            arms = block_return_falsey_arms(method_type)
+            return type_vars if arms.any? && project_redefined?(scope, call_site)
+
+            block_type = strip_falsey_arms(block_type, arms)
             return type_vars.merge(block_var_name => block_type) unless
               argument_reaches_variable?(method_type, block_var_name, args)
 
@@ -1898,6 +1905,17 @@ module Rigor
           # passes through unchanged, so an untyped block still binds `Dynamic[top]`. A block that answers
           # only the stripped values binds `bot`, so `filter_map { nil }` is `Array[bot]`: an Array that
           # holds no element.
+          # Whether the receiver class's Ruby source defines the dispatched method, the probe
+          # {#arg_binding_permitted?} also reads. Without a scope there is no discovery to consult.
+          def project_redefined?(scope, call_site)
+            return false if scope.nil?
+
+            class_name, method_name, kind = call_site
+            return false if method_name.nil?
+
+            scope.discovered_method?(class_name, method_name, kind)
+          end
+
           def strip_falsey_arms(block_type, arms)
             return block_type if arms.empty?
             return Narrowing.narrow_truthy(block_type) if arms.include?(:false) # rubocop:disable Lint/BooleanSymbol

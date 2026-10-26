@@ -111,7 +111,7 @@ RSpec.describe "filter_map block-return solving", type: :runner do
     expect(dumped_type("{ a: 1, b: 2 }.filter_map { |k, v| v.to_s }")).to eq(%(Array["1" | "2"]))
   end
 
-  # The rule reads the declared spelling, not the method name: `U?` strips `nil` alone, and an arm other than `nil` /
+  # The rule reads the declared spelling, not the method name: `U?` strips `nil` alone and keeps `false`, and an arm other than `nil` /
   # `false` (`bool`, `String`), `false` without `nil`, or a second variable leaves the variable unbound.
   it "reads a U? block return and declines any other arm or a second variable" do
     sig = {
@@ -133,7 +133,37 @@ RSpec.describe "filter_map block-return solving", type: :runner do
       dump_type(Box.new.only_false { n })
       dump_type(Box.new.with_other { n })
       dump_type(Box.new.two { n })
+      m = [false, 1, nil].sample
+      dump_type(Box.new.pick { m })
     RUBY
-    expect(dumped(source, sig: sig)).to eq(["Array[1]", *Array.new(4, "Array[Dynamic[top]]")])
+    expect(dumped(source, sig: sig)).to eq(["Array[1]", *Array.new(4, "Array[Dynamic[top]]"), "Array[1 | false]"])
+  end
+
+  # A receiver class whose Ruby source defines `filter_map` itself is trusted to its own body, not to the core
+  # signature: this one keeps `false` (`compact` drops only `nil`), so stripping it would read `Array[true]` and
+  # fold `b.last == false` always-falsey on correct code.
+  it "leaves U unbound for a class that defines filter_map in Ruby over an Enumerable declaration" do
+    sig = {
+      "coll2.rbs" => <<~RBS
+        class Coll2
+          include Enumerable[Integer]
+          def each: () { (Integer) -> void } -> void
+        end
+      RBS
+    }
+    source = <<~RUBY
+      #{prelude}
+      class Coll2
+        include Enumerable
+        def each
+          yield 1
+          yield 2
+        end
+
+        def filter_map(&blk) = map(&blk).compact
+      end
+      dump_type(Coll2.new.filter_map { |i| i.odd? })
+    RUBY
+    expect(dumped(source, sig: sig)).to eq(["Array[Dynamic[top]]"])
   end
 end

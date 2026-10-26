@@ -113,6 +113,32 @@ module Rigor
         nil
       end
 
+      DEFINITION_COUNTS_KEY = :__rigor_self_call_ivar_writes_definition_counts__
+      private_constant :DEFINITION_COUNTS_KEY
+
+      # `{[owner, name] => the number of instance `def` rows of name the project records for owner}`, over every
+      # file of `deferred_ranges` (a `discovered_deferred_ranges` table). Built once per table and kept in ONE
+      # thread slot keyed by the table's identity (#2300): the table is never written in place, a file whose rows
+      # equal the seed's keeps the seed's table, and a scan of every file's rows per query was the cost once the
+      # table held the whole project. The slot is not released at the end of a run: it holds one table and its counts,
+      # and the next table replaces them.
+      def definition_counts(deferred_ranges)
+        slot = Thread.current[DEFINITION_COUNTS_KEY]
+        return slot[1] if slot && slot[0].equal?(deferred_ranges)
+
+        counts = {}
+        deferred_ranges.each_value do |rows|
+          rows.each do |row|
+            next unless row[3] == :instance
+
+            key = [row[4], row[2]]
+            counts[key] = counts.fetch(key, 0) + 1
+          end
+        end
+        Thread.current[DEFINITION_COUNTS_KEY] = [deferred_ranges, counts]
+        counts
+      end
+
       # One proof's state: the instance variables read code writes, and the `def` bodies already read.
       class Proof
         attr_reader :written
@@ -268,11 +294,7 @@ module Rigor
         end
 
         def definition_count(owner, name)
-          count = 0
-          @scope.discovered_deferred_ranges.each_value do |rows|
-            count += rows.count { |row| row[2] == name && row[3] == :instance && row[4] == owner }
-          end
-          count
+          SelfCallIvarWrites.definition_counts(@scope.discovered_deferred_ranges).fetch([owner, name], 0)
         end
 
         # Whether `chain`'s own order stands with no second world: no order mark and no fork. `ResolutionChain#settle`

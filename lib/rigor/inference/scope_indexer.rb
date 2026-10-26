@@ -15,6 +15,7 @@ require_relative "../cache/file_digest"
 require_relative "../analysis/check_rules/published_constant_guard"
 require_relative "anonymous_meta_class"
 require_relative "def_handle"
+require_relative "definers_index"
 require_relative "fresh_frame_blocks"
 require_relative "global_write_census"
 require_relative "guard_rebinding"
@@ -436,6 +437,9 @@ module Rigor
         # The fold also writes the singleton hash of each class this file `extend`s, declared there or not.
         file_extends.each_key { |owner| singleton_def_nodes[owner]&.freeze }
         freeze_def_tables(def_pair, singleton_pair)
+        # #2300 — the override gate's definers index then inverts the seed once per run, not once per file.
+        DefinersIndex.record_layers(def_nodes, default_scope.discovered_def_nodes)
+        DefinersIndex.record_layers(singleton_def_nodes, default_scope.discovered_singleton_def_nodes)
         [extends, methods_table, unpositioned]
       end
 

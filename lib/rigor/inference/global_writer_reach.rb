@@ -69,7 +69,8 @@ module Rigor
       end
 
       # The method names that write `name` (nil for an anonymous writer). Records the census key, so a file that
-      # starts or stops writing the global re-checks the reader.
+      # starts or stops writing the global re-checks the reader. A guard on the `case` site: every `when` test built so
+      # far also records the key through a statement call's {.candidates} or a callee's method edge.
       def writers(scope, name)
         record_writers(name) if Analysis::DependencyRecorder.active?
         writer_table(scope)[name] || EMPTY

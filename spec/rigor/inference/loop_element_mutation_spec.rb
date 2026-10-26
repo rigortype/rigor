@@ -190,6 +190,22 @@ RSpec.describe "a loop body that mutates an element in place", type: :runner do
       RUBY
     end
 
+    it "does not fold an element appended to through `each.with_index(1).map`" do
+      expect(flow_rules(<<~RUBY)).to eq([])
+        a = [[1]]
+        a.each.with_index(1).map { |x, i| x << i }
+        puts(a[0].size == 1 ? :y : :n)
+      RUBY
+    end
+
+    it "does not fold a Set element a block over a shallow copy adds to" do
+      expect(flow_rules(<<~RUBY)).to eq([])
+        a = [Set[1]]
+        a.dup.each { |s| s.add(2) }
+        puts(a[0].size == 1 ? :y : :n)
+      RUBY
+    end
+
     it "keeps the precise shape when the block over `values` only reads" do
       expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
         h = { a: [1] }
@@ -229,6 +245,14 @@ RSpec.describe "a loop body that mutates an element in place", type: :runner do
         a = [[1], [3]]
         [0].each { |i| a[i] << 2 }
         puts(a.size == 2 ? :y : :n)
+      RUBY
+    end
+
+    it "keeps the outer shape when the chain is rooted at a block parameter that shadows it" do
+      expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+        a = [[1]]
+        [[[5]]].each { |a| a[0] << 2 }
+        puts(a[0].size == 1 ? :y : :n)
       RUBY
     end
 

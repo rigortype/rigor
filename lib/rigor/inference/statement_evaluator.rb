@@ -344,6 +344,14 @@ module Rigor
         @operand_types = operand_types
       end
 
+      # Issue #2330 — drops the calling thread's callee-chain census memo ({#resolved_census}), which holds the last
+      # analysed file's whole `DiscoveryIndex` (every project def AST). `Runner#run` calls it on the way out, so a
+      # long-lived thread (the LSP main thread across `invalidate!`) retains no generation between runs. Cleared
+      # rather than held weakly: one slot, one owner, and the next run rebuilds it on first use.
+      def self.release_resolved_census
+        Thread.current[RESOLVED_CENSUS_KEY] = nil
+      end
+
       # Runs `block` with a fresh return sink installed, then yields the collected explicit-`return` value types to the
       # caller. The sink is an array of `Rigor::Type`. Nested invocations stack: the previous sink is restored on exit
       # so a `def` evaluated inside another method's body (which itself installed a sink) does not corrupt the outer

@@ -313,7 +313,7 @@ module Rigor
         seeded_scope.with_discovery(
           seeded_scope.discovery.with(
             discovered_methods: methods_table,
-            discovered_def_nodes: def_nodes,
+            discovered_def_nodes: freeze_def_table(def_nodes),
             discovered_def_nestings: def_nestings,
             discovered_singleton_def_nodes: singleton_def_nodes,
             discovered_superclasses: superclasses,
@@ -457,6 +457,14 @@ module Rigor
         [default_scope.discovered_superclasses.merge(walked.fetch(:superclasses)),
          merge_header_nestings(default_scope.discovery.discovered_header_nestings.dup,
                                walked.fetch(:header_nestings)).freeze]
+      end
+
+      # Issue #2330 — the per-file def table is read by identity: the callee-chain census memo is keyed by the
+      # {Scope::DiscoveryIndex} that carries it, which is only sound while the table is never written in place.
+      # Frozen after the extends fold, the last in-place writer; the seed's per-class hashes are frozen already.
+      def freeze_def_table(table)
+        table.each_value(&:freeze)
+        table.freeze
       end
 
       # The instance-side def-node table and its issue #681 nesting twin, each merged over the cross-file seed.

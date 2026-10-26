@@ -533,6 +533,8 @@ module Rigor
         # freshness path for this run; the `auto` default resolves strict in CI (#190), stat-first elsewhere.
         Cache::FileDigest.with_run(strict: @configuration.cache_validation_strict?) do
           Inference::DefNodeResolver.with_run { run_analysis(paths) }
+        ensure
+          Inference::StatementEvaluator.release_resolved_census
         end
       end
 

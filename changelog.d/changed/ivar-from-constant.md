@@ -1,0 +1,4 @@
+- **[inference]** An instance variable assigned a constant (`@q = LIT`) now reads that constant's type in sibling methods and in `rigor sig-gen`. ([#2384](https://github.com/rigortype/rigor/pull/2384))
+  - A reader such as `def q = @q` is emitted with the type `def g = LIT` gets, where it was skipped as untyped.
+  - The write keeps its previous reading when the file may rebind the constant: a second assignment, an `||=` or operator write, a multiple-assignment target, or a `const_set` or `remove_const`.
+  - A constant assigned in another file resolves only where it did before.

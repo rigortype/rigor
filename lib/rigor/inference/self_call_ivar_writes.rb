@@ -120,7 +120,8 @@ module Rigor
       # file of `deferred_ranges` (a `discovered_deferred_ranges` table). Built once per table and kept in ONE
       # thread slot keyed by the table's identity (#2300): the table is never written in place, a file whose rows
       # equal the seed's keeps the seed's table, and a scan of every file's rows per query was the cost once the
-      # table held the whole project.
+      # table held the whole project. The slot is not released at the end of a run: it holds one table and its counts,
+      # and the next table replaces them.
       def definition_counts(deferred_ranges)
         slot = Thread.current[DEFINITION_COUNTS_KEY]
         return slot[1] if slot && slot[0].equal?(deferred_ranges)

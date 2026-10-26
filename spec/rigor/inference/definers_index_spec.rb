@@ -51,9 +51,12 @@ RSpec.describe Rigor::Inference::DefinersIndex do
       original.call(table)
     end
 
+    per_file_builds = []
     answers = paths.map do |path|
       table = file_scope(path).discovered_def_nodes
+      before = builds.size
       index = described_class.for(table)
+      per_file_builds << builds[before..].reject { |built| built.equal?(seed_scope.discovered_def_nodes) }
       [as_sets(index, %i[run other make top_helper]),
        as_sets(described_class.send(:build, table), %i[run other make top_helper])]
     end
@@ -62,6 +65,18 @@ RSpec.describe Rigor::Inference::DefinersIndex do
     expect(builds.count { |table| table.equal?(seed_table) }).to eq(1)
     answers.each { |layered, whole| expect(layered).to eq(whole) }
     expect(answers.first.first).to eq(run: %w[Base Child], other: ["Child"], make: nil, top_helper: nil)
+    # Per file, only the owners the file replaced are inverted: `Base` for base.rb, `Child` and the top level for
+    # child.rb. The seed's other owners are read from the seed's index.
+    expect(per_file_builds.map { |built| built.map(&:keys) })
+      .to eq([[["Base"]], [["Child", Rigor::Inference::ScopeIndexer::TOP_LEVEL_DEF_KEY]]])
+  end
+
+  it "inverts a table whole when the seed is frozen but one of its inner tables is not" do
+    seed = { "Base" => { run: :node }.freeze, "Open" => { run: :node } }.freeze
+    merged = seed.merge("Child" => { run: :node })
+    described_class.record_layers(merged, seed)
+
+    expect(described_class.for(merged)).to be_a(Hash)
   end
 
   it "inverts a table whole when its seed's tables are not all frozen" do

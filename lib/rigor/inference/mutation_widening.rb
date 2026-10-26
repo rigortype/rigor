@@ -168,7 +168,10 @@ module Rigor
         when Type::Constant then StringMutation.constant?(type) || SetMutation.constant?(type)
         # A re-openable nominal counts since issue #580: skipping it made the one-way door
         # self-fulfilling, since the arm never saw the arg types it grows from.
-        when Type::Nominal then MutationRejoin.regrowable_carrier?(type) || SetMutation.regrowable?(type)
+        # A precise `Array[E]` / `Set[E]` counts since issue #2361, which re-grows it from these arguments.
+        when Type::Nominal
+          MutationRejoin.regrowable_carrier?(type) || MutationRejoin.precise_array?(type) ||
+            SetMutation.regrowable?(type)
         when Type::Difference then type.removes_empty_witness?
         when Type::Union then type.members.any? { |m| shape_carrier?(m) }
         else false
@@ -306,7 +309,7 @@ module Rigor
       # Returns the widened type for a binding whose receiver is about to be mutated by
       # `method_name`, or `nil` when no widening applies (binding is not a carrier the mutation
       # stands for, OR the method is not a mutator for that shape, OR the carrier is a PRECISE
-      # nominal, whose element set is a claim this seam may not grow — see {MutationRejoin.regrowable_carrier?}).
+      # nominal the call stores nothing into — see {MutationRejoin.widen_precise_array}).
       def widen_for_mutator(type, method_name, values: :widen, arg_types: NO_ARG_TYPES)
         values = :keep unless VALUE_REWRITING_MUTATORS.include?(method_name)
         values = RewriteMutation.values_mode(type, method_name, values)

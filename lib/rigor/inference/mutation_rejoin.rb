@@ -32,6 +32,7 @@ module Rigor
       # carrier does not rebind the binding at all: a rebind drops the per-slot narrowings `with_local`
       # keys to the old value, and paying that for an identical type is a straight loss.
       def widen_nominal(nominal, method_name, values: :widen, arg_types: MutationWidening::NO_ARG_TYPES)
+        return widen_precise_array(nominal, method_name, values:, arg_types:) if precise_array?(nominal)
         return nil unless regrowable_carrier?(nominal)
 
         pre_state = values == :widen ? value_pin_widened_args(nominal) : nominal
@@ -126,6 +127,41 @@ module Rigor
 
       def gradual_parameter?(type)
         ContentJoin.union_members(type).any?(Type::Dynamic)
+      end
+
+      # A typed `Array[E]` whose `E` has no `Dynamic` arm — the carrier {#regrowable_carrier?} refuses.
+      def precise_array?(nominal)
+        nominal.class_name == "Array" && nominal.type_args.size == 1 && !gradual_parameter?(nominal.type_args.first)
+      end
+
+      # Issue #2361 — a PRECISE `Array[E]` re-grows under a store, joining what the store puts in: `a = ARGV.dup;
+      # a.clear; a << 1; a.each { |v| v.fdiv(2) }` read `Array[String]` and reported `undefined method 'fdiv' for
+      # String` on code that prints `[0.5]`.
+      #
+      # Only a content adder ({ContentJoin::ARRAY_CONTENT_ADDERS}) re-grows it, and the join keeps the seed: `clear`
+      # empties the array but leaves `E` standing, a superset of what it holds, so `a << 1` reads
+      # `Array[String | Integer]` after a `clear` too. A rewriter (`map!`, `flatten!`) stores nothing this seam can
+      # read and leaves the carrier as it was; `replace` and `fill` join their stored elements onto the seed.
+      #
+      # No `Dynamic` floor joins a store the extractor reads: the floor exists because a seam that saw one store
+      # could not see the next once the carrier was precise, and this arm is what sees the next one. A store it reads
+      # nothing out of (an unreadable argument, a splat, which types as `Dynamic[top]`) still joins the floor. An
+      # adder with no argument types at all is left alone, as {MutationWidening.join_added_elements} leaves it: the
+      # block-capture seams pass none, and their own content join adds the stores.
+      #
+      # The #561 guard stays: the added members are admitted against the carrier's value-PINNED members
+      # ({#pinned_evidence}), so a store foreign to an `Array[:multi]` a signature declared joins as `Dynamic[top]`
+      # rather than as a class the declaration rejects.
+      def widen_precise_array(nominal, method_name, values:, arg_types:)
+        return nil unless ContentJoin::ARRAY_CONTENT_ADDERS.include?(method_name) && !arg_types.empty?
+
+        added = MutationWidening.value_pin_widened(ContentJoin.array_added_elements(method_name, arg_types))
+        admitted = if added.empty? then [Type::Combinator.untyped]
+                   else ContentJoin.admissible_evidence(pinned_evidence(nominal.type_args), added)
+                   end
+        pre_state = values == :widen ? value_pin_widened_args(nominal) : nominal
+        rejoined = ContentJoin.join_array_content(pre_state, admitted)
+        rejoined == nominal ? nil : rejoined
       end
 
       # The value-rewriting counterpart of {MutationWidening.widen_tuple}'s `values: :widen`. A mutator that lands a

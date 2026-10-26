@@ -3,7 +3,7 @@
 # Issue #2294 — a Set mutator widens the receiver's element with what it puts in, as the Array and Hash mutators do.
 # A constant-folded `Set[...]` widens to the #2290 typed Set (`Set[E | Dynamic[top]]`) and joins the added elements;
 # a typed Set whose element already carries the gradual arm re-grows. A PRECISE `Set[String]` (an RBS return such as
-# `Array#to_set`) is left alone, as a precise `Array[String]` is.
+# `Array#to_set`) re-grows as well, as a precise `Array[String]` does (issue #2361).
 #
 # Ruby witnesses (`ruby -e 'require "set"; ...'`): `f = Set["a"]; f.clear; f << 1; f.map { |v| v.fdiv(2) }` is
 # `[0.5]`; `s = Set[1]; s.merge(["a"])` holds `1` and `"a"`; `(Set[1] | ["a"]).to_a` is `[1, "a"]`.
@@ -61,9 +61,9 @@ RSpec.describe "Set mutation widening", type: :runner do
       expect(dumped("s = n > 0 ? Set[1] : Set[:a]\ns << x\ndump_type(s)")).to eq(expected)
     end
 
-    # Positive control: the precise RBS answer is a claim the seam does not grow, as for `Array#dup` on ARGV.
-    it "leaves a precise Set[String] untouched" do
-      expect(dumped("s = ARGV.to_set\ns << 1\ndump_type(s)")).to eq(["Set[String]"])
+    # Issue #2361 — a precise RBS answer re-grows too, without the floor, as `Array#dup` on ARGV does.
+    it "joins a store into a precise Set[String]" do
+      expect(dumped("s = ARGV.to_set\ns << 1\ndump_type(s)")).to eq(["Set[Integer | String]"])
     end
   end
 

@@ -2,6 +2,7 @@
 
 require_relative "../type"
 require_relative "content_join"
+require_relative "mutation_rejoin"
 require_relative "rewrite_mutation"
 
 module Rigor
@@ -19,12 +20,17 @@ module Rigor
     # - a constant-folded `Constant[Set]` widens to that carrier, its members' value pins dropped
     #   ({MethodDispatcher.array_new_element}) and joined with the `Dynamic[top]` floor;
     # - a typed `Set` whose element already carries a gradual arm re-grows the way
-    #   {MutationRejoin.regrowable_carrier?} lets an `Array` / `Hash` re-grow. A PRECISE `Set[String]` (an RBS
-    #   return such as `Array#to_set`) is a claim somebody made and is left alone, as a precise `Array[String]`
-    #   is.
+    #   {MutationRejoin.regrowable_carrier?} lets an `Array` / `Hash` re-grow;
+    # - a PRECISE `Set[String]` (an RBS return such as `Array#to_set`) re-grows too (issue #2361), as a precise
+    #   `Array[String]` does ({MutationRejoin.widen_precise_array}): `f = ARGV.to_set; f.clear; f << 1` is
+    #   `Set[String | Integer]`.
     #
-    # The carrier's element always carries the floor, so {ContentJoin.admissible_evidence} admits every added
-    # member as itself: the seed-admissibility gate has nothing to contradict on a gradual seed.
+    # A gradual seed admits every added member as itself: the seed-admissibility gate has nothing to contradict on
+    # it. A precise seed admits them against its value-PINNED members ({MutationRejoin.pinned_evidence}), the #561
+    # guard the Array re-join keeps, and takes no {RewriteMutation} arm: `replace` joins its elements onto the seed,
+    # and `map!` leaves it as it was. An adder this seam saw no arguments for joins `Dynamic[top]`: the store
+    # happened, and what it stored is unknown. Unlike an Array, a Set has no block-capture content join to add it
+    # afterwards, and the block seams pass no arguments.
     module SetMutation
       # Receiver-mutating Set methods. The non-bang siblings (`map` vs `map!`, `select` vs `select!`) and the
       # algebra (`|`, `+`, `-`, `&`, `^`) return a new Set and stay precise.
@@ -60,9 +66,9 @@ module Rigor
         type.is_a?(Type::Union) ? type.members.any? { |member| carrier?(member) } : carrier?(type)
       end
 
+      # Every typed `Set[E]`, a precise one included since issue #2361.
       def regrowable?(nominal)
-        nominal.class_name == "Set" && nominal.type_args.size == 1 &&
-          ContentJoin.union_members(nominal.type_args.first).any?(Type::Dynamic)
+        nominal.class_name == "Set" && nominal.type_args.size == 1
       end
 
       # The carrier `type` holds after `method_name` with argument types `arg_types`, or `nil` when the call is not
@@ -82,13 +88,23 @@ module Rigor
       end
 
       def join(carrier, method_name, arg_types)
-        carrier = RewriteMutation.arm(carrier, method_name)
+        seed = carrier.type_args.first
+        # A precise seed takes no rewrite arm, as a precise `Array` does not ({MutationRejoin.widen_precise_array}).
+        carrier = RewriteMutation.arm(carrier, method_name) if MutationRejoin.gradual_parameter?(seed)
         return carrier unless CONTENT_ADDERS.include?(method_name)
 
         added = added_elements(method_name, arg_types).map { |t| widened_member(t) }
-        return carrier if added.empty?
+        added = admitted(seed, added)
+        added = [Type::Combinator.untyped] if added.empty?
 
         Type::Combinator.nominal_of("Set", type_args: [Type::Combinator.union(carrier.type_args.first, *added)])
+      end
+
+      # `added` as the #561 gate admits it against a precise seed's value-pinned members; a gradual seed admits all.
+      def admitted(seed, added)
+        return added if MutationRejoin.gradual_parameter?(seed)
+
+        ContentJoin.admissible_evidence(MutationRejoin.pinned_evidence([seed]), added)
       end
 
       # The element types one content-adder call puts in, from the call's argument types.

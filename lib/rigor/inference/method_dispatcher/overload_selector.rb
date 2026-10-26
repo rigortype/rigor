@@ -4,6 +4,7 @@ require_relative "../../type"
 require_relative "../acceptance"
 require_relative "../rbs_type_translator"
 require_relative "alias_strict_nominals"
+require_relative "contested_overloads"
 require_relative "facet_distribution"
 require_relative "imprecise_argument"
 require_relative "keyword_arguments"
@@ -445,13 +446,7 @@ module Rigor
 
           # `shared` is the keyword bundle `select_candidates` assembled (see `find_matching_overload`).
           def accepts_param?(param, arg, shared, strict, keyword = false) # rubocop:disable Style/OptionalBooleanParameter
-            param_type = shared[:param_overrides][param.name] || RbsTypeTranslator.translate(
-              param.type,
-              self_type: shared[:self_type],
-              instance_type: shared[:instance_type],
-              type_vars: shared[:type_vars],
-              alias_expander: shared[:environment]&.rbs_loader
-            )
+            param_type = translate_param(param, shared)
             # An `untyped` arg gradually accepts against every param, so a value-pinning param would be
             # "matched" with zero evidence and its value-precise return (`(nil) -> []`) would beat broader
             # overloads purely by list position. Decline the pair; only the strict pass (where the arg

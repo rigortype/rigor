@@ -1228,19 +1228,29 @@ module Rigor
 
           # Each argument list ({ArgumentDistribution.lists}, or the call's own) with the overloads it selects, or nil
           # when every list selects `chosen` alone. `selector` holds {OverloadSelector}'s keyword inputs.
+          # Past the list limit a union argument reads every overload some value of the arguments may select
+          # ({OverloadSelector.overlapping_matches}), or `chosen` when none overlaps.
           def argument_distribution_matches(method_definition, chosen, args, call_node, selector)
             return nil unless distributable_arguments?(method_definition, args, call_node)
 
             lists = ArgumentDistribution.lists(args)
-            return nil if lists.nil? && args.none?(Type::Nominal)
-
-            per_list = (lists || [args]).map do |arg_types|
-              picked = chosen if arg_types.equal?(args)
-              picked ||= OverloadSelector.select(method_definition, arg_types:, **selector)
-              contested = OverloadSelector.contested_matches(method_definition, picked, arg_types:, **selector)
-              [arg_types, contested || [picked]]
-            end
+            per_list =
+              if lists then lists.map { |list| [list, list_matches(method_definition, chosen, args, list, selector)] }
+              elsif args.any?(Type::Union)
+                overlapping = OverloadSelector.overlapping_matches(method_definition, arg_types: args, **selector)
+                [[args, overlapping.empty? ? [chosen] : overlapping]]
+              elsif args.any?(Type::Nominal)
+                [[args, list_matches(method_definition, chosen, args, args, selector)]]
+              else return nil
+              end
             per_list unless per_list.all? { |_, matches| matches.size == 1 && matches.first.equal?(chosen) }
+          end
+
+          # The overloads one argument list selects: its own pick, or every overload a wider nominal argument overlaps.
+          def list_matches(method_definition, chosen, args, arg_types, selector)
+            picked = chosen if arg_types.equal?(args)
+            picked ||= OverloadSelector.select(method_definition, arg_types:, **selector)
+            OverloadSelector.contested_matches(method_definition, picked, arg_types:, **selector) || [picked]
           end
 
           # Only a call with overloads to choose between and precise arguments it spells out one by one may select

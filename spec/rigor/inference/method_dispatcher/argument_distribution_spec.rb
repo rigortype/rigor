@@ -22,6 +22,22 @@ RSpec.describe "Union and supertype arguments in overload selection (#2379)", ty
         def receiver: (Integer a, Integer | Float b) -> untyped
         def predicate: (Integer a, Integer | Float b) -> untyped
         def precise: (Integer a, Integer b) -> untyped
+        def nine: (Pick p, Integer | String | Symbol a, Integer | String | Symbol b) -> untyped
+        def wide: (Pick p, 1 | 2 | 3 | 4 | 5 | 6 | 7 | "a" | "b" u) -> untyped
+        def narrow: (Pick p, Integer i) -> untyped
+        def typed: (Pick p, Array[Numeric] xs) -> untyped
+      end
+
+      class Pick
+        def pair: (Integer, Integer) -> :ii
+                | (String, String) -> :ss
+                | (Symbol, Symbol) -> :yy
+        def one: (Integer) -> :i
+               | (String) -> :s
+        def nar: (Numeric) -> :num
+               | (Integer) -> :int
+        def arr: (Array[Integer]) -> :ai
+               | (untyped) -> :any
       end
     RBS
   end
@@ -49,6 +65,11 @@ RSpec.describe "Union and supertype arguments in overload selection (#2379)", ty
             2
           end
         end
+
+        def nine(p, a, b) = dump_type(p.pair(a, b))
+        def wide(p, u) = dump_type(p.one(u))
+        def narrow(p, i) = dump_type(p.nar(i))
+        def typed(p, xs) = dump_type(p.arr(xs))
       end
     RUBY
   end
@@ -79,6 +100,24 @@ RSpec.describe "Union and supertype arguments in overload selection (#2379)", ty
     expect(dumped(11)).to eq("dump_type: 3")
     expect(dumped(12)).to eq("dump_type: Float | Integer")
     expect(dumped(13)).to eq("dump_type: Integer")
+  end
+
+  # Past eight per-member lists the call reads every overload some value of the arguments may select, rather than
+  # falling back to the first: three by three members is nine lists, and one nine-member union is nine.
+  it "joins every overlapping overload past the per-member list limit" do
+    expect(dumped(23)).to eq("dump_type: :ii | :ss | :yy")
+    expect(dumped(24)).to eq("dump_type: :i | :s")
+  end
+
+  # An argument no wider than the selected parameter keeps the one overload: `Integer` is taken by `(Numeric)`.
+  it "keeps the selected overload when the argument is not wider than its parameter" do
+    expect(dumped(25)).to eq("dump_type: :num")
+  end
+
+  # Only strictly typed overloads join a wider argument's overlap: the `(untyped)` arm does not. This pins the filter
+  # the approval entry names; whether the catch-all arm should join is a separate question.
+  it "leaves an untyped catch-all overload out of the overlap" do
+    expect(dumped(26)).to eq("dump_type: :ai")
   end
 
   it "does not fold a predicate on the sum to a constant" do

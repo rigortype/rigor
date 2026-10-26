@@ -111,8 +111,9 @@ RSpec.describe "filter_map block-return solving", type: :runner do
     expect(dumped_type("{ a: 1, b: 2 }.filter_map { |k, v| v.to_s }")).to eq(%(Array["1" | "2"]))
   end
 
-  # The rule reads the declared spelling, not the method name: `U?` strips `nil` alone and keeps `false`, and an arm other than `nil` /
-  # `false` (`bool`, `String`), `false` without `nil`, or a second variable leaves the variable unbound.
+  # The rule reads the declared spelling, not the method name: `U?` strips `nil` alone and keeps `false`, and an
+  # arm other than `nil` / `false` (`bool`, `String`), `false` without `nil`, or a second variable leaves the
+  # variable unbound.
   it "reads a U? block return and declines any other arm or a second variable" do
     sig = {
       "box.rbs" => <<~RBS

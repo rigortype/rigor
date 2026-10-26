@@ -125,20 +125,28 @@ RSpec.describe "a project singleton override of a Module method wins on the clas
       module Hk; def inherited(s) = s.define_singleton_method(:name) { "m" }; end
       class Top4; extend Hk; def self.name = nil; end
       class Sh4 < Top4; end
+      module Hd; define_method(:inherited) { |s| s.define_singleton_method(:name) { "d" } }; end
+      class Top5; extend Hd; def self.name = nil; end
+      class Sh5 < Top5; end
       Sh1.name.upcase # "X"
       Sh2.name.upcase # "Y"
       Sh3.name.upcase # "Z"
       Sh4.name.upcase # "M"
+      Sh5.name.upcase # "D"
     RUBY
   end
 
   it "keeps the inherited def's type in a hierarchy with no inherited hook (control)" do
-    expect(dumps(<<~RUBY)).to eq(%w[7 nil])
+    expect(dumps(<<~RUBY)).to eq(%w[7 nil 7 8])
       class Top5; def self.name = 7; end
       class Sh5 < Top5; end
       class Top6; def self.name = nil; def self.inherited(s) = s.define_singleton_method(:name) { "x" }; end
+      class Sh7 < Top5; def self.inherited(s) = super; end
+      class Own < Top6; def self.name = 8; end
       Rigor.dump_type(Sh5.name) # 7
       Rigor.dump_type(Top6.name) # nil, the hook's own class is not created by it
+      Rigor.dump_type(Sh7.name) # 7, its own hook runs for its subclasses only
+      Rigor.dump_type(Own.name) # 8, its own def replaces what the hook defined
     RUBY
   end
 

@@ -64,8 +64,8 @@ module Rigor
         module_function
 
         # Runs the block with `scope` as the one whose project tables the unseen-writer and single-file gates read, in
-        # place of the census's own scope. `rigor sig-gen` indexes each file under a scope that carries no project
-        # tables, so without it another file's writer, ancestor or reopening would go unseen.
+        # place of the census's own scope. `rigor sig-gen` indexes each file over the project tables less the member
+        # layouts; this scope carries all of them, so another file's writer, ancestor or reopening is seen.
         def with_writer_scope(scope)
           return yield if scope.nil?
 

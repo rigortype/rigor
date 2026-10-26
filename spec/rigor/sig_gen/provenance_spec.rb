@@ -204,7 +204,7 @@ SIG_PROVENANCE_RESIDUE = {
   # then dropped on review: the method is `private` (runner.rb's `private :…` list) and private
   # API is not declared in this sig.
   # -16 (#1154): an ivar a declared parameter assigns now reads that type, so 16 rows over it render.
-  "sig/rigor.rbs" => 35,
+  "sig/rigor.rbs" => 31,
   # -4 (#1181 slice): Bucket/DriftRow member rows are marked under #1183 and `buckets` under #1154;
   # `audit`/`without`/`initialize` tightened to generated/intent, leaving `filter`'s honest
   # `[Array[untyped], Integer]` divergence as the sole unmarked row.
@@ -217,7 +217,7 @@ SIG_PROVENANCE_RESIDUE = {
   # -2 (#1092): an RBS `-> self` return keeps the receiver's type arguments, so `FactStore#normalize`
   # and `CheckRules.filter_suppressed` stop inferring the raw `Array`; both now classify as parameter
   # intent (their declared `Array[Fact]` / `Array[Diagnostic]` follows from the declared parameters).
-  "sig/rigor/analysis/fact_store.rbs" => 15,
+  "sig/rigor/analysis/fact_store.rbs" => 14,
   # New file (#1181 slice): the three members whose element classes are not sig-covered yet
   # (`synthetic_method_index`, `project_patched_methods`, `template_units`) stay `untyped` — they are
   # Data members sig-gen cannot infer, but the declared type is `untyped` anyway, so no gap marker
@@ -265,7 +265,7 @@ SIG_PROVENANCE_RESIDUE = {
   # declared-divergent (`Array[untyped]` from `select`), and `path_row` / `self_path_row` /
   # `descends_from?` are unrenderable. `extend_registry` left residue the same slice — typed
   # `Effects::Registry` in and out makes it parameter-intent.
-  "sig/rigor/effects/plugin_facts.rbs" => 11,
+  "sig/rigor/effects/plugin_facts.rbs" => 10,
   # New file (#1181 vocabulary slice): `vocabulary_version`, `labels` and `descriptions` are
   # #1154-marked — the issue covers any ivar assigned in `initialize` from a parameter,
   # normalized or verbatim; `roots` is computed from `@known` — not a parameter — so it pins
@@ -312,12 +312,12 @@ SIG_PROVENANCE_RESIDUE = {
   # own instance candidate, which is generated-equivalent.
   # -3 (#1153): an empty-collection early return no longer leaves a stray `[]` arm beside an `Array[E]` arm,
   # so the declared `Array[...]` now matches what sig-gen proposes.
-  "sig/rigor/plugin/base.rbs" => 17,
-  "sig/rigor/plugin/blueprint.rbs" => 3,
+  "sig/rigor/plugin/base.rbs" => 16,
+  "sig/rigor/plugin/blueprint.rbs" => 2,
   "sig/rigor/plugin/fact_store.rbs" => 2,
   # -2 (#720): `file?` / `directory?` are `probe(path) { … }`, and the block's `bool` now reaches the
   # caller, so sig-gen generates what the two hand-written declarations say.
-  "sig/rigor/plugin/io_boundary.rbs" => 2,
+  "sig/rigor/plugin/io_boundary.rbs" => 1,
   "sig/rigor/plugin/load_error.rbs" => 3,
   # -1 (#1154): an ivar a declared parameter assigns now reads that type, so 1 row over it renders.
   "sig/rigor/plugin/loader.rbs" => 1,
@@ -326,7 +326,7 @@ SIG_PROVENANCE_RESIDUE = {
   # +1 (#1181 vocabulary slice): the six `effect_*` readers are #1154-marked and `effects?` /
   # `effect_owner` earned (the reader bound once into a local narrows, so sig-gen proves
   # `String`); `effect_discharge_allowed?` is unrenderable.
-  "sig/rigor/plugin/manifest.rbs" => 22,
+  "sig/rigor/plugin/manifest.rbs" => 21,
   # New file (#1181 slice): `to_h` is declared-divergent (sig-gen infers a string-literal-keyed
   # union; `Hash[String, untyped]` matches the manifest `to_h` convention) and `eql?` is an alias
   # row with no sig-gen shape.
@@ -389,7 +389,7 @@ SIG_PROVENANCE_RESIDUE = {
   # `discovered_class_sources`, `constant_sources`. Marked rows are not residue, so the count is back at 43.
   # The three earlier Set readers (`published_constant_sourced`, `declaration_sourced`, `struct_fold_safe_locals`)
   # move class the same way and were already marked.
-  "sig/rigor/scope.rbs" => 43,
+  "sig/rigor/scope.rbs" => 41,
   "sig/rigor/sig_gen/skip_reason_catalog.rbs" => 8,
   "sig/rigor/source.rbs" => 4,
   "sig/rigor/testing.rbs" => 4,

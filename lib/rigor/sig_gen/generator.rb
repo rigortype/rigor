@@ -135,6 +135,9 @@ module Rigor
         # process from reading the first's entries, and the bucket is released when the run ends (#2398's rule
         # for the callee census), so a finished run holds none of it.
         @run_generation = Object.new.freeze
+        # Both read the files as they are now, so a second `run` of one generator re-reads them.
+        @project_tables = nil
+        @file_base_scope = nil
         candidates = resolved.flat_map { |path| analyse_file(path, @environment) }
         annotate_effects(
           demote_overridden_base_methods(
@@ -468,15 +471,27 @@ module Rigor
         end.uniq
       end
 
-      # #1154 — the project's discovery tables, read only by the declared-parameter ivar credit: it must see the ivar
-      # writers in other files (an ancestor, another object's `instance_variable_set`, a reopening) as `rigor check`
-      # does. Built once per run over the configured project paths as well as the files sig-gen reads, so a run over
-      # one file declines what a `check` of it declines; every other part of the generator keeps its per-file scope.
-      def ivar_writer_scope(base_scope)
-        @ivar_writer_tables ||= Inference::ProjectSeedTables.for_paths(
+      # #1154 / #2300 — the project's discovery tables, built once per run over the configured project paths as well
+      # as the files sig-gen reads, so a run over one file reads what a `check` of it reads. Every file is indexed
+      # over them ({#file_base_scope}): a helper, an ancestor or a constant another file defines resolves as it does
+      # under `check` instead of reading ABSENT. The declared-parameter ivar credit reads them whole
+      # ({#ivar_writer_scope}).
+      def project_tables
+        @project_tables ||= Inference::ProjectSeedTables.for_paths(
           ((@resolved_paths || []) + resolve_paths(Array(@configuration.paths))).uniq { |path| File.expand_path(path) }
         )
-        base_scope.with_discovery(base_scope.discovery.with(**@ivar_writer_tables))
+      end
+
+      # The member layouts stay per-file. sig-gen writes a value class for every `Data.define` / `Struct.new` layout
+      # the indexed scope carries ({#collect_meta_layouts}), so a seeded layout would re-emit every value class of the
+      # project in every file.
+      PER_FILE_TABLES = %i[data_member_layouts struct_member_layouts].freeze
+      private_constant :PER_FILE_TABLES
+
+      # #1154 — the declared-parameter ivar credit must see the ivar writers in other files (an ancestor, another
+      # object's `instance_variable_set`, a reopening) as `rigor check` does.
+      def ivar_writer_scope(base_scope)
+        base_scope.with_discovery(base_scope.discovery.with(**project_tables))
       end
 
       # #1406 — sig-gen keeps the census's own answer: a declared ivar type read back would echo the declaration.
@@ -486,13 +501,16 @@ module Rigor
         )
       end
 
-      # The scope each file is indexed under. It carries the run's return-memo token (see {#run}), which
-      # {#ivar_writer_scope} inherits, so both readings of a callee share one memo bucket.
+      # The scope each file is indexed under: the project's tables less the per-file ones ({#project_tables}), and the
+      # run's return-memo token (see {#run}), which {#ivar_writer_scope} inherits, so every reading of a callee shares
+      # one memo bucket. Built once per run.
       def file_base_scope(environment)
-        base = Scope.empty(environment: environment)
-        return base if @run_generation.nil?
-
-        base.with_discovery(base.discovery.with(run_generation: @run_generation))
+        @file_base_scope ||= begin
+          base = Scope.empty(environment: environment)
+          tables = project_tables.except(*PER_FILE_TABLES)
+          tables = tables.merge(run_generation: @run_generation) if @run_generation
+          base.with_discovery(base.discovery.with(**tables))
+        end
       end
 
       def analyse_file(path, environment)

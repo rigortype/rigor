@@ -129,12 +129,20 @@ module Rigor
         resolved = resolve_paths(@paths)
         @resolved_paths = resolved
         @environment = build_environment(resolved)
+        # ADR-84 WD2, as `Runner#run_analysis` mints it for `check` (#2300): one return-memo bucket for the whole
+        # run. Without it the memo keys on each file's merged `discovered_def_nodes`, a new table per file, so a
+        # callee reached from two files was re-inferred in each. A fresh token per run keeps a second run in one
+        # process from reading the first's entries, and the bucket is released when the run ends (#2398's rule
+        # for the callee census), so a finished run holds none of it.
+        @run_generation = Object.new.freeze
         candidates = resolved.flat_map { |path| analyse_file(path, @environment) }
         annotate_effects(
           demote_overridden_base_methods(
             demote_unresolvable_superclasses(demote_inline_generic_classes(resolve_superclass_spellings(candidates)))
           )
         )
+      ensure
+        Inference::ExpressionTyper.release_return_memo(@run_generation) if @run_generation
       end
 
       private
@@ -478,12 +486,21 @@ module Rigor
         )
       end
 
+      # The scope each file is indexed under. It carries the run's return-memo token (see {#run}), which
+      # {#ivar_writer_scope} inherits, so both readings of a callee share one memo bucket.
+      def file_base_scope(environment)
+        base = Scope.empty(environment: environment)
+        return base if @run_generation.nil?
+
+        base.with_discovery(base.discovery.with(run_generation: @run_generation))
+      end
+
       def analyse_file(path, environment)
         source = File.read(path)
         parse_result = Prism.parse(source, filepath: path, version: @configuration.target_ruby)
         return [] if parse_result.errors.any?
 
-        scope_index = index_file(parse_result.value, Scope.empty(environment: environment))
+        scope_index = index_file(parse_result.value, file_base_scope(environment))
 
         reset_file_maps
         @meta_layouts = collect_meta_layouts(scope_index)

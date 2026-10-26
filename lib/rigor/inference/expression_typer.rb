@@ -367,6 +367,14 @@ module Rigor
         slot[1].transform_values(&:values)
       end
 
+      # #2300 — drops the calling thread's return memo bucket when it belongs to `generation`, the token a run seeded.
+      # A run that ends calls this on the way out so its entries are not held until the next run replaces the slot; a
+      # bucket another run minted is left alone.
+      def self.release_return_memo(generation)
+        slot = Thread.current[RETURN_MEMO_KEY]
+        Thread.current[RETURN_MEMO_KEY] = nil if slot && slot[0].equal?(generation)
+      end
+
       # Issue #720 — the value the block passed by the call site currently being re-typed evaluates to, or
       # `nil` outside such a frame. Read by {#type_of_yield}.
       #

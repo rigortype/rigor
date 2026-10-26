@@ -1437,7 +1437,7 @@ RSpec.describe Rigor::SigGen::Generator do
           def with_ensure; x; ensure; :z; end
           def nested; v = begin; x; rescue; nil; end; v; end
           def lookup_arm(s); Integer("#{s}"); rescue ArgumentError; "#{s}".split(",").first; end
-          def local_arm(s); y = "a"; Integer(s); rescue; y; end
+          def local_arm; y = "a"; x; rescue; y; end
         end
       RUBY
       generator(paths: [path]).run

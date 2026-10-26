@@ -84,7 +84,8 @@ RSpec.describe "Precise carrier re-grow (issue #2361)", type: :runner do
 
     # The #561 gate, as on an Array: a class the literal element does not admit joins as the gradual floor.
     it "floors a store of another class into a literal-element Set" do
-      expect(dumped("s = ARGV.map(&:to_i).map { \"x\" }.to_set\ns << 1\ndump_type(s)")).to eq(['Set["x" | Dynamic[top]]'])
+      source = "s = ARGV.map(&:to_i).map { \"x\" }.to_set\ns << 1\ndump_type(s)"
+      expect(dumped(source)).to eq(['Set["x" | Dynamic[top]]'])
     end
 
     it "floors a precise Set a self-call grows through a Set-only adder" do

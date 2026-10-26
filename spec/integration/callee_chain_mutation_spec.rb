@@ -101,10 +101,10 @@ RSpec.describe "a callee chain that mutates an argument floors it (#2104)" do
     RUBY
   end
 
-  it "does not yet count a mutation inside a callee's non-escaping block (the remaining XXH3 gap)" do
-    # Pins a decision, not a wish: the bare-collection floor this would apply fires `def.return-type-mismatch` on
-    # haml's `AttributeCompiler#compile`, so the census leaves it out until the floor can keep the element type.
-    expect(diagnostics(<<~RUBY)).to eq(undefined_upcase)
+  it "floors an argument the last callee mutates inside a non-escaping block (the XXH3 shape, #2296)" do
+    # Issue #2296 — the block channel's floor keeps the element type (`Array[Dynamic[top] | Integer]`), so it is
+    # counted along a chain as the other channels are.
+    expect(diagnostics(<<~RUBY)).to eq([])
       def stripes(acc) = poke(acc)
       def poke(acc) = 2.times { |i| acc[i] = "x" }
     RUBY

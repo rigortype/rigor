@@ -1,0 +1,4 @@
+- **[inference]** A collection passed to a method that changes it inside a block no longer keeps its literal type after the call, so reading it no longer reports a false `undefined method`. ([#2373](https://github.com/rigortype/rigor/pull/2373))
+  - Covers a change made in a block of the called method, at any nesting, as in `def poke(acc) = 2.times { |i| acc[i] = "x" }`, and through methods that pass the collection on.
+  - The collection keeps its element type next to an unknown one, so `[7, 9]` reads as an Array of Integer or anything.
+  - A set passed to a method that calls `add` or `merge` on it widens the same way. A hash passed to one that only calls `merge`, which returns a new hash, is unchanged.

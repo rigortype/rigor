@@ -209,6 +209,7 @@ members:
     - lib/rigor/analysis/check_rules/ivar_write_collector.rb
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/definer_resolution.rb
+    - lib/rigor/inference/expression_typer.rb
     copies:
     - lib/rigor/inference/project_seed_tables.rb
     justified:
@@ -221,6 +222,8 @@ members:
       lib/rigor/analysis/runner.rb:
       - paired_copy
       lib/rigor/inference/definer_resolution.rb:
+      - consults_contested
+      lib/rigor/inference/expression_typer.rb:
       - consults_contested
   discovered_parameter_envelopes:
     reads:

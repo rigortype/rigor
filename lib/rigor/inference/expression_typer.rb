@@ -2642,7 +2642,61 @@ module Rigor
         found = scope.singleton_def_through_ancestors(class_name, method_name)
         owner = found.last
         found = [nil, nil] if owner && SingletonExternalAhead.withhold?(scope, class_name, method_name, owner)
+        found = [nil, nil] if found.last && dynamic_singleton_definer_ahead?(class_name, method_name, found.last)
         table[key] = found
+      end
+
+      SINGLETON_WILDCARD_SLOT = %i[singleton *].freeze
+      private_constant :SINGLETON_WILDCARD_SLOT
+
+      # Issue #2284 — a project entry nearer than the `def`'s owner on the singleton chain may define the name
+      # without a `def`, which the def tables do not hold: `class S < B; define_singleton_method(:x) { "s" }; end`
+      # calls S's block, not `B.x`. The farther `def` is then withheld and the call types `Dynamic`. A class's own
+      # singleton side is read from the visibility-contest census: `define_singleton_method(:x)`,
+      # `singleton_class.define_method(:x)` / `attr_*` and a computed name contest the entry's slot whether or not a
+      # `def` is recorded (#1984, #2013). An `extend`ed module's side is read from `discovered_methods`, which holds
+      # its `attr_*` and `define_method` rows, and the module's `def self.extended` hook may define any name on the
+      # extender, so it withholds too.
+      #
+      # An `inherited` hook anywhere on the chain past the receiver's own entry runs when the receiver's class is
+      # created and may define any singleton method on it (`def self.inherited(s) = s.define_singleton_method(:x)`),
+      # so a `def` the receiver only inherits is withheld then as well: a class's `def self.inherited`, or an
+      # `inherited` an extended module defines.
+      def dynamic_singleton_definer_ahead?(class_name, method_name, owner)
+        name = method_name.to_sym
+        chain = Scope::ResolutionChain.for(scope, class_name.to_s, :singleton, :methods)
+        return true if class_name.to_s != owner.to_s && inherited_hook_on_chain?(chain, class_name.to_s)
+
+        chain.entries.each do |entry|
+          next if entry.external?
+          return false if entry.name == owner.to_s
+          return true if entry_defines_without_def?(entry, name)
+        end
+        false
+      end
+
+      def inherited_hook_on_chain?(chain, receiver_name)
+        chain.entries.any? do |entry|
+          next false if entry.external? || entry.name == receiver_name
+
+          if entry.side == :singleton
+            !scope.singleton_def_for(entry.name, :inherited).nil?
+          else
+            scope.discovered_method?(entry.name, :inherited, :instance)
+          end
+        end
+      end
+
+      def entry_defines_without_def?(entry, name)
+        unless entry.side == :singleton
+          return scope.discovered_method?(entry.name, name, :instance) ||
+                 !scope.singleton_def_for(entry.name, :extended).nil?
+        end
+
+        discovery = scope.discovery
+        # No edge of its own: `singleton_def_through_ancestors`' chain search filed every entry ahead of the owner.
+        discovery.contested?(:discovered_method_visibilities, [entry.name, [:singleton, name]]) ||
+          discovery.contested?(:discovered_method_visibilities, [entry.name, SINGLETON_WILDCARD_SLOT])
       end
 
       # The project-side singleton-method band: a `Foo.bar` call resolved against a `class << …` / `def self.…`

@@ -103,19 +103,21 @@ RSpec.describe "plugin signature member stand-down through the runner (#2422)" d
     Rigor::Cache::Store.new(root: File.join(Dir.pwd, ".rigor", "cache"))
   end
 
-  it "reports the typo, no false nil receiver, and one notice per stood-down member" do
+  it "reports the typo, no false nil receiver, and one notice naming every stood-down member" do
     rows = run(workers: 0)
     rules = rows.map { |row| row[2] }
     expect(rules).to include("call.undefined-method")
     expect(rules).not_to include("call.possible-nil-receiver", "rbs.coverage.definition-build-failed")
     notices = rows.select { |row| row[2] == "rbs.coverage.plugin-signature-stood-down" }
-    expect(notices.size).to eq(8)
-    expect(notices.map { |row| row[3] }).to all(include(".gem_rbs_collection/activesupport/7.0/activesupport.rbs"))
-    expect(notices.map { |row| row[3] }).to all(include("Two declarations of one method"))
-    expect(notices.map { |row| row[3][/declares `([^`]+)`/, 1] }).to contain_exactly(
+    expect(notices.size).to eq(1)
+    message = notices.first[3]
+    expect(message).to include("core_ext.rbs", "loaded without 8 method declaration(s)", "Two declarations of one method")
+    named = message.scan(%r{`([^`/]+)` \(([^)]+)\)})
+    expect(named.map(&:first)).to contain_exactly(
       "Object#acts_like?", "Array#compact_blank!", "Hash#compact_blank", "Integer#ordinalize",
       "NilClass#to_param", "TrueClass#to_param", "FalseClass#to_param", "Time#to_fs"
     )
+    expect(named.map(&:last).uniq).to eq([".gem_rbs_collection/activesupport/7.0/activesupport.rbs"])
   end
 
   it "says the same under the fork pool and on a cold and a warm env cache" do

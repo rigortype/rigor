@@ -38,7 +38,8 @@ methods are declared twice — `Object#acts_like?`, `Integer#ordinalize`,
 `Time#to_fs` among them. For each such method the plugin's declaration
 stands down and yours is used; the rest of the plugin still loads. The
 run reports one `rbs.coverage.plugin-signature-stood-down` info row
-per method, naming both files.
+for the plugin's file, naming the methods that stood down and the file
+whose declaration is used for each.
 
 ## What it covers
 

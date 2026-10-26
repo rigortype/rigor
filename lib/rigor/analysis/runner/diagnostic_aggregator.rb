@@ -457,7 +457,9 @@ module Rigor
           standdowns = @snapshots[:signature_standdowns]
           return [] if standdowns.nil? || standdowns.empty?
 
-          standdowns.map { |entry| build_rbs_plugin_signature_stood_down_diagnostic(entry) }
+          members, files = standdowns.partition { |entry| entry[5] == :member }
+          files.map { |entry| build_rbs_plugin_signature_stood_down_diagnostic(entry) } +
+            members.group_by(&:first).map { |path, rows| build_rbs_plugin_member_stood_down_diagnostic(path, rows) }
         end
 
         # Issue #1713 — the other outcome that avoided a definition-build failure: a required-feature-gated
@@ -792,8 +794,6 @@ module Rigor
         end
 
         def build_rbs_plugin_signature_stood_down_diagnostic(entry)
-          return build_rbs_plugin_member_stood_down_diagnostic(entry) if entry[5] == :member
-
           path, class_name, existing_arity, incoming_arity, existing_file = entry
           displaced_by = displacing_source_phrase(existing_file)
           Diagnostic.new(
@@ -815,19 +815,24 @@ module Rigor
           )
         end
 
-        # Issue #2422 — one member a loaded plugin signature file left out because another source declares it.
-        def build_rbs_plugin_member_stood_down_diagnostic(entry)
-          path, declaration, _, _, cause_file = entry
+        # Issue #2422 — one plugin signature file that loaded without the members another source also declares,
+        # naming each (sampled) with the file whose declaration was used instead. One row per file, not per
+        # member: an `rbs collection install` of activesupport overlaps `rigor-activesupport-core-ext` on hundreds.
+        def build_rbs_plugin_member_stood_down_diagnostic(path, rows)
+          labels = rows.map do |_path, declaration, _, _, cause_file|
+            cause = cause_file.nil? ? "" : " (#{relative_signature_path(cause_file.to_s)})"
+            "`#{declaration}`#{cause}"
+          end
           Diagnostic.new(
             path: ".rigor.yml",
             line: 1,
             column: 1,
-            message: "`#{relative_signature_path(path.to_s)}` (a signature file a plugin contributes) declares " \
-                     "`#{declaration}`, but #{displacing_source_phrase(cause_file)} already declares it. Two " \
-                     "declarations of one method fail the class's definition build, so the plugin's declaration " \
-                     "stood down and calls resolve against the other one; the rest of the plugin's file still " \
-                     "loads. Expected when a bundled plugin and an `rbs collection install` or your own " \
-                     "signatures both declare the method; nothing to fix unless you want the plugin's typing " \
+            message: "`#{relative_signature_path(path.to_s)}` (a signature file a plugin contributes) loaded without " \
+                     "#{rows.size} method declaration(s) another signature source already makes: " \
+                     "#{sampled(labels, 10)}. Two declarations of one method fail the class's definition build, so " \
+                     "the plugin's declaration stood down and calls resolve against the other one; the rest of the " \
+                     "plugin's file still loads. Expected when a bundled plugin and an `rbs collection install` or " \
+                     "your own signatures both declare a method; nothing to fix unless you want the plugin's typing " \
                      "back, which needs the other source to stop declaring it.",
             severity: :info,
             rule: "rbs.coverage.plugin-signature-stood-down",

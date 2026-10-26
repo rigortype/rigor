@@ -28,6 +28,7 @@ RSpec.describe "a self-call in a caller's block floors the captured argument its
         def poke(acc) = (acc[0] = "x")
         def kpoke(acc:) = (acc[0] = "x")
         def foo(x) = x
+        def store(x) = (@x = x)
       end
     RUBY
   end
@@ -45,7 +46,13 @@ RSpec.describe "a self-call in a caller's block floors the captured argument its
       "a block on a receiver of an assigned value" => "x = [1].each { poke(acc) }.size; foo(x)",
       "a block on a receiver whose call has its own block" => "[1].each { poke(acc) }.then { 1 }",
       "a then block on a chained receiver" => "1.then { poke(acc) }.to_s",
-      "a block on an argument" => "foo([1].each { poke(acc) })"
+      "a block on an argument" => "foo([1].each { poke(acc) })",
+      "a lambda called in the block" => "[1].each { l = -> { poke(acc) }; l.call }",
+      "a lambda called with .()" => "[1].each { l = -> { poke(acc) }; l.() }",
+      "a lambda called with []" => "[1].each { l = -> { poke(acc) }; l[] }",
+      "a lambda literal called in place" => "[1].each { -> { poke(acc) }.call }",
+      "an instance_eval with no receiver" => "[1].each { instance_eval { poke(acc) } }",
+      "an instance_eval on self" => "[1].each { self.instance_eval { poke(acc) } }"
     }.each do |label, call|
       it label do
         expect(errors(instance_run(call))).to eq([])
@@ -97,8 +104,16 @@ RSpec.describe "a self-call in a caller's block floors the captured argument its
       expect(errors(source)).to eq(undefined_upcase)
     end
 
-    it "a lambda in the block that is never called" do
-      expect(errors(instance_run("[1].each { l = -> { poke(acc) }; foo(l) }"))).to eq(undefined_upcase)
+    it "a nested block's parameter shadowing it, the nested block not visited on its own" do
+      expect(errors(instance_run("[[1]].each { |acc| [2].each { poke(acc) } }"))).to eq(undefined_upcase)
+    end
+
+    it "an escaping block passed as an argument" do
+      expect(errors(instance_run("store(proc { poke(acc) })"))).to eq(undefined_upcase)
+    end
+
+    it "a define_method body in the block" do
+      expect(errors(instance_run("[1].each { define_method(:z) { poke(acc) } }"))).to eq(undefined_upcase)
     end
 
     it "a Set block parameter shadowing it" do
@@ -118,6 +133,12 @@ RSpec.describe "a self-call in a caller's block floors the captured argument its
       end
       expect(dumps).to eq(["Set[7]"])
     end
+  end
+
+  # Conservative by design: Ruby never runs the lambda, so `upcase` raises on `7`. A lambda in the block is walked
+  # as the escaping path walks one, since it may be called there; the floor drops this report and adds none.
+  it "floors through a lambda in the block that is never called (gives up a true positive)" do
+    expect(errors(instance_run("[1].each { l = -> { poke(acc) }; foo(l) }"))).to eq([])
   end
 
   # Conservative by design: Ruby leaves `acc` at `[1, 2]`, so `upcase` raises on `1`. The floor applies after the

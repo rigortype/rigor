@@ -4641,12 +4641,46 @@ module Rigor
         return post_scope if foreign_self_block?(call_node)
 
         acc = post_scope
-        each_node_in_method_scope(call_node.block.body, 0) do |node, depth|
-          next unless node.is_a?(Prism::CallNode)
-
+        each_node_in_caller_block(call_node.block.body, 0) do |node, depth|
           acc = floor_callee_escaped_args_for_call(node, acc, climbing: depth)
         end
         acc
+      end
+
+      # Yields every call under `node` with the number of blocks and lambdas it sits in, for
+      # {#floor_block_callee_captures}. A lambda is entered, as the escaping path floors one: it may be called in the
+      # block (`l.call`, `-> { ... }.call`). A nested def is not. Nor is the block of a nested call whose self-calls
+      # are provably not the caller's: one run on another object ({#foreign_block_call?}), a `define_method` /
+      # `define_singleton_method` method body, or a `Class.new` / `Module.new` / `Struct.new` / `Data.define` block.
+      # An `instance_eval` / `class_exec` / … on `self` or with no receiver dispatches to the caller and is entered.
+      def each_node_in_caller_block(node, depth, &)
+        return if node.nil?
+
+        yield node, depth if node.is_a?(Prism::CallNode)
+        skip_block = node.is_a?(Prism::CallNode) && foreign_block_call?(node)
+        node.rigor_each_child do |child|
+          next if child.is_a?(Prism::DefNode)
+
+          if child.is_a?(Prism::BlockNode) || child.is_a?(Prism::LambdaNode)
+            each_node_in_caller_block(child, depth + 1, &) unless skip_block && child.is_a?(Prism::BlockNode)
+          else
+            each_node_in_caller_block(child, depth, &)
+          end
+        end
+      end
+
+      def foreign_block_call?(call_node)
+        return false unless self_rebinding_block_call?(call_node)
+        return true if %i[define_method define_singleton_method].include?(call_node.name)
+        return true unless AnonymousMetaClass.block_form_receiver(call_node).nil?
+
+        foreign_self_block?(call_node) || fresh_receiver?(call_node.receiver)
+      end
+
+      # A `X.new` receiver is a new object, never the caller's `self`; {#foreign_self_block?} reads only a class
+      # object as foreign, since an instance's class may be a subclass of `self`'s.
+      def fresh_receiver?(receiver)
+        receiver.is_a?(Prism::CallNode) && receiver.name == :new && !receiver.receiver.nil?
       end
 
       # True when a local `node` passes (positionally or as a keyword's value) is bound in `scope` to a type the

@@ -34,8 +34,9 @@ that master leaves silent.
 The user ruled the conservative fix in round 3 of #2415. What is lost:
 
 - An element mutated through a reader no longer keeps its precise type. A memo also floors its values when a reader's
-  value is used even if nothing mutates it: `h[x] = h.fetch(x, 0) + 1` reads `Hash[1 | 2, Dynamic[top]]`, which the
-  fixpoint already answered.
+  value is used even if nothing mutates it, unless every value or element is of a class no method mutates (Integer,
+  Float, Symbol, nil, true, false, Rational, Complex). That exemption keeps master's `m[k] = m[k] + 1` at
+  `Hash[Symbol, 0 | Integer]`; a String or collection value floors.
 - Every splat store floors, including `a.push(*xs)`, whose positional reading was sound.
 
 Against master, no sig-gen row over `lib/` loses precision; the rows that lose precision against round 2 are listed in

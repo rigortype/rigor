@@ -6145,8 +6145,12 @@ module Rigor
 
       # Issue #2411 — `memo` with its values or elements floored to `Dynamic[top]` and a Hash's keys kept: a reader's
       # value is an element the block may then mutate where no scan sees it (`h[x] << "s"`, `v = h[:k]; v << "s"`,
-      # `h[:k][:n] = "s"`), so the join's element types are not what the memo holds.
+      # `h[:k][:n] = "s"`), so the join's element types are not what the memo holds. A memo whose every value or
+      # element is of a class no method mutates ({MEMO_IMMUTABLE_CLASSES}) keeps its join: `m[k] = m[k] + 1` reads an
+      # Integer, which nothing in the block can change.
       def memo_value_floor(type)
+        return type if memo_contents_immutable?(type)
+
         case type
         when Type::Union then Type::Combinator.union(*type.members.map { |member| memo_value_floor(member) })
         when Type::Nominal
@@ -6154,6 +6158,36 @@ module Rigor
 
           Type::Combinator.nominal_of("Hash", type_args: [type.type_args.first, Type::Combinator.untyped])
         else content_floor_for(type) || type
+        end
+      end
+
+      # The classes whose instances no method mutates.
+      MEMO_IMMUTABLE_CLASSES = Set[
+        "Integer", "Float", "Symbol", "NilClass", "TrueClass", "FalseClass", "Rational", "Complex"
+      ].freeze
+      private_constant :MEMO_IMMUTABLE_CLASSES
+
+      # Whether every value of a Hash memo, or every element of an Array memo, is of a {MEMO_IMMUTABLE_CLASSES} class.
+      def memo_contents_immutable?(type)
+        case type
+        when Type::Union then type.members.all? { |member| memo_contents_immutable?(member) }
+        when Type::Nominal
+          slot = type.class_name == "Hash" ? 1 : 0
+          %w[Hash Array].include?(type.class_name) && !type.type_args[slot].nil? &&
+            memo_immutable_value?(type.type_args[slot])
+        when Type::Tuple then type.elements.all? { |element| memo_immutable_value?(element) }
+        when Type::HashShape then type.pairs.values.all? { |value| memo_immutable_value?(value) }
+        else false
+        end
+      end
+
+      def memo_immutable_value?(type)
+        case type
+        when Type::Union then type.members.all? { |member| memo_immutable_value?(member) }
+        when Type::Constant then MEMO_IMMUTABLE_CLASSES.include?(type.value.class.name)
+        when Type::Nominal then MEMO_IMMUTABLE_CLASSES.include?(type.class_name)
+        when Type::IntegerRange, Type::FloatRange then true
+        else false
         end
       end
 

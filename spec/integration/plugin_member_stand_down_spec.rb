@@ -111,6 +111,7 @@ RSpec.describe "plugin signature member stand-down through the runner (#2422)" d
     notices = rows.select { |row| row[2] == "rbs.coverage.plugin-signature-stood-down" }
     expect(notices.size).to eq(8)
     expect(notices.map { |row| row[3] }).to all(include(".gem_rbs_collection/activesupport/7.0/activesupport.rbs"))
+    expect(notices.map { |row| row[3] }).to all(include("Two declarations of one method"))
     expect(notices.map { |row| row[3][/declares `([^`]+)`/, 1] }).to contain_exactly(
       "Object#acts_like?", "Array#compact_blank!", "Hash#compact_blank", "Integer#ordinalize",
       "NilClass#to_param", "TrueClass#to_param", "FalseClass#to_param", "Time#to_fs"

@@ -13,8 +13,10 @@ module Rigor
       # A shared mutable holder keeps the write/read timing of the original inline ivars while letting the
       # writer and the readers live in separate objects without a back-reference cycle.
       #
-      # Writes go through {#absorb}, which folds each value in by its fact's declared merge rule; `[]=` is a
-      # plain assignment. A reader and a writer per fact are defined from the declarations as well.
+      # The analysis paths write through {#absorb}, which folds each value in by its fact's declared merge
+      # rule. `[]=` and the per-fact `name=` writers (defined from the declarations, like the readers) are a
+      # plain assignment that bypasses the merge rule: they exist for specs that seed a slot, and no
+      # production path calls them.
       class RunSnapshots
         def initialize
           @values = RunLevelFacts.empty_values

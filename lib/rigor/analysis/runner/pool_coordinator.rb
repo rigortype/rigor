@@ -497,8 +497,10 @@ module Rigor
         # `project_scope_seed` its worker would need to record complete edges. Without `fork` (Windows) a
         # recording run degrades to sequential, which records correctly through `@analyze_file`.
         #
-        # An effects run (ADR-103 WD13) is pinned for exactly the same reason — the Ractor messages carry
-        # no side-table channel — and degrades the same way. The degrade is sound rather than merely safe:
+        # An effects run (ADR-103 WD13) is pinned the same way: the Ractor `:done` {WorkerPayload} has an
+        # `effects` slot, but the Ractor worker never collects into it (its session is built without the
+        # recording inputs, and the backend is off-default, #414), so only the fork backend fills it. Without
+        # `fork` it degrades the same way. The degrade is sound rather than merely safe:
         # the sequential fallback still collects, so the effect graph is complete either way.
         # @param source_files — the file list every worker's / the fallback's environment is
         #   built over — the whole project (issue #793), defaulting to `files` for direct callers.

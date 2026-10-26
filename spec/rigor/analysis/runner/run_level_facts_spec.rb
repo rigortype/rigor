@@ -31,8 +31,14 @@ RunLevelFactsSpecLoader = Struct.new(:answers) do
   end
 end
 
-RunLevelFactsSpecEnvironment = Struct.new(:rbs_loader, :hkt_scan_failure) do
-  def hkt_registry = nil
+# Like the real `Environment#hkt_registry`, the demand is what records a declined HKT directive (#785) on the
+# reporter the environment was built with — so a worker drain that snapshots its reporters BEFORE demanding the
+# registry loses the row on the pool paths.
+RunLevelFactsSpecEnvironment = Struct.new(:rbs_loader, :hkt_scan_failure, :reporter) do
+  def hkt_registry
+    reporter&.record_hkt_error(message: "uri= is required", path: "sig/a.rbs", line: 3, column: 1)
+    nil
+  end
 end
 
 RSpec.describe Rigor::Analysis::Runner::RunLevelFacts do
@@ -76,11 +82,11 @@ RSpec.describe Rigor::Analysis::Runner::RunLevelFacts do
                                              source_rbs_synthesizers: [], plugins: [], empty?: true)
   end
 
-  # One entry per reporter stream, recorded by every per-file analysis whichever process runs it.
+  # One entry per reporter stream but the hkt-directive one, recorded by every per-file analysis whichever
+  # process runs it. The hkt-directive entry comes only from the run's own HKT demand (the fake environment).
   def record_streams(rbs_extended, boundary_cross, source_rbs_synthesis)
     rbs_extended.record_unresolved(payload: "rigor:v1:nope", path: "sig/a.rbs", line: 1, column: 1)
     rbs_extended.record_lossy_projection(head: "pick_of", path: "sig/a.rbs", line: 2, column: 1)
-    rbs_extended.record_hkt_error(message: "uri= is required", path: "sig/a.rbs", line: 3, column: 1)
     rbs_extended.record_deprecated_form(payload: "int<5, 10>", replacement: "Integer[5..10]",
                                         path: "sig/a.rbs", line: 4, column: 1)
     boundary_cross.record(class_name: "Acme", method_name: :label, gem_name: "acme", rbs_display: "() -> String")
@@ -95,6 +101,7 @@ RSpec.describe Rigor::Analysis::Runner::RunLevelFacts do
       source_rbs_synthesis: Rigor::Plugin::SourceRbsSynthesisReporter.new
     }
     snapshots = Rigor::Analysis::Runner::RunSnapshots.new
+    environment.reporter = reporters[:rbs_extended]
     configuration = Rigor::Configuration.new("signature_paths" => ["sig"])
     cache_store = path == :ractor ? Rigor::Cache::Store.new(root: File.join(Dir.pwd, ".rigor-cache")) : nil
     coordinator = Rigor::Analysis::Runner::PoolCoordinator.new(
@@ -143,6 +150,7 @@ RSpec.describe Rigor::Analysis::Runner::RunLevelFacts do
           .and_return(fact_values.fetch(:conformance_results))
         allow(Rigor::Analysis::WorkerSession).to receive(:new).and_wrap_original do |original, **options|
           session = original.call(**options)
+          environment.reporter = session.rbs_extended_reporter
           allow(session).to receive(:analyze) do
             record_streams(*%i[@rbs_extended_reporter @boundary_cross_reporter @source_rbs_synthesis_reporter]
                              .map { |ivar| session.instance_variable_get(ivar) })

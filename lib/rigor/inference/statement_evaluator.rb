@@ -344,6 +344,15 @@ module Rigor
         @operand_types = operand_types
       end
 
+      # Issue #2330 — drops the calling thread's callee-chain census memo ({#resolved_census}) outright. The memo is
+      # already held weakly by the `DiscoveryIndex` it was built for (an `ObjectSpace::WeakKeyMap`), so a discarded
+      # index takes its entries with it on any entry point, `Runner#run` or not (the LSP providers index on the main
+      # thread). `Runner#run` still calls this on the way out, which frees the entries of an index that is still
+      # reachable, such as the project seed.
+      def self.release_resolved_census
+        Thread.current[RESOLVED_CENSUS_KEY] = nil
+      end
+
       # Runs `block` with a fresh return sink installed, then yields the collected explicit-`return` value types to the
       # caller. The sink is an array of `Rigor::Type`. Nested invocations stack: the previous sink is restored on exit
       # so a `def` evaluated inside another method's body (which itself installed a sink) does not corrupt the outer
@@ -4664,8 +4673,8 @@ module Rigor
 
       # Issue #2104 — the per-thread memo of a census that also resolves self-calls ({#resolve_self_callees}), so it
       # reads, besides `def_node`'s AST, the class self-calls resolve in and the discovery index whose def table they
-      # resolve through. Those two key it: the index by identity, as it is immutable (one slot, as a file's analysis
-      # reads one index; a scope indexed for another file replaces it), the class by name. A run builds hundreds of
+      # resolve through. Those two key it: the index by identity, as it is immutable (one entry per live index, held
+      # weakly: a table dropped with its index), the class by name. A run builds hundreds of
       # thousands of evaluators, and a per-evaluator memo alone recomputed each closure and each def's edges about
       # thirty times over (#2295's cost on the release gate). Issue #2297 — the side self-calls resolve on
       # ({#resolve_self_callees}) keys it too: a singleton-side table apart from the instance-side one.
@@ -4676,10 +4685,10 @@ module Rigor
         return yield if Analysis::DependencyRecorder.active?
 
         discovery = scope.discovery
-        slot = Thread.current[RESOLVED_CENSUS_KEY]
-        slot = Thread.current[RESOLVED_CENSUS_KEY] = [discovery, {}, {}] unless slot&.first.equal?(discovery)
+        table = (Thread.current[RESOLVED_CENSUS_KEY] ||= ObjectSpace::WeakKeyMap.new)
+        slot = (table[discovery] ||= [{}, {}])
         self_type = scope.self_type
-        by_class = (slot[self_type.is_a?(Type::Singleton) ? 2 : 1][kind] ||= {})
+        by_class = (slot[self_type.is_a?(Type::Singleton) ? 1 : 0][kind] ||= {})
         class_name = enclosing_class_name_for(self_type)
         by_def = (by_class[class_name] ||= {}.compare_by_identity)
         by_def.fetch(def_node) { by_def[def_node] = yield }

@@ -61,6 +61,13 @@ module Rigor
     )
 
     class DiscoveryIndex
+      # Issue #2330 — identity as a hash key. `Data` hashes and compares structurally, which over these project-sized
+      # tables is both costly and wrong for a per-thread memo keyed by "this very index" (an `ObjectSpace::WeakKeyMap`
+      # holds the memo while the index lives and drops it with it). `==` stays structural.
+      def hash = object_id.hash
+
+      def eql?(other) = equal?(other)
+
       EMPTY_NODE_TABLE = {}.compare_by_identity.freeze
       EMPTY_TABLE = {}.freeze
       EMPTY_NAME_SET = Set.new.freeze

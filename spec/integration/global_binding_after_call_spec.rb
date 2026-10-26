@@ -353,7 +353,9 @@ RSpec.describe "a global's binding past a call that may reach its writer (#2314)
   # Guard: past DEF_BUDGET bodies the search gives up and forgets, reading less than Ruby proves.
   it "forgets past the search budget even when no writer is reached" do
     # NoMethodError in Ruby; quiet past the budget
-    expect(undefined("a.rb" => "def w = ($bg = 1)\ndef d0 = d1\ndef d1 = d2\ndef d2 = d3\ndef d3 = d4\ndef d4 = d5\ndef d5 = d6\ndef d6 = d7\ndef d7 = d8\ndef d8 = d9\ndef d9 = d10\ndef d10 = d11\ndef d11 = d12\ndef d12 = d13\ndef d13 = d14\ndef d14 = d15\ndef d15 = d16\ndef d16 = d17\ndef d17 = d18\ndef d18 = d19\ndef d19 = d20\ndef d20 = d21\ndef d21 = d22\ndef d22 = d23\ndef d23 = d24\ndef d24 = d25\ndef d25 = d26\ndef d26 = d27\ndef d27 = d28\ndef d28 = d29\ndef d29 = d30\ndef d30 = d31\ndef d31 = d32\ndef d32 = d33\ndef d33 = d34\ndef d34 = d35\ndef d35 = d36\ndef d36 = d37\ndef d37 = d38\ndef d38 = d39\ndef d39 = d40\ndef d40 = d41\ndef d41 = d42\ndef d42 = d43\ndef d43 = d44\ndef d44 = d45\ndef d45 = d46\ndef d46 = d47\ndef d47 = d48\ndef d48 = d49\ndef d49 = d50\ndef d50 = d51\ndef d51 = d52\ndef d52 = d53\ndef d53 = d54\ndef d54 = d55\ndef d55 = d56\ndef d56 = d57\ndef d57 = d58\ndef d58 = d59\ndef d59 = d60\ndef d60 = d61\ndef d61 = d62\ndef d62 = d63\ndef d63 = d64\ndef d64 = d65\ndef d65 = d66\ndef d66 = d67\ndef d67 = d68\ndef d68 = d69\ndef d69 = 1\n$bg = nil\nd0\n$bg + 1\n")).to eq([])
+    chain = (0...69).map { |i| "def d#{i} = d#{i + 1}\n" }.join
+    source = "def w = ($bg = 1)\n#{chain}def d69 = 1\n$bg = nil\nd0\n$bg + 1\n"
+    expect(undefined("a.rb" => source)).to eq([])
   end
 
   # Known gap: `alias $ay $ax` makes the two one variable, and the census keys a writer by the name it spells.

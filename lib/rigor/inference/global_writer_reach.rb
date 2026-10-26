@@ -46,9 +46,7 @@ module Rigor
       def candidates(scope)
         table = writer_table(scope)
         globals = scope.globals
-        if Analysis::DependencyRecorder.active?
-          globals.each_key { |name| record_writers(name) }
-        end
+        globals.each_key { |name| record_writers(name) } if Analysis::DependencyRecorder.active?
         return EMPTY if table.empty? || globals.empty?
 
         table.each_key.select do |name|

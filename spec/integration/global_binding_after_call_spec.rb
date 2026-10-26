@@ -459,12 +459,14 @@ RSpec.describe "a global's binding past a call that may reach its writer (#2314)
                   edited: "other.rb", after: "class Q\n  def baz = w\nend\n", first: [["use.rb", 4]], second: [])
     end
 
-    # The alias keeps its name across the edit, so only the `method_alias:` read re-checks.
+    # The alias keeps its name across the edit and the search reads no body in its file, so only the
+    # `method_alias:` read re-checks.
     it "forgets the global once an alias is pointed at its writer" do
       use = "def bar(o) = o.ra\n$g = nil\nbar(Object.new)\n$g + 1\n"
-      before = "class Q\n  def reset! = ($g = 1)\n  def noop = 1\n  alias_method :ra, :noop\nend\n"
-      expect_edit(files: { "use.rb" => use, "other.rb" => before }, edited: "other.rb",
-                  after: before.sub(":noop\nend", ":reset!\nend"), first: [["use.rb", 4]], second: [])
+      before = "class Q\n  alias_method :ra, :nothing_defines_this\nend\n"
+      expect_edit(files: { "use.rb" => use, "other.rb" => before, "writer.rb" => "def w = ($g = 2)\n" },
+                  edited: "other.rb", after: "class Q\n  alias_method :ra, :w\nend\n",
+                  first: [["use.rb", 4]], second: [])
     end
 
     # A `when` test that runs no statement call, so only the case site's own census read re-checks.

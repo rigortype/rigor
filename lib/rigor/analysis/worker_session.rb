@@ -25,6 +25,7 @@ require_relative "dependency_source_inference"
 require_relative "diagnostic"
 require_relative "erb_template_detector"
 require_relative "template_units"
+require_relative "runner/run_level_facts"
 
 module Rigor
   module Analysis
@@ -284,33 +285,25 @@ module Rigor
       # project whose `sig/` produced a single such event killed each worker HERE — after its files were
       # analysed — and the run degraded to in-process re-analysis with a `pool-degraded` row. All three
       # streams now carry `(path, line, column)` primitives.
+      #
+      # ADR-116 WD3 (#1195) — both halves are declared rather than listed here: each reporter snapshots its
+      # own streams ({Runner::RunLevelFacts::REPORTERS}), and the `:analysis` facts come from
+      # {Runner::RunLevelFacts.drain}, the same read the coordinator makes of an environment it analysed on.
+      # The facts are read first: their HKT demand (#784, made once per worker so a worker whose share of
+      # files demanded nothing still reports the run's outcome) is what fills the hkt-directive stream (#785).
+      # On a worker that analysed a file the demand is a memoised read; the fork backend never hands a worker
+      # an empty slice, so no idle worker pays the env load.
       def drain_reporters
-        # Issue #784 — demand the registry once per worker before reading the slot, so a worker whose share
-        # of files happened to contain no `Klass.method` call still reports the run's outcome (the same
-        # reason `PoolCoordinator#hkt_scan_outcome` demands it on the sequential path). The Environment
-        # object is built in the constructor, but its RBS env is lazy: on a worker that analysed a file this
-        # is a memoised read; on one that demanded nothing it is the same cache-served env load that file
-        # would have paid. The fork backend never hands a worker an empty slice, so no idle worker pays it.
-        @environment&.hkt_registry
-        {
-          rbs_extended: {
-            unresolved_payloads: @rbs_extended_reporter.unresolved_payloads,
-            lossy_projections: @rbs_extended_reporter.lossy_projections,
-            # Issue #785 — the HKT directive stream rides the same channel for the same reason
-            # `hkt_scan_failure` does: the directives are read by the registry scan, and under the pool the
-            # PARENT never demands that scan, so a diagnostic wired off the parent's reporter would appear
-            # at `--workers=0` and vanish at `--workers=N`. The demand above is what fills this.
-            hkt_directive_errors: @rbs_extended_reporter.hkt_directive_errors,
-            # ADR-109 WD3 — the deprecated-form stream rides the same channel: the payload is read where
-            # the annotated method is dispatched, which under the pool is only ever inside a worker.
-            deprecated_forms: @rbs_extended_reporter.deprecated_forms
-          },
-          boundary_cross: @boundary_cross_reporter.entries,
-          source_rbs_synthesis: @source_rbs_synthesis_reporter.entries,
-          definition_build_failures: @environment&.rbs_loader&.definition_build_failures || [],
-          hkt_scan_failure: @environment&.hkt_scan_failure
-        }
+        facts = Runner::RunLevelFacts.drain(@environment)
+        Runner::RunLevelFacts.snapshot_reporters(reporters).merge(facts)
       end
+
+      # The per-worker reporter accumulators, by {Runner::RunLevelFacts::REPORTERS} key.
+      def reporters
+        { rbs_extended: @rbs_extended_reporter, boundary_cross: @boundary_cross_reporter,
+          source_rbs_synthesis: @source_rbs_synthesis_reporter }
+      end
+      private :reporters
 
       # ADR-46 — the per-file {DependencyRecorder::Record}s captured by this session's `#analyze` calls (empty
       # unless `record_dependencies:` was set). Marshal-clean (Data of frozen Sets / String Hashes), so the

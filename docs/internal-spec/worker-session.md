@@ -170,6 +170,20 @@ location-carrying entries would print one row per worker, because an
 `RBS::Location` compares equal only against a location over the same
 `RBS::Buffer` object and each worker parses its own.
 
+Neither half of the `#drain_reporters` payload is listed by hand
+([ADR-116](../adr/116-hot-file-restructuring.md) WD3,
+[#1195](https://github.com/rigortype/rigor/issues/1195)). Each reporter
+snapshots its own streams (`#snapshot`) and the coordinator replays a
+worker's copy through the reporter's own record methods (`#absorb`); the
+run-level facts the payload carries are the `:analysis` facts
+`Runner::RunLevelFacts` declares, read by the same `RunLevelFacts.drain`
+a coordinator-side path applies to the environment it analysed on, and
+folded in by each fact's declared merge rule. The session's drains travel
+together as one `Runner::WorkerPayload` — the fork child's payload file,
+the Ractor worker's `:done` message, and the fork degrade path's harvest
+of the parent session — so a new stream or fact changes its reporter or
+its declaration, never the pool's merge sites.
+
 Plugin `#prepare` runs **once at construction** so each worker is warm
 before its first `#analyze` call; any raise from `prepare` is captured into
 `#prepare_diagnostics` for the runner to surface alongside the per-file

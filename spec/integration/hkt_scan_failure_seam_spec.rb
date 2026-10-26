@@ -83,7 +83,7 @@ RSpec.describe "HKT scan-failure seam (issue #784)" do
   # Issue #791 — the OTHER build behind `Environment#hkt_registry`. The plugin-overlay merge sat one line
   # ABOVE the #784 rescue, so a raise from a plugin's manifest escaped the getter; post-#788 that is not a
   # per-file crash storm but an uncaught abort, because the holder memoises only on success and the
-  # run-owned demands (`PoolCoordinator#hkt_scan_outcome` after the file loop, `WorkerSession#drain_reporters`)
+  # run-owned demands (`RunLevelFacts::Collect.hkt_scan_failure` after the file loop, `WorkerSession#drain_reporters`)
   # have no rescue above them. Nothing in today's tree can trigger it — `Manifest` validates registrations at
   # construction and the loader demands `manifest` at load — so the raise is staged here.
   describe "the plugin-overlay stage (issue #791)" do
@@ -140,7 +140,7 @@ RSpec.describe "HKT scan-failure seam (issue #784)" do
       expect(Rigor::Inference::HktRegistry).to have_received(:scan_rbs_loader).at_least(:once)
     end
 
-    # The run-owned demand (`PoolCoordinator#hkt_scan_outcome`, after the file loop) is the site the #791
+    # The run-owned demand (`RunLevelFacts::Collect.hkt_scan_failure`, after the file loop) is the site the #791
     # follow-up measured raising: a file that never calls a `Klass.method` demands nothing, so the
     # coordinator's own demand is the only one — and it sits outside every rescue.
     it "reports the row from the run's own demand when no analysed file demands the registry" do

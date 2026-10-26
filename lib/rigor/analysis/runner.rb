@@ -87,11 +87,10 @@ module Rigor
       # forbids Rigor demanding in its place) and the HKT-scan outcome (whose producer is an environment a
       # nothing-changed recheck otherwise has no reason to build). {IncrementalSession} persists what a full
       # run answers here and hands it back to the next narrowed run.
+      #
+      # Which rows those are is declared, not listed: every {RunLevelFacts} fact marked `replay`.
       def run_level_rows
-        Cache::IncrementalSnapshot::RunLevelRows.new(
-          definition_build_failures: @snapshots.definition_build_failures,
-          hkt_scan_failure: @snapshots.hkt_scan_failure
-        )
+        Cache::IncrementalSnapshot::RunLevelRows.new(**@snapshots.to_h.slice(*RunLevelFacts.replayable_names))
       end
 
       # ADR-46 — the per-file cross-file read records this run captured (empty unless
@@ -1228,40 +1227,13 @@ module Rigor
       end
       private :template_unit_failure_diagnostics
 
-      # The rbs-coverage build-failure ladder plus every remaining post-analysis stream
-      # `#assemble_run_diagnostics` appends, in their fixed contract order (see the comments at each call
-      # below and at the streams' own definitions). Split out of `#assemble_run_diagnostics` so that
-      # method's `Metrics/AbcSize` stays under budget — every stream here is a plain `DiagnosticAggregator`
-      # reader with no branching of its own, so the split changes nothing about WHEN or in WHAT order they
-      # run.
+      # Every remaining post-analysis stream `#assemble_run_diagnostics` appends — the `rbs.coverage.*`
+      # build-failure ladder (widest consequence first: quarantine, env build, definition build #696, HKT scan
+      # #784), its notices, the conformance rows, the reporter streams, the plugin run disclosures (#1051)
+      # and, last, the trust-refusal envelope (#959) — in the contract order ADR-116 WD3's
+      # {RunLevelFacts} declares. Read after `analyze_targets`, so every worker payload has been merged.
       def post_analysis_diagnostic_streams
-        diagnostics = @diagnostic_aggregator.rbs_quarantined_signature_diagnostics
-        diagnostics += @diagnostic_aggregator.rbs_environment_build_failed_diagnostics
-        # Issue #696 — after its env-wide twin and before the synthesized-namespace notice: the four
-        # `rbs.coverage.*` build conditions surface widest-consequence first, and their relative order is
-        # the diagnostic output contract.
-        diagnostics += @diagnostic_aggregator.rbs_definition_build_failed_diagnostics
-        # Issue #784 — last of the four, deliberately: it loses only the IMPLICIT HKT registrations a
-        # `type` alias would have contributed, never a class's own declared method surface, so it is the
-        # narrowest-consequence rung on the same ladder.
-        diagnostics += @diagnostic_aggregator.rbs_hkt_scan_failed_diagnostics
-        # The synthesized-namespace notice, then (#610) the plugin-signature stand-down: the outcome that
-        # AVOIDED a definition-build failure, so the quietest row on that ladder.
-        diagnostics += @diagnostic_aggregator.rbs_coverage_notice_diagnostics
-        diagnostics += @diagnostic_aggregator.conforms_to_diagnostics
-        diagnostics += @diagnostic_aggregator.rbs_extended_reporter_diagnostics
-        diagnostics += @diagnostic_aggregator.boundary_cross_diagnostics
-        diagnostics += @diagnostic_aggregator.source_rbs_synthesis_diagnostics
-        # Issue #1051 — read after `analyze_targets` for the same reason the refusal stream below is: a
-        # plugin may register a disclosure from `#prepare` (the usual case) or while analysing a file, and
-        # both have to be in before the table is harvested. Ordered before the refusals so the run-level
-        # plugin rows read plugin-authored notice first, engine-authored envelope second.
-        diagnostics += @diagnostic_aggregator.plugin_run_disclosure_diagnostics
-        # Issue #959 — read LAST (after `analyze_targets`, which already ran before this method is called),
-        # so every per-file plugin call has had its chance to record a refusal on its (per-plugin-instance
-        # memoised) `IoBoundary`, alongside the prepare-time refusals the same boundary instance may
-        # already carry.
-        diagnostics + @diagnostic_aggregator.plugin_trust_refusal_diagnostics
+        @diagnostic_aggregator.run_level_diagnostics
       end
       private :post_analysis_diagnostic_streams
 
@@ -2173,14 +2145,7 @@ module Rigor
           pool_mode: -> { pool_mode? },
           cached_plugin_prepare_diagnostics: -> { @cached_plugin_prepare_diagnostics },
           pre_eval_diagnostics_from_scanner: -> { @pre_eval_diagnostics_from_scanner },
-          synthesized_namespaces_snapshot: -> { @snapshots.synthesized_namespaces },
-          quarantined_signatures_snapshot: -> { @snapshots.quarantined_signatures },
-          signature_standdowns_snapshot: -> { @snapshots.signature_standdowns },
-          vendored_standdowns_snapshot: -> { @snapshots.vendored_standdowns },
-          env_build_failure_snapshot: -> { @snapshots.env_build_failure },
-          definition_build_failures_snapshot: -> { @snapshots.definition_build_failures },
-          hkt_scan_failure_snapshot: -> { @snapshots.hkt_scan_failure },
-          conformance_results_snapshot: -> { @snapshots.conformance_results },
+          snapshots: @snapshots,
           pooled_run_disclosures: -> { @pool_coordinator.collected_run_disclosures },
           served_run_disclosures: -> { @served_run_disclosures },
           pooled_trust_refusals: -> { @pool_coordinator.collected_trust_refusals }

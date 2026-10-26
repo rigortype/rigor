@@ -29,35 +29,23 @@ module Rigor
         # @param pool_mode — reader returning the pool-mode flag.
         # @param cached_plugin_prepare_diagnostics — reader returning the prepare-diagnostic snapshot.
         # @param pre_eval_diagnostics_from_scanner — reader returning the pre-eval scanner diagnostics.
-        # @param synthesized_namespaces_snapshot — reader.
-        # @param quarantined_signatures_snapshot — reader returning the `signature_paths:` files skipped
-        #   because they do not parse (`[path, first_error_line]` pairs).
-        # @param signature_standdowns_snapshot — reader returning the plugin-contributed signature files
-        #   that stood down against a colliding generic arity (#610), as
-        #   `[path, class_name, existing_arity, incoming_arity, existing_file]` tuples. Defaults to none so
-        #   a caller that snapshots nothing of the kind need not say so.
-        # @param vendored_standdowns_snapshot — issue #1713 — reader returning what each required-feature-gated
-        #   vendored directory left out (`Environment::RbsLoader#vendored_standdowns`). Defaults to none.
-        # @param env_build_failure_snapshot — reader returning the total RBS env-build failure tuple
-        #   (`[error_class, first_error_line, conflicting_buffer_names]`) or nil when the env built.
-        # @param definition_build_failures_snapshot — issue #696 — reader returning the per-class
-        #   `RBS::DefinitionBuilder` failures the run observed, as `[class_name, error_class, member,
-        #   conflicting_buffer_names, unresolved_type_name_detail]` tuples (issue #997 added the fifth
-        #   element — `[token, location, refinement_hint]`, `nil` unless `error_class` is
-        #   `RBS::NoTypeFoundError`). Empty for a healthy sig set.
-        # @param hkt_scan_failure_snapshot — issue #784 — reader returning the `[error_class_name,
-        #   first_message_line, raw_frame_or_nil, stage]` tuple whichever stage of the HKT-registry build
-        #   raised, or nil when both built (or were never demanded). `stage` is `:scan` (the RBS `type`-alias
-        #   scan) or `:overlay` (the plugin-manifest aggregation, #791), and picks the row's wording.
-        # @param conformance_results_snapshot — reader.
+        # @param snapshots — the run's {RunSnapshots} store (ADR-116 WD3), read at row-build time. Its slots'
+        #   shapes, as the rows below read them:
+        #   - `quarantined_signatures` — the `signature_paths:` files skipped because they do not parse
+        #     (`[path, first_error_line]` pairs);
+        #   - `signature_standdowns` (#610) — `[path, class_name, existing_arity, incoming_arity,
+        #     existing_file]` tuples;
+        #   - `vendored_standdowns` (#1713) — `Environment::RbsLoader#vendored_standdowns`;
+        #   - `env_build_failure` — `[error_class, first_error_line, conflicting_buffer_names]`, or nil;
+        #   - `definition_build_failures` (#696) — `[class_name, error_class, member,
+        #     conflicting_buffer_names, unresolved_type_name_detail]` tuples (#997 added the fifth element —
+        #     `[token, location, refinement_hint]`, `nil` unless `error_class` is `RBS::NoTypeFoundError`);
+        #   - `hkt_scan_failure` (#784) — `[error_class_name, first_message_line, raw_frame_or_nil, stage]`,
+        #     or nil; `stage` is `:scan` or `:overlay` (#791) and picks the row's wording.
         def initialize(configuration:, rbs_extended_reporter:, boundary_cross_reporter:, # rubocop:disable Metrics/ParameterLists
                        source_rbs_synthesis_reporter:, plugin_registry:, dependency_source_index:,
                        pool_mode:, cached_plugin_prepare_diagnostics:,
-                       pre_eval_diagnostics_from_scanner:, synthesized_namespaces_snapshot:,
-                       quarantined_signatures_snapshot:, env_build_failure_snapshot:,
-                       definition_build_failures_snapshot:, hkt_scan_failure_snapshot:,
-                       conformance_results_snapshot:, signature_standdowns_snapshot: -> { [] },
-                       vendored_standdowns_snapshot: -> { [] }, pooled_run_disclosures: -> { [] },
+                       pre_eval_diagnostics_from_scanner:, snapshots:, pooled_run_disclosures: -> { [] },
                        served_run_disclosures: -> { [] }, pooled_trust_refusals: -> { [] })
           @configuration = configuration
           @rbs_extended_reporter = rbs_extended_reporter
@@ -68,14 +56,7 @@ module Rigor
           @pool_mode_reader = pool_mode
           @cached_plugin_prepare_diagnostics_reader = cached_plugin_prepare_diagnostics
           @pre_eval_diagnostics_from_scanner_reader = pre_eval_diagnostics_from_scanner
-          @synthesized_namespaces_snapshot_reader = synthesized_namespaces_snapshot
-          @quarantined_signatures_snapshot_reader = quarantined_signatures_snapshot
-          @signature_standdowns_snapshot_reader = signature_standdowns_snapshot
-          @vendored_standdowns_snapshot_reader = vendored_standdowns_snapshot
-          @env_build_failure_snapshot_reader = env_build_failure_snapshot
-          @definition_build_failures_snapshot_reader = definition_build_failures_snapshot
-          @hkt_scan_failure_snapshot_reader = hkt_scan_failure_snapshot
-          @conformance_results_snapshot_reader = conformance_results_snapshot
+          @snapshots = snapshots
           # Issue #1051 — reader for the pool coordinator's de-duplicated run-scoped disclosure table.
           # Empty on a sequential run, where `plugin_registry`'s own instances are the ones that registered.
           @pooled_run_disclosures_reader = pooled_run_disclosures
@@ -84,6 +65,14 @@ module Rigor
           # Issue #1900 — reader for the pool coordinator's summed trust-refusal table. Empty on a
           # sequential run, where `plugin_registry`'s own boundaries made every read.
           @pooled_trust_refusals_reader = pooled_trust_refusals
+        end
+
+        # ADR-116 WD3 — every post-analysis run-level row, in the contract order {RunLevelFacts.row_builders}
+        # declares: the `rbs.coverage.*` build-failure ladder widest consequence first, its `:info` notices,
+        # the conformance rows, the reporter streams, then the plugin run disclosures and the trust-refusal
+        # envelope, read last so every per-file plugin call has recorded its refusals.
+        def run_level_diagnostics
+          RunLevelFacts.row_builders.flat_map { |builder| public_send(builder) }
         end
 
         # Pre-file diagnostic streams that fire once per run rather than per analyzed file: plugin load /
@@ -379,7 +368,7 @@ module Rigor
         # the `reject-unparseable-signatures` feature promotes this rule to `:error` for anyone who opts in
         # (and by default at the next major).
         def rbs_quarantined_signature_diagnostics
-          quarantined = quarantined_signatures_snapshot
+          quarantined = @snapshots[:quarantined_signatures]
           return [] if quarantined.empty?
 
           [build_rbs_quarantined_signature_diagnostic(quarantined)]
@@ -400,7 +389,7 @@ module Rigor
         # `reject-unparseable-signatures` bleeding-edge feature promotes it to `:error` for anyone who opts in
         # (and by default at the next major).
         def rbs_environment_build_failed_diagnostics
-          failure = env_build_failure_snapshot
+          failure = @snapshots[:env_build_failure]
           return [] if failure.nil?
 
           [build_rbs_environment_build_failed_diagnostic(failure)]
@@ -426,7 +415,7 @@ module Rigor
         # a Rigor release turn a green build red with no user change (ADR-5 / AGENTS.md § FP discipline).
         # The `reject-unparseable-signatures` bleeding-edge feature promotes it to `:error`.
         def rbs_definition_build_failed_diagnostics
-          failures = definition_build_failures_snapshot
+          failures = @snapshots[:definition_build_failures]
           return [] if failures.nil? || failures.empty?
 
           [build_rbs_definition_build_failed_diagnostic(failures)]
@@ -445,14 +434,14 @@ module Rigor
         # surface, no signature file is skipped, the environment builds. That is why this sits LAST on the
         # ladder, after its two `rbs.coverage.*` siblings above.
         def rbs_hkt_scan_failed_diagnostics
-          failure = hkt_scan_failure_snapshot
+          failure = @snapshots[:hkt_scan_failure]
           return [] if failure.nil?
 
           [build_rbs_hkt_scan_failed_diagnostic(failure)]
         end
 
         def rbs_synthesized_namespace_diagnostics
-          synthesized = synthesized_namespaces_snapshot
+          synthesized = @snapshots[:synthesized_namespaces]
           return [] if synthesized.nil? || synthesized.empty?
 
           [build_rbs_synthesized_namespace_diagnostic(synthesized)]
@@ -465,7 +454,7 @@ module Rigor
         # typing they are not getting and why, and — unlike the quarantine row this file used to be
         # misreported as — is not sent to remove a declaration the plugin owns.
         def rbs_plugin_signature_stood_down_diagnostics
-          standdowns = signature_standdowns_snapshot
+          standdowns = @snapshots[:signature_standdowns]
           return [] if standdowns.nil? || standdowns.empty?
 
           standdowns.map { |entry| build_rbs_plugin_signature_stood_down_diagnostic(entry) }
@@ -476,7 +465,7 @@ module Rigor
         # declares — a member, a whole type, or, when nothing narrower built, the directory. One `:info` per
         # directory, naming the declarations that stood down and the files that displaced them.
         def rbs_vendored_signature_stood_down_diagnostics
-          standdowns = vendored_standdowns_snapshot
+          standdowns = @snapshots[:vendored_standdowns]
           return [] if standdowns.nil? || standdowns.empty?
 
           standdowns.map { |entry| build_rbs_vendored_signature_stood_down_diagnostic(entry) }
@@ -498,7 +487,7 @@ module Rigor
         # conformance; every analysis path, pooled or degraded, takes the snapshot `synthesized_namespaces`
         # comes from.
         def conforms_to_diagnostics
-          results = conformance_results_snapshot
+          results = @snapshots[:conformance_results]
           return [] if results.nil? || results.empty?
 
           results.map { |record| build_conformance_diagnostic(record) }
@@ -936,9 +925,12 @@ module Rigor
         # all three cross the pool drain channel (see {RbsExtended::Reporter}); an entry with no position
         # falls back to `.rigor.yml`-style file-level attribution.
         def rbs_extended_reporter_diagnostics
-          return [] if @rbs_extended_reporter.empty?
+          unresolved_payload_diagnostics + lossy_projection_diagnostics + hkt_directive_diagnostics +
+            deprecated_form_diagnostics
+        end
 
-          unresolved = @rbs_extended_reporter.unresolved_payloads.map do |entry|
+        def unresolved_payload_diagnostics
+          @rbs_extended_reporter.unresolved_payloads.map do |entry|
             build_positioned_reporter_diagnostic(
               entry,
               rule: "dynamic.rbs-extended.unresolved",
@@ -947,8 +939,10 @@ module Rigor
                        "that contributes the referenced type vocabulary."
             )
           end
+        end
 
-          lossy = @rbs_extended_reporter.lossy_projections.map do |entry|
+        def lossy_projection_diagnostics
+          @rbs_extended_reporter.lossy_projections.map do |entry|
             build_positioned_reporter_diagnostic(
               entry,
               rule: "dynamic.shape.lossy-projection",
@@ -957,8 +951,6 @@ module Rigor
                        "a `HashShape` / `Tuple` carrier or accept the unchanged result."
             )
           end
-
-          unresolved + lossy + hkt_directive_diagnostics + deprecated_form_diagnostics
         end
 
         # ADR-109 WD3 — one row per annotation still written in a spelling the grammar accepts but no
@@ -1329,38 +1321,6 @@ module Rigor
 
         def pre_eval_diagnostics_from_scanner
           @pre_eval_diagnostics_from_scanner_reader.call
-        end
-
-        def synthesized_namespaces_snapshot
-          @synthesized_namespaces_snapshot_reader.call
-        end
-
-        def quarantined_signatures_snapshot
-          @quarantined_signatures_snapshot_reader.call
-        end
-
-        def signature_standdowns_snapshot
-          @signature_standdowns_snapshot_reader.call
-        end
-
-        def vendored_standdowns_snapshot
-          @vendored_standdowns_snapshot_reader.call
-        end
-
-        def env_build_failure_snapshot
-          @env_build_failure_snapshot_reader.call
-        end
-
-        def definition_build_failures_snapshot
-          @definition_build_failures_snapshot_reader.call
-        end
-
-        def hkt_scan_failure_snapshot
-          @hkt_scan_failure_snapshot_reader.call
-        end
-
-        def conformance_results_snapshot
-          @conformance_results_snapshot_reader.call
         end
       end
     end

@@ -146,7 +146,7 @@ module Rigor
     # code (`Plugin::Registry#hkt_overlay_registry` reads each manifest); before this it sat one line ABOVE
     # the #784 rescue, so a raise there escaped {#hkt_registry} entirely. Post-#788 that is not a per-file
     # crash storm but an uncaught abort: {HktRegistryHolder#fetch} memoises only on success, so the raise
-    # is re-attempted at every demand, and the run-owned demands (`Runner::PoolCoordinator#hkt_scan_outcome`
+    # is re-attempted at every demand, and the run-owned demands (`Runner::RunLevelFacts::Collect.hkt_scan_failure`
     # after the file loop, `Analysis::WorkerSession#drain_reporters`) sit outside any rescue.
     #
     # The degradation is narrower than the scan's: only the plugin overlay is dropped, and the RBS scan

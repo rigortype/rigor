@@ -6124,6 +6124,8 @@ module Rigor
         pre_state = lookup_mutated_seed(body, memo_param, memo_type, MEMO_SEED_MUTATORS) do |depth, nesting|
           depth == nesting
         end
+        return content_floor_for(pre_state) || call_type if memo_escapes_scan?(body, memo_param)
+
         memo = if calls.empty?
                  # Issue #2411 — a memo the block only reshapes (`m.merge!(s)`, `m.delete(k)`) answers its widened seed.
                  pre_state.equal?(memo_type) ? call_type : pre_state
@@ -6131,6 +6133,85 @@ module Rigor
                  join_memo_content(call_node, memo_param, calls, pre_state, shadows) || call_type
                end
         floor_memo_callee_escapes(body, memo_param, memo)
+      end
+
+      # Issue #2411 — whether the block can change the memo where neither the join nor the callee floor sees it, so
+      # the memo answers its content floor ({#content_floor_for}) instead of the join. Read as an expression, the
+      # join's answer reaches every use of the call, and one that misses a store reports on correct code:
+      # `|x, h| g = h; g["s"] = "v"; h[:a] = 2` joined `Hash[:a, 2]`, and `.fetch("s").upcase` read `2`. Every read
+      # or write of the memo's name in its own scope ({#scope_nesting}) must be one the scan models
+      # ({#memo_read_modelled?}); a rebinding write (`h = {}`) is not, since the stores after it reach another object.
+      def memo_escapes_scan?(body, memo_param)
+        Source::NodeWalker.each_with_ancestors(body) do |node, ancestors|
+          next unless MEMO_NAME_NODES.any? { |klass| node.is_a?(klass) } && node.name == memo_param
+          next unless node.depth == scope_nesting(ancestors)
+          return true unless node.is_a?(Prism::LocalVariableReadNode) && memo_read_modelled?(node, ancestors)
+        end
+        false
+      end
+
+      # The nodes that read or bind a local by name. `LocalVariableTargetNode` covers a multi-assign and a `rescue =>`.
+      MEMO_NAME_NODES = [
+        Prism::LocalVariableReadNode, Prism::LocalVariableWriteNode, Prism::LocalVariableTargetNode,
+        Prism::LocalVariableOperatorWriteNode, Prism::LocalVariableOrWriteNode, Prism::LocalVariableAndWriteNode
+      ].freeze
+      private_constant :MEMO_NAME_NODES
+
+      # The memo reads that cannot hand the object to anything the scan does not see. A call on the memo is one when
+      # it takes no block (`tap`, `each` and `then` yield it) and its value is not the memo: either the method is one
+      # whose value never is ({MEMO_VALUE_READERS}), or the value is discarded ({#memo_value_discarded?}), as `h << x`
+      # and `h.merge!(s)`, which answer the receiver, usually are. An index compound write on it is one. So is an
+      # argument of a self-call that resolves to a user def, whose census the callee floor reads
+      # ({#floor_memo_callee_escapes}). Any other read — `g = h`, `[h]`, `Helper.fill(h, x)`, an unresolved self-call —
+      # is not.
+      def memo_read_modelled?(read, ancestors)
+        parent = ancestors.last
+        if parent.respond_to?(:receiver) && parent.receiver.equal?(read)
+          return true if INDEX_WRITE_NODES.any? { |klass| parent.is_a?(klass) }
+          return false unless parent.is_a?(Prism::CallNode) && parent.block.nil?
+
+          return MEMO_VALUE_READERS.include?(parent.name) || memo_value_discarded?(parent, ancestors[0...-1])
+        end
+        memo_self_call_argument?(ancestors)
+      end
+
+      # Methods of Hash and Array whose value is never the receiver itself, so using it hands nothing on.
+      MEMO_VALUE_READERS = Set[
+        :[], :[]=, :store, :fetch, :dig, :key?, :has_key?, :include?, :member?, :key, :value?, :has_value?,
+        :size, :length, :count, :empty?, :any?, :none?, :keys, :values, :values_at, :fetch_values, :first, :last,
+        :delete, :pop, :shift, :to_s, :inspect, :hash, :==, :!=, :eql?, :equal?, :frozen?, :nil?, :is_a?,
+        :kind_of?, :instance_of?, :respond_to?, :class, :join, :sum, :min, :max, :dup, :clone
+      ].freeze
+      private_constant :MEMO_VALUE_READERS
+
+      # Whether `node`'s value is dropped: a statement that is not its sequence's last, or the last one of a sequence
+      # whose own value is dropped, up through `if` / `unless` arms, `begin` / `rescue` bodies and parentheses, to the
+      # `each_with_object` block body, whose value the call never answers.
+      def memo_value_discarded?(node, ancestors)
+        return true if ancestors.empty?
+
+        parent = ancestors.last
+        up = ancestors[0...-1]
+        case parent
+        when Prism::StatementsNode
+          !parent.body.last.equal?(node) || memo_value_discarded?(parent, up)
+        when Prism::IfNode, Prism::UnlessNode
+          !parent.predicate.equal?(node) && memo_value_discarded?(parent, up)
+        when Prism::ElseNode, Prism::BeginNode, Prism::RescueNode, Prism::ParenthesesNode
+          memo_value_discarded?(parent, up)
+        when Prism::EnsureNode then true
+        else false
+        end
+      end
+
+      # Whether the read under `ancestors` is a positional or keyword argument of a self-call that resolves to a user def.
+      def memo_self_call_argument?(ancestors)
+        nodes = ancestors.reverse
+        nodes = nodes.drop(2) if nodes.first.is_a?(Prism::AssocNode) && nodes[1].is_a?(Prism::KeywordHashNode)
+        return false unless nodes[0].is_a?(Prism::ArgumentsNode) && nodes[1].is_a?(Prism::CallNode)
+        return false unless self_dispatch_call?(nodes[1])
+
+        !resolve_self_callees(nodes[1]).empty?
       end
 
       # Issue #2411 — `memo` floored as a captured local is when the block hands it to a self-call whose callee

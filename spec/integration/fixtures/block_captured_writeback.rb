@@ -175,12 +175,67 @@ ewo_merged = [{ a: 1 }].each_with_object({}) { |s, m| m.merge!(s) }
 assert_type("Hash[Dynamic[top], Dynamic[top]]", ewo_merged)
 ewo_or_write = [1].each_with_object({}) { |x, h| h[x] ||= [] }
 assert_type("Hash[1, Dynamic[top]]", ewo_or_write)
+# Reading the memo through a method whose value is never the memo keeps the join.
+ewo_counted = [1, 2].each_with_object({}) { |x, h| h[x] = h.fetch(x, 0) + 1 }
+assert_type("Hash[1 | 2, Dynamic[top]]", ewo_counted)
 
 # A memo handed to a self-call that stores into it floors as a captured local
 # does: the block's own stores are not every key it holds. Asserted inline, not
 # bound: the snapshot's `post_scope` resolves no top-level def, so it cannot floor.
 def ewo_record(hash, n) = (hash[[n, :key]] = "k")
 assert_type("Hash[Dynamic[top], Dynamic[top]]", [1].each_with_object({}) { |x, out| ewo_record(out, x) })
+
+# The floor reads the callee's census by slot: a callee that mutates another
+# argument leaves the memo's join alone, and a second positional or a keyword
+# argument floors it. Inside a def, so the snapshot's def-less scope binds none.
+def ewo_fill_other(buf, _hash) = (buf << 1)
+def ewo_fill_second(_x, hash) = (hash[:k] = "s")
+def ewo_fill_keyword(_x, into:) = (into[:k] = "s")
+
+def ewo_callee_slots(buf)
+  other = [1].each_with_object({}) do |x, h|
+    ewo_fill_other(buf, h)
+    h[x] = 1
+  end
+  assert_type("Hash[1, 1]", other)
+  second = [1].each_with_object({}) do |x, h|
+    ewo_fill_second(x, h)
+    h[x] = 1
+  end
+  assert_type("Hash[Dynamic[top], Dynamic[top]]", second)
+  keyword = [1].each_with_object({}) do |x, h|
+    ewo_fill_keyword(x, into: h)
+    h[x] = 1
+  end
+  assert_type("Hash[Dynamic[top], Dynamic[top]]", keyword)
+end
+
+# A memo the scan cannot follow answers its floor, not the join: an alias
+# (`g = h`) or a call with a receiver may store what no scanned store does.
+# A `break` ends the call with its own value.
+module EwoHelper
+  def self.fill(hash, x) = (hash[[x, :H]] = "s")
+end
+
+def ewo_escapes
+  aliased = [1, 2].each_with_object({}) do |_x, h|
+    g = h
+    g["s"] = "v"
+    h[:a] = 2
+  end
+  assert_type("Hash[Dynamic[top], Dynamic[top]]", aliased)
+  received = [1].each_with_object({}) do |x, h|
+    h[x] = 1
+    EwoHelper.fill(h, x)
+  end
+  assert_type("Hash[Dynamic[top], Dynamic[top]]", received)
+  broken = [1, 2].each_with_object([]) do |x, a|
+    break :stop if x == 2
+
+    a << x
+  end
+  assert_type(":stop | Array[1 | 2]", broken)
+end
 
 # A block that never mutates the memo keeps it: Ruby returns `{}` here.
 assert_type("{}", [1].each_with_object({}) { |_x, h| h.size })

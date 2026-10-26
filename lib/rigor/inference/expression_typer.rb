@@ -1775,11 +1775,17 @@ module Rigor
       # Issue #2411 — `recv.each_with_object(memo) { |x, acc| acc[k] = v }` returns the memo as the block's
       # stores leave it. The statement evaluator owns that join ({StatementEvaluator#each_with_object_value}),
       # and reading it here gives every value position the statement's answer: a method's tail is typed through
-      # this typer, and read off the dispatch alone it was the memo argument's literal `{}` / `[]`.
+      # this typer, and read off the dispatch alone it was the memo argument's literal `{}` / `[]`. A `break` ends
+      # the call with its own value, so the block's break arms ({#call_break_arm_types}) join the memo: the join
+      # alone read `break :stop if x == 2; a << x` as `Array[1 | 2]`, where Ruby answers `:stop`.
       def memo_object_value(node, result)
         return result unless node.name == :each_with_object && node.block.is_a?(Prism::BlockNode)
 
-        StatementEvaluator.new(scope: scope, tracer: tracer).each_with_object_value(node, result)
+        memo = StatementEvaluator.new(scope: scope, tracer: tracer).each_with_object_value(node, result)
+        return memo if memo.equal?(result)
+
+        breaks = call_break_arm_types(node)
+        breaks.empty? ? memo : Type::Combinator.union(memo, *breaks)
       end
 
       # The RHS-value override for plain attribute / index writes (#520); a non-write call keeps the

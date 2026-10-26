@@ -55,16 +55,14 @@ RSpec.describe "Enumerator::Lazy chained calls", type: :runner do
       end
     end
 
-    # `filter_map` / `flat_map` mirror upstream's `(nil | false | U)` / `(Array[U] | U)` block-return
-    # spelling, which the method-level type-parameter binder does not read as a bare variable, so `U` stays
-    # free and the element is the `Dynamic[top]` floor. That is what the EAGER call answers on the same
-    # nominal receiver (`ARGV.filter_map { |x| x.length }` is `Array[Dynamic[top]]`), so the lazy chain is no
-    # worse than the eager one it replaces; only the receiver class is this lane's subject. Flip these two
-    # expectations when the binder learns to read a union block return (`compose_block_type_vars`) — both
-    # paths move together.
-    it "keeps the class on filter_map / flat_map, whose element stays the eager path's floor" do
+    # `flat_map` mirrors upstream's `(Array[U] | U)` block-return spelling, which the method-level type-parameter
+    # binder does not read as a bare variable, so `U` stays free and the element is the `Dynamic[top]` floor. That is
+    # what the EAGER call answers on the same nominal receiver, so the lazy chain is no worse than the eager one it
+    # replaces. `filter_map`'s `(nil | false | U)` is solved from the block's type less `nil` and `false` (#2322), on
+    # the eager and the lazy path alike.
+    it "keeps the class on filter_map / flat_map, solving filter_map's element from its block" do
       {
-        "[1, 2, 3].lazy.filter_map { |x| x * 2 }" => "Enumerator::Lazy[Dynamic[top]]",
+        "[1, 2, 3].lazy.filter_map { |x| x * 2 }" => "Enumerator::Lazy[2 | 4 | 6]",
         "[1, 2, 3].lazy.flat_map { |x| [x, x] }" => "Enumerator::Lazy[Dynamic[top]]",
         "ARGV.lazy.map { |x| x.length }" => "Enumerator::Lazy[non-negative-int]"
       }.each do |expression, expected|

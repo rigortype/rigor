@@ -88,7 +88,12 @@ RSpec.describe "a self-call in a caller's block floors the captured argument its
 
     # `poke` inside `instance_eval` runs on the `Obj`, whose `poke` does not mutate.
     it "a self-call in a nested block run on another object" do
-      source = instance_run("[1].each { Obj.new.instance_eval { poke(acc) } }") + "class Obj\n  def poke(acc) = acc.size\nend\n"
+      source = <<~RUBY
+        #{instance_run('[1].each { Obj.new.instance_eval { poke(acc) } }')}
+        class Obj
+          def poke(acc) = acc.size
+        end
+      RUBY
       expect(errors(source)).to eq(undefined_upcase)
     end
 

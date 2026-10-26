@@ -1,6 +1,6 @@
 # sig-gen's project seed lands with its provenance moves and a +39 % run cost on lib/
 
-- **PR:** none
+- **PR:** [#2408](https://github.com/rigortype/rigor/pull/2408)
 - **Issue:** [#2300](https://github.com/rigortype/rigor/issues/2300)
 - **Class:** gate-row
 - **Precedent:** [ADR-107](../docs/adr/107-checked-types-and-typeless-comments.md)

@@ -53,7 +53,7 @@ RSpec.describe "the callee-chain census memo (#2104)" do
   end
 
   # Issue #2330 — the memo is keyed by the whole `DiscoveryIndex`, and the slot it fills is released when a run ends.
-  RSpec.describe "the callee-chain census memo's discovery key and lifetime (#2330)" do
+  describe "discovery key and lifetime (#2330)" do
     let(:caller_source) do
       <<~RUBY
         class Mut

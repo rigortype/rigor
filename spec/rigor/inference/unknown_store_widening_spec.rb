@@ -206,9 +206,17 @@ RSpec.describe Rigor::Inference::UnknownStoreWidening do
       end
 
       it "declines a path the straight-line widening cannot follow" do
-        # A `HashShape` slot: `ElementReadWidening` walks tuples only, on straight-line code too.
+        # A `HashShape` hop by position: `first` names a pair, not a value, so `ElementReadWidening` selects no key,
+        # on straight-line code too.
         seed = Rigor::Type::Combinator.hash_shape_of({ a: Rigor::Type::Combinator.tuple_of })
-        expect(described_class.widen(seed, sites_of("h = {}\n[1].each { |e| h[:a] << e }\n"))).to equal(seed)
+        expect(described_class.widen(seed, sites_of("h = {}\n[1].each { |e| h.first << e }\n"))).to equal(seed)
+      end
+
+      it "widens a HashShape value the path selects by its literal key" do
+        # Issue #2363: `ElementReadWidening` resolves a `HashShape` hop by key, as the straight-line site does.
+        seed = Rigor::Type::Combinator.hash_shape_of({ a: Rigor::Type::Combinator.tuple_of })
+        widened = described_class.widen(seed, sites_of("h = {}\n[1].each { |e| h[:a] << e }\n"))
+        expect(widened.describe).to eq("{ a: Array[Dynamic[top]] }")
       end
     end
 

@@ -144,14 +144,16 @@ RSpec.describe "Set mutation widening", type: :runner do
   describe "a set held inside a collection" do
     {
       "add through an iterator" => %(arr = [Set["a"]]\narr.each { |e| e.add(1) }\nputs 1 if arr.first.include?(1)),
-      "merge through an iterator" => %(arr = [Set["a"]]\narr.each { |e| e.merge([1]) }\nputs 1 if arr.first.include?(1)),
+      "merge through an iterator" =>
+        %(arr = [Set["a"]]\narr.each { |e| e.merge([1]) }\nputs 1 if arr.first.include?(1)),
       "subtract through an iterator" =>
         %(arr = [Set["a"]]\narr.each { |e| e.subtract(["a"]) }\nputs 1 if arr.first.include?("a")),
       "add through a nested iterator" =>
         %(nn = [[Set["a"]]]\nnn.each { |i| i.each { |s| s.add(1) } }\nputs 1 if nn.first.first.include?(1)),
       "add through a for loop" => %(arr = [Set["a"]]\nfor e in arr; e.add(1); end\nputs 1 if arr.first.include?(1)),
       "add on a hash value" => %(h = { k: Set["a"] }\nh[:k].add(1)\nputs 1 if h[:k].include?(1)),
-      "merge on a string-keyed hash value" => %(h = { "k" => Set["a"] }\nh["k"].merge([1])\nputs 1 if h["k"].include?(1)),
+      "merge on a string-keyed hash value" =>
+        %(h = { "k" => Set["a"] }\nh["k"].merge([1])\nputs 1 if h["k"].include?(1)),
       "subtract on a hash value" => %(h = { k: Set["a"] }\nh[:k].subtract(["a"])\nputs 1 if h[:k].include?("a"))
     }.each do |label, source|
       it "does not fold a membership test after #{label}" do

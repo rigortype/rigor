@@ -146,4 +146,146 @@ RSpec.describe "a loop body that mutates an element in place", type: :runner do
       RUBY
     end
   end
+
+  # Issue #2287 — the loop's receiver is a call that exposes a variable's own elements, or the body mutates an outer
+  # variable's element through an index chain.
+  describe "a receiver that exposes a variable's elements" do
+    it "does not fold a hash value appended to through `values.each`" do
+      expect(flow_rules(<<~RUBY)).to eq([])
+        h = { a: [1] }
+        h.values.each { |v| v << 2 }
+        puts(h[:a].size == 1 ? :y : :n)
+      RUBY
+    end
+
+    it "does not fold a hash value appended to by a for loop over `values`" do
+      expect(flow_rules(<<~RUBY)).to eq([])
+        h = { a: [1] }
+        for v in h.values; v << 2; end
+        puts(h[:a].size == 1 ? :y : :n)
+      RUBY
+    end
+
+    it "does not fold an element appended to through a shallow copy" do
+      expect(flow_rules(<<~RUBY)).to eq([])
+        a = [[1]]
+        a.dup.each { |x| x << 2 }
+        puts(a[0].size == 1 ? :y : :n)
+      RUBY
+    end
+
+    it "does not fold an element appended to through `each_with_index.map`" do
+      expect(flow_rules(<<~RUBY)).to eq([])
+        b = [[1]]
+        b.each_with_index.map { |x, i| x << i }
+        puts(b[0].size == 1 ? :y : :n)
+      RUBY
+    end
+
+    it "does not fold an element appended to through `each.with_index`" do
+      expect(flow_rules(<<~RUBY)).to eq([])
+        a = [[1]]
+        a.each.with_index { |x, i| x << i }
+        puts(a[0].size == 1 ? :y : :n)
+      RUBY
+    end
+
+    it "does not fold an element appended to through `each.with_index(1).map`" do
+      expect(flow_rules(<<~RUBY)).to eq([])
+        a = [[1]]
+        a.each.with_index(1).map { |x, i| x << i }
+        puts(a[0].size == 1 ? :y : :n)
+      RUBY
+    end
+
+    it "does not fold an element appended to through a `clone`" do
+      expect(flow_rules(<<~RUBY)).to eq([])
+        a = [[1]]
+        a.clone.each { |x| x << 2 }
+        puts(a[0].size == 1 ? :y : :n)
+      RUBY
+    end
+
+    it "does not fold an element appended to through `map.with_index`" do
+      expect(flow_rules(<<~RUBY)).to eq([])
+        a = [[1]]
+        a.map.with_index { |x, i| x << i }
+        puts(a[0].size == 1 ? :y : :n)
+      RUBY
+    end
+
+    it "does not fold a Set element a block over a shallow copy adds to" do
+      expect(flow_rules(<<~RUBY)).to eq([])
+        a = [Set[1]]
+        a.dup.each { |s| s.add(2) }
+        puts(a[0].size == 1 ? :y : :n)
+      RUBY
+    end
+
+    it "keeps the shape when a block-bearing call between them built new elements" do
+      expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+        a = [[1]]
+        a.map { |x| x.dup }.each { |y| y << 2 }
+        puts(a[0].size == 1 ? :y : :n)
+      RUBY
+    end
+
+    it "keeps the precise shape when the block over `values` only reads" do
+      expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+        h = { a: [1] }
+        h.values.map { |v| v.size }
+        puts(h[:a].size == 1 ? :y : :n)
+      RUBY
+    end
+
+    it "keeps the tuple when the block calls `Hash#merge`, which returns a new hash" do
+      expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+        a = [{ a: 1 }]
+        a.dup.each { |x| x.merge(b: 2) }
+        puts(a[0].size == 1 ? :y : :n)
+      RUBY
+    end
+  end
+
+  describe "an outer variable's element mutated through an index chain" do
+    it "does not fold an element a block appended to by a computed index" do
+      expect(flow_rules(<<~RUBY)).to eq([])
+        a = [[1]]
+        [0].each { |i| a[i] << 2 }
+        puts(a[0].size == 1 ? :y : :n)
+      RUBY
+    end
+
+    it "does not fold an element appended to under `loop`" do
+      expect(flow_rules(<<~RUBY)).to eq([])
+        a = [[1]]
+        loop { a[0] << 2; break }
+        puts(a[0].size == 1 ? :y : :n)
+      RUBY
+    end
+
+    it "keeps the outer arity, which mutating an element cannot change" do
+      expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+        a = [[1], [3]]
+        [0].each { |i| a[i] << 2 }
+        puts(a.size == 2 ? :y : :n)
+      RUBY
+    end
+
+    it "keeps the outer shape when the chain is rooted at a block parameter that shadows it" do
+      expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+        a = [[1]]
+        [[[5]]].each { |a| a[0] << 2 }
+        puts(a[0].size == 1 ? :y : :n)
+      RUBY
+    end
+
+    it "keeps the precise shape when the block only reads the element" do
+      expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+        a = [[1]]
+        [0].each { |i| a[i].size }
+        puts(a[0].size == 1 ? :y : :n)
+      RUBY
+    end
+  end
 end

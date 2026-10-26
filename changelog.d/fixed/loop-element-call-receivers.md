@@ -1,0 +1,3 @@
+- **[engine]** A loop that mutates its elements through a call such as `h.values`, `a.dup` or `a.each_with_index`, or a block that mutates an outer array's element by index, no longer leaves the original literal shape behind. ([#2395](https://github.com/rigortype/rigor/pull/2395))
+  - `h = { a: [1] }; h.values.each { |v| v << 2 }; puts 1 if h[:a].size == 1` and `a = [[1]]; [0].each { |i| a[i] << 2 }; puts 2 if a[0].size == 1` used to report the condition as always truthy; both are quiet now.
+  - A loop that only reads its elements keeps their precise shapes.

@@ -236,6 +236,9 @@ module Rigor
         receiver = call_node.receiver
         return scope if receiver.nil?
 
+        widened = widen_outer_element_read(call_node, scope)
+        return widened if widened
+
         ReceiverAlias.candidates(receiver).reduce(scope) do |acc, read|
           # A block-local read ({ReceiverAlias.block_local?}: a `depth == 0` local, or `it`) is not a
           # capture of the outer scope, so widening its name against the OUTER scope would hit an
@@ -248,6 +251,23 @@ module Rigor
           # straight-line paths have no such join, which is why their default is `:widen` (issue #560).
           widen_alias_read(call_node.name, read, acc, values: :keep)
         end
+      end
+
+      # Issue #2287 — a mutator on an element read rooted at a captured local (`[0].each { |i| a[i] << 2 }`,
+      # `loop { a[0] << 2; break }`) mutates an element the outer binding still carries, and names no variable
+      # {ReceiverAlias.candidates} could widen. The element at that path widens in the outer scope as the
+      # straight-line {ElementReadWidening.widen_element_read} widens it; a block-local root is skipped as a
+      # block-local read is. Answers the widened scope, or `nil` when the receiver is no such read or nothing widened.
+      def widen_outer_element_read(call_node, scope)
+        path = ElementReadWidening.element_read_path(call_node.receiver)
+        return nil if path.nil?
+
+        read, steps = path
+        return nil if ReceiverAlias.block_local?(read)
+
+        current = scope.local(read.name)
+        widened = current && ElementReadWidening.widen_through_path(current, steps, call_node.name, NO_ARG_TYPES)
+        widened && scope.with_mutated_local(read.name, widened)
       end
 
       # The arms per kind of binding differ only in which pair of `Scope` accessors they use, so they are read out

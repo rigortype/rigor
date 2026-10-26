@@ -85,10 +85,9 @@ module Rigor
         candidates(first, depth + 1) + candidates(second, depth + 1)
       end
 
-      # Calls whose result hands its caller the receiver's own element objects (issue #2287): `h.values` and
-      # `h.each_value` the hash's values, `a.dup` / `a.clone` a shallow copy sharing them, and the blockless
-      # enumerator spellings (`a.each`, `a.map`, `a.each_with_index`, `e.with_index`) the elements themselves.
-      ELEMENT_EXPOSING_CALLS = %i[values each_value dup clone each map each_with_index with_index].to_set.freeze
+      # Calls whose result hands its caller the receiver's own element objects (issue #2287): `h.values` the hash's values,
+      # `a.dup` / `a.clone` a shallow copy sharing them, and the blockless enumerator spellings (`a.each`, `a.map`, `a.each_with_index`, `e.with_index`) the elements themselves.
+      ELEMENT_EXPOSING_CALLS = %i[values dup clone each map each_with_index with_index].to_set.freeze
       private_constant :ELEMENT_EXPOSING_CALLS
 
       # The variables whose elements a loop over `receiver` is handed: {.candidates} of `receiver` once every

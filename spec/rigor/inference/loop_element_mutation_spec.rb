@@ -198,6 +198,22 @@ RSpec.describe "a loop body that mutates an element in place", type: :runner do
       RUBY
     end
 
+    it "does not fold an element appended to through a `clone`" do
+      expect(flow_rules(<<~RUBY)).to eq([])
+        a = [[1]]
+        a.clone.each { |x| x << 2 }
+        puts(a[0].size == 1 ? :y : :n)
+      RUBY
+    end
+
+    it "does not fold an element appended to through `map.with_index`" do
+      expect(flow_rules(<<~RUBY)).to eq([])
+        a = [[1]]
+        a.map.with_index { |x, i| x << i }
+        puts(a[0].size == 1 ? :y : :n)
+      RUBY
+    end
+
     it "does not fold a Set element a block over a shallow copy adds to" do
       expect(flow_rules(<<~RUBY)).to eq([])
         a = [Set[1]]

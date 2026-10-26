@@ -5,7 +5,7 @@ require "tmpdir"
 
 # Issue #2300 — `rigor sig-gen` keeps one user-method return memo for the whole run, as `rigor check` does since
 # ADR-84 WD2. Without a run-generation token the memo keyed on each file's merged `discovered_def_nodes`, a new
-# table per file, so the bucket was dropped at every file boundary.
+# table per file, so the bucket was dropped at every file boundary. The bucket is released when the run ends.
 RSpec.describe Rigor::SigGen::Generator do
   let(:tmpdir) { Dir.mktmpdir }
   let(:paths) do
@@ -39,12 +39,16 @@ RSpec.describe Rigor::SigGen::Generator do
     described_class.new(configuration: configuration, paths: paths)
   end
 
-  it "indexes every file of a run under one memo token, and a second run under a fresh one" do
-    tokens = []
+  def record_tokens(tokens)
     allow(Rigor::Inference::ScopeIndexer).to receive(:index).and_wrap_original do |original, root, **kwargs|
       tokens << kwargs.fetch(:default_scope).run_generation
       original.call(root, **kwargs)
     end
+  end
+
+  it "indexes every file of a run under one memo token, and a second run under a fresh one" do
+    tokens = []
+    record_tokens(tokens)
 
     generator(paths).run
     first_run = tokens.dup
@@ -58,18 +62,48 @@ RSpec.describe Rigor::SigGen::Generator do
     expect(tokens.first).not_to equal(first_run.first)
   end
 
-  it "keeps the first file's memo entries after the second file is analysed" do
+  it "mints a fresh token for every run of one generator" do
+    tokens = []
+    record_tokens(tokens)
+
+    same = generator(paths)
+    same.run
+    same.run
+
+    expect(tokens.size).to eq(4)
+    expect(tokens.first(2).uniq(&:object_id).size).to eq(1)
+    expect(tokens.last(2).uniq(&:object_id).size).to eq(1)
+    expect(tokens.last).not_to equal(tokens.first)
+  end
+
+  it "keeps the first file's memo entries after the second file is analysed, and releases them when the run ends" do
+    memo_at_release = nil
+    allow(Rigor::Inference::ExpressionTyper).to receive(:release_return_memo).and_wrap_original do |original, token|
+      memo_at_release = Rigor::Inference::ExpressionTyper.harvest_return_memo
+      original.call(token)
+    end
+
     candidates = generator(paths).run
 
-    memoised = Rigor::Inference::ExpressionTyper.harvest_return_memo.keys.map do |def_node|
-      [def_node.name, def_node.location.slice]
-    end
+    memoised = memo_at_release.keys.map { |def_node| [def_node.name, def_node.location.slice] }
     expect(memoised).to contain_exactly(
       [:helper, "def helper = [1, 2].map(&:to_s)"],
       [:helper, "def helper = { a: 1 }.keys"]
     )
+    expect(Rigor::Inference::ExpressionTyper.harvest_return_memo).to be_empty
     expect(candidates.map { |candidate| [candidate.class_name, candidate.method_name] }).to include(
       ["Alpha", :wrapped], ["Beta", :wrapped]
     )
+  end
+
+  it "leaves a memo bucket another run minted in place" do
+    other = Object.new.freeze
+    Thread.current[:__rigor_user_method_return_memo__] = [other, { marker: {} }.compare_by_identity]
+
+    Rigor::Inference::ExpressionTyper.release_return_memo(Object.new)
+
+    expect(Rigor::Inference::ExpressionTyper.harvest_return_memo.to_a).to eq([[:marker, []]])
+  ensure
+    Rigor::Inference::ExpressionTyper.release_return_memo(other)
   end
 end

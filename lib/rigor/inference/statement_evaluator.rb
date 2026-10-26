@@ -4579,22 +4579,22 @@ module Rigor
       # Issue #2297 — a call may resolve to more than one def ({#resolve_self_callees}); each channel floors through
       # every one of them before the next channel runs, so a bare-census mutation in any of them still goes first.
       #
-      # `only`, when given, keeps the argument reads it accepts and leaves the rest alone (see
-      # {#floor_block_callee_captures}).
-      def floor_callee_escaped_args_for_call(node, base_scope, only: nil)
+      # `climbing`, when given, keeps only the argument reads deeper than it: those that climb out of a block that
+      # many levels in ({#floor_block_callee_captures}).
+      def floor_callee_escaped_args_for_call(node, base_scope, climbing: nil)
         callees = argument_mutating_callees(node)
         return base_scope if callees.empty?
 
         acc = base_scope
         callees.each do |def_node, offset|
-          acc = floor_arguments(node, callee_content_mutated_parameters(def_node), acc, offset, only) do |type|
+          acc = floor_arguments(node, callee_content_mutated_parameters(def_node), acc, offset, climbing) do |type|
             content_floor_for(type)
           end
         end
         # Each closure below is only worth computing when an argument holds something its floor could widen.
         if floorable_local_argument?(node, acc) { |type| UnknownStoreWidening.callee_floorable?(type) }
           callees.each do |def_node, offset|
-            acc = floor_arguments(node, callee_block_mutated_parameters(def_node), acc, offset, only) do |type|
+            acc = floor_arguments(node, callee_block_mutated_parameters(def_node), acc, offset, climbing) do |type|
               UnknownStoreWidening.callee_block_floor(type)
             end
           end
@@ -4602,7 +4602,7 @@ module Rigor
         return acc unless floorable_local_argument?(node, acc) { |type| SetMutation.carrier_in?(type) }
 
         callees.each do |def_node, offset|
-          acc = floor_arguments(node, callee_set_mutated_parameters(def_node), acc, offset, only) do |type|
+          acc = floor_arguments(node, callee_set_mutated_parameters(def_node), acc, offset, climbing) do |type|
             UnknownStoreWidening.callee_set_floor(type)
           end
         end
@@ -4613,23 +4613,38 @@ module Rigor
       # self-call whose callee mutates it: `acc = [7, 9]; [1].each { poke(acc) }`. The body's own statement floor
       # rebinds `acc` only inside the block, and neither write-back reads it there (the rebind write-back follows
       # local writes, the content join follows mutator calls), so the continuation kept the literal and
-      # `acc[0].upcase` reported on correct code. Each self-call in the body floors here as at a statement, its
+      # `acc[0].upcase` reported on correct code.
+      #
+      # Every call the statement `node` makes before it returns is visited: `node` itself and the calls in its
+      # receiver chain and arguments (`[1].each { poke(acc) }.size`, `foo([1].each { poke(acc) })`), never inside a
+      # block or lambda of them. For each one with a `:non_escaping` block not run on another object
+      # ({#foreign_self_block?}), each self-call in the block floors as at a statement, by position or keyword, its
       # arguments limited to reads that climb out of the block: a block parameter or a nested block's parameter
-      # shadowing the outer name is not the outer local. A block that may run zero times floors too, as the escaping
-      # path ({#floor_block_body_callee_escaped_args}) does — the floor only forgets. A block run on another object
-      # (`instance_exec`) dispatches its self-calls there, so it is left alone.
-      def floor_block_callee_captures(call_node, post_scope)
-        block = call_node.block
-        return post_scope unless block.is_a?(Prism::BlockNode) && block.body
+      # shadowing the outer name is not the outer local. The body walk ({#each_node_in_method_scope}) leaves out a
+      # lambda and the block of a nested `instance_eval` / `define_method` / …, whose self-calls are not ours.
+      #
+      # Two readings are conservative, since the floor only forgets: a block that may run zero times floors, as the
+      # escaping path ({#floor_block_body_callee_escaped_args}) does, and the floor applies after the block's
+      # write-back, so a rebind later in the body (`poke(acc); acc = [1, 2]`) is floored too.
+      def floor_block_callee_captures(node, post_scope)
+        acc = post_scope
+        each_node_outside_nested_scopes(node) do |call|
+          next unless call.is_a?(Prism::CallNode) && call.block.is_a?(Prism::BlockNode) && call.block.body
+
+          acc = floor_block_body_callee_captures(call, acc)
+        end
+        acc
+      end
+
+      def floor_block_body_callee_captures(call_node, post_scope)
         return post_scope unless classify_closure_escape(call_node) == :non_escaping
         return post_scope if foreign_self_block?(call_node)
 
         acc = post_scope
-        Source::NodeWalker.each_with_ancestors(block.body) do |node, ancestors|
-          next unless CapturedLocals.callee_call?(node)
+        each_node_in_method_scope(call_node.block.body, 0) do |node, depth|
+          next unless node.is_a?(Prism::CallNode)
 
-          nesting = scope_nesting(ancestors)
-          acc = floor_callee_escaped_args_for_call(node, acc, only: ->(read) { read.depth > nesting })
+          acc = floor_callee_escaped_args_for_call(node, acc, climbing: depth)
         end
         acc
       end
@@ -4655,13 +4670,13 @@ module Rigor
 
       # `base_scope` with each local `node` passes to a parameter of `mutated` rebound to what the block answers for
       # its binding; a nil answer, or an answer equal to the binding, leaves it.
-      def floor_arguments(node, mutated, base_scope, offset, only = nil)
+      def floor_arguments(node, mutated, base_scope, offset, climbing = nil)
         arguments = arguments_for_slots(node, mutated, offset)
         return base_scope if arguments.empty?
 
         arguments.reduce(base_scope) do |acc, argument|
           next acc unless acc.locals.key?(argument.name)
-          next acc if only && !only.call(argument)
+          next acc if climbing && argument.depth <= climbing
 
           current = acc.local(argument.name)
           floored = yield(current)

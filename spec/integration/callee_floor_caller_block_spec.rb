@@ -26,6 +26,8 @@ RSpec.describe "a self-call in a caller's block floors the captured argument its
         end
 
         def poke(acc) = (acc[0] = "x")
+        def kpoke(acc:) = (acc[0] = "x")
+        def foo(x) = x
       end
     RUBY
   end
@@ -36,7 +38,14 @@ RSpec.describe "a self-call in a caller's block floors the captured argument its
     {
       "an each block" => "[1].each { poke(acc) }",
       "a block nested in a block" => "[1].each { [2].each { poke(acc) } }",
-      "a literal send hand-off" => "[1].each { send(:poke, acc) }"
+      "a literal send hand-off" => "[1].each { send(:poke, acc) }",
+      "a keyword argument" => "[1].each { kpoke(acc: acc) }",
+      "a keyword shorthand" => "[1].each { kpoke(acc:) }",
+      "a block on a receiver of the statement" => "[1].each { poke(acc) }.size",
+      "a block on a receiver of an assigned value" => "x = [1].each { poke(acc) }.size; foo(x)",
+      "a block on a receiver whose call has its own block" => "[1].each { poke(acc) }.then { 1 }",
+      "a then block on a chained receiver" => "1.then { poke(acc) }.to_s",
+      "a block on an argument" => "foo([1].each { poke(acc) })"
     }.each do |label, call|
       it label do
         expect(errors(instance_run(call))).to eq([])
@@ -76,6 +85,40 @@ RSpec.describe "a self-call in a caller's block floors the captured argument its
         expect(errors(instance_run(call))).to eq(undefined_upcase)
       end
     end
+
+    # `poke` inside `instance_eval` runs on the `Obj`, whose `poke` does not mutate.
+    it "a self-call in a nested block run on another object" do
+      source = instance_run("[1].each { Obj.new.instance_eval { poke(acc) } }") + "class Obj\n  def poke(acc) = acc.size\nend\n"
+      expect(errors(source)).to eq(undefined_upcase)
+    end
+
+    it "a lambda in the block that is never called" do
+      expect(errors(instance_run("[1].each { l = -> { poke(acc) }; foo(l) }"))).to eq(undefined_upcase)
+    end
+
+    it "a Set block parameter shadowing it" do
+      result = analyze(<<~RUBY)
+        require "set"
+        require "rigor/testing"
+        include Rigor::Testing
+        def addx(s) = s.add("x")
+        def run
+          s = Set[7]
+          [Set[1]].each { |s| addx(s) }
+          dump_type(s)
+        end
+      RUBY
+      dumps = result.diagnostics.filter_map do |d|
+        d.message.delete_prefix("dump_type: ") if d.message.start_with?("dump_type")
+      end
+      expect(dumps).to eq(["Set[7]"])
+    end
+  end
+
+  # Conservative by design: Ruby leaves `acc` at `[1, 2]`, so `upcase` raises on `1`. The floor applies after the
+  # block's write-back, so it forgets the rebind as well; it drops this report and adds none.
+  it "floors over a rebind later in the block (gives up a true positive)" do
+    expect(errors(instance_run("[1].each { poke(acc); acc = [1, 2] }"))).to eq([])
   end
 
   # The block-site floor answers what the statement-level floor answers for the same callee.

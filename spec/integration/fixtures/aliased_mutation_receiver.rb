@@ -74,10 +74,8 @@ shape = SchemaWalk.collect([[:required, :email, nil], [:optional, :tags, [[:requ
 # across the recursive edge stays open and `element_info`'s emptiness guard is
 # not statically decided.
 #
-# `declared` is a KNOWN, deliberate residual and marks the boundary of the fix:
-# `declared[kind] << key` mutates the array an INDEX READ returned, and an index
-# read names an object no binding can be attributed to, so the widening declines
-# rather than guessing which entry moved. It folds no condition here, so it is
-# not a false-positive source; tightening it would need element-level tracking
-# inside a `HashShape`, which is a separate feature.
-assert_type("{ required: Hash, optional: Hash, declared: { required: [], optional: [] } }", shape)
+# `declared[kind] << key` mutates the array an INDEX READ on a captured local
+# returned. Since issue #2287 the block's outer-mutation walk widens the element
+# that read reaches in `declared`'s `HashShape`; `kind` is no literal key, so
+# both values widen while the keys survive.
+assert_type("{ required: Hash, optional: Hash, declared: { required: Array[Dynamic[top]], optional: Array[Dynamic[top]] } }", shape)

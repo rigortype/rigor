@@ -2,6 +2,7 @@
 
 require "spec_helper"
 require "tmpdir"
+require "timeout"
 
 # ADR-116 WD3 (#1195) — every declared run-level fact, across every path that can produce it. Each path used to
 # copy the slots by hand, and the copies drifted (#1201: the sequential fallback once took three of the five
@@ -211,7 +212,7 @@ RSpec.describe Rigor::Analysis::Runner::RunLevelFacts do
         allow(Ractor).to receive(:new).and_wrap_original do |original, *args, &block|
           worker = original.call(*args, &block)
           begin
-            worker.join
+            Timeout.timeout(10) { worker.join }
           rescue Ractor::Error
             nil
           end

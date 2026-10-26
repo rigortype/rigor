@@ -1094,7 +1094,7 @@ module Rigor
 
         private
 
-        # `Ractor#send` to a worker whose port is already closed (it died before dispatch). The death is
+        # `Ractor#send` to a worker whose port is already closed (it died before this send, whether before dispatch or part-way through it). The death is
         # observed through the monitor notice, and the unsent file is re-analysed by the degrade.
         def send_to_worker(worker, message)
           worker.send(message)

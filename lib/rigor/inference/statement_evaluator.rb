@@ -3816,6 +3816,8 @@ module Rigor
         # the continuation collection so `out = [0]; arr.each { |x| out << x }` types `Array[0 | Integer]`, not
         # `Array[0]`. Same always-safe rationale (only widens).
         post_scope = content_writeback_block_captures(node, post_scope, seed_scope: pre_widen_scope)
+        # Issue #2397 — the same continuation for a captured local a self-call in the body hands to a mutating callee.
+        post_scope = floor_block_callee_captures(node, post_scope)
         # Indexed-collection narrowing — drop any `receiver[key] ||= default` narrowing the analyzer recorded earlier
         # when an intervening `[]=` writes the same slot or any other mutator runs against the receiver. Always-safe
         # (only forgets; never invents).
@@ -4577,20 +4579,23 @@ module Rigor
       #
       # Issue #2297 — a call may resolve to more than one def ({#resolve_self_callees}); each channel floors through
       # every one of them before the next channel runs, so a bare-census mutation in any of them still goes first.
-      def floor_callee_escaped_args_for_call(node, base_scope)
+      #
+      # `only`, when given, keeps the argument reads it accepts and leaves the rest alone (see
+      # {#floor_block_callee_captures}).
+      def floor_callee_escaped_args_for_call(node, base_scope, only: nil)
         callees = argument_mutating_callees(node)
         return base_scope if callees.empty?
 
         acc = base_scope
         callees.each do |def_node, offset|
-          acc = floor_arguments(node, callee_content_mutated_parameters(def_node), acc, offset) do |type|
+          acc = floor_arguments(node, callee_content_mutated_parameters(def_node), acc, offset, only) do |type|
             content_floor_for(type)
           end
         end
         # Each closure below is only worth computing when an argument holds something its floor could widen.
         if floorable_local_argument?(node, acc) { |type| UnknownStoreWidening.callee_floorable?(type) }
           callees.each do |def_node, offset|
-            acc = floor_arguments(node, callee_block_mutated_parameters(def_node), acc, offset) do |type|
+            acc = floor_arguments(node, callee_block_mutated_parameters(def_node), acc, offset, only) do |type|
               UnknownStoreWidening.callee_block_floor(type)
             end
           end
@@ -4598,9 +4603,34 @@ module Rigor
         return acc unless floorable_local_argument?(node, acc) { |type| SetMutation.carrier_in?(type) }
 
         callees.each do |def_node, offset|
-          acc = floor_arguments(node, callee_set_mutated_parameters(def_node), acc, offset) do |type|
+          acc = floor_arguments(node, callee_set_mutated_parameters(def_node), acc, offset, only) do |type|
             UnknownStoreWidening.callee_set_floor(type)
           end
+        end
+        acc
+      end
+
+      # Issue #2397 — the continuation of a `:non_escaping` block whose body hands a captured outer local to a
+      # self-call whose callee mutates it: `acc = [7, 9]; [1].each { poke(acc) }`. The body's own statement floor
+      # rebinds `acc` only inside the block, and neither write-back reads it there (the rebind write-back follows
+      # local writes, the content join follows mutator calls), so the continuation kept the literal and
+      # `acc[0].upcase` reported on correct code. Each self-call in the body floors here as at a statement, its
+      # arguments limited to reads that climb out of the block: a block parameter or a nested block's parameter
+      # shadowing the outer name is not the outer local. A block that may run zero times floors too, as the escaping
+      # path ({#floor_block_body_callee_escaped_args}) does — the floor only forgets. A block run on another object
+      # (`instance_exec`) dispatches its self-calls there, so it is left alone.
+      def floor_block_callee_captures(call_node, post_scope)
+        block = call_node.block
+        return post_scope unless block.is_a?(Prism::BlockNode) && block.body
+        return post_scope unless classify_closure_escape(call_node) == :non_escaping
+        return post_scope if foreign_self_block?(call_node)
+
+        acc = post_scope
+        Source::NodeWalker.each_with_ancestors(block.body) do |node, ancestors|
+          next unless CapturedLocals.callee_call?(node)
+
+          nesting = scope_nesting(ancestors)
+          acc = floor_callee_escaped_args_for_call(node, acc, only: ->(read) { read.depth > nesting })
         end
         acc
       end
@@ -4626,12 +4656,13 @@ module Rigor
 
       # `base_scope` with each local `node` passes to a parameter of `mutated` rebound to what the block answers for
       # its binding; a nil answer, or an answer equal to the binding, leaves it.
-      def floor_arguments(node, mutated, base_scope, offset)
+      def floor_arguments(node, mutated, base_scope, offset, only = nil)
         arguments = arguments_for_slots(node, mutated, offset)
         return base_scope if arguments.empty?
 
         arguments.reduce(base_scope) do |acc, argument|
           next acc unless acc.locals.key?(argument.name)
+          next acc if only && !only.call(argument)
 
           current = acc.local(argument.name)
           floored = yield(current)

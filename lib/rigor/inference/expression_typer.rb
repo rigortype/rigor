@@ -3074,8 +3074,9 @@ module Rigor
       # the singleton index.
       #
       # DELIBERATELY not keyed on the whole {Scope::DiscoveryIndex}, unlike {#class_graph_buckets} and
-      # {#override_gate_buckets} above. {#build_method_definers_index} reads the ONE table it is handed and
-      # nothing else, so the def tables are already the complete key, and the index object is a strictly
+      # {#override_gate_buckets} above. {DefinersIndex.for} reads the ONE table it is handed, and the seed that
+      # table was merged over, and nothing else, so the def tables are already the complete key, and the index
+      # object is a strictly
       # narrower one: the project-seed scope carries a fresh index per file while its def tables stay the
       # same object. Over the 200 synthetic files above, an index-keyed memo misses all 400 times where a
       # def-table-keyed one misses 201 — it would rebuild the seed's 934-entry table once per file and hand
@@ -3093,17 +3094,7 @@ module Rigor
           Thread.current[METHOD_DEFINERS_INDEX_KEY] = way
         end
         singleton = kind == :singleton
-        way[singleton ? 3 : 2] ||= build_method_definers_index(singleton ? singleton_def_nodes : def_nodes)
-      end
-
-      def build_method_definers_index(table)
-        index = {}
-        table.each do |class_name, methods|
-          next if class_name == Inference::ScopeIndexer::TOP_LEVEL_DEF_KEY
-
-          methods.each_key { |method_name| (index[method_name] ||= []) << class_name }
-        end
-        index
+        way[singleton ? 3 : 2] ||= DefinersIndex.for(singleton ? singleton_def_nodes : def_nodes)
       end
 
       # True when `candidate`'s ancestor chain (superclasses + included/prepended modules) reaches `owner` —

@@ -175,7 +175,7 @@ RSpec.describe "override-gate memo storage" do
     end
   end
 
-  # The definers memo is keyed the other way round on purpose: `#build_method_definers_index` reads the
+  # The definers memo is keyed the other way round on purpose: `DefinersIndex.for` reads the
   # one table it is handed, so the def tables are the complete key AND a narrower one than the index
   # object, which the project-seed scope replaces per file while its def tables stay put. Widening this
   # key to the `DiscoveryIndex` would rebuild the seed's table once per file.

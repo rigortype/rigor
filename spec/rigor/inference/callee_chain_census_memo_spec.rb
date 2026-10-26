@@ -65,7 +65,7 @@ RSpec.describe "the callee-chain census memo (#2104)" do
       RUBY
     end
     let(:seed_source) { "class Mut\n  def stripes(acc) = acc << 1\nend\n" }
-    let(:override_source) { "class Mut\n  def stripes(acc) = 1\nend\n" }
+    let(:override_source) { "class Mut\n  def stripes(acc) = 1\n  def self.helper = 1\nend\n" }
 
     def seed_scope
       program = Prism.parse(seed_source).value
@@ -116,7 +116,8 @@ RSpec.describe "the callee-chain census memo (#2104)" do
     it "does not keep a discovery alive through the memo it filled, whichever entry point filled it" do
       probe = lambda do
         scope, call = per_file(caller_source)
-        derived = scope.with_discovery(scope.discovery.with(discovered_superclasses: scope.discovery.discovered_superclasses.dup))
+        supers = scope.discovery.discovered_superclasses.dup
+        derived = scope.with_discovery(scope.discovery.with(discovered_superclasses: supers))
         Rigor::Inference::StatementEvaluator.new(scope: derived).content_mutated_arguments(call)
         WeakRef.new(derived.discovery)
       end
@@ -129,7 +130,7 @@ RSpec.describe "the callee-chain census memo (#2104)" do
       end
       5.times { GC.start }
 
-      expect(ref.weakref_alive?).to be_falsey
+      expect(ref).not_to be_weakref_alive
     end
 
     it "freezes the per-file def table and its per-class tables" do
@@ -137,6 +138,8 @@ RSpec.describe "the callee-chain census memo (#2104)" do
 
       expect(scope.discovered_def_nodes).to be_frozen
       expect(scope.discovered_def_nodes.values).to all(be_frozen)
+      expect(scope.discovered_singleton_def_nodes).to be_frozen
+      expect(scope.discovered_singleton_def_nodes.values).to all(be_frozen)
     end
 
     it "empties the thread slot when a run ends" do

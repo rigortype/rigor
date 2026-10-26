@@ -307,15 +307,16 @@ module Rigor
         siblings = per_file_siblings(seeded_scope.discovery.sibling_tables, file_tables[0], file_tables[2],
                                      file_singleton, file_visibilities)
         extends, methods_table, unpositioned =
-          merge_and_fold_extends(default_scope, root, def_nodes, singleton_def_nodes, seeded_scope, siblings,
+          merge_and_fold_extends(default_scope, root, [def_nodes, file_tables[0]],
+                                 [singleton_def_nodes, file_singleton.first], seeded_scope, siblings,
                                  mixin_unpositioned)
 
         seeded_scope.with_discovery(
           seeded_scope.discovery.with(
             discovered_methods: methods_table,
-            discovered_def_nodes: freeze_def_table(def_nodes, file_tables[0]),
+            discovered_def_nodes: def_nodes,
             discovered_def_nestings: def_nestings,
-            discovered_singleton_def_nodes: freeze_def_table(singleton_def_nodes, file_singleton.first),
+            discovered_singleton_def_nodes: singleton_def_nodes,
             discovered_superclasses: superclasses,
             discovered_header_nestings: header_nestings,
             discovered_includes: includes,
@@ -422,13 +423,18 @@ module Rigor
       # ADR-119 WD1 — the unpositioned union (the seed's, the mixin walks' and this file's extend side) is settled
       # first, because the fold reads it to tell a certain extend edge from a listed one. `siblings` is written by
       # the fold.
-      def merge_and_fold_extends(default_scope, root, def_nodes, singleton_def_nodes, seeded_scope, siblings,
+      # `def_pair` and `singleton_pair` are `[merged table, this file's own table]`; the merged tables are frozen once the
+      # fold, their last in-place writer, is done ({#freeze_def_tables}).
+      def merge_and_fold_extends(default_scope, root, def_pair, singleton_pair, seeded_scope, siblings,
                                  mixin_unpositioned)
+        def_nodes = def_pair.first
+        singleton_def_nodes = singleton_pair.first
         file_extends, extends, extend_unpositioned = merge_extend_tables(default_scope, root)
         unpositioned = union_unpositioned(default_scope.discovery.unpositioned_mixins, *mixin_unpositioned,
                                           extend_unpositioned)
         methods_table = fold_per_file_extends(file_extends, def_nodes, singleton_def_nodes, seeded_scope, siblings,
                                               unpositioned)
+        freeze_def_tables(def_pair, singleton_pair)
         [extends, methods_table, unpositioned]
       end
 
@@ -466,9 +472,11 @@ module Rigor
       # Only the per-class hashes of the classes this file declares are frozen here (the merge made or took
       # them); a seed-only class's hash was frozen by `finalize_def_index`, so walking the whole table per file is
       # needless.
-      def freeze_def_table(table, file_table)
-        file_table.each_key { |owner| table[owner].freeze }
-        table.freeze
+      def freeze_def_tables(*pairs)
+        pairs.each do |table, file_table|
+          file_table.each_key { |owner| table[owner].freeze }
+          table.freeze
+        end
       end
 
       # The instance-side def-node table and its issue #681 nesting twin, each merged over the cross-file seed.

@@ -712,8 +712,11 @@ module Rigor
           # Ractor's default port, which is the same mailbox the workers push their results to.
           pool.each { |worker| worker.monitor(Ractor.current.default_port) }
 
-          files.each_with_index { |path, index| pool[index % pool.size].send(path) }
-          pool.each { |worker| worker.send(nil) }
+          # A worker that died before its turn has a closed port: `Ractor#send` raises `Ractor::ClosedError`.
+          # That is the same death the monitor loop below counts, so it is not a failure of the run — the
+          # file simply never reports and lands in the degrade, like any file a dead worker never answered.
+          files.each_with_index { |path, index| send_to_worker(pool[index % pool.size], path) }
+          pool.each { |worker| send_to_worker(worker, nil) }
 
           prepare_diagnostics = nil
           prepare_refusals = nil
@@ -1090,6 +1093,14 @@ module Rigor
         end
 
         private
+
+        # `Ractor#send` to a worker whose port is already closed (it died before dispatch). The death is
+        # observed through the monitor notice, and the unsent file is re-analysed by the degrade.
+        def send_to_worker(worker, message)
+          worker.send(message)
+        rescue Ractor::ClosedError
+          nil
+        end
 
         def reporters
           { rbs_extended: @rbs_extended_reporter, boundary_cross: @boundary_cross_reporter,

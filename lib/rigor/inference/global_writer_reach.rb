@@ -31,14 +31,13 @@ module Rigor
     # The search reads method names, not receivers: from the node it follows every call, by name, into every project
     # `def` of that name on any class, transitively, and reaches a writer when it meets a call named after one. A
     # call naming its method by a computed value (`send(name)`, `eval(code)`) reaches. A name no project `def` defines
-    # follows `method_missing`. A `define_method` method that calls a writer is not followed (only its own writes
-    # count), and an implicit conversion a core method runs (`puts obj` runs `obj.to_s`) is read as the core method
-    # alone, as {GuardRebinding} reads it.
+    # follows `method_missing`, `new` follows `initialize`, and an alias name (`alias`, `alias_method`, a
+    # `def_delegator` alias) follows the name it stands for. A nested `def` is not read, since defining a method runs
+    # nothing. Past {Search::DEF_BUDGET} bodies the search answers that it reaches. A `define_method` method that calls
+    # a writer is not followed (only its own writes count), and a method core code calls back without the program
+    # spelling it (`puts obj` runs `obj.to_s`) is read as the core method alone, as {GuardRebinding} reads it.
     module GlobalWriterReach
-      # The globals that are not program-wide: a method's write to one is its own frame's.
-      FRAME_LOCAL = %i[$_ $~].to_set.freeze
       EMPTY = Set.new.freeze
-      private_constant :FRAME_LOCAL
 
       module_function
 
@@ -48,21 +47,19 @@ module Rigor
         table = writer_table(scope)
         globals = scope.globals
         if Analysis::DependencyRecorder.active?
-          globals.each_key { |name| record_writers(name) unless FRAME_LOCAL.include?(name) }
+          globals.each_key { |name| record_writers(name) }
         end
         return EMPTY if table.empty? || globals.empty?
 
         table.each_key.select do |name|
           type = globals[name]
-          !type.nil? && !type.is_a?(Type::Dynamic) && !FRAME_LOCAL.include?(name)
+          !type.nil? && !type.is_a?(Type::Dynamic)
         end
       end
 
       # True when running `node`, typed in `scope`, may reach a project method that writes `name` (see the module
       # comment).
       def may_write?(node, name, scope)
-        return false if FRAME_LOCAL.include?(name)
-
         writers = writers(scope, name)
         return false if writers.empty?
         return false unless GuardRebinding.may_rebind?(node, scope)
@@ -82,21 +79,32 @@ module Rigor
         Analysis::DependencyRecorder.read_name(:global_census, "global_writer:#{name}")
       end
 
-      # `{ global => Set[method name or nil] }` over the project's census and the `pre_eval:` files' own, kept for the
-      # census objects it was built from.
-      def writer_table(scope)
+      # `{ global => Set[method name or nil] }` over the project's census and the `pre_eval:` files' own.
+      def writer_table(scope) = census_tables(scope).first
+
+      # `{ alias name => Set[the method names it stands for] }`: an `alias`, an `alias_method` or a `def_delegator`
+      # with a literal alias name, from the same census.
+      def alias_table(scope) = census_tables(scope).last
+
+      # The two tables above, kept for the census objects they were built from.
+      def census_tables(scope)
         census = scope.discovered_global_write_census
         pre_eval = scope.environment&.project_patched_methods&.write_census
-        cached = @writer_table
+        cached = @census_tables
         return cached[2] if cached && cached[0].equal?(census) && cached[1].equal?(pre_eval)
 
-        table = {}
+        tables = [{}, {}]
         [census, pre_eval].each do |entries|
-          entries&.each { |entry| (table[entry[1]] ||= Set.new) << entry[2] if entry[0] == :global_writer }
+          entries&.each do |kind, key, value|
+            case kind
+            when :global_writer then (tables[0][key] ||= Set.new) << value
+            when :method_alias then (tables[1][key] ||= Set.new) << value
+            end
+          end
         end
-        table.each_value(&:freeze)
-        @writer_table = [census, pre_eval, table.freeze]
-        table
+        tables.each { |table| table.each_value(&:freeze).freeze }
+        @census_tables = [census, pre_eval, tables.freeze]
+        tables
       end
 
       # True when `node` is a call whose receiver no target resolves: the method it runs may be any.
@@ -143,6 +151,8 @@ module Rigor
         def initialize(scope, writers)
           @scope = scope
           @writers = writers
+          @aliases = GlobalWriterReach.alias_table(scope)
+          @recording = Analysis::DependencyRecorder.active?
           @seen = Set.new
           @queue = []
           @read = 0
@@ -194,6 +204,8 @@ module Rigor
 
         def scan_call(node)
           enqueue(node.name)
+          # `new` runs the class's `initialize`.
+          enqueue(:initialize) if node.name == :new
           arguments = node.arguments&.arguments || []
           if SEND_CALLS.include?(node.name)
             name = literal_name(arguments.first)
@@ -222,6 +234,9 @@ module Rigor
           reached! if @writers.include?(name)
           @seen << name
           @queue << name
+          # An alias runs the method it names.
+          Analysis::DependencyRecorder.read_name(:global_census, "method_alias:#{name}") if @recording
+          @aliases[name]&.each { |original| enqueue(original) }
         end
 
         def literal_name(node)

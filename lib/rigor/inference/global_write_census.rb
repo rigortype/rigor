@@ -33,7 +33,10 @@ module Rigor
     # - `[:global_writer, name, method]` — issue #2314: a write of the global `name` inside a method body, keyed by
     #   the `def`'s name (or the literal name a `define_method` block defines), or by nil inside a lambda or a block
     #   its call keeps to run later ({StoredBlockCall}). A write in a block its call runs at once belongs to the
-    #   enclosing body. A write at the top level or in a class body records nothing. {GlobalWriterReach} reads these.
+    #   enclosing body. A write at the top level or in a class body records nothing, and neither does a write of
+    #   the frame-local `$_` or `$~`. {GlobalWriterReach} reads these.
+    # - `[:method_alias, new, old]` — issue #2314: `alias new old`, `alias_method :new, :old` or `def_delegator
+    #   :@o, :old, :new`, whose new name runs a method named old. {GlobalWriterReach} follows it.
     #
     # The census is a `Set` of those frozen entries, merged by union across files, the project pre-pass and the
     # `pre_eval:` files. It is recorded inside descents that already visit every node ({Collector#visit}), never
@@ -174,14 +177,23 @@ module Rigor
           case node
           when Prism::DefNode then open_body(node, node.name)
           when Prism::LambdaNode then open_body(node, nil)
-          when Prism::CallNode then open_stored_block(node)
+          when Prism::AliasMethodNode then record_method_alias(node.new_name, node.old_name)
+          when Prism::CallNode
+            open_stored_block(node)
+            visit_alias_call(node)
           when Prism::GlobalVariableWriteNode, Prism::GlobalVariableOrWriteNode, Prism::GlobalVariableAndWriteNode,
                Prism::GlobalVariableOperatorWriteNode, Prism::GlobalVariableTargetNode
             record_global_writer(node)
           end
         end
 
+        # `$_` and `$~` are the frame's own: a method's write to one never reaches its caller.
+        FRAME_LOCAL_GLOBALS = %i[$_ $~].freeze
+        private_constant :FRAME_LOCAL_GLOBALS
+
         def record_global_writer(node)
+          return if FRAME_LOCAL_GLOBALS.include?(node.name)
+
           start = node.location.start_offset
           bodies = @bodies
           bodies.pop(3) while !bodies.empty? && bodies[-2] <= start
@@ -193,6 +205,23 @@ module Rigor
         def open_body(node, label)
           location = node.location
           @bodies.push(location.start_offset, location.end_offset, label)
+        end
+
+        # `alias_method :new, :old`, and `def_delegator :@o, :old, :new` (and its instance and single spellings), whose
+        # new name runs a method of the old name.
+        def visit_alias_call(node)
+          arguments = node.arguments&.arguments
+          case node.name
+          when :alias_method then record_method_alias(arguments[0], arguments[1]) if arguments&.size == 2
+          when :def_delegator, :def_instance_delegator, :def_single_delegator
+            record_method_alias(arguments[2], arguments[1]) if arguments&.size == 3
+          end
+        end
+
+        def record_method_alias(new_node, old_node)
+          new_name = literal_name(new_node)
+          old_name = literal_name(old_node)
+          @census << [:method_alias, new_name, old_name].freeze if new_name && old_name && new_name != old_name
         end
 
         def open_stored_block(node)

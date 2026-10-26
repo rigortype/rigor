@@ -1,0 +1,3 @@
+- **[inference]** Inside a class method (`def self.run`, or a `def` in `class << self`), a collection passed to another class method that changes it no longer keeps its literal type after the call, so reading it no longer reports a false `undefined method`. ([#2394](https://github.com/rigortype/rigor/pull/2394))
+  - The called class method is now checked as well as an instance method of the same name, and the collection is widened when either one changes it.
+  - `send(:name, ...)` and `public_send(:name, ...)` with a symbol literal are followed like a direct call to `name`, unless the class defines its own `send` or `public_send`.

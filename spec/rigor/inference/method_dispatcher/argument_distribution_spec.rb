@@ -127,12 +127,21 @@ RSpec.describe "Union and supertype arguments in overload selection (#2379)", ty
   # One union argument selects per member however many it has, through the selector itself: the first matching
   # overload wins (`(Integer) -> nil` after `(Integer) -> Integer` is never taken, nor `(Integer)` after `(Numeric)`),
   # and the alias pass still reads `(int)`.
-  it "selects per member of one union argument past eight members, by the selector's own rules" do
+  it "selects per member of one union argument past eight members" do
     expect(dumped(24)).to eq("dump_type: :i | :s")
+  end
+
+  it "never takes an overload an earlier one shadows for every member" do
     expect(dumped(27)).to eq("dump_type: Integer | String")
-    expect(dumped(28)).to eq("dump_type: :num | :str")
-    expect(dumped(29)).to eq("dump_type: :int | :range")
     expect(result.diagnostics.map(&:rule)).not_to include("call.possible-nil-receiver")
+  end
+
+  it "takes the first matching overload, not a later one a member also matches" do
+    expect(dumped(28)).to eq("dump_type: :num | :str")
+  end
+
+  it "keeps the alias pass for a member of a long union" do
+    expect(dumped(29)).to eq("dump_type: :int | :range")
   end
 
   # A member no overload takes keeps the first-overload fallback, with or without eight members to spare.

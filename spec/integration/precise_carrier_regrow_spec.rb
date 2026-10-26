@@ -140,6 +140,12 @@ RSpec.describe "Precise carrier re-grow (issue #2361)", type: :runner do
     end
   end
 
+  # A store the element accepts changes nothing; joining it would only add the store's shape-erased class.
+  it "keeps a Tuple element a store it already covers" do
+    source = "s = ARGV.map { |v| [v.size, v.size] }\ns << [2, 3]\ndump_type(s)"
+    expect(dumped(source)).to eq(["Array[[non-negative-int, non-negative-int]]"])
+  end
+
   describe "receivers whose behaviour is unchanged" do
     it "keeps a Tuple's seed-admissibility floor" do
       expect(dumped("l = [1, 2]\nl << \"a\"\ndump_type(l)")).to eq(["Array[1 | 2 | Dynamic[top]]"])

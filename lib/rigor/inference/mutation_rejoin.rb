@@ -171,14 +171,35 @@ module Rigor
         rejoined == nominal ? nil : rejoined
       end
 
-      # True when every member `stored` puts in is already a member of the precise element `element`, so the store
-      # changes nothing: `s = ints.map { "x" }; s << "x"` keeps `Array["x"]` and its `s.last == "x"` fold, which
-      # is correct. Joining the value-pin-widened `String` instead would only lose precision.
+      # True when the precise element `element` already covers every type `stored` puts in, so the store changes
+      # nothing: `s = ints.map { "x" }; s << "x"` keeps `Array["x"]` and its `s.last == "x"` fold, which is correct,
+      # and a `[Integer, Integer]` pushed onto an `Array[[0 | Integer, Integer]]` keeps the Tuple element. Joining
+      # the value-pin-widened, shape-erased store instead would only lose precision.
+      #
+      # A stored type carrying `Dynamic` anywhere is never covered, though `Acceptance` passes it gradually: keeping
+      # the element would claim the unknown part is what the element says (`retry_binding_accepted?`'s rule).
       def already_held?(element, stored)
         return false if stored.empty?
 
         held = ContentJoin.union_members(element)
-        stored.all? { |type| type && ContentJoin.union_members(type).all? { |member| held.include?(member) } }
+        stored.all? do |type|
+          next false if type.nil? || carries_dynamic?(type)
+
+          ContentJoin.union_members(type).all? { |member| held.include?(member) } ||
+            Acceptance.accepts(element, type).yes?
+        end
+      end
+
+      def carries_dynamic?(type)
+        case type
+        when Type::Dynamic then true
+        when Type::Union, Type::Intersection then type.members.any? { |member| carries_dynamic?(member) }
+        when Type::Nominal then type.type_args.any? { |arg| carries_dynamic?(arg) }
+        when Type::Tuple then type.elements.any? { |element| carries_dynamic?(element) }
+        when Type::HashShape then type.pairs.each_value.any? { |value| carries_dynamic?(value) }
+        when Type::Difference, Type::Refined then carries_dynamic?(type.base)
+        else false
+        end
       end
 
       # The value-rewriting counterpart of {MutationWidening.widen_tuple}'s `values: :widen`. A mutator that lands a

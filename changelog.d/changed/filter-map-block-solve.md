@@ -1,0 +1,3 @@
+- **[inference]** `filter_map` now types its result from the block, so `refs.filter_map { |r| r.to_s if r }` over `Array[Symbol]` is `Array[String]` instead of `Array[untyped]`. ([#2421](https://github.com/rigortype/rigor/pull/2421))
+  - The element is the block's type without `nil` and `false`, so a block answering `bool` gives `Array[true]`, and an untyped block still gives `Array[untyped]`.
+  - A method that returns such a value is no longer skipped by `rigor sig-gen`.

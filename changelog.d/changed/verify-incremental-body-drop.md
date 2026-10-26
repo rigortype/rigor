@@ -1,0 +1,2 @@
+- **[cli]** `rigor check --verify-incremental-edits=N` now also replays up to two copies of each sampled file with one class or module body statement removed, visibility calls such as `private` and `module_function` first, so an invalidation edge that only a body-keeping edit exercises is tested. ([#2387](https://github.com/rigortype/rigor/pull/2387))
+  - Each sampled file now costs up to four replays instead of two; the run takes longer in proportion.

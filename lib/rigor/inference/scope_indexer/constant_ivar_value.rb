@@ -2,7 +2,6 @@
 
 require "prism"
 
-require_relative "../../source/constant_path"
 require_relative "../../source/node_walker"
 
 module Rigor
@@ -18,8 +17,8 @@ module Rigor
       # scope, merged over the scope's project seed, a mutated literal widened), and resolved through the ordinary
       # constant lookup. {#type_of} answers nil, leaving the write's ordinary typing, when:
       #
-      # - the value is not a constant read whose every segment is a constant (`LIT`, `A::LIT`, `::LIT`; not
-      #   `self.class::LIT`);
+      # - the value is not a constant read (`LIT`, `A::LIT`, `::LIT`); a path over anything else (`self.class::LIT`)
+      #   resolves to nothing, as it does in a method body;
       # - the file may rebind a constant of that last segment: a second write in any form, an operator, `||=` or `&&=`
       #   write, a multiple-assignment target, or a `const_set` / `remove_const` naming it — or naming anything but a
       #   literal, which may be it.
@@ -43,7 +42,6 @@ module Rigor
         # The type `value` reads under the file's constant table, or nil when the write keeps its ordinary typing.
         def type_of(value, scope)
           return nil unless value.is_a?(Prism::ConstantReadNode) || value.is_a?(Prism::ConstantPathNode)
-          return nil if Source::ConstantPath.qualified_name_or_nil(value).nil?
           return nil if rebound?(value.name)
 
           scope.with_discovery(scope.discovery.with(in_source_constants: constants)).type_of(value)

@@ -12,9 +12,9 @@ require "rigor/configuration"
 # A write whose value is a constant read now takes the type the constant's write binds, unless the file may rebind
 # that constant (`ScopeIndexer::ConstantIvarValue`).
 RSpec.describe "the ADR-58 ivar census types a write from an in-source constant (#2291)" do
-  def census(source, class_name, ivar)
+  def census(source, class_name, ivar, scope: Rigor::Scope.empty)
     program = Prism.parse(source).value
-    index = Rigor::Inference::ScopeIndexer.index(program, default_scope: Rigor::Scope.empty)
+    index = Rigor::Inference::ScopeIndexer.index(program, default_scope: scope)
     index[program].class_ivars_for(class_name)[ivar]&.describe
   end
 
@@ -35,6 +35,16 @@ RSpec.describe "the ADR-58 ivar census types a write from an in-source constant 
       source = "module M\nX = 1\nend\nclass K\ndef initialize = @x = M::X\nend\n"
 
       expect(census(source, "K", :@x)).to eq("1")
+    end
+
+    it "keeps resolving a constant the scope's project seed carries" do
+      empty = Rigor::Scope.empty
+      seeded = empty.with_discovery(
+        empty.discovery.with(in_source_constants: { "OTHER" => Rigor::Type::Combinator.constant_of(7) })
+      )
+      source = "class K\nOWN = 1\ndef initialize = @x = OTHER\nend\n"
+
+      expect(census(source, "K", :@x, scope: seeded)).to eq("7")
     end
 
     it "takes a constant a sibling method mutates as the widened type a method body reads" do
@@ -70,6 +80,7 @@ RSpec.describe "the ADR-58 ivar census types a write from an in-source constant 
       expect(k_census("LIT = 1\ndef self.set(n) = const_set(n, 2)\ndef initialize = @x = LIT")).to eq("Dynamic[top]")
     end
 
+    # Guard: such a path resolves to nothing under the constant table too.
     it "declines a constant path whose base is not a constant" do
       expect(k_census("LIT = 1\ndef initialize = @x = self.class::LIT")).to eq("Dynamic[top]")
     end

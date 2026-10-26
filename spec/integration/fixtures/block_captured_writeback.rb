@@ -249,6 +249,41 @@ def ewo_escapes
   assert_type(":stop | Array[1 | 2]", broken)
 end
 
+# A self-call whose value carries the memo out (`keep` returns it, `wrap`
+# holds it) and a reflective store (`send`, `public_send`) store what no scan
+# sees, so each answers the floor. Ruby stores the "v" / "t" in every case.
+def ewo_keep(hash) = hash
+def ewo_wrap(hash) = [hash]
+
+def ewo_carried_out
+  kept = [1].each_with_object({}) do |_x, h|
+    g = ewo_keep(h)
+    g["s"] = "v"
+    h[:a] = 1
+  end
+  assert_type("Hash[Dynamic[top], Dynamic[top]]", kept)
+  kept_index = [1].each_with_object({}) do |_x, h|
+    ewo_keep(h)["s"] = "v"
+    h[:a] = 1
+  end
+  assert_type("Hash[Dynamic[top], Dynamic[top]]", kept_index)
+  wrapped = [1].each_with_object({}) do |_x, h|
+    ewo_wrap(h).first["s"] = "v"
+    h[:a] = 1
+  end
+  assert_type("Hash[Dynamic[top], Dynamic[top]]", wrapped)
+  sent = [1].each_with_object({}) do |_x, h|
+    h.send(:store, :t, "t")
+    h[:a] = 1
+  end
+  assert_type("Hash[Dynamic[top], Dynamic[top]]", sent)
+  public_sent = [1].each_with_object({}) do |_x, h|
+    h.public_send(:[]=, :t, "t")
+    h[:a] = 1
+  end
+  assert_type("Hash[Dynamic[top], Dynamic[top]]", public_sent)
+end
+
 # A block that never mutates the memo keeps it: Ruby returns `{}` here.
 assert_type("{}", [1].each_with_object({}) { |_x, h| h.size })
 

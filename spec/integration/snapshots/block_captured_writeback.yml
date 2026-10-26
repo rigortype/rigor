@@ -66,5 +66,10 @@ assertions:
   '36': Hash[Dynamic[top], Dynamic[top]]
   '37': Hash[Dynamic[top], Dynamic[top]]
   '38': ":stop | Array[1 | 2]"
-  '39': "{}"
-  '40': "[1, 2]"
+  '39': Hash[Dynamic[top], Dynamic[top]]
+  '40': Hash[Dynamic[top], Dynamic[top]]
+  '41': Hash[Dynamic[top], Dynamic[top]]
+  '42': Hash[Dynamic[top], Dynamic[top]]
+  '43': Hash[Dynamic[top], Dynamic[top]]
+  '44': "{}"
+  '45': "[1, 2]"

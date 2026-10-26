@@ -6164,21 +6164,30 @@ module Rigor
       private_constant :MEMO_NAME_NODES
 
       # The memo reads that cannot hand the object to anything the scan does not see. A call on the memo is one when
-      # it takes no block (`tap`, `each` and `then` yield it) and its value is not the memo: either the method is one
-      # whose value never is ({MEMO_VALUE_READERS}), or the value is discarded ({#memo_value_discarded?}), as `h << x`
-      # and `h.merge!(s)`, which answer the receiver, usually are. An index compound write on it is one. So is an
-      # argument of a self-call that resolves to a user def, whose census the callee floor reads
-      # ({#floor_memo_callee_escapes}). Any other read — `g = h`, `[h]`, `Helper.fill(h, x)`, an unresolved self-call —
-      # is not.
+      # it takes no block (`tap`, `each` and `then` yield it) and the scan knows the method: one whose value never is
+      # the memo ({MEMO_VALUE_READERS}), or a mutator the join or the seed widening reads ({CONTENT_MUTATORS},
+      # {MEMO_SEED_MUTATORS}) whose value, the memo for `h << x` and `h.merge!(s)`, is discarded
+      # ({#memo_value_discarded?}). Any other name is not: `h.send(:store, :t, "t")` stores what no scan sees. An index
+      # compound write on it is one. So is an argument of a self-call that resolves to a user def, whose census the
+      # callee floor reads ({#floor_memo_callee_escapes}), when the call's value is discarded: `keep(h)["s"] = "v"`
+      # stores through the value. Any other read — `g = h`, `[h]`, `Helper.fill(h, x)`, an unresolved self-call — is
+      # not.
       def memo_read_modelled?(read, ancestors)
         parent = ancestors.last
         if parent.respond_to?(:receiver) && parent.receiver.equal?(read)
           return true if INDEX_WRITE_NODES.any? { |klass| parent.is_a?(klass) }
           return false unless parent.is_a?(Prism::CallNode) && parent.block.nil?
 
-          return MEMO_VALUE_READERS.include?(parent.name) || memo_value_discarded?(parent, ancestors[0...-1])
+          return memo_receiver_call_modelled?(parent, ancestors[0...-1])
         end
         memo_self_call_argument?(ancestors)
+      end
+
+      def memo_receiver_call_modelled?(call, ancestors)
+        return true if MEMO_VALUE_READERS.include?(call.name)
+        return false unless CONTENT_MUTATORS.include?(call.name) || MEMO_SEED_MUTATORS.include?(call.name)
+
+        memo_value_discarded?(call, ancestors)
       end
 
       # Methods of Hash and Array whose value is never the receiver itself, so using it hands nothing on.
@@ -6225,13 +6234,15 @@ module Rigor
       end
 
       # Whether the read under `ancestors` is a positional or keyword argument of a self-call resolving to a user def.
+      # Its value must be discarded: the callee may return the memo (`def keep(h) = h`) or wrap it.
       def memo_self_call_argument?(ancestors)
-        nodes = ancestors.reverse
-        nodes = nodes.drop(2) if nodes.first.is_a?(Prism::AssocNode) && nodes[1].is_a?(Prism::KeywordHashNode)
-        return false unless nodes[0].is_a?(Prism::ArgumentsNode) && nodes[1].is_a?(Prism::CallNode)
-        return false unless self_dispatch_call?(nodes[1])
+        depth = ancestors.size - 1
+        depth -= 2 if ancestors[depth].is_a?(Prism::AssocNode) && ancestors[depth - 1].is_a?(Prism::KeywordHashNode)
+        call = ancestors[depth - 1]
+        return false unless ancestors[depth].is_a?(Prism::ArgumentsNode) && call.is_a?(Prism::CallNode)
+        return false unless self_dispatch_call?(call) && memo_value_discarded?(call, ancestors[0...(depth - 1)])
 
-        !resolve_self_callees(nodes[1]).empty?
+        !resolve_self_callees(call).empty?
       end
 
       # Issue #2411 — `memo` floored as a captured local is when the block hands it to a self-call whose callee

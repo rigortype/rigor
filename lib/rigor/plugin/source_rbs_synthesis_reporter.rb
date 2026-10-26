@@ -61,6 +61,17 @@ module Rigor
       def empty?
         @entries.empty?
       end
+
+      # The pool drain ({Rigor::Analysis::WorkerSession#drain_reporters}): the frozen entries.
+      def snapshot
+        entries
+      end
+
+      # Replays one worker's {#snapshot}, `kind:` (#824) and `line:` (#1075) included; the dedup above
+      # collapses every worker's copy. Nil records nothing.
+      def absorb(snapshot)
+        Array(snapshot).each { |entry| record(**entry.to_h) }
+      end
     end
   end
 end

@@ -8,6 +8,7 @@ require_relative "engine_source"
 require_relative "store"
 require_relative "../analysis/shadow_harness"
 require_relative "../analysis/run_cache_key"
+require_relative "../analysis/runner/run_level_facts"
 require_relative "../environment"
 require_relative "../analysis/path_expansion"
 require_relative "../rooted_glob"
@@ -282,12 +283,14 @@ module Rigor
         end
       end
 
-      # Issues #796 / #794 — the two run-level rows the snapshot carries. `definition_build_failures` is the
-      # reported per-class detail list ({Environment::RbsLoader#definition_build_failures}); `hkt_scan_failure`
-      # is the `[error_class, first_line, frame, stage]` tuple ({Rigor::Environment#hkt_scan_failure}), nil
-      # when the scan succeeded — which is why the presence of this object, not the tuple, is what says a
-      # replay is available.
-      RunLevelRows = Data.define(:definition_build_failures, :hkt_scan_failure)
+      # Issues #796 / #794 — the run-level rows the snapshot carries: one member per run-level fact declared
+      # `replay` ({Analysis::Runner::RunLevelFacts}, ADR-116 WD3). Today that is `definition_build_failures`,
+      # the reported per-class detail list ({Environment::RbsLoader#definition_build_failures}), and
+      # `hkt_scan_failure`, the `[error_class, first_line, frame, stage]` tuple
+      # ({Rigor::Environment#hkt_scan_failure}), nil when the scan succeeded — which is why the presence of
+      # this object, not the tuple, is what says a replay is available. Declaring another fact `replay`
+      # changes this shape, so it bumps {SCHEMA}.
+      RunLevelRows = Data.define(*Analysis::Runner::RunLevelFacts.replayable_names)
 
       # The global fingerprint that gates a snapshot load: a digest of the inputs whose change requires a full
       # rebuild — the engine version + schema, the engine's own SOURCE when the version does not pin it, the

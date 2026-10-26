@@ -375,7 +375,7 @@ RSpec.describe Rigor::Environment do
       # Issue #791 — the plugin-overlay merge used to sit one line ABOVE the #784 rescue, so a raise there
       # escaped `#hkt_registry` altogether. Post-#788 that is not a per-file crash storm but an uncaught
       # abort of the whole run: the holder memoises only on success, so the raise is re-attempted at every
-      # demand, and the run-owned demands (`PoolCoordinator#hkt_scan_outcome`, `WorkerSession#drain_reporters`)
+      # demand, and the run-owned demands (`RunLevelFacts::Collect.hkt_scan_failure`, `WorkerSession#drain_reporters`)
       # have no rescue above them.
       describe "the #791 plugin-overlay stage of the same seam" do
         # A real `Plugin::Registry` subclass rather than a stub: the registry the run holds is FROZEN, so

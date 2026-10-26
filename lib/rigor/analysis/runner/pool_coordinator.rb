@@ -11,6 +11,8 @@ require_relative "../../effects/signature_sources"
 require_relative "../../rbs_extended/conformance_checker"
 require_relative "../../runtime/jit"
 require_relative "../../cache/engine_source"
+require_relative "run_level_facts"
+require_relative "worker_payload"
 
 module Rigor
   module Analysis
@@ -271,16 +273,21 @@ module Rigor
 
             env = resolve_sequential_environment(source_files: project_files)
           end
-          snapshot_project_signature_state(signature_state_environment(resolve, project_files))
-          snapshot_effect_annotation_carrier(
-            annotation_carrier_environment(resolve, in_hand: !env.nil?)&.rbs_loader
-          )
-          # `env` rather than `resolve.call`: read the demand the snapshots above just made when they built
-          # an environment, and force nothing when they did not.
-          record_definition_build_failures(env&.rbs_loader&.definition_build_failures)
+          # Each gate resolves its environment only when its first fact is read, so the carrier's `in_hand:`
+          # sees an environment the signature state just built.
+          harvest_environment_facts do |gate|
+            if gate == :annotation_carrier
+              annotation_carrier_environment(resolve, in_hand: !env.nil?)
+            else
+              signature_state_environment(resolve, project_files)
+            end
+          end
+          # `env` rather than `resolve.call`: read the demand the harvest above just made when it built an
+          # environment, and force nothing when it did not.
+          @snapshots.absorb(RunLevelFacts.drain(env, demanding: false))
           # An empty closure analyses no file, so only a deleted file's buffer can make a tuple stale here.
           replayed = replayed_restored_run_level_rows?(closure: [], redemand_env: resolve)
-          record_hkt_scan_failure(hkt_scan_outcome(resolve.call)) unless replayed
+          @snapshots.absorb(RunLevelFacts.drain(resolve.call, demanding: true)) unless replayed
           prepare_rows
         end
 
@@ -295,15 +302,15 @@ module Rigor
 
         # Issue #794 — the signature-state snapshot's own gates, asked BEFORE an environment exists. Every
         # answer is loader-free (the configuration, the plugin registry and, issue #1713, the required-feature
-        # scan), and with no gate open {#snapshot_project_signature_state} writes the same empty state a nil
-        # environment gives it.
+        # scan), and with no gate open the `:signature_state` collectors write the same empty state a nil
+        # environment gives them.
         def signature_state_environment(resolve, project_files)
           gated = plugin_signature_paths? || project_signature_paths? || vendored_features_requested?(project_files)
           gated ? resolve.call : nil
         end
 
         # Issue #1713 — whether this run activates a required-feature-gated vendored directory, whose stand-down
-        # {#snapshot_project_signature_state} reports: the scan every build of this run gates on, or the
+        # {RunLevelFacts::Collect.vendored_standdowns} reports: the scan every build of this run gates on, or the
         # feature named under `libraries:`.
         def vendored_features_requested?(project_files)
           features = project_files.nil? || project_files.empty? ? [] : required_features_for(project_files)
@@ -331,25 +338,28 @@ module Rigor
         end
 
         # Issues #796 / #794 — fold the previous full run's run-level rows into this narrowed run's
-        # snapshots. The definition-build set is UNIONed (`#record_definition_build_failures` dedupes by
+        # snapshots. The definition-build set is UNIONed ({RunLevelFacts::Merge.union_by_class} dedupes by
         # class), so a class this run demanded for itself and the replayed set agree; the HKT outcome is a
-        # single tuple whoever demanded it, so `||=` keeps this run's own answer when it has one. Returns
+        # single tuple whoever demanded it, so first-wins keeps this run's own answer when it has one. Returns
         # true when a replay was available, which is what tells {#serve_empty_closure} it owes no HKT demand
         # of its own — and so no environment.
         #
         # @param closure — the files this run analyses; see {#stale_replayed_failure?}.
         # @param redemand_env — resolves the environment {#redemand_stale_failures} re-derives a stale
         #   failure in; nil (the empty closure, which has no stale failure) re-derives nothing.
+        #
+        # Every replayable fact ({RunLevelFacts::Fact#replay}) is absorbed by its own merge rule; the
+        # definition-build set alone is filtered for staleness first.
         def replayed_restored_run_level_rows?(closure: nil, redemand_env: nil)
           rows = @restored_run_level_rows
           return false if rows.nil?
 
-          stale, replayable = Array(rows.definition_build_failures).partition do |failure|
+          replayed = rows.to_h
+          stale, replayable = Array(replayed[:definition_build_failures]).partition do |failure|
             stale_replayed_failure?(failure, closure)
           end
-          record_definition_build_failures(replayable)
+          @snapshots.absorb(replayed.merge(definition_build_failures: replayable))
           redemand_stale_failures(stale, redemand_env)
-          record_hkt_scan_failure(rows.hkt_scan_failure)
           true
         end
 
@@ -375,7 +385,7 @@ module Rigor
           loader = redemand_env.call&.rbs_loader
           return if loader.nil?
 
-          record_definition_build_failures(pending.filter_map { |name| loader.redemand_definition(name) })
+          @snapshots.absorb(definition_build_failures: pending.filter_map { |name| loader.redemand_definition(name) })
         end
 
         # A replayed definition-build failure the snapshot's own fingerprint cannot vouch for. The
@@ -419,84 +429,39 @@ module Rigor
         end
 
         def analyze_files_sequentially(files, environment)
-          snapshot_project_signature_state(environment)
-          snapshot_effect_annotation_carrier(environment&.rbs_loader)
+          harvest_environment_facts { environment }
           result = files.flat_map { |path| @analyze_file.call(path, environment) }
-          # Issue #696 — AFTER the loop, deliberately. Definition builds are lazy (ADR-54 WD1: per class, on
-          # first demand), so a snapshot taken beside the ones above — which run BEFORE `files.flat_map` —
-          # would read an empty list on every run, including the ones this diagnostic exists for.
-          record_definition_build_failures(environment&.rbs_loader&.definition_build_failures)
-          # Issue #784 — same timing contract, same reason: the HKT scan is first demanded from inside a
-          # file's analysis (the dispatcher's Singleton-receiver tier), so a snapshot taken any earlier
-          # would read nil on every run. And demanded HERE once more by the run itself, because a subset
-          # run (`--verify-incremental`'s partition, an incremental recheck's closure) may contain no file
-          # that demands it — the row must not depend on which files were analysed. See {#hkt_scan_outcome}
-          # for why a Rigor-owned demand is sound here where #696 forbids it.
-          record_hkt_scan_failure(hkt_scan_outcome(environment))
-          if @collect_stats
-            loader = environment.rbs_loader
-            @snapshots.class_decl_paths = loader&.class_decl_paths || {}.freeze
-            @snapshots.signature_paths = loader&.signature_paths || [].freeze
-          end
+          # Issues #696 / #784 — AFTER the loop, deliberately. Definition builds are lazy (ADR-54 WD1: per
+          # class, on first demand) and the HKT scan is first demanded from inside a file's analysis, so a
+          # read beside the harvest above would find nothing on every run. The HKT registry is demanded here
+          # once more by the run itself, because a subset run may contain no file that demands it (see
+          # {RunLevelFacts::Collect.hkt_scan_failure} for why a Rigor-owned demand is sound there).
+          @snapshots.absorb(RunLevelFacts.drain(environment))
+          harvest_stats { environment }
           result
         end
 
-        # The whole-run findings about the project's OWN `signature_paths:` RBS — the namespaces the loader had
-        # to synthesize, the files it had to quarantine, the total env-build failure (if any), and the
-        # `rigor:v1:conforms-to` results. Snapshotted as small plain data (NOT the env) so `#run` can surface
-        # them as diagnostics without rebuilding it.
-        #
-        # All are gated on the project actually declaring `signature_paths:`, for one reason: each forces the
-        # (otherwise lazy) RBS env to build, and doing that when there is no project sig set would warm
-        # `.rigor/cache` on a bare `--no-stats` run. The loader has already memoised each answer, so reading
-        # them here is free.
-        def snapshot_project_signature_state(environment)
-          # Issue #610 — NOT behind the `signature_paths:` gate below: the source a bundled plugin's `sig/`
-          # stands down against is typically an `rbs collection install` the configuration never lists
-          # there. Gated instead on a loaded plugin contributing signatures at all — the registry answers
-          # that without touching the env, and it is exactly the set the loader defers — so a project with
-          # no such plugin reads nothing off its loader here, as before.
-          @snapshots.signature_standdowns =
-            plugin_signature_paths? ? signature_standdowns_for(environment&.rbs_loader) : []
-          # Issue #1713 — NOT behind the `signature_paths:` gate either: what displaces a vendored declaration may
-          # be a gem's or a collection's copy. The loader answers without building its env when no gated
-          # directory is active.
-          @snapshots.vendored_standdowns = vendored_standdowns_for(environment&.rbs_loader)
-          unless project_signature_paths?
-            @snapshots.synthesized_namespaces = []
-            @snapshots.quarantined_signatures = []
-            @snapshots.conformance_results = []
-            @snapshots.env_build_failure = nil
-            return
-          end
-
-          # nil-safe: the empty-closure path reaches here with no environment when the project has no files.
-          loader = environment&.rbs_loader
-          @snapshots.synthesized_namespaces = loader&.synthesized_namespaces || []
-          @snapshots.quarantined_signatures = loader&.quarantined_signatures || []
-          @snapshots.env_build_failure = loader&.env_build_failure
-          @snapshots.conformance_results = RbsExtended::ConformanceChecker.scan(loader)
+        # ADR-116 WD3 — the `:environment` run-level facts ({RunLevelFacts}), in declaration order, off the
+        # environment the block yields for each fact's gate: the project-signature state (#798 — every path
+        # takes it, pooled or not, because no per-file analysis produces it) and the #441 effect-annotation
+        # carrier. Snapshotted as small plain data (NOT the env) so the environment stays a LOCAL that goes
+        # GC-eligible when its path returns.
+        def harvest_environment_facts(&)
+          @snapshots.absorb(RunLevelFacts.harvest(:environment, harvest_context, &))
         end
 
-        # #441 — the inline stratum of `effect.annotations-unchecked`, carried out of the analysis path as
-        # small plain data, for the same reason the block above is: the environment stays a LOCAL so it goes
-        # GC-eligible when the path returns, and the residual pass runs after it.
-        #
-        # {Runner#effect_annotation_residual_diagnostics} used to read the loader off `@run_environment`,
-        # which only the ADR-45 result-cacheable path ever assigns — so a `--no-cache`, `--workers N` or
-        # `--incremental` run reported a `.rbs` annotation and stayed silent about the identical one written
-        # as an rbs-inline comment, while a default run reported both. The environment was there either way;
-        # nothing was carrying it. {Effects::SignatureSources.annotated_carrier} reduces it to at most ONE
-        # synthesized buffer, which is all a one-`:info`-per-run pass can spend.
-        #
-        # Skipped when collection is on — then {Runner::EffectEnvelopePass} reads the loader directly and
-        # this pass is gated off — so a collecting run pays nothing, and a project with no synthesizing
-        # plugin answers with an empty array and no regex at all.
-        def snapshot_effect_annotation_carrier(loader)
-          virtual = @record_effects ? nil : loader&.virtual_rbs
-          @snapshots.effect_annotation_carrier = Effects::SignatureSources.annotated_carrier(virtual)
-        rescue StandardError
-          @snapshots.effect_annotation_carrier = [].freeze
+        # `RunStats` telemetry ONLY (`class_decl_paths` / `signature_paths`), which a `--no-stats` run
+        # legitimately skips. Never gates a diagnostic slot (#798).
+        def harvest_stats(&)
+          @snapshots.absorb(RunLevelFacts.harvest(:stats, harvest_context, &)) if @collect_stats
+        end
+
+        def harvest_context
+          RunLevelFacts::Context.new(
+            project_signature_paths: project_signature_paths?,
+            plugin_signature_paths: plugin_signature_paths?,
+            record_effects: @record_effects
+          )
         end
 
         # Sequential-mode environment resolver. Returns the supplied `environment:` override (with the
@@ -532,8 +497,10 @@ module Rigor
         # `project_scope_seed` its worker would need to record complete edges. Without `fork` (Windows) a
         # recording run degrades to sequential, which records correctly through `@analyze_file`.
         #
-        # An effects run (ADR-103 WD13) is pinned for exactly the same reason — the Ractor messages carry
-        # no side-table channel — and degrades the same way. The degrade is sound rather than merely safe:
+        # An effects run (ADR-103 WD13) is pinned the same way: the Ractor `:done` {WorkerPayload} has an
+        # `effects` slot, but the Ractor worker never collects into it (its session is built without the
+        # recording inputs, and the backend is off-default, #414), so only the fork backend fills it. Without
+        # `fork` it degrades the same way. The degrade is sound rather than merely safe:
         # the sequential fallback still collects, so the effect graph is complete either way.
         # @param source_files — the file list every worker's / the fallback's environment is
         #   built over — the whole project (issue #793), defaulting to `files` for direct callers.
@@ -607,8 +574,8 @@ module Rigor
         #   plugin, so each worker produces the same diagnostic set; surfacing them once avoids N×
         #   duplication).
         # - `[:file, path, diagnostics, refusals]` — one per analysed file.
-        # - `[:done, drained_reporters, disclosures]` — once at exit, the per-worker reporter snapshots for
-        #   end-of-pool merge.
+        # - `[:done, payload]` — once at exit, the worker's {WorkerPayload} (its reporter snapshots, drained
+        #   run-level facts and disclosures) for end-of-pool merge.
         #
         # The Ruby 4.0+ Ractor model uses a single per-Ractor mailbox (no `Ractor.yield`); workers push
         # back via `Ractor.main.send`. The coordinator drains its mailbox via `Ractor.receive` until it has
@@ -695,9 +662,9 @@ module Rigor
             )
           )
           warm_env = prewarm_rbs_cache_for_pool(source_files: source_files, locked_gems: locked_gems)
-          snapshot_project_signature_state(warm_env)
-          snapshot_effect_annotation_carrier(warm_env&.rbs_loader)
-          record_definition_build_failures(warm_env&.rbs_loader&.definition_build_failures)
+          harvest_environment_facts { warm_env }
+          @snapshots.absorb(RunLevelFacts.drain(warm_env, demanding: false))
+          harvest_stats { warm_env }
 
           configuration = @configuration
           cache_root = @cache_store&.root
@@ -736,7 +703,7 @@ module Rigor
               # Issue #1051 — sent with `:done`, not with `:prepare`: this backend builds no parent session,
               # so the worker's own table is the only place a disclosure exists, and it is complete only
               # once the worker has finished its files.
-              main.send([:done, session.drain_reporters, session.drain_run_disclosures])
+              main.send([:done, Rigor::Analysis::Runner::WorkerPayload.harvest(session)])
             end
           end
 
@@ -774,8 +741,7 @@ module Rigor
               results_by_path[message[1]] = message[2]
               refusals_by_path[message[1]] = message[3]
             when :done
-              merge_worker_reporters(message[1])
-              merge_run_disclosures(message[2])
+              absorb_worker_payload(message[1])
             end
           end
 
@@ -823,8 +789,7 @@ module Rigor
 
           environment = build_runner_environment(source_files: source_files)
           degraded.each { |path| results_by_path[path] = @analyze_file.call(path, environment) }
-          record_definition_build_failures(environment.rbs_loader&.definition_build_failures)
-          record_hkt_scan_failure(hkt_scan_outcome(environment))
+          @snapshots.absorb(RunLevelFacts.drain(environment))
         end
 
         # ADR-15 Amendment (2026-05-20) — fork-based worker pool, the active backend for `workers > 0`.
@@ -872,14 +837,13 @@ module Rigor
           # a resulting definition-build failure is already sitting in the parent's loader at the moment
           # each child copy-on-write-inherits it — every child's own `#drain_reporters` then reports it
           # right alongside whatever its own slice demanded, with no separate plumbing needed. Left
-          # unconditional, unlike `#snapshot_fork_pool_stats` below: these are diagnostic rows, not
+          # unconditional, unlike `#harvest_stats` below: these are diagnostic rows, not
           # `RunStats` telemetry, and the stats gate must not decide which diagnostics a run reports (a
           # `--workers N --no-stats` run used to say strictly LESS than the sequential path over the
           # same project).
-          snapshot_project_signature_state(session.environment)
-          snapshot_effect_annotation_carrier(session.environment.rbs_loader)
-          # Issue #1051 — taken BEFORE the fork, for the same reason and with the same effect as the two
-          # snapshots above: `#prepare` ran on the parent when the session was built, so every disclosure a
+          harvest_environment_facts { session.environment }
+          # Issue #1051 — taken BEFORE the fork, for the same reason and with the same effect as the harvest
+          # above: `#prepare` ran on the parent when the session was built, so every disclosure a
           # plugin registers there (the normal case — a disclosure is a fact about the project's inputs,
           # known before a file is read) is already in this table, in the same order the sequential path
           # would produce. Each child inherits the identical table and re-offers it in its payload, where
@@ -890,7 +854,8 @@ module Rigor
           # session's record of what it already reported and drains only its own slice's, so the prepare-time
           # refusal is counted once, as `--workers 0` counts it, rather than once per worker.
           merge_trust_refusals(session.drain_trust_refusals)
-          snapshot_fork_pool_stats(session) if @collect_stats
+          # `RunStats` telemetry only, off the same pre-fork environment.
+          harvest_stats { session.environment }
 
           worker_count = [@workers, files.size].min
           slices = files.each_slice((files.size.to_f / worker_count).ceil).to_a
@@ -914,16 +879,10 @@ module Rigor
               results_by_path[path] = session.analyze(path)
               refusals_by_path[path] = session.drain_trust_refusals
             end
-            merge_worker_reporters(session.drain_reporters)
-            # The degraded slice ran on the parent session, so a disclosure it registered lives there.
-            merge_run_disclosures(session.drain_run_disclosures)
-            # The degraded slice was re-analysed on the parent session, so its dependency records live there,
-            # not in a child payload — fold them in alongside the successful children's.
-            if @record_dependencies
-              collect_dependencies(session.drain_dependencies, session.drain_analysis_reads,
-                                   session.drain_analysis_disclosures)
-            end
-            @collected_effects.merge!(session.drain_effects) if @record_effects
+            # The degraded slice ran on the parent session, so its reporters, run-level facts, disclosures,
+            # dependency records and effects live there, not in a child payload — fold them in alongside the
+            # successful children's. Its refusals were drained file by file above.
+            absorb_worker_payload(WorkerPayload.harvest(session, record_effects: @record_effects))
           end
 
           merge_slice_refusals(slices, refusals_by_slice, refusals_by_path)
@@ -957,31 +916,12 @@ module Rigor
           # worker finishes first and stays at no-YJIT parity, exactly as the sequential path would.
           Runtime::Jit.rearm_after_fork
           results = slice.to_h { |path| [path, session.analyze(path)] }
-          payload = { results: results, reporters: session.drain_reporters,
-                      dependencies: session.drain_dependencies,
-                      analysis_reads: session.drain_analysis_reads,
-                      analysis_disclosures: session.drain_analysis_disclosures,
-                      disclosures: session.drain_run_disclosures,
-                      refusals: session.drain_trust_refusals }
-          # ADR-103 WD13 — the effects slot exists only on a collecting run, so a normal `--workers N` run
-          # marshals exactly the payload it marshalled before the feature existed.
-          payload[:effects] = session.drain_effects if @record_effects
+          # ADR-103 WD13 — the effects slot is filled only on a collecting run.
+          payload = WorkerPayload.harvest(session, results: results, record_effects: @record_effects)
           File.binwrite(out_path, Marshal.dump(payload))
           exit!(0)
         rescue StandardError
           exit!(1)
-        end
-
-        # Issue #798 — `RunStats` telemetry ONLY, now that `#snapshot_project_signature_state` (called
-        # unconditionally above) owns every diagnostic-bearing slot this method used to ALSO write
-        # (`quarantined_signatures`, `env_build_failure`): those must not be gated on `@collect_stats`, and
-        # this method's own name says what is left — `class_decl_paths` / `signature_paths`, read off the
-        # parent session's loader so end-of-run {RunStats} can attribute the RBS class universe, which a
-        # `--no-stats` run legitimately skips.
-        def snapshot_fork_pool_stats(session)
-          loader = session.environment.rbs_loader
-          @snapshots.class_decl_paths = loader&.class_decl_paths || {}.freeze
-          @snapshots.signature_paths = loader&.signature_paths || [].freeze
         end
 
         # Waits for every forked child, merges each successful payload into `results_by_path`, and returns
@@ -994,16 +934,10 @@ module Rigor
             _, status = Process.waitpid2(child[:pid])
             payload = fork_worker_payload(status, child[:out_path])
             if payload
-              results_by_path.merge!(payload.fetch(:results))
-              merge_worker_reporters(payload.fetch(:reporters))
-              merge_run_disclosures(payload.fetch(:disclosures, []))
-              refusals = payload.fetch(:refusals, [])
+              results_by_path.merge!(payload.results)
+              absorb_worker_payload(payload)
+              refusals = Array(payload.refusals)
               refusals_by_slice ? refusals_by_slice[child[:index]] = refusals : merge_trust_refusals(refusals)
-              if @record_dependencies
-                collect_dependencies(payload.fetch(:dependencies, {}), payload.fetch(:analysis_reads, {}),
-                                     payload.fetch(:analysis_disclosures, {}))
-              end
-              @collected_effects.merge!(payload.fetch(:effects, {})) if @record_effects
             else
               degraded.concat(child[:slice])
             end
@@ -1019,7 +953,7 @@ module Rigor
           collected_analysis_disclosures.merge!(analysis_disclosures)
         end
 
-        # @return the child's `{results:, reporters:}` payload, or nil when the child exited
+        # @return the child's {WorkerPayload}, or nil when the child exited
         #   abnormally or wrote no readable payload. `Marshal.load` is safe here: the blob was written by
         #   our own forked child to a temp file we created.
         def fork_worker_payload(status, out_path)
@@ -1103,25 +1037,18 @@ module Rigor
         def analyze_files_sequentially_fallback(files, reason:, source_files: files)
           prepare_rows = prepare_coordinator_plugins_once
           environment = build_runner_environment(source_files: source_files)
-          # Same set, same ORDER as `#analyze_files_sequentially`. The signature state used to be hand-copied
-          # here slot by slot, which dropped `synthesized-namespace` and every conformance row. The conformance
-          # scan inside it demands the definition of every `rigor:v1:conforms-to` class, so it has to run
-          # BEFORE the definition-build failures are read below, or a failure only that scan reaches is lost.
-          snapshot_project_signature_state(environment)
-          snapshot_effect_annotation_carrier(environment.rbs_loader)
+          # Same harvest, same ORDER as `#analyze_files_sequentially` (#1201: a hand-copied list here once
+          # dropped `synthesized-namespace` and every conformance row). The conformance scan inside it demands
+          # the definition of every `rigor:v1:conforms-to` class, so it runs BEFORE the definition-build
+          # failures are drained below, or a failure only that scan reaches is lost.
+          harvest_environment_facts { environment }
           diagnostics = prepare_rows + files.flat_map { |path| @analyze_file.call(path, environment) }
-          loader = environment.rbs_loader
-          # Issue #696 — this path analyses on the coordinator, so its loader IS the one that reached the
-          # failing build, and it must snapshot the same slot the two real paths do. Reached whenever
-          # `fork` is unavailable (Windows) and on `--incremental` / effects runs without it: a run that
-          # degraded to sequential must not also report less than a sequential run would.
-          record_definition_build_failures(loader&.definition_build_failures)
-          # Issue #784 — same reasoning: this path's Environment IS the one that reached the scan, so it
-          # must snapshot the slot too, or a run that degraded to sequential would report less than a
-          # sequential run would. Demanded once by the run as well, for the reason at the sequential site.
-          record_hkt_scan_failure(hkt_scan_outcome(environment))
-          @snapshots.class_decl_paths = loader&.class_decl_paths || {}.freeze
-          @snapshots.signature_paths = loader&.signature_paths || [].freeze
+          # Issues #696 / #784 — this path analyses on the coordinator, so its environment IS the one that
+          # reached the failing build and the scan, and it drains the same facts the sequential path does.
+          # Reached whenever `fork` is unavailable (Windows) and on `--incremental` / effects runs without it:
+          # a run that degraded to sequential must not also report less than a sequential run would.
+          @snapshots.absorb(RunLevelFacts.drain(environment))
+          harvest_stats { environment }
           diagnostics.unshift(
             Diagnostic.new(
               path: ".rigor.yml", line: 1, column: 1,
@@ -1140,149 +1067,33 @@ module Rigor
           Array(@prepare_coordinator_plugins.call)
         end
 
+        # One worker drain ({WorkerSession#drain_reporters}): each reporter absorbs its own snapshot, by
+        # its primitives (#785, #805) so every worker's copy of an entry collapses to the single row a
+        # `--workers=0` run prints, and the drained `:analysis` facts fold in by their merge rules — the
+        # definition-build union (#696) and the first-wins HKT outcome (#784). A key an older drain shape
+        # lacks records nothing.
         def merge_worker_reporters(drained)
-          merge_rbs_extended_reporter(drained.fetch(:rbs_extended))
-          drained.fetch(:boundary_cross).each do |entry|
-            @boundary_cross_reporter.record(
-              class_name: entry.class_name,
-              method_name: entry.method_name,
-              gem_name: entry.gem_name,
-              rbs_display: entry.rbs_display
-            )
+          RunLevelFacts.absorb_reporters(reporters, drained)
+          @snapshots.absorb(RunLevelFacts.drained_facts(drained))
+        end
+
+        # One {WorkerPayload}, minus its per-file results and its refusals, which each backend merges in its
+        # own file order.
+        def absorb_worker_payload(payload)
+          merge_worker_reporters(payload.reporters)
+          merge_run_disclosures(payload.disclosures)
+          if @record_dependencies
+            collect_dependencies(payload.dependencies || {}, payload.analysis_reads || {},
+                                 payload.analysis_disclosures || {})
           end
-          # ADR-32 WD6 — merge per-worker synthesizer failures back into the coordinator's reporter. Fetched
-          # with a default empty array so older drains (pre-slice-2) remain compatible.
-          #
-          # `kind:` rides along (issue #824): without it every drained entry replayed as WD6's default
-          # `:failed`, so under `--workers N` a WD12 "parsed but not honoured" row came back as
-          # `source-rbs-synthesis-failed` — a different id, and a message telling the user the file
-          # contributed nothing when all but one of its annotations bound. Every worker reads the same
-          # sources and so hands over the same entries; the reporter's own dedup collapses them. `line:` rides
-          # along for the same reason (#1075): a consistency error is positioned at its `.rbs` member.
-          Array(drained[:source_rbs_synthesis]).each do |entry|
-            @source_rbs_synthesis_reporter.record(
-              plugin_id: entry.plugin_id, path: entry.path, message: entry.message, kind: entry.kind,
-              line: entry.line
-            )
-          end
-          # Issue #696. Fetched with a default so an older drain stays compatible, exactly as the line above.
-          record_definition_build_failures(drained[:definition_build_failures])
-          # Issue #784. `Hash#[]` is already a nil default, exactly as `env_build_failure` is snapshotted
-          # elsewhere — an older drain shape simply has no key and records nothing.
-          record_hkt_scan_failure(drained[:hkt_scan_failure])
+          @collected_effects.merge!(payload.effects || {}) if @record_effects
         end
 
         private
 
-        # Replays one worker's three {RbsExtended::Reporter} streams into the run's own reporter.
-        #
-        # `hkt_directive_errors` (issue #785) is read with `Hash#[]`'s nil default rather than `fetch`,
-        # exactly as `source_rbs_synthesis` is, so an older drain shape simply records nothing.
-        #
-        # All three streams replay by their `(path, line, column)` primitives (#785 for the hkt stream, #805
-        # for its two elders). Every worker reads the same `.rbs`, so each hands over the same entries, and
-        # only a primitive-keyed dedup collapses them back to the single row a `--workers=0` run prints — an
-        # `RBS::Location` compares equal only against a location over the same `RBS::Buffer` object, so a
-        # location-keyed one would print N copies at `--workers=N`. The entries could not reach here carrying
-        # a location anyway: the drain Marshals its payload and an `RBS::Location` has no `_dump`.
-        def merge_rbs_extended_reporter(rbs)
-          rbs.fetch(:unresolved_payloads).each do |entry|
-            @rbs_extended_reporter.record_unresolved(
-              payload: entry.payload, path: entry.path, line: entry.line, column: entry.column
-            )
-          end
-          rbs.fetch(:lossy_projections).each do |entry|
-            @rbs_extended_reporter.record_lossy_projection(
-              head: entry.head, path: entry.path, line: entry.line, column: entry.column
-            )
-          end
-          Array(rbs[:hkt_directive_errors]).each do |entry|
-            @rbs_extended_reporter.record_hkt_error(
-              message: entry.message, path: entry.path, line: entry.line, column: entry.column
-            )
-          end
-          replay_deprecated_forms(rbs)
-        end
-
-        # ADR-109 WD3 — the fourth stream, read with the nil default like the hkt one so an older drain
-        # shape records nothing.
-        def replay_deprecated_forms(rbs)
-          Array(rbs[:deprecated_forms]).each do |entry|
-            @rbs_extended_reporter.record_deprecated_form(
-              payload: entry.payload, replacement: entry.replacement,
-              path: entry.path, line: entry.line, column: entry.column
-            )
-          end
-        end
-
-        # Issue #696 — accumulate the per-class `RBS::DefinitionBuilder` failures this run observed, deduped
-        # by class name and kept in first-seen order.
-        #
-        # Accumulating rather than assigning is what makes a pooled run say what a sequential one says: each
-        # worker holds its OWN loader and its own memo (the `@state` that also gates the stderr banner, which
-        # is why the banner repeats per worker — #295), so a class that fails in two workers arrives twice
-        # and a class only one worker touched arrives once. The union over the workers is the set the RUN
-        # hit; neither worker alone is.
-        #
-        # NOT gated on `project_signature_paths?`, unlike {#snapshot_project_signature_state}. That gate
-        # exists because each condition there forces the otherwise-lazy env build, which would warm the cache
-        # on a project with no sig set of its own. Nothing is forced here — this reads what the analysis
-        # already demanded — and the failure is not a project-sig-only condition anyway: two BUNDLED sources
-        # declaring the same method collapse a class with no `signature_paths:` in sight (the
-        # `bigdecimal` / `BigMath` shape, #299). Gating it would suppress exactly the variant the user cannot
-        # fix by editing their own `sig/`.
-        def record_definition_build_failures(failures)
-          return if failures.nil? || failures.empty?
-
-          # Issue #1902 — one tuple per class, chosen by {Environment::RbsLoader.definition_build_detail_order}
-          # rather than by arrival: a fresh record and a replayed one (or two workers' records) for the same
-          # class can name different failures, and the earlier one used to win.
-          @snapshots.definition_build_failures =
-            (@snapshots.definition_build_failures + failures)
-            .group_by(&:first)
-            .map { |_, candidates| candidates.min_by { |c| Environment::RbsLoader.definition_build_detail_order(c) } }
-            .freeze
-        end
-
-        # Issue #784 — first-wins, unlike {#record_definition_build_failures}'s accumulate-and-dedup. That
-        # method accumulates because each pool WORKER owns its own loader and its own per-class memo, so a
-        # collapsed class can genuinely be observed by only some workers and the run's set is the union.
-        # The HKT scan has no such per-worker variation: `Environment#hkt_registry` builds from the SAME
-        # `signature_paths:` overlay every worker was handed, so every worker that demands it either all
-        # raise identically or all succeed — there is only ever one tuple to record, and `||=` is correct
-        # (and cheap) rather than an accumulate-and-dedup this slot never needs.
-        def record_hkt_scan_failure(tuple)
-          @snapshots.hkt_scan_failure ||= tuple
-        end
-
-        # Issue #784 — demand the registry once on behalf of the run, then read the slot. The seam in
-        # {Environment#hkt_registry} is demand-driven, and nothing guarantees any analysed file demands it:
-        # a `--verify-incremental` partition or an incremental closure can miss every `Klass.method` call,
-        # and then the slot is nil after the loop and the run says nothing — while `--incremental` has also
-        # dropped the row from its per-file cache. Demanding here makes the outcome a property of the RUN,
-        # not of which files happened to be in it.
-        #
-        # This is sound where #696's "a demand that is Rigor's own MUST NOT contribute" is not, and the
-        # difference is the shape of what is recorded. #696 reports a per-class LIST whose membership is
-        # "the classes the analysis demanded"; a Rigor-internal demand adds classes the user never asked
-        # about and makes that list vary with configuration. The HKT scan is ONE build with ONE outcome —
-        # the same tuple whoever demands it — so an extra demand cannot change what is reported, only
-        # guarantee it is observed.
-        #
-        # What it costs, stated plainly because {#record_definition_build_failures}'s comment promises
-        # "nothing is forced here": the demand DOES force the RBS env build when the environment has not
-        # built it yet (the scan reads the loader). On every path that reaches this method that build is
-        # either already done (the loop demanded it) or the same load one analysed file would have paid:
-        # a Marshal load when a cache store exists, the parse a full run pays under `--no-cache`. Never a
-        # build on a project with no files (see {#analyze_files}). Memoised, so on a reused Environment
-        # this is a hash read.
-        #
-        # @return the recorded tuple, or nil (no environment, or the scan built)
-        def hkt_scan_outcome(environment)
-          return nil if environment.nil?
-
-          environment.hkt_registry
-          environment.hkt_scan_failure
+        def reporters
+          { rbs_extended: @rbs_extended_reporter, boundary_cross: @boundary_cross_reporter,
+            source_rbs_synthesis: @source_rbs_synthesis_reporter }
         end
 
         # True when the project declares its own `signature_paths:` (the only place the
@@ -1292,23 +1103,11 @@ module Rigor
           !(paths.nil? || paths.empty?)
         end
 
-        # Issue #610 — see {#snapshot_project_signature_state}. The registry's `signature_paths` is what
+        # Issue #610 — see {RunLevelFacts::Collect.signature_standdowns}. The registry's `signature_paths` is what
         # `Environment.for_project` defers, so this is the loader-free form of "is anything deferred?".
         def plugin_signature_paths?
           registry = plugin_registry
           registry.respond_to?(:signature_paths) && !registry.signature_paths.empty?
-        end
-
-        # Empty for a loader with nothing deferred, without touching its env.
-        def signature_standdowns_for(loader)
-          return [] if loader.nil? || !loader.respond_to?(:deferred_signature_paths)
-          return [] if loader.deferred_signature_paths.empty?
-
-          loader.signature_standdowns
-        end
-
-        def vendored_standdowns_for(loader)
-          loader.respond_to?(:vendored_standdowns) ? loader.vendored_standdowns : []
         end
 
         def plugin_registry

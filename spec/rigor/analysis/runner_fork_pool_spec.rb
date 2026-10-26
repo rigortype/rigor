@@ -160,7 +160,7 @@ RSpec.describe "Rigor::Analysis::Runner with fork pool (ADR-15 Amendment)" do
   end
 
   # Issue #798 — `PoolCoordinator#analyze_files_in_fork_pool` never called
-  # `#snapshot_project_signature_state`, so the project-signature state (`synthesized-namespace`,
+  # the signature-state snapshot, so the project-signature state (`synthesized-namespace`,
   # `quarantined-signature`, `definition-build-failed`) — which has no per-file producer, only a snapshot
   # read off the run's OWN environment — had no producer at all under `--workers N`. The two slots the fork
   # pool DID cover through a separate stats-only helper (`quarantined-signature`,
@@ -172,7 +172,7 @@ RSpec.describe "Rigor::Analysis::Runner with fork pool (ADR-15 Amendment)" do
     # `data-contrast:` is a record key `rbs` rejects, so `broken.rbs` is quarantined; the qualified
     # declaration with no enclosing `module Acme` is the namespace the loader has to synthesize; `DupDemo`
     # is declared twice (once under a `conforms-to` directive so the conformance scan — itself run INSIDE
-    # `#snapshot_project_signature_state` — demands its instance definition and so triggers the build
+    # `#harvest_environment_facts` — demands its instance definition and so triggers the build
     # failure even though no analysed `.rb` file ever names the class).
     def write_signature_state_fixture(dir)
       FileUtils.mkdir_p(File.join(dir, "sig"))

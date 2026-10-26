@@ -50,6 +50,17 @@ module Rigor
           end
         end
 
+        # The pool drain ({Rigor::Analysis::WorkerSession#drain_reporters}): the frozen entries.
+        def snapshot
+          entries
+        end
+
+        # Replays one worker's {#snapshot}; the record-time dedup collapses every worker's copy. Nil records
+        # nothing.
+        def absorb(snapshot)
+          Array(snapshot).each { |entry| record(**entry.to_h) }
+        end
+
         private
 
         def same_key?(existing, entry)

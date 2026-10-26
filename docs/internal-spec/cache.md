@@ -1663,7 +1663,10 @@ regenerates every one of them
 weaken that promise: it is not a diagnostic cache but a record of two INPUTS a
 narrowed run cannot observe, replayed so that the run can produce the rows itself.
 
-Exactly two live here, and the list is closed:
+Exactly two live here, and the list is closed. They are the run-level facts
+`Runner::RunLevelFacts` declares `replay`; `RunLevelRows` and the narrowed run's replay are
+both derived from those declarations ([ADR-116](../adr/116-hot-file-restructuring.md) WD3), so
+marking another fact `replay` changes the snapshot's shape and MUST bump `SCHEMA`:
 
 - **`definition_build_failures`** — the reported `rbs.coverage.definition-build-failed`
   details. Its producer is the ANALYSIS's own demand for a class's method surface, and

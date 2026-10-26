@@ -265,8 +265,7 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
 
       merged = [[[singleton_side, mango], [instance_side]], [[instance_side], [mango, singleton_side]]].map do |batches|
         snapshots = Rigor::Analysis::Runner::RunSnapshots.new
-        coordinator = build_coordinator(snapshots: snapshots)
-        batches.each { |batch| coordinator.send(:record_definition_build_failures, batch) }
+        batches.each { |batch| snapshots.absorb(definition_build_failures: batch) }
         snapshots.definition_build_failures.sort_by(&:first)
       end
 
@@ -518,7 +517,7 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
     end
   end
 
-  describe "#snapshot_project_signature_state" do
+  describe "#harvest_environment_facts" do
     it "resets every signature-state snapshot to its inert default when the project declares no signature_paths" do
       snapshots = Rigor::Analysis::Runner::RunSnapshots.new
       snapshots.synthesized_namespaces = ["stale"]
@@ -532,10 +531,11 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       # environment when no gated directory is active; the no-signature_paths branch returns before reading
       # anything else, and the #610 stand-down slot asks the (empty) plugin registry.
       environment = instance_double(
-        Rigor::Environment, rbs_loader: instance_double(Rigor::Environment::RbsLoader, vendored_standdowns: [])
+        Rigor::Environment,
+        rbs_loader: instance_double(Rigor::Environment::RbsLoader, vendored_standdowns: [], virtual_rbs: [])
       )
 
-      coordinator.snapshot_project_signature_state(environment)
+      coordinator.harvest_environment_facts { environment }
 
       expect(snapshots.synthesized_namespaces).to eq([])
       expect(snapshots.quarantined_signatures).to eq([])
@@ -555,12 +555,13 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       registry = instance_double(Rigor::Plugin::Registry, signature_paths: ["/plugins/rigor-activerecord/sig"])
       loader = instance_double(
         Rigor::Environment::RbsLoader,
-        deferred_signature_paths: [Pathname("/plugins/rigor-activerecord/sig")], signature_standdowns: [standdown]
+        deferred_signature_paths: [Pathname("/plugins/rigor-activerecord/sig")], signature_standdowns: [standdown],
+        vendored_standdowns: [], virtual_rbs: []
       )
       coordinator = build_coordinator(snapshots: snapshots, plugin_registry: registry)
       environment = instance_double(Rigor::Environment, rbs_loader: loader)
 
-      coordinator.snapshot_project_signature_state(environment)
+      coordinator.harvest_environment_facts { environment }
 
       expect(snapshots.signature_standdowns).to eq([standdown])
       expect(snapshots.quarantined_signatures).to eq([])
@@ -575,12 +576,13 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
         Rigor::Environment::RbsLoader,
         synthesized_namespaces: ["Foo::Bar"],
         quarantined_signatures: ["bad.rbs"],
-        env_build_failure: [StandardError, 3, ["buf"]]
+        env_build_failure: [StandardError, 3, ["buf"]],
+        vendored_standdowns: [], virtual_rbs: []
       )
       environment = instance_double(Rigor::Environment, rbs_loader: loader)
       allow(Rigor::RbsExtended::ConformanceChecker).to receive(:scan).with(loader).and_return([:conformance_hit])
 
-      coordinator.snapshot_project_signature_state(environment)
+      coordinator.harvest_environment_facts { environment }
 
       expect(snapshots.synthesized_namespaces).to eq(["Foo::Bar"])
       expect(snapshots.quarantined_signatures).to eq(["bad.rbs"])
@@ -983,10 +985,13 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
     end
 
     def empty_reporters_payload(results:, dependencies: {})
-      { results: results,
+      Rigor::Analysis::Runner::WorkerPayload.new(
+        results: results,
         reporters: { rbs_extended: { unresolved_payloads: [], lossy_projections: [] },
                      boundary_cross: [], source_rbs_synthesis: [] },
-        dependencies: dependencies }
+        dependencies: dependencies, analysis_reads: {}, analysis_disclosures: {}, disclosures: [], refusals: [],
+        effects: nil
+      )
     end
 
     it "merges a successful child's results into results_by_path and reports no degraded slice" do
@@ -1070,8 +1075,10 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
         expect(Rigor::Runtime::Jit).to have_received(:rearm_after_fork)
         expect(coordinator).to have_received(:exit!).with(0)
         expect(Marshal.load(File.binread(out_path))) # rubocop:disable Security/MarshalLoad
-          .to eq(results: { "a.rb" => [] }, reporters: {}, dependencies: {}, analysis_reads: {},
-                 analysis_disclosures: {}, disclosures: [], refusals: [])
+          .to eq(Rigor::Analysis::Runner::WorkerPayload.new(
+                   results: { "a.rb" => [] }, reporters: {}, dependencies: {}, analysis_reads: {},
+                   analysis_disclosures: {}, disclosures: [], refusals: [], effects: nil
+                 ))
       end
     end
 
@@ -1093,14 +1100,14 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
   end
 
   # Issue #798 — narrowed to `RunStats` telemetry only. `quarantined_signatures` / `env_build_failure` used
-  # to be written HERE, gated on `@collect_stats`, which is what made a `--workers N --no-stats` run silent
-  # about a broken `signature_paths:` file the sequential path reports — those diagnostic-bearing slots now
-  # belong entirely to `#snapshot_project_signature_state`, called unconditionally in
-  # `#analyze_files_in_fork_pool` regardless of whether stats collection is on.
-  describe "#snapshot_fork_pool_stats (private)" do
+  # to be written by the fork pool's stats snapshot, gated on `@collect_stats`, which is what made a
+  # `--workers N --no-stats` run silent about a broken `signature_paths:` file the sequential path reports —
+  # those diagnostic-bearing slots now belong entirely to `#harvest_environment_facts`, called
+  # unconditionally in `#analyze_files_in_fork_pool` regardless of whether stats collection is on.
+  describe "#harvest_stats" do
     it "snapshots class_decl_paths / signature_paths off the parent session's loader" do
       snapshots = Rigor::Analysis::Runner::RunSnapshots.new
-      coordinator = build_coordinator(snapshots: snapshots)
+      coordinator = build_coordinator(snapshots: snapshots, collect_stats: true)
       loader = instance_double(
         Rigor::Environment::RbsLoader, class_decl_paths: { "Foo" => "foo.rbs" }, signature_paths: ["sig"]
       )
@@ -1108,7 +1115,7 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
         Rigor::Analysis::WorkerSession, environment: instance_double(Rigor::Environment, rbs_loader: loader)
       )
 
-      coordinator.send(:snapshot_fork_pool_stats, session)
+      coordinator.harvest_stats { session.environment }
 
       expect(snapshots.class_decl_paths).to eq({ "Foo" => "foo.rbs" })
       expect(snapshots.signature_paths).to eq(["sig"])
@@ -1118,13 +1125,13 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       snapshots = Rigor::Analysis::Runner::RunSnapshots.new
       snapshots.quarantined_signatures = ["stays"]
       snapshots.env_build_failure = [StandardError, 9, []]
-      coordinator = build_coordinator(snapshots: snapshots)
+      coordinator = build_coordinator(snapshots: snapshots, collect_stats: true)
       loader = instance_double(Rigor::Environment::RbsLoader, class_decl_paths: {}, signature_paths: [])
       session = instance_double(
         Rigor::Analysis::WorkerSession, environment: instance_double(Rigor::Environment, rbs_loader: loader)
       )
 
-      coordinator.send(:snapshot_fork_pool_stats, session)
+      coordinator.harvest_stats { session.environment }
 
       expect(snapshots.quarantined_signatures).to eq(["stays"])
       expect(snapshots.env_build_failure).to eq([StandardError, 9, []])
@@ -1209,9 +1216,9 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       end
     end
 
-    # Issue #798 — `analyze_files_in_fork_pool` never called `#snapshot_project_signature_state` at all, so
+    # Issue #798 — `analyze_files_in_fork_pool` never took the signature-state snapshot at all, so
     # `quarantined-signature` / `synthesized-namespace` had no producer under `--workers N`, and the two
-    # slots `#snapshot_fork_pool_stats` DID cover (`quarantined_signatures`, `env_build_failure`) were gated
+    # slots its stats-only snapshot DID cover (`quarantined_signatures`, `env_build_failure`) were gated
     # on `@collect_stats` — a `--workers N --no-stats` run said strictly LESS than the sequential path over
     # the same project. `collect_stats: false` here is the regression case: these rows must survive it.
     it "reports quarantined/synthesized project-signature state through a real fork pool even with " \
@@ -1396,7 +1403,7 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
 
     # `Environment.for_project` un-stubbed, so this pins the chain the carrier depends on rather than a
     # keyword list: a plugin-synthesized buffer is on the built environment's loader, where
-    # `#snapshot_effect_annotation_carrier` reads it. No RBS environment is demanded (the loader is lazy
+    # `RunLevelFacts::Collect.effect_annotation_carrier` reads it. No RBS environment is demanded (the loader is lazy
     # and `cache_store: nil` makes `#prewarm` a no-op), and the paths deliberately do not exist, so the
     # synthesizer is invoked directly rather than through the cache-store memo.
     it "carries the plugin-synthesized virtual RBS the rbs-inline lane is read from" do
@@ -1420,7 +1427,7 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
   end
 
   # Issue #798 — the SAME gap `analyze_files_in_fork_pool` had: nothing called
-  # `#snapshot_project_signature_state` on this backend at all, so `synthesized-namespace` /
+  # the signature-state snapshot on this backend at all, so `synthesized-namespace` /
   # `quarantined-signature` / the conformance results had no producer under a Ractor-pool run, healthy or
   # not. `workers: 0` reaches every line up to (and stops at) the pool array — `Array.new(0) { ... }` never
   # invokes its block, so no real Ractor is ever spawned — which is how this exercises the coordinator's OWN
@@ -1433,15 +1440,16 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
       cache_store = instance_double(Rigor::Cache::Store, root: "/tmp/rigor-798-cache-root-stub")
       coordinator = build_coordinator(workers: 0, cache_store: cache_store, snapshots: snapshots)
       failure = ["Acme", "RBS::DuplicatedMethodDefinitionError", "::Acme#label", ["sig/acme.rbs"]]
-      loader = instance_double(Rigor::Environment::RbsLoader, definition_build_failures: [failure], virtual_rbs: [])
+      standdown = ["data/vendored_gem_sigs/prime", [], true]
+      loader = instance_double(Rigor::Environment::RbsLoader, definition_build_failures: [failure], virtual_rbs: [],
+                                                              vendored_standdowns: [standdown])
       warm_env = instance_double(Rigor::Environment, rbs_loader: loader)
       allow(coordinator).to receive(:prewarm_rbs_cache_for_pool).and_return(warm_env)
-      allow(coordinator).to receive(:snapshot_project_signature_state)
 
       result = coordinator.analyze_files_in_pool([], source_files: [])
 
       expect(result).to eq([])
-      expect(coordinator).to have_received(:snapshot_project_signature_state).with(warm_env)
+      expect(snapshots.vendored_standdowns).to eq([standdown])
       expect(snapshots.definition_build_failures).to eq([failure])
     end
   end
@@ -1463,11 +1471,10 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
         Rigor::Environment::RbsLoader,
         virtual_rbs: [["virtual:x:plain.rb", "class Plain\nend\n"],
                       ["virtual:x:memo.rb", "class Memo\n  %a{pure}\n  def value: () -> Integer\nend\n"]],
-        definition_build_failures: []
+        definition_build_failures: [], vendored_standdowns: []
       )
       warm_env = instance_double(Rigor::Environment, rbs_loader: loader)
       allow(coordinator).to receive(:prewarm_rbs_cache_for_pool).and_return(warm_env)
-      allow(coordinator).to receive(:snapshot_project_signature_state)
 
       coordinator.analyze_files_in_pool([], source_files: ["plain.rb", "memo.rb"])
 
@@ -1566,7 +1573,7 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
        snapshots.definition_build_failures.map(&:first)]
     end
 
-    # #798 brought the fork and Ractor pools up to `#snapshot_project_signature_state` and left this path
+    # #798 brought the fork and Ractor pools up to the shared signature-state snapshot and left this path
     # hand-copying three of its slots, so a run that degraded here (no `fork`; `RIGOR_POOL_BACKEND=ractor`
     # with `--no-cache`) never set `synthesized_namespaces` or `conformance_results`. The run then lost
     # `rbs.coverage.synthesized-namespace`, every `rigor:v1:conforms-to` row, and the definition-build

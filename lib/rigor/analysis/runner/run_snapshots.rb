@@ -1,68 +1,58 @@
 # frozen_string_literal: true
 
+require_relative "run_level_facts"
+
 module Rigor
   module Analysis
     class Runner
-      # Mutable per-run holder for the end-of-pass snapshots that the analysis paths compute as a side
-      # effect and the rest of the run reads back: the RBS `class_decl_paths` / `signature_paths` tables
-      # (consumed by {RunStats}), the synthesized-namespace name list, the `conforms-to` scan results
-      # (consumed by the diagnostic aggregator), and the effect-annotation carrier (#441 — consumed by
-      # {EffectAnnotationResidualPass} on the runs that never store the environment).
+      # Mutable per-run store for the run-level facts ({RunLevelFacts}): one slot per declared fact, keyed by
+      # its name. The analysis paths write it ({PoolCoordinator} — sequential, fork-pool, Ractor-pool,
+      # fallback, empty closure) and the rest of the run reads it back: the {DiagnosticAggregator} rows,
+      # {RunStats}, {EffectAnnotationResidualPass} and the incremental snapshot's `RunLevelRows`.
       #
-      # The snapshots are written by whichever analysis path ran ({PoolCoordinator} sequential / fork-pool /
-      # fallback) and read by the {Runner} and {DiagnosticAggregator}. A shared mutable holder keeps the
-      # write/read timing bit-for-bit with the original inline ivars (the same pattern the reporter
-      # accumulators use) while letting the writer and readers live in separate objects without a
-      # back-reference cycle.
+      # A shared mutable holder keeps the write/read timing of the original inline ivars while letting the
+      # writer and the readers live in separate objects without a back-reference cycle.
+      #
+      # The analysis paths write through {#absorb}, which folds each value in by its fact's declared merge
+      # rule. `[]=` and the per-fact `name=` writers (defined from the declarations, like the readers) are a
+      # plain assignment that bypasses the merge rule: they exist for specs that seed a slot, and no
+      # production path calls them.
       class RunSnapshots
-        attr_accessor :class_decl_paths, :signature_paths,
-                      :synthesized_namespaces, :quarantined_signatures, :signature_standdowns, :vendored_standdowns,
-                      :conformance_results,
-                      :env_build_failure, :definition_build_failures, :hkt_scan_failure,
-                      :effect_annotation_carrier
-
-        # Constructor defaults match the {Runner} constructor: the pre-seed values `build_run_stats` /
-        # `pre_file_diagnostics` read before the first analysis path runs are frozen empties. The
-        # `env_build_failure` slot is nil (no failure) rather than an empty collection — it holds a single
-        # `[error_class, first_line, buffer_names]` tuple or nothing. Its per-class sibling
-        # `definition_build_failures` (#696) holds a LIST, because a collapsed universe fails many classes,
-        # and is accumulated ACROSS pool workers rather than assigned once — see
-        # {PoolCoordinator#merge_worker_reporters}. `hkt_scan_failure` (#784) is nil-or-tuple like
-        # `env_build_failure`, not a list like `definition_build_failures`: the scan is ONE build over the
-        # whole `signature_paths:` overlay, not a per-class one, so it has exactly one outcome per run.
-        # `signature_standdowns` (#610) is the quarantine slot's twin for the plugin-contributed files that
-        # stood down against a colliding generic arity: a list, assigned once from the loader as
-        # `quarantined_signatures` is, and derived from the final env so a cache HIT carries it too.
-        # `vendored_standdowns` (#1713) is the same shape of slot for what a required-feature-gated vendored
-        # directory left out because another signature source declares it.
         def initialize
-          @class_decl_paths = {}.freeze
-          @signature_paths = [].freeze
-          @synthesized_namespaces = [].freeze
-          @quarantined_signatures = [].freeze
-          @signature_standdowns = [].freeze
-          @vendored_standdowns = [].freeze
-          @conformance_results = [].freeze
-          @env_build_failure = nil
-          @definition_build_failures = [].freeze
-          @hkt_scan_failure = nil
-          @effect_annotation_carrier = [].freeze
+          @values = RunLevelFacts.empty_values
         end
 
-        # Per-`#run` reset. Mirrors the original `#run` body, which reset these to NON-frozen empties (distinct
-        # from the frozen constructor defaults) at the top of each run.
+        # Per-`#run` reset to every fact's declared empty value.
         def reset_for_run
-          @class_decl_paths = {}.freeze
-          @signature_paths = []
-          @synthesized_namespaces = []
-          @quarantined_signatures = []
-          @signature_standdowns = []
-          @vendored_standdowns = []
-          @conformance_results = []
-          @env_build_failure = nil
-          @definition_build_failures = []
-          @hkt_scan_failure = nil
-          @effect_annotation_carrier = [].freeze
+          @values = RunLevelFacts.empty_values
+        end
+
+        def [](name)
+          RunLevelFacts.fact(name)
+          @values[name]
+        end
+
+        def []=(name, value)
+          RunLevelFacts.fact(name)
+          @values[name] = value
+        end
+
+        # Folds `facts` (`{name => value}`) into the store, each by its fact's merge rule.
+        def absorb(facts)
+          facts.each do |name, value|
+            merge = RunLevelFacts.fact(name).merge
+            @values[name] = RunLevelFacts::Merge.public_send(merge, @values[name], value)
+          end
+          self
+        end
+
+        def to_h
+          @values.dup
+        end
+
+        RunLevelFacts.facts.each do |fact|
+          define_method(fact.name) { @values[fact.name] }
+          define_method(:"#{fact.name}=") { |value| @values[fact.name] = value }
         end
       end
     end

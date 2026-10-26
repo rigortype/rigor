@@ -66,15 +66,24 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
       pool_mode: -> { pool_mode },
       cached_plugin_prepare_diagnostics: -> { cached_plugin_prepare_diagnostics },
       pre_eval_diagnostics_from_scanner: -> { pre_eval_diagnostics_from_scanner },
-      synthesized_namespaces_snapshot: -> { synthesized_namespaces_snapshot },
-      quarantined_signatures_snapshot: -> { quarantined_signatures_snapshot },
-      signature_standdowns_snapshot: -> { signature_standdowns_snapshot },
-      vendored_standdowns_snapshot: -> { vendored_standdowns_snapshot },
-      env_build_failure_snapshot: -> { env_build_failure_snapshot },
-      definition_build_failures_snapshot: -> { definition_build_failures_snapshot },
-      hkt_scan_failure_snapshot: -> { hkt_scan_failure_snapshot },
-      conformance_results_snapshot: -> { conformance_results_snapshot }
+      snapshots: run_snapshots(
+        synthesized_namespaces: synthesized_namespaces_snapshot,
+        quarantined_signatures: quarantined_signatures_snapshot,
+        signature_standdowns: signature_standdowns_snapshot,
+        vendored_standdowns: vendored_standdowns_snapshot,
+        env_build_failure: env_build_failure_snapshot,
+        definition_build_failures: definition_build_failures_snapshot,
+        hkt_scan_failure: hkt_scan_failure_snapshot,
+        conformance_results: conformance_results_snapshot
+      )
     )
+  end
+
+  # The run's keyed store (ADR-116 WD3), each slot assigned as given.
+  def run_snapshots(values)
+    snapshots = Rigor::Analysis::Runner::RunSnapshots.new
+    values.each { |name, value| snapshots[name] = value }
+    snapshots
   end
 
   def load_error(message, resolved_path: nil)

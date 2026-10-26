@@ -48,6 +48,16 @@ module Rigor
       HktDirectiveEntry = Data.define(:message, :path, :line, :column)
       DeprecatedFormEntry = Data.define(:payload, :replacement, :path, :line, :column)
 
+      # Every stream, by its reader, with the record method that replays one of its entries: an entry's
+      # members are that method's keywords. {#snapshot} and {#absorb} walk this table, so a new stream is
+      # declared here and nowhere else in the pool drain (ADR-116 WD3).
+      STREAMS = {
+        unresolved_payloads: :record_unresolved,
+        lossy_projections: :record_lossy_projection,
+        hkt_directive_errors: :record_hkt_error,
+        deprecated_forms: :record_deprecated_form
+      }.freeze
+
       # Flattens an `RBS::Location` (or anything answering the same readers) to the `(path, line, column)`
       # triple every entry carries. `column` is 1-based, since `RBS::Location#start_column` is 0-based and
       # diagnostics are not. Each component is `nil` when the location cannot supply it, and the diagnostic
@@ -160,9 +170,23 @@ module Rigor
       # True when no events have accumulated. Used by callers that want to skip the diagnostic-emission pass
       # entirely on the common no-event path.
       def empty?
-        @mutex.synchronize do
-          @unresolved_payloads.empty? && @lossy_projections.empty? && @hkt_directive_errors.empty? &&
-            @deprecated_forms.empty?
+        STREAMS.each_key.all? { |stream| public_send(stream).empty? }
+      end
+
+      # The drain a pool worker hands back: every stream's frozen entries by reader name. Marshal-clean and
+      # shareable, since each entry carries `(path, line, column)` primitives (#785, #805).
+      def snapshot
+        STREAMS.each_key.to_h { |stream| [stream, public_send(stream)] }
+      end
+
+      # Replays one worker's {#snapshot} through the record methods, whose dedup collapses the copies every
+      # worker hands over to the single row a `--workers=0` run prints. A missing stream (an older drain
+      # shape) or a nil snapshot records nothing.
+      def absorb(snapshot)
+        return if snapshot.nil?
+
+        STREAMS.each do |stream, record|
+          Array(snapshot[stream]).each { |entry| public_send(record, **entry.to_h) }
         end
       end
 

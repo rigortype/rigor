@@ -2657,15 +2657,34 @@ module Rigor
       # `def` is recorded (#1984, #2013). An `extend`ed module's side is read from `discovered_methods`, which holds
       # its `attr_*` and `define_method` rows, and the module's `def self.extended` hook may define any name on the
       # extender, so it withholds too.
+      #
+      # An `inherited` hook anywhere on the chain past the receiver's own entry runs when the receiver's class is
+      # created and may define any singleton method on it (`def self.inherited(s) = s.define_singleton_method(:x)`),
+      # so a `def` the receiver only inherits is withheld then as well: a class's `def self.inherited`, or an
+      # `inherited` an extended module defines.
       def dynamic_singleton_definer_ahead?(class_name, method_name, owner)
         name = method_name.to_sym
         chain = Scope::ResolutionChain.for(scope, class_name.to_s, :singleton, :methods)
+        return true if class_name.to_s != owner.to_s && inherited_hook_on_chain?(chain, class_name.to_s)
+
         chain.entries.each do |entry|
           next if entry.external?
           return false if entry.name == owner.to_s
           return true if entry_defines_without_def?(entry, name)
         end
         false
+      end
+
+      def inherited_hook_on_chain?(chain, receiver_name)
+        chain.entries.any? do |entry|
+          next false if entry.external? || entry.name == receiver_name
+
+          if entry.side == :singleton
+            !scope.singleton_def_for(entry.name, :inherited).nil?
+          else
+            scope.discovered_method?(entry.name, :inherited, :instance)
+          end
+        end
       end
 
       def entry_defines_without_def?(entry, name)

@@ -113,6 +113,35 @@ RSpec.describe "a project singleton override of a Module method wins on the clas
     RUBY
   end
 
+  # An `inherited` hook on an ancestor runs when the subclass is created and may define the name on it.
+  it "reports nothing on a subclass whose ancestor's inherited hook may redefine the name" do
+    expect(undefined_methods(<<~RUBY)).to eq([])
+      class Top1; def self.name = nil; def self.inherited(s) = s.define_singleton_method(:name) { "x" }; end
+      class Sh1 < Top1; end
+      class Top2; def self.name = nil; def self.inherited(s) = (s.singleton_class.attr_accessor :name; s.name = "y"); end
+      class Sh2 < Top2; end
+      class Top3; def self.name = nil; def self.inherited(s); super; s.class_eval { def self.name = "z" }; end; end
+      class Sh3 < Top3; end
+      module Hk; def inherited(s) = s.define_singleton_method(:name) { "m" }; end
+      class Top4; extend Hk; def self.name = nil; end
+      class Sh4 < Top4; end
+      Sh1.name.upcase # "X"
+      Sh2.name.upcase # "Y"
+      Sh3.name.upcase # "Z"
+      Sh4.name.upcase # "M"
+    RUBY
+  end
+
+  it "keeps the inherited def's type in a hierarchy with no inherited hook (control)" do
+    expect(dumps(<<~RUBY)).to eq(%w[7 nil])
+      class Top5; def self.name = 7; end
+      class Sh5 < Top5; end
+      class Top6; def self.name = nil; def self.inherited(s) = s.define_singleton_method(:name) { "x" }; end
+      Rigor.dump_type(Sh5.name) # 7
+      Rigor.dump_type(Top6.name) # nil, the hook's own class is not created by it
+    RUBY
+  end
+
   # A contest farther than the `def`'s owner does not reach the call: the nearer `def` runs.
   it "keeps a nearer def's type when a farther class defines the name without a def" do
     expect(dumps(<<~RUBY)).to eq(["5"])

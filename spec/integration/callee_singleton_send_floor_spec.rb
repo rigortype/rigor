@@ -26,6 +26,18 @@ RSpec.describe "the callee mutation floor resolves singleton self-calls and lite
     result.diagnostics.map { |d| [d.line, d.qualified_rule] }
   end
 
+  def dumped(source)
+    FileUtils.mkdir_p("lib")
+    File.write(File.join("lib", "mut.rb"), %(require "rigor/testing"\ninclude Rigor::Testing\n#{source}))
+    configuration = Rigor::Configuration.new(
+      Rigor::Configuration::DEFAULTS.merge("paths" => %w[lib], "workers" => 0)
+    )
+    result = guarded_run(Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil), %w[lib])
+    result.diagnostics.filter_map do |diagnostic|
+      diagnostic.message.delete_prefix("dump_type: ") if diagnostic.message.start_with?("dump_type")
+    end
+  end
+
   around do |example|
     Dir.mktmpdir("rigor-callee-singleton-send-") { |dir| Dir.chdir(dir) { example.run } }
   end
@@ -145,6 +157,24 @@ RSpec.describe "the callee mutation floor resolves singleton self-calls and lite
       end
     RUBY
     expect(diagnostics(source)).to eq([[11, "call.undefined-method"]])
+  end
+
+  # Each channel floors through every def the call resolves to before the next channel runs, so the instance def's
+  # direct mutation takes the bare floor even though the singleton def, read first, mutates nothing.
+  it "applies the bare floor through the second def a singleton-side call resolves to" do
+    source = <<~RUBY
+      class Mut
+        def self.run
+          acc = [7, 9]
+          stripes(acc)
+          dump_type(acc)
+        end
+
+        def self.stripes(acc) = acc.size
+        def stripes(acc) = (acc[0] = "x")
+      end
+    RUBY
+    expect(dumped(source)).to eq(["Array[Dynamic[top]]"])
   end
 
   # Each shape hands the argument from the singleton side to a mutating instance def, or reaches a singleton def the

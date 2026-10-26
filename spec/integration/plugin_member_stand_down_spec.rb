@@ -111,7 +111,8 @@ RSpec.describe "plugin signature member stand-down through the runner (#2422)" d
     notices = rows.select { |row| row[2] == "rbs.coverage.plugin-signature-stood-down" }
     expect(notices.size).to eq(1)
     message = notices.first[3]
-    expect(message).to include("core_ext.rbs", "loaded without 8 method declaration(s)", "Two declarations of one method")
+    expect(message).to include("core_ext.rbs", "loaded without 8 method declaration(s)",
+                               "Two declarations of one method")
     named = message.scan(%r{`([^`/]+)` \(([^)]+)\)})
     expect(named.map(&:first)).to contain_exactly(
       "Object#acts_like?", "Array#compact_blank!", "Hash#compact_blank", "Integer#ordinalize",

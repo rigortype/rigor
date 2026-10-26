@@ -4652,7 +4652,7 @@ module Rigor
       # block (`l.call`, `-> { ... }.call`). A nested def is not. Nor is the block of a nested call whose self-calls
       # are provably not the caller's: one run on another object ({#foreign_block_call?}), a `define_method` /
       # `define_singleton_method` method body, or a `Class.new` / `Module.new` / `Struct.new` / `Data.define` block.
-      # An `instance_eval` / `class_exec` / … on `self` or with no receiver dispatches to the caller and is entered.
+      # An `instance_eval` / `class_exec` / … on any other receiver (none, `self`, an instance) is entered.
       def each_node_in_caller_block(node, depth, &)
         return if node.nil?
 
@@ -4674,13 +4674,7 @@ module Rigor
         return true if %i[define_method define_singleton_method].include?(call_node.name)
         return true unless AnonymousMetaClass.block_form_receiver(call_node).nil?
 
-        foreign_self_block?(call_node) || fresh_receiver?(call_node.receiver)
-      end
-
-      # A `X.new` receiver is a new object, never the caller's `self`; {#foreign_self_block?} reads only a class
-      # object as foreign, since an instance's class may be a subclass of `self`'s.
-      def fresh_receiver?(receiver)
-        receiver.is_a?(Prism::CallNode) && receiver.name == :new && !receiver.receiver.nil?
+        foreign_self_block?(call_node)
       end
 
       # True when a local `node` passes (positionally or as a keyword's value) is bound in `scope` to a type the

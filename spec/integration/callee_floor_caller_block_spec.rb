@@ -93,17 +93,6 @@ RSpec.describe "a self-call in a caller's block floors the captured argument its
       end
     end
 
-    # `poke` inside `instance_eval` runs on the `Obj`, whose `poke` does not mutate.
-    it "a self-call in a nested block run on another object" do
-      source = <<~RUBY
-        #{instance_run('[1].each { Obj.new.instance_eval { poke(acc) } }')}
-        class Obj
-          def poke(acc) = acc.size
-        end
-      RUBY
-      expect(errors(source)).to eq(undefined_upcase)
-    end
-
     it "a nested block's parameter shadowing it, the nested block not visited on its own" do
       expect(errors(instance_run("[[1]].each { |acc| [2].each { poke(acc) } }"))).to eq(undefined_upcase)
     end
@@ -133,6 +122,18 @@ RSpec.describe "a self-call in a caller's block floors the captured argument its
       end
       expect(dumps).to eq(["Set[7]"])
     end
+  end
+
+  # Conservative by design: `poke` inside `instance_eval` runs on the `Obj`, whose `poke` does not mutate, so Ruby
+  # raises on `7`. Only a class-object receiver is provably another object; the floor drops this report and adds none.
+  it "floors through an instance_eval on an instance receiver (gives up a true positive)" do
+    source = <<~RUBY
+      #{instance_run('[1].each { Obj.new.instance_eval { poke(acc) } }')}
+      class Obj
+        def poke(acc) = acc.size
+      end
+    RUBY
+    expect(errors(source)).to eq([])
   end
 
   # Conservative by design: Ruby never runs the lambda, so `upcase` raises on `7`. A lambda in the block is walked

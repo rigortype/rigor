@@ -1084,13 +1084,45 @@ module Rigor
       # every project entry ahead of `Class`. The fallback declines so the typer's singleton-body inference
       # answers the definer's return, or `Dynamic` where the slot is contested and the def may not be the one
       # that runs.
+      #
+      # The chain walk files the class edge of every entry it passes, so it runs only for a name some project file
+      # defines at all ({BlockCallTiming.project_defines_anywhere?}, which files the `defines:<name>` edge either way,
+      # #1459). Without it every class-body `private` / `attr_reader` call on a project class would depend on its
+      # whole ancestry. The by-name answer is memoised per discovery index; the edge is filed on every call.
       def project_singleton_definer?(receiver_type, context)
         return false unless receiver_type.is_a?(Type::Singleton)
 
         scope = context.scope
         return false if scope.nil?
+        return false unless project_defines_name?(scope, context.method_name)
 
         !scope.singleton_def_through_ancestors(receiver_type.class_name, context.method_name).last.nil?
+      end
+
+      def project_defines_name?(scope, method_name)
+        memo = defines_name_memo(scope)
+        if memo.key?(method_name)
+          Analysis::DependencyRecorder.read_missing(:defines, method_name) if Analysis::DependencyRecorder.active?
+          return memo[method_name]
+        end
+
+        memo[method_name] = BlockCallTiming.project_defines_anywhere?(method_name, scope)
+      end
+
+      DEFINES_NAME_MEMO_KEY = :__rigor_user_class_fallback_defines_name__
+      private_constant :DEFINES_NAME_MEMO_KEY
+
+      # One slot per discovery index and environment, as {#external_ancestor_memo} keeps its own: the answer reads
+      # only the frozen discovery tables and the environment's `pre_eval:` patches.
+      def defines_name_memo(scope)
+        discovery = scope.discovery
+        environment = scope.environment
+        slot = Thread.current[DEFINES_NAME_MEMO_KEY]
+        unless slot && slot[0].equal?(discovery) && slot[1].equal?(environment)
+          slot = [discovery, environment, {}]
+          Thread.current[DEFINES_NAME_MEMO_KEY] = slot
+        end
+        slot[2]
       end
 
       EXTERNAL_ANCESTOR_MEMO_KEY = :__rigor_user_class_fallback_external_ancestor__

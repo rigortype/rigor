@@ -1,0 +1,3 @@
+- **[sig-gen]** A method that ends in `each_with_object({})` or `each_with_object([])` now gets the collection its block fills, so `rigor sig-gen` no longer proposes `-> {}` or `-> []` for it. ([#2415](https://github.com/rigortype/rigor/pull/2415))
+  - `def pairs = h.each_with_object({}) { |(k, v), out| out[k] = v }` gets a `Hash` of the stored key and value types, and `acc << x.to_s` gets `Array[String]`. The same type now applies wherever the call is used as a value, such as an argument.
+  - A memo the block grows with `h[k] ||= []`, `merge!` or `update` widens too, as does one the block passes to a method that changes it. A block that never changes the memo still returns `{}`.

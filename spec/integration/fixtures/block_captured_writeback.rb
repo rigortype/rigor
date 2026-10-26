@@ -163,6 +163,31 @@ assert_type("Array[2 | 4 | 6]", ewo_arr)
 ewo_hash = [1, 2, 3].each_with_object({}) { |x, h| h[x] = x * 2 }
 assert_type("Hash[1 | 2 | 3, 2 | 4 | 6]", ewo_hash)
 
+# --- Issue #2411 / #2293: the memo return is the call's VALUE, not only a
+# statement's binding. Read as an operand (and as a method's tail, which
+# sig-gen types the same way) the call answered the memo argument's `{}` / `[]`. ---
+assert_type("Hash[:a, 1]", { a: 1 }.each_with_object({}) { |(k, v), out| out[k] = v })
+assert_type("Array[\"1\" | \"2\"]", [1, 2].each_with_object([]) { |x, acc| acc << x.to_s })
+
+# A memo only reshaped (`merge!`) widens as a captured local does; an index
+# compound write (`h[x] ||= []`) is a store.
+ewo_merged = [{ a: 1 }].each_with_object({}) { |s, m| m.merge!(s) }
+assert_type("Hash[Dynamic[top], Dynamic[top]]", ewo_merged)
+ewo_or_write = [1].each_with_object({}) { |x, h| h[x] ||= [] }
+assert_type("Hash[1, Dynamic[top]]", ewo_or_write)
+
+# A memo handed to a self-call that stores into it floors as a captured local
+# does: the block's own store is not every key it holds.
+def ewo_record(hash, n) = (hash[[n, :key]] = "k")
+ewo_escaped = [1].each_with_object({}) do |x, out|
+  ewo_record(out, x)
+  out[[x, :element]] = 1
+end
+assert_type("Hash[Dynamic[top], Dynamic[top]]", ewo_escaped)
+
+# A block that never mutates the memo keeps it: Ruby returns `{}` here.
+assert_type("{}", [1].each_with_object({}) { |_x, h| h.size })
+
 # --- A non-content-mutation block over a collection stays byte-identical:
 # the block only READS the captured local, so its exact literal Tuple is
 # preserved (no spurious widening from the slice-C walk). ---

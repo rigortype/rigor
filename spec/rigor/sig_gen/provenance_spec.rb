@@ -234,7 +234,8 @@ SIG_PROVENANCE_RESIDUE = {
   # New files (#1181 slice): the bound side of `Effects::*`. Marked rows are #1150 Data members;
   # unmarked residue is the ordinary unrenderable/declared-divergent mix (`label_set.rbs` also pins
   # the `eql?` alias row, `origin.rbs`/`taint_cause.rbs` fully classify).
-  "sig/rigor/effects/config_envelopes.rbs" => 3,
+  # -1 (#2411): `for_classes`' tail `each_with_object({})` now reads its stores, `Hash[String, Envelope]`, as declared.
+  "sig/rigor/effects/config_envelopes.rbs" => 2,
   # New file (#1181 collection-side slice): `Entry`'s members and constructors are #1150-marked;
   # the five unmarked rows are `[]`/`keys`/`each`/`size`/`empty?` — unrenderable
   # (`sig.skipped.untyped-return`, all single-expression readers sig-gen declines).

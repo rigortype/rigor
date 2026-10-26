@@ -1769,7 +1769,17 @@ module Rigor
       def call_type_for(node)
         return safe_navigation_call_type(node) if node.safe_navigation?
 
-        attribute_write_value(node, call_dispatch_type_for(node))
+        memo_object_value(node, attribute_write_value(node, call_dispatch_type_for(node)))
+      end
+
+      # Issue #2411 — `recv.each_with_object(memo) { |x, acc| acc[k] = v }` returns the memo as the block's
+      # stores leave it. The statement evaluator owns that join ({StatementEvaluator#each_with_object_value}),
+      # and reading it here gives every value position the statement's answer: a method's tail is typed through
+      # this typer, and read off the dispatch alone it was the memo argument's literal `{}` / `[]`.
+      def memo_object_value(node, result)
+        return result unless node.name == :each_with_object && node.block.is_a?(Prism::BlockNode)
+
+        StatementEvaluator.new(scope: scope, tracer: tracer).each_with_object_value(node, result)
       end
 
       # The RHS-value override for plain attribute / index writes (#520); a non-write call keeps the

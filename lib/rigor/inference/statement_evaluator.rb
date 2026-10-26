@@ -635,6 +635,15 @@ module Rigor
         index_write_stored_type(node, scope, current: current, rhs: rhs)
       end
 
+      # The value of `recv.each_with_object(memo) { |x, acc| … }` given `call_type`, the call's dispatched type
+      # (issue #2411): the memo as the block's content mutations of `acc` leave it ({#each_with_object_return}).
+      # `ExpressionTyper` reads it for every call, so a value position — a method's tail, which
+      # {DefReturnTyper} types through `Scope#type_of` — answers what a statement does; read off the dispatch
+      # alone, `def m = xs.each_with_object({}) { |x, h| h[x] = 1 }` returned the memo argument's `{}`.
+      def each_with_object_value(call_node, call_type)
+        each_with_object_return(call_node, call_type)
+      end
+
       private
 
       attr_reader :scope, :tracer
@@ -3637,11 +3646,9 @@ module Rigor
         invoked = call_operand_scope(node, walk, scope)
         invoked = forget_operand_specials(node, invoked)
         operand_types = walk.types(tracer)
+        # The `each_with_object` memo widening (ADR-56 slice C, B3) is part of the call's type, applied by
+        # `ExpressionTyper#call_type_for` ({#each_with_object_value}).
         call_type = OperandWalk.type_of(scope, node, tracer, operand_types)
-        # ADR-56 slice C (B3) — `each_with_object(memo) { |x, acc| acc << … }` returns the memo; the engine otherwise
-        # types the call `Dynamic[top]`. Compute the joined memo type from the block's content mutations of the memo
-        # block-param and adopt it as the call's return type.
-        call_type = each_with_object_return(node, call_type)
         [call_type, invoke_from(node, invoked, call_type, operand_types)]
       end
 
@@ -6113,24 +6120,52 @@ module Rigor
         # captured-local walk.
         shadows = {}.compare_by_identity
         calls = body_content_mutations_on(body, memo_param, shadows)
-        return call_type if calls.empty?
-
-        pre_state = lookup_mutated_seed(body, memo_param, scope.type_of(memo_arg, tracer: tracer)) do |depth, nesting|
+        memo_type = scope.type_of(memo_arg, tracer: tracer)
+        pre_state = lookup_mutated_seed(body, memo_param, memo_type, MEMO_SEED_MUTATORS) do |depth, nesting|
           depth == nesting
         end
-        joined = join_memo_content(call_node, memo_param, calls, pre_state, shadows)
-        joined || call_type
+        memo = if calls.empty?
+                 # Issue #2411 — a memo the block only reshapes (`m.merge!(s)`, `m.delete(k)`) answers its widened seed.
+                 pre_state.equal?(memo_type) ? call_type : pre_state
+               else
+                 join_memo_content(call_node, memo_param, calls, pre_state, shadows) || call_type
+               end
+        floor_memo_callee_escapes(body, memo_param, memo)
       end
+
+      # Issue #2411 — `memo` floored as a captured local is when the block hands it to a self-call whose callee
+      # mutates it ({#floor_callee_escaped_args_for_call}, the walk {#floor_block_body_callee_captures} makes): the
+      # join reads only the stores in the block, so `|x, out| record(out, x); out[[x, :e]] = 1` joined
+      # `Hash[[Integer, :e], 1]` while `record` stored other keys, and a memo the block only passed on kept its `{}`.
+      # Every read of the memo's name counts, a nested block's parameter shadowing it included: the floor only forgets.
+      # The walk runs on an evaluator whose scope binds the memo, since the floor reads only locals its scope binds.
+      def floor_memo_callee_escapes(body, memo_param, memo)
+        StatementEvaluator.new(scope: scope.with_local(memo_param, memo), tracer: tracer)
+                          .callee_floored_local(body, memo_param)
+      end
+
+      protected
+
+      # `name` as the self-calls in `body` leave it, each flooring the arguments its callee mutates
+      # ({#floor_memo_callee_escapes}).
+      def callee_floored_local(body, name)
+        floored = scope
+        each_node_in_caller_block(body, 0) { |node, _depth| floored = floor_callee_escaped_args_for_call(node, floored) }
+        floored.local(name)
+      end
+
+      private
 
       # `seed` as the {HashLookupMutation} calls `body` makes on `name` leave it. They add no content, so the join
       # never sees them as sites, and a seed read before `widen_after_block` is still the closed shape whose known
       # values answer every missing key: `b = { a: 1 }; [1].each { b.default = 0; b[:c] = 2 }` read `b[:zz]` as
       # `1 | 2`, and so did an `each_with_object({})` memo given a default beside its stores, and a `while` body. The
       # block receives a read's `depth` and its enclosing block count, and says whether the read is the variable
-      # `seed` describes. A `def` opens a scope of its own, so nothing under one is.
-      def lookup_mutated_seed(body, name, seed)
+      # `seed` describes. A `def` opens a scope of its own, so nothing under one is. `mutators` widens the call names
+      # read; the `each_with_object` memo passes {MEMO_SEED_MUTATORS}.
+      def lookup_mutated_seed(body, name, seed, mutators = HashLookupMutation::MUTATORS)
         Source::NodeWalker.each_with_ancestors(body) do |node, ancestors|
-          next unless node.is_a?(Prism::CallNode) && HashLookupMutation::MUTATORS.include?(node.name)
+          next unless node.is_a?(Prism::CallNode) && mutators.include?(node.name)
           next if ancestors.any?(Prism::DefNode)
 
           receiver = node.receiver
@@ -6172,21 +6207,19 @@ module Rigor
         second.respond_to?(:name) ? second.name : nil
       end
 
-      # Content-mutator calls on the block-local `var_name` within `body` — directly, or from a nested block that
-      # reaches it by exactly the scopes it is nested in. A nested block's own parameter of the same name is a
-      # different variable and does not count.
+      # Content mutations of the block-local `var_name` within `body` — directly, or from a nested block that reaches
+      # it by exactly the scopes it is nested in. A nested block's own parameter of the same name is a different
+      # variable and does not count. The sites are the ones {#captured_content_mutations} reads for a captured local
+      # ({#content_mutation_target}), the index compound writes included: scanning calls alone, `h[x] ||= []` was no
+      # store, and the memo kept its `{}`.
       def body_content_mutations_on(body, var_name, shadows)
         calls = []
         Source::NodeWalker.each_with_ancestors(body) do |descendant, ancestors|
-          next unless descendant.is_a?(Prism::CallNode)
-          next unless CONTENT_MUTATORS.include?(descendant.name)
+          name, site = content_mutation_target(descendant) { |receiver| receiver.depth == scope_nesting(ancestors) }
+          next unless name == var_name
 
-          receiver = descendant.receiver
-          next unless receiver.is_a?(Prism::LocalVariableReadNode)
-          next unless receiver.name == var_name && receiver.depth == scope_nesting(ancestors)
-
-          calls << descendant
-          record_shadows(shadows, descendant, ancestors)
+          calls << site
+          record_shadows(shadows, site, ancestors)
         end
         calls
       end
@@ -6325,6 +6358,13 @@ module Rigor
                           (StringMutation::MUTATORS - MutationWidening::ARRAY_MUTATORS -
                            MutationWidening::HASH_MUTATORS)).freeze
       private_constant :CONTENT_MUTATORS
+
+      # The memo's seed widens on every shape mutator its scan does not read evidence from, as a captured local's
+      # binding does on the block seam ({MutationWidening.widen_after_block}): the {HashLookupMutation} calls, and the
+      # rewriters and removers (`merge!`, `update`, `delete`, `replace`, …) whose added content no join can read. Read
+      # off the memo argument alone, `xs.each_with_object({}) { |s, m| m.merge!(s) }` answered the empty `{}`.
+      MEMO_SEED_MUTATORS = (MutationWidening::SHAPE_MUTATORS - CONTENT_MUTATORS).freeze
+      private_constant :MEMO_SEED_MUTATORS
 
       # Issue #2296 — the Set adders {CONTENT_MUTATORS} leaves out (`add`, `add?`, `merge`): a scan cannot see the
       # receiver's class, and `merge` on a Hash returns a new Hash, so the callee census keeps them apart and floors

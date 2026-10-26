@@ -3,7 +3,7 @@ module Rigor
     module Reachability
       class ScanCache
         def self.open: (untyped, ?target_ruby: untyped) -> Rigor::Analysis::Reachability::ScanCache
-        def self.source_digest: () -> String
+        def self.source_digest: () -> ("unreadable" | String)
         def initialize: (path: untyped, header: untyped) -> void
         def save: () -> nil
       end

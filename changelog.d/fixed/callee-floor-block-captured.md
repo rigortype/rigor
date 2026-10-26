@@ -1,0 +1,3 @@
+- **[inference]** A local passed from inside a block to a method that changes it no longer keeps its literal type after the block, so reading it no longer reports a false `undefined method`. ([#2400](https://github.com/rigortype/rigor/pull/2400))
+  - Covers `acc = [7, 9]; [1].each { poke(acc) }` with `def poke(acc) = (acc[0] = "x")`, nested blocks, keyword arguments, `send(:poke, acc)`, class methods, and a block chained on (`[1].each { poke(acc) }.size`) or passed as an argument.
+  - A block parameter or block-local of the same name, or a copy such as `poke(acc.dup)`, still leaves the outer local as it was.

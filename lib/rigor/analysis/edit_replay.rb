@@ -19,10 +19,12 @@ module Rigor
     # - `dropped` (#2277) — the file with ONE statement of a `class` / `module` body removed and everything else kept,
     #   so the declarations, the other definitions and every broader key stay as they were and a finer edge is the
     #   only thing that re-checks a reader. At most {MAX_DROPS} statements per file: the visibility-changing calls
-    #   (`private`, `module_function`, ... {VISIBILITY_CALLS}) first, in source order, since those are what finer edges
-    #   such as #2161's `visibility:` read; then the other statements, spread evenly over the file.
+    #   (`private`, `module_function`, ... {VISIBILITY_CALLS}) first, a body's own statements before those of the bodies
+    #   nested in it, since those are what finer edges such as #2161's `visibility:` read; then the other statements,
+    #   spread evenly over the file. A drop whose remainder does not parse (a heredoc body left behind) gives way to the
+    #   next candidate. Statements of a `class << self` body are never candidates.
     #
-    # Neither replays an addition. An edit identical to the file or to an earlier edit, or a file that does not parse
+    # No edit is an addition. An edit identical to the file or to an earlier edit, or a file that does not parse
     # (or, for the skeleton, declares nothing), is not replayed.
     module EditReplay
       Edit = Data.define(:label, :source)
@@ -47,29 +49,51 @@ module Rigor
         edits.reject { |edit| edit.source == source }.uniq(&:source)
       end
 
-      # Up to {MAX_DROPS} edits, each `source` less one statement of a class / module body.
+      # Up to {MAX_DROPS} edits, each `source` less one statement of a class / module body, in source order. A drop that
+      # leaves text that does not parse is never returned: the next candidate takes its place.
       def drops(source)
         result = Prism.parse(source)
         return [] unless result.success?
 
-        picked = pick_drops(drop_candidates(result.value.statements.body))
-        picked.map do |node|
-          location = node.location
-          from, to = whole_lines(source, location.start_offset, location.end_offset)
-          dropped = source.byteslice(0, from) + source.byteslice(to..)
-          Edit.new(label: "dropping the statement at line #{location.start_line} of", source: dropped)
+        picked = []
+        preferred(drop_candidates(result.value.statements.body)).each do |node|
+          edit = drop_edit(source, node)
+          picked << [node, edit] if edit
+          break if picked.size == MAX_DROPS
         end
+        picked.sort_by { |node, _| node.location.start_offset }.map(&:last)
+      end
+
+      # `source` less `node`, or nil when what is left does not parse. The range runs to the furthest heredoc body
+      # inside the node, which sits after the node's own location.
+      def drop_edit(source, node)
+        location = node.location
+        from, to = whole_lines(source, location.start_offset, [location.end_offset, heredoc_end(node)].max)
+        dropped = source.byteslice(0, from) + source.byteslice(to..)
+        return nil unless Prism.parse(dropped).success?
+
+        Edit.new(label: "dropping the statement at line #{location.start_line} of", source: dropped)
+      end
+
+      # The end offset of the furthest heredoc terminator inside `node` (0 when it holds none).
+      def heredoc_end(node)
+        own = node.respond_to?(:closing_loc) && node.respond_to?(:opening_loc) &&
+              node.opening_loc&.slice&.start_with?("<<")
+        ends = node.compact_child_nodes.map { |child| heredoc_end(child) }
+        ends << node.closing_loc.end_offset if own && node.closing_loc
+        ends.max || 0
       end
 
       # The byte range of `start...finish` widened to the lines it alone occupies, so no blank line is left behind.
       def whole_lines(source, start, finish)
         head = source.byteslice(0, start)[/(?<=\A|\n)[ \t]*\z/]
-        tail = source.byteslice(finish..)[/\A[ \t]*\n/]
+        tail = finish.positive? && source.getbyte(finish - 1) == 10 ? "" : source.byteslice(finish..)[/\A[ \t]*\n/]
         head.nil? || tail.nil? ? [start, finish] : [start - head.bytesize, finish + tail.bytesize]
       end
 
-      # Every statement directly in a `class` / `module` body of `nodes`, nested bodies included (a nested declaration
-      # is itself a candidate, dropped whole), in source order.
+      # Every statement directly in a `class` / `module` body of `nodes`, nested bodies included, in the order a body's
+      # own statements come before those of the bodies nested in it (a nested declaration is itself a candidate,
+      # dropped whole). A `class << self` body is never searched: its statements are not candidates.
       def drop_candidates(nodes)
         nodes.flat_map do |node|
           next [] unless (node.is_a?(Prism::ClassNode) || node.is_a?(Prism::ModuleNode)) &&
@@ -80,15 +104,14 @@ module Rigor
         end
       end
 
-      def pick_drops(candidates)
+      # The candidates in the order to try them: the visibility calls, then the other statements from the evenly spread
+      # picks outward, then the rest of the other statements.
+      def preferred(candidates)
         visibility, others = candidates.partition { |node| visibility_call?(node) }
-        picked = visibility.first(MAX_DROPS)
-        room = MAX_DROPS - picked.size
-        if room.positive? && !others.empty?
-          count = [room, others.size].min
-          picked += Array.new(count) { |index| others[((index * 2) + 1) * others.size / (count * 2)] }
+        spread = Array.new(others.empty? ? 0 : MAX_DROPS) do |index|
+          others[(((index * 2) + 1) * others.size) / (MAX_DROPS * 2)]
         end
-        picked.sort_by { |node| node.location.start_offset }
+        [*visibility, *spread, *others].uniq(&:object_id)
       end
 
       def visibility_call?(node)
@@ -124,7 +147,8 @@ module Rigor
         superclass = node.superclass
         superclass ? "class #{node.constant_path.slice} < #{superclass.slice}" : "class #{node.constant_path.slice}"
       end
-      private_class_method :declarations, :header_of, :drop_candidates, :whole_lines, :pick_drops, :visibility_call?
+      private_class_method :declarations, :header_of, :drop_candidates, :whole_lines, :drop_edit, :heredoc_end,
+                           :preferred, :visibility_call?
     end
   end
 end

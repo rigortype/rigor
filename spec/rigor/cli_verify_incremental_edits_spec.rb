@@ -211,9 +211,12 @@ RSpec.describe Rigor::CLI do
   # with the declarations and defs as they were, so the `visibility:` read of `DefinerResolution.module_function_row?`
   # is the edge that re-checks `use.rb`.
   #
-  # G3 (`module_function_row?` not calling `read_visibility`) is not killable here, and is equivalent on this path: the
-  # call `Es.two(1)` reaches the row through `DefinerResolution.possible?`, which files the same `visibility:Es#two`
-  # key (`module_function_row?`'s own comment says so). The `drop_edge(:visibility)` example below stands for G4.
+  # G3 (`module_function_row?` not calling `read_visibility`) is not killable here: it is equivalent. The only caller of
+  # `self_extended_copy_visibility`, `DefinerResolution.side_visibility`, first calls
+  # `scope.discovered_method_visibility(owner, name, singleton: true)`, which files `visibility:<owner>#<name>`
+  # unconditionally (`Scope#discovered_method_visibility`), so the read in `module_function_row?` is always preceded by
+  # an identical one. The `Es#*` any-row read is covered by other readers. The `drop_edge(:visibility)` example below
+  # stands for G4.
   describe "with the self-extended module_function fixture" do
     before do
       File.write("lib/es.rb", "module Es\n  extend self\n  private def two(a, b) = a\nend\n")

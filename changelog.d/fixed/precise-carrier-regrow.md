@@ -1,0 +1,3 @@
+- **[engine]** A precise `Array[E]` or `Set[E]` now joins the element type a store of another class puts in, so a read after `clear` and a refill no longer reports. ([#2423](https://github.com/rigortype/rigor/pull/2423))
+  - `a = ARGV.dup; a.clear; a << 1; a.each { |v| v.fdiv(2) }` and its `ARGV.to_set` twin reported `undefined method 'fdiv' for String`; the carrier now reads `Array[Integer | String]` / `Set[Integer | String]`.
+  - A literal element is covered too: `s = ints.map { "x" }; s << "y"` no longer folds `s.last == "y"` always-falsey, while a store of the same literal keeps its correct fold.

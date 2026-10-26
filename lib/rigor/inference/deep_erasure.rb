@@ -5,6 +5,7 @@ require_relative "../type"
 require_relative "../source/node_walker"
 require_relative "mutation_rejoin"
 require_relative "receiver_alias"
+require_relative "set_mutation"
 
 module Rigor
   module Inference
@@ -54,11 +55,31 @@ module Rigor
       # and so does `it` / `_1` wherever it is read, and an accumulator parameter (`inject([]) { |acc, e| acc << e }`):
       # the rule is wider than "an element", which only loses precision. It does not follow an alias (`y = x`) or
       # an element passed to a call (`add(x)`), which the straight-line widening does not either.
-      def element_mutation?(body, names)
+      #
+      # A Set-only mutator (`add`, `merge`, `subtract`, … — {SetMutation::MUTATORS} less `SHAPE_MUTATORS`) counts
+      # only when `set_held` is given and answers true (issue #2363). The names are read without their receiver,
+      # and `merge` on a Hash element returns a new Hash, so the caller answers from the collection's type whether
+      # an element could be a Set at all ({holds_set?}). The block runs at the first such site, at most once.
+      def element_mutation?(body, names, &set_held)
         return false if body.nil?
 
         names |= nested_parameter_names(body)
-        Source::NodeWalker.each(body).any? { |node| element_mutation_site?(node, names) }
+        Source::NodeWalker.each(body).any? { |node| element_mutation_site?(node, names, set_held) }
+      end
+
+      # True when `type` holds a `Set` at some depth: as itself, a union member, a `Tuple` element, a `HashShape`
+      # value or a type argument. A collection whose type holds none has no element a Set-only mutator can be
+      # mutating, so a `merge` on one of its elements is `Hash#merge`, which returns a new Hash.
+      def holds_set?(type)
+        case type
+        when Type::Constant then SetMutation.constant?(type)
+        when Type::Nominal then type.class_name == "Set" || type.type_args.any? { |arg| holds_set?(arg) }
+        when Type::Tuple then type.elements.any? { |element| holds_set?(element) }
+        when Type::HashShape then type.pairs.each_value.any? { |value| holds_set?(value) }
+        when Type::Union then type.members.any? { |member| holds_set?(member) }
+        when Type::Difference then holds_set?(type.base)
+        else false
+        end
       end
 
       # The names `parameters` (a block's parameter list, or a `for` index) binds.
@@ -80,9 +101,12 @@ module Rigor
         end
       end
 
-      def element_mutation_site?(node, names)
+      def element_mutation_site?(node, names, set_held)
         if node.is_a?(Prism::CallNode)
-          MutationWidening::SHAPE_MUTATORS.include?(node.name) && element_rooted?(node.receiver, names)
+          return false unless element_rooted?(node.receiver, names)
+
+          MutationWidening::SHAPE_MUTATORS.include?(node.name) ||
+            (!set_held.nil? && SetMutation::MUTATORS.include?(node.name) && set_held.call)
         else
           ELEMENT_WRITE_NODES.include?(node.class) && element_rooted?(node.receiver, names)
         end
@@ -103,9 +127,16 @@ module Rigor
       # (`[[1]]`). The receiver's variables drop their shapes at every depth ({widen}), as a `for` loop's
       # value does ({StatementEvaluator#for_collection_after}).
       def widen_element_aliases(receiver, body, names, scope)
-        return scope unless element_mutation?(body, names)
+        return scope unless element_mutation?(body, names) { receiver_holds_set?(receiver, scope) }
 
         widen_receiver(receiver, scope)
+      end
+
+      def receiver_holds_set?(receiver, scope)
+        ReceiverAlias.candidates(receiver).any? do |read|
+          getter, = MutationWidening::ALIAS_ACCESSORS[read.class]
+          getter && holds_set?(scope.public_send(getter, ReceiverAlias.read_name(read)))
+        end
       end
 
       def widen_receiver(receiver, scope)

@@ -308,8 +308,7 @@ module Rigor
                                      file_singleton, file_visibilities)
         extends, methods_table, unpositioned =
           merge_and_fold_extends(default_scope, root, [def_nodes, file_tables[0]],
-                                 [singleton_def_nodes, file_singleton.first], seeded_scope, siblings,
-                                 mixin_unpositioned)
+                                 [singleton_def_nodes, file_singleton[0]], seeded_scope, siblings, mixin_unpositioned)
 
         seeded_scope.with_discovery(
           seeded_scope.discovery.with(
@@ -423,7 +422,7 @@ module Rigor
       # ADR-119 WD1 — the unpositioned union (the seed's, the mixin walks' and this file's extend side) is settled
       # first, because the fold reads it to tell a certain extend edge from a listed one. `siblings` is written by
       # the fold.
-      # `def_pair` and `singleton_pair` are `[merged table, this file's own table]`; the merged tables are frozen once the
+      # `def_pair` and `singleton_pair` are `[merged table, this file's own]`; the merged tables are frozen once the
       # fold, their last in-place writer, is done ({#freeze_def_tables}).
       def merge_and_fold_extends(default_scope, root, def_pair, singleton_pair, seeded_scope, siblings,
                                  mixin_unpositioned)

@@ -452,6 +452,28 @@ RSpec.describe "a global's binding past a call that may reach its writer (#2314)
                   first: [["use.rb", 3]], second: [])
     end
 
+    # The search reads `o.baz` by name, on a receiver no caller types, so only its own `defines:` read re-checks.
+    it "forgets the global once a method the search follows on an untyped receiver is defined" do
+      use = "def bar(o) = o.baz\n$g = nil\nbar(Object.new)\n$g + 1\n"
+      expect_edit(files: { "use.rb" => use, "other.rb" => "\n", "writer.rb" => "def w = ($g = 2)\n" },
+                  edited: "other.rb", after: "class Q\n  def baz = w\nend\n", first: [["use.rb", 4]], second: [])
+    end
+
+    # The alias keeps its name across the edit, so only the `method_alias:` read re-checks.
+    it "forgets the global once an alias is pointed at its writer" do
+      use = "def bar(o) = o.ra\n$g = nil\nbar(Object.new)\n$g + 1\n"
+      before = "class Q\n  def reset! = ($g = 1)\n  def noop = 1\n  alias_method :ra, :noop\nend\n"
+      expect_edit(files: { "use.rb" => use, "other.rb" => before }, edited: "other.rb",
+                  after: before.sub(":noop\nend", ":reset!\nend"), first: [["use.rb", 4]], second: [])
+    end
+
+    # A `when` test that runs no statement call, so only the case site's own census read re-checks.
+    it "forgets a case subject once a when lambda's method starts writing it" do
+      use = "$g = nil\ncase $g\nwhen String then 1\nwhen ->(_) { reset!; false } then 2\nelse $g + 1\nend\n"
+      expect_edit(files: { "use.rb" => use, "other.rb" => "def reset! = 1\n" }, edited: "other.rb",
+                  after: "def reset! = ($g = 2)\n", first: [["use.rb", 5]], second: [])
+    end
+
     it "forgets the global once the called method starts calling its writer" do
       expect_edit(files: { "use.rb" => use, "other.rb" => "def reset! = 1\n", "writer.rb" => "def b1 = ($g = 2)\n" },
                   edited: "other.rb", after: "def reset! = b1\n", first: [["use.rb", 3]], second: [])

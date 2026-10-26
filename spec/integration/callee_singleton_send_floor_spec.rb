@@ -4,7 +4,9 @@
 # `class << self`) against the instance-side def table, and did not follow `send(:name, ...)` /
 # `public_send(:name, ...)`. Each row is a file whose `run` passes `acc = [7, 9]` to a callee that mutates it (or not)
 # and then calls `upcase` on `acc[0]`; the expectation is the diagnostics `rigor check` reports for it, which Ruby
-# agrees with: `"X"` when the callee writes `"x"` into slot 0, a NoMethodError on `7` when nothing does.
+# agrees with: `"X"` when the callee writes `"x"` into slot 0, a NoMethodError on `7` when nothing does. On the
+# singleton side the floor also reads the same-named instance def, so two controls pin the true positives that costs
+# (`approval-queue.d/callee-floor-singleton-side.md`).
 
 require "spec_helper"
 require "fileutils"
@@ -63,16 +65,20 @@ RSpec.describe "the callee mutation floor resolves singleton self-calls and lite
       RUBY
     end
 
-    it "keeps the report when only the same-named instance chain mutates" do
-      expect(diagnostics(singleton_run("stripes(acc)", <<~RUBY))).to eq(undefined_upcase)
+    # Control, an accepted loss: Ruby raises on `7`, as only the instance `stripes` chain mutates, but the singleton side
+    # also reads the same-named instance def.
+    it "floors an argument only the same-named instance chain mutates" do
+      expect(diagnostics(singleton_run("stripes(acc)", <<~RUBY))).to eq([])
         def self.stripes(acc) = acc.size
         def stripes(acc) = poke(acc)
         def poke(acc) = (acc[0] = "x")
       RUBY
     end
 
-    it "resolves a singleton chain's next hop on the singleton side too" do
-      expect(diagnostics(singleton_run("stripes(acc)", <<~RUBY))).to eq(undefined_upcase)
+    # Control, an accepted loss: Ruby reaches the non-mutating `self.poke` and raises on `7`; the next hop of a
+    # singleton chain reads the same-named instance `poke` too.
+    it "floors an argument the same-named instance def mutates at a singleton chain's next hop" do
+      expect(diagnostics(singleton_run("stripes(acc)", <<~RUBY))).to eq([])
         def self.stripes(acc) = poke(acc)
         def self.poke(acc) = acc.size
         def poke(acc) = (acc[0] = "x")
@@ -114,7 +120,8 @@ RSpec.describe "the callee mutation floor resolves singleton self-calls and lite
     end
   end
 
-  # `Mut.run` reaches the later singleton `poke` and Ruby raises on `7`; `run_instance` reaches the instance `poke`.
+  # `Mut.run` reaches the later, mutating `self.poke` ("X"); `run_instance` reaches the instance `poke` and Ruby raises
+  # on `7`. The module_function `stripes` is one def on both sides, so its hand-offs must not share one answer.
   it "resolves one module_function def's hand-offs per side when callers on both sides reach it" do
     source = <<~RUBY
       module Mut
@@ -133,11 +140,73 @@ RSpec.describe "the callee mutation floor resolves singleton self-calls and lite
         module_function
 
         def stripes(acc) = poke(acc)
-        def poke(acc) = (acc[0] = "x")
-        def self.poke(acc) = acc.size
+        def poke(acc) = acc.size
+        def self.poke(acc) = (acc[0] = "x")
       end
     RUBY
-    expect(diagnostics(source)).to eq([[5, "call.undefined-method"]])
+    expect(diagnostics(source)).to eq([[11, "call.undefined-method"]])
+  end
+
+  # Each shape hands the argument from the singleton side to a mutating instance def, or reaches a singleton def the
+  # index does not record, through a path the floor does not follow; Ruby answers "X" for each.
+  context "with a singleton-side hand-off the floor does not follow" do
+    it "floors through the same-named instance def behind a `new.call` facade" do
+      expect(diagnostics(singleton_run("call(acc)", <<~RUBY))).to eq([])
+        def self.call(acc) = new.call(acc)
+        def call(acc) = (acc[0] = "x")
+      RUBY
+    end
+
+    it "floors through the same-named instance def behind a singleton instance" do
+      expect(diagnostics(singleton_run("helper(acc)", <<~RUBY))).to eq([])
+        def self.instance = @instance ||= new
+        def self.helper(acc) = instance.helper(acc)
+        def helper(acc) = (acc[0] = "x")
+      RUBY
+    end
+
+    it "floors through a def made a module function by `module_function :name`" do
+      source = <<~RUBY
+        module Mut
+          def self.run
+            acc = [7, 9]
+            poke(acc)
+            acc[0].upcase
+          end
+
+          def poke(acc) = (acc[0] = "x")
+          module_function :poke
+        end
+      RUBY
+      expect(diagnostics(source)).to eq([])
+    end
+
+    it "floors through the same-named instance def beside `define_singleton_method`" do
+      expect(diagnostics(singleton_run("poke(acc)", <<~RUBY))).to eq([])
+        define_singleton_method(:poke) { |acc| acc[0] = "x" }
+        def poke(acc) = (acc[0] = "x")
+      RUBY
+    end
+
+    it "floors through the same-named instance def beside an `alias_method` in `class << self`" do
+      source = <<~RUBY
+        class Mut
+          class << self
+            def run
+              acc = [7, 9]
+              poke(acc)
+              acc[0].upcase
+            end
+
+            def real(acc) = (acc[0] = "x")
+            alias_method :poke, :real
+          end
+
+          def poke(acc) = (acc[0] = "x")
+        end
+      RUBY
+      expect(diagnostics(source)).to eq([])
+    end
   end
 
   context "with an instance-side caller" do
@@ -203,6 +272,19 @@ RSpec.describe "the callee mutation floor resolves singleton self-calls and lite
     it "follows a literal `send` in a singleton-side body to the singleton def" do
       expect(diagnostics(singleton_run("send(:poke, acc)", <<~RUBY))).to eq([])
         def self.poke(acc) = (acc[0] = "x")
+      RUBY
+    end
+
+    it "reads `send` as an ordinary self-call when the class defines its own `send`" do
+      expect(diagnostics(instance_run("send(:ping, acc)", <<~RUBY))).to eq([])
+        def send(kind, buf) = (buf[0] = "x")
+      RUBY
+    end
+
+    it "reads `public_send` as an ordinary self-call when the class defines its own `public_send`" do
+      expect(diagnostics(instance_run("public_send(:ping, acc)", <<~RUBY))).to eq([])
+        def public_send(kind, buf) = (buf[0] = "x")
+        def ping(buf) = buf.size
       RUBY
     end
 

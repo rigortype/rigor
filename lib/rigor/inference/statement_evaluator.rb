@@ -536,29 +536,32 @@ module Rigor
       # callee floor ({#widen_callee_escaped_argument_captures}) floors after the call, and the ones
       # {CapturedLocals.content_mutations} reports as a block's callee-mutated captures.
       def content_mutated_arguments(call_node)
-        def_node = argument_mutating_callee(call_node)
-        return NO_ARGUMENT_READS if def_node.nil?
+        callees = argument_mutating_callees(call_node)
+        return NO_ARGUMENT_READS if callees.empty?
 
-        arguments_for_slots(call_node, callee_content_mutated_parameters(def_node))
+        reads = callees.flat_map do |def_node, offset|
+          arguments_for_slots(call_node, callee_content_mutated_parameters(def_node), offset)
+        end
+        callees.size == 1 ? reads : reads.uniq
       end
 
-      # The user def a self-dispatch `call_node` that passes a local resolves to, or nil — the def whose census the
-      # callee floor reads.
-      def argument_mutating_callee(call_node)
-        return unless self_dispatch_call?(call_node)
+      # The `[def, offset]` pairs a self-dispatch `call_node` that passes a local resolves to
+      # ({#resolve_self_callees}) — the defs whose census the callee floor reads; empty for any other call.
+      def argument_mutating_callees(call_node)
+        return NO_CALLEES unless self_dispatch_call?(call_node)
         # Fast path — only a local passed as an argument can be reported, so a call with none skips the def
         # resolution and the body scan entirely (the overwhelming common case).
-        return unless call_passes_local_argument?(call_node)
+        return NO_CALLEES unless call_passes_local_argument?(call_node)
 
-        resolve_self_callee_def(call_node)
+        resolve_self_callees(call_node)
       end
 
-      # The local-variable reads `call_node` passes to the parameters of `mutated`, a `{ name => slot }` census.
-      def arguments_for_slots(call_node, mutated)
+      # The local-variable reads `call_node` passes to the parameters of `mutated`, a `{ name => slot }` census, the
+      # first `offset` arguments not being the callee's (the `:name` of a `send` hand-off, {#resolve_self_callees}).
+      def arguments_for_slots(call_node, mutated, offset)
         return NO_ARGUMENT_READS if mutated.empty?
 
         argument_nodes = call_node.arguments.arguments
-        offset = self_call_argument_offset(call_node)
         mutated.values.uniq.filter_map do |slot|
           argument = slot.is_a?(Symbol) ? keyword_argument(argument_nodes, slot) : argument_nodes[slot + offset]
           argument = argument.value if argument.is_a?(Prism::ImplicitNode)
@@ -4562,24 +4565,35 @@ module Rigor
       # ({UnknownStoreWidening.callee_block_floor} / {UnknownStoreWidening.callee_set_floor}): a parameter the callee
       # mutates inside a block (`2.times { |i| acc[i] = v }`), and a Set argument the callee grows through a Set-only
       # adder (`s.add(x)`, `s.merge(xs)`), which the bare census leaves out because `Hash#merge` does not mutate.
+      #
+      # Issue #2297 — a call may resolve to more than one def ({#resolve_self_callees}); each channel floors through
+      # every one of them before the next channel runs, so a bare-census mutation in any of them still goes first.
       def floor_callee_escaped_args_for_call(node, base_scope)
-        def_node = argument_mutating_callee(node)
-        return base_scope if def_node.nil?
+        callees = argument_mutating_callees(node)
+        return base_scope if callees.empty?
 
-        acc = floor_arguments(node, callee_content_mutated_parameters(def_node), base_scope) do |type|
-          content_floor_for(type)
+        acc = base_scope
+        callees.each do |def_node, offset|
+          acc = floor_arguments(node, callee_content_mutated_parameters(def_node), acc, offset) do |type|
+            content_floor_for(type)
+          end
         end
         # Each closure below is only worth computing when an argument holds something its floor could widen.
         if floorable_local_argument?(node, acc) { |type| UnknownStoreWidening.callee_floorable?(type) }
-          acc = floor_arguments(node, callee_block_mutated_parameters(def_node), acc) do |type|
-            UnknownStoreWidening.callee_block_floor(type)
+          callees.each do |def_node, offset|
+            acc = floor_arguments(node, callee_block_mutated_parameters(def_node), acc, offset) do |type|
+              UnknownStoreWidening.callee_block_floor(type)
+            end
           end
         end
         return acc unless floorable_local_argument?(node, acc) { |type| SetMutation.carrier_in?(type) }
 
-        floor_arguments(node, callee_set_mutated_parameters(def_node), acc) do |type|
-          UnknownStoreWidening.callee_set_floor(type)
+        callees.each do |def_node, offset|
+          acc = floor_arguments(node, callee_set_mutated_parameters(def_node), acc, offset) do |type|
+            UnknownStoreWidening.callee_set_floor(type)
+          end
         end
+        acc
       end
 
       # True when a local `node` passes (positionally or as a keyword's value) is bound in `scope` to a type the
@@ -4603,8 +4617,8 @@ module Rigor
 
       # `base_scope` with each local `node` passes to a parameter of `mutated` rebound to what the block answers for
       # its binding; a nil answer, or an answer equal to the binding, leaves it.
-      def floor_arguments(node, mutated, base_scope)
-        arguments = arguments_for_slots(node, mutated)
+      def floor_arguments(node, mutated, base_scope, offset)
+        arguments = arguments_for_slots(node, mutated, offset)
         return base_scope if arguments.empty?
 
         arguments.reduce(base_scope) do |acc, argument|
@@ -4648,13 +4662,13 @@ module Rigor
         end
       end
 
-      # Issue #2104 — the per-thread memo of a census that also resolves self-calls ({#resolve_self_callee_def}), so it
+      # Issue #2104 — the per-thread memo of a census that also resolves self-calls ({#resolve_self_callees}), so it
       # reads, besides `def_node`'s AST, the class self-calls resolve in and the discovery index whose def table they
       # resolve through. Those two key it: the index by identity, as it is immutable (one slot, as a file's analysis
       # reads one index; a scope indexed for another file replaces it), the class by name. A run builds hundreds of
       # thousands of evaluators, and a per-evaluator memo alone recomputed each closure and each def's edges about
       # thirty times over (#2295's cost on the release gate). Issue #2297 — the side self-calls resolve on
-      # ({#resolve_self_callee_def}) keys it too: a singleton-side table apart from the instance-side one.
+      # ({#resolve_self_callees}) keys it too: a singleton-side table apart from the instance-side one.
       #
       # While a dependency recorder is active the memo is bypassed: a resolution records an ADR-46 read in the file
       # and in each capture window open at the time, and a hit would leave that read out of them.
@@ -4758,15 +4772,14 @@ module Rigor
         slots = content_parameter_slots(def_node)
         edges = []
         each_forwarding_call(def_node, slots) do |call_node, forwarded|
-          callee = resolve_self_callee_def(call_node)
-          next if callee.nil?
+          resolve_self_callees(call_node).each do |callee, offset|
+            callee_slots = content_parameter_slots(callee)
+            forwarded.each do |name, index|
+              names = bound_parameter_names(callee_slots, index.is_a?(Integer) ? index - offset : index)
+              next if names.empty?
 
-          callee_slots = content_parameter_slots(callee)
-          forwarded.each do |name, callee_slot|
-            names = bound_parameter_names(callee_slots, callee_slot)
-            next if names.empty?
-
-            edges << CalleeMutationChain::Edge.new(name: name, slot: slots[name], callee: callee, callee_names: names)
+              edges << CalleeMutationChain::Edge.new(name: name, slot: slots[name], callee: callee, callee_names: names)
+            end
           end
         end
         edges.empty? ? NO_FORWARDS : edges
@@ -4797,21 +4810,21 @@ module Rigor
       # `[[parameter_name, callee_slot], ...]` for the arguments of `call_node` that read one of `slots`' parameters at
       # `depth`, the block nesting the call sits at: a read of the method's own parameter there has that depth. An
       # argument after a splat or `...` has an index that says nothing about the parameter it binds, so it binds
-      # {ANY_SLOT}, any positional parameter of the callee; one before the first splat keeps its index.
+      # {ANY_SLOT}, any positional parameter of the callee; one before the first splat keeps its index among the call's
+      # arguments, which {#compute_forwarding_edges} shifts by each callee's offset ({#resolve_self_callees}).
       def forwarded_parameters(call_node, slots, depth)
         args = call_node.arguments
         return NO_FORWARDS unless args.is_a?(Prism::ArgumentsNode)
 
         spread = false
         forwarded = []
-        offset = self_call_argument_offset(call_node)
         args.arguments.each_with_index do |argument, index|
           if argument.is_a?(Prism::KeywordHashNode)
             forwarded.concat(forwarded_keywords(argument, slots, depth))
           elsif argument.is_a?(Prism::SplatNode) || argument.is_a?(Prism::ForwardingArgumentsNode)
             spread = true
           elsif (name = parameter_read_name(argument, slots, depth))
-            forwarded << [name, spread ? ANY_SLOT : index - offset]
+            forwarded << [name, spread ? ANY_SLOT : index]
           end
         end
         forwarded
@@ -4849,45 +4862,65 @@ module Rigor
         node.name if slots.key?(node.name)
       end
 
-      # The user def a self-dispatch `node` resolves to in the enclosing class, or nil. Reuses the discovery index
-      # `Scope#user_def_for` reads; no ancestor walk (the boundary-escape idiom is same-class), keeping this off the hot
-      # path for the overwhelming majority of self-calls that resolve to nothing escaping.
+      # The `[def, offset]` pairs a self-dispatch `node` resolves to in the enclosing class, `offset` being how many
+      # leading arguments of `node` are not the def's. Reuses the discovery index `Scope#user_def_for` reads; no
+      # ancestor walk (the boundary-escape idiom is same-class), keeping this off the hot path for the overwhelming
+      # majority of self-calls that resolve to nothing escaping.
       #
       # Issue #2297 — in a singleton-side body (`def self.x`, a `def` in `class << self`), whose `self` is the class
-      # object, a self-call resolves to the singleton def of that name, never to the same-named instance def. The
-      # singleton table already holds the instance defs `extend self` and `module_function` publish there. A
-      # `send(:name, ...)` / `public_send(:name, ...)` with a symbol literal resolves as the self-call `name(...)`
-      # ({#self_call_name}).
-      def resolve_self_callee_def(node)
-        name = self_call_name(node)
+      # object, a self-call resolves to the singleton def of that name AND to the same-named instance def, so the floor
+      # applies when either mutates. Ruby calls only the singleton side, but the hand-offs that reach an instance def
+      # from there (`new.call(acc)`, `instance.helper(acc)`) and the singleton defs the index does not record
+      # (`module_function :poke`, `define_singleton_method`, `alias_method` in `class << self`) are not followed, and
+      # dropping the instance def floored too little on correct code (`approval-queue.d/callee-floor-singleton-side.md`).
+      # An instance-side body resolves to instance defs only.
+      #
+      # A `send(:name, ...)` / `public_send(:name, ...)` with a symbol literal resolves as the self-call `name(...)`,
+      # offset 1, on each side that has no def of the `send` / `public_send` name itself; on a side that has one, it is
+      # an ordinary self-call to that def, offset 0.
+      def resolve_self_callees(node)
         self_type = scope.self_type
         class_name = enclosing_class_name_for(self_type)
-        return scope.top_level_def_for(name) if class_name.nil?
-        return scope.singleton_def_for(class_name, name) if self_type.is_a?(Type::Singleton)
+        if class_name.nil?
+          found = side_callee(node) { |name| scope.top_level_def_for(name) }
+          return found.nil? ? NO_CALLEES : [found]
+        end
 
-        scope.user_def_for(class_name, name)
+        instance = side_callee(node) { |name| scope.user_def_for(class_name, name) }
+        return (instance.nil? ? NO_CALLEES : [instance]) unless self_type.is_a?(Type::Singleton)
+
+        singleton = side_callee(node) { |name| scope.singleton_def_for(class_name, name) }
+        return (singleton.nil? ? NO_CALLEES : [singleton]) if instance.nil?
+        return [instance] if singleton.nil? || singleton.first.equal?(instance.first)
+
+        [singleton, instance]
       end
 
-      # Issue #2297 — the method a self-dispatch `node` calls: the target of `send(:name, ...)` or
-      # `public_send(:name, ...)` when its first argument is a symbol literal, else the call's own name. A non-literal
-      # target keeps the call's own name (`send`), which resolves to no user def unless the class defines one.
-      def self_call_name(node)
-        return node.name unless self_call_argument_offset(node) == 1
+      # The `[def, offset]` `node` resolves to on one side, whose def table the block looks a name up in, or nil.
+      def side_callee(node)
+        if send_hand_off?(node)
+          own = yield(node.name)
+          return [own, 0] if own
 
-        node.arguments.arguments.first.unescaped.to_sym
+          target = yield(node.arguments.arguments.first.unescaped.to_sym)
+          return target && [target, 1]
+        end
+
+        found = yield(node.name)
+        found && [found, 0]
       end
 
-      # Issue #2297 — how many leading arguments of `node` are not the callee's: 1 for a `send` / `public_send` whose
-      # first argument is a symbol literal (the target name), else 0.
-      def self_call_argument_offset(node)
-        return 0 unless SEND_HAND_OFFS.include?(node.name)
+      # True for a `send` / `public_send` whose first argument is a symbol literal (the target name).
+      def send_hand_off?(node)
+        return false unless SEND_HAND_OFFS.include?(node.name)
 
         args = node.arguments
-        args.is_a?(Prism::ArgumentsNode) && args.arguments.first.is_a?(Prism::SymbolNode) ? 1 : 0
+        args.is_a?(Prism::ArgumentsNode) && args.arguments.first.is_a?(Prism::SymbolNode)
       end
 
       SEND_HAND_OFFS = %i[send public_send].freeze
-      private_constant :SEND_HAND_OFFS
+      NO_CALLEES = [].freeze
+      private_constant :SEND_HAND_OFFS, :NO_CALLEES
 
       def self_dispatch_call?(node)
         return false unless node.is_a?(Prism::CallNode)

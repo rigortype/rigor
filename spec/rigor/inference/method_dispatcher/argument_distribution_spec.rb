@@ -151,8 +151,12 @@ RSpec.describe "Union and supertype arguments in overload selection (#2379)", ty
   end
 
   # Two union arguments that combine past eight lists answer `Dynamic[top]`, never the first overload alone.
+  # The call itself answers it: no fail-soft fallback is recorded at the `p.pair` call.
   it "answers untyped when union arguments combine past the list limit" do
     expect(dumped(23)).to eq("dump_type: Dynamic[top]")
+    call_column = source.lines[22].index("p.pair") + 1
+    fallbacks = analyze(source, sig: sig, explain: true).diagnostics.select { |d| d.line == 23 && d.rule == "fallback" }
+    expect(fallbacks.map(&:column)).not_to include(call_column)
   end
 
   # An argument no wider than the selected parameter keeps the one overload: `Integer` is taken by `(Numeric)`.

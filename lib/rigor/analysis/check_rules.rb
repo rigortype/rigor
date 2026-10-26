@@ -14,6 +14,7 @@ require_relative "dependency_recorder"
 require_relative "check_rules/rule_ids"
 require_relative "check_rules/inferred_param_guard"
 require_relative "check_rules/declaration_sourced_guard"
+require_relative "check_rules/gradual_tuple_return"
 require_relative "check_rules/published_constant_guard"
 require_relative "check_rules/dead_version_guard_arms"
 require_relative "check_rules/rule_walk"
@@ -4228,9 +4229,10 @@ module Rigor
         # precision improvements.
         def compare_return(declared, inferred)
           result = declared.accepts(inferred)
-          return :error if result.no?
+          return nil unless result.no?
+          return nil if GradualTupleReturn.consistent?(declared, inferred)
 
-          nil
+          :error
         end
 
         def build_return_type_mismatch_diagnostic(path, def_node, declared, inferred, severity)

@@ -518,9 +518,13 @@ module Rigor
       # def hands on to a self-call counts whether or not the callee resolves: the session's empty scope resolves no
       # callee, and without it an edit that starts or stops forwarding a parameter to a mutating callee would leave
       # the effects equal and the callers' floors stale.
+      #
+      # Issue #2296 — the parameters the def mutates inside a block, or through a Set-only adder, count too: they
+      # floor the caller's argument through {#floor_callee_escaped_args_for_call}'s element-keeping channels.
       def content_mutated_parameter_positions(def_node)
         slots = content_parameter_slots(def_node)
-        census = callee_content_mutated_parameters(def_node).values
+        census = callee_content_mutated_parameters(def_node).values +
+                 own_block_content_parameters(def_node).values + own_set_content_parameters(def_node).values
         each_forwarding_call(def_node, slots) { |_, forwarded| census += forwarded.map { |name, _| slots[name] } }
         positions, keywords = census.uniq.partition { |slot| slot.is_a?(Integer) }
         positions.sort + keywords.sort
@@ -532,15 +536,25 @@ module Rigor
       # callee floor ({#widen_callee_escaped_argument_captures}) floors after the call, and the ones
       # {CapturedLocals.content_mutations} reports as a block's callee-mutated captures.
       def content_mutated_arguments(call_node)
-        return NO_ARGUMENT_READS unless self_dispatch_call?(call_node)
-        # Fast path — only a local passed as an argument can be reported, so a call with none skips the def
-        # resolution and the body scan entirely (the overwhelming common case).
-        return NO_ARGUMENT_READS unless call_passes_local_argument?(call_node)
-
-        def_node = resolve_self_callee_def(call_node)
+        def_node = argument_mutating_callee(call_node)
         return NO_ARGUMENT_READS if def_node.nil?
 
-        mutated = callee_content_mutated_parameters(def_node)
+        arguments_for_slots(call_node, callee_content_mutated_parameters(def_node))
+      end
+
+      # The user def a self-dispatch `call_node` that passes a local resolves to, or nil — the def whose census the
+      # callee floor reads.
+      def argument_mutating_callee(call_node)
+        return unless self_dispatch_call?(call_node)
+        # Fast path — only a local passed as an argument can be reported, so a call with none skips the def
+        # resolution and the body scan entirely (the overwhelming common case).
+        return unless call_passes_local_argument?(call_node)
+
+        resolve_self_callee_def(call_node)
+      end
+
+      # The local-variable reads `call_node` passes to the parameters of `mutated`, a `{ name => slot }` census.
+      def arguments_for_slots(call_node, mutated)
         return NO_ARGUMENT_READS if mutated.empty?
 
         argument_nodes = call_node.arguments.arguments
@@ -4542,15 +4556,62 @@ module Rigor
 
       # Runs for every call of every body it walks, and nearly every call reports no argument, so that case returns
       # before `reduce`: `Enumerable#inject` allocates its iteration state even over an empty array.
+      #
+      # Issue #2296 — two more channels follow the bare-carrier floor, each keeping the argument's element type
+      # ({UnknownStoreWidening.callee_block_floor} / {UnknownStoreWidening.callee_set_floor}): a parameter the callee
+      # mutates inside a block (`2.times { |i| acc[i] = v }`), and a Set argument the callee grows through a Set-only
+      # adder (`s.add(x)`, `s.merge(xs)`), which the bare census leaves out because `Hash#merge` does not mutate.
       def floor_callee_escaped_args_for_call(node, base_scope)
-        arguments = content_mutated_arguments(node)
+        def_node = argument_mutating_callee(node)
+        return base_scope if def_node.nil?
+
+        acc = floor_arguments(node, callee_content_mutated_parameters(def_node), base_scope) do |type|
+          content_floor_for(type)
+        end
+        # Each closure below is only worth computing when an argument holds something its floor could widen.
+        if floorable_local_argument?(node, acc) { |type| UnknownStoreWidening.callee_floorable?(type) }
+          acc = floor_arguments(node, callee_block_mutated_parameters(def_node), acc) do |type|
+            UnknownStoreWidening.callee_block_floor(type)
+          end
+        end
+        return acc unless floorable_local_argument?(node, acc) { |type| SetMutation.carrier_in?(type) }
+
+        floor_arguments(node, callee_set_mutated_parameters(def_node), acc) do |type|
+          UnknownStoreWidening.callee_set_floor(type)
+        end
+      end
+
+      # True when a local `node` passes (positionally or as a keyword's value) is bound in `scope` to a type the
+      # block accepts.
+      def floorable_local_argument?(node, scope, &)
+        node.arguments.arguments.any? do |argument|
+          if argument.is_a?(Prism::KeywordHashNode)
+            argument.elements.any? do |pair|
+              pair.is_a?(Prism::AssocNode) && floorable_local?(pair.value, scope, &)
+            end
+          else
+            floorable_local?(argument, scope, &)
+          end
+        end
+      end
+
+      def floorable_local?(node, scope)
+        node = node.value if node.is_a?(Prism::ImplicitNode)
+        node.is_a?(Prism::LocalVariableReadNode) && scope.locals.key?(node.name) && yield(scope.local(node.name))
+      end
+
+      # `base_scope` with each local `node` passes to a parameter of `mutated` rebound to what the block answers for
+      # its binding; a nil answer, or an answer equal to the binding, leaves it.
+      def floor_arguments(node, mutated, base_scope)
+        arguments = arguments_for_slots(node, mutated)
         return base_scope if arguments.empty?
 
         arguments.reduce(base_scope) do |acc, argument|
           next acc unless acc.locals.key?(argument.name)
 
-          floored = content_floor_for(acc.local(argument.name))
-          floored.nil? ? acc : acc.with_mutated_local(argument.name, floored)
+          current = acc.local(argument.name)
+          floored = yield(current)
+          floored.nil? || floored == current ? acc : acc.with_mutated_local(argument.name, floored)
         end
       end
 
@@ -4563,6 +4624,26 @@ module Rigor
         cache = (@callee_mutated_param_cache ||= {}.compare_by_identity)
         cache[def_node] ||= resolved_census(:close, def_node) do
           CalleeMutationChain.close(def_node, own: method(:own_content_parameters), edges: method(:forwarding_edges))
+        end
+      end
+
+      # Issue #2296 — the `{ name => slot }` parameters the callee mutates inside a block in its body
+      # ({#own_block_content_parameters}), closed over hand-offs as {#callee_content_mutated_parameters} is.
+      def callee_block_mutated_parameters(def_node)
+        cache = (@callee_block_param_cache ||= {}.compare_by_identity)
+        cache[def_node] ||= resolved_census(:close_block, def_node) do
+          CalleeMutationChain.close(def_node, own: method(:own_block_content_parameters),
+                                              edges: method(:forwarding_edges))
+        end
+      end
+
+      # Issue #2296 — the `{ name => slot }` parameters the callee grows through a Set-only adder
+      # ({#own_set_content_parameters}), closed over hand-offs the same way.
+      def callee_set_mutated_parameters(def_node)
+        cache = (@callee_set_param_cache ||= {}.compare_by_identity)
+        cache[def_node] ||= resolved_census(:close_set, def_node) do
+          CalleeMutationChain.close(def_node, own: method(:own_set_content_parameters),
+                                              edges: method(:forwarding_edges))
         end
       end
 
@@ -4598,6 +4679,57 @@ module Rigor
       def own_content_parameters(def_node)
         def_census(:own, def_node) { escaped_content_parameters(def_node).merge(direct_content_parameters(def_node)) }
       end
+
+      # Issue #2296 — the parameters `def_node` content-mutates inside a block of its body, at any nesting: a
+      # mutation whose receiver reads the parameter itself at the block depth it sits at, so a block parameter or
+      # block-local of the same name, and a block-local copy (`t = [acc[i]]; t[0] = v`), do not count. A lambda or
+      # nested def is not entered (its body is not run by the call), nor is a block that runs on another `self`
+      # ({#each_node_in_method_scope}). The walk counts the method body too: a mutation there, or in an escaping
+      # block, is one the bare census ({#own_content_parameters}) also counts, and its floor runs first, leaving this
+      # one nothing to widen. A property of the AST alone, memoised per def node for the thread.
+      def own_block_content_parameters(def_node) = block_and_set_parameters(def_node)[0]
+
+      # Issue #2296 — the parameters `def_node` grows through a Set-only adder ({SET_ONLY_ADDERS}) in its body or a
+      # block in it, read at the depth it sits at as above. The name alone does not say the receiver is a Set
+      # (`Hash#merge` returns a new Hash), so only a Set argument is floored on it
+      # ({UnknownStoreWidening.callee_set_floor}).
+      def own_set_content_parameters(def_node) = block_and_set_parameters(def_node)[1]
+
+      # Both censuses above, `[block, set]`, from one walk of the method scope, memoised per def node for the thread.
+      def block_and_set_parameters(def_node)
+        def_census(:block_and_set, def_node) do
+          slots = content_parameter_slots(def_node)
+          next NO_BLOCK_AND_SET if slots.empty?
+
+          block = nil
+          set = nil
+          each_node_in_method_scope(def_node.body, 0) do |node, depth|
+            name = content_mutation_target(node) { |r| r.depth == depth }.first
+            (block ||= Set.new) << name if counted_mutation?(def_node, slots, name, node)
+            name = set_only_adder_target(node, depth)
+            (set ||= Set.new) << name if counted_mutation?(def_node, slots, name, node)
+          end
+          [block.nil? ? NO_PARAMETER_SLOTS : slots.slice(*block), set.nil? ? NO_PARAMETER_SLOTS : slots.slice(*set)]
+        end
+      end
+
+      # True when `name`, the local the mutation `node` targets, is one of `slots`' parameters and `node` runs before
+      # any rebind of it ({#after_rebind?}).
+      def counted_mutation?(def_node, slots, name, node)
+        !name.nil? && slots.key?(name) && !after_rebind?(def_node, name, node)
+      end
+
+      # The local `node` grows through a Set-only adder when its receiver reads that local at `depth`, else nil.
+      def set_only_adder_target(node, depth)
+        return unless node.is_a?(Prism::CallNode) && SET_ONLY_ADDERS.include?(node.name)
+
+        receiver = node.receiver
+        receiver.name if receiver.is_a?(Prism::LocalVariableReadNode) && receiver.depth == depth
+      end
+
+      NO_PARAMETER_SLOTS = {}.freeze
+      NO_BLOCK_AND_SET = [NO_PARAMETER_SLOTS, NO_PARAMETER_SLOTS].freeze
+      private_constant :NO_PARAMETER_SLOTS, :NO_BLOCK_AND_SET
 
       # Issue #2104 — the per-thread memo of a census that reads nothing but `def_node`'s AST, under `kind`.
       def def_census(kind, def_node)
@@ -4747,8 +4879,10 @@ module Rigor
           next unless descendant.is_a?(Prism::CallNode) && descendant.block.is_a?(Prism::BlockNode)
           next if syntactically_non_escaping_call?(descendant)
 
-          collect_content_mutations(descendant.block.body).each_key do |name|
-            mutated << name if positions.key?(name)
+          collect_content_mutations(descendant.block.body).each do |name, nodes|
+            next unless positions.key?(name)
+
+            mutated << name if nodes.any? { |node| !after_rebind?(def_node, name, node) }
           end
         end
         positions.slice(*mutated)
@@ -4760,9 +4894,9 @@ module Rigor
       # parameter-name read is genuinely at method scope (depth 0) rather than a block-local of the same name that
       # merely shadows the parameter — so we never floor a caller argument the callee did not actually mutate.
       #
-      # A mutation inside a NON-escaping block (`n.times { |i| acc[i] = v }`) is not counted: the bare-collection floor
-      # it would apply turned haml's `AttributeCompiler#compile` (a `temple` array a helper fills in a `times` block,
-      # returned against a declared tuple) into a `def.return-type-mismatch` (af3efef33, and again under #2104).
+      # A mutation inside a NON-escaping block (`n.times { |i| acc[i] = v }`) is not counted here: the bare-collection
+      # floor this census applies dropped the element type (af3efef33, and again under #2104). Issue #2296 counts it in
+      # {#own_block_content_parameters}, whose floor keeps the element type.
       def direct_content_parameters(def_node)
         cache = (@direct_param_cache ||= {}.compare_by_identity)
         cache[def_node] ||= compute_direct_content_parameters(def_node)
@@ -4775,9 +4909,96 @@ module Rigor
         mutated = Set.new
         each_node_outside_nested_scopes(def_node.body) do |descendant|
           name, = content_mutation_target(descendant) { |r| r.is_a?(Prism::LocalVariableReadNode) && r.depth.zero? }
-          mutated << name if !name.nil? && positions.key?(name)
+          mutated << name if !name.nil? && positions.key?(name) && !after_rebind?(def_node, name, descendant)
         end
         positions.slice(*mutated)
+      end
+
+      # Issue #2296 — true when `node` runs after the def has rebound its parameter `name` to a fresh object
+      # (`acc = acc.dup` as a statement of the method body, ahead of `node`): from there `name` holds another object,
+      # so a mutation of it does not reach the caller's argument. Only an unconditional rebind counts, a write that is
+      # itself a statement of the body, not one under a branch, a loop, a block or `||=`. Its value MUST provably be a
+      # new object ({#fresh_value?}): `acc = acc.to_a` or `s = s.to_s` hands back the same object, so a mutation after
+      # it still reaches the caller. A def whose body has a `rescue` or `ensure` clause never rebinds, since the clause
+      # runs with whichever binding the raise left. And only a node that starts after the write ends counts, so
+      # `acc = poke(acc)` still passes the original.
+      def after_rebind?(def_node, name, node)
+        offset = parameter_rebinds(def_node)[name]
+        !offset.nil? && node.location.start_offset >= offset
+      end
+
+      # `{ name => end_offset }` of the first unconditional fresh rebind of each parameter ({#after_rebind?}),
+      # memoised per def node for the thread.
+      def parameter_rebinds(def_node)
+        def_census(:rebinds, def_node) do
+          slots = content_parameter_slots(def_node)
+          rebinds = nil
+          body_statements(def_node.body).each do |statement|
+            next unless fresh_rebind?(statement, slots)
+
+            (rebinds ||= {})[statement.name] ||= statement.location.end_offset
+          end
+          rebinds || NO_PARAMETER_SLOTS
+        end
+      end
+
+      def fresh_rebind?(statement, slots)
+        case statement
+        when Prism::LocalVariableWriteNode
+          statement.depth.zero? && slots.key?(statement.name) && fresh_value?(statement.value, statement.name)
+        when Prism::LocalVariableOperatorWriteNode
+          statement.depth.zero? && slots.key?(statement.name) &&
+            FRESH_OPERATORS.include?(statement.binary_operator)
+        else false
+        end
+      end
+
+      # A value that is always a new object: a `dup` / `clone`, an Array / Hash / String literal, `new` on a core
+      # collection class ({#core_collection_constant?}), or one of {FRESH_COPIERS} called on the parameter itself. Any
+      # other call may return its receiver.
+      def fresh_value?(value, name)
+        case value
+        when Prism::ArrayNode, Prism::HashNode, Prism::StringNode, Prism::InterpolatedStringNode then true
+        when Prism::CallNode then fresh_call?(value, name)
+        else false
+        end
+      end
+
+      def fresh_call?(call, name)
+        return true if FRESH_DUPLICATORS.include?(call.name)
+        return core_collection_constant?(call.receiver) if call.name == :new
+
+        receiver = call.receiver
+        FRESH_COPIERS.include?(call.name) && receiver.is_a?(Prism::LocalVariableReadNode) && receiver.name == name
+      end
+
+      # `::Array` / `::Hash` / `::String` / `::Set`, written `::`-rooted: the core classes whose `new` always builds a
+      # new object. A project class's `new` may hand back its argument (`Ident.new(acc)`) or wrap it (`Wrap.new(acc)`,
+      # whose `[]=` writes through), so it is no fresh rebind. The census reads the AST alone and cannot resolve a bare
+      # `Array`, which a namespace may shadow (`M::Array`), so only the rooted spelling counts.
+      def core_collection_constant?(node)
+        node.is_a?(Prism::ConstantPathNode) && node.parent.nil? && FRESH_CONSTRUCTED.include?(node.name)
+      end
+
+      FRESH_DUPLICATORS = %i[dup clone].to_set.freeze
+      FRESH_CONSTRUCTED = %i[Array Hash String Set].to_set.freeze
+      FRESH_COPIERS = %i[map collect select reject merge + -].to_set.freeze
+      FRESH_OPERATORS = %i[+ -].to_set.freeze
+      private_constant :FRESH_DUPLICATORS, :FRESH_CONSTRUCTED, :FRESH_COPIERS, :FRESH_OPERATORS
+
+      # The statements a def body runs in order: a statements list, with a parenthesised list (an endless def's
+      # `= (a; b)`) read in place, or the lone expression. A body with a `rescue` / `ensure` clause (a `BeginNode`)
+      # answers none, so it never rebinds.
+      def body_statements(body)
+        case body
+        when nil, Prism::BeginNode then NO_FORWARDS
+        when Prism::StatementsNode then body.body.flat_map { |statement| body_statements_of(statement) }
+        else [body]
+        end
+      end
+
+      def body_statements_of(statement)
+        statement.is_a?(Prism::ParenthesesNode) ? body_statements(statement.body) : [statement]
       end
 
       # Yields every node reachable from `body` without crossing into a nested block / def / lambda — i.e. the nodes
@@ -5954,6 +6175,12 @@ module Rigor
                           (StringMutation::MUTATORS - MutationWidening::ARRAY_MUTATORS -
                            MutationWidening::HASH_MUTATORS)).freeze
       private_constant :CONTENT_MUTATORS
+
+      # Issue #2296 — the Set adders {CONTENT_MUTATORS} leaves out (`add`, `add?`, `merge`): a scan cannot see the
+      # receiver's class, and `merge` on a Hash returns a new Hash, so the callee census keeps them apart and floors
+      # only a Set argument on them.
+      SET_ONLY_ADDERS = (SetMutation::CONTENT_ADDERS - CONTENT_MUTATORS).freeze
+      private_constant :SET_ONLY_ADDERS
 
       # The shared "not a content mutation" answer. This predicate runs on every node of every block, loop and
       # method body it censuses (~950k calls on the lib self-check) and almost always declines, so a fresh

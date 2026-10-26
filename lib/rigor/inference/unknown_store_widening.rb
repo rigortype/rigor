@@ -99,6 +99,47 @@ module Rigor
         VALUE_PRESERVING.include?(method_name) && !literal_carrier?(type) ? widened : gradual_content(widened)
       end
 
+      # Issue #2296 — what the caller's argument `type` can hold after a callee that mutates the parameter inside a
+      # block (`def poke(acc) = 2.times { |i| acc[i] = "x" }`). Nothing at the call says what the block stores, so
+      # each carrier takes one unknown store and keeps its element type beside the gradual arm, as a block-captured
+      # binding does ({.widen}): `[7, 9]` reads `Array[Dynamic[top] | Integer]`, `{ a: 1 }`
+      # `Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]`, `Set[1]` `Set[Dynamic[top] | Integer]`, a literal
+      # String `String`. Not {.content_floor}'s bare carrier: dropping the element type there widened
+      # `ScopeIndexer.finalize_constant_writes` to `Hash[untyped, untyped]` under sig-gen (#2295). A class-level
+      # nominal (`Hash[String, Set[String]]`) is a claim this seam may not grow, and is left alone; a value-pinned one
+      # (`Hash["a" | "b", 1]`) holds a first-store answer the unknown store falsifies, and takes the gradual arm, as a
+      # block's unknown-store binding does.
+      def callee_block_floor(type)
+        widened = widen_store(type, :[]=, unknown_arguments(2)) || type
+        widened = callee_set_floor(widened) || widened
+        value_pinned_collection?(widened) ? gradual_content(widened) : widened
+      end
+
+      # Issue #2296 — `type` after a callee that grows the parameter through a Set-only adder (`s.add(x)`,
+      # `s.merge(xs)`): a Set carrier takes one unknown store, and anything else, a Hash under `merge` included, is
+      # returned as nil (unchanged).
+      def callee_set_floor(type)
+        widen_store(type, :add, unknown_arguments(1))
+      end
+
+      def unknown_arguments(count) = Array.new(count) { Type::Combinator.untyped }
+
+      # False only when {.callee_block_floor} and {.callee_set_floor} are sure to leave `type` as it is: a type that is
+      # no String, Array, Hash or Set carrier in any form. A cheap gate, so a call passing only such locals skips the
+      # census closures those floors read.
+      def callee_floorable?(type)
+        case type
+        when Type::Union then type.members.any? { |member| callee_floorable?(member) }
+        when Type::Tuple, Type::HashShape, Type::Difference, Type::Refined, Type::Intersection then true
+        when Type::Constant then type.value.is_a?(String) || type.value.is_a?(::Set)
+        when Type::Nominal then FLOORABLE_NOMINALS.include?(type.class_name)
+        else false
+        end
+      end
+
+      FLOORABLE_NOMINALS = %w[Array Hash Set String].freeze
+      private_constant :FLOORABLE_NOMINALS
+
       # Every `Array` / `Hash` / `String` carrier `type` can be as its bare carrier: `Array[Dynamic[top]]`,
       # `Hash[Dynamic[top], Dynamic[top]]`, `String`. A literal, a nominal (a precise one included) and a refinement
       # over one ({.carrier_class}) all floor; so `non-empty-string`, which a callee can empty, reads `String`.

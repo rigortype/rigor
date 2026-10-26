@@ -55,6 +55,11 @@ module Rigor
         constant?(type) || (type.is_a?(Type::Nominal) && regrowable?(type))
       end
 
+      # True when `type`, or a member of it, is a {#carrier?}: the only types a Set-only adder's floor can change.
+      def carrier_in?(type)
+        type.is_a?(Type::Union) ? type.members.any? { |member| carrier?(member) } : carrier?(type)
+      end
+
       def regrowable?(nominal)
         nominal.class_name == "Set" && nominal.type_args.size == 1 &&
           ContentJoin.union_members(nominal.type_args.first).any?(Type::Dynamic)

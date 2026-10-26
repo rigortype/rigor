@@ -1,4 +1,4 @@
-# Add four reasoned producers.yml rows for the EditReplay statement-drop helpers
+# Add three reasoned producers.yml rows for the EditReplay statement-drop helpers, and widen the file's computes: line
 
 - **PR:** [#2387](https://github.com/rigortype/rigor/pull/2387)
 - **Issue:** [#2277](https://github.com/rigortype/rigor/issues/2277)

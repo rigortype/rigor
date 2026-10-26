@@ -258,7 +258,7 @@ output looks right, but it acted on the wrong input or measured the wrong thing.
   replays up to four edits per sampled file (emptied, reduced to its class/module skeleton, and up to two
   with one class/module body statement dropped, visibility calls first, #2277) and so covers only removals;
   an edge that only an addition exercises is not tested.
-  On `lib` (607 files) each sampled file cost about 95–105 s with two edits; with up to four (#2277) one sampled file (the first of `lib`) took about 150 s (about 37 s per edit). The cold tools (`bench-perf`, the A/Bs) all pass `--no-cache` and
+  On `lib` (607 files) each sampled file cost about 95–105 s with two edits. Measured with four edits (#2277) on the first sampled file: 113 s for `--verify-incremental-edits=0`, 267 s for `=1`, so 153 s for the four replays (about 38 s each). The cold tools (`bench-perf`, the A/Bs) all pass `--no-cache` and
   say nothing about a warm run.
 - **In a CPU profile, prefer vernier to stackprof.** stackprof's `:cpu` mode charges samples taken inside a long C
   call (Prism's parse) to the next interrupt check. During #1507 that made `IO.read` read as ~460 ms and

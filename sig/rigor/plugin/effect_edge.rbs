@@ -11,7 +11,7 @@ module Rigor
       # intent tracked by #2325, and only then does this row generate; coercion-facing: `to_s`), and `initialize`
       # stores the result of the private `validate_receiver!` helper (#2312).
       attr_reader receiver: String
-      # sig-gen gap: #2321 — `method:` is `untyped` (input `untyped`, looks deliberate; a declared type is authoring
+      # sig-gen gap: #2325 — `method:` is `untyped` (input `untyped`, looks deliberate; a declared type is authoring
       # intent tracked by #2325, and only then does this row generate; coercion-facing: `String | Symbol | nil`),
       # stored as `method&.to_sym`.
       attr_reader method: Symbol?

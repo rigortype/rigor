@@ -37,9 +37,9 @@ module Rigor
 
       attr_reader return_type_name: String?
 
-      # sig-gen gap: #2321 — `initialize` stores `severity.to_sym`, and `VALID_SEVERITIES.include?` bounds the
-      # stored value to the three declared literals; the derived-write credit generates `Symbol`, not the literal
-      # union, so this row keeps the declared literals as intent.
+      # authored: the declared literal union is intent. `initialize` stores `severity.to_sym` after
+      # `validate_severity!` bounds it to `VALID_SEVERITIES`, so the value is one of the three literals, but sig-gen
+      # generates `Symbol` for it, not the union.
       attr_reader severity: :error | :warning | :info
 
       # `method_name`/`severity` accept String too (both are `to_sym`'d); `param_types` entries are

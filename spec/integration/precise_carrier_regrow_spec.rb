@@ -75,6 +75,12 @@ RSpec.describe "Precise carrier re-grow (issue #2361)", type: :runner do
       end
     end
 
+    it "joins a store outside a literal element and keeps one of the same literal" do
+      seed = "ARGV.map(&:to_i).map { \"x\" }.to_set"
+      source = "s = #{seed}\ns << \"x\"\ndump_type(s)\nt = #{seed}\nt << \"y\"\ndump_type(t)"
+      expect(dumped(source)).to eq(['Set["x"]', 'Set["x" | String]'])
+    end
+
     it "floors a precise Set a self-call grows through a Set-only adder" do
       source = "def put(s) = s.add(1)\ns = ARGV.to_set\nput(s)\ndump_type(s)"
       expect(dumped(source)).to eq(["Set[Dynamic[top] | String]"])

@@ -1,4 +1,5 @@
 - **[sig-gen]** A method whose body has a `rescue` clause now gets a proposed return type that includes each rescue arm's value. ([#2414](https://github.com/rigortype/rigor/pull/2414))
   - `def load; parse; rescue StandardError; nil; end` now gets a proposal that includes `nil`; before, the `nil` was missing.
   - When the body has an `else` clause, the else's value takes the place of the body's value.
+  - A method whose rescue arm returns a local variable, instance variable or parameter now gets no proposal, because the engine reads that value as untyped in the arm (the arm can run before the body's assignment).
   - An arm that re-raises or retries adds nothing. `rigor annotate` and `rigor lens` share the fix.

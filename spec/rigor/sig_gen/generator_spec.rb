@@ -1419,7 +1419,7 @@ RSpec.describe Rigor::SigGen::Generator do
   # the body's value; the ensure-clause's value is discarded.
   describe "def-level rescue arms (#2410)" do
     let(:candidates) do
-      path = write_fixture("lib/box.rb", <<~RUBY)
+      path = write_fixture("lib/box.rb", <<~'RUBY')
         class Local; end
         class EA < StandardError; end
         class EB < StandardError; end
@@ -1436,12 +1436,26 @@ RSpec.describe Rigor::SigGen::Generator do
           def with_else; x; rescue; nil; else; y; end
           def with_ensure; x; ensure; :z; end
           def nested; v = begin; x; rescue; nil; end; v; end
+          def lookup_arm(s); Integer("#{s}"); rescue ArgumentError; "#{s}".split(",").first; end
+          def local_arm(s); y = "a"; Integer(s); rescue; y; end
         end
       RUBY
       generator(paths: [path]).run
     end
 
-    def rbs_of(name) = candidates.find { |c| c.method_name == name }.rbs
+    def candidate(name) = candidates.find { |c| c.method_name == name }
+    def rbs_of(name) = candidate(name).rbs
+
+    # `Array#first` misses with nil (#2197); an arm's lookup keeps that nil like the body's would.
+    it "keeps the nil of an optimistic lookup an arm returns" do
+      expect(rbs_of(:lookup_arm)).to eq("def lookup_arm: (untyped) -> (Integer | String | nil)")
+    end
+
+    # The arm runs after the body raised at some point, so `y` may or may not hold the body's `"a"`; the arm reads
+    # it under its own recorded scope (untyped), not the body's last expression's.
+    it "proposes nothing when an arm reads a local the body assigned" do
+      expect(candidate(:local_arm).skip_reason).to eq(:untyped_return)
+    end
 
     it "unions a def-level rescue arm's value with the body's" do
       expect(rbs_of(:one_arm)).to eq("def one_arm: () -> (Local | nil)")

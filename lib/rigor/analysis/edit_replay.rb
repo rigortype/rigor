@@ -86,7 +86,7 @@ module Rigor
         room = MAX_DROPS - picked.size
         if room.positive? && !others.empty?
           count = [room, others.size].min
-          picked += Array.new(count) { |index| others[(index * 2 + 1) * others.size / (count * 2)] }
+          picked += Array.new(count) { |index| others[((index * 2) + 1) * others.size / (count * 2)] }
         end
         picked.sort_by { |node| node.location.start_offset }
       end

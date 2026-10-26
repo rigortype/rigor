@@ -284,7 +284,8 @@ module Rigor
       # missing invalidation edge goes unseen. Here each of `--verify-incremental-edits` sampled files is edited through
       # an editor buffer (never on disk) by each of {Analysis::EditReplay.edits} — emptied, reduced to its
       # `class` / `module` skeleton, and (#2277) with one body statement dropped, at most
-      # {Analysis::EditReplay::MAX_DROPS} times — and the warm recheck of the baseline ({IncrementalSession#replay_edit}) must equal
+      # {Analysis::EditReplay::MAX_DROPS} times — and the warm recheck of the baseline
+      # ({IncrementalSession#replay_edit}) must equal
       # a full analysis of the edited tree: a dependent the recheck failed to re-analyse is served from the baseline and
       # differs. A run in which every replay declined compared nothing, so it fails rather than report OK.
       def verify_edit_replays(session, configuration, paths, options)
@@ -799,7 +800,8 @@ module Rigor
             options[:verify_incremental] = true
           end
           opts.on("--verify-incremental-edits=N", Integer,
-                  "with --verify-incremental, also replay edits (empty, class/module skeleton, up to 2 one-statement drops) on N files") do |value|
+                  "with --verify-incremental, also replay edits (empty, class/module skeleton, up to 2 " \
+                  "one-statement drops) on N files") do |value|
             if value.negative?
               raise OptionParser::InvalidArgument, "--verify-incremental-edits=#{value} (must be 0 or more)"
             end

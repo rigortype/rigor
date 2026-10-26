@@ -91,8 +91,8 @@ RSpec.describe Rigor::CLI do
       expect(err).to eq("")
       expect(out).to include("--verify-incremental OK")
       # `use.rb` declares nothing, so it has no skeleton to replay: 2 edits of `other.rb`, 1 of `use.rb`.
-      expect(out).to include("3 edits replayed (files emptied, reduced to their class/module skeleton, and with a body " \
-                             "statement dropped), every recheck matches full")
+      expect(out).to include("3 edits replayed (files emptied, reduced to their class/module skeleton, and with a " \
+                             "body statement dropped), every recheck matches full")
       expect(status).to eq(0)
     end
 

@@ -167,6 +167,29 @@ RSpec.describe "Set mutation widening", type: :runner do
     end
 
     # A `for` loop's value is its collection, whose shapes a Set mutation of an element drops as well.
+    it "widens only the string-keyed hash value the mutation reached" do
+      source = %(h = { "k" => Set["a"], "j" => Set["b"] }\nh["k"].add(1)\ndump_type(h))
+      expect(dumped(source)).to eq(['{ "k": Set[Dynamic[top] | Integer | String], "j": Set["b"] }'])
+    end
+
+    # Against a `Tuple` arm a literal key selects no known position, so every element widens; the shape arm widens
+    # its one key.
+    it "widens a key's value and every tuple element on a union of a hash shape and a tuple" do
+      source = %(c = n > 0 ? { k: Set["a"], j: Set["b"] } : [Set["c"]]\nc[:k].add(1)\ndump_type(c))
+      expected = '[Set[Dynamic[top] | Integer | String]] | { k: Set[Dynamic[top] | Integer | String], j: Set["b"] }'
+      expect(dumped(source)).to eq([expected])
+    end
+
+    it "does not fold a membership test after add through an iterator over a union of collections" do
+      source = %(s = ARGV.empty? ? [Set["a"]] : [Set["b"]]\ns.each { |e| e.add(1) }\nputs 1 if s.first.include?(1))
+      expect(errors(source)).to eq([])
+    end
+
+    # The `for` path takes the same Set gate against the collection's type.
+    it "keeps a for loop's value shape through Hash#merge when the rows hold no set" do
+      expect(dumped(%(z = for r in [{ a: 1 }]; r.merge(b: 2); end\ndump_type(z)))).to eq(["Array[{ a: 1 }]"])
+    end
+
     it "widens every hash value when the key is not a literal" do
       source = %(h = { k: Set["a"], j: Set["b"] }\nh[x.to_sym].add(1)\ndump_type(h))
       expected = "{ k: Set[Dynamic[top] | Integer | String], j: Set[Dynamic[top] | Integer | String] }"

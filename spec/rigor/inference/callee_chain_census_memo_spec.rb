@@ -51,69 +51,69 @@ RSpec.describe "the callee-chain census memo (#2104)" do
 
     expect(record.missing).to include("method:Mut#ghost")
   end
-end
 
-# Issue #2330 — the memo is keyed by the whole `DiscoveryIndex`, and the slot it fills is released when a run ends.
-RSpec.describe "the callee-chain census memo's discovery key and lifetime (#2330)" do
-  let(:caller_source) do
-    <<~RUBY
-      class Mut
-        def run(acc)
-          stripes(acc)
+  # Issue #2330 — the memo is keyed by the whole `DiscoveryIndex`, and the slot it fills is released when a run ends.
+  RSpec.describe "the callee-chain census memo's discovery key and lifetime (#2330)" do
+    let(:caller_source) do
+      <<~RUBY
+        class Mut
+          def run(acc)
+            stripes(acc)
+          end
         end
+      RUBY
+    end
+    let(:seed_source) { "class Mut\n  def stripes(acc) = acc << 1\nend\n" }
+    let(:override_source) { "class Mut\n  def stripes(acc) = 1\nend\n" }
+
+    def seed_scope
+      program = Prism.parse(seed_source).value
+      Rigor::Inference::ScopeIndexer.index(program, default_scope: Rigor::Scope.empty)[program]
+    end
+
+    def per_file(source)
+      program = Prism.parse(source).value
+      index = Rigor::Inference::ScopeIndexer.index(program, default_scope: seed_scope)
+      call = nil
+      Rigor::Source::NodeWalker.each(program) do |node|
+        call ||= node if node.is_a?(Prism::CallNode) && node.name == :stripes
       end
-    RUBY
-  end
-  let(:seed_source) { "class Mut\n  def stripes(acc) = acc << 1\nend\n" }
-  let(:override_source) { "class Mut\n  def stripes(acc) = 1\nend\n" }
-
-  def seed_scope
-    program = Prism.parse(seed_source).value
-    Rigor::Inference::ScopeIndexer.index(program, default_scope: Rigor::Scope.empty)[program]
-  end
-
-  def per_file(source)
-    program = Prism.parse(source).value
-    index = Rigor::Inference::ScopeIndexer.index(program, default_scope: seed_scope)
-    call = nil
-    Rigor::Source::NodeWalker.each(program) do |node|
-      call ||= node if node.is_a?(Prism::CallNode) && node.name == :stripes
-    end
-    [index[call], call]
-  end
-
-  def floored_for(source)
-    scope, call = per_file(source)
-    Rigor::Inference::StatementEvaluator.new(scope: scope).content_mutated_arguments(call)
-  end
-
-  it "answers the second per-file discovery's override, not the first discovery's memoised callee" do
-    first = floored_for(caller_source)
-    second = floored_for("#{caller_source}\n#{override_source}")
-
-    expect(first.map(&:name)).to eq([:acc])
-    expect(second).to eq([])
-  end
-
-  it "freezes the per-file def table and its per-class tables" do
-    scope, = per_file("#{caller_source}\n#{override_source}")
-
-    expect(scope.discovered_def_nodes).to be_frozen
-    expect(scope.discovered_def_nodes.values).to all(be_frozen)
-  end
-
-  it "empties the thread slot when a run ends" do
-    floored_for(caller_source)
-    expect(Thread.current[:rigor_callee_resolved_census]).not_to be_nil
-
-    Dir.mktmpdir do |dir|
-      path = File.join(dir, "mut.rb")
-      File.write(path, "#{seed_source}#{caller_source}")
-      runner = Rigor::Analysis::Runner.new(configuration: Rigor::Configuration.new("paths" => [path]),
-                                           cache_store: nil)
-      guarded_run(runner, [path])
+      [index[call], call]
     end
 
-    expect(Thread.current[:rigor_callee_resolved_census]).to be_nil
+    def floored_for(source)
+      scope, call = per_file(source)
+      Rigor::Inference::StatementEvaluator.new(scope: scope).content_mutated_arguments(call)
+    end
+
+    it "answers the second per-file discovery's override, not the first discovery's memoised callee" do
+      first = floored_for(caller_source)
+      second = floored_for("#{caller_source}\n#{override_source}")
+
+      expect(first.map(&:name)).to eq([:acc])
+      expect(second).to eq([])
+    end
+
+    it "freezes the per-file def table and its per-class tables" do
+      scope, = per_file("#{caller_source}\n#{override_source}")
+
+      expect(scope.discovered_def_nodes).to be_frozen
+      expect(scope.discovered_def_nodes.values).to all(be_frozen)
+    end
+
+    it "empties the thread slot when a run ends" do
+      floored_for(caller_source)
+      expect(Thread.current[:rigor_callee_resolved_census]).not_to be_nil
+
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, "mut.rb")
+        File.write(path, "#{seed_source}#{caller_source}")
+        runner = Rigor::Analysis::Runner.new(configuration: Rigor::Configuration.new("paths" => [path]),
+                                             cache_store: nil)
+        guarded_run(runner, [path])
+      end
+
+      expect(Thread.current[:rigor_callee_resolved_census]).to be_nil
+    end
   end
 end

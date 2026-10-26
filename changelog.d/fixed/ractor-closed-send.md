@@ -1,0 +1,1 @@
+- **[cli]** A Ractor-backend run no longer aborts with `Ractor::ClosedError` when a worker has already died before its files are sent; those files are re-analysed in process, as for any other dead worker. ([#2420](https://github.com/rigortype/rigor/pull/2420))

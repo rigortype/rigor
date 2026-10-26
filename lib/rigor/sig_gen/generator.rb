@@ -135,6 +135,8 @@ module Rigor
         # process from reading the first's entries, and the bucket is released when the run ends (#2398's rule
         # for the callee census), so a finished run holds none of it.
         @run_generation = Object.new.freeze
+        # Both read the files as they are now, so a second `run` of one generator re-reads them.
+        @project_tables = nil
         @file_base_scope = nil
         candidates = resolved.flat_map { |path| analyse_file(path, @environment) }
         annotate_effects(

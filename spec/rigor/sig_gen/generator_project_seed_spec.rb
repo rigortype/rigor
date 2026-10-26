@@ -37,6 +37,27 @@ RSpec.describe Rigor::SigGen::Generator do
     expect(row(candidates, "User", :name).rbs).to eq('def name: () -> "s"')
   end
 
+  it "re-reads the project and mints a fresh base scope when one generator runs twice" do
+    util = write_fixture("lib/util.rb", "module Util\n  def self.label = \"s\"\nend\n")
+    paths = [util, write_fixture("lib/user.rb", "class User\n  def name = Util.label\nend\n")]
+    configuration = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS.merge("paths" => paths))
+    generator = described_class.new(configuration: configuration, paths: paths)
+    tokens = []
+    allow(Rigor::Inference::ScopeIndexer).to receive(:index).and_wrap_original do |original, root, **kwargs|
+      tokens << kwargs.fetch(:default_scope).run_generation
+      original.call(root, **kwargs)
+    end
+
+    generator.run
+    File.write(util, "module Util\n  def self.label = :sym\nend\n")
+    second = generator.run
+
+    expect(tokens.first(2).uniq.size).to eq(1)
+    expect(tokens.last(2).uniq.size).to eq(1)
+    expect(tokens.last).not_to equal(tokens.first)
+    expect(row(second, "User", :name).rbs).to eq("def name: () -> :sym")
+  end
+
   it "declines a value another file's subclass overrides, instead of writing the base's own answer" do
     candidates = run_over([
                             write_fixture("lib/field.rb", <<~RUBY),

@@ -6,6 +6,7 @@
 # memo is bypassed, so a resolution the closure makes still records its ADR-46 read in the file being analysed.
 
 require "spec_helper"
+require "weakref"
 require "rigor/analysis/dependency_recorder"
 
 RSpec.describe "the callee-chain census memo (#2104)" do
@@ -86,12 +87,49 @@ RSpec.describe "the callee-chain census memo (#2104)" do
       Rigor::Inference::StatementEvaluator.new(scope: scope).content_mutated_arguments(call)
     end
 
-    it "answers the second per-file discovery's override, not the first discovery's memoised callee" do
-      first = floored_for(caller_source)
-      second = floored_for("#{caller_source}\n#{override_source}")
+    it "answers each discovery's own callee for one shared caller" do
+      program = Prism.parse(<<~RUBY).value
+        class Mut
+          def run(acc) = fwd(acc)
+          def fwd(acc) = stripes(acc)
+        end
+      RUBY
+      call = nil
+      Rigor::Source::NodeWalker.each(program) do |node|
+        call ||= node if node.is_a?(Prism::CallNode) && node.name == :stripes
+      end
+      fwd_call = nil
+      Rigor::Source::NodeWalker.each(program) do |node|
+        fwd_call ||= node if node.is_a?(Prism::CallNode) && node.name == :fwd
+      end
+      answers = ["def stripes(acc) = acc << 1", "def stripes(acc) = 1"].map do |seed_def|
+        seed_program = Prism.parse("class Mut\n  #{seed_def}\nend\n").value
+        seed = Rigor::Inference::ScopeIndexer.index(seed_program, default_scope: Rigor::Scope.empty)[seed_program]
+        index = Rigor::Inference::ScopeIndexer.index(program, default_scope: seed)
+        Rigor::Inference::StatementEvaluator.new(scope: index[fwd_call]).content_mutated_arguments(fwd_call)
+                                            .map(&:name)
+      end
 
-      expect(first.map(&:name)).to eq([:acc])
-      expect(second).to eq([])
+      expect(answers).to eq([[:acc], []])
+    end
+
+    it "does not keep a discovery alive through the memo it filled, whichever entry point filled it" do
+      probe = lambda do
+        scope, call = per_file(caller_source)
+        derived = scope.with_discovery(scope.discovery.with(discovered_superclasses: scope.discovery.discovered_superclasses.dup))
+        Rigor::Inference::StatementEvaluator.new(scope: derived).content_mutated_arguments(call)
+        WeakRef.new(derived.discovery)
+      end
+      ref = probe.call
+      expect(Thread.current[:rigor_callee_resolved_census]).to be_a(ObjectSpace::WeakKeyMap)
+
+      # The other per-thread memos key on the index too (one slot each); drop them so only the census can hold it.
+      Thread.current.keys.grep(/rigor/).each do |key|
+        Thread.current[key] = nil unless key == :rigor_callee_resolved_census
+      end
+      5.times { GC.start }
+
+      expect(ref.weakref_alive?).to be_falsey
     end
 
     it "freezes the per-file def table and its per-class tables" do

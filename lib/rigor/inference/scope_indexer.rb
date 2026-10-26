@@ -313,9 +313,9 @@ module Rigor
         seeded_scope.with_discovery(
           seeded_scope.discovery.with(
             discovered_methods: methods_table,
-            discovered_def_nodes: freeze_def_table(def_nodes),
+            discovered_def_nodes: freeze_def_table(def_nodes, file_tables[0]),
             discovered_def_nestings: def_nestings,
-            discovered_singleton_def_nodes: singleton_def_nodes,
+            discovered_singleton_def_nodes: freeze_def_table(singleton_def_nodes, file_singleton.first),
             discovered_superclasses: superclasses,
             discovered_header_nestings: header_nestings,
             discovered_includes: includes,
@@ -462,8 +462,12 @@ module Rigor
       # Issue #2330 — the per-file def table is read by identity: the callee-chain census memo is keyed by the
       # {Scope::DiscoveryIndex} that carries it, which is only sound while the table is never written in place.
       # Frozen after the extends fold, the last in-place writer; the seed's per-class hashes are frozen already.
-      def freeze_def_table(table)
-        table.each_value(&:freeze)
+      #
+      # Only the per-class hashes of the classes this file declares are frozen here (the merge made or took
+      # them); a seed-only class's hash was frozen by `finalize_def_index`, so walking the whole table per file is
+      # needless.
+      def freeze_def_table(table, file_table)
+        file_table.each_key { |owner| table[owner].freeze }
         table.freeze
       end
 

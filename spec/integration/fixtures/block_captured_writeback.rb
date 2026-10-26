@@ -284,6 +284,72 @@ def ewo_carried_out
   assert_type("Hash[Dynamic[top], Dynamic[top]]", public_sent)
 end
 
+# A reader whose value is used hands out an element the block may mutate where
+# no scan sees it, so the memo's values (a Hash keeps its keys) or elements
+# floor. Ruby stores "s" into the element in every case.
+def ewo_reader_elements
+  indexed = [1].each_with_object({}) do |x, h|
+    h[x] = []
+    h[x] << "s"
+  end
+  assert_type("Hash[1, Dynamic[top]]", indexed)
+  fetched = [1].each_with_object({}) do |x, h|
+    h[x] = []
+    h.fetch(x) << "s"
+  end
+  assert_type("Hash[1, Dynamic[top]]", fetched)
+  via_values = [1].each_with_object({}) do |_x, h|
+    h[:k] = []
+    h.values.first.push("s")
+  end
+  assert_type("Hash[:k, Dynamic[top]]", via_values)
+  via_local = [1].each_with_object({}) do |_x, h|
+    h[:k] = []
+    v = h[:k]
+    v << "s"
+  end
+  assert_type("Hash[:k, Dynamic[top]]", via_local)
+  nested = [1].each_with_object({}) do |_x, h|
+    h[:k] = { n: 0 }
+    h[:k][:n] = "s"
+  end
+  assert_type("Hash[:k, Dynamic[top]]", nested)
+  elements = [1].each_with_object([]) do |x, a|
+    a << [x]
+    a.first << 2
+  end
+  assert_type("Array[Dynamic[top]]", elements)
+end
+
+# A mutator given a splat or `**` argument stores what the join, reading each
+# argument by position, never sees, so the memo floors.
+def ewo_splat_stores
+  stored = [1].each_with_object({}) do |_x, h|
+    kv = [:t, "t"]
+    h.store(*kv)
+    h[:a] = 1
+  end
+  assert_type("Hash[Dynamic[top], Dynamic[top]]", stored)
+  index_set = [1].each_with_object({}) do |_x, h|
+    args = [:t, "t"]
+    h.[]=(*args)
+    h[:a] = 1
+  end
+  assert_type("Hash[Dynamic[top], Dynamic[top]]", index_set)
+  stored_first = [1].each_with_object({}) do |_x, h|
+    kv = [[:t, "t"]]
+    h.store(*kv.first)
+    h[:a] = 1
+  end
+  assert_type("Hash[Dynamic[top], Dynamic[top]]", stored_first)
+  inserted = [1].each_with_object([]) do |_x, a|
+    xs = ["s"]
+    a.insert(0, *xs)
+    a << 1
+  end
+  assert_type("Array[Dynamic[top]]", inserted)
+end
+
 # A block that never mutates the memo keeps it: Ruby returns `{}` here.
 assert_type("{}", [1].each_with_object({}) { |_x, h| h.size })
 

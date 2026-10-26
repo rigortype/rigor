@@ -6126,7 +6126,8 @@ module Rigor
         pre_state = lookup_mutated_seed(body, memo_param, memo_type, MEMO_SEED_MUTATORS) do |depth, nesting|
           depth == nesting
         end
-        return content_floor_for(pre_state) || call_type if memo_escapes_scan?(body, memo_param)
+        reach = memo_scan_reach(body, memo_param)
+        return content_floor_for(pre_state) || call_type if reach == :escape
 
         # The memo alias is a block-local (depth 0) — collect content mutations on it directly rather than via the
         # captured-local walk.
@@ -6138,7 +6139,22 @@ module Rigor
                else
                  join_memo_content(call_node, memo_param, calls, pre_state, shadows) || call_type
                end
-        floor_memo_callee_escapes(body, memo_param, memo)
+        memo = floor_memo_callee_escapes(body, memo_param, memo)
+        reach == :values ? memo_value_floor(memo) : memo
+      end
+
+      # Issue #2411 — `memo` with its values or elements floored to `Dynamic[top]` and a Hash's keys kept: a reader's
+      # value is an element the block may then mutate where no scan sees it (`h[x] << "s"`, `v = h[:k]; v << "s"`,
+      # `h[:k][:n] = "s"`), so the join's element types are not what the memo holds.
+      def memo_value_floor(type)
+        case type
+        when Type::Union then Type::Combinator.union(*type.members.map { |member| memo_value_floor(member) })
+        when Type::Nominal
+          return content_floor_for(type) || type unless type.class_name == "Hash" && type.type_args.size == 2
+
+          Type::Combinator.nominal_of("Hash", type_args: [type.type_args.first, Type::Combinator.untyped])
+        else content_floor_for(type) || type
+        end
       end
 
       # Issue #2411 — whether the block can change the memo where neither the join nor the callee floor sees it, so
@@ -6147,13 +6163,20 @@ module Rigor
       # `|x, h| g = h; g["s"] = "v"; h[:a] = 2` joined `Hash[:a, 2]`, and `.fetch("s").upcase` read `2`. Every read
       # or write of the memo's name in its own scope ({#scope_nesting}) must be one the scan models
       # ({#memo_read_modelled?}); a rebinding write (`h = {}`) is not, since the stores after it reach another object.
-      def memo_escapes_scan?(body, memo_param)
+      # Answers `:escape` for such a read or write, `:values` when the only unmodelled reads are readers whose value
+      # is used ({#memo_value_floor}), and nil when every read is modelled.
+      def memo_scan_reach(body, memo_param)
+        reach = nil
         Source::NodeWalker.each_with_ancestors(body) do |node, ancestors|
           next unless MEMO_NAME_NODES.any? { |klass| node.is_a?(klass) } && node.name == memo_param
           next unless node.depth == scope_nesting(ancestors)
-          return true unless node.is_a?(Prism::LocalVariableReadNode) && memo_read_modelled?(node, ancestors)
+
+          modelled = node.is_a?(Prism::LocalVariableReadNode) && memo_read_modelled?(node, ancestors)
+          return :escape unless modelled
+
+          reach = :values if modelled == :values
         end
-        false
+        reach
       end
 
       # The nodes that read or bind a local by name. `LocalVariableTargetNode` covers a multi-assign and a `rescue =>`.
@@ -6183,11 +6206,23 @@ module Rigor
         memo_self_call_argument?(ancestors)
       end
 
+      # True, false, or `:values` for a reader whose value is used: the value may be an element the block mutates.
+      # A mutator given a splat or `**` argument is not modelled: the join reads each argument by position, and
+      # `h.store(*kv)` stored a pair it never saw.
       def memo_receiver_call_modelled?(call, ancestors)
-        return true if MEMO_VALUE_READERS.include?(call.name)
-        return false unless CONTENT_MUTATORS.include?(call.name) || MEMO_SEED_MUTATORS.include?(call.name)
+        mutator = CONTENT_MUTATORS.include?(call.name) || MEMO_SEED_MUTATORS.include?(call.name)
+        return false if mutator && memo_splat_arguments?(call)
+        return memo_value_discarded?(call, ancestors) || :values if MEMO_VALUE_READERS.include?(call.name)
+        return false unless mutator
 
         memo_value_discarded?(call, ancestors)
+      end
+
+      def memo_splat_arguments?(call)
+        (call.arguments&.arguments || []).any? do |argument|
+          argument.is_a?(Prism::SplatNode) ||
+            (argument.is_a?(Prism::KeywordHashNode) && argument.elements.any?(Prism::AssocSplatNode))
+        end
       end
 
       # Methods of Hash and Array whose value is never the receiver itself, so using it hands nothing on.

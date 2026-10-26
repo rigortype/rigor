@@ -71,5 +71,15 @@ assertions:
   '41': Hash[Dynamic[top], Dynamic[top]]
   '42': Hash[Dynamic[top], Dynamic[top]]
   '43': Hash[Dynamic[top], Dynamic[top]]
-  '44': "{}"
-  '45': "[1, 2]"
+  '44': Hash[1, Dynamic[top]]
+  '45': Hash[1, Dynamic[top]]
+  '46': Hash[:k, Dynamic[top]]
+  '47': Hash[:k, Dynamic[top]]
+  '48': Hash[:k, Dynamic[top]]
+  '49': Array[Dynamic[top]]
+  '50': Hash[Dynamic[top], Dynamic[top]]
+  '51': Hash[Dynamic[top], Dynamic[top]]
+  '52': Hash[Dynamic[top], Dynamic[top]]
+  '53': Array[Dynamic[top]]
+  '54': "{}"
+  '55': "[1, 2]"

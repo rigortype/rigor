@@ -163,6 +163,196 @@ assert_type("Array[2 | 4 | 6]", ewo_arr)
 ewo_hash = [1, 2, 3].each_with_object({}) { |x, h| h[x] = x * 2 }
 assert_type("Hash[1 | 2 | 3, 2 | 4 | 6]", ewo_hash)
 
+# --- Issue #2411 / #2293: the memo return is the call's VALUE, not only a
+# statement's binding. Read as an operand (and as a method's tail, which
+# sig-gen types the same way) the call answered the memo argument's `{}` / `[]`. ---
+assert_type("Hash[:a, 1]", { a: 1 }.each_with_object({}) { |(k, v), out| out[k] = v })
+assert_type("Array[\"1\" | \"2\"]", [1, 2].each_with_object([]) { |x, acc| acc << x.to_s })
+
+# A memo only reshaped (`merge!`) widens as a captured local does; an index
+# compound write (`h[x] ||= []`) is a store.
+ewo_merged = [{ a: 1 }].each_with_object({}) { |s, m| m.merge!(s) }
+assert_type("Hash[Dynamic[top], Dynamic[top]]", ewo_merged)
+ewo_or_write = [1].each_with_object({}) { |x, h| h[x] ||= [] }
+assert_type("Hash[1, Dynamic[top]]", ewo_or_write)
+# Reading the memo through a method whose value is never the memo keeps the join.
+ewo_counted = [1, 2].each_with_object({}) { |x, h| h[x] = h.fetch(x, 0) + 1 }
+assert_type("Hash[1 | 2, Dynamic[top]]", ewo_counted)
+# A store in a nested `each` keeps the join, since `each` drops its block's
+# value; under `map` the value `acc << …` answers is the memo, handed on.
+ewo_nested_each = [1].each_with_object([]) { |x, acc| [2].each { acc << [x, :k] } }
+assert_type("Array[[1, :k]]", ewo_nested_each)
+ewo_nested_map = [1].each_with_object([]) { |x, acc| [2].map { acc << [x, :k] } }
+assert_type("Array[Dynamic[top]]", ewo_nested_map)
+
+# A memo handed to a self-call that stores into it floors as a captured local
+# does: the block's own stores are not every key it holds. Asserted inline, not
+# bound: the snapshot's `post_scope` resolves no top-level def, so it cannot floor.
+def ewo_record(hash, n) = (hash[[n, :key]] = "k")
+assert_type("Hash[Dynamic[top], Dynamic[top]]", [1].each_with_object({}) { |x, out| ewo_record(out, x) })
+
+# The floor reads the callee's census by slot: a callee that mutates another
+# argument leaves the memo's join alone, and a second positional or a keyword
+# argument floors it. Inside a def, so the snapshot's def-less scope binds none.
+def ewo_fill_other(buf, _hash) = (buf << 1)
+def ewo_fill_second(_x, hash) = (hash[:k] = "s")
+def ewo_fill_keyword(_x, into:) = (into[:k] = "s")
+
+def ewo_callee_slots(buf)
+  other = [1].each_with_object({}) do |x, h|
+    ewo_fill_other(buf, h)
+    h[x] = 1
+  end
+  assert_type("Hash[1, 1]", other)
+  second = [1].each_with_object({}) do |x, h|
+    ewo_fill_second(x, h)
+    h[x] = 1
+  end
+  assert_type("Hash[Dynamic[top], Dynamic[top]]", second)
+  keyword = [1].each_with_object({}) do |x, h|
+    ewo_fill_keyword(x, into: h)
+    h[x] = 1
+  end
+  assert_type("Hash[Dynamic[top], Dynamic[top]]", keyword)
+end
+
+# A memo the scan cannot follow answers its floor, not the join: an alias
+# (`g = h`) or a call with a receiver may store what no scanned store does.
+# A `break` ends the call with its own value.
+module EwoHelper
+  def self.fill(hash, x) = (hash[[x, :H]] = "s")
+end
+
+def ewo_escapes
+  aliased = [1, 2].each_with_object({}) do |_x, h|
+    g = h
+    g["s"] = "v"
+    h[:a] = 2
+  end
+  assert_type("Hash[Dynamic[top], Dynamic[top]]", aliased)
+  received = [1].each_with_object({}) do |x, h|
+    h[x] = 1
+    EwoHelper.fill(h, x)
+  end
+  assert_type("Hash[Dynamic[top], Dynamic[top]]", received)
+  # Rebinding the memo parameter sends later stores to another object; Ruby returns `{}`.
+  rebound = [1].each_with_object({}) do |x, h|
+    h = {}
+    h[x] = 1
+  end
+  assert_type("Hash[Dynamic[top], Dynamic[top]]", rebound)
+  broken = [1, 2].each_with_object([]) do |x, a|
+    break :stop if x == 2
+
+    a << x
+  end
+  assert_type(":stop | Array[1 | 2]", broken)
+end
+
+# A self-call whose value carries the memo out (`keep` returns it, `wrap`
+# holds it) and a reflective store (`send`, `public_send`) store what no scan
+# sees, so each answers the floor. Ruby stores the "v" / "t" in every case.
+def ewo_keep(hash) = hash
+def ewo_wrap(hash) = [hash]
+
+def ewo_carried_out
+  kept = [1].each_with_object({}) do |_x, h|
+    g = ewo_keep(h)
+    g["s"] = "v"
+    h[:a] = 1
+  end
+  assert_type("Hash[Dynamic[top], Dynamic[top]]", kept)
+  kept_index = [1].each_with_object({}) do |_x, h|
+    ewo_keep(h)["s"] = "v"
+    h[:a] = 1
+  end
+  assert_type("Hash[Dynamic[top], Dynamic[top]]", kept_index)
+  wrapped = [1].each_with_object({}) do |_x, h|
+    ewo_wrap(h).first["s"] = "v"
+    h[:a] = 1
+  end
+  assert_type("Hash[Dynamic[top], Dynamic[top]]", wrapped)
+  sent = [1].each_with_object({}) do |_x, h|
+    h.send(:store, :t, "t")
+    h[:a] = 1
+  end
+  assert_type("Hash[Dynamic[top], Dynamic[top]]", sent)
+  public_sent = [1].each_with_object({}) do |_x, h|
+    h.public_send(:[]=, :t, "t")
+    h[:a] = 1
+  end
+  assert_type("Hash[Dynamic[top], Dynamic[top]]", public_sent)
+end
+
+# A reader whose value is used hands out an element the block may mutate where
+# no scan sees it, so the memo's values (a Hash keeps its keys) or elements
+# floor. Ruby stores "s" into the element in every case.
+def ewo_reader_elements
+  indexed = [1].each_with_object({}) do |x, h|
+    h[x] = []
+    h[x] << "s"
+  end
+  assert_type("Hash[1, Dynamic[top]]", indexed)
+  fetched = [1].each_with_object({}) do |x, h|
+    h[x] = []
+    h.fetch(x) << "s"
+  end
+  assert_type("Hash[1, Dynamic[top]]", fetched)
+  via_values = [1].each_with_object({}) do |_x, h|
+    h[:k] = []
+    h.values.first.push("s")
+  end
+  assert_type("Hash[:k, Dynamic[top]]", via_values)
+  via_local = [1].each_with_object({}) do |_x, h|
+    h[:k] = []
+    v = h[:k]
+    v << "s"
+  end
+  assert_type("Hash[:k, Dynamic[top]]", via_local)
+  nested = [1].each_with_object({}) do |_x, h|
+    h[:k] = { n: 0 }
+    h[:k][:n] = "s"
+  end
+  assert_type("Hash[:k, Dynamic[top]]", nested)
+  elements = [1].each_with_object([]) do |x, a|
+    a << [x]
+    a.first << 2
+  end
+  assert_type("Array[Dynamic[top]]", elements)
+end
+
+# A mutator given a splat or `**` argument stores what the join, reading each
+# argument by position, never sees, so the memo floors.
+def ewo_splat_stores
+  stored = [1].each_with_object({}) do |_x, h|
+    kv = [:t, "t"]
+    h.store(*kv)
+    h[:a] = 1
+  end
+  assert_type("Hash[Dynamic[top], Dynamic[top]]", stored)
+  index_set = [1].each_with_object({}) do |_x, h|
+    args = [:t, "t"]
+    h.[]=(*args)
+    h[:a] = 1
+  end
+  assert_type("Hash[Dynamic[top], Dynamic[top]]", index_set)
+  stored_first = [1].each_with_object({}) do |_x, h|
+    kv = [[:t, "t"]]
+    h.store(*kv.first)
+    h[:a] = 1
+  end
+  assert_type("Hash[Dynamic[top], Dynamic[top]]", stored_first)
+  inserted = [1].each_with_object([]) do |_x, a|
+    xs = ["s"]
+    a.insert(0, *xs)
+    a << 1
+  end
+  assert_type("Array[Dynamic[top]]", inserted)
+end
+
+# A block that never mutates the memo keeps it: Ruby returns `{}` here.
+assert_type("{}", [1].each_with_object({}) { |_x, h| h.size })
+
 # --- A non-content-mutation block over a collection stays byte-identical:
 # the block only READS the captured local, so its exact literal Tuple is
 # preserved (no spurious widening from the slice-C walk). ---

@@ -635,6 +635,15 @@ module Rigor
         index_write_stored_type(node, scope, current: current, rhs: rhs)
       end
 
+      # The value of `recv.each_with_object(memo) { |x, acc| … }` given `call_type`, the call's dispatched type
+      # (issue #2411): the memo as the block's content mutations of `acc` leave it ({#each_with_object_return}).
+      # `ExpressionTyper` reads it for every call, so a value position — a method's tail, which
+      # {DefReturnTyper} types through `Scope#type_of` — answers what a statement does; read off the dispatch
+      # alone, `def m = xs.each_with_object({}) { |x, h| h[x] = 1 }` returned the memo argument's `{}`.
+      def each_with_object_value(call_node, call_type)
+        each_with_object_return(call_node, call_type)
+      end
+
       private
 
       attr_reader :scope, :tracer
@@ -3637,11 +3646,9 @@ module Rigor
         invoked = call_operand_scope(node, walk, scope)
         invoked = forget_operand_specials(node, invoked)
         operand_types = walk.types(tracer)
+        # The `each_with_object` memo widening (ADR-56 slice C, B3) is part of the call's type, applied by
+        # `ExpressionTyper#call_type_for` ({#each_with_object_value}).
         call_type = OperandWalk.type_of(scope, node, tracer, operand_types)
-        # ADR-56 slice C (B3) — `each_with_object(memo) { |x, acc| acc << … }` returns the memo; the engine otherwise
-        # types the call `Dynamic[top]`. Compute the joined memo type from the block's content mutations of the memo
-        # block-param and adopt it as the call's return type.
-        call_type = each_with_object_return(node, call_type)
         [call_type, invoke_from(node, invoked, call_type, operand_types)]
       end
 
@@ -6109,28 +6116,239 @@ module Rigor
         body = block.body
         return call_type if body.nil?
 
+        memo_after_block(call_node, call_type, memo_param, body)
+      end
+
+      # {#each_with_object_return}'s answer once the call is known to bind a memo parameter in a block with a body.
+      def memo_after_block(call_node, call_type, memo_param, body)
+        memo_arg = call_node.arguments.arguments.first
+        memo_type = scope.type_of(memo_arg, tracer: tracer)
+        pre_state = lookup_mutated_seed(body, memo_param, memo_type, MEMO_SEED_MUTATORS) do |depth, nesting|
+          depth == nesting
+        end
+        reach = memo_scan_reach(body, memo_param)
+        return content_floor_for(pre_state) || call_type if reach == :escape
+
         # The memo alias is a block-local (depth 0) — collect content mutations on it directly rather than via the
         # captured-local walk.
         shadows = {}.compare_by_identity
         calls = body_content_mutations_on(body, memo_param, shadows)
-        return call_type if calls.empty?
-
-        pre_state = lookup_mutated_seed(body, memo_param, scope.type_of(memo_arg, tracer: tracer)) do |depth, nesting|
-          depth == nesting
-        end
-        joined = join_memo_content(call_node, memo_param, calls, pre_state, shadows)
-        joined || call_type
+        memo = if calls.empty?
+                 # Issue #2411 — a memo the block only reshapes (`m.merge!(s)`, `m.delete(k)`) answers its widened seed.
+                 pre_state.equal?(memo_type) ? call_type : pre_state
+               else
+                 join_memo_content(call_node, memo_param, calls, pre_state, shadows) || call_type
+               end
+        memo = floor_memo_callee_escapes(body, memo_param, memo)
+        reach == :values ? memo_value_floor(memo) : memo
       end
+
+      # Issue #2411 — `memo` with its values or elements floored to `Dynamic[top]` and a Hash's keys kept: a reader's
+      # value is an element the block may then mutate where no scan sees it (`h[x] << "s"`, `v = h[:k]; v << "s"`,
+      # `h[:k][:n] = "s"`), so the join's element types are not what the memo holds. A memo whose every value or
+      # element is of a class no method mutates ({MEMO_IMMUTABLE_CLASSES}) keeps its join: `m[k] = m[k] + 1` reads an
+      # Integer, which nothing in the block can change.
+      def memo_value_floor(type)
+        return type if memo_contents_immutable?(type)
+
+        case type
+        when Type::Union then Type::Combinator.union(*type.members.map { |member| memo_value_floor(member) })
+        when Type::Nominal
+          return content_floor_for(type) || type unless type.class_name == "Hash" && type.type_args.size == 2
+
+          Type::Combinator.nominal_of("Hash", type_args: [type.type_args.first, Type::Combinator.untyped])
+        else content_floor_for(type) || type
+        end
+      end
+
+      # The classes whose instances no method mutates.
+      MEMO_IMMUTABLE_CLASSES = Set[
+        "Integer", "Float", "Symbol", "NilClass", "TrueClass", "FalseClass", "Rational", "Complex"
+      ].freeze
+      private_constant :MEMO_IMMUTABLE_CLASSES
+
+      # Whether every value of a Hash memo, or every element of an Array memo, is of a {MEMO_IMMUTABLE_CLASSES} class.
+      def memo_contents_immutable?(type)
+        case type
+        when Type::Union then type.members.all? { |member| memo_contents_immutable?(member) }
+        when Type::Nominal
+          slot = type.class_name == "Hash" ? 1 : 0
+          %w[Hash Array].include?(type.class_name) && !type.type_args[slot].nil? &&
+            memo_immutable_value?(type.type_args[slot])
+        when Type::Tuple then type.elements.all? { |element| memo_immutable_value?(element) }
+        when Type::HashShape then type.pairs.values.all? { |value| memo_immutable_value?(value) }
+        else false
+        end
+      end
+
+      def memo_immutable_value?(type)
+        case type
+        when Type::Union then type.members.all? { |member| memo_immutable_value?(member) }
+        when Type::Constant then MEMO_IMMUTABLE_CLASSES.include?(type.value.class.name)
+        when Type::Nominal then MEMO_IMMUTABLE_CLASSES.include?(type.class_name)
+        when Type::IntegerRange, Type::FloatRange then true
+        else false
+        end
+      end
+
+      # Issue #2411 — whether the block can change the memo where neither the join nor the callee floor sees it, so
+      # the memo answers its content floor ({#content_floor_for}) instead of the join. Read as an expression, the
+      # join's answer reaches every use of the call, and one that misses a store reports on correct code:
+      # `|x, h| g = h; g["s"] = "v"; h[:a] = 2` joined `Hash[:a, 2]`, and `.fetch("s").upcase` read `2`. Every read
+      # or write of the memo's name in its own scope ({#scope_nesting}) must be one the scan models
+      # ({#memo_read_modelled?}); a rebinding write (`h = {}`) is not, since the stores after it reach another object.
+      # Answers `:escape` for such a read or write, `:values` when the only unmodelled reads are readers whose value
+      # is used ({#memo_value_floor}), and nil when every read is modelled.
+      def memo_scan_reach(body, memo_param)
+        reach = nil
+        Source::NodeWalker.each_with_ancestors(body) do |node, ancestors|
+          next unless MEMO_NAME_NODES.any? { |klass| node.is_a?(klass) } && node.name == memo_param
+          next unless node.depth == scope_nesting(ancestors)
+
+          modelled = node.is_a?(Prism::LocalVariableReadNode) && memo_read_modelled?(node, ancestors)
+          return :escape unless modelled
+
+          reach = :values if modelled == :values
+        end
+        reach
+      end
+
+      # The nodes that read or bind a local by name. `LocalVariableTargetNode` covers a multi-assign and a `rescue =>`.
+      MEMO_NAME_NODES = [
+        Prism::LocalVariableReadNode, Prism::LocalVariableWriteNode, Prism::LocalVariableTargetNode,
+        Prism::LocalVariableOperatorWriteNode, Prism::LocalVariableOrWriteNode, Prism::LocalVariableAndWriteNode
+      ].freeze
+      private_constant :MEMO_NAME_NODES
+
+      # The memo reads that cannot hand the object to anything the scan does not see. A call on the memo is one when
+      # it takes no block (`tap`, `each` and `then` yield it) and the scan knows the method: one whose value never is
+      # the memo ({MEMO_VALUE_READERS}), or a mutator the join or the seed widening reads ({CONTENT_MUTATORS},
+      # {MEMO_SEED_MUTATORS}) whose value, the memo for `h << x` and `h.merge!(s)`, is discarded
+      # ({#memo_value_discarded?}). Any other name is not: `h.send(:store, :t, "t")` stores what no scan sees. An index
+      # compound write on it is one. So is an argument of a self-call that resolves to a user def, whose census the
+      # callee floor reads ({#floor_memo_callee_escapes}), when the call's value is discarded: `keep(h)["s"] = "v"`
+      # stores through the value. Any other read — `g = h`, `[h]`, `Helper.fill(h, x)`, an unresolved self-call — is
+      # not.
+      def memo_read_modelled?(read, ancestors)
+        parent = ancestors.last
+        if parent.respond_to?(:receiver) && parent.receiver.equal?(read)
+          return true if INDEX_WRITE_NODES.any? { |klass| parent.is_a?(klass) }
+          return false unless parent.is_a?(Prism::CallNode) && parent.block.nil?
+
+          return memo_receiver_call_modelled?(parent, ancestors[0...-1])
+        end
+        memo_self_call_argument?(ancestors)
+      end
+
+      # True, false, or `:values` for a reader whose value is used: the value may be an element the block mutates.
+      # A mutator given a splat or `**` argument is not modelled: the join reads each argument by position, and
+      # `h.store(*kv)` stored a pair it never saw.
+      def memo_receiver_call_modelled?(call, ancestors)
+        mutator = CONTENT_MUTATORS.include?(call.name) || MEMO_SEED_MUTATORS.include?(call.name)
+        return false if mutator && memo_splat_arguments?(call)
+        return memo_value_discarded?(call, ancestors) || :values if MEMO_VALUE_READERS.include?(call.name)
+        return false unless mutator
+
+        memo_value_discarded?(call, ancestors)
+      end
+
+      def memo_splat_arguments?(call)
+        (call.arguments&.arguments || []).any? do |argument|
+          argument.is_a?(Prism::SplatNode) ||
+            (argument.is_a?(Prism::KeywordHashNode) && argument.elements.any?(Prism::AssocSplatNode))
+        end
+      end
+
+      # Methods of Hash and Array whose value is never the receiver itself, so using it hands nothing on.
+      MEMO_VALUE_READERS = Set[
+        :[], :[]=, :store, :fetch, :dig, :key?, :has_key?, :include?, :member?, :key, :value?, :has_value?,
+        :size, :length, :count, :empty?, :any?, :none?, :keys, :values, :values_at, :fetch_values, :first, :last,
+        :delete, :pop, :shift, :to_s, :inspect, :hash, :==, :!=, :eql?, :equal?, :frozen?, :nil?, :is_a?,
+        :kind_of?, :instance_of?, :respond_to?, :class, :join, :sum, :min, :max, :dup, :clone
+      ].freeze
+      private_constant :MEMO_VALUE_READERS
+
+      # Iterators whose block's value the call never reads.
+      MEMO_BLOCK_VALUE_DROPPING = Set[
+        :each, :each_with_index, :each_pair, :each_key, :each_value, :each_index, :reverse_each, :each_slice,
+        :each_cons, :each_entry, :each_char, :each_line, :each_byte, :times, :upto, :downto, :step, :loop
+      ].freeze
+      private_constant :MEMO_BLOCK_VALUE_DROPPING
+
+      # Whether `node`'s value is dropped: a statement that is not its sequence's last, or the last one of a sequence
+      # whose own value is dropped, up through `if` / `unless` arms, `begin` / `rescue` bodies and parentheses, to the
+      # `each_with_object` block body, whose value the call never answers, or to the body of a nested block whose
+      # call never reads its value ({MEMO_BLOCK_VALUE_DROPPING}: `xs.each { |y| acc << y }`). Any other block's value
+      # may be the memo handed on (`map { acc << y }`).
+      def memo_value_discarded?(node, ancestors)
+        return true if ancestors.empty?
+
+        parent = ancestors.last
+        up = ancestors[0...-1]
+        case parent
+        when Prism::StatementsNode
+          return true unless parent.body.last.equal?(node)
+
+          block = up.last
+          return memo_value_discarded?(parent, up) unless block.is_a?(Prism::BlockNode)
+
+          up[-2].is_a?(Prism::CallNode) && MEMO_BLOCK_VALUE_DROPPING.include?(up[-2].name)
+        when Prism::IfNode, Prism::UnlessNode
+          !parent.predicate.equal?(node) && memo_value_discarded?(parent, up)
+        when Prism::ElseNode, Prism::BeginNode, Prism::RescueNode, Prism::ParenthesesNode
+          memo_value_discarded?(parent, up)
+        when Prism::EnsureNode then true
+        else false
+        end
+      end
+
+      # Whether the read under `ancestors` is a positional or keyword argument of a self-call resolving to a user def.
+      # Its value must be discarded: the callee may return the memo (`def keep(h) = h`) or wrap it.
+      def memo_self_call_argument?(ancestors)
+        depth = ancestors.size - 1
+        depth -= 2 if ancestors[depth].is_a?(Prism::AssocNode) && ancestors[depth - 1].is_a?(Prism::KeywordHashNode)
+        call = ancestors[depth - 1]
+        return false unless ancestors[depth].is_a?(Prism::ArgumentsNode) && call.is_a?(Prism::CallNode)
+        return false unless self_dispatch_call?(call) && memo_value_discarded?(call, ancestors[0...(depth - 1)])
+
+        !resolve_self_callees(call).empty?
+      end
+
+      # Issue #2411 — `memo` floored as a captured local is when the block hands it to a self-call whose callee
+      # mutates it ({#floor_callee_escaped_args_for_call}, the walk {#floor_block_body_callee_captures} makes): the
+      # join reads only the stores in the block, so `|x, out| record(out, x); out[[x, :e]] = 1` joined
+      # `Hash[[Integer, :e], 1]` while `record` stored other keys, and a memo the block only passed on kept its `{}`.
+      # Every read of the memo's name counts, a nested block's parameter shadowing it included: the floor only forgets.
+      # The walk runs on an evaluator whose scope binds the memo, since the floor reads only locals its scope binds.
+      def floor_memo_callee_escapes(body, memo_param, memo)
+        StatementEvaluator.new(scope: scope.with_local(memo_param, memo), tracer: tracer)
+                          .callee_floored_local(body, memo_param)
+      end
+
+      protected
+
+      # `name` as the self-calls in `body` leave it, each flooring the arguments its callee mutates
+      # ({#floor_memo_callee_escapes}).
+      def callee_floored_local(body, name)
+        floored = scope
+        each_node_in_caller_block(body, 0) do |node, _depth|
+          floored = floor_callee_escaped_args_for_call(node, floored)
+        end
+        floored.local(name)
+      end
+
+      private
 
       # `seed` as the {HashLookupMutation} calls `body` makes on `name` leave it. They add no content, so the join
       # never sees them as sites, and a seed read before `widen_after_block` is still the closed shape whose known
       # values answer every missing key: `b = { a: 1 }; [1].each { b.default = 0; b[:c] = 2 }` read `b[:zz]` as
       # `1 | 2`, and so did an `each_with_object({})` memo given a default beside its stores, and a `while` body. The
       # block receives a read's `depth` and its enclosing block count, and says whether the read is the variable
-      # `seed` describes. A `def` opens a scope of its own, so nothing under one is.
-      def lookup_mutated_seed(body, name, seed)
+      # `seed` describes. A `def` opens a scope of its own, so nothing under one is. `mutators` widens the call names
+      # read; the `each_with_object` memo passes {MEMO_SEED_MUTATORS}.
+      def lookup_mutated_seed(body, name, seed, mutators = HashLookupMutation::MUTATORS)
         Source::NodeWalker.each_with_ancestors(body) do |node, ancestors|
-          next unless node.is_a?(Prism::CallNode) && HashLookupMutation::MUTATORS.include?(node.name)
+          next unless node.is_a?(Prism::CallNode) && mutators.include?(node.name)
           next if ancestors.any?(Prism::DefNode)
 
           receiver = node.receiver
@@ -6172,21 +6390,19 @@ module Rigor
         second.respond_to?(:name) ? second.name : nil
       end
 
-      # Content-mutator calls on the block-local `var_name` within `body` — directly, or from a nested block that
-      # reaches it by exactly the scopes it is nested in. A nested block's own parameter of the same name is a
-      # different variable and does not count.
+      # Content mutations of the block-local `var_name` within `body` — directly, or from a nested block that reaches
+      # it by exactly the scopes it is nested in. A nested block's own parameter of the same name is a different
+      # variable and does not count. The sites are the ones {#captured_content_mutations} reads for a captured local
+      # ({#content_mutation_target}), the index compound writes included: scanning calls alone, `h[x] ||= []` was no
+      # store, and the memo kept its `{}`.
       def body_content_mutations_on(body, var_name, shadows)
         calls = []
         Source::NodeWalker.each_with_ancestors(body) do |descendant, ancestors|
-          next unless descendant.is_a?(Prism::CallNode)
-          next unless CONTENT_MUTATORS.include?(descendant.name)
+          name, site = content_mutation_target(descendant) { |receiver| receiver.depth == scope_nesting(ancestors) }
+          next unless name == var_name
 
-          receiver = descendant.receiver
-          next unless receiver.is_a?(Prism::LocalVariableReadNode)
-          next unless receiver.name == var_name && receiver.depth == scope_nesting(ancestors)
-
-          calls << descendant
-          record_shadows(shadows, descendant, ancestors)
+          calls << site
+          record_shadows(shadows, site, ancestors)
         end
         calls
       end
@@ -6325,6 +6541,13 @@ module Rigor
                           (StringMutation::MUTATORS - MutationWidening::ARRAY_MUTATORS -
                            MutationWidening::HASH_MUTATORS)).freeze
       private_constant :CONTENT_MUTATORS
+
+      # The memo's seed widens on every shape mutator its scan does not read evidence from, as a captured local's
+      # binding does on the block seam ({MutationWidening.widen_after_block}): the {HashLookupMutation} calls, and the
+      # rewriters and removers (`merge!`, `update`, `delete`, `replace`, …) whose added content no join can read. Read
+      # off the memo argument alone, `xs.each_with_object({}) { |s, m| m.merge!(s) }` answered the empty `{}`.
+      MEMO_SEED_MUTATORS = (MutationWidening::SHAPE_MUTATORS - CONTENT_MUTATORS).freeze
+      private_constant :MEMO_SEED_MUTATORS
 
       # Issue #2296 — the Set adders {CONTENT_MUTATORS} leaves out (`add`, `add?`, `merge`): a scan cannot see the
       # receiver's class, and `merge` on a Hash returns a new Hash, so the callee census keeps them apart and floors

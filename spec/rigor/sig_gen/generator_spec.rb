@@ -125,6 +125,24 @@ RSpec.describe Rigor::SigGen::Generator do
         .to eq([["Widget", :n, "def n: () -> 42"]])
     end
 
+    # Issue #2411 / #2293 — a tail `each_with_object` returns the memo as its block's stores leave it. Typed off the
+    # dispatch alone the tail answered the memo argument, and sig-gen proposed `-> {}` / `-> []`.
+    it "proposes the mutated memo's type for a tail each_with_object" do
+      path = write_fixture("lib/memo.rb", <<~RUBY)
+        class Memo
+          def pairs = { a: 1 }.each_with_object({}) { |(k, v), out| out[k] = v }
+          def strs = [1, 2].each_with_object([]) { |x, acc| acc << x.to_s }
+        end
+      RUBY
+
+      new_methods = generator(paths: [path]).run.select do |c|
+        c.classification == Rigor::SigGen::Classification::NEW_METHOD
+      end
+
+      expect(new_methods.map(&:rbs))
+        .to eq(["def pairs: () -> Hash[:a, 1]", 'def strs: () -> Array["1" | "2"]'])
+    end
+
     it "resolves a directory path by recursively globbing every nested *.rb file" do
       write_fixture("lib/a/one.rb", "class One\n  def n\n    1\n  end\nend\n")
       write_fixture("lib/b/two.rb", "class Two\n  def n\n    2\n  end\nend\n")

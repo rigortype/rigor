@@ -1,0 +1,3 @@
+- **[engine]** A Set held as an array element or a hash value no longer keeps the elements it was built with after `add`, `merge` or `subtract`. ([#2390](https://github.com/rigortype/rigor/pull/2390))
+  - `arr = [Set["a"]]; arr.each { |e| e.add(1) }; puts 1 if arr.first.include?(1)` and `h = { k: Set["a"] }; h[:k].add(1); puts 2 if h[:k].include?(1)` used to report the condition as always falsey; both are quiet now.
+  - `Hash#merge` on a row of a collection that holds no Set still leaves the rows' literal shapes as they were.

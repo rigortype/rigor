@@ -45,6 +45,7 @@ RSpec.describe "Precise carrier re-grow (issue #2361)", type: :runner do
       "fill" => ["a.fill(1)", "Array[Integer | String]"],
       "replace" => ["a.replace([1])", "Array[Integer | String]"],
       "a splat push" => ["xs = [1, 2]\na.push(*xs)", "Array[Dynamic[top] | String]"],
+      "a ranged fill, whose stored value the join does not read" => ["a.fill(1, 0, 1)", "Array[Dynamic[top] | String]"],
       "a store under if" => ["a << 1 if flag", "Array[Integer | String] | Array[String]"],
       "a store under unless" => ["a << 1 unless flag", "Array[Integer | String] | Array[String]"],
       "a store under case" => ["case ARGV.size\nwhen 1 then a << 1\nend", "Array[Integer | String] | Array[String]"],
@@ -79,6 +80,11 @@ RSpec.describe "Precise carrier re-grow (issue #2361)", type: :runner do
       seed = "ARGV.map(&:to_i).map { \"x\" }.to_set"
       source = "s = #{seed}\ns << \"x\"\ndump_type(s)\nt = #{seed}\nt << \"y\"\ndump_type(t)"
       expect(dumped(source)).to eq(['Set["x"]', 'Set["x" | String]'])
+    end
+
+    # The #561 gate, as on an Array: a class the literal element does not admit joins as the gradual floor.
+    it "floors a store of another class into a literal-element Set" do
+      expect(dumped("s = ARGV.map(&:to_i).map { \"x\" }.to_set\ns << 1\ndump_type(s)")).to eq(['Set["x" | Dynamic[top]]'])
     end
 
     it "floors a precise Set a self-call grows through a Set-only adder" do

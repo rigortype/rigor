@@ -77,8 +77,8 @@ RSpec.describe "the callee mutation floor resolves singleton self-calls and lite
       RUBY
     end
 
-    # Control, an accepted loss: Ruby raises on `7`, as only the instance `stripes` chain mutates, but the singleton side
-    # also reads the same-named instance def.
+    # Control, an accepted loss: Ruby raises on `7`, as only the instance `stripes` chain mutates, but the singleton
+    # side also reads the same-named instance def.
     it "floors an argument only the same-named instance chain mutates" do
       expect(diagnostics(singleton_run("stripes(acc)", <<~RUBY))).to eq([])
         def self.stripes(acc) = acc.size

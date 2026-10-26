@@ -4872,7 +4872,8 @@ module Rigor
       # applies when either mutates. Ruby calls only the singleton side, but the hand-offs that reach an instance def
       # from there (`new.call(acc)`, `instance.helper(acc)`) and the singleton defs the index does not record
       # (`module_function :poke`, `define_singleton_method`, `alias_method` in `class << self`) are not followed, and
-      # dropping the instance def floored too little on correct code (`approval-queue.d/callee-floor-singleton-side.md`).
+      # dropping the instance def floored too little on correct code
+      # (`approval-queue.d/callee-floor-singleton-side.md`).
       # An instance-side body resolves to instance defs only.
       #
       # A `send(:name, ...)` / `public_send(:name, ...)` with a symbol literal resolves as the self-call `name(...)`,

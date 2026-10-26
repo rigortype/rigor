@@ -165,6 +165,8 @@ RSpec.describe "the callee mutation floor resolves singleton self-calls and lite
       RUBY
     end
 
+    # Guard: passes before the instance-def reading too; the index already publishes `module_function :name` and
+    # `module_function def` on the singleton side.
     it "floors through a def made a module function by `module_function :name`" do
       source = <<~RUBY
         module Mut

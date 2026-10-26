@@ -6116,16 +6116,22 @@ module Rigor
         body = block.body
         return call_type if body.nil?
 
-        # The memo alias is a block-local (depth 0) — collect content mutations on it directly rather than via the
-        # captured-local walk.
-        shadows = {}.compare_by_identity
-        calls = body_content_mutations_on(body, memo_param, shadows)
+        memo_after_block(call_node, call_type, memo_param, body)
+      end
+
+      # {#each_with_object_return}'s answer once the call is known to bind a memo parameter in a block with a body.
+      def memo_after_block(call_node, call_type, memo_param, body)
+        memo_arg = call_node.arguments.arguments.first
         memo_type = scope.type_of(memo_arg, tracer: tracer)
         pre_state = lookup_mutated_seed(body, memo_param, memo_type, MEMO_SEED_MUTATORS) do |depth, nesting|
           depth == nesting
         end
         return content_floor_for(pre_state) || call_type if memo_escapes_scan?(body, memo_param)
 
+        # The memo alias is a block-local (depth 0) — collect content mutations on it directly rather than via the
+        # captured-local walk.
+        shadows = {}.compare_by_identity
+        calls = body_content_mutations_on(body, memo_param, shadows)
         memo = if calls.empty?
                  # Issue #2411 — a memo the block only reshapes (`m.merge!(s)`, `m.delete(k)`) answers its widened seed.
                  pre_state.equal?(memo_type) ? call_type : pre_state

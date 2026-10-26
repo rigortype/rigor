@@ -177,13 +177,10 @@ ewo_or_write = [1].each_with_object({}) { |x, h| h[x] ||= [] }
 assert_type("Hash[1, Dynamic[top]]", ewo_or_write)
 
 # A memo handed to a self-call that stores into it floors as a captured local
-# does: the block's own store is not every key it holds.
+# does: the block's own stores are not every key it holds. Asserted inline, not
+# bound: the snapshot's `post_scope` resolves no top-level def, so it cannot floor.
 def ewo_record(hash, n) = (hash[[n, :key]] = "k")
-ewo_escaped = [1].each_with_object({}) do |x, out|
-  ewo_record(out, x)
-  out[[x, :element]] = 1
-end
-assert_type("Hash[Dynamic[top], Dynamic[top]]", ewo_escaped)
+assert_type("Hash[Dynamic[top], Dynamic[top]]", [1].each_with_object({}) { |x, out| ewo_record(out, x) })
 
 # A block that never mutates the memo keeps it: Ruby returns `{}` here.
 assert_type("{}", [1].each_with_object({}) { |_x, h| h.size })

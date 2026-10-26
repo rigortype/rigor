@@ -6150,7 +6150,9 @@ module Rigor
       # ({#floor_memo_callee_escapes}).
       def callee_floored_local(body, name)
         floored = scope
-        each_node_in_caller_block(body, 0) { |node, _depth| floored = floor_callee_escaped_args_for_call(node, floored) }
+        each_node_in_caller_block(body, 0) do |node, _depth|
+          floored = floor_callee_escaped_args_for_call(node, floored)
+        end
         floored.local(name)
       end
 

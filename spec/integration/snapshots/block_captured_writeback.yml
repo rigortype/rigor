@@ -7,6 +7,8 @@ locals:
   escaped: Dynamic[top]
   ewo_arr: Array[2 | 4 | 6]
   ewo_hash: Hash[1 | 2 | 3, 2 | 4 | 6]
+  ewo_merged: Hash[Dynamic[top], Dynamic[top]]
+  ewo_or_write: Hash[1, Dynamic[top]]
   fact: Integer
   flag: 1 | 99
   groups: Hash[1 | 2 | 3, Dynamic[top]]
@@ -46,4 +48,10 @@ assertions:
   '21': Hash[1 | 2 | 3, Dynamic[top]]
   '22': Array[2 | 4 | 6]
   '23': Hash[1 | 2 | 3, 2 | 4 | 6]
-  '24': "[1, 2]"
+  '24': Hash[:a, 1]
+  '25': Array["1" | "2"]
+  '26': Hash[Dynamic[top], Dynamic[top]]
+  '27': Hash[1, Dynamic[top]]
+  '28': Hash[Dynamic[top], Dynamic[top]]
+  '29': "{}"
+  '30': "[1, 2]"

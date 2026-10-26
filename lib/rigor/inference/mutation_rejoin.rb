@@ -149,19 +149,36 @@ module Rigor
       # adder with no argument types at all is left alone, as {MutationWidening.join_added_elements} leaves it: the
       # block-capture seams pass none, and their own content join adds the stores.
       #
+      # A literal element is a precise element too (`ints.map { "x" }` is `Array["x"]`): a store outside the literal
+      # joins its class (`Array["x" | String]`), so `s << "y"; s.last == "y"` no longer folds always-falsey, and a
+      # store of a literal already held changes nothing ({#already_held?}).
+      #
       # The #561 guard stays: the added members are admitted against the carrier's value-PINNED members
       # ({#pinned_evidence}), so a store foreign to an `Array[:multi]` a signature declared joins as `Dynamic[top]`
       # rather than as a class the declaration rejects.
       def widen_precise_array(nominal, method_name, values:, arg_types:)
         return nil unless ContentJoin::ARRAY_CONTENT_ADDERS.include?(method_name) && !arg_types.empty?
 
-        added = MutationWidening.value_pin_widened(ContentJoin.array_added_elements(method_name, arg_types))
+        stored = ContentJoin.array_added_elements(method_name, arg_types)
+        return nil if already_held?(nominal.type_args.first, stored)
+
+        added = MutationWidening.value_pin_widened(stored)
         admitted = if added.empty? then [Type::Combinator.untyped]
                    else ContentJoin.admissible_evidence(pinned_evidence(nominal.type_args), added)
                    end
         pre_state = values == :widen ? value_pin_widened_args(nominal) : nominal
         rejoined = ContentJoin.join_array_content(pre_state, admitted)
         rejoined == nominal ? nil : rejoined
+      end
+
+      # True when every member `stored` puts in is already a member of the precise element `element`, so the store
+      # changes nothing: `s = ints.map { "x" }; s << "x"` keeps `Array["x"]` and its `s.last == "x"` fold, which
+      # is correct. Joining the value-pin-widened `String` instead would only lose precision.
+      def already_held?(element, stored)
+        return false if stored.empty?
+
+        held = ContentJoin.union_members(element)
+        stored.all? { |type| type && ContentJoin.union_members(type).all? { |member| held.include?(member) } }
       end
 
       # The value-rewriting counterpart of {MutationWidening.widen_tuple}'s `values: :widen`. A mutator that lands a

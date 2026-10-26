@@ -93,8 +93,10 @@ module Rigor
         carrier = RewriteMutation.arm(carrier, method_name) if MutationRejoin.gradual_parameter?(seed)
         return carrier unless CONTENT_ADDERS.include?(method_name)
 
-        added = added_elements(method_name, arg_types).map { |t| widened_member(t) }
-        added = admitted(seed, added)
+        stored = added_elements(method_name, arg_types)
+        return carrier if !MutationRejoin.gradual_parameter?(seed) && MutationRejoin.already_held?(seed, stored)
+
+        added = admitted(seed, stored.map { |t| widened_member(t) })
         added = [Type::Combinator.untyped] if added.empty?
 
         Type::Combinator.nominal_of("Set", type_args: [Type::Combinator.union(carrier.type_args.first, *added)])

@@ -94,6 +94,52 @@ RSpec.describe "Precise carrier re-grow (issue #2361)", type: :runner do
     expect(errors(source, sig: sig)).to be_empty
   end
 
+  # A literal element (`ints.map { "x" }` is `Array["x"]`) is a precise element too. Its pin used to survive every
+  # store, so an `==` read of the stored value folded always-falsey on a program that prints. Ruby witnesses
+  # (`ruby -e 'ints = [1]; ...'`): each `puts` below runs.
+  describe "a literal element under a store" do
+    def flow(source)
+      errors("ints = ARGV.map(&:to_i)\n#{source}").grep(/\Aflow\./)
+    end
+
+    {
+      "the String repro" => ['s = ints.map { "x" }', 's << "y"', 'puts "2" if s.last == "y"'],
+      "the bool repro" => ["s = ints.map { |i| i.positive? }", "s << false", 'puts "1" if s.last == false'],
+      "the fill repro" => ["s = ints.map { :keep }", "s.fill(:drop)", 'puts "3" if s.first == :drop'],
+      "the concat repro" => ["s = ints.map { true }", "s.concat([false])", 'puts "7" if s.last == false']
+    }.each do |label, (seed, store, read)|
+      it "does not fold #{label}" do
+        expect(flow("#{seed}\n#{store}\n#{read}\n")).to be_empty
+      end
+    end
+
+    literals = { "a String" => ['"x"', '"y"'], "a Symbol" => %w[:keep :drop], "true" => %w[true false],
+                 "an Integer" => %w[1 2], "a Float" => %w[1.5 2.5], "nil" => %w[nil 0] }
+    stores = { "<<" => "s << NEW", "push" => "s.push(NEW)", "concat" => "s.concat([NEW])", "fill" => "s.fill(NEW)",
+               "[]=" => "s[0] = NEW", "insert" => "s.insert(0, NEW)", "unshift" => "s.unshift(NEW)" }
+    literals.each do |kind, (old, new)|
+      stores.each do |name, store|
+        it "does not fold a read of #{kind} element after #{name} stores another literal" do
+          source = "s = ints.map { #{old} }\n#{store.sub('NEW', new)}\n" \
+                   "puts 1 if s.first == #{new}\nputs 2 if s.last == #{new}\nputs 3 if s.include?(#{new})\n"
+          expect(flow(source)).to be_empty
+        end
+      end
+    end
+
+    it "joins the stored literal's class" do
+      expect(dumped("s = ARGV.map(&:to_i).map { \"x\" }\ns << \"y\"\ndump_type(s)")).to eq(['Array["x" | String]'])
+    end
+
+    # Control: a store of the literal already held changes nothing, so the correct always-truthy fold stays.
+    it "keeps the carrier and its fold under a store of the same literal" do
+      source = "s = ARGV.map(&:to_i).map { \"x\" }\ns << \"x\"\ndump_type(s)"
+      expect(dumped(source)).to eq(['Array["x"]'])
+      expect(flow("s = ints.map { \"x\" }\ns << \"x\"\nputs 1 if s.last == \"x\"\n"))
+        .to eq(["flow.always-truthy-condition"])
+    end
+  end
+
   describe "receivers whose behaviour is unchanged" do
     it "keeps a Tuple's seed-admissibility floor" do
       expect(dumped("l = [1, 2]\nl << \"a\"\ndump_type(l)")).to eq(["Array[1 | 2 | Dynamic[top]]"])

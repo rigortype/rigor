@@ -222,6 +222,14 @@ RSpec.describe "a loop body that mutates an element in place", type: :runner do
       RUBY
     end
 
+    it "keeps the shape when a block-bearing call between them built new elements" do
+      expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
+        a = [[1]]
+        a.map { |x| x.dup }.each { |y| y << 2 }
+        puts(a[0].size == 1 ? :y : :n)
+      RUBY
+    end
+
     it "keeps the precise shape when the block over `values` only reads" do
       expect(flow_rules(<<~RUBY)).to eq(["flow.always-truthy-condition"])
         h = { a: [1] }

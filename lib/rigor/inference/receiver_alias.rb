@@ -85,6 +85,26 @@ module Rigor
         candidates(first, depth + 1) + candidates(second, depth + 1)
       end
 
+      # Calls whose result hands its caller the receiver's own element objects (issue #2287): `h.values` and
+      # `h.each_value` the hash's values, `a.dup` / `a.clone` a shallow copy sharing them, and the blockless
+      # enumerator spellings (`a.each`, `a.map`, `a.each_with_index`, `e.with_index`) the elements themselves.
+      ELEMENT_EXPOSING_CALLS = %i[values each_value dup clone each map each_with_index with_index].to_set.freeze
+      private_constant :ELEMENT_EXPOSING_CALLS
+
+      # The variables whose elements a loop over `receiver` is handed: {.candidates} of `receiver` once every
+      # blockless {ELEMENT_EXPOSING_CALLS} call is peeled off, so `h.values.each { |v| v << 2 }` and
+      # `a.each_with_index.map { |x, i| x << i }` name `h` and `a`. Only a loop's element widening reads it; an
+      # in-place mutation OF such a result (`h.values << 1`, `a.dup << 1`) changes a new object, not the variable.
+      def element_sources(receiver)
+        depth = 0
+        while receiver.is_a?(Prism::CallNode) && receiver.block.nil? && ELEMENT_EXPOSING_CALLS.include?(receiver.name)
+          return [] if (depth += 1) > WALK_DEPTH_CAP
+
+          receiver = receiver.receiver
+        end
+        candidates(receiver)
+      end
+
       # The variable reads an in-place mutation of `receiver` changes: {.candidates}' locals and instance
       # variables, or the class variable or global the receiver reads or writes directly, parenthesised or not
       # (`(@@c ||= []) << x` mutates `@@c`, as `(buf ||= []) << x` mutates `buf`). A class variable or global counts

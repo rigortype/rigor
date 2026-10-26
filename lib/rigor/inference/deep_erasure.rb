@@ -125,7 +125,8 @@ module Rigor
       # A block call hands each of its receiver's elements to the block's parameters, and a body that mutates one in
       # place (`a.each { |x| x << 2 }`) changes the shape the receiver's binding still carries one level down
       # (`[[1]]`). The receiver's variables drop their shapes at every depth ({widen}), as a `for` loop's
-      # value does ({StatementEvaluator#for_collection_after}).
+      # value does ({StatementEvaluator#for_collection_after}). A receiver that is a call exposing a variable's
+      # elements (`h.values`, `a.dup`, `a.each_with_index`) names that variable ({ReceiverAlias.element_sources}).
       def widen_element_aliases(receiver, body, names, scope)
         return scope unless element_mutation?(body, names) { receiver_holds_set?(receiver, scope) }
 
@@ -133,14 +134,14 @@ module Rigor
       end
 
       def receiver_holds_set?(receiver, scope)
-        ReceiverAlias.candidates(receiver).any? do |read|
+        ReceiverAlias.element_sources(receiver).any? do |read|
           getter, = MutationWidening::ALIAS_ACCESSORS[read.class]
           getter && holds_set?(scope.public_send(getter, ReceiverAlias.read_name(read)))
         end
       end
 
       def widen_receiver(receiver, scope)
-        ReceiverAlias.candidates(receiver).reduce(scope) { |acc, read| widen_read(read, acc) }
+        ReceiverAlias.element_sources(receiver).reduce(scope) { |acc, read| widen_read(read, acc) }
       end
 
       # `a.each(&:strip!)`: a block argument naming a mutator mutates every element it is handed.

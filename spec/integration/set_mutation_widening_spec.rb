@@ -160,8 +160,14 @@ RSpec.describe "Set mutation widening", type: :runner do
     end
 
     it "widens only the hash value the mutation reached" do
-      source = %(h = { k: Set["a"], n: 1 }\nh[:k].add(1)\ndump_type(h))
-      expect(dumped(source)).to eq(["{ k: Set[Dynamic[top] | Integer | String], n: 1 }"])
+      source = %(h = { k: Set["a"], j: Set["b"] }\nh[:k].add(1)\ndump_type(h))
+      expect(dumped(source)).to eq(['{ k: Set[Dynamic[top] | Integer | String], j: Set["b"] }'])
+    end
+
+    # A `for` loop's value is its collection, whose shapes a Set mutation of an element drops as well.
+    it "drops the nested shapes of a for loop's value after add on a set its element holds" do
+      source = %(v = for e in [{ k: Set["a"] }]; e[:k].add(1); end\ndump_type(v))
+      expect(dumped(source)).to eq(["Array[Hash[Symbol, Set]]"])
     end
 
     # The Set gate reads the collection's type: an iterator over Hash rows has no Set element for `merge` to mutate.

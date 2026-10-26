@@ -3816,8 +3816,6 @@ module Rigor
         # the continuation collection so `out = [0]; arr.each { |x| out << x }` types `Array[0 | Integer]`, not
         # `Array[0]`. Same always-safe rationale (only widens).
         post_scope = content_writeback_block_captures(node, post_scope, seed_scope: pre_widen_scope)
-        # Issue #2397 — the same continuation for a captured local a self-call in the body hands to a mutating callee.
-        post_scope = floor_block_callee_captures(node, post_scope)
         # Indexed-collection narrowing — drop any `receiver[key] ||= default` narrowing the analyzer recorded earlier
         # when an intervening `[]=` writes the same slot or any other mutator runs against the receiver. Always-safe
         # (only forgets; never invents).
@@ -4566,7 +4564,8 @@ module Rigor
           acc = floor_callee_escaped_args_for_call(receiver, acc)
           receiver = receiver.receiver
         end
-        acc
+        # Issue #2397 — and every self-call in the call's own non-escaping block.
+        floor_block_callee_captures(node, acc)
       end
 
       # Runs for every call of every body it walks, and nearly every call reports no argument, so that case returns

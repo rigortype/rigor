@@ -92,18 +92,23 @@ module Rigor
         cached = @census_tables
         return cached[2] if cached && cached[0].equal?(census) && cached[1].equal?(pre_eval)
 
+        tables = build_tables([census, pre_eval])
+        @census_tables = [census, pre_eval, tables.freeze]
+        tables
+      end
+
+      TABLE_KINDS = { global_writer: 0, method_alias: 1 }.freeze
+      private_constant :TABLE_KINDS
+
+      def build_tables(censuses)
         tables = [{}, {}]
-        [census, pre_eval].each do |entries|
+        censuses.each do |entries|
           entries&.each do |kind, key, value|
-            case kind
-            when :global_writer then (tables[0][key] ||= Set.new) << value
-            when :method_alias then (tables[1][key] ||= Set.new) << value
-            end
+            index = TABLE_KINDS[kind]
+            (tables[index][key] ||= Set.new) << value if index
           end
         end
         tables.each { |table| table.each_value(&:freeze).freeze }
-        @census_tables = [census, pre_eval, tables.freeze]
-        tables
       end
 
       # True when `node` is a call whose receiver no target resolves: the method it runs may be any.

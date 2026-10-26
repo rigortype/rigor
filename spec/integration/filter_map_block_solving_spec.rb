@@ -109,14 +109,16 @@ RSpec.describe "filter_map block-return solving", type: :runner do
   end
 
   # The rule reads the declared spelling, not the method name: `U?` strips `nil` alone, and an arm other than `nil` /
-  # `false` (`bool`), or `false` without `nil`, leaves the variable unbound.
-  it "reads a U? block return and declines a bool or false-only arm" do
+  # `false` (`bool`, `String`), `false` without `nil`, or a second variable leaves the variable unbound.
+  it "reads a U? block return and declines any other arm or a second variable" do
     sig = {
       "box.rbs" => <<~RBS
         class Box
           def pick: [U] () { () -> U? } -> Array[U]
           def with_bool: [U] () { () -> (U | bool) } -> Array[U]
           def only_false: [U] () { () -> (U | false) } -> Array[U]
+          def with_other: [U] () { () -> (U | nil | String) } -> Array[U]
+          def two: [U, V] () { () -> (U | V | nil) } -> Array[U]
         end
       RBS
     }
@@ -126,7 +128,9 @@ RSpec.describe "filter_map block-return solving", type: :runner do
       dump_type(Box.new.pick { n })
       dump_type(Box.new.with_bool { n })
       dump_type(Box.new.only_false { n })
+      dump_type(Box.new.with_other { n })
+      dump_type(Box.new.two { n })
     RUBY
-    expect(dumped(source, sig: sig)).to eq(["Array[1]", "Array[Dynamic[top]]", "Array[Dynamic[top]]"])
+    expect(dumped(source, sig: sig)).to eq(["Array[1]", *Array.new(4, "Array[Dynamic[top]]")])
   end
 end

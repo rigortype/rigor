@@ -1415,6 +1415,77 @@ RSpec.describe Rigor::SigGen::Generator do
     end
   end
 
+  # Issue #2410 — a def-level rescue chain returns the value of whichever arm completes, and an else-clause replaces
+  # the body's value; the ensure-clause's value is discarded.
+  describe "def-level rescue arms (#2410)" do
+    let(:candidates) do
+      path = write_fixture("lib/box.rb", <<~'RUBY')
+        class Local; end
+        class EA < StandardError; end
+        class EB < StandardError; end
+        class Box
+          def x = Local.new
+          def y = 42
+          def modifier = Local.new rescue nil
+          def one_arm; Local.new; rescue StandardError; nil; end
+          def two_arms; x; rescue EA; :error; rescue EB; nil; end
+          def empty_arm; x; rescue EA; end
+          def reraise; x; rescue; raise; end
+          def retrying; x; rescue; retry; end
+          def returning; x; rescue; return 1; end
+          def with_else; x; rescue; nil; else; y; end
+          def with_ensure; x; ensure; :z; end
+          def nested; v = begin; x; rescue; nil; end; v; end
+          def lookup_arm(s); Integer("#{s}"); rescue ArgumentError; "#{s}".split(",").first; end
+          def local_arm; y = "a"; x; rescue; y; end
+        end
+      RUBY
+      generator(paths: [path]).run
+    end
+
+    def candidate(name) = candidates.find { |c| c.method_name == name }
+    def rbs_of(name) = candidate(name).rbs
+
+    # `Array#first` misses with nil (#2197); an arm's lookup keeps that nil like the body's would.
+    it "keeps the nil of an optimistic lookup an arm returns" do
+      expect(rbs_of(:lookup_arm)).to eq("def lookup_arm: (untyped) -> (Integer | String | nil)")
+    end
+
+    # The arm runs after the body raised at some point, so `y` may or may not hold the body's `"a"`; the arm reads
+    # it under its own recorded scope (untyped), not the body's last expression's.
+    it "proposes nothing when an arm reads a local the body assigned" do
+      expect(candidate(:local_arm).skip_reason).to eq(:untyped_return)
+    end
+
+    it "unions a def-level rescue arm's value with the body's" do
+      expect(rbs_of(:one_arm)).to eq("def one_arm: () -> (Local | nil)")
+    end
+
+    it "unions every arm of the chain" do
+      expect(rbs_of(:two_arms)).to eq("def two_arms: () -> (:error | Local | nil)")
+    end
+
+    it "reads an empty arm as nil" do
+      expect(rbs_of(:empty_arm)).to eq("def empty_arm: () -> (Local | nil)")
+    end
+
+    it "reads the else-clause's value in place of the body's" do
+      expect(rbs_of(:with_else)).to eq("def with_else: () -> (42 | nil)")
+    end
+
+    it "adds nothing for an arm that re-raises, retries or returns (guard)" do
+      expect([rbs_of(:reraise), rbs_of(:retrying), rbs_of(:returning)]).to eq(
+        ["def reraise: () -> Local", "def retrying: () -> Local", "def returning: () -> (1 | Local)"]
+      )
+    end
+
+    it "keeps the ensure-clause's value, a rescue modifier and a nested begin as before (guard)" do
+      expect([rbs_of(:with_ensure), rbs_of(:modifier), rbs_of(:nested)]).to eq(
+        ["def with_ensure: () -> Local", "def modifier: () -> (Local | nil)", "def nested: () -> (Local | nil)"]
+      )
+    end
+  end
+
   describe "explicit-return union (post-dogfood body-typer enhancement)" do
     it "unions an explicit `return value` with the implicit-return expression" do
       src = "class Box\n  def m(flag)\n    return 1 if flag\n    \"end\"\n  end\nend\n"

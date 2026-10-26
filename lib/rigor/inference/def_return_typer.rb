@@ -35,7 +35,7 @@ module Rigor
         body = def_node.body
         return nil if body.nil?
 
-        last = body_last_expression(body)
+        last = primary_value_expression(body)
         return nil if last.nil?
 
         inner_scope = scope_index[last] || scope_index[body] || scope_index[def_node]
@@ -46,9 +46,52 @@ module Rigor
 
         lookup_context = keep_lookup_nil ? LookupContext.new(scope_index, truthy_guards(body)) : nil
         last_type = with_lookup_nil(last_type, last, inner_scope, lookup_context) if lookup_context
-        union_with_explicit_returns(body, last_type, scope_index, lookup_context: lookup_context)
+        arm_types = rescue_arm_types(body, inner_scope, scope_index, lookup_context)
+        return nil if arm_types.nil?
+
+        union_with_explicit_returns(body, Type::Combinator.union(last_type, *arm_types), scope_index,
+                                    lookup_context: lookup_context)
       rescue StandardError
         nil
+      end
+
+      # Issue #2410 — the value a def body ends on when no exception escapes its primary path. A def-level
+      # `rescue … else … end` body is a `BeginNode` whose else-clause, when present, replaces the body's value (the
+      # ensure-clause's value is discarded, so it never counts).
+      def primary_value_expression(body)
+        return body_last_expression(body) unless body.is_a?(Prism::BeginNode) && body.else_clause
+
+        body_last_expression(body.else_clause.statements)
+      end
+
+      # Issue #2410 — the value of each arm of a def-level rescue chain, which the method returns when that arm
+      # completes. An empty arm returns `nil`; an arm ending in `raise`, `retry` or `return` types as bottom and so
+      # adds nothing here (a `return`'s value is collected with the other explicit returns). Nil when an arm cannot
+      # be typed: the body's value alone would be a narrower, wrong contract.
+      def rescue_arm_types(body, inner_scope, scope_index, lookup_context)
+        return [] unless body.is_a?(Prism::BeginNode)
+
+        types = []
+        arm = body.rescue_clause
+        while arm
+          type = rescue_arm_type(arm, inner_scope, scope_index, lookup_context)
+          return nil if type.nil?
+
+          types << type
+          arm = arm.subsequent
+        end
+        types
+      end
+
+      def rescue_arm_type(arm, inner_scope, scope_index, lookup_context)
+        value = body_last_expression(arm.statements)
+        return Type::Combinator.constant_of(nil) if value.nil?
+
+        scope = scope_index[value] || scope_index[arm] || inner_scope
+        type = safe_type_of(scope, value)
+        return nil if type.nil?
+
+        lookup_context ? with_lookup_nil(type, value, scope, lookup_context) : type
       end
 
       # What {#optimistic_value?} reads beside a node's scope: the engine's per-node scopes, and for each lookup

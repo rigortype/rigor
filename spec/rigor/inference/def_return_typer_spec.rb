@@ -44,6 +44,17 @@ RSpec.describe Rigor::Inference::DefReturnTyper do
       expect(described_class.call(def_node, indexed)).to eq(int_type)
     end
 
+    # Issue #2410 — the body's value alone would be a narrower, wrong contract.
+    it "returns nil when a def-level rescue arm cannot be typed" do
+      def_node = parse_def("def foo; 1; rescue; bar; end")
+      body_scope = instance_double(Rigor::Scope, type_of: Rigor::Type::Combinator.constant_of(1))
+      arm_scope = instance_double(Rigor::Scope)
+      allow(arm_scope).to receive(:type_of).and_raise(StandardError)
+      arm_value = def_node.body.rescue_clause.statements.body.last
+      indexed = { def_node.body.statements.body.last => body_scope, arm_value => arm_scope }
+      expect(described_class.call(def_node, indexed)).to be_nil
+    end
+
     it "unions the last expression with explicit return values" do
       def_node = parse_def("def foo; return 1; 2; end")
       last_expr = described_class.body_last_expression(def_node.body)

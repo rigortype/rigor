@@ -202,7 +202,7 @@ RSpec.describe Rigor::Analysis::Runner::RunLevelFacts do
   # the coordinator dispatches is a race, and `Ractor#send` to a worker that already died raises
   # `Ractor::ClosedError`. Every worker is held until it has died here, so the dead-before-send ordering
   # happens on every run, for the first, middle and last send and for the closing `nil` of every worker.
-  it "degrades to the sequential rows when every Ractor worker died before dispatch" do # rubocop:disable RSpec/ExampleLength
+  it "degrades to the sequential rows when every Ractor worker died before dispatch" do
     Dir.mktmpdir do |dir|
       Dir.chdir(dir) do
         files = %w[a.rb b.rb c.rb].each { |name| File.write(name, "x = 1\n") }

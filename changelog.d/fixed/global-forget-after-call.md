@@ -1,0 +1,4 @@
+- **[inference]** A global's value no longer survives a call that may reach a project method assigning it. ([#2382](https://github.com/rigortype/rigor/pull/2382))
+  - `def reset! = ($g = 1); $g = nil; reset!; $g + 1` used to report `undefined method '+' for nil`; it is quiet now, and `$flag = false; enable; puts "on" if $flag` no longer reads the condition as always falsey.
+  - A call that reaches no method writing the global keeps it, so `$h = nil; noop; $h + 1` still reports. Built-in and standard-library calls such as `puts` keep it too.
+  - A `case` on a global follows the same rule for a calling `when` test, so a test whose method writes no global keeps narrowing the subject.

@@ -5,6 +5,7 @@ require "prism"
 require_relative "../source/constant_path"
 require_relative "../source/node_children"
 require_relative "ivar_writer_census"
+require_relative "stored_block_call"
 
 module Rigor
   module Inference
@@ -29,6 +30,13 @@ module Rigor
     #   `main`), as written. A module RBS does not know may carry any method, so it reaches every class.
     # - the instance-variable writer entries of {IvarWriterCensus} (issue #1154): `[:ivar_set, name]`,
     #   `[:ivar_set_class, class_name]` and `[:own_write, class_name, name, path]`.
+    # - `[:global_writer, name, method]` — issue #2314: a write of the global `name` inside a method body, keyed by
+    #   the `def`'s name (or the literal name a `define_method` block defines), or by nil inside a lambda or a block
+    #   its call keeps to run later ({StoredBlockCall}). A write in a block its call runs at once belongs to the
+    #   enclosing body. A write at the top level or in a class body records nothing, and neither does a write of
+    #   the frame-local `$_` or `$~`. {GlobalWriterReach} reads these.
+    # - `[:method_alias, new, old]` — issue #2314: `alias new old`, `alias_method :new, :old` or `def_delegator
+    #   :@o, :old, :new`, whose new name runs a method named old. {GlobalWriterReach} follows it.
     #
     # The census is a `Set` of those frozen entries, merged by union across files, the project pre-pass and the
     # `pre_eval:` files. It is recorded inside descents that already visit every node ({Collector#visit}), never
@@ -140,6 +148,7 @@ module Rigor
           @refine_ranges = []
           @ivar_writers = IvarWriterCensus.new(@census)
           @in_effect = in_effect
+          @bodies = []
         end
 
         # A node the collector cannot read must not fail the analysis of its file, nor of every file the pre-pass
@@ -148,6 +157,7 @@ module Rigor
         # the host walk does not track it, or no class owns an instance there).
         def visit(node, top_level:, owner: nil)
           @ivar_writers.visit(node, owner)
+          visit_global_writer(node)
           case node
           when Prism::AliasGlobalVariableNode then visit_global_alias(node)
           when Prism::DefNode then record(node, node.name)
@@ -159,6 +169,68 @@ module Rigor
         end
 
         private
+
+        # Issue #2314 — tracks the method bodies, lambdas and stored blocks of a pre-order descent as flat
+        # `start, end, label` triples (`@bodies`, innermost last), and records a global write inside one
+        # ({GlobalWriterReach}). A body ending before the write starts is closed. Only those nodes read their location.
+        def visit_global_writer(node)
+          case node
+          when Prism::DefNode then open_body(node, node.name)
+          when Prism::LambdaNode then open_body(node, nil)
+          when Prism::AliasMethodNode then record_method_alias(node.new_name, node.old_name)
+          when Prism::CallNode
+            open_stored_block(node)
+            visit_alias_call(node)
+          when Prism::GlobalVariableWriteNode, Prism::GlobalVariableOrWriteNode, Prism::GlobalVariableAndWriteNode,
+               Prism::GlobalVariableOperatorWriteNode, Prism::GlobalVariableTargetNode
+            record_global_writer(node)
+          end
+        end
+
+        # `$_` and `$~` are the frame's own: a method's write to one never reaches its caller.
+        FRAME_LOCAL_GLOBALS = %i[$_ $~].freeze
+        private_constant :FRAME_LOCAL_GLOBALS
+
+        def record_global_writer(node)
+          return if FRAME_LOCAL_GLOBALS.include?(node.name)
+
+          start = node.location.start_offset
+          bodies = @bodies
+          bodies.pop(3) while !bodies.empty? && bodies[-2] <= start
+          index = bodies.size - 3
+          index -= 3 while index >= 0 && !(bodies[index] <= start && start < bodies[index + 1])
+          @census << [:global_writer, node.name, bodies[index + 2]].freeze if index >= 0
+        end
+
+        def open_body(node, label)
+          location = node.location
+          @bodies.push(location.start_offset, location.end_offset, label)
+        end
+
+        # `alias_method :new, :old`, and `def_delegator :@o, :old, :new` (and its instance and single spellings), whose
+        # new name runs a method of the old name.
+        def visit_alias_call(node)
+          arguments = node.arguments&.arguments
+          case node.name
+          when :alias_method then record_method_alias(arguments[0], arguments[1]) if arguments&.size == 2
+          when :def_delegator, :def_instance_delegator, :def_single_delegator
+            record_method_alias(arguments[2], arguments[1]) if arguments&.size == 3
+          end
+        end
+
+        def record_method_alias(new_node, old_node)
+          new_name = literal_name(new_node)
+          old_name = literal_name(old_node)
+          @census << [:method_alias, new_name, old_name].freeze if new_name && old_name && new_name != old_name
+        end
+
+        def open_stored_block(node)
+          block = node.block
+          return unless block.is_a?(Prism::BlockNode) && StoredBlockCall.stores_block?(node)
+
+          definer = %i[define_method define_singleton_method].include?(node.name)
+          open_body(block, definer ? literal_name(node.arguments&.arguments&.first) : nil)
+        end
 
         def visit_global_alias(node)
           [node.new_name, node.old_name].each do |side|

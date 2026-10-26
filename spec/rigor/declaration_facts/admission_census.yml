@@ -91,6 +91,7 @@ members:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/block_call_timing.rb
     - lib/rigor/inference/expression_typer.rb
+    - lib/rigor/inference/global_writer_reach.rb
     - lib/rigor/inference/parameter_inference_collector.rb
     - lib/rigor/inference/refined_dispatch/constructed_class.rb
     - lib/rigor/inference/self_call_ivar_writes.rb
@@ -103,6 +104,8 @@ members:
       lib/rigor/inference/project_seed_tables.rb:
       - paired_copy
       lib/rigor/analysis/check_rules/rebinding_block_callees.rb:
+      - existence
+      lib/rigor/inference/global_writer_reach.rb:
       - existence
       lib/rigor/analysis/check_rules/ruby_deprecations.rb:
       - existence
@@ -147,6 +150,7 @@ members:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/block_call_timing.rb
     - lib/rigor/inference/expression_typer.rb
+    - lib/rigor/inference/global_writer_reach.rb
     - lib/rigor/inference/method_dispatcher/process_folding.rb
     - lib/rigor/inference/parameter_inference_collector.rb
     - lib/rigor/scope/resolution_chain.rb
@@ -157,6 +161,8 @@ members:
       lib/rigor/inference/project_seed_tables.rb:
       - paired_copy
       lib/rigor/analysis/check_rules/rebinding_block_callees.rb:
+      - existence
+      lib/rigor/inference/global_writer_reach.rb:
       - existence
       lib/rigor/analysis/incremental_session.rb:
       - cache_key
@@ -300,6 +306,7 @@ members:
     - lib/rigor/analysis/check_rules.rb
     - lib/rigor/analysis/incremental_session.rb
     - lib/rigor/analysis/runner.rb
+    - lib/rigor/inference/global_writer_reach.rb
     copies:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/project_seed_tables.rb

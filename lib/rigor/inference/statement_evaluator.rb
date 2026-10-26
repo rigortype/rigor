@@ -28,6 +28,7 @@ require_relative "closure_escape_analyzer"
 require_relative "content_join"
 require_relative "define_method_block_self"
 require_relative "macro_block_self_type"
+require_relative "global_writer_reach"
 require_relative "guard_rebinding"
 require_relative "self_call_ivar_writes"
 require_relative "intervening_ivar_reset"
@@ -1680,6 +1681,11 @@ module Rigor
           InterveningIvarReset.may_write?(condition, name, before, run_lambdas: true)
         when Prism::LocalVariableReadNode, Prism::LocalVariableWriteNode
           false
+        when Prism::GlobalVariableReadNode
+          # Issue #2314 — the question the statement walk asks past a call ({#forget_reached_globals}).
+          body = when_lambda_body(condition)
+          GlobalWriterReach.may_write?(condition, name, before) ||
+            (!body.nil? && GlobalWriterReach.may_write?(body, name, before))
         else
           body = when_lambda_body(condition)
           GuardRebinding.may_rebind?(condition, before) || (!body.nil? && GuardRebinding.may_rebind?(body, before))
@@ -3829,7 +3835,30 @@ module Rigor
                          post_scope.forget_guard_narrowings
                        end
         end
+        post_scope = forget_reached_globals(node, post_scope)
         forget_rescued_status(LastStatus.after(node, post_scope, scope), node)
+      end
+
+      def guard_narrowed_global?(scope, name)
+        scope.guard_narrowed? && scope.guard_records.key?([:global, name])
+      end
+
+      # Issue #2314 — `post_scope` with each global a project method may write rebound to `Dynamic[top]` when the
+      # statement call `node` may reach that method ({GlobalWriterReach.may_write?}): `$g = nil; reset!; $g + 1`,
+      # with `reset!` assigning `$g`, is `2` in Ruby. A global no reachable method writes keeps its binding. A
+      # `case` whose `when` test may rebind a global subject reads it the same way ({#when_test_rebinds_subject?}).
+      # A global a guard narrowed where the operands started keeps the union issue #1429's restore reads instead
+      # (`return unless $sep; puts(reset_sep); $sep.length` reads `$sep` as the union of its seed and `","`).
+      def forget_reached_globals(node, post_scope)
+        names = GlobalWriterReach.candidates(post_scope)
+        return post_scope if names.empty?
+
+        names.reduce(post_scope) do |acc, name|
+          next acc if guard_narrowed_global?(operand_scope, name)
+          next acc unless GlobalWriterReach.may_write?(node, name, operand_scope)
+
+          acc.with_global(name, Type::Combinator.untyped)
+        end
       end
 
       # True when the call may rebind this frame's match globals: it is match-capable itself ({#match_capable_call?}),

@@ -195,7 +195,10 @@ module Rigor
       # 45: issue #1154 — each seed bundle's `global_write_census` also records the ivar writers the declared-parameter
       # credit reads (`[:ivar_set, name]`, `[:ivar_set_class, class]`, `[:own_write, class, name, path]`), which a
       # pre-45 bundle carries none of, so a warm run would credit an ivar write a cold run declines.
-      SCHEMA = 45
+      # 46: issue #2314 — each seed bundle's `global_write_census` also records the global writers
+      # (`[:global_writer, name, method]`) the statement walk reads past a call; a pre-46 bundle carries none, so a
+      # warm run would keep a global's binding a cold run forgets.
+      SCHEMA = 46
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.

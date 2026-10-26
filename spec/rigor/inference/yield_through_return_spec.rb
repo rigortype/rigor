@@ -124,7 +124,7 @@ RSpec.describe "yield-through return inference" do
       "value of a helper that yields (the shipped shape)" =>
         [:via_guarded_helper, "def via_guarded_helper: (untyped) -> ([untyped] | [])"],
       "the same logic inlined, rescue kept" =>
-        [:inlined, "def inlined: (untyped) -> [untyped]"],
+        [:inlined, "def inlined: (untyped) -> ([untyped] | [])"],
       "the helper's value assigned to a local, then returned" =>
         [:local_from_helper, "def local_from_helper: (untyped) -> [untyped]"],
       "yield-through, no rescue" =>

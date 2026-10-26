@@ -5,7 +5,7 @@ require "stringio"
 require "tmpdir"
 
 # Issue #1967 — `--verify-incremental` re-analyses half of an unchanged tree, so it cannot see a missing invalidation
-# edge: with nothing edited, every served row is still right. `--verify-incremental-edits N` replays two edits on N
+# edge: with nothing edited, every served row is still right. `--verify-incremental-edits N` replays edits on N
 # sampled files through an editor buffer, never on disk (the file emptied, and the file reduced to its class/module
 # skeleton), and compares each warm recheck with a full run of the edited tree.
 #
@@ -85,14 +85,14 @@ RSpec.describe Rigor::CLI do
   describe "with the global-census fixture" do
     before { write_census_fixture }
 
-    it "replays both edits of each sampled file and reports OK when every recheck matches a full run" do
+    it "replays every edit of each sampled file and reports OK when every recheck matches a full run" do
       status, out, err = verify("--verify-incremental-edits", "2")
 
       expect(err).to eq("")
       expect(out).to include("--verify-incremental OK")
       # `use.rb` declares nothing, so it has no skeleton to replay: 2 edits of `other.rb`, 1 of `use.rb`.
-      expect(out).to include("3 edits replayed (files emptied and reduced to their class/module skeleton), " \
-                             "every recheck matches full")
+      expect(out).to include("3 edits replayed (files emptied, reduced to their class/module skeleton, and with a " \
+                             "body statement dropped), every recheck matches full")
       expect(status).to eq(0)
     end
 
@@ -177,8 +177,8 @@ RSpec.describe Rigor::CLI do
   end
 
   # #2134's override shape: `vis.rb` reopens `Parent` only to make `foo` private, so `Child`'s private override reduces
-  # nothing. With the `visibility:` reads dropped, emptying `vis.rb` already fails. This does not show the skeleton edit
-  # covers the edge: #2161's `module_function` / `private` swap passes both edits with it dropped (#2277).
+  # nothing. With the `visibility:` reads dropped, emptying `vis.rb` already fails. The skeleton edit does not cover the
+  # edge for #2161's `module_function` / `private` shape (see the self-extended fixture below).
   describe "with the method-visibility fixture" do
     before do
       File.write("lib/parent.rb", "class Parent\n  def foo = 1\nend\n")
@@ -201,6 +201,44 @@ RSpec.describe Rigor::CLI do
 
       expect(out).to include("--verify-incremental OK")
       expect(status).to eq(0)
+    end
+  end
+
+  # #2161's shape, #2277's gap: `Es` extends itself and `two` is private, so `Es.two(1)` is a private call, unless a
+  # reopening's `module_function :two` row gives it a public singleton copy (then the call is an arity error).
+  # `vis.rb` also defines `helper`, so emptying it or reducing it to `module Es; end` removes a definition and moves a
+  # broader key; only dropping the `module_function :two` statement leaves `private :two` behind (the issue's swap)
+  # with the declarations and defs as they were, so the `visibility:` read of `DefinerResolution.module_function_row?`
+  # is the edge that re-checks `use.rb`.
+  #
+  # G3 (`module_function_row?` not calling `read_visibility`) is not killable here: it is equivalent. The only caller of
+  # `self_extended_copy_visibility`, `DefinerResolution.side_visibility`, first calls
+  # `scope.discovered_method_visibility(owner, name, singleton: true)`, which files `visibility:<owner>#<name>`
+  # unconditionally (`Scope#discovered_method_visibility`), so the read in `module_function_row?` is always preceded by
+  # an identical one. The `Es#*` any-row read is covered by other readers. The `drop_edge(:visibility)` example below
+  # stands for G4.
+  describe "with the self-extended module_function fixture" do
+    before do
+      File.write("lib/es.rb", "module Es\n  extend self\n  private def two(a, b) = a\nend\n")
+      File.write("lib/use.rb", "def b = Es.two(1)\n")
+      File.write("lib/vis.rb", "module Es\n  def helper = 1\n  module_function :two\n  private :two\nend\n")
+    end
+
+    it "reports OK when every edge is recorded" do
+      status, out, err = verify("--verify-incremental-edits", "3")
+
+      expect(err).to eq("")
+      expect(out).to include("--verify-incremental OK")
+      expect(status).to eq(0)
+    end
+
+    it "fails on the statement-dropping edit, which keeps every definition, when no visibility edge is recorded" do
+      drop_edge(:visibility)
+
+      status, _out, err = verify("--verify-incremental-edits", "3")
+
+      expect(err).to match(%r{FAILED — the recheck after dropping the statement at line 3 of \S*lib/vis\.rb differs})
+      expect(status).to eq(1)
     end
   end
 end

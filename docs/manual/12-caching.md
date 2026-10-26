@@ -190,9 +190,10 @@ unchanged tree, so it cannot see an edit that fails to re-check a
 file it affects. `--verify-incremental-edits=N` also edits `N`
 files one at a time, in memory and not on disk, and compares each
 warm recheck with a full analysis of the edited tree. Each file is
-edited twice: once emptied, and once reduced to its `class` /
-`module` declarations with every body dropped. It replays only
-those two removals, never an addition or any other edit.
+edited up to four times: once emptied, once reduced to its
+`class` / `module` declarations with every body dropped, and up
+to twice with one statement of a `class` / `module` body removed
+and the rest kept. It replays only removals, never an addition.
 
 Rigor is also precise about *what* an edit changed. Re-checking a
 file that many others depend on — a base class, a widely-used

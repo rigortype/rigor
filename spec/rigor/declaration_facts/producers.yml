@@ -54,10 +54,13 @@ lib/rigor/analysis/dependency_source_inference/walker.rb:
     Rigor::Analysis::DependencySourceInference::Walker#walk_node: grandfathered
     Rigor::Analysis::DependencySourceInference::Walker#walk_refine_declarations: a dispatcher over a refine body; it hands each nested class or module back to walk_node under the prefix it was given and derives no declaration context itself
 lib/rigor/analysis/edit_replay.rb:
-  computes: the class/module skeleton text the --verify-incremental-edits replay substitutes for a file (#1967)
+  computes: the edited file text (class/module skeleton, one statement dropped) the --verify-incremental-edits replay substitutes for a file (issues 1967 and 2277)
   producers:
+    Rigor::Analysis::EditReplay: 'issue #2277, names the visibility-changing calls (private, module_function, ...) the statement-drop edit tries first; it is a list of spellings to pick source text by and derives no declaration context'
+    Rigor::Analysis::EditReplay#drop_candidates: 'issue #2277, lists the statements of each class and module body as written so the verify gate can replay the file with one of them removed; it reads no declaration fact, feeds no analysis, and derives no declaration context'
     Rigor::Analysis::EditReplay#declarations: 'issue #1967, copies the source spelling of each nested class and module header into the skeleton edit the verify gate replays through an editor buffer; it reads no declaration fact, feeds no analysis, and derives no declaration context'
     Rigor::Analysis::EditReplay#header_of: 'issue #1967, renders one class or module header (constant path and superclass, as written) for that skeleton edit; it derives no declaration context'
+    Rigor::Analysis::EditReplay#visibility_call?: 'issue #2277, classifies a body statement as a visibility call by its spelling so the statement-drop edit is replayed on it first; it derives no declaration context'
 lib/rigor/analysis/incremental.rb:
   computes: the dependency keys an --incremental recheck fires from the per-file tables the indexer already wrote
   producers:

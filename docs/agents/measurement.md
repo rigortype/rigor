@@ -255,10 +255,10 @@ output looks right, but it acted on the wrong input or measured the wrong thing.
   of the tree, not an edit's closure (#1526). For the same reason a plain `--verify-incremental` OK proves
   nothing about invalidation edges (#1967): it replays no edit. Only a warm-against-cold comparison after an
   edit does — a session spec that edits between baseline and recheck, or `--verify-incremental-edits=N`, which
-  replays exactly two edits per sampled file (emptied, and reduced to its class/module skeleton) and so covers
-  only edges a removal fires; an edge that only an addition or a body-changing edit exercises is not tested, such
-  as #2161's `module_function :two` to `private :two` swap behind a `visibility:` read (#2277).
-  On `lib` (607 files) each sampled file costs about 95–105 s. The cold tools (`bench-perf`, the A/Bs) all pass `--no-cache` and
+  replays up to four edits per sampled file (emptied, reduced to its class/module skeleton, and up to two
+  with one class/module body statement dropped, visibility calls first, #2277) and so covers only removals;
+  an edge that only an addition exercises is not tested.
+  On `lib` (607 files) each sampled file cost about 95–105 s with two edits. Measured with four edits (#2277) on the first sampled file: 113 s for `--verify-incremental-edits=0`, 267 s for `=1`, so 153 s for the four replays (about 38 s each). The cold tools (`bench-perf`, the A/Bs) all pass `--no-cache` and
   say nothing about a warm run.
 - **In a CPU profile, prefer vernier to stackprof.** stackprof's `:cpu` mode charges samples taken inside a long C
   call (Prism's parse) to the next interrupt check. During #1507 that made `IO.read` read as ~460 ms and

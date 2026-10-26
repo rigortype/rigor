@@ -187,11 +187,21 @@ RSpec.describe "the callee mutation floor resolves singleton self-calls and lite
       RUBY
     end
 
-    it "floors a block's captured argument through the same-named instance def behind a facade" do
-      expect(diagnostics(singleton_run("[1].each { call(acc) }", <<~RUBY))).to eq([])
-        def self.call(acc) = new.call(acc)
-        def call(acc) = (acc[0] = "x")
+    # Ruby answers `[1, 2]`; reading `a` at its entry contents at every position folded `[1, 1]`.
+    it "counts a block's call into the same-named instance def behind a facade as a mutation of its capture" do
+      source = <<~RUBY
+        class Mut
+          def self.run
+            a = [1]
+            r = [1, 2].map { |e| v = a.size; add(a, e); v }
+            dump_type(r)
+          end
+
+          def self.add(a, e) = new.add(a, e)
+          def add(a, e) = (a << e)
+        end
       RUBY
+      expect(dumped(source)).to eq(["[non-negative-int, non-negative-int]"])
     end
 
     it "floors through the same-named instance def behind a singleton instance" do

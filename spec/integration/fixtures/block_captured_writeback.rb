@@ -229,6 +229,12 @@ def ewo_escapes
     EwoHelper.fill(h, x)
   end
   assert_type("Hash[Dynamic[top], Dynamic[top]]", received)
+  # Rebinding the memo parameter sends later stores to another object; Ruby returns `{}`.
+  rebound = [1].each_with_object({}) do |x, h|
+    h = {}
+    h[x] = 1
+  end
+  assert_type("Hash[Dynamic[top], Dynamic[top]]", rebound)
   broken = [1, 2].each_with_object([]) do |x, a|
     break :stop if x == 2
 

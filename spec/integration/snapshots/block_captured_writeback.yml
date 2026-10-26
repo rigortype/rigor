@@ -60,6 +60,7 @@ assertions:
   '32': Hash[Dynamic[top], Dynamic[top]]
   '33': Hash[Dynamic[top], Dynamic[top]]
   '34': Hash[Dynamic[top], Dynamic[top]]
-  '35': ":stop | Array[1 | 2]"
-  '36': "{}"
-  '37': "[1, 2]"
+  '35': Hash[Dynamic[top], Dynamic[top]]
+  '36': ":stop | Array[1 | 2]"
+  '37': "{}"
+  '38': "[1, 2]"

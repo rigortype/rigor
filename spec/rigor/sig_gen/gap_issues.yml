@@ -18,8 +18,9 @@
 - 2302  # sig-gen types an empty array literal grown by `concat` / `<<` as `Array[untyped]`
 - 2309  # sig-gen keeps a `Set[untyped]` fallback arm beside `Set[E]` (`lookup || Set.new.freeze`)
 - 2312  # sig-gen skips a method whose non-decline arm calls a private helper with untyped parameters
-- 2321  # sig-gen leaves an ivar assigned from an expression derived from an `initialize` parameter (`dup.freeze`, `to_sym`, `map`) untyped
 - 2322  # `filter_map` answers `Array[untyped]` with a typed receiver and block
 - 2323  # sig-gen cannot type `Inference::MatchRebinding::Frame`, so `Scope`'s `match_frame` and its closure predicates are hand-written
+- 2325  # sig-gen cannot type a reader whose constructor or helper parameter is declared untyped or undeclared
 - 2326  # an ivar `Hash.new` memo store slot (`@state[:k] ||= build`) reads as `Dynamic[top]`, so the reader over it is skipped
 - 2403  # sig-gen drops a `Hash#[]` lookup miss's nil when the lookup is reached through a project call
+- 2418  # sig-gen: Plugin::Manifest readers written by private assign_* helpers and typed only by their validators stay hand-written

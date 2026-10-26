@@ -18,7 +18,7 @@ class Rigor::Plugin::Manifest
   def config_schema: () -> untyped
   def config_defaults: () -> Hash[String, untyped]
   def target_gems: () -> Array[String]
-  # sig-gen gap: #2321 — written by a private `assign_*` helper whose parameters are undeclared (`initialize` hands
+  # sig-gen gap: #2418 — written by a private `assign_*` helper whose parameters are undeclared (`initialize` hands
   # its fields to such helpers); each write is a derived expression (`dup.freeze`, `map`), so the helper's parameter
   # types alone would not generate it.
   def template_globs: () -> Array[String]
@@ -35,31 +35,31 @@ class Rigor::Plugin::Manifest
   def hkt_registrations: () -> untyped
   def hkt_definitions: () -> untyped
   def signature_paths: () -> Array[String]
-  # sig-gen gap: #2321 — same shape as `template_globs`: `validate_protocol_contracts!` requires every element
+  # sig-gen gap: #2418 — same shape as `template_globs`: `validate_protocol_contracts!` requires every element
   # `is_a?(ProtocolContract)`.
   def protocol_contracts: () -> Array[Rigor::Plugin::ProtocolContract]
   # ADR-32 WD6/WD12 — any object responding to `call`, and its result is a documented multi-shape
   # outcome (`String` / nil / `[:error, msg]` / `[:ok, src, msgs]`), not `String?` — `untyped` is the
   # honest claim until the outcome has a sig'd shape.
   def source_rbs_synthesizer: () -> untyped
-  # sig-gen gap: #2321 — same shape as `template_globs`: the validator (`validate_additional_initializers!`) requires
+  # sig-gen gap: #2418 — same shape as `template_globs`: the validator (`validate_additional_initializers!`) requires
   # every element `is_a?(AdditionalInitializer)`, so the element type is hand-written.
   def additional_initializers: () -> Array[Rigor::Plugin::AdditionalInitializer]
 
-  # sig-gen gap: #2321 — same shape as `template_globs`: `validate_effect_root!` bounds the spelling.
+  # sig-gen gap: #2418 — same shape as `template_globs`: `validate_effect_root!` bounds the spelling.
   def effect_root: () -> String?
-  # sig-gen gap: #2321 — same shape as `template_globs`: `validate_effect_labels!` requires non-empty `String`
+  # sig-gen gap: #2418 — same shape as `template_globs`: `validate_effect_labels!` requires non-empty `String`
   # elements.
   def effect_labels: () -> Array[String]
-  # sig-gen gap: #2321 — same shape as `template_globs`: `validate_effect_attributions!` requires every element
+  # sig-gen gap: #2418 — same shape as `template_globs`: `validate_effect_attributions!` requires every element
   # `is_a?(EffectAttribution)`.
   def effect_attributions: () -> Array[Rigor::Plugin::EffectAttribution]
-  # sig-gen gap: #2321 — same shape as `template_globs`: `validate_effect_edges!` requires `is_a?(EffectEdge)`.
+  # sig-gen gap: #2418 — same shape as `template_globs`: `validate_effect_edges!` requires `is_a?(EffectEdge)`.
   def effect_edges: () -> Array[Rigor::Plugin::EffectEdge]
-  # sig-gen gap: #2321 — same shape as `template_globs`: `validate_effect_entry_points!` requires
+  # sig-gen gap: #2418 — same shape as `template_globs`: `validate_effect_entry_points!` requires
   # `is_a?(EffectEntryPoints)`.
   def effect_entry_points: () -> Array[Rigor::Plugin::EffectEntryPoints]
-  # sig-gen gap: #2321 — same shape as `template_globs`: `validate_effect_ancestry!` requires `is_a?(EffectAncestry)`.
+  # sig-gen gap: #2418 — same shape as `template_globs`: `validate_effect_ancestry!` requires `is_a?(EffectAncestry)`.
   def effect_ancestry: () -> Array[Rigor::Plugin::EffectAncestry]
 
   # The identity opening a root when this plugin's labels join the run's vocabulary: the

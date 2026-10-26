@@ -141,6 +141,7 @@ RSpec.describe "the callee mutation floor resolves singleton self-calls and lite
   end
 
   context "with an instance-side caller" do
+    # Guard: the base engine already resolved an instance-side self-call on the instance side.
     it "keeps resolving to the instance def when a same-named singleton def mutates" do
       expect(diagnostics(instance_run("stripes(acc)", <<~RUBY))).to eq(undefined_upcase)
         def stripes(acc) = acc.size
@@ -148,6 +149,7 @@ RSpec.describe "the callee mutation floor resolves singleton self-calls and lite
       RUBY
     end
 
+    # Guard: module_function already worked on the base engine.
     it "floors an argument a module_function callee mutates" do
       source = <<~RUBY
         module Mut
@@ -204,6 +206,7 @@ RSpec.describe "the callee mutation floor resolves singleton self-calls and lite
       RUBY
     end
 
+    # Guard: a non-literal target is unchanged from the base engine (Ruby answers "X"; the report stays).
     it "leaves a non-literal `send` target as it was" do
       expect(diagnostics(instance_run("send(name, acc)", <<~RUBY))).to eq(undefined_upcase)
         def name = :poke

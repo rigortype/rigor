@@ -558,8 +558,9 @@ module Rigor
         return NO_ARGUMENT_READS if mutated.empty?
 
         argument_nodes = call_node.arguments.arguments
+        offset = self_call_argument_offset(call_node)
         mutated.values.uniq.filter_map do |slot|
-          argument = slot.is_a?(Symbol) ? keyword_argument(argument_nodes, slot) : argument_nodes[slot]
+          argument = slot.is_a?(Symbol) ? keyword_argument(argument_nodes, slot) : argument_nodes[slot + offset]
           argument = argument.value if argument.is_a?(Prism::ImplicitNode)
           argument if argument.is_a?(Prism::LocalVariableReadNode)
         end
@@ -4652,7 +4653,8 @@ module Rigor
       # resolve through. Those two key it: the index by identity, as it is immutable (one slot, as a file's analysis
       # reads one index; a scope indexed for another file replaces it), the class by name. A run builds hundreds of
       # thousands of evaluators, and a per-evaluator memo alone recomputed each closure and each def's edges about
-      # thirty times over (#2295's cost on the release gate).
+      # thirty times over (#2295's cost on the release gate). Issue #2297 — the side self-calls resolve on
+      # ({#resolve_self_callee_def}) keys it too: a singleton-side table apart from the instance-side one.
       #
       # While a dependency recorder is active the memo is bypassed: a resolution records an ADR-46 read in the file
       # and in each capture window open at the time, and a hit would leave that read out of them.
@@ -4661,9 +4663,10 @@ module Rigor
 
         discovery = scope.discovery
         slot = Thread.current[RESOLVED_CENSUS_KEY]
-        slot = Thread.current[RESOLVED_CENSUS_KEY] = [discovery, {}] unless slot&.first.equal?(discovery)
-        by_class = (slot.last[kind] ||= {})
-        class_name = enclosing_class_name_for(scope.self_type)
+        slot = Thread.current[RESOLVED_CENSUS_KEY] = [discovery, {}, {}] unless slot&.first.equal?(discovery)
+        self_type = scope.self_type
+        by_class = (slot[self_type.is_a?(Type::Singleton) ? 2 : 1][kind] ||= {})
+        class_name = enclosing_class_name_for(self_type)
         by_def = (by_class[class_name] ||= {}.compare_by_identity)
         by_def.fetch(def_node) { by_def[def_node] = yield }
       end
@@ -4801,13 +4804,14 @@ module Rigor
 
         spread = false
         forwarded = []
+        offset = self_call_argument_offset(call_node)
         args.arguments.each_with_index do |argument, index|
           if argument.is_a?(Prism::KeywordHashNode)
             forwarded.concat(forwarded_keywords(argument, slots, depth))
           elsif argument.is_a?(Prism::SplatNode) || argument.is_a?(Prism::ForwardingArgumentsNode)
             spread = true
           elsif (name = parameter_read_name(argument, slots, depth))
-            forwarded << [name, spread ? ANY_SLOT : index]
+            forwarded << [name, spread ? ANY_SLOT : index - offset]
           end
         end
         forwarded
@@ -4848,12 +4852,42 @@ module Rigor
       # The user def a self-dispatch `node` resolves to in the enclosing class, or nil. Reuses the discovery index
       # `Scope#user_def_for` reads; no ancestor walk (the boundary-escape idiom is same-class), keeping this off the hot
       # path for the overwhelming majority of self-calls that resolve to nothing escaping.
+      #
+      # Issue #2297 — in a singleton-side body (`def self.x`, a `def` in `class << self`), whose `self` is the class
+      # object, a self-call resolves to the singleton def of that name, never to the same-named instance def. The
+      # singleton table already holds the instance defs `extend self` and `module_function` publish there. A
+      # `send(:name, ...)` / `public_send(:name, ...)` with a symbol literal resolves as the self-call `name(...)`
+      # ({#self_call_name}).
       def resolve_self_callee_def(node)
-        class_name = enclosing_class_name_for(scope.self_type)
-        return scope.top_level_def_for(node.name) if class_name.nil?
+        name = self_call_name(node)
+        self_type = scope.self_type
+        class_name = enclosing_class_name_for(self_type)
+        return scope.top_level_def_for(name) if class_name.nil?
+        return scope.singleton_def_for(class_name, name) if self_type.is_a?(Type::Singleton)
 
-        scope.user_def_for(class_name, node.name)
+        scope.user_def_for(class_name, name)
       end
+
+      # Issue #2297 — the method a self-dispatch `node` calls: the target of `send(:name, ...)` or
+      # `public_send(:name, ...)` when its first argument is a symbol literal, else the call's own name. A non-literal
+      # target keeps the call's own name (`send`), which resolves to no user def unless the class defines one.
+      def self_call_name(node)
+        return node.name unless self_call_argument_offset(node) == 1
+
+        node.arguments.arguments.first.unescaped.to_sym
+      end
+
+      # Issue #2297 — how many leading arguments of `node` are not the callee's: 1 for a `send` / `public_send` whose
+      # first argument is a symbol literal (the target name), else 0.
+      def self_call_argument_offset(node)
+        return 0 unless SEND_HAND_OFFS.include?(node.name)
+
+        args = node.arguments
+        args.is_a?(Prism::ArgumentsNode) && args.arguments.first.is_a?(Prism::SymbolNode) ? 1 : 0
+      end
+
+      SEND_HAND_OFFS = %i[send public_send].freeze
+      private_constant :SEND_HAND_OFFS
 
       def self_dispatch_call?(node)
         return false unless node.is_a?(Prism::CallNode)

@@ -187,6 +187,13 @@ RSpec.describe "the callee mutation floor resolves singleton self-calls and lite
       RUBY
     end
 
+    it "floors a block's captured argument through the same-named instance def behind a facade" do
+      expect(diagnostics(singleton_run("[1].each { call(acc) }", <<~RUBY))).to eq([])
+        def self.call(acc) = new.call(acc)
+        def call(acc) = (acc[0] = "x")
+      RUBY
+    end
+
     it "floors through the same-named instance def behind a singleton instance" do
       expect(diagnostics(singleton_run("helper(acc)", <<~RUBY))).to eq([])
         def self.instance = @instance ||= new

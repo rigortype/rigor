@@ -178,6 +178,12 @@ assert_type("Hash[1, Dynamic[top]]", ewo_or_write)
 # Reading the memo through a method whose value is never the memo keeps the join.
 ewo_counted = [1, 2].each_with_object({}) { |x, h| h[x] = h.fetch(x, 0) + 1 }
 assert_type("Hash[1 | 2, Dynamic[top]]", ewo_counted)
+# A store in a nested `each` keeps the join, since `each` drops its block's
+# value; under `map` the value `acc << …` answers is the memo, handed on.
+ewo_nested_each = [1].each_with_object([]) { |x, acc| [2].each { acc << [x, :k] } }
+assert_type("Array[[1, :k]]", ewo_nested_each)
+ewo_nested_map = [1].each_with_object([]) { |x, acc| [2].map { acc << [x, :k] } }
+assert_type("Array[Dynamic[top]]", ewo_nested_map)
 
 # A memo handed to a self-call that stores into it floors as a captured local
 # does: the block's own stores are not every key it holds. Asserted inline, not

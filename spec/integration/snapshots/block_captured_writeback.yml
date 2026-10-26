@@ -9,6 +9,8 @@ locals:
   ewo_counted: Hash[1 | 2, Dynamic[top]]
   ewo_hash: Hash[1 | 2 | 3, 2 | 4 | 6]
   ewo_merged: Hash[Dynamic[top], Dynamic[top]]
+  ewo_nested_each: Array[[1, :k]]
+  ewo_nested_map: Array[Dynamic[top]]
   ewo_or_write: Hash[1, Dynamic[top]]
   fact: Integer
   flag: 1 | 99
@@ -54,13 +56,15 @@ assertions:
   '26': Hash[Dynamic[top], Dynamic[top]]
   '27': Hash[1, Dynamic[top]]
   '28': Hash[1 | 2, Dynamic[top]]
-  '29': Hash[Dynamic[top], Dynamic[top]]
-  '30': Hash[1, 1]
+  '29': Array[[1, :k]]
+  '30': Array[Dynamic[top]]
   '31': Hash[Dynamic[top], Dynamic[top]]
-  '32': Hash[Dynamic[top], Dynamic[top]]
+  '32': Hash[1, 1]
   '33': Hash[Dynamic[top], Dynamic[top]]
   '34': Hash[Dynamic[top], Dynamic[top]]
   '35': Hash[Dynamic[top], Dynamic[top]]
-  '36': ":stop | Array[1 | 2]"
-  '37': "{}"
-  '38': "[1, 2]"
+  '36': Hash[Dynamic[top], Dynamic[top]]
+  '37': Hash[Dynamic[top], Dynamic[top]]
+  '38': ":stop | Array[1 | 2]"
+  '39': "{}"
+  '40': "[1, 2]"

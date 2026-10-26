@@ -6184,9 +6184,18 @@ module Rigor
       ].freeze
       private_constant :MEMO_VALUE_READERS
 
+      # Iterators whose block's value the call never reads.
+      MEMO_BLOCK_VALUE_DROPPING = Set[
+        :each, :each_with_index, :each_pair, :each_key, :each_value, :each_index, :reverse_each, :each_slice,
+        :each_cons, :each_entry, :each_char, :each_line, :each_byte, :times, :upto, :downto, :step, :loop
+      ].freeze
+      private_constant :MEMO_BLOCK_VALUE_DROPPING
+
       # Whether `node`'s value is dropped: a statement that is not its sequence's last, or the last one of a sequence
       # whose own value is dropped, up through `if` / `unless` arms, `begin` / `rescue` bodies and parentheses, to the
-      # `each_with_object` block body, whose value the call never answers.
+      # `each_with_object` block body, whose value the call never answers, or to the body of a nested block whose
+      # call never reads its value ({MEMO_BLOCK_VALUE_DROPPING}: `xs.each { |y| acc << y }`). Any other block's value
+      # may be the memo handed on (`map { acc << y }`).
       def memo_value_discarded?(node, ancestors)
         return true if ancestors.empty?
 
@@ -6194,7 +6203,12 @@ module Rigor
         up = ancestors[0...-1]
         case parent
         when Prism::StatementsNode
-          !parent.body.last.equal?(node) || memo_value_discarded?(parent, up)
+          return true unless parent.body.last.equal?(node)
+
+          block = up.last
+          return memo_value_discarded?(parent, up) unless block.is_a?(Prism::BlockNode)
+
+          up[-2].is_a?(Prism::CallNode) && MEMO_BLOCK_VALUE_DROPPING.include?(up[-2].name)
         when Prism::IfNode, Prism::UnlessNode
           !parent.predicate.equal?(node) && memo_value_discarded?(parent, up)
         when Prism::ElseNode, Prism::BeginNode, Prism::RescueNode, Prism::ParenthesesNode
@@ -6204,7 +6218,7 @@ module Rigor
         end
       end
 
-      # Whether the read under `ancestors` is a positional or keyword argument of a self-call that resolves to a user def.
+      # Whether the read under `ancestors` is a positional or keyword argument of a self-call resolving to a user def.
       def memo_self_call_argument?(ancestors)
         nodes = ancestors.reverse
         nodes = nodes.drop(2) if nodes.first.is_a?(Prism::AssocNode) && nodes[1].is_a?(Prism::KeywordHashNode)

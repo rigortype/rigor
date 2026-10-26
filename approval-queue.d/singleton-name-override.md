@@ -38,9 +38,23 @@ wildcard slot, so every inherited singleton `def` behind it reads `Dynamic`, inc
 `Sw.foo.upcase` therefore loses a true positive when `Sw`'s superclass has `def self.foo = nil`. The census cannot
 say which names a computed definer reaches, so withholding all of them is the conservative reading.
 
+The maintainer ruled on the review's remaining Severe. An `inherited` hook can define any singleton method on the
+subclass it is called for (`def self.inherited(s) = s.define_singleton_method(:name) { "x" }`), so when the
+receiver only inherits the `def`, the call declines to `Dynamic` if any project entry on its singleton chain past
+its own entry has such a hook. That means a class's `def self.inherited`, or an `inherited` that an extended
+module defines. Accepted cost: in a hierarchy with a registry-style `inherited` hook, every inherited singleton
+`def` reads `Dynamic` on subclasses, even when the hook only records the subclass.
+
+Also accepted (a reviewer's minor): an extended module's `def self.extended` withholds the farther `def` even
+when the hook defines nothing on the extender.
+
 ## To undo
 
-Remove the `expression_typer.rb` reads entry and its `justified` entry from `admission_census.yml`. Then
+To drop only the inherited-hook decline, delete `inherited_hook_on_chain?` and its call in
+`dynamic_singleton_definer_ahead?`. The examples "reports nothing on a subclass whose ancestor's inherited hook may
+redefine the name" and "keeps the def's type where no ancestor's inherited hook reaches the receiver" depend on it.
+
+To undo the census row, remove the `expression_typer.rb` reads entry and its `justified` entry from `admission_census.yml`. Then
 either delete `dynamic_singleton_definer_ahead?` and its call in `resolve_singleton_def_with_owner` (the
 false positive returns), or route the same consult through an already-recorded reader. The examples in
 `spec/integration/singleton_override_of_module_method_spec.rb` under "types the call Dynamic when a nearer

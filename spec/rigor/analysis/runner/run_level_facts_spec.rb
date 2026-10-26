@@ -2,6 +2,7 @@
 
 require "spec_helper"
 require "tmpdir"
+require "timeout"
 
 # ADR-116 WD3 (#1195) — every declared run-level fact, across every path that can produce it. Each path used to
 # copy the slots by hand, and the copies drifted (#1201: the sequential fallback once took three of the five
@@ -140,24 +141,28 @@ RSpec.describe Rigor::Analysis::Runner::RunLevelFacts do
     original.nil? ? ENV.delete("RIGOR_POOL_BACKEND") : (ENV["RIGOR_POOL_BACKEND"] = original)
   end
 
+  def stub_pool_environment
+    allow(Rigor::Environment).to receive(:for_project).and_return(environment)
+    allow(Rigor::RbsExtended::ConformanceChecker).to receive(:scan)
+      .and_return(fact_values.fetch(:conformance_results))
+    allow(Rigor::Analysis::WorkerSession).to receive(:new).and_wrap_original do |original, **options|
+      session = original.call(**options)
+      environment.reporter = session.rbs_extended_reporter
+      allow(session).to receive(:analyze) do
+        record_streams(*%i[@rbs_extended_reporter @boundary_cross_reporter @source_rbs_synthesis_reporter]
+                         .map { |ivar| session.instance_variable_get(ivar) })
+        []
+      end
+      session
+    end
+  end
+
   it "reports every declared fact's rows identically on the sequential, fork, Ractor, fallback and " \
      "empty-closure paths" do # rubocop:disable RSpec/ExampleLength
     Dir.mktmpdir do |dir|
       Dir.chdir(dir) do
         files = %w[a.rb b.rb c.rb].each { |name| File.write(name, "x = 1\n") }
-        allow(Rigor::Environment).to receive(:for_project).and_return(environment)
-        allow(Rigor::RbsExtended::ConformanceChecker).to receive(:scan)
-          .and_return(fact_values.fetch(:conformance_results))
-        allow(Rigor::Analysis::WorkerSession).to receive(:new).and_wrap_original do |original, **options|
-          session = original.call(**options)
-          environment.reporter = session.rbs_extended_reporter
-          allow(session).to receive(:analyze) do
-            record_streams(*%i[@rbs_extended_reporter @boundary_cross_reporter @source_rbs_synthesis_reporter]
-                             .map { |ivar| session.instance_variable_get(ivar) })
-            []
-          end
-          session
-        end
+        stub_pool_environment
 
         runs = {
           sequential: with_backend(nil) { run_path(:sequential, files, files) },
@@ -190,6 +195,38 @@ RSpec.describe Rigor::Analysis::Runner::RunLevelFacts do
               .to eq([path, builder, runs[:sequential][:rows].fetch(builder)])
           end
         end
+      end
+    end
+  end
+
+  # #2405 — the example above reaches the Ractor degrade only when the workers die; whether they die BEFORE
+  # the coordinator dispatches is a race, and `Ractor#send` to a worker that already died raises
+  # `Ractor::ClosedError`. Every worker is held until it has died here, so the dead-before-send ordering
+  # happens on every run, for the first, middle and last send and for the closing `nil` of every worker.
+  it "degrades to the sequential rows when every Ractor worker died before dispatch" do
+    Dir.mktmpdir do |dir|
+      Dir.chdir(dir) do
+        files = %w[a.rb b.rb c.rb].each { |name| File.write(name, "x = 1\n") }
+        stub_pool_environment
+        dead_before_dispatch = []
+        allow(Ractor).to receive(:new).and_wrap_original do |original, *args, &block|
+          worker = original.call(*args, &block)
+          begin
+            Timeout.timeout(10) { worker.join }
+          rescue Ractor::Error
+            nil
+          end
+          dead_before_dispatch << worker
+          worker
+        end
+
+        sequential = with_backend(nil) { run_path(:sequential, files, files) }
+        ractor = with_backend("ractor") { run_path(:ractor, files, files) }
+
+        expect(dead_before_dispatch.size).to eq(2)
+        dead_before_dispatch.each { |worker| expect { worker.send(:probe) }.to raise_error(Ractor::ClosedError) }
+        expect(ractor[:rows]).to eq(sequential[:rows])
+        facts.each { |fact| expect(ractor[:snapshots][fact.name]).to eq(fact_values.fetch(fact.name)) }
       end
     end
   end

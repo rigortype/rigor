@@ -2636,7 +2636,7 @@ end
 
 # An implicit-self call keeps the frame-wide entry: its receiver is `self`, which a block entry does not type.
 class MatchBlockString2443 < String
-  def first_group = gsub(/(x)?/) { assert_type("String?", $1) }
+  def first_group = gsub(/(x)/) { assert_type("String?", $1) }
 end
 
 # The entry replaces a stale narrowing: on the `=~`'s falsey edge `$1` was nil, but the `gsub` block reads its own

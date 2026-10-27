@@ -111,6 +111,13 @@ RSpec.describe Rigor::Inference::RewriteMutation do
         .to eq(union(nominal("Array", nominal("Integer")), constant(nil)))
     end
 
+    it "reads the counterpart's element through a non-empty witness, and none off a non-collection answer" do
+      int = nominal("Integer")
+      expect(described_class.counterpart_element(Rigor::Type::Combinator.non_empty_array(int))).to eq(int)
+      expect(described_class.counterpart_element(nominal("Set", int))).to eq(int)
+      expect(described_class.counterpart_element(nominal("Enumerator", int, nominal("Array", int)))).to be_nil
+    end
+
     it "takes no typed answer for a Hash rewriter or a literal Tuple" do
       hash = nominal("Hash", nominal("Symbol"), nominal("Integer"))
       expect(described_class.typed(hash, :transform_values!, nominal("String"))).to be_nil

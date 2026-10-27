@@ -515,8 +515,8 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
       end
 
       it "passes a String-keyed result to a Hash[Symbol, untyped] parameter" do
-        sig = "class Probe\n  def take: (Hash[Symbol, untyped]) -> void\n" \
-              "  def f: (Hash[String, untyped]) -> void\nend\n"
+        sig = "class Probe\n  def take: (Hash[Symbol, untyped]) -> void\n  " \
+              "def f: (Hash[String, untyped]) -> void\nend\n"
         files = { "sig/probe.rbs" => sig }
         source = "class Probe\n  def take(h); end\n  def f(h) = take(h.symbolize_keys)\nend\n"
         result = run_plugin(source: source, files: files, signature_paths: ["sig"])

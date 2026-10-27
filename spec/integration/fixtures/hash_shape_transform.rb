@@ -18,7 +18,7 @@ assert_type('{ name: "Alice", age: 30 }', sym_keyed)
 # to its string form.
 sym_hash = { name: "Alice", age: 30 }
 str_hash = sym_hash.transform_keys(&:to_s)
-assert_type('{ "name": "Alice", "age": 30 }', str_hash)
+assert_type('{ "name" => "Alice", "age" => 30 }', str_hash)
 
 # `&:to_sym` on a symbol-keyed HashShape is a no-op on the keys.
 sym_noop = sym_hash.transform_keys(&:to_sym)
@@ -26,7 +26,7 @@ assert_type('{ name: "Alice", age: 30 }', sym_noop)
 
 # Full-block form: explicit block parameter instead of &:symbol.
 block_keys = sym_hash.transform_keys { |k| k.to_s }
-assert_type('{ "name": "Alice", "age": 30 }', block_keys)
+assert_type('{ "name" => "Alice", "age" => 30 }', block_keys)
 
 # --- transform_values ---
 

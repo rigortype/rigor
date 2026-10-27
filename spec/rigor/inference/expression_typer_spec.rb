@@ -1514,7 +1514,7 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       end
 
       it "still folds a block-only transform_keys" do
-        expect(dumped_types(<<~RUBY)).to eq(['{ "a": 1, "b": 2 }'])
+        expect(dumped_types(<<~RUBY)).to eq(['{ "a" => 1, "b" => 2 }'])
           dump_type({ a: 1, b: 2 }.transform_keys { |k| k.to_s })
         RUBY
       end

@@ -2983,7 +2983,7 @@ RSpec.describe "block-return scope threading", type: :runner do
       end
 
       it "keeps a HashShape key fold whose tail ignores its prefix exact" do
-        expect(dumped_type(<<~RUBY)).to eq('{ "a": 1, "b": 2 }')
+        expect(dumped_type(<<~RUBY)).to eq('{ "a" => 1, "b" => 2 }')
           m = Mutex.new
           v = 1
           dump_type(m.synchronize do
@@ -3972,8 +3972,8 @@ RSpec.describe "block-return scope threading", type: :runner do
     end
 
     it "declines a key fold whose new keys the pinned counter spelled" do
-      # `{ "a1" => 1, "b2" => 2 }` at runtime. The pin read `i` as `1` at both pairs and folded `{ "a1": 1,
-      # "b1": 2 }` — two distinct constants, so the collision decline did not catch it. Widened, the new key is
+      # `{ "a1" => 1, "b2" => 2 }` at runtime. The pin read `i` as `1` at both pairs and folded `{ "a1" => 1,
+      # "b1" => 2 }` — two distinct constants, so the collision decline did not catch it. Widened, the new key is
       # no single `Constant`, so the tier declines to the dispatcher, whose generic block-return pass lays the
       # same captured binding and reads the key as a `String` rather than the entry scope's `"a1"`.
       expect(dumped_type(<<~RUBY)).to eq("Hash[String, 1 | 2]")
@@ -3986,7 +3986,7 @@ RSpec.describe "block-return scope threading", type: :runner do
     end
 
     it "keeps a key fold that ignores the rebound counter" do
-      expect(dumped_type(<<~RUBY)).to eq('{ "a": 1, "b": 2 }')
+      expect(dumped_type(<<~RUBY)).to eq('{ "a" => 1, "b" => 2 }')
         seen = 0
         dump_type({ a: 1, b: 2 }.transform_keys do |k|
           seen += 1

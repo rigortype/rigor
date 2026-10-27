@@ -397,21 +397,29 @@ diff — not a policy scoped to `app/views/**/*`. See
   knows what `rigor-rails-routes` published, and `permit`
   validation only what `rigor-activerecord` published — enabling
   those producers widens what this plugin can check.
-- **`params[:key]` stays untyped.** Inside a controller, `params`
-  types as `ActionController::Parameters`, and so does the result
-  of every builder method that always returns one — `require`,
+- **`params[:key]` is a gradual carrier.** Inside a controller,
+  `params` types as `ActionController::Parameters`, and so does the
+  result of every builder method that always returns one — `require`,
   `permit`, `permit!`, `expect`, `slice`, `slice!`, `except`,
   `without`, `extract!`, `merge`, `merge!`, `reverse_merge`,
   `reverse_merge!`, `with_defaults`, `with_defaults!`, `compact`,
   `compact_blank`, `deep_dup` — so a chain built from them keeps a
-  concrete receiver throughout. A subscript read is deliberately
-  left untyped: `params[:missing]` is `nil` at runtime, and a type
-  that says otherwise would let the flow rules fold live
-  conditions (`if params[:q]`, `url.nil?`) to a constant and report
-  working code. Methods whose result depends on the call — `dig`,
-  `fetch`, `compact!`, and the block-less `select` / `reject` /
-  `transform_keys` / `transform_values` — are untyped for the same
-  reason.
+  concrete receiver throughout. A subscript read answers
+  `Dynamic[ActionController::Parameters | nil]` (#2430): the static
+  facet is the nilable `Parameters`, so `params[:user][:name]` and
+  `params[:user].permit(:name)` keep dispatching on that facet, and
+  the `Dynamic` wrapper lets the value cross a declared boundary such
+  as a `String` parameter, as a scalar param does at runtime. The
+  facet is nilable rather than the non-nil nominal on purpose:
+  `params[:missing]` is `nil` at runtime, and a non-nil type would
+  let the flow rules fold live conditions (`if params[:q]`,
+  `url.nil?`) to a constant and report working code. Methods on the
+  carrier outside the chain (`params[:q].to_s`) answer `Dynamic[top]`,
+  because the engine dispatches a `Dynamic` receiver without projecting
+  its facet: a loss of precision, not a false positive. Methods whose
+  result depends on the call — `dig`, `fetch`, `compact!`, and the
+  block-less `select` / `reject` / `transform_keys` /
+  `transform_values` — are untyped for the same reason.
 - **`flash[:key]` and `session[:key]` stay untyped too**, for that
   same reason and measured the same way. Both are leaf reads that
   return whatever was stored — or `nil` for a key that is not set.

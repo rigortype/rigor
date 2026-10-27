@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 # Issue #2361 — a PRECISE `Array[E]` / `Set[E]` (no `Dynamic` arm in `E`, an RBS return such as `ARGV.dup` or
-# `Array#to_set`, or a literal element) re-grows under a store of another type, on a literal seed's terms: a member
-# of a class the seed admits joins as itself, any other takes the `Dynamic[top]` floor, and the floor joins every
-# re-grow, so a later remover or rewriter cannot leave a closed carrier a declared type rejects.
+# `Array#to_set`, or a literal element) re-grows under a store of another type: a stored member `E` accepts joins as
+# itself, any other takes the `Dynamic[top]` floor, and the floor joins every re-grow, so a later remover or rewriter
+# cannot leave a carrier holding a member a declared type rejects.
 #
 # Ruby witnesses (`ruby -e 'require "set"; ...'` with no arguments):
 # `f = ARGV.to_set; f.clear; f << 1; p f.map { |v| v.fdiv(2) }` prints `[0.5]`;
@@ -79,10 +79,10 @@ RSpec.describe "Precise carrier re-grow (issue #2361)", type: :runner do
       end
     end
 
-    it "joins a store outside a literal element and keeps one of the same literal" do
+    it "floors a store outside a literal element and keeps one of the same literal" do
       seed = "ARGV.map(&:to_i).map { \"x\" }.to_set"
       source = "s = #{seed}\ns << \"x\"\ndump_type(s)\nt = #{seed}\nt << \"y\"\ndump_type(t)"
-      expect(dumped(source)).to eq(['Set["x"]', 'Set["x" | Dynamic[top] | String]'])
+      expect(dumped(source)).to eq(['Set["x"]', 'Set["x" | Dynamic[top]]'])
     end
 
     # The #561 gate, as on an Array: a class the literal element does not admit joins as the gradual floor.
@@ -102,40 +102,52 @@ RSpec.describe "Precise carrier re-grow (issue #2361)", type: :runner do
     end
   end
 
-  # Each store is undone at runtime before the declared boundary, which the carrier cannot narrow back; the floor is
-  # what keeps the boundary quiet. Ruby runs each and returns normally.
+  # Each store is undone at runtime before the declared boundary, which the carrier cannot narrow back, so a
+  # precise element must not gain a member the boundary rejects. Ruby runs each and returns normally. The calls take
+  # an explicit receiver: an implicit-self call's arguments are not checked against the signature.
   describe "a store a remover or rewriter undoes before a declared boundary" do
     let(:sig) do
       { "t4.rbs" => <<~RBS }
         class T4
           def take: (Array[String]) -> void
           def take_set: (Set[String]) -> void
-          def ret: (Array[String]) -> Array[String]
           def take_x: (Array["x"]) -> void
           def take_x_set: (Set["x"]) -> void
+          def take_nested: (Array[Array[String]]) -> void
+          def ret: (Array[String]) -> Array[String]
+          def ret_x: (Array[Integer]) -> Array["x"]
         end
       RBS
     end
 
+    let(:stubs) do
+      %w[take take_set take_x take_x_set take_nested].map { |name| "  def #{name}(_a) = nil\n" }.join
+    end
+
     def boundary_rules(body)
-      stubs = %w[take take_set take_x take_x_set].map { |name| "  def #{name}(_a) = nil\n" }.join
-      errors("class T4\n  def run\n#{body}\n  end\n#{stubs}end\n", sig: sig)
+      errors("class T4\n#{stubs}end\nt = T4.new\n#{body}\n", sig: sig)
+    end
+
+    # Control: the boundary rule does fire on these call shapes.
+    it "reports an argument the declaration rejects" do
+      expect(boundary_rules("t.take(ARGV.map(&:to_i))")).to eq(["call.argument-type-mismatch"])
     end
 
     {
-      "pop" => "a = ARGV.dup; a << 1; a.pop; take(a)",
-      "shift" => "a = ARGV.dup; a.unshift(1); a.shift; take(a)",
-      "delete" => "a = ARGV.dup; a << :m; a.delete(:m); take(a)",
-      "delete_if" => "a = ARGV.dup; a << 1; a.delete_if { |v| v.is_a?(Integer) }; take(a)",
-      "select!" => "a = ARGV.dup; a << 1; a.select! { |v| v.is_a?(String) }; take(a)",
-      "compact!" => "a = ARGV.dup; a << nil if ARGV.empty?; a.compact!; take(a)",
-      "clear" => "a = ARGV.dup; a << 1; a.clear; a << \"s\"; take(a)",
-      "map!" => "a = ARGV.dup; a << 1; a.map!(&:to_s); take(a)",
-      "replace" => "a = ARGV.dup; a << 1; a.replace([\"s\"]); take(a)",
-      "Set#subtract" => "s = ARGV.to_set; s.merge([1]); s.subtract([1]); take_set(s)",
-      # A literal element admits a store of its own class as itself, so only the floor keeps these quiet.
-      "pop on a literal element" => "s = ARGV.map { \"x\" }; s << \"y\"; s.pop; take_x(s)",
-      "Set#delete on a literal element" => "s = ARGV.map { \"x\" }.to_set; s << \"y\"; s.delete(\"y\"); take_x_set(s)"
+      "pop" => "a = ARGV.dup; a << 1; a.pop; t.take(a)",
+      "shift" => "a = ARGV.dup; a.unshift(1); a.shift; t.take(a)",
+      "delete" => "a = ARGV.dup; a << :m; a.delete(:m); t.take(a)",
+      "delete_if" => "a = ARGV.dup; a << 1; a.delete_if { |v| v.is_a?(Integer) }; t.take(a)",
+      "select!" => "a = ARGV.dup; a << 1; a.select! { |v| v.is_a?(String) }; t.take(a)",
+      "compact!" => "a = ARGV.dup; a << nil if ARGV.empty?; a.compact!; t.take(a)",
+      "clear" => "a = ARGV.dup; a << 1; a.clear; a << \"s\"; t.take(a)",
+      "map!" => "a = ARGV.dup; a << 1; a.map!(&:to_s); t.take(a)",
+      "replace" => "a = ARGV.dup; a << 1; a.replace([\"s\"]); t.take(a)",
+      "Set#subtract" => "s = ARGV.to_set; s.merge([1]); s.subtract([1]); t.take_set(s)",
+      "pop on a literal element" => "s = ARGV.map { \"x\" }; s << \"y\"; s.pop; t.take_x(s)",
+      "Set#delete on a literal element" =>
+        "s = ARGV.map { \"x\" }.to_set; s << \"y\"; s.delete(\"y\"); t.take_x_set(s)",
+      "pop on a nested element" => "n = ARGV.map { |v| [v] }; n << [1]; n.pop; t.take_nested(n)"
     }.each do |label, body|
       it "reports nothing after #{label}" do
         expect(boundary_rules(body)).to be_empty
@@ -144,6 +156,11 @@ RSpec.describe "Precise carrier re-grow (issue #2361)", type: :runner do
 
     it "reports nothing on a declared parameter returned after compact!" do
       source = "class T4\n  def ret(a)\n    a << nil\n    a.compact!\n    a\n  end\nend\n"
+      expect(errors(source, sig: sig)).to be_empty
+    end
+
+    it "reports nothing on a literal element returned after pop" do
+      source = "class T4\n  def ret_x(ints)\n    s = ints.map { \"x\" }\n    s << \"y\"\n    s.pop\n    s\n  end\nend\n"
       expect(errors(source, sig: sig)).to be_empty
     end
   end
@@ -194,9 +211,9 @@ RSpec.describe "Precise carrier re-grow (issue #2361)", type: :runner do
       end
     end
 
-    it "joins the stored literal's class" do
+    it "joins a store the literal element rejects as the floor" do
       source = "s = ARGV.map(&:to_i).map { \"x\" }\ns << \"y\"\ndump_type(s)"
-      expect(dumped(source)).to eq(['Array["x" | Dynamic[top] | String]'])
+      expect(dumped(source)).to eq(['Array["x" | Dynamic[top]]'])
     end
 
     # Control: a store of the literal already held changes nothing, so the correct always-truthy fold stays.

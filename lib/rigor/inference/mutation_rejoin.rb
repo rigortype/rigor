@@ -142,16 +142,15 @@ module Rigor
       # empties the array but leaves `E` standing, a superset of what it holds. A rewriter (`map!`, `flatten!`) and a
       # remover leave the carrier as they found it.
       #
-      # The join is {MutationWidening.join_added_elements}' for a literal seed: each added member is admitted
-      # against the seed's classes ({ContentJoin.admissible_evidence}), a member of another class takes the
-      # `Dynamic[top]` floor instead, and the floor joins every re-grow. `a << 1` therefore reads
-      # `Array[Dynamic[top] | String]` and `s = ints.map { "x" }; s << "y"` reads `Array["x" | Dynamic[top] | String]`.
-      # Both halves answer one false positive: nothing narrows a carrier back when a remover or rewriter takes the
-      # store out again (`a << 1; a.pop`, `a << nil; a.compact!`, `a.map!(&:to_s)`), so a joined `Integer` or `nil`
-      # made `take(a)` against a declared `Array[String]` report `call.argument-type-mismatch`, and a parameter
-      # returned as its declared `-> Array[String]` report `def.return-type-mismatch`, on correct Ruby. A union
-      # carrying the floor neither folds nor dispatches loudly, so the read stays silent. Once floored, the carrier is
-      # gradual and later stores re-join through {#widen_nominal}'s ordinary arm.
+      # Each added member the element accepts joins as itself; any other takes the `Dynamic[top]` floor
+      # ({#precise_admitted}), and the floor joins every re-grow as it does on the literal arms. `a << 1` therefore
+      # reads `Array[Dynamic[top] | String]` and `s = ints.map { "x" }; s << "y"` reads `Array["x" | Dynamic[top]]`.
+      # Nothing narrows a carrier back when a remover or rewriter takes the store out again (`a << 1; a.pop`,
+      # `a << nil; a.compact!`, `a.map!(&:to_s)`), so a joined `Integer` or `nil` made `t.take(a)` against a declared
+      # `Array[String]` report `call.argument-type-mismatch`, and a parameter returned as its declared
+      # `-> Array[String]` report `def.return-type-mismatch`, on correct Ruby. A union carrying the floor neither folds
+      # nor dispatches loudly, so the read stays silent. Once floored, the carrier is gradual and later stores re-join
+      # through {#widen_nominal}'s ordinary arm.
       #
       # A store the element already accepts changes nothing ({#already_held?}). An adder with no argument types at
       # all is left alone, as {MutationWidening.join_added_elements} leaves it: the block-capture seams pass none,
@@ -163,10 +162,27 @@ module Rigor
         return nil if already_held?(nominal.type_args.first, stored)
 
         added = MutationWidening.value_pin_widened(stored)
-        admitted = added.empty? ? [] : ContentJoin.admissible_evidence(nominal.type_args, added)
+        admitted = precise_admitted(nominal.type_args.first, added)
         pre_state = values == :widen ? value_pin_widened_args(nominal) : nominal
         rejoined = ContentJoin.join_array_content(pre_state, MutationWidening.gradual_floor(admitted))
         rejoined == nominal ? nil : rejoined
+      end
+
+      # The seed-admissibility gate for a precise element: an added member joins as itself only when `element`
+      # already accepts it, and takes the `Dynamic[top]` floor otherwise. A precise element therefore never gains a
+      # member it rejects, which is what a declared boundary checks: nothing narrows the carrier back when a remover
+      # or rewriter takes the store out again, and a joined foreign arm stays rejected beside the floor — `Integer`
+      # under a declared `Array[String]`, `String` under `-> Array["x"]`, `Array[Integer]` under
+      # `Array[Array[String]]` each reported on correct Ruby. A class set ({ContentJoin.admissible_evidence}) is too
+      # coarse for that: it admits `Array[Integer]` beside `[String]` and `"y"` beside `"x"`.
+      def precise_admitted(element, added)
+        added.flat_map do |type|
+          ContentJoin.union_members(type).map { |member| held_member?(element, member) ? member : Type::Combinator.untyped }
+        end
+      end
+
+      def held_member?(element, member)
+        !carries_dynamic?(member) && Acceptance.accepts(element, member).yes?
       end
 
       # True when the precise element `element` already covers every type `stored` puts in, so the store changes

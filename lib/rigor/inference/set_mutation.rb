@@ -26,11 +26,11 @@ module Rigor
     #   `Set[Dynamic[top] | String]`.
     #
     # A gradual seed admits every added member as itself: the seed-admissibility gate has nothing to contradict on
-    # it. A precise seed admits them against its classes, a member of another class taking the floor, and takes no
-    # {RewriteMutation} arm: `replace` joins its elements onto the seed, and `map!` leaves it as it was. Every join
-    # carries the `Dynamic[top]` floor, as the Array re-join's does. An adder whose arguments the block-capture seam
-    # did not type joins only that floor: the store happened, and a Set has no block content join to add it
-    # afterwards. An adder called with no arguments changes nothing.
+    # it. A precise seed admits only a member its element accepts ({MutationRejoin.precise_admitted}), any other
+    # taking the floor, and takes no {RewriteMutation} arm: `replace` joins its elements onto the seed, and `map!`
+    # leaves it as it was. Every join carries the `Dynamic[top]` floor, as the Array re-join's does. An adder whose
+    # arguments the block-capture seam did not type joins only that floor: the store happened, and a Set has no
+    # block content join to add it afterwards. An adder called with no arguments changes nothing.
     module SetMutation
       # Receiver-mutating Set methods. The non-bang siblings (`map` vs `map!`, `select` vs `select!`) and the
       # algebra (`|`, `+`, `-`, `&`, `^`) return a new Set and stay precise.
@@ -112,11 +112,11 @@ module Rigor
         Type::Combinator.nominal_of("Set", type_args: [element])
       end
 
-      # `added` as the seed-admissibility gate admits it against a precise seed's classes; a gradual seed admits all.
+      # `added` as {MutationRejoin.precise_admitted} admits it into a precise seed; a gradual seed admits all.
       def admitted(seed, added)
         return added if MutationRejoin.gradual_parameter?(seed)
 
-        ContentJoin.admissible_evidence([seed], added)
+        MutationRejoin.precise_admitted(seed, added)
       end
 
       # The element types one content-adder call puts in, from the call's argument types.

@@ -4,9 +4,10 @@ require "spec_helper"
 
 # Issue #2429 — when no overload matches a call's arguments, a call with a block answers by the block-declaring
 # overloads whose positional arity admits it: the one such arm, or the return every such arm agrees on. Otherwise
-# #2379's per-value selection may still answer, and failing that the RBS tier declines. The fallback took the first overload not requiring a block, so `URI.open(url, read_timeout: 3)
-# { |io| ... }` (the keyword hash lands on `?String mode`, which matches neither arm) answered the block-less arm's
-# `StringIO | Tempfile` rather than the block's value. Ruby: `URI.open("/etc/hosts", read_timeout: 3) { |io| 42 }`
+# #2379's per-value selection may still answer, and failing that the RBS tier declines. The fallback took the first
+# overload not requiring a block, so `URI.open(url, read_timeout: 3) { |io| ... }` (the keyword hash lands on
+# `?String mode`, which matches neither arm) answered the block-less arm's `StringIO | Tempfile` rather than the
+# block's value. Ruby: `URI.open("/etc/hosts", read_timeout: 3) { |io| 42 }`
 # is `42`; `[3, 1, 2].max_by(2.0) { |x| x }` is `[3, 2]`.
 RSpec.describe "Block-aware no-match overload fallback (#2429)", type: :runner do
   let(:sig) do
@@ -83,9 +84,13 @@ RSpec.describe "Block-aware no-match overload fallback (#2429)", type: :runner d
       r = S.h("a", strict: true) { |s| s }
       dump_type(r)
       r.no_such_method
+      dump_type(S.h(1.5) { |s| s })
     RUBY
-    expect(result.diagnostics.map(&:qualified_rule)).to eq(%w[dump.type call.undefined-method])
-    expect(result.diagnostics.first.message).to eq(%(dump_type: "a"))
+    # `1.5` against the RBS arms is the argument mismatch the RBS reports anyway.
+    expect(result.diagnostics.map(&:qualified_rule))
+      .to eq(%w[dump.type call.undefined-method dump.type call.argument-type-mismatch])
+    expect(result.diagnostics.select { |d| d.qualified_rule == "dump.type" }.map(&:message))
+      .to eq([%(dump_type: "a"), %(dump_type: "1.5")])
   end
 
   # #2379's per-value selection still answers before the decline: `"s"` takes the String arm and `1` the Integer arm.
@@ -188,5 +193,28 @@ RSpec.describe "Block-aware no-match overload fallback (#2429)", type: :runner d
         def control(url) = URI.open(url)
       end
     RUBY
+  end
+
+  # An argument value the block fallback selects no overload for leaves the per-value selection without an answer,
+  # and the call reads as undistributed (nil) rather than handing `nil` on as an overload. A dispatcher `rescue`
+  # would otherwise turn the resulting `NoMethodError` into the same decline, so no type shows it.
+  it "answers nil from the per-value selection when an argument value selects no overload" do
+    loader = Rigor::Environment::RbsLoader.new(virtual_rbs: [["(spec: #2429)", <<~RBS]])
+      class S
+        def self.h: (Integer) -> Symbol
+                  | (Integer, ?Integer) { (Integer) -> void } -> Integer
+                  | (String, ?String) { (String) -> void } -> String
+      end
+    RBS
+    definition = loader.singleton_definition("S").methods[:h]
+    args = [Rigor::Type::Combinator.union(Rigor::Type::Combinator.nominal_of("Float"),
+                                          Rigor::Type::Combinator.nominal_of("String"))]
+    lists = Rigor::Inference::MethodDispatcher::ArgumentDistribution.lists(args)
+    selector = { self_type: Rigor::Type::Combinator.singleton_of("S"),
+                 instance_type: Rigor::Type::Combinator.nominal_of("S"), type_vars: {}, block_required: true,
+                 environment: Rigor::Environment.new(rbs_loader: loader) }
+    picked = Rigor::Inference::MethodDispatcher::RbsDispatch
+             .send(:argument_distribution_matches, definition, nil, args, lists, selector)
+    expect(picked).to be_nil
   end
 end

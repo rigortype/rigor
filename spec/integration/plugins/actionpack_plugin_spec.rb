@@ -48,21 +48,45 @@ DEFAULT_AP_ROUTES_RB = <<~RUBY
   end
 RUBY
 
+# Issue #2430 — a project `sig/` declaring `Model.find(String)`, the declared boundary `params[:id]` crosses.
+MODEL_FIND_SIG = <<~RBS
+  class Model
+    def self.find: (String id) -> Model
+  end
+RBS
+
+# The shape of the actionpack 7.2 collection's `Parameters` declaration, hand-written as a stand-in: its
+# `[]` is `(untyped) -> untyped`. The #2430 specs run once with it and once without.
+PARAMETERS_STANDIN_SIG = <<~RBS
+  module ActionController
+    class Parameters
+      def []: (untyped key) -> untyped
+      def require: (untyped key) -> untyped
+      def permit: (*untyped filters) -> untyped
+    end
+  end
+RBS
+
 RSpec.describe "plugins/rigor-actionpack" do
   before { Rigor::Plugin.unregister! }
   after { Rigor::Plugin.unregister! }
 
-  def with_demo(controller_source, routes: DEFAULT_AP_ROUTES_RB)
+  def with_demo(controller_source, routes: DEFAULT_AP_ROUTES_RB, signatures: {})
     Dir.mktmpdir do |dir|
       FileUtils.mkdir_p(File.join(dir, "config"))
       FileUtils.mkdir_p(File.join(dir, "app", "controllers"))
       File.write(File.join(dir, "config", "routes.rb"), routes)
       File.write(File.join(dir, "app", "controllers", "demo_controller.rb"), controller_source)
+      unless signatures.empty?
+        FileUtils.mkdir_p(File.join(dir, "sig"))
+        signatures.each { |name, body| File.write(File.join(dir, "sig", name), body) }
+      end
 
       configuration = Rigor::Configuration.new(
         Rigor::Configuration::DEFAULTS.merge(
           "paths" => [File.join(dir, "app", "controllers")],
-          "plugins" => %w[rigor-rails-routes rigor-actionpack]
+          "plugins" => %w[rigor-rails-routes rigor-actionpack],
+          "signature_paths" => signatures.empty? ? nil : [File.join(dir, "sig")]
         )
       )
 
@@ -374,7 +398,9 @@ RSpec.describe "plugins/rigor-actionpack" do
     # #574 / #534 item 1 — the positive half. The two hazard controls around this one are ABSENCE
     # assertions, and absence is also what a regression to `Dynamic` produces, so on their own they
     # would keep passing if the typing silently went away. This pins the answer itself.
-    it "types `params[:key]` as a nilable Parameters" do
+    # #2430 — the answer is the gradual carrier, `Dynamic` over the nilable facet. Asserting the `Dynamic[`
+    # wrapper keeps the pin from passing on a silent regression to the bare union (which drops it).
+    it "types `params[:key]` as a gradual carrier over nilable Parameters (#2430)" do
       source = <<~RUBY
         class C
           def create
@@ -386,7 +412,82 @@ RSpec.describe "plugins/rigor-actionpack" do
       with_demo(source) do |result|
         dumps = result.diagnostics.select { |d| d.rule == "dump.type" }.map(&:message)
         expect(dumps.size).to eq(2)
-        expect(dumps).to all(include("ActionController::Parameters?"))
+        expect(dumps).to all(include("Dynamic[ActionController::Parameters?]"))
+      end
+    end
+
+    # Issue #2430 — a `params[:key]` read is a gradual carrier, so it crosses a declared `String` parameter.
+    # The control call is a real mismatch and must still fire: without it, silence could be the harness
+    # going dark rather than the boundary accepting the carrier.
+    describe "a `params[:key]` value at a declared String parameter (#2430)" do
+      source = <<~RUBY
+        class C
+          def show
+            Model.find(params[:id])
+            Model.find(42)
+          end
+        end
+      RUBY
+
+      it "is silent with the Parameters RBS stand-in in the project sig/, and the control fires" do
+        signatures = { "model.rbs" => MODEL_FIND_SIG, "parameters.rbs" => PARAMETERS_STANDIN_SIG }
+        with_demo(source, signatures: signatures) do |result|
+          mismatches = result.diagnostics.select { |d| d.rule == "call.argument-type-mismatch" }
+          expect(mismatches.size).to eq(1)
+          expect(mismatches.first.message).to include("got 42")
+        end
+      end
+
+      it "is silent with no Parameters declaration in the project sig/, and the control fires" do
+        with_demo(source, signatures: { "model.rbs" => MODEL_FIND_SIG }) do |result|
+          mismatches = result.diagnostics.select { |d| d.rule == "call.argument-type-mismatch" }
+          expect(mismatches.size).to eq(1)
+          expect(mismatches.first.message).to include("got 42")
+        end
+      end
+    end
+
+    # Issue #2430 — the chain on the carrier still dispatches to the strong-parameters hook. The dump is the
+    # proof: a chain that stopped resolving would answer `Dynamic[top]`, and `.to_h` must dispatch without an
+    # `undefined-method` on the carrier.
+    it "keeps `.permit`, `.require` and `.to_h` dispatching on a `params[:key]` carrier (#2430)" do
+      source = <<~RUBY
+        class C
+          def create
+            Rigor.dump_type(params[:user].permit(:name))
+            Rigor.dump_type(params[:user].require(:name))
+            Rigor.dump_type(params[:user].to_h)
+          end
+        end
+      RUBY
+      with_demo(source) do |result|
+        dumps = result.diagnostics.select { |d| d.rule == "dump.type" }.map(&:message)
+        expect(dumps.size).to eq(3)
+        expect(dumps[0]).to include("Dynamic[ActionController::Parameters]")
+        expect(dumps[1]).to include("Dynamic[ActionController::Parameters]")
+        expect(result.diagnostics.map(&:rule)).not_to include("call.undefined-method")
+      end
+    end
+
+    # Issue #2430 — a nil-check guard on a `params[:key]` read stays silent. This is a labelled guard: the
+    # guarded forms are silent under the bare union and under the carrier alike, so no removal of the fix
+    # line fails it. The unguarded assigned form is pinned by the possible-nil spec below.
+    it "keeps a nil-check guard on a `params[:key]` read silent (#2430 guard)" do
+      source = <<~RUBY
+        class C
+          def create
+            q = params[:q]
+            return if q.nil?
+            q.strip
+            r = params[:r]
+            r.strip if r
+          end
+        end
+      RUBY
+      with_demo(source) do |result|
+        rules = result.diagnostics.map(&:rule)
+        expect(rules).not_to include("call.possible-nil-receiver")
+        expect(rules).not_to include("call.undefined-method")
       end
     end
 
@@ -396,7 +497,7 @@ RSpec.describe "plugins/rigor-actionpack" do
     # unions. `#to_s` is the selector this harness can assert without loading a second plugin —
     # `#present?` / `#blank?` come from `rigor-activesupport-core-ext`'s `Object` rows, which the survey
     # configs enable and this one does not.
-    it "resolves a method call on the nilable `params[:key]` through both arms (#1101)" do
+    it "answers a method call on the nilable `params[:key]` carrier without a false positive (#1101, #2430)" do
       source = <<~RUBY
         class C
           def create
@@ -407,10 +508,12 @@ RSpec.describe "plugins/rigor-actionpack" do
       RUBY
       with_demo(source) do |result|
         dumps = result.diagnostics.select { |d| d.rule == "dump.type" }.map(&:message)
-        # `NilClass#to_s` folds to `""`; the `Parameters` arm reaches `Object#to_s`.
-        expect(dumps[0]).to include("\"\" | String")
+        # #2430 changed the answer, and the reason is the engine, not the plugin. The carrier is `Dynamic`,
+        # and the composite-receiver tier projects a `Union` receiver but not a `Dynamic` one, so `to_s` is
+        # no longer resolved arm by arm (it was `"" | String` on the bare union). The gradual `Dynamic[top]`
+        # is a loss of precision, not a false positive (ADR-5). `nil?` answers `bool` on every receiver.
+        expect(dumps[0]).to include("Dynamic[top]")
         expect(dumps[1]).to include("bool")
-        expect(dumps).to all(satisfy { |m| !m.include?("Dynamic[top]") })
       end
     end
 

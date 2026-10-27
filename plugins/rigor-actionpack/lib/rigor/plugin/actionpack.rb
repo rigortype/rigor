@@ -574,6 +574,16 @@ module Rigor
         Rigor::Type::Combinator.nominal_of(REQUEST_CONTEXT_READER_TYPES[:params])
       end
 
+      # Issue #2430 — the chain on a `params[...]` carrier (`params[:user].permit(:name)`). The result stays
+      # a `Dynamic` of the same nominal, so it crosses a declared boundary as the carrier does.
+      dynamic_return methods: STRONG_PARAMS_CHAIN_METHODS do |call_node, scope|
+        next nil unless call_node.is_a?(Prism::CallNode) && call_node.receiver
+        next nil unless controller_scope?(scope)
+        next nil unless params_carrier_facet?(scope.type_of(call_node.receiver))
+
+        Rigor::Type::Combinator.dynamic(Rigor::Type::Combinator.nominal_of(REQUEST_CONTEXT_READER_TYPES[:params]))
+      end
+
       # Issue #534 item 1, reopened by #574. `#[]` is the single largest named-receiver pair on both survey
       # apps (redmine 581, mastodon ~475). The honest contract is `Parameters | nil` — a missing key really
       # returns nil — and the block comment above records why that typing was REJECTED in 2026-09-01: it put
@@ -589,13 +599,51 @@ module Rigor
       #
       # The non-nil `-> Parameters` typing stays rejected on its own merits, unchanged: it makes every
       # `params[:k]` condition always-truthy and folds a ternary over one to its true arm.
+      #
+      # Issue #2430 — the answer is a GRADUAL carrier, `Dynamic[Parameters | nil]`, not the bare union.
+      # A declared boundary (a `String` parameter, a `-> String` return) rejects the bare union, because
+      # `Acceptance` passes only a `Dynamic` through every boundary, and a scalar param is a `String` at
+      # runtime. The static facet keeps the strong-params chain typed: the carrier-gated rules below
+      # dispatch on the facet, so `params[:user][:name]` and `params[:user].permit(:name)` keep resolving.
+      # The control hazards (no truthiness fold, no `bot`, no possible-nil on `q = params[:q]`) are
+      # unchanged, because the facet is the same `Parameters | nil` union.
       dynamic_return receivers: [REQUEST_CONTEXT_READER_TYPES[:params]], methods: %i[[]] do |call_node, _scope|
         next nil unless call_node.is_a?(Prism::CallNode)
 
-        Rigor::Type::Combinator.union(
-          Rigor::Type::Combinator.nominal_of(REQUEST_CONTEXT_READER_TYPES[:params]),
-          Rigor::Type::Combinator.constant_of(nil)
+        params_read_type
+      end
+
+      # Issue #2430 — `Dynamic` is not a `Nominal`, so the receiver-gated rules never see a carrier
+      # receiver. These two rules gate on the carrier's facet instead, and only inside a controller: a
+      # carrier is minted by the `params` reader, which is controller-only, so no other scope can hold one.
+      dynamic_return methods: %i[[]] do |call_node, scope|
+        next nil unless call_node.is_a?(Prism::CallNode) && call_node.receiver
+        next nil unless controller_scope?(scope)
+        next nil unless params_carrier_facet?(scope.type_of(call_node.receiver))
+
+        params_read_type
+      end
+
+      # The `params` carrier's static facet as a `Dynamic`: `Parameters | nil`, gradual at every boundary.
+      def params_read_type
+        Rigor::Type::Combinator.dynamic(
+          Rigor::Type::Combinator.union(
+            Rigor::Type::Combinator.nominal_of(REQUEST_CONTEXT_READER_TYPES[:params]),
+            Rigor::Type::Combinator.constant_of(nil)
+          )
         )
+      end
+
+      # True when `type` is a `Dynamic` whose facet is `Parameters` or `Parameters | nil`: the carrier a
+      # `params[...]` read answers, and the value a chained `[]` / strong-params call receives.
+      def params_carrier_facet?(type)
+        return false unless type.is_a?(Rigor::Type::Dynamic)
+
+        facet = type.static_facet
+        members = facet.is_a?(Rigor::Type::Union) ? facet.members : [facet]
+        non_nil = members.reject { |member| member.is_a?(Rigor::Type::Constant) && member.value.nil? }
+        non_nil.size == 1 && non_nil.first.is_a?(Rigor::Type::Nominal) &&
+          non_nil.first.class_name == REQUEST_CONTEXT_READER_TYPES[:params]
       end
 
       # Phase 5c (2026-09-02, issue #534 "same lane") — the rest of the request-context surface the

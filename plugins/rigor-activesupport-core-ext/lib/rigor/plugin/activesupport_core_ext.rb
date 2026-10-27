@@ -212,8 +212,8 @@ module Rigor
         next nil unless call_node.is_a?(Prism::CallNode)
         next nil unless call_node.receiver
         next nil unless call_node.arguments.nil?
-        next nil unless call_node.block.nil?
 
+        # A block is ignored by `symbolize_keys`, so it does not decline.
         SymbolizeKeys.result(scope&.type_of(call_node.receiver), scope)
       end
 

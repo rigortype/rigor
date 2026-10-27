@@ -514,6 +514,63 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
         expect(dump_list).to eq(["Hash[Dynamic[top], Integer]", "Hash[Dynamic[top], Integer]"])
       end
 
+      it "maps a String subclass key to Symbol" do
+        sig = "class MyStr < String\nend\nclass Probe\n  def f: (Hash[MyStr, Integer]) -> void\nend\n"
+        source = "class MyStr < String\nend\nclass Probe\n" \
+                 "  def f(h)\n    Rigor.dump_type(h.symbolize_keys)\n  end\nend\n"
+        result = run_plugin(source: source, files: { "sig/probe.rbs" => sig }, signature_paths: ["sig"])
+
+        expect(dumps(result)).to eq(["Hash[Symbol, Integer]"])
+      end
+
+      # Review of #2450. `to_sym` defined by the project on a core value class, a subclass of a non-value class
+      # or a delegator is a Symbol-returning key the bundled RBS does not know, so none of them may be read as
+      # a keyless-`to_sym` class: `.to_proc` on the result must not report `call.undefined-method`.
+      it "does not claim an Integer key stays an Integer when the project defines Integer#to_sym" do
+        sig = "class Probe\n  def f: (Hash[Integer, Integer]) -> void\nend\n"
+        source = "class Integer\n  def to_sym = :\"i\#{self}\"\nend\n" \
+                 "class Probe\n  def f(h) = h.symbolize_keys.keys.first.to_proc\nend\n"
+        result = run_plugin(source: source, files: { "sig/probe.rbs" => sig }, signature_paths: ["sig"])
+
+        expect(result.diagnostics.map(&:qualified_rule).grep(/\Acall\./)).to be_empty
+      end
+
+      it "reads a project subclass key and a delegator key as untyped, not as themselves" do
+        sig = "class Path < Array[String]\nend\nclass Probe\n  def f: (Hash[Path, Integer], " \
+              "Hash[SimpleDelegator, Integer]) -> void\nend\n"
+        source = "require 'delegate'\nclass Path < Array\n  def to_sym = :p\nend\n" \
+                 "class Probe\n  def f(a, b)\n    a.symbolize_keys.keys.first.to_proc\n    " \
+                 "b.symbolize_keys.keys.first.to_proc\n    1\n  end\nend\n"
+        result = run_plugin(source: source, files: { "sig/probe.rbs" => sig }, signature_paths: ["sig"])
+
+        expect(result.diagnostics.map(&:qualified_rule).grep(/\Acall\./)).to be_empty
+      end
+
+      # Review of #2450 M2: a `&.` receiver, a union of hashes and a passed block (ignored by Ruby) keep the
+      # `Symbol` key the base answered.
+      it "maps a nil-able receiver, a union of hashes and a call with a block" do
+        dump_list, rules = probe(
+          ["Hash[String, Integer]?", "Hash[String, Integer] | Hash[String, String]", "Hash[String, Integer]"],
+          "Rigor.dump_type(p0&.symbolize_keys)\nRigor.dump_type(p1.symbolize_keys)\n" \
+          "Rigor.dump_type(p2.symbolize_keys { |k| k })\n1"
+        )
+
+        expect(rules).to be_empty
+        expect(dump_list).to eq(
+          ["Hash[Symbol, Integer]?", "Hash[Symbol, Integer] | Hash[Symbol, String]", "Hash[Symbol, Integer]"]
+        )
+      end
+
+      # Review of #2450 m3: an open shape can hold keys the shape does not list (a `default_proc` writing `5`),
+      # so the hook declines it and the `Hash[untyped, V]` row answers. ActiveSupport 8.1.4 gives
+      # `{a: 1, 5 => "x"}` for that program.
+      it "declines an open shape" do
+        shape = Rigor::Type::HashShape.new({ "a" => Rigor::Type::Combinator.constant_of(1) }, extra_keys: :open)
+
+        expect(Rigor::Plugin::ActivesupportCoreExt::SymbolizeKeys.result(shape, nil)).to be_nil
+      end
+
+      # Guards only the rejected `Hash[Symbol | K, V]` row design (it fails this example); it does not pin the hook.
       it "passes a String-keyed result to a Hash[Symbol, untyped] parameter" do
         sig = "class Probe\n  def take: (Hash[Symbol, untyped]) -> void\n  " \
               "def f: (Hash[String, untyped]) -> void\nend\n"

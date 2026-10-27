@@ -200,11 +200,18 @@ module Rigor
 
           joined = Type::Combinator.union(local_type, seed_type)
           widened = widened.with_ivar(name, joined)
-          marking = mark == :unproven ? writes.nil? : mark
-          marked = (marking && nil_free?(local_type)) || scope.declaration_sourced?(:ivar, name)
+          marked = widen_marks?(mark, writes, local_type) || scope.declaration_sourced?(:ivar, name)
           marked ? widened.seed_declaration_sourced_ivar(name, joined) : widened
         end
       end
+
+      # Whether {.widen} stamps the declaration mark on a binding narrowed to `local_type`: one whose narrowing ruled
+      # `nil` out, under `mark: true`, or under `mark: :unproven` when no write set is proven (`writes` nil).
+      def widen_marks?(mark, writes, local_type)
+        marking = mark == :unproven ? writes.nil? : mark
+        marking && nil_free?(local_type)
+      end
+      private_class_method :widen_marks?
 
       # Issue #1963 — `scope` past the calls `node`, a condition operand, makes: {.widen} over the names every
       # candidate call in it may write, or every name when one of them is not proven. A call's literal block may run,

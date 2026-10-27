@@ -127,6 +127,14 @@ RSpec.describe "a project sidecar sig and an open singleton surface (#2438)" do
       expect(dumps(result)).to eq(["dump_type: N::X"])
     end
 
+    it "still reports `instance` when a nested project Singleton is prepended" do
+      write("lib/a.rb", "require \"singleton\"\nmodule N\n  module Singleton\n  end\n  class P\n    prepend Singleton\n    " \
+                        "def x = 1\n  end\nend\nN::P.instance\n")
+      write("sig/a.rbs", "module N\n  module Singleton\n  end\n  class P\n    def x: () -> Integer\n  end\nend\n")
+
+      expect(undefined_messages(run_check)).to eq(["undefined method `instance' for singleton(N::P)"])
+    end
+
     # `Singleton.included` raises TypeError for a module, so a class that includes such a module has no `instance`.
     it "still reports `instance` when only a module the class includes includes Singleton" do
       write("lib/a.rb", "require \"singleton\"\nmodule M\n  include Singleton\nend\nclass C\n  include M\n  " \
@@ -219,7 +227,8 @@ RSpec.describe "a project sidecar sig and an open singleton surface (#2438)" do
       expect(messages_for("class Svc\n  include Comparable\nend\nSvc.helper\n", "class Svc\nend\n")).to eq([])
     end
 
-    # A superclass chain past `ResolutionChain::LIMIT` is cut, so the class is not provably closed.
+    # Guard: a superclass chain past `ResolutionChain::LIMIT` is cut, so the class is not provably closed. The
+    # rule's own ancestry budget declines the same call today, so removing the cut check alone does not fail this.
     it "does not report a class method on a class whose superclass chain is cut" do
       chain = (1..101).map { |i| "class C#{i} < C#{i - 1}\nend\n" }.join
       source = "class C0\nend\n#{chain}C101.fooo\n"

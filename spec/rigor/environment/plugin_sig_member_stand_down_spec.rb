@@ -493,7 +493,8 @@ end
         expect(loader.definition_build_failures).to be_empty
         expect(ancestors(loader, "ActiveRecord::ConnectionNotEstablished")).to include("MyBase")
         expect(ancestors(loader, "ActiveRecord::ConnectionNotEstablished")).not_to include("ActiveRecord::ActiveRecordError")
-        expect(superclass_rows(loader)).to eq([["ActiveRecord::ConnectionNotEstablished < ActiveRecordError", "activerecord.rbs"]])
+        expect(superclass_rows(loader))
+          .to eq([["ActiveRecord::ConnectionNotEstablished < ActiveRecordError", "activerecord.rbs"]])
       end
     end
 

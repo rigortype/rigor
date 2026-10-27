@@ -26,41 +26,42 @@ RSpec.describe "plugin superclass stand-down through the runner (#2439)" do
 
   # The issue's reproduction, with the collection cut to the hierarchy that collides.
   def write_project(dir)
-    files = {
-      "collection_sig/activerecord.rbs" => <<~RBS,
-        module ActiveRecord
-          class ActiveRecordError < StandardError
-          end
-          class AdapterError < ActiveRecordError
-          end
-          class ConnectionNotEstablished < AdapterError
-          end
-          class StatementInvalid < AdapterError
-          end
-        end
-      RBS
-      "app/models/query.rb" => <<~RUBY
-        class Query
-          class StatementInvalid < ::ActiveRecord::StatementInvalid
-          end
-          def run
-            yield
-          rescue ::ActiveRecord::StatementInvalid => e
-            raise StatementInvalid, e.message
-          end
-          def control
-            m = Regexp.last_match
-            m.begin(0)
-          end
-        end
-      RUBY
-    }
-    files.each do |relative, contents|
+    files = { "collection_sig/activerecord.rbs" => collection_rbs, "app/models/query.rb" => query_source }
+    files.each do |relative, body|
       full = File.join(dir, relative)
       FileUtils.mkdir_p(File.dirname(full))
-      File.write(full, contents)
+      File.write(full, body)
     end
   end
+
+  def collection_rbs = <<~RBS
+    module ActiveRecord
+      class ActiveRecordError < StandardError
+      end
+      class AdapterError < ActiveRecordError
+      end
+      class ConnectionNotEstablished < AdapterError
+      end
+      class StatementInvalid < AdapterError
+      end
+    end
+  RBS
+
+  def query_source = <<~RUBY
+    class Query
+      class StatementInvalid < ::ActiveRecord::StatementInvalid
+      end
+      def run
+        yield
+      rescue ::ActiveRecord::StatementInvalid => e
+        raise StatementInvalid, e.message
+      end
+      def control
+        m = Regexp.last_match
+        m.begin(0)
+      end
+    end
+  RUBY
 
   def run(dir, store)
     Rigor::Plugin.unregister!

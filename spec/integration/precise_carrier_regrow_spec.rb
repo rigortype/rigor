@@ -1,7 +1,9 @@
 # frozen_string_literal: true
 
 # Issue #2361 — a PRECISE `Array[E]` / `Set[E]` (no `Dynamic` arm in `E`, an RBS return such as `ARGV.dup` or
-# `Array#to_set`) re-grows under a store of another type, joining the stored element type onto the seed.
+# `Array#to_set`, or a literal element) re-grows under a store of another type, on a literal seed's terms: a member
+# of a class the seed admits joins as itself, any other takes the `Dynamic[top]` floor, and the floor joins every
+# re-grow, so a later remover or rewriter cannot leave a closed carrier a declared type rejects.
 #
 # Ruby witnesses (`ruby -e 'require "set"; ...'` with no arguments):
 # `f = ARGV.to_set; f.clear; f << 1; p f.map { |v| v.fdiv(2) }` prints `[0.5]`;
@@ -33,26 +35,27 @@ RSpec.describe "Precise carrier re-grow (issue #2361)", type: :runner do
 
   describe "an Array[String] under a store" do
     {
-      "<<" => ["a << 1", "Array[Integer | String]"],
-      "clear then <<" => ["a.clear\na << 1", "Array[Integer | String]"],
+      "<<" => ["a << 1", "Array[Dynamic[top] | String]"],
+      "clear then <<" => ["a.clear\na << 1", "Array[Dynamic[top] | String]"],
       "<< of the element's own class" => ["a << \"x\"", "Array[String]"],
-      "push with several arguments" => ["a.push(1, :x)", "Array[Integer | String | Symbol]"],
-      "concat" => ["a.concat([1])", "Array[Integer | String]"],
-      "unshift" => ["a.unshift(1)", "Array[Integer | String]"],
-      "insert" => ["a.insert(0, 1)", "Array[Integer | String]"],
-      "[]=" => ["a[0] = 1", "Array[Integer | String]"],
-      "a splicing []=" => ["a[0, 0] = [1]", "Array[Integer | String]"],
-      "fill" => ["a.fill(1)", "Array[Integer | String]"],
-      "replace" => ["a.replace([1])", "Array[Integer | String]"],
+      "push with several arguments" => ["a.push(1, :x)", "Array[Dynamic[top] | String]"],
+      "concat" => ["a.concat([1])", "Array[Dynamic[top] | String]"],
+      "unshift" => ["a.unshift(1)", "Array[Dynamic[top] | String]"],
+      "insert" => ["a.insert(0, 1)", "Array[Dynamic[top] | String]"],
+      "[]=" => ["a[0] = 1", "Array[Dynamic[top] | String]"],
+      "a splicing []=" => ["a[0, 0] = [1]", "Array[Dynamic[top] | String]"],
+      "fill" => ["a.fill(1)", "Array[Dynamic[top] | String]"],
+      "replace" => ["a.replace([1])", "Array[Dynamic[top] | String]"],
       "a splat push" => ["xs = [1, 2]\na.push(*xs)", "Array[Dynamic[top] | String]"],
       "a ranged fill, whose stored value the join does not read" => ["a.fill(1, 0, 1)", "Array[Dynamic[top] | String]"],
-      "a store under if" => ["a << 1 if flag", "Array[Integer | String] | Array[String]"],
-      "a store under unless" => ["a << 1 unless flag", "Array[Integer | String] | Array[String]"],
-      "a store under case" => ["case ARGV.size\nwhen 1 then a << 1\nend", "Array[Integer | String] | Array[String]"],
+      "a store under if" => ["a << 1 if flag", "Array[Dynamic[top] | String] | Array[String]"],
+      "a store under unless" => ["a << 1 unless flag", "Array[Dynamic[top] | String] | Array[String]"],
+      "a store under case" => ["case ARGV.size\nwhen 1 then a << 1\nend",
+                               "Array[Dynamic[top] | String] | Array[String]"],
       "a store in a loop body" => ["while flag\n  a << 1\nend", "Array[1 | String]"],
       "a store in a block" => ["[1].each { |i| a << i }", "Array[1 | String]"]
     }.each do |label, (body, expected)|
-      it "joins the stored type after #{label}" do
+      it "re-grows after #{label}" do
         expect(dumped("a = ARGV.dup\n#{body}\ndump_type(a)")).to eq([expected])
       end
     end
@@ -64,14 +67,14 @@ RSpec.describe "Precise carrier re-grow (issue #2361)", type: :runner do
 
   describe "a Set[String] under a store" do
     {
-      "add" => ["s.add(1)", "Set[Integer | String]"],
-      "<<" => ["s << 1", "Set[Integer | String]"],
-      "add?" => ["s.add?(1)", "Set[Integer | String]"],
-      "merge over several enumerables" => ["s.merge([1], [:x])", "Set[Integer | String | Symbol]"],
-      "replace" => ["s.replace([1])", "Set[Integer | String]"],
+      "add" => ["s.add(1)", "Set[Dynamic[top] | String]"],
+      "<<" => ["s << 1", "Set[Dynamic[top] | String]"],
+      "add?" => ["s.add?(1)", "Set[Dynamic[top] | String]"],
+      "merge over several enumerables" => ["s.merge([1], [:x])", "Set[Dynamic[top] | String]"],
+      "replace" => ["s.replace([1])", "Set[Dynamic[top] | String]"],
       "<< in a block" => ["[1].each { |i| s << i }", "Set[Dynamic[top] | String]"]
     }.each do |label, (body, expected)|
-      it "joins the stored type after #{label}" do
+      it "re-grows after #{label}" do
         expect(dumped("s = ARGV.to_set\n#{body}\ndump_type(s)")).to eq([expected])
       end
     end
@@ -79,7 +82,7 @@ RSpec.describe "Precise carrier re-grow (issue #2361)", type: :runner do
     it "joins a store outside a literal element and keeps one of the same literal" do
       seed = "ARGV.map(&:to_i).map { \"x\" }.to_set"
       source = "s = #{seed}\ns << \"x\"\ndump_type(s)\nt = #{seed}\nt << \"y\"\ndump_type(t)"
-      expect(dumped(source)).to eq(['Set["x"]', 'Set["x" | String]'])
+      expect(dumped(source)).to eq(['Set["x"]', 'Set["x" | Dynamic[top] | String]'])
     end
 
     # The #561 gate, as on an Array: a class the literal element does not admit joins as the gradual floor.
@@ -88,9 +91,60 @@ RSpec.describe "Precise carrier re-grow (issue #2361)", type: :runner do
       expect(dumped(source)).to eq(['Set["x" | Dynamic[top]]'])
     end
 
+    # An adder called with no arguments at all (`merge` takes `*enums`) stores nothing.
+    it "leaves a precise Set alone under an adder called with no arguments" do
+      expect(dumped("s = ARGV.to_set\ns.merge\ndump_type(s)")).to eq(["Set[String]"])
+    end
+
     it "floors a precise Set a self-call grows through a Set-only adder" do
       source = "def put(s) = s.add(1)\ns = ARGV.to_set\nput(s)\ndump_type(s)"
       expect(dumped(source)).to eq(["Set[Dynamic[top] | String]"])
+    end
+  end
+
+  # Each store is undone at runtime before the declared boundary, which the carrier cannot narrow back; the floor is
+  # what keeps the boundary quiet. Ruby runs each and returns normally.
+  describe "a store a remover or rewriter undoes before a declared boundary" do
+    let(:sig) do
+      { "t4.rbs" => <<~RBS }
+        class T4
+          def take: (Array[String]) -> void
+          def take_set: (Set[String]) -> void
+          def ret: (Array[String]) -> Array[String]
+          def take_x: (Array["x"]) -> void
+          def take_x_set: (Set["x"]) -> void
+        end
+      RBS
+    end
+
+    def boundary_rules(body)
+      stubs = %w[take take_set take_x take_x_set].map { |name| "  def #{name}(_a) = nil\n" }.join
+      errors("class T4\n  def run\n#{body}\n  end\n#{stubs}end\n", sig: sig)
+    end
+
+    {
+      "pop" => "a = ARGV.dup; a << 1; a.pop; take(a)",
+      "shift" => "a = ARGV.dup; a.unshift(1); a.shift; take(a)",
+      "delete" => "a = ARGV.dup; a << :m; a.delete(:m); take(a)",
+      "delete_if" => "a = ARGV.dup; a << 1; a.delete_if { |v| v.is_a?(Integer) }; take(a)",
+      "select!" => "a = ARGV.dup; a << 1; a.select! { |v| v.is_a?(String) }; take(a)",
+      "compact!" => "a = ARGV.dup; a << nil if ARGV.empty?; a.compact!; take(a)",
+      "clear" => "a = ARGV.dup; a << 1; a.clear; a << \"s\"; take(a)",
+      "map!" => "a = ARGV.dup; a << 1; a.map!(&:to_s); take(a)",
+      "replace" => "a = ARGV.dup; a << 1; a.replace([\"s\"]); take(a)",
+      "Set#subtract" => "s = ARGV.to_set; s.merge([1]); s.subtract([1]); take_set(s)",
+      # A literal element admits a store of its own class as itself, so only the floor keeps these quiet.
+      "pop on a literal element" => "s = ARGV.map { \"x\" }; s << \"y\"; s.pop; take_x(s)",
+      "Set#delete on a literal element" => "s = ARGV.map { \"x\" }.to_set; s << \"y\"; s.delete(\"y\"); take_x_set(s)"
+    }.each do |label, body|
+      it "reports nothing after #{label}" do
+        expect(boundary_rules(body)).to be_empty
+      end
+    end
+
+    it "reports nothing on a declared parameter returned after compact!" do
+      source = "class T4\n  def ret(a)\n    a << nil\n    a.compact!\n    a\n  end\nend\n"
+      expect(errors(source, sig: sig)).to be_empty
     end
   end
 
@@ -141,7 +195,8 @@ RSpec.describe "Precise carrier re-grow (issue #2361)", type: :runner do
     end
 
     it "joins the stored literal's class" do
-      expect(dumped("s = ARGV.map(&:to_i).map { \"x\" }\ns << \"y\"\ndump_type(s)")).to eq(['Array["x" | String]'])
+      source = "s = ARGV.map(&:to_i).map { \"x\" }\ns << \"y\"\ndump_type(s)"
+      expect(dumped(source)).to eq(['Array["x" | Dynamic[top] | String]'])
     end
 
     # Control: a store of the literal already held changes nothing, so the correct always-truthy fold stays.

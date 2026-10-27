@@ -134,28 +134,28 @@ module Rigor
         nominal.class_name == "Array" && nominal.type_args.size == 1 && !gradual_parameter?(nominal.type_args.first)
       end
 
-      # Issue #2361 — a PRECISE `Array[E]` re-grows under a store, joining what the store puts in: `a = ARGV.dup;
+      # Issue #2361 — a PRECISE `Array[E]` re-grows under a store, on the literal arms' terms: `a = ARGV.dup;
       # a.clear; a << 1; a.each { |v| v.fdiv(2) }` read `Array[String]` and reported `undefined method 'fdiv' for
       # String` on code that prints `[0.5]`.
       #
       # Only a content adder ({ContentJoin::ARRAY_CONTENT_ADDERS}) re-grows it, and the join keeps the seed: `clear`
-      # empties the array but leaves `E` standing, a superset of what it holds, so `a << 1` reads
-      # `Array[String | Integer]` after a `clear` too. A rewriter (`map!`, `flatten!`) stores nothing this seam can
-      # read and leaves the carrier as it was; `replace` and `fill` join their stored elements onto the seed.
+      # empties the array but leaves `E` standing, a superset of what it holds. A rewriter (`map!`, `flatten!`) and a
+      # remover leave the carrier as they found it.
       #
-      # No `Dynamic` floor joins a store the extractor reads: the floor exists because a seam that saw one store
-      # could not see the next once the carrier was precise, and this arm is what sees the next one. A store it reads
-      # nothing out of (an unreadable argument, a splat, which types as `Dynamic[top]`) still joins the floor. An
-      # adder with no argument types at all is left alone, as {MutationWidening.join_added_elements} leaves it: the
-      # block-capture seams pass none, and their own content join adds the stores.
+      # The join is {MutationWidening.join_added_elements}' for a literal seed: each added member is admitted
+      # against the seed's classes ({ContentJoin.admissible_evidence}), a member of another class takes the
+      # `Dynamic[top]` floor instead, and the floor joins every re-grow. `a << 1` therefore reads
+      # `Array[Dynamic[top] | String]` and `s = ints.map { "x" }; s << "y"` reads `Array["x" | Dynamic[top] | String]`.
+      # Both halves answer one false positive: nothing narrows a carrier back when a remover or rewriter takes the
+      # store out again (`a << 1; a.pop`, `a << nil; a.compact!`, `a.map!(&:to_s)`), so a joined `Integer` or `nil`
+      # made `take(a)` against a declared `Array[String]` report `call.argument-type-mismatch`, and a parameter
+      # returned as its declared `-> Array[String]` report `def.return-type-mismatch`, on correct Ruby. A union
+      # carrying the floor neither folds nor dispatches loudly, so the read stays silent. Once floored, the carrier is
+      # gradual and later stores re-join through {#widen_nominal}'s ordinary arm.
       #
-      # A literal element is a precise element too (`ints.map { "x" }` is `Array["x"]`): a store outside the literal
-      # joins its class (`Array["x" | String]`), so `s << "y"; s.last == "y"` no longer folds always-falsey, and a
-      # store of a literal already held changes nothing ({#already_held?}).
-      #
-      # The #561 guard stays: the added members are admitted against the carrier's value-PINNED members
-      # ({#pinned_evidence}), so a store foreign to an `Array[:multi]` a signature declared joins as `Dynamic[top]`
-      # rather than as a class the declaration rejects.
+      # A store the element already accepts changes nothing ({#already_held?}). An adder with no argument types at
+      # all is left alone, as {MutationWidening.join_added_elements} leaves it: the block-capture seams pass none,
+      # and their own content join adds the stores.
       def widen_precise_array(nominal, method_name, values:, arg_types:)
         return nil unless ContentJoin::ARRAY_CONTENT_ADDERS.include?(method_name) && !arg_types.empty?
 
@@ -163,11 +163,9 @@ module Rigor
         return nil if already_held?(nominal.type_args.first, stored)
 
         added = MutationWidening.value_pin_widened(stored)
-        admitted = if added.empty? then [Type::Combinator.untyped]
-                   else ContentJoin.admissible_evidence(pinned_evidence(nominal.type_args), added)
-                   end
+        admitted = added.empty? ? [] : ContentJoin.admissible_evidence(nominal.type_args, added)
         pre_state = values == :widen ? value_pin_widened_args(nominal) : nominal
-        rejoined = ContentJoin.join_array_content(pre_state, admitted)
+        rejoined = ContentJoin.join_array_content(pre_state, MutationWidening.gradual_floor(admitted))
         rejoined == nominal ? nil : rejoined
       end
 

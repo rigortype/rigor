@@ -61,9 +61,10 @@ RSpec.describe "Set mutation widening", type: :runner do
       expect(dumped("s = n > 0 ? Set[1] : Set[:a]\ns << x\ndump_type(s)")).to eq(expected)
     end
 
-    # Issue #2361 — a precise RBS answer re-grows too, without the floor, as `Array#dup` on ARGV does.
-    it "joins a store into a precise Set[String]" do
-      expect(dumped("s = ARGV.to_set\ns << 1\ndump_type(s)")).to eq(["Set[Integer | String]"])
+    # Issue #2361 — a precise RBS answer re-grows too, as `Array#dup` on ARGV does: a class the seed does not admit
+    # takes the floor.
+    it "re-grows a precise Set[String] under a store" do
+      expect(dumped("s = ARGV.to_set\ns << 1\ndump_type(s)")).to eq(["Set[Dynamic[top] | String]"])
     end
   end
 

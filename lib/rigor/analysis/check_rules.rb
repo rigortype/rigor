@@ -1601,11 +1601,11 @@ module Rigor
           end
         end
 
-        # The last class's own superclass, when the chain does not name it: an expression the tables cannot
-        # resolve, or none in source but one in the member-less declaration.
+        # The last class's own superclass, which the chain does not name: an expression the tables cannot resolve,
+        # or one only the member-less declaration writes (the chain ends at the implicit `Object` exactly when
+        # the source writes none).
         def open_tail?(chain, last, scope, loader)
           return true if chain.opaque_tail?(scope)
-          return false unless scope.superclass_of(last).nil?
 
           raw = loader.memberless_project_superclass(last)
           return false if raw.nil? || CLOSED_ROOTS.include?(raw.delete_prefix("::"))

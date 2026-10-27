@@ -202,6 +202,16 @@ RSpec.describe "a project sidecar sig and an open singleton surface (#2438)" do
       expect(messages_for("class MyErr\nend\nMyErr.typo\n", "class MyErr < StandardError\nend\n")).to eq([])
     end
 
+    it "still reports a typo when the declaration names a closed project class as the superclass" do
+      messages = messages_for("class Parent\nend\nclass Kid\nend\nKid.fooo\n", "class Parent\nend\nclass Kid < Parent\nend\n")
+
+      expect(messages).to eq(["undefined method `fooo' for singleton(Kid)"])
+    end
+
+    it "does not report a class method on a class whose superclass is an expression" do
+      expect(messages_for("class K < Struct.new(:a)\nend\nK.fooo\n", "class K\nend\n")).to eq([])
+    end
+
     it "still reports a typo on a closed class whose whole definition is inside paths:" do
       messages = messages_for("class Plain\nend\nPlain.fooo\n", "class Plain\nend\n")
 

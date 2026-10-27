@@ -71,6 +71,11 @@ module Rigor
       # receiver: `a.map!(&:to_i)` holds what `a.map(&:to_i)` returns, and `a.flatten!` what `a.flatten` does.
       TYPED_COUNTERPARTS = Ractor.make_shareable({ map!: :map, collect!: :collect, flatten!: :flatten })
 
+      # The carrier classes {.typed} rewrites, with the rewriters each takes. `Set#flatten!` is absent: it flattens
+      # only nested Sets, so `ARGV.map { |x| [x] }.to_set.flatten!` still holds `[String]` Arrays, while `Set#flatten`
+      # answers an element its RBS does not narrow.
+      TYPED_CARRIERS = Ractor.make_shareable({ "Array" => %i[map! collect! flatten!], "Set" => %i[map! collect!] })
+
       # Issue #2427 — `carrier` with its element replaced by `element`, the element of what the non-bang counterpart
       # ({TYPED_COUNTERPARTS}) answers for the same call: `a = ARGV.dup; a.map!(&:to_i)` reads `Array[Integer]` and
       # `a.map!(&:strip)` keeps `Array[String]`. It is the typed form of {.arm}'s {REPLACED} answer, and it replaces
@@ -84,7 +89,7 @@ module Rigor
 
         case carrier
         when Type::Nominal
-          return nil unless carrier.type_args.size == 1 && REPLACED.dig(carrier.class_name, method_name) == [0]
+          return nil unless carrier.type_args.size == 1 && TYPED_CARRIERS[carrier.class_name]&.include?(method_name)
 
           Type::Combinator.nominal_of(carrier.class_name, type_args: [element])
         when Type::Difference

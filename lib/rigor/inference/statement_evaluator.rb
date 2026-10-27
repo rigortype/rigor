@@ -1263,14 +1263,21 @@ module Rigor
       # Issue #2427 — the element an element rewriter (`map!`, `collect!`, `flatten!`) leaves in its receiver, read
       # off what the non-bang counterpart answers for the same receiver, block and arguments
       # ({RewriteMutation::TYPED_COUNTERPARTS}): `a.map!(&:to_i)` stores what `a.map(&:to_i)` returns. `nil` when the
-      # call is no such rewriter, a `map!` has no block (the enumerator form), the receiver names no carrier the
-      # widening rewrites, or the counterpart has no single element; the widening then takes
+      # call is no such rewriter, or the counterpart has no single element; the widening then takes
       # {RewriteMutation}'s gradual arm.
+      #
+      # `nil` too when the receiver may name more than one binding (`(flag ? a : b).map!(&:to_i)`): Ruby rewrites
+      # only the one the branch selects, and typing every candidate gave the other one an element it never holds.
+      #
+      # The block and receiver gates only save typing a counterpart nothing consumes: with no block `map` answers an
+      # Enumerator, which has no element to read, and {RewriteMutation.typed} answers nothing for a receiver the
+      # widening does not rewrite.
       def rewritten_element(call_node, current_scope)
         counterpart = RewriteMutation::TYPED_COUNTERPARTS[call_node.name]
         return nil if counterpart.nil?
-        return nil if counterpart != :flatten && call_node.block.nil?
-        return nil unless MutationWidening.joinable_receiver?(call_node.receiver, current_scope)
+        return nil if counterpart != :flatten && call_node.block.nil? # cost guard
+        return nil unless MutationWidening.joinable_receiver?(call_node.receiver, current_scope) # cost guard
+        return nil unless ReceiverAlias.mutated_reads(call_node.receiver).size == 1
 
         RewriteMutation.counterpart_element(operand_scope.type_of(call_node.copy(name: counterpart)))
       end

@@ -68,4 +68,45 @@ RSpec.describe "Element rewriters on a precise Array (issue #2427)", type: :runn
   it "types a precise Set's element after map!" do
     expect(dumped(%(require "set"\ns = ARGV.to_set\ns.map!(&:to_i)\ndump_type(s)))).to eq(["Set[Integer]"])
   end
+
+  # `Set#flatten!` flattens only nested Sets: `["4"].map { |x| [x] }.to_set.flatten!` is still `Set[["4"]]`.
+  it "keeps a precise Set's element under flatten!" do
+    expect(dumped(%(s = ARGV.map { |x| [x] }.to_set\ns.flatten!\ndump_type(s)))).to eq(["Set[[String]]"])
+  end
+
+  # Ruby rewrites only the binding the branch selects, so neither candidate takes the typed element.
+  describe "a receiver that may name more than one binding" do
+    it "gives an unselected local no rewritten element" do
+      expect(errors(<<~RUBY)).to be_empty
+        c = ARGV.empty?
+        a = ARGV.dup
+        b = ARGV.dup
+        (c ? a : b).map!(&:to_i)
+        b.first.upcase if c && b.first
+      RUBY
+    end
+
+    it "gives an unselected ivar no rewritten element" do
+      expect(errors(<<~RUBY)).to be_empty
+        class Holder
+          def run(c)
+            @a = ARGV.dup
+            @b = ARGV.dup
+            (c ? @a : @b).collect! { |s| s.size }
+            @b.first.upcase if c && @b.first
+          end
+        end
+      RUBY
+    end
+
+    it "gives an unselected local no flattened element" do
+      expect(errors(<<~RUBY)).to be_empty
+        f = ARGV.empty?
+        a = ARGV.map { |x| [x] }
+        b = ARGV.map { |x| [x] }
+        (f ? a : b).flatten!
+        b.first.first.upcase if f && b.first
+      RUBY
+    end
+  end
 end

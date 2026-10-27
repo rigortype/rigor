@@ -75,14 +75,14 @@ RSpec.describe Rigor::Inference::UnknownStoreWidening do
     end
 
     it "gives every Array member of a union seed the gradual arm" do
-      # `flag ? xs : [1]` under `map!`: the precise member is declined by the widening itself, but the site
-      # still rewrites whichever array the local holds, so each member takes the arm.
+      # `flag ? xs : [1]` under `map!`: the site rewrites whichever array the local holds, so each member takes the
+      # arm. Since issue #2427 the precise member is rewritten by the widening itself and keeps no `String` arm.
       union = Rigor::Type::Combinator.union(
         Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.nominal_of("String")]),
         one_pinned_tuple
       )
       widened = described_class.widen(union, sites_of("a = []\n[1].each { |e| a.map!(&:to_s) }\n"))
-      expect(widened.describe).to eq("Array[Dynamic[top] | String] | Array[Dynamic[top]]")
+      expect(widened.describe).to eq("Array[Dynamic[top]]")
     end
 
     it "keeps an empty-witness refinement while giving its base the gradual arm" do
@@ -124,11 +124,12 @@ RSpec.describe Rigor::Inference::UnknownStoreWidening do
         )
       end
 
+      # Since issue #2427 the precise member's `Integer` does not survive a total rewrite.
       it "gives a precise member of the same union the arm too, as when another member widens" do
         precise = Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.nominal_of("Integer")])
         seed = Rigor::Type::Combinator.union(precise, non_empty_strings)
         widened = described_class.widen(seed, sites_of("a = []\n[1].each { |e| a.map!(&:to_sym) }\n"))
-        expect(widened.describe).to eq("Array[Dynamic[top] | Integer] | non-empty-array[Dynamic[top]]")
+        expect(widened.describe).to eq("Array[Dynamic[top]] | non-empty-array[Dynamic[top]]")
       end
 
       it "leaves the refinement unchanged under an adder called with no argument" do
@@ -154,9 +155,11 @@ RSpec.describe Rigor::Inference::UnknownStoreWidening do
           .to eq(non_empty_strings)
       end
 
-      it "leaves a precise nominal on its own unchanged under the same site" do
+      # Issue #2427 — `a = ["x"]; [1].each { a.map!(&:to_sym) }` holds Symbols, so the precise `String` is not kept.
+      it "gives a precise nominal on its own the arm under the same site" do
         precise = Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.nominal_of("String")])
-        expect(described_class.widen(precise, sites_of("a = []\n[1].each { |e| a.map!(&:to_sym) }\n"))).to eq(precise)
+        expect(described_class.widen(precise, sites_of("a = []\n[1].each { |e| a.map!(&:to_sym) }\n")))
+          .to eq(Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.untyped]))
       end
     end
 

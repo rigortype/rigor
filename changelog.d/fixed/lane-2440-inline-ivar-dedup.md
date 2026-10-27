@@ -1,0 +1,3 @@
+- **[rbs]** A project that commits `rbs-inline --output`'s RBS under `sig/` no longer loses every class with a `# @rbs @ivar: T` annotation to `RBS::InstanceVariableDuplicationError`. ([#2467](https://github.com/rigortype/rigor/pull/2467))
+  - An instance variable or class instance variable declared both in `sig/` and inline is reconciled like a method. When the types match, nothing is reported. When they differ, the `sig/` declaration binds and the inline one is reported at `:info`.
+  - The `rbs.coverage.definition-build-failed` warning names both colliding files. It names an inline-RBS source by its `.rb` file. Its advice now fits a duplicated instance variable, a superclass mismatch, a missing superclass, or a type applied with the wrong arguments.

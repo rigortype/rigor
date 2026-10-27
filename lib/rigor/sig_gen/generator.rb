@@ -265,26 +265,30 @@ module Rigor
 
       # The other half of {#demote_generic_reopenings}: every emittable candidate carries the header spelling of
       # each generic class the run may open a header for — its own class, the classes it is nested in, and the
-      # file's class shells and theirs — so the writer and `--format=print` spell the same header. Method bodies
-      # keep `untyped` for element types; nothing here names `E` in a member.
+      # file's class shells and theirs — so the writer and `--print` spell the same header. Method bodies keep
+      # `untyped` for element types; nothing here names `E` in a member.
       def stamp_generic_reopenings(candidates)
         loader = @environment&.rbs_loader
         return candidates if loader.nil?
 
         emittable = candidates.select { |c| Classification::EMITTABLE.include?(c.classification) }
-        names = emittable.flat_map { |c| [c.class_name, *c.class_shells] }.uniq.flat_map { |n| namespace_prefixes(n) }
-        spelled = names.uniq.each_with_object({}) do |name, acc|
-          params = loader.class_declaration_type_params(name)
-          acc[name] = "[#{params.map(&:to_s).join(', ')}]" if !params.empty? && params.all? { |p| plain_type_param?(p) }
-        end
+        spelled = header_type_params(loader, emittable.flat_map { |c| [c.class_name, *c.class_shells] })
         return candidates if spelled.empty?
 
-        spelled.freeze
         candidates.map do |candidate|
           next candidate unless Classification::EMITTABLE.include?(candidate.classification)
 
           candidate.with_class_type_params(spelled)
         end
+      end
+
+      # `{ class name => "[unchecked out E]" }` for every name in `names`, or a namespace it is nested in, whose
+      # loaded declaration is generic with plain parameters only.
+      def header_type_params(loader, names)
+        names.uniq.flat_map { |name| namespace_prefixes(name) }.uniq.each_with_object({}) do |name, acc|
+          params = loader.class_declaration_type_params(name)
+          acc[name] = "[#{params.join(', ')}]" if !params.empty? && params.all? { |p| plain_type_param?(p) }
+        end.freeze
       end
 
       def namespace_prefixes(class_name)

@@ -49,20 +49,26 @@ rule in `AGENTS.md` favour the side that only withholds diagnostics.
 Keep the frame-wide entry for every other receiver. This was the coordinator's ruling after
 review, and it is the only option that adds no report on correct code.
 
-Separately, the groups of a regex pattern narrow only when every `(?` in its source opens `(?:`,
-`(?<name>` or `(?'name'`. This is the coordinator's ruling after two review rounds found
-`unconditional_capture_groups` misreading inline flags, comments and lookarounds. Each misreading
-types `$N` as `String` where Ruby has nil. The allowlist gives up precision on atomic groups,
-lookbehinds and harmless inline flags (`(?i)`) in exchange for not narrowing any construct the walk
-was not written for.
+Separately, the block entry binds only what every match binds: `$~`, `$&`, and the pre- and
+post-match. It no longer types `$N` from the pattern. Three review rounds found
+`unconditional_capture_groups` misreading one source shape after another, each typing `$N` as
+`String` where Ruby has nil:
+
+- inline flags;
+- comments;
+- lookarounds;
+- nested character classes.
+
+The coordinator ruled to back out the per-group half rather than patch the walk again. Every `$N`
+in such a block reads `String?` until #2472 fixes the walk. The erubi report needs only `$~`.
 
 ## To undo
 
 - To stop narrowing a `Dynamic` receiver, drop the `dynamic` kind from
   `Narrowing.string_match_receiver?`.
 - To narrow another receiver, widen that predicate.
-- To narrow the groups of another `(?` construct, add its opener to
-  `Narrowing::PLAIN_GROUP_OPENER`, once `unconditional_capture_groups` reads it correctly.
+- To narrow the groups once #2472 lands, pass `unconditional_capture_groups` of a readable pattern
+  to `regex_match_predicate_scopes` in `Narrowing.yielded_match_scope`.
 
 The fixture `spec/integration/fixtures/regex_global_narrowing.rb` pins both choices:
 `match_block_erubi`, `match_block_project_receiver`, `match_block_project_gsub`,

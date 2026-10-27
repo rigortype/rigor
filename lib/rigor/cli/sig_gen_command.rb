@@ -61,13 +61,14 @@ module Rigor
 
         observation_roots = observation_roots(configuration, options)
         observations = collect_observations(configuration, options, observation_roots, paths)
+        mode = options.fetch(:mode).to_sym
         generator = SigGen::Generator.new(configuration: configuration, paths: paths,
                                           observations: observations,
                                           include_private: options.fetch(:include_private),
                                           effect_annotator: effect_annotator(configuration, paths, options),
-                                          overwrite: options.fetch(:overwrite))
+                                          overwrite: options.fetch(:overwrite),
+                                          target_writer: target_writer(configuration, options, mode))
         candidates = generator.run
-        mode = options.fetch(:mode).to_sym
 
         status = case mode
                  when :write then dispatch_write(candidates, configuration, options)
@@ -221,9 +222,9 @@ module Rigor
       # Issue #2437 — a superclass the project declares in source but this run wrote nothing for gets different
       # advice: no gem RBS is missing; the superclass's own methods could not be typed, or were not written.
       def report_unresolvable_superclasses(unresolvable, generator)
-        project, external = unresolvable.partition do |_name, superclass|
-          generator.source_declared_superclass?(superclass)
-        end
+        reports = unresolvable.map { |name, superclass| [name, *generator.unresolvable_superclass_report(superclass)] }
+        project, external = reports.partition { |_name, kind, _root| kind == :project }
+                                   .map { |rows| rows.to_h { |name, _kind, root| [name, root] } }
         report_unwritten_project_superclasses(project)
         return if external.empty?
 
@@ -333,6 +334,14 @@ module Rigor
 
         @err.puts("rigor sig-gen --check: #{refused.size} method(s) whose inline declaration and sig/ copy " \
                   "disagree; make them agree, or pass --overwrite to replace the sig/ member.")
+      end
+
+      # #2461 — only a run that writes or compares files asks whether the writer will accept each target: where a
+      # target lands depends on the working directory, and print, diff and JSON output must not.
+      def target_writer(configuration, options, mode)
+        return nil unless %i[write check].include?(mode)
+
+        build_writer(configuration, options, dry_run: true)
       end
 
       def build_writer(configuration, options, dry_run: false)

@@ -25,19 +25,34 @@ RSpec.describe Rigor::SigGen::Generator do
     "module Lib\n#{lines.map { |line| "  #{line}\n" }.join}end\n"
   end
 
-  def run_generator(files)
+  def write_files(files)
     files.each do |rel, contents|
       full = File.join(tmpdir, rel)
       FileUtils.mkdir_p(File.dirname(full))
       File.binwrite(full, contents)
     end
+  end
+
+  def run_generator(files)
+    write_files(files)
     Dir.chdir(tmpdir) do
-      generator = described_class.new(configuration: configuration, paths: ["lib"])
+      generator = described_class.new(configuration: configuration, paths: ["lib"], target_writer: target_writer)
       candidates = generator.run
-      mapper = Rigor::SigGen::PathMapper.new(configuration: configuration, project_root: tmpdir)
-      Rigor::SigGen::Writer.new(path_mapper: mapper).write_all(candidates)
+      Rigor::SigGen::Writer.new(path_mapper: path_mapper).write_all(candidates)
       [candidates, generator]
     end
+  end
+
+  # What `CLI::SigGenCommand#build_writer` builds for a `--write` run from the current directory.
+  def path_mapper
+    Rigor::SigGen::PathMapper.new(
+      configuration: configuration,
+      layout_index: Rigor::SigGen::LayoutIndex.new(signature_paths: configuration.signature_paths)
+    )
+  end
+
+  def target_writer
+    Rigor::SigGen::Writer.new(path_mapper: path_mapper, dry_run: true)
   end
 
   def sig(name)
@@ -79,7 +94,7 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(sig("base")).to include("class Base")
       expect_demoted(candidates, :tag)
       expect(generator.unresolvable_superclasses).to eq("Lib::Cdata" => "Lib::TextBase")
-      expect(generator.source_declared_superclass?("Lib::TextBase")).to be(true)
+      expect(generator.unresolvable_superclass_report("Lib::TextBase")).to eq([:project, "Lib::TextBase"])
       expect(validation_errors).to be_empty
     end
 
@@ -155,15 +170,39 @@ RSpec.describe Rigor::SigGen::Generator do
 
     # Run from another directory, every target maps outside that directory's `sig/`, which the writer refuses.
     it "demotes the subclass when the shell's target is outside the sig root" do
-      run_generator("lib/errors.rb" => errors, "lib/sub.rb" => subclass)
+      write_files("lib/errors.rb" => errors, "lib/sub.rb" => subclass)
       elsewhere = Dir.mktmpdir
       generator = Dir.chdir(elsewhere) do
-        described_class.new(configuration: configuration, paths: [File.join(tmpdir, "lib")]).tap(&:run)
+        described_class.new(configuration: configuration, paths: [File.join(tmpdir, "lib")],
+                            target_writer: target_writer).tap(&:run)
       ensure
         FileUtils.remove_entry(elsewhere)
       end
 
       expect(generator.unresolvable_superclasses).to eq("Lib::NotFound" => "Lib::Error")
+    end
+
+    it "demotes the subclass when the shell's target cannot be read" do
+      write_files("lib/errors.rb" => errors, "sig/errors.rbs" => in_lib("class Thing", "end"), "lib/sub.rb" => subclass)
+      target = File.join(tmpdir, "sig/errors.rbs")
+      File.chmod(0o000, target)
+      generator = Dir.chdir(tmpdir) do
+        described_class.new(configuration: configuration, paths: ["lib"], target_writer: target_writer).tap(&:run)
+      ensure
+        File.chmod(0o644, target)
+      end
+
+      expect(generator.unresolvable_superclasses).to eq("Lib::NotFound" => "Lib::Error")
+    end
+
+    # Print, diff and JSON runs pass no writer, and their output must not depend on the target files or the
+    # working directory: the class counts as written on its candidate alone, as before #2461.
+    it "keeps the subclass when no target writer is given, whatever the target" do
+      write_files("lib/errors.rb" => errors, "sig/errors.rbs" => in_lib("class Thing", "  def y: () ->", "end"),
+                  "lib/sub.rb" => subclass)
+      generator = Dir.chdir(tmpdir) { described_class.new(configuration: configuration, paths: ["lib"]).tap(&:run) }
+
+      expect(generator.unresolvable_superclasses).to be_empty
     end
 
     # A guard (control): a parseable existing target is updated with the shell, and the subclass rests on it.

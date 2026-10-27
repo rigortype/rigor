@@ -28,16 +28,25 @@ for the trade-off to be recorded here.
   #2438 false positive. Measured on a fixture: with an empty `sig/` declaration, `TextBase.new.nope` fires; without
   it, it is silent.
 
+- **Where the target check applies (review round 2).** The writer takes its sig root from the working
+  directory, so asking whether it accepts a target makes the answer depend on where the command runs. Applied in
+  every mode, `--print` and `--format=json` from a subdirectory, or from outside the project with `--config`,
+  demoted every project subclass. The check therefore runs only in `--write` and `--check`, the modes that hand
+  the candidates to a writer. Print, diff and JSON count a class with a candidate the writer is sure to write,
+  as before #2461, and do not depend on the working directory. The cost is that in those modes a superclass on an
+  unparseable or mis-encoded `sig/` file still counts, so they can show a subclass `--write` would skip.
+
 ## Decision
 
 Demote. A correct but thin result beats a collapsed or falsely closed one (ADR-5, and AGENTS.md's false-positive
-rule). It follows #2454, which already counted a shell only when its file is written; this extends the same rule
-to the class's own candidates and to the target file. The sig-gen warning now tells a superclass the project
-declares (and would close if written) apart from one no source or RBS declares, and advises typing the superclass,
-fixing its `sig/` file, or hand-writing its declaration, instead of `rbs collection install`.
+rule). It follows #2454, which already counted a shell only when its file is written. This extends the same rule
+to the class's own candidates and, in `--write` and `--check` only, to the target file. The sig-gen warning now
+tells a superclass the project declares (and would close if written) apart from one no source or RBS declares.
+For the first it advises typing the superclass, fixing its `sig/` file, or hand-writing its declaration, instead
+of `rbs collection install`. For the second it names the first class on the chain the project does not declare.
 
 ## To undo
 
 Restore the `acc << candidate.class_name` line in `declared_by_run` and drop `written?`'s target check in
-`lib/rigor/sig_gen/generator.rb`. The subclasses then come back, with the `NoSuperclassFoundError` the issue
+`lib/rigor/sig_gen/generator.rb` (and the `target_writer:` the CLI passes it in `--write` and `--check`). The subclasses then come back, with the `NoSuperclassFoundError` the issue
 reports. The warning split in `CLI::SigGenCommand#report_unresolvable_superclasses` can stay either way.

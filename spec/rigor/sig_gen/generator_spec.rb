@@ -2836,8 +2836,7 @@ RSpec.describe Rigor::SigGen::Generator do
         end
       RUBY
 
-      # From the fixture root, so `sig/` is a root the writer would write `Record` into (#2461).
-      candidates = Dir.chdir(tmpdir) { generator(paths: [path]).run }
+      candidates = generator(paths: [path]).run
 
       expect(skipped_for(candidates, :unresolvable_superclass)).to be_empty
       expect(candidates.map(&:class_name).uniq.sort).to eq(["Admin::Record", "Record"])
@@ -2959,8 +2958,7 @@ end
         end
       RUBY
 
-      # From the fixture root, so `sig/` is a root the writer would write `Base` into (#2461).
-      candidates = Dir.chdir(tmpdir) { generator(paths: [path]).run }
+      candidates = generator(paths: [path]).run
 
       expect(emitted(candidates)).to contain_exactly(["Base", :target_class], ["RecordList", :target_class])
     end

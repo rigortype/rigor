@@ -612,12 +612,12 @@ module Rigor
       # frame ({MatchRebinding::YieldingMatch}), on `=~`'s terms: `$~` a `MatchData`, `$&` and the pre- and post-match
       # a `String`, and, when the pattern is a regex the analyzer reads (a literal or a `Constant[Regexp]`, not
       # `//x`), each unconditional group's `$N` and `$+` a `String`. Any other pattern — a String, an untyped value —
-      # leaves the groups unbound, so they read the RBS `String?`. So does a source the group walk misreads
-      # ({UNREAD_GROUP_SOURCE}).
+      # leaves the groups unbound, so they read the RBS `String?`. So does a source with a `(?` construct other than a
+      # non-capturing or named group ({#plain_group_source?}).
       def yielded_match_scope(scope, pattern_node)
         pattern = regex_operand_pattern(pattern_node, scope)
         unconditional =
-          if pattern.is_a?(RegexMatchPattern) && !pattern.extended && !UNREAD_GROUP_SOURCE.match?(pattern.source)
+          if pattern.is_a?(RegexMatchPattern) && !pattern.extended && plain_group_source?(pattern.source)
             unconditional_capture_groups(pattern.source)
           else
             Set.new
@@ -626,11 +626,19 @@ module Rigor
         truthy
       end
 
-      # A source {#unconditional_capture_groups} misreads: an inline flag group that turns on extended mode
-      # (`(?x)`, `(?ix:…)`), whose comments may hold a `(`, and the absent operator `(?~…)`, whose groups take part
-      # in no match Ruby reports. Read over the raw source, so an escaped `\(?x)` is declined too.
-      UNREAD_GROUP_SOURCE = /\(\?[imx]*x[imx]*(?:-[imx]*)?[:)]|\(\?~/
-      private_constant :UNREAD_GROUP_SOURCE
+      # The `(?` openers {#unconditional_capture_groups} reads correctly: `(?:`, `(?<name>` and `(?'name'`. Anything
+      # else — an inline flag group, which may turn on extended mode with any charset letter beside it (`(?ax)`), a
+      # comment that may hold a paren (`(?#(b)`), a lookaround, whose groups do not take part in the match
+      # (`(?!(b))`), the absent operator, an atomic group, a conditional — is not read.
+      PLAIN_GROUP_OPENER = /\G\?(?::|<[^=!]|')/
+      private_constant :PLAIN_GROUP_OPENER
+
+      # True when every `(?` outside an escape and a character class opens a group {PLAIN_GROUP_OPENER} admits.
+      def plain_group_source?(source)
+        each_structural_char(source) do |pos, chr|
+          break false if chr == "(" && source[pos + 1] == "?" && !source.match?(PLAIN_GROUP_OPENER, pos + 1)
+        end != false
+      end
 
       # Issue #2443 — true when every member of `type` is a String (a project subclass included) or a `Dynamic` that
       # is untyped or may hold only Strings, Symbols and nil ({#match_member_kind}). A `nil` member never runs the

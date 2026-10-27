@@ -2713,14 +2713,25 @@ def match_block_string_subclass(raw)
   ms.scan(/(a)/) { m = Regexp.last_match; m.begin(0) }
 end
 
-# A source the group walk misreads narrows no group: an inline flag group that turns on extended mode, and the absent
-# operator (Ruby: `$2` is nil in the first two and `$1` in the third, for `match_block_unread_groups("a", "b")`).
+# Only a source whose every `(?` opens a non-capturing or a named group narrows its groups; any other construct
+# leaves them `String?`. The group walk misreads an inline flag group that turns on extended mode, the absent
+# operator, a comment holding a paren and a group in a negative lookahead (Ruby, for `match_block_unread_groups("a",
+# "b")`: `$2` is nil in the first two, `$1` in the third, `$2` in the fourth and `$1` in the fifth), and the
+# allowlist declines an atomic group too, though its group does take part (Ruby: `$1` is "a" there).
 def match_block_unread_groups(str, other)
-  str.gsub(/(?x) (a) # (b)
-/) { assert_type("String?", $2) }
+  str.gsub(/(?ax) (a) # (b)
+/) { w = $2; w.upcase } # GENUINE-NIL
   str.gsub(/(a)(?x) # (b)
 /) { assert_type("String?", $2) }
   other.gsub(/(?~(a))/) { assert_type("String?", $1) }
+  str.gsub(/(a)(?#(b)/) { w = $2; w.upcase } # GENUINE-NIL
+  str.gsub(/(?!(b))a/) { w = $1; w.upcase } # GENUINE-NIL
+  str.gsub(/(?>(a))/) { assert_type("String?", $1) }
+end
+
+# A named group still narrows (Ruby: `match_block_named_groups("ab")` returns "AB").
+def match_block_named_groups(str)
+  str.gsub(/(?<x>a)(?'y'b)(?:c)?/) { w = $2; $1.upcase + w.upcase }
 end
 
 # rubocop:enable Style/PerlBackrefs

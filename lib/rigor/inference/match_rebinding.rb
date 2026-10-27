@@ -370,9 +370,9 @@ module Rigor
       # code that rebinds it ({GuardRebinding.block_entry}).
       #
       # Issue #1371 — a proc's body ({.proc_body?}) runs whenever the proc is called, not where it is written, so it
-      # enters with the match globals unbound. Issue #2443 — the block of a call that matches before every yield (`scan`, `gsub`,
-      # `sub`, …) enters with that call's own match edge, laid over the entry above ({YieldingMatch}); a match its
-      # body runs still rebinds them through the statement-level rules.
+      # enters with the match globals unbound. Issue #2443 — the block of a call that matches before every yield
+      # (`scan`, `gsub`, `sub`, …) enters with that call's own match edge, laid over the entry above
+      # ({YieldingMatch}); a match its body runs still rebinds them through the statement-level rules.
       def block_entry(scope, block_node, call_node = nil)
         operand_scope = scope
         scope = GuardRebinding.block_entry(scope, block_node, call_node)

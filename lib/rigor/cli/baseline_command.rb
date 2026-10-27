@@ -25,6 +25,7 @@ module Rigor
     class BaselineCommand < Command # rubocop:disable Metrics/ClassLength
       EXIT_USAGE = 64
       DEFAULT_BASELINE_PATH = ".rigor-baseline.yml"
+      MAX_UNBASELINEABLE_FILES = 10
 
       SUBCOMMANDS = %w[generate regenerate dump drift prune].freeze
 
@@ -100,8 +101,6 @@ module Rigor
         0
       end
 
-      MAX_UNBASELINEABLE_FILES = 10
-
       # Diagnostics the baseline cannot key never enter the file, so the next `rigor check` surfaces them. Say so,
       # with how many, why and where; the exit status stays 0 (the file was written as asked).
       def report_unbaselineable(unkeyable)
@@ -109,10 +108,12 @@ module Rigor
 
         no_rule, no_path = unkeyable.partition { |d| d.qualified_rule.nil? }
         parts = []
-        parts << "#{no_rule.size} diagnostic(s) have no rule (parse errors in #{unbaselineable_files(no_rule).size} file(s))" \
-          unless no_rule.empty?
+        unless no_rule.empty?
+          parts << "#{no_rule.size} diagnostic(s) have no rule " \
+                   "(parse errors in #{unbaselineable_files(no_rule).size} file(s))"
+        end
         parts << "#{no_path.size} diagnostic(s) have no path" unless no_path.empty?
-        @err.puts("rigor: #{parts.join("; ")} and cannot be baselined; fix them or add the files to exclude:")
+        @err.puts("rigor: #{parts.join('; ')} and cannot be baselined; fix them or add the files to exclude:")
         files = unbaselineable_files(no_rule)
         files.first(MAX_UNBASELINEABLE_FILES).each { |f| @err.puts("  #{f}") }
         extra = files.size - MAX_UNBASELINEABLE_FILES

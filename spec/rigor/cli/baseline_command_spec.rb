@@ -225,7 +225,7 @@ RSpec.describe Rigor::CLI::BaselineCommand do
         covered = YAML.safe_load_file(File.join(tmpdir, ".rigor-baseline.yml"))["ignored"].sum { |r| r["count"] }
         expect(status).to eq(0)
         expect(err).to match(/\((\d+) bucket\(s\) covering #{covered} diagnostic\(s\); match-mode: rule\)/)
-        expect(err).to match(/rigor: \d+ diagnostic\(s\) have no rule \(parse errors in 2 file\(s\)\) and cannot be baselined/)
+        expect(err).to match(/rigor: \d+ diagnostic\(s\) have no rule \(parse errors in 2 file\(s\)\) and cannot be/)
         expect(err).to include("  lib/bad.rb\n", "  lib/bad2.rb\n")
       end
     end

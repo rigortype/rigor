@@ -52,7 +52,7 @@ RSpec.describe Rigor::SigGen::Generator do
 
   def declaration_errors(name, entry, builder, validator)
     errors = []
-    [:build_instance, :build_singleton].each do |build|
+    %i[build_instance build_singleton].each do |build|
       builder.public_send(build, name)
     rescue RBS::BaseError => e
       errors << e.class

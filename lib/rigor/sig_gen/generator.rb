@@ -1977,7 +1977,7 @@ module Rigor
       # Whether a type name written as `name` resolves to a constant the run can see: one the RBS environment
       # declares, or a class or module the project's source declares, whether or not `sig/` has caught up with it.
       def declared_constant?(name)
-        class_known?(name) || project_tables.fetch(:discovered_classes, {}).key?(name)
+        class_known?(name) || Reflection.discovered_class?(name, scope: file_base_scope(@environment))
       end
 
       # Issue #1002 — the reverse of {#translate_method_type_return}'s `alias_expander:`. Folding happens here,

@@ -69,7 +69,8 @@ Roughly the top ~40 selectors plus their close neighbours, across:
   `#extract!`. `#symbolize_keys` / `#to_options` map the key type per
   member, as ActiveSupport does (`key.to_sym rescue key`): a `String` or
   `Symbol` key reads as `Symbol`, an `Integer` or `Float` key stays as it
-  is, and a key Rigor cannot decide reads as `untyped`. So
+  is (unless the project defines `to_sym` on it), and any other key reads
+  as `untyped`. So
   `Hash[String, Integer]` gives `Hash[Symbol, Integer]` and
   `Hash[Integer, Integer]` gives `Hash[Integer, Integer]`. Without the
   plugin, on the activesupport overlay alone, the key reads `untyped`.

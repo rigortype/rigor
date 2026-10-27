@@ -516,8 +516,8 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
 
       it "maps a String subclass key to Symbol" do
         sig = "class MyStr < String\nend\nclass Probe\n  def f: (Hash[MyStr, Integer]) -> void\nend\n"
-        source = "class MyStr < String\nend\nclass Probe\n" \
-                 "  def f(h)\n    Rigor.dump_type(h.symbolize_keys)\n  end\nend\n"
+        source = "class MyStr < String\nend\nclass Probe\n  " \
+                 "def f(h)\n    Rigor.dump_type(h.symbolize_keys)\n  end\nend\n"
         result = run_plugin(source: source, files: { "sig/probe.rbs" => sig }, signature_paths: ["sig"])
 
         expect(dumps(result)).to eq(["Hash[Symbol, Integer]"])

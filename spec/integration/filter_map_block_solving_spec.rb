@@ -167,4 +167,22 @@ RSpec.describe "filter_map block-return solving", type: :runner do
     RUBY
     expect(dumped(source, sig: sig)).to eq(["Array[Dynamic[top]]"])
   end
+
+  # A filter_map result is a precise Array (`Array[true]`, `Array["x"]`), and a later `<<` / `fill` / `concat` of a value
+  # outside it must re-grow the element (#2361) rather than leave the pin, or the `==` read folds always-falsey on a
+  # program that prints. Ruby prints 1, 2, 3 and 7 for `ints = [1, 0, 2]`.
+  it "re-grows a filter_map result that a later write widens" do
+    sig = { "repro.rbs" => "class Repro\n  def run: (Array[Integer] ints) -> void\nend\n" }
+    source = <<~RUBY
+      class Repro
+        def run(ints)
+          a = ints.filter_map { |i| i.positive? }; a << false; puts 1 if a.last == false
+          s = ints.filter_map { |i| "x" if i > 0 }; s << "y"; puts 2 if s.last == "y"
+          t = ints.filter_map { |i| :keep if i > 0 }; t.fill(:drop); puts 3 if t.first == :drop
+          b = ints.filter_map { |i| i.zero? }; b.concat([false]); puts 7 if b.last == false
+        end
+      end
+    RUBY
+    expect(analyze(source, sig: sig).diagnostics.map { |d| [d.line, d.rule.to_s] }).to eq([])
+  end
 end

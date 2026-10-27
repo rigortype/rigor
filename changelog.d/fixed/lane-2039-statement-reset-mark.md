@@ -1,0 +1,3 @@
+- **[inference]** A method call on `self` between a nil guard on an instance variable and its read no longer brings back a false `possible nil receiver` report. ([#2469](https://github.com/rigortype/rigor/pull/2469))
+  - Applies when Rigor cannot prove which instance variables the called method writes, as with `return unless @tag; refresh_items; @tag.upcase`.
+  - A called method that Rigor can see assigns the variable, as `def clear_tag = (@tag = nil)` does, still reports.

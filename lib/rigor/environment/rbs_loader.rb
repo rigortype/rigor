@@ -1921,6 +1921,43 @@ module Rigor
       private :assign_reopen_inputs
       private :ruby_library_roots
 
+      # Issue #2438 — true when every RBS declaration of `class_name` is the project's own
+      # ({#project_authored_classes}) and none of them declares a member of the class itself: no method, attribute,
+      # alias or mixin, only nested class / module / constant / type declarations (and variable or visibility
+      # lines, which add no method). `rigor sig-gen --write` writes exactly this for a namespace whose source
+      # lists no methods of its own (`module NS; class Foo; …; end; end`), while the namespace's methods live
+      # where the generator cannot see them: a file outside `paths:`, a mixin, a hook. Such a declaration
+      # names the class without describing its surface. Bundled (core, stdlib, gem) declarations never count.
+      def memberless_project_class?(class_name)
+        (@state[:memberless_project_classes] ||= build_memberless_project_classes)
+          .include?(class_name.to_s.delete_prefix("::"))
+      end
+
+      SURFACE_MEMBERS = [
+        ::RBS::AST::Members::MethodDefinition, ::RBS::AST::Members::Attribute,
+        ::RBS::AST::Members::Alias, ::RBS::AST::Members::Mixin
+      ].freeze
+      private_constant :SURFACE_MEMBERS
+
+      def build_memberless_project_classes
+        authored = project_authored_classes
+        environment = env
+        return Set.new.freeze if authored.empty? || environment.nil?
+
+        environment.class_decls.each_with_object(Set.new) do |(rbs_name, entry), acc|
+          name = rbs_name.to_s.delete_prefix("::")
+          next unless authored.include?(name)
+
+          members = self.class.entry_declarations(entry).flat_map do |decl|
+            decl.respond_to?(:members) ? decl.members : []
+          end
+          acc << name if members.none? { |member| SURFACE_MEMBERS.any? { |kind| member.is_a?(kind) } }
+        end.freeze
+      rescue ::RBS::BaseError
+        Set.new.freeze
+      end
+      private :build_memberless_project_classes
+
       # The class / module names every one of whose declarations is the project's own
       # ({#project_authored_entry?}, which {#inline_only_entry?} asks behind its inline-only gate).
       def project_authored_classes

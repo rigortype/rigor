@@ -832,6 +832,7 @@ module Rigor
           return nil if method_def
 
           return nil if last_resort_surface_answers?(receiver_type, class_name, call_node, scope, kind, lexical_sites)
+          return nil if open_project_singleton?(receiver_type, class_name, call_node, scope)
           return nil if subclass_instance_may_answer?(rendered_receiver, class_name, call_node.name, scope,
                                                       call_node.receiver)
 
@@ -1523,6 +1524,33 @@ module Rigor
             CORE_OVERLAY_OPEN_RECEIVERS.include?(bare_name) ||
             (GEM_OVERLAY_OPEN_RECEIVERS.include?(bare_name) && gem_overlay_loaded?(scope)) ||
             ruby_library_reopen?(class_name, scope)
+        end
+
+        # Issue #2438 — a class-method call on a class the project's own signatures name but whose source leaves
+        # the singleton surface open. Before `rigor sig-gen --write` such a class was source-only and an
+        # unresolved call on it was silent; the sidecar must not turn the same call into a finding. Two shapes:
+        #
+        # - `C.instance` where `C` includes the stdlib `Singleton`: the answer is
+        #   `SingletonMixinDispatch.answers?`, the predicate the typer itself uses, so the rule never reports a
+        #   call the engine typed. The class's other members are irrelevant: the mixin's hook defines `instance`.
+        # - every project declaration of `C` is member-less (`RbsLoader#memberless_project_class?`), the
+        #   wrapper `module NS` sig-gen writes around a nested class. The namespace's own methods live outside
+        #   what the generator saw (a file outside `paths:`, a mixin, a hook), so its singleton surface is
+        #   not enumerable from the declaration. Instance-side calls keep being checked; declaring any member
+        #   re-closes the class.
+        def open_project_singleton?(receiver_type, class_name, call_node, scope)
+          return false unless receiver_type.is_a?(Type::Singleton)
+
+          Inference::MethodDispatcher::SingletonMixinDispatch.answers?(
+            scope, receiver_type, call_node.name, call_node.arguments.nil?
+          ) || memberless_project_class?(class_name, scope)
+        end
+
+        def memberless_project_class?(class_name, scope)
+          loader = scope.environment&.rbs_loader
+          return false if loader.nil? || !loader.respond_to?(:memberless_project_class?)
+
+          loader.memberless_project_class?(class_name)
         end
 
         # Issue #2174 — `class Matrix` reopened with one `#:`-annotated method, and no `matrix` signatures

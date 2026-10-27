@@ -33,18 +33,22 @@ module Rigor
 
         # @return the instance type of `C` for `C.instance`, or nil to decline.
         def try_dispatch(context)
-          return nil unless context.method_name == SELECTOR
-          return nil unless context.args.empty?
-
           receiver = context.receiver
-          return nil unless receiver.is_a?(Type::Singleton)
-
-          scope = context.scope
-          return nil if scope.nil?
-          return nil unless includes_singleton_mixin?(scope, receiver.class_name)
-          return nil if project_singleton_shadow?(scope)
+          return nil unless answers?(context.scope, receiver, context.method_name, context.args.empty?)
 
           Type::Combinator.nominal_of(receiver.class_name)
+        end
+
+        # Issue #2438 — the one predicate behind {try_dispatch} and `CheckRules#undefined_method_diagnostic`, so the
+        # typer and the `call.undefined-method` rule cannot disagree about `C.instance`: a call this tier types is
+        # never reported as undefined, whatever a project sidecar of `C` lists.
+        def answers?(scope, receiver, method_name, no_arguments)
+          return false unless method_name == SELECTOR && no_arguments
+          return false unless receiver.is_a?(Type::Singleton)
+          return false if scope.nil?
+          return false unless includes_singleton_mixin?(scope, receiver.class_name)
+
+          !project_singleton_shadow?(scope)
         end
 
         def includes_singleton_mixin?(scope, class_name)

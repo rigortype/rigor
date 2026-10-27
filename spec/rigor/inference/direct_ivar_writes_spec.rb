@@ -27,7 +27,8 @@ RSpec.describe Rigor::Inference::DirectIvarWrites do
     ["def r = (@tag = nil)", "def r = (@tag = @peer&.tag)", "def r = (@tag = (@peer if ready?))",
      "def r = (@tag = ready? ? 'a' : nil)", "def r = (@tag = (case @k when 1 then 'a' end))",
      "def r = (@tag = (unless ready? then 'a' end))", "def r = (@tag = nil if ready?)",
-     "def r = (@tag = (if ready? then 'a' elsif done? then nil else 'b' end))"].each do |body|
+     "def r = (@tag = (if ready? then 'a' elsif done? then nil else 'b' end))",
+     "def r = (@tag = (if ready? then else 'b' end))"].each do |body|
       expect(writes(body)).to eq(Set[:@tag]), body
     end
   end
@@ -51,7 +52,9 @@ RSpec.describe Rigor::Inference::DirectIvarWrites do
     expect(writes("def r = (@a, @tag = 1, 's')")).to eq(Set[])
     expect(writes("def r = (@a, @tag = 1, nil)")).to eq(Set[:@tag])
     expect(writes("def r = (@a, @tag = [nil, 's'])")).to eq(Set[:@a])
+    expect(writes("def r = (@a, @b, @tag = 1, 2)")).to eq(Set[:@tag])
     expect(writes("def r = (@a, @tag = 1, *rest)")).to eq(Set[])
+    expect(writes("def r = (@a, @tag = *pre, nil)")).to eq(Set[])
     expect(writes("def r = (@a, @tag = pair)")).to eq(Set[])
   end
 
@@ -74,6 +77,7 @@ RSpec.describe Rigor::Inference::DirectIvarWrites do
     expect(writes("include Resetter", prelude: prelude)).to eq(Set[:@tag])
   end
 
+  # Guard: `Scope#user_def_for` holds instance-side defs only, so the receiver check in `def_node` is a second fence.
   it "does not take a singleton def as the callee" do
     expect(writes("def self.r = (@tag = nil)")).to eq(Set[])
   end

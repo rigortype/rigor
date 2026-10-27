@@ -1497,11 +1497,24 @@ module Rigor
           # to {#shared_value_class} where both sides have one, and to `Dynamic[top]` otherwise. The key
           # stays in the map either way so {#compose_arg_type_vars} does not bind the variable from the
           # argument alone.
+          #
+          # A block return spelled as the variable beside falsey arms (`(nil | false | U)`, `U?`) solves the
+          # variable from the block's type less those arms ({#strip_falsey_arms}): `filter_map` keeps only
+          # the block's truthy values, so a block answering `String | nil` binds `U` to `String`. The strip
+          # trusts the declared method to discard those values, so a receiver class whose Ruby source
+          # defines the method itself leaves the variable unbound: `def filter_map(&b) = map(&b).compact`
+          # under an `include Enumerable[Integer]` declaration keeps `false`, and `Array[true]` would fold
+          # `b.last == false` always-falsey on correct code.
           def compose_block_type_vars(method_type, type_vars, block_type, args, scope:, call_node:, call_site:)
             return type_vars if block_type.nil?
 
             block_var_name = method_type_block_return_variable(method_type)
             return type_vars if block_var_name.nil?
+
+            arms = block_return_falsey_arms(method_type)
+            return type_vars if arms.any? && project_redefined?(scope, call_site)
+
+            block_type = strip_falsey_arms(block_type, arms)
             return type_vars.merge(block_var_name => block_type) unless
               argument_reaches_variable?(method_type, block_var_name, args)
 
@@ -1836,14 +1849,78 @@ module Rigor
           end
 
           def block_return_variable(method_type)
+            return_type = block_return_type(method_type)
+            return return_type if return_type.is_a?(RBS::Types::Variable)
+
+            falsey_armed_variable(return_type)&.first
+          end
+
+          def block_return_type(method_type)
             block = method_type.respond_to?(:block) ? method_type.block : nil
             return nil if block.nil?
 
             fun = block.type
-            return nil unless fun.respond_to?(:return_type)
+            fun.respond_to?(:return_type) ? fun.return_type : nil
+          end
 
-            return_type = fun.return_type
-            return_type.is_a?(RBS::Types::Variable) ? return_type : nil
+          # The falsey arms ({#falsey_armed_variable}) the block's declared return spells beside its variable;
+          # empty for a bare variable.
+          def block_return_falsey_arms(method_type)
+            falsey_armed_variable(block_return_type(method_type))&.last || EMPTY_FALSEY_ARMS
+          end
+
+          EMPTY_FALSEY_ARMS = [].freeze
+          private_constant :EMPTY_FALSEY_ARMS
+
+          # A block return that is one type variable beside `nil` and/or `false` and nothing else —
+          # `Enumerable#filter_map`'s `(nil | false | U)`, or `U?` — as `[variable, arms]`, the arms a subset
+          # of `[:nil, :false]`. Anything else, `bool` among them, is nil: a block return must only lose
+          # values the method itself discards, and a `false`-only arm has no carrier that removes `false`
+          # alone from a `Dynamic` block type, so it declines too.
+          def falsey_armed_variable(return_type)
+            members =
+              case return_type
+              when RBS::Types::Optional then [return_type.type, RBS::Types::Bases::Nil.new(location: nil)]
+              when RBS::Types::Union then return_type.types
+              else return nil
+              end
+            variables, arms = members.partition { |member| member.is_a?(RBS::Types::Variable) }
+            return nil unless variables.size == 1
+
+            arm_names = arms.map { |arm| falsey_arm_name(arm) }
+            return nil if arm_names.include?(nil) || !arm_names.include?(:nil)
+
+            [variables.first, arm_names.uniq]
+          end
+
+          def falsey_arm_name(arm)
+            case arm
+            when RBS::Types::Bases::Nil then :nil
+            when RBS::Types::Literal then arm.literal == false ? :false : nil # rubocop:disable Lint/BooleanSymbol
+            end
+          end
+
+          # The block's type less the falsey values the declared return spells beside the variable: its
+          # truthy fragment for `nil | false`, its non-nil fragment for `nil` alone. A `Dynamic` block type
+          # passes through unchanged, so an untyped block still binds `Dynamic[top]`. A block that answers
+          # only the stripped values binds `bot`, so `filter_map { nil }` is `Array[bot]`: an Array that
+          # holds no element.
+          # Whether the receiver class's Ruby source defines the dispatched method, the probe
+          # {#arg_binding_permitted?} also reads. Without a scope there is no discovery to consult.
+          def project_redefined?(scope, call_site)
+            return false if scope.nil?
+
+            class_name, method_name, kind = call_site
+            return false if method_name.nil?
+
+            scope.discovered_method?(class_name, method_name, kind)
+          end
+
+          def strip_falsey_arms(block_type, arms)
+            return block_type if arms.empty?
+            return Narrowing.narrow_truthy(block_type) if arms.include?(:false) # rubocop:disable Lint/BooleanSymbol
+
+            Narrowing.narrow_non_nil(block_type)
           end
 
           # ----- block parameter probe (Phase C sub-phase 1) -----

@@ -1,0 +1,3 @@
+- **[engine]** Writing a project `sig/` with `rigor sig-gen` no longer makes `call.undefined-method` report class-method calls that the source leaves open. ([#2477](https://github.com/rigortype/rigor/pull/2477))
+  - `C.instance` on a class that includes `Singleton` is no longer reported, whatever the class's declaration lists.
+  - A class method called on a namespace that the project's own signatures declare with no methods, attributes, aliases or mixins is no longer reported, so a wrapper `module NS` around a nested class no longer hides methods defined outside `paths:`. A typo on such a namespace is no longer reported either; declaring any member of it restores the check.

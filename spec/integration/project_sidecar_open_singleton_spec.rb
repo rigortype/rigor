@@ -128,8 +128,8 @@ RSpec.describe "a project sidecar sig and an open singleton surface (#2438)" do
     end
 
     it "still reports `instance` when a nested project Singleton is prepended" do
-      write("lib/a.rb", "require \"singleton\"\nmodule N\n  module Singleton\n  end\n  class P\n    prepend Singleton\n    " \
-                        "def x = 1\n  end\nend\nN::P.instance\n")
+      write("lib/a.rb", "require \"singleton\"\nmodule N\n  module Singleton\n  end\n  class P\n    " \
+                        "prepend Singleton\n    def x = 1\n  end\nend\nN::P.instance\n")
       write("sig/a.rbs", "module N\n  module Singleton\n  end\n  class P\n    def x: () -> Integer\n  end\nend\n")
 
       expect(undefined_messages(run_check)).to eq(["undefined method `instance' for singleton(N::P)"])

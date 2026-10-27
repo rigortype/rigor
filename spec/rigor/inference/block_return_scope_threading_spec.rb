@@ -1085,16 +1085,20 @@ RSpec.describe "block-return scope threading", type: :runner do
         RUBY
       end
 
-      it "keeps it beside a store into another instance variable" do
-        # `@log << s` reaches `@log`, never `@pool`, although neither is a binding the fold widens.
+      it "keeps it beside a store into an instance variable" do
+        # `@log << s` reaches `@log`, never `pool`, although `@log` is no binding the fold widens. The memo table
+        # is a local the method binds: on an instance variable the value position widens whatever the marks say
+        # (#2354), since another call may have filled `@pool`.
         expect(dumped_type(<<~RUBY)).to eq('"b"')
           class Registry
             def initialize
               @log = []
-              @pool = {}
             end
 
-            def run = dump_type(%w[a b].find { |s| @log << s; (@pool[s] ||= s) == "b" })
+            def run
+              pool = {}
+              dump_type(%w[a b].find { |s| @log << s; (pool[s] ||= s) == "b" })
+            end
           end
         RUBY
       end

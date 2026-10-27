@@ -2385,7 +2385,9 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
 
     it "reads the nested memo `(@m ||= {})[key] ||= v` as the rvalue" do
       # `Effects::Registry.for_configuration`: the receiver is typed, but a non-literal key's slot is not.
-      expect(scope.type_of(parse_expression("(@m ||= {})[[rand, rand]] ||= 7")).describe).to eq("7")
+      # A construction rvalue: the receiver is no local this body binds, so a literal `7` reads `7 | Dynamic[top]`
+      # (#2354).
+      expect(scope.type_of(parse_expression("(@m ||= {})[[rand, rand]] ||= Object.new")).describe).to eq("Object")
     end
 
     it "reads a receiver bound to Dynamic the same way, since its slot is just as untracked" do

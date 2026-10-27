@@ -37,6 +37,7 @@ module Rigor
           @scans = nil
           @last_line_closure = nil
           @last_line_fallback = nil
+          @body_bindings = nil
         end
 
         def matching_closure?(scope = nil)
@@ -86,6 +87,16 @@ module Rigor
         def forwarded_block?(name)
           @forwarded_block = forwarded_block_name || false if @forwarded_block.nil?
           @forwarded_block == name
+        end
+
+        # Issue #2354 — whether the frame's own body binds the local `name` (a write, or a block's, lambda's,
+        # `rescue`'s or pattern's own parameter or target), as against a local the method's parameters alone bind.
+        # Kept per name for the rest of the body.
+        def body_binds_local?(name)
+          bound = (@body_bindings ||= {})
+          return bound[name] if bound.key?(name)
+
+          bound[name] = binds_local?(@body, name)
         end
 
         # Issue #1157 — whether a call's `&expr` block argument hands on the block THIS method was called with: the

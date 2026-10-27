@@ -68,6 +68,62 @@ RSpec.describe "index `||=` in value position (memoization idiom)", type: :runne
     expect(diagnostics_for(source).map(&:first)).to eq(["call.undefined-method"])
   end
 
+  # Issue #2354 — a receiver whose type passes the #544 test but whose gradual slot another call may have filled:
+  # an instance variable seeded `{}` in another method, a parameter declared `Hash[Symbol, untyped]`, or the value
+  # of an outer `||=`. Only a local the current body binds keeps the literal reading.
+  describe "a receiver that is no local the current body binds" do
+    it "reports nothing on an instance variable another method seeds" do
+      # Runtime: after `@cache[:k] = {name: "s"}`, `a(:k)` returns "S"; after `@cache[:k] = "s"`, `b(:k)` returns "S".
+      expect(diagnostics_for(<<~RUBY)).to eq([])
+        class Memo
+          def initialize
+            @cache = {}
+          end
+
+          def a(k) = (@cache[k] ||= {})[:name].upcase
+          def b(k) = (@cache[k] ||= 1).upcase
+        end
+      RUBY
+    end
+
+    it "reports nothing on a parameter declared with an untyped value" do
+      # Runtime: `c({k: {name: "s"}}, :k)` and `d({k: "s"}, :k)` return "S".
+      result = analyze("class T\n  def c(h, k) = (h[k] ||= {})[:name].upcase\n  " \
+                       "def d(h, k) = (h[k] ||= 1).upcase\nend\n",
+                       sig: { "t.rbs" => "class T\n  def c: (Hash[Symbol, untyped], Symbol) -> untyped\n  " \
+                                         "def d: (Hash[Symbol, untyped], Symbol) -> untyped\nend\n" })
+      expect(result.diagnostics.reject { |d| d.severity.to_s == "info" }.map(&:rule)).to eq([])
+    end
+
+    it "reports nothing on the inner `||=` of an inline nest" do
+      # Runtime: `nest_a({x: {y: {name: "s"}}}, :x, :y)` and `nest_b({x: {y: "s"}}, :x, :y)` return "S".
+      source = "def nest_a(h, a, b) = ((h[a] ||= {})[b] ||= {})[:name].upcase\n" \
+               "def nest_b(h, a, b) = ((h[a] ||= {})[b] ||= 1).upcase\n"
+      expect(diagnostics_for(source)).to eq([])
+    end
+
+    it "unions a literal scalar rvalue with the unknown slot on an instance variable" do
+      source = "class M\n  def initialize = @c = {}\n  def b(k) = dump_type(@c[k] ||= 1)\nend\n"
+      expect(dumped_type(source)).to eq("1 | Dynamic[top]")
+    end
+
+    it "keeps the rvalue on a local the body binds to a gradual table (control)" do
+      # Runtime: 1. `h` is the body's own fresh `Hash.new`, so no earlier call filled its slot.
+      expect(dumped_type("def m(k)\n  h = Hash.new\n  dump_type(h[k] ||= 1)\nend\n")).to eq("1")
+    end
+
+    it "keeps the rvalue on a receiver fresh at every run (control)" do
+      # Runtime: 1.
+      expect(dumped_type("def m(k) = dump_type(Hash.new[k] ||= 1)\n")).to eq("1")
+    end
+
+    it "ACCEPTED TRADE-OFF: goes silent on the inner `||=` of a nest rooted at a body-local literal" do
+      # Runtime: NoMethodError (`upcase` for 1), since `h` is empty on entry. The inner receiver is an expression,
+      # so it widens like any other; approval-queue.d entry for #2354.
+      expect(diagnostics_for("def m(a, b)\n  h = {}\n  ((h[a] ||= {})[b] ||= 1).upcase\nend\n")).to eq([])
+    end
+  end
+
   it "keeps a local hash literal's precise answer (no regression)" do
     # Runtime: [1]. The slot is provably absent, so the read is not gradual and no memo reading applies.
     expect(diagnostics_for("def g\n  h = {}\n  (h[:a] ||= []).push(1)\nend\n")).to eq([])

@@ -626,7 +626,7 @@ module Rigor
         current = index_read_type(node, scope)
         rhs = scope.type_of(node.value, tracer: tracer)
         if memoizing_index_read?(node, current, rhs)
-          return rhs if IndexedNarrowing.fully_tracked_receiver_type?(scope.type_of(node.receiver, tracer: tracer))
+          return rhs if tracked_memo_receiver?(node.receiver)
 
           memo = untracked_memo_value(rhs)
           return memo if memo
@@ -1184,6 +1184,27 @@ module Rigor
 
       # True when {#index_compound_write_value} reads the `||=` `node` as the memoization idiom's rvalue: the slot
       # reads wholly gradual, the rvalue can store something truthy, and no block-return pass marked the site.
+      # Whether a memoizing `||=` on `receiver` reads as the fresh rvalue ({#index_compound_write_value}): the
+      # receiver's type passes the #544 test, and the receiver is a local the current body binds, captured into a
+      # block or not, or an object fresh at every run (`Hash.new`, {RepeatedOrWrites.fresh_object?}) (issue
+      # #2354). An ivar, cvar or global read, a parameter, or any other expression (a call result, a
+      # parenthesised `||=`) is a table whose gradual slot another call, or an earlier run of this one, may have
+      # filled — an ivar seeded `{}` in `initialize`, a parameter declared `Hash[Symbol, untyped]` — so it widens
+      # through {#untracked_memo_value} like an untracked receiver. Without a frame (no method, class or file
+      # body stamped one) a local receiver is treated as body-bound, as before #2354.
+      def tracked_memo_receiver?(receiver)
+        return false unless body_bound_memo_receiver?(receiver)
+
+        IndexedNarrowing.fully_tracked_receiver_type?(scope.type_of(receiver, tracer: tracer))
+      end
+
+      def body_bound_memo_receiver?(receiver)
+        return RepeatedOrWrites.fresh_object?(receiver) unless receiver.is_a?(Prism::LocalVariableReadNode)
+
+        frame = scope.match_frame
+        frame.nil? || frame.body_binds_local?(receiver.name)
+      end
+
       def memoizing_index_read?(node, current, rhs)
         current.is_a?(Type::Dynamic) && !Narrowing.narrow_truthy(rhs).is_a?(Type::Bot) &&
           !scope.repeated_or_write?(node)

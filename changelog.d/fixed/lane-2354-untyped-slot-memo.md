@@ -1,0 +1,3 @@
+- **[inference]** A value-position `h[k] ||= v` on an instance variable, a parameter or a nested `||=` no longer reads its untyped slot as the fresh literal. ([#2435](https://github.com/rigortype/rigor/pull/2435))
+  - `(@cache[k] ||= {})[:name].upcase` with `@cache = {}` set in `initialize`, `(h[k] ||= 1).upcase` on a `Hash[Symbol, untyped]` parameter, and `((h[a] ||= {})[b] ||= 1).upcase` reported `call.undefined-method` for `nil` or `1`, though another call may have filled the slot.
+  - A local the method body binds itself, such as `pool = {}` folded in a block, keeps the precise reading.

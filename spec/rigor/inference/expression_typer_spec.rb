@@ -2383,9 +2383,18 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(scope.type_of(parse_expression("@cache[:k] ||= Object.new")).describe).to eq("Object")
     end
 
-    it "reads the nested memo `(@m ||= {})[key] ||= v` as the rvalue" do
+    it "reads the nested memo `(@m ||= {})[key] ||= v` as a construction rvalue's class" do
       # `Effects::Registry.for_configuration`: the receiver is typed, but a non-literal key's slot is not.
-      expect(scope.type_of(parse_expression("(@m ||= {})[[rand, rand]] ||= 7")).describe).to eq("7")
+      # A construction rvalue: the receiver is no local this body binds, so a literal `7` reads `7 | Dynamic[top]`
+      # (#2354).
+      expect(scope.type_of(parse_expression("(@m ||= {})[[rand, rand]] ||= Object.new")).describe).to eq("Object")
+    end
+
+    it "keeps the rvalue on a local receiver of a scope no body stamped a frame on (#2354)" do
+      # No method, class or file frame: the local reads as body-bound, so a literal rvalue stays `1`.
+      hash = Rigor::Type::Combinator.nominal_of("Hash", type_args: [Rigor::Type::Combinator.untyped] * 2)
+      node = parse_expression("h[:k] ||= 1", scopes: [[:h]])
+      expect(scope.with_local(:h, hash).type_of(node).describe).to eq("1")
     end
 
     it "reads a receiver bound to Dynamic the same way, since its slot is just as untracked" do

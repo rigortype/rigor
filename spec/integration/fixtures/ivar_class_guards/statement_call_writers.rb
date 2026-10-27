@@ -3,7 +3,7 @@ include Rigor::Testing
 
 # Issue #2039 — a statement self-call whose write set the #1596 proof cannot clear still leaves the reset unmarked
 # when the callee's own body assigns the variable a value that may be `nil` (`DirectIvarWrites`). The proof declines
-# here for a reason in the callee (a `yield`, a call on a parameter, an unknown self-call, a safe-navigation call on
+# here for a reason in the callee (a `yield`, a call on a parameter, a self-call to a `define_method` method, a safe-navigation call on
 # an ivar, a call on a project constant) or in the class (`include Comparable`, `method_missing`), and each read
 # still reports. Under Ruby 4.0.5 every `probe_*` raises NoMethodError on `nil`.
 class CalleeWriters
@@ -27,7 +27,7 @@ class CalleeWriters
     notify_somebody
   end
 
-  def notify_somebody = nil
+  define_method(:notify_somebody) { nil }
 
   def r_logger
     @tag = nil

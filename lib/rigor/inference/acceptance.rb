@@ -1050,13 +1050,13 @@ module Rigor
         end
 
         # `maybe`, unless a precise element type rules the tuple out at any length: some position none of
-        # whose members `E` holds (`[Integer, Integer]` never takes an `Array[String]`). A raw `Array` or an
-        # element with a gradual arm stays `maybe`. The accepted cost (ADR-5) is that a wrong-length
+        # whose members `E` holds (`[Integer, Integer]` never takes an `Array[String]`). A raw `Array` stays `maybe`, and so
+        # does an element with a gradual arm, since no position rejects a `Dynamic` member. The accepted cost (ADR-5) is that a wrong-length
         # `Array[E]` passed or returned where a tuple is declared goes unreported.
         def array_element_verdict(self_type, other_type, mode)
           nominal = other_type.is_a?(Type::Difference) ? other_type.base : other_type
           element = nominal.type_args.first
-          unless element.nil? || gradual_arm?(element)
+          unless element.nil?
             members = ContentJoin.union_members(element)
             refused = self_type.elements.find do |formal|
               members.all? { |member| accepts(formal, member, mode: mode).no? }

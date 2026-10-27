@@ -255,7 +255,7 @@ module Rigor
       # (#744 half 2) and is not decided here: this pass only stops sig-gen manufacturing the conflict.
       def demote_overridden_base_methods(candidates)
         superclasses = candidates.each_with_object({}) do |candidate, acc|
-          (candidate.class_superclasses || {}).each { |name, sup| acc[name] = sup.sub(/\[.*\]\z/, "") }
+          (candidate.class_superclasses || {}).each { |name, sup| acc[name] = bare_superclass_name(sup) }
         end
         return candidates if superclasses.empty?
 
@@ -350,12 +350,18 @@ module Rigor
       # The first candidate spelling that names a class this run declares or the RBS environment knows, or
       # nil when none does — an unresolvable superclass is #735's business, not this pass's.
       def resolve_superclass_token(token, nesting, known)
+        # A rooted token (`::Hash`) already names one class; the nesting must not capture it (#2459).
+        return token if token.start_with?("::")
+
         base = token.sub(/\[.*\]\z/, "")
-        args = token[base.length..] || ""
         nesting.length.downto(1) do |i|
           candidate = "#{nesting[0, i].join('::')}::#{base}"
-          return "#{candidate}#{args}" if known.include?(candidate) ||
-                                          Reflection.rbs_class_known?(candidate, environment: @environment)
+          # The arguments {#record_superclass} computed belong to the top-level class of the bare name, so they are
+          # computed again for the class the token resolves to: `Hash` inside a `module Foo` declaring a plain
+          # `Foo::Hash` takes none (#2459).
+          return generic_superclass_spelling(candidate) if known.include?(candidate) ||
+                                                           Reflection.rbs_class_known?(candidate,
+                                                                                       environment: @environment)
         end
         token
       end
@@ -452,9 +458,9 @@ module Rigor
         return superclass if seen[name]
 
         seen[name] = true
-        # The recorded spelling may carry the type arguments {#generic_superclass_spelling} added; the
-        # resolvability question is about the class, so it is asked of the bare name.
-        base = superclass.sub(/\[.*\]\z/, "")
+        # The recorded spelling may carry the type arguments {#generic_superclass_spelling} added, and a rooted
+        # token its `::` (#2459); the resolvability question is about the class, so it is asked of the bare name.
+        base = bare_superclass_name(superclass)
         return nil if Reflection.rbs_class_known?(base, environment: @environment)
         return superclass unless emitted.include?(base)
 
@@ -822,15 +828,25 @@ module Rigor
       # `class MyHash < ::Hash[untyped, untyped]` beside the file's other declarations. A class the RBS environment
       # already declares (the project's `sig/`, an earlier run) is left to that declaration, and a superclass the
       # header's nesting shadows is not core's: `Hash` inside a `module Foo` that declares `Foo::Hash` is the project's.
+      # A rooted `::Hash` names core's class whatever the nesting declares, so the shadow cannot capture it (#2459).
       def register_core_subclass_shell(full, prefix, superclass)
         return if class_known?(full)
-        return unless @environment&.rbs_loader&.core_or_stdlib_class?(superclass)
 
-        head = superclass.split("::").first
-        namespaces = TypeNameQualification.enclosing_namespaces(prefix.join("::"))
-        return if TypeNameQualification.shadowed?(head, namespaces, method(:declared_constant?))
+        bare = bare_superclass_name(superclass)
+        return unless @environment&.rbs_loader&.core_or_stdlib_class?(bare)
+
+        unless superclass.start_with?("::")
+          namespaces = TypeNameQualification.enclosing_namespaces(prefix.join("::"))
+          return if TypeNameQualification.shadowed?(bare.split("::").first, namespaces, method(:declared_constant?))
+        end
 
         @class_shells << full
+      end
+
+      # The class a recorded superclass token names, as the fully qualified key every class-name set and the RBS
+      # loader use: the type arguments {#generic_superclass_spelling} added and a rooted token's `::` both dropped.
+      def bare_superclass_name(token)
+        token.sub(/\[.*\]\z/, "").delete_prefix("::")
       end
 
       # Issue #735 — a GENERIC superclass has to be written with its arguments. `class Entries < Array`
@@ -843,7 +859,7 @@ module Rigor
         loader = @environment&.rbs_loader
         return superclass if loader.nil?
 
-        arity = loader.class_type_param_names(superclass).size
+        arity = loader.class_type_param_names(bare_superclass_name(superclass)).size
         return superclass if arity.zero?
 
         "#{superclass}[#{(['untyped'] * arity).join(', ')}]"
@@ -1175,15 +1191,19 @@ module Rigor
         "#{optional_marker}#{keyword.name}: #{rendered}"
       end
 
+      # Issue #2459 — a ROOTED path (`::Hash`, `::A::B`) keeps its leading `::`: it names exactly one class, and the
+      # passes after {#record_superclass} must not re-resolve it against the header's nesting, where a project
+      # `Foo::Hash` would capture it. Every pass that compares the token against class names strips the anchor.
       def qualified_constant_path(constant_path)
         case constant_path
         when Prism::ConstantReadNode
           constant_path.name.to_s
         when Prism::ConstantPathNode
-          parent = qualified_constant_path(constant_path.parent) if constant_path.parent
           name = constant_path.name&.to_s
           return nil if name.nil?
+          return "::#{name}" if constant_path.parent.nil?
 
+          parent = qualified_constant_path(constant_path.parent)
           parent ? "#{parent}::#{name}" : name
         end
       end

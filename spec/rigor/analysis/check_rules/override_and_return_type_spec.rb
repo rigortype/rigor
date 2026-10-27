@@ -180,6 +180,20 @@ RSpec.describe "return-type and Liskov override rules", type: :runner do
       end
     end
 
+    describe "a String-vs-Symbol record key mismatch (#2235)" do
+      it "spells each key kind as RBS does, so the declared String key and the inferred Symbol key read apart" do
+        result = analyze(<<~RUBY, sig: { "demo.rbs" => "class Demo\n  def attrs: () -> { \"a-b\" => Integer }\nend\n" })
+          class Demo
+            def attrs
+              { "a-b": 1 }
+            end
+          end
+        RUBY
+        expect(return_diags(result).first&.message)
+          .to eq("return-type mismatch on `attrs': declared { \"a-b\" => Integer }, inferred { :\"a-b\" => 1 }")
+      end
+    end
+
     describe "declared_return_union (alias-declared returns, issue #529)" do
       # An alias-declared return used to translate to untyped, so the rule was structurally silent on
       # it. With the check side handing the loader to the translator, the declared side compares at the

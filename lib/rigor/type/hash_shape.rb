@@ -28,8 +28,8 @@ module Rigor
       ALLOWED_KEY_CLASSES = [Symbol, String, Integer, Float, TrueClass, FalseClass, NilClass].freeze
       EXTRA_KEY_POLICIES = %i[open closed].freeze
       POLICY_KEYWORDS = %i[required_keys optional_keys read_only_keys extra_keys].freeze
-      # A Symbol whose text matches renders as a bare RBS record key (`lang:`) in {#erase_to_rbs};
-      # anything else is a quoted Symbol with a fat arrow (`:"data-contrast" =>`). See {#erase_key_prefix}.
+      # A Symbol whose text matches renders as a bare RBS record key (`lang:`) in {#describe} and {#erase_to_rbs};
+      # anything else is a quoted Symbol with a fat arrow (`:"data-contrast" =>`). See {#key_prefix}.
       BARE_RECORD_KEY = /\A[A-Za-z_][A-Za-z0-9_]*[?!]?\z/
 
       attr_reader :pairs, :required_keys, :optional_keys, :read_only_keys, :extra_keys
@@ -74,7 +74,7 @@ module Rigor
         return hash_erasure unless closed?
         return hash_erasure if pairs.each_key.any? { |k| !k.is_a?(Symbol) || !record_key_spellable?(k) }
 
-        rendered = pairs.map { |k, v| "#{erase_key_prefix(k)} #{v.erase_to_rbs}" }
+        rendered = pairs.map { |k, v| "#{key_prefix(k)} #{v.erase_to_rbs}" }
         "{ #{rendered.join(', ')} }"
       end
 
@@ -193,46 +193,27 @@ module Rigor
       def render_entry(key, value, verbosity)
         prefix = []
         prefix << "readonly" if read_only_key?(key)
-        rendered_key = optional_key?(key) ? "?#{render_key(key)}" : render_key(key)
-        prefix << "#{rendered_key}#{key_separator(key)}"
+        prefix << key_prefix(key)
         "#{prefix.join(' ')} #{value.describe(verbosity)}"
       end
 
-      # `describe` is a human-facing display contract (it feeds diagnostic messages, never a parser),
-      # so it keeps the compact `"a":` form for a quoted key. Non-(Symbol|String) scalar keys render in
-      # the natural hashrocket spelling (`1 => 2`, `1.0 => 4`, `nil => 0`) via {#key_separator}; their
-      # `inspect` is the canonical Ruby literal, so describe stays deterministic. The RBS-erasure path
-      # uses {#erase_key_prefix} instead, which must emit a parseable key.
-      def render_key(key)
-        case key
-        when Symbol then key.to_s
-        else key.inspect
-        end
-      end
-
-      # Symbol / String keys keep the compact colon form (`a: 1`, `"k": 2`); every other scalar key uses
-      # the hashrocket (`1 => 2`) — the form the user would have to write in source.
-      def key_separator(key)
-        case key
-        when Symbol, String then ":"
-        else " =>"
-        end
-      end
-
-      # An RBS record entry's key + separator, for the {#erase_to_rbs} path (which only ever sees
-      # Symbol keys — string-keyed shapes degrade to `Hash[...]` before reaching here). A Symbol whose
-      # text is a plain identifier is a bare key with a colon (`lang:`, Ruby keywords like `class`
-      # included). Any other Symbol is a quoted Symbol literal with a fat arrow (`:"data-contrast" =>`):
-      # RBS rejects a bare non-identifier (`data-contrast:`) and a quoted key with a colon
-      # (`"data-contrast":`), and reads `"data-contrast" =>` as the String key, so the written record
-      # declared a key the body never has (#2176). Optional keys carry a leading `?`.
-      def erase_key_prefix(key)
+      # A key and its separator as RBS spells them, with a leading `?` for an optional key. `describe`
+      # (the diagnostic display) and {#erase_to_rbs} (which only ever sees Symbol keys — string-keyed
+      # shapes degrade to `Hash[...]` before reaching here) share it, so a key reads the same in a
+      # message as in the signature it erases to. A Symbol whose text is a plain identifier is a bare
+      # key with a colon (`lang:`, Ruby keywords like `class` included). Any other Symbol is a quoted
+      # Symbol literal with a fat arrow (`:"data-contrast" =>`): RBS rejects a bare non-identifier
+      # (`data-contrast:`) and a quoted key with a colon (`"data-contrast":`), and reads
+      # `"data-contrast" =>` as the String key, so the written record declared a key the body never has
+      # (#2176). Every other key, a String included, is its `inspect` literal with a fat arrow
+      # (`"a-b" =>`, `1 =>`, `nil =>`): the compact `"a-b":` would read as a Symbol key in Ruby, so a
+      # String-vs-Symbol key mismatch in a diagnostic was unreadable (#2235).
+      def key_prefix(key)
         optional = optional_key?(key) ? "?" : ""
-        if BARE_RECORD_KEY.match?(key.to_s)
-          "#{optional}#{key}:"
-        else
-          "#{optional}:#{key.to_s.inspect} =>"
-        end
+        return "#{optional}#{key.inspect} =>" unless key.is_a?(Symbol)
+        return "#{optional}#{key}:" if BARE_RECORD_KEY.match?(key.to_s)
+
+        "#{optional}:#{key.to_s.inspect} =>"
       end
 
       # `String#inspect` escapes `#{`, `#$` and `#@` as `\#`, which RBS's parser does not read back as

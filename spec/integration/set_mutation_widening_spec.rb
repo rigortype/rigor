@@ -170,7 +170,7 @@ RSpec.describe "Set mutation widening", type: :runner do
     # A `for` loop's value is its collection, whose shapes a Set mutation of an element drops as well.
     it "widens only the string-keyed hash value the mutation reached" do
       source = %(h = { "k" => Set["a"], "j" => Set["b"] }\nh["k"].add(1)\ndump_type(h))
-      expect(dumped(source)).to eq(['{ "k": Set[Dynamic[top] | Integer | String], "j": Set["b"] }'])
+      expect(dumped(source)).to eq(['{ "k" => Set[Dynamic[top] | Integer | String], "j" => Set["b"] }'])
     end
 
     # Against a `Tuple` arm a literal key selects no known position, so every element widens; the shape arm widens

@@ -228,7 +228,7 @@ RSpec.describe "a block-return type variable that a parameter also names", type:
     # Other tiers answer these ahead of RbsDispatch. They guard against the change rerouting them.
     it "keeps block-only transform_keys on its exact HashShape fold" do
       expect(dumped_types(run("dump_type({ a: 1, b: 2 }.transform_keys { |k| k.to_s })")))
-        .to eq(['{ "a": 1, "b": 2 }'])
+        .to eq(['{ "a" => 1, "b" => 2 }'])
     end
 
     it "keeps the mapping-only transform_keys answer" do

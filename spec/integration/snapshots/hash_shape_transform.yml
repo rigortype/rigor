@@ -1,10 +1,10 @@
 ---
 locals:
-  block_keys: '{ "name": "Alice", "age": 30 }'
+  block_keys: '{ "name" => "Alice", "age" => 30 }'
   block_vals: '{ name: "Alice", age: "30" }'
   hetero: '{ x: 1, y: "hello" }'
-  str_hash: '{ "name": "Alice", "age": 30 }'
-  str_keyed: '{ "name": "Alice", "age": 30 }'
+  str_hash: '{ "name" => "Alice", "age" => 30 }'
+  str_keyed: '{ "name" => "Alice", "age" => 30 }'
   stringified: '{ name: "Alice", age: "30" }'
   sym_hash: '{ name: "Alice", age: 30 }'
   sym_keyed: '{ name: "Alice", age: 30 }'
@@ -12,9 +12,9 @@ locals:
   up: '{ x: "1", y: "hello" }'
 assertions:
   '1': '{ name: "Alice", age: 30 }'
-  '2': '{ "name": "Alice", "age": 30 }'
+  '2': '{ "name" => "Alice", "age" => 30 }'
   '3': '{ name: "Alice", age: 30 }'
-  '4': '{ "name": "Alice", "age": 30 }'
+  '4': '{ "name" => "Alice", "age" => 30 }'
   '5': '{ name: "Alice", age: "30" }'
   '6': '{ name: "Alice", age: "30" }'
   '7': '{ x: "1", y: "hello" }'

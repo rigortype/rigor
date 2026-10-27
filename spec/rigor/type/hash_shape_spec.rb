@@ -136,9 +136,26 @@ RSpec.describe Rigor::Type::HashShape do
       expect(shape.erase_to_rbs).to eq("Hash[top, top]")
     end
 
-    it "renders string-keyed shapes with quoted keys in describe" do
-      shape = described_class.new("a" => int_nominal)
-      expect(shape.describe).to eq("{ \"a\": Integer }")
+    # `describe` spells a key as RBS does (#2235): `"a": T` is a Symbol key in Ruby, so a String key that
+    # rendered that way read the same as a Symbol key in a key-kind mismatch message.
+    it "renders a String key in describe as the quoted String with a fat arrow" do
+      shape = described_class.new("a" => int_nominal, "a-b" => str_nominal)
+      expect(shape.describe).to eq("{ \"a\" => Integer, \"a-b\" => String }")
+    end
+
+    it "renders an identifier Symbol key in describe bare with a colon" do
+      shape = described_class.new(a: int_nominal, if: str_nominal)
+      expect(shape.describe).to eq("{ a: Integer, if: String }")
+    end
+
+    it "renders a non-identifier Symbol key in describe as the quoted Symbol with a fat arrow" do
+      shape = described_class.new("a-b": int_nominal)
+      expect(shape.describe).to eq("{ :\"a-b\" => Integer }")
+    end
+
+    it "keeps the String and the Symbol spelling of the same text apart in describe, optional keys included" do
+      shape = described_class.new({ "a-b" => int_nominal, "a-b": int_nominal }, optional_keys: ["a-b", :"a-b"])
+      expect(shape.describe).to eq("{ ?\"a-b\" => Integer, ?:\"a-b\" => Integer }")
     end
 
     it "erases empty closed shapes to an empty RBS record" do

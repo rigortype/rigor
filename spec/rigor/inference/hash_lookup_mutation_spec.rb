@@ -453,7 +453,7 @@ RSpec.describe "Hash lookup mutation widening", type: :runner do
     end
 
     it "keeps the String-keyed literal under a non-mutating call" do
-      expect(dumped_types(<<~RUBY)).to eq(["{ \"k\": 1 }", "1"])
+      expect(dumped_types(<<~RUBY)).to eq(["{ \"k\" => 1 }", "1"])
         s = { "k" => 1 }
         s.compare_by_identity?
         dump_type(s)

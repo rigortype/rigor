@@ -88,6 +88,7 @@ Diagnostics MUST use a domain-aware display contract so users do not misread neg
 - Bare `~U` MAY be used only when the surrounding diagnostic already states the domain, for example "within `String`, value is `~"foo"`".
 - If dynamic-origin provenance matters, display it separately from the domain expression when possible, for example `String - "foo"` with a dynamic-origin note, or `Dynamic[String - "foo"]` in technical traces. The `Dynamic[T]` display rule is in [diagnostic-policy.md](diagnostic-policy.md).
 - If the retained-exclusion budget is exceeded, display the positive domain plus an omission note rather than an unstable long chain, such as `Integer with 12 excluded literals omitted`.
+- A hash shape MUST spell each key as an RBS record spells it, so a String key and a Symbol key never read alike: a Symbol whose text is an identifier bare with a colon (`a: Integer`), any other Symbol as a quoted Symbol literal with a fat arrow (`:"a-b" => Integer`), and a String or other scalar key as its literal with a fat arrow (`"a-b" => Integer`, `1 => Integer`). An optional key carries a leading `?`. The compact `"a-b": Integer` is a Symbol key in Ruby, so it MUST NOT spell a String key.
 
 ### Display examples
 

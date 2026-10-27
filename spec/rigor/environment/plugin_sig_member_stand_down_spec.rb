@@ -401,4 +401,182 @@ RSpec.describe "issue #2422 plugin signature member stand-down" do
       [row[1], row[4]]
     end).to eq([["FFI::Pointer::NULL", "virtual:lib/a.rb"]])
   end
+
+  # Issue #2439 — rigor-activerecord's `framework.rbs` declares `StatementInvalid` and `ConnectionNotEstablished`
+  # `< ActiveRecordError`; activerecord 7.1+ in `gem_rbs_collection` declares both `< AdapterError`. Two clauses
+  # raised `RBS::SuperclassMismatchError`, so the plugin's class header now drops its superclass whenever another
+  # source gives the class one, and keeps it otherwise.
+  describe "superclass clause" do
+    let(:ar_sig) { File.expand_path("../../../plugins/rigor-activerecord/sig", __dir__) }
+
+    # The 7.1+ shape: `AdapterError` between the two errors and `ActiveRecordError`.
+    def adapter_rbs = <<~RBS
+      module ActiveRecord
+        class ActiveRecordError < StandardError
+        end
+        class AdapterError < ActiveRecordError
+        end
+        class ConnectionNotEstablished < AdapterError
+        end
+        class StatementInvalid < AdapterError
+        end
+      end
+    RBS
+
+    def ar_loader(dir, rbs, project: false, cache_store: nil)
+      paths = []
+      unless rbs.nil?
+        other = File.join(dir, "other_sig")
+        FileUtils.mkdir_p(other)
+        File.write(File.join(other, "activerecord.rbs"), rbs)
+        paths << other
+      end
+      Rigor::Environment::RbsLoader.new(
+        libraries: Rigor::Environment::DEFAULT_LIBRARIES, signature_paths: paths + [ar_sig],
+        deferred_signature_paths: [ar_sig], project_signature_paths: project ? paths : [], cache_store: cache_store
+      )
+    end
+
+    def superclass_rows(loader)
+      member_rows(loader).filter_map { |row| [row[1], File.basename(row[4].to_s)] if row[1].include?(" < ") }
+    end
+
+    def ancestors(loader, name) = loader.ancestor_names_for(name)
+
+    it "reopens the class under another source's superclass, and every class builds" do
+      Dir.mktmpdir do |dir|
+        loader = ar_loader(dir, adapter_rbs)
+        expect(loader.definition_build_failures).to be_empty
+        expect(ancestors(loader, "ActiveRecord::StatementInvalid"))
+          .to include("ActiveRecord::AdapterError", "ActiveRecord::ActiveRecordError", "StandardError")
+        expect(ancestors(loader, "ActiveRecord::RecordNotUnique")).to include("ActiveRecord::AdapterError")
+        expect(superclass_rows(loader)).to eq(
+          [["ActiveRecord::ConnectionNotEstablished < ActiveRecordError", "activerecord.rbs"],
+           ["ActiveRecord::StatementInvalid < ActiveRecordError", "activerecord.rbs"]]
+        )
+      end
+    end
+
+    it "reports no row where the other source names the same superclass (activerecord 6.0-7.0)" do
+      Dir.mktmpdir do |dir|
+        loader = ar_loader(dir, adapter_rbs.gsub("< AdapterError", "< ActiveRecordError"))
+        expect(loader.definition_build_failures).to be_empty
+        expect(ancestors(loader, "ActiveRecord::StatementInvalid")).to include("ActiveRecord::ActiveRecordError")
+        expect(superclass_rows(loader)).to be_empty
+      end
+    end
+
+    it "keeps the plugin's superclass when no other source gives the class one" do
+      Dir.mktmpdir do |dir|
+        [nil, "module ActiveRecord
+  class StatementInvalid
+    def sql: () -> String?
+  end
+end
+"].each do |rbs|
+          loader = ar_loader(dir, rbs)
+          expect(ancestors(loader, "ActiveRecord::StatementInvalid"))
+            .to include("ActiveRecord::ActiveRecordError", "StandardError")
+          expect(superclass_rows(loader)).to be_empty
+        end
+      end
+    end
+
+    it "yields to a superclass the project's own sig/ declares" do
+      Dir.mktmpdir do |dir|
+        loader = ar_loader(dir, "class MyBase < StandardError
+end
+" \
+                                "class ActiveRecord::ConnectionNotEstablished < MyBase
+end
+", project: true)
+        expect(loader.definition_build_failures).to be_empty
+        expect(ancestors(loader, "ActiveRecord::ConnectionNotEstablished")).to include("MyBase")
+        expect(ancestors(loader, "ActiveRecord::ConnectionNotEstablished")).not_to include("ActiveRecord::ActiveRecordError")
+        expect(superclass_rows(loader))
+          .to eq([["ActiveRecord::ConnectionNotEstablished < ActiveRecordError", "activerecord.rbs"]])
+      end
+    end
+
+    # Review of #2464, M-1: the report compares the two clauses as RBS resolves them — the plugin's in the lexical
+    # context it is written in, class aliases normalised, type arguments included — so a row names exactly a
+    # clause whose class differs. Each shape builds; only the row differs.
+    describe "which dropped clause is reported" do
+      def shape_rows(plugin_rbs, other_rbs)
+        Dir.mktmpdir do |dir|
+          plugin = File.join(dir, "plugin_sig")
+          other = File.join(dir, "other_sig")
+          [plugin, other].each { |d| FileUtils.mkdir_p(d) }
+          File.write(File.join(plugin, "plugin.rbs"), plugin_rbs)
+          File.write(File.join(other, "other.rbs"), other_rbs)
+          loader = Rigor::Environment::RbsLoader.new(
+            libraries: [], signature_paths: [other, plugin], deferred_signature_paths: [plugin]
+          )
+          expect(loader.definition_build_failures).to be_empty
+          superclass_rows(loader)
+        end
+      end
+
+      let(:namespaced_c) { "class C\nend\nmodule A\n  class C\n  end\nend\n" }
+
+      it "resolves a compact header's superclass at the top level, not under the class's own namespace (P1)" do
+        expect(shape_rows("class A::B < C\nend\n", "#{namespaced_c}class A::B < ::C\nend\n")).to be_empty
+      end
+
+      it "reports a compact header whose superclass the other source names under the namespace (P2)" do
+        expect(shape_rows("class A::B < C\nend\n", "#{namespaced_c}class A::B < ::A::C\nend\n"))
+          .to eq([["A::B < C", "other.rbs"]])
+      end
+
+      # Guard on rbs 4.x, whose resolver already normalises an alias on both sides; `normalized` is for the 3.x line.
+      it "reads a class alias as the class it names (P3)" do
+        expect(shape_rows("class Foo < Al\nend\n", "class Target\nend\nclass Al = Target\nclass Foo < Target\nend\n"))
+          .to be_empty
+      end
+
+      # Guard on rbs 4.x, whose resolver already normalises an alias on both sides; `normalized` is for the 3.x line.
+      it "reads the other source's class alias as the class it names too" do
+        expect(shape_rows("class Foo < Target\nend\n", "class Target\nend\nclass Al = Target\nclass Foo < Al\nend\n"))
+          .to be_empty
+      end
+
+      it "reports a clause whose type arguments differ (P4)" do
+        expect(shape_rows("class Foo < Base[String]\nend\n",
+                          "class Base[T]\nend\nclass Foo < Base[Integer]\nend\n"))
+          .to eq([["Foo < Base[String]", "other.rbs"]])
+      end
+
+      it "resolves innermost namespace first, per enclosing declaration (P5)" do
+        other = "class Error\nend\nmodule X\n  class Error\n  end\nend\nmodule Y\n  class Error\n  end\nend\n" \
+                "class X::E < ::X::Error\nend\nclass Y::E < ::Error\nend\n"
+        plugin = "module X\n  class E < Error\n  end\nend\nmodule Y\n  class E < Error\n  end\nend\n"
+        expect(shape_rows(plugin, other)).to eq([["Y::E < Error", "other.rbs"]])
+      end
+
+      it "resolves a nested compact header in its enclosing module, skipping the compact prefix (P6)" do
+        other = "module A\n  class D\n  end\n  class B\n    class D\n    end\n  end\nend\nclass A::B::C < ::A::D\nend\n"
+        expect(shape_rows("module A\n  class B::C < D\n  end\nend\n", other)).to be_empty
+      end
+
+      it "resolves the superclass outside the class it names, not under it (P7)" do
+        expect(shape_rows("class Foo < Bar\nend\n",
+                          "class Bar\nend\nclass Foo\n  class Bar\n  end\nend\nclass Foo < ::Bar\nend\n"))
+          .to be_empty
+      end
+    end
+
+    # Guard for the warm half: the rows are derived from the built env, so no mutation of the plan separates a
+    # warm run from a cold one; the cold half fails with the plan.
+    it "reports the same rows on a warm run, without rebuilding the env" do
+      Dir.mktmpdir do |dir|
+        store = Rigor::Cache::Store.new(root: File.join(dir, "cache"))
+        cold_rows = superclass_rows(ar_loader(dir, adapter_rbs, cache_store: store))
+        allow(Rigor::Environment::RbsLoader).to receive(:build_env_for).and_call_original
+        warm = ar_loader(dir, adapter_rbs, cache_store: store)
+        expect(superclass_rows(warm)).to eq(cold_rows)
+        expect(cold_rows.size).to eq(2)
+        expect(Rigor::Environment::RbsLoader).not_to have_received(:build_env_for)
+      end
+    end
+  end
 end

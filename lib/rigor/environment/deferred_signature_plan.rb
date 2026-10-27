@@ -20,7 +20,9 @@ module Rigor
     #   continued ({GatedSignaturePlan.untaken} narrows an `attr_accessor` or `self?` to its untaken half);
     # - a constant, global, type alias, interface or class alias another source already declares, and a type
     #   whose kind (class or module) contradicts another source's, stands down on its own, where adding it would
-    #   have raised `RBS::DuplicatedDeclarationError` and dropped the plugin's whole file.
+    #   have raised `RBS::DuplicatedDeclarationError` and dropped the plugin's whole file;
+    # - a class header's superclass clause another source already gives the class one stands down (#2439), where two
+    #   different clauses would have raised `RBS::SuperclassMismatchError`; the plugin's declaration reopens the class.
     #
     # A declaration with nothing taken comes back as the same object, so a file with no collision loads as it
     # stands. {.standdown_rows} reads what stood down back off the built environment, so a warm run off the env
@@ -56,7 +58,18 @@ module Rigor
 
           composed(member, defined) || GatedSignaturePlan.untaken(member, taken)
         end
-        same?(members, decl.members) ? decl : GatedSignaturePlan.rebuild(decl, members: members)
+        drop = superclass_given?(decl, others)
+        return decl if same?(members, decl.members) && !drop
+
+        GatedSignaturePlan.rebuild(decl, members: members, drop_super_class: drop)
+      end
+
+      # Issue #2439 — true when `decl` is a class with a superclass clause and another source (`others`) already
+      # gives the class one. Two different clauses raise `RBS::SuperclassMismatchError` and the class and every
+      # descendant read `Dynamic[top]`, so the plugin's header stands down and reopens the class without one. The
+      # two names are not compared: they are not resolved yet, and the other source's superclass binds either way.
+      def superclass_given?(decl, others)
+        super_class?(decl) && others.any? { |other| super_class?(other) }
       end
 
       # `member` as an overload continuation, or nil when it cannot be one: only a plain one-sided `def` can, and
@@ -127,22 +140,53 @@ module Rigor
         RbsLoader.declaration_buffer_name(decl)
       end
 
-      # What {.plan} left out of the deferred `file` (its parsed `decls`) in the built `env`, as `[declaration,
-      # cause_file]` rows — `Object#acts_like?`, `Time.at`, `FFI::Pointer::NULL`, or a type name — with the buffer
-      # of the other source's declaration, or nil when it cannot be named. A composed method is not a row: the
-      # plugin's overloads still bind.
-      def standdown_rows(env, file, decls)
-        rows = []
-        decls.each { |decl| declaration_rows(env, file, decl, nil, rows) }
-        rows.uniq
+      # One {.standdown_rows} walk over a deferred file: the built env, the file's buffer name, the rows so far, and
+      # the env's type-name resolver, built on first use (only a dropped superclass clause needs it).
+      class Walk
+        attr_reader :env, :file, :rows
+
+        def initialize(env, file)
+          @env = env
+          @file = file
+          @rows = []
+        end
+
+        # rbs 4.x builds the resolver with `TypeNameResolver.build(env)`; rbs 3.x's constructor takes the env, which
+        # the 4.x signature Rigor reads (`new(all_names, aliases)`) does not describe.
+        def resolver
+          @resolver ||= begin
+            klass = ::RBS::Resolver::TypeNameResolver
+            if klass.respond_to?(:build)
+              klass.build(env)
+            else
+              klass.new(env) # rigor:disable call.wrong-arity
+            end
+          end
+        end
       end
 
-      def declaration_rows(env, file, decl, namespace, rows)
-        name = GatedSignaturePlan.qualify(namespace, declared_name(decl))
-        return type_rows(env, file, decl, name, rows) if GatedSignaturePlan.type_declaration?(decl)
+      # What {.plan} left out of the deferred `file` (its parsed `decls`) in the built `env`, as `[declaration,
+      # cause_file]` rows — `Object#acts_like?`, `Time.at`, `FFI::Pointer::NULL`, `Foo < Bar`, or a type name — with
+      # the buffer of the other source's declaration, or nil when it cannot be named. A composed method is not a row:
+      # the plugin's overloads still bind.
+      def standdown_rows(env, file, decls)
+        walk = Walk.new(env, file)
+        decls.each { |decl| declaration_rows(walk, decl, nil) }
+        walk.rows.uniq
+      end
 
-        cause = displaced_by(env, decl, name, file)
-        rows << [decl.is_a?(::RBS::AST::Declarations::Global) ? decl.name.to_s : name, cause] if cause
+      # `context` is RBS's resolver context for where `decl` is written: nil at the top level, else `[outer,
+      # absolute name of the enclosing declaration]`, as `RBS::Environment#append_context` builds it.
+      def declaration_rows(walk, decl, context)
+        name = GatedSignaturePlan.qualify(namespace_of(context), declared_name(decl))
+        return type_rows(walk, decl, name, context) if GatedSignaturePlan.type_declaration?(decl)
+
+        cause = displaced_by(walk.env, decl, name, walk.file)
+        walk.rows << [decl.is_a?(::RBS::AST::Declarations::Global) ? decl.name.to_s : name, cause] if cause
+      end
+
+      def namespace_of(context)
+        context && context.last.to_s.delete_prefix("::")
       end
 
       # A non-nil buffer name (possibly empty) when another source's declaration of `decl` is the one loaded.
@@ -154,25 +198,75 @@ module Rigor
         buffer == file ? nil : buffer
       end
 
-      def type_rows(env, file, decl, name, rows)
-        entry = env.class_decls[::RBS::TypeName.parse("::#{name}")]
-        declarations = entry.nil? ? [] : RbsLoader.entry_declarations(entry)
-        loaded = declarations.select { |other| buffer_of(other) == file }
-        others = declarations.reject { |other| loaded.include?(other) || GatedSignaturePlan.synthetic?(other) }
+      def type_rows(walk, decl, name, context)
+        loaded, others = loaded_and_others(walk, name)
         if loaded.empty?
-          cause = others.empty? ? alias_cause(env, name) : buffer_of(others.first)
-          rows << [name, cause] if cause
+          cause = others.empty? ? alias_cause(walk.env, name) : buffer_of(others.first)
+          walk.rows << [name, cause] if cause
           return
         end
 
-        rows.concat(member_rows(decl, name, loaded, others))
-        decl.members.each { |member| declaration_rows(env, file, member, name, rows) if declaration?(member) }
+        walk.rows.concat(superclass_rows(walk, decl, name, context, others))
+        walk.rows.concat(member_rows(decl, name, loaded, others))
+        inner = [context, ::RBS::TypeName.parse("::#{name}")]
+        decl.members.each { |member| declaration_rows(walk, member, inner) if declaration?(member) }
+      end
+
+      # The declarations of `name` the walked file loaded, and the ones other sources made (synthesized stubs left out).
+      def loaded_and_others(walk, name)
+        entry = walk.env.class_decls[::RBS::TypeName.parse("::#{name}")]
+        declarations = entry.nil? ? [] : RbsLoader.entry_declarations(entry)
+        loaded = declarations.select { |other| buffer_of(other) == walk.file }
+        [loaded, declarations.reject { |other| loaded.include?(other) || GatedSignaturePlan.synthetic?(other) }]
       end
 
       # The buffer of a class or module alias declaring `name` (empty when it cannot be named), or nil.
       def alias_cause(env, name)
         entry = env.class_alias_decls[::RBS::TypeName.parse("::#{name}")]
         entry && (RbsLoader.declaration_buffer_name(entry.decl) || "")
+      end
+
+      # The plugin's superclass clause as a row (`ActiveRecord::StatementInvalid < ActiveRecordError`) when the plan
+      # dropped it for another source's ({.superclass_given?}) and that source's names a different class or type
+      # arguments. The plan drops an identical clause too, but nothing is lost, so no row.
+      def superclass_rows(walk, decl, name, context, others)
+        return [] unless superclass_given?(decl, others)
+
+        cause = others.find { |other| super_class?(other) }
+        return [] if same_super_class?(walk, decl.super_class, context, cause.super_class)
+
+        written = decl.super_class
+        args = written.args.empty? ? "" : "[#{written.args.join(', ')}]"
+        [["#{name} < #{written.name}#{args}", buffer_of(cause)]]
+      end
+
+      # Whether the plugin's clause `written`, resolved as RBS resolves a superclass (in the context the class is
+      # written in, not its own), names the class and type arguments of `other`, the built env's already-absolute
+      # clause, class aliases normalised on both sides. An unresolvable name differs.
+      def same_super_class?(walk, written, context, other)
+        name = absolute_name(walk, written.name, context)
+        return false if name.nil? || normalized(walk.env, name) != normalized(walk.env, other.name)
+
+        written.args.map { |arg| normalized_type(walk, arg, context) } ==
+          other.args.map { |arg| normalized_type(walk, arg, nil) }
+      end
+
+      def absolute_name(walk, name, context)
+        name.absolute? ? name : walk.resolver.resolve(name, context: context)
+      end
+
+      def normalized(env, name)
+        name.class? ? env.normalize_module_name(name) : name
+      end
+
+      def normalized_type(walk, type, context)
+        return type.to_s unless type.respond_to?(:map_type_name)
+
+        type.map_type_name { |name, _, _| normalized(walk.env, absolute_name(walk, name, context) || name) }.to_s
+      end
+
+      def super_class?(decl)
+        decl.is_a?(::RBS::AST::Declarations::Class) && !decl.super_class.nil?
       end
 
       def member_rows(decl, name, loaded, others)

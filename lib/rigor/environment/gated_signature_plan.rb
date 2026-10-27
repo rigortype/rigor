@@ -213,10 +213,13 @@ module Rigor
         end
       end
 
-      def rebuild(decl, members:)
+      # `decl` with `members` in place of its own. A class keeps its superclass unless `drop_super_class` (#2439: a
+      # plugin's class header another source already gives a superclass reopens the class without one).
+      def rebuild(decl, members:, drop_super_class: false)
         if decl.is_a?(::RBS::AST::Declarations::Class)
           ::RBS::AST::Declarations::Class.new(
-            name: decl.name, type_params: decl.type_params, super_class: decl.super_class, members: members,
+            name: decl.name, type_params: decl.type_params, super_class: drop_super_class ? nil : decl.super_class,
+            members: members,
             annotations: decl.annotations, location: decl.location, comment: decl.comment
           )
         else

@@ -25,6 +25,7 @@ module Rigor
     class BaselineCommand < Command # rubocop:disable Metrics/ClassLength
       EXIT_USAGE = 64
       DEFAULT_BASELINE_PATH = ".rigor-baseline.yml"
+      MAX_UNBASELINEABLE_FILES = 10
 
       SUBCOMMANDS = %w[generate regenerate dump drift prune].freeze
 
@@ -81,11 +82,13 @@ module Rigor
                                                                     project_root: Dir.pwd)
         File.write(path, baseline.to_yaml)
 
+        covered = baseline.buckets.sum(&:count)
         @err.puts(
           "rigor: #{verb} #{path} " \
-          "(#{baseline.size} bucket(s) covering #{diagnostics.size} diagnostic(s); " \
+          "(#{baseline.size} bucket(s) covering #{covered} diagnostic(s); " \
           "match-mode: #{options.fetch(:match_mode)})"
         )
+        report_unbaselineable(Analysis::Baseline.unkeyable(diagnostics))
         if configuration.baseline_path.nil?
           # Name the config file that actually governs this project (`.rigor.dist.yml` when no local override
           # exists), so the hint points at the file the user must edit.
@@ -96,6 +99,38 @@ module Rigor
           )
         end
         0
+      end
+
+      # Diagnostics the baseline cannot key never enter the file, so the next `rigor check` surfaces them. Say so,
+      # with how many, why and where; the exit status stays 0 (the file was written as asked).
+      def report_unbaselineable(unkeyable)
+        return if unkeyable.empty?
+
+        no_rule, no_path = unkeyable.partition { |d| d.qualified_rule.nil? }
+        files = unbaselineable_files(no_rule)
+        parts = []
+        unless no_rule.empty?
+          parts << "#{no_rule.size} diagnostic(s) have no rule (parse, path or internal errors) " \
+                   "in #{files.size} file(s)"
+        end
+        parts << "#{no_path.size} diagnostic(s) have no path" unless no_path.empty?
+        listing = files.empty? ? "" : ":"
+        @err.puts("rigor: #{parts.join('; ')} and cannot be baselined; " \
+                  "fix them, or remove or exclude the files#{listing}")
+        files.first(MAX_UNBASELINEABLE_FILES).each { |f| @err.puts("  #{f}") }
+        extra = files.size - MAX_UNBASELINEABLE_FILES
+        @err.puts("  ... and #{extra} more file(s)") if extra.positive?
+      end
+
+      def unbaselineable_files(diagnostics)
+        root = Pathname.new(Dir.pwd)
+        diagnostics.filter_map(&:path).map { |p| relative_to(root, p) }.uniq.sort
+      end
+
+      def relative_to(root, path)
+        Pathname.new(path).relative_path_from(root).to_s
+      rescue ArgumentError
+        path
       end
 
       def parse_generate_options(subcommand: "generate")

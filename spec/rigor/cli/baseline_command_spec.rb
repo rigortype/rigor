@@ -212,6 +212,77 @@ RSpec.describe Rigor::CLI::BaselineCommand do
     end
   end
 
+  describe "files the baseline cannot key (parse errors)" do
+    before do
+      write_demo_project(diagnostic_source: "x = nil\nx.foo\n")
+      File.write(File.join(tmpdir, "lib", "bad.rb"), "def broken(\n  1 +\nend\n")
+      File.write(File.join(tmpdir, "lib", "bad2.rb"), "class X\n  def y\n")
+    end
+
+    %w[generate regenerate].each do |sub|
+      it "`#{sub}` counts only what the buckets cover and names the unbaselineable files" do
+        status, _out, err = run_cli("baseline", sub, cwd: tmpdir)
+        covered = YAML.safe_load_file(File.join(tmpdir, ".rigor-baseline.yml"))["ignored"].sum { |r| r["count"] }
+        expect(status).to eq(0)
+        expect(err).to match(/\((\d+) bucket\(s\) covering #{covered} diagnostic\(s\); match-mode: rule\)/)
+        expect(err).to include("have no rule (parse, path or internal errors) in 2 file(s)")
+        expect(err).to include("  lib/bad.rb\n", "  lib/bad2.rb\n")
+        expect(err).not_to include("have no path")
+      end
+    end
+
+    it "reports the same covered count under --match-mode message" do
+      _status, _out, err = run_cli("baseline", "generate", "--match-mode=message", cwd: tmpdir)
+      covered = YAML.safe_load_file(File.join(tmpdir, ".rigor-baseline.yml"))["ignored"].sum { |r| r["count"] }
+      expect(err).to include("covering #{covered} diagnostic(s); match-mode: message")
+      expect(err).to include("cannot be baselined")
+    end
+
+    it "lists at most ten files and counts the rest" do
+      12.times { |i| File.write(File.join(tmpdir, "lib", "broken#{i}.rb"), "def (\n") }
+      _status, _out, err = run_cli("baseline", "generate", cwd: tmpdir)
+      expect(err).to include("in 14 file(s)", "  ... and 4 more file(s)")
+      expect(err.lines.grep(%r{^  lib/}).size).to eq(10)
+    end
+
+    it "reports a missing `paths:` entry as a rule-less diagnostic that cannot be baselined" do
+      File.write(File.join(tmpdir, ".rigor.yml"), "paths:\n  - lib\n  - nowhere\nlibraries:\n  - prism\n")
+      _status, _out, err = run_cli("baseline", "generate", cwd: tmpdir)
+      expect(err).to include("cannot be baselined")
+      expect(err).to include("nowhere")
+    end
+
+    it "lists a file outside the working directory in the spelling the baseline YAML would key it" do
+      Dir.mktmpdir do |outside|
+        File.write(File.join(outside, "broken.rb"), "def (\n")
+        File.write(File.join(tmpdir, ".rigor.yml"), "paths:\n  - lib\n  - #{outside}\nlibraries:\n  - prism\n")
+        _status, _out, err = run_cli("baseline", "generate", cwd: tmpdir)
+        expected = Dir.chdir(tmpdir) do
+          Pathname.new(File.join(outside, "broken.rb")).relative_path_from(Pathname.new(Dir.pwd)).to_s
+        end
+        expect(expected).to start_with("../")
+        expect(err).to include("  #{expected}\n")
+      end
+    end
+
+    it "names diagnostics that have a rule but no path" do
+      pathless = Rigor::Analysis::Diagnostic.new(path: nil, line: 1, column: 1, message: "m", severity: :error,
+                                                 rule: "call.undefined-method", source_family: :builtin)
+      allow(Rigor::Analysis::Runner).to receive(:new)
+        .and_return(instance_double(Rigor::Analysis::Runner, run: double(diagnostics: [pathless])))
+      _status, _out, err = run_cli("baseline", "generate", cwd: tmpdir)
+      expect(err).to include("1 diagnostic(s) have no path and cannot be baselined; " \
+                             "fix them, or remove or exclude the files")
+      expect(err).not_to include("exclude the files:")
+    end
+
+    it "prints no second line when every diagnostic is keyable" do
+      FileUtils.rm([File.join(tmpdir, "lib", "bad.rb"), File.join(tmpdir, "lib", "bad2.rb")])
+      _status, _out, err = run_cli("baseline", "generate", cwd: tmpdir)
+      expect(err).not_to include("cannot be baselined")
+    end
+  end
+
   describe "rigor check --baseline-strict" do
     let(:diagnostic_source) do
       <<~RUBY

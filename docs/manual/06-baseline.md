@@ -79,6 +79,8 @@ a diagnostic another layer has already suppressed.
 
 `generate` and `regenerate` analyse with your loaded configuration unchanged except that `baseline:` is off, so options such as `bleeding_edge`, `target_ruby` or `severity_overrides` shape the recorded set exactly as they shape `rigor check`.
 
+The summary counts only the diagnostics the written buckets cover. A diagnostic with no rule — a **parse error** in a file Rigor could not parse, a missing `paths:` entry, or an internal error — or no path cannot be keyed, so it never enters the baseline. The command prints a second line saying how many, why, and which files. The exit status stays 0, but the next `rigor check` with `baseline:` wired still reports them and exits non-zero until you fix those files, exclude them, or remove a bad `paths:` entry.
+
 `generate` and `regenerate` take `--match-mode=rule` (the
 default — one bucket per file × rule) or `--match-mode=message`
 (a bucket per distinct message: more precise, more churn).

@@ -1,0 +1,3 @@
+- **[cli]** `rigor baseline generate` and `regenerate` count only the diagnostics the written buckets cover, and say how many could not be baselined. ([#2442](https://github.com/rigortype/rigor/issues/2442))
+  - Diagnostics with no rule (parse errors, a missing `paths:` entry) cannot be keyed, so they never enter the file; the summary used to count them as covered.
+  - A second line names how many such diagnostics there are and in which files. The exit status stays 0.

@@ -97,6 +97,13 @@ module Rigor
           new(buckets, project_root: project_root)
         end
 
+        # The diagnostics a baseline cannot address: no rule (a Prism parse error, a path or internal error) or no path.
+        # `#filter` passes these through and `from_diagnostics` leaves them out of every bucket; this is the one
+        # definition of both.
+        def unkeyable(diagnostics)
+          diagnostics.reject { |d| d.qualified_rule && d.path }
+        end
+
         private
 
         def parse_loaded(raw, path:, project_root:)
@@ -143,10 +150,7 @@ module Rigor
         # of message. File paths are normalised to relative before keying.
         def group_for_baseline(diagnostics, match_mode, project_root)
           root = Pathname.new(project_root)
-          diagnostics.each_with_object({}) do |diag, into|
-            next if diag.qualified_rule.nil?
-            next if diag.path.nil?
-
+          (diagnostics - unkeyable(diagnostics)).each_with_object({}) do |diag, into|
             rel = relative_path(diag.path, root)
             key = case match_mode
                   when :rule
@@ -158,17 +162,17 @@ module Rigor
           end
         end
 
+        def relative_path(path, root_pathname)
+          Pathname.new(path).relative_path_from(root_pathname).to_s
+        rescue ArgumentError
+          path # different drive letter on Windows or non-child path
+        end
+
         # Generates a Regexp source string for the baseline row. The string is `Regexp.escape`d so the YAML
         # round-trip produces a regex that matches the literal message. Users hand-editing the row can replace
         # the escaped form with a pattern.
         def message_pattern_for(message)
           Regexp.new(Regexp.escape(message.to_s))
-        end
-
-        def relative_path(path, root_pathname)
-          Pathname.new(path).relative_path_from(root_pathname).to_s
-        rescue ArgumentError
-          path # different drive letter on Windows or non-child path
         end
       end
 
@@ -211,7 +215,7 @@ module Rigor
 
         # Diagnostics that lacked a rule or a path bypass the baseline entirely (the baseline can't address
         # them).
-        unkeyable = diagnostics.reject { |d| d.qualified_rule && d.path }
+        unkeyable = self.class.unkeyable(diagnostics)
         [surfaced + unkeyable, silenced_count]
       end
 
@@ -306,9 +310,7 @@ module Rigor
         # over rule-ID rows because they're more specific. A diagnostic that matches no row goes into a
         # synthetic "no-bucket" bin keyed by (file, rule).
         bins = {}
-        diagnostics.each do |diag|
-          next if diag.qualified_rule.nil? || diag.path.nil?
-
+        (diagnostics - self.class.unkeyable(diagnostics)).each do |diag|
           bucket = claim_bucket_for(diag)
           key = if bucket
                   [bucket.file, bucket.rule,

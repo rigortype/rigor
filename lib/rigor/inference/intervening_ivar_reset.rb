@@ -181,13 +181,16 @@ module Rigor
       # `call.possible-nil-receiver` (ADR-58), as a declared one is not. A narrowing that kept `nil`
       # (`return if @tag`, `@tag.nil?`) widens unmarked, so a read the program really makes on `nil` still reports.
       # Issue #2039 — `mark: :unproven` marks as `mark: true` does only when the block answers nil (no write set is
-      # proven); a call proven to write the variable widens it unmarked.
-      def widen(scope, mark: false)
+      # proven) and `direct_writes` (called at most once, answering a `Set`) does not name the variable: a call
+      # proven to write it, or whose callee visibly assigns it a possibly-nil value ({DirectIvarWrites}), widens it
+      # unmarked.
+      def widen(scope, mark: false, direct_writes: nil)
         seed = class_ivar_seed(scope)
         return scope if seed.nil? || seed.empty?
 
         computed = false
         writes = nil
+        direct = nil
         seed.reduce(scope) do |widened, (name, seed_type)|
           local_type = scope.ivar(name)
           next widened if local_type.nil? || local_type == seed_type
@@ -200,15 +203,19 @@ module Rigor
 
           joined = Type::Combinator.union(local_type, seed_type)
           widened = widened.with_ivar(name, joined)
-          marked = widen_marks?(mark, writes, local_type) || scope.declaration_sourced?(:ivar, name)
+          if mark == :unproven && writes.nil? && direct.nil?
+            direct = direct_writes ? direct_writes.call : Set.new
+          end
+          marked = widen_marks?(mark, writes, direct, name, local_type) || scope.declaration_sourced?(:ivar, name)
           marked ? widened.seed_declaration_sourced_ivar(name, joined) : widened
         end
       end
 
-      # Whether {.widen} stamps the declaration mark on a binding narrowed to `local_type`: one whose narrowing ruled
-      # `nil` out, under `mark: true`, or under `mark: :unproven` when no write set is proven (`writes` nil).
-      def widen_marks?(mark, writes, local_type)
-        marking = mark == :unproven ? writes.nil? : mark
+      # Whether {.widen} stamps the declaration mark on `name`'s binding, narrowed to `local_type`: one whose
+      # narrowing ruled `nil` out, under `mark: true`, or under `mark: :unproven` when no write set is proven
+      # (`writes` nil) and the callee does not visibly write it (`direct`).
+      def widen_marks?(mark, writes, direct, name, local_type)
+        marking = mark == :unproven ? writes.nil? && !direct.include?(name) : mark
         marking && nil_free?(local_type)
       end
       private_class_method :widen_marks?

@@ -51,48 +51,26 @@ module Rigor
           includes_singleton_mixin?(scope, receiver.class_name)
         end
 
-        # True when `class_name`, or a project class up its as-written superclass chain, `include`s the stdlib
-        # `Singleton`. Ruby's `Singleton.included` hook also installs an `inherited` hook, so a subclass answers
-        # `instance` with its own instance (`class D < C` where `C` includes it).
+        # True when `class_name`'s instance ancestry carries the stdlib `Singleton` as an `include` — in the class
+        # itself or in a project class up its superclass chain (Ruby's `Singleton.included` also installs an
+        # `inherited` hook, so `class D < C` answers `instance` with its own instance). Read off
+        # `Scope::ResolutionChain` (the `:constants` flavor, so an empty project `module Singleton` is a project
+        # entry), where the stdlib module is an external entry. Issue #2438 — two shapes are not the mixin: a
+        # name that resolves to a project constant (a top-level `Singleton`, `M::Singleton` inside `module M`),
+        # which is a project entry rather than an external one; and `prepend Singleton`, which runs
+        # `prepend_features` instead of the `included` hook and so defines no `instance`. A prepended entry
+        # sits ahead of its owner on the chain.
         def includes_singleton_mixin?(scope, class_name)
-          name = class_name.to_s.delete_prefix("::")
-          seen = Set.new
-          while name && seen.add?(name)
-            return true if own_singleton_include?(scope, name)
-
-            name = project_superclass(scope, name)
+          chain = Scope::ResolutionChain.for(scope, class_name.to_s.delete_prefix("::"), :instance, :constants)
+          chain.entries.each_with_index.any? do |entry, index|
+            entry.external? && !entry.superclass_edge && MIXIN_NAMES.include?(entry.raw.to_s) &&
+              included_after_owner?(chain, entry, index)
           end
-          false
         end
 
-        # `include Singleton` written in `name`'s own body, naming the stdlib module. Issue #2438 — `prepend
-        # Singleton` defines no `instance` (`Singleton.prepend_features` is not the `included` hook) and the
-        # discovery table lists prepends among the includes, so a class that prepends it declines outright; and a
-        # name that resolves to a project constant (`M::Singleton` inside `module M`) is not the stdlib mixin.
-        def own_singleton_include?(scope, name)
-          stdlib = ->(raw) { MIXIN_NAMES.include?(raw.to_s) && !project_constant?(scope, name, raw) }
-          return false if (scope.discovery.discovered_prepends[name] || []).any?(&stdlib)
-
-          scope.includes_of(name).any?(&stdlib)
-        end
-
-        def project_constant?(scope, name, raw)
-          !resolve_project_class(scope, name, raw, inside_body: true).nil?
-        end
-
-        # The project class `name`'s as-written superclass resolves to, or nil (none written, or a library class).
-        def project_superclass(scope, name)
-          raw = scope.superclass_of(name)
-          raw && resolve_project_class(scope, name, raw, inside_body: false)
-        end
-
-        # The project-declared class an ancestor name written in `name`'s declaration resolves to, or nil: the
-        # declaration's lexical nesting outwards, after `<name>::<raw>` for a name written inside the body (an
-        # `include`) rather than in the header (a superclass).
-        def resolve_project_class(scope, name, raw, inside_body:)
-          classes = scope.discovery.discovered_classes
-          candidates = inside_body && !raw.to_s.start_with?("::") ? ["#{name}::#{raw}"] : []
-          (candidates + scope.ancestor_name_candidates(name, raw)).find { |candidate| classes.key?(candidate) }
+        def included_after_owner?(chain, entry, index)
+          owner = entry.owner && chain.index_of(entry.owner)
+          !owner.nil? && index > owner
         end
       end
     end

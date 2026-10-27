@@ -1556,45 +1556,63 @@ module Rigor
         CLOSED_ROOTS = Set["Object", "BasicObject"].freeze
         private_constant :CLOSED_ROOTS
 
-        # Issue #2438 — whether a class's singleton surface may hold methods its source in `paths:` does not show.
-        # Open when the class, or a project class up its superclass chain:
+        # Issue #2438 — whether a class's singleton surface may hold methods its source in `paths:` does not show,
+        # read off `Scope::ResolutionChain` (`:constants` flavor, so a project module that holds only constants is
+        # still a project entry). Open when the class, or a project class up its superclass chain:
         #
-        # 1. records a mixin (`include` / `extend` / `prepend`), an `inherited` / `included` / `extended` /
-        #    `prepended` hook, or `method_missing` / `respond_to_missing?`;
+        # 1. records a mixin (`include` / `extend` / `prepend`: any instance-side entry that is not one of the
+        #    chain's classes, or any singleton-side entry beyond the classes' own singletons), an `inherited` /
+        #    `included` / `extended` / `prepended` hook, or `method_missing` / `respond_to_missing?`;
         # 2. has no `class` / `module` body of its own inside `paths:` (`class Ext::Foo` names `Ext` without one);
-        # 3. or the chain, as the source writes it (else as the member-less declaration writes it), reaches a class
-        #    the project does not define: a library, gem or core class other than `Object` / `BasicObject`
-        #    (`ApplicationRecord < ActiveRecord::Base`, `MyError < StandardError`).
+        # 3. or the chain reaches a class the project does not define, other than `Object` / `BasicObject`: an
+        #    external superclass (`ApplicationRecord < ActiveRecord::Base`, `MyError < StandardError`), a
+        #    superclass written as an expression, or — where the source writes no superclass for the last class —
+        #    the superclass its member-less declaration writes, unless that is a project class.
         #
         # A definition or reopening in a file outside `paths:` cannot be seen, so a class whose body is inside
         # `paths:` and whose methods live only outside it counts as closed.
-        def open_source_class?(class_name, scope, loader, seen = Set.new)
+        def open_source_class?(class_name, scope, loader)
           name = class_name.to_s.delete_prefix("::")
-          return false unless seen.add?(name)
+          instance = Scope::ResolutionChain.for(scope, name, :instance, :constants)
+          classes = instance.level_classes.compact
+          return true if classes.empty? || instance.truncated?
 
-          discovery = scope.discovery
-          return true if (discovery.discovered_class_sources[name] || []).empty?
-          return true if records_opening_mixin_or_hook?(name, scope)
+          sources = scope.discovery.discovered_class_sources
+          return true if classes.any? { |klass| (sources[klass] || []).empty? || opening_hook?(klass, scope) }
+          return true if opening_entry?(instance, classes) ||
+                         opening_entry?(Scope::ResolutionChain.for(scope, name, :singleton, :constants), classes)
 
-          raw = scope.superclass_of(name) || loader.memberless_project_superclass(name)
-          return false if raw.nil? || CLOSED_ROOTS.include?(raw.to_s.delete_prefix("::"))
-
-          classes = discovery.discovered_classes
-          parent = scope.ancestor_name_candidates(name, raw).find { |candidate| classes.key?(candidate) }
-          parent.nil? || open_source_class?(parent, scope, loader, seen)
+          open_tail?(instance, classes.last, scope, loader)
         end
 
-        def records_opening_mixin_or_hook?(name, scope)
-          return true unless scope.includes_of(name).empty?
-
-          # `module_function` records the module itself as an extend; that adds no method the source does not show.
-          extends = scope.discovery.discovered_extends[name] || []
-          return true if extends.any? { |raw| raw.to_s.delete_prefix("::") != name }
-
-          OPENING_HOOKS.any? do |hook|
-            scope.discovered_method?(name, hook, :singleton) || scope.discovered_method?(name, hook, :instance)
+        def opening_entry?(chain, classes)
+          chain.entries.any? do |entry|
+            if entry.external?
+              !entry.superclass_edge || !CLOSED_ROOTS.include?(entry.raw.to_s.delete_prefix("::"))
+            else
+              !classes.include?(entry.name)
+            end
           end
         end
+
+        def opening_hook?(klass, scope)
+          OPENING_HOOKS.any? do |hook|
+            scope.discovered_method?(klass, hook, :singleton) || scope.discovered_method?(klass, hook, :instance)
+          end
+        end
+
+        # The last class's own superclass, when the chain does not name it: an expression the tables cannot
+        # resolve, or none in source but one in the member-less declaration.
+        def open_tail?(chain, last, scope, loader)
+          return true if chain.opaque_tail?(scope)
+          return false unless scope.superclass_of(last).nil?
+
+          raw = loader.memberless_project_superclass(last)
+          return false if raw.nil? || CLOSED_ROOTS.include?(raw.delete_prefix("::"))
+
+          !scope.discovery.discovered_classes.key?(raw.delete_prefix("::"))
+        end
+
         # Issue #2174 — `class Matrix` reopened with one `#:`-annotated method, and no `matrix` signatures
         # loaded, gives Matrix a declaration holding only that method ({RbsLoader#ruby_library_reopen?}).
         # `Matrix.identity(2)` is correct Ruby, so the class's surface is treated as open: `call.undefined-method`

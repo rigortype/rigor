@@ -1,0 +1,3 @@
+- **[sig-gen]** `rigor sig-gen` now writes signatures that resolve when a namespace shadows a core class name or a class subclasses a core class. ([#2454](https://github.com/rigortype/rigor/pull/2454))
+  - Inside a `module Foo` that declares `Foo::Set`, a method returning a core `Set` is written `-> ::Set[untyped]` rather than `-> Set[untyped]`, which RBS read as `Foo::Set` ([#2230](https://github.com/rigortype/rigor/issues/2230)).
+  - An empty subclass such as `class MyHash < Hash; end` is declared `class MyHash < ::Hash[untyped, untyped]` beside the other declarations written for its file, so a method returning one no longer fails `rbs validate` with `NoTypeFoundError` ([#2224](https://github.com/rigortype/rigor/issues/2224)).

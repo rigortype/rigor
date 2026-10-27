@@ -147,6 +147,15 @@ RSpec.describe Rigor::CLI::SigGenCommand do
       expect(rbs_validate).to eq([0, ""])
     end
 
+    it "writes a bounded one's own methods into the declaration sig/ carries" do
+      write("lib/bound.rb", "class Bound\n  def z = 1\nend\n")
+
+      expect(sig_gen("--write", "lib").first).to eq(0)
+
+      expect(written("box")).to end_with("class Bound[T < Comparable]\n  def get: () -> T\n  def z: () -> 1\nend\n")
+      expect(rbs_validate).to eq([0, ""])
+    end
+
     it "names the skip in --format=json" do
       _status, out, = sig_gen("--format=json", "lib")
       row = JSON.parse(out).fetch("candidates").find { |r| r["method"] == "y" }

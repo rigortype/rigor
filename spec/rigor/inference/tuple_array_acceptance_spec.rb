@@ -119,7 +119,10 @@ RSpec.describe "A tuple parameter against an Array argument", type: :runner do
                     | (untyped) -> String
           def self.gen: [A, B] ([A, B]) -> A
                       | [X] (array[X]) -> String
+          def self.rec: ({ a: Integer }, Array[Integer]) -> Symbol
+                      | (_MyEach[untyped], Array[Integer]) -> String
           def self.probe: (Array[String], Array[Integer]) -> void
+          def self.probe_rec: (Hash[Symbol, untyped], Array[Integer]) -> void
         end
       RBS
     end
@@ -136,6 +139,12 @@ RSpec.describe "A tuple parameter against an Array argument", type: :runner do
             assert_type("String", G.u(a))
             assert_type("String", G.gen(a))
             assert_type("Symbol", G.u([1, 2]))
+            nil
+          end
+
+          # A record's `maybe` for an unread hash is not re-asked: the record overload keeps its gradual-pass win.
+          def self.probe_rec(h, a)
+            assert_type("Symbol", G.rec(h, a))
             nil
           end
         end

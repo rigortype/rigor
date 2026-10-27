@@ -92,16 +92,26 @@ RSpec.describe Rigor::Cache::RbsDescriptor do
     # `plugin_sig_dir` declares the same class as `project_sig_dir` at a different generic arity: the pair
     # `add_deferred_signatures` was written for, and the only shape in which deferring a path changes the
     # env at all.
-    let(:project_sig_dir) { sig_dir("project_sig", "collide.rbs", "class DigestGateCollide\nend\n") }
-    let(:plugin_sig_dir) { sig_dir("plugin_sig", "collide.rbs", "class DigestGateCollide[Elem]\nend\n") }
+    #
+    # Issue #2422 — each also declares `DigestGateMember#m`, which the plugin's file composes with as an overload
+    # unless `project_signature_paths` names the project's directory, when it stands down.
+    let(:project_sig_dir) do
+      sig_dir("project_sig", "collide.rbs", "class DigestGateCollide\nend\n",
+              "member.rbs" => "class DigestGateMember\n  def m: () -> Integer\nend\n")
+    end
+    let(:plugin_sig_dir) do
+      sig_dir("plugin_sig", "collide.rbs", "class DigestGateCollide[Elem]\nend\n",
+              "member.rbs" => "class DigestGateMember\n  def m: () -> String\nend\n")
+    end
     let(:extra_sig_dir) { sig_dir("extra_sig", "extra.rbs", "class DigestGateExtra\nend\n") }
 
     after { FileUtils.rm_rf(tmpdir) }
 
-    def sig_dir(name, basename, content)
+    def sig_dir(name, basename, content, more = {})
       path = File.join(tmpdir, name)
       FileUtils.mkdir_p(path)
       File.write(File.join(path, basename), content)
+      more.each { |other, text| File.write(File.join(path, other), text) }
       path
     end
 
@@ -124,7 +134,8 @@ RSpec.describe Rigor::Cache::RbsDescriptor do
         signature_paths: [[project_sig_dir, plugin_sig_dir],
                           [project_sig_dir, plugin_sig_dir, extra_sig_dir]],
         virtual_rbs: [[], [["digest_gate_virtual.rbs", "class DigestGateVirtual\nend\n"]]],
-        deferred_signature_paths: [[], [plugin_sig_dir]]
+        deferred_signature_paths: [[plugin_sig_dir], []],
+        project_signature_paths: [[], [project_sig_dir]]
       }
     end
 
@@ -147,7 +158,14 @@ RSpec.describe Rigor::Cache::RbsDescriptor do
     def env_fingerprint(loader)
       keywords = build_env_for_keywords.to_h { |keyword| [keyword, loader.public_send(keyword)] }
       env = Rigor::Environment::RbsLoader.build_env_for(**keywords)
-      env.class_decls.map { |name, entry| [name.to_s, entry.each_decl.count] }.sort
+      # Issue #2422 — and each declaration's members, so a member composed (an overload continuation) and one
+      # stood down (absent) read apart.
+      env.class_decls.map do |name, entry|
+        members = entry.each_decl.map do |decl|
+          decl.members.map { |member| [member.class.name, member.respond_to?(:overloading?) && member.overloading?] }
+        end
+        [name.to_s, entry.each_decl.count, members]
+      end.sort
     end
 
     def env_cache_key(loader)

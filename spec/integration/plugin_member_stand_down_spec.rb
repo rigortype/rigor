@@ -12,6 +12,7 @@ unless defined?(AS_CORE_EXT_PLUGIN_LIB)
   AS_CORE_EXT_PLUGIN_LIB = File.expand_path("../../plugins/rigor-activesupport-core-ext/lib", __dir__)
 end
 $LOAD_PATH.unshift(AS_CORE_EXT_PLUGIN_LIB) unless $LOAD_PATH.include?(AS_CORE_EXT_PLUGIN_LIB)
+require "rigor-activesupport-core-ext"
 
 # Issue #2422 end to end: `rigor-activesupport-core-ext` enabled beside an `rbs collection install` that
 # declares `Object#acts_like?` (and the reporter's seven other rows). Before the fix the plugin's file reopened
@@ -35,10 +36,13 @@ RSpec.describe "plugin signature member stand-down through the runner (#2422)" d
 
   after { Rigor::Plugin.unregister! }
 
-  # What `rbs collection install` ships for activesupport 7.0, cut to the reporter's eight rows.
+  # What `rbs collection install` ships for activesupport 7.0, cut to the reporter's eight rows plus the two
+  # literal returns the review of #2424 found folding correct code, and a `to_fs` wider than the plugin's.
   def collection_rbs = <<~RBS
     class Object
       def acts_like?: (untyped duck) -> bool
+      def html_safe?: () -> false
+      def duplicable?: () -> true
     end
     class Array[unchecked out Elem]
       def compact_blank!: () -> self
@@ -59,7 +63,7 @@ RSpec.describe "plugin signature member stand-down through the runner (#2422)" d
       def to_param: () -> self
     end
     class Time
-      def to_fs: (?Symbol format) -> String
+      def to_fs: (?Symbol | String format) -> String
     end
   RBS
 
@@ -84,17 +88,56 @@ RSpec.describe "plugin signature member stand-down through the runner (#2422)" d
     File.write("rbs_collection.lock.yaml", lockfile_yaml)
     File.write("a.rb", "def m(x)\n  y = x ? \"s\" : nil\n  y.nil?\n  1.foo\nend\n")
     File.write("b.rb", "def n(x)\n  x.present?\nend\n")
+    File.write("c.rb", composed_source)
   end
+
+  # The project's own `sig/`, declaring a plugin method the collection does not.
+  def write_own_sig
+    FileUtils.mkdir_p("sig")
+    File.write(File.join("sig", "own.rbs"), "class Integer\n  def ordinal: () -> Symbol\nend\n")
+  end
+
+  # Correct code the collection's narrower declarations alone would misjudge: `html_safe?` read as always
+  # false, `duplicable?` as always true, and a `to_fs` argument only the collection's overload accepts.
+  def composed_source = <<~RUBY
+    def h(o)
+      if o.html_safe?
+        1
+      else
+        2
+      end
+    end
+
+    def d(o)
+      return 1 unless o.duplicable?
+
+      2
+    end
+
+    def t = Time.now.to_fs("x").upcase
+
+    # Only the plugin declares `squish`: a run that silently lost the plugin reports it.
+    def s = "  x ".squish
+  RUBY
 
   def config
     Rigor::Configuration.new(
-      Rigor::Configuration::DEFAULTS.merge("paths" => %w[a.rb b.rb], "plugins" => ["rigor-activesupport-core-ext"])
+      Rigor::Configuration::DEFAULTS.merge("paths" => %w[a.rb b.rb c.rb], "plugins" => ["rigor-activesupport-core-ext"])
     )
   end
 
+  # The plugin is registered by the requirer on every run: once required, `require` does not register it again
+  # after the `unregister!` each run starts from.
   def run(workers:, cache_store: nil)
+    Rigor::Plugin.unregister!
+    requirer = lambda do |_name|
+      Rigor::Plugin.register(Rigor::Plugin::ActivesupportCoreExt)
+      true
+    end
     result = guarded_run(
-      Rigor::Analysis::Runner.new(configuration: config, cache_store: cache_store, workers: workers), %w[a.rb b.rb]
+      Rigor::Analysis::Runner.new(configuration: config, cache_store: cache_store, workers: workers,
+                                  plugin_requirer: requirer),
+      %w[a.rb b.rb c.rb]
     )
     result.diagnostics.map { |d| [d.path, d.line, d.rule, d.message] }.sort
   end
@@ -103,26 +146,31 @@ RSpec.describe "plugin signature member stand-down through the runner (#2422)" d
     Rigor::Cache::Store.new(root: File.join(Dir.pwd, ".rigor", "cache"))
   end
 
-  it "reports the typo, no false nil receiver, and one notice naming every stood-down member" do
+  it "composes with the collection: the typo reports, nothing false does, and nothing stood down" do
     rows = run(workers: 0)
-    rules = rows.map { |row| row[2] }
-    expect(rules).to include("call.undefined-method")
-    expect(rules).not_to include("call.possible-nil-receiver", "rbs.coverage.definition-build-failed")
+    expect(rows.reject { |row| row[0] == ".rigor.yml" }.map { |row| [File.basename(row[0]), row[1], row[2]] })
+      .to eq([["a.rb", 4, "call.undefined-method"]])
+    expect(rows.map { |row| row[2] }).not_to include("rbs.coverage.plugin-signature-stood-down",
+                                                     "rbs.coverage.definition-build-failed")
+  end
+
+  it "stands a member down to the project's own sig/ and names it in one notice" do
+    write_own_sig
+    rows = run(workers: 0)
     notices = rows.select { |row| row[2] == "rbs.coverage.plugin-signature-stood-down" }
     expect(notices.size).to eq(1)
     message = notices.first[3]
-    expect(message).to include("core_ext.rbs", "loaded without 8 method declaration(s)",
-                               "Two declarations of one method")
-    named = message.scan(%r{`([^`/]+)` \(([^)]+)\)})
-    expect(named.map(&:first)).to contain_exactly(
-      "Object#acts_like?", "Array#compact_blank!", "Hash#compact_blank", "Integer#ordinalize",
-      "NilClass#to_param", "TrueClass#to_param", "FalseClass#to_param", "Time#to_fs"
-    )
-    expect(named.map(&:last).uniq).to eq([".gem_rbs_collection/activesupport/7.0/activesupport.rbs"])
+    expect(message).to include("core_ext.rbs", "loaded without 1 declaration(s)", "the other source's, named in")
+    expect(message.scan(%r{`([^`/]+)` \(([^)]+)\)})).to eq([["Integer#ordinal", "sig/own.rbs"]])
+    expect(rows.map do |row|
+      row[2]
+    end).not_to include("call.possible-nil-receiver", "rbs.coverage.definition-build-failed")
   end
 
   it "says the same under the fork pool and on a cold and a warm env cache" do
+    write_own_sig
     sequential = run(workers: 0)
+    expect(sequential.map { |row| row[2] }).to include("rbs.coverage.plugin-signature-stood-down")
     expect(run(workers: 2)).to eq(sequential)
     expect(run(workers: 0, cache_store: store)).to eq(sequential)
     expect(run(workers: 0, cache_store: store)).to eq(sequential)

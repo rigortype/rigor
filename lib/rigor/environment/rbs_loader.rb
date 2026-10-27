@@ -10,6 +10,7 @@ require_relative "member_consistency"
 require_relative "required_features"
 require_relative "gated_signature_guard"
 require_relative "gated_signature_plan"
+require_relative "deferred_signature_plan"
 require_relative "ruby_library_roots"
 require_relative "../rooted_glob"
 
@@ -96,8 +97,13 @@ module Rigor
         # Vendored gem stubs (`data/vendored_gem_sigs/<gem>/`) are loaded on top of `signature_paths` so the
         # per-gem RBS bundled with Rigor itself is in scope for every analysis run. The gem stubs are
         # intentionally read-only and appended LAST so user-supplied `signature_paths` win on name conflicts.
-        def build_env_for(libraries:, signature_paths:, virtual_rbs: [], deferred_signature_paths: [])
-          inputs = [signature_paths, virtual_rbs, deferred_signature_paths]
+        #
+        # @param project_signature_paths — issue #2422 — the project's own `signature_paths:` (not the collection,
+        #   gem or plugin directories also on `signature_paths`): a plugin member another source declares composes
+        #   with it as an overload unless that source is the project's own ({DeferredSignaturePlan}).
+        def build_env_for(libraries:, signature_paths:, virtual_rbs: [], deferred_signature_paths: [],
+                          project_signature_paths: [])
+          inputs = [signature_paths, virtual_rbs, deferred_signature_paths, project_signature_paths]
           env, gated_dirs = whole_gated_attempt(libraries, inputs)
           return env if gated_dirs.empty?
 
@@ -171,7 +177,8 @@ module Rigor
         #
         # @param gated_plan — issue #1713 — a {GatedSignaturePlan} loaded in place of the gated directories: its
         #   kept declarations where the directories would have loaded, its shells after the project's signatures.
-        def build_env_attempt(libraries, signature_paths, virtual_rbs, deferred_signature_paths, gated_plan: nil)
+        def build_env_attempt(libraries, signature_paths, virtual_rbs, deferred_signature_paths,
+                              project_signature_paths = [], gated_plan: nil)
           libraries = libraries_without_shadowed_bigdecimal_math(libraries)
           rbs_loader, loaded_libraries = library_loader(libraries)
           gated_dirs = loadable_gated_dirs(libraries, loaded_libraries)
@@ -203,13 +210,21 @@ module Rigor
           # Issues #824 / #1075 — every member a `.rbs` file also declares was ranked above; the inline side of
           # each pair the `.rbs` won stands down here ({.add_virtual_rbs}), so the two never collide.
           add_virtual_rbs(env, virtual_rbs, inline_standdowns: consistency.inline_standdowns)
-          # Issues #610 / #2422 — the plugins' files last, so each stands down against every other source.
-          add_deferred_signatures(env, project_sig_files(deferred_signature_paths))
+          # Issues #610 / #2422 — the plugins' files last, so each is planned against every other source.
+          add_plugin_signatures(env, deferred_signature_paths, project_signature_paths, virtual_rbs)
           synthesize_missing_namespaces(env)
           # Issue #777 — resolve-time backstop: also unload colliding PROJECT buffers (class-vs-module /
           # constant redeclarations against bundled RBS). Virtual culprits are preferred when both appear.
           env, resolved = resolve_quarantining_virtual_collisions(env, virtual_rbs, project_files: project_files)
           [stub_missing_referenced_types(env, resolved, project_files), gated_dirs]
+        end
+
+        # Issue #2422 — {.add_deferred_signatures} over the plugins' files, with the buffer names of the project's
+        # own signature sources, which a plugin member stands down to rather than composing with: its
+        # `signature_paths:` files and its inline RBS.
+        def add_plugin_signatures(env, deferred_signature_paths, project_signature_paths, virtual_rbs)
+          own = project_sig_files(project_signature_paths) | virtual_rbs.to_set { |name, _| name.to_s }
+          add_deferred_signatures(env, project_sig_files(deferred_signature_paths), own)
         end
 
         # An `RBS::EnvironmentLoader` with every library of `libraries` that resolves added, and those libraries.
@@ -622,12 +637,13 @@ module Rigor
         # innocent ones is the change to make if that ever stops being true.
         #
         # Issue #2422 — at equal arity the plugin reopens the class, and a method both sources declare fails the
-        # definition build (`DuplicatedMethodDefinitionError`) for the class and everything under it. So the
-        # stand-down reaches members too: each method, attribute or alias another loaded source already declares
-        # on the same class is left out of the plugin's file before it is added
-        # ({GatedSignaturePlan.without_taken_members}, the #1713 member planning), and the rest of the file
-        # loads. {.deferred_member_standdowns} reads what was left out back off the built env.
-        def add_deferred_signatures(env, deferred_files)
+        # definition build (`DuplicatedMethodDefinitionError`) for the class and everything under it; a constant
+        # both declare raises `DuplicatedDeclarationError` and drops the plugin's whole file. So the file is planned
+        # against the env before it is added ({DeferredSignaturePlan}): a colliding method composes with another
+        # source's `def` as an overload continuation, or stands down when the other source is the project's own
+        # (`own`, buffer names) or cannot be continued; a colliding declaration stands down on its own; the rest
+        # of the file loads. {.deferred_member_standdowns} reads what stood down back off the built env.
+        def add_deferred_signatures(env, deferred_files, own = Set.new)
           deferred_files.sort.each do |file|
             parsed = parse_signature_file(file)
             next if parsed.nil?
@@ -635,7 +651,7 @@ module Rigor
             buffer, directives, decls = parsed
             next if generic_arity_conflict(env, decls)
 
-            add_project_parsed_decls(env, buffer, directives, GatedSignaturePlan.without_taken_members(decls, env))
+            add_project_parsed_decls(env, buffer, directives, DeferredSignaturePlan.plan(decls, env, own))
           end
         end
 
@@ -670,9 +686,8 @@ module Rigor
             parsed = loaded.include?(file) ? parse_signature_file(file) : nil
             next [] if parsed.nil? || generic_arity_conflict(env, parsed[2])
 
-            GatedSignaturePlan.member_standdown_rows(env, file, parsed[2]).sort.map do |label, cause|
-              [file, label, nil, nil, cause, :member]
-            end
+            rows = DeferredSignaturePlan.standdown_rows(env, file, parsed[2]).sort_by(&:first)
+            rows.map { |label, cause| [file, label, nil, nil, cause, :member] }
           end
         end
 
@@ -1660,7 +1675,8 @@ module Rigor
         end
       end
 
-      attr_reader :libraries, :signature_paths, :cache_store, :virtual_rbs, :deferred_signature_paths
+      attr_reader :libraries, :signature_paths, :cache_store, :virtual_rbs, :deferred_signature_paths,
+                  :project_signature_paths
 
       # @param libraries — stdlib library names to load on top of core (e.g.,
       #   `["pathname", "json"]`). Empty by default. Each entry MUST correspond to a directory under the
@@ -3068,7 +3084,8 @@ module Rigor
           libraries: @libraries,
           signature_paths: @signature_paths,
           virtual_rbs: @virtual_rbs,
-          deferred_signature_paths: @deferred_signature_paths
+          deferred_signature_paths: @deferred_signature_paths,
+          project_signature_paths: @project_signature_paths
         )
       end
 

@@ -815,12 +815,13 @@ module Rigor
           )
         end
 
-        # Issue #2422 — one plugin signature file that loaded without the members another source also declares,
+        # Issue #2422 — one plugin signature file that loaded without the declarations another source also makes,
         # naming each (sampled) with the file whose declaration was used instead. One row per file, not per
-        # member: an `rbs collection install` of activesupport overlaps `rigor-activesupport-core-ext` on hundreds.
+        # declaration: an `rbs collection install` of a gem can overlap the plugin for it on hundreds. A method
+        # that composed with the other source's as an overload is not here; the plugin's overloads still bind.
         def build_rbs_plugin_member_stood_down_diagnostic(path, rows)
           labels = rows.map do |_path, declaration, _, _, cause_file|
-            cause = cause_file.nil? ? "" : " (#{relative_signature_path(cause_file.to_s)})"
+            cause = cause_file.nil? || cause_file.empty? ? "" : " (#{relative_signature_path(cause_file.to_s)})"
             "`#{declaration}`#{cause}"
           end
           Diagnostic.new(
@@ -828,12 +829,11 @@ module Rigor
             line: 1,
             column: 1,
             message: "`#{relative_signature_path(path.to_s)}` (a signature file a plugin contributes) loaded without " \
-                     "#{rows.size} method declaration(s) another signature source already makes: " \
-                     "#{sampled(labels, 10)}. Two declarations of one method fail the class's definition build, so " \
-                     "the plugin's declaration stood down and calls resolve against the other one; the rest of the " \
-                     "plugin's file still loads. Expected when a bundled plugin and an `rbs collection install` or " \
-                     "your own signatures both declare a method; nothing to fix unless you want the plugin's typing " \
-                     "back, which needs the other source to stop declaring it.",
+                     "#{rows.size} declaration(s) another signature source already makes: #{sampled(labels, 10)}. " \
+                     "Two declarations of one method or constant fail the build, so the plugin's stood down and " \
+                     "the other source's, named in parentheses, is used; the rest of the plugin's file still " \
+                     "loads. Nothing to fix unless you want the plugin's typing back, which needs that source to " \
+                     "stop declaring it.",
             severity: :info,
             rule: "rbs.coverage.plugin-signature-stood-down",
             source_family: :builtin

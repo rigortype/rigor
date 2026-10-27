@@ -77,8 +77,27 @@ module Rigor
       # reconstructs {.config_entries} without loading a plugin, so an entry there that it cannot rebuild
       # would turn the warm fast lane into a permanent miss on every project that enables a bundled plugin.
       def self.env_only_config_entries(loader)
-        [deferred_signature_paths_entry(loader)].compact
+        [deferred_signature_paths_entry(loader), project_signature_paths_entry(loader)].compact
       end
+
+      # Issue #2422 — which of the loader's `signature_paths:` are the project's own changes the env built from
+      # byte-identical files: a bundled plugin's method composes with another source's as an overload, but stands
+      # down to the project's own. Only read when a plugin defers signatures, so a project without one keeps its
+      # key.
+      def self.project_signature_paths_entry(loader)
+        return nil unless loader.respond_to?(:project_signature_paths) && loader.respond_to?(:deferred_signature_paths)
+        return nil if Array(loader.deferred_signature_paths).empty?
+
+        own = Array(loader.project_signature_paths).map(&:to_s).sort
+        return nil if own.empty?
+
+        Descriptor::ConfigEntry.new(
+          key: "rbs.project_signature_paths",
+          value_hash: Digest::SHA256.hexdigest(own.join("\n"))
+        )
+      end
+
+      private_class_method :project_signature_paths_entry
 
       def self.deferred_signature_paths_entry(loader)
         return nil unless loader.respond_to?(:deferred_signature_paths)

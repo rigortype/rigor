@@ -116,11 +116,34 @@ module Rigor
         @unresolvable_superclasses = {}
         # Issue #722 — whole-run: `{ class name => the lexical nesting its header is written in }`.
         @superclass_nestings = {}
+        # Issue #2437 — whole-run: every class a walked file declares with a `class` keyword or a `Data.define` /
+        # `Struct.new` layout, so the report can tell a project superclass this run did not write from one nothing
+        # declares.
+        @source_classes = Set.new
       end
 
       # Lifts legacy plain-`Array[Type]` observation entries into {ObservedCall} carriers. Specs from the
       # slice-3 generation predate the carrier and pass observations as `{ [class, method] => [[type1, type2],
       # ...] }`; the wrapper keeps those passing while internal code always sees the new shape.
+      # Whether an unresolvable superclass token ({#unresolvable_superclasses}) names a class the walked source
+      # declares and this run wrote nothing for, whose own chain would close if the project's classes were written:
+      # each step a source class, ending at no superclass or at one the RBS environment knows (#2437). What is
+      # missing is then the project's own declaration, not a gem's RBS. `class ApplicationRecord <
+      # ActiveRecord::Base` with no RBS for the gem is not such a class: writing it would not help.
+      def source_declared_superclass?(token)
+        name = bare_class_name(token)
+        seen = {}
+        while @source_classes.include?(name) && !seen[name]
+          seen[name] = true
+          nesting, superclass = @superclass_nestings[name]
+          return true if superclass.nil?
+
+          name = bare_class_name(resolve_superclass_token(superclass, nesting, @source_classes))
+          return true if Reflection.rbs_class_known?(name, environment: @environment)
+        end
+        false
+      end
+
       def normalize_observations(map)
         return map if map.empty?
 
@@ -140,6 +163,10 @@ module Rigor
         # Both read the files as they are now, so a second `run` of one generator re-reads them.
         @project_tables = nil
         @file_base_scope = nil
+        # #2461 — which `sig/` targets the writer will write to, read from the files as they are now.
+        @writable_targets = {}
+        @signature_path_mapper = nil
+        @writer_probe = nil
         candidates = resolved.flat_map { |path| analyse_file(path, @environment) }
         demoted = demote_overridden_base_methods(
           demote_unresolvable_superclasses(demote_inline_generic_classes(resolve_superclass_spellings(candidates)))
@@ -417,16 +444,61 @@ module Rigor
         end
       end
 
-      # Everything this run declares, superclass or not: a chain that reaches `class Record` — emitted here, with no
-      # superclass of its own — terminates in a class the next run WILL know. A class shell counts only when its
-      # file has a candidate the writer is sure to write ({Writer.writes?}): a shell on a file whose every method is
-      # skipped, already declared by `sig/`, or a tighter return the writer will not apply never reaches disk (#2454).
+      # Everything this run puts on disk, superclass or not: a chain that reaches `class Record` — emitted here, with
+      # no superclass of its own — terminates in a class the next run WILL know. Only what the writer is sure to
+      # write counts, because a subclass written against a class nothing declares fails its build
+      # (`RBS::NoSuperclassFoundError`) on the next run:
+      #
+      # - a class with a candidate the writer is sure to write ({#written?}). A class whose every method is skipped
+      #   is not written, so it does not count (#2437); a class shell on it would close it instead (#2438);
+      # - a class shell on a file with such a candidate: a shell on a file whose every method is skipped, already
+      #   declared by `sig/`, or a tighter return the writer will not apply never reaches disk (#2454);
+      # - the wrapper namespaces of either, which the writer renders around them with their recorded superclasses.
+      #
+      # Counting too few only demotes a subclass, the output before #2454 (ADR-5).
       def declared_by_run(candidates)
-        written_paths = candidates.each_with_object(Set.new) { |c, acc| acc << c.path if Writer.writes?(c) }
-        candidates.each_with_object(Set.new) do |candidate, acc|
-          acc << candidate.class_name if candidate.class_name
-          acc.merge(candidate.class_shells || []) if written_paths.include?(candidate.path)
+        written = candidates.select { |candidate| written?(candidate) }
+        written_paths = written.to_set(&:path)
+        declared = Set.new
+        written.each { |candidate| declared << candidate.class_name if candidate.class_name }
+        candidates.each do |candidate|
+          declared.merge(candidate.class_shells || []) if written_paths.include?(candidate.path)
         end
+        declared.flat_map { |name| wrapper_names(name) }.to_set | declared
+      end
+
+      # `A::B::C` is written inside `A` and `A::B`.
+      def bare_class_name(token)
+        token.sub(/\[.*\]\z/, "").delete_prefix("::")
+      end
+
+      def wrapper_names(name)
+        segments = name.split("::")
+        (1...segments.size).map { |n| segments.first(n).join("::") }
+      end
+
+      # Whether the writer will put `candidate` on disk: a candidate it is sure to write ({Writer.writes?}), aimed
+      # at a target it will write to (#2461).
+      def written?(candidate)
+        return false unless Writer.writes?(candidate)
+
+        target = signature_path_mapper.target_for(candidate.path, class_name: candidate.class_name,
+                                                                  method_name: candidate.method_name,
+                                                                  kind: candidate.rbs_kind)
+        @writable_targets[target] = writer_probe.accepts_target?(target) unless @writable_targets.key?(target)
+        @writable_targets[target]
+      end
+
+      # The target routing {CLI::SigGenCommand#build_writer} gives the writer, over the same `sig/` layout.
+      def signature_path_mapper
+        @signature_path_mapper ||= PathMapper.new(
+          configuration: @configuration,
+          layout_index: LayoutIndex.new(signature_paths: @configuration.signature_paths)
+        )
+      end
+
+      def writer_probe
+        @writer_probe ||= Writer.new(path_mapper: signature_path_mapper, dry_run: true)
       end
 
       # A nested class or module goes with its wrapper. `WikiPage::Webhookable`'s declaration is emitted
@@ -765,6 +837,7 @@ module Rigor
 
         full = child_prefix.join("::")
         @namespace_kinds[full] = node.is_a?(Prism::ClassNode) ? :class : :module
+        @source_classes << full if node.is_a?(Prism::ClassNode)
         record_superclass(node, full, prefix)
         walk_namespace_body(node, child_prefix, out)
         true
@@ -891,6 +964,7 @@ module Rigor
         @meta_layouts.each do |class_name, layout|
           @namespace_kinds[class_name] = :class
           @class_shells << class_name
+          @source_classes << class_name
           @class_superclasses[class_name] = MetaClassShape::SUPERCLASSES.fetch(layout.kind)
         end
       end

@@ -88,6 +88,20 @@ module Rigor
         candidate.classification == Classification::NEW_METHOD
       end
 
+      # Whether {#write_target} would write to `target` at all, asked before any candidate is rendered (#2461): a
+      # target inside the sig root that is missing (the create path), or that exists, is valid UTF-8 and parses.
+      # {#update_existing} leaves an unparseable or mis-encoded file untouched, so a class shell on it never
+      # reaches disk. A spliced result {RbsValidity} rejects is a writer defect and is not predicted here.
+      def accepts_target?(target)
+        return false unless inside_sig_root?(target)
+        return true unless target.exist?
+
+        source = target.read
+        source.valid_encoding? && !parse_signature(source).nil?
+      rescue SystemCallError
+        false
+      end
+
       # Whether `proposed` has STRICTLY FEWER bare `untyped` tokens than `existing`. A count, not a slot-by-slot
       # comparison: it reads as "at least one more position is concrete", and does not prove that no concrete
       # position became `untyped` elsewhere. Word-boundary matching counts `untyped` only as a type token, not

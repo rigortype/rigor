@@ -86,7 +86,7 @@ module Rigor
         report_inline_declared(candidates, options)
         report_withheld_annotations(candidates, options)
         report_unrenderable(generator.unrenderable)
-        report_unresolvable_superclasses(generator.unresolvable_superclasses)
+        report_unresolvable_superclasses(generator.unresolvable_superclasses, generator)
       end
 
       private
@@ -217,16 +217,36 @@ module Rigor
       # declaring it would fail to build and take the class's type coverage with it. Naming the unresolved
       # superclass is the actionable part — it is usually one gem's missing RBS standing between the user
       # and signatures for a whole layer of their app.
-      def report_unresolvable_superclasses(unresolvable)
-        return if unresolvable.empty?
+      #
+      # Issue #2437 — a superclass the project declares in source but this run wrote nothing for gets different
+      # advice: no gem RBS is missing; the superclass's own methods could not be typed, or were not written.
+      def report_unresolvable_superclasses(unresolvable, generator)
+        project, external = unresolvable.partition do |_name, superclass|
+          generator.source_declared_superclass?(superclass)
+        end
+        report_unwritten_project_superclasses(project)
+        return if external.empty?
 
         @err.puts(
-          "rigor sig-gen: skipped #{unresolvable.size} class(es) whose superclass no loaded RBS declares. " \
+          "rigor sig-gen: skipped #{external.size} class(es) whose superclass no loaded RBS declares. " \
           "A signature for them would fail to build (`RBS::NoSuperclassFoundError`) and would leave the " \
           "class LESS typed than it is now. Provide RBS for the superclass — `rbs collection install`, the " \
           "gem's own `sig/`, or a `signature_paths:` entry — and re-run."
         )
-        unresolvable.sort.each { |class_name, superclass| @err.puts("  #{class_name} < #{superclass}") }
+        external.sort.each { |class_name, superclass| @err.puts("  #{class_name} < #{superclass}") }
+      end
+
+      def report_unwritten_project_superclasses(project)
+        return if project.empty?
+
+        @err.puts(
+          "rigor sig-gen: skipped #{project.size} class(es) whose superclass this run wrote no signature for. " \
+          "The superclass is declared in the project's source, but its own methods could not be typed, or its " \
+          "`sig/` file could not be written, so a signature for these subclasses would fail to build " \
+          "(`RBS::NoSuperclassFoundError`). Annotate or type the superclass's methods, fix its `sig/` file, or " \
+          "hand-write its declaration, and re-run."
+        )
+        project.sort.each { |class_name, superclass| @err.puts("  #{class_name} < #{superclass}") }
       end
 
       # #1991 — the path errors `rigor check` reports for the arguments: a path that is neither a directory nor a

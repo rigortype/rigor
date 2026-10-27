@@ -70,6 +70,18 @@ RSpec.describe "ADR-72 ActiveSupport overlay — deep_dup, the Hash aliases and 
     expect(dumps(result)).to eq(["Array[Array[Integer]]", "String", "Object", "Hash[:a, 1]"])
   end
 
+  # Review of #2424: `symbolize_keys!` keeps a key without `to_sym` (`key.to_sym rescue key`), so its row
+  # stays `-> self`; `Hash[Symbol, V]` read an Integer key as a Symbol.
+  it "keeps an Integer key's type through symbolize_keys! and to_options!" do
+    result = run_source(<<~RUBY)
+      h = { 1 => 2 }
+      h.symbolize_keys!.keys.first + 1
+      h.to_options!.keys.first + 1
+    RUBY
+
+    expect(call_rules(result)).to be_empty
+  end
+
   it "types the Hash aliases like the rows they alias" do
     result = run_source(<<~RUBY)
       h = { "a" => 1 }

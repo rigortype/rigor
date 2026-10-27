@@ -33,7 +33,9 @@ module Rigor
           signature_paths: loader.signature_paths,
           virtual_rbs: loader.respond_to?(:virtual_rbs) ? loader.virtual_rbs : [],
           deferred_signature_paths:
-            loader.respond_to?(:deferred_signature_paths) ? loader.deferred_signature_paths : []
+            loader.respond_to?(:deferred_signature_paths) ? loader.deferred_signature_paths : [],
+          project_signature_paths:
+            loader.respond_to?(:project_signature_paths) ? loader.project_signature_paths : []
         )
       end
 

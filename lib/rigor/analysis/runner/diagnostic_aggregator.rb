@@ -34,7 +34,7 @@ module Rigor
         #   - `quarantined_signatures` — the `signature_paths:` files skipped because they do not parse
         #     (`[path, first_error_line]` pairs);
         #   - `signature_standdowns` (#610) — `[path, class_name, existing_arity, incoming_arity,
-        #     existing_file]` tuples;
+        #     existing_file]` tuples, then (#2422) `[path, declaration, nil, nil, cause_file, :member]` ones;
         #   - `vendored_standdowns` (#1713) — `Environment::RbsLoader#vendored_standdowns`;
         #   - `env_build_failure` — `[error_class, first_error_line, conflicting_buffer_names]`, or nil;
         #   - `definition_build_failures` (#696) — `[class_name, error_class, member,
@@ -457,7 +457,9 @@ module Rigor
           standdowns = @snapshots[:signature_standdowns]
           return [] if standdowns.nil? || standdowns.empty?
 
-          standdowns.map { |entry| build_rbs_plugin_signature_stood_down_diagnostic(entry) }
+          members, files = standdowns.partition { |entry| entry[5] == :member }
+          files.map { |entry| build_rbs_plugin_signature_stood_down_diagnostic(entry) } +
+            members.group_by(&:first).map { |path, rows| build_rbs_plugin_member_stood_down_diagnostic(path, rows) }
         end
 
         # Issue #1713 — the other outcome that avoided a definition-build failure: a required-feature-gated
@@ -807,6 +809,31 @@ module Rigor
                      "loaded. Expected when a bundled plugin and an `rbs collection install` both declare " \
                      "the class; nothing to fix unless you want the plugin's typing back, which needs the " \
                      "other source to stop declaring the class.",
+            severity: :info,
+            rule: "rbs.coverage.plugin-signature-stood-down",
+            source_family: :builtin
+          )
+        end
+
+        # Issue #2422 — one plugin signature file that loaded without the declarations another source also makes,
+        # naming each (sampled) with the file whose declaration was used instead. One row per file, not per
+        # declaration: an `rbs collection install` of a gem can overlap the plugin for it on hundreds. A method
+        # that composed with the other source's as an overload is not here; the plugin's overloads still bind.
+        def build_rbs_plugin_member_stood_down_diagnostic(path, rows)
+          labels = rows.map do |_path, declaration, _, _, cause_file|
+            cause = cause_file.nil? || cause_file.empty? ? "" : " (#{relative_signature_path(cause_file.to_s)})"
+            "`#{declaration}`#{cause}"
+          end
+          Diagnostic.new(
+            path: ".rigor.yml",
+            line: 1,
+            column: 1,
+            message: "`#{relative_signature_path(path.to_s)}` (a signature file a plugin contributes) loaded without " \
+                     "#{rows.size} declaration(s) another signature source already makes: #{sampled(labels, 10)}. " \
+                     "Two declarations of one method or constant fail the build, so the plugin's stood down and " \
+                     "the other source's, named in parentheses, is used; the rest of the plugin's file still " \
+                     "loads. Nothing to fix unless you want the plugin's typing back, which needs that source to " \
+                     "stop declaring it.",
             severity: :info,
             rule: "rbs.coverage.plugin-signature-stood-down",
             source_family: :builtin

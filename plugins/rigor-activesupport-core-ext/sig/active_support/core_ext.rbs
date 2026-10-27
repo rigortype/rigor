@@ -1566,24 +1566,29 @@ class Hash[unchecked out K, unchecked out V]
   # mutating (raising is not an effect label).
   %a{pure}
   def symbolize_keys: () -> Hash[Symbol, V]
+  # `symbolize_keys!` keeps `-> self`: `key.to_sym rescue key` leaves a key without `to_sym` as it is, so
+  # `Hash[Symbol, V]` is wrong for an Integer-keyed receiver (#2424 review). The other bang forms below
+  # answer the re-keyed or re-valued hash.
   def symbolize_keys!: () -> self
   %a{pure}
   def deep_symbolize_keys: () -> Hash[untyped, untyped]
-  def deep_symbolize_keys!: () -> self
+  def deep_symbolize_keys!: () -> Hash[untyped, untyped]
   %a{pure}
   def stringify_keys: () -> Hash[String, V]
-  def stringify_keys!: () -> self
+  def stringify_keys!: () -> Hash[String, V]
   %a{pure}
   def deep_stringify_keys: () -> Hash[untyped, untyped]
-  def deep_stringify_keys!: () -> self
+  def deep_stringify_keys!: () -> Hash[untyped, untyped]
   %a{pure}
   def assert_valid_keys: (*K | Array[K]) -> self
+  # The block's result is the new key at every level, so the keys are its type, not `K`: `{ a: 1 }
+  # .deep_transform_keys(&:to_s)` has String keys. Nested values are re-keyed too, so they read `untyped`.
   %a{pure}
-  def deep_transform_keys: () { (K) -> K } -> Hash[K, untyped]
-  def deep_transform_keys!: () { (K) -> K } -> self
+  def deep_transform_keys: [X] () { (K) -> X } -> Hash[X, untyped]
+  def deep_transform_keys!: [X] () { (K) -> X } -> Hash[X, untyped]
   %a{pure}
   def deep_transform_values: () { (V) -> untyped } -> Hash[K, untyped]
-  def deep_transform_values!: () { (V) -> untyped } -> self
+  def deep_transform_values!: () { (V) -> untyped } -> Hash[K, untyped]
   # `alias_method`s of `symbolize_keys` / `symbolize_keys!`.
   %a{pure}
   def to_options: () -> Hash[Symbol, V]
@@ -1600,11 +1605,17 @@ class Hash[unchecked out K, unchecked out V]
   # `core_ext/hash/deep_merge` — the block receives `(key, this_val,
   # other_val)` and returns the merged value; neither `deep_merge` nor its
   # block mutates either hash (containment covers the block itself).
+  # The result carries the argument's keys and values as well as the
+  # receiver's, and a key both hold a Hash under merges into a third Hash
+  # that is neither side's value type (`{ n: { x: 1 } }.deep_merge(n: { y:
+  # "s" })[:n]` is `{ x: 1, y: "s" }`), so the values read `untyped`.
+  # `(Hash[K, V]) -> Hash[K, V]` typed `h.deep_merge(b: "x")[:b]` as the
+  # receiver's value type (#2424 review). The bang form answers the receiver.
   %a{pure}
-  def deep_merge: (Hash[K, V]) -> Hash[K, V]
-                | (Hash[K, V]) { (K, V, V) -> V } -> Hash[K, V]
-  def deep_merge!: (Hash[K, V]) -> self
-                 | (Hash[K, V]) { (K, V, V) -> V } -> self
+  def deep_merge: [A, B] (Hash[A, B] other_hash) -> Hash[K | A, untyped]
+                | [A, B] (Hash[A, B] other_hash) { (K | A, untyped, untyped) -> untyped } -> Hash[K | A, untyped]
+  def deep_merge!: [A, B] (Hash[A, B] other_hash) -> Hash[K | A, untyped]
+                 | [A, B] (Hash[A, B] other_hash) { (K | A, untyped, untyped) -> untyped } -> Hash[K | A, untyped]
   # `other.is_a?(Hash)` — the hook `ActiveSupport::DeepMergeable` asks before
   # recursing into a value. `:nodoc:`, but public.
   %a{pure}

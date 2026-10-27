@@ -167,7 +167,8 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     end
   end
 
-  # A method-level `[E]` binds its own `E`, which the class's copied parameter must not disturb.
+  # Guard: a method-level `[E]` binds its own `E`, which the class's copied parameter must not disturb. No line of
+  # the fix fails it; it holds the inline-copied member's text against an anchoring pass that would rewrite it.
   it "leaves a method-level type parameter of an inline declaration as written" do
     require "rigor-rbs-inline"
     Rigor::Plugin.register(Rigor::Plugin::RbsInline) unless Rigor::Plugin.registered_for("rbs-inline")

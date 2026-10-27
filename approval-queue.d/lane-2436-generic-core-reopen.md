@@ -28,7 +28,9 @@ is not obviously exact.
 The second option, as the coordinator ruled on the issue: copy when every parameter is plain, otherwise skip as
 `sig.skipped.generic-reopening`, unless `sig/` already declares the class (its own header then stays, as for
 `sig.skipped.inline-generic-class`). It follows #1422's `demote_inline_generic_classes`, which skips rather than
-writes a header it cannot make exact; ADR-5 favours the skip over a definition-build failure.
+writes a header it cannot make exact; ADR-5 favours the skip over a definition-build failure. Review of #2473 added
+the coordinator's second ruling: a class a member names whose bare spelling equals one of the class's declared
+parameter names is written anchored (`::E`), rather than the class being demoted, so the member keeps its type.
 
 ## To undo
 

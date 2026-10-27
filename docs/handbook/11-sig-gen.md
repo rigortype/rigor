@@ -344,7 +344,9 @@ declaration's type parameters: `class Array[unchecked out E]`.
 rbs rejects a reopening whose parameters differ, so a bare
 `class Array` would fail the class, and every class whose
 signature mentions it, with `GenericParameterMismatchError`.
-The members still say `untyped` for the element type.
+The members still say `untyped` for the element type, and a
+class whose name matches a copied parameter is written
+anchored (`::E`), since a bare `E` would name the parameter.
 
 The parameters are copied only when every one is plain: a
 name, a variance and `unchecked`. A bound or a default

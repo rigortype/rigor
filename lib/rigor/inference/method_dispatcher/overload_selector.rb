@@ -231,11 +231,23 @@ module Rigor
             # and the dispatch layer unions their returns (#521).
             matches = find_matching_overload(overloads, shared, strict: false)
             every_match = gradual || ImpreciseArgument.any_in?(shared[:arg_types], shared[:keywords_last])
-            return matches.first(1) unless every_match
+            return [first_read_match(matches, shared)].compact unless every_match
 
             # Issue #1675 — and every overload the arguments' untyped parts reach on their own, after the
             # whole-argument matches so the singular `select` keeps its answer.
             ImpreciseArgument.with_stand_ins(matches, shared) { find_matching_overload(overloads, it, strict: false) }
+          end
+
+          # Issue #2428 — the single winner of pass 2 is the first match that does not rest on a tuple's `maybe` for
+          # an `Array` of unknown arity, when there is one. Pass 1 declines a strict overload against a competitor
+          # whose parameter is an alias, an interface or `untyped`, and taking the tuple overload by list position
+          # then typed redis's `hmget(key, Array[String])` as `[String?]`, where its `(arg, Array[arg])` overload
+          # says `Array[String?]`. Only the tuple's `maybe` is re-asked; a record's `maybe` for an unread hash keeps
+          # its documented gradual-pass answer.
+          def first_read_match(matches, shared)
+            return matches.first if matches.size < 2 || !Acceptance.unread_array_in?(shared[:arg_types])
+
+            matches.find { |mt| Acceptance.refusing_unread_arrays { matches?(mt, shared) } } || matches.first
           end
 
           # Pass 0. With every argument a plain value (a `Constant`, or a `Nominal` with no type arguments), the
@@ -308,7 +320,10 @@ module Rigor
               next false unless engages_block_shape?(method_type, shared[:block_required])
 
               fun = method_type.type
-              ok = KeywordArguments.accepted_by?(fun, shared, false) { |*kv| accepts_param?(*kv, shared, false, true) }
+              # Issue #2428 — a tuple keyword's `maybe` for an unread Array is no evidence here; pass 2 decides.
+              ok = Acceptance.refusing_unread_arrays do
+                KeywordArguments.accepted_by?(fun, shared, false) { |*kv| accepts_param?(*kv, shared, false, true) }
+              end
               next false unless ok
 
               arg_types = KeywordArguments.selection_positional(method_type, shared)
@@ -462,8 +477,10 @@ module Rigor
             # A record's `maybe` for a `Hash` with a gradual arm or an open shape is no evidence for the overload:
             # with `({ a: Integer }) -> Integer | (Hash[Symbol, untyped]) -> String`, `{ **o, b: 2 }` has a key the
             # closed record forbids, yet the first overload won by list position. The gradual pass still takes it.
-            # A `maybe` that survives with those records answering `no` has another source, and still counts.
-            return false if strict && result.maybe? && Acceptance.maybe_rests_on_unread_hash?(param_type, arg)
+            # A tuple's `maybe` for an `Array` of unknown arity is the same: `([Integer, Integer]) -> Symbol |
+            # (Array[Integer]) -> String` answers `String` for an `Array[Integer]`. A `maybe` that survives with
+            # those shapes answering `no` has another source, and still counts.
+            return false if strict && result.maybe? && Acceptance.maybe_rests_on_unread_shape?(param_type, arg)
 
             result.yes? || result.maybe?
           end

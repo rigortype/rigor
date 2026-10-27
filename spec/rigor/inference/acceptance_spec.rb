@@ -401,10 +401,51 @@ RSpec.describe Rigor::Inference::Acceptance do
       expect(accepts(a, b)).to be_no
     end
 
-    it "rejects non-Tuple values" do
+    it "rejects non-Tuple, non-Array values" do
       a = tuple_of(int_nominal)
       expect(accepts(a, int_nominal)).to be_no
-      expect(accepts(a, Rigor::Type::Combinator.nominal_of(Array))).to be_no
+      expect(accepts(a, Rigor::Type::Combinator.nominal_of(Hash, type_args: [int_nominal, int_nominal]))).to be_no
+    end
+
+    # Issue #2428 — an `Array[E]` has unknown arity, so a tuple answers `maybe` unless some position rejects
+    # every member of `E`, which no length can repair.
+    describe "against an Array of unknown arity" do
+      def int_pair = tuple_of(int_nominal, int_nominal)
+      def array_of(elem) = Rigor::Type::Combinator.nominal_of(Array, type_args: [elem])
+
+      it "answers yes for a Tuple of matching arity and members" do
+        expect(accepts(int_pair, tuple_of(int_constant, int_constant))).to be_yes
+      end
+
+      it "answers maybe for a raw Array, an Array[untyped] and an Array whose element every position holds" do
+        expect(accepts(int_pair, Rigor::Type::Combinator.nominal_of(Array))).to be_maybe
+        expect(accepts(int_pair, array_of(dyn_top))).to be_maybe
+        expect(accepts(int_pair, array_of(Rigor::Type::Combinator.union(str_nominal, dyn_top)))).to be_maybe
+        expect(accepts(int_pair, array_of(int_nominal))).to be_maybe
+        expect(accepts(int_pair, array_of(int_or_str))).to be_maybe
+      end
+
+      it "answers maybe for a non-empty-array Difference" do
+        non_empty = Rigor::Type::Combinator.non_empty_array(int_nominal)
+        expect(accepts(int_pair, non_empty)).to be_maybe
+      end
+
+      it "answers no when a position rejects every element member" do
+        expect(accepts(int_pair, array_of(Rigor::Type::Combinator.nominal_of(Symbol)))).to be_no
+        expect(accepts(tuple_of(int_nominal, str_nominal), array_of(str_nominal))).to be_no
+      end
+
+      it "answers no for an Array subclass" do
+        subclass = Class.new(Array)
+        stub_const("RigorSpecArraySub", subclass)
+        expect(accepts(int_pair, Rigor::Type::Combinator.nominal_of("RigorSpecArraySub"))).to be_no
+      end
+
+      it "reports the maybe as resting on the unread array, and nothing else as such" do
+        expect(described_class.maybe_rests_on_unread_shape?(int_pair, array_of(int_nominal))).to be(true)
+        expect(described_class.maybe_rests_on_unread_shape?(array_of(int_nominal), array_of(int_nominal)))
+          .to be(false)
+      end
     end
 
     it "Nominal[Array] accepts a Tuple via projection" do

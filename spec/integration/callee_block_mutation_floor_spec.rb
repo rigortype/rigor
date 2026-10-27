@@ -232,7 +232,7 @@ RSpec.describe "a callee's block mutation floors the caller's argument (#2296)",
   end
 
   # `def.return-type-mismatch` against a declared tuple: a floored Array's unknown length and gradual elements cannot
-  # prove the tuple wrong, but a known element no tuple slot overlaps still can.
+  # prove the tuple wrong, and only an element type no tuple slot accepts still does.
   describe "a floored argument returned against a declared tuple" do
     def mismatches(body, rbs)
       result = analyze(<<~RUBY, sig: { "p.rbs" => "class P\n  def norm: (untyped) -> untyped\n  #{rbs}\nend\n" })
@@ -251,15 +251,20 @@ RSpec.describe "a callee's block mutation floors the caller's argument (#2296)",
       expect(mismatches(floored, "def pair: () -> [Integer, Integer]")).to eq([])
     end
 
-    it "reports when a known element overlaps no tuple slot" do
-      expect(mismatches(floored, "def pair: () -> [String, String]")).to eq(
-        ["return-type mismatch on `pair': declared [String, String], inferred Array[Dynamic[top] | Integer]"]
-      )
+    # Issue #2428 withdrew #2296's report here: a tuple answers `maybe` for an Array of unknown length unless a slot
+    # rejects every element member, and a `Dynamic` member is never rejected.
+    it "is silent when a known element overlaps no tuple slot" do
+      expect(mismatches(floored, "def pair: () -> [String, String]")).to eq([])
     end
 
-    it "keeps reporting an Array with no gradual element" do
-      expect(mismatches("def pair(xs) = xs.map(&:to_i)", "def pair: (Array[String]) -> [Integer, Integer]")).to eq(
-        ["return-type mismatch on `pair': declared [Integer, Integer], inferred Array[Integer]"]
+    # Issue #2428's accepted cost: an `Array[Integer]` may hold exactly two Integers.
+    it "is silent for an Array with no gradual element whose element fits the tuple" do
+      expect(mismatches("def pair(xs) = xs.map(&:to_i)", "def pair: (Array[String]) -> [Integer, Integer]")).to eq([])
+    end
+
+    it "keeps reporting an Array whose element no tuple slot accepts" do
+      expect(mismatches("def pair(xs) = xs", "def pair: (Array[String]) -> [Integer, Integer]")).to eq(
+        ["return-type mismatch on `pair': declared [Integer, Integer], inferred Array[String]"]
       )
     end
 

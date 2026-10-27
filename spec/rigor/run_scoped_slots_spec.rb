@@ -50,7 +50,7 @@ RSpec.describe Rigor::RunScopedSlots do
   # and clearing it from inside a frame would break that frame.
   let(:not_run_scoped) do
     {
-      __rigor_acceptance_unread_hash_refused__: "frame flag, installed and restored around a block",
+      __rigor_acceptance_unread_shape_refused__: "frame flag, installed and restored around a block",
       __rigor_declared_param_writer_scope__: "frame slot, installed and restored around a block",
       __rigor_dependency_capture_stack__: "frame slot of the ADR-46 dependency recorder",
       __rigor_dependency_recorder__: "frame slot of the ADR-46 dependency recorder",

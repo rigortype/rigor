@@ -435,6 +435,30 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
       )
     end
 
+    # Review of #2424: these rows answered the receiver's own types (`-> self` / `-> Hash[K, V]`) although each
+    # re-keys or re-values it, as ActiveSupport 8.1.4 does: `{ a: 1 }.deep_merge(b: "x")[:b]` is "x",
+    # `deep_transform_keys(&:to_s)` has String keys, and the bang forms answer the receiver changed in place.
+    it "types the re-keying and merging rows by what they return" do
+      source = <<~RUBY
+        Rigor.dump_type({ a: 1 }.deep_merge({ b: "x" }))
+        Rigor.dump_type({ a: 1 }.deep_merge!({ b: "x" }))
+        Rigor.dump_type({ a: 1 }.deep_transform_keys(&:to_s))
+        Rigor.dump_type({ a: 1 }.deep_transform_keys!(&:to_s))
+        Rigor.dump_type({ a: 1 }.deep_transform_values!(&:to_s))
+        Rigor.dump_type({ "a" => 1 }.symbolize_keys!)
+        Rigor.dump_type({ a: 1 }.stringify_keys!)
+        Rigor.dump_type({ "a" => 1 }.deep_symbolize_keys!)
+      RUBY
+      result = run_plugin(source: source)
+
+      expect(result.diagnostics.map(&:qualified_rule).grep(/\Acall\./)).to be_empty
+      expect(dumps(result)).to eq(
+        ["Hash[:a | Dynamic[top], Dynamic[top]]", "Hash[:a | Dynamic[top], Dynamic[top]]", 'Hash["a", Dynamic[top]]',
+         'Hash["a", Dynamic[top]]', "Hash[:a, Dynamic[top]]", "Hash[Symbol, 1]", "Hash[String, 1]",
+         "Hash[Dynamic[top], Dynamic[top]]"]
+      )
+    end
+
     it "still witnesses a genuinely undefined method on a Range, a Hash and an Array receiver" do
       result = run_plugin(source: "(1..5).overlapz?(2..3)\n{ a: 1 }.with_defaultz({})\n[1].deep_dupe\n")
 

@@ -832,6 +832,7 @@ module Rigor
           return nil if method_def
 
           return nil if last_resort_surface_answers?(receiver_type, class_name, call_node, scope, kind, lexical_sites)
+          return nil if open_project_singleton?(receiver_type, class_name, call_node, scope)
           return nil if subclass_instance_may_answer?(rendered_receiver, class_name, call_node.name, scope,
                                                       call_node.receiver)
 
@@ -1523,6 +1524,97 @@ module Rigor
             CORE_OVERLAY_OPEN_RECEIVERS.include?(bare_name) ||
             (GEM_OVERLAY_OPEN_RECEIVERS.include?(bare_name) && gem_overlay_loaded?(scope)) ||
             ruby_library_reopen?(class_name, scope)
+        end
+
+        # Issue #2438 — a class-method call on a class the project's own signatures name but whose source leaves
+        # the singleton surface open. Before `rigor sig-gen --write` such a class was source-only and an
+        # unresolved call on it was silent; the sidecar must not turn the same call into a finding. Two shapes:
+        #
+        # - `C.instance` where `C`, or a project class up its superclass chain, `include`s the stdlib `Singleton`:
+        #   the answer is `SingletonMixinDispatch.answers?`, the predicate the typer itself uses, so the rule never
+        #   reports a call the engine typed. The class's other members are irrelevant: the mixin's hook defines
+        #   `instance`.
+        # - every project declaration of `C` is member-less (`RbsLoader#memberless_project_class?`) AND the source
+        #   leaves `C` open ({#open_source_class?}). A member-less declaration does not describe the class's
+        #   surface, but a class whose whole definition Rigor can see in `paths:` is still closed, so a typo on it
+        #   keeps firing. Instance-side calls keep being checked; declaring any member re-closes the class.
+        def open_project_singleton?(receiver_type, class_name, call_node, scope)
+          return false unless receiver_type.is_a?(Type::Singleton)
+          return true if Inference::MethodDispatcher::SingletonMixinDispatch.answers?(
+            scope, receiver_type, call_node.name, call_node.arguments.nil?
+          )
+
+          loader = scope.environment&.rbs_loader
+          return false if loader.nil? || !loader.respond_to?(:memberless_project_class?)
+
+          loader.memberless_project_class?(class_name) && open_source_class?(class_name, scope, loader)
+        end
+
+        OPENING_HOOKS = %i[inherited included extended prepended method_missing respond_to_missing?].freeze
+        private_constant :OPENING_HOOKS
+
+        CLOSED_ROOTS = Set["Object", "BasicObject"].freeze
+        private_constant :CLOSED_ROOTS
+
+        # Issue #2438 — whether a class's singleton surface may hold methods its source in `paths:` does not show,
+        # read off `Scope::ResolutionChain` (`:constants` flavor, so a project module that holds only constants is
+        # still a project entry). Open when the class, or a project class up its superclass chain:
+        #
+        # 1. `extend`s a module (any singleton-side entry beyond the classes' own singletons), or records an
+        #    `inherited` / `included` / `extended` / `prepended` hook or `method_missing` / `respond_to_missing?`.
+        #    A plain `include` or `prepend` adds instance methods only, so it leaves the singleton side closed;
+        # 2. has no `class` / `module` body of its own inside `paths:` (`class Ext::Foo` names `Ext` without one);
+        # 3. or the chain reaches a class the project does not define, other than `Object` / `BasicObject`: an
+        #    external superclass (`ApplicationRecord < ActiveRecord::Base`, `MyError < StandardError`), a
+        #    superclass written as an expression, or — where the source writes no superclass for the last class —
+        #    the superclass its member-less declaration writes, unless that is a project class.
+        #
+        # A definition or reopening in a file outside `paths:` cannot be seen, so a class whose body is inside
+        # `paths:` and whose methods live only outside it counts as closed.
+        def open_source_class?(class_name, scope, loader)
+          name = class_name.to_s.delete_prefix("::")
+          instance = Scope::ResolutionChain.for(scope, name, :instance, :constants)
+          singleton = Scope::ResolutionChain.for(scope, name, :singleton, :constants)
+          [instance, singleton].each { |chain| chain.record(scope) }
+          classes = instance.level_classes.compact
+          return true if classes.empty? || instance.truncated?
+
+          sources = scope.discovered_class_sources
+          return true if classes.any? { |klass| (sources[klass] || []).empty? || opening_hook?(klass, scope) }
+          return true if opening_entry?(instance, classes, mixins: false) ||
+                         opening_entry?(singleton, classes, mixins: true)
+
+          open_tail?(instance, classes.last, scope, loader)
+        end
+
+        # An external superclass other than `Object` / `BasicObject` opens either side; a module entry opens the
+        # chain only where `mixins` is set (the singleton side, where it is an `extend`).
+        def opening_entry?(chain, classes, mixins:)
+          chain.entries.any? do |entry|
+            if entry.external? && entry.superclass_edge
+              !CLOSED_ROOTS.include?(entry.raw.to_s.delete_prefix("::"))
+            else
+              mixins && !classes.include?(entry.name)
+            end
+          end
+        end
+
+        def opening_hook?(klass, scope)
+          OPENING_HOOKS.any? do |hook|
+            scope.discovered_method?(klass, hook, :singleton) || scope.discovered_method?(klass, hook, :instance)
+          end
+        end
+
+        # The last class's own superclass, which the chain does not name: an expression the tables cannot resolve,
+        # or one only the member-less declaration writes (the chain ends at the implicit `Object` exactly when
+        # the source writes none).
+        def open_tail?(chain, last, scope, loader)
+          return true if chain.opaque_tail?(scope)
+
+          raw = loader.memberless_project_superclass(last)
+          return false if raw.nil? || CLOSED_ROOTS.include?(raw.delete_prefix("::"))
+
+          !scope.discovered_classes.key?(raw.delete_prefix("::"))
         end
 
         # Issue #2174 — `class Matrix` reopened with one `#:`-annotated method, and no `matrix` signatures

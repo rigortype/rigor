@@ -4,6 +4,7 @@ require "tempfile"
 
 require_relative "uri"
 require_relative "publish_batcher"
+require_relative "config_warning_announcer"
 require_relative "../analysis/runner"
 require_relative "../analysis/buffer_binding"
 
@@ -19,7 +20,7 @@ module Rigor
     # buffers' debounce timers elapse around the same moment, the `PublishBatcher` coalesces them into one
     # `#publish_many` round dispatched across the fork-based worker pool (issue #142) instead of N
     # independent, GVL-serialized `Runner` calls.
-    class DiagnosticPublisher
+    class DiagnosticPublisher # rubocop:disable Metrics/ClassLength
       # Maps Rigor severity symbols to LSP DiagnosticSeverity
       # integers per spec § "Diagnostic":
       #   1 = Error, 2 = Warning, 3 = Information, 4 = Hint.
@@ -44,9 +45,6 @@ module Rigor
       # concurrent rounds; one key means a burst collapses into the last one.
       PROJECT_ROUND_KEY = :__rigor_project_round__
 
-      # LSP `MessageType.Warning`, the `type` of a `window/showMessage` notification.
-      MESSAGE_TYPE_WARNING = 2
-
       def initialize(writer:, buffer_table:, project_context:,
                      debouncer: nil, debounce_seconds: 0.2)
         @writer = writer
@@ -54,6 +52,7 @@ module Rigor
         @project_context = project_context
         @debouncer = debouncer
         @debounce_seconds = debounce_seconds
+        @config_warning_announcer = ConfigWarningAnnouncer.new(writer: writer, project_context: project_context)
         @round_lock = Mutex.new
         @round_running = false
         @round_pending = false
@@ -133,18 +132,8 @@ module Rigor
         notify(uri, [])
       end
 
-      # Issue #2231 — shows each configuration warning the editor has not seen yet as a `window/showMessage`
-      # (`MessageType.Warning`), worded as `rigor check` prints it on STDERR.
-      # {ProjectContext#unannounced_config_warnings} decides what is new, so a call after a reload that changed
-      # nothing writes nothing.
-      def announce_config_warnings
-        return unless @project_context.respond_to?(:unannounced_config_warnings)
-
-        @project_context.unannounced_config_warnings.each do |warning|
-          @writer.write(method: "window/showMessage",
-                        params: { type: MESSAGE_TYPE_WARNING, message: "rigor: #{warning.message}" })
-        end
-      end
+      # Issue #2231 — shows the configuration warnings the editor has not seen yet ({ConfigWarningAnnouncer}).
+      def announce_config_warnings = @config_warning_announcer.announce
 
       # Cancels every in-flight debounced task. Called from `Server#handle_shutdown` so pending publishes
       # don't fire against a closed STDOUT.
@@ -200,9 +189,7 @@ module Rigor
       def execute_project_round(saved_uri)
         generation = @project_context.generation
         diagnostics = @project_context.project_diagnostics
-        # The round re-read the configuration; a changed warning set is announced even when the diagnostics
-        # below are discarded, since the reload itself stands.
-        announce_config_warnings
+        announce_config_warnings # the round re-read the configuration; the reload stands even if the result does not
         return if generation != @project_context.generation
 
         by_path = diagnostics.group_by(&:path)

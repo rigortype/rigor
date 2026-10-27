@@ -10,7 +10,7 @@ require "rigor/configuration"
 # with `undefined-method: "off"` in `.rigor.yml` (a key that does nothing) saw the error it was meant to silence and no
 # hint why. The server now shows each warning as a `window/showMessage` once per configuration load: at `initialized`,
 # and again only when a save round's reload changes the warning set.
-RSpec.describe "Language server configuration warnings" do # rubocop:disable RSpec/DescribeClass
+RSpec.describe "Language server configuration warnings" do
   let(:writer) do
     Class.new do
       attr_reader :payloads

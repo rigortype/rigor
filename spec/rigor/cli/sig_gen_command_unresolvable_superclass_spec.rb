@@ -91,7 +91,8 @@ RSpec.describe Rigor::CLI::SigGenCommand do
   # refused one: `--print` and JSON keep the subclass, `--write` and `--check` demote it.
   describe "a superclass shell on a `sig/` file that does not parse" do
     before do
-      write("lib/errors.rb", "module Lib\n  class Error < StandardError; end\n  class Thing\n    def x = 1\n  end\nend\n")
+      write("lib/errors.rb",
+            "module Lib\n  class Error < StandardError; end\n  class Thing\n    def x = 1\n  end\nend\n")
       write("sig/errors.rbs", "module Lib\n  class Thing\n    def y: () ->\n  end\nend\n")
       write("lib/sub.rb", "module Lib\n  class NotFound < Error\n    def code = 404\n  end\nend\n")
     end

@@ -160,12 +160,19 @@ module Rigor
         loaded = declarations.select { |other| buffer_of(other) == file }
         others = declarations.reject { |other| loaded.include?(other) || GatedSignaturePlan.synthetic?(other) }
         if loaded.empty?
-          rows << [name, buffer_of(others.first)] unless others.empty?
+          cause = others.empty? ? alias_cause(env, name) : buffer_of(others.first)
+          rows << [name, cause] if cause
           return
         end
 
         rows.concat(member_rows(decl, name, loaded, others))
         decl.members.each { |member| declaration_rows(env, file, member, name, rows) if declaration?(member) }
+      end
+
+      # The buffer of a class or module alias declaring `name` (empty when it cannot be named), or nil.
+      def alias_cause(env, name)
+        entry = env.class_alias_decls[::RBS::TypeName.parse("::#{name}")]
+        entry && (RbsLoader.declaration_buffer_name(entry.decl) || "")
       end
 
       def member_rows(decl, name, loaded, others)

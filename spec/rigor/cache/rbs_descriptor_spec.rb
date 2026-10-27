@@ -172,6 +172,14 @@ RSpec.describe Rigor::Cache::RbsDescriptor do
       described_class.build(loader).cache_key_for(producer_id: Rigor::Cache::RbsEnvironment::PRODUCER_ID)
     end
 
+    # Issue #2422 — the gate above varies `project_signature_paths` between none and one directory, which an
+    # entry that digests nothing still tells apart. Two different non-empty lists must key apart too.
+    it "digests which signature paths are the project's own, not only whether any are" do
+      base = loader_variations.transform_values(&:first).merge(project_signature_paths: [project_sig_dir])
+      other = base.merge(project_signature_paths: [extra_sig_dir])
+      expect(env_cache_key(loader_for(base))).not_to eq(env_cache_key(loader_for(other)))
+    end
+
     it "has a variation or an explicit exemption for every build_env_for keyword" do
       unclassified = build_env_for_keywords - loader_variations.keys - keywords_that_cannot_change_the_environment
 

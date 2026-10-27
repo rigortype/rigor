@@ -65,6 +65,10 @@ RSpec.describe "plugin signature member stand-down through the runner (#2422)" d
     class Time
       def to_fs: (?Symbol | String format) -> String
     end
+    class Hash[unchecked out K, unchecked out V]
+      def deep_merge: (untyped other) -> untyped
+      def deep_transform_keys: () { (untyped) -> untyped } -> untyped
+    end
   RBS
 
   def lockfile_yaml = <<~YAML
@@ -167,6 +171,46 @@ RSpec.describe "plugin signature member stand-down through the runner (#2422)" d
     expect(rows.map do |row|
       row[2]
     end).not_to include("call.possible-nil-receiver", "rbs.coverage.definition-build-failed")
+  end
+
+  # Review of #2424, S1: composing puts the plugin's overloads first, so a plugin row that pins the receiver's
+  # types in its result took precedence over the collection's `untyped`. `deep_merge` adds the argument's keys
+  # and values, and `deep_transform_keys` re-keys with the block's result.
+  def write_probe
+    FileUtils.mkdir_p("sig")
+    File.write(File.join("sig", "probe.rbs"), <<~RBS)
+      class Probe
+        def a2: (Hash[Symbol, Integer]) -> String
+        def a3: (Hash[Symbol, Integer]) -> String
+      end
+    RBS
+    File.write("c.rb", <<~RUBY)
+      class Probe
+        def a2(h)
+          m = h.deep_merge({ b: "x" })
+          v = m[:b]
+          v.upcase
+        end
+
+        def a3(h)
+          k = h.deep_transform_keys(&:to_s).keys.first
+          k + "x"
+        end
+      end
+    RUBY
+  end
+
+  def probe_rows(rows) = rows.select { |row| row[0].end_with?("c.rb") }
+
+  it "types deep_merge and deep_transform_keys results by what they return, with the collection" do
+    write_probe
+    expect(probe_rows(run(workers: 0))).to be_empty
+  end
+
+  it "types deep_merge and deep_transform_keys results by what they return, without the collection" do
+    write_probe
+    FileUtils.rm_rf([".gem_rbs_collection", "rbs_collection.lock.yaml"])
+    expect(probe_rows(run(workers: 0))).to be_empty
   end
 
   it "says the same under the fork pool and on a cold and a warm env cache" do

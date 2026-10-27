@@ -83,8 +83,11 @@ RSpec.describe "ADR-72 ActiveSupport overlay — deep_dup, the Hash aliases and 
     RUBY
 
     expect(call_rules(result)).to be_empty
+    # `to_options!` re-keys the receiver in place and answers it, so `{ "a" => 1 }.to_options!` is `{ a: 1 }`:
+    # Symbol keys, like `to_options`. It read the receiver's `Hash[String, Integer]` (`-> self`) until the
+    # #2424 review.
     expect(dumps(result)).to eq(
-      ["Hash[Symbol, 1]", "Hash[String, Integer]", "Hash[String, Integer]", "Hash[String, Integer]",
+      ["Hash[Symbol, 1]", "Hash[Symbol, 1]", "Hash[String, Integer]", "Hash[String, Integer]",
        'Hash["a", 1]', "bool", "Dynamic[top]"]
     )
   end

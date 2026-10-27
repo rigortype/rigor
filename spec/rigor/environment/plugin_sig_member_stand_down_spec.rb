@@ -352,6 +352,16 @@ RSpec.describe "issue #2422 plugin signature member stand-down" do
       end
     end
 
+    it "stands a type down on its own when another source declares its name as a class alias" do
+      Dir.mktmpdir do |dir|
+        loader = build("class Gizmo\n  def a: () -> Integer\nend\nclass Widget\n  def b: () -> Integer\nend\n",
+                       "class Gizmo = Integer\n", dir, own: false)
+        expect(types_of(loader, "Widget", :b)).to eq(["() -> ::Integer"])
+        expect(loader.signature_standdowns.map { |row| [row[1], File.basename(row[4].to_s)] })
+          .to eq([%w[Gizmo other.rbs]])
+      end
+    end
+
     it "stands a type down on its own when another source declares it with the other kind" do
       Dir.mktmpdir do |dir|
         loader = build("class Gizmo\n  def a: () -> Integer\nend\nclass Widget\n  def b: () -> Integer\nend\n",

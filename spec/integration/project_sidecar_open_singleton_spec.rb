@@ -207,12 +207,13 @@ RSpec.describe "a project sidecar sig and an open singleton surface (#2438)" do
       expect(messages).to eq([])
     end
 
-    it "does not report a class method on a class that includes a project module" do
+    # A plain `include` adds instance methods only, so the class's singleton side stays closed.
+    it "still reports a class method on a class that includes a project module" do
       messages = messages_for(
         "module Conc\n  def c = 1\nend\nclass Svc\n  include Conc\nend\nSvc.helper\n", "class Svc\nend\n"
       )
 
-      expect(messages).to eq([])
+      expect(messages).to eq(["undefined method `helper' for singleton(Svc)"])
     end
 
     # A project module the class extends is a mixin too, though the source shows every method it adds.
@@ -222,9 +223,9 @@ RSpec.describe "a project sidecar sig and an open singleton surface (#2438)" do
       expect(messages).to eq([])
     end
 
-    # A library module the class includes opens it too, though RBS declares the module.
-    it "does not report a class method on a class that includes a library module" do
-      expect(messages_for("class Svc\n  include Comparable\nend\nSvc.helper\n", "class Svc\nend\n")).to eq([])
+    it "still reports a class method on a class that includes a library module" do
+      expect(messages_for("class Svc\n  include Comparable\nend\nSvc.helper\n", "class Svc\nend\n"))
+        .to eq(["undefined method `helper' for singleton(Svc)"])
     end
 
     # Guard: a superclass chain past `ResolutionChain::LIMIT` is cut, so the class is not provably closed. The

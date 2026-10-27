@@ -1560,9 +1560,9 @@ module Rigor
         # read off `Scope::ResolutionChain` (`:constants` flavor, so a project module that holds only constants is
         # still a project entry). Open when the class, or a project class up its superclass chain:
         #
-        # 1. records a mixin (`include` / `extend` / `prepend`: any instance-side entry that is not one of the
-        #    chain's classes, or any singleton-side entry beyond the classes' own singletons), an `inherited` /
-        #    `included` / `extended` / `prepended` hook, or `method_missing` / `respond_to_missing?`;
+        # 1. `extend`s a module (any singleton-side entry beyond the classes' own singletons), or records an
+        #    `inherited` / `included` / `extended` / `prepended` hook or `method_missing` / `respond_to_missing?`.
+        #    A plain `include` or `prepend` adds instance methods only, so it leaves the singleton side closed;
         # 2. has no `class` / `module` body of its own inside `paths:` (`class Ext::Foo` names `Ext` without one);
         # 3. or the chain reaches a class the project does not define, other than `Object` / `BasicObject`: an
         #    external superclass (`ApplicationRecord < ActiveRecord::Base`, `MyError < StandardError`), a
@@ -1581,17 +1581,20 @@ module Rigor
 
           sources = scope.discovered_class_sources
           return true if classes.any? { |klass| (sources[klass] || []).empty? || opening_hook?(klass, scope) }
-          return true if opening_entry?(instance, classes) || opening_entry?(singleton, classes)
+          return true if opening_entry?(instance, classes, mixins: false) ||
+                         opening_entry?(singleton, classes, mixins: true)
 
           open_tail?(instance, classes.last, scope, loader)
         end
 
-        def opening_entry?(chain, classes)
+        # An external superclass other than `Object` / `BasicObject` opens either side; a module entry opens the
+        # chain only where `mixins` is set (the singleton side, where it is an `extend`).
+        def opening_entry?(chain, classes, mixins:)
           chain.entries.any? do |entry|
-            if entry.external?
-              !entry.superclass_edge || !CLOSED_ROOTS.include?(entry.raw.to_s.delete_prefix("::"))
+            if entry.external? && entry.superclass_edge
+              !CLOSED_ROOTS.include?(entry.raw.to_s.delete_prefix("::"))
             else
-              !classes.include?(entry.name)
+              mixins && !classes.include?(entry.name)
             end
           end
         end

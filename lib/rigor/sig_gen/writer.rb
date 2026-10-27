@@ -36,6 +36,9 @@ module Rigor
       MergeState = Struct.new(:source, :decls, :applied, :skipped, :left_unreadable, :replaced, keyword_init: true)
       private_constant :MergeState
 
+      # The target routing this writer applies; the generator maps candidates through it to ask {#accepts_target?}.
+      attr_reader :path_mapper
+
       # @param dry_run — assemble and validate every target exactly as a write would, and report it, without
       #   creating or changing a file. `sig-gen --check` (ADR-112 WD4) is this, so it can only ever disagree
       #   with `--write` about the disk, never about the content.
@@ -88,6 +91,20 @@ module Rigor
       # subclass, which is the output before #2454.
       def self.writes?(candidate)
         candidate.classification == Classification::NEW_METHOD
+      end
+
+      # Whether {#write_target} would write to `target` at all, asked before any candidate is rendered (#2461): a
+      # target inside the sig root that is missing (the create path), or that exists, is valid UTF-8 and parses.
+      # {#update_existing} leaves an unparseable or mis-encoded file untouched, so a class shell on it never
+      # reaches disk. A spliced result {RbsValidity} rejects is a writer defect and is not predicted here.
+      def accepts_target?(target)
+        return false unless inside_sig_root?(target)
+        return true unless target.exist?
+
+        source = target.read
+        source.valid_encoding? && !parse_signature(source).nil?
+      rescue SystemCallError
+        false
       end
 
       # Whether `proposed` has STRICTLY FEWER bare `untyped` tokens than `existing`. A count, not a slot-by-slot

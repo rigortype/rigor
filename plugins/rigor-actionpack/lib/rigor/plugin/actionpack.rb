@@ -84,7 +84,9 @@ module Rigor
         # the engine reads as "a template exists here and has no unit". The bump is belt-and-braces: what
         # actually invalidates is the claim itself, through the glob row in `TemplateUnits#digest` and the
         # `claimed_globs` equality the carry checks. A manifest version is in no cache key of its own.
-        version: "1.5.0",
+        # Bumped 2026-10-27 (#2430) — `params[...]` answers the gradual `Dynamic[Parameters | nil]` rather than
+        # the bare union, so a cached 1.5.0 run carries the non-gradual answer at every `params[:k]` argument.
+        version: "1.6.0",
         description: "Validates Action Pack route-helper calls and filter chains inside controllers, and types the request-context readers (`params` / `session` / `request` / `flash`) and their chains.",
         config_schema: {
           "controller_search_paths" => { kind: :array, default: ["app/controllers"] },
@@ -560,7 +562,8 @@ module Rigor
       # The control specs stay, and they still bite: they pin the HAZARD (no truthiness fold, no `bot`
       # branch, no possible-nil firing), not the Dynamic answer, so they go red if either typing's
       # hazard ever returns — and they now carry a positive assertion that `params[:k]` types
-      # `Parameters?`, so a silent regression to `Dynamic` or to the non-nil nominal fails them too.
+      # `Dynamic[ActionController::Parameters?]` (#2430), so a silent regression to bare `Dynamic[top]`
+      # or to the non-nil nominal fails them too.
       STRONG_PARAMS_CHAIN_METHODS = %i[
         require permit permit! expect slice
         except without extract! slice!

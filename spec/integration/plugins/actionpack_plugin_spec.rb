@@ -499,6 +499,53 @@ RSpec.describe "plugins/rigor-actionpack" do
       end
     end
 
+    # Issue #2430 — the same guard with an actionpack collection installed. The stand-in declares
+    # `ActionController::Parameters` without `strip`, so the bare union made both guarded reads report
+    # `call.undefined-method` on the narrowed `Parameters` arm: the guard narrowed correctly and the
+    # carrier's nominal arm was still wrong. The gradual carrier is silent. This example pins the fix line,
+    # so reverting `params_read_type` to the bare union fails it.
+    it "keeps a nil-check guard on a `params[:key]` read silent with an actionpack collection (#2430)" do
+      source = <<~RUBY
+        class C
+          def create
+            q = params[:q]
+            return if q.nil?
+            q.strip
+            r = params[:r]
+            r.strip if r
+          end
+        end
+      RUBY
+      with_demo(source, signatures: { "parameters.rbs" => PARAMETERS_STANDIN_SIG }) do |result|
+        rules = result.diagnostics.map(&:rule)
+        expect(rules).not_to include("call.undefined-method")
+        expect(rules).not_to include("call.possible-nil-receiver")
+      end
+    end
+
+    # Issue #2430 — the carrier gate is pinned from both sides. An untyped value that is not a `params`
+    # carrier keeps its own answer, `Dynamic[top]`. Reducing `params_carrier_facet?` to a bare `Dynamic` test
+    # would hand this value the `params` answer, and the examples fail. Dropping the `controller_scope?` gate
+    # survives on purpose: a carrier is minted only by the controller-only `params` reader, so no carrier
+    # exists outside a controller for that gate to refuse.
+    it "gives a non-params untyped value no `params` carrier (#2430)" do
+      source = <<~RUBY
+        class C
+          def create
+            raw = JSON.parse("{}")
+            Rigor.dump_type(raw[:x])
+            Rigor.dump_type(raw.permit(:a))
+          end
+        end
+      RUBY
+      with_demo(source) do |result|
+        dumps = result.diagnostics.select { |d| d.rule == "dump.type" }.map(&:message)
+        expect(dumps.size).to eq(2)
+        expect(dumps).to all(include("Dynamic[top]"))
+        expect(dumps).to all(satisfy { |m| !m.include?("ActionController::Parameters") })
+      end
+    end
+
     # Issue #1101 — the layer under the typing above. `params[:key]` is `Parameters | nil`, and until the
     # dispatcher projected a composite receiver the whole union landed `Dynamic[top]`: the `Parameters`
     # arm resolves only through the user-class ancestor fallback, a tier BELOW the one that distributed

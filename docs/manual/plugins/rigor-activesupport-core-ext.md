@@ -66,7 +66,14 @@ Roughly the top ~40 selectors plus their close neighbours, across:
 - **Hash** — `#symbolize_keys` / `#stringify_keys` (+ deep / bang) and
   their `#to_options` alias, `#deep_merge`, `#reverse_merge` /
   `#with_defaults` (+ bang), `#with_indifferent_access`, `#except!`,
-  `#extract!`.
+  `#extract!`. `#symbolize_keys` / `#to_options` map the key type per
+  member, as ActiveSupport does (`key.to_sym rescue key`): a `String` or
+  `Symbol` key reads as `Symbol`, an `Integer` or `Float` key stays as it
+  is, and a key Rigor cannot decide reads as `untyped`. So
+  `Hash[String, Integer]` gives `Hash[Symbol, Integer]` and
+  `Hash[Integer, Integer]` gives `Hash[Integer, Integer]`. Without the
+  plugin, on the activesupport overlay alone, the key reads `untyped`.
+  The bang forms answer the receiver's own type.
 - **Range** — `#overlaps?`, `#to_fs` / `#to_formatted_s`.
 - **Enumerable** — `#index_by`, `#index_with`, `#pluck`, `#exclude?`.
 

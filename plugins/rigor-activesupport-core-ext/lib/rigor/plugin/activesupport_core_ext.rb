@@ -3,6 +3,7 @@
 require "rigor/plugin"
 
 require_relative "activesupport_core_ext/effects"
+require_relative "activesupport_core_ext/symbolize_keys"
 
 module Rigor
   module Plugin
@@ -43,12 +44,15 @@ module Rigor
       manifest(
         id: "activesupport-core-ext",
         target_gems: ["activesupport"],
+        # Bumped 2026-10-27 (#2433) — `Hash#symbolize_keys` / `#to_options` map each key member through a
+        # `dynamic_return` hook instead of claiming `Hash[Symbol, V]`.
+        #
         # Bumped 2026-09-10 (#534 item 7) — `ActiveSupport::Concern` is declared, so `extend
         # ActiveSupport::Concern` resolves instead of reading as an unresolved constant.
         #
         # Bumped 2026-09-02 (#632) — `ActiveSupport::Duration`'s reader surface (`ago`/`to_i`/`iso8601`/…)
         # is now declared, open_receivers-protected; see the class comment above.
-        version: "0.5.0",
+        version: "0.6.0",
         description: "RBS bundle for the most-frequently-flagged ActiveSupport core_ext extensions, " \
                      "plus the `ActiveSupport::Duration` type of the numeric time multipliers and its " \
                      "reader surface.",
@@ -200,6 +204,17 @@ module Rigor
         next nil if receiver_kind.nil?
 
         duration_arithmetic_result(call_node.name, receiver_kind, argument_kind)
+      end
+
+      # #2433 — `symbolize_keys` / `to_options` keep a key without `to_sym`, so the key type is mapped per
+      # member; see {SymbolizeKeys}. The RBS rows answer `Hash[untyped, V]` wherever this declines.
+      dynamic_return methods: %i[symbolize_keys to_options] do |call_node, scope|
+        next nil unless call_node.is_a?(Prism::CallNode)
+        next nil unless call_node.receiver
+        next nil unless call_node.arguments.nil?
+        next nil unless call_node.block.nil?
+
+        SymbolizeKeys.result(scope&.type_of(call_node.receiver), scope)
       end
 
       # ADR-88 WD1 — both tables are static and the RBS bundle ships with the gem; nothing here reads a

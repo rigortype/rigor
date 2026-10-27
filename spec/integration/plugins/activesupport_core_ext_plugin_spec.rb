@@ -470,6 +470,61 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
       expect(run_plugin(source: source).diagnostics.map(&:qualified_rule).grep(/\Acall\./)).to be_empty
     end
 
+    # #2433: `symbolize_keys` is `transform_keys { |key| key.to_sym rescue key }` (ActiveSupport 8.1.4), so
+    # the `dynamic_return` hook maps each key member: String / Symbol become Symbol, an Integer stays.
+    describe "symbolize_keys and to_options (#2433)" do
+      # Receivers are typed by a project signature (`Probe#f`), because a literal's key type would fold.
+      def probe(params, body)
+        names = params.each_index.map { |i| "p#{i}" }
+        sig = "class Probe\n  def f: (#{params.join(', ')}) -> Integer\nend\n"
+        source = "class Probe\n  def f(#{names.join(', ')})\n#{body}\n  end\nend\n"
+        result = run_plugin(source: source, files: { "sig/probe.rbs" => sig }, signature_paths: ["sig"])
+        [dumps(result), result.diagnostics.map(&:qualified_rule).grep(/\Acall\./)]
+      end
+
+      it "maps each key member by whether it has to_sym" do
+        dump_list, rules = probe(
+          ["Hash[String, Integer]", "Hash[Integer, Integer]", "Hash[String | Integer, Integer]",
+           "Hash[Float | Symbol, Integer]"],
+          "Rigor.dump_type(p0.symbolize_keys)\nRigor.dump_type(p1.symbolize_keys)\n" \
+          "Rigor.dump_type(p2.to_options)\nRigor.dump_type(p3.symbolize_keys)\n1"
+        )
+
+        expect(rules).to be_empty
+        expect(dump_list).to eq(
+          ["Hash[Symbol, Integer]", "Hash[Integer, Integer]", "Hash[Integer | Symbol, Integer]",
+           "Hash[Float | Symbol, Integer]"]
+        )
+      end
+
+      it "leaves an Integer key an Integer and still types a String key as a Symbol" do
+        _, rules = probe(["Hash[Integer, Integer]"], "p0.symbolize_keys.keys.first + 1\np0.to_options.keys.first + 1")
+        expect(rules).to be_empty
+
+        _, rules = probe(["Hash[String, Integer]"], "p0.symbolize_keys.keys.first + 1")
+        expect(rules).to eq(["call.undefined-method"])
+      end
+
+      it "answers an undecidable key as untyped rather than as a Symbol" do
+        dump_list, = probe(
+          ["Hash[Object, Integer]", "Hash[untyped, Integer]"],
+          "Rigor.dump_type(p0.symbolize_keys)\nRigor.dump_type(p1.symbolize_keys)\n1"
+        )
+
+        expect(dump_list).to eq(["Hash[Dynamic[top], Integer]", "Hash[Dynamic[top], Integer]"])
+      end
+
+      it "passes a String-keyed result to a Hash[Symbol, untyped] parameter" do
+        sig = "class Probe\n  def take: (Hash[Symbol, untyped]) -> void\n" \
+              "  def f: (Hash[String, untyped]) -> void\nend\n"
+        files = { "sig/probe.rbs" => sig }
+        source = "class Probe\n  def take(h); end\n  def f(h) = take(h.symbolize_keys)\nend\n"
+        result = run_plugin(source: source, files: files, signature_paths: ["sig"])
+
+        expect(result.diagnostics.map(&:qualified_rule).grep(/\Acall\./)).to be_empty
+      end
+    end
+
     it "still witnesses a genuinely undefined method on a Range, a Hash and an Array receiver" do
       result = run_plugin(source: "(1..5).overlapz?(2..3)\n{ a: 1 }.with_defaultz({})\n[1].deep_dupe\n")
 

@@ -3468,16 +3468,16 @@ module Rigor
       end
 
       # Issue #2440 — `SuperclassMismatchError` carries the class entry and no location of its own: the
-      # colliding declarations are the ones that name a superclass.
+      # colliding declarations are the ones that name a superclass. {.entry_declarations} reads the entry on
+      # both rbs majors (`each_decl` on 4.x, `MultiEntry::D` wrappers on 3.x).
       def superclass_mismatch_locations(error)
-        entry = error.entry
-        decls = entry.respond_to?(:each_decl) ? entry.each_decl.to_a : []
+        decls = self.class.entry_declarations(error.entry)
         decls.select { |decl| decl.respond_to?(:super_class) && decl.super_class }.map(&:location)
       end
 
       def class_entry_decls(type_name)
         entry = env&.class_decls&.[](type_name)
-        entry.respond_to?(:each_decl) ? entry.each_decl.to_a : []
+        entry.nil? ? [] : self.class.entry_declarations(entry)
       end
 
       # The member the failure is ABOUT, taken off the error object rather than parsed out of its message.

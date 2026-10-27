@@ -231,8 +231,7 @@ module Rigor
             # and the dispatch layer unions their returns (#521).
             matches = find_matching_overload(overloads, shared, strict: false)
             every_match = gradual || ImpreciseArgument.any_in?(shared[:arg_types], shared[:keywords_last])
-            return [first_read_match(matches, shared)] if !every_match && matches.size > 1
-            return matches unless every_match
+            return [first_read_match(matches, shared)].compact unless every_match
 
             # Issue #1675 — and every overload the arguments' untyped parts reach on their own, after the
             # whole-argument matches so the singular `select` keeps its answer.
@@ -246,10 +245,9 @@ module Rigor
           # says `Array[String?]`. Only the tuple's `maybe` is re-asked; a record's `maybe` for an unread hash keeps
           # its documented gradual-pass answer.
           def first_read_match(matches, shared)
-            first = matches.first
-            return first unless Acceptance.unread_array_in?(shared[:arg_types])
+            return matches.first if matches.size < 2 || !Acceptance.unread_array_in?(shared[:arg_types])
 
-            matches.find { |method_type| Acceptance.refusing_unread_arrays { matches?(method_type, shared) } } || first
+            matches.find { |mt| Acceptance.refusing_unread_arrays { matches?(mt, shared) } } || matches.first
           end
 
           # Pass 0. With every argument a plain value (a `Constant`, or a `Nominal` with no type arguments), the

@@ -512,6 +512,9 @@ module Rigor
         # entry across a run boundary (LSP re-check, ADR-62 warm loop); nil until the first run so
         # runner-less probes keep the per-file fallback.
         @run_generation = nil
+        # The return memo bucket the last `run` filled, kept for {#return_summaries} once the run has released the
+        # thread's slot; nil before the first run.
+        @return_memo = nil
         build_collaborators
       end
 
@@ -535,7 +538,9 @@ module Rigor
         Cache::FileDigest.with_run(strict: @configuration.cache_validation_strict?) do
           Inference::DefNodeResolver.with_run { run_analysis(paths) }
         ensure
-          Inference::StatementEvaluator.release_resolved_census
+          # ADR-89 WD2 — {#return_summaries} reads the return memo after the run, so the runner keeps the bucket the
+          # run filled before the thread's run-scoped slots are released (issues #2412, #2399).
+          @return_memo = Inference::ExpressionTyper.current_return_memo
           RunScopedSlots.release
         end
       end
@@ -773,7 +778,7 @@ module Rigor
       # @return the summaries keyed by `[path, "Class#method"]` (or `"Class.method"`), each holding `keys:`,
       #   `returns:` and `effects:`.
       def return_summaries
-        memo = Inference::ExpressionTyper.harvest_return_memo
+        memo = Inference::ExpressionTyper.harvest_return_memo(@return_memo)
         return {} if memo.empty?
 
         result = {}

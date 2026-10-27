@@ -55,6 +55,7 @@ require_relative "rewrite_mutation"
 require_relative "unknown_store_widening"
 require_relative "untyped_rejoin"
 require_relative "version_guard"
+require_relative "../run_scoped_slots"
 
 module Rigor
   module Inference
@@ -342,15 +343,6 @@ module Rigor
         @in_operand = in_operand
         @operand_recorder = operand_recorder
         @operand_types = operand_types
-      end
-
-      # Issue #2330 — drops the calling thread's callee-chain census memo ({#resolved_census}) outright. The memo is
-      # already held weakly by the `DiscoveryIndex` it was built for (an `ObjectSpace::WeakKeyMap`), so a discarded
-      # index takes its entries with it on any entry point, `Runner#run` or not (the LSP providers index on the main
-      # thread). `Runner#run` still calls this on the way out, which frees the entries of an index that is still
-      # reachable, such as the project seed.
-      def self.release_resolved_census
-        Thread.current[RESOLVED_CENSUS_KEY] = nil
       end
 
       # Runs `block` with a fresh return sink installed, then yields the collected explicit-`return` value types to the
@@ -4796,7 +4788,7 @@ module Rigor
         by_def.fetch(def_node) { by_def[def_node] = yield }
       end
 
-      RESOLVED_CENSUS_KEY = :rigor_callee_resolved_census
+      RESOLVED_CENSUS_KEY = RunScopedSlots.register(:rigor_callee_resolved_census)
       private_constant :RESOLVED_CENSUS_KEY
 
       # The parameters `def_node` mutates itself, from either channel: those escape-mutated inside a block (which may
@@ -4866,7 +4858,7 @@ module Rigor
         entry.fetch(kind) { entry[kind] = yield }
       end
 
-      DEF_CENSUS_KEY = :rigor_callee_def_census
+      DEF_CENSUS_KEY = RunScopedSlots.register(:rigor_callee_def_census)
       private_constant :DEF_CENSUS_KEY
 
       # Issue #2104 — the {CalleeMutationChain::Edge}s along which `def_node` hands one of its parameters, unchanged, to

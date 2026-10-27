@@ -34,6 +34,7 @@ require_relative "check_rules/rebinding_block_callees"
 require_relative "check_rules/rbs_receiver_surface"
 require_relative "check_rules/special_global_setters"
 require_relative "check_rules/ruby_deprecations"
+require_relative "../run_scoped_slots"
 
 module Rigor
   module Analysis
@@ -3095,7 +3096,7 @@ module Rigor
           build_visibility_mismatch_diagnostic(path, call_node, "singleton(#{class_name})")
         end
 
-        PRIVATE_NAMES_MEMO = :rigor_check_rules_private_singleton_names
+        PRIVATE_NAMES_MEMO = RunScopedSlots.register(:rigor_check_rules_private_singleton_names)
         private_constant :PRIVATE_NAMES_MEMO
 
         # Issue #1984 — the table-only gate the singleton side asks before it reads a chain, as the instance side asks

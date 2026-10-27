@@ -5,6 +5,7 @@ require "prism"
 require_relative "../type"
 require_relative "mutation_widening"
 require_relative "key_presence_guard/scan"
+require_relative "../run_scoped_slots"
 
 module Rigor
   module Inference
@@ -58,7 +59,7 @@ module Rigor
       ).to_set.freeze
 
       STATE_KEY = :__rigor_key_presence_guard
-      CACHE_KEY = :__rigor_key_presence_guard_rewalk
+      CACHE_KEY = RunScopedSlots.register(:__rigor_key_presence_guard_rewalk)
       private_constant :STATE_KEY, :CACHE_KEY
 
       # The re-walk's state: the file's root, the end offset of each recorded guard, and the per-file scans.

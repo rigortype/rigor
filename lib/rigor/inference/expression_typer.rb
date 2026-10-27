@@ -361,20 +361,17 @@ module Rigor
       # recording run to harvest each analyzed callee's observed call keys → return descriptors. Returns an
       # empty hash when no bucket exists (a run that memoised nothing). Class method: the bucket lives on
       # `Thread.current`, independent of any one `ExpressionTyper` instance.
-      def self.harvest_return_memo
-        slot = Thread.current[RETURN_MEMO_KEY]
-        return {} if slot.nil?
+      #
+      # `bucket` defaults to the calling thread's current one; `Runner#run` keeps the bucket its run filled
+      # ({.current_return_memo}) and passes it, since the run releases the thread's slot when it ends.
+      def self.harvest_return_memo(bucket = current_return_memo)
+        return {} if bucket.nil?
 
-        slot[1].transform_values(&:values)
+        bucket.transform_values(&:values)
       end
 
-      # #2300 — drops the calling thread's return memo bucket when it belongs to `generation`, the token a run seeded.
-      # A run that ends calls this on the way out so its entries are not held until the next run replaces the slot; a
-      # bucket another run minted is left alone.
-      def self.release_return_memo(generation)
-        slot = Thread.current[RETURN_MEMO_KEY]
-        Thread.current[RETURN_MEMO_KEY] = nil if slot && slot[0].equal?(generation)
-      end
+      # The calling thread's return memo bucket (`{ def_node => { descriptor => MemoEntry } }`), or nil.
+      def self.current_return_memo = Thread.current[RETURN_MEMO_KEY]&.last
 
       # Issue #720 — the value the block passed by the call site currently being re-typed evaluates to, or
       # `nil` outside such a frame. Read by {#type_of_yield}.
@@ -2759,7 +2756,7 @@ module Rigor
       # external entries this lookup passes over. Cross-file: the chain is built from the tables the runner
       # seeds from the project-wide pre-pass, cycle-guarded and capped at `Scope::ANCESTOR_WALK_LIMIT`.
 
-      CLASS_GRAPH_CACHE_KEY = :__rigor_class_graph_cache__
+      CLASS_GRAPH_CACHE_KEY = RunScopedSlots.register(:__rigor_class_graph_cache__)
       private_constant :CLASS_GRAPH_CACHE_KEY
 
       # Memo for the static class-graph resolvers below. They are pure functions of the scope's *frozen*
@@ -2960,7 +2957,7 @@ module Rigor
         dynamic_top
       end
 
-      OVERRIDE_GATE_CACHE_KEY = :__rigor_overridable_method_gate__
+      OVERRIDE_GATE_CACHE_KEY = RunScopedSlots.register(:__rigor_overridable_method_gate__)
       private_constant :OVERRIDE_GATE_CACHE_KEY
 
       # Memo for {#overridden_in_project?}, nested `kind → owner → method_name`. The predicate is a pure
@@ -3033,7 +3030,7 @@ module Rigor
       EMPTY_REDEFINERS = [].freeze
       private_constant :EMPTY_REDEFINERS
 
-      METHOD_DEFINERS_INDEX_KEY = :__rigor_method_definers_index__
+      METHOD_DEFINERS_INDEX_KEY = RunScopedSlots.register(:__rigor_method_definers_index__)
       private_constant :METHOD_DEFINERS_INDEX_KEY
 
       # The second way. Two flat thread slots rather than one slot holding an array of ways: a
@@ -3041,7 +3038,7 @@ module Rigor
       # elements are pinned, and the engine then reads the `way[0].equal?(…)` guards below as always-falsey
       # (`make check` fires `flow.always-truthy-condition` on this very file). Two keys read as two plain
       # `Thread.current` reads and keep the guards analysable.
-      METHOD_DEFINERS_INDEX_ALT_KEY = :__rigor_method_definers_index_alt__
+      METHOD_DEFINERS_INDEX_ALT_KEY = RunScopedSlots.register(:__rigor_method_definers_index_alt__)
       private_constant :METHOD_DEFINERS_INDEX_ALT_KEY
 
       # `method_name (Symbol) → [owner names]` inverted index over the instance / singleton def tables,
@@ -3176,10 +3173,11 @@ module Rigor
       # `[receiver, *args]` descriptor tuple; a callee may appear under at most two node identities per run
       # (the project-index parse every OTHER file resolves through, plus the defining file's own analysis
       # parse). Only the current generation's bucket is retained (single slot) — a rolled-over run's entries
-      # become garbage instead of accumulating across LSP runs. `ExpressionTyper` is rebuilt per
-      # `Scope#type_of`, so the store lives on `Thread.current`; fork-pool workers are separate processes,
-      # so it never crosses a project boundary (ADR-84 WD5).
-      RETURN_MEMO_KEY = :__rigor_user_method_return_memo__
+      # become garbage instead of accumulating across LSP runs, and the run that filled the slot releases it
+      # when it ends ({RunScopedSlots}; `Runner#run` keeps its bucket for `#return_summaries`).
+      # `ExpressionTyper` is rebuilt per `Scope#type_of`, so the store lives on `Thread.current`; fork-pool
+      # workers are separate processes, so it never crosses a project boundary (ADR-84 WD5).
+      RETURN_MEMO_KEY = RunScopedSlots.register(:__rigor_user_method_return_memo__)
       private_constant :RETURN_MEMO_KEY
 
       # ADR-84 WD2 — one memo entry: the final inferred return plus, when the entry was computed under

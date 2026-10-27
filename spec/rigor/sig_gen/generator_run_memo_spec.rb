@@ -5,7 +5,8 @@ require "tmpdir"
 
 # Issue #2300 — `rigor sig-gen` keeps one user-method return memo for the whole run, as `rigor check` does since
 # ADR-84 WD2. Without a run-generation token the memo keyed on each file's merged `discovered_def_nodes`, a new
-# table per file, so the bucket was dropped at every file boundary. The bucket is released when the run ends.
+# table per file, so the bucket was dropped at every file boundary. The bucket is released when the run ends, with
+# the thread's other run-scoped slots (`Rigor::RunScopedSlots`, #2399).
 RSpec.describe Rigor::SigGen::Generator do
   let(:tmpdir) { Dir.mktmpdir }
   let(:paths) do
@@ -78,9 +79,9 @@ RSpec.describe Rigor::SigGen::Generator do
 
   it "keeps the first file's memo entries after the second file is analysed, and releases them when the run ends" do
     memo_at_release = nil
-    allow(Rigor::Inference::ExpressionTyper).to receive(:release_return_memo).and_wrap_original do |original, token|
+    allow(Rigor::RunScopedSlots).to receive(:release).and_wrap_original do |original|
       memo_at_release = Rigor::Inference::ExpressionTyper.harvest_return_memo
-      original.call(token)
+      original.call
     end
 
     candidates = generator(paths).run
@@ -94,16 +95,5 @@ RSpec.describe Rigor::SigGen::Generator do
     expect(candidates.map { |candidate| [candidate.class_name, candidate.method_name] }).to include(
       ["Alpha", :wrapped], ["Beta", :wrapped]
     )
-  end
-
-  it "leaves a memo bucket another run minted in place" do
-    other = Object.new.freeze
-    Thread.current[:__rigor_user_method_return_memo__] = [other, { marker: {} }.compare_by_identity]
-
-    Rigor::Inference::ExpressionTyper.release_return_memo(Object.new)
-
-    expect(Rigor::Inference::ExpressionTyper.harvest_return_memo.to_a).to eq([[:marker, []]])
-  ensure
-    Rigor::Inference::ExpressionTyper.release_return_memo(other)
   end
 end

@@ -5,6 +5,7 @@ require "prism"
 require_relative "void_origin"
 require_relative "../reflection"
 require_relative "../source/node_children"
+require_relative "../run_scoped_slots"
 
 module Rigor
   module Inference
@@ -62,7 +63,7 @@ module Rigor
       # graceful-degradation branch is needed. `def_node` identity is stable per run (the ADR-85
       # {DefNodeResolver} yields one node object per `(path, node_id)`), the same identity the ADR-84
       # return memo relies on.
-      MEMO_KEY = :__rigor_void_tail_summary_memo__
+      MEMO_KEY = RunScopedSlots.register(:__rigor_void_tail_summary_memo__)
       private_constant :MEMO_KEY
 
       def initialize(scope)

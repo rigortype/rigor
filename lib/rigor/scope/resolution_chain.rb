@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "../run_scoped_slots"
+
 module Rigor
   class Scope
     # ADR-24 (amended for #1567, #1568, #1570 and #1571) — Ruby's method resolution order for one project class or
@@ -494,7 +496,7 @@ module Rigor
       end
       private :compute_levels
 
-      MEMO_KEY = :__rigor_resolution_chain__
+      MEMO_KEY = RunScopedSlots.register(:__rigor_resolution_chain__)
       private_constant :MEMO_KEY
 
       FLAVORS = %i[methods constants arity].freeze

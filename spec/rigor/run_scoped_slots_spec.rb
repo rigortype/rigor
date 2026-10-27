@@ -4,10 +4,14 @@
 # `ObjectSpace::WeakKeyMap` keyed by a node, whose strong value (a scope) reaches the parse tree that holds the key,
 # so neither entry was ever collected and every in-process run (`check`, `sig-gen`, a language-server publish) added
 # its whole analysis to the heap. Both are run-scoped slots ({Rigor::RunScopedSlots}), emptied when a run ends.
+#
+# Issue #2399 — about twenty other per-thread memo slots held the last run's discovery tables and environment until
+# the next run on the thread replaced them. They are registered too, so a finished run leaves none of them behind.
 
 require "spec_helper"
 require "fileutils"
 require "tmpdir"
+require "rigor/language_server"
 
 RSpec.describe Rigor::RunScopedSlots do
   let(:tmpdir) { Dir.mktmpdir }
@@ -28,6 +32,13 @@ RSpec.describe Rigor::RunScopedSlots do
         def wrapped = id(first([1]))
 
         def id(value) = value
+
+        def fill(acc)
+          stripes(acc)
+          acc
+        end
+
+        def stripes(acc) = acc << 1
       end
     RUBY
     full
@@ -72,6 +83,27 @@ RSpec.describe Rigor::RunScopedSlots do
         expect(loop_keys.map { |key| Thread.current[key] }).to all(be_nil)
       end
 
+      it "leaves no environment of its own behind" do
+        # An earlier example's run may still be held by a slot nothing has released yet; start from none.
+        Thread.current.keys.grep(/rigor/).each { |key| Thread.current[key] = nil }
+        before = settled_environments
+        send(run)
+
+        expect(settled_environments).to eq(before)
+      end
+
+      # A slot a new owner adds is caught here until it is registered: the run fills it and nothing empties it.
+      it "leaves every per-thread memo slot empty" do
+        send(run)
+
+        holding = Thread.current.keys.grep(/rigor/).reject do |key|
+          value = Thread.current[key]
+          value.nil? || value == 0 || (value.respond_to?(:empty?) && value.empty?)
+        end
+        expect(holding).to be_empty
+        expect(described_class.keys.map { |key| Thread.current[key] }).to all(be_nil)
+      end
+
       it "retains no more environments after the third run than after the first" do
         send(run)
         after_first = settled_environments
@@ -80,6 +112,32 @@ RSpec.describe Rigor::RunScopedSlots do
         expect(settled_environments).to eq(after_first)
       end
     end
+  end
+
+  # A language-server provider types on the main thread outside any run, filling the same slots; one a run released
+  # under it refills on its first miss and answers as before.
+  it "answers a hover the same after the slots it filled are released" do
+    buffer_table = Rigor::LanguageServer::BufferTable.new
+    context = Rigor::LanguageServer::ProjectContext.new(configuration: Rigor::Configuration.new("paths" => []))
+    provider = Rigor::LanguageServer::HoverProvider.new(buffer_table: buffer_table, project_context: context)
+    uri = "file://#{tmpdir}/hover.rb"
+    buffer_table.open(uri: uri, bytes: <<~RUBY, version: 1)
+      class Greeter
+        def name = [1, 2].map(&:to_s).first
+        def greet = name
+      end
+      Greeter.new.greet
+    RUBY
+    hover = -> { provider.provide(uri: uri, line: 4, character: 12)&.dig(:contents, :value) }
+
+    described_class.release
+    first = hover.call
+    filled = described_class.keys.reject { |key| Thread.current[key].nil? }
+    described_class.release
+
+    expect(filled).not_to be_empty
+    expect(first).to include(%(type:   "1"))
+    expect(hover.call).to eq(first)
   end
 
   it "empties the records when a run raises" do

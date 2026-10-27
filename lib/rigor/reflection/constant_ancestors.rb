@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "../run_scoped_slots"
+
 module Rigor
   # {Reflection}'s constant-ancestor walk ([#354](https://github.com/rigortype/rigor/issues/354)), split out for
   # the reader rather than for the loader: the whole-spelling ladder's step 2 (`reflection.rb`) and the
@@ -8,11 +10,11 @@ module Rigor
   # keeps the walk behind the facade its callers already read.
   module Reflection
     # #354 — thread-local slot for the per-run ancestor-scope memo. See {.ancestor_constant_scopes}.
-    ANCESTOR_SCOPES_KEY = :__rigor_ancestor_constant_scopes__
+    ANCESTOR_SCOPES_KEY = RunScopedSlots.register(:__rigor_ancestor_constant_scopes__)
     private_constant :ANCESTOR_SCOPES_KEY
 
     # The recording run's slot. See {.recorded_ancestor_constant_scopes}.
-    RECORDED_ANCESTOR_SCOPES_KEY = :__rigor_recorded_ancestor_constant_scopes__
+    RECORDED_ANCESTOR_SCOPES_KEY = RunScopedSlots.register(:__rigor_recorded_ancestor_constant_scopes__)
     private_constant :RECORDED_ANCESTOR_SCOPES_KEY
 
     module_function

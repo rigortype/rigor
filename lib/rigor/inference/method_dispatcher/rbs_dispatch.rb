@@ -11,6 +11,7 @@ require_relative "../optimistic_origin"
 require_relative "argument_distribution"
 require_relative "overload_selector"
 require_relative "self_substitute"
+require_relative "../../run_scoped_slots"
 
 module Rigor
   module Inference
@@ -683,7 +684,7 @@ module Rigor
 
           # The same one-slot memo shape as {#core_stdlib_memo}; see there for why it is one slot keyed
           # on the discovery index's identity, and what a recording run may store in it.
-          MIXIN_ANCESTOR_MEMO_KEY = :__rigor_mixin_ancestor_dispatch__
+          MIXIN_ANCESTOR_MEMO_KEY = RunScopedSlots.register(:__rigor_mixin_ancestor_dispatch__)
           private_constant :MIXIN_ANCESTOR_MEMO_KEY
 
           def mixin_ancestor_memo(environment, scope)
@@ -857,7 +858,7 @@ module Rigor
           # the measurement. A `Scope` hands each analysed file its own discovery index, so an
           # identity-keyed store would pin every file's index, and every RBS definition resolved
           # against it, for the length of the run.
-          CORE_STDLIB_ANCESTOR_MEMO_KEY = :__rigor_core_stdlib_ancestor_dispatch__
+          CORE_STDLIB_ANCESTOR_MEMO_KEY = RunScopedSlots.register(:__rigor_core_stdlib_ancestor_dispatch__)
           private_constant :CORE_STDLIB_ANCESTOR_MEMO_KEY
 
           def core_stdlib_memo(environment, scope)

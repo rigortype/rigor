@@ -205,7 +205,12 @@ RSpec.describe Rigor::SigGen::Generator do
     # A shell rides on its file's candidates, and the writer writes no file without one it acts on. A subclass in
     # another file must not be written against a shell that never reached disk: it is demoted, as before #2224.
     context "when the shell's own file has nothing to write" do
-      let(:subclass) { "module Lib\n  class NotFound < Error\n    def code = 404\n  end\nend\n" }
+      let(:subclass) { in_lib("class NotFound < Error", "  def code = 404", "end") }
+
+      # `lines` wrapped in `module Lib`, each indented one level.
+      def in_lib(*lines)
+        "module Lib\n#{lines.map { |line| "  #{line}\n" }.join}end\n"
+      end
 
       def run_generator(files)
         files.each do |rel, contents|
@@ -233,7 +238,7 @@ RSpec.describe Rigor::SigGen::Generator do
 
       it "demotes the subclass when every method in that file is skipped" do
         candidates, generator = run_generator(
-          "lib/errors.rb" => "module Lib\n  class Error < StandardError; end\n  class Thing\n    def dyn(x) = x.foo\n  end\nend\n",
+          "lib/errors.rb" => in_lib("class Error < StandardError; end", "class Thing", "  def dyn(x) = x.foo", "end"),
           "lib/sub.rb" => subclass
         )
 
@@ -243,7 +248,7 @@ RSpec.describe Rigor::SigGen::Generator do
 
       it "demotes the subclass when `sig/` already declares every method in that file" do
         candidates, generator = run_generator(
-          "lib/errors.rb" => "module Lib\n  class Error < StandardError; end\n  class Thing\n    def x = 1\n  end\nend\n",
+          "lib/errors.rb" => in_lib("class Error < StandardError; end", "class Thing", "  def x = 1", "end"),
           "sig/errors.rbs" => "module Lib\n  class Thing\n    def x: () -> Integer\n  end\nend\n",
           "lib/sub.rb" => subclass
         )
@@ -254,7 +259,7 @@ RSpec.describe Rigor::SigGen::Generator do
 
       it "demotes the subclass when the file's only written class is itself demoted for its superclass" do
         candidates, generator = run_generator(
-          "lib/errors.rb" => "module Lib\n  class Error < StandardError; end\n  class Thing < Missing\n    def x = 1\n  end\nend\n",
+          "lib/errors.rb" => in_lib("class Error < StandardError; end", "class Thing < Missing", "  def x = 1", "end"),
           "lib/sub.rb" => subclass
         )
 
@@ -265,8 +270,8 @@ RSpec.describe Rigor::SigGen::Generator do
       # Two steps of the cascade: `Thing`'s demotion unwrites `Error`, which demotes `Middle`, which unwrites `Leaf`.
       it "follows a chain of shells each demoted by the one before" do
         candidates, generator = run_generator(
-          "lib/errors.rb" => "module Lib\n  class Error < StandardError; end\n  class Thing < Missing\n    def x = 1\n  end\nend\n",
-          "lib/middle.rb" => "module Lib\n  class Leaf < StandardError; end\n  class Middle < Error\n    def m = 1\n  end\nend\n",
+          "lib/errors.rb" => in_lib("class Error < StandardError; end", "class Thing < Missing", "  def x = 1", "end"),
+          "lib/middle.rb" => in_lib("class Leaf < StandardError; end", "class Middle < Error", "  def m = 1", "end"),
           "lib/sub.rb" => "module Lib\n  class NotFound < Leaf\n    def code = 404\n  end\nend\n"
         )
 
@@ -297,7 +302,7 @@ RSpec.describe Rigor::SigGen::Generator do
       # The other side: when the shell's file IS written, the subclass rests on it and is declared.
       it "declares the subclass when the shell's file is written" do
         run_generator(
-          "lib/errors.rb" => "module Lib\n  class Error < StandardError; end\n  class Thing\n    def x = 1\n  end\nend\n",
+          "lib/errors.rb" => in_lib("class Error < StandardError; end", "class Thing", "  def x = 1", "end"),
           "lib/sub.rb" => subclass
         )
 

@@ -533,6 +533,11 @@ end
           .to be_empty
       end
 
+      it "reads the other source's class alias as the class it names too" do
+        expect(shape_rows("class Foo < Target\nend\n", "class Target\nend\nclass Al = Target\nclass Foo < Al\nend\n"))
+          .to be_empty
+      end
+
       it "reports a clause whose type arguments differ (P4)" do
         expect(shape_rows("class Foo < Base[String]\nend\n",
                           "class Base[T]\nend\nclass Foo < Base[Integer]\nend\n"))

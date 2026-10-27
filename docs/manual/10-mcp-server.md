@@ -193,6 +193,22 @@ All messages except `notifications/*` require a response.
 
 ## Tool reference
 
+Every tool that takes a `config` argument reports the configuration's
+warnings — the ones `rigor check` prints on STDERR, such as a key that
+has no effect or a `disable:` token that names no rule. `rigor_check`
+carries them in its own document; every other such tool appends a
+second `text` content block holding one JSON object, after the tool's
+own output, which is left unchanged:
+
+```json
+{"config_warnings": [{"kind": "unknown_key", "message": "`undefined-method` is not a recognized configuration key; it has no effect.", "key": "undefined-method", "suggestion": null}]}
+```
+
+Each entry has the shape of `rigor check --format json`'s
+`config_warnings` entries. There is no such block when the
+configuration has no warnings, or when it fails to load (the tool
+reports that error itself).
+
 ### rigor_check
 
 Analyze one or more Ruby files or directories for type errors,
@@ -221,6 +237,10 @@ undefined methods, arity mismatches, and nil-receiver risks.
   ]
 }
 ```
+
+When `.rigor.yml` has [configuration warnings](03-configuration.md)
+(a key or a `disable:` token that has no effect), the document carries
+them under `config_warnings`, as `rigor check --format json` does.
 
 `isError` is `false` when the run completes normally, even if
 diagnostics were found. `isError: true` signals a configuration or

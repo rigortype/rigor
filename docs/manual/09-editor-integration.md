@@ -25,6 +25,7 @@ design + capability matrix lives in
 | `textDocument/documentSymbol` | Outline tree from Prism AST: `class` / `module` / `def` with nesting. |
 | `workspace/didChangeWatchedFiles` | Invalidates the per-session `Environment` + `Cache::Store` cache so saved files repropagate. |
 | `workspace/didChangeConfiguration` | Same — re-reads `.rigor.yml` / `Gemfile.lock` etc. |
+| `window/showMessage` | One warning per [configuration warning](03-configuration.md) — the lines `rigor check` prints on STDERR, such as a key that has no effect or a `disable:` token that names no rule. Sent on `initialized`, and again after a save only when re-reading `.rigor.yml` changed the set of warnings. |
 
 ## Prerequisites
 
@@ -193,6 +194,14 @@ For a legacy bundler-based install, swap the connection list to
 - Run `rigor check <path>` from the same project root; if it works
   there, the LSP should too. If `rigor check` fails, fix that
   first.
+
+**A rule still fires although `.rigor.yml` turns it off.**
+
+- Look for a `rigor:` warning the server showed when it started (or
+  after the save that changed `.rigor.yml`): a misspelt key such as
+  `undefined-method: "off"` at the top level, or a `disable:` token
+  that names no rule, has no effect, and the server says so once.
+  The same warnings appear on STDERR from `rigor check`.
 
 **Completion popup is empty.**
 

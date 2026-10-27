@@ -44,6 +44,9 @@ module Rigor
       # concurrent rounds; one key means a burst collapses into the last one.
       PROJECT_ROUND_KEY = :__rigor_project_round__
 
+      # LSP `MessageType.Warning`, the `type` of a `window/showMessage` notification.
+      MESSAGE_TYPE_WARNING = 2
+
       def initialize(writer:, buffer_table:, project_context:,
                      debouncer: nil, debounce_seconds: 0.2)
         @writer = writer
@@ -130,6 +133,19 @@ module Rigor
         notify(uri, [])
       end
 
+      # Issue #2231 — shows each configuration warning the editor has not seen yet as a `window/showMessage`
+      # (`MessageType.Warning`), worded as `rigor check` prints it on STDERR.
+      # {ProjectContext#unannounced_config_warnings} decides what is new, so a call after a reload that changed
+      # nothing writes nothing.
+      def announce_config_warnings
+        return unless @project_context.respond_to?(:unannounced_config_warnings)
+
+        @project_context.unannounced_config_warnings.each do |warning|
+          @writer.write(method: "window/showMessage",
+                        params: { type: MESSAGE_TYPE_WARNING, message: "rigor: #{warning.message}" })
+        end
+      end
+
       # Cancels every in-flight debounced task. Called from `Server#handle_shutdown` so pending publishes
       # don't fire against a closed STDOUT.
       def cancel_pending
@@ -184,6 +200,9 @@ module Rigor
       def execute_project_round(saved_uri)
         generation = @project_context.generation
         diagnostics = @project_context.project_diagnostics
+        # The round re-read the configuration; a changed warning set is announced even when the diagnostics
+        # below are discarded, since the reload itself stands.
+        announce_config_warnings
         return if generation != @project_context.generation
 
         by_path = diagnostics.group_by(&:path)

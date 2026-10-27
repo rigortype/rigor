@@ -155,6 +155,10 @@ module Rigor
       ].freeze
       Ractor.make_shareable(TOOLS)
 
+      # The tools that read a configuration — the ones taking a `config` argument — and so report its warnings.
+      CONFIG_TOOLS = TOOLS.filter_map { |tool| tool[:name] if tool.dig(:inputSchema, :properties, :config) }.freeze
+      Ractor.make_shareable(CONFIG_TOOLS)
+
       def initialize(config_path: nil, err: $stderr)
         @config_path = config_path
         @err = err
@@ -201,7 +205,8 @@ module Rigor
         require_relative "../cli"
         exit_code = with_captured_streams(out_io, err_io) { CLI.new(argv, out: out_io, err: err_io).run }
 
-        success(id, tool_result(out_io.string, err_io.string, exit_code))
+        result = tool_result(out_io.string, err_io.string, exit_code)
+        success(id, with_config_warnings(result, name, args, out_io.string))
       rescue SystemExit => e
         # Defence against any command that exits: it must not take the server down with it.
         success(id, { content: [{ type: "text", text: "Command exited (status #{e.status})" }], isError: true })
@@ -219,6 +224,38 @@ module Rigor
       def tool_result(out, err, exit_code)
         is_error = [CLI::EXIT_USAGE, CLI::EXIT_INTERNAL_ERROR].include?(exit_code) || (out.empty? && !exit_code.zero?)
         { content: [{ type: "text", text: out.empty? ? err : out }], isError: is_error }
+      end
+
+      # Issue #2231 — `rigor check` puts {ConfigAudit} warnings in its JSON `config_warnings`; the other tools read the
+      # same configuration and said nothing about it, so an agent saw `call.undefined-method` on a project whose
+      # `.rigor.yml` misspelt the key meant to silence it and got no hint why. Every tool that takes a `config`
+      # argument now carries them: a second `text` content block holding `{"config_warnings": [...]}`, each entry the
+      # shape check's JSON uses. The tool's own document is left byte-for-byte as its CLI printed it, and an output
+      # that already carries the key (check's) gets no second copy. Nothing is added when there is nothing to say,
+      # nor when the configuration does not load — the CLI has already reported that.
+      def with_config_warnings(result, name, args, out)
+        return result unless CONFIG_TOOLS.include?(name)
+
+        warnings = config_warnings(present_config(args["config"]) || @config_path)
+        return result if warnings.empty? || carries_config_warnings?(out)
+
+        block = { type: "text", text: JSON.generate({ "config_warnings" => warnings.map(&:to_h) }) }
+        result.merge(content: result.fetch(:content) + [block])
+      end
+
+      def config_warnings(config_path)
+        require_relative "../configuration"
+        require_relative "../config_audit"
+        ConfigAudit.warnings(Configuration.load(config_path))
+      rescue StandardError
+        []
+      end
+
+      def carries_config_warnings?(out)
+        document = JSON.parse(out)
+        document.is_a?(Hash) && document.key?("config_warnings")
+      rescue JSON::ParserError
+        false
       end
 
       # The JSON-RPC channel is the process's stdout, so nothing a command writes past its `out:` (an option

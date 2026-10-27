@@ -11,6 +11,7 @@ require_relative "../cache/incremental_snapshot"
 require_relative "../effects/identity"
 require_relative "../analysis/path_expansion"
 require_relative "../protection/discovery_seed"
+require_relative "../config_audit"
 
 module Rigor
   module LanguageServer
@@ -70,6 +71,25 @@ module Rigor
         @project_scan = nil
         @incremental_session = nil
         @session_primed = false
+        @announced_config_warnings = nil
+        @announce_lock = Mutex.new
+      end
+
+      # Issue #2231 — the {ConfigAudit} warnings for the configuration as last loaded that the editor has not been
+      # shown yet, or an empty array. `rigor check` prints these on every run; the server is one long run, so it
+      # announces a warning set once: at `initialized` for the configuration it started with, and again only when
+      # a later reload (every save round re-reads `.rigor.yml`) changes the set. A save that leaves the warnings
+      # as they were says nothing more, and a fix followed by the same mistake announces it again. Called from the
+      # dispatch thread and the save round's thread alike, hence the lock.
+      def unannounced_config_warnings
+        warnings = ConfigAudit.warnings(@configuration)
+        messages = warnings.map(&:message)
+        @announce_lock.synchronize do
+          next [] if messages == @announced_config_warnings
+
+          @announced_config_warnings = messages
+          warnings
+        end
       end
 
       # Returns the cached `Rigor::Environment` for this session, building it on first access. The build

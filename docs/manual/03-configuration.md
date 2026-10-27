@@ -144,7 +144,10 @@ is left alone, other than the reserved run-level rows (`rbs.coverage.…`,
 those rows are the intended keys and are never flagged, while a bare plugin
 rule, `all`, or a `plugin.`-qualified key for an unconfigured plugin is. The same findings appear in the
 `--format=json` payload under `config_warnings` (each tagged with a
-`kind`), so CI can assert on them.
+`kind`), so CI can assert on them. The [language server](09-editor-integration.md)
+shows each one as a `window/showMessage` warning, and every
+[MCP tool](10-mcp-server.md#tool-reference) that takes a `config`
+argument includes them in its result.
 
 ### Diagnostics
 

@@ -535,4 +535,67 @@ RSpec.describe Rigor::MCP::Server do
       expect(err.string.lines.count).to be > 2
     end
   end
+
+  # #2231 — every tool that reads a configuration reports its ConfigAudit warnings, as `rigor check`'s JSON does: an
+  # agent whose `.rigor.yml` says `undefined-method: "off"` (a key that does nothing) learns why the rule still fires.
+  describe "config_warnings" do
+    def with_inert_config(config = "undefined-method: \"off\"\ndisable:\n  - call.undefined-methdo\n")
+      Dir.mktmpdir("rigor-mcp-config-warnings-") do |dir|
+        file = File.join(dir, "a.rb")
+        File.write(file, "x = 1\n")
+        config_path = File.join(dir, ".rigor.yml")
+        File.write(config_path, "paths:\n  - #{dir}\n#{config}")
+        yield file, config_path
+      end
+    end
+
+    def warning_block(resp)
+      blocks = resp.dig("result", "content").drop(1)
+      expect(blocks.size).to eq(1), resp.inspect
+      JSON.parse(blocks.first.fetch("text")).fetch("config_warnings")
+    end
+
+    it "adds a config_warnings block naming the inert key and the inert disable: token" do
+      with_inert_config do |file, config|
+        resp = tool_call("rigor_annotate", { "file" => file, "config" => config })
+
+        expect(resp.dig("result", "isError")).to be(false)
+        expect(resp.dig("result", "content", 0, "text")).to include("x = 1")
+        warnings = warning_block(resp)
+        expect(warnings.map { |w| w["kind"] }).to contain_exactly("unknown_key", "disabled_rule")
+        expect(warnings.find { |w| w["kind"] == "unknown_key" }["key"]).to eq("undefined-method")
+        expect(warnings.find { |w| w["kind"] == "disabled_rule" }["token"]).to eq("call.undefined-methdo")
+      end
+    end
+
+    it "reads the session default config when the call names none" do
+      with_inert_config do |file, config|
+        s = described_class.new(config_path: config, err: StringIO.new)
+        resp = JSON.parse(JSON.generate(s.handle("id" => 1, "method" => "tools/call",
+                                                 "params" => { "name" => "rigor_type_of",
+                                                               "arguments" => { "file" => file, "line" => 1,
+                                                                                "col" => 1 } })))
+
+        expect(warning_block(resp).map { |w| w["kind"] }).to contain_exactly("unknown_key", "disabled_rule")
+      end
+    end
+
+    it "leaves rigor_check with its own config_warnings and no second copy" do
+      with_inert_config do |file, config|
+        resp = tool_call("rigor_check", { "paths" => [file], "config" => config })
+
+        expect(resp.dig("result", "content").size).to eq(1)
+        warnings = JSON.parse(resp.dig("result", "content", 0, "text")).fetch("config_warnings")
+        expect(warnings.map { |w| w["kind"] }).to contain_exactly("unknown_key", "disabled_rule")
+      end
+    end
+
+    it "adds nothing when the configuration has no warnings" do
+      with_inert_config("") do |file, config|
+        resp = tool_call("rigor_annotate", { "file" => file, "config" => config })
+
+        expect(resp.dig("result", "content").size).to eq(1)
+      end
+    end
+  end
 end

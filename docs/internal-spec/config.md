@@ -38,7 +38,7 @@ design, not an implementation detail** — a key may sit in one tier, or all thr
 | --- | --- | --- | --- |
 | **1. Schema** | editor / CI | edit time | An editor squiggle. **No runtime effect whatsoever.** |
 | **2. `Configuration` load** | this implementation | load time | `Rigor::ConfigurationError` (an `ArgumentError`) — the run stops. |
-| **3. Config audit** | this implementation | check time | A STDERR warning, and a tagged entry under `config_warnings` in the `--format=json` payload. **The exit code is unchanged.** |
+| **3. Config audit** | this implementation | check time | A STDERR warning, and a tagged entry under `config_warnings` in the `--format=json` payload. **The exit code is unchanged.** The language server shows each as a `window/showMessage` warning once per changed warning set, and the MCP tools that take a `config` argument carry them as `config_warnings` in their result. |
 
 Tier 2 is for a value the loader cannot proceed on (a malformed `dependencies.source_inference[]`
 entry, an out-of-range `budget_per_gem`, an `effects.snapshot.gate` outside the enum, an

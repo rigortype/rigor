@@ -84,7 +84,9 @@ module Rigor
         # the engine reads as "a template exists here and has no unit". The bump is belt-and-braces: what
         # actually invalidates is the claim itself, through the glob row in `TemplateUnits#digest` and the
         # `claimed_globs` equality the carry checks. A manifest version is in no cache key of its own.
-        version: "1.5.0",
+        # Bumped 2026-10-27 (#2430) — `params[...]` answers the gradual `Dynamic[Parameters | nil]` rather than
+        # the bare union, so a cached 1.5.0 run carries the non-gradual answer at every `params[:k]` argument.
+        version: "1.6.0",
         description: "Validates Action Pack route-helper calls and filter chains inside controllers, and types the request-context readers (`params` / `session` / `request` / `flash`) and their chains.",
         config_schema: {
           "controller_search_paths" => { kind: :array, default: ["app/controllers"] },
@@ -560,7 +562,8 @@ module Rigor
       # The control specs stay, and they still bite: they pin the HAZARD (no truthiness fold, no `bot`
       # branch, no possible-nil firing), not the Dynamic answer, so they go red if either typing's
       # hazard ever returns — and they now carry a positive assertion that `params[:k]` types
-      # `Parameters?`, so a silent regression to `Dynamic` or to the non-nil nominal fails them too.
+      # `Dynamic[ActionController::Parameters?]` (#2430), so a silent regression to bare `Dynamic[top]`
+      # or to the non-nil nominal fails them too.
       STRONG_PARAMS_CHAIN_METHODS = %i[
         require permit permit! expect slice
         except without extract! slice!
@@ -572,6 +575,16 @@ module Rigor
         next nil unless call_node.is_a?(Prism::CallNode)
 
         Rigor::Type::Combinator.nominal_of(REQUEST_CONTEXT_READER_TYPES[:params])
+      end
+
+      # Issue #2430 — the chain on a `params[...]` carrier (`params[:user].permit(:name)`). The result stays
+      # a `Dynamic` of the same nominal, so it crosses a declared boundary as the carrier does.
+      dynamic_return methods: STRONG_PARAMS_CHAIN_METHODS do |call_node, scope|
+        next nil unless call_node.is_a?(Prism::CallNode) && call_node.receiver
+        next nil unless controller_scope?(scope)
+        next nil unless params_carrier_facet?(scope.type_of(call_node.receiver))
+
+        Rigor::Type::Combinator.dynamic(Rigor::Type::Combinator.nominal_of(REQUEST_CONTEXT_READER_TYPES[:params]))
       end
 
       # Issue #534 item 1, reopened by #574. `#[]` is the single largest named-receiver pair on both survey
@@ -589,13 +602,51 @@ module Rigor
       #
       # The non-nil `-> Parameters` typing stays rejected on its own merits, unchanged: it makes every
       # `params[:k]` condition always-truthy and folds a ternary over one to its true arm.
+      #
+      # Issue #2430 — the answer is a GRADUAL carrier, `Dynamic[Parameters | nil]`, not the bare union.
+      # A declared boundary (a `String` parameter, a `-> String` return) rejects the bare union, because
+      # `Acceptance` passes only a `Dynamic` through every boundary, and a scalar param is a `String` at
+      # runtime. The static facet keeps the strong-params chain typed: the carrier-gated rules below
+      # dispatch on the facet, so `params[:user][:name]` and `params[:user].permit(:name)` keep resolving.
+      # The control hazards (no truthiness fold, no `bot`, no possible-nil on `q = params[:q]`) are
+      # unchanged, because the facet is the same `Parameters | nil` union.
       dynamic_return receivers: [REQUEST_CONTEXT_READER_TYPES[:params]], methods: %i[[]] do |call_node, _scope|
         next nil unless call_node.is_a?(Prism::CallNode)
 
-        Rigor::Type::Combinator.union(
-          Rigor::Type::Combinator.nominal_of(REQUEST_CONTEXT_READER_TYPES[:params]),
-          Rigor::Type::Combinator.constant_of(nil)
+        params_read_type
+      end
+
+      # Issue #2430 — `Dynamic` is not a `Nominal`, so the receiver-gated rules never see a carrier
+      # receiver. These two rules gate on the carrier's facet instead, and only inside a controller: a
+      # carrier is minted by the `params` reader, which is controller-only, so no other scope can hold one.
+      dynamic_return methods: %i[[]] do |call_node, scope|
+        next nil unless call_node.is_a?(Prism::CallNode) && call_node.receiver
+        next nil unless controller_scope?(scope)
+        next nil unless params_carrier_facet?(scope.type_of(call_node.receiver))
+
+        params_read_type
+      end
+
+      # The `params` carrier's static facet as a `Dynamic`: `Parameters | nil`, gradual at every boundary.
+      def params_read_type
+        Rigor::Type::Combinator.dynamic(
+          Rigor::Type::Combinator.union(
+            Rigor::Type::Combinator.nominal_of(REQUEST_CONTEXT_READER_TYPES[:params]),
+            Rigor::Type::Combinator.constant_of(nil)
+          )
         )
+      end
+
+      # True when `type` is a `Dynamic` whose facet is `Parameters` or `Parameters | nil`: the carrier a
+      # `params[...]` read answers, and the value a chained `[]` / strong-params call receives.
+      def params_carrier_facet?(type)
+        return false unless type.is_a?(Rigor::Type::Dynamic)
+
+        facet = type.static_facet
+        members = facet.is_a?(Rigor::Type::Union) ? facet.members : [facet]
+        non_nil = members.reject { |member| member.is_a?(Rigor::Type::Constant) && member.value.nil? }
+        non_nil.size == 1 && non_nil.first.is_a?(Rigor::Type::Nominal) &&
+          non_nil.first.class_name == REQUEST_CONTEXT_READER_TYPES[:params]
       end
 
       # Phase 5c (2026-09-02, issue #534 "same lane") — the rest of the request-context surface the

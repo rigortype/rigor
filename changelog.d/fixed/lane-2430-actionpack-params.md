@@ -1,0 +1,5 @@
+- **[plugins/rigor-actionpack]** A `params[:key]` read in a controller no longer draws `call.argument-type-mismatch` at a declared `String` parameter, with or without an `ActionController::Parameters` declaration. ([#2445](https://github.com/rigortype/rigor/pull/2445))
+  - `Model.find(params[:id])` against `(String id)` is silent. The value is now a gradual carrier over `ActionController::Parameters | nil`, which the declared boundary accepts.
+  - `params[:user][:name]`, `params[:user].permit(:name)` and `params[:user].require(:name)` keep their strong-parameters typing, and the nil-check guard stays silent.
+  - A guarded `params[:key]` local no longer draws `call.undefined-method` on the narrowed `Parameters` arm when an actionpack collection declaring `ActionController::Parameters` is installed.
+  - A method called on the value outside that chain, such as `params[:q].to_s`, now answers `Dynamic[top]` instead of `"" | String`. This is less precision, not a new false positive.

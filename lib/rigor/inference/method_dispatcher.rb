@@ -1185,12 +1185,14 @@ module Rigor
       #
       # `RbsDispatch` already distributes over a `Union` (and erases a `Difference` to its base, #533),
       # but it does so INSIDE one tier, so a member that needs a LOWER tier — a user class with no RBS,
-      # a discovered `def`, an opt-in gem — makes the whole union decline. That is the corpus shape:
-      # rigor-actionpack types `params[:k]` as `ActionController::Parameters | nil`, the `Parameters` arm
-      # resolves only through the user-class fallback, and so `params[:k].present?` / `#==` / `#blank?` /
-      # `#to_s` read opaque on every Rails app. Measured by toggling this file alone: the named-pair
-      # census drains 137 sites on redmine and 56 on mastodon, and `rigor check` reports the same
-      # diagnostics on both arms across eight survey targets.
+      # a discovered `def`, an opt-in gem — makes the whole union decline. That was the corpus shape before
+      # #2430: rigor-actionpack typed `params[:k]` as the bare `ActionController::Parameters | nil` union, the
+      # `Parameters` arm resolved only through the user-class fallback, and so `params[:k].present?` / `#==`
+      # / `#blank?` / `#to_s` read opaque on every Rails app. Measured by toggling this file alone: the
+      # named-pair census drained 137 sites on redmine and 56 on mastodon, and `rigor check` reported the
+      # same diagnostics on both arms across eight survey targets. The plugin now answers a `Dynamic`
+      # carrier, which this projection does not reach, so those off-chain calls read `Dynamic[top]` until
+      # the carrier is projected here too (#2448).
       #
       # **Why the bottom and not next to `RbsDispatch`.** Sitting here, the tier can only ever replace a
       # `Dynamic[top]` the typer was about to produce — the same ADR-5 argument {UniversalObjectDispatch}

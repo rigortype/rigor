@@ -644,6 +644,8 @@ module Rigor
       def record_member_undecided(reporter, record, root)
         plugin_id, path = split_virtual_source_name(record.virtual_name)
         return if path.nil?
+        return record_variable_undecided(reporter, record, root, plugin_id, path) if
+          MemberConsistency.variable_kind?(record.kind)
 
         reporter.record(
           plugin_id: plugin_id, path: path, kind: :not_honoured,
@@ -656,8 +658,22 @@ module Rigor
         )
       end
 
+      # Issue #2440 — an instance variable declared by both sides with different types. `sig/` binds
+      # (the coordinator's ruling on #2440, ADR-5): the row is `:info`, never `rbs.contradicting-signature`.
+      def record_variable_undecided(reporter, record, root, plugin_id, path)
+        reporter.record(
+          plugin_id: plugin_id, path: path, kind: :not_honoured,
+          message: "`#{member_label(record)}` is also declared in " \
+                   "`#{path_relative_to(record.signature_path, root)}` with a different type " \
+                   "(#{record.detail}), so the `.rbs` declaration binds and the inline one was dropped. " \
+                   "RBS rejects two declarations of one instance variable, so only one can stay; " \
+                   "regenerate the committed `.rbs` (`rbs-inline --output`) or align the two types."
+        )
+      end
+
+      # `Demo#m` / `Demo.m` for a method, `Demo#@x` / `Demo.@x` for an instance / class instance variable.
       def member_label(record)
-        separator = record.kind == :singleton ? "." : "#"
+        separator = %i[singleton class_instance_variable].include?(record.kind) ? "." : "#"
         "#{record.class_name}#{separator}#{record.method_name}"
       end
 

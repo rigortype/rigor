@@ -107,6 +107,10 @@ lib/rigor/environment/gated_signature_plan.rb:
   computes: the kind and visibility of a vendored RBS member narrowed to its untaken half (#1713)
   producers:
     Rigor::Environment::GatedSignaturePlan#narrowed: rewrites one parsed vendored RBS member, keeping a `def self?` method's instance side private as RBS's module_function form makes it; it reads no Ruby source and records no declaration context
+lib/rigor/environment/member_consistency.rb:
+  computes: the key an RBS mixin member (`include` / `extend` / `prepend`) contributes to the inline-vs-`sig/` consistency rule (#2440)
+  producers:
+    Rigor::Environment::MemberConsistency.member_keys: keys a parsed RBS `include` / `extend` / `prepend` member by its module name and type arguments so an identical inline one stands down; it reads no Ruby source and records no declaration context
 lib/rigor/environment/missing_gem_constant_index.rb:
   computes: the top-level constant names an RBS-less gem declares
   producers:

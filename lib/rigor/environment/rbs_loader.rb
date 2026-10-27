@@ -1176,11 +1176,12 @@ module Rigor
         end
 
         # `[owners, shadowable]`. `owners` is `{[class_name, method_name, kind] => [signature_path, member,
-        # visibility]}` for every method-shaped member the project's own `signature_paths:` files declare and
-        # the inline sources also name; the first file in sorted order owns a key two `.rbs` files declare
-        # (that pair fails the definition build anyway). `shadowable` is every `::` segment of every class /
-        # module name the inline sources and the signature files declare — the names a relative reference
-        # might resolve to inside an enclosing namespace ({MemberConsistency::Comparator#faithful?}).
+        # visibility]}` for every method-shaped or instance-variable member the project's own
+        # `signature_paths:` files declare and the inline sources also name; the first file in sorted order
+        # owns a key two `.rbs` files declare (that pair fails the definition build anyway). `shadowable` is
+        # every `::` segment of every class / module name the inline sources and the signature files declare
+        # — the names a relative reference might resolve to inside an enclosing namespace
+        # ({MemberConsistency::Comparator#faithful?}).
         #
         # The parse is scoped by a substring pre-filter over each file's text: a declaration has to spell its
         # own name, so a signature file mentioning none of the names the inline sources declare cannot
@@ -1206,8 +1207,8 @@ module Rigor
         def index_signature_members(index, file, decls)
           return if decls.nil?
 
-          each_declared_member(decls) do |class_name, member, visibility|
-            member_method_keys(member).each do |method_name, kind|
+          each_declared_member(decls) do |class_name, member, visibility, nesting|
+            member_keys(member, nesting).each do |method_name, kind|
               index[[class_name, method_name, kind]] ||= [file, member, visibility].freeze
             end
           end
@@ -1233,49 +1234,55 @@ module Rigor
             decls = parse_signature_source(name, content)
             next if decls.nil?
 
-            each_declared_member(decls) do |class_name, member, visibility|
-              entries << [name.to_s, class_name, member, visibility]
+            each_declared_member(decls) do |class_name, member, visibility, nesting|
+              entries << [name.to_s, class_name, member, visibility, nesting]
             end
           end
         end
 
-        # Removes, in place, every member contributing a key in `keys` (a Set of `[class, method, kind]`).
-        # Nested declarations are descended into after the rejection, and a declaration member contributes no
-        # method key, so nesting is never itself removed.
-        def strip_members!(decls, keys, prefix = [])
+        # Removes, in place, every member contributing a key in `keys` (a Set of `[class, method, kind]`,
+        # instance-variable keys included, #2440). Nested declarations are descended into after the
+        # rejection, and a declaration member contributes no key, so nesting is never itself removed.
+        def strip_members!(decls, keys, prefix = [], written = [])
           Array(decls).each do |decl|
             next unless declaration_with_members?(decl)
 
             inner = prefix + [decl.name.to_s.delete_prefix("::")]
+            nesting = written + [decl.name.to_s]
             class_name = inner.join("::")
             decl.members.reject! do |member|
-              member_method_keys(member).any? { |method_name, kind| keys.include?([class_name, method_name, kind]) }
+              member_keys(member, nesting.join("/")).any? do |method_name, kind|
+                keys.include?([class_name, method_name, kind])
+              end
             end
-            strip_members!(decl.members, keys, inner)
+            strip_members!(decl.members, keys, inner, nesting)
           end
         end
 
-        # Yields `[class_name, member, visibility]` for every member of every class / module declaration in
-        # `decls`, descending through nesting. The enclosing path is accumulated and the name rendered
-        # `::`-stripped, so a `module Foo; class Bar` and a `class Foo::Bar` elsewhere key the same — which is
-        # what makes a `sig/` declaration and an inline one comparable at all. `visibility` is the member's
-        # own (`private def x`) or else the one the enclosing `private` / `public` section sets; a singleton
-        # method takes no section, as in Ruby.
-        def each_declared_member(decls, prefix = [], &block)
+        # Yields `[class_name, member, visibility, nesting]` for every member of every class / module
+        # declaration in `decls`, descending through nesting. The enclosing path is accumulated and the name
+        # rendered `::`-stripped, so a `module Foo; class Bar` and a `class Foo::Bar` elsewhere key the same —
+        # which is what makes a `sig/` declaration and an inline one comparable at all. `visibility` is the
+        # member's own (`private def x`) or else the one the enclosing `private` / `public` section sets; a
+        # singleton method takes no section, as in Ruby. `nesting` is the declaration names exactly as
+        # written, outermost first, joined by `/` (`Foo/Bar` against `Foo::Bar`): a mixin's relative name
+        # resolves through it, so {MemberConsistency.member_keys} keys a mixin by it (#2440).
+        def each_declared_member(decls, prefix = [], written = [], &block)
           Array(decls).each do |decl|
             next unless declaration_with_members?(decl)
 
             inner = prefix + [decl.name.to_s.delete_prefix("::")]
+            nesting = written + [decl.name.to_s]
             class_name = inner.join("::")
             section = :public
             decl.members.each do |member|
               case member
               when ::RBS::AST::Members::Private then section = :private
               when ::RBS::AST::Members::Public then section = :public
-              else block.call(class_name, member, member_visibility(member, section))
+              else block.call(class_name, member, member_visibility(member, section), nesting.join("/"))
               end
             end
-            each_declared_member(decl.members, inner, &block)
+            each_declared_member(decl.members, inner, nesting, &block)
           end
         end
 
@@ -1295,6 +1302,12 @@ module Rigor
         # definition build, which is what decides whether two members collide.
         def member_method_keys(member)
           MemberConsistency.member_method_keys(member)
+        end
+
+        # {MemberConsistency.member_keys} — the method keys plus an instance variable's and a mixin's (#2440),
+        # which is what the inline-vs-`sig/` consistency rule indexes and strips by.
+        def member_keys(member, nesting = nil)
+          MemberConsistency.member_keys(member, nesting)
         end
 
         # A class / module declaration header, as the pre-filter in {.signature_member_index} reads it out of
@@ -3166,7 +3179,8 @@ module Rigor
         key = class_name.to_s.delete_prefix("::")
         details = ((@state[:definition_build_details] ||= {})[key] ||= [])
         details << [key, error.class.name.to_s, definition_build_member(error),
-                    definition_build_conflict_buffers(error), unresolved_type_name_detail(error)].freeze
+                    definition_build_conflict_buffers(error, key), unresolved_type_name_detail(error),
+                    variable_mixin_count(error, key)].freeze
       end
 
       # Issue #997 — the `RBS::NoTypeFoundError` twin of {#definition_build_member}: `nil` for every other
@@ -3354,20 +3368,28 @@ module Rigor
 
       def definition_build_failure_warning(class_name, error)
         first_line = error.message.to_s.lines.first.to_s.strip
-        buffers = definition_build_conflict_buffers(error)
+        buffers = definition_build_conflict_buffers(error, class_name)
         collisions =
           if buffers.empty?
             ""
           else
             listed = buffers.first(QUARANTINE_WARN_LIMIT)
             more = buffers.size - listed.size
-            lines = listed.map { |name| "    - #{name}" }
+            lines = listed.map { |name| "    - #{signature_source_label(name)}" }
             lines << "    … and #{more} more" if more.positive?
             "\n  Colliding declaration(s):\n#{lines.join("\n")}"
           end
         "rigor: RBS definition build failed for `#{class_name}`: #{error.class}: #{first_line}\n  " \
           "Rigor still treats the class as known, so calls into it now silently degrade to\n  " \
           "`Dynamic[top]` — real methods and typos alike — instead of resolving normally.#{collisions}"
+      end
+
+      # Issue #2440 — a `virtual:<plugin>:<path>` buffer named by the `.rb` file it was synthesized from.
+      def signature_source_label(name)
+        prefix, plugin_id, path = name.to_s.split(":", 3)
+        return name.to_s unless prefix == "virtual" && plugin_id && path && !path.empty?
+
+        "#{path} (inline RBS via #{plugin_id})"
       end
 
       def warn_about_deferred_definition_build_failures
@@ -3408,10 +3430,11 @@ module Rigor
       # `InvalidOverloadMethodError` carry `#members` (each with a `#location`);
       # `DuplicatedInterfaceMethodDefinitionError` carries a single `#member`; most others
       # (`NoSuperclassFoundError`, `UnknownMethodAliasError`, `RecursiveAncestorError`, …) carry only a bare
-      # `#location`. Falls back to an empty list — the warning still names the class and the exception's own
-      # message — for the remainder (e.g. `SuperclassMismatchError`, which carries neither).
-      def definition_build_conflict_buffers(error)
-        definition_build_error_locations(error)
+      # `#location`. A duplicated instance variable carries one location and a `SuperclassMismatchError` none,
+      # so both read the class entry's declarations for the other side (#2440). Falls back to an empty list —
+      # the warning still names the class and the exception's own message — for the remainder.
+      def definition_build_conflict_buffers(error, class_name = nil)
+        definition_build_error_locations(error, class_name)
           .compact.filter_map { |loc| loc.buffer&.name }.map(&:to_s)
           .reject { |name| name == CACHED_LOCATION_BUFFER_NAME }.uniq.freeze
       rescue ::RBS::BaseError, StandardError
@@ -3420,12 +3443,98 @@ module Rigor
 
       # The `RBS::Location`s an error carries, by whichever accessor its class happens to expose (see the
       # shape survey above). Split out so the buffer-name extraction reads as one pipeline.
-      def definition_build_error_locations(error)
+      def definition_build_error_locations(error, class_name = nil)
         return Array(error.members).map(&:location) if error.respond_to?(:members) && error.members
         return [error.member.location] if error.respond_to?(:member) && error.member
+        # `VariableDuplicationError` is younger than the rbs floor the gemspec allows.
+        if defined?(::RBS::VariableDuplicationError) && error.is_a?(::RBS::VariableDuplicationError)
+          return variable_duplication_locations(error, class_name)
+        end
+        return superclass_mismatch_locations(error) if error.is_a?(::RBS::SuperclassMismatchError)
         return [error.location] if error.respond_to?(:location)
 
         []
+      end
+
+      # Issue #2440 — a duplicated `@x` / `self.@x` carries the location of ONE of its two declarations, so
+      # the file list named only that side (typically the `virtual:rbs-inline:` buffer, leaving out the
+      # committed `.rbs` the user can actually edit). The class entry's declarations name the rest: every
+      # declaration of the class that declares the same variable, of the same kind. When the variable's
+      # owner is a module the failing class mixes in (rbs counts it once per declaration that does), the
+      # declarations of the failing class that mix that module in are named too: they are the duplicate.
+      def variable_duplication_locations(error, class_name = nil)
+        [error.location, *variable_declarations(error).map(&:location), *mixin_locations(class_name, error.type_name)]
+      end
+
+      # Every declaration of the variable the error names, of the error's kind, in its owner's entry.
+      def variable_declarations(error)
+        member_class =
+          if error.is_a?(::RBS::ClassInstanceVariableDuplicationError)
+            ::RBS::AST::Members::ClassInstanceVariable
+          else
+            ::RBS::AST::Members::InstanceVariable
+          end
+        class_entry_decls(error.type_name).flat_map do |decl|
+          decl_members(decl).select { |m| m.instance_of?(member_class) && m.name == error.variable_name }
+        end
+      end
+
+      # Issue #2440 — how many times `class_name`'s own declarations mix in the module that owns the
+      # duplicated variable, when that is what duplicated it: the owner is another module, it declares the
+      # variable exactly once, and the class mixes it in at least twice (in one declaration or across
+      # several). nil otherwise — a variable duplicated in the owner itself and inherited (`Sub < Base`)
+      # is not a double mixin. Carried in the failure tuple's sixth slot so the advice can tell the two
+      # apart on a replayed tuple too.
+      def variable_mixin_count(error, class_name)
+        return nil unless defined?(::RBS::VariableDuplicationError) && error.is_a?(::RBS::VariableDuplicationError)
+
+        owner = parse_type_name(class_name)
+        return nil if owner.nil? || owner == error.type_name
+        return nil unless variable_declarations(error).size == 1
+
+        count = class_entry_decls(owner).sum do |decl|
+          decl_members(decl).count { |m| mixin_of?(m, error.type_name) }
+        end
+        count >= 2 ? count : nil
+      rescue ::RBS::BaseError, StandardError
+        nil
+      end
+
+      MIXIN_MEMBERS = [::RBS::AST::Members::Include, ::RBS::AST::Members::Extend,
+                       ::RBS::AST::Members::Prepend].freeze
+      private_constant :MIXIN_MEMBERS
+
+      # `resolve_type_names` has made every mixin name absolute.
+      def mixin_of?(member, module_name)
+        MIXIN_MEMBERS.any? { |klass| member.is_a?(klass) } && member.name == module_name
+      end
+
+      def mixin_locations(class_name, module_name)
+        return [] if class_name.nil?
+
+        owner = parse_type_name(class_name)
+        return [] if owner.nil? || owner == module_name
+
+        class_entry_decls(owner).filter_map do |decl|
+          decl.location if decl_members(decl).any? { |m| mixin_of?(m, module_name) }
+        end
+      end
+
+      def decl_members(decl)
+        decl.respond_to?(:members) ? Array(decl.members) : []
+      end
+
+      # Issue #2440 — `SuperclassMismatchError` carries the class entry and no location of its own: the
+      # colliding declarations are the ones that name a superclass. {.entry_declarations} reads the entry on
+      # both rbs majors (`each_decl` on 4.x, `MultiEntry::D` wrappers on 3.x).
+      def superclass_mismatch_locations(error)
+        decls = self.class.entry_declarations(error.entry)
+        decls.select { |decl| decl.respond_to?(:super_class) && decl.super_class }.map(&:location)
+      end
+
+      def class_entry_decls(type_name)
+        entry = env&.class_decls&.[](type_name)
+        entry.nil? ? [] : self.class.entry_declarations(entry)
       end
 
       # The member the failure is ABOUT, taken off the error object rather than parsed out of its message.

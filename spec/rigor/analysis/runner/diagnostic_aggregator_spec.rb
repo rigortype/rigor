@@ -902,6 +902,18 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
         .to include("another loaded signature source already declares it with 2 type parameters")
     end
 
+    # Issues #2422 / #2439 — the per-member row also carries a superclass a plugin's class header gave up, so
+    # its reason may not speak of methods and constants alone.
+    it "words the per-member row so it covers a superclass stand-down too" do
+      rows = build_aggregator(
+        signature_standdowns_snapshot: [["sig/errors.rbs", "ActiveRecord::StatementInvalid < ActiveRecordError",
+                                         nil, nil, "sig/collection.rbs", :member]]
+      ).rbs_plugin_signature_stood_down_diagnostics
+
+      expect(rows.first.message).to include("or two different superclasses of one class) fail the build")
+      expect(rows.first.message).not_to include("Two declarations of one method or constant fail the build")
+    end
+
     it "is silent when nothing stood down" do
       expect(build_aggregator(signature_standdowns_snapshot: []).rbs_plugin_signature_stood_down_diagnostics).to eq([])
     end
@@ -1013,6 +1025,98 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
       expect(message).to include("Rigor refinement `finite-float`")
       expect(message).to include("%a{rigor:v1:param: name is finite-float}")
       expect(message).to include("docs/manual/16-rbs-extended-annotations.md")
+    end
+
+    # Issues #2440 / #2439 / #2437 — the error classes whose remediation is not "remove the duplicate".
+    def advice_for(error_class, member, buffers, mixins = nil)
+      build_aggregator(definition_build_failures_snapshot: [["Greeter", error_class, member, buffers, nil, mixins]])
+        .rbs_definition_build_failed_diagnostics.first.message
+    end
+
+    it "tells a duplicated instance variable with an inline side to regenerate the committed RBS" do
+      message = advice_for("RBS::InstanceVariableDuplicationError", "::Greeter",
+                           ["#{Dir.pwd}/sig/generated/greeter.rbs", "virtual:rbs-inline:#{Dir.pwd}/lib/greeter.rb"])
+
+      expect(message).to include("The same instance variable is declared twice in one class")
+      expect(message).to include("regenerate the committed `.rbs` (`rbs-inline --output`)")
+      expect(message).not_to include("remove the duplicate declaration")
+      # The virtual buffer is named by the `.rb` file it came from.
+      expect(message).to include(
+        "Conflicting signature file(s): lib/greeter.rb (inline RBS via rbs-inline), sig/generated/greeter.rbs."
+      )
+    end
+
+    it "tells two signature files duplicating an instance variable to keep one" do
+      message = advice_for("RBS::InstanceVariableDuplicationError", "::Greeter",
+                           ["#{Dir.pwd}/sig/a.rbs", "#{Dir.pwd}/sig/b.rbs"])
+
+      expect(message).to include("Two signature files declare the same instance variable in one class")
+      expect(message).not_to include("rbs-inline")
+    end
+
+    it "names a duplicated class instance variable as one" do
+      message = advice_for("RBS::ClassInstanceVariableDuplicationError", "::Greeter",
+                           ["#{Dir.pwd}/sig/a.rbs", "#{Dir.pwd}/sig/b.rbs"])
+
+      expect(message).to include("the same class instance variable in one class")
+    end
+
+    it "says two inline annotations collide when every source is inline" do
+      message = advice_for("RBS::InstanceVariableDuplicationError", "::Greeter",
+                           ["virtual:rbs-inline:#{Dir.pwd}/lib/b.rb", "virtual:rbs-inline:#{Dir.pwd}/lib/c.rb"])
+
+      expect(message).to include("Two inline `# @rbs` annotations declare the same instance variable")
+      expect(message).not_to include("committed", "Two signature files")
+    end
+
+    it "never calls a single file two signature files" do
+      message = advice_for("RBS::InstanceVariableDuplicationError", "::Greeter", ["#{Dir.pwd}/sig/a.rbs"])
+
+      expect(message).to include("The same instance variable is declared twice in one class")
+      expect(message).not_to include("Two signature files")
+    end
+
+    # g_mx1: both mixins may sit in one declaration, so the wording may not claim several.
+    it "names the module and the double mixin when the tuple carries a mixin count" do
+      message = advice_for("RBS::InstanceVariableDuplicationError", "::Helper", ["#{Dir.pwd}/sig/a.rbs"], 2)
+
+      expect(message).to include("`Greeter` mixes in `Helper` (`include`, `extend` or `prepend`) more than once, " \
+                                 "in one declaration or across several")
+      expect(message).not_to include("Two signature files", "twice in one class", "more than one of its declarations")
+    end
+
+    # g_sup: the owner differs from the failing class because the variable is inherited, not mixed in twice.
+    it "keeps the declaration-count wording when the owner differs but no mixin count is carried" do
+      message = advice_for("RBS::InstanceVariableDuplicationError", "::Base",
+                           ["#{Dir.pwd}/sig/a.rbs", "#{Dir.pwd}/sig/b.rbs"])
+
+      expect(message).to include("Two signature files declare the same instance variable in one class")
+      expect(message).not_to include("mixes in")
+    end
+
+    it "gives a superclass mismatch its own advice" do
+      message = advice_for("RBS::SuperclassMismatchError", "::Greeter",
+                           ["#{Dir.pwd}/sig/a.rbs", "virtual:rbs-inline:#{Dir.pwd}/lib/greeter.rb"])
+
+      expect(message).to include("Two declarations of the class name different superclasses")
+      expect(message).to include("fix the annotation and regenerate the committed `.rbs`")
+      expect(message).not_to include("remove the duplicate declaration")
+    end
+
+    it "names the missing superclass and suggests declaring it or re-running sig-gen" do
+      message = advice_for("RBS::NoSuperclassFoundError", "::ApplicationRecord", ["#{Dir.pwd}/sig/a.rbs"])
+
+      expect(message).to include("`ApplicationRecord` is named as a superclass, but no loaded signature declares it")
+      expect(message).to include("re-run `rigor sig-gen`")
+      expect(message).not_to include("remove the duplicate declaration")
+    end
+
+    it "says a type was applied with the wrong number of arguments or to the wrong class" do
+      message = advice_for("RBS::InvalidTypeApplicationError", "::Array", ["#{Dir.pwd}/sig/a.rbs"])
+
+      expect(message).to include("A signature applies `Array` with the wrong number of type arguments")
+      expect(message).to include("or applies them to the wrong class")
+      expect(message).not_to include("remove the duplicate declaration")
     end
   end
 end

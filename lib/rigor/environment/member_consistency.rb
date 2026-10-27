@@ -59,6 +59,9 @@ module Rigor
       NO_RECORDS = [].freeze
       private_constant :NO_RECORDS
 
+      # The key kinds {.member_keys} gives a variable member.
+      VARIABLE_KINDS = %i[instance_variable class_instance_variable].freeze
+
       # What a disjointness proof may lean on (ADR-112 WD5, #1075): the RBS class hierarchy the analysis
       # itself uses, restricted to classes Ruby core and the stdlib declare. Never Ruby constants loaded in
       # the analyzer process — those depend on which libraries happen to be required, and rbs and Ruby
@@ -115,8 +118,8 @@ module Rigor
       class << self
         # @param signature_members — `{[class, method, kind] => [signature_path, member, visibility]}`, the
         #   first project `.rbs` member declaring each key, with its effective visibility.
-        # @param inline_members — `[[virtual_name, class_name, member, visibility], ...]`, every member the
-        #   inline sources declare.
+        # @param inline_members — `[[virtual_name, class_name, member, visibility, nesting], ...]`, every member
+        #   the inline sources declare, with the lexical nesting {.member_keys} keys a mixin by.
         # @param shadowable — the first segment of every class / module name the project's inputs declare
         #   ({Comparator#initialize}).
         # @param proof — an {RbsProof} for the reported rows, or nil for the environment build.
@@ -131,9 +134,9 @@ module Rigor
 
           state = { comparator: Comparator.new(shadowable, proof: proof), records: [], inline: Set.new,
                     signature: Hash.new { |hash, file| hash[file] = Set.new }, checked: {}.compare_by_identity }
-          inline_members.each do |virtual_name, class_name, member, visibility|
+          inline_members.each do |virtual_name, class_name, member, visibility, nesting|
             state[:records].concat(refinement_records(state, class_name, member, nil, virtual_name))
-            resolve_member(state, signature_members, [virtual_name, class_name, member, visibility])
+            resolve_member(state, signature_members, [virtual_name, class_name, member, visibility, nesting])
           end
           Resolution.new(
             records: state[:records].uniq.sort_by { |r| record_sort_key(r) }.freeze,
@@ -159,11 +162,57 @@ module Rigor
           end
         end
 
+        # Issue #2440 — every key one RBS member contributes to a definition build: its method keys
+        # ({.member_method_keys}) and, for an instance variable (`@x: T`) or a class instance variable
+        # (`self.@x: T`), `[:@x, :instance_variable]` / `[:@x, :class_instance_variable]`. rbs 4.2 raises
+        # `InstanceVariableDuplicationError` / `ClassInstanceVariableDuplicationError` for two of those in one
+        # class even when the types agree, so a `sig/` and an inline declaration of one has to be reconciled
+        # like a method. A method name never starts with `@`, so the two key spaces cannot meet. A class
+        # variable (`@@x`) contributes nothing: rbs does not reject a duplicate. Neither does an attribute's
+        # implied instance variable, which rbs lets an explicit `@x` declaration override.
+        #
+        # A mixin (`include M`, `extend M`, `prepend M`) is keyed by the lexical nesting of the declaration
+        # it sits in and the module and type arguments exactly as written, `[:"A/C|M[String]", :include]`:
+        # rbs 4.2 counts every instance variable `M` declares once per declaration of the class that mixes it
+        # in, so the same `include M` in `sig/` and inline raises `InstanceVariableDuplicationError ... in ::M`
+        # for the class. A relative name resolves through the nesting it is written in, so `include M` inside
+        # `module A; class C` (`A::M` when that exists) and inside `class A::C` (`::M`) are different mixins,
+        # and so are `M` and `::M`; only an identical spelling in an identical nesting is the same member and
+        # stands down. `rbs-inline --output` mirrors the Ruby file's nesting, so its committed output still
+        # pairs with the inline buffer. A mixin with different arguments keys differently and is left alone.
+        # Two members sharing a mixin key declare no method types to compare, so they read as equal.
+        #
+        # `nesting` is the declaration names as written, outermost first, joined by `/`
+        # ({RbsLoader.each_declared_member}); nil keys a mixin by its spelling alone.
+        #
+        # Kept apart from {.member_method_keys} on purpose: the plugin-signature plans key collisions by
+        # method only, and this rule is the inline-vs-`sig/` one.
+        def member_keys(member, nesting = nil)
+          case member
+          when ::RBS::AST::Members::InstanceVariable then [[member.name, :instance_variable]]
+          when ::RBS::AST::Members::ClassInstanceVariable then [[member.name, :class_instance_variable]]
+          when ::RBS::AST::Members::Include then [[mixin_key(member, nesting), :include]]
+          when ::RBS::AST::Members::Extend then [[mixin_key(member, nesting), :extend]]
+          when ::RBS::AST::Members::Prepend then [[mixin_key(member, nesting), :prepend]]
+          else member_method_keys(member)
+          end
+        end
+
+        # Whether a key `kind` names a variable rather than a method.
+        def variable_kind?(kind)
+          VARIABLE_KINDS.include?(kind)
+        end
+
         private
 
+        def mixin_key(member, nesting)
+          args = member.args.empty? ? "" : "[#{member.args.join(', ')}]"
+          :"#{nesting}|#{member.name}#{args}"
+        end
+
         def resolve_member(state, signature_members, inline)
-          _virtual_name, class_name, member, = inline
-          overlapping = member_method_keys(member).filter_map do |method_name, kind|
+          _virtual_name, class_name, member, _visibility, nesting = inline
+          overlapping = member_keys(member, nesting).filter_map do |method_name, kind|
             key = [class_name, method_name, kind]
             owner = signature_members[key]
             owner && [key, *owner]
@@ -235,7 +284,7 @@ module Rigor
         end
 
         def full_keys(class_name, member)
-          member_method_keys(member).map { |method_name, kind| [class_name, method_name, kind] }
+          member_keys(member).map { |method_name, kind| [class_name, method_name, kind] }
         end
 
         # The `.rbs` line is read only for an outcome that reports it: asking an `RBS::Buffer` for a line

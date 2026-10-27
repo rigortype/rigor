@@ -38,8 +38,9 @@ module Rigor
         #   - `vendored_standdowns` (#1713) — `Environment::RbsLoader#vendored_standdowns`;
         #   - `env_build_failure` — `[error_class, first_error_line, conflicting_buffer_names]`, or nil;
         #   - `definition_build_failures` (#696) — `[class_name, error_class, member,
-        #     conflicting_buffer_names, unresolved_type_name_detail]` tuples (#997 added the fifth element —
-        #     `[token, location, refinement_hint]`, `nil` unless `error_class` is `RBS::NoTypeFoundError`);
+        #     conflicting_buffer_names, unresolved_type_name_detail, mixin_count]` tuples (#997 added the fifth
+        #     element — `[token, location, refinement_hint]`, `nil` unless `error_class` is
+        #     `RBS::NoTypeFoundError`; #2440 the sixth, {Environment::RbsLoader#variable_mixin_count});
         #   - `hkt_scan_failure` (#784) — `[error_class_name, first_message_line, raw_frame_or_nil, stage]`,
         #     or nil; `stage` is `:scan` or `:overlay` (#791) and picks the row's wording.
         def initialize(configuration:, rbs_extended_reporter:, boundary_cross_reporter:, # rubocop:disable Metrics/ParameterLists
@@ -621,7 +622,7 @@ module Rigor
           failures = failures.sort_by { |failure| failure.first.to_s }
           sample_size = 5
           files = failures.flat_map { |failure| Array(failure[3]) }
-                          .map { |name| relative_signature_path(name) }.uniq.sort
+                          .map { |name| signature_source_label(name.to_s) }.uniq.sort
           Diagnostic.new(
             path: ".rigor.yml",
             line: 1,
@@ -642,20 +643,94 @@ module Rigor
         # declarations of one CLASS at different generic arity (#610); `NoTypeFoundError` (issue #997) is
         # ONE declaration naming a type that does not exist, which "remove the duplicate declaration" sends
         # its reader after a duplicate that is not there — the fifth tuple element
-        # ({RbsLoader#unresolved_type_name_detail}) is non-nil for exactly that case. Every other error class
-        # (the two duplicated-definition errors, `RecursiveAncestorError`, …) keeps the duplicate-declaration
-        # wording, which is accurate for them.
+        # ({RbsLoader#unresolved_type_name_detail}) is non-nil for exactly that case. Issue #2440 — a
+        # duplicated instance variable, a superclass mismatch, a missing superclass and a type applied to
+        # the wrong arguments each get their own sentence, and when a `virtual:` (inline RBS) buffer is
+        # among the colliding sources the advice never tells the reader to remove it as if it were a file.
+        # Every other error class (the two duplicated-definition errors, `RecursiveAncestorError`, …) keeps
+        # the duplicate-declaration wording, which is accurate for them.
         def definition_build_advice(failure)
-          _, error_class, _member, _buffers, unresolved = failure
-          if error_class.to_s.end_with?("GenericParameterMismatchError")
+          _, error_class, member, buffers, unresolved = failure
+          inline = Array(buffers).any? { |name| name.to_s.start_with?("virtual:") }
+          case error_class.to_s.split("::").last
+          when "GenericParameterMismatchError"
             "Two signature sources declare the class with a different number of type parameters; make " \
-              "the declarations agree (`rbs validate`) to restore type coverage."
-          elsif unresolved
-            unresolved_type_name_advice(unresolved)
+            "the declarations agree (`rbs validate`) to restore type coverage."
+          when "InstanceVariableDuplicationError" then variable_duplication_advice("instance variable", failure)
+          when "ClassInstanceVariableDuplicationError"
+            variable_duplication_advice("class instance variable", failure)
+          when "SuperclassMismatchError" then superclass_mismatch_advice(inline)
+          when "NoSuperclassFoundError" then no_superclass_advice(member)
+          when "InvalidTypeApplicationError" then invalid_type_application_advice(member)
           else
+            return unresolved_type_name_advice(unresolved) if unresolved
+
             "Two signature sources declare the same member; remove the duplicate declaration " \
               "(`rbs validate`) to restore type coverage."
           end
+        end
+
+        # The sixth tuple slot ({RbsLoader#variable_mixin_count}) is set only when the failing class mixes in
+        # the variable's owner at least twice and the owner declares it once: rbs counts the variable once per
+        # mixin. Otherwise — a variable duplicated in the owner itself, inherited or not — the wording follows
+        # which sources collide: inline only, inline and a file, two files, or one file declaring it twice.
+        def variable_duplication_advice(noun, failure)
+          class_name, _, member, buffers, _, mixins = failure
+          if mixins.is_a?(Integer) && mixins >= 2
+            return mixin_variable_duplication_advice(noun, class_name.to_s.delete_prefix("::"),
+                                                     member.to_s.delete_prefix("::"))
+          end
+
+          names = Array(buffers).map(&:to_s)
+          inline = names.count { |name| name.start_with?("virtual:") }
+          if inline >= 2 && inline == names.size
+            "Two inline `# @rbs` annotations declare the same #{noun} in one class, and RBS rejects the " \
+              "pair even when the types agree; keep one of them to restore type coverage."
+          elsif inline.positive?
+            "The same #{noun} is declared twice in one class, at least once by an inline `# @rbs` " \
+              "annotation, and RBS rejects the pair even when the types agree. Keep one declaration: " \
+              "regenerate the committed `.rbs` (`rbs-inline --output`) or remove its copy of the " \
+              "variable, or drop the annotation from the `.rb` file, to restore type coverage."
+          elsif names.size >= 2
+            "Two signature files declare the same #{noun} in one class, and RBS rejects the pair even " \
+              "when the types agree; keep one declaration (`rbs validate`) to restore type coverage."
+          else
+            "The same #{noun} is declared twice in one class, and RBS rejects the pair even when the " \
+              "types agree; keep one declaration (`rbs validate`) to restore type coverage."
+          end
+        end
+
+        def mixin_variable_duplication_advice(noun, klass, owner)
+          "`#{klass}` mixes in `#{owner}` (`include`, `extend` or `prepend`) more than once, in one " \
+            "declaration or across several, and RBS counts each #{noun} `#{owner}` declares once per mixin. " \
+            "Keep a single mixin of `#{owner}` in `#{klass}` (a committed `rbs-inline --output` file and the " \
+            "`.rb` file it came from count as two declarations) to restore type coverage."
+        end
+
+        def superclass_mismatch_advice(inline)
+          advice = "Two declarations of the class name different superclasses; make them name the same " \
+                   "one, or leave the superclass off every declaration but one (a reopening needs none), " \
+                   "to restore type coverage."
+          return advice unless inline
+
+          "#{advice} Where one side is an inline annotation, fix the annotation and regenerate the " \
+            "committed `.rbs` (`rbs-inline --output`), or remove the committed copy."
+        end
+
+        def no_superclass_advice(member)
+          name = member.to_s.delete_prefix("::")
+          subject = name.empty? ? "A superclass" : "`#{name}`"
+          "#{subject} is named as a superclass, but no loaded signature declares it; declare it in your " \
+            "`sig/` (or load the library that does through `libraries:`), or re-run `rigor sig-gen` if " \
+            "the signature was generated, to restore type coverage."
+        end
+
+        def invalid_type_application_advice(member)
+          name = member.to_s.delete_prefix("::")
+          subject = name.empty? ? "a type" : "`#{name}`"
+          "A signature applies #{subject} with the wrong number of type arguments, or applies them to the " \
+            "wrong class; match the arguments to the type parameters the class declares (`rbs validate`) " \
+            "to restore type coverage."
         end
 
         # Issue #997 — `unresolved` is {RbsLoader#unresolved_type_name_detail}'s `[token, location,
@@ -768,6 +843,15 @@ module Rigor
         end
 
         # The absolute path is what the loader records; the user thinks in project-relative terms.
+        # Issue #2440 — a `virtual:<plugin>:<path>` buffer is named by the `.rb` file it was synthesized
+        # from, which is the file the user can open; the plugin id says how it became RBS.
+        def signature_source_label(name)
+          prefix, plugin_id, path = name.split(":", 3)
+          return relative_signature_path(name) unless prefix == "virtual" && plugin_id && path && !path.empty?
+
+          "#{relative_signature_path(path)} (inline RBS via #{plugin_id})"
+        end
+
         def relative_signature_path(path)
           root = "#{Dir.pwd}#{File::SEPARATOR}"
           path.start_with?(root) ? path.delete_prefix(root) : path
@@ -819,6 +903,7 @@ module Rigor
         # naming each (sampled) with the file whose declaration was used instead. One row per file, not per
         # declaration: an `rbs collection install` of a gem can overlap the plugin for it on hundreds. A method
         # that composed with the other source's as an overload is not here; the plugin's overloads still bind.
+        # The wording covers a superclass a plugin's class header gave up (#2439) as well as a member.
         def build_rbs_plugin_member_stood_down_diagnostic(path, rows)
           labels = rows.map do |_path, declaration, _, _, cause_file|
             cause = cause_file.nil? || cause_file.empty? ? "" : " (#{relative_signature_path(cause_file.to_s)})"
@@ -830,8 +915,9 @@ module Rigor
             column: 1,
             message: "`#{relative_signature_path(path.to_s)}` (a signature file a plugin contributes) loaded without " \
                      "#{rows.size} declaration(s) another signature source already makes: #{sampled(labels, 10)}. " \
-                     "Two declarations of one method or constant fail the build, so the plugin's stood down and " \
-                     "the other source's, named in parentheses, is used; the rest of the plugin's file still " \
+                     "Conflicting declarations (two of one method or constant, or two different superclasses " \
+                     "of one class) fail the build, so the plugin's stood down and the other source's, named in " \
+                     "parentheses, is used; the rest of the plugin's file still " \
                      "loads. Nothing to fix unless you want the plugin's typing back, which needs that source to " \
                      "stop declaring it.",
             severity: :info,

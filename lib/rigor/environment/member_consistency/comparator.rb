@@ -103,6 +103,7 @@ module Rigor
         #   `:inline` (the inline side is more precise), `:contradiction` or `:undecided`; `detail` names the
         #   deciding position for the two reported outcomes and is nil otherwise.
         def compare(signature_member, inline_member, method_name)
+          return compare_variables(signature_member, inline_member) if variable?(signature_member)
           return EQUAL if same_declaration?(signature_member, inline_member)
           return SIGNATURE_MORE_PRECISE if inferred_signature?(inline_member)
 
@@ -172,6 +173,22 @@ module Rigor
         # consistent or inconsistent with, and `sig/` binds without a word.
         def inferred_signature?(member)
           member_annotation_strings(member).include?(INFERRED_SIGNATURE_DIRECTIVE)
+        end
+
+        def variable?(member)
+          member.is_a?(::RBS::AST::Members::InstanceVariable) ||
+            member.is_a?(::RBS::AST::Members::ClassInstanceVariable)
+        end
+
+        # Issue #2440 — an instance variable (or class instance variable) declared on both sides. Two
+        # declarations of one type are equal and merge silently. Any other pair is undecided, never ranked
+        # and never a contradiction: `sig/` binds and the inline declaration is reported at `:info`. A
+        # variable has no call to satisfy, so "more precise" has no reader to favour, and the committed
+        # `.rbs` (typically `rbs-inline --output`'s own) is the declaration the project's other tools read.
+        def compare_variables(signature_member, inline_member)
+          return EQUAL if signature_member.type == inline_member.type
+
+          [:undecided, "the type is `#{signature_member.type}` in `sig/` and `#{inline_member.type}` inline"]
         end
 
         def compare_aliases(signature_member, inline_member)

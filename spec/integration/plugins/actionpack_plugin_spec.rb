@@ -532,7 +532,7 @@ RSpec.describe "plugins/rigor-actionpack" do
       source = <<~RUBY
         class C
           def create
-            raw = JSON.parse("{}")
+            raw = Object.new.instance_variable_get(:@x)
             Rigor.dump_type(raw[:x])
             Rigor.dump_type(raw.permit(:a))
           end

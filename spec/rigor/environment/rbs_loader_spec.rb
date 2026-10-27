@@ -2350,6 +2350,88 @@ RSpec.describe Rigor::Environment::RbsLoader do
     end
   end
 
+  # Issue #2440 — the documented rbs-inline workflow commits `rbs-inline --output`'s RBS under `sig/`, and
+  # the auto-wired reader synthesizes the same declarations again. rbs 4.2 raises
+  # `InstanceVariableDuplicationError` for two `@x` declarations in one class even when the types agree
+  # (`ClassInstanceVariableDuplicationError` for `self.@x`), so the consistency rule keys variables too.
+  describe "inline instance variable against sig/ (issue #2440)" do
+    let(:tmpdir) { Dir.mktmpdir("rigor-rbs-loader-inline-ivar-spec-") }
+    let(:sig_file) { File.join(tmpdir, "greeter.rbs") }
+    let(:virtual_name) { "virtual:rbs-inline:/app/lib/greeter.rb" }
+
+    after { FileUtils.rm_rf(tmpdir) }
+
+    def build_loader(sig, inline)
+      File.write(sig_file, sig)
+      loader = described_class.new(signature_paths: [tmpdir], virtual_rbs: [[virtual_name, inline]])
+      allow(loader).to receive(:warn)
+      loader
+    end
+
+    def build_both(loader)
+      loader.instance_definition("Greeter")
+      loader.singleton_definition("Greeter")
+      loader.definition_build_failures
+    end
+
+    def rows(loader)
+      loader.member_consistency(proof: Rigor::Environment::MemberConsistency::RbsProof.new(loader))
+            .map { |r| [r.class_name, r.method_name, r.kind, r.outcome] }
+    end
+
+    it "builds a class whose @x both sides declare with the same type, and reports nothing" do
+      loader = build_loader("class Greeter\n  @name: String\n  def greet: () -> String\nend\n",
+                            "class Greeter\n  @name: String\n  def greet: () -> String\nend\n")
+      expect(build_both(loader)).to be_empty
+      expect(loader.instance_definition("Greeter").instance_variables[:@name].type.to_s).to eq("::String")
+      expect(rows(loader).map(&:last)).to all(eq(:equal))
+    end
+
+    it "builds a class whose self.@x both sides declare" do
+      loader = build_loader("class Greeter\n  self.@count: Integer\nend\n",
+                            "class Greeter\n  self.@count: Integer\nend\n")
+      expect(build_both(loader)).to be_empty
+      expect(rows(loader)).to eq([["Greeter", :@count, :class_instance_variable, :equal]])
+    end
+
+    it "binds sig/'s type for a differing @x and records one undecided row, never a contradiction" do
+      loader = build_loader("class Greeter\n  @name: ::String\nend\n", "class Greeter\n  @name: ::Integer\nend\n")
+      expect(build_both(loader)).to be_empty
+      expect(loader.instance_definition("Greeter").instance_variables[:@name].type.to_s).to eq("::String")
+      expect(rows(loader)).to eq([["Greeter", :@name, :instance_variable, :undecided]])
+    end
+
+    # Guard: `@@x` takes no part in the rule (rbs accepts a duplicate), and an `attr_reader` beside an
+    # inline `@x` is not the same member; both stay as they were.
+    it "leaves a duplicated @@x and an attr_reader beside @x alone (guard)" do
+      loader = build_loader("class Greeter\n  @@registry: Array[String]\n  attr_reader tag: String\nend\n",
+                            "class Greeter\n  @@registry: Array[String]\n  @tag: String\nend\n")
+      expect(build_both(loader)).to be_empty
+      expect(rows(loader)).to be_empty
+      definition = loader.instance_definition("Greeter")
+      expect(definition.methods.keys).to include(:tag)
+      expect(definition.instance_variables.keys).to include(:@tag)
+    end
+
+    # The rule reconciles a `.rbs` against an inline source only; two `.rbs` files still collide, and the
+    # failure names both of them although the error carries one location.
+    it "still fails two .rbs files declaring one @x, naming both files" do
+      File.write(File.join(tmpdir, "other.rbs"), "class Greeter\n  @name: String\nend\n")
+      loader = build_loader("class Greeter\n  @name: String\nend\n", "")
+      failure = build_both(loader).first
+      expect(failure[1]).to eq("RBS::InstanceVariableDuplicationError")
+      expect(failure[3]).to contain_exactly(sig_file, File.join(tmpdir, "other.rbs"))
+    end
+
+    it "names both declarations of a superclass mismatch" do
+      File.write(File.join(tmpdir, "other.rbs"), "class Greeter < ::Exception\nend\n")
+      loader = build_loader("class Greeter < ::StandardError\nend\n", "")
+      failure = build_both(loader).first
+      expect(failure[1]).to eq("RBS::SuperclassMismatchError")
+      expect(failure[3]).to contain_exactly(sig_file, File.join(tmpdir, "other.rbs"))
+    end
+  end
+
   # Issue #1713 — a gated vendored directory loads less what another source declares.
   describe "partial stand-down of a required-feature-gated vendored directory" do
     let(:tmpdir) { Dir.mktmpdir("rigor-rbs-loader-gated-spec-") }

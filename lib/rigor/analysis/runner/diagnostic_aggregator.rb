@@ -621,7 +621,7 @@ module Rigor
           failures = failures.sort_by { |failure| failure.first.to_s }
           sample_size = 5
           files = failures.flat_map { |failure| Array(failure[3]) }
-                          .map { |name| relative_signature_path(name) }.uniq.sort
+                          .map { |name| signature_source_label(name.to_s) }.uniq.sort
           Diagnostic.new(
             path: ".rigor.yml",
             line: 1,
@@ -642,20 +642,69 @@ module Rigor
         # declarations of one CLASS at different generic arity (#610); `NoTypeFoundError` (issue #997) is
         # ONE declaration naming a type that does not exist, which "remove the duplicate declaration" sends
         # its reader after a duplicate that is not there — the fifth tuple element
-        # ({RbsLoader#unresolved_type_name_detail}) is non-nil for exactly that case. Every other error class
-        # (the two duplicated-definition errors, `RecursiveAncestorError`, …) keeps the duplicate-declaration
-        # wording, which is accurate for them.
+        # ({RbsLoader#unresolved_type_name_detail}) is non-nil for exactly that case. Issue #2440 — a
+        # duplicated instance variable, a superclass mismatch, a missing superclass and a type applied to
+        # the wrong arguments each get their own sentence, and when a `virtual:` (inline RBS) buffer is
+        # among the colliding sources the advice never tells the reader to remove it as if it were a file.
+        # Every other error class (the two duplicated-definition errors, `RecursiveAncestorError`, …) keeps
+        # the duplicate-declaration wording, which is accurate for them.
         def definition_build_advice(failure)
-          _, error_class, _member, _buffers, unresolved = failure
-          if error_class.to_s.end_with?("GenericParameterMismatchError")
+          _, error_class, member, buffers, unresolved = failure
+          inline = Array(buffers).any? { |name| name.to_s.start_with?("virtual:") }
+          case error_class.to_s.split("::").last
+          when "GenericParameterMismatchError"
             "Two signature sources declare the class with a different number of type parameters; make " \
               "the declarations agree (`rbs validate`) to restore type coverage."
-          elsif unresolved
-            unresolved_type_name_advice(unresolved)
+          when "InstanceVariableDuplicationError" then variable_duplication_advice("instance variable", inline)
+          when "ClassInstanceVariableDuplicationError"
+            variable_duplication_advice("class instance variable", inline)
+          when "SuperclassMismatchError" then superclass_mismatch_advice(inline)
+          when "NoSuperclassFoundError" then no_superclass_advice(member)
+          when "InvalidTypeApplicationError" then invalid_type_application_advice(member)
           else
+            return unresolved_type_name_advice(unresolved) if unresolved
+
             "Two signature sources declare the same member; remove the duplicate declaration " \
               "(`rbs validate`) to restore type coverage."
           end
+        end
+
+        def variable_duplication_advice(noun, inline)
+          if inline
+            "The same #{noun} is declared twice in one class, at least once by an inline `# @rbs` " \
+              "annotation, and RBS rejects the pair even when the types agree. Keep one declaration: " \
+              "regenerate the committed `.rbs` (`rbs-inline --output`) or remove its copy of the " \
+              "variable, or drop the annotation from the `.rb` file, to restore type coverage."
+          else
+            "Two signature files declare the same #{noun} in one class, and RBS rejects the pair even " \
+              "when the types agree; keep one declaration (`rbs validate`) to restore type coverage."
+          end
+        end
+
+        def superclass_mismatch_advice(inline)
+          advice = "Two declarations of the class name different superclasses; make them name the same " \
+                   "one, or leave the superclass off every declaration but one (a reopening needs none), " \
+                   "to restore type coverage."
+          return advice unless inline
+
+          "#{advice} Where one side is an inline annotation, fix the annotation and regenerate the " \
+            "committed `.rbs` (`rbs-inline --output`), or remove the committed copy."
+        end
+
+        def no_superclass_advice(member)
+          name = member.to_s.delete_prefix("::")
+          subject = name.empty? ? "A superclass" : "`#{name}`"
+          "#{subject} is named as a superclass, but no loaded signature declares it; declare it in your " \
+            "`sig/` (or load the library that does through `libraries:`), or re-run `rigor sig-gen` if " \
+            "the signature was generated, to restore type coverage."
+        end
+
+        def invalid_type_application_advice(member)
+          name = member.to_s.delete_prefix("::")
+          subject = name.empty? ? "a type" : "`#{name}`"
+          "A signature applies #{subject} with the wrong number of type arguments, or applies them to the " \
+            "wrong class; match the arguments to the type parameters the class declares (`rbs validate`) " \
+            "to restore type coverage."
         end
 
         # Issue #997 — `unresolved` is {RbsLoader#unresolved_type_name_detail}'s `[token, location,
@@ -768,6 +817,15 @@ module Rigor
         end
 
         # The absolute path is what the loader records; the user thinks in project-relative terms.
+        # Issue #2440 — a `virtual:<plugin>:<path>` buffer is named by the `.rb` file it was synthesized
+        # from, which is the file the user can open; the plugin id says how it became RBS.
+        def signature_source_label(name)
+          prefix, plugin_id, path = name.split(":", 3)
+          return relative_signature_path(name) unless prefix == "virtual" && plugin_id && path && !path.empty?
+
+          "#{relative_signature_path(path)} (inline RBS via #{plugin_id})"
+        end
+
         def relative_signature_path(path)
           root = "#{Dir.pwd}#{File::SEPARATOR}"
           path.start_with?(root) ? path.delete_prefix(root) : path

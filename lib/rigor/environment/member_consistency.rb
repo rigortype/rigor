@@ -59,6 +59,9 @@ module Rigor
       NO_RECORDS = [].freeze
       private_constant :NO_RECORDS
 
+      # The key kinds {.member_keys} gives a variable member.
+      VARIABLE_KINDS = %i[instance_variable class_instance_variable].freeze
+
       # What a disjointness proof may lean on (ADR-112 WD5, #1075): the RBS class hierarchy the analysis
       # itself uses, restricted to classes Ruby core and the stdlib declare. Never Ruby constants loaded in
       # the analyzer process — those depend on which libraries happen to be required, and rbs and Ruby
@@ -159,11 +162,35 @@ module Rigor
           end
         end
 
+        # Issue #2440 — every key one RBS member contributes to a definition build: its method keys
+        # ({.member_method_keys}) and, for an instance variable (`@x: T`) or a class instance variable
+        # (`self.@x: T`), `[:@x, :instance_variable]` / `[:@x, :class_instance_variable]`. rbs 4.2 raises
+        # `InstanceVariableDuplicationError` / `ClassInstanceVariableDuplicationError` for two of those in one
+        # class even when the types agree, so a `sig/` and an inline declaration of one has to be reconciled
+        # like a method. A method name never starts with `@`, so the two key spaces cannot meet. A class
+        # variable (`@@x`) contributes nothing: rbs does not reject a duplicate. Neither does an attribute's
+        # implied instance variable, which rbs lets an explicit `@x` declaration override.
+        #
+        # Kept apart from {.member_method_keys} on purpose: the plugin-signature plans key collisions by
+        # method only, and this rule is the inline-vs-`sig/` one.
+        def member_keys(member)
+          case member
+          when ::RBS::AST::Members::InstanceVariable then [[member.name, :instance_variable]]
+          when ::RBS::AST::Members::ClassInstanceVariable then [[member.name, :class_instance_variable]]
+          else member_method_keys(member)
+          end
+        end
+
+        # Whether a key `kind` names a variable rather than a method.
+        def variable_kind?(kind)
+          VARIABLE_KINDS.include?(kind)
+        end
+
         private
 
         def resolve_member(state, signature_members, inline)
           _virtual_name, class_name, member, = inline
-          overlapping = member_method_keys(member).filter_map do |method_name, kind|
+          overlapping = member_keys(member).filter_map do |method_name, kind|
             key = [class_name, method_name, kind]
             owner = signature_members[key]
             owner && [key, *owner]
@@ -235,7 +262,7 @@ module Rigor
         end
 
         def full_keys(class_name, member)
-          member_method_keys(member).map { |method_name, kind| [class_name, method_name, kind] }
+          member_keys(member).map { |method_name, kind| [class_name, method_name, kind] }
         end
 
         # The `.rbs` line is read only for an outcome that reports it: asking an `RBS::Buffer` for a line

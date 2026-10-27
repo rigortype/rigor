@@ -2449,7 +2449,8 @@ RSpec.describe Rigor::Environment::RbsLoader do
       )
       expect(build_both(loader, "Ctl")).to be_empty
       expect(rows(loader)).to eq(
-        [["Ctl", :Ext, :extend, :equal], ["Ctl", :Inc, :include, :equal], ["Ctl", :Pre, :prepend, :equal]]
+        [["Ctl", :"Ctl|Ext", :extend, :equal], ["Ctl", :"Ctl|Inc", :include, :equal],
+         ["Ctl", :"Ctl|Pre", :prepend, :equal]]
       )
       expect(loader.instance_definition("Ctl").methods.keys).to include(:go)
     end
@@ -2459,6 +2460,47 @@ RSpec.describe Rigor::Environment::RbsLoader do
       loader = build_loader("module Box[T]\nend\nclass Ctl\n  include Box[String]\nend\n",
                             "class Ctl\n  include Box[Integer]\nend\n")
       expect(rows(loader)).to be_empty
+    end
+
+    # The reviewer's g1 / g1b: `include M` inside `module A; class C` resolves `M` through `A` (to `A::M`),
+    # inside `class A::C` it does not (to `::M`). Different mixins, so both stay and `A::C` keeps both.
+    it "keeps an inline include whose lexical nesting differs from sig/'s (g1b)" do
+      loader = build_loader("module M\nend\nmodule A\n  module M\n  end\nend\nclass A::C\n  include M\nend\n",
+                            "module A\n  class C\n    include M\n  end\nend\n")
+      expect(rows(loader)).to be_empty
+      expect(loader.instance_definition("A::C").ancestors.ancestors.map { |a| a.name.to_s })
+        .to include("::A::M", "::M")
+    end
+
+    # `::M` and `M` are different spellings, so they never pair, even in the same nesting (g1, D12).
+    it "keeps an inline include spelled without the leading :: that sig/ writes (g1)" do
+      loader = build_loader("module M\nend\nclass C\n  include ::M\nend\n", "class C\n  include M\nend\n")
+      expect(rows(loader)).to be_empty
+    end
+
+    it "carries the mixin count when the class mixes the variable's owner in twice in one declaration (g_mx1)" do
+      loader = build_loader("module Helper\n  @user: String\nend\nclass Ctl\n  include Helper\n  include Helper\nend\n",
+                            "")
+      expect(build_both(loader, "Ctl").first.values_at(0, 2, 5)).to eq(["Ctl", "::Helper", 2])
+    end
+
+    # The reviewer's g_sup: the variable is duplicated in `Base` itself and inherited, which is no mixin.
+    it "carries no mixin count for a variable duplicated in an inherited class (g_sup)" do
+      File.write(File.join(tmpdir, "other.rbs"), "class Base\n  @x: String\nend\n")
+      loader = build_loader("class Base\n  @x: String\nend\nclass Sub < Base\nend\n", "")
+      expect(build_both(loader, "Sub").first.values_at(0, 2, 5)).to eq(["Sub", "::Base", nil])
+    end
+
+    # The stderr banner names an inline-RBS buffer by the `.rb` file it came from.
+    it "labels inline buffers by their .rb file in the stderr warning" do
+      loader = described_class.new(virtual_rbs: [["virtual:rbs-inline:/app/lib/b.rb", "class Foo\n  @x: String\nend\n"],
+                                                 ["virtual:rbs-inline:/app/lib/c.rb",
+                                                  "class Foo\n  @x: String\nend\n"]])
+      messages = []
+      allow(loader).to receive(:warn) { |msg| messages << msg }
+      loader.instance_definition("Foo")
+      expect(messages.join).to include("- /app/lib/b.rb (inline RBS via rbs-inline)",
+                                       "- /app/lib/c.rb (inline RBS via rbs-inline)")
     end
 
     it "names the declarations that mix the module in when the duplicate comes through a mixin" do

@@ -1028,8 +1028,8 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
     end
 
     # Issues #2440 / #2439 / #2437 — the error classes whose remediation is not "remove the duplicate".
-    def advice_for(error_class, member, buffers)
-      build_aggregator(definition_build_failures_snapshot: [["Greeter", error_class, member, buffers]])
+    def advice_for(error_class, member, buffers, mixins = nil)
+      build_aggregator(definition_build_failures_snapshot: [["Greeter", error_class, member, buffers, nil, mixins]])
         .rbs_definition_build_failed_diagnostics.first.message
     end
 
@@ -1076,11 +1076,22 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
       expect(message).not_to include("Two signature files")
     end
 
-    it "names the module and the double mixin when the variable's owner is not the failing class" do
-      message = advice_for("RBS::InstanceVariableDuplicationError", "::Helper", ["#{Dir.pwd}/sig/a.rbs"])
+    # g_mx1: both mixins may sit in one declaration, so the wording may not claim several.
+    it "names the module and the double mixin when the tuple carries a mixin count" do
+      message = advice_for("RBS::InstanceVariableDuplicationError", "::Helper", ["#{Dir.pwd}/sig/a.rbs"], 2)
 
-      expect(message).to include("`Greeter` mixes in `Helper` (`include`, `extend` or `prepend`) in more than one")
-      expect(message).not_to include("Two signature files", "twice in one class")
+      expect(message).to include("`Greeter` mixes in `Helper` (`include`, `extend` or `prepend`) more than once, " \
+                                 "in one declaration or across several")
+      expect(message).not_to include("Two signature files", "twice in one class", "more than one of its declarations")
+    end
+
+    # g_sup: the owner differs from the failing class because the variable is inherited, not mixed in twice.
+    it "keeps the declaration-count wording when the owner differs but no mixin count is carried" do
+      message = advice_for("RBS::InstanceVariableDuplicationError", "::Base",
+                           ["#{Dir.pwd}/sig/a.rbs", "#{Dir.pwd}/sig/b.rbs"])
+
+      expect(message).to include("Two signature files declare the same instance variable in one class")
+      expect(message).not_to include("mixes in")
     end
 
     it "gives a superclass mismatch its own advice" do

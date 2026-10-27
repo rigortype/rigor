@@ -104,8 +104,6 @@ module Rigor
         #   deciding position for the two reported outcomes and is nil otherwise.
         def compare(signature_member, inline_member, method_name)
           return compare_variables(signature_member, inline_member) if variable?(signature_member)
-          # A mixin's key is its module and arguments (#2440), so two members sharing one are the same mixin.
-          return EQUAL if mixin?(signature_member)
           return EQUAL if same_declaration?(signature_member, inline_member)
           return SIGNATURE_MORE_PRECISE if inferred_signature?(inline_member)
 
@@ -175,11 +173,6 @@ module Rigor
         # consistent or inconsistent with, and `sig/` binds without a word.
         def inferred_signature?(member)
           member_annotation_strings(member).include?(INFERRED_SIGNATURE_DIRECTIVE)
-        end
-
-        def mixin?(member)
-          member.is_a?(::RBS::AST::Members::Include) || member.is_a?(::RBS::AST::Members::Extend) ||
-            member.is_a?(::RBS::AST::Members::Prepend)
         end
 
         def variable?(member)

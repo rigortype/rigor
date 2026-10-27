@@ -38,8 +38,9 @@ module Rigor
         #   - `vendored_standdowns` (#1713) — `Environment::RbsLoader#vendored_standdowns`;
         #   - `env_build_failure` — `[error_class, first_error_line, conflicting_buffer_names]`, or nil;
         #   - `definition_build_failures` (#696) — `[class_name, error_class, member,
-        #     conflicting_buffer_names, unresolved_type_name_detail]` tuples (#997 added the fifth element —
-        #     `[token, location, refinement_hint]`, `nil` unless `error_class` is `RBS::NoTypeFoundError`);
+        #     conflicting_buffer_names, unresolved_type_name_detail, mixin_count]` tuples (#997 added the fifth
+        #     element — `[token, location, refinement_hint]`, `nil` unless `error_class` is
+        #     `RBS::NoTypeFoundError`; #2440 the sixth, {Environment::RbsLoader#variable_mixin_count});
         #   - `hkt_scan_failure` (#784) — `[error_class_name, first_message_line, raw_frame_or_nil, stage]`,
         #     or nil; `stage` is `:scan` or `:overlay` (#791) and picks the row's wording.
         def initialize(configuration:, rbs_extended_reporter:, boundary_cross_reporter:, # rubocop:disable Metrics/ParameterLists
@@ -669,15 +670,16 @@ module Rigor
           end
         end
 
-        # The variable's owner is the error's member (`::M`). When it is not the failing class, the class mixes
-        # `M` in from more than one of its declarations, and rbs counts `M`'s variables once per declaration
-        # that does. Otherwise the wording follows which sources collide: inline only, inline and a file,
-        # two files, or one file declaring it twice.
+        # The sixth tuple slot ({RbsLoader#variable_mixin_count}) is set only when the failing class mixes in
+        # the variable's owner at least twice and the owner declares it once: rbs counts the variable once per
+        # mixin. Otherwise — a variable duplicated in the owner itself, inherited or not — the wording follows
+        # which sources collide: inline only, inline and a file, two files, or one file declaring it twice.
         def variable_duplication_advice(noun, failure)
-          class_name, _, member, buffers = failure
-          owner = member.to_s.delete_prefix("::")
-          klass = class_name.to_s.delete_prefix("::")
-          return mixin_variable_duplication_advice(noun, klass, owner) if !owner.empty? && owner != klass
+          class_name, _, member, buffers, _, mixins = failure
+          if mixins.is_a?(Integer) && mixins >= 2
+            return mixin_variable_duplication_advice(noun, class_name.to_s.delete_prefix("::"),
+                                                     member.to_s.delete_prefix("::"))
+          end
 
           names = Array(buffers).map(&:to_s)
           inline = names.count { |name| name.start_with?("virtual:") }
@@ -699,10 +701,10 @@ module Rigor
         end
 
         def mixin_variable_duplication_advice(noun, klass, owner)
-          "`#{klass}` mixes in `#{owner}` (`include`, `extend` or `prepend`) in more than one of its " \
-            "declarations, and RBS counts each #{noun} `#{owner}` declares once per declaration that does. " \
-            "Keep the mixin in one declaration of `#{klass}` (a committed `rbs-inline --output` file and the " \
-            "`.rb` file it came from count as two) to restore type coverage."
+          "`#{klass}` mixes in `#{owner}` (`include`, `extend` or `prepend`) more than once, in one " \
+            "declaration or across several, and RBS counts each #{noun} `#{owner}` declares once per mixin. " \
+            "Keep a single mixin of `#{owner}` in `#{klass}` (a committed `rbs-inline --output` file and the " \
+            "`.rb` file it came from count as two declarations) to restore type coverage."
         end
 
         def superclass_mismatch_advice(inline)

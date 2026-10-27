@@ -106,6 +106,7 @@ RSpec.describe "Language server configuration warnings" do # rubocop:disable RSp
     end
   end
 
+  # Guard: no line of the fix can make a clean configuration announce something; this pins that it stays silent.
   it "shows nothing for a configuration with no warnings" do
     with_project("paths:\n  - lib\n") do |dir|
       server, = boot_server(dir)

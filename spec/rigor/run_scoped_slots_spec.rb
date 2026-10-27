@@ -2,8 +2,8 @@
 
 # Issue #2412 — `LoopValueRecord` and the inject-accumulator record kept every finished run alive: each is an
 # `ObjectSpace::WeakKeyMap` keyed by a node, whose strong value (a scope) reaches the parse tree that holds the key,
-# so neither entry was ever collected and every in-process run (`check`, `sig-gen`, a language-server publish) added
-# its whole analysis to the heap. Both are run-scoped slots ({Rigor::RunScopedSlots}), emptied when a run ends.
+# so neither entry was ever collected and every run on the same thread (`check` or `sig-gen` repeated in one process)
+# added its whole analysis to the heap. Both are run-scoped slots ({Rigor::RunScopedSlots}), emptied when a run ends.
 #
 # Issue #2399 — about twenty other per-thread memo slots held the last run's discovery tables and environment until
 # the next run on the thread replaced them. They are registered too, so a finished run leaves none of them behind.

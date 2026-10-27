@@ -117,6 +117,56 @@ RSpec.describe "index `||=` in value position (memoization idiom)", type: :runne
       expect(dumped_type("def m(k) = dump_type(Hash.new[k] ||= 1)\n")).to eq("1")
     end
 
+    it "reports nothing on a parameter the body also writes, before, after or around the call" do
+      # Runtime: `later({k: "s"}, :k)`, `branch({k: "s"}, :k, true)` and `shadow({k: "s"}, :k, [1])` return "S". A
+      # parameter is the caller's object wherever else the body binds its name.
+      rbs = "class P\n  " \
+            "def later: (Hash[Symbol, untyped], Symbol) -> untyped\n  " \
+            "def branch: (Hash[Symbol, untyped], Symbol, bool) -> untyped\n  " \
+            "def shadow: (Hash[Symbol, untyped], Symbol, Array[Integer]) -> untyped\n" \
+            "end\n"
+      result = analyze(<<~RUBY, sig: { "p.rbs" => rbs })
+        class P
+          def later(h, k)
+            r = (h[k] ||= 1).upcase
+            h = {}
+            r
+          end
+
+          def branch(h, k, f)
+            h = h.dup if f
+            (h[k] ||= 1).upcase
+          end
+
+          def shadow(h, k, xs)
+            xs.each { |h| h }
+            (h[k] ||= 1).upcase
+          end
+        end
+      RUBY
+      expect(result.diagnostics.reject { |d| d.severity.to_s == "info" }.map(&:rule)).to eq([])
+    end
+
+    it "ACCEPTED TRADE-OFF: goes silent on a parameter the body rebinds to a literal first" do
+      # Runtime: NoMethodError (`upcase` for 1), since `h` is the body's own `{}` at the call. Any local named by a
+      # parameter widens; approval-queue.d entry for #2354.
+      rbs = "class Q\n  def m: (Hash[Symbol, untyped], Symbol) -> untyped\nend\n"
+      result = analyze("class Q\n  def m(h, k)\n    h = {}\n    (h[k] ||= 1).upcase\n  end\nend\n",
+                       sig: { "q.rbs" => rbs })
+      expect(result.diagnostics.reject { |d| d.severity.to_s == "info" }.map(&:rule)).to eq([])
+    end
+
+    it "keeps the rvalue on a block parameter and on a pattern bind (control)" do
+      # Runtime: `[1]` and 1. Both are names the body binds itself, so they keep the pre-#2354 reading.
+      source = "def bp(k) = [Hash.new].map { |h| dump_type(h[k] ||= 1) }\n" \
+               "def pat(k)\n  x = Hash.new\n  case x\n  in Hash => h then dump_type(h[k] ||= 1)\n  end\nend\n"
+      result = analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}))
+      dumps = result.diagnostics.filter_map do |diagnostic|
+        diagnostic.message.delete_prefix("dump_type: ") if diagnostic.message.start_with?("dump_type")
+      end
+      expect(dumps).to eq(%w[1 1])
+    end
+
     it "ACCEPTED TRADE-OFF: goes silent on the inner `||=` of a nest rooted at a body-local literal" do
       # Runtime: NoMethodError (`upcase` for 1), since `h` is empty on entry. The inner receiver is an expression,
       # so it widens like any other; approval-queue.d entry for #2354.

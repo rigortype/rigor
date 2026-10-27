@@ -37,7 +37,8 @@ module Rigor
           @scans = nil
           @last_line_closure = nil
           @last_line_fallback = nil
-          @body_bindings = nil
+          @body_locals = nil
+          @parameter_names = nil
         end
 
         def matching_closure?(scope = nil)
@@ -89,14 +90,15 @@ module Rigor
           @forwarded_block == name
         end
 
-        # Issue #2354 — whether the frame's own body binds the local `name` (a write, or a block's, lambda's,
-        # `rescue`'s or pattern's own parameter or target), as against a local the method's parameters alone bind.
-        # Kept per name for the rest of the body.
-        def body_binds_local?(name)
-          bound = (@body_bindings ||= {})
+        # Issue #2354 — whether `name` is a local of the frame's own body: the body binds it (a write, or a block's,
+        # lambda's, `rescue`'s or pattern's own parameter or target) and no parameter of the method names it. A
+        # method parameter is the caller's object wherever the body also writes the name (`h = h.dup if f`, a
+        # later `h = {}`), so it never counts. Kept per name for the rest of the body.
+        def body_local?(name)
+          bound = (@body_locals ||= {})
           return bound[name] if bound.key?(name)
 
-          bound[name] = binds_local?(@body, name)
+          bound[name] = !parameter_names.include?(name) && binds_local?(@body, name)
         end
 
         # Issue #1157 — whether a call's `&expr` block argument hands on the block THIS method was called with: the
@@ -153,6 +155,33 @@ module Rigor
           parameters = @parameters
           block = parameters.is_a?(Prism::ParametersNode) ? parameters.block : nil
           !block.nil? && block.name.nil?
+        end
+
+        # The names the method's own parameters bind: positional (destructured ones included), optional, rest,
+        # keyword, keyword-rest and block. Empty for a class, module or file body.
+        def parameter_names
+          @parameter_names ||= begin
+            parameters = @parameters
+            names = Set.new
+            if parameters.is_a?(Prism::ParametersNode)
+              [*parameters.requireds, *parameters.optionals, parameters.rest, *parameters.posts,
+               *parameters.keywords, parameters.keyword_rest, parameters.block].each do |parameter|
+                collect_parameter_names(parameter, names)
+              end
+            end
+            names.freeze
+          end
+        end
+
+        def collect_parameter_names(node, names)
+          case node
+          when Prism::MultiTargetNode
+            [*node.lefts, node.rest, *node.rights].each { |target| collect_parameter_names(target, names) }
+          when Prism::SplatNode then collect_parameter_names(node.expression, names)
+          else
+            name = node.respond_to?(:name) ? node.name : nil
+            names << name if name
+          end
         end
 
         # The method's own `&block` parameter's name, or nil.

@@ -1182,11 +1182,10 @@ module Rigor
         end
       end
 
-      # True when {#index_compound_write_value} reads the `||=` `node` as the memoization idiom's rvalue: the slot
-      # reads wholly gradual, the rvalue can store something truthy, and no block-return pass marked the site.
       # Whether a memoizing `||=` on `receiver` reads as the fresh rvalue ({#index_compound_write_value}): the
       # receiver's type passes the #544 test, and the receiver is a local the current body binds, captured into a
-      # block or not, or an object fresh at every run (`Hash.new`, {RepeatedOrWrites.fresh_object?}) (issue
+      # block or not, and no parameter of the enclosing method names ({MatchRebinding::Frame#body_local?}), or
+      # an object fresh at every run (`Hash.new`, {RepeatedOrWrites.fresh_object?}) (issue
       # #2354). An ivar, cvar or global read, a parameter, or any other expression (a call result, a
       # parenthesised `||=`) is a table whose gradual slot another call, or an earlier run of this one, may have
       # filled — an ivar seeded `{}` in `initialize`, a parameter declared `Hash[Symbol, untyped]` — so it widens
@@ -1202,9 +1201,11 @@ module Rigor
         return RepeatedOrWrites.fresh_object?(receiver) unless receiver.is_a?(Prism::LocalVariableReadNode)
 
         frame = scope.match_frame
-        frame.nil? || frame.body_binds_local?(receiver.name)
+        frame.nil? || frame.body_local?(receiver.name)
       end
 
+      # True when {#index_compound_write_value} reads the `||=` `node` as the memoization idiom's rvalue: the slot
+      # reads wholly gradual, the rvalue can store something truthy, and no block-return pass marked the site.
       def memoizing_index_read?(node, current, rhs)
         current.is_a?(Type::Dynamic) && !Narrowing.narrow_truthy(rhs).is_a?(Type::Bot) &&
           !scope.repeated_or_write?(node)

@@ -21,7 +21,11 @@ receiver's origin decides the reading.
   fixes all six spellings and keeps the `pool` fold. The cost is that a nest rooted at a body-local literal,
   `def m(a, b); h = {}; ((h[a] ||= {})[b] ||= 1).upcase; end`, goes silent. It is a true positive today, since the
   call raises NoMethodError at runtime. Its inner receiver is an expression, and widening it is what fixes the
-  parameter-rooted nest.
+  parameter-rooted nest. A local any parameter of the enclosing method names widens too, whatever the body writes
+  (review round 2), so `def m(h, k); h = {}; (h[k] ||= 1).upcase; end` also goes silent though it raises at
+  runtime. A name-only body test kept the literal for `h = h.dup if f`, a later `h = {}` or a block parameter
+  shadowing `h`, all of which run fine on a caller's table. Block parameters, pattern binds, ivar aliases
+  (`c = @cache`) and `define_method`-captured locals keep the literal reading; the coordinator files those.
 - Carry the outer `||=`'s widened value as `Dynamic[...]` so that the type test rejects it. This was not needed
   once the receiver test covers expressions. It would also reach every local bound to such a value.
 - The lane also exempted an object fresh at every run (`Hash.new[k] ||= v`, `RepeatedOrWrites.fresh_object?`) from
@@ -30,8 +34,8 @@ receiver's origin decides the reading.
 
 ## Decision
 
-Receiver-origin test with the fresh-object exemption. ADR-5 ranks the false positives on running memo code above the
-nested body-local true positive. The trade-off is pinned as an `ACCEPTED TRADE-OFF` example in
+Receiver-origin test with the parameter rule and the fresh-object exemption. ADR-5 ranks the false positives on
+running memo code above the two true positives lost. Both trade-offs are pinned as `ACCEPTED TRADE-OFF` examples in
 `spec/rigor/inference/index_or_write_memo_value_spec.rb`.
 
 ## To undo

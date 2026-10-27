@@ -1800,7 +1800,9 @@ RSpec.describe "Rigor type construction (integration)" do
     # The number of `# QUIET-1446` lines each entry carries.
     quiet_counts = {
       "guards.rb" => 7, "invalidation.rb" => 1, "bot_receivers.rb" => 5, "writes.rb" => 2, "self_calls.rb" => 27,
-      "condition_calls.rb" => 16, "case_when_calls.rb" => 19
+      "condition_calls.rb" => 16, "case_when_calls.rb" => 19,
+      "statement_calls.rb" => 6, "statement_call_writers.rb" => 0,
+      "statement_call_rewriters.rb" => 15
     }.freeze
 
     def fixture_source(name) = File.read(File.join(__dir__, "fixtures/ivar_class_guards", name))
@@ -1855,6 +1857,27 @@ RSpec.describe "Rigor type construction (integration)" do
         expect(reported(result).map { |d| [d.line, d.rule.to_s] }).to eq([]), redefinition
       end
       expect(reported(analyze(files: { "a.rb" => caller_source, "b.rb" => "X = 1\n" })).map(&:line)).to eq([9])
+    end
+
+    # Issue #2039 — a reopening in another file makes the #1596 proof decline, but the callee's own `@tag = nil` keeps
+    # the statement reset unmarked, so the read still reports: Ruby 4.0.5 raises NoMethodError in `probe`.
+    it "keeps reporting past a callee that writes nil in a class another file reopens" do
+      caller_source = <<~RUBY
+        class Reopened
+          def initialize = (@tag = "t")
+          def clear = (@tag = nil)
+
+          def probe
+            return unless @tag
+
+            clear
+            t = @tag
+            t.upcase
+          end
+        end
+      RUBY
+      result = analyze(files: { "a.rb" => caller_source, "b.rb" => "class Reopened\n  def other = 1\nend\n" })
+      expect(reported(result).map { |d| [d.line, d.rule.to_s] }).to eq([[10, "call.possible-nil-receiver"]])
     end
 
     # A refinement in effect where the callee sits reroutes even a core call: `warn` here runs `LoudWarn`'s, which

@@ -31,6 +31,7 @@ require_relative "macro_block_self_type"
 require_relative "global_writer_reach"
 require_relative "guard_rebinding"
 require_relative "self_call_ivar_writes"
+require_relative "direct_ivar_writes"
 require_relative "intervening_ivar_reset"
 require_relative "match_rebinding"
 require_relative "clause_widening"
@@ -4062,11 +4063,19 @@ module Rigor
       # calls do, marking a binding whose narrowing had ruled `nil` out, since the code they run is far more often
       # code that leaves the variable alone. A `yield` or proc call in the call's receiver or arguments
       # (`@items << yield`, `puts(yield)`) widens every narrowed ivar ({InterveningIvarReset.after_operands}).
+      #
+      # Issue #2039 — an implicit-self or `self.` call marks on the same rule only when its write set is unproven
+      # and its callee's body shows no possibly-nil write of the ivar (`mark: :unproven`, {DirectIvarWrites}):
+      # `v2?`, an `attr_reader` call or `respond_to?(:x)` forgets the narrowing without making the ivar newly
+      # nil-reportable, while a callee that assigns it where the program shows (`clear_tag`) widens unmarked.
       def invalidate_ivars_for_intervening_call(call_node, current_scope)
         widened =
           if intervening_call_candidate?(call_node)
-            mark = !InterveningIvarReset.self_call?(call_node)
-            InterveningIvarReset.widen(current_scope, mark: mark) { self_call_ivar_writes(call_node) }
+            mark = InterveningIvarReset.self_call?(call_node) ? :unproven : true
+            direct_writes = -> { DirectIvarWrites.of(call_node, operand_scope) }
+            InterveningIvarReset.widen(current_scope, mark: mark, direct_writes: direct_writes) do
+              self_call_ivar_writes(call_node)
+            end
           else
             InterveningIvarReset.after_block(call_node, current_scope)
           end

@@ -134,6 +134,11 @@ lib/rigor/inference/definer_resolution.rb:
   computes: the candidate-set read of a method name over a resolution chain, Known, Unknown or Absent (ADR-119 WD2)
   producers:
     Rigor::Inference::DefinerResolution#visibility_answer: a consumer, not a declaration producer; `:public` is the visibility it answers for a definer with none recorded, and it writes no table
+lib/rigor/inference/direct_ivar_writes.rb:
+  computes: the instance variables a self-call's callee visibly assigns a possibly-nil value, for the statement intervening-call reset's mark (#2039)
+  producers:
+    Rigor::Inference::DirectIvarWrites: NON_RUNNING_NODES lists a def and a class, module or singleton class body only as code that does not run on the callee's self; it derives no declaration context
+    Rigor::Inference::DirectIvarWrites#collect: stops the write search at a def, class, module or singleton class body (#2039); the callee it reads comes from Scope#user_def_for and the resolution chain, and it derives no declaration context
 lib/rigor/inference/expression_typer.rb:
   computes: the type a class or module expression evaluates to, and the barrier around a re-typed callee body
   producers:

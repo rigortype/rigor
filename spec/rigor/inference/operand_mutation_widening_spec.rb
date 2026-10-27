@@ -263,6 +263,7 @@ RSpec.describe "mutator widening in operand position", type: :runner do
             @items = []
           end
           def ready? = rand > 0.5
+          def reset! = (@name = nil; true)
           def run
             return unless @name
             %<line>s
@@ -272,9 +273,12 @@ RSpec.describe "mutator widening in operand position", type: :runner do
         end
       RUBY
       expect(rules(format(source, line: "$stdout.puts(ready? && @items.push(1))"), "call.possible-nil")).to be_empty
-      # The statement-position `&&` does reset: its `ready?` is a statement's call.
-      expect(rules(format(source, line: "ready? && @items.push(1)"), "call.possible-nil"))
+      # The statement-position `&&` does reset: its first operand is a statement's call. Issue #2039 — the reset
+      # marks past a callee whose write set is unproven and whose body writes no `nil` (`ready?`), so it shows only
+      # past one that writes `nil` (`reset!`), where Ruby 4.0.5 raises NoMethodError on `n.upcase`.
+      expect(rules(format(source, line: "reset! && @items.push(1)"), "call.possible-nil"))
         .to eq(["call.possible-nil-receiver"])
+      expect(rules(format(source, line: "ready? && @items.push(1)"), "call.possible-nil")).to be_empty
     end
   end
 

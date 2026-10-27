@@ -1,0 +1,2 @@
+- **[inference]** A call with a block whose arguments match no declared overload now takes the type of the block's value, so `URI.open(url, read_timeout: 3) { |io| io.read }` no longer reports a false return-type mismatch. ([#2446](https://github.com/rigortype/rigor/pull/2446))
+  - A call without a block, or to a method with no block-taking overload, keeps its previous type.

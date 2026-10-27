@@ -1,0 +1,3 @@
+- **[engine]** A long-lived process that runs analyses repeatedly, such as the language server, no longer grows in memory with every run. ([#2453](https://github.com/rigortype/rigor/pull/2453))
+  - Each in-process `rigor check`, `rigor sig-gen` or language-server publish used to keep its whole analysis alive, about 1.3 million heap slots per run over 20 files.
+  - Per-thread caches that held the last run until the next one replaced them are now emptied when a run ends as well.

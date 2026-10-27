@@ -180,6 +180,8 @@ module Rigor
       # takes the mark when widened, so a `nil` only the seed brings back is not fuel for
       # `call.possible-nil-receiver` (ADR-58), as a declared one is not. A narrowing that kept `nil`
       # (`return if @tag`, `@tag.nil?`) widens unmarked, so a read the program really makes on `nil` still reports.
+      # Issue #2039 — `mark: :unproven` marks as `mark: true` does only when the block answers nil (no write set is
+      # proven); a call proven to write the variable widens it unmarked.
       def widen(scope, mark: false)
         seed = class_ivar_seed(scope)
         return scope if seed.nil? || seed.empty?
@@ -198,7 +200,8 @@ module Rigor
 
           joined = Type::Combinator.union(local_type, seed_type)
           widened = widened.with_ivar(name, joined)
-          marked = (mark && nil_free?(local_type)) || scope.declaration_sourced?(:ivar, name)
+          marking = mark == :unproven ? writes.nil? : mark
+          marked = (marking && nil_free?(local_type)) || scope.declaration_sourced?(:ivar, name)
           marked ? widened.seed_declaration_sourced_ivar(name, joined) : widened
         end
       end

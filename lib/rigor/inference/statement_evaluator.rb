@@ -4062,10 +4062,14 @@ module Rigor
       # calls do, marking a binding whose narrowing had ruled `nil` out, since the code they run is far more often
       # code that leaves the variable alone. A `yield` or proc call in the call's receiver or arguments
       # (`@items << yield`, `puts(yield)`) widens every narrowed ivar ({InterveningIvarReset.after_operands}).
+      #
+      # Issue #2039 — an implicit-self or `self.` call marks on the same rule only when its write set is unproven
+      # (`mark: :unproven`): `v2?`, an `attr_reader` call or `respond_to?(:x)` forgets the narrowing without making
+      # the ivar newly nil-reportable, while a call proven to write it (`clear_tag`) widens unmarked.
       def invalidate_ivars_for_intervening_call(call_node, current_scope)
         widened =
           if intervening_call_candidate?(call_node)
-            mark = !InterveningIvarReset.self_call?(call_node)
+            mark = InterveningIvarReset.self_call?(call_node) ? :unproven : true
             InterveningIvarReset.widen(current_scope, mark: mark) { self_call_ivar_writes(call_node) }
           else
             InterveningIvarReset.after_block(call_node, current_scope)

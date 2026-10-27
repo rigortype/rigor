@@ -12,7 +12,7 @@ Issue #2224 asks sig-gen to declare an empty subclass of a core class (`class My
 
 ## Options and trade-offs
 
-- **Shells beside the file's own methods, core and stdlib superclasses only (taken).** This fits the existing shell path without a new candidate kind, and it adds no row to `--print` or `--format=json` output, whose formats are a public contract. A file holding only empty subclasses still gets no declaration, so a method in another file that returns one of those classes still fails `rbs validate`.
+- **Shells beside the file's own methods, core and stdlib superclasses only (taken).** This fits the existing shell path without a new candidate kind, and it adds no row to `--print` or `--format=json` output, whose formats are a public contract. A file holding only empty subclasses still gets no declaration, so a method in another file that returns one of those classes still fails `rbs validate`. A shell counts as declared for a subclass in another file only when its file has a method the writer writes; otherwise that subclass is skipped with the unresolvable-superclass notice, as it was before.
 - **A new candidate kind for a class declaration.** This would cover a file holding only empty subclasses, but it adds a classification to the JSON payload and to `--print`, which changes the public output format. Under contribution-flow.md that change is serious.
 - **Any superclass the environment knows, including gem and project classes.** This would declare `class Post < ::ApplicationRecord` for an empty model as well. It goes past the issue, and it changes `--write` output for every Rails project.
 

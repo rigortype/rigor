@@ -202,6 +202,99 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(validation_errors).to be_empty
     end
 
+    # A shell rides on its file's candidates, and the writer writes no file without one it acts on. A subclass in
+    # another file must not be written against a shell that never reached disk: it is demoted, as before #2224.
+    context "when the shell's own file has nothing to write" do
+      let(:subclass) { "module Lib\n  class NotFound < Error\n    def code = 404\n  end\nend\n" }
+
+      def run_generator(files)
+        files.each do |rel, contents|
+          full = File.join(tmpdir, rel)
+          FileUtils.mkdir_p(File.dirname(full))
+          File.write(full, contents)
+        end
+        Dir.chdir(tmpdir) do
+          generator = described_class.new(configuration: configuration, paths: ["lib"])
+          candidates = generator.run
+          mapper = Rigor::SigGen::PathMapper.new(configuration: configuration, project_root: tmpdir)
+          Rigor::SigGen::Writer.new(path_mapper: mapper).write_all(candidates)
+          [candidates, generator]
+        end
+      end
+
+      def expect_subclass_demoted(candidates, generator)
+        code = candidates.find { |c| c.method_name == :code }
+        expect(code.classification).to eq(Rigor::SigGen::Classification::SKIPPED)
+        expect(code.skip_reason).to eq(:unresolvable_superclass)
+        expect(generator.unresolvable_superclasses).to include("Lib::NotFound")
+        expect(File).not_to exist(File.join(tmpdir, "sig/sub.rbs"))
+        expect(validation_errors).to be_empty
+      end
+
+      it "demotes the subclass when every method in that file is skipped" do
+        candidates, generator = run_generator(
+          "lib/errors.rb" => "module Lib\n  class Error < StandardError; end\n  class Thing\n    def dyn(x) = x.foo\n  end\nend\n",
+          "lib/sub.rb" => subclass
+        )
+
+        expect(File).not_to exist(File.join(tmpdir, "sig/errors.rbs"))
+        expect_subclass_demoted(candidates, generator)
+      end
+
+      it "demotes the subclass when `sig/` already declares every method in that file" do
+        candidates, generator = run_generator(
+          "lib/errors.rb" => "module Lib\n  class Error < StandardError; end\n  class Thing\n    def x = 1\n  end\nend\n",
+          "sig/errors.rbs" => "module Lib\n  class Thing\n    def x: () -> Integer\n  end\nend\n",
+          "lib/sub.rb" => subclass
+        )
+
+        expect(File.read(File.join(tmpdir, "sig/errors.rbs"))).not_to include("Error")
+        expect_subclass_demoted(candidates, generator)
+      end
+
+      it "demotes the subclass when the file's only written class is itself demoted for its superclass" do
+        candidates, generator = run_generator(
+          "lib/errors.rb" => "module Lib\n  class Error < StandardError; end\n  class Thing < Missing\n    def x = 1\n  end\nend\n",
+          "lib/sub.rb" => subclass
+        )
+
+        expect(File).not_to exist(File.join(tmpdir, "sig/errors.rbs"))
+        expect_subclass_demoted(candidates, generator)
+      end
+
+      it "demotes the subclass when the file's only written method is demoted for an unsigned override" do
+        candidates, generator = run_generator(
+          "lib/errors.rb" => <<~RUBY,
+            module Lib
+              class Error < StandardError; end
+              class Base
+                def t(_x) = nil
+              end
+              class Over < Base
+                def t(x) = x.foo
+              end
+            end
+          RUBY
+          "lib/sub.rb" => subclass
+        )
+
+        expect(File).not_to exist(File.join(tmpdir, "sig/errors.rbs"))
+        expect_subclass_demoted(candidates, generator)
+      end
+
+      # The other side: when the shell's file IS written, the subclass rests on it and is declared.
+      it "declares the subclass when the shell's file is written" do
+        run_generator(
+          "lib/errors.rb" => "module Lib\n  class Error < StandardError; end\n  class Thing\n    def x = 1\n  end\nend\n",
+          "lib/sub.rb" => subclass
+        )
+
+        expect(File.read(File.join(tmpdir, "sig/errors.rbs"))).to include("class Error < ::StandardError")
+        expect(File.read(File.join(tmpdir, "sig/sub.rbs"))).to include("class NotFound < ::Lib::Error")
+        expect(validation_errors).to be_empty
+      end
+    end
+
     # A guard on the issue's scope: a subclass of a project class keeps the pre-#2224 output.
     it "declares no empty subclass of a project class" do
       written = generate(

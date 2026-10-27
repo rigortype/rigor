@@ -84,6 +84,13 @@ module Rigor
       # position became `untyped` elsewhere. Word-boundary matching counts `untyped` only as a type token, not
       # as a substring inside identifiers. Public because the generator asks the same question before it lists a
       # declared `initialize` at all (#1436).
+      # Whether the writer acts on `candidate` at all. A file none of whose candidates it acts on is not written, so
+      # a class shell riding on that file's candidates never reaches disk; the generator asks this before it
+      # counts a shell as declared (#2454).
+      def self.writes?(candidate)
+        EMITTABLE.include?(candidate.classification)
+      end
+
       def self.fewer_untyped?(proposed, existing)
         proposed.scan(/\buntyped\b/).size < existing.scan(/\buntyped\b/).size
       end

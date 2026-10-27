@@ -140,11 +140,12 @@ module Rigor
         @project_tables = nil
         @file_base_scope = nil
         candidates = resolved.flat_map { |path| analyse_file(path, @environment) }
-        annotate_effects(
-          demote_overridden_base_methods(
-            demote_unresolvable_superclasses(demote_inline_generic_classes(resolve_superclass_spellings(candidates)))
-          )
+        demoted = demote_overridden_base_methods(
+          demote_unresolvable_superclasses(demote_inline_generic_classes(resolve_superclass_spellings(candidates)))
         )
+        # Again after the override demotion: a demoted method can leave its file with nothing to write, and a class
+        # shell riding on that file then declares nothing a subclass elsewhere could rest on.
+        annotate_effects(demote_unresolvable_superclasses(demoted))
       ensure
         Inference::ExpressionTyper.release_return_memo(@run_generation) if @run_generation
       end
@@ -317,11 +318,7 @@ module Rigor
       def resolve_superclass_spellings(candidates)
         return candidates if @superclass_nestings.empty?
 
-        known = candidates.each_with_object(Set.new) do |candidate, acc|
-          acc << candidate.class_name if candidate.class_name
-          acc.merge(candidate.class_shells || [])
-        end
-        rewrites = superclass_rewrites(known)
+        rewrites = superclass_rewrites(declared_by_run(candidates))
         return candidates if rewrites.empty?
 
         candidates.map do |candidate|
@@ -382,27 +379,44 @@ module Rigor
       # ran — source discovery and the plugins still type it. Emitting the class with the superclass merely
       # OMITTED would be the harmful middle: the class becomes RBS-known with only the emitted methods, so
       # every inherited call fires `call.undefined-method`.
+      #
+      # Demoting a class can leave a file with nothing to write, which takes the class shells riding on it off the
+      # emitted set, so the pass repeats until no further class becomes unresolvable. The emitted set only shrinks,
+      # so the unresolvable set only grows and the loop ends.
       def demote_unresolvable_superclasses(candidates)
         superclasses = candidates.each_with_object({}) do |candidate, acc|
           (candidate.class_superclasses || {}).each { |name, sup| acc[name] = sup }
         end
-        # Everything this run declares, superclass or not: a chain that reaches `class Record` — emitted
-        # here, with no superclass of its own — terminates in a class the next run WILL know.
-        emitted = candidates.each_with_object(Set.new) do |candidate, acc|
-          acc << candidate.class_name if candidate.class_name
-          acc.merge(candidate.class_shells || [])
+        current = candidates
+        unresolvable = {}
+        loop do
+          found = unresolvable_superclass_roots(superclasses, declared_by_run(current))
+          return current if found.size == unresolvable.size
+
+          unresolvable = found
+          current = candidates.map do |candidate|
+            owner = unresolvable_for(candidate.class_name, unresolvable)
+            owner ? record_unresolvable_superclass(candidate, owner) : candidate
+          end
         end
-        unresolvable = superclasses.each_with_object({}) do |(name, _sup), acc|
+      end
+
+      def unresolvable_superclass_roots(superclasses, emitted)
+        superclasses.each_with_object({}) do |(name, _sup), acc|
           root = unresolved_superclass_root(name, superclasses, emitted)
           acc[name] = root if root
         end
-        return candidates if unresolvable.empty?
+      end
 
-        candidates.map do |candidate|
-          owner = unresolvable_for(candidate.class_name, unresolvable)
-          next candidate if owner.nil?
-
-          record_unresolvable_superclass(candidate, owner)
+      # Everything this run declares, superclass or not: a chain that reaches `class Record` — emitted here, with no
+      # superclass of its own — terminates in a class the next run WILL know. A class shell counts only when its
+      # file has a candidate the writer acts on: the writer writes no file without one, so a shell on a file whose
+      # every method is skipped, or already declared by `sig/`, never reaches disk (#2454).
+      def declared_by_run(candidates)
+        written_paths = candidates.each_with_object(Set.new) { |c, acc| acc << c.path if Writer.writes?(c) }
+        candidates.each_with_object(Set.new) do |candidate, acc|
+          acc << candidate.class_name if candidate.class_name
+          acc.merge(candidate.class_shells || []) if written_paths.include?(candidate.path)
         end
       end
 

@@ -626,6 +626,24 @@ list is the current state):
   are recognised as user-authored and never produce a
   duplicate `def` insertion.
 
+Two rules shape the class declarations and type names around
+those methods:
+
+- **A subclass of a core or stdlib class** is declared even
+  when it has no method of its own to emit, so a method
+  returning one resolves: `class MyHash < Hash; end` is
+  written `class MyHash < ::Hash[untyped, untyped]`. The
+  declaration goes into the file written for its source file,
+  so it appears only when that source file has at least one
+  method to emit. A class some signature already declares is
+  left to that declaration.
+- **A type name a namespace shadows** is written with a
+  leading `::`. Inside a `module Foo` that declares a
+  `Foo::Set`, a method returning a core `Set` is written
+  `-> ::Set[untyped]`, because RBS would read a bare `Set`
+  there as `Foo::Set`. Where nothing shadows the name, it is
+  written bare as before.
+
 Method shapes the generator does **not** cover yet:
 
 - `define_method(:name) { ... }`.

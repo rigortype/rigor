@@ -62,6 +62,9 @@ module Rigor
       # The key kinds {.member_keys} gives a variable member.
       VARIABLE_KINDS = %i[instance_variable class_instance_variable].freeze
 
+      # The key kinds {.member_keys} gives a mixin.
+      MIXIN_KINDS = %i[include extend prepend].freeze
+
       # What a disjointness proof may lean on (ADR-112 WD5, #1075): the RBS class hierarchy the analysis
       # itself uses, restricted to classes Ruby core and the stdlib declare. Never Ruby constants loaded in
       # the analyzer process — those depend on which libraries happen to be required, and rbs and Ruby
@@ -171,14 +174,29 @@ module Rigor
         # variable (`@@x`) contributes nothing: rbs does not reject a duplicate. Neither does an attribute's
         # implied instance variable, which rbs lets an explicit `@x` declaration override.
         #
+        # A mixin (`include M`, `extend M`, `prepend M`) is keyed by the module name and its type arguments as
+        # written, `[:"M[String]", :include]`: rbs 4.2 counts every instance variable `M` declares once per
+        # declaration of the class that mixes it in, so the same `include M` in `sig/` and inline raises
+        # `InstanceVariableDuplicationError ... in ::M` for the class. An identical inline mixin is therefore
+        # one member with the `sig/` one and stands down; a mixin with different arguments keys differently
+        # and is left alone, since it is not a duplicate.
+        #
         # Kept apart from {.member_method_keys} on purpose: the plugin-signature plans key collisions by
         # method only, and this rule is the inline-vs-`sig/` one.
         def member_keys(member)
           case member
           when ::RBS::AST::Members::InstanceVariable then [[member.name, :instance_variable]]
           when ::RBS::AST::Members::ClassInstanceVariable then [[member.name, :class_instance_variable]]
+          when ::RBS::AST::Members::Include then [[mixin_key(member), :include]]
+          when ::RBS::AST::Members::Extend then [[mixin_key(member), :extend]]
+          when ::RBS::AST::Members::Prepend then [[mixin_key(member), :prepend]]
           else member_method_keys(member)
           end
+        end
+
+        # Whether a key `kind` names a mixin rather than a method or a variable.
+        def mixin_kind?(kind)
+          MIXIN_KINDS.include?(kind)
         end
 
         # Whether a key `kind` names a variable rather than a method.
@@ -187,6 +205,11 @@ module Rigor
         end
 
         private
+
+        def mixin_key(member)
+          args = member.args.empty? ? "" : "[#{member.args.join(', ')}]"
+          :"#{member.name.to_s.delete_prefix('::')}#{args}"
+        end
 
         def resolve_member(state, signature_members, inline)
           _virtual_name, class_name, member, = inline

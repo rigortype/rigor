@@ -3148,7 +3148,7 @@ module Rigor
         key = class_name.to_s.delete_prefix("::")
         details = ((@state[:definition_build_details] ||= {})[key] ||= [])
         details << [key, error.class.name.to_s, definition_build_member(error),
-                    definition_build_conflict_buffers(error), unresolved_type_name_detail(error)].freeze
+                    definition_build_conflict_buffers(error, key), unresolved_type_name_detail(error)].freeze
       end
 
       # Issue #997 — the `RBS::NoTypeFoundError` twin of {#definition_build_member}: `nil` for every other
@@ -3336,7 +3336,7 @@ module Rigor
 
       def definition_build_failure_warning(class_name, error)
         first_line = error.message.to_s.lines.first.to_s.strip
-        buffers = definition_build_conflict_buffers(error)
+        buffers = definition_build_conflict_buffers(error, class_name)
         collisions =
           if buffers.empty?
             ""
@@ -3401,8 +3401,8 @@ module Rigor
       # `#location`. A duplicated instance variable carries one location and a `SuperclassMismatchError` none,
       # so both read the class entry's declarations for the other side (#2440). Falls back to an empty list —
       # the warning still names the class and the exception's own message — for the remainder.
-      def definition_build_conflict_buffers(error)
-        definition_build_error_locations(error)
+      def definition_build_conflict_buffers(error, class_name = nil)
+        definition_build_error_locations(error, class_name)
           .compact.filter_map { |loc| loc.buffer&.name }.map(&:to_s)
           .reject { |name| name == CACHED_LOCATION_BUFFER_NAME }.uniq.freeze
       rescue ::RBS::BaseError, StandardError
@@ -3411,12 +3411,12 @@ module Rigor
 
       # The `RBS::Location`s an error carries, by whichever accessor its class happens to expose (see the
       # shape survey above). Split out so the buffer-name extraction reads as one pipeline.
-      def definition_build_error_locations(error)
+      def definition_build_error_locations(error, class_name = nil)
         return Array(error.members).map(&:location) if error.respond_to?(:members) && error.members
         return [error.member.location] if error.respond_to?(:member) && error.member
         # `VariableDuplicationError` is younger than the rbs floor the gemspec allows.
         if defined?(::RBS::VariableDuplicationError) && error.is_a?(::RBS::VariableDuplicationError)
-          return variable_duplication_locations(error)
+          return variable_duplication_locations(error, class_name)
         end
         return superclass_mismatch_locations(error) if error.is_a?(::RBS::SuperclassMismatchError)
         return [error.location] if error.respond_to?(:location)
@@ -3427,8 +3427,10 @@ module Rigor
       # Issue #2440 — a duplicated `@x` / `self.@x` carries the location of ONE of its two declarations, so
       # the file list named only that side (typically the `virtual:rbs-inline:` buffer, leaving out the
       # committed `.rbs` the user can actually edit). The class entry's declarations name the rest: every
-      # declaration of the class that declares the same variable, of the same kind.
-      def variable_duplication_locations(error)
+      # declaration of the class that declares the same variable, of the same kind. When the variable's
+      # owner is a module the failing class mixes in (rbs counts it once per declaration that does), the
+      # declarations of the failing class that mix that module in are named too: they are the duplicate.
+      def variable_duplication_locations(error, class_name = nil)
         member_class =
           if error.is_a?(::RBS::ClassInstanceVariableDuplicationError)
             ::RBS::AST::Members::ClassInstanceVariable
@@ -3436,10 +3438,33 @@ module Rigor
             ::RBS::AST::Members::InstanceVariable
           end
         declared = class_entry_decls(error.type_name).flat_map do |decl|
-          members = decl.respond_to?(:members) ? Array(decl.members) : []
-          members.select { |m| m.instance_of?(member_class) && m.name == error.variable_name }.map(&:location)
+          decl_members(decl).select { |m| m.instance_of?(member_class) && m.name == error.variable_name }
+                            .map(&:location)
         end
-        [error.location, *declared]
+        [error.location, *declared, *mixin_locations(class_name, error.type_name)]
+      end
+
+      MIXIN_MEMBERS = [::RBS::AST::Members::Include, ::RBS::AST::Members::Extend,
+                       ::RBS::AST::Members::Prepend].freeze
+      private_constant :MIXIN_MEMBERS
+
+      def mixin_locations(class_name, module_name)
+        return [] if class_name.nil?
+
+        owner = parse_type_name(class_name)
+        return [] if owner.nil? || owner == module_name
+
+        class_entry_decls(owner).filter_map do |decl|
+          mixes = decl_members(decl).any? do |m|
+            # `resolve_type_names` has made every mixin name absolute.
+            MIXIN_MEMBERS.any? { |klass| m.is_a?(klass) } && m.name == module_name
+          end
+          decl.location if mixes
+        end
+      end
+
+      def decl_members(decl)
+        decl.respond_to?(:members) ? Array(decl.members) : []
       end
 
       # Issue #2440 — `SuperclassMismatchError` carries the class entry and no location of its own: the

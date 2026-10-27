@@ -655,9 +655,9 @@ module Rigor
           when "GenericParameterMismatchError"
             "Two signature sources declare the class with a different number of type parameters; make " \
             "the declarations agree (`rbs validate`) to restore type coverage."
-          when "InstanceVariableDuplicationError" then variable_duplication_advice("instance variable", inline)
+          when "InstanceVariableDuplicationError" then variable_duplication_advice("instance variable", failure)
           when "ClassInstanceVariableDuplicationError"
-            variable_duplication_advice("class instance variable", inline)
+            variable_duplication_advice("class instance variable", failure)
           when "SuperclassMismatchError" then superclass_mismatch_advice(inline)
           when "NoSuperclassFoundError" then no_superclass_advice(member)
           when "InvalidTypeApplicationError" then invalid_type_application_advice(member)
@@ -669,16 +669,40 @@ module Rigor
           end
         end
 
-        def variable_duplication_advice(noun, inline)
-          if inline
+        # The variable's owner is the error's member (`::M`). When it is not the failing class, the class mixes
+        # `M` in from more than one of its declarations, and rbs counts `M`'s variables once per declaration
+        # that does. Otherwise the wording follows which sources collide: inline only, inline and a file,
+        # two files, or one file declaring it twice.
+        def variable_duplication_advice(noun, failure)
+          class_name, _, member, buffers = failure
+          owner = member.to_s.delete_prefix("::")
+          klass = class_name.to_s.delete_prefix("::")
+          return mixin_variable_duplication_advice(noun, klass, owner) if !owner.empty? && owner != klass
+
+          names = Array(buffers).map(&:to_s)
+          inline = names.count { |name| name.start_with?("virtual:") }
+          if inline >= 2 && inline == names.size
+            "Two inline `# @rbs` annotations declare the same #{noun} in one class, and RBS rejects the " \
+              "pair even when the types agree; keep one of them to restore type coverage."
+          elsif inline.positive?
             "The same #{noun} is declared twice in one class, at least once by an inline `# @rbs` " \
               "annotation, and RBS rejects the pair even when the types agree. Keep one declaration: " \
               "regenerate the committed `.rbs` (`rbs-inline --output`) or remove its copy of the " \
               "variable, or drop the annotation from the `.rb` file, to restore type coverage."
-          else
+          elsif names.size >= 2
             "Two signature files declare the same #{noun} in one class, and RBS rejects the pair even " \
               "when the types agree; keep one declaration (`rbs validate`) to restore type coverage."
+          else
+            "The same #{noun} is declared twice in one class, and RBS rejects the pair even when the " \
+              "types agree; keep one declaration (`rbs validate`) to restore type coverage."
           end
+        end
+
+        def mixin_variable_duplication_advice(noun, klass, owner)
+          "`#{klass}` mixes in `#{owner}` (`include`, `extend` or `prepend`) in more than one of its " \
+            "declarations, and RBS counts each #{noun} `#{owner}` declares once per declaration that does. " \
+            "Keep the mixin in one declaration of `#{klass}` (a committed `rbs-inline --output` file and the " \
+            "`.rb` file it came from count as two) to restore type coverage."
         end
 
         def superclass_mismatch_advice(inline)

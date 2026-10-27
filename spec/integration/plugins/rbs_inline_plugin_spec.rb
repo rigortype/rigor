@@ -1305,6 +1305,54 @@ RSpec.describe "plugins/rigor-rbs-inline" do
         expect(rows.map(&:severity)).to eq([:info])
         expect(rows.first.message).to include('`Greeter#@name`', "with a different type")
       end
+
+      it "labels a differing class instance variable `Class.@x`" do
+        result = run_plugin(
+          source: "# rbs_inline: enabled\nclass Greeter\n  # @rbs self.@count: Integer\nend\n",
+          files: { "sig/generated/demo.rbs" => "class Greeter\n  self.@count: String\nend\n" },
+          signature_paths: ["sig"]
+        )
+        rows = result.diagnostics.select { |d| d.qualified_rule == "source-rbs-annotation-not-honoured" }
+        expect(rows.map(&:message)).to contain_exactly(include("`Greeter.@count`"))
+      end
+
+      # The reviewer's f3noself: the module's ivar reached the class once per declaration including it.
+      it "builds a class that includes an ivar-declaring module in both sources" do
+        result = run_plugin(
+          source: <<~RUBY,
+            # rbs_inline: enabled
+            module Helper
+              # @rbs @user: String
+
+              # @rbs return: String
+              def user! = (@user ||= "x")
+            end
+
+            class Ctl
+              include Helper
+
+              def go = user!.no_such_method
+            end
+          RUBY
+          files: { "sig/generated/demo.rbs" => <<~RBS },
+            module Helper
+              @user: String
+
+              def user!: () -> String
+            end
+
+            class Ctl
+              include Helper
+
+              def go: () -> untyped
+            end
+          RBS
+          signature_paths: ["sig"]
+        )
+        rules = result.diagnostics.map(&:qualified_rule)
+        expect(rules).not_to include("rbs.coverage.definition-build-failed")
+        expect(rules).to include("call.undefined-method")
+      end
     end
   end
 

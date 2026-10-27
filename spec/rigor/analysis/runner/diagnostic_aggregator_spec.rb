@@ -1055,9 +1055,32 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
     end
 
     it "names a duplicated class instance variable as one" do
-      message = advice_for("RBS::ClassInstanceVariableDuplicationError", "::Greeter", ["#{Dir.pwd}/sig/a.rbs"])
+      message = advice_for("RBS::ClassInstanceVariableDuplicationError", "::Greeter",
+                           ["#{Dir.pwd}/sig/a.rbs", "#{Dir.pwd}/sig/b.rbs"])
 
       expect(message).to include("the same class instance variable in one class")
+    end
+
+    it "says two inline annotations collide when every source is inline" do
+      message = advice_for("RBS::InstanceVariableDuplicationError", "::Greeter",
+                           ["virtual:rbs-inline:#{Dir.pwd}/lib/b.rb", "virtual:rbs-inline:#{Dir.pwd}/lib/c.rb"])
+
+      expect(message).to include("Two inline `# @rbs` annotations declare the same instance variable")
+      expect(message).not_to include("committed", "Two signature files")
+    end
+
+    it "never calls a single file two signature files" do
+      message = advice_for("RBS::InstanceVariableDuplicationError", "::Greeter", ["#{Dir.pwd}/sig/a.rbs"])
+
+      expect(message).to include("The same instance variable is declared twice in one class")
+      expect(message).not_to include("Two signature files")
+    end
+
+    it "names the module and the double mixin when the variable's owner is not the failing class" do
+      message = advice_for("RBS::InstanceVariableDuplicationError", "::Helper", ["#{Dir.pwd}/sig/a.rbs"])
+
+      expect(message).to include("`Greeter` mixes in `Helper` (`include`, `extend` or `prepend`) in more than one")
+      expect(message).not_to include("Two signature files", "twice in one class")
     end
 
     it "gives a superclass mismatch its own advice" do

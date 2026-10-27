@@ -2368,9 +2368,9 @@ RSpec.describe Rigor::Environment::RbsLoader do
       loader
     end
 
-    def build_both(loader)
-      loader.instance_definition("Greeter")
-      loader.singleton_definition("Greeter")
+    def build_both(loader, class_name = "Greeter")
+      loader.instance_definition(class_name)
+      loader.singleton_definition(class_name)
       loader.definition_build_failures
     end
 
@@ -2420,6 +2420,52 @@ RSpec.describe Rigor::Environment::RbsLoader do
       loader = build_loader("class Greeter\n  @name: String\nend\n", "")
       failure = build_both(loader).first
       expect(failure[1]).to eq("RBS::InstanceVariableDuplicationError")
+      expect(failure[3]).to contain_exactly(sig_file, File.join(tmpdir, "other.rbs"))
+    end
+
+    # Guard: `@x` and `self.@x` are different variables to rbs, so a sig/ one and an inline other both stay.
+    it "keeps a sig/ @x beside an inline self.@x of the same name (guard)" do
+      loader = build_loader("class Greeter\n  @count: String\nend\n", "class Greeter\n  self.@count: Integer\nend\n")
+      expect(build_both(loader)).to be_empty
+      expect(rows(loader)).to be_empty
+    end
+
+    # Guard: the key is the class's full name, so `A::Greeter` inline is not `Greeter` in sig/.
+    it "does not pair a same-named class in another namespace (guard)" do
+      loader = build_loader("class Greeter\n  @name: String\nend\n",
+                            "module A\n  class Greeter\n    @name: Integer\n  end\nend\n")
+      expect(build_both(loader)).to be_empty
+      expect(rows(loader)).to be_empty
+      expect(loader.instance_definition("A::Greeter").instance_variables[:@name].type.to_s).to eq("::Integer")
+    end
+
+    # rbs counts a module's variables once per declaration of the class that mixes it in, so the same
+    # `include` in sig/ and inline failed the class with `... in ::Helper` (the reviewer's f3noself / f5).
+    it "stands an identical inline include, extend or prepend down" do
+      loader = build_loader(
+        "module Inc\n  @a: String\nend\nmodule Ext\n  @b: String\nend\nmodule Pre\n  @c: String\nend\n" \
+        "class Ctl\n  include Inc\n  extend Ext\n  prepend Pre\nend\n",
+        "class Ctl\n  include Inc\n  extend Ext\n  prepend Pre\n  def go: () -> String\nend\n"
+      )
+      expect(build_both(loader, "Ctl")).to be_empty
+      expect(rows(loader)).to eq(
+        [["Ctl", :Ext, :extend, :equal], ["Ctl", :Inc, :include, :equal], ["Ctl", :Pre, :prepend, :equal]]
+      )
+      expect(loader.instance_definition("Ctl").methods.keys).to include(:go)
+    end
+
+    # Guard: a mixin with other type arguments is not a duplicate of sig/'s and is left in place.
+    it "leaves an inline mixin with different type arguments alone (guard)" do
+      loader = build_loader("module Box[T]\nend\nclass Ctl\n  include Box[String]\nend\n",
+                            "class Ctl\n  include Box[Integer]\nend\n")
+      expect(rows(loader)).to be_empty
+    end
+
+    it "names the declarations that mix the module in when the duplicate comes through a mixin" do
+      File.write(File.join(tmpdir, "other.rbs"), "class Ctl\n  include Helper\nend\n")
+      loader = build_loader("module Helper\n  @user: String\nend\nclass Ctl\n  include Helper\nend\n", "")
+      failure = build_both(loader, "Ctl").first
+      expect(failure[0..2]).to eq(["Ctl", "RBS::InstanceVariableDuplicationError", "::Helper"])
       expect(failure[3]).to contain_exactly(sig_file, File.join(tmpdir, "other.rbs"))
     end
 

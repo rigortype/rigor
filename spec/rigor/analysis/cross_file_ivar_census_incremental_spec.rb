@@ -42,14 +42,15 @@ RSpec.describe "cross-file ivar census — incremental" do
       write_files(dir, files.merge("a.rb" => reader))
       session = session_for(dir)
       expect([rows(guarded_baseline(session)), full_run(dir)]).to eq([baseline, baseline])
-      steps.each do |edit, rechecked, expected|
-        write_files(dir, edit)
-        recheck = guarded_recheck(session)
-        reader_path = File.join(dir, "a.rb")
-        rechecked ? expect(recheck.affected).to(include(reader_path)) : expect(recheck.affected).not_to(include(reader_path))
-        expect([rows(recheck.diagnostics), full_run(dir)]).to eq([expected, expected]), edit.inspect
-      end
+      steps.each { |edit, rechecked, expected| expect_step(dir, session, edit, rechecked, expected) }
     end
+  end
+
+  def expect_step(dir, session, edit, rechecked, expected)
+    write_files(dir, edit)
+    recheck = guarded_recheck(session)
+    expect(recheck.affected.include?(File.join(dir, "a.rb"))).to eq(rechecked), edit.inspect
+    expect([rows(recheck.diagnostics), full_run(dir)]).to eq([expected, expected]), edit.inspect
   end
 
   it "re-checks the reader when a reopening's write changes type, and not when its value does not move" do

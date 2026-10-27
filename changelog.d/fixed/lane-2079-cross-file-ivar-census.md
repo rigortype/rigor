@@ -1,0 +1,4 @@
+- **[inference]** An instance variable written in another file's reopening of a class, in a module the class includes or prepends, or in a superclass now counts toward the type the class's methods read, so they no longer report false `undefined method` errors or always-truthy conditions on it. ([#PR](https://github.com/rigortype/rigor/pull/PR))
+  - Applies only to an instance variable the reading file's own class body already writes: one that only another file or an ancestor writes still reads as unknown.
+  - A literal written elsewhere counts as its value; any other value, an `attr_writer` or `attr_accessor` included, counts as unknown, so reads of that variable in the class are no longer checked.
+  - A write in a singleton method, through `extend`, in a `self.included` hook or in an `include(Module.new { … })` block does not count.

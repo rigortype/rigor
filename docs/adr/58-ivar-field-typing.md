@@ -20,7 +20,10 @@ writes, see WD5 status. The `||=`-seeding stretch is
 write, see the WD2 amendment). WD2 amended again (2026-10-20, #1154 —
 a write from a declared parameter records the declared type, held on
 2026-10-21 to parity with a literal write; and 2026-10-21, #1406 — a
-declared ivar type wins over the writes). Archetype:
+declared ivar type wins over the writes). Amendment proposed
+2026-10-28 (#2079 / #2170 — another file's and the chain's writes join
+existing census entries, coarsely typed; see the amendment before
+"Rejected / deferred alternatives"). Archetype:
 deliberative. Stakes: high — this governs when `possible-nil-receiver`
 may fire on ivar-sourced optionality, the single largest FP class on
 idiomatic data-structure Ruby (94 % of possible-nil errors across the
@@ -607,6 +610,57 @@ write is therefore not applied to its own result: `@a = []; @a += [1]`
 still seeds `[] | [1]`, as before, and no rule was seen to fold on it.
 The corpus gate (18 targets, plus gitlab's 97 files with an ivar `op=`)
 moved no diagnostic; the PR itemises the 39 seeds that change.
+
+### Amendment, 2026-10-28 — cross-file and chain census contributions (#2079, #2170)
+
+**Status: proposed, pending ratification** (`approval-queue.d/lane-2079-cross-file-ivar-census.md`).
+
+The class-ivar census is built per file, keyed by each write's lexical
+owner. Two kinds of write that land on `K`'s instances were therefore
+missing from `K`'s seed: a write in another file's reopening of `K`
+(#2079), and a write in a module `K` includes or prepends or in a
+superclass of `K` (#2170). Without them a seed could be narrower than
+any value the program stores, which is the opposite of WD1's premise
+that the seed is an over-approximation. `class E; def initialize = (@x
+= nil); def get = @x.upcase; end` with `class E; def set = (@x = "a");
+end` in another file read `@x` as `nil` and reported `upcase` on it,
+and `@y = false; other; if @y` folded always-falsey when `other`
+lived in another file.
+
+Decision:
+
+- **Widening only, existing entries only.** Each ivar the file's
+  census already holds for `K` is joined with those writes. No entry
+  is created: an ivar only another file or an ancestor writes keeps
+  reading `Dynamic[top]`. A new precise entry would narrow a read
+  that is `Dynamic` today, and could add rows.
+- **Coarse typing across files.** Another file's write joins as a
+  literal's `Constant` (`nil`, booleans, numbers, strings, symbols),
+  and as `Dynamic[top]` for anything else, an `attr_writer` /
+  `attr_accessor` included. The value is recorded flow-free by the
+  discovery pre-pass (`[:own_write_type, …]` in the global write
+  census), so no other file is typed. An ancestor declared in the
+  same file joins its own census entry, typed as the census types it,
+  before its read-before-write `nil`.
+- **Chain-wide and flow-free.** Every project class and module on
+  `K`'s instance resolution chain contributes, whether or not `K`
+  ever runs the writing method. A module's own census gains no chain.
+  Singleton-side writes, `extend`, the `self.included(base)` hook
+  (#1958) and `include(Module.new { … })` (no chain entry) contribute
+  nothing.
+- **Declaration-sourced.** The joined types are part of the seed, so
+  a `nil` they bring is WD1 declaration-sourced and is not fuel for
+  `call.possible-nil-receiver`; #2039 keeps the statement-position
+  reset from bringing it back unmarked.
+- **ADR-46.** Each read files `own_write_type:<owner>#<ivar>`, fired
+  when a file's coarse values for the pair move (a type change under
+  the same name included), and the chain's class edges.
+
+Accepted losses, under ADR-5: a non-literal write in another file or
+an ancestor widens the entry with `Dynamic[top]`, so checks on that
+ivar's reads in `K` (`call.undefined-method`, argument types, condition
+folds) stop; a write on a path `K` never takes still widens; and a
+literal another file writes but never runs at `K`'s read stops a fold.
 
 ## Rejected / deferred alternatives
 

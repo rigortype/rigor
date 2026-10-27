@@ -7,7 +7,10 @@ require "spec_helper"
 # as one project; a line marked `# FIRES <rule>` must report that rule and every other line must stay quiet. The
 # fixtures carry Ruby 4.0.5's results in their comments.
 RSpec.describe "cross-file and chain ivar census (#2079, #2170)", type: :runner do
-  root = File.join(__dir__, "fixtures/cross_file_ivar_census")
+  def fixture_files(fixture)
+    Dir[File.join(__dir__, "fixtures/cross_file_ivar_census", fixture, "*.rb")]
+      .to_h { |path| [File.basename(path), File.read(path)] }
+  end
 
   def reported(result)
     result.diagnostics.reject { |d| d.severity == :info || d.rule.to_s == "call.unresolved-toplevel" }
@@ -25,7 +28,7 @@ RSpec.describe "cross-file and chain ivar census (#2079, #2170)", type: :runner 
 
   %w[reopening mixins cross_file_mixins].each do |fixture|
     it "reports exactly the marked lines in #{fixture}/" do
-      files = Dir[File.join(root, fixture, "*.rb")].sort.to_h { |path| [File.basename(path), File.read(path)] }
+      files = fixture_files(fixture)
       expect(reported(analyze(files: files))).to eq(marked(files))
     end
   end

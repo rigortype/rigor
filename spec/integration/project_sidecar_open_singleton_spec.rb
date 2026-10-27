@@ -161,8 +161,8 @@ RSpec.describe "a project sidecar sig and an open singleton surface (#2438)" do
       expect(messages).to eq([])
     end
 
-    it "does not report a class method on a class that includes a module" do
-      expect(messages_for("class Svc\n  include Concerns\nend\nSvc.helper\n", "class Svc\nend\n")).to eq([])
+    it "does not report a class method on a class that includes a project module" do
+      expect(messages_for("module Conc\n  def c = 1\nend\nclass Svc\n  include Conc\nend\nSvc.helper\n", "class Svc\nend\n")).to eq([])
     end
 
     # A project module the class extends is a mixin too, though the source shows every method it adds.

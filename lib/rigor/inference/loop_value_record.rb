@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "../run_scoped_slots"
+
 module Rigor
   module Inference
     # The value the statement evaluator last gave a loop node, and the scope it evaluated the loop from, so
@@ -13,15 +15,17 @@ module Rigor
     # evaluation would. It is not compared with `Scope#==`, which ignores several fields (`match_frame`,
     # `declared_refinements`, `struct_fold_safe_locals`, the opaque-block flags, `lexical_nesting`, the origins tables,
     # `discovery`): across the cost spec's 10933 reads every match was an identity match, and `lib/` read no record at
-    # all (issue #2262). It lives in a per-thread map whose keys are held weakly, so a record goes when its parse tree
-    # does.
+    # all (issue #2262). It lives in a per-thread map keyed by the loop node. The map's keys are weak but its values
+    # are strong, and a recorded scope reaches its discovery, its environment and the parse tree that holds the key,
+    # so a record never goes on its own (issue #2412): the map is a run-scoped slot ({RunScopedSlots}), emptied when
+    # the run that filled it ends.
     module LoopValueRecord
-      KEY = :rigor_loop_value_record
+      KEY = RunScopedSlots.register(:rigor_loop_value_record)
       private_constant :KEY
 
       module_function
 
-      COUNT_KEY = :rigor_loop_value_count
+      COUNT_KEY = RunScopedSlots.register(:rigor_loop_value_count)
       private_constant :COUNT_KEY
 
       def record(node, scope, type)

@@ -2,6 +2,7 @@
 
 require_relative "../type"
 require_relative "external_ancestor_resolution"
+require_relative "../run_scoped_slots"
 
 module Rigor
   module Inference
@@ -19,7 +20,7 @@ module Rigor
       NO_TARGETS = [].freeze
       private_constant :NO_TARGETS
 
-      MEMO_KEY = :__rigor_project_method_ownership_memo__
+      MEMO_KEY = RunScopedSlots.register(:__rigor_project_method_ownership_memo__)
       private_constant :MEMO_KEY
 
       module_function

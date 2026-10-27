@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "../run_scoped_slots"
+
 module Rigor
   module Inference
     # The `method_name (Symbol) → [owner names]` inverted index the override gate reads
@@ -17,14 +19,13 @@ module Rigor
     # missing one of the seed's owners, is inverted whole, as is a table {.record_layers} was not told about. Only
     # the order of a name's owners can differ, and the gate asks `any?` of the list.
     module DefinersIndex
-      # These thread slots are not released at the end of a run; they are bounded instead, like
-      # `ExpressionTyper#method_definers_index`'s two ways. Each is a fixed number of entries, replaced rather than
-      # accumulated: two `[merged, seed]` pairs (the last file's two def tables) and two seed indexes. So a finished
-      # run keeps at most one project's seed tables and their indexes alive, and the next run's first file replaces
-      # them.
-      LAYERS_KEY = :__rigor_definers_index_layers__
-      SEED_INDEX_KEY = :__rigor_definers_index_seed__
-      SEED_INDEX_ALT_KEY = :__rigor_definers_index_seed_alt__
+      # These thread slots are bounded, like `ExpressionTyper#method_definers_index`'s two ways. Each is a fixed
+      # number of entries, replaced rather than accumulated: two `[merged, seed]` pairs (the last file's two def
+      # tables) and two seed indexes. The run that filled them releases them when it ends ({RunScopedSlots}, #2399),
+      # so a finished run keeps none of its seed tables or their indexes alive.
+      LAYERS_KEY = RunScopedSlots.register(:__rigor_definers_index_layers__)
+      SEED_INDEX_KEY = RunScopedSlots.register(:__rigor_definers_index_seed__)
+      SEED_INDEX_ALT_KEY = RunScopedSlots.register(:__rigor_definers_index_seed_alt__)
       private_constant :LAYERS_KEY, :SEED_INDEX_KEY, :SEED_INDEX_ALT_KEY
 
       # A name's owners: the seed's, less the owners the file replaced, plus the replaced owners' own.

@@ -1,0 +1,4 @@
+- **[engine]** A process that runs `rigor check` or `rigor sig-gen` repeatedly in-process, such as an MCP-style host or a spec suite, no longer grows in memory with every run. ([#2453](https://github.com/rigortype/rigor/pull/2453))
+  - Each run used to keep its whole analysis alive, about 1.3 million heap slots per run over 20 files.
+  - Per-thread caches that held the last run until the next one replaced them are now emptied when a run ends as well.
+  - The language server's publishes were not affected. Growth through its hover, completion and definition providers is tracked separately.

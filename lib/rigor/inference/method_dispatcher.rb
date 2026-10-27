@@ -41,6 +41,7 @@ require_relative "method_dispatcher/universal_object_dispatch"
 require_relative "method_dispatcher/singleton_mixin_dispatch"
 require_relative "method_dispatcher/method_folding"
 require_relative "method_dispatcher/optional_count"
+require_relative "../run_scoped_slots"
 
 module Rigor
   module Inference
@@ -1109,7 +1110,7 @@ module Rigor
         memo[method_name] = BlockCallTiming.project_defines_anywhere?(method_name, scope)
       end
 
-      DEFINES_NAME_MEMO_KEY = :__rigor_user_class_fallback_defines_name__
+      DEFINES_NAME_MEMO_KEY = RunScopedSlots.register(:__rigor_user_class_fallback_defines_name__)
       private_constant :DEFINES_NAME_MEMO_KEY
 
       # One slot per discovery index and environment, as {#external_ancestor_memo} keeps its own: the answer reads
@@ -1125,7 +1126,7 @@ module Rigor
         slot[2]
       end
 
-      EXTERNAL_ANCESTOR_MEMO_KEY = :__rigor_user_class_fallback_external_ancestor__
+      EXTERNAL_ANCESTOR_MEMO_KEY = RunScopedSlots.register(:__rigor_user_class_fallback_external_ancestor__)
       private_constant :EXTERNAL_ANCESTOR_MEMO_KEY
 
       # One slot per discovery index and environment, as `RbsDispatch#ancestor_memo_slot` keeps its own: the answer

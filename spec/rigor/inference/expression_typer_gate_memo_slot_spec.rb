@@ -17,7 +17,8 @@ require "tmpdir"
 #
 # The keys are read as literal Symbols because the `*_KEY` constants are `private_constant` — the spec
 # deliberately reaches for the thread-locals, since the whole point is that no production caller can
-# observe this.
+# observe this. A run releases its slots when it ends (`Rigor::RunScopedSlots`, #2399), so each example reads
+# them as the run left them, captured when the run calls the release.
 RSpec.describe "override-gate memo storage" do
   def gate_key = :__rigor_overridable_method_gate__
   def index_key = :__rigor_method_definers_index__
@@ -51,15 +52,30 @@ RSpec.describe "override-gate memo storage" do
     end
   end
 
+  # The run-scoped slots as the last run left them, captured when it released them.
+  let(:at_release) { {} }
+
   def run_check(dir)
     configuration = Rigor::Configuration.new("paths" => [dir], "parallel" => { "workers" => 0 })
+    allow(Rigor::RunScopedSlots).to receive(:release).and_wrap_original do |original|
+      at_release.replace([gate_key, index_key, index_alt_key].to_h { |key| [key, Thread.current[key]] })
+      original.call
+    end
     guarded_run(Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil))
+  end
+
+  # The slot `key` held when the last run released its slots.
+  def run_slot(key) = at_release.fetch(key)
+
+  # Puts the last run's slots back on the thread, so a probe after the run reads the memos the run filled.
+  def reinstate_run_slots
+    at_release.each { |key, value| Thread.current[key] = value }
   end
 
   # Counts the inverted indexes the memo is holding, under EITHER shape: a store keeps one per def
   # table it ever saw, the bounded form keeps at most one per kind per way.
   def held_indexes
-    ways = [Thread.current[index_key], Thread.current[index_alt_key]].compact
+    ways = [run_slot(index_key), run_slot(index_alt_key)].compact
     return 0 if ways.empty?
     return ways.first.size if ways.first.is_a?(Hash)
 
@@ -68,7 +84,7 @@ RSpec.describe "override-gate memo storage" do
 
   # Counts the gate's answer buckets the same way.
   def held_gate_buckets
-    held = Thread.current[gate_key]
+    held = run_slot(gate_key)
     return 0 if held.nil?
     return held.values.sum { |by_super| by_super.values.sum(&:size) } if held.is_a?(Hash)
 
@@ -93,7 +109,7 @@ RSpec.describe "override-gate memo storage" do
       write_project(dir, 6)
       run_check(dir)
 
-      slot = Thread.current[gate_key]
+      slot = run_slot(gate_key)
       # A store would be a Hash here, one bucket deep per file; the bound is the Array itself.
       expect(slot).to be_an(Array)
       expect(slot.size).to eq(2)
@@ -107,7 +123,7 @@ RSpec.describe "override-gate memo storage" do
       write_project(dir, 6)
       run_check(dir)
 
-      ways = [Thread.current[index_key], Thread.current[index_alt_key]].compact
+      ways = [run_slot(index_key), run_slot(index_alt_key)].compact
       expect(ways.size).to be <= 2
       ways.each do |way|
         expect(way.size).to eq(4)
@@ -125,7 +141,7 @@ RSpec.describe "override-gate memo storage" do
       write_project(dir, 6)
       run_check(dir)
 
-      answers = Thread.current[gate_key][1]
+      answers = run_slot(gate_key)[1]
       expect(answers[:instance]).not_to be_empty
       expect(held_indexes).to be > 0
     end
@@ -159,6 +175,7 @@ RSpec.describe "override-gate memo storage" do
     Dir.mktmpdir do |dir|
       write_project(dir, 2)
       run_check(dir)
+      reinstate_run_slots
       index = Thread.current[gate_key][0]
       bucket = Thread.current[gate_key][1]
 
@@ -183,6 +200,7 @@ RSpec.describe "override-gate memo storage" do
     Dir.mktmpdir do |dir|
       write_project(dir, 2)
       run_check(dir)
+      reinstate_run_slots
       index = Thread.current[index_key]
       def_nodes = index[0]
 

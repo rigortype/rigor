@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../configuration"
 require_relative "../environment"
+require_relative "../run_scoped_slots"
 require_relative "../project_environment"
 require_relative "../scope"
 require_relative "../reflection"
@@ -132,8 +133,8 @@ module Rigor
         # ADR-84 WD2, as `Runner#run_analysis` mints it for `check` (#2300): one return-memo bucket for the whole
         # run. Without it the memo keys on each file's merged `discovered_def_nodes`, a new table per file, so a
         # callee reached from two files was re-inferred in each. A fresh token per run keeps a second run in one
-        # process from reading the first's entries, and the bucket is released when the run ends (#2398's rule
-        # for the callee census), so a finished run holds none of it.
+        # process from reading the first's entries, and the bucket is released with the other run-scoped slots
+        # when the run ends ({RunScopedSlots}), so a finished run holds none of it.
         @run_generation = Object.new.freeze
         # Both read the files as they are now, so a second `run` of one generator re-reads them.
         @project_tables = nil
@@ -145,7 +146,7 @@ module Rigor
           )
         )
       ensure
-        Inference::ExpressionTyper.release_return_memo(@run_generation) if @run_generation
+        RunScopedSlots.release
       end
 
       private

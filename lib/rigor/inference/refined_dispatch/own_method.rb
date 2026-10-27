@@ -2,6 +2,7 @@
 
 require_relative "../builtins/cruby_definers"
 require_relative "constructed_class"
+require_relative "../../run_scoped_slots"
 
 module Rigor
   module Inference
@@ -317,7 +318,7 @@ module Rigor
           all.include?(name) ? all - [name] : all
         end
 
-        SUBCLASS_MEMO_KEY = :__rigor_own_method_subclasses__
+        SUBCLASS_MEMO_KEY = RunScopedSlots.register(:__rigor_own_method_subclasses__)
         private_constant :SUBCLASS_MEMO_KEY
 
         # One thread-local slot keyed on the scope's discovery index (a frozen `Data`) and environment, the only

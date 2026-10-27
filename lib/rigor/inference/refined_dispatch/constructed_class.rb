@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "../../run_scoped_slots"
+
 module Rigor
   module Inference
     module RefinedDispatch
@@ -16,7 +18,7 @@ module Rigor
       # the name itself, and no constant write of it. Any other shape answers false, as does a class a
       # `K = Class.new(...)` write names.
       module ConstructedClass
-        MEMO_KEY = :__rigor_constructed_class__
+        MEMO_KEY = RunScopedSlots.register(:__rigor_constructed_class__)
         EMPTY = [].freeze
         private_constant :MEMO_KEY, :EMPTY
 

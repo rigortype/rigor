@@ -150,8 +150,8 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     def check_diagnostics
       write("lib/use.rb", "class User\n  def a = [1].mk.e\n  def b = [1].mks.first.e\n  def h = { 1 => 2 }.mk.k\nend\n")
       out = StringIO.new
-      Rigor::CLI.start(["check", "--no-cache", "--format=json", "--config=#{File.join(root, '.rigor.yml')}", "lib/use.rb"],
-                       out: out, err: StringIO.new)
+      argv = ["check", "--no-cache", "--format=json", "--config=#{File.join(root, '.rigor.yml')}", "lib/use.rb"]
+      Rigor::CLI.start(argv, out: out, err: StringIO.new)
       JSON.parse(out.string).fetch("diagnostics").map { |d| d["message"] }
     end
 

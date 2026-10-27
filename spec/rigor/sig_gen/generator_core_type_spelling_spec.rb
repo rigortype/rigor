@@ -267,6 +267,34 @@ RSpec.describe Rigor::SigGen::Generator do
         expect_subclass_demoted(candidates, generator)
       end
 
+      # Repro C: without `--overwrite` the writer leaves a declared method alone, so a tighter return writes nothing.
+      it "demotes the subclass when the file's only proposal is a tighter return the writer will not apply" do
+        candidates, generator = run_generator(
+          "lib/errors.rb" => in_lib("class Error < StandardError; end", "class Thing", "  def x = rand(10)", "end"),
+          "sig/errors.rbs" => in_lib("class Thing", "  def x: () -> Numeric", "end"),
+          "lib/sub.rb" => subclass
+        )
+
+        expect(candidates.find { |c| c.method_name == :x }.classification)
+          .to eq(Rigor::SigGen::Classification::TIGHTER_RETURN)
+        expect(File.read(File.join(tmpdir, "sig/errors.rbs"))).not_to include("Error")
+        expect_subclass_demoted(candidates, generator)
+      end
+
+      # The token is resolved to the class Ruby means, `Lib::Error`, whether or not its shell is written. Left as
+      # `Error`, it would resolve to the top-level class `sig/` declares, and the subclass would be written against
+      # the wrong superclass.
+      it "resolves the superclass to the unwritten shell rather than a top-level class of the same name" do
+        candidates, generator = run_generator(
+          "lib/errors.rb" => in_lib("class Error < StandardError; end", "class Thing", "  def dyn(x) = x.foo", "end"),
+          "sig/top_error.rbs" => "class Error\nend\n",
+          "lib/sub.rb" => subclass
+        )
+
+        expect(generator.unresolvable_superclasses).to eq("Lib::NotFound" => "Lib::Error")
+        expect_subclass_demoted(candidates, generator)
+      end
+
       # Two steps of the cascade: `Thing`'s demotion unwrites `Error`, which demotes `Middle`, which unwrites `Leaf`.
       it "follows a chain of shells each demoted by the one before" do
         candidates, generator = run_generator(

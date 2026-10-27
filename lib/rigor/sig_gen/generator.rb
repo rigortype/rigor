@@ -318,7 +318,15 @@ module Rigor
       def resolve_superclass_spellings(candidates)
         return candidates if @superclass_nestings.empty?
 
-        rewrites = superclass_rewrites(declared_by_run(candidates))
+        # Every shell counts here, written or not: the question is which class Ruby means by the token, and the
+        # source declares `Lib::Error` whether or not its file is written. Whether the resolved superclass reaches
+        # disk is {#demote_unresolvable_superclasses}'s question. Counting only written shells would leave `Error`
+        # unresolved, and a top-level `Error` some signature declares would then take it (#2454).
+        known = candidates.each_with_object(Set.new) do |candidate, acc|
+          acc << candidate.class_name if candidate.class_name
+          acc.merge(candidate.class_shells || [])
+        end
+        rewrites = superclass_rewrites(known)
         return candidates if rewrites.empty?
 
         candidates.map do |candidate|

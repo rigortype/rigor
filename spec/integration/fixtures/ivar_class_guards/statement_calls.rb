@@ -31,7 +31,7 @@ class Shower
   def self_dot_call
     return unless @tag
 
-    v2?
+    self.v2?
     t = @tag
     t.upcase # QUIET-1446
   end
@@ -44,11 +44,11 @@ class Shower
     t.upcase # QUIET-1446
   end
 
-  # Guard: quiet before #2039 too, through the operand reset `!` takes.
+  # Guard: quiet before #2039 too. `v2?` is the receiver of `!`, and the operand reset past it marks.
   def negated_call
     return unless @tag
 
-    v2?
+    !v2?
     t = @tag
     t.upcase # QUIET-1446
   end

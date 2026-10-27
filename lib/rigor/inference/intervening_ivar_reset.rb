@@ -190,7 +190,7 @@ module Rigor
 
         computed = false
         writes = nil
-        direct = nil
+        direct = lazy_set(direct_writes)
         seed.reduce(scope) do |widened, (name, seed_type)|
           local_type = scope.ivar(name)
           next widened if local_type.nil? || local_type == seed_type
@@ -203,9 +203,6 @@ module Rigor
 
           joined = Type::Combinator.union(local_type, seed_type)
           widened = widened.with_ivar(name, joined)
-          if mark == :unproven && writes.nil? && direct.nil?
-            direct = direct_writes ? direct_writes.call : Set.new
-          end
           marked = widen_marks?(mark, writes, direct, name, local_type) || scope.declaration_sourced?(:ivar, name)
           marked ? widened.seed_declaration_sourced_ivar(name, joined) : widened
         end
@@ -215,10 +212,18 @@ module Rigor
       # narrowing ruled `nil` out, under `mark: true`, or under `mark: :unproven` when no write set is proven
       # (`writes` nil) and the callee does not visibly write it (`direct`).
       def widen_marks?(mark, writes, direct, name, local_type)
-        marking = mark == :unproven ? writes.nil? && !direct.include?(name) : mark
-        marking && nil_free?(local_type)
+        return false unless mark && nil_free?(local_type)
+
+        mark != :unproven || (writes.nil? && !direct.call.include?(name))
       end
       private_class_method :widen_marks?
+
+      # A callable answering `callable`'s `Set`, computed on the first call; an empty one when `callable` is nil.
+      def lazy_set(callable)
+        value = nil
+        -> { value ||= callable ? callable.call : Set.new }
+      end
+      private_class_method :lazy_set
 
       # Issue #1963 — `scope` past the calls `node`, a condition operand, makes: {.widen} over the names every
       # candidate call in it may write, or every name when one of them is not proven. A call's literal block may run,

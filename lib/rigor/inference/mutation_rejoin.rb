@@ -177,12 +177,10 @@ module Rigor
       # coarse for that: it admits `Array[Integer]` beside `[String]` and `"y"` beside `"x"`.
       def precise_admitted(element, added)
         added.flat_map do |type|
-          ContentJoin.union_members(type).map { |member| held_member?(element, member) ? member : Type::Combinator.untyped }
+          ContentJoin.union_members(type).map do |member|
+            Acceptance.accepts(element, member).yes? ? member : Type::Combinator.untyped
+          end
         end
-      end
-
-      def held_member?(element, member)
-        !carries_dynamic?(member) && Acceptance.accepts(element, member).yes?
       end
 
       # True when the precise element `element` already covers every type `stored` puts in, so the store changes

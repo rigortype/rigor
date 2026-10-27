@@ -1,0 +1,3 @@
+- **[engine]** A hash type in a message now spells its keys as RBS does, so a String key and a Symbol key no longer read alike. ([#2449](https://github.com/rigortype/rigor/pull/2449))
+  - A String key reads `"a-b" => Integer`, a Symbol key that is not a plain identifier reads `:"a-b" => Integer`, and an identifier Symbol key stays `a: Integer`.
+  - A return-type mismatch between a declared String key and an inferred Symbol key used to print `{ "a-b": Integer }` against `{ a-b: 1 }`.

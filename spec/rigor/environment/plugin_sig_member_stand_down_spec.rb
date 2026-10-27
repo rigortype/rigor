@@ -528,11 +528,13 @@ end
           .to eq([["A::B < C", "other.rbs"]])
       end
 
+      # Guard on rbs 4.x, whose resolver already normalises an alias on both sides; `normalized` is for the 3.x line.
       it "reads a class alias as the class it names (P3)" do
         expect(shape_rows("class Foo < Al\nend\n", "class Target\nend\nclass Al = Target\nclass Foo < Target\nend\n"))
           .to be_empty
       end
 
+      # Guard on rbs 4.x, whose resolver already normalises an alias on both sides; `normalized` is for the 3.x line.
       it "reads the other source's class alias as the class it names too" do
         expect(shape_rows("class Foo < Target\nend\n", "class Target\nend\nclass Al = Target\nclass Foo < Al\nend\n"))
           .to be_empty

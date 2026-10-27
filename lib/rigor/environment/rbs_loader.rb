@@ -2616,6 +2616,31 @@ module Rigor
       NO_TYPE_PARAMS = [].freeze
       private_constant :NO_TYPE_PARAMS
 
+      # Issue #2436 — the `RBS::AST::TypeParam` list a loaded declaration of `class_name` spells (`[unchecked out
+      # E]` for `Array`), read off the declarations rather than through {#class_type_param_names}: a definition
+      # build validates the entry and raises on one whose declarations already disagree, which is the env sig-gen
+      # is asked to repair. The first declaration answers, as it is the one rbs compares every other against
+      # ({.generic_arity_conflict}). Empty for a non-generic or unknown name, and when the environment did not
+      # build.
+      def class_declaration_type_params(class_name)
+        memo = (@state[:declaration_type_params] ||= {})
+        key = class_name.to_s.delete_prefix("::")
+        memo.fetch(key) { memo[key] = read_declaration_type_params(key) }
+      end
+
+      def read_declaration_type_params(key)
+        rbs_name = parse_type_name(key)
+        entry = rbs_name && env&.class_decls&.[](rbs_name)
+        return NO_TYPE_PARAMS if entry.nil?
+
+        first = self.class.entry_declarations(entry).first
+        params = first.respond_to?(:type_params) ? first.type_params : nil
+        params.nil? || params.empty? ? NO_TYPE_PARAMS : params.dup.freeze
+      rescue ::RBS::BaseError
+        NO_TYPE_PARAMS
+      end
+      private :read_declaration_type_params
+
       def class_ordering(lhs, rhs)
         @hierarchy.class_ordering(lhs, rhs)
       end

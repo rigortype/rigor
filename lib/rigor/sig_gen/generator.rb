@@ -142,11 +142,13 @@ module Rigor
         @file_base_scope = nil
         candidates = resolved.flat_map { |path| analyse_file(path, @environment) }
         demoted = demote_overridden_base_methods(
-          demote_unresolvable_superclasses(demote_inline_generic_classes(resolve_superclass_spellings(candidates)))
+          demote_unresolvable_superclasses(
+            demote_generic_reopenings(demote_inline_generic_classes(resolve_superclass_spellings(candidates)))
+          )
         )
         # Again after the override demotion: a demoted method can leave its file with nothing to write, and a class
         # shell riding on that file then declares nothing a subclass elsewhere could rest on.
-        annotate_effects(demote_unresolvable_superclasses(demoted))
+        annotate_effects(stamp_generic_reopenings(demote_unresolvable_superclasses(demoted)))
       ensure
         RunScopedSlots.release
       end
@@ -235,6 +237,73 @@ module Rigor
       def opens_generic_class?(class_name, generic)
         segments = class_name.split("::")
         (1..segments.size).any? { |n| generic.key?(segments.first(n).join("::")) }
+      end
+
+      # Issue #2436 — a class the loaded RBS declares generic (`Array`, `Hash`, a gem's or the project's own) is
+      # reopened with that declaration's type parameters copied onto the header ({#stamp_generic_reopenings}),
+      # which is exact only while every parameter is plain. A bound or a default is a type spelled relative to the
+      # declaring file's namespace, and copying it under another nesting can resolve it to a different class, so
+      # rbs would reject the header as it rejects a parameterless one (`GenericParameterMismatchError`): the class,
+      # and every class whose signature mentions it, fails its definition build. A method of such a class, or of
+      # one nested in it, is skipped instead — unless `sig/` already declares the class, whose own header the
+      # writer then writes into ({#demote_inline_generic_classes}' rule).
+      def demote_generic_reopenings(candidates)
+        loader = @environment&.rbs_loader
+        return candidates if loader.nil?
+
+        layout = nil
+        candidates.map do |candidate|
+          next candidate unless Classification::EMITTABLE.include?(candidate.classification)
+          next candidate unless namespace_prefixes(candidate.class_name).any? { |name| bounded_generic?(loader, name) }
+
+          layout ||= LayoutIndex.new(signature_paths: @configuration.signature_paths)
+          next candidate if layout.file_for(candidate.class_name)
+
+          demoted_candidate(candidate, :generic_reopening)
+        end
+      end
+
+      # The other half of {#demote_generic_reopenings}: every emittable candidate carries the header spelling of
+      # each generic class the run may open a header for — its own class, the classes it is nested in, and the
+      # file's class shells and theirs — so the writer and `--format=print` spell the same header. Method bodies
+      # keep `untyped` for element types; nothing here names `E` in a member.
+      def stamp_generic_reopenings(candidates)
+        loader = @environment&.rbs_loader
+        return candidates if loader.nil?
+
+        emittable = candidates.select { |c| Classification::EMITTABLE.include?(c.classification) }
+        names = emittable.flat_map { |c| [c.class_name, *c.class_shells] }.uniq.flat_map { |n| namespace_prefixes(n) }
+        spelled = names.uniq.each_with_object({}) do |name, acc|
+          params = loader.class_declaration_type_params(name)
+          acc[name] = "[#{params.map(&:to_s).join(', ')}]" if !params.empty? && params.all? { |p| plain_type_param?(p) }
+        end
+        return candidates if spelled.empty?
+
+        spelled.freeze
+        candidates.map do |candidate|
+          next candidate unless Classification::EMITTABLE.include?(candidate.classification)
+
+          candidate.with_class_type_params(spelled)
+        end
+      end
+
+      def namespace_prefixes(class_name)
+        return [] if class_name.nil?
+
+        segments = class_name.split("::")
+        (1..segments.size).map { |n| segments.first(n).join("::") }
+      end
+
+      def bounded_generic?(loader, name)
+        params = loader.class_declaration_type_params(name)
+        !params.empty? && !params.all? { |param| plain_type_param?(param) }
+      end
+
+      # A name, a variance and `unchecked`, and nothing that spells a type: no upper or lower bound, no default.
+      def plain_type_param?(param)
+        %i[upper_bound lower_bound default_type].none? do |reader|
+          param.respond_to?(reader) && param.public_send(reader)
+        end
       end
 
       # Issue #744 — a base class's method is NOT emitted when a project subclass overrides it and the

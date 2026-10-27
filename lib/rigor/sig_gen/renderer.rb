@@ -94,11 +94,14 @@ module Rigor
       # mode used to hard-code `class`, which turned a module into a class the moment it held an emittable method —
       # output that raises `RBS::DuplicatedDeclarationError` on load if the real `module` is declared anywhere else
       # (#227). Defaulting to `class` when the map has no entry keeps the pre-existing spelling for a leaf class.
+      # A generic class the run reopens carries its declaration's type parameters, as the written header does (#2436).
       def declaration_header(candidate, class_name)
-        return "module #{class_name}" if candidate.namespace_kinds[class_name] == :module
+        params = candidate.class_type_params[class_name]
+        return "module #{class_name}#{params}" if candidate.namespace_kinds[class_name] == :module
 
         superclass = candidate.class_superclasses[class_name]
-        superclass ? "class #{class_name} < #{SuperclassSpelling.absolute(superclass)}" : "class #{class_name}"
+        head = "class #{class_name}#{params}"
+        superclass ? "#{head} < #{SuperclassSpelling.absolute(superclass)}" : head
       end
 
       def render_diff(candidates)

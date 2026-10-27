@@ -666,11 +666,13 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RbsDispatch do
       end
 
       it "leaves the variable untyped when a keyword parameter names it" do
-        expect(fold_call(:keyword_seed, [keywords])).to equal(untyped)
+        call_node = call_node_of("RigorSpecFold.keyword_seed(seed: a0) { 1 }")
+        expect(fold_call(:keyword_seed, [keywords], call_node: call_node)).to equal(untyped)
       end
 
       it "leaves the variable untyped when a keyword rest parameter names it" do
-        expect(fold_call(:keyword_rest_seed, [keywords])).to equal(untyped)
+        call_node = call_node_of("RigorSpecFold.keyword_rest_seed(seed: a0) { 1 }")
+        expect(fold_call(:keyword_rest_seed, [keywords], call_node: call_node)).to equal(untyped)
       end
 
       it "leaves the variable untyped when it sits inside a container parameter" do

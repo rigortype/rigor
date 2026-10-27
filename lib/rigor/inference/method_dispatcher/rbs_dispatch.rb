@@ -1088,10 +1088,28 @@ module Rigor
               block_required: !block_type.nil?,
               environment: environment
             )
-            return nil if candidates.empty?
+            if candidates.empty?
+              return unselected_return(method_definition, self_type, instance_type, type_vars, args, block_type,
+                                       scope, call_node, call_site, environment, keywords_last)
+            end
 
             selected_return(candidates, method_definition, self_type, instance_type, type_vars, args, block_type, scope,
                             call_node, call_site, environment, keywords_last)
+          end
+
+          # Issue #2429 — a block call no overload matches, whose block overloads the arity fallback cannot decide
+          # between, selects nothing. An argument union may still select per value (#2379): `S.h(flag ? "s" : 1) { }`
+          # takes the `String` arm for `"s"` and the `Integer` arm for `1`. Otherwise the tier declines (nil), so a
+          # later tier, such as the project's own definition of the method, answers.
+          # rubocop:disable Metrics/ParameterLists
+          def unselected_return(method_definition, self_type, instance_type, type_vars, args, block_type, scope,
+                                call_node, call_site, environment, keywords_last)
+            # rubocop:enable Metrics/ParameterLists
+            return nil if keywords_last
+
+            distributed = distributed_argument_return(method_definition, nil, self_type, instance_type, type_vars, args,
+                                                      block_type, scope, call_node, call_site, environment)
+            distributed.equal?(NOT_DISTRIBUTED) ? nil : distributed
           end
 
           # The return of the overloads the call selected: per argument value where a union or supertype argument
@@ -1241,6 +1259,9 @@ module Rigor
             per_list = (lists || [args]).map do |arg_types|
               picked = chosen if arg_types.equal?(args)
               picked ||= OverloadSelector.select(method_definition, arg_types:, **selector)
+              # #2429's block fallback may answer no overload; the call then reads as it did undistributed.
+              return nil unless picked
+
               contested = OverloadSelector.contested_matches(method_definition, picked, arg_types:, **selector)
               [arg_types, contested || [picked]]
             end
@@ -2024,7 +2045,9 @@ module Rigor
               instance_type: instance_type,
               type_vars: type_vars,
               block_required: true,
-              environment: environment
+              environment: environment,
+              # A call no overload matches binds no block parameter from the return path's block fallback (#2429).
+              block_fallback: false
             )
             return [] unless method_type
 
@@ -2102,7 +2125,7 @@ module Rigor
             # rubocop:enable Metrics/ParameterLists
             unless FacetDistribution.faceted?(arg_types)
               return OverloadSelector.select_declared(method_definition, arg_types, selector_self, instance_type,
-                                                      type_vars, block_required, environment, true, true, splats)
+                                                      type_vars, block_required, environment, true, true, splats, false)
             end
 
             facet_matches(method_definition, arg_types, selector_self, instance_type, type_vars, block_required,
@@ -2122,7 +2145,7 @@ module Rigor
               # The fallback list (`member` false) answers every gradual match rather than the strict pass's pick.
               OverloadSelector.select_declared(method_definition, list, selector_self, instance_type, type_vars,
                                                block_required, environment, member || :gradual, keywords_last,
-                                               splats)
+                                               splats, false)
             end
           end
 

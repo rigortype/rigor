@@ -8,6 +8,7 @@ require_relative "contested_overloads"
 require_relative "facet_distribution"
 require_relative "imprecise_argument"
 require_relative "keyword_arguments"
+require_relative "no_match_fallback"
 require_relative "proven_overload"
 require_relative "receiver_affinity"
 require_relative "splat_arity"
@@ -46,7 +47,8 @@ module Rigor
       #    (step 4's fallback picks the first overload regardless).
       # 4. If no overload matches at all, fall back to the first overload that does not require a block (else
       #    `method_types.first`), so existing call sites keep their phase 1 / 2b behavior. This preserves the
-      #    fail-soft invariant of the dispatcher.
+      #    fail-soft invariant of the dispatcher. A call with a block reads the block overloads by arity instead
+      #    (`no_match_fallback`, #2429).
       #
       # The selector is intentionally agnostic about the dispatch kind (instance vs singleton). Both kinds
       # share the same arity and acceptance shape; the difference is only in which `Definition` the caller
@@ -67,8 +69,9 @@ module Rigor
         #   to `Array[Dynamic[Top]]`.
         # @param block_required — when `true`, only overloads that declare a block clause are
         #   considered first (Slice 6 phase C sub-phase 1), and a call none of them matches is retried with
-        #   the block ignored. The fallback prefers an overload that does not require a block over
-        #   `method_types.first`.
+        #   the block ignored. Where nothing matches, a block call answers by arity among the block overloads
+        #   (`block_call_fallback`, #2429), and otherwise the fallback prefers an overload that does not require a
+        #   block over `method_types.first`.
         # @return the chosen overload, or nil when the definition has no method
         #   types at all.
         def select(method_definition, **) = select_candidates(method_definition, member_wise: false, **).first
@@ -89,12 +92,14 @@ module Rigor
         # rubocop:disable-next Metrics/ParameterLists -- the selection keywords plus the member-wise switch.
         # @param keywords_last — the call's last argument is a keyword hash (`f(a, k: 1)`, not `f(a, { k: 1 })`).
         # @param splats — the indices of `arg_types` that are splat arguments (`f(*xs)`), or nil (#1801).
+        # @param block_fallback — false keeps a block call nothing matches on the block-less fallback (#2429): the
+        #   block-parameter probe binds no parameters from an overload the call does not match.
         def select_candidates(definition, arg_types:, self_type:, instance_type:, type_vars: {},
                               block_required: false, environment: nil, member_wise: true, keywords_last: false,
-                              splats: nil)
+                              splats: nil, block_fallback: true)
           unless FacetDistribution.faceted?(arg_types)
             return select_declared(definition, arg_types, self_type, instance_type, type_vars, block_required,
-                                   environment, false, keywords_last, splats)
+                                   environment, false, keywords_last, splats, block_fallback)
           end
 
           FacetDistribution.select(arg_types, definition, member_wise:, environment:) do |args, member|
@@ -102,7 +107,7 @@ module Rigor
             # gradually matches every arm and the strict pass's pick is the first by position, so the member-wise answer
             # is every gradual match (`:joined`), as the block probe reads it (#1750); the caller joins their returns.
             select_declared(definition, args, self_type, instance_type, type_vars, block_required, environment,
-                            member || (member_wise && :joined), keywords_last, splats)
+                            member || (member_wise && :joined), keywords_last, splats, block_fallback)
           end
         end
 
@@ -115,7 +120,7 @@ module Rigor
         # first-overload fallback, as the return path's reading of the arguments as given always has (#1782).
         # rubocop:disable-next Metrics/ParameterLists -- the selection inputs plus the member-wise flag.
         def select_declared(method_definition, arg_types, self_type, instance_type, type_vars, block_required,
-                            environment, member, keywords_last, splats = nil)
+                            environment, member, keywords_last, splats, block_fallback)
           declared = method_definition.method_types
           return [] if declared.empty?
 
@@ -160,12 +165,7 @@ module Rigor
           end
           return [] if member && member != :joined
 
-          # No (usable) block at the call site: prefer an overload that does not REQUIRE a block over
-          # `overloads.first`. Methods like `Array#filter` / `Enumerable#map` declare the block-bearing
-          # overload first (`() { ... } -> Array[Elem]`) and the bare-call overload second
-          # (`() -> Enumerator[...]`). Without this, a no-block `[1, 2].filter` would adopt the block
-          # overload's `Array[Elem]` return when the call actually yields an `Enumerator`.
-          [overloads.find { |mt| !overload_requires_block?(mt) } || overloads.first]
+          no_match_fallback(overloads, shared, block_fallback)
         end
 
         def overload_has_block?(method_type)

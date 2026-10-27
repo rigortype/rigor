@@ -1,0 +1,220 @@
+# frozen_string_literal: true
+
+require "spec_helper"
+
+# Issue #2429 — when no overload matches a call's arguments, a call with a block answers by the block-declaring
+# overloads whose positional arity admits it: the one such arm, or the return every such arm agrees on. Otherwise
+# #2379's per-value selection may still answer, and failing that the RBS tier declines. The fallback took the first
+# overload not requiring a block, so `URI.open(url, read_timeout: 3) { |io| ... }` (the keyword hash lands on
+# `?String mode`, which matches neither arm) answered the block-less arm's `StringIO | Tempfile` rather than the
+# block's value. Ruby: `URI.open("/etc/hosts", read_timeout: 3) { |io| 42 }`
+# is `42`; `[3, 1, 2].max_by(2.0) { |x| x }` is `[3, 2]`.
+RSpec.describe "Block-aware no-match overload fallback (#2429)", type: :runner do
+  let(:sig) do
+    { "r.rbs" => <<~RBS }
+      class R
+        def self.f: (String) -> Integer
+                  | [T] (String) { () -> T } -> T
+      end
+      class S
+        def self.h: (Integer) -> Symbol
+                  | (Integer, ?Integer) { (Integer) -> void } -> Integer
+                  | (String, ?String) { (String) -> void } -> String
+        def self.g: (Integer) -> Symbol
+                  | (Integer) { (Integer) -> void } -> String
+                  | (String) { (String) -> void } -> String
+      end
+    RBS
+  end
+
+  let(:fetch_sig) do
+    { "fetch.rbs" => <<~RBS }
+      class Fetch
+        def fetch: (String) -> String
+        def control: (String) -> Integer
+      end
+    RBS
+  end
+
+  def dumped_types(source, sig: {})
+    result = analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}), sig: sig)
+    result.diagnostics.filter_map do |diagnostic|
+      diagnostic.message.delete_prefix("dump_type: ") if diagnostic.message.start_with?("dump_type")
+    end
+  end
+
+  def return_mismatches(source)
+    analyze(source, sig: fetch_sig).diagnostics.select { |d| d.qualified_rule == "def.return-type-mismatch" }
+  end
+
+  it "binds a no-match block call to the one block overload's return" do
+    expect(dumped_types(<<~RUBY, sig: sig)).to eq([%("s")])
+      dump_type(R.f(1) { "s" })
+    RUBY
+  end
+
+  it "keeps the block-less overload for a no-match call without a block" do
+    expect(dumped_types(<<~RUBY, sig: sig)).to eq(%w[Integer])
+      dump_type(R.f(1))
+    RUBY
+  end
+
+  # Both block arms admit two positionals and disagree, so position does not decide between them: the RBS tier
+  # declines, which on a method only RBS declares ends at `Dynamic[top]`.
+  it "declines when the admissible block overloads disagree" do
+    result = analyze(<<~RUBY, sig: sig)
+      require "rigor/testing"
+      include Rigor::Testing
+      r = S.h("a", strict: true) { |s| s.upcase }
+      dump_type(r)
+      r.upcase
+    RUBY
+    expect(result.diagnostics.map(&:qualified_rule)).to eq(%w[dump.type])
+    expect(result.diagnostics.first.message).to eq("dump_type: Dynamic[top]")
+  end
+
+  # The decline lets the project's own definition answer, and a wrong call on its value still reports.
+  it "lets the project's definition answer a call the block overloads do not decide" do
+    result = analyze(<<~RUBY, sig: sig)
+      require "rigor/testing"
+      include Rigor::Testing
+      class S
+        def self.h(x, y = nil) = (yield x; x.to_s)
+      end
+      r = S.h("a", strict: true) { |s| s }
+      dump_type(r)
+      r.no_such_method
+      dump_type(S.h(1.5) { |s| s })
+    RUBY
+    # `1.5` against the RBS arms is the argument mismatch the RBS reports anyway.
+    expect(result.diagnostics.map(&:qualified_rule))
+      .to eq(%w[dump.type call.undefined-method dump.type call.argument-type-mismatch])
+    expect(result.diagnostics.select { |d| d.qualified_rule == "dump.type" }.map(&:message))
+      .to eq([%(dump_type: "a"), %(dump_type: "1.5")])
+  end
+
+  # #2379's per-value selection still answers before the decline: `"s"` takes the String arm and `1` the Integer arm.
+  it "selects per argument value before declining" do
+    expect(dumped_types(<<~RUBY, sig: sig)).to eq(["Integer | String"])
+      c = rand < 0.5 ? "s" : 1
+      dump_type(S.h(c) { |x| x })
+    RUBY
+  end
+
+  # `1.5` selects no overload and the block arms disagree for it, so the per-value selection has no answer either.
+  it "declines when an argument value selects nothing" do
+    expect(dumped_types(<<~RUBY, sig: sig)).to eq(["Dynamic[top]", "Dynamic[top]"])
+      c = rand < 0.5 ? 1.5 : "s"
+      dump_type(S.h(c) { |x| x })
+      d = rand < 0.5 ? Float(gets) : gets.to_s
+      dump_type(S.h(d) { |x| x })
+    RUBY
+  end
+
+  it "uses the return the admissible block overloads agree on" do
+    expect(dumped_types(<<~RUBY, sig: sig)).to eq(%w[String])
+      dump_type(S.g(1.0) { |x| x })
+    RUBY
+  end
+
+  it "takes the block overload whose arity admits the call (max_by(2.0))" do
+    result = analyze(<<~RUBY)
+      require "rigor/testing"
+      include Rigor::Testing
+      top = [3, 1, 2].max_by(2.0) { |x| x }
+      dump_type(top)
+      top.size
+    RUBY
+    expect(result.diagnostics.map(&:qualified_rule)).not_to include("call.possible-nil-receiver")
+    expect(result.diagnostics.filter_map { |d| d.message[/dump_type: (.*)/, 1] }).to eq(["Array[1 | 2 | 3]"])
+  end
+
+  # The RBS tier declines; on these RBS-only methods that ends at `Dynamic[top]`, beside the arity error alone.
+  it "declines when no block overload's arity admits the call" do
+    result = analyze(<<~RUBY)
+      require "rigor/testing"
+      include Rigor::Testing
+      dump_type(File.open("x", "r", 1, 2, 3) { |f| 1 })
+      dump_type(1.then(2) { |x| x })
+    RUBY
+    expect(result.diagnostics.map(&:qualified_rule)).to eq(%w[dump.type call.wrong-arity dump.type call.wrong-arity])
+    expect(result.diagnostics.select { |d| d.qualified_rule == "dump.type" }.map(&:message))
+      .to eq(["dump_type: Dynamic[top]"] * 2)
+  end
+
+  it "leaves a no-match call's block parameters untyped" do
+    expect(dumped_types(<<~RUBY, sig: sig)).to eq(["Dynamic[top]"] * 4)
+      [3, 1, 2].max_by(2.0) { |x| dump_type(x) }
+      File.open("x", "r", 1, 2, 3) { |f| dump_type(f) }
+      S.g(1.0) { |x| dump_type(x) }
+      R.f(1) { |*a| dump_type(a.first) }
+    RUBY
+  end
+
+  # The second call, without keywords, matches the block arm in the passes and was `1` before #2429 too (guard).
+  it "types URI.open with keywords and a block by the block's value" do
+    expect(dumped_types(<<~RUBY)).to eq(%w[1 1])
+      require "open-uri"
+      dump_type(URI.open("u", read_timeout: 3) { |io| 1 })
+      dump_type(URI.open("u") { |io| 1 })
+    RUBY
+  end
+
+  # Guard: each call matches in the passes, so the fallback never runs; the types are base's.
+  it "keeps the matched block and block-less selections" do
+    expected = ["decimal-int-string", "Array[Integer]", "Enumerator[Array[1 | 2 | 3], Array[Integer]]",
+                "Enumerator[1 | 2, Array[1 | 2]]"]
+    expect(dumped_types(<<~RUBY)).to eq(expected)
+      dump_type(1.then { |x| x.to_s })
+      dump_type([1, 2, 3].each_slice(2) { |s| s })
+      dump_type([1, 2, 3].each_slice(2))
+      dump_type([1, 2].filter)
+    RUBY
+  end
+
+  it "reports no return-type mismatch on a block URI.open whose block answers the declared type" do
+    expect(return_mismatches(<<~RUBY)).to eq([])
+      require "open-uri"
+
+      class Fetch
+        def fetch(url)
+          URI.open(url, read_timeout: 3) { |io| io.read.to_s }
+        end
+      end
+    RUBY
+  end
+
+  # Guard: the block-less call matches its arm in the passes, so the fallback never runs; it must stay a true positive.
+  it "still reports a block-less URI.open against a declared Integer" do
+    expect(return_mismatches(<<~RUBY).map(&:message)).to contain_exactly(include("StringIO | Tempfile"))
+      require "open-uri"
+
+      class Fetch
+        def control(url) = URI.open(url)
+      end
+    RUBY
+  end
+
+  # An argument value the block fallback selects no overload for leaves the per-value selection without an answer,
+  # and the call reads as undistributed (nil) rather than handing `nil` on as an overload. A dispatcher `rescue`
+  # would otherwise turn the resulting `NoMethodError` into the same decline, so no type shows it.
+  it "answers nil from the per-value selection when an argument value selects no overload" do
+    loader = Rigor::Environment::RbsLoader.new(virtual_rbs: [["(spec: #2429)", <<~RBS]])
+      class S
+        def self.h: (Integer) -> Symbol
+                  | (Integer, ?Integer) { (Integer) -> void } -> Integer
+                  | (String, ?String) { (String) -> void } -> String
+      end
+    RBS
+    definition = loader.singleton_definition("S").methods[:h]
+    args = [Rigor::Type::Combinator.union(Rigor::Type::Combinator.nominal_of("Float"),
+                                          Rigor::Type::Combinator.nominal_of("String"))]
+    lists = Rigor::Inference::MethodDispatcher::ArgumentDistribution.lists(args)
+    selector = { self_type: Rigor::Type::Combinator.singleton_of("S"),
+                 instance_type: Rigor::Type::Combinator.nominal_of("S"), type_vars: {}, block_required: true,
+                 environment: Rigor::Environment.new(rbs_loader: loader) }
+    picked = Rigor::Inference::MethodDispatcher::RbsDispatch
+             .send(:argument_distribution_matches, definition, nil, args, lists, selector)
+    expect(picked).to be_nil
+  end
+end

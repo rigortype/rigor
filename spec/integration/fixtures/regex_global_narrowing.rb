@@ -2680,6 +2680,11 @@ def match_block_project_receiver(str)
   MatchBlockTok2443.new.scan(/(x)/) { w = $1; w.upcase }
 end
 
+# Without a match in the frame, the project class's block reads no match either (Ruby: nil).
+def match_block_project_unbound
+  MatchBlockTok2443.new.scan(/(x)/) { assert_type("String?", $1) }
+end
+
 def match_block_project_gsub(str)
   return unless str =~ /(\d+)/
 

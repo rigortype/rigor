@@ -310,9 +310,7 @@ module Rigor
         # over rule-ID rows because they're more specific. A diagnostic that matches no row goes into a
         # synthetic "no-bucket" bin keyed by (file, rule).
         bins = {}
-        diagnostics.each do |diag|
-          next if diag.qualified_rule.nil? || diag.path.nil?
-
+        (diagnostics - self.class.unkeyable(diagnostics)).each do |diag|
           bucket = claim_bucket_for(diag)
           key = if bucket
                   [bucket.file, bucket.rule,

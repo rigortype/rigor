@@ -245,11 +245,24 @@ RSpec.describe Rigor::CLI::BaselineCommand do
       expect(err.lines.grep(%r{^  lib/}).size).to eq(10)
     end
 
-    it "does not advise excluding a file when a missing `paths:` entry has none to list" do
+    it "reports a missing `paths:` entry as a rule-less diagnostic that cannot be baselined" do
       File.write(File.join(tmpdir, ".rigor.yml"), "paths:\n  - lib\n  - nowhere\nlibraries:\n  - prism\n")
       _status, _out, err = run_cli("baseline", "generate", cwd: tmpdir)
       expect(err).to include("cannot be baselined")
       expect(err).to include("nowhere")
+    end
+
+    it "lists a file outside the working directory in the spelling the baseline YAML would key it" do
+      Dir.mktmpdir do |outside|
+        File.write(File.join(outside, "broken.rb"), "def (\n")
+        File.write(File.join(tmpdir, ".rigor.yml"), "paths:\n  - lib\n  - #{outside}\nlibraries:\n  - prism\n")
+        _status, _out, err = run_cli("baseline", "generate", cwd: tmpdir)
+        expected = Dir.chdir(tmpdir) do
+          Pathname.new(File.join(outside, "broken.rb")).relative_path_from(Pathname.new(Dir.pwd)).to_s
+        end
+        expect(expected).to start_with("../")
+        expect(err).to include("  #{expected}\n")
+      end
     end
 
     it "names diagnostics that have a rule but no path" do

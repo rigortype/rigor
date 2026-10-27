@@ -2624,6 +2624,15 @@ def match_block_groups(str)
   str.scan("x") { assert_type("String?", $1) }
 end
 
+# A typed receiver reads the same, its `nil` aside, since a `nil` receiver never runs the block; an extended-mode
+# pattern, whose comments the group walk could miscount, narrows no group (Ruby: `match_block_typed("a")` returns
+# "a").
+def match_block_typed(raw)
+  s = raw ? String(raw) : nil
+  s&.scan(/(a)/) { assert_type("String", $1) }
+  s.to_s.scan(/(a) # (b)/x) { assert_type("String?", $1) }
+end
+
 # The entry replaces a stale narrowing: on the `=~`'s falsey edge `$1` was nil, but the `gsub` block reads its own
 # group (Ruby: `match_block_stale_edge("ab cd")` returns "Ab Cd").
 def match_block_stale_edge(line)

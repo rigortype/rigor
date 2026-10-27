@@ -33,9 +33,22 @@ precedent, so `([Integer, Integer]) -> Symbol | (Array[Integer]) -> String` stil
 overload. `spec/rigor/inference/tuple_array_acceptance_spec.rb` pins the accepted cost: a declared
 `(Array[String]) -> [String, String]` returning its parameter is silent.
 
+The cost also withdraws #2296's "a known member that overlaps no slot still reports" for an Array of
+unknown length: a floored `Array[Dynamic[top] | Integer]` returned as `[String, String]` is now
+silent, because a `Dynamic` member is never rejected. `spec/integration/callee_block_mutation_floor_spec.rb`
+pins both flipped examples, and an `Array[String]` returned as `[Integer, Integer]` still reports. The
+`CheckRules::GradualTupleReturn` check that carried #2296's rule could no longer return true, so it is
+deleted; the `callee-block-mutation-floor` entry's mentions of it describe the rule as #2296 shipped it.
+
+In overload selection, pass 2's single-winner branch takes the first match that does not rest on the
+tuple's `maybe`, so an alias, interface or `untyped` competitor still wins over a tuple overload
+listed before it (the vendored redis `hmget(key, Array[String])` keeps `Array[String?]`).
+
 ## To undo
 
 Restore the unconditional `no` for a non-tuple in `Acceptance#accepts_tuple`, drop
-`array_element_verdict` and the `rests_on_unread_array?` arm of `maybe_rests_on_unread_shape?`, and
+`array_element_verdict`, the `rests_on_unread_array?` arm of `maybe_rests_on_unread_shape?` and
+`OverloadSelector#first_read_match`, restore the two flipped floor-spec expectations and
+`CheckRules::GradualTupleReturn`, and
 revert the tuple paragraphs in `docs/internal-spec/inference-engine.md` and
 `docs/type-specification/rbs-compatible-types.md`. Nothing else depends on it yet.

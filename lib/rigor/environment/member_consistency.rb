@@ -62,9 +62,6 @@ module Rigor
       # The key kinds {.member_keys} gives a variable member.
       VARIABLE_KINDS = %i[instance_variable class_instance_variable].freeze
 
-      # The key kinds {.member_keys} gives a mixin.
-      MIXIN_KINDS = %i[include extend prepend].freeze
-
       # What a disjointness proof may lean on (ADR-112 WD5, #1075): the RBS class hierarchy the analysis
       # itself uses, restricted to classes Ruby core and the stdlib declare. Never Ruby constants loaded in
       # the analyzer process — those depend on which libraries happen to be required, and rbs and Ruby
@@ -192,11 +189,6 @@ module Rigor
           when ::RBS::AST::Members::Prepend then [[mixin_key(member), :prepend]]
           else member_method_keys(member)
           end
-        end
-
-        # Whether a key `kind` names a mixin rather than a method or a variable.
-        def mixin_kind?(kind)
-          MIXIN_KINDS.include?(kind)
         end
 
         # Whether a key `kind` names a variable rather than a method.

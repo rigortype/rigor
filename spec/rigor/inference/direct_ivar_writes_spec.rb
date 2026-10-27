@@ -67,7 +67,7 @@ RSpec.describe Rigor::Inference::DirectIvarWrites do
   it "follows the callee's own self-calls, and stops past the def budget" do
     expect(writes("def clear = (@tag = nil)\n  def r = clear")).to eq(Set[:@tag])
     expect(writes("def clear = (@tag = nil)\n  def r = self.clear")).to eq(Set[:@tag])
-    chain = (1..8).map { |i| "def s#{i} = s#{i + 1}" }.join("\n") + "\ndef s9 = (@tag = nil)"
+    chain = [*(1..8).map { |i| "def s#{i} = s#{i + 1}" }, "def s9 = (@tag = nil)"].join("\n")
     expect(writes(chain, target: "s2")).to eq(Set[:@tag])
     expect(writes(chain, target: "s1")).to eq(Set[])
   end

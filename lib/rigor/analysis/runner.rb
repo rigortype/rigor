@@ -843,6 +843,8 @@ module Rigor
         Cache::FileDigest.with_run(strict: @configuration.cache_validation_strict?) do
           Inference::DefNodeResolver.with_run { evaluate_return_types_setup(paths, specs) }
         end
+      ensure
+        RunScopedSlots.release
       end
 
       # Builds the discovery index + environment (a real run's prologue, minus per-file analysis) and

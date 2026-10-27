@@ -14,6 +14,8 @@ module Rigor
   #
   # Only memo slots belong here. A slot a `with_*` frame installs and restores around a block is already empty
   # when the frame returns, and clearing it from inside a frame would break the frame.
+  #
+  # The registry is a module-level array filled at require time, so it is for the main Ractor only.
   module RunScopedSlots
     @keys = []
 

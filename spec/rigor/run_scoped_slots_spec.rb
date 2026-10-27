@@ -45,6 +45,48 @@ RSpec.describe Rigor::RunScopedSlots do
   end
   let(:configuration) { Rigor::Configuration.new(Rigor::Configuration::DEFAULTS.merge("paths" => [path])) }
 
+  # The per-thread keys `lib/` names that are deliberately not run-scoped, each with why. A frame slot is one a
+  # `with_*`-style block installs and restores on the way out, so it is already empty when the run's frame returns,
+  # and clearing it from inside a frame would break that frame.
+  let(:not_run_scoped) do
+    {
+      __rigor_acceptance_unread_hash_refused__: "frame flag, installed and restored around a block",
+      __rigor_declared_param_writer_scope__: "frame slot, installed and restored around a block",
+      __rigor_dependency_capture_stack__: "frame slot of the ADR-46 dependency recorder",
+      __rigor_dependency_recorder__: "frame slot of the ADR-46 dependency recorder",
+      __rigor_effects_collector__: "frame slot of the effects collector",
+      __rigor_flow_tracer__: "frame slot of the flow tracer",
+      __rigor_forwarded_call_arg_types__: "frame slot, installed and restored around a block",
+      __rigor_key_presence_guard: "frame slot of KeyPresenceGuard.with_guards",
+      __rigor_project_round__: "a Debouncer key in the language server, not a thread-local",
+      __rigor_reflective_ivar_write_repeating__: "frame depth counter, restored on the way out",
+      __rigor_self_call_resolution_recorder__: "frame slot of the self-call resolution recorder",
+      __rigor_threaded_block_body__: "frame flag, installed and restored around a block",
+      __rigor_user_method_inference_stack__: "ADR-55 guard stack, popped to empty by each frame",
+      __rigor_user_method_return_summary__: "ADR-55 state, cleared when the guard stack drains",
+      __rigor_user_method_summary_consult_depths__: "ADR-55 state, cleared when the guard stack drains",
+      __rigor_user_method_transient_event_depths__: "ADR-55 state, cleared when the guard stack drains",
+      __rigor_user_method_unroll_fuel__: "ADR-55 state, cleared when the guard stack drains",
+      __rigor_yield_value_type__: "frame slot, installed and restored around a block",
+      rigor_break_sink: "jump sink frame, installed and restored around a loop",
+      rigor_break_value_sink: "jump sink frame, installed and restored around a loop",
+      rigor_cache_file_digest_memo: "Cache::FileDigest.with_run frame",
+      rigor_cache_file_stat_memo: "Cache::FileDigest.with_run frame",
+      rigor_cache_recording_instant: "Cache::FileDigest.with_run frame",
+      rigor_cache_strict_validation: "Cache::FileDigest.with_run frame",
+      rigor_def_node_resolver_memo: "DefNodeResolver.with_run frame",
+      rigor_def_visibilities: "per-file scan state, cleared in the scanner's ensure",
+      rigor_guarded_defs: "per-file scan state, cleared in the scanner's ensure",
+      rigor_io_boundary_attribution: "thread-variable frame, installed and restored around a block",
+      rigor_next_sink: "jump sink frame, installed and restored around a block",
+      rigor_provisional_returns: "return sink frame, installed and restored around a body",
+      rigor_retry_frames: "frame stack of the enclosing `begin` / `retry` edges",
+      rigor_return_sink: "return sink frame, installed and restored around a body",
+      rigor_run_disclosure_attribution: "thread-variable frame, installed and restored around a block",
+      rigor_scope_index_unentered_evaluator: "frame slot, installed and restored around the index walk"
+    }
+  end
+
   after do
     FileUtils.remove_entry(tmpdir)
     loop_keys.each { |key| Thread.current[key] = nil }
@@ -140,6 +182,18 @@ RSpec.describe Rigor::RunScopedSlots do
     expect(hover.call).to eq(first)
   end
 
+  it "empties the slots when the incremental session's return-type probe ends" do
+    runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil)
+    allow(runner).to receive(:evaluate_return_types_setup) do
+      loop_keys.each { |key| Thread.current[key] = :filled }
+      {}
+    end
+
+    runner.evaluate_return_types([path], [{ class_name: "Looper", method_name: :id, singleton: false }])
+
+    expect(loop_keys.map { |key| Thread.current[key] }).to all(be_nil)
+  end
+
   it "empties the records when a run raises" do
     runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil)
     allow(runner).to receive(:run_analysis) do
@@ -160,6 +214,37 @@ RSpec.describe Rigor::RunScopedSlots do
 
     expect { generator.run }.to raise_error(RuntimeError, "boom")
     expect(loop_keys.map { |key| Thread.current[key] }).to all(be_nil)
+  end
+
+  # Every per-thread key `lib/` names: a `rigor` symbol read through `Thread.current[...]` or
+  # `thread_variable_get` / `_set`, directly or through a constant, and every `*_KEY` / `*MEMO*` constant holding
+  # one (a key passed on through a variable, as the RBS ancestor-dispatch memos are).
+  def thread_keys_in_lib
+    lib = File.expand_path("../../lib", __dir__)
+    Dir[File.join(lib, "**/*.rb")].each_with_object({}) do |path, keys|
+      source = File.read(path)
+      constants = {}
+      source.scan(/^\s*([A-Z][A-Z0-9_]*) = (?:RunScopedSlots\.register\()?:([a-z_]*rigor[a-z_]*)\)?$/) do |name, sym|
+        constants[name] = sym
+        keys[sym.to_sym] = path if name.end_with?("_KEY") || name.include?("MEMO")
+      end
+      access = /Thread\.current(?:\[|\.thread_variable_[gs]et\()\s*([A-Z][A-Z0-9_]*|:[a-z_]*rigor[a-z_]*)/
+      source.scan(access).flatten.each do |used|
+        sym = used.start_with?(":") ? used.delete_prefix(":") : constants[used]
+        keys[sym.to_sym] = path if sym
+      end
+    end
+  end
+
+  # A memo slot a new owner adds is caught here even when no fixture fills it.
+  it "registers every per-thread key in lib/ that is not a listed frame slot" do
+    keys = thread_keys_in_lib
+
+    unlisted = keys.keys - described_class.keys - not_run_scoped.keys
+    expect(unlisted.to_h { |key| [key, keys[key]] }).to be_empty
+    expect(described_class.keys - keys.keys).to be_empty
+    expect(not_run_scoped.keys - keys.keys).to be_empty
+    expect(not_run_scoped.keys & described_class.keys).to be_empty
   end
 
   it "registers a key once and hands it back" do

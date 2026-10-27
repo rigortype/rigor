@@ -368,4 +368,74 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(written).not_to include("MyHash")
     end
   end
+
+  # A rooted superclass names exactly one class. Ruby reads `class Sub2 < ::Hash` inside a `module Foo` that
+  # declares `Foo::Hash` as core's `Hash`, and the bare `< Hash` beside it as `Foo::Hash`.
+  describe "a rooted superclass token (#2459)" do
+    it "keeps the anchor past a namespace class of the same name, with the core class's type arguments" do
+      written = generate(
+        { "lib/foo.rb" => "module Foo\n  class Hash; def x = 1; end\n  class Sub2 < ::Hash; def y = 1; end\nend\n" },
+        name: "foo"
+      )
+
+      expect(written).to include("class Sub2 < ::Hash[untyped, untyped]\n    def y: () -> 1")
+      expect(validation_errors).to be_empty
+    end
+
+    it "declares an empty subclass of a rooted core class the nesting shadows" do
+      written = generate(
+        { "lib/bar.rb" => "module Bar\n  class Set; def x = 1; end\n  class Sub < ::Set; end\nend\n" },
+        name: "bar"
+      )
+
+      expect(written).to include("class Sub < ::Set[untyped]\n  end")
+      expect(validation_errors).to be_empty
+    end
+
+    # A guard (control): the unanchored token keeps #722's resolution, which the anchor work must not disturb.
+    it "still resolves an unanchored token against the nesting" do
+      written = generate(
+        { "lib/foo.rb" => "module Foo\n  class Hash; def x = 1; end\n  class Sub3 < Hash; def z = 1; end\nend\n" },
+        name: "foo"
+      )
+
+      expect(written).to include("class Sub3 < ::Foo::Hash\n")
+      expect(validation_errors).to be_empty
+    end
+
+    it "counts a rooted project superclass this run declares as resolvable" do
+      generate(
+        {
+          "lib/base.rb" => "module A\n  class Base\n    def b = 1\n  end\nend\n",
+          "lib/b.rb" => "module A\n  class B < ::A::Base\n    def c = 1\n  end\nend\n"
+        },
+        name: "base"
+      )
+
+      expect(File.read(File.join(tmpdir, "sig/b.rbs"))).to include("class B < ::A::Base\n")
+      expect(validation_errors).to be_empty
+    end
+
+    it "follows a rooted superclass when it demotes a base method an unsigned override shadows" do
+      written = generate(
+        {
+          "lib/lib.rb" => <<~RUBY
+            module Lib
+              class Base
+                def t(_x) = nil
+                def keep = 1
+              end
+              class Over < ::Lib::Base
+                def t(x) = x.foo
+              end
+            end
+          RUBY
+        },
+        name: "lib"
+      )
+
+      expect(written).to include("def keep: () -> 1")
+      expect(written).not_to include("def t:")
+    end
+  end
 end

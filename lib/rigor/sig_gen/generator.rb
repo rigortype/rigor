@@ -418,8 +418,8 @@ module Rigor
 
       # Everything this run declares, superclass or not: a chain that reaches `class Record` — emitted here, with no
       # superclass of its own — terminates in a class the next run WILL know. A class shell counts only when its
-      # file has a candidate the writer acts on: the writer writes no file without one, so a shell on a file whose
-      # every method is skipped, or already declared by `sig/`, never reaches disk (#2454).
+      # file has a candidate the writer is sure to write ({Writer.writes?}): a shell on a file whose every method is
+      # skipped, already declared by `sig/`, or a tighter return the writer will not apply never reaches disk (#2454).
       def declared_by_run(candidates)
         written_paths = candidates.each_with_object(Set.new) { |c, acc| acc << c.path if Writer.writes?(c) }
         candidates.each_with_object(Set.new) do |candidate, acc|

@@ -899,7 +899,7 @@ end
 class Hash[unchecked out K, unchecked out V]
   # `core_ext/hash/keys`
   def symbolize_keys: () -> Hash[Symbol, V]
-  def symbolize_keys!: () -> Hash[Symbol, V]
+  def symbolize_keys!: () -> self
   def deep_symbolize_keys: () -> Hash[untyped, untyped]
   def deep_symbolize_keys!: () -> Hash[untyped, untyped]
   def stringify_keys: () -> Hash[String, V]
@@ -913,7 +913,7 @@ class Hash[unchecked out K, unchecked out V]
   def deep_transform_values!: () { (V) -> untyped } -> Hash[K, untyped]
   # `alias_method`s of `symbolize_keys` / `symbolize_keys!`.
   def to_options: () -> Hash[Symbol, V]
-  def to_options!: () -> Hash[Symbol, V]
+  def to_options!: () -> self
 
   # `core_ext/hash/deep_dup`
   def deep_dup: () -> Hash[K, V]

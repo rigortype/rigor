@@ -1566,8 +1566,10 @@ class Hash[unchecked out K, unchecked out V]
   # mutating (raising is not an effect label).
   %a{pure}
   def symbolize_keys: () -> Hash[Symbol, V]
-  # The bang forms answer the receiver, re-keyed: `-> self` kept the receiver's old key type (#2424 review).
-  def symbolize_keys!: () -> Hash[Symbol, V]
+  # `symbolize_keys!` keeps `-> self`: `key.to_sym rescue key` leaves a key without `to_sym` as it is, so
+  # `Hash[Symbol, V]` is wrong for an Integer-keyed receiver (#2424 review). The other bang forms below
+  # answer the re-keyed or re-valued hash.
+  def symbolize_keys!: () -> self
   %a{pure}
   def deep_symbolize_keys: () -> Hash[untyped, untyped]
   def deep_symbolize_keys!: () -> Hash[untyped, untyped]
@@ -1590,7 +1592,7 @@ class Hash[unchecked out K, unchecked out V]
   # `alias_method`s of `symbolize_keys` / `symbolize_keys!`.
   %a{pure}
   def to_options: () -> Hash[Symbol, V]
-  def to_options!: () -> Hash[Symbol, V]
+  def to_options!: () -> self
 
   # `core_ext/hash/deep_dup` — allocates a deep copy, never touches the
   # receiver. NOT `%a{pure}`: it calls `deep_dup` on every value, and on

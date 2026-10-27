@@ -445,7 +445,6 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
         Rigor.dump_type({ a: 1 }.deep_transform_keys(&:to_s))
         Rigor.dump_type({ a: 1 }.deep_transform_keys!(&:to_s))
         Rigor.dump_type({ a: 1 }.deep_transform_values!(&:to_s))
-        Rigor.dump_type({ "a" => 1 }.symbolize_keys!)
         Rigor.dump_type({ a: 1 }.stringify_keys!)
         Rigor.dump_type({ "a" => 1 }.deep_symbolize_keys!)
       RUBY
@@ -454,9 +453,21 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
       expect(result.diagnostics.map(&:qualified_rule).grep(/\Acall\./)).to be_empty
       expect(dumps(result)).to eq(
         ["Hash[:a | Dynamic[top], Dynamic[top]]", "Hash[:a | Dynamic[top], Dynamic[top]]", 'Hash["a", Dynamic[top]]',
-         'Hash["a", Dynamic[top]]', "Hash[:a, Dynamic[top]]", "Hash[Symbol, 1]", "Hash[String, 1]",
+         'Hash["a", Dynamic[top]]', "Hash[:a, Dynamic[top]]", "Hash[String, 1]",
          "Hash[Dynamic[top], Dynamic[top]]"]
       )
+    end
+
+    # Review of #2424: `symbolize_keys!` keeps a key without `to_sym` (`key.to_sym rescue key`), so its row
+    # stays `-> self`; `Hash[Symbol, V]` read an Integer key as a Symbol.
+    it "keeps an Integer key's type through symbolize_keys! and to_options!" do
+      source = <<~RUBY
+        h = { 1 => 2 }
+        h.symbolize_keys!.keys.first + 1
+        h.to_options!.keys.first + 1
+      RUBY
+
+      expect(run_plugin(source: source).diagnostics.map(&:qualified_rule).grep(/\Acall\./)).to be_empty
     end
 
     it "still witnesses a genuinely undefined method on a Range, a Hash and an Array receiver" do

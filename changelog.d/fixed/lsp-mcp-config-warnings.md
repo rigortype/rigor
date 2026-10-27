@@ -1,0 +1,3 @@
+- **[editor]** The language server and the MCP tools now report configuration warnings, which only `rigor check` and `rigor doctor` showed before. ([#2456](https://github.com/rigortype/rigor/pull/2456))
+  - `rigor lsp` shows each warning as a `window/showMessage` warning when the editor connects, and again after a save only when re-reading `.rigor.yml` changed the warnings. A top-level `undefined-method: "off"` or a `disable:` token that names no rule is now named in the editor instead of leaving the rule firing without explanation.
+  - Every `rigor mcp` tool that takes a `config` argument appends a `{"config_warnings": [...]}` content block in the shape `rigor check --format json` uses; `rigor_check` keeps carrying them in its own document.

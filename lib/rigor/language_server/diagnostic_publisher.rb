@@ -4,6 +4,7 @@ require "tempfile"
 
 require_relative "uri"
 require_relative "publish_batcher"
+require_relative "config_warning_announcer"
 require_relative "../analysis/runner"
 require_relative "../analysis/buffer_binding"
 
@@ -19,7 +20,7 @@ module Rigor
     # buffers' debounce timers elapse around the same moment, the `PublishBatcher` coalesces them into one
     # `#publish_many` round dispatched across the fork-based worker pool (issue #142) instead of N
     # independent, GVL-serialized `Runner` calls.
-    class DiagnosticPublisher
+    class DiagnosticPublisher # rubocop:disable Metrics/ClassLength
       # Maps Rigor severity symbols to LSP DiagnosticSeverity
       # integers per spec § "Diagnostic":
       #   1 = Error, 2 = Warning, 3 = Information, 4 = Hint.
@@ -51,6 +52,7 @@ module Rigor
         @project_context = project_context
         @debouncer = debouncer
         @debounce_seconds = debounce_seconds
+        @config_warning_announcer = ConfigWarningAnnouncer.new(writer: writer, project_context: project_context)
         @round_lock = Mutex.new
         @round_running = false
         @round_pending = false
@@ -130,6 +132,9 @@ module Rigor
         notify(uri, [])
       end
 
+      # Issue #2231 — shows the configuration warnings the editor has not seen yet ({ConfigWarningAnnouncer}).
+      def announce_config_warnings = @config_warning_announcer.announce
+
       # Cancels every in-flight debounced task. Called from `Server#handle_shutdown` so pending publishes
       # don't fire against a closed STDOUT.
       def cancel_pending
@@ -184,6 +189,7 @@ module Rigor
       def execute_project_round(saved_uri)
         generation = @project_context.generation
         diagnostics = @project_context.project_diagnostics
+        announce_config_warnings # the round re-read the configuration; the reload stands even if the result does not
         return if generation != @project_context.generation
 
         by_path = diagnostics.group_by(&:path)

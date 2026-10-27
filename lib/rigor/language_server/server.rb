@@ -194,7 +194,12 @@ module Rigor
 
       # `initialized` is a notification — no response body. Nothing is registered here yet: the server handles
       # `workspace/didChangeWatchedFiles` when a client sends it, but does not register for it dynamically.
+      #
+      # Issue #2231 — the configuration the server started with is audited here, the first point at which the
+      # client is listening, so a `.rigor.yml` key that does nothing is named in the editor as `rigor check`
+      # names it on STDERR.
       def handle_initialized
+        @publisher&.announce_config_warnings
         nil
       end
 

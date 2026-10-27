@@ -12,6 +12,7 @@ require_relative "match_rebinding/frame"
 require_relative "match_rebinding/operands"
 require_relative "match_rebinding/calls"
 require_relative "match_rebinding/self_calls"
+require_relative "match_rebinding/yielding_match"
 require_relative "last_line"
 
 module Rigor
@@ -367,17 +368,49 @@ module Rigor
       #
       # Issue #1429 — the entry also restores a guard's narrowing of a global or constant where the body may run after
       # code that rebinds it ({GuardRebinding.block_entry}).
+      #
+      # Issue #1371 — a proc's body ({.proc_body?}) runs whenever the proc is called, not where it is written, so it
+      # enters with the match globals unbound. Issue #2443 — the block of a call that matches before every yield (`scan`, `gsub`,
+      # `sub`, …) enters with that call's own match edge, laid over the entry above ({YieldingMatch}); a match its
+      # body runs still rebinds them through the statement-level rules.
       def block_entry(scope, block_node, call_node = nil)
+        operand_scope = scope
         scope = GuardRebinding.block_entry(scope, block_node, call_node)
         return FreshFrameBlocks.entry(scope, call_node) if FreshFrameBlocks.fresh_entry?(call_node, scope)
 
         scope = FreshFrameBlocks.closure_entry(scope, block_node, call_node)
         scope = LastLine.block_entry(scope, block_node, call_node)
+        YieldingMatch.entry(frame_entry(scope, block_node, call_node), block_node, call_node, operand_scope)
+      end
+
+      def frame_entry(scope, block_node, call_node)
         return scope unless scope.match_globals_bound?
+        return scope.forget_match_globals if proc_body?(block_node, call_node, scope)
         return scope unless scope.match_rebinding_closure? || entry_may_match?(block_node.body, scope, call_node) ||
                             (call_node.is_a?(Prism::CallNode) && operands_may_rebind?(call_node, scope))
 
         scope.forget_match_globals
+      end
+
+      # True when `block_node` is the body of a proc made where it is written: a lambda literal, or the block of
+      # Kernel's `lambda` / `proc` or the core `Proc.new`. The other calls that keep their block
+      # ({StoredBlockCall}) are a definer's or a root's ({FreshFrameBlocks}), or run it on a schedule of their own
+      # (`Enumerator.new`, `Hash.new`), and keep the frame-wide entry.
+      def proc_body?(block_node, call_node, scope)
+        return true if block_node.is_a?(Prism::LambdaNode)
+        return false unless call_node.is_a?(Prism::CallNode) && call_node.block.equal?(block_node)
+
+        receiver = call_node.receiver
+        case call_node.name
+        when :lambda, :proc then StoredBlockCall.kernel_spelled?(receiver)
+        when :new then StoredBlockCall.root_constant_name(receiver) == :Proc && core_proc?(receiver, scope)
+        else false
+        end
+      end
+
+      def core_proc?(receiver, scope)
+        type = scope.type_of(receiver)
+        type.is_a?(Type::Singleton) && type.class_name == "Proc"
       end
 
       def entry_may_match?(body, scope, call_node)
@@ -386,7 +419,7 @@ module Rigor
 
         body.is_a?(Prism::Node) && scan(body, scope, base: true)
       end
-      private_class_method :entry_may_match?
+      private_class_method :frame_entry, :proc_body?, :core_proc?, :entry_may_match?
     end
   end
 end

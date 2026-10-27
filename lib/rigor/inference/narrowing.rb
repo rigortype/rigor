@@ -608,6 +608,27 @@ module Rigor
         truthy
       end
 
+      # Issue #2443 — the match edge of a call that yields only after it has matched `pattern_node` in the caller's
+      # frame ({MatchRebinding::YieldingMatch}), on `=~`'s terms: `$~` a `MatchData`, `$&` and the pre- and post-match
+      # a `String`, and, when the pattern is a regex the analyzer reads (a literal or a `Constant[Regexp]`, not
+      # `//x`), each unconditional group's `$N` and `$+` a `String`. Any other pattern — a String, an untyped value —
+      # leaves the groups unbound, so they read the RBS `String?`.
+      def yielded_match_scope(scope, pattern_node)
+        pattern = regex_operand_pattern(pattern_node, scope)
+        unconditional =
+          pattern.is_a?(RegexMatchPattern) && !pattern.extended ? unconditional_capture_groups(pattern.source) : Set.new
+        truthy, = regex_match_predicate_scopes(scope, unconditional)
+        truthy
+      end
+
+      # Issue #2443 — true when every member of `type` is a String (a project subclass included) or a `Dynamic` that
+      # is untyped or may hold only Strings, Symbols and nil ({#match_member_kind}). A `nil` member never runs the
+      # block, so it counts neither way.
+      def string_match_receiver?(type, scope)
+        kinds = match_member_kinds(type, scope) - [:nil]
+        !kinds.empty? && kinds.all? { |kind| %i[string string_subclass dynamic].include?(kind) }
+      end
+
       # Internal analyser. Returns `[truthy_scope, falsey_scope]` when the predicate shape is
       # recognised, or `nil` to signal "no narrowing" so the public surface can fall back to the
       # entry scope. Issue #1359 — a condition whose value is a `gets`-family reader's, the bare call

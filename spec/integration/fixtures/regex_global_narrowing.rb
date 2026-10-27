@@ -2583,4 +2583,102 @@ def numbered_kept_without_intervening_call(s)
   end
 end
 
+
+# Issue #2443 — `scan`, `gsub`, `gsub!`, `sub` and `sub!` set the caller's `$~` to the current match before every
+# yield, with a Regexp or a String pattern, so their block reads a `MatchData` whatever the frame held. erubi's
+# idiom: an untyped receiver and an untyped pattern (Ruby: `match_block_erubi("a<%x%>", /<%(.*?)%>/)` and
+# `match_block_methods(+"axa")` run without a nil receiver).
+def match_block_erubi(input, regexp)
+  pos = 0
+  input.scan(regexp) do |_code|
+    match = Regexp.last_match
+    len = match.begin(0) - pos
+    pos = match.end(0)
+    assert_type("MatchData", Regexp.last_match)
+    assert_type("Integer", len)
+  end
+end
+
+def match_block_methods(str)
+  str.gsub(/x/) { m = Regexp.last_match; m.begin(0).to_s }
+  str.gsub("x") { m = Regexp.last_match; m.begin(0).to_s }
+  str.sub(/x/) { m = Regexp.last_match; m.end(0).to_s }
+  str.sub("x") { assert_type("String", $&); $~.pre_match }
+  str.gsub!(/x/) { m = Regexp.last_match; m.end(0).to_s }
+  str.sub!("x") { m = Regexp.last_match; m.end(0).to_s }
+  str&.scan(/x/) { assert_type("MatchData", $~) }
+end
+
+# Each unconditional group's `$N` reads `String`; an optional group's, and any group of a String pattern, keep the
+# RBS `String?` (Ruby: `"ab".scan(/(\w)(\d)?/) { p $2 }` prints nil).
+def match_block_groups(str)
+  str.scan(/(\w)(\d)?/) do
+    first = $1
+    second = $2
+    assert_type("String", first)
+    assert_type("String?", second)
+    assert_type("String", Regexp.last_match(1))
+    first.upcase
+    second.upcase # GENUINE-NIL
+  end
+  str.scan("x") { assert_type("String?", $1) }
+end
+
+# The entry replaces a stale narrowing: on the `=~`'s falsey edge `$1` was nil, but the `gsub` block reads its own
+# group (Ruby: `match_block_stale_edge("ab cd")` returns "Ab Cd").
+def match_block_stale_edge(line)
+  return if line =~ /^(#)/
+
+  line.gsub(/(\w+)/) { w = $1; w.capitalize }
+end
+
+# Control: a match the body runs rebinds `$~` past the entry (Ruby: nil after the failed match).
+def match_block_body_rebinds(str)
+  str.scan(/x/) do
+    "zz" =~ /q/
+    m = Regexp.last_match
+    m.begin(0) # GENUINE-NIL
+  end
+end
+
+# Control: outside any match `Regexp.last_match` stays nilable, and a plain iterator with no match keeps the
+# enclosing narrowing (#1358).
+def match_block_outside(str, items)
+  m = Regexp.last_match
+  m.begin(0) # GENUINE-NIL
+  return unless str =~ /(\d+)/
+
+  items.each { assert_type("String", $1) }
+end
+
+# A receiver known to be something else than a String runs a method of its own, and its block enters with the match
+# globals unbound rather than narrowed from either frame.
+class MatchBlockScanner2443
+  def scan(_pattern) = yield
+end
+
+def match_block_other_receiver(str)
+  return unless str =~ /(\d+)/
+
+  MatchBlockScanner2443.new.scan(/(x)/) { assert_type("String?", $1) }
+end
+
+# Issue #1371 — a proc's body runs when the proc is called, after any match in between, so it enters with the match
+# globals unbound (Ruby: `match_block_lambda("a1", "zy")` returns nil).
+def match_block_lambda(str, other)
+  f = nil
+  f = -> { assert_type("String?", $1) } if str =~ /(\d+)/
+  other =~ /(x)?y/
+  f&.call
+end
+
+def match_block_procs(str)
+  return unless str =~ /(\d+)/
+
+  lambda { assert_type("String?", $1) }
+  proc { assert_type("String?", $1) }
+  g = Proc.new { w = $1; w.upcase } # GENUINE-NIL
+  g
+end
+
 # rubocop:enable Style/PerlBackrefs

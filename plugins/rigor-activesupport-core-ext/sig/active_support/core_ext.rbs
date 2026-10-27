@@ -1565,7 +1565,9 @@ class Hash[unchecked out K, unchecked out V]
   # non-bang half is `%a{pure}`. `assert_valid_keys` raises rather than
   # mutating (raising is not an effect label).
   %a{pure}
-  def symbolize_keys: () -> Hash[Symbol, V]
+  # `key.to_sym rescue key` keeps a key without `to_sym`, so no one key type is right: `Hash[untyped, V]` here,
+  # and the plugin's `dynamic_return` hook (#2433) maps each key member where it can.
+  def symbolize_keys: () -> Hash[untyped, V]
   # `symbolize_keys!` keeps `-> self`: `key.to_sym rescue key` leaves a key without `to_sym` as it is, so
   # `Hash[Symbol, V]` is wrong for an Integer-keyed receiver (#2424 review). The other bang forms below
   # answer the re-keyed or re-valued hash.
@@ -1591,7 +1593,7 @@ class Hash[unchecked out K, unchecked out V]
   def deep_transform_values!: () { (V) -> untyped } -> Hash[K, untyped]
   # `alias_method`s of `symbolize_keys` / `symbolize_keys!`.
   %a{pure}
-  def to_options: () -> Hash[Symbol, V]
+  def to_options: () -> Hash[untyped, V]
   def to_options!: () -> self
 
   # `core_ext/hash/deep_dup` — allocates a deep copy, never touches the

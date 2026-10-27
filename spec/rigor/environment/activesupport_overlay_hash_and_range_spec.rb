@@ -70,6 +70,20 @@ RSpec.describe "ADR-72 ActiveSupport overlay — deep_dup, the Hash aliases and 
     expect(dumps(result)).to eq(["Array[Array[Integer]]", "String", "Object", "Hash[:a, 1]"])
   end
 
+  # #2433: without the plugin's `dynamic_return` hook the non-bang rows answer `Hash[untyped, V]`, since
+  # `key.to_sym rescue key` leaves a key without `to_sym` as it is.
+  it "reads symbolize_keys and to_options with an untyped key, so an Integer key is not claimed a Symbol" do
+    result = run_source(<<~RUBY)
+      Rigor.dump_type({ "a" => 1 }.symbolize_keys)
+      h = { 1 => 2 }
+      Rigor.dump_type(h.to_options)
+      h.symbolize_keys.keys.first + 1
+    RUBY
+
+    expect(call_rules(result)).to be_empty
+    expect(dumps(result)).to eq(["Hash[Dynamic[top], 1]", "Hash[Dynamic[top], 2]"])
+  end
+
   # Review of #2424: `symbolize_keys!` keeps a key without `to_sym` (`key.to_sym rescue key`), so its row
   # stays `-> self`; `Hash[Symbol, V]` read an Integer key as a Symbol.
   it "keeps an Integer key's type through symbolize_keys! and to_options!" do
@@ -96,7 +110,7 @@ RSpec.describe "ADR-72 ActiveSupport overlay — deep_dup, the Hash aliases and 
 
     expect(call_rules(result)).to be_empty
     expect(dumps(result)).to eq(
-      ["Hash[Symbol, 1]", "Hash[String, Integer]", "Hash[String, Integer]", "Hash[String, Integer]",
+      ["Hash[Dynamic[top], 1]", "Hash[String, Integer]", "Hash[String, Integer]", "Hash[String, Integer]",
        'Hash["a", 1]', "bool", "Dynamic[top]"]
     )
   end

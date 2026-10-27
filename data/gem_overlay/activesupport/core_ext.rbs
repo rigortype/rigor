@@ -898,7 +898,9 @@ end
 
 class Hash[unchecked out K, unchecked out V]
   # `core_ext/hash/keys`
-  def symbolize_keys: () -> Hash[Symbol, V]
+  # `key.to_sym rescue key` keeps a key without `to_sym`, so no one key type is right: `Hash[untyped, V]` here,
+  # and with the plugin `dynamic_return` hook (#2433) maps each key member where it can.
+  def symbolize_keys: () -> Hash[untyped, V]
   def symbolize_keys!: () -> self
   def deep_symbolize_keys: () -> Hash[untyped, untyped]
   def deep_symbolize_keys!: () -> Hash[untyped, untyped]
@@ -912,7 +914,7 @@ class Hash[unchecked out K, unchecked out V]
   def deep_transform_values: () { (V) -> untyped } -> Hash[K, untyped]
   def deep_transform_values!: () { (V) -> untyped } -> Hash[K, untyped]
   # `alias_method`s of `symbolize_keys` / `symbolize_keys!`.
-  def to_options: () -> Hash[Symbol, V]
+  def to_options: () -> Hash[untyped, V]
   def to_options!: () -> self
 
   # `core_ext/hash/deep_dup`

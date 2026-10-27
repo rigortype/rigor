@@ -1,0 +1,3 @@
+- **[plugin]** `Hash#symbolize_keys` and `#to_options` no longer read an Integer key as a Symbol, so `hash.symbolize_keys.keys.first + 1` over `Hash[Integer, Integer]` stops reporting `undefined method '+' for Symbol`. ([#2450](https://github.com/rigortype/rigor/pull/2450))
+  - With `rigor-activesupport-core-ext`, a String or Symbol key becomes `Symbol` and any other key reads `untyped`, so `Hash[String, Integer]` still gives `Hash[Symbol, Integer]`.
+  - On the activesupport overlay alone, the key reads `untyped`.

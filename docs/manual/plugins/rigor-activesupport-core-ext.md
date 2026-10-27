@@ -33,13 +33,15 @@ path, no vendoring, no `signature_paths:` wiring.
 > never double-declare.
 
 If the project also runs `rbs collection install` for `activesupport`,
-or declares a core extension in its own `sig/` or inline RBS, some
-methods are declared twice — `Object#acts_like?`, `Integer#ordinalize`,
-`Time#to_fs` among them. For each such method the plugin's declaration
-stands down and yours is used; the rest of the plugin still loads. The
-run reports one `rbs.coverage.plugin-signature-stood-down` info row
-for the plugin's file, naming the methods that stood down and the file
-whose declaration is used for each.
+some methods are declared twice — `Object#acts_like?`,
+`Object#html_safe?`, `Time#to_fs` among them. Rigor merges the two:
+the plugin's signatures are tried first and the collection's still
+apply, so a call either one accepts type-checks. When your own `sig/`
+or inline RBS declares one of the plugin's methods, yours is used
+instead and the plugin's stands down; the run reports one
+`rbs.coverage.plugin-signature-stood-down` info row for the plugin's
+file, naming those methods and the file whose declaration is used for
+each.
 
 ## What it covers
 

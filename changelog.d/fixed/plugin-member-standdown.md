@@ -1,4 +1,5 @@
-- **[rbs]** A bundled plugin's signature no longer breaks every class under `Object` when an `rbs collection install`, your own `sig/` or inline RBS declares one of the same methods. ([#2424](https://github.com/rigortype/rigor/pull/2424))
+- **[rbs]** A bundled plugin's signature no longer breaks every class under `Object` when an `rbs collection install`, your own `sig/` or inline RBS declares one of the same methods or constants. ([#2424](https://github.com/rigortype/rigor/pull/2424))
   - For example, `rigor-activesupport-core-ext` beside an activesupport collection declaring `Object#acts_like?` drew false `possible nil receiver` errors on `nil?` and `present?` and hid real `undefined method` errors.
-  - The plugin's declaration of each such method stands down and yours is used; the rest of the plugin's signatures still load.
-  - One `rbs.coverage.plugin-signature-stood-down` info row per plugin file names the methods that stood down and the file used for each.
+  - A method the plugin and a collection or gem both declare now takes both signatures, the plugin's first, so a call either accepts type-checks.
+  - A method your own `sig/` or inline RBS declares uses yours, and the plugin's stands down; so does a constant another source already declares, without losing the rest of the plugin's signatures.
+  - One `rbs.coverage.plugin-signature-stood-down` info row per plugin file names what stood down and the file used instead.

@@ -317,13 +317,18 @@ module Rigor
       # A `rewritten_element` answers first for the carriers {RewriteMutation.typed} types (issue #2427).
       def widen_for_mutator(type, method_name, values: :widen, arg_types: NO_ARG_TYPES, unread_arguments: false,
                             rewritten_element: nil)
+        typed = rewritten_element && type && RewriteMutation.typed(type, method_name, rewritten_element)
+        return typed == type ? nil : typed if typed
+
+        widen_carrier(type, method_name, values:, arg_types:, unread_arguments:, rewritten_element:)
+      end
+
+      # {#widen_for_mutator} for a carrier no typed element rewrite answered.
+      def widen_carrier(type, method_name, values:, arg_types:, unread_arguments:, rewritten_element:)
         values = :keep unless VALUE_REWRITING_MUTATORS.include?(method_name)
         values = RewriteMutation.values_mode(type, method_name, values)
 
         return nil if type.nil?
-        typed = rewritten_element && RewriteMutation.typed(type, method_name, rewritten_element)
-        return typed == type ? nil : typed if typed
-
         return SetMutation.widen(type, method_name, arg_types, unread_arguments:) if SetMutation.set?(type)
 
         case type

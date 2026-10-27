@@ -100,4 +100,67 @@ RSpec.describe "A tuple parameter against an Array argument", type: :runner do
       end
     RUBY
   end
+
+  # Issue #2428 round 2 — pass 1 declines when a competing overload's parameter is an alias, an interface or
+  # `untyped`, and pass 2 then took the tuple overload by list position on its `maybe`. Pass 2 now takes the first
+  # match that does not rest on that `maybe`.
+  describe "in the gradual overload pass" do
+    let(:gradual_sig) do
+      { "g.rbs" => <<~RBS }
+        interface _MyEach[T]
+          def each: () { (T) -> void } -> void
+        end
+        class G
+          def self.i: ([String, String]) -> Symbol
+                    | (_MyEach[String]) -> String
+          def self.al: ([Integer, Integer]) -> Symbol
+                     | (array[Integer]) -> String
+          def self.u: ([Integer, Integer]) -> Symbol
+                    | (untyped) -> String
+          def self.gen: [A, B] ([A, B]) -> A
+                      | [X] (array[X]) -> String
+          def self.probe: (Array[String], Array[Integer]) -> void
+        end
+      RBS
+    end
+
+    it "takes the overload the Array matches without the tuple's maybe" do
+      expect(rules(<<~RUBY, sig: gradual_sig)).to be_empty
+        require "rigor/testing"
+        include Rigor::Testing
+
+        class G
+          def self.probe(s, a)
+            assert_type("String", G.i(s))
+            assert_type("String", G.al(a))
+            assert_type("String", G.u(a))
+            assert_type("String", G.gen(a))
+            assert_type("Symbol", G.u([1, 2]))
+            nil
+          end
+        end
+      RUBY
+    end
+
+    # The vendored redis signature declares `hmget: (arg, [arg]) -> [String?]` before
+    # `(arg, Array[arg]) -> Array[String?]`. Reading the first folded `vals.size` to `1` and reported
+    # `vals.size == 2` as always falsey.
+    it "types redis hmget with an Array of fields by its Array overload" do
+      expect(rules(<<~RUBY, sig: { "f.rbs" => "class F\n  def go: (Array[String]) -> Symbol?\nend\n" })).to be_empty
+        require "redis"
+        require "rigor/testing"
+        include Rigor::Testing
+
+        class F
+          def go(fields)
+            vals = Redis.new.hmget("k", fields)
+            assert_type("Array[String?]", vals)
+            return :two if vals.size == 2
+
+            nil
+          end
+        end
+      RUBY
+    end
+  end
 end

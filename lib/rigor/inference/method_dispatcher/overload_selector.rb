@@ -231,11 +231,25 @@ module Rigor
             # and the dispatch layer unions their returns (#521).
             matches = find_matching_overload(overloads, shared, strict: false)
             every_match = gradual || ImpreciseArgument.any_in?(shared[:arg_types], shared[:keywords_last])
-            return matches.first(1) unless every_match
+            return [first_read_match(matches, shared)] if !every_match && matches.size > 1
+            return matches unless every_match
 
             # Issue #1675 — and every overload the arguments' untyped parts reach on their own, after the
             # whole-argument matches so the singular `select` keeps its answer.
             ImpreciseArgument.with_stand_ins(matches, shared) { find_matching_overload(overloads, it, strict: false) }
+          end
+
+          # Issue #2428 — the single winner of pass 2 is the first match that does not rest on a tuple's `maybe` for
+          # an `Array` of unknown arity, when there is one. Pass 1 declines a strict overload against a competitor
+          # whose parameter is an alias, an interface or `untyped`, and taking the tuple overload by list position
+          # then typed redis's `hmget(key, Array[String])` as `[String?]`, where its `(arg, Array[arg])` overload
+          # says `Array[String?]`. Only the tuple's `maybe` is re-asked; a record's `maybe` for an unread hash keeps
+          # its documented gradual-pass answer.
+          def first_read_match(matches, shared)
+            first = matches.first
+            return first unless Acceptance.unread_array_in?(shared[:arg_types])
+
+            matches.find { |method_type| Acceptance.refusing_unread_arrays { matches?(method_type, shared) } } || first
           end
 
           # Pass 0. With every argument a plain value (a `Constant`, or a `Nominal` with no type arguments), the

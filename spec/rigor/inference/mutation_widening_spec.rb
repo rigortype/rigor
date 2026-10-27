@@ -488,12 +488,14 @@ RSpec.describe Rigor::Inference::MutationWidening do
                                                         Rigor::Type::Combinator.untyped)
     end
 
-    # The must-not-widen control, and the reason the re-join is gated at all: a PRECISE nominal's
-    # element set is a claim a declaration made (haml's `-> Array[:multi]`), not this seam's own
-    # residue, and growing it is the #561 `def.return-type-mismatch` blast radius.
-    it "declines a precise nominal carrier" do
+    # Issue #2361 — a PRECISE nominal re-grows, but its value-pinned members keep the #561 gate: a
+    # store foreign to haml's declared `-> Array[:multi]` joins as the gradual floor, never as a
+    # class the declaration rejects.
+    it "re-grows a precise nominal carrier, flooring a member its pinned seed does not admit" do
       declared = Rigor::Type::Combinator.nominal_of("Array", type_args: [constant(:multi)])
-      expect(described_class.widen_for_mutator(declared, :push, arg_types: [constant("s")])).to be_nil
+      widened = described_class.widen_for_mutator(declared, :push, arg_types: [constant("s")])
+      expect(widened.type_args.first).to eq(Rigor::Type::Combinator.union(constant(:multi),
+                                                                          Rigor::Type::Combinator.untyped))
     end
 
     # …and a non-adder on an open carrier changes nothing, so it must not rebind the binding at all.

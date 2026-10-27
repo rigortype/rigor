@@ -2779,8 +2779,9 @@ RSpec.describe "block-return scope threading", type: :runner do
       end
 
       it "floors a captured precise nominal the body appends to" do
-        # `Array[String]` is a claim the widening may not grow, so it declines and the name stays unanswered.
-        expect(dumped_type(<<~RUBY)).to eq("[#{(['Dynamic[top]'] * 9).join(', ')}]")
+        # Issue #2361 — the widening re-grows a precise `Array[String]` with the store, which the body types through
+        # its gradual arm; it used to decline, and the name stayed unanswered (`Dynamic[top]`).
+        expect(dumped_type(<<~RUBY)).to eq("[#{(['Dynamic[top] | String'] * 9).join(', ')}]")
           ks = ENV.keys
           dump_type([1, 2, 3, 4, 5, 6, 7, 8, 9].map do |e|
             ks << e
@@ -3591,9 +3592,10 @@ RSpec.describe "block-return scope threading", type: :runner do
         RUBY
       end
 
-      it "keeps a precise nominal Array whose widening declines" do
-        # `Array[String]` is a claim the widening may not grow, so the threaded body keeps it as well.
-        expect(dumped_type(<<~RUBY)).to eq("Array[String]")
+      it "re-grows a precise nominal Array with a store reading a local the body writes" do
+        # Issue #2361 — the precise `Array[String]` re-grows with the store. `w` is written in the body, so the threaded
+        # pass reads the store as `Dynamic[top]`, and the tail answers the carrier with that arm.
+        expect(dumped_type(<<~RUBY)).to eq("Array[Dynamic[top] | String]")
           m = Mutex.new
           v = 1
           ks = ENV.keys

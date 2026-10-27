@@ -32,6 +32,7 @@ module Rigor
       # carrier does not rebind the binding at all: a rebind drops the per-slot narrowings `with_local`
       # keys to the old value, and paying that for an identical type is a straight loss.
       def widen_nominal(nominal, method_name, values: :widen, arg_types: MutationWidening::NO_ARG_TYPES)
+        return widen_precise_array(nominal, method_name, values:, arg_types:) if precise_array?(nominal)
         return nil unless regrowable_carrier?(nominal)
 
         pre_state = values == :widen ? value_pin_widened_args(nominal) : nominal
@@ -126,6 +127,91 @@ module Rigor
 
       def gradual_parameter?(type)
         ContentJoin.union_members(type).any?(Type::Dynamic)
+      end
+
+      # A typed `Array[E]` whose `E` has no `Dynamic` arm — the carrier {#regrowable_carrier?} refuses.
+      def precise_array?(nominal)
+        nominal.class_name == "Array" && nominal.type_args.size == 1 && !gradual_parameter?(nominal.type_args.first)
+      end
+
+      # Issue #2361 — a PRECISE `Array[E]` re-grows under a store, on the literal arms' terms: `a = ARGV.dup;
+      # a.clear; a << 1; a.each { |v| v.fdiv(2) }` read `Array[String]` and reported `undefined method 'fdiv' for
+      # String` on code that prints `[0.5]`.
+      #
+      # Only a content adder ({ContentJoin::ARRAY_CONTENT_ADDERS}) re-grows it, and the join keeps the seed: `clear`
+      # empties the array but leaves `E` standing, a superset of what it holds. A rewriter (`map!`, `flatten!`) and a
+      # remover leave the carrier as they found it.
+      #
+      # Each added member the element accepts joins as itself; any other takes the `Dynamic[top]` floor
+      # ({#precise_admitted}), and the floor joins every re-grow as it does on the literal arms. `a << 1` therefore
+      # reads `Array[Dynamic[top] | String]` and `s = ints.map { "x" }; s << "y"` reads `Array["x" | Dynamic[top]]`.
+      # Nothing narrows a carrier back when a remover or rewriter takes the store out again (`a << 1; a.pop`,
+      # `a << nil; a.compact!`, `a.map!(&:to_s)`), so a joined `Integer` or `nil` made `t.take(a)` against a declared
+      # `Array[String]` report `call.argument-type-mismatch`, and a parameter returned as its declared
+      # `-> Array[String]` report `def.return-type-mismatch`, on correct Ruby. A union carrying the floor neither folds
+      # nor dispatches loudly, so the read stays silent. Once floored, the carrier is gradual and later stores re-join
+      # through {#widen_nominal}'s ordinary arm.
+      #
+      # A store the element already accepts changes nothing ({#already_held?}). An adder with no argument types at
+      # all is left alone, as {MutationWidening.join_added_elements} leaves it: the block-capture seams pass none,
+      # and their own content join adds the stores.
+      def widen_precise_array(nominal, method_name, values:, arg_types:)
+        return nil unless ContentJoin::ARRAY_CONTENT_ADDERS.include?(method_name) && !arg_types.empty?
+
+        stored = ContentJoin.array_added_elements(method_name, arg_types)
+        return nil if already_held?(nominal.type_args.first, stored)
+
+        added = MutationWidening.value_pin_widened(stored)
+        admitted = precise_admitted(nominal.type_args.first, added)
+        pre_state = values == :widen ? value_pin_widened_args(nominal) : nominal
+        rejoined = ContentJoin.join_array_content(pre_state, MutationWidening.gradual_floor(admitted))
+        rejoined == nominal ? nil : rejoined
+      end
+
+      # The seed-admissibility gate for a precise element: an added member joins as itself only when `element`
+      # already accepts it, and takes the `Dynamic[top]` floor otherwise. A precise element therefore never gains a
+      # member it rejects, which is what a declared boundary checks: nothing narrows the carrier back when a remover
+      # or rewriter takes the store out again, and a joined foreign arm stays rejected beside the floor — `Integer`
+      # under a declared `Array[String]`, `String` under `-> Array["x"]`, `Array[Integer]` under
+      # `Array[Array[String]]` each reported on correct Ruby. A class set ({ContentJoin.admissible_evidence}) is too
+      # coarse for that: it admits `Array[Integer]` beside `[String]` and `"y"` beside `"x"`.
+      def precise_admitted(element, added)
+        added.flat_map do |type|
+          ContentJoin.union_members(type).map do |member|
+            Acceptance.accepts(element, member).yes? ? member : Type::Combinator.untyped
+          end
+        end
+      end
+
+      # True when the precise element `element` already covers every type `stored` puts in, so the store changes
+      # nothing: `s = ints.map { "x" }; s << "x"` keeps `Array["x"]` and its `s.last == "x"` fold, which is correct,
+      # and a `[Integer, Integer]` pushed onto an `Array[[0 | Integer, Integer]]` keeps the Tuple element. Joining
+      # the value-pin-widened, shape-erased store instead would only lose precision.
+      #
+      # A stored type carrying `Dynamic` anywhere is never covered, though `Acceptance` passes it gradually: keeping
+      # the element would claim the unknown part is what the element says (`retry_binding_accepted?`'s rule).
+      def already_held?(element, stored)
+        return false if stored.empty?
+
+        held = ContentJoin.union_members(element)
+        stored.all? do |type|
+          next false if type.nil? || carries_dynamic?(type)
+
+          ContentJoin.union_members(type).all? { |member| held.include?(member) } ||
+            Acceptance.accepts(element, type).yes?
+        end
+      end
+
+      def carries_dynamic?(type)
+        case type
+        when Type::Dynamic then true
+        when Type::Union, Type::Intersection then type.members.any? { |member| carries_dynamic?(member) }
+        when Type::Nominal then type.type_args.any? { |arg| carries_dynamic?(arg) }
+        when Type::Tuple then type.elements.any? { |element| carries_dynamic?(element) }
+        when Type::HashShape then type.pairs.each_value.any? { |value| carries_dynamic?(value) }
+        when Type::Difference, Type::Refined then carries_dynamic?(type.base)
+        else false
+        end
       end
 
       # The value-rewriting counterpart of {MutationWidening.widen_tuple}'s `values: :widen`. A mutator that lands a

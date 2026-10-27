@@ -2,6 +2,7 @@
 
 require_relative "../type"
 require_relative "content_join"
+require_relative "mutation_rejoin"
 require_relative "rewrite_mutation"
 
 module Rigor
@@ -19,12 +20,17 @@ module Rigor
     # - a constant-folded `Constant[Set]` widens to that carrier, its members' value pins dropped
     #   ({MethodDispatcher.array_new_element}) and joined with the `Dynamic[top]` floor;
     # - a typed `Set` whose element already carries a gradual arm re-grows the way
-    #   {MutationRejoin.regrowable_carrier?} lets an `Array` / `Hash` re-grow. A PRECISE `Set[String]` (an RBS
-    #   return such as `Array#to_set`) is a claim somebody made and is left alone, as a precise `Array[String]`
-    #   is.
+    #   {MutationRejoin.regrowable_carrier?} lets an `Array` / `Hash` re-grow;
+    # - a PRECISE `Set[String]` (an RBS return such as `Array#to_set`) re-grows too (issue #2361), as a precise
+    #   `Array[String]` does ({MutationRejoin.widen_precise_array}): `f = ARGV.to_set; f.clear; f << 1` is
+    #   `Set[Dynamic[top] | String]`.
     #
-    # The carrier's element always carries the floor, so {ContentJoin.admissible_evidence} admits every added
-    # member as itself: the seed-admissibility gate has nothing to contradict on a gradual seed.
+    # A gradual seed admits every added member as itself: the seed-admissibility gate has nothing to contradict on
+    # it. A precise seed admits only a member its element accepts ({MutationRejoin.precise_admitted}), any other
+    # taking the floor, and takes no {RewriteMutation} arm: `replace` joins its elements onto the seed, and `map!`
+    # leaves it as it was. Every join carries the `Dynamic[top]` floor, as the Array re-join's does. An adder whose
+    # arguments the block-capture seam did not type joins only that floor: the store happened, and a Set has no
+    # block content join to add it afterwards. An adder called with no arguments changes nothing.
     module SetMutation
       # Receiver-mutating Set methods. The non-bang siblings (`map` vs `map!`, `select` vs `select!`) and the
       # algebra (`|`, `+`, `-`, `&`, `^`) return a new Set and stay precise.
@@ -60,9 +66,9 @@ module Rigor
         type.is_a?(Type::Union) ? type.members.any? { |member| carrier?(member) } : carrier?(type)
       end
 
+      # Every typed `Set[E]`, a precise one included since issue #2361.
       def regrowable?(nominal)
-        nominal.class_name == "Set" && nominal.type_args.size == 1 &&
-          ContentJoin.union_members(nominal.type_args.first).any?(Type::Dynamic)
+        nominal.class_name == "Set" && nominal.type_args.size == 1
       end
 
       # The carrier `type` holds after `method_name` with argument types `arg_types`, or `nil` when the call is not
@@ -70,25 +76,47 @@ module Rigor
       # so a remover on an already-widened Set does not rebind it. That is a guard, not a behaviour: a Set has no
       # `receiver[key] ||=` slot narrowings for a rebind to drop, so the identical carrier would read the same either
       # way, and declining only saves rebuilding the scope.
-      def widen(type, method_name, arg_types)
+      def widen(type, method_name, arg_types, unread_arguments: false)
         return nil unless MUTATORS.include?(method_name)
 
         if constant?(type)
-          join(floored(type.value.map { |v| Type::Combinator.constant_of(v) }), method_name, arg_types)
+          seed = floored(type.value.map { |v| Type::Combinator.constant_of(v) })
+          join(seed, method_name, arg_types, unread_arguments)
         elsif type.is_a?(Type::Nominal) && regrowable?(type)
-          joined = join(type, method_name, arg_types)
+          joined = join(type, method_name, arg_types, unread_arguments)
           joined == type ? nil : joined
         end
       end
 
-      def join(carrier, method_name, arg_types)
-        carrier = RewriteMutation.arm(carrier, method_name)
+      # Every join carries the `Dynamic[top]` floor, a precise seed's included (issue #2361): a later remover or
+      # rewriter (`subtract`, `delete`, `map!`) can take the stored members out again, and nothing narrows the
+      # carrier back, so a closed `Set[Integer | String]` would reject a declared `Set[String]` the program meets.
+      def join(carrier, method_name, arg_types, unread_arguments)
+        seed = carrier.type_args.first
+        # A precise seed takes no rewrite arm, as a precise `Array` does not ({MutationRejoin.widen_precise_array}).
+        carrier = RewriteMutation.arm(carrier, method_name) if MutationRejoin.gradual_parameter?(seed)
         return carrier unless CONTENT_ADDERS.include?(method_name)
 
-        added = added_elements(method_name, arg_types).map { |t| widened_member(t) }
-        return carrier if added.empty?
+        stored = added_elements(method_name, arg_types)
+        if stored.empty?
+          # An adder called with no arguments (`s.merge`) is a no-op; one whose arguments went untyped is a store.
+          return carrier unless unread_arguments
 
-        Type::Combinator.nominal_of("Set", type_args: [Type::Combinator.union(carrier.type_args.first, *added)])
+          added = []
+        else
+          return carrier if !MutationRejoin.gradual_parameter?(seed) && MutationRejoin.already_held?(seed, stored)
+
+          added = admitted(seed, stored.map { |t| widened_member(t) })
+        end
+        element = Type::Combinator.union(carrier.type_args.first, *added, Type::Combinator.untyped)
+        Type::Combinator.nominal_of("Set", type_args: [element])
+      end
+
+      # `added` as {MutationRejoin.precise_admitted} admits it into a precise seed; a gradual seed admits all.
+      def admitted(seed, added)
+        return added if MutationRejoin.gradual_parameter?(seed)
+
+        MutationRejoin.precise_admitted(seed, added)
       end
 
       # The element types one content-adder call puts in, from the call's argument types.

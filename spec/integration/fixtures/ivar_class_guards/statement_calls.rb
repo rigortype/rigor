@@ -44,6 +44,7 @@ class Shower
     t.upcase # QUIET-1446
   end
 
+  # Guard: quiet before #2039 too, through the operand reset `!` takes.
   def negated_call
     return unless @tag
 
@@ -60,6 +61,7 @@ class Shower
     t.upcase # QUIET-1446
   end
 
+  # Guard: `pure` is proven to write nothing, so `@tag` keeps its narrowing.
   def proven_pure_call
     return unless @tag
 
@@ -77,7 +79,7 @@ class Shower
     t.upcase # FIRES-1446 call.possible-nil-receiver
   end
 
-  # Ruby 4.0.5 raises NoMethodError once `@tag` is nil: the narrowing kept `nil`.
+  # Guard: Ruby 4.0.5 raises NoMethodError once `@tag` is nil: the narrowing kept `nil`.
   def nil_kept_narrowing
     return if @tag
 

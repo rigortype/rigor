@@ -1089,12 +1089,27 @@ module Rigor
               environment: environment
             )
             if candidates.empty?
-              # A block call no overload matches may have no block overload to answer by (#2429): `Dynamic[top]`.
-              return block_type && method_definition.method_types.any? ? Type::Combinator.untyped : nil
+              return unselected_return(method_definition, self_type, instance_type, type_vars, args, block_type,
+                                       scope, call_node, call_site, environment, keywords_last)
             end
 
             selected_return(candidates, method_definition, self_type, instance_type, type_vars, args, block_type, scope,
                             call_node, call_site, environment, keywords_last)
+          end
+
+          # Issue #2429 — a block call no overload matches, whose block overloads the arity fallback cannot decide
+          # between, selects nothing. An argument union may still select per value (#2379): `S.h(flag ? "s" : 1) { }`
+          # takes the `String` arm for `"s"` and the `Integer` arm for `1`. Otherwise the tier declines (nil), so a
+          # later tier, such as the project's own definition of the method, answers.
+          # rubocop:disable Metrics/ParameterLists
+          def unselected_return(method_definition, self_type, instance_type, type_vars, args, block_type, scope,
+                                call_node, call_site, environment, keywords_last)
+            # rubocop:enable Metrics/ParameterLists
+            return nil if keywords_last
+
+            distributed = distributed_argument_return(method_definition, nil, self_type, instance_type, type_vars, args,
+                                                      block_type, scope, call_node, call_site, environment)
+            distributed.equal?(NOT_DISTRIBUTED) ? nil : distributed
           end
 
           # The return of the overloads the call selected: per argument value where a union or supertype argument

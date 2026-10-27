@@ -16,7 +16,8 @@ require "tmpdir"
 #
 # The key is read as a literal Symbol because `CLASS_GRAPH_CACHE_KEY` is a `private_constant` — the
 # spec deliberately reaches for the thread-local rather than a public accessor, since the whole point is
-# that no production caller can observe this.
+# that no production caller can observe this. A run releases its slots when it ends (`Rigor::RunScopedSlots`,
+# #2399), so each example reads them as the run left them, captured when the run calls the release.
 RSpec.describe "class-graph memo storage" do
   def slot_key = :__rigor_class_graph_cache__
 
@@ -39,12 +40,22 @@ RSpec.describe "class-graph memo storage" do
     end
   end
 
+  # The run-scoped slots as the last run left them, captured when it released them.
+  let(:at_release) { {} }
+
   def run_check(dir)
     configuration = Rigor::Configuration.new("paths" => [dir], "parallel" => { "workers" => 0 })
     runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil)
+    allow(Rigor::RunScopedSlots).to receive(:release).and_wrap_original do |original|
+      at_release.replace([slot_key, :__rigor_resolution_chain__].to_h { |key| [key, Thread.current[key]] })
+      original.call
+    end
     guarded_run(runner)
     runner
   end
+
+  # The slot `key` held when the last run released its slots.
+  def run_slot(key) = at_release.fetch(key)
 
   around do |example|
     Thread.current[slot_key] = nil
@@ -58,7 +69,7 @@ RSpec.describe "class-graph memo storage" do
       write_project(dir, 6)
       run_check(dir)
 
-      slot = Thread.current[slot_key]
+      slot = run_slot(slot_key)
       # A store would be a Hash here, one bucket deep per file; the bound is the Array itself.
       expect(slot).to be_an(Array)
       expect(slot.size).to eq(2)
@@ -77,7 +88,7 @@ RSpec.describe "class-graph memo storage" do
       Dir.mktmpdir do |dir|
         write_project(dir, files)
         run_check(dir)
-        slot = Thread.current[chain_key]
+        slot = run_slot(chain_key)
         expect(slot).to be_an(Array)
         expect(slot.size).to eq(2)
         expect(slot[0]).to be_a(Rigor::Scope::DiscoveryIndex)
@@ -98,7 +109,7 @@ RSpec.describe "class-graph memo storage" do
       write_project(dir, 6)
       run_check(dir)
 
-      bucket = Thread.current[slot_key][1]
+      bucket = run_slot(slot_key)[1]
       # ADR-119 C2-b1: the instance typing site reads its definer through `typing_def`; the existence reads keep
       # `user_def`, which this fixture does not reach. The typing bucket filled proves the slot served the run.
       expect(bucket[:typing_def]).not_to be_empty
@@ -113,13 +124,13 @@ RSpec.describe "class-graph memo storage" do
     Dir.mktmpdir do |dir|
       write_project(dir, 2)
       run_check(dir)
-      two = Thread.current[slot_key].size
+      two = run_slot(slot_key).size
     end
     Thread.current[slot_key] = nil
     Dir.mktmpdir do |dir|
       write_project(dir, 6)
       run_check(dir)
-      six = Thread.current[slot_key].size
+      six = run_slot(slot_key).size
     end
 
     expect(six).to eq(two)
@@ -133,7 +144,9 @@ RSpec.describe "class-graph memo storage" do
     Dir.mktmpdir do |dir|
       write_project(dir, 2)
       run_check(dir)
-      slot = Thread.current[slot_key]
+      slot = run_slot(slot_key)
+      # Back on the thread, so the probe below reads the memo the run filled.
+      Thread.current[slot_key] = slot
       index = slot[0]
       bucket = slot[1]
 

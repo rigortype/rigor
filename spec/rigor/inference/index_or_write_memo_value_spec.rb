@@ -147,6 +147,44 @@ RSpec.describe "index `||=` in value position (memoization idiom)", type: :runne
       expect(result.diagnostics.reject { |d| d.severity.to_s == "info" }.map(&:rule)).to eq([])
     end
 
+    it "reports nothing on an optional, keyword or destructured parameter the body rebinds" do
+      # Runtime: `opt(:k, {k: "s"})`, `kw(:k, h: {k: "s"})` and `des([{k: "s"}, 0], :k)` return "S". A destructured
+      # `h` reads `Dynamic[top]`, so `des` rebinds it to a typed table to reach the parameter-name test.
+      rbs = "class R\n  " \
+            "def opt: (Symbol, ?Hash[Symbol, untyped]) -> untyped\n  " \
+            "def kw: (Symbol, h: Hash[Symbol, untyped]) -> untyped\n  " \
+            "def des: ([Hash[Symbol, untyped], Integer], Symbol) -> untyped\n" \
+            "end\n"
+      result = analyze(<<~RUBY, sig: { "r.rbs" => rbs })
+        class R
+          def opt(k, h = {})
+            h = h.dup
+            (h[k] ||= 1).upcase
+          end
+
+          def kw(k, h:)
+            h = h.dup
+            (h[k] ||= 1).upcase
+          end
+
+          def des((h, x), k)
+            h = {}.merge(h)
+            (h[k] ||= 1).upcase
+          end
+        end
+      RUBY
+      expect(result.diagnostics.reject { |d| d.severity.to_s == "info" }.map(&:message)).to eq([])
+    end
+
+    it "ACCEPTED TRADE-OFF: goes silent on a block parameter that shadows a method parameter" do
+      # Runtime: `sh({}, :k, [{}])` raises NoMethodError (`upcase` for 1). The block's `h` is named by the method's
+      # parameter, so it widens like the parameter; approval-queue.d entry for #2354.
+      rbs = "class S\n  def sh: (Hash[Symbol, untyped], Symbol, Array[Hash[Symbol, untyped]]) -> untyped\nend\n"
+      result = analyze("class S\n  def sh(h, k, ys)\n    ys.each { |h| (h[k] ||= 1).upcase }\n  end\nend\n",
+                       sig: { "s.rbs" => rbs })
+      expect(result.diagnostics.reject { |d| d.severity.to_s == "info" }.map(&:rule)).to eq([])
+    end
+
     it "ACCEPTED TRADE-OFF: goes silent on a parameter the body rebinds to a literal first" do
       # Runtime: NoMethodError (`upcase` for 1), since `h` is the body's own `{}` at the call. Any local named by a
       # parameter widens; approval-queue.d entry for #2354.

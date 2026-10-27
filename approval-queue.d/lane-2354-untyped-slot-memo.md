@@ -24,7 +24,9 @@ receiver's origin decides the reading.
   parameter-rooted nest. A local any parameter of the enclosing method names widens too, whatever the body writes
   (review round 2), so `def m(h, k); h = {}; (h[k] ||= 1).upcase; end` also goes silent though it raises at
   runtime. A name-only body test kept the literal for `h = h.dup if f`, a later `h = {}` or a block parameter
-  shadowing `h`, all of which run fine on a caller's table. Block parameters, pattern binds, ivar aliases
+  shadowing `h`, all of which run fine on a caller's table. The test is by name, so a block parameter or block-local
+  that shadows a method parameter's name widens inside the block too: `ys.each { |h| (h[k] ||= 1).upcase }` and
+  `xs.map { |x; h| h = {}; (h[x] ||= 1).upcase }` raise on `1` at runtime and are silent. Both are rare. Block parameters, pattern binds, ivar aliases
   (`c = @cache`) and `define_method`-captured locals keep the literal reading; the coordinator files those.
 - Carry the outer `||=`'s widened value as `Dynamic[...]` so that the type test rejects it. This was not needed
   once the receiver test covers expressions. It would also reach every local bound to such a value.
@@ -35,7 +37,7 @@ receiver's origin decides the reading.
 ## Decision
 
 Receiver-origin test with the parameter rule and the fresh-object exemption. ADR-5 ranks the false positives on
-running memo code above the two true positives lost. Both trade-offs are pinned as `ACCEPTED TRADE-OFF` examples in
+running memo code above the true positives lost. The trade-offs are pinned as `ACCEPTED TRADE-OFF` examples in
 `spec/rigor/inference/index_or_write_memo_value_spec.rb`.
 
 ## To undo

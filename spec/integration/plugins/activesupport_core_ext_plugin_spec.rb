@@ -563,7 +563,8 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
 
       # Review of #2450 final round: a literal Integer key is a Constant member, not a Nominal, so it is its own path.
       it "does not read a literal Integer key as a Symbol" do
-        result = run_plugin(source: "h = { 1 => 2 }\nRigor.dump_type(h.symbolize_keys)\nh.symbolize_keys.keys.first + 1\n")
+        source = "h = { 1 => 2 }\nRigor.dump_type(h.symbolize_keys)\nh.symbolize_keys.keys.first + 1\n"
+        result = run_plugin(source: source)
 
         expect(dumps(result)).to eq(["Hash[Dynamic[top], 2]"])
         expect(result.diagnostics.map(&:qualified_rule).grep(/\Acall\./)).to be_empty

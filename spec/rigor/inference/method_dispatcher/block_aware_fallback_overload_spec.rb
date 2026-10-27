@@ -17,13 +17,6 @@ RSpec.describe "Block-aware no-match overload fallback (#2429)", type: :runner d
     RBS
   end
 
-  def dumped_types(source, sig: {})
-    result = analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}), sig: sig)
-    result.diagnostics.filter_map do |diagnostic|
-      diagnostic.message.delete_prefix("dump_type: ") if diagnostic.message.start_with?("dump_type")
-    end
-  end
-
   let(:fetch_sig) do
     { "fetch.rbs" => <<~RBS }
       class Fetch
@@ -31,6 +24,13 @@ RSpec.describe "Block-aware no-match overload fallback (#2429)", type: :runner d
         def control: (String) -> Integer
       end
     RBS
+  end
+
+  def dumped_types(source, sig: {})
+    result = analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}), sig: sig)
+    result.diagnostics.filter_map do |diagnostic|
+      diagnostic.message.delete_prefix("dump_type: ") if diagnostic.message.start_with?("dump_type")
+    end
   end
 
   def return_mismatches(source)

@@ -163,9 +163,8 @@ module Rigor
           # No overload matched. A call with a block falls back to an overload that declares one (#2429): the
           # block-less arm's return is what the method answers without a block, so `URI.open(url, read_timeout: 3)
           # { |io| ... }` read `StringIO | Tempfile` instead of binding the block overload's `T` to the block's value.
-          return [overloads.find { |mt| overload_has_block?(mt) } || fallback_without_block(overloads)] if block_required
-
-          [fallback_without_block(overloads)]
+          with_block = overloads.find { |mt| overload_has_block?(mt) } if block_required
+          [with_block || fallback_without_block(overloads)]
         end
 
         # No (usable) block at the call site: prefer an overload that does not REQUIRE a block over

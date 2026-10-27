@@ -74,10 +74,54 @@ RSpec.describe Rigor::Inference::RewriteMutation do
       expect(widen(counter, :[]=, arg_types: [constant(:x), constant(1)]).type_args.last).to eq(nominal("Integer"))
     end
 
-    # The #561 boundary: a precise nominal is a declaration's claim, and RBS's own `map!` keeps `Elem`.
-    it "declines a precise nominal" do
-      expect(widen(nominal("Array", nominal("String")), :map!)).to be_nil
+    # The #561 boundary: a precise Hash is a declaration's claim, and RBS's own `transform_values!` keeps it.
+    it "declines a precise Hash" do
       expect(widen(nominal("Hash", nominal("Symbol"), nominal("Integer")), :transform_values!)).to be_nil
+    end
+
+    # Issue #2427 — an untyped element rewrite on a precise `Array[E]` takes the gradual arm rather than keep `E`.
+    it "rewrites a precise Array's element to the gradual arm when the call site typed no element" do
+      %i[map! collect! flatten!].each do |name|
+        expect(widen(nominal("Array", nominal("String")), name)).to eq(nominal("Array", untyped))
+      end
+    end
+
+    it "rewrites the element to the call site's typed element, precise and gradual carriers alike" do
+      int = nominal("Integer")
+      expect(widen(nominal("Array", nominal("String")), :map!, rewritten_element: int)).to eq(nominal("Array", int))
+      expect(widen(nominal("Array", union(nominal("String"), untyped)), :collect!, rewritten_element: int))
+        .to eq(nominal("Array", int))
+      expect(widen(nominal("Set", nominal("String")), :map!, rewritten_element: int)).to eq(nominal("Set", int))
+    end
+
+    it "keeps a precise Array whose typed element is unchanged" do
+      expect(widen(nominal("Array", nominal("String")), :map!, rewritten_element: nominal("String"))).to be_nil
+    end
+
+    it "keeps the witness under a typed `map!` and drops it under a typed `flatten!`" do
+      non_empty = Rigor::Type::Combinator.non_empty_array(nominal("String"))
+      int = nominal("Integer")
+      expect(widen(non_empty, :map!, rewritten_element: int)).to eq(Rigor::Type::Combinator.non_empty_array(int))
+      expect(widen(non_empty, :flatten!, rewritten_element: int)).to eq(nominal("Array", int))
+    end
+
+    it "types each Array member of a union and leaves the rest" do
+      seed = union(nominal("Array", nominal("String")), constant(nil))
+      expect(widen(seed, :map!, rewritten_element: nominal("Integer")))
+        .to eq(union(nominal("Array", nominal("Integer")), constant(nil)))
+    end
+
+    it "reads the counterpart's element through a non-empty witness, and none off a non-collection answer" do
+      int = nominal("Integer")
+      expect(described_class.counterpart_element(Rigor::Type::Combinator.non_empty_array(int))).to eq(int)
+      expect(described_class.counterpart_element(nominal("Set", int))).to eq(int)
+      expect(described_class.counterpart_element(nominal("Enumerator", int, nominal("Array", int)))).to be_nil
+    end
+
+    it "takes no typed answer for a Hash rewriter or a literal Tuple" do
+      hash = nominal("Hash", nominal("Symbol"), nominal("Integer"))
+      expect(described_class.typed(hash, :transform_values!, nominal("String"))).to be_nil
+      expect(described_class.typed(Rigor::Type::Combinator.tuple_of(constant(1)), :map!, nominal("String"))).to be_nil
     end
 
     it "declines a carrier the rewrite leaves as it is" do

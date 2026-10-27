@@ -29,9 +29,10 @@ module Rigor
     # written in; a refinement seed (`non-empty-array[0]`) still can, since its remover does not close a literal.
     #
     # A site whose widening declines leaves the binding as it is, exactly as the straight-line seam does: a
-    # precise nominal (a declared or inferred `Array[String]` is a claim this seam may not grow), a receiver
-    # that is no carrier, or a name the mutator tables do not list for that carrier (`store` on a `Tuple`, a method
-    # its class does not define). The caller MUST therefore not read an unchanged binding as describing later
+    # precise nominal under a site that stores nothing it can see (a declared or inferred `Array[String]` is a claim
+    # this seam may not grow; an element rewriter such as `map!` replaces it with the gradual arm, issue #2427), a
+    # receiver that is no carrier, or a name the mutator tables do not list for that carrier (`store` on a `Tuple`, a
+    # method its class does not define). The caller MUST therefore not read an unchanged binding as describing later
     # iterations. An empty-witness refinement under a storing mutator that keeps the witness is not such a decline:
     # the straight-line widening grows it (issue #936), and gives a site whose arguments describe nothing it stores
     # (`non-empty-array[String]` under `map!`) the gradual arm itself ({RewriteMutation}),

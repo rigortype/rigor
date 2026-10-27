@@ -1255,8 +1255,31 @@ module Rigor
       def widen_mutated_receivers(call_node, current_scope)
         arg_types = mutator_arg_types(call_node, current_scope)
         widened = MutationWidening.widen_after_call(call_node: call_node, current_scope: current_scope,
-                                                    arg_types: arg_types)
+                                                    arg_types: arg_types,
+                                                    rewritten_element: rewritten_element(call_node, current_scope))
         ElementReadWidening.widen_element_read(call_node: call_node, current_scope: widened, arg_types: arg_types)
+      end
+
+      # Issue #2427 — the element an element rewriter (`map!`, `collect!`, `flatten!`) leaves in its receiver, read
+      # off what the non-bang counterpart answers for the same receiver, block and arguments
+      # ({RewriteMutation::TYPED_COUNTERPARTS}): `a.map!(&:to_i)` stores what `a.map(&:to_i)` returns. `nil` when the
+      # call is no such rewriter, or the counterpart has no single element; the widening then takes
+      # {RewriteMutation}'s gradual arm.
+      #
+      # `nil` too when the receiver may name more than one binding (`(flag ? a : b).map!(&:to_i)`): Ruby rewrites
+      # only the one the branch selects, and typing every candidate gave the other one an element it never holds.
+      #
+      # The block and receiver gates only save typing a counterpart nothing consumes: with no block `map` answers an
+      # Enumerator, which has no element to read, and {RewriteMutation.typed} answers nothing for a receiver the
+      # widening does not rewrite.
+      def rewritten_element(call_node, current_scope)
+        counterpart = RewriteMutation::TYPED_COUNTERPARTS[call_node.name]
+        return nil if counterpart.nil?
+        return nil if counterpart != :flatten && call_node.block.nil? # cost guard
+        return nil unless MutationWidening.joinable_receiver?(call_node.receiver, current_scope) # cost guard
+        return nil unless ReceiverAlias.mutated_reads(call_node.receiver).size == 1
+
+        RewriteMutation.counterpart_element(operand_scope.type_of(call_node.copy(name: counterpart)))
       end
 
       # `tr!` / `tr_s!` are typed too: whether they can empty a `non-empty-string` turns on their replacement argument.

@@ -126,8 +126,9 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
 
     # The #1253 review's probe, through the `unless … empty?` narrowing. A rewrite cannot empty the receiver, so
     # the witness stays and only the element goes; a reorder changes neither, so the binding must not move at all.
+    # Since issue #2427 the element is the block's: `to_sym` on each `ENV.keys` String answers a Symbol.
     it "keeps the witness and replaces the element under `map!` and `collect!`" do
-      expect(dumped_types(<<~RUBY)).to eq(["non-empty-array[Dynamic[top]]"] * 2)
+      expect(dumped_types(<<~RUBY)).to eq(["non-empty-array[Symbol]"] * 2)
         ys = ENV.keys
         unless ys.empty?
           ys.map!(&:to_sym)

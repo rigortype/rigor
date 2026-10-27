@@ -1,0 +1,5 @@
+- **[inference]** Calling `map!`, `collect!` or `flatten!` on a typed array now gives the array the element type the call produces, so reading an element afterwards no longer reports a false `undefined method`. ([#2452](https://github.com/rigortype/rigor/pull/2452))
+  - `a = ARGV.dup; a.map!(&:to_i)` reads as an Array of Integer, and `a.map!(&:strip)` still reads as an Array of String.
+  - When the new element type cannot be worked out, as in `a.map!.with_index { … }`, the element becomes unknown instead of keeping the old type.
+  - `flatten` and `flatten!` on an array of literal arrays, such as `ARGV.map { |x| [x] }`, now flatten the inner arrays.
+  - `map!` on a typed Set gets the same element type.

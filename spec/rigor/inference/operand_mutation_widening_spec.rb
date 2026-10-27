@@ -131,16 +131,15 @@ RSpec.describe "mutator widening in operand position", type: :runner do
       RUBY
     end
 
-    # The #561 boundary: a precise nominal is a declaration's claim, and the widening declines it in the
-    # statement form, so it declines it here too.
-    it "leaves a precise nominal as the statement form leaves it" do
-      statement = dumped_types(<<~RUBY)
+    # Issue #2427 — the statement form types a precise nominal's element from its block; the enumerator form has no
+    # block to read and takes the gradual arm, and neither keeps the stale `String`.
+    it "rewrites a precise nominal's element, gradually where the mutator has no block" do
+      expect(dumped_types(<<~RUBY)).to eq(["Array[non-negative-int]"])
         a = gets.to_s.split(",")
         a.map! { |x| x.size }
         dump_type(a)
       RUBY
-      expect(statement).to eq(["Array[String]"])
-      expect(dumped_types(<<~RUBY)).to eq(statement)
+      expect(dumped_types(<<~RUBY)).to eq(["Array[Dynamic[top]]"])
         a = gets.to_s.split(",")
         a.map!.with_index { |x, i| x.size }
         dump_type(a)

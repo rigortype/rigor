@@ -136,10 +136,11 @@ module Rigor
       # pre-join behaviour exactly.
       NO_ARG_TYPES = [].freeze
 
-      def widen_after_call(call_node:, current_scope:, arg_types: NO_ARG_TYPES)
+      # `rewritten_element` is the element a typed element rewriter stores ({RewriteMutation.typed}), or `nil`.
+      def widen_after_call(call_node:, current_scope:, arg_types: NO_ARG_TYPES, rewritten_element: nil)
         return current_scope if pure_self_returner?(call_node.name)
 
-        widen_receiver_aliases(call_node.receiver, call_node.name, current_scope, arg_types: arg_types)
+        widen_receiver_aliases(call_node.receiver, call_node.name, current_scope, arg_types:, rewritten_element:)
       end
 
       # True when `receiver` names at least one variable whose CURRENT binding is a literal-shape
@@ -180,11 +181,11 @@ module Rigor
 
       # Widens every variable `receiver` can evaluate to ({ReceiverAlias.mutated_reads}), against `method_name`'s
       # mutator table.
-      def widen_receiver_aliases(receiver, method_name, current_scope, arg_types: NO_ARG_TYPES)
+      def widen_receiver_aliases(receiver, method_name, current_scope, arg_types: NO_ARG_TYPES, rewritten_element: nil)
         return current_scope if receiver.nil?
 
         ReceiverAlias.mutated_reads(receiver).reduce(current_scope) do |acc, read|
-          widen_alias_read(method_name, read, acc, arg_types: arg_types)
+          widen_alias_read(method_name, read, acc, arg_types:, rewritten_element:)
         end
       end
 
@@ -288,13 +289,14 @@ module Rigor
 
       # `unread_arguments` says the call passes arguments this seam did not type (the block-capture path): a Set,
       # which has no block content join, takes one unknown store for it ({SetMutation.widen}).
-      def widen_alias_read(method_name, read, scope, values: :widen, arg_types: NO_ARG_TYPES, unread_arguments: false)
+      def widen_alias_read(method_name, read, scope, values: :widen, arg_types: NO_ARG_TYPES, unread_arguments: false,
+                           rewritten_element: nil)
         getter, builder = ALIAS_ACCESSORS[read.class]
         return scope if getter.nil?
 
         name = ReceiverAlias.read_name(read)
         current = scope.public_send(getter, name)
-        widened = widen_for_mutator(current, method_name, values:, arg_types:, unread_arguments:)
+        widened = widen_for_mutator(current, method_name, values:, arg_types:, unread_arguments:, rewritten_element:)
         return scope if widened.nil?
 
         MutationRejoin.rebind(scope, builder, name, widened, pre_state: current, kind: getter)
@@ -312,7 +314,17 @@ module Rigor
       # `method_name`, or `nil` when no widening applies (binding is not a carrier the mutation
       # stands for, OR the method is not a mutator for that shape, OR the carrier is a PRECISE
       # nominal the call stores nothing into — see {MutationRejoin.widen_precise_array}).
-      def widen_for_mutator(type, method_name, values: :widen, arg_types: NO_ARG_TYPES, unread_arguments: false)
+      # A `rewritten_element` answers first for the carriers {RewriteMutation.typed} types (issue #2427).
+      def widen_for_mutator(type, method_name, values: :widen, arg_types: NO_ARG_TYPES, unread_arguments: false,
+                            rewritten_element: nil)
+        typed = rewritten_element && type && RewriteMutation.typed(type, method_name, rewritten_element)
+        return typed == type ? nil : typed if typed
+
+        widen_carrier(type, method_name, values:, arg_types:, unread_arguments:, rewritten_element:)
+      end
+
+      # {#widen_for_mutator} for a carrier no typed element rewrite answered.
+      def widen_carrier(type, method_name, values:, arg_types:, unread_arguments:, rewritten_element:)
         values = :keep unless VALUE_REWRITING_MUTATORS.include?(method_name)
         values = RewriteMutation.values_mode(type, method_name, values)
 
@@ -334,7 +346,7 @@ module Rigor
         when Type::Difference
           widen_difference(type, method_name, arg_types: arg_types)
         when Type::Union
-          widen_union(type, method_name, values: values, arg_types: arg_types, unread_arguments:)
+          widen_union(type, method_name, values:, arg_types:, unread_arguments:, rewritten_element:)
         end
       end
 
@@ -352,12 +364,13 @@ module Rigor
       #
       # `nil` when no member widened — a union with no carrier member, or one whose carriers are
       # already nominal, is untouched exactly as the scalar path leaves them.
-      def widen_union(union, method_name, values: :widen, arg_types: NO_ARG_TYPES, unread_arguments: false)
+      def widen_union(union, method_name, values: :widen, arg_types: NO_ARG_TYPES, unread_arguments: false,
+                      rewritten_element: nil)
         widened_any = false
         members = union.members.map do |member|
           next member unless mutation_carrier?(member, method_name)
 
-          widened = widen_for_mutator(member, method_name, values:, arg_types:, unread_arguments:)
+          widened = widen_for_mutator(member, method_name, values:, arg_types:, unread_arguments:, rewritten_element:)
           next member if widened.nil?
 
           widened_any = true

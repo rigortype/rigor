@@ -262,6 +262,18 @@ RSpec.describe Rigor::SigGen::Generator do
         expect_subclass_demoted(candidates, generator)
       end
 
+      # Two steps of the cascade: `Thing`'s demotion unwrites `Error`, which demotes `Middle`, which unwrites `Leaf`.
+      it "follows a chain of shells each demoted by the one before" do
+        candidates, generator = run_generator(
+          "lib/errors.rb" => "module Lib\n  class Error < StandardError; end\n  class Thing < Missing\n    def x = 1\n  end\nend\n",
+          "lib/middle.rb" => "module Lib\n  class Leaf < StandardError; end\n  class Middle < Error\n    def m = 1\n  end\nend\n",
+          "lib/sub.rb" => "module Lib\n  class NotFound < Leaf\n    def code = 404\n  end\nend\n"
+        )
+
+        expect(File).not_to exist(File.join(tmpdir, "sig/middle.rbs"))
+        expect_subclass_demoted(candidates, generator)
+      end
+
       it "demotes the subclass when the file's only written method is demoted for an unsigned override" do
         candidates, generator = run_generator(
           "lib/errors.rb" => <<~RUBY,

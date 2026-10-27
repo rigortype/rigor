@@ -13,13 +13,15 @@
 ## Options and trade-offs
 
 - **Keep `Parameters | nil`.** The `String` boundary false positive stays. It is the most common `params` shape in Rails controllers.
-- **Dynamic over the nilable facet, plugin-only.** The subscript answers `Dynamic[ActionController::Parameters | nil]`. Two carrier-gated `dynamic_return` rules, scoped to controllers, keep `params[:user][:name]` and the strong-parameters chain resolving on the facet. Cost: a method called on the carrier outside the chain, such as `params[:q].to_s`, answers `Dynamic[top]` instead of `"" | String`, because the engine's composite-receiver tier projects a `Union` receiver but not a `Dynamic` one. That is precision loss, not a false positive.
+- **Dynamic over the nilable facet, plugin-only.** The subscript answers `Dynamic[ActionController::Parameters | nil]`. Two carrier-gated `dynamic_return` rules, scoped to controllers, keep `params[:user][:name]` and the strong-parameters chain resolving on the facet. Cost: a method called on the carrier outside the chain answers `Dynamic[top]` instead of its precise answer. That covers `==`, `.present?`, `.blank?` and `.to_s` (`params[:q].to_s` was `"" | String`). The cause is that the engine's composite-receiver tier projects a `Union` receiver but not a `Dynamic` one. #1101 measured that tier at 137 named-pair sites on redmine and 56 on mastodon, and the bare union used to route those sites through it, so this is the same class of loss at the call sites the union used to answer. It is precision loss, not a false positive. Recovery is #2448, which projects a `Dynamic` carrier in the composite tier.
 - **Dynamic over the nilable facet, with an engine change** that projects a `Dynamic[Union]` receiver through its facet. This would keep `"" | String`, but it touches every `Dynamic` union receiver in the engine. It is out of scope for this plugin change and is filed for the coordinator as a separate issue.
 - **Non-nil `Parameters`.** Rejected, as before, because it folds every `params[:k]` condition and makes a ternary over one collapse.
 
 ## Decision
 
 The second option, plugin-only. The coordinator ruled on 2026-10-27 to keep the engine untouched. A false positive at a declared boundary is the robustness failure ADR-5 weighs most, and the precision given up (`params[:q].to_s` answering `Dynamic[top]`) is a gradual answer, not a wrong one. The #1101 spec pin that asserted `"" | String` now asserts `Dynamic[top]`, with the reason in its comment.
+
+The precision loss is the whole class listed under the second option, not only `to_s`, and #2448 is where it is recovered. The same change brings improvements that review found: the ternary and `bot` folds on `params` chains are fixed, and the collection-case `call.undefined-method` false positives are gone. A guarded `params[:key]` local no longer draws that diagnostic when an actionpack collection declaring `ActionController::Parameters` is installed.
 
 This partly reverses the #534 / #574 adoption: the `params[...]` answer at argument and return boundaries moves from the precise nilable union to a gradual carrier with the same facet. The #534 / #574 hazard controls are unchanged, because the facet is the same union: no truthiness fold on `params[:k] ? … : …`, no `bot` branch, and no `call.possible-nil-receiver` on `q = params[:q]; q.strip`.
 

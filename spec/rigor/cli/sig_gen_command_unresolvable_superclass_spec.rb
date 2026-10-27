@@ -87,6 +87,47 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     expect(err).to include("superclass this run wrote no signature for", "  Sub < Rec\n")
   end
 
+  # #2461 — only `--write` and `--check` ask the writer whether it accepts a target, so the modes diverge on a
+  # refused one: `--print` and JSON keep the subclass, `--write` and `--check` demote it.
+  describe "a superclass shell on a `sig/` file that does not parse" do
+    before do
+      write("lib/errors.rb", "module Lib\n  class Error < StandardError; end\n  class Thing\n    def x = 1\n  end\nend\n")
+      write("sig/errors.rbs", "module Lib\n  class Thing\n    def y: () ->\n  end\nend\n")
+      write("lib/sub.rb", "module Lib\n  class NotFound < Error\n    def code = 404\n  end\nend\n")
+    end
+
+    def sig_gen_run(*argv)
+      out = StringIO.new
+      err = StringIO.new
+      status = described_class.new(argv: [*argv, "lib", "--config=#{File.join(root, '.rigor.yml')}"], out: out,
+                                   err: err).run
+      [status, out.string, err.string]
+    end
+
+    it "still prints the subclass in --print" do
+      _status, out, err = sig_gen_run("--print")
+
+      expect(out).to include("class Lib::NotFound < ::Lib::Error")
+      expect(err).not_to include("Lib::NotFound < Lib::Error")
+    end
+
+    it "still emits the subclass in --format=json" do
+      _status, out, = sig_gen_run("--format=json")
+      code = JSON.parse(out).fetch("candidates").find { |row| row["method"] == "code" }
+
+      expect(code).to include("class" => "Lib::NotFound", "classification" => "new_method")
+    end
+
+    it "demotes the subclass in --check as --write does" do
+      _status, _out, check_err = sig_gen_run("--check")
+      _status, _out, write_err = sig_gen_run("--write")
+
+      expect(check_err).to include("  Lib::NotFound < Lib::Error\n")
+      expect(write_err).to include("  Lib::NotFound < Lib::Error\n")
+      expect(File).not_to exist(File.join(root, "sig/sub.rbs"))
+    end
+  end
+
   # #2461 review — print and JSON runs ask no writer where a file would go, so where they are run from does not
   # change what they report. From a subdirectory, or from outside the project with `--config`, every target the
   # writer maps lies outside that directory's `sig/`.

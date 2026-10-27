@@ -36,12 +36,12 @@ module Rigor
       MergeState = Struct.new(:source, :decls, :applied, :skipped, :left_unreadable, :replaced, keyword_init: true)
       private_constant :MergeState
 
-      # @param dry_run — assemble and validate every target exactly as a write would, and report it, without
-      #   creating or changing a file. `sig-gen --check` (ADR-112 WD4) is this, so it can only ever disagree
-      #   with `--write` about the disk, never about the content.
       # The target routing this writer applies; the generator maps candidates through it to ask {#accepts_target?}.
       attr_reader :path_mapper
 
+      # @param dry_run — assemble and validate every target exactly as a write would, and report it, without
+      #   creating or changing a file. `sig-gen --check` (ADR-112 WD4) is this, so it can only ever disagree
+      #   with `--write` about the disk, never about the content.
       def initialize(path_mapper:, overwrite: false, dry_run: false)
         @path_mapper = path_mapper
         @overwrite = overwrite

@@ -33,8 +33,10 @@ for the trade-off to be recorded here.
   every mode, `--print` and `--format=json` from a subdirectory, or from outside the project with `--config`,
   demoted every project subclass. The check therefore runs only in `--write` and `--check`, the modes that hand
   the candidates to a writer. Print, diff and JSON count a class with a candidate the writer is sure to write,
-  as before #2461, and do not depend on the working directory. The cost is that in those modes a superclass on an
-  unparseable or mis-encoded `sig/` file still counts, so they can show a subclass `--write` would skip.
+  as before #2461, and do not depend on the working directory. The accepted divergence: `--print` and JSON no
+  longer predict `--write` when the writer refuses a target. In #2461's fixture, where `sig/errors.rbs` does not
+  parse, `--print` shows `class Lib::NotFound < ::Lib::Error` and JSON lists `code` as a new method, while
+  `--write` and `--check` demote `Lib::NotFound` and name it in the skipped-class warning.
 
 ## Decision
 

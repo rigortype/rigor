@@ -183,6 +183,8 @@ RSpec.describe Rigor::SigGen::Generator do
     end
 
     it "demotes the subclass when the shell's target cannot be read" do
+      skip "root reads a mode-000 file, so the target stays readable" if Process.uid.zero?
+
       write_files("lib/errors.rb" => errors, "sig/errors.rbs" => in_lib("class Thing", "end"), "lib/sub.rb" => subclass)
       target = File.join(tmpdir, "sig/errors.rbs")
       File.chmod(0o000, target)

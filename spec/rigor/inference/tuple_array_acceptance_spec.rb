@@ -151,19 +151,29 @@ RSpec.describe "A tuple parameter against an Array argument", type: :runner do
             nil
           end
 
-          # Pass 1.5 checks keywords gradually, so it refuses the tuple's `maybe` too and leaves the choice to pass 2.
+          # A record's `maybe` for an unread hash is not re-asked: the record overload keeps its gradual-pass win.
+          def self.probe_rec(h, a)
+            assert_type("Symbol", G.rec(h, a))
+            nil
+          end
+        end
+      RUBY
+    end
+
+    # Pass 1.5 checks keywords gradually, so it refuses the tuple's `maybe` too and leaves the choice to pass 2.
+    # `kw3` (an `Array[Integer]` competitor) and the literal pair are controls.
+    it "takes the keyword overload the Array matches without the tuple's maybe" do
+      expect(rules(<<~RUBY, sig: gradual_sig)).to be_empty
+        require "rigor/testing"
+        include Rigor::Testing
+
+        class G
           def self.probe_kw(a)
             assert_type("String", G.kw(pair: a))
             assert_type("String", G.kw2(1, pair: a))
             assert_type("String", G.kw3(pair: a))
             assert_type("String", G.kw4(pair: a))
             assert_type("Symbol", G.kw(pair: [1, 2]))
-            nil
-          end
-
-          # A record's `maybe` for an unread hash is not re-asked: the record overload keeps its gradual-pass win.
-          def self.probe_rec(h, a)
-            assert_type("Symbol", G.rec(h, a))
             nil
           end
         end

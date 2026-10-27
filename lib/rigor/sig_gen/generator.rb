@@ -27,6 +27,7 @@ require_relative "declaration_equivalence"
 require_relative "inline_declarations"
 require_relative "layout_index"
 require_relative "method_candidate"
+require_relative "type_name_qualification"
 require_relative "writer"
 require_relative "../rooted_glob"
 
@@ -140,11 +141,12 @@ module Rigor
         @project_tables = nil
         @file_base_scope = nil
         candidates = resolved.flat_map { |path| analyse_file(path, @environment) }
-        annotate_effects(
-          demote_overridden_base_methods(
-            demote_unresolvable_superclasses(demote_inline_generic_classes(resolve_superclass_spellings(candidates)))
-          )
+        demoted = demote_overridden_base_methods(
+          demote_unresolvable_superclasses(demote_inline_generic_classes(resolve_superclass_spellings(candidates)))
         )
+        # Again after the override demotion: a demoted method can leave its file with nothing to write, and a class
+        # shell riding on that file then declares nothing a subclass elsewhere could rest on.
+        annotate_effects(demote_unresolvable_superclasses(demoted))
       ensure
         RunScopedSlots.release
       end
@@ -317,6 +319,10 @@ module Rigor
       def resolve_superclass_spellings(candidates)
         return candidates if @superclass_nestings.empty?
 
+        # Every shell counts here, written or not: the question is which class Ruby means by the token, and the
+        # source declares `Lib::Error` whether or not its file is written. Whether the resolved superclass reaches
+        # disk is {#demote_unresolvable_superclasses}'s question. Counting only written shells would leave `Error`
+        # unresolved, and a top-level `Error` some signature declares would then take it (#2454).
         known = candidates.each_with_object(Set.new) do |candidate, acc|
           acc << candidate.class_name if candidate.class_name
           acc.merge(candidate.class_shells || [])
@@ -382,27 +388,44 @@ module Rigor
       # ran — source discovery and the plugins still type it. Emitting the class with the superclass merely
       # OMITTED would be the harmful middle: the class becomes RBS-known with only the emitted methods, so
       # every inherited call fires `call.undefined-method`.
+      #
+      # Demoting a class can leave a file with nothing to write, which takes the class shells riding on it off the
+      # emitted set, so the pass repeats until no further class becomes unresolvable. The emitted set only shrinks,
+      # so the unresolvable set only grows and the loop ends.
       def demote_unresolvable_superclasses(candidates)
         superclasses = candidates.each_with_object({}) do |candidate, acc|
           (candidate.class_superclasses || {}).each { |name, sup| acc[name] = sup }
         end
-        # Everything this run declares, superclass or not: a chain that reaches `class Record` — emitted
-        # here, with no superclass of its own — terminates in a class the next run WILL know.
-        emitted = candidates.each_with_object(Set.new) do |candidate, acc|
-          acc << candidate.class_name if candidate.class_name
-          acc.merge(candidate.class_shells || [])
+        current = candidates
+        unresolvable = {}
+        loop do
+          found = unresolvable_superclass_roots(superclasses, declared_by_run(current))
+          return current if found.size == unresolvable.size
+
+          unresolvable = found
+          current = candidates.map do |candidate|
+            owner = unresolvable_for(candidate.class_name, unresolvable)
+            owner ? record_unresolvable_superclass(candidate, owner) : candidate
+          end
         end
-        unresolvable = superclasses.each_with_object({}) do |(name, _sup), acc|
+      end
+
+      def unresolvable_superclass_roots(superclasses, emitted)
+        superclasses.each_with_object({}) do |(name, _sup), acc|
           root = unresolved_superclass_root(name, superclasses, emitted)
           acc[name] = root if root
         end
-        return candidates if unresolvable.empty?
+      end
 
-        candidates.map do |candidate|
-          owner = unresolvable_for(candidate.class_name, unresolvable)
-          next candidate if owner.nil?
-
-          record_unresolvable_superclass(candidate, owner)
+      # Everything this run declares, superclass or not: a chain that reaches `class Record` — emitted here, with no
+      # superclass of its own — terminates in a class the next run WILL know. A class shell counts only when its
+      # file has a candidate the writer is sure to write ({Writer.writes?}): a shell on a file whose every method is
+      # skipped, already declared by `sig/`, or a tighter return the writer will not apply never reaches disk (#2454).
+      def declared_by_run(candidates)
+        written_paths = candidates.each_with_object(Set.new) { |c, acc| acc << c.path if Writer.writes?(c) }
+        candidates.each_with_object(Set.new) do |candidate, acc|
+          acc << candidate.class_name if candidate.class_name
+          acc.merge(candidate.class_shells || []) if written_paths.include?(candidate.path)
         end
       end
 
@@ -790,6 +813,24 @@ module Rigor
         # file, while this table is whole-run.
         @superclass_nestings[full] = [prefix.dup, spelling]
         @class_superclasses[full] = spelling
+        register_core_subclass_shell(full, prefix, superclass)
+      end
+
+      # Issue #2224 — a subclass of a core or stdlib class got a declaration only when it had a method of its own to
+      # emit, so after `class MyHash < Hash; end` a method returning one was written `-> MyHash` against a class no
+      # signature declared, and `rbs validate` failed with `NoTypeFoundError`. As a class shell it is declared
+      # `class MyHash < ::Hash[untyped, untyped]` beside the file's other declarations. A class the RBS environment
+      # already declares (the project's `sig/`, an earlier run) is left to that declaration, and a superclass the
+      # header's nesting shadows is not core's: `Hash` inside a `module Foo` that declares `Foo::Hash` is the project's.
+      def register_core_subclass_shell(full, prefix, superclass)
+        return if class_known?(full)
+        return unless @environment&.rbs_loader&.core_or_stdlib_class?(superclass)
+
+        head = superclass.split("::").first
+        namespaces = TypeNameQualification.enclosing_namespaces(prefix.join("::"))
+        return if TypeNameQualification.shadowed?(head, namespaces, method(:declared_constant?))
+
+        @class_shells << full
       end
 
       # Issue #735 — a GENERIC superclass has to be written with its arguments. `class Entries < Array`
@@ -1948,8 +1989,18 @@ module Rigor
       # `owner:` is the class or module the rendered member belongs to. {AliasIndex} needs it to judge whether
       # a matching alias is one this reader would expect to see; a call site that cannot supply it renders the
       # type unfolded, which is the same output as before #1002.
+      #
+      # Issue #2230 — qualified last, after the alias fold has matched the unqualified spelling it keys on, so a core
+      # name a namespace of the owner shadows (`Set` inside a `module Foo` that declares `Foo::Set`) is written `::Set`.
       def elaborated_rbs(type, owner: nil)
-        alias_index.fold(TypeElaborator.elaborate(type, environment: @environment).erase_to_rbs, owner)
+        folded = alias_index.fold(TypeElaborator.elaborate(type, environment: @environment).erase_to_rbs, owner)
+        TypeNameQualification.qualify(folded, owner) { |name| declared_constant?(name) }
+      end
+
+      # Whether a type name written as `name` resolves to a constant the run can see: one the RBS environment
+      # declares, or a class or module the project's source declares, whether or not `sig/` has caught up with it.
+      def declared_constant?(name)
+        class_known?(name) || Reflection.discovered_class?(name, scope: file_base_scope(@environment))
       end
 
       # Issue #1002 — the reverse of {#translate_method_type_return}'s `alias_expander:`. Folding happens here,

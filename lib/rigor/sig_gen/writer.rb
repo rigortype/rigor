@@ -79,6 +79,15 @@ module Rigor
         write_target(target, emittable, source_path: source_path)
       end
 
+      # Whether the writer is sure to write `candidate`. A file the writer writes nothing to is left as it is, so a
+      # class shell riding on that file's candidates never reaches disk; the generator asks this before it counts
+      # a shell as declared (#2454). Only a new method is sure: without `--overwrite` the writer skips a tighter
+      # return or an inline overwrite whose method the target already declares. Counting too few only demotes a
+      # subclass, which is the output before #2454.
+      def self.writes?(candidate)
+        candidate.classification == Classification::NEW_METHOD
+      end
+
       # Whether `proposed` has STRICTLY FEWER bare `untyped` tokens than `existing`. A count, not a slot-by-slot
       # comparison: it reads as "at least one more position is concrete", and does not prove that no concrete
       # position became `untyped` elsewhere. Word-boundary matching counts `untyped` only as a type token, not

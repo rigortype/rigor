@@ -1,0 +1,2 @@
+- **[sig-gen]** `sig-gen --write` writes a superclass spelled with a leading `::` as the class it names, so `class Sub < ::Hash` inside a namespace that declares its own `Hash` no longer fails `rbs validate`. ([#2465](https://github.com/rigortype/rigor/pull/2465))
+  - An unanchored superclass that resolves to a class of the enclosing namespace takes that class's type arguments, not those of the top-level class of the same name.

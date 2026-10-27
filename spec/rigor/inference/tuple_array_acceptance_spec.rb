@@ -123,6 +123,15 @@ RSpec.describe "A tuple parameter against an Array argument", type: :runner do
                       | (_MyEach[untyped], Array[Integer]) -> String
           def self.probe: (Array[String], Array[Integer]) -> void
           def self.probe_rec: (Hash[Symbol, untyped], Array[Integer]) -> void
+          def self.kw: (pair: [Integer, Integer]) -> Symbol
+                     | (pair: untyped) -> String
+          def self.kw2: (Integer, pair: [Integer, Integer]) -> Symbol
+                      | (Integer, pair: untyped) -> String
+          def self.kw3: (pair: [Integer, Integer]) -> Symbol
+                      | (pair: Array[Integer]) -> String
+          def self.kw4: (pair: [Integer, Integer]) -> Symbol
+                      | (pair: _Each[Integer]) -> String
+          def self.probe_kw: (Array[Integer]) -> void
         end
       RBS
     end
@@ -139,6 +148,16 @@ RSpec.describe "A tuple parameter against an Array argument", type: :runner do
             assert_type("String", G.u(a))
             assert_type("String", G.gen(a))
             assert_type("Symbol", G.u([1, 2]))
+            nil
+          end
+
+          # Pass 1.5 checks keywords gradually, so it refuses the tuple's `maybe` too and leaves the choice to pass 2.
+          def self.probe_kw(a)
+            assert_type("String", G.kw(pair: a))
+            assert_type("String", G.kw2(1, pair: a))
+            assert_type("String", G.kw3(pair: a))
+            assert_type("String", G.kw4(pair: a))
+            assert_type("Symbol", G.kw(pair: [1, 2]))
             nil
           end
 

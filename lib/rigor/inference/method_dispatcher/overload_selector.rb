@@ -322,7 +322,10 @@ module Rigor
               next false unless engages_block_shape?(method_type, shared[:block_required])
 
               fun = method_type.type
-              ok = KeywordArguments.accepted_by?(fun, shared, false) { |*kv| accepts_param?(*kv, shared, false, true) }
+              # Issue #2428 — a tuple keyword's `maybe` for an unread Array is no evidence here; pass 2 decides.
+              ok = Acceptance.refusing_unread_arrays do
+                KeywordArguments.accepted_by?(fun, shared, false) { |*kv| accepts_param?(*kv, shared, false, true) }
+              end
               next false unless ok
 
               arg_types = KeywordArguments.selection_positional(method_type, shared)

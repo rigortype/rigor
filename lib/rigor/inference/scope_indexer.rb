@@ -47,6 +47,7 @@ require_relative "scope_indexer/member_layouts_collector"
 require_relative "scope_indexer/declared_ivar_types"
 require_relative "scope_indexer/declared_param_writes"
 require_relative "scope_indexer/constant_ivar_value"
+require_relative "scope_indexer/ivar_contributions"
 
 module Rigor
   module Inference
@@ -118,6 +119,8 @@ module Rigor
 
       # No path whose contributions are all `possible` (issue #2021), the cross-file walks' default.
       EMPTY_PATH_SET = Set.new.freeze
+      # The {IvarWriterCensus} entry kinds the project pre-pass tags with the file that records them.
+      PATH_TAGGED_KINDS = %i[own_write own_write_type].to_set.freeze
 
       # `declared_ivar_types:` — whether an RBS-declared ivar type replaces the census's join of the writes (#1406).
       # `rigor sig-gen` passes false: it proposes what the code says, and reading a declaration back would make a row
@@ -569,8 +572,12 @@ module Rigor
         merge_held_ivar_writes!(accumulator)
         record_aliased_ivar_mutations!(root, mutated_ivars)
         widen_mutated_ivar_entries!(accumulator, mutated_ivars)
+        # #2170 — an ancestor's writes as this file's census types them, before its read-before-write `nil`.
+        writes = accumulator.transform_values(&:dup)
         contribute_read_before_write_nil!(accumulator, read_before_write, init_writes)
         make_reflective_classes_gradual!(accumulator, reflective_opaque)
+        # #2079 / #2170 — another file's writes, and the chain's modules' and superclasses', join existing entries.
+        IvarContributions.join!(accumulator, writes, default_scope)
         # #1406 — an RBS `@x: T` or `attr_* x: T` declaration replaces the census's join of the writes.
         DeclaredIvarTypes.apply!(accumulator, default_scope) if declared_ivar_types
         accumulator.transform_values(&:freeze).freeze
@@ -10469,10 +10476,11 @@ module Rigor
 
       # #1154 — tags each `[:own_write, class, ivar]` entry with the file that records it, so a reader of the merged
       # census can tell a second file writing the same ivar of the same class (`UnseenIvarWriters`).
+      # Issue #2079 — and each `[:own_write_type, class, ivar, value]` entry, which {IvarContributions} reads.
       def attribute_own_writes(census, path)
-        return census unless census.any? { |entry| entry.first == :own_write }
+        return census unless census.any? { |entry| PATH_TAGGED_KINDS.include?(entry.first) }
 
-        census.to_set { |entry| entry.first == :own_write ? [*entry, path].freeze : entry }
+        census.to_set { |entry| PATH_TAGGED_KINDS.include?(entry.first) ? [*entry, path].freeze : entry }
       end
 
       # Folds one file's Data + Struct member-layout tables into the cross-file accumulator (kept out of

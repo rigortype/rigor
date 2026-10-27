@@ -49,11 +49,20 @@ rule in `AGENTS.md` favour the side that only withholds diagnostics.
 Keep the frame-wide entry for every other receiver. This was the coordinator's ruling after
 review, and it is the only option that adds no report on correct code.
 
+Separately, the groups of a regex pattern narrow only when every `(?` in its source opens `(?:`,
+`(?<name>` or `(?'name'`. This is the coordinator's ruling after two review rounds found
+`unconditional_capture_groups` misreading inline flags, comments and lookarounds. Each misreading
+types `$N` as `String` where Ruby has nil. The allowlist gives up precision on atomic groups,
+lookbehinds and harmless inline flags (`(?i)`) in exchange for not narrowing any construct the walk
+was not written for.
+
 ## To undo
 
 - To stop narrowing a `Dynamic` receiver, drop the `dynamic` kind from
   `Narrowing.string_match_receiver?`.
 - To narrow another receiver, widen that predicate.
+- To narrow the groups of another `(?` construct, add its opener to
+  `Narrowing::PLAIN_GROUP_OPENER`, once `unconditional_capture_groups` reads it correctly.
 
 The fixture `spec/integration/fixtures/regex_global_narrowing.rb` pins both choices:
 `match_block_erubi`, `match_block_project_receiver`, `match_block_project_gsub`,

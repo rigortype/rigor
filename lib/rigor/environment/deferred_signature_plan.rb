@@ -20,7 +20,9 @@ module Rigor
     #   continued ({GatedSignaturePlan.untaken} narrows an `attr_accessor` or `self?` to its untaken half);
     # - a constant, global, type alias, interface or class alias another source already declares, and a type
     #   whose kind (class or module) contradicts another source's, stands down on its own, where adding it would
-    #   have raised `RBS::DuplicatedDeclarationError` and dropped the plugin's whole file.
+    #   have raised `RBS::DuplicatedDeclarationError` and dropped the plugin's whole file;
+    # - a class header's superclass clause another source already gives the class one stands down (#2439), where two
+    #   different clauses would have raised `RBS::SuperclassMismatchError`; the plugin's declaration reopens the class.
     #
     # A declaration with nothing taken comes back as the same object, so a file with no collision loads as it
     # stands. {.standdown_rows} reads what stood down back off the built environment, so a warm run off the env
@@ -56,7 +58,18 @@ module Rigor
 
           composed(member, defined) || GatedSignaturePlan.untaken(member, taken)
         end
-        same?(members, decl.members) ? decl : GatedSignaturePlan.rebuild(decl, members: members)
+        drop = superclass_given?(decl, others)
+        return decl if same?(members, decl.members) && !drop
+
+        GatedSignaturePlan.rebuild(decl, members: members, drop_super_class: drop)
+      end
+
+      # Issue #2439 — true when `decl` is a class with a superclass clause and another source (`others`) already
+      # gives the class one. Two different clauses raise `RBS::SuperclassMismatchError` and the class and every
+      # descendant read `Dynamic[top]`, so the plugin's header stands down and reopens the class without one. The
+      # two names are not compared: they are not resolved yet, and the other source's superclass binds either way.
+      def superclass_given?(decl, others)
+        super_class?(decl) && others.any? { |other| super_class?(other) }
       end
 
       # `member` as an overload continuation, or nil when it cannot be one: only a plain one-sided `def` can, and
@@ -165,6 +178,7 @@ module Rigor
           return
         end
 
+        rows.concat(superclass_rows(env, decl, name, loaded, others))
         rows.concat(member_rows(decl, name, loaded, others))
         decl.members.each { |member| declaration_rows(env, file, member, name, rows) if declaration?(member) }
       end
@@ -173,6 +187,38 @@ module Rigor
       def alias_cause(env, name)
         entry = env.class_alias_decls[::RBS::TypeName.parse("::#{name}")]
         entry && (RbsLoader.declaration_buffer_name(entry.decl) || "")
+      end
+
+      # The plugin's superclass clause as a row (`ActiveRecord::StatementInvalid < ActiveRecordError`) when every
+      # declaration the file loaded for the class lost it to another source's ({.superclass_given?}) and that
+      # source names a different class. The plan drops a matching clause too, but nothing is lost, so no row.
+      def superclass_rows(env, decl, name, loaded, others)
+        return [] unless superclass_given?(decl, others) && loaded.none? { |kept| super_class?(kept) }
+
+        cause = others.find { |other| super_class?(other) }
+        return [] if resolved_super_class(env, decl.super_class.name, name) == cause.super_class.name.to_s
+
+        [["#{name} < #{decl.super_class.name}", buffer_of(cause)]]
+      end
+
+      # `written` (a superclass name as the plugin spells it) as the absolute name it reads in `env`: the first
+      # namespace enclosing `class_name`, innermost first, under which its leading segment is a declared class,
+      # module or alias. The built env's names are already absolute, so this is only what the report compares.
+      def resolved_super_class(env, written, class_name)
+        return written.to_s if written.absolute?
+
+        head = written.to_s.split("::").first
+        prefixes = class_name.split("::")[0...-1]
+        prefixes.size.downto(0) do |size|
+          prefix = prefixes.first(size).map { |segment| "::#{segment}" }.join
+          candidate = ::RBS::TypeName.parse("#{prefix}::#{head}")
+          return "#{prefix}::#{written}" if env.class_decls.key?(candidate) || env.class_alias_decls.key?(candidate)
+        end
+        "::#{written}"
+      end
+
+      def super_class?(decl)
+        decl.is_a?(::RBS::AST::Declarations::Class) && !decl.super_class.nil?
       end
 
       def member_rows(decl, name, loaded, others)

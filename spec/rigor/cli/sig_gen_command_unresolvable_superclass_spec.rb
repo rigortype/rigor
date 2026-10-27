@@ -42,6 +42,16 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     expect(err).not_to include("rbs collection install")
   end
 
+  it "advises the same for a project superclass whose own chain ends at a core class" do
+    write("lib/errors.rb", "class AppError < StandardError\n  def render(x) = x.whatever\nend\n")
+    write("lib/not_found.rb", "class NotFound < AppError\n  def code = 404\nend\n")
+
+    err = sig_gen_err
+
+    expect(err).to include("superclass this run wrote no signature for", "  NotFound < AppError\n")
+    expect(err).not_to include("rbs collection install")
+  end
+
   it "keeps the provide-RBS advice for a superclass nothing declares" do
     write("lib/sub.rb", "class Sub < Missing\n  def x = 1\nend\n")
 

@@ -1,0 +1,3 @@
+- **[sig-gen]** A reopened generic class such as `class Array` or `class Hash` is now written with its declared type parameters, so `rbs validate` and the class's definition build no longer fail with `GenericParameterMismatchError`. ([#2473](https://github.com/rigortype/rigor/pull/2473))
+  - The parameters are copied from the first loaded declaration (core, stdlib, a gem or the project's `sig/`) when every one is plain, as in `class Hash[unchecked out K, unchecked out V]`; `--print` shows the same header.
+  - A class whose parameter has a bound or a default, and that `sig/` does not declare, has its methods skipped as `sig.skipped.generic-reopening` instead.

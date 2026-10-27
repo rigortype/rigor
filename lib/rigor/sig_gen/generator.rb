@@ -137,7 +137,7 @@ module Rigor
       # on the chain that is not a source class: `User < ApplicationRecord` reports `ActiveRecord::Base`, the class
       # whose RBS is missing, rather than the project class between them.
       def unresolvable_superclass_report(token)
-        name = bare_class_name(token)
+        name = bare_superclass_name(token)
         root = token
         seen = {}
         while @source_classes.include?(name) && !seen[name]
@@ -146,7 +146,7 @@ module Rigor
           return [:project, token] if superclass.nil?
 
           root = resolve_superclass_token(superclass, nesting, @source_classes)
-          name = bare_class_name(root)
+          name = bare_superclass_name(root)
           return [:project, token] if Reflection.rbs_class_known?(name, environment: @environment)
         end
         [:external, root]
@@ -553,10 +553,6 @@ module Rigor
           declared.merge(candidate.class_shells || []) if written_paths.include?(candidate.path)
         end
         declared.flat_map { |name| wrapper_names(name) }.to_set | declared
-      end
-
-      def bare_class_name(token)
-        token.sub(/\[.*\]\z/, "").delete_prefix("::")
       end
 
       # `A::B::C` is written inside `A` and `A::B`.

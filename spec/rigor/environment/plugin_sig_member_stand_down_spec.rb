@@ -498,6 +498,8 @@ end
       end
     end
 
+    # Guard for the warm half: the rows are derived from the built env, so no mutation of the plan separates a
+    # warm run from a cold one; the cold half fails with the plan.
     it "reports the same rows on a warm run, without rebuilding the env" do
       Dir.mktmpdir do |dir|
         store = Rigor::Cache::Store.new(root: File.join(dir, "cache"))

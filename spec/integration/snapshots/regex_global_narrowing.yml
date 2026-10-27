@@ -303,14 +303,16 @@ assertions:
   '295': MatchData
   '296': Integer
   '297': String
-  '298': MatchData
-  '299': String?
-  '300': String?
-  '301': MatchData
-  '302': String
+  '298': String
+  '299': String
+  '300': MatchData
+  '301': String?
+  '302': String?
   '303': MatchData
-  '304': MatchData
-  '305': MatchData?
-  '306': String?
-  '307': String
-  '308': MatchData?
+  '304': String
+  '305': MatchData
+  '306': MatchData
+  '307': MatchData?
+  '308': String?
+  '309': String
+  '310': MatchData?

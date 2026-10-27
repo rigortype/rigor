@@ -2603,7 +2603,7 @@ def match_block_methods(str)
   str.gsub(/x/) { m = Regexp.last_match; m.begin(0).to_s }
   str.gsub("x") { m = Regexp.last_match; m.begin(0).to_s }
   str.sub(/x/) { m = Regexp.last_match; m.end(0).to_s }
-  str.sub("x") { assert_type("String", $&); $~.pre_match }
+  str.sub("x") { assert_type("String", $&); assert_type("String", $`); assert_type("String", $'); $~.pre_match }
   str.gsub!(/x/) { m = Regexp.last_match; m.end(0).to_s }
   str.sub!("x") { m = Regexp.last_match; m.end(0).to_s }
   str&.scan(/x/) { assert_type("MatchData", $~) }

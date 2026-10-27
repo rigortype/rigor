@@ -227,6 +227,7 @@ RSpec.describe Rigor::CLI::BaselineCommand do
         expect(err).to match(/\((\d+) bucket\(s\) covering #{covered} diagnostic\(s\); match-mode: rule\)/)
         expect(err).to include("have no rule (parse, path or internal errors) in 2 file(s)")
         expect(err).to include("  lib/bad.rb\n", "  lib/bad2.rb\n")
+        expect(err).not_to include("have no path")
       end
     end
 

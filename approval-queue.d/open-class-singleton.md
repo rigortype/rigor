@@ -37,7 +37,8 @@ project class up its superclass chain, matches any of these:
 1. It records an `include` / `extend` / `prepend`, an `inherited` / `included` / `extended` / `prepended` hook,
    or `method_missing` / `respond_to_missing?`.
 2. It has no body of its own inside `paths:`.
-3. Its superclass chain reaches a class the project does not define, other than `Object` and `BasicObject`.
+3. Its superclass chain reaches a class the project does not define, other than `Object` and `BasicObject`, or a
+   superclass written as an expression. A superclass only the member-less declaration writes counts too.
 
 Accepted costs:
 

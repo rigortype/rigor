@@ -101,18 +101,7 @@ module Rigor
         # `#filter` passes these through and `from_diagnostics` leaves them out of every bucket; this is the one
         # definition of both.
         def unkeyable(diagnostics)
-          diagnostics.reject { |d| keyable?(d) }
-        end
-
-        def keyable?(diagnostic)
-          !diagnostic.qualified_rule.nil? && !diagnostic.path.nil?
-        end
-
-        # The path as the baseline YAML keys it: relative to `project_root`, or unchanged when it is not under it.
-        def relative_path(path, root_pathname)
-          Pathname.new(path).relative_path_from(root_pathname).to_s
-        rescue ArgumentError
-          path # different drive letter on Windows or non-child path
+          diagnostics.reject { |d| d.qualified_rule && d.path }
         end
 
         private
@@ -161,9 +150,7 @@ module Rigor
         # of message. File paths are normalised to relative before keying.
         def group_for_baseline(diagnostics, match_mode, project_root)
           root = Pathname.new(project_root)
-          diagnostics.each_with_object({}) do |diag, into|
-            next unless keyable?(diag)
-
+          (diagnostics - unkeyable(diagnostics)).each_with_object({}) do |diag, into|
             rel = relative_path(diag.path, root)
             key = case match_mode
                   when :rule
@@ -173,6 +160,12 @@ module Rigor
                   end
             (into[key] ||= []) << diag
           end
+        end
+
+        def relative_path(path, root_pathname)
+          Pathname.new(path).relative_path_from(root_pathname).to_s
+        rescue ArgumentError
+          path # different drive letter on Windows or non-child path
         end
 
         # Generates a Regexp source string for the baseline row. The string is `Regexp.escape`d so the YAML

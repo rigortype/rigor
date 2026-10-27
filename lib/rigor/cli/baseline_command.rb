@@ -124,7 +124,13 @@ module Rigor
 
       def unbaselineable_files(diagnostics)
         root = Pathname.new(Dir.pwd)
-        diagnostics.filter_map(&:path).map { |p| Analysis::Baseline.relative_path(p, root) }.uniq.sort
+        diagnostics.filter_map(&:path).map { |p| relative_to(root, p) }.uniq.sort
+      end
+
+      def relative_to(root, path)
+        Pathname.new(path).relative_path_from(root).to_s
+      rescue ArgumentError
+        path
       end
 
       def parse_generate_options(subcommand: "generate")

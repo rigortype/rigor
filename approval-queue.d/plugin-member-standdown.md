@@ -56,6 +56,15 @@ plugin stands down to the project's own sources. A colliding constant, global, t
 or kind-clashing type stands down alone. The notice is one row per plugin file, following the vendored notice's
 shape, which the brief names as the model, and composed methods are left out of it.
 
+A type whose kind contradicts another source's stands down whole, with the types nested in it, rather than as a
+#1713-style shell that keeps them. The round-2 review accepted this: a class one source declares as a module is a
+program that is wrong at runtime, and losing the nested types costs no false positive.
+
+The composing ruling's continuation order and continuing onto an attribute or alias were verified on rbs 4.2 locally.
+CI's `RBS compatibility (RBS 3.x)` job runs `spec/rigor/environment` on the 3.x line, which includes
+`plugin_sig_member_stand_down_spec.rb`'s order and attribute/alias examples, so the 3.x line is checked there rather
+than locally.
+
 ## To undo
 
 Inline: move `add_deferred_signatures` back into `add_project_signatures` and drop the

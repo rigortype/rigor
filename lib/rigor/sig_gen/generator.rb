@@ -2067,7 +2067,24 @@ module Rigor
       # name a namespace of the owner shadows (`Set` inside a `module Foo` that declares `Foo::Set`) is written `::Set`.
       def elaborated_rbs(type, owner: nil)
         folded = alias_index.fold(TypeElaborator.elaborate(type, environment: @environment).erase_to_rbs, owner)
-        TypeNameQualification.qualify(folded, owner) { |name| declared_constant?(name) }
+        captured = owner_type_param_names(owner)
+        TypeNameQualification.qualify(folded, owner) { |name| captured.include?(name) || declared_constant?(name) }
+      end
+
+      # Issue #2436 — inside `class Array[unchecked out E]` a bare `E` names the type variable, not a class `::E`,
+      # so a class whose spelling equals one of the owner's declared type-parameter names is anchored. The names
+      # come as `"Array::E"`, the form {TypeNameQualification.qualify} asks about for the owner's own namespace;
+      # a namespace the owner is nested in does not bind its parameters inside the owner's declaration.
+      def owner_type_param_names(owner)
+        loader = owner && @environment&.rbs_loader
+        return Set.new if loader.nil?
+
+        @owner_type_param_names ||= {}
+        @owner_type_param_names.fetch(owner) do
+          @owner_type_param_names[owner] = loader.class_declaration_type_params(owner).to_set do |p|
+            "#{owner}::#{p.name}"
+          end
+        end
       end
 
       # Whether a type name written as `name` resolves to a constant the run can see: one the RBS environment

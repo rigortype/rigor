@@ -70,6 +70,9 @@ RSpec.describe Rigor::CLI::SigGenCommand do
         module Kernel
           def kfoo = 1
         end
+        module Enumerable
+          def kbar = 1
+        end
       RUBY
     end
 
@@ -96,6 +99,10 @@ RSpec.describe Rigor::CLI::SigGenCommand do
         module Kernel
           def kfoo: () -> 1
         end
+
+        module Enumerable[unchecked out E]
+          def kbar: () -> 1
+        end
       RBS
       expect(rbs_validate).to eq([0, ""])
     end
@@ -105,9 +112,73 @@ RSpec.describe Rigor::CLI::SigGenCommand do
 
       expect(out.lines.grep(/\A(class|module) /).map(&:chomp)).to eq(
         ["class Array[unchecked out E]", "class Hash[unchecked out K, unchecked out V]",
-         "class Set[unchecked out A]", "class String", "module Kernel"]
+         "class Set[unchecked out A]", "class String", "module Kernel", "module Enumerable[unchecked out E]"]
       )
     end
+  end
+
+  it "keeps the parameters on a candidate the effect pass rebuilds" do
+    write(".rigor.yml", "paths:\n  - lib\neffects: {}\n")
+    write("lib/ext.rb", "class Array\n  def ok = 1\nend\n")
+
+    expect(sig_gen("--write", "lib").first).to eq(0)
+
+    expect(written("ext")).to start_with("class Array[unchecked out E]\n")
+  end
+
+  # Review of #2473: inside `class Array[unchecked out E]` a bare `E` is the type variable, so a member returning
+  # the project's class `E` must spell it `::E`, or `[1].mk` reads as the element type.
+  describe "a class named like a copied type parameter" do
+    before do
+      write("lib/ext.rb", <<~RUBY)
+        class E
+          def e = 1
+        end
+        class K
+          def k = 1
+        end
+        class Array
+          def mk = E.new
+          def mks = [E.new]
+        end
+        class Hash
+          def mk = K.new
+        end
+      RUBY
+    end
+
+    def check_diagnostics
+      write("lib/use.rb", "class User\n  def a = [1].mk.e\n  def b = [1].mks.first.e\n  def h = { 1 => 2 }.mk.k\nend\n")
+      out = StringIO.new
+      Rigor::CLI.start(["check", "--no-cache", "--format=json", "--config=#{File.join(root, '.rigor.yml')}", "lib/use.rb"],
+                       out: out, err: StringIO.new)
+      JSON.parse(out.string).fetch("diagnostics").map { |d| d["message"] }
+    end
+
+    it "anchors the class so the member still names it" do
+      expect(sig_gen("--write", "lib").first).to eq(0)
+
+      expect(written("ext")).to include(
+        "class Array[unchecked out E]\n  def mk: () -> ::E\n  def mks: () -> [::E]\nend\n",
+        "class Hash[unchecked out K, unchecked out V]\n  def mk: () -> ::K\nend\n"
+      )
+      expect(rbs_validate).to eq([0, ""])
+      expect(check_diagnostics).to eq([])
+    end
+  end
+
+  # A method-level `[E]` binds its own `E`, which the class's copied parameter must not disturb.
+  it "leaves a method-level type parameter of an inline declaration as written" do
+    require "rigor-rbs-inline"
+    Rigor::Plugin.register(Rigor::Plugin::RbsInline) unless Rigor::Plugin.registered_for("rbs-inline")
+    write(".rigor.yml", "paths:\n  - lib\nplugins:\n  - gem: rigor-rbs-inline\n    id: rbs-inline\n    " \
+                        "config:\n      require_magic_comment: false\n")
+    write("lib/ext.rb", "class Array\n  #: [E] (E) -> E\n  def idt(x) = x\nend\n")
+
+    expect(sig_gen("--write", "lib").first).to eq(0)
+
+    expect(written("ext")).to eq("class Array[unchecked out E]\n  def idt: [E] (E) -> E\nend\n")
+    expect(rbs_validate).to eq([0, ""])
   end
 
   it "inserts the header with its parameters into a file that declares other classes" do

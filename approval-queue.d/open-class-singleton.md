@@ -37,8 +37,9 @@ mixin argument's leading `::`: `include ::Singleton` must keep typing, so `inclu
 `RbsLoader#memberless_project_class?` and then `CheckRules#open_source_class?`. A class is open when it, or a
 project class up its superclass chain, matches any of these:
 
-1. It records an `include` / `extend` / `prepend`, an `inherited` / `included` / `extended` / `prepended` hook,
-   or `method_missing` / `respond_to_missing?`.
+1. It `extend`s a module, or records an `inherited` / `included` / `extended` / `prepended` hook or
+   `method_missing` / `respond_to_missing?`. A plain `include` or `prepend` adds instance methods only, so it
+   leaves the singleton side closed.
 2. It has no body of its own inside `paths:`.
 3. Its superclass chain reaches a class the project does not define, other than `Object` and `BasicObject`, or a
    superclass written as an expression. A superclass only the member-less declaration writes counts too.

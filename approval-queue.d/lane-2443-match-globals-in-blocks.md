@@ -50,25 +50,27 @@ Keep the frame-wide entry for every other receiver. This was the coordinator's r
 review, and it is the only option that adds no report on correct code.
 
 Separately, the block entry binds only what every match binds: `$~`, `$&`, and the pre- and
-post-match. It no longer types `$N` from the pattern. Three review rounds found
-`unconditional_capture_groups` misreading one source shape after another, each typing `$N` as
-`String` where Ruby has nil:
+post-match. These are laid over the frame-wide entry, and every `$N` and `$+` keeps the binding
+that entry gives it, exactly as before this PR. This is the coordinator's ruling after review.
 
-- inline flags;
-- comments;
-- lookarounds;
-- nested character classes.
+Typing `$N` from the call's own pattern was backed out. Three rounds found
+`unconditional_capture_groups` misreading one source shape after another: inline flags, comments,
+lookarounds, nested character classes. #2472 tracks fixing the walk.
 
-The coordinator ruled to back out the per-group half rather than patch the walk again. Every `$N`
-in such a block reads `String?` until #2472 fixes the walk. The erubi report needs only `$~`.
+Forgetting the groups at entry was also backed out. A group narrowed by an earlier match in the
+method then read `String?` and reported correct code, as in
+`return unless s =~ /(\d+)/; s.gsub(/(\w)/) { w = $1; w.upcase }`.
+
+Keeping the frame-wide binding leaves #1371's stale-binding cases as they were on master. The
+erubi report needs only `$~`.
 
 ## To undo
 
 - To stop narrowing a `Dynamic` receiver, drop the `dynamic` kind from
   `Narrowing.string_match_receiver?`.
 - To narrow another receiver, widen that predicate.
-- To narrow the groups once #2472 lands, pass `unconditional_capture_groups` of a readable pattern
-  to `regex_match_predicate_scopes` in `Narrowing.yielded_match_scope`.
+- To type the groups from the pattern once #2472 lands, extend `Narrowing.yielded_match_scope`.
+  It must also replace a group an earlier match bound, which #1371 asks for.
 
 The fixture `spec/integration/fixtures/regex_global_narrowing.rb` pins both choices:
 `match_block_erubi`, `match_block_project_receiver`, `match_block_project_gsub`,

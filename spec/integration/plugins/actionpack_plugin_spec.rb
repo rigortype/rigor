@@ -71,22 +71,28 @@ RSpec.describe "plugins/rigor-actionpack" do
   before { Rigor::Plugin.unregister! }
   after { Rigor::Plugin.unregister! }
 
+  # Issue #2430 — writes the project `sig/` files, and returns the `signature_paths` they make; nil when
+  # there are none, which leaves the configuration's default in place.
+  def write_demo_signatures(dir, signatures)
+    return nil if signatures.empty?
+
+    FileUtils.mkdir_p(File.join(dir, "sig"))
+    signatures.each { |name, body| File.write(File.join(dir, "sig", name), body) }
+    [File.join(dir, "sig")]
+  end
+
   def with_demo(controller_source, routes: DEFAULT_AP_ROUTES_RB, signatures: {})
     Dir.mktmpdir do |dir|
       FileUtils.mkdir_p(File.join(dir, "config"))
       FileUtils.mkdir_p(File.join(dir, "app", "controllers"))
       File.write(File.join(dir, "config", "routes.rb"), routes)
       File.write(File.join(dir, "app", "controllers", "demo_controller.rb"), controller_source)
-      unless signatures.empty?
-        FileUtils.mkdir_p(File.join(dir, "sig"))
-        signatures.each { |name, body| File.write(File.join(dir, "sig", name), body) }
-      end
 
       configuration = Rigor::Configuration.new(
         Rigor::Configuration::DEFAULTS.merge(
           "paths" => [File.join(dir, "app", "controllers")],
           "plugins" => %w[rigor-rails-routes rigor-actionpack],
-          "signature_paths" => signatures.empty? ? nil : [File.join(dir, "sig")]
+          "signature_paths" => write_demo_signatures(dir, signatures)
         )
       )
 
@@ -420,14 +426,16 @@ RSpec.describe "plugins/rigor-actionpack" do
     # The control call is a real mismatch and must still fire: without it, silence could be the harness
     # going dark rather than the boundary accepting the carrier.
     describe "a `params[:key]` value at a declared String parameter (#2430)" do
-      source = <<~RUBY
-        class C
-          def show
-            Model.find(params[:id])
-            Model.find(42)
+      let(:source) do
+        <<~RUBY
+          class C
+            def show
+              Model.find(params[:id])
+              Model.find(42)
+            end
           end
-        end
-      RUBY
+        RUBY
+      end
 
       it "is silent with the Parameters RBS stand-in in the project sig/, and the control fires" do
         signatures = { "model.rbs" => MODEL_FIND_SIG, "parameters.rbs" => PARAMETERS_STANDIN_SIG }

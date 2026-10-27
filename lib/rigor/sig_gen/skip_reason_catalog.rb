@@ -110,6 +110,19 @@ module Rigor
           next_step: "Declare the class in `sig/` with the same type parameters as the inline declaration " \
                      "(`class Box[T]` ... `end`) and re-run; sig-gen then writes the members into it."
         ),
+        "sig.skipped.generic-reopening" => Entry.new(
+          id: "sig.skipped.generic-reopening",
+          summary: "The method reopens a generic class whose type parameters sig-gen cannot copy onto a header.",
+          explanation: "The class (or one it is nested in) is declared generic by loaded RBS — core, stdlib, a gem " \
+                       "or `sig/` — and one of its type parameters has an upper bound or a default. sig-gen copies " \
+                       "a declaration's type parameters onto the header it writes only when every one is plain, " \
+                       "because a bound or default is a type spelled relative to the declaring file and can name " \
+                       "a different class under another nesting. A header without the parameters, or with ones " \
+                       "that differ, is rejected by rbs (`GenericParameterMismatchError`): the class, and every " \
+                       "class whose signature mentions it, would fail its definition build.",
+          next_step: "Declare the class in `sig/` with the declaration's own type parameters (`class Box[T < " \
+                     "Comparable]` ... `end`) and re-run; sig-gen then writes the members into that declaration."
+        ),
         "sig.skipped.inline-differs" => Entry.new(
           id: "sig.skipped.inline-differs",
           summary: "The method's inline declaration and its `sig/` declaration disagree; neither was changed.",

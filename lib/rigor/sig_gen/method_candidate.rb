@@ -33,13 +33,14 @@ module Rigor
     class MethodCandidate
       attr_reader :path, :class_name, :method_name, :kind, :classification,
                   :inferred_return, :declared_return_rbs, :rbs, :skip_reason,
-                  :namespace_kinds, :class_shells, :class_superclasses,
+                  :namespace_kinds, :class_shells, :class_superclasses, :class_type_params,
                   :annotations, :effect_reason, :declared_rbs, :declared_annotations
 
       def initialize(path:, class_name:, method_name:, kind:, classification:, # rubocop:disable Metrics/ParameterLists
                      inferred_return: nil, declared_return_rbs: nil, rbs: nil, skip_reason: nil,
                      namespace_kinds: {}, class_shells: [], class_superclasses: {},
-                     annotations: [], effect_reason: nil, declared_rbs: nil, declared_annotations: [])
+                     annotations: [], effect_reason: nil, declared_rbs: nil, declared_annotations: [],
+                     class_type_params: {})
         @path = path
         @class_name = class_name
         @method_name = method_name
@@ -55,6 +56,10 @@ module Rigor
         # superclasses appear; computed ones are absent. The Writer emits `class Bar < Base` for the leaf when
         # present.
         @class_superclasses = class_superclasses.freeze
+        # Issue #2436 — qualified class name => the type-parameter list a loaded declaration gives it, spelled for
+        # a header (`{ "Array" => "[unchecked out E]" }`). A header the writer opens for one of these classes
+        # carries the list; a class absent from the map is written without one.
+        @class_type_params = class_type_params.freeze
         @annotations = annotations.freeze
         @effect_reason = effect_reason
         @declared_rbs = declared_rbs
@@ -85,7 +90,21 @@ module Rigor
           declared_return_rbs: @declared_return_rbs, rbs: @rbs, skip_reason: @skip_reason,
           namespace_kinds: @namespace_kinds, class_shells: @class_shells,
           class_superclasses: @class_superclasses, annotations: annotations, effect_reason: reason,
-          declared_rbs: @declared_rbs, declared_annotations: @declared_annotations
+          declared_rbs: @declared_rbs, declared_annotations: @declared_annotations,
+          class_type_params: @class_type_params
+        )
+      end
+
+      # A copy carrying the run's reopened-class type parameters (#2436).
+      def with_class_type_params(class_type_params)
+        self.class.new(
+          path: @path, class_name: @class_name, method_name: @method_name, kind: @kind,
+          classification: @classification, inferred_return: @inferred_return,
+          declared_return_rbs: @declared_return_rbs, rbs: @rbs, skip_reason: @skip_reason,
+          namespace_kinds: @namespace_kinds, class_shells: @class_shells,
+          class_superclasses: @class_superclasses, annotations: @annotations, effect_reason: @effect_reason,
+          declared_rbs: @declared_rbs, declared_annotations: @declared_annotations,
+          class_type_params: class_type_params
         )
       end
 

@@ -155,6 +155,11 @@ The `sig.skipped.*` reasons are:
   generic by an inline declaration and `sig/` does not declare
   it yet, or names its type parameters otherwise. See
   [Classes made generic inline](#classes-made-generic-inline).
+- `sig.skipped.generic-reopening` — the method's class, or one
+  it is nested in, is declared generic by loaded RBS with a
+  type parameter that has a bound or a default, and `sig/`
+  does not declare it. See
+  [Reopening a generic class](#reopening-a-generic-class).
 - `sig.skipped.inline-differs` — the method is declared
   inline and in `sig/`, and the two disagree. A refusal:
   `--write` and `--check` exit `1`. See
@@ -330,10 +335,34 @@ so a return inferred for the new line would describe
 parameters that are about to change. Delete the `sig/` member
 and re-run; sig-gen then writes the method afresh.
 
+### Reopening a generic class
+
+When your code reopens a class that loaded RBS declares
+generic — `class Array`, `class Hash`, a gem's class, or one
+your `sig/` declares — sig-gen writes the header with that
+declaration's type parameters: `class Array[unchecked out E]`.
+rbs rejects a reopening whose parameters differ, so a bare
+`class Array` would fail the class, and every class whose
+signature mentions it, with `GenericParameterMismatchError`.
+The members still say `untyped` for the element type, and a
+class whose name matches a copied parameter is written
+anchored (`::E`), since a bare `E` would name the parameter.
+
+The parameters are copied only when every one is plain: a
+name, a variance and `unchecked`. A bound or a default
+(`class Box[T < Comparable]`) is a type written for the
+declaring file's namespace and could mean another class
+where sig-gen writes, so that class's methods, and those of
+classes nested in it, are skipped as
+`sig.skipped.generic-reopening`. Declare the class in `sig/`
+with its parameters and sig-gen writes the members into that
+declaration. A file that already declares the class keeps its
+own header.
+
 ### Classes made generic inline
 
-sig-gen does not write a class's type parameters yet. A class
-declared generic inline (`# @rbs generic T`) is therefore not
+sig-gen does not copy type parameters from an inline
+declaration. A class declared generic inline (`# @rbs generic T`) is therefore not
 opened in `sig/`: a header without its parameters would make
 rbs reject the class, and every class whose signature mentions
 it, with `GenericParameterMismatchError`. Its methods, and

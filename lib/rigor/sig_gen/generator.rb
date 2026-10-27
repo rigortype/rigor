@@ -142,11 +142,13 @@ module Rigor
         @file_base_scope = nil
         candidates = resolved.flat_map { |path| analyse_file(path, @environment) }
         demoted = demote_overridden_base_methods(
-          demote_unresolvable_superclasses(demote_inline_generic_classes(resolve_superclass_spellings(candidates)))
+          demote_unresolvable_superclasses(
+            demote_generic_reopenings(demote_inline_generic_classes(resolve_superclass_spellings(candidates)))
+          )
         )
         # Again after the override demotion: a demoted method can leave its file with nothing to write, and a class
         # shell riding on that file then declares nothing a subclass elsewhere could rest on.
-        annotate_effects(demote_unresolvable_superclasses(demoted))
+        annotate_effects(stamp_generic_reopenings(demote_unresolvable_superclasses(demoted)))
       ensure
         RunScopedSlots.release
       end
@@ -235,6 +237,77 @@ module Rigor
       def opens_generic_class?(class_name, generic)
         segments = class_name.split("::")
         (1..segments.size).any? { |n| generic.key?(segments.first(n).join("::")) }
+      end
+
+      # Issue #2436 — a class the loaded RBS declares generic (`Array`, `Hash`, a gem's or the project's own) is
+      # reopened with that declaration's type parameters copied onto the header ({#stamp_generic_reopenings}),
+      # which is exact only while every parameter is plain. A bound or a default is a type spelled relative to the
+      # declaring file's namespace, and copying it under another nesting can resolve it to a different class, so
+      # rbs would reject the header as it rejects a parameterless one (`GenericParameterMismatchError`): the class,
+      # and every class whose signature mentions it, fails its definition build. A method of such a class, or of
+      # one nested in it, is skipped instead — unless `sig/` already declares the class, whose own header the
+      # writer then writes into ({#demote_inline_generic_classes}' rule).
+      def demote_generic_reopenings(candidates)
+        loader = @environment&.rbs_loader
+        return candidates if loader.nil?
+
+        layout = nil
+        candidates.map do |candidate|
+          next candidate unless Classification::EMITTABLE.include?(candidate.classification)
+          next candidate unless namespace_prefixes(candidate.class_name).any? { |name| bounded_generic?(loader, name) }
+
+          layout ||= LayoutIndex.new(signature_paths: @configuration.signature_paths)
+          next candidate if layout.file_for(candidate.class_name)
+
+          demoted_candidate(candidate, :generic_reopening)
+        end
+      end
+
+      # The other half of {#demote_generic_reopenings}: every emittable candidate carries the header spelling of
+      # each generic class the run may open a header for — its own class, the classes it is nested in, and the
+      # file's class shells and theirs — so the writer and `--print` spell the same header. Method bodies keep
+      # `untyped` for element types; nothing here names `E` in a member.
+      def stamp_generic_reopenings(candidates)
+        loader = @environment&.rbs_loader
+        return candidates if loader.nil?
+
+        emittable = candidates.select { |c| Classification::EMITTABLE.include?(c.classification) }
+        spelled = header_type_params(loader, emittable.flat_map { |c| [c.class_name, *c.class_shells] })
+        return candidates if spelled.empty?
+
+        candidates.map do |candidate|
+          next candidate unless Classification::EMITTABLE.include?(candidate.classification)
+
+          candidate.with_class_type_params(spelled)
+        end
+      end
+
+      # `{ class name => "[unchecked out E]" }` for every name in `names`, or a namespace it is nested in, whose
+      # loaded declaration is generic with plain parameters only.
+      def header_type_params(loader, names)
+        names.uniq.flat_map { |name| namespace_prefixes(name) }.uniq.each_with_object({}) do |name, acc|
+          params = loader.class_declaration_type_params(name)
+          acc[name] = "[#{params.join(', ')}]" if !params.empty? && params.all? { |p| plain_type_param?(p) }
+        end.freeze
+      end
+
+      def namespace_prefixes(class_name)
+        return [] if class_name.nil?
+
+        segments = class_name.split("::")
+        (1..segments.size).map { |n| segments.first(n).join("::") }
+      end
+
+      def bounded_generic?(loader, name)
+        params = loader.class_declaration_type_params(name)
+        !params.empty? && !params.all? { |param| plain_type_param?(param) }
+      end
+
+      # A name, a variance and `unchecked`, and nothing that spells a type: no upper or lower bound, no default.
+      def plain_type_param?(param)
+        %i[upper_bound lower_bound default_type].none? do |reader|
+          param.respond_to?(reader) && param.public_send(reader)
+        end
       end
 
       # Issue #744 — a base class's method is NOT emitted when a project subclass overrides it and the
@@ -2014,7 +2087,24 @@ module Rigor
       # name a namespace of the owner shadows (`Set` inside a `module Foo` that declares `Foo::Set`) is written `::Set`.
       def elaborated_rbs(type, owner: nil)
         folded = alias_index.fold(TypeElaborator.elaborate(type, environment: @environment).erase_to_rbs, owner)
-        TypeNameQualification.qualify(folded, owner) { |name| declared_constant?(name) }
+        captured = owner_type_param_names(owner)
+        TypeNameQualification.qualify(folded, owner) { |name| captured.include?(name) || declared_constant?(name) }
+      end
+
+      # Issue #2436 — inside `class Array[unchecked out E]` a bare `E` names the type variable, not a class `::E`,
+      # so a class whose spelling equals one of the owner's declared type-parameter names is anchored. The names
+      # come as `"Array::E"`, the form {TypeNameQualification.qualify} asks about for the owner's own namespace;
+      # a namespace the owner is nested in does not bind its parameters inside the owner's declaration.
+      def owner_type_param_names(owner)
+        loader = owner && @environment&.rbs_loader
+        return Set.new if loader.nil?
+
+        @owner_type_param_names ||= {}
+        @owner_type_param_names.fetch(owner) do
+          @owner_type_param_names[owner] = loader.class_declaration_type_params(owner).to_set do |p|
+            "#{owner}::#{p.name}"
+          end
+        end
       end
 
       # Whether a type name written as `name` resolves to a constant the run can see: one the RBS environment

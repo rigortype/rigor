@@ -55,6 +55,10 @@ module Rigor
         # generic T`) and `sig/` does not declare it yet. sig-gen writes no class type parameters, and a header
         # without them fails the class's definition build.
         inline_generic_class: "sig.skipped.inline-generic-class",
+        # #2436 — the member's class, or one it is nested in, is declared generic by loaded RBS with a parameter
+        # that has a bound or a default, and `sig/` does not declare it. A header copied from that declaration
+        # could resolve the bound differently, and one without parameters fails the class's definition build.
+        generic_reopening: "sig.skipped.generic-reopening",
         # ADR-112 WD4 — the member is declared inline and in `sig/`, and the two disagree. A refusal, not a
         # skip: `--write` and `--check` exit 1 until a person reconciles them or passes `--overwrite`.
         inline_differs: "sig.skipped.inline-differs",

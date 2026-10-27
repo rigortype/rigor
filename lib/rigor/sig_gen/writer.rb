@@ -48,6 +48,8 @@ module Rigor
         @global_namespace_kinds = {}
         # Run-level qualified-class-name => superclass-token view, same lifecycle as `@global_namespace_kinds`.
         @global_superclasses = {}
+        # #2436 — the target being rendered's view of {MethodCandidate#class_type_params}, set per target.
+        @type_params = {}
       end
 
       # Process the full candidate list by resolving each candidate's target sig file via the path mapper (which
@@ -164,6 +166,7 @@ module Rigor
         tree = build_namespace_tree(candidates, shells)
         kinds = merged_namespace_kinds(candidates)
         supers = merged_superclasses(candidates)
+        @type_params = merged_type_params(candidates)
         render_tree_nodes(tree, kinds, supers, 0)
       end
 
@@ -207,6 +210,13 @@ module Rigor
           (c.class_superclasses || {}).each { |name, sup| merged[name] = sup }
         end
         merged
+      end
+
+      # #2436 — every candidate carries the run's map, so folding the target's candidates is the whole view.
+      def merged_type_params(candidates)
+        candidates.each_with_object({}) do |c, acc|
+          acc.merge!(c.class_type_params) if c.respond_to?(:class_type_params)
+        end
       end
 
       def build_superclasses(candidates)
@@ -264,7 +274,7 @@ module Rigor
         indent = INDENT * depth
         qualified = (prefix + [node[:name]]).join("::")
         keyword = node_keyword(node, kinds, qualified)
-        header = "#{keyword} #{node[:name]}#{superclass_suffix(keyword, supers, qualified)}"
+        header = "#{keyword} #{node[:name]}#{@type_params[qualified]}#{superclass_suffix(keyword, supers, qualified)}"
         body = render_tree_node_body(node, kinds, supers, depth, prefix)
         "#{indent}#{header}\n#{body}#{indent}end\n"
       end
@@ -350,6 +360,7 @@ module Rigor
         supers = merged_superclasses(candidates)
         kinds = merged_namespace_kinds(candidates)
         shells = collect_class_shells(candidates)
+        @type_params = merged_type_params(candidates)
         groups = candidates.group_by(&:class_name)
         # Ancestors first, so `Foo` is created (or found) before `Foo::Bar` looks for a parent to nest under.
         # A plain sort suffices: a name always sorts before every name it is a strict prefix of.

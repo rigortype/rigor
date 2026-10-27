@@ -5,6 +5,7 @@ require "prism"
 require "tmpdir"
 
 require_relative "../environment"
+require_relative "../run_scoped_slots"
 require_relative "../scope"
 require_relative "../cache/store"
 require_relative "../cache/rbs_descriptor"
@@ -535,6 +536,7 @@ module Rigor
           Inference::DefNodeResolver.with_run { run_analysis(paths) }
         ensure
           Inference::StatementEvaluator.release_resolved_census
+          RunScopedSlots.release
         end
       end
 

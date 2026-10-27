@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../configuration"
 require_relative "../environment"
+require_relative "../run_scoped_slots"
 require_relative "../project_environment"
 require_relative "../scope"
 require_relative "../reflection"
@@ -146,6 +147,7 @@ module Rigor
         )
       ensure
         Inference::ExpressionTyper.release_return_memo(@run_generation) if @run_generation
+        RunScopedSlots.release
       end
 
       private

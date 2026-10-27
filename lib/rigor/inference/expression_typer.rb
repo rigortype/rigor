@@ -10,6 +10,7 @@ require_relative "../source/constant_path"
 require_relative "../source/node_children"
 require_relative "../source/node_walker"
 require_relative "../analysis/self_call_resolution_recorder"
+require_relative "../run_scoped_slots"
 require_relative "block_call_timing"
 require_relative "block_repetition"
 require_relative "project_yielder"
@@ -345,7 +346,7 @@ module Rigor
         self.class.recorded_inject_accumulator(block, scope)
       end
 
-      INJECT_ACCUMULATOR_KEY = :__rigor_inject_accumulator__
+      INJECT_ACCUMULATOR_KEY = RunScopedSlots.register(:__rigor_inject_accumulator__)
       private_constant :INJECT_ACCUMULATOR_KEY
 
       # The accumulator type {#record_inject_accumulator} stored for `block` when the call was typed from `scope`
@@ -5636,8 +5637,9 @@ module Rigor
       end
 
       # Records `type` as the accumulator `block` receives when typed from this typer's scope
-      # ({.recorded_inject_accumulator}). The keys are weak, so a finished file's nodes do not stay reachable, and
-      # the values strong, so a record outlives a collection while its node does. Prism nodes compare by identity.
+      # ({.recorded_inject_accumulator}). Prism nodes compare by identity. The keys are weak but the values strong,
+      # and a recorded scope reaches the parse tree that holds the key, so a record never goes on its own (issue
+      # #2412): the map is a run-scoped slot ({RunScopedSlots}), emptied when the run that filled it ends.
       def record_inject_accumulator(block, type)
         (Thread.current[INJECT_ACCUMULATOR_KEY] ||= ObjectSpace::WeakKeyMap.new)[block] = [scope, type].freeze
       end

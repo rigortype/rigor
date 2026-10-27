@@ -20,8 +20,9 @@ module Rigor
       # The rule is exact rather than heuristic — the receiver must be a `Singleton[C]` whose `C` the project
       # pre-pass recorded as including `Singleton` — so a class that does not include the mixin is untouched,
       # and a project that defines its own `Singleton` module is the one case that would misfire. Guarded by
-      # {project_singleton_shadow?}: a project-declared `Singleton` class or module wins and the tier declines,
-      # because then the name means something else entirely.
+      # {own_singleton_include?}: when the included name resolves to a project-declared class or module (a
+      # top-level `Singleton`, or `M::Singleton` inside `module M`), the tier declines, because then the name
+      # means something else entirely.
       module SingletonMixinDispatch
         MIXIN_NAMES = Ractor.make_shareable(Set["Singleton", "::Singleton"])
         private_constant :MIXIN_NAMES
@@ -46,9 +47,8 @@ module Rigor
           return false unless method_name == SELECTOR && no_arguments
           return false unless receiver.is_a?(Type::Singleton)
           return false if scope.nil?
-          return false unless includes_singleton_mixin?(scope, receiver.class_name)
 
-          !project_singleton_shadow?(scope)
+          includes_singleton_mixin?(scope, receiver.class_name)
         end
 
         # True when `class_name`, or a project class up its as-written superclass chain, `include`s the stdlib
@@ -93,12 +93,6 @@ module Rigor
           classes = scope.discovery.discovered_classes
           candidates = inside_body && !raw.to_s.start_with?("::") ? ["#{name}::#{raw}"] : []
           (candidates + scope.ancestor_name_candidates(name, raw)).find { |candidate| classes.key?(candidate) }
-        end
-
-        # True when the project declares its OWN `Singleton` class / module, in which case `include Singleton`
-        # names that one and the stdlib rule does not apply.
-        def project_singleton_shadow?(scope)
-          MIXIN_NAMES.any? { |name| scope.discovery.discovered_classes.key?(name.to_s.delete_prefix("::")) }
         end
       end
     end

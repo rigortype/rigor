@@ -161,6 +161,17 @@ RSpec.describe "a project sidecar sig and an open singleton surface (#2438)" do
       expect(messages).to eq([])
     end
 
+    it "does not report a class method on a class that includes a module" do
+      expect(messages_for("class Svc\n  include Concerns\nend\nSvc.helper\n", "class Svc\nend\n")).to eq([])
+    end
+
+    # A project module the class extends is a mixin too, though the source shows every method it adds.
+    it "does not report a class method on a class that extends a project module" do
+      messages = messages_for("module H\n  def h = 1\nend\nclass W\n  extend H\nend\nW.helper\n", "class W\nend\n")
+
+      expect(messages).to eq([])
+    end
+
     it "does not report a class method on a namespace with no body inside paths:" do
       messages = messages_for(
         "class Ext::Foo\n  def y = Ext.helper\nend\n",
@@ -186,10 +197,21 @@ RSpec.describe "a project sidecar sig and an open singleton surface (#2438)" do
         .to eq([])
     end
 
+    # The source writes no superclass here, so the declaration's own is read.
+    it "does not report a class method on a class whose declaration names a core superclass" do
+      expect(messages_for("class MyErr\nend\nMyErr.typo\n", "class MyErr < StandardError\nend\n")).to eq([])
+    end
+
     it "still reports a typo on a closed class whose whole definition is inside paths:" do
       messages = messages_for("class Plain\nend\nPlain.fooo\n", "class Plain\nend\n")
 
       expect(messages).to eq(["undefined method `fooo' for singleton(Plain)"])
+    end
+
+    it "still reports a typo on a closed class that names Object as its superclass" do
+      messages = messages_for("class Obj < Object\nend\nObj.fooo\n", "class Obj < Object\nend\n")
+
+      expect(messages).to eq(["undefined method `fooo' for singleton(Obj)"])
     end
 
     it "still reports a typo on a closed class nested in a member-less namespace" do

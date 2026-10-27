@@ -67,8 +67,8 @@ module Rigor
         #   to `Array[Dynamic[Top]]`.
         # @param block_required — when `true`, only overloads that declare a block clause are
         #   considered first (Slice 6 phase C sub-phase 1), and a call none of them matches is retried with
-        #   the block ignored. The fallback prefers an overload that does not require a block over
-        #   `method_types.first`.
+        #   the block ignored. Where nothing matches, the fallback prefers an overload that declares a block
+        #   (#2429), and a block-less call prefers one that does not require a block, over `method_types.first`.
         # @return the chosen overload, or nil when the definition has no method
         #   types at all.
         def select(method_definition, **) = select_candidates(method_definition, member_wise: false, **).first
@@ -160,12 +160,21 @@ module Rigor
           end
           return [] if member && member != :joined
 
-          # No (usable) block at the call site: prefer an overload that does not REQUIRE a block over
-          # `overloads.first`. Methods like `Array#filter` / `Enumerable#map` declare the block-bearing
-          # overload first (`() { ... } -> Array[Elem]`) and the bare-call overload second
-          # (`() -> Enumerator[...]`). Without this, a no-block `[1, 2].filter` would adopt the block
-          # overload's `Array[Elem]` return when the call actually yields an `Enumerator`.
-          [overloads.find { |mt| !overload_requires_block?(mt) } || overloads.first]
+          # No overload matched. A call with a block falls back to an overload that declares one (#2429): the
+          # block-less arm's return is what the method answers without a block, so `URI.open(url, read_timeout: 3)
+          # { |io| ... }` read `StringIO | Tempfile` instead of binding the block overload's `T` to the block's value.
+          return [overloads.find { |mt| overload_has_block?(mt) } || fallback_without_block(overloads)] if block_required
+
+          [fallback_without_block(overloads)]
+        end
+
+        # No (usable) block at the call site: prefer an overload that does not REQUIRE a block over
+        # `overloads.first`. Methods like `Array#filter` / `Enumerable#map` declare the block-bearing
+        # overload first (`() { ... } -> Array[Elem]`) and the bare-call overload second
+        # (`() -> Enumerator[...]`). Without this, a no-block `[1, 2].filter` would adopt the block
+        # overload's `Array[Elem]` return when the call actually yields an `Enumerator`.
+        def fallback_without_block(overloads)
+          overloads.find { |mt| !overload_requires_block?(mt) } || overloads.first
         end
 
         def overload_has_block?(method_type)

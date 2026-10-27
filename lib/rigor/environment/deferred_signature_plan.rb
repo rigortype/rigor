@@ -47,7 +47,6 @@ module Rigor
 
       def plan_type(decl, env, own, name)
         others = GatedSignaturePlan.other_declarations(env, name)
-        own_keys = GatedSignaturePlan.declared_keys(others.select { |other| own.include?(buffer_of(other)) })
         taken = GatedSignaturePlan.declared_keys(others)
         external = others.reject { |other| own.include?(buffer_of(other)) }
         defined = GatedSignaturePlan.declared_keys(external) | definition_keys(external)
@@ -55,7 +54,7 @@ module Rigor
           next plan_declaration(member, env, own, name) if declaration?(member)
           next member if taken.empty?
 
-          composed(member, own_keys, defined) || GatedSignaturePlan.untaken(member, taken)
+          composed(member, defined) || GatedSignaturePlan.untaken(member, taken)
         end
         same?(members, decl.members) ? decl : GatedSignaturePlan.rebuild(decl, members: members)
       end
@@ -63,12 +62,12 @@ module Rigor
       # `member` as an overload continuation, or nil when it cannot be one: only a plain one-sided `def` can, and
       # only onto a method — a `def`, an attribute or an alias, all of which RBS continues — that a source other
       # than the project's own declares.
-      def composed(member, own_keys, defined)
+      def composed(member, defined)
         return nil unless member.is_a?(::RBS::AST::Members::MethodDefinition) && !member.overloading?
         return nil if member.kind == :singleton_instance
 
         key = [member.name, member.kind]
-        return nil if own_keys.include?(key) || !defined.include?(key)
+        return nil unless defined.include?(key)
 
         member.update(overloading: true)
       end

@@ -498,6 +498,66 @@ end
       end
     end
 
+    # Review of #2464, M-1: the report compares the two clauses as RBS resolves them — the plugin's in the lexical
+    # context it is written in, class aliases normalised, type arguments included — so a row names exactly a
+    # clause whose class differs. Each shape builds; only the row differs.
+    describe "which dropped clause is reported" do
+      def shape_rows(plugin_rbs, other_rbs)
+        Dir.mktmpdir do |dir|
+          plugin = File.join(dir, "plugin_sig")
+          other = File.join(dir, "other_sig")
+          [plugin, other].each { |d| FileUtils.mkdir_p(d) }
+          File.write(File.join(plugin, "plugin.rbs"), plugin_rbs)
+          File.write(File.join(other, "other.rbs"), other_rbs)
+          loader = Rigor::Environment::RbsLoader.new(
+            libraries: [], signature_paths: [other, plugin], deferred_signature_paths: [plugin]
+          )
+          expect(loader.definition_build_failures).to be_empty
+          superclass_rows(loader)
+        end
+      end
+
+      let(:namespaced_c) { "class C\nend\nmodule A\n  class C\n  end\nend\n" }
+
+      it "resolves a compact header's superclass at the top level, not under the class's own namespace (P1)" do
+        expect(shape_rows("class A::B < C\nend\n", "#{namespaced_c}class A::B < ::C\nend\n")).to be_empty
+      end
+
+      it "reports a compact header whose superclass the other source names under the namespace (P2)" do
+        expect(shape_rows("class A::B < C\nend\n", "#{namespaced_c}class A::B < ::A::C\nend\n"))
+          .to eq([["A::B < C", "other.rbs"]])
+      end
+
+      it "reads a class alias as the class it names (P3)" do
+        expect(shape_rows("class Foo < Al\nend\n", "class Target\nend\nclass Al = Target\nclass Foo < Target\nend\n"))
+          .to be_empty
+      end
+
+      it "reports a clause whose type arguments differ (P4)" do
+        expect(shape_rows("class Foo < Base[String]\nend\n",
+                          "class Base[T]\nend\nclass Foo < Base[Integer]\nend\n"))
+          .to eq([["Foo < Base[String]", "other.rbs"]])
+      end
+
+      it "resolves innermost namespace first, per enclosing declaration (P5)" do
+        other = "class Error\nend\nmodule X\n  class Error\n  end\nend\nmodule Y\n  class Error\n  end\nend\n" \
+                "class X::E < ::X::Error\nend\nclass Y::E < ::Error\nend\n"
+        plugin = "module X\n  class E < Error\n  end\nend\nmodule Y\n  class E < Error\n  end\nend\n"
+        expect(shape_rows(plugin, other)).to eq([["Y::E < Error", "other.rbs"]])
+      end
+
+      it "resolves a nested compact header in its enclosing module, skipping the compact prefix (P6)" do
+        other = "module A\n  class D\n  end\n  class B\n    class D\n    end\n  end\nend\nclass A::B::C < ::A::D\nend\n"
+        expect(shape_rows("module A\n  class B::C < D\n  end\nend\n", other)).to be_empty
+      end
+
+      it "resolves the superclass outside the class it names, not under it (P7)" do
+        expect(shape_rows("class Foo < Bar\nend\n",
+                          "class Bar\nend\nclass Foo\n  class Bar\n  end\nend\nclass Foo < ::Bar\nend\n"))
+          .to be_empty
+      end
+    end
+
     # Guard for the warm half: the rows are derived from the built env, so no mutation of the plan separates a
     # warm run from a cold one; the cold half fails with the plan.
     it "reports the same rows on a warm run, without rebuilding the env" do

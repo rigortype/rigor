@@ -1778,6 +1778,25 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
         recv = array_of(array_of(nominal("Integer")))
         expect(dispatch(receiver: recv, method_name: :flatten, args: [nominal("Integer")])).to be_nil
       end
+
+      # Issue #2427 — `ARGV.map { |x| [x] }` is `Array[[String]]`, whose Tuple element flattens too.
+      it "flattens a Tuple element into the union of its elements" do
+        recv = array_of(tuple(nominal("String"), tuple(constant(1))))
+        expect(dispatch(receiver: recv, method_name: :flatten))
+          .to eq(array_of(Rigor::Type::Combinator.union(nominal("String"), constant(1))))
+      end
+
+      it "bounds a Tuple element's flatten to the depth argument" do
+        recv = array_of(tuple(tuple(nominal("String"))))
+        expect(dispatch(receiver: recv, method_name: :flatten, args: [constant(1)]))
+          .to eq(array_of(tuple(nominal("String"))))
+      end
+
+      it "flattens a Union element member by member" do
+        recv = array_of(Rigor::Type::Combinator.union(nominal("Symbol"), tuple(nominal("String"))))
+        expect(dispatch(receiver: recv, method_name: :flatten))
+          .to eq(array_of(Rigor::Type::Combinator.union(nominal("Symbol"), nominal("String"))))
+      end
     end
   end
 

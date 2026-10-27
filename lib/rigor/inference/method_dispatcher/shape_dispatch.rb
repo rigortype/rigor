@@ -452,14 +452,22 @@ module Rigor
           # Resolves the element type of a flattened `Array[element]`. Each `Array[U]` nesting level
           # contributes `U`; the per-level element types are unioned. `depth < 0` recurses without bound;
           # `depth == 0` stops (Ruby's `flatten(0)` is a no-op copy and returns the element unchanged).
+          #
+          # Issue #2427 — a `Tuple` element is an Array too and contributes the union of its own elements, each
+          # flattened one level deeper; a `Union` element is flattened member by member. `ARGV.map { |x| [x] }`
+          # is `Array[[String]]`, and returning its `[String]` element unchanged made `.flatten.first.upcase`
+          # report `undefined method 'upcase' for [String]` on code Ruby runs.
           def flatten_nominal_element(element, depth)
             return element if depth.zero?
-            return element unless array_nominal?(element)
 
-            inner = element.type_args.first
-            return element if inner.nil?
-
-            flatten_nominal_element(inner, depth - 1)
+            case element
+            when Type::Tuple
+              Type::Combinator.union(*element.elements.map { |inner| flatten_nominal_element(inner, depth - 1) })
+            when Type::Union
+              Type::Combinator.union(*element.members.map { |member| flatten_nominal_element(member, depth) })
+            else
+              array_nominal?(element) ? flatten_nominal_element(element.type_args.first, depth - 1) : element
+            end
           end
 
           def array_nominal?(type)

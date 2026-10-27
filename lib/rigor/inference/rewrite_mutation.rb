@@ -67,6 +67,51 @@ module Rigor
         Type::Combinator.nominal_of(carrier.class_name, type_args: args)
       end
 
+      # The element rewriters {.typed} answers for, keyed to the non-bang call whose result is the rewritten
+      # receiver: `a.map!(&:to_i)` holds what `a.map(&:to_i)` returns, and `a.flatten!` what `a.flatten` does.
+      TYPED_COUNTERPARTS = Ractor.make_shareable({ map!: :map, collect!: :collect, flatten!: :flatten })
+
+      # Issue #2427 — `carrier` with its element replaced by `element`, the element of what the non-bang counterpart
+      # ({TYPED_COUNTERPARTS}) answers for the same call: `a = ARGV.dup; a.map!(&:to_i)` reads `Array[Integer]` and
+      # `a.map!(&:strip)` keeps `Array[String]`. It is the typed form of {.arm}'s {REPLACED} answer, and it replaces
+      # the gradual and the precise element alike, since nothing the seed held survives the rewrite.
+      #
+      # Answers for an `Array` / `Set` nominal and an empty-witness refinement of one (keeping the witness only where
+      # {RefinementMutation.preserves_witness?} does: `map!` keeps it, `flatten!` can empty `[[]]`). `nil` for any
+      # other carrier or name, so the caller takes the gradual arm instead.
+      def typed(carrier, method_name, element)
+        return nil unless TYPED_COUNTERPARTS.key?(method_name)
+
+        case carrier
+        when Type::Nominal
+          return nil unless carrier.type_args.size == 1 && REPLACED.dig(carrier.class_name, method_name) == [0]
+
+          Type::Combinator.nominal_of(carrier.class_name, type_args: [element])
+        when Type::Difference
+          typed_refinement(carrier, method_name, element)
+        end
+      end
+
+      def typed_refinement(difference, method_name, element)
+        base = difference.base
+        return nil unless difference.removes_empty_witness? && base.is_a?(Type::Nominal)
+
+        rewritten = typed(base, method_name, element)
+        return nil if rewritten.nil?
+
+        kept = RefinementMutation.preserves_witness?(base.class_name, method_name)
+        kept ? Type::Combinator.difference(rewritten, difference.removed) : rewritten
+      end
+
+      # The element of `result`, the non-bang counterpart's answer: an `Array[R]` / `Set[R]` nominal, or an
+      # empty-witness refinement of one. `nil` when the answer has no single element to read.
+      def counterpart_element(result)
+        result = result.base if result.is_a?(Type::Difference) && result.removes_empty_witness?
+        return nil unless result.is_a?(Type::Nominal) && %w[Array Set].include?(result.class_name)
+
+        result.type_args.size == 1 ? result.type_args.first : nil
+      end
+
       # {.arm} through a `Union` (member by member) and an empty-witness refinement (its base, keeping the witness
       # only when the mutator cannot empty the receiver — {RefinementMutation.preserves_witness?}). For a carrier
       # the ADR-56 slice-C join rebuilt from its seed, which knows the adders' content but not the rewrite.
@@ -115,7 +160,7 @@ module Rigor
         when Type::Nominal then type.class_name
         end
       end
-      private_class_method :value_carrier_class, :arm_refinement
+      private_class_method :value_carrier_class, :arm_refinement, :typed_refinement
     end
   end
 end

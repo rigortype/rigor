@@ -60,8 +60,9 @@ RSpec.describe "Precise carrier re-grow (issue #2361)", type: :runner do
       end
     end
 
-    it "leaves a rewriter alone, as it did" do
-      expect(dumped("a = ARGV.dup\na.map! { 1 }\ndump_type(a)")).to eq(["Array[String]"])
+    # Issue #2427 — a rewriter replaces the element with what the non-bang `map` answers.
+    it "replaces the element under a rewriter" do
+      expect(dumped("a = ARGV.dup\na.map! { 1 }\ndump_type(a)")).to eq(["Array[1]"])
     end
   end
 

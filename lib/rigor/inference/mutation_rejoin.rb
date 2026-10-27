@@ -139,8 +139,11 @@ module Rigor
       # String` on code that prints `[0.5]`.
       #
       # Only a content adder ({ContentJoin::ARRAY_CONTENT_ADDERS}) re-grows it, and the join keeps the seed: `clear`
-      # empties the array but leaves `E` standing, a superset of what it holds. A rewriter (`map!`, `flatten!`) and a
-      # remover leave the carrier as they found it.
+      # empties the array but leaves `E` standing, a superset of what it holds. A remover leaves the carrier as it
+      # found it. An element rewriter (`map!`, `collect!`, `flatten!`) replaces `E` (issue #2427): with the element
+      # the non-bang counterpart answers when the call site could type it ({RewriteMutation.typed}, answered before
+      # this method), and otherwise with {RewriteMutation.arm}'s gradual element — `a.map!.with_index { … }` holds
+      # whatever the block returns, and keeping the stale `E` reported a missing method on correct code.
       #
       # Each added member the element accepts joins as itself; any other takes the `Dynamic[top]` floor
       # ({#precise_admitted}), and the floor joins every re-grow as it does on the literal arms. `a << 1` therefore
@@ -156,6 +159,7 @@ module Rigor
       # all is left alone, as {MutationWidening.join_added_elements} leaves it: the block-capture seams pass none,
       # and their own content join adds the stores.
       def widen_precise_array(nominal, method_name, values:, arg_types:)
+        return RewriteMutation.arm(nominal, method_name) if RewriteMutation::TYPED_COUNTERPARTS.key?(method_name)
         return nil unless ContentJoin::ARRAY_CONTENT_ADDERS.include?(method_name) && !arg_types.empty?
 
         stored = ContentJoin.array_added_elements(method_name, arg_types)

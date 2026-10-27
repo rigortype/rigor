@@ -91,41 +91,143 @@ RSpec.describe "a project sidecar sig and an open singleton surface (#2438)" do
         ["undefined method `instance' for singleton(TagManager)"] * 2
       )
     end
+
+    it "still reports `instance` when the Singleton the class includes is a nested project module" do
+      write("lib/a.rb", "module M\n  module Singleton\n  end\n  class X\n    include Singleton\n    def x = 1\n  end\n" \
+                        "end\nM::X.instance\n")
+      write("sig/a.rbs", "module M\n  module Singleton\n  end\n  class X\n    def x: () -> Integer\n  end\nend\n")
+
+      expect(undefined_messages(run_check)).to eq(["undefined method `instance' for singleton(M::X)"])
+    end
+
+    # `prepend Singleton` runs `prepend_features`, not the `included` hook, so Ruby defines no `instance`.
+    it "still reports `instance` on a class that prepends Singleton" do
+      write("lib/a.rb", "require \"singleton\"\nclass A\n  prepend Singleton\n  def x = 1\nend\nA.instance\n")
+      write("sig/a.rbs", "class A\n  def x: () -> Integer\nend\n")
+
+      expect(undefined_messages(run_check)).to eq(["undefined method `instance' for singleton(A)"])
+    end
+
+    it "still reports `instance` called with an argument" do
+      write_tag_manager
+      write("lib/caller.rb", "TagManager.instance(1)\n")
+
+      expect(undefined_messages(run_check)).to eq(["undefined method `instance' for singleton(TagManager)"])
+    end
+
+    it "does not report `instance` on a subclass of a class that includes Singleton, and types it as the subclass" do
+      write("lib/a.rb", <<~RUBY)
+        require "singleton"
+        class C
+          include Singleton
+          def x = 1
+        end
+        class D < C
+          def y = 2
+        end
+        Rigor.dump_type(D.instance)
+        D.typo
+      RUBY
+      write("sig/a.rbs", "class C\n  def x: () -> Integer\nend\nclass D < C\n  def y: () -> Integer\nend\n")
+      result = run_check
+
+      expect(undefined_messages(result)).to eq(["undefined method `typo' for singleton(D)"])
+      expect(dumps(result)).to eq(["dump_type: D"])
+    end
   end
 
-  describe "a member-less namespace declaration" do
-    def write_namespace(sidecar:)
-      write("lib/a.rb", <<~RUBY)
-        module NS
-          class Foo
-            def x = 1
-            def y = NS.helper
-          end
-        end
-      RUBY
-      # Outside `paths:`, so neither the analyzer nor sig-gen sees it.
-      write("ext/ns.rb", "module NS\n  def self.helper = 1\nend\n")
+  describe "a member-less project declaration" do
+    def messages_for(source, sidecar, files = {})
+      write("lib/a.rb", source)
       write("sig/a.rbs", sidecar)
+      files.each { |path, body| write(path, body) }
+      undefined_messages(run_check)
     end
 
-    it "does not report a class method the declaration cannot enumerate" do
-      write_namespace(sidecar: "module NS\n  class Foo\n    def x: () -> 1\n  end\nend\n")
+    it "does not report a class method on a namespace that extends a module" do
+      messages = messages_for(
+        "module NS\n  extend Helpers\n  class Foo\n    def y = NS.helper\n  end\nend\n",
+        "module NS\n  class Foo\n    def y: () -> untyped\n  end\nend\n",
+        # Outside `paths:`, so neither the analyzer nor sig-gen sees it.
+        "ext/helpers.rb" => "module Helpers\n  def helper = 1\nend\n"
+      )
 
-      expect(undefined_messages(run_check)).to eq([])
+      expect(messages).to eq([])
     end
 
-    it "still reports once the namespace's declaration lists a member of its own" do
-      write_namespace(sidecar: "module NS\n  def self.known: () -> 1\n  class Foo\n    def x: () -> 1\n  end\nend\n")
+    it "does not report a class method on a class that defines an inherited hook" do
+      messages = messages_for("class Base\n  def self.inherited(sub) = super\nend\nBase.registered\n", "class Base\nend\n")
 
-      expect(undefined_messages(run_check)).to eq(["undefined method `helper' for singleton(NS)"])
+      expect(messages).to eq([])
+    end
+
+    it "does not report a class method on a namespace with no body inside paths:" do
+      messages = messages_for(
+        "class Ext::Foo\n  def y = Ext.helper\nend\n",
+        "module Ext\n  class Foo\n    def y: () -> untyped\n  end\nend\n"
+      )
+
+      expect(messages).to eq([])
+    end
+
+    it "does not report a class method on a class whose superclass chain reaches a library class" do
+      messages = messages_for(
+        "class ApplicationRecord < ActiveRecord::Base\nend\nclass Poll < ApplicationRecord\nend\nPoll.joins(:votes)\n",
+        "class ApplicationRecord\nend\nclass Poll < ApplicationRecord\nend\n"
+      )
+
+      expect(messages).to eq([])
+    end
+
+    # The accepted cost of the superclass arm: a core superclass is a library class too, so a typo on a
+    # member-less error class is not reported.
+    it "does not report a class method on a class that subclasses a core class" do
+      expect(messages_for("class MyErr < StandardError\nend\nMyErr.typo\n", "class MyErr < StandardError\nend\n"))
+        .to eq([])
+    end
+
+    it "still reports a typo on a closed class whose whole definition is inside paths:" do
+      messages = messages_for("class Plain\nend\nPlain.fooo\n", "class Plain\nend\n")
+
+      expect(messages).to eq(["undefined method `fooo' for singleton(Plain)"])
+    end
+
+    it "still reports a typo on a closed class nested in a member-less namespace" do
+      messages = messages_for(
+        "module Admin\n  module Metrics\n  end\nend\nclass Admin::Metrics::Dimension\n  def self.retrieve(keys) = keys\n" \
+        "end\nclass Admin::Metrics::Dimension::Lang\nend\nAdmin::Metrics::Dimension.retreive([1])\n",
+        "module Admin\n  module Metrics\n    class Dimension\n      class Lang\n      end\n    end\n  end\nend\n"
+      )
+
+      expect(messages).to eq(["undefined method `retreive' for singleton(Admin::Metrics::Dimension)"])
+    end
+
+    # Known limit: a file outside `paths:` is not read, so a namespace whose body is inside `paths:` and whose
+    # class methods live only outside it reads as closed.
+    it "still reports a class method defined only in a file outside paths:" do
+      messages = messages_for(
+        "module NS\n  class Foo\n    def y = NS.helper\n  end\nend\n",
+        "module NS\n  class Foo\n    def y: () -> untyped\n  end\nend\n",
+        "ext/ns.rb" => "module NS\n  def self.helper = 1\nend\n"
+      )
+
+      expect(messages).to eq(["undefined method `helper' for singleton(NS)"])
+    end
+
+    it "still reports once the declaration lists a member of its own" do
+      messages = messages_for(
+        "class Base\n  def self.inherited(sub) = super\nend\nBase.registered\n",
+        "class Base\n  def self.known: () -> 1\nend\n"
+      )
+
+      expect(messages).to eq(["undefined method `registered' for singleton(Base)"])
     end
 
     # The instance side is left closed: the decline is for singleton calls only.
     it "still reports an instance-side call on a member-less class" do
-      write("lib/w.rb", "module NS\n  class W\n  end\nend\nNS::W.new.typo\n")
-      write("sig/w.rbs", "module NS\n  class W\n  end\nend\n")
+      messages = messages_for("class W\n  extend Helpers\nend\nW.new.typo\n", "class W\nend\n")
 
-      expect(undefined_messages(run_check)).to eq(["undefined method `typo' for NS::W"])
+      expect(messages).to eq(["undefined method `typo' for W"])
     end
   end
 

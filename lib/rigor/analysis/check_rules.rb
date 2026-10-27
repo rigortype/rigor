@@ -1530,29 +1530,71 @@ module Rigor
         # the singleton surface open. Before `rigor sig-gen --write` such a class was source-only and an
         # unresolved call on it was silent; the sidecar must not turn the same call into a finding. Two shapes:
         #
-        # - `C.instance` where `C` includes the stdlib `Singleton`: the answer is
-        #   `SingletonMixinDispatch.answers?`, the predicate the typer itself uses, so the rule never reports a
-        #   call the engine typed. The class's other members are irrelevant: the mixin's hook defines `instance`.
-        # - every project declaration of `C` is member-less (`RbsLoader#memberless_project_class?`), the
-        #   wrapper `module NS` sig-gen writes around a nested class. The namespace's own methods live outside
-        #   what the generator saw (a file outside `paths:`, a mixin, a hook), so its singleton surface is
-        #   not enumerable from the declaration. Instance-side calls keep being checked; declaring any member
-        #   re-closes the class.
+        # - `C.instance` where `C`, or a project class up its superclass chain, `include`s the stdlib `Singleton`:
+        #   the answer is `SingletonMixinDispatch.answers?`, the predicate the typer itself uses, so the rule never
+        #   reports a call the engine typed. The class's other members are irrelevant: the mixin's hook defines
+        #   `instance`.
+        # - every project declaration of `C` is member-less (`RbsLoader#memberless_project_class?`) AND the source
+        #   leaves `C` open ({#open_source_class?}). A member-less declaration does not describe the class's
+        #   surface, but a class whose whole definition Rigor can see in `paths:` is still closed, so a typo on it
+        #   keeps firing. Instance-side calls keep being checked; declaring any member re-closes the class.
         def open_project_singleton?(receiver_type, class_name, call_node, scope)
           return false unless receiver_type.is_a?(Type::Singleton)
-
-          Inference::MethodDispatcher::SingletonMixinDispatch.answers?(
+          return true if Inference::MethodDispatcher::SingletonMixinDispatch.answers?(
             scope, receiver_type, call_node.name, call_node.arguments.nil?
-          ) || memberless_project_class?(class_name, scope)
-        end
+          )
 
-        def memberless_project_class?(class_name, scope)
           loader = scope.environment&.rbs_loader
           return false if loader.nil? || !loader.respond_to?(:memberless_project_class?)
 
-          loader.memberless_project_class?(class_name)
+          loader.memberless_project_class?(class_name) && open_source_class?(class_name, scope, loader)
         end
 
+        OPENING_HOOKS = %i[inherited included extended prepended method_missing respond_to_missing?].freeze
+        private_constant :OPENING_HOOKS
+
+        CLOSED_ROOTS = Set["Object", "BasicObject"].freeze
+        private_constant :CLOSED_ROOTS
+
+        # Issue #2438 — whether a class's singleton surface may hold methods its source in `paths:` does not show.
+        # Open when the class, or a project class up its superclass chain:
+        #
+        # 1. records a mixin (`include` / `extend` / `prepend`), an `inherited` / `included` / `extended` /
+        #    `prepended` hook, or `method_missing` / `respond_to_missing?`;
+        # 2. has no `class` / `module` body of its own inside `paths:` (`class Ext::Foo` names `Ext` without one);
+        # 3. or the chain, as the source writes it (else as the member-less declaration writes it), reaches a class
+        #    the project does not define: a library, gem or core class other than `Object` / `BasicObject`
+        #    (`ApplicationRecord < ActiveRecord::Base`, `MyError < StandardError`).
+        #
+        # A definition or reopening in a file outside `paths:` cannot be seen, so a class whose body is inside
+        # `paths:` and whose methods live only outside it counts as closed.
+        def open_source_class?(class_name, scope, loader, seen = Set.new)
+          name = class_name.to_s.delete_prefix("::")
+          return false unless seen.add?(name)
+
+          discovery = scope.discovery
+          return true if (discovery.discovered_class_sources[name] || []).empty?
+          return true if records_opening_mixin_or_hook?(name, scope)
+
+          raw = scope.superclass_of(name) || loader.memberless_project_superclass(name)
+          return false if raw.nil? || CLOSED_ROOTS.include?(raw.to_s.delete_prefix("::"))
+
+          classes = discovery.discovered_classes
+          parent = scope.ancestor_name_candidates(name, raw).find { |candidate| classes.key?(candidate) }
+          parent.nil? || open_source_class?(parent, scope, loader, seen)
+        end
+
+        def records_opening_mixin_or_hook?(name, scope)
+          return true unless scope.includes_of(name).empty?
+
+          # `module_function` records the module itself as an extend; that adds no method the source does not show.
+          extends = scope.discovery.discovered_extends[name] || []
+          return true if extends.any? { |raw| raw.to_s.delete_prefix("::") != name }
+
+          OPENING_HOOKS.any? do |hook|
+            scope.discovered_method?(name, hook, :singleton) || scope.discovered_method?(name, hook, :instance)
+          end
+        end
         # Issue #2174 — `class Matrix` reopened with one `#:`-annotated method, and no `matrix` signatures
         # loaded, gives Matrix a declaration holding only that method ({RbsLoader#ruby_library_reopen?}).
         # `Matrix.identity(2)` is correct Ruby, so the class's surface is treated as open: `call.undefined-method`

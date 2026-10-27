@@ -1929,32 +1929,44 @@ module Rigor
       # where the generator cannot see them: a file outside `paths:`, a mixin, a hook. Such a declaration
       # names the class without describing its surface. Bundled (core, stdlib, gem) declarations never count.
       def memberless_project_class?(class_name)
-        (@state[:memberless_project_classes] ||= build_memberless_project_classes)
-          .include?(class_name.to_s.delete_prefix("::"))
+        memberless_project_classes.key?(class_name.to_s.delete_prefix("::"))
       end
-
+      
+      # The superclass a member-less project declaration of `class_name` writes (`class Poll < ::ApplicationRecord`),
+      # as RBS spells it (rooted), or nil when none of its declarations writes one or the class is not member-less.
+      def memberless_project_superclass(class_name)
+        memberless_project_classes[class_name.to_s.delete_prefix("::")]
+      end
+      
+      def memberless_project_classes
+        @state[:memberless_project_classes] ||= build_memberless_project_classes
+      end
+      private :memberless_project_classes
+      
       SURFACE_MEMBERS = [
         ::RBS::AST::Members::MethodDefinition, ::RBS::AST::Members::Attribute,
         ::RBS::AST::Members::Alias, ::RBS::AST::Members::Mixin
       ].freeze
       private_constant :SURFACE_MEMBERS
-
+      
       def build_memberless_project_classes
         authored = project_authored_classes
         environment = env
-        return Set.new.freeze if authored.empty? || environment.nil?
-
-        environment.class_decls.each_with_object(Set.new) do |(rbs_name, entry), acc|
+        return {}.freeze if authored.empty? || environment.nil?
+      
+        environment.class_decls.each_with_object({}) do |(rbs_name, entry), acc|
           name = rbs_name.to_s.delete_prefix("::")
           next unless authored.include?(name)
-
-          members = self.class.entry_declarations(entry).flat_map do |decl|
-            decl.respond_to?(:members) ? decl.members : []
-          end
-          acc << name if members.none? { |member| SURFACE_MEMBERS.any? { |kind| member.is_a?(kind) } }
+      
+          decls = self.class.entry_declarations(entry)
+          members = decls.flat_map { |decl| decl.respond_to?(:members) ? decl.members : [] }
+          next unless members.none? { |member| SURFACE_MEMBERS.any? { |kind| member.is_a?(kind) } }
+      
+          supers = decls.filter_map { |decl| decl.respond_to?(:super_class) && decl.super_class&.name&.to_s }
+          acc[name] = supers.first&.freeze
         end.freeze
       rescue ::RBS::BaseError
-        Set.new.freeze
+        {}.freeze
       end
       private :build_memberless_project_classes
 

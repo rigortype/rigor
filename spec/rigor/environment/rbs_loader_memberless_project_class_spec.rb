@@ -29,9 +29,10 @@ RSpec.describe Rigor::Environment::RbsLoader, "#memberless_project_class?" do
       module Mixed
         include Comparable
       end
-      module Aliased
-        alias self.a self.b
-        def self.b: () -> 1
+      class Aliased
+        alias a b
+      end
+      class Sub < ::Base
       end
       class Attr
         attr_reader name: String
@@ -59,6 +60,11 @@ RSpec.describe Rigor::Environment::RbsLoader, "#memberless_project_class?" do
     File.write(File.join(user_sig, "ns_more.rbs"), "module NS\n  def self.known: () -> 1\nend\n")
 
     expect(loader.memberless_project_class?("NS")).to be(false)
+  end
+
+  it "records the superclass a member-less declaration writes, as RBS spells it" do
+    expect([loader.memberless_project_superclass("Sub"), loader.memberless_project_superclass("NS")])
+      .to eq(["::Base", nil])
   end
 
   it "answers false for a member-less module a library signature path declares" do

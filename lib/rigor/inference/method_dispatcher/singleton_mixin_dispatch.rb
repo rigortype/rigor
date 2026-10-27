@@ -51,8 +51,48 @@ module Rigor
           !project_singleton_shadow?(scope)
         end
 
+        # True when `class_name`, or a project class up its as-written superclass chain, `include`s the stdlib
+        # `Singleton`. Ruby's `Singleton.included` hook also installs an `inherited` hook, so a subclass answers
+        # `instance` with its own instance (`class D < C` where `C` includes it).
         def includes_singleton_mixin?(scope, class_name)
-          scope.includes_of(class_name).any? { |name| MIXIN_NAMES.include?(name.to_s) }
+          name = class_name.to_s.delete_prefix("::")
+          seen = Set.new
+          while name && seen.add?(name)
+            return true if own_singleton_include?(scope, name)
+
+            name = project_superclass(scope, name)
+          end
+          false
+        end
+
+        # `include Singleton` written in `name`'s own body, naming the stdlib module. Issue #2438 — `prepend
+        # Singleton` defines no `instance` (`Singleton.prepend_features` is not the `included` hook) and the
+        # discovery table lists prepends among the includes, so a class that prepends it declines outright; and a
+        # name that resolves to a project constant (`M::Singleton` inside `module M`) is not the stdlib mixin.
+        def own_singleton_include?(scope, name)
+          stdlib = ->(raw) { MIXIN_NAMES.include?(raw.to_s) && !project_constant?(scope, name, raw) }
+          return false if (scope.discovery.discovered_prepends[name] || []).any?(&stdlib)
+
+          scope.includes_of(name).any?(&stdlib)
+        end
+
+        def project_constant?(scope, name, raw)
+          !resolve_project_class(scope, name, raw, inside_body: true).nil?
+        end
+
+        # The project class `name`'s as-written superclass resolves to, or nil (none written, or a library class).
+        def project_superclass(scope, name)
+          raw = scope.superclass_of(name)
+          raw && resolve_project_class(scope, name, raw, inside_body: false)
+        end
+
+        # The project-declared class an ancestor name written in `name`'s declaration resolves to, or nil: the
+        # declaration's lexical nesting outwards, after `<name>::<raw>` for a name written inside the body (an
+        # `include`) rather than in the header (a superclass).
+        def resolve_project_class(scope, name, raw, inside_body:)
+          classes = scope.discovery.discovered_classes
+          candidates = inside_body && !raw.to_s.start_with?("::") ? ["#{name}::#{raw}"] : []
+          (candidates + scope.ancestor_name_candidates(name, raw)).find { |candidate| classes.key?(candidate) }
         end
 
         # True when the project declares its OWN `Singleton` class / module, in which case `include Singleton`

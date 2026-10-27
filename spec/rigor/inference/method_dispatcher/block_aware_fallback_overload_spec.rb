@@ -49,6 +49,7 @@ RSpec.describe "Block-aware no-match overload fallback (#2429)", type: :runner d
     RUBY
   end
 
+  # The second call, without keywords, matches the block arm in the passes and was `1` before #2429 too (guard).
   it "types URI.open with keywords and a block by the block's value" do
     expect(dumped_types(<<~RUBY)).to eq(%w[1 1])
       require "open-uri"
@@ -69,6 +70,7 @@ RSpec.describe "Block-aware no-match overload fallback (#2429)", type: :runner d
     RUBY
   end
 
+  # Guard: the block-less call matches its arm in the passes, so the fallback never runs; it must stay a true positive.
   it "still reports a block-less URI.open against a declared Integer" do
     expect(return_mismatches(<<~RUBY).map(&:message)).to contain_exactly(include("StringIO | Tempfile"))
       require "open-uri"

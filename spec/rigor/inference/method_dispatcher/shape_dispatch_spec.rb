@@ -1797,6 +1797,13 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
         expect(dispatch(receiver: recv, method_name: :flatten))
           .to eq(array_of(Rigor::Type::Combinator.union(nominal("Symbol"), nominal("String"))))
       end
+
+      # `String#scan(Regexp)`'s RBS answer: flattening the nominal member would surface its optional-group `nil`.
+      it "keeps a nominal Array member of a Union element" do
+        inner = array_of(Rigor::Type::Combinator.union(nominal("String"), constant(nil)))
+        recv = array_of(Rigor::Type::Combinator.union(nominal("String"), inner))
+        expect(dispatch(receiver: recv, method_name: :flatten)).to eq(recv)
+      end
     end
   end
 

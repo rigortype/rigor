@@ -61,6 +61,10 @@ RSpec.describe "Element rewriters on a precise Array (issue #2427)", type: :runn
     expect(errors("ARGV.map { |x| [x] }.flatten.first.upcase\n")).to be_empty
   end
 
+  it "reports no nil receiver on a flattened String#scan" do
+    expect(errors(%(File.read("x").scan(/^path = (.+)$/).flatten.map { |path| path.strip }\n))).to be_empty
+  end
+
   it "types a precise Set's element after map!" do
     expect(dumped(%(require "set"\ns = ARGV.to_set\ns.map!(&:to_i)\ndump_type(s)))).to eq(["Set[Integer]"])
   end

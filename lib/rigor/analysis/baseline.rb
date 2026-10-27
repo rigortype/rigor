@@ -97,6 +97,13 @@ module Rigor
           new(buckets, project_root: project_root)
         end
 
+        # The diagnostics a baseline cannot address: no rule (a Prism parse error, a path or internal error) or no path.
+        # `#filter` passes these through and `from_diagnostics` leaves them out of every bucket; this is the one
+        # definition of both.
+        def unkeyable(diagnostics)
+          diagnostics.reject { |d| d.qualified_rule && d.path }
+        end
+
         private
 
         def parse_loaded(raw, path:, project_root:)
@@ -211,7 +218,7 @@ module Rigor
 
         # Diagnostics that lacked a rule or a path bypass the baseline entirely (the baseline can't address
         # them).
-        unkeyable = diagnostics.reject { |d| d.qualified_rule && d.path }
+        unkeyable = self.class.unkeyable(diagnostics)
         [surfaced + unkeyable, silenced_count]
       end
 

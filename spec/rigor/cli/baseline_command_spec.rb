@@ -212,6 +212,38 @@ RSpec.describe Rigor::CLI::BaselineCommand do
     end
   end
 
+  describe "files the baseline cannot key (parse errors)" do
+    before do
+      write_demo_project(diagnostic_source: "x = nil\nx.foo\n")
+      File.write(File.join(tmpdir, "lib", "bad.rb"), "def broken(\n  1 +\nend\n")
+      File.write(File.join(tmpdir, "lib", "bad2.rb"), "class X\n  def y\n")
+    end
+
+    %w[generate regenerate].each do |sub|
+      it "`#{sub}` counts only what the buckets cover and names the unbaselineable files" do
+        status, _out, err = run_cli("baseline", sub, cwd: tmpdir)
+        covered = YAML.safe_load_file(File.join(tmpdir, ".rigor-baseline.yml"))["ignored"].sum { |r| r["count"] }
+        expect(status).to eq(0)
+        expect(err).to match(/\((\d+) bucket\(s\) covering #{covered} diagnostic\(s\); match-mode: rule\)/)
+        expect(err).to match(/rigor: \d+ diagnostic\(s\) have no rule \(parse errors in 2 file\(s\)\) and cannot be baselined/)
+        expect(err).to include("  lib/bad.rb\n", "  lib/bad2.rb\n")
+      end
+    end
+
+    it "reports the same covered count under --match-mode message" do
+      _status, _out, err = run_cli("baseline", "generate", "--match-mode=message", cwd: tmpdir)
+      covered = YAML.safe_load_file(File.join(tmpdir, ".rigor-baseline.yml"))["ignored"].sum { |r| r["count"] }
+      expect(err).to include("covering #{covered} diagnostic(s); match-mode: message")
+      expect(err).to include("cannot be baselined")
+    end
+
+    it "prints no second line when every diagnostic is keyable" do
+      FileUtils.rm([File.join(tmpdir, "lib", "bad.rb"), File.join(tmpdir, "lib", "bad2.rb")])
+      _status, _out, err = run_cli("baseline", "generate", cwd: tmpdir)
+      expect(err).not_to include("cannot be baselined")
+    end
+  end
+
   describe "rigor check --baseline-strict" do
     let(:diagnostic_source) do
       <<~RUBY

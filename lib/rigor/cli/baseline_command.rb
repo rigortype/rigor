@@ -81,11 +81,13 @@ module Rigor
                                                                     project_root: Dir.pwd)
         File.write(path, baseline.to_yaml)
 
+        covered = baseline.buckets.sum(&:count)
         @err.puts(
           "rigor: #{verb} #{path} " \
-          "(#{baseline.size} bucket(s) covering #{diagnostics.size} diagnostic(s); " \
+          "(#{baseline.size} bucket(s) covering #{covered} diagnostic(s); " \
           "match-mode: #{options.fetch(:match_mode)})"
         )
+        report_unbaselineable(Analysis::Baseline.unkeyable(diagnostics))
         if configuration.baseline_path.nil?
           # Name the config file that actually governs this project (`.rigor.dist.yml` when no local override
           # exists), so the hint points at the file the user must edit.
@@ -96,6 +98,30 @@ module Rigor
           )
         end
         0
+      end
+
+      MAX_UNBASELINEABLE_FILES = 10
+
+      # Diagnostics the baseline cannot key never enter the file, so the next `rigor check` surfaces them. Say so,
+      # with how many, why and where; the exit status stays 0 (the file was written as asked).
+      def report_unbaselineable(unkeyable)
+        return if unkeyable.empty?
+
+        no_rule, no_path = unkeyable.partition { |d| d.qualified_rule.nil? }
+        parts = []
+        parts << "#{no_rule.size} diagnostic(s) have no rule (parse errors in #{unbaselineable_files(no_rule).size} file(s))" \
+          unless no_rule.empty?
+        parts << "#{no_path.size} diagnostic(s) have no path" unless no_path.empty?
+        @err.puts("rigor: #{parts.join("; ")} and cannot be baselined; fix them or add the files to exclude:")
+        files = unbaselineable_files(no_rule)
+        files.first(MAX_UNBASELINEABLE_FILES).each { |f| @err.puts("  #{f}") }
+        extra = files.size - MAX_UNBASELINEABLE_FILES
+        @err.puts("  ... and #{extra} more file(s)") if extra.positive?
+      end
+
+      def unbaselineable_files(diagnostics)
+        root = "#{Dir.pwd}/"
+        diagnostics.filter_map(&:path).map { |p| p.to_s.delete_prefix(root) }.uniq.sort
       end
 
       def parse_generate_options(subcommand: "generate")

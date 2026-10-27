@@ -2631,6 +2631,12 @@ def match_block_typed(raw)
   s = raw ? String(raw) : nil
   s&.scan(/(a)/) { assert_type("String", $1) }
   s.to_s.scan(/(a) # (b)/x) { assert_type("String?", $1) }
+  s.scan(/(a)/) { assert_type("String", $1) } # GENUINE-NIL
+end
+
+# An implicit-self call keeps the frame-wide entry: its receiver is `self`, which a block entry does not type.
+class MatchBlockString2443 < String
+  def first_group = gsub(/(x)?/) { assert_type("String?", $1) }
 end
 
 # The entry replaces a stale narrowing: on the `=~`'s falsey edge `$1` was nil, but the `gsub` block reads its own
@@ -2688,6 +2694,20 @@ def match_block_procs(str)
   proc { assert_type("String?", $1) }
   g = Proc.new { w = $1; w.upcase } # GENUINE-NIL
   g
+end
+
+# Control: a project's own `Proc` runs its block where it is written (Ruby: `MatchBlockPool2443.run("a1")` returns
+# "1").
+module MatchBlockPool2443
+  class Proc
+    def self.new = yield
+  end
+
+  def self.run(str)
+    return unless str =~ /(\d+)/
+
+    Proc.new { assert_type("String", $1); $1 }
+  end
 end
 
 # rubocop:enable Style/PerlBackrefs

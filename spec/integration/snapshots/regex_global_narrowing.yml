@@ -312,6 +312,9 @@ assertions:
   '304': String?
   '305': String
   '306': String?
-  '307': String?
+  '307': String
   '308': String?
   '309': String?
+  '310': String?
+  '311': String?
+  '312': String

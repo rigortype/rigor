@@ -482,7 +482,7 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
         [dumps(result), result.diagnostics.map(&:qualified_rule).grep(/\Acall\./)]
       end
 
-      it "maps each key member by whether it has to_sym" do
+      it "maps a String or Symbol key to Symbol and every other key to untyped" do
         dump_list, rules = probe(
           ["Hash[String, Integer]", "Hash[Integer, Integer]", "Hash[String | Integer, Integer]",
            "Hash[Float | Symbol, Integer]"],
@@ -492,12 +492,12 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
 
         expect(rules).to be_empty
         expect(dump_list).to eq(
-          ["Hash[Symbol, Integer]", "Hash[Integer, Integer]", "Hash[Integer | Symbol, Integer]",
-           "Hash[Float | Symbol, Integer]"]
+          ["Hash[Symbol, Integer]", "Hash[Dynamic[top], Integer]", "Hash[Dynamic[top] | Symbol, Integer]",
+           "Hash[Dynamic[top] | Symbol, Integer]"]
         )
       end
 
-      it "leaves an Integer key an Integer and still types a String key as a Symbol" do
+      it "stays silent on an Integer key and still types a String key as a Symbol" do
         _, rules = probe(["Hash[Integer, Integer]"], "p0.symbolize_keys.keys.first + 1\np0.to_options.keys.first + 1")
         expect(rules).to be_empty
 
@@ -523,10 +523,10 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
         expect(dumps(result)).to eq(["Hash[Symbol, Integer]"])
       end
 
-      # Review of #2450. `to_sym` defined by the project on a core value class, a subclass of a non-value class
-      # or a delegator is a Symbol-returning key the bundled RBS does not know, so none of them may be read as
-      # a keyless-`to_sym` class: `.to_proc` on the result must not report `call.undefined-method`.
-      it "does not claim an Integer key stays an Integer when the project defines Integer#to_sym" do
+      # Review of #2450. `to_sym` defined by the project on a core class, a subclass or a delegator is invisible to
+      # the bundled RBS, so no key other than String or Symbol is claimed to have none: `.to_proc` on the result
+      # must not report `call.undefined-method`.
+      it "stays silent when the project reopens Integer with to_sym" do
         sig = "class Probe\n  def f: (Hash[Integer, Integer]) -> void\nend\n"
         source = "class Integer\n  def to_sym = :\"i\#{self}\"\nend\n" \
                  "class Probe\n  def f(h) = h.symbolize_keys.keys.first.to_proc\nend\n"
@@ -559,6 +559,47 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
         expect(dump_list).to eq(
           ["Hash[Symbol, Integer]?", "Hash[Symbol, Integer] | Hash[Symbol, String]", "Hash[Symbol, Integer]"]
         )
+      end
+
+      it "stays silent when to_sym comes from a mixin defined in another file" do
+        sig = "class Probe\n  def f: (Hash[Integer, Integer]) -> void\nend\n"
+        files = { "sig/probe.rbs" => sig,
+                  "mix.rb" => "module SymMix\n  def to_sym = :m\nend\nInteger.include(SymMix)\n" }
+        source = "class Probe\n  def f(h) = h.symbolize_keys.keys.first.to_proc\nend\n"
+        result = run_plugin(source: source, files: files, signature_paths: ["sig"], paths: %w[mix.rb demo.rb])
+
+        expect(result.diagnostics.map(&:qualified_rule).grep(/\Acall\./)).to be_empty
+      end
+
+      # Review of #2450 round 3: `nil.symbolize_keys` raises, so a nil-able receiver without `&.` answers the Hash
+      # members alone (the engine adds `nil` back for `&.`, pinned above).
+      it "drops the nil member of a nil-able receiver called without &." do
+        sig = "class Probe\n  def hn: () -> Hash[String, Integer]?\n  def f: () -> Hash[Symbol, Integer]\nend\n"
+        source = "class Probe\n  def f\n    v = hn.symbolize_keys\n    v.keys\n    v\n  end\nend\n"
+        result = run_plugin(source: source, files: { "sig/probe.rbs" => sig }, signature_paths: ["sig"])
+
+        expect(result.diagnostics.map(&:qualified_rule)).not_to include("def.return-type-mismatch")
+        expect(result.diagnostics.map(&:qualified_rule)).not_to include("flow.possible-nil-receiver")
+      end
+
+      it "reads a union with a non-Hash member as the static row, and drops an empty shape from a union" do
+        dump_list, rules = probe(
+          ["Hash[String, Integer] | String", "bool"],
+          "Rigor.dump_type(p0.symbolize_keys)\nRigor.dump_type((p1 ? { 'a' => 1 } : {}).symbolize_keys)\n1"
+        )
+
+        expect(rules).to be_empty
+        expect(dump_list).to eq(["Dynamic[top]", "Hash[Symbol, 1]"])
+      end
+
+      it "keeps the Hash[untyped, V] rows in the plugin's RBS, and declines a call with an argument" do
+        rbs = File.read(
+          File.expand_path("../../../plugins/rigor-activesupport-core-ext/sig/active_support/core_ext.rbs", __dir__)
+        )
+        expect(rbs).to include("def symbolize_keys: () -> Hash[untyped, V]", "def to_options: () -> Hash[untyped, V]")
+
+        dump_list, = probe(["Hash[String, Integer]"], "Rigor.dump_type(p0.symbolize_keys(1))\n1")
+        expect(dump_list).not_to include("Hash[Symbol, Integer]")
       end
 
       # Review of #2450 m3: an open shape can hold keys the shape does not list (a `default_proc` writing `5`),

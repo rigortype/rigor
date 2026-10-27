@@ -13,27 +13,30 @@ module Rigor
       # `Hash[Symbol | K, V]` makes a String-keyed hash fail a declared `Hash[Symbol, untyped]` parameter.
       # So the RBS rows answer `Hash[untyped, V]` and this module maps each key member where it can.
       #
-      # It declines (`nil`, the RBS row answers) for a receiver member that is neither a `Hash[K, V]` nor `nil`,
-      # and it answers `Dynamic[top]` for a key member it cannot decide, so the result is never more precise than
-      # what is known.
+      # A key that is not a String or Symbol (an Integer, a project class) reads `Dynamic[top]`: no Rigor fact proves
+      # a class has no `to_sym` (a mixin, a `pre_eval` file or a reopening can add one), so a kept key could claim
+      # a type the program does not have. It declines (`nil`, the RBS row answers) when a receiver member is
+      # neither a `Hash[K, V]` nor `nil`. A `nil` member is dropped: `nil.symbolize_keys` raises, and the engine
+      # adds `nil` back for `&.`.
       module SymbolizeKeys
         HASH = "Hash"
         SYMBOLIZED_CLASSES = %w[String Symbol].freeze
 
         module_function
 
-        # Answers `Hash[K', V]` (or the union of such, with `nil` kept for a `&.` receiver), or nil to decline.
+        # Answers `Hash[K', V]` (the union of such over the receiver's Hash members), or nil to decline.
         def result(receiver_type, scope)
           members = receiver_type.is_a?(Rigor::Type::Union) ? receiver_type.members : [receiver_type]
-          answers = members.map { |member| member_answer(member, scope) }
-          return nil if answers.any?(:decline) || answers.all?(:nil)
+          answers = members.reject { |member| nil_member?(member) }.map { |member| member_answer(member, scope) }
+          return nil if answers.empty? || answers.any?(:decline)
 
-          nil_type = Rigor::Type::Combinator.constant_of(nil)
-          Rigor::Type::Combinator.union(*answers.map { |answer| answer == :nil ? nil_type : answer })
+          hashes = answers.reject { |answer| answer == :empty }
+          hashes.empty? ? nil : Rigor::Type::Combinator.union(*hashes)
         end
 
+        # An empty closed shape is `{}`: it adds no key, so it drops out of the union rather than declining it.
         def member_answer(member, scope)
-          return :nil if nil_member?(member)
+          return :empty if member.is_a?(Rigor::Type::HashShape) && member.closed? && member.pairs.empty?
 
           key_type, value_type = hash_arguments(member)
           return :decline if key_type.nil?
@@ -73,20 +76,11 @@ module Rigor
         def map_member(member, scope)
           case member
           when Rigor::Type::Constant
-            return symbol if member.value.is_a?(String) || member.value.is_a?(Symbol)
-
-            kept_class?(member.value.class.name, scope) ? member : Rigor::Type::Combinator.untyped
-          when Rigor::Type::IntegerRange then kept_class?("Integer", scope) ? member : Rigor::Type::Combinator.untyped
-          when Rigor::Type::Nominal then map_nominal(member, scope)
+            member.value.is_a?(String) || member.value.is_a?(Symbol) ? symbol : Rigor::Type::Combinator.untyped
+          when Rigor::Type::Nominal
+            symbolized_class?(member.class_name, scope) ? symbol : Rigor::Type::Combinator.untyped
           else Rigor::Type::Combinator.untyped
           end
-        end
-
-        def map_nominal(nominal, scope)
-          name = nominal.class_name
-          return symbol if symbolized_class?(name, scope)
-
-          kept_class?(name, scope) ? nominal : Rigor::Type::Combinator.untyped
         end
 
         def symbol
@@ -97,27 +91,6 @@ module Rigor
         def symbolized_class?(name, scope)
           SYMBOLIZED_CLASSES.include?(name) ||
             SYMBOLIZED_CLASSES.any? { |base| %i[equal subclass].include?(ordering(name, base, scope)) }
-        end
-
-        # The core value classes that cannot meaningfully be subclassed, each with the chain a `to_sym` could
-        # be defined on. Any other class, a project subclass or a delegator included, may answer `to_sym`.
-        KEPT_CLASS_CHAINS = {
-          "Integer" => %w[Integer Numeric Comparable Object Kernel BasicObject],
-          "Float" => %w[Float Numeric Comparable Object Kernel BasicObject],
-          "Rational" => %w[Rational Numeric Comparable Object Kernel BasicObject],
-          "Complex" => %w[Complex Numeric Comparable Object Kernel BasicObject],
-          "NilClass" => %w[NilClass Object Kernel BasicObject],
-          "TrueClass" => %w[TrueClass Object Kernel BasicObject],
-          "FalseClass" => %w[FalseClass Object Kernel BasicObject]
-        }.transform_values(&:freeze).freeze
-
-        # True for one of {KEPT_CLASS_CHAINS} when the project defines no `to_sym` on it or an ancestor.
-        # `discovered_method?` also records the negative dependency, so adding such a `def` invalidates.
-        def kept_class?(name, scope)
-          chain = KEPT_CLASS_CHAINS[name]
-          return false if chain.nil? || scope.nil?
-
-          chain.none? { |owner| Rigor::Reflection.discovered_method?(owner, :to_sym, scope: scope) }
         end
 
         def ordering(name, base, scope)

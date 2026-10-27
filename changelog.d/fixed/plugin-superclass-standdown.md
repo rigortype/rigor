@@ -1,0 +1,3 @@
+- **[rbs]** `rigor-activerecord` beside an activerecord 7.1 or later `rbs collection install` no longer fails to build `ActiveRecord::StatementInvalid`, which left it and every class that rescues or subclasses it untyped behind an `rbs.coverage.definition-build-failed` warning. ([#2464](https://github.com/rigortype/rigor/pull/2464))
+  - When another signature source already gives a class a superclass, a bundled plugin's declaration of that class now reopens it without its own, so the other source's superclass is used.
+  - When the two superclasses differ, the `rbs.coverage.plugin-signature-stood-down` info row names the plugin's, such as `ActiveRecord::StatementInvalid < ActiveRecordError`.

@@ -608,6 +608,26 @@ module Rigor
         truthy
       end
 
+      # Issue #2443 — `scope` with what every match binds, laid over the bindings it holds, for the block of a call
+      # that yields only after it has matched in the caller's frame ({MatchRebinding::YieldingMatch}): `$~` a
+      # `MatchData`, and `$&` and the pre- and post-match a `String`. The numbered groups and `$+` keep the bindings
+      # `scope` gives them. Typing them from the call's own pattern needs the group walk
+      # ({#unconditional_capture_groups}) to read every source right, which it does not yet (#2472), and forgetting
+      # them would report a group an earlier match in the method narrowed.
+      def yielded_match_scope(scope)
+        string_t = Type::Combinator.nominal_of("String")
+        scope.with_global(:$~, Type::Combinator.nominal_of("MatchData"))
+             .with_global(:$&, string_t).with_global(:$`, string_t).with_global(:$', string_t)
+      end
+
+      # Issue #2443 — true when every member of `type` is a String (a project subclass included) or a `Dynamic` that
+      # is untyped or may hold only Strings, Symbols and nil ({#match_member_kind}). A `nil` member never runs the
+      # block, so it counts neither way.
+      def string_match_receiver?(type, scope)
+        kinds = match_member_kinds(type, scope) - [:nil]
+        !kinds.empty? && kinds.all? { |kind| %i[string string_subclass dynamic].include?(kind) }
+      end
+
       # Internal analyser. Returns `[truthy_scope, falsey_scope]` when the predicate shape is
       # recognised, or `nil` to signal "no narrowing" so the public surface can fall back to the
       # entry scope. Issue #1359 — a condition whose value is a `gets`-family reader's, the bare call

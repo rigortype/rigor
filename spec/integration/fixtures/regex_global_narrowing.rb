@@ -2583,4 +2583,152 @@ def numbered_kept_without_intervening_call(s)
   end
 end
 
+
+# Issue #2443 — `scan`, `gsub`, `gsub!`, `sub` and `sub!` set the caller's `$~` to the current match before every
+# yield, with a Regexp or a String pattern, so their block reads a `MatchData` whatever the frame held. erubi's
+# idiom: an untyped receiver and an untyped pattern (Ruby: `match_block_erubi("a<%x%>", /<%(.*?)%>/)` and
+# `match_block_methods(+"axa")` run without a nil receiver).
+def match_block_erubi(input, regexp)
+  pos = 0
+  input.scan(regexp) do |_code|
+    match = Regexp.last_match
+    len = match.begin(0) - pos
+    pos = match.end(0)
+    assert_type("MatchData", Regexp.last_match)
+    assert_type("Integer", len)
+  end
+end
+
+def match_block_methods(str)
+  str.gsub(/x/) { m = Regexp.last_match; m.begin(0).to_s }
+  str.gsub("x") { m = Regexp.last_match; m.begin(0).to_s }
+  str.sub(/x/) { m = Regexp.last_match; m.end(0).to_s }
+  str.sub("x") { assert_type("String", $&); assert_type("String", $`); assert_type("String", $'); $~.pre_match }
+  str.gsub!(/x/) { m = Regexp.last_match; m.end(0).to_s }
+  str.sub!("x") { m = Regexp.last_match; m.end(0).to_s }
+  str&.scan(/x/) { assert_type("MatchData", $~) }
+end
+
+# The entry binds only what every match binds: `$~`, `$&` and the pre- and post-match. Every numbered group keeps the
+# binding it had before the block, the RBS `String?` where nothing bound it, even an unconditional one, until the
+# group walk reads every source right (#2472) (Ruby: `"ab".scan(/(\w)(\d)?/) { p $2 }` prints nil).
+def match_block_groups(str)
+  str.scan(/(\w)(\d)?/) do
+    second = $2
+    assert_type("String?", $1)
+    assert_type("String?", Regexp.last_match(1))
+    assert_type("MatchData", Regexp.last_match)
+    second.upcase # GENUINE-NIL
+  end
+end
+
+# A group an earlier match in the method narrowed keeps that binding in the block, as it did before #2443 (Ruby:
+# `match_block_prior_group("a1")` and `match_block_prior_group_last_match("a1")` return "A1", and
+# `match_block_prior_group_scan("ab1")` returns "ab1").
+def match_block_prior_group(str)
+  return unless str =~ /(\d+)/
+
+  str.gsub(/(\w)/) { assert_type("String", $1); w = $1; w.upcase }
+end
+
+def match_block_prior_group_last_match(str)
+  return unless str =~ /(\d+)/
+
+  str.gsub(/(\w)/) { w = Regexp.last_match(1); w.upcase }
+end
+
+def match_block_prior_group_scan(str)
+  if str =~ /\A(\w+)/
+    str.scan(/(\d)/) { w = $1; w.to_sym }
+  end
+end
+
+# A typed receiver reads the same, its `nil` aside, since a `nil` receiver never runs the block.
+def match_block_typed(raw)
+  s = raw ? String(raw) : nil
+  s&.scan(/(a)/) { assert_type("MatchData", $~) }
+  s.scan(/(a)/) { assert_type("MatchData", $~) } # GENUINE-NIL
+end
+
+# An implicit-self call keeps the frame-wide entry: its receiver is `self`, which a block entry does not type.
+class MatchBlockString2443 < String
+  def first_group = gsub(/(x)/) { assert_type("MatchData?", Regexp.last_match) }
+end
+
+# Past the `=~`'s falsey edge the `gsub` block keeps the `$1` binding the frame-wide entry gives it, as before #2443,
+# though Ruby reads the block's own group there (#1371); `$~` and `$&` read the block's own match (Ruby:
+# `match_block_stale_edge("ab cd")` returns "Ab Cd").
+def match_block_stale_edge(line)
+  return if line =~ /^(#)/
+
+  line.gsub(/(\w+)/) { assert_type("String?", $1); $&.capitalize }
+end
+
+# Control: a match the body runs rebinds `$~` past the entry (Ruby: nil after the failed match).
+def match_block_body_rebinds(str)
+  str.scan(/x/) do
+    "zz" =~ /q/
+    m = Regexp.last_match
+    m.begin(0) # GENUINE-NIL
+  end
+end
+
+# Control: outside any match `Regexp.last_match` stays nilable, and a plain iterator with no match keeps the
+# enclosing narrowing (#1358).
+def match_block_outside(str, items)
+  m = Regexp.last_match
+  m.begin(0) # GENUINE-NIL
+  return unless str =~ /(\d+)/
+
+  items.each { assert_type("String", $1) }
+end
+
+# A receiver known to be something else keeps the frame-wide entry: a method defined in Ruby matches in a frame of its
+# own, so its block reads the caller's `$~`, here the guard's (Ruby: `match_block_project_receiver("a12")` returns
+# "12", `match_block_project_gsub("a12")` and `match_block_union("a12", false)` return 1, and
+# `match_block_pathname("a12", "ab")` returns `Pathname("a1")`).
+class MatchBlockTok2443
+  def scan(_pattern) = yield
+  def gsub(_pattern) = yield
+end
+
+def match_block_project_receiver(str)
+  return unless str =~ /(\d+)/
+
+  MatchBlockTok2443.new.scan(/(x)/) { w = $1; w.upcase }
+end
+
+# Without a match in the frame, the project class's block reads no match either (Ruby: nil).
+def match_block_project_unbound
+  MatchBlockTok2443.new.scan(/(x)/) { assert_type("MatchData?", Regexp.last_match) }
+end
+
+def match_block_project_gsub(str)
+  return unless str =~ /(\d+)/
+
+  MatchBlockTok2443.new.gsub(/x/) { m = Regexp.last_match; m.begin(0) }
+end
+
+def match_block_pathname(str, path)
+  return unless str =~ /(\d+)/
+
+  Pathname.new(path).sub(/(b)/) { m = Regexp.last_match; m.begin(0).to_s }
+end
+
+def match_block_union(str, flag)
+  return unless str =~ /(\d+)/
+
+  v = flag ? +"abc" : Pathname.new("x")
+  v.sub(/(b)/) { m = Regexp.last_match; m.begin(0).to_s }
+  1
+end
+
+# A project subclass of String is a String (Ruby: `match_block_string_subclass("a")` returns "a").
+class MatchBlockStr2443 < String; end
+
+def match_block_string_subclass(raw)
+  ms = MatchBlockStr2443.new(raw.to_s)
+  ms.scan(/(a)/) { m = Regexp.last_match; m.begin(0) }
+end
+
 # rubocop:enable Style/PerlBackrefs

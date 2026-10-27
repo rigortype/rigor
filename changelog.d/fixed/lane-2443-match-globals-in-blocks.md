@@ -1,0 +1,3 @@
+- **[inference]** `Regexp.last_match` and `$~` inside a `scan`, `gsub`, `gsub!`, `sub` or `sub!` block are now read as the call's own match, so `m = Regexp.last_match; m.begin(0)` there no longer reports a possible `nil` receiver. ([#2468](https://github.com/rigortype/rigor/pull/2468))
+  - This applies when the receiver is a String or untyped. A block of any other receiver is read as before.
+  - Numbered groups such as `$1` read there as they did before.

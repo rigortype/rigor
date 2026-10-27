@@ -12,6 +12,7 @@ require_relative "match_rebinding/frame"
 require_relative "match_rebinding/operands"
 require_relative "match_rebinding/calls"
 require_relative "match_rebinding/self_calls"
+require_relative "match_rebinding/yielding_match"
 require_relative "last_line"
 
 module Rigor
@@ -367,12 +368,21 @@ module Rigor
       #
       # Issue #1429 — the entry also restores a guard's narrowing of a global or constant where the body may run after
       # code that rebinds it ({GuardRebinding.block_entry}).
+      #
+      # Issue #2443 — the block of a call that matches before every yield (`scan`, `gsub`, `sub`, …) on a String or
+      # untyped receiver enters with that call's own match edge, laid over the entry above ({YieldingMatch}); a match
+      # its body runs still rebinds them through the statement-level rules.
       def block_entry(scope, block_node, call_node = nil)
+        operand_scope = scope
         scope = GuardRebinding.block_entry(scope, block_node, call_node)
         return FreshFrameBlocks.entry(scope, call_node) if FreshFrameBlocks.fresh_entry?(call_node, scope)
 
         scope = FreshFrameBlocks.closure_entry(scope, block_node, call_node)
         scope = LastLine.block_entry(scope, block_node, call_node)
+        YieldingMatch.entry(frame_entry(scope, block_node, call_node), block_node, call_node, operand_scope)
+      end
+
+      def frame_entry(scope, block_node, call_node)
         return scope unless scope.match_globals_bound?
         return scope unless scope.match_rebinding_closure? || entry_may_match?(block_node.body, scope, call_node) ||
                             (call_node.is_a?(Prism::CallNode) && operands_may_rebind?(call_node, scope))
@@ -386,7 +396,7 @@ module Rigor
 
         body.is_a?(Prism::Node) && scan(body, scope, base: true)
       end
-      private_class_method :entry_may_match?
+      private_class_method :frame_entry, :entry_may_match?
     end
   end
 end

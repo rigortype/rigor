@@ -11,8 +11,8 @@ module Rigor
     #
     # - a method another source declares (a `def`, an attribute or an alias), where that source is NOT the
     #   project's own (an `rbs collection install`, a gem's `sig/`, a vendored or another plugin's file), is
-    #   *composed*: the plugin's `def` becomes an overload continuation, `def m: <plugin overloads> | ...`, so RBS puts the plugin's
-    #   overloads first and keeps the other source's as the fallback. The plugin's signatures are often written
+    #   *composed*: the plugin's `def` becomes an overload continuation, `def m: <plugin overloads> | ...`, so
+    #   RBS puts the plugin's overloads first and keeps the other source's as the fallback. The plugin's signatures are often written
     #   wider on purpose (`Object#html_safe?: () -> bool` where the collection says `-> false`), and standing them
     #   down would let the narrower one fold correct code into dead branches;
     # - any other method, attribute or alias another source declares stands down: the project's own `sig/` or

@@ -151,10 +151,16 @@ module Rigor
           @rows = []
         end
 
+        # rbs 4.x builds the resolver with `TypeNameResolver.build(env)`; rbs 3.x's constructor takes the env, which
+        # the 4.x signature Rigor reads (`new(all_names, aliases)`) does not describe.
         def resolver
           @resolver ||= begin
             klass = ::RBS::Resolver::TypeNameResolver
-            klass.respond_to?(:build) ? klass.build(env) : klass.new(env)
+            if klass.respond_to?(:build)
+              klass.build(env)
+            else
+              klass.new(env) # rigor:disable call.wrong-arity
+            end
           end
         end
       end

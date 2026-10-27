@@ -62,6 +62,7 @@ module Rigor
         # sits ahead of its owner on the chain.
         def includes_singleton_mixin?(scope, class_name)
           chain = Scope::ResolutionChain.for(scope, class_name.to_s.delete_prefix("::"), :instance, :constants)
+          chain.record(scope)
           chain.entries.each_with_index.any? do |entry, index|
             entry.external? && !entry.superclass_edge && MIXIN_NAMES.include?(entry.raw.to_s) &&
               included_after_owner?(chain, entry, index)

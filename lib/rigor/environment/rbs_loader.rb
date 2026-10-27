@@ -1931,43 +1931,50 @@ module Rigor
       def memberless_project_class?(class_name)
         memberless_project_classes.key?(class_name.to_s.delete_prefix("::"))
       end
-      
+
       # The superclass a member-less project declaration of `class_name` writes (`class Poll < ::ApplicationRecord`),
       # as RBS spells it (rooted), or nil when none of its declarations writes one or the class is not member-less.
       def memberless_project_superclass(class_name)
         memberless_project_classes[class_name.to_s.delete_prefix("::")]
       end
-      
+
       def memberless_project_classes
         @state[:memberless_project_classes] ||= build_memberless_project_classes
       end
       private :memberless_project_classes
-      
+
       SURFACE_MEMBERS = [
         ::RBS::AST::Members::MethodDefinition, ::RBS::AST::Members::Attribute,
         ::RBS::AST::Members::Alias, ::RBS::AST::Members::Mixin
       ].freeze
       private_constant :SURFACE_MEMBERS
-      
+
       def build_memberless_project_classes
         authored = project_authored_classes
         environment = env
         return {}.freeze if authored.empty? || environment.nil?
-      
+
         environment.class_decls.each_with_object({}) do |(rbs_name, entry), acc|
           name = rbs_name.to_s.delete_prefix("::")
           next unless authored.include?(name)
-      
+
           decls = self.class.entry_declarations(entry)
-          members = decls.flat_map { |decl| decl.respond_to?(:members) ? decl.members : [] }
-          next unless members.none? { |member| SURFACE_MEMBERS.any? { |kind| member.is_a?(kind) } }
-      
-          supers = decls.filter_map { |decl| decl.respond_to?(:super_class) && decl.super_class&.name&.to_s }
-          acc[name] = supers.first&.freeze
+          acc[name] = declared_superclass_name(decls) if decls.none? { |decl| surface_member?(decl) }
         end.freeze
       rescue ::RBS::BaseError
         {}.freeze
       end
+
+      def surface_member?(decl)
+        members = decl.respond_to?(:members) ? decl.members : []
+        members.any? { |member| SURFACE_MEMBERS.any? { |kind| member.is_a?(kind) } }
+      end
+      private :surface_member?
+
+      def declared_superclass_name(decls)
+        decls.filter_map { |decl| decl.respond_to?(:super_class) && decl.super_class&.name&.to_s }.first&.freeze
+      end
+      private :declared_superclass_name
       private :build_memberless_project_classes
 
       # The class / module names every one of whose declarations is the project's own

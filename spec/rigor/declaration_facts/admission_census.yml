@@ -43,7 +43,6 @@ members:
     - lib/rigor/analysis/template_units.rb
     - lib/rigor/inference/in_effect_refinements/scope_reads.rb
     - lib/rigor/inference/last_line/implicit_self.rb
-    - lib/rigor/inference/method_dispatcher/singleton_mixin_dispatch.rb
     - lib/rigor/inference/narrowing.rb
     - lib/rigor/inference/object_mixins.rb
     - lib/rigor/inference/pre_eval_constants.rb
@@ -368,6 +367,7 @@ members:
     - lib/rigor/inference/project_seed_tables.rb
   discovered_class_sources:
     reads:
+    - lib/rigor/analysis/check_rules.rb
     - lib/rigor/analysis/incremental_session.rb
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/in_effect_refinements/scope_reads.rb

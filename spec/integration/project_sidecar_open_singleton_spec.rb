@@ -93,8 +93,8 @@ RSpec.describe "a project sidecar sig and an open singleton surface (#2438)" do
     end
 
     it "still reports `instance` when the Singleton the class includes is a nested project module" do
-      write("lib/a.rb", "module M\n  module Singleton\n  end\n  class X\n    include Singleton\n    def x = 1\n  end\n" \
-                        "end\nM::X.instance\n")
+      write("lib/a.rb", "module M\n  module Singleton\n  end\n  class X\n    include Singleton\n    " \
+                        "def x = 1\n  end\nend\nM::X.instance\n")
       write("sig/a.rbs", "module M\n  module Singleton\n  end\n  class X\n    def x: () -> Integer\n  end\nend\n")
 
       expect(undefined_messages(run_check)).to eq(["undefined method `instance' for singleton(M::X)"])
@@ -156,13 +156,19 @@ RSpec.describe "a project sidecar sig and an open singleton surface (#2438)" do
     end
 
     it "does not report a class method on a class that defines an inherited hook" do
-      messages = messages_for("class Base\n  def self.inherited(sub) = super\nend\nBase.registered\n", "class Base\nend\n")
+      messages = messages_for(
+        "class Base\n  def self.inherited(sub) = super\nend\nBase.registered\n", "class Base\nend\n"
+      )
 
       expect(messages).to eq([])
     end
 
     it "does not report a class method on a class that includes a project module" do
-      expect(messages_for("module Conc\n  def c = 1\nend\nclass Svc\n  include Conc\nend\nSvc.helper\n", "class Svc\nend\n")).to eq([])
+      messages = messages_for(
+        "module Conc\n  def c = 1\nend\nclass Svc\n  include Conc\nend\nSvc.helper\n", "class Svc\nend\n"
+      )
+
+      expect(messages).to eq([])
     end
 
     # A project module the class extends is a mixin too, though the source shows every method it adds.
@@ -203,7 +209,9 @@ RSpec.describe "a project sidecar sig and an open singleton surface (#2438)" do
     end
 
     it "still reports a typo when the declaration names a closed project class as the superclass" do
-      messages = messages_for("class Parent\nend\nclass Kid\nend\nKid.fooo\n", "class Parent\nend\nclass Kid < Parent\nend\n")
+      messages = messages_for(
+        "class Parent\nend\nclass Kid\nend\nKid.fooo\n", "class Parent\nend\nclass Kid < Parent\nend\n"
+      )
 
       expect(messages).to eq(["undefined method `fooo' for singleton(Kid)"])
     end
@@ -226,8 +234,9 @@ RSpec.describe "a project sidecar sig and an open singleton surface (#2438)" do
 
     it "still reports a typo on a closed class nested in a member-less namespace" do
       messages = messages_for(
-        "module Admin\n  module Metrics\n  end\nend\nclass Admin::Metrics::Dimension\n  def self.retrieve(keys) = keys\n" \
-        "end\nclass Admin::Metrics::Dimension::Lang\nend\nAdmin::Metrics::Dimension.retreive([1])\n",
+        "module Admin\n  module Metrics\n  end\nend\n" \
+        "class Admin::Metrics::Dimension\n  def self.retrieve(keys) = keys\nend\n" \
+        "class Admin::Metrics::Dimension::Lang\nend\nAdmin::Metrics::Dimension.retreive([1])\n",
         "module Admin\n  module Metrics\n    class Dimension\n      class Lang\n      end\n    end\n  end\nend\n"
       )
 

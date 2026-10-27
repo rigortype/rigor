@@ -1574,13 +1574,14 @@ module Rigor
         def open_source_class?(class_name, scope, loader)
           name = class_name.to_s.delete_prefix("::")
           instance = Scope::ResolutionChain.for(scope, name, :instance, :constants)
+          singleton = Scope::ResolutionChain.for(scope, name, :singleton, :constants)
+          [instance, singleton].each { |chain| chain.record(scope) }
           classes = instance.level_classes.compact
           return true if classes.empty? || instance.truncated?
 
-          sources = scope.discovery.discovered_class_sources
+          sources = scope.discovered_class_sources
           return true if classes.any? { |klass| (sources[klass] || []).empty? || opening_hook?(klass, scope) }
-          return true if opening_entry?(instance, classes) ||
-                         opening_entry?(Scope::ResolutionChain.for(scope, name, :singleton, :constants), classes)
+          return true if opening_entry?(instance, classes) || opening_entry?(singleton, classes)
 
           open_tail?(instance, classes.last, scope, loader)
         end
@@ -1610,7 +1611,7 @@ module Rigor
           raw = loader.memberless_project_superclass(last)
           return false if raw.nil? || CLOSED_ROOTS.include?(raw.delete_prefix("::"))
 
-          !scope.discovery.discovered_classes.key?(raw.delete_prefix("::"))
+          !scope.discovered_classes.key?(raw.delete_prefix("::"))
         end
 
         # Issue #2174 — `class Matrix` reopened with one `#:`-annotated method, and no `matrix` signatures

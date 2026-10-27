@@ -29,8 +29,11 @@ review, ruled that the member-less decline must also require the source to leave
 ## Decision
 
 The third option, singleton side only. `C.instance` asks `SingletonMixinDispatch.answers?`, the predicate the
-typer uses. It answers for an `include` (not a `prepend`) of the stdlib `Singleton` in `C` or a project class up
-its superclass chain, so the rule and the typer cannot disagree. The member-less decline asks
+typer uses. It answers for an `include` (not a `prepend`) of the stdlib `Singleton` in the body of `C` or of a
+project class up its superclass chain, so the rule and the typer cannot disagree. A project `N::Singleton` that
+the name resolves to inside `module N` still counts as the stdlib mixin, because the discovery tables drop a
+mixin argument's leading `::`: `include ::Singleton` must keep typing, so `include Singleton` that means
+`N::Singleton` is read the same way and is not reported (an accepted false negative). The member-less decline asks
 `RbsLoader#memberless_project_class?` and then `CheckRules#open_source_class?`. A class is open when it, or a
 project class up its superclass chain, matches any of these:
 

@@ -92,12 +92,48 @@ RSpec.describe "a project sidecar sig and an open singleton surface (#2438)" do
       )
     end
 
-    it "still reports `instance` when the Singleton the class includes is a nested project module" do
-      write("lib/a.rb", "module M\n  module Singleton\n  end\n  class X\n    include Singleton\n    " \
-                        "def x = 1\n  end\nend\nM::X.instance\n")
-      write("sig/a.rbs", "module M\n  module Singleton\n  end\n  class X\n    def x: () -> Integer\n  end\nend\n")
+    it "still reports `instance` when the project defines a top-level Singleton the class includes as `::Singleton`" do
+      write("lib/a.rb", "module Singleton\nend\nclass X\n  include ::Singleton\n  def x = 1\nend\nX.instance\n")
+      write("sig/a.rbs", "module Singleton\nend\nclass X\n  def x: () -> Integer\nend\n")
 
-      expect(undefined_messages(run_check)).to eq(["undefined method `instance' for singleton(M::X)"])
+      expect(undefined_messages(run_check)).to eq(["undefined method `instance' for singleton(X)"])
+    end
+
+    # The tables drop a mixin argument's leading `::`, so `include ::Singleton` and `include Singleton` inside
+    # `module N` read alike. Both are taken as the stdlib mixin: the rooted spelling types, and neither reports.
+    it "types `instance` as the class when it includes ::Singleton beside a nested project Singleton" do
+      write("lib/a.rb", <<~SOURCE)
+        require "singleton"
+        module N
+          class Singleton
+          end
+          class X
+            include ::Singleton
+            def x = 1
+          end
+          class Y
+            include Singleton
+            def y = 1
+          end
+        end
+        Rigor.dump_type(N::X.instance)
+        N::Y.instance
+      SOURCE
+      write("sig/a.rbs", "module N\n  class Singleton\n  end\n  class X\n    def x: () -> Integer\n  end\n  " \
+                         "class Y\n    def y: () -> Integer\n  end\nend\n")
+      result = run_check
+
+      expect(undefined_messages(result)).to eq([])
+      expect(dumps(result)).to eq(["dump_type: N::X"])
+    end
+
+    # `Singleton.included` raises TypeError for a module, so a class that includes such a module has no `instance`.
+    it "still reports `instance` when only a module the class includes includes Singleton" do
+      write("lib/a.rb", "require \"singleton\"\nmodule M\n  include Singleton\nend\nclass C\n  include M\n  " \
+                        "def x = 1\nend\nC.instance\n")
+      write("sig/a.rbs", "module M\nend\nclass C\n  include M\n  def x: () -> Integer\nend\n")
+
+      expect(undefined_messages(run_check)).to eq(["undefined method `instance' for singleton(C)"])
     end
 
     # `prepend Singleton` runs `prepend_features`, not the `included` hook, so Ruby defines no `instance`.
@@ -176,6 +212,19 @@ RSpec.describe "a project sidecar sig and an open singleton surface (#2438)" do
       messages = messages_for("module H\n  def h = 1\nend\nclass W\n  extend H\nend\nW.helper\n", "class W\nend\n")
 
       expect(messages).to eq([])
+    end
+
+    # A library module the class includes opens it too, though RBS declares the module.
+    it "does not report a class method on a class that includes a library module" do
+      expect(messages_for("class Svc\n  include Comparable\nend\nSvc.helper\n", "class Svc\nend\n")).to eq([])
+    end
+
+    # A superclass chain past `ResolutionChain::LIMIT` is cut, so the class is not provably closed.
+    it "does not report a class method on a class whose superclass chain is cut" do
+      chain = (1..101).map { |i| "class C#{i} < C#{i - 1}\nend\n" }.join
+      source = "class C0\nend\n#{chain}C101.fooo\n"
+
+      expect(messages_for(source, "class C101\nend\n")).to eq([])
     end
 
     it "does not report a class method on a namespace with no body inside paths:" do

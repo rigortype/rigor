@@ -51,27 +51,43 @@ module Rigor
           includes_singleton_mixin?(scope, receiver.class_name)
         end
 
-        # True when `class_name`'s instance ancestry carries the stdlib `Singleton` as an `include` — in the class
-        # itself or in a project class up its superclass chain (Ruby's `Singleton.included` also installs an
+        # True when `class_name`'s instance ancestry carries the stdlib `Singleton` as an `include` written in the
+        # class itself or in a project class up its superclass chain (Ruby's `Singleton.included` also installs an
         # `inherited` hook, so `class D < C` answers `instance` with its own instance). Read off
         # `Scope::ResolutionChain` (the `:constants` flavor, so an empty project `module Singleton` is a project
-        # entry), where the stdlib module is an external entry. Issue #2438 — two shapes are not the mixin: a
-        # name that resolves to a project constant (a top-level `Singleton`, `M::Singleton` inside `module M`),
-        # which is a project entry rather than an external one; and `prepend Singleton`, which runs
-        # `prepend_features` instead of the `included` hook and so defines no `instance`. A prepended entry
-        # sits ahead of its owner on the chain.
+        # entry), where the stdlib module is an external entry. Issue #2438 — what is not the mixin:
+        #
+        # - `prepend Singleton`, which runs `prepend_features` instead of the `included` hook and so defines no
+        #   `instance`; a prepended entry sits ahead of its owner on the chain;
+        # - an `include Singleton` in a MODULE the class includes: `Singleton.included` raises `TypeError` for a
+        #   module, so that code never runs;
+        # - a top-level project `Singleton`, which both `Singleton` and `::Singleton` name.
+        #
+        # A NESTED project `N::Singleton` the name resolved to is read as the stdlib mixin: the discovery tables
+        # drop the leading `::` of a mixin argument, so `include ::Singleton` and `include Singleton` inside
+        # `module N` record the same name, and the stdlib reading is the one that types the rooted spelling and
+        # never reports a correct call.
         def includes_singleton_mixin?(scope, class_name)
           chain = Scope::ResolutionChain.for(scope, class_name.to_s.delete_prefix("::"), :instance, :constants)
           chain.record(scope)
-          chain.entries.each_with_index.any? do |entry, index|
-            entry.external? && !entry.superclass_edge && MIXIN_NAMES.include?(entry.raw.to_s) &&
-              included_after_owner?(chain, entry, index)
+          classes = chain.level_classes.compact
+          chain.entries.each_with_index.any? { |entry, index| singleton_include?(chain, classes, entry, index) }
+        end
+
+        def singleton_include?(chain, classes, entry, index)
+          if entry.external?
+            !entry.superclass_edge && MIXIN_NAMES.include?(entry.raw.to_s) && classes.include?(entry.owner) &&
+              index > chain.index_of(entry.owner)
+          else
+            entry.name.end_with?("::Singleton") && included_by_level_class?(chain, index)
           end
         end
 
-        def included_after_owner?(chain, entry, index)
-          owner = entry.owner && chain.index_of(entry.owner)
-          !owner.nil? && index > owner
+        # The entry sits after its level's class, so it was included into that level rather than prepended.
+        def included_by_level_class?(chain, index)
+          level = chain.level_starts.rindex { |start| start <= index }
+          klass = level && chain.level_classes[level]
+          !klass.nil? && index > chain.index_of(klass)
         end
       end
     end

@@ -902,6 +902,18 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
         .to include("another loaded signature source already declares it with 2 type parameters")
     end
 
+    # Issues #2422 / #2439 — the per-member row also carries a superclass a plugin's class header gave up, so
+    # its reason may not speak of methods and constants alone.
+    it "words the per-member row so it covers a superclass stand-down too" do
+      rows = build_aggregator(
+        signature_standdowns_snapshot: [["sig/errors.rbs", "ActiveRecord::StatementInvalid < ActiveRecordError",
+                                         nil, nil, "sig/collection.rbs", :member]]
+      ).rbs_plugin_signature_stood_down_diagnostics
+
+      expect(rows.first.message).to include("or two different superclasses of one class) fail the build")
+      expect(rows.first.message).not_to include("Two declarations of one method or constant fail the build")
+    end
+
     it "is silent when nothing stood down" do
       expect(build_aggregator(signature_standdowns_snapshot: []).rbs_plugin_signature_stood_down_diagnostics).to eq([])
     end

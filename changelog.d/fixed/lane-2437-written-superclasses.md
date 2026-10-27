@@ -1,0 +1,5 @@
+- **[sig-gen]** `sig-gen --write` no longer writes a subclass against a project superclass it does not write itself, so the next `rigor check` no longer reports `RBS::NoSuperclassFoundError` for it. ([#2478](https://github.com/rigortype/rigor/pull/2478))
+  - A superclass counts as written only when one of its own methods is written, when it is an empty subclass declared beside a written method, or when it encloses a written class.
+  - A superclass in a `sig/` file that does not parse or is not valid UTF-8 is not written, so its subclasses are skipped too.
+  - Such a subclass is skipped and goes back to source inference, as for a superclass no RBS declares.
+  - The skipped-class warning now says when the superclass is the project's own, and suggests typing it, fixing its `sig/` file, or declaring it by hand instead of installing RBS.

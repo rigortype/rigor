@@ -608,36 +608,14 @@ module Rigor
         truthy
       end
 
-      # Issue #2443 — the match edge of a call that yields only after it has matched `pattern_node` in the caller's
-      # frame ({MatchRebinding::YieldingMatch}), on `=~`'s terms: `$~` a `MatchData`, `$&` and the pre- and post-match
-      # a `String`, and, when the pattern is a regex the analyzer reads (a literal or a `Constant[Regexp]`, not
-      # `//x`), each unconditional group's `$N` and `$+` a `String`. Any other pattern — a String, an untyped value —
-      # leaves the groups unbound, so they read the RBS `String?`. So does a source with a `(?` construct other than a
-      # non-capturing or named group ({#plain_group_source?}).
-      def yielded_match_scope(scope, pattern_node)
-        pattern = regex_operand_pattern(pattern_node, scope)
-        unconditional =
-          if pattern.is_a?(RegexMatchPattern) && !pattern.extended && plain_group_source?(pattern.source)
-            unconditional_capture_groups(pattern.source)
-          else
-            Set.new
-          end
-        truthy, = regex_match_predicate_scopes(scope, unconditional)
+      # Issue #2443 — the match edge of a call that yields only after it has matched in the caller's frame
+      # ({MatchRebinding::YieldingMatch}): `$~` a `MatchData`, and `$&` and the pre- and post-match a `String`, which
+      # every successful match binds. The numbered groups and `$+` are left unbound, so they read the RBS `String?`:
+      # narrowing them needs the group walk ({#unconditional_capture_groups}) to read the pattern right, which it
+      # does not for every source yet (#2472).
+      def yielded_match_scope(scope)
+        truthy, = regex_match_predicate_scopes(scope, Set.new)
         truthy
-      end
-
-      # The `(?` openers {#unconditional_capture_groups} reads correctly: `(?:`, `(?<name>` and `(?'name'`. Anything
-      # else — an inline flag group, which may turn on extended mode with any charset letter beside it (`(?ax)`), a
-      # comment that may hold a paren (`(?#(b)`), a lookaround, whose groups do not take part in the match
-      # (`(?!(b))`), the absent operator, an atomic group, a conditional — is not read.
-      PLAIN_GROUP_OPENER = /\G\?(?::|<[^=!]|')/
-      private_constant :PLAIN_GROUP_OPENER
-
-      # True when every `(?` outside an escape and a character class opens a group {PLAIN_GROUP_OPENER} admits.
-      def plain_group_source?(source)
-        each_structural_char(source) do |pos, chr|
-          break false if chr == "(" && source[pos + 1] == "?" && !source.match?(PLAIN_GROUP_OPENER, pos + 1)
-        end != false
       end
 
       # Issue #2443 — true when every member of `type` is a String (a project subclass included) or a `Dynamic` that

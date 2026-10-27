@@ -2609,42 +2609,37 @@ def match_block_methods(str)
   str&.scan(/x/) { assert_type("MatchData", $~) }
 end
 
-# Each unconditional group's `$N` reads `String`; an optional group's, and any group of a String pattern, keep the
-# RBS `String?` (Ruby: `"ab".scan(/(\w)(\d)?/) { p $2 }` prints nil).
+# The entry binds only what every match binds: `$~`, `$&` and the pre- and post-match. Every numbered group, even an
+# unconditional one, keeps the RBS `String?` until the group walk reads every source right (#2472) (Ruby:
+# `"ab".scan(/(\w)(\d)?/) { p $2 }` prints nil).
 def match_block_groups(str)
   str.scan(/(\w)(\d)?/) do
-    first = $1
     second = $2
-    assert_type("String", first)
-    assert_type("String?", second)
-    assert_type("String", Regexp.last_match(1))
-    first.upcase
+    assert_type("String?", $1)
+    assert_type("String?", Regexp.last_match(1))
+    assert_type("MatchData", Regexp.last_match)
     second.upcase # GENUINE-NIL
   end
-  str.scan("x") { assert_type("String?", $1) }
 end
 
-# A typed receiver reads the same, its `nil` aside, since a `nil` receiver never runs the block; an extended-mode
-# pattern, whose comments the group walk could miscount, narrows no group (Ruby: `match_block_typed("a")` returns
-# "a").
+# A typed receiver reads the same, its `nil` aside, since a `nil` receiver never runs the block.
 def match_block_typed(raw)
   s = raw ? String(raw) : nil
-  s&.scan(/(a)/) { assert_type("String", $1) }
-  s.to_s.scan(/(a) # (b)/x) { assert_type("String?", $1) }
-  s.scan(/(a)/) { assert_type("String", $1) } # GENUINE-NIL
+  s&.scan(/(a)/) { assert_type("MatchData", $~) }
+  s.scan(/(a)/) { assert_type("MatchData", $~) } # GENUINE-NIL
 end
 
 # An implicit-self call keeps the frame-wide entry: its receiver is `self`, which a block entry does not type.
 class MatchBlockString2443 < String
-  def first_group = gsub(/(x)/) { assert_type("String?", $1) }
+  def first_group = gsub(/(x)/) { assert_type("MatchData?", Regexp.last_match) }
 end
 
-# The entry replaces a stale narrowing: on the `=~`'s falsey edge `$1` was nil, but the `gsub` block reads its own
-# group (Ruby: `match_block_stale_edge("ab cd")` returns "Ab Cd").
+# The entry replaces a stale narrowing: on the `=~`'s falsey edge `$1` was nil, but the `gsub` block reads a match
+# of its own (Ruby: `match_block_stale_edge("ab cd")` returns "Ab Cd").
 def match_block_stale_edge(line)
   return if line =~ /^(#)/
 
-  line.gsub(/(\w+)/) { w = $1; w.capitalize }
+  line.gsub(/(\w+)/) { assert_type("String?", $1); $&.capitalize }
 end
 
 # Control: a match the body runs rebinds `$~` past the entry (Ruby: nil after the failed match).
@@ -2668,7 +2663,8 @@ end
 
 # A receiver known to be something else keeps the frame-wide entry: a method defined in Ruby matches in a frame of its
 # own, so its block reads the caller's `$~`, here the guard's (Ruby: `match_block_project_receiver("a12")` returns
-# "12", `match_block_project_gsub("a12")` and `match_block_union("a12", false)` return 1, and `match_block_pathname("a12", "ab")` returns `Pathname("a1")`).
+# "12", `match_block_project_gsub("a12")` and `match_block_union("a12", false)` return 1, and
+# `match_block_pathname("a12", "ab")` returns `Pathname("a1")`).
 class MatchBlockTok2443
   def scan(_pattern) = yield
   def gsub(_pattern) = yield
@@ -2682,7 +2678,7 @@ end
 
 # Without a match in the frame, the project class's block reads no match either (Ruby: nil).
 def match_block_project_unbound
-  MatchBlockTok2443.new.scan(/(x)/) { assert_type("String?", $1) }
+  MatchBlockTok2443.new.scan(/(x)/) { assert_type("MatchData?", Regexp.last_match) }
 end
 
 def match_block_project_gsub(str)
@@ -2711,28 +2707,6 @@ class MatchBlockStr2443 < String; end
 def match_block_string_subclass(raw)
   ms = MatchBlockStr2443.new(raw.to_s)
   ms.scan(/(a)/) { m = Regexp.last_match; m.begin(0) }
-end
-
-# Only a source whose every `(?` opens a non-capturing or a named group narrows its groups; any other construct
-# leaves them `String?`. The group walk misreads an inline flag group that turns on extended mode, the absent
-# operator, a comment holding a paren and a group in a negative lookahead (Ruby, for `match_block_unread_groups("a",
-# "b")`: `$2` is nil in the first two, `$1` in the third, `$2` in the fourth and `$1` in the fifth). The allowlist
-# declines a lookbehind and an atomic group too, though their groups do take part (Ruby: `$1` is "a" there).
-def match_block_unread_groups(str, other)
-  str.gsub(/(?ax) (a) # (b)
-/) { w = $2; w.upcase } # GENUINE-NIL
-  str.gsub(/(a)(?x) # (b)
-/) { assert_type("String?", $2) }
-  other.gsub(/(?~(a))/) { assert_type("String?", $1) }
-  str.gsub(/(a)(?#(b)/) { w = $2; w.upcase } # GENUINE-NIL
-  str.gsub(/(?!(b))a/) { w = $1; w.upcase } # GENUINE-NIL
-  str.gsub(/(?<=x)(a)/) { assert_type("String?", $1) }
-  str.gsub(/(?>(a))/) { assert_type("String?", $1) }
-end
-
-# A named group still narrows (Ruby: `match_block_named_groups("ab")` returns "AB").
-def match_block_named_groups(str)
-  str.gsub(/(?<x>a)(?'y'b)(?:c)?/) { w = $2; $1.upcase + w.upcase }
 end
 
 # rubocop:enable Style/PerlBackrefs

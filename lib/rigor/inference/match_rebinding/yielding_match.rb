@@ -28,11 +28,10 @@ module Rigor
         # `scope` with the match globals `call_node`'s block enters with; `scope` itself for any other block.
         # `operand_scope` types the receiver.
         def entry(scope, block_node, call_node, operand_scope)
-          return scope unless yielding_call?(block_node, call_node)
+          return scope unless yielding_call?(block_node, call_node) &&
+                              Narrowing.string_match_receiver?(operand_scope.type_of(call_node.receiver), operand_scope)
 
-          return scope unless Narrowing.string_match_receiver?(operand_scope.type_of(call_node.receiver), operand_scope)
-
-          Narrowing.yielded_match_scope(scope, call_node.arguments&.arguments&.first)
+          Narrowing.yielded_match_scope(scope)
         end
 
         def yielding_call?(block_node, call_node)

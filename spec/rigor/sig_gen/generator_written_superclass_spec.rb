@@ -153,6 +153,19 @@ RSpec.describe Rigor::SigGen::Generator do
       expect_subclass_demoted(candidates, generator)
     end
 
+    # Run from another directory, every target maps outside that directory's `sig/`, which the writer refuses.
+    it "demotes the subclass when the shell's target is outside the sig root" do
+      run_generator("lib/errors.rb" => errors, "lib/sub.rb" => subclass)
+      elsewhere = Dir.mktmpdir
+      generator = Dir.chdir(elsewhere) do
+        described_class.new(configuration: configuration, paths: [File.join(tmpdir, "lib")]).tap(&:run)
+      ensure
+        FileUtils.remove_entry(elsewhere)
+      end
+
+      expect(generator.unresolvable_superclasses).to eq("Lib::NotFound" => "Lib::Error")
+    end
+
     # A guard (control): a parseable existing target is updated with the shell, and the subclass rests on it.
     it "writes the shell into a parseable existing target and keeps the subclass" do
       run_generator("lib/errors.rb" => errors, "sig/errors.rbs" => in_lib("class Thing", "end"),

@@ -2666,48 +2666,56 @@ def match_block_outside(str, items)
   items.each { assert_type("String", $1) }
 end
 
-# A receiver known to be something else than a String runs a method of its own, and its block enters with the match
-# globals unbound rather than narrowed from either frame.
-class MatchBlockScanner2443
+# A receiver known to be something else keeps the frame-wide entry: a method defined in Ruby matches in a frame of its
+# own, so its block reads the caller's `$~`, here the guard's (Ruby: `match_block_project_receiver("a12")` returns
+# "12", `match_block_project_gsub("a12")` and `match_block_union("a12", false)` return 1, and `match_block_pathname("a12", "ab")` returns `Pathname("a1")`).
+class MatchBlockTok2443
   def scan(_pattern) = yield
+  def gsub(_pattern) = yield
 end
 
-def match_block_other_receiver(str)
+def match_block_project_receiver(str)
   return unless str =~ /(\d+)/
 
-  MatchBlockScanner2443.new.scan(/(x)/) { assert_type("String?", $1) }
+  MatchBlockTok2443.new.scan(/(x)/) { w = $1; w.upcase }
 end
 
-# Issue #1371 — a proc's body runs when the proc is called, after any match in between, so it enters with the match
-# globals unbound (Ruby: `match_block_lambda("a1", "zy")` returns nil).
-def match_block_lambda(str, other)
-  f = nil
-  f = -> { assert_type("String?", $1) } if str =~ /(\d+)/
-  other =~ /(x)?y/
-  f&.call
-end
-
-def match_block_procs(str)
+def match_block_project_gsub(str)
   return unless str =~ /(\d+)/
 
-  lambda { assert_type("String?", $1) }
-  proc { assert_type("String?", $1) }
-  g = Proc.new { w = $1; w.upcase } # GENUINE-NIL
-  g
+  MatchBlockTok2443.new.gsub(/x/) { m = Regexp.last_match; m.begin(0) }
 end
 
-# Control: a project's own `Proc` runs its block where it is written (Ruby: `MatchBlockPool2443.run("a1")` returns
-# "1").
-module MatchBlockPool2443
-  class Proc
-    def self.new = yield
-  end
+def match_block_pathname(str, path)
+  return unless str =~ /(\d+)/
 
-  def self.run(str)
-    return unless str =~ /(\d+)/
+  Pathname.new(path).sub(/(b)/) { m = Regexp.last_match; m.begin(0).to_s }
+end
 
-    Proc.new { assert_type("String", $1); $1 }
-  end
+def match_block_union(str, flag)
+  return unless str =~ /(\d+)/
+
+  v = flag ? +"abc" : Pathname.new("x")
+  v.sub(/(b)/) { m = Regexp.last_match; m.begin(0).to_s }
+  1
+end
+
+# A project subclass of String is a String (Ruby: `match_block_string_subclass("a")` returns "a").
+class MatchBlockStr2443 < String; end
+
+def match_block_string_subclass(raw)
+  ms = MatchBlockStr2443.new(raw.to_s)
+  ms.scan(/(a)/) { m = Regexp.last_match; m.begin(0) }
+end
+
+# A source the group walk misreads narrows no group: an inline flag group that turns on extended mode, and the absent
+# operator (Ruby: `$2` is nil in the first two and `$1` in the third, for `match_block_unread_groups("a", "b")`).
+def match_block_unread_groups(str, other)
+  str.gsub(/(?x) (a) # (b)
+/) { assert_type("String?", $2) }
+  str.gsub(/(a)(?x) # (b)
+/) { assert_type("String?", $2) }
+  other.gsub(/(?~(a))/) { assert_type("String?", $1) }
 end
 
 # rubocop:enable Style/PerlBackrefs

@@ -15,9 +15,10 @@ module Rigor
       # A receiver that is a String, or a `Dynamic` the analyzer cannot type ({Narrowing.string_match_receiver?}),
       # enters with the call's own match edge ({Narrowing.yielded_match_scope}). A `Dynamic` receiver may be another
       # object whose block-taking `scan` runs no match, and then the block reads the caller's `$~`; narrowing it
-      # anyway can only drop a diagnostic, never add one (ADR-5). A receiver known to be anything else enters with
-      # the globals unbound, since its method runs in a frame of its own and the narrowing at the call site may be
-      # stale by the time it yields. An implicit-self call keeps the frame-wide entry.
+      # anyway can only drop a diagnostic, never add one (ADR-5). A receiver known to be anything else — a project
+      # class, `Pathname`, a union with either — keeps the frame-wide entry: a method defined in Ruby runs its
+      # matches in a frame of its own, so its block reads the caller's `$~` as the frame rules leave it. So does an
+      # implicit-self call.
       module YieldingMatch
         NAMES = Set[:scan, :gsub, :gsub!, :sub, :sub!].freeze
         private_constant :NAMES
@@ -30,12 +31,10 @@ module Rigor
           return scope unless yielding_call?(block_node, call_node)
 
           pattern = call_node.arguments&.arguments&.first
-          receiver_type = operand_scope.type_of(call_node.receiver)
-          if pattern && Narrowing.string_match_receiver?(receiver_type, operand_scope)
-            Narrowing.yielded_match_scope(scope, pattern)
-          else
-            scope.forget_match_globals
-          end
+          return scope if pattern.nil?
+          return scope unless Narrowing.string_match_receiver?(operand_scope.type_of(call_node.receiver), operand_scope)
+
+          Narrowing.yielded_match_scope(scope, pattern)
         end
 
         def yielding_call?(block_node, call_node)

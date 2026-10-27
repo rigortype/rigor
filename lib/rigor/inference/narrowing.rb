@@ -612,14 +612,25 @@ module Rigor
       # frame ({MatchRebinding::YieldingMatch}), on `=~`'s terms: `$~` a `MatchData`, `$&` and the pre- and post-match
       # a `String`, and, when the pattern is a regex the analyzer reads (a literal or a `Constant[Regexp]`, not
       # `//x`), each unconditional group's `$N` and `$+` a `String`. Any other pattern — a String, an untyped value —
-      # leaves the groups unbound, so they read the RBS `String?`.
+      # leaves the groups unbound, so they read the RBS `String?`. So does a source the group walk misreads
+      # ({UNREAD_GROUP_SOURCE}).
       def yielded_match_scope(scope, pattern_node)
         pattern = regex_operand_pattern(pattern_node, scope)
         unconditional =
-          pattern.is_a?(RegexMatchPattern) && !pattern.extended ? unconditional_capture_groups(pattern.source) : Set.new
+          if pattern.is_a?(RegexMatchPattern) && !pattern.extended && !UNREAD_GROUP_SOURCE.match?(pattern.source)
+            unconditional_capture_groups(pattern.source)
+          else
+            Set.new
+          end
         truthy, = regex_match_predicate_scopes(scope, unconditional)
         truthy
       end
+
+      # A source {#unconditional_capture_groups} misreads: an inline flag group that turns on extended mode
+      # (`(?x)`, `(?ix:…)`), whose comments may hold a `(`, and the absent operator `(?~…)`, whose groups take part
+      # in no match Ruby reports. Read over the raw source, so an escaped `\(?x)` is declined too.
+      UNREAD_GROUP_SOURCE = /\(\?[imx]*x[imx]*(?:-[imx]*)?[:)]|\(\?~/
+      private_constant :UNREAD_GROUP_SOURCE
 
       # Issue #2443 — true when every member of `type` is a String (a project subclass included) or a `Dynamic` that
       # is untyped or may hold only Strings, Symbols and nil ({#match_member_kind}). A `nil` member never runs the

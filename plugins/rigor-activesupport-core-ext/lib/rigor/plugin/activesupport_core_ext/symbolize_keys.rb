@@ -109,7 +109,7 @@ module Rigor
           "NilClass" => %w[NilClass Object Kernel BasicObject],
           "TrueClass" => %w[TrueClass Object Kernel BasicObject],
           "FalseClass" => %w[FalseClass Object Kernel BasicObject]
-        }.freeze
+        }.transform_values(&:freeze).freeze
 
         # True for one of {KEPT_CLASS_CHAINS} when the project defines no `to_sym` on it or an ancestor.
         # `discovered_method?` also records the negative dependency, so adding such a `def` invalidates.

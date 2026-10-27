@@ -94,7 +94,8 @@ RSpec.describe "plugin signature member stand-down through the runner (#2422)" d
   # The project's own `sig/`, declaring a plugin method the collection does not.
   def write_own_sig
     FileUtils.mkdir_p("sig")
-    File.write(File.join("sig", "own.rbs"), "class Integer\n  def ordinal: () -> Symbol\nend\n")
+    File.write(File.join("sig", "own.rbs"),
+               "class Integer\n  def ordinal: () -> Symbol\n  def multiple_of?: (Integer) -> bool\nend\n")
   end
 
   # Correct code the collection's narrower declarations alone would misjudge: `html_safe?` read as always
@@ -160,8 +161,9 @@ RSpec.describe "plugin signature member stand-down through the runner (#2422)" d
     notices = rows.select { |row| row[2] == "rbs.coverage.plugin-signature-stood-down" }
     expect(notices.size).to eq(1)
     message = notices.first[3]
-    expect(message).to include("core_ext.rbs", "loaded without 1 declaration(s)", "the other source's, named in")
-    expect(message.scan(%r{`([^`/]+)` \(([^)]+)\)})).to eq([["Integer#ordinal", "sig/own.rbs"]])
+    expect(message).to include("core_ext.rbs", "loaded without 2 declaration(s)", "the other source's, named in")
+    expect(message.scan(%r{`([^`/]+)` \(([^)]+)\)})).to eq([["Integer#multiple_of?", "sig/own.rbs"],
+                                                            ["Integer#ordinal", "sig/own.rbs"]])
     expect(rows.map do |row|
       row[2]
     end).not_to include("call.possible-nil-receiver", "rbs.coverage.definition-build-failed")

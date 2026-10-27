@@ -1,2 +1,3 @@
-- **[inference]** A call with a block whose arguments match no declared overload now takes the type of the block's value, so `URI.open(url, read_timeout: 3) { |io| io.read }` no longer reports a false return-type mismatch. ([#2446](https://github.com/rigortype/rigor/pull/2446))
-  - A call without a block, or to a method with no block-taking overload, keeps its previous type.
+- **[inference]** A call with a block whose arguments match no declared overload now takes its type from the block-taking overloads that fit its argument count, so `URI.open(url, read_timeout: 3) { |io| io.read }` no longer reports a false return-type mismatch. ([#2446](https://github.com/rigortype/rigor/pull/2446))
+  - When exactly one block-taking overload fits, or all that fit return the same type, the call takes that type; otherwise it is left unknown (`Dynamic[top]`).
+  - A call without a block, or to a method with no block-taking overload, keeps its previous type, and the block's parameters on such a call stay unknown as before.

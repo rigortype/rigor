@@ -50,6 +50,8 @@ If an internal type contains one of these markers in an invalid RBS context, the
 
 RBS records (`{ key: T }`) and tuples (`[A, B]`) are accepted as exact forms. Rigor's internal hash and array shapes (see [structural-interfaces-and-object-shapes.md](structural-interfaces-and-object-shapes.md)) extend these RBS forms with required/optional/extra-key policies and read-only markers; those extensions erase deterministically (see [rbs-erasure.md](rbs-erasure.md)).
 
+A tuple accepts another tuple of the same arity whose members it accepts position by position. It does not reject an `Array[E]` on length, which the array does not carry: it answers "maybe" unless some tuple member accepts no member of `E` (`[Integer, Integer]` against `Array[String]` is still a mismatch). A declared `[String, String]` therefore accepts an `Array[String]` argument or return value without a diagnostic, even when the array's length differs at runtime.
+
 ### Type variables
 
 Type variable bounds and declaration-site variance from RBS are preserved. Generic preservation through method bodies — for example inferring `[S < _RewindableStream] (S stream) -> S` when a method returns the same parameter object it received — is a Rigor inference behavior, not a new surface form. See [structural-interfaces-and-object-shapes.md](structural-interfaces-and-object-shapes.md).

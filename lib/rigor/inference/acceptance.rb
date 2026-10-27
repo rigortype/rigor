@@ -75,41 +75,52 @@ module Rigor
       }.freeze
       private_constant :TYPE_HANDLERS
 
-      UNREAD_HASH_REFUSED_KEY = :__rigor_acceptance_unread_hash_refused__
-      private_constant :UNREAD_HASH_REFUSED_KEY
+      UNREAD_SHAPE_REFUSED_KEY = :__rigor_acceptance_unread_shape_refused__
+      private_constant :UNREAD_SHAPE_REFUSED_KEY
 
-      # Whether a `maybe` for `param` against `arg` rests on a record that could not read a hash's entries: a
-      # `Hash` with a gradual arm ({#gradual_hash?}) or an open `HashShape`. The record cannot prove the key set
-      # of either, and its `maybe` climbs through whatever holds the record. `OverloadSelector`'s strict pass
-      # reads that `maybe` as no evidence for the overload, so this re-asks with each such record answering
-      # `no` and reports whether the pair then fails. A `maybe` from anywhere else (a subclass only the Ruby
-      # source declares, a splat under a parameter that is no record) survives the re-ask and still counts.
-      def maybe_rests_on_unread_hash?(param, arg)
-        return false unless contains_type?(param) { |type| type.is_a?(Type::HashShape) }
-        return false unless contains_type?(arg) { |type| unread_hash?(type) }
+      # Whether a `maybe` for `param` against `arg` rests on a shape that could not read its argument: a record
+      # against a `Hash` with a gradual arm ({#gradual_hash?}) or an open `HashShape`, or a tuple against an
+      # `Array` of unknown arity ({#array_carrier?}). The shape cannot prove the key set or the length, and its
+      # `maybe` climbs through whatever holds it. `OverloadSelector`'s strict pass reads that `maybe` as no
+      # evidence for the overload, so this re-asks with each such shape answering `no` and reports whether the
+      # pair then fails. A `maybe` from anywhere else (a subclass only the Ruby source declares, a splat under a
+      # parameter that is no shape) survives the re-ask and still counts.
+      def maybe_rests_on_unread_shape?(param, arg)
+        return false unless rests_on_unread_hash?(param, arg) || rests_on_unread_array?(param, arg)
 
-        refusing_unread_hashes { accepts(param, arg, mode: :gradual).no? }
+        refusing_unread_shapes { accepts(param, arg, mode: :gradual).no? }
       end
 
       # rubocop:disable-next Metrics/ClassLength
       class << self
         private
 
-        # The flag lives on the thread, not on a parameter, because the record may sit any number of `accepts`
-        # calls below the one asked (a tuple element, a `Hash` value, a union member), and those calls go
-        # through each carrier's `Type#accepts`. It is set only for the duration of the block.
-        def refusing_unread_hashes
-          previous = Thread.current[UNREAD_HASH_REFUSED_KEY]
-          Thread.current[UNREAD_HASH_REFUSED_KEY] = true
-          yield
-        ensure
-          Thread.current[UNREAD_HASH_REFUSED_KEY] = previous
+        def rests_on_unread_hash?(param, arg)
+          contains_type?(param) { |type| type.is_a?(Type::HashShape) } &&
+            contains_type?(arg) { |type| unread_hash?(type) }
         end
 
-        # The `maybe` a record answers for a hash whose entries it cannot read, or `no` inside
-        # {#refusing_unread_hashes}.
-        def unread_hash_maybe(mode, reason)
-          return hash_shape_no(mode, "#{reason} (refused as evidence)") if Thread.current[UNREAD_HASH_REFUSED_KEY]
+        def rests_on_unread_array?(param, arg)
+          contains_type?(param) { |type| type.is_a?(Type::Tuple) } &&
+            contains_type?(arg) { |type| array_carrier?(type) }
+        end
+
+        # The flag lives on the thread, not on a parameter, because the shape may sit any number of `accepts`
+        # calls below the one asked (a tuple element, a `Hash` value, a union member), and those calls go
+        # through each carrier's `Type#accepts`. It is set only for the duration of the block.
+        def refusing_unread_shapes
+          previous = Thread.current[UNREAD_SHAPE_REFUSED_KEY]
+          Thread.current[UNREAD_SHAPE_REFUSED_KEY] = true
+          yield
+        ensure
+          Thread.current[UNREAD_SHAPE_REFUSED_KEY] = previous
+        end
+
+        # The `maybe` a shape answers for an argument it cannot read, or `no` inside {#refusing_unread_shapes}.
+        def unread_shape_maybe(mode, reason)
+          if Thread.current[UNREAD_SHAPE_REFUSED_KEY]
+            return Type::AcceptsResult.no(mode: mode, reasons: "#{reason} (refused as evidence)")
+          end
 
           Type::AcceptsResult.maybe(mode: mode, reasons: reason)
         end
@@ -1004,9 +1015,12 @@ module Rigor
 
         # Tuple[A1..An] accepts:
         # - Tuple[B1..Bn] when arities match and each Ai accepts Bi (covariant per-position).
-        # - Anything else: no (we cannot prove the arity from a generic nominal alone).
+        # - An `Array[E]` (see {#array_element_verdict}): maybe, or no on an element contradiction.
+        # - Anything else: no.
         def accepts_tuple(self_type, other_type, mode)
           unless other_type.is_a?(Type::Tuple)
+            return array_element_verdict(self_type, other_type, mode) if array_carrier?(other_type)
+
             return Type::AcceptsResult.no(
               mode: mode,
               reasons: "Tuple does not accept #{other_type.class}"
@@ -1024,6 +1038,38 @@ module Rigor
             accepts(formal, actual, mode: mode)
           end
           combine_arg_results(per_element, mode)
+        end
+
+        # An `Array` nominal, directly or as the base of a `Difference` (`non-empty-array[E]`). Its arity is
+        # unknown, so a tuple cannot reject it on length: `URI.encode_www_form` takes
+        # `Enumerable[[_ToS, _ToS]]` and is handed the `Array[Array[String]]` that `URI.decode_www_form`
+        # answers. An `Array` subclass is not read, as {#gradual_hash?} does not read a `Hash` subclass.
+        def array_carrier?(type)
+          nominal = type.is_a?(Type::Difference) ? type.base : type
+          nominal.is_a?(Type::Nominal) && nominal.class_name == "Array"
+        end
+
+        # `maybe`, unless a precise element type rules the tuple out at any length: some position none of
+        # whose members `E` holds (`[Integer, Integer]` never takes an `Array[String]`). A raw `Array` or an
+        # element with a gradual arm stays `maybe`. The accepted cost (ADR-5) is that a wrong-length
+        # `Array[E]` passed or returned where a tuple is declared goes unreported.
+        def array_element_verdict(self_type, other_type, mode)
+          nominal = other_type.is_a?(Type::Difference) ? other_type.base : other_type
+          element = nominal.type_args.first
+          unless element.nil? || gradual_arm?(element)
+            members = ContentJoin.union_members(element)
+            refused = self_type.elements.find do |formal|
+              members.all? { |member| accepts(formal, member, mode: mode).no? }
+            end
+            if refused
+              return Type::AcceptsResult.no(
+                mode: mode,
+                reasons: "tuple member #{refused.describe(:short)} rejects #{element.describe(:short)}"
+              )
+            end
+          end
+
+          unread_shape_maybe(mode, "tuple arity unknown for #{other_type.describe(:short)}")
         end
 
         # HashShape{k1: T1, ...} accepts another HashShape when every required key of self is required on
@@ -1057,7 +1103,7 @@ module Rigor
           result = combine_arg_results(per_entry, mode)
           return result unless result.yes? && self_type.closed? && other_type.open?
 
-          unread_hash_maybe(mode, "HashShape closed target cannot check open source")
+          unread_shape_maybe(mode, "HashShape closed target cannot check open source")
         end
 
         # A `Hash` nominal — directly or as the base of a `Difference` (`non-empty-hash[K, V]`) — that is raw or
@@ -1086,7 +1132,7 @@ module Rigor
           refused = refused_value_keys(self_type, value_type, mode)
           return hash_shape_no(mode, "Hash value type refused for required keys: #{refused.inspect}") if refused.any?
 
-          unread_hash_maybe(mode, "HashShape cannot check #{other_type.describe(:short)}")
+          unread_shape_maybe(mode, "HashShape cannot check #{other_type.describe(:short)}")
         end
 
         def unholdable_keys(self_type, key_type, mode)

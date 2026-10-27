@@ -462,8 +462,10 @@ module Rigor
             # A record's `maybe` for a `Hash` with a gradual arm or an open shape is no evidence for the overload:
             # with `({ a: Integer }) -> Integer | (Hash[Symbol, untyped]) -> String`, `{ **o, b: 2 }` has a key the
             # closed record forbids, yet the first overload won by list position. The gradual pass still takes it.
-            # A `maybe` that survives with those records answering `no` has another source, and still counts.
-            return false if strict && result.maybe? && Acceptance.maybe_rests_on_unread_hash?(param_type, arg)
+            # A tuple's `maybe` for an `Array` of unknown arity is the same: `([Integer, Integer]) -> Symbol |
+            # (Array[Integer]) -> String` answers `String` for an `Array[Integer]`. A `maybe` that survives with
+            # those shapes answering `no` has another source, and still counts.
+            return false if strict && result.maybe? && Acceptance.maybe_rests_on_unread_shape?(param_type, arg)
 
             result.yes? || result.maybe?
           end

@@ -101,7 +101,18 @@ module Rigor
         # `#filter` passes these through and `from_diagnostics` leaves them out of every bucket; this is the one
         # definition of both.
         def unkeyable(diagnostics)
-          diagnostics.reject { |d| d.qualified_rule && d.path }
+          diagnostics.reject { |d| keyable?(d) }
+        end
+
+        def keyable?(diagnostic)
+          !diagnostic.qualified_rule.nil? && !diagnostic.path.nil?
+        end
+
+        # The path as the baseline YAML keys it: relative to `project_root`, or unchanged when it is not under it.
+        def relative_path(path, root_pathname)
+          Pathname.new(path).relative_path_from(root_pathname).to_s
+        rescue ArgumentError
+          path # different drive letter on Windows or non-child path
         end
 
         private
@@ -151,8 +162,7 @@ module Rigor
         def group_for_baseline(diagnostics, match_mode, project_root)
           root = Pathname.new(project_root)
           diagnostics.each_with_object({}) do |diag, into|
-            next if diag.qualified_rule.nil?
-            next if diag.path.nil?
+            next unless keyable?(diag)
 
             rel = relative_path(diag.path, root)
             key = case match_mode
@@ -170,12 +180,6 @@ module Rigor
         # the escaped form with a pattern.
         def message_pattern_for(message)
           Regexp.new(Regexp.escape(message.to_s))
-        end
-
-        def relative_path(path, root_pathname)
-          Pathname.new(path).relative_path_from(root_pathname).to_s
-        rescue ArgumentError
-          path # different drive letter on Windows or non-child path
         end
       end
 

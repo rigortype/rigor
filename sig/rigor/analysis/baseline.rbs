@@ -70,6 +70,12 @@ module Rigor
 
       # `project_root` is `Pathname.new`'d, so a `Pathname` is accepted as well as a `String`
       # (`without` re-passes the stored Pathname).
+      def self.unkeyable: (untyped diagnostics) -> Array[untyped]
+
+      def self.keyable?: (untyped diagnostic) -> bool
+
+      def self.relative_path: (::String | ::Pathname path, ::Pathname root_pathname) -> ::String
+
       def initialize: (Array[Bucket] buckets, ?project_root: ::String | ::Pathname) -> void
 
       # Apply the baseline filter. Returns [surfaced_diagnostics, silenced_count].

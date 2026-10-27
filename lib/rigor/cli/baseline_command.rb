@@ -107,22 +107,24 @@ module Rigor
         return if unkeyable.empty?
 
         no_rule, no_path = unkeyable.partition { |d| d.qualified_rule.nil? }
+        files = unbaselineable_files(no_rule)
         parts = []
         unless no_rule.empty?
-          parts << "#{no_rule.size} diagnostic(s) have no rule " \
-                   "(parse errors in #{unbaselineable_files(no_rule).size} file(s))"
+          parts << "#{no_rule.size} diagnostic(s) have no rule (parse, path or internal errors) " \
+                   "in #{files.size} file(s)"
         end
         parts << "#{no_path.size} diagnostic(s) have no path" unless no_path.empty?
-        @err.puts("rigor: #{parts.join('; ')} and cannot be baselined; fix them or add the files to exclude:")
-        files = unbaselineable_files(no_rule)
+        listing = files.empty? ? "" : ":"
+        @err.puts("rigor: #{parts.join('; ')} and cannot be baselined; " \
+                  "fix them, or remove or exclude the files#{listing}")
         files.first(MAX_UNBASELINEABLE_FILES).each { |f| @err.puts("  #{f}") }
         extra = files.size - MAX_UNBASELINEABLE_FILES
         @err.puts("  ... and #{extra} more file(s)") if extra.positive?
       end
 
       def unbaselineable_files(diagnostics)
-        root = "#{Dir.pwd}/"
-        diagnostics.filter_map(&:path).map { |p| p.to_s.delete_prefix(root) }.uniq.sort
+        root = Pathname.new(Dir.pwd)
+        diagnostics.filter_map(&:path).map { |p| Analysis::Baseline.relative_path(p, root) }.uniq.sort
       end
 
       def parse_generate_options(subcommand: "generate")

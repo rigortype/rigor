@@ -225,7 +225,7 @@ RSpec.describe Rigor::CLI::BaselineCommand do
         covered = YAML.safe_load_file(File.join(tmpdir, ".rigor-baseline.yml"))["ignored"].sum { |r| r["count"] }
         expect(status).to eq(0)
         expect(err).to match(/\((\d+) bucket\(s\) covering #{covered} diagnostic\(s\); match-mode: rule\)/)
-        expect(err).to match(/rigor: \d+ diagnostic\(s\) have no rule \(parse errors in 2 file\(s\)\) and cannot be/)
+        expect(err).to match(/have no rule \(parse, path or internal errors\) in 2 file\(s\)/)
         expect(err).to include("  lib/bad.rb\n", "  lib/bad2.rb\n")
       end
     end
@@ -235,6 +235,31 @@ RSpec.describe Rigor::CLI::BaselineCommand do
       covered = YAML.safe_load_file(File.join(tmpdir, ".rigor-baseline.yml"))["ignored"].sum { |r| r["count"] }
       expect(err).to include("covering #{covered} diagnostic(s); match-mode: message")
       expect(err).to include("cannot be baselined")
+    end
+
+    it "lists at most ten files and counts the rest" do
+      12.times { |i| File.write(File.join(tmpdir, "lib", "broken#{i}.rb"), "def (\n") }
+      _status, _out, err = run_cli("baseline", "generate", cwd: tmpdir)
+      expect(err).to include("in 14 file(s)", "  ... and 4 more file(s)")
+      expect(err.lines.grep(%r{^  lib/}).size).to eq(10)
+    end
+
+    it "does not advise excluding a file when a missing `paths:` entry has none to list" do
+      File.write(File.join(tmpdir, ".rigor.yml"), "paths:\n  - lib\n  - nowhere\nlibraries:\n  - prism\n")
+      _status, _out, err = run_cli("baseline", "generate", cwd: tmpdir)
+      expect(err).to include("cannot be baselined")
+      expect(err).to include("nowhere")
+    end
+
+    it "names diagnostics that have a rule but no path" do
+      pathless = Rigor::Analysis::Diagnostic.new(path: nil, line: 1, column: 1, message: "m", severity: :error,
+                                                 rule: "call.undefined-method", source_family: :builtin)
+      allow(Rigor::Analysis::Runner).to receive(:new)
+        .and_return(instance_double(Rigor::Analysis::Runner, run: double(diagnostics: [pathless])))
+      _status, _out, err = run_cli("baseline", "generate", cwd: tmpdir)
+      expect(err).to include("1 diagnostic(s) have no path and cannot be baselined; " \
+                             "fix them, or remove or exclude the files")
+      expect(err).not_to include("exclude the files:")
     end
 
     it "prints no second line when every diagnostic is keyable" do

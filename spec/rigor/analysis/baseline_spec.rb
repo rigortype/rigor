@@ -214,6 +214,16 @@ RSpec.describe Rigor::Analysis::Baseline do
   end
 
   describe "#filter — WD4 ALL-or-NOTHING per bucket" do
+    it "passes a rule-less diagnostic (a parse error) through and never keys it" do
+      parse_error = diagnostic(path: "a.rb", rule: nil)
+      baseline = described_class.from_diagnostics([parse_error])
+      expect(baseline).to be_empty
+      expect(described_class.unkeyable([parse_error])).to eq([parse_error])
+      surfaced, silenced = baseline.filter([parse_error])
+      expect(surfaced).to eq([parse_error])
+      expect(silenced).to eq(0)
+    end
+
     it "silences all diagnostics in a bucket when actual <= count" do
       baseline = described_class.from_diagnostics([
                                                     diagnostic(path: "a.rb", rule: "call.undefined-method"),

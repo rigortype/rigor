@@ -218,14 +218,15 @@ baseline is a ceiling, not a blanket. Reducing it later is the
 Recommend committing `.rigor-baseline.yml` — it documents project
 state; list it in the Final step's file inventory.
 
-**Parse errors cannot be baselined.** A file Prism cannot parse yields
-diagnostics with no rule, which have no `(file, rule)` bucket. The
-summary then prints a second line ("N diagnostic(s) have no rule
-(parse errors in M file(s)) and cannot be baselined") and lists the
-files; the command still exits 0. Acknowledge mode reaches a green
-`rigor check` only after those files are fixed or added to `exclude:`
-in the config, so do that before wiring `baseline:`, then re-run
-`rigor baseline regenerate`.
+**Rule-less diagnostics cannot be baselined.** A file Prism cannot
+parse (a parse error), a missing `paths:` entry or an internal error
+yields a diagnostic with no rule, so it has no `(file, rule)` bucket.
+The summary then prints a second line ("N diagnostic(s) have no rule
+(parse, path or internal errors) in M file(s) and cannot be
+baselined") and lists the files; the command still exits 0. Acknowledge
+mode reaches a green `rigor check` only after those files are fixed or
+added to `exclude:`, or the bad `paths:` entry is removed. Do that
+before wiring `baseline:`, then re-run `rigor baseline regenerate`.
 
 Print the suppression summary for the user: "N diagnostics recorded
 as baseline; M will surface on subsequent runs." Take N from the

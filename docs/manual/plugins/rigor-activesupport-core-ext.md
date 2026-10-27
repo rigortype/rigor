@@ -68,11 +68,11 @@ Roughly the top ~40 selectors plus their close neighbours, across:
   `#with_defaults` (+ bang), `#with_indifferent_access`, `#except!`,
   `#extract!`. `#symbolize_keys` / `#to_options` map the key type per
   member, as ActiveSupport does (`key.to_sym rescue key`): a `String` or
-  `Symbol` key reads as `Symbol`, an `Integer` or `Float` key stays as it
-  is (unless the project defines `to_sym` on it), and any other key reads
-  as `untyped`. So
+  `Symbol` key reads as `Symbol`, and every other key (an `Integer`, a
+  `Float`, a project class) reads as `untyped`, because a mixin or a
+  project file can give any class a `to_sym`. So
   `Hash[String, Integer]` gives `Hash[Symbol, Integer]` and
-  `Hash[Integer, Integer]` gives `Hash[Integer, Integer]`. Without the
+  `Hash[Integer, Integer]` gives `Hash[untyped, Integer]`. Without the
   plugin, on the activesupport overlay alone, the key reads `untyped`.
   The bang forms answer the receiver's own type.
 - **Range** — `#overlaps?`, `#to_fs` / `#to_formatted_s`.

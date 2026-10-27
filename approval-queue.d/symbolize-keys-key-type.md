@@ -23,19 +23,18 @@ for both a String-keyed and an Integer-keyed receiver.
 ## Decision
 
 The static non-bang rows (the plugin's `core_ext.rbs` and the overlay's twin) answer `Hash[untyped, V]`. The plugin hook maps
-each key member: a String or Symbol (or a subclass, or a literal of either) becomes `Symbol`. Only the core value classes
-that cannot meaningfully be subclassed stay as themselves (Integer, Float, Rational, Complex, NilClass, TrueClass,
-FalseClass, with their literal and IntegerRange forms), and even those become `Dynamic[top]` when the project defines
-`to_sym` on the class or an ancestor (Numeric, Comparable, Object, Kernel, BasicObject), read through
-`Reflection.discovered_method?` so the negative dependency is recorded. Every other key, a project subclass, a delegator
-or `Object` included, becomes `Dynamic[top]`, because bundled RBS cannot show that such a class has no `to_sym`
-(review of the first revision: a project reopening of Integer, a `Path < Array` subclass and `SimpleDelegator` keys
-reported `call.undefined-method` on correct code). A receiver union is mapped per `Hash` member with `nil` kept, so
-`h&.symbolize_keys` keeps its `Symbol` key; a block is ignored as Ruby does; the hook declines a member that is neither
-a `Hash[K, V]` nominal, a non-empty difference of one, a closed non-empty shape, nor `nil`. An open shape declines
-(a `default_proc` can add keys). A String-keyed hash read through the overlay alone loses its `Symbol` key and goes
-silent. The bang forms (`-> self`) are unchanged. The hook is the user's coordinator ruling; the narrowed key rule is
-the coordinator's round-2 ruling.
+each key member: a String or Symbol (or a String subclass, or a literal of either) becomes `Symbol`; every other key, Integer,
+Float, nil, true, false, Rational, Complex, an IntegerRange, a project class or a delegator included, becomes `Dynamic[top]`.
+The coordinator ruled in round 3 that no key class is kept: round 2 kept the core value classes unless
+`Reflection.discovered_method?` saw a project `to_sym`, but that misses a `to_sym` defined in another file under
+`pre_eval`, added by `Integer.include(M)` / `prepend` / `Numeric.include`, or written as `class ::Integer`, and a kept key
+then reports `call.undefined-method` on correct code. The accepted cost is that an Integer-keyed receiver reads
+`Hash[Dynamic[top], V]`, so `Hash[Integer, Integer]#symbolize_keys` is silent on `+` but no longer typed. The hook answers
+the `Hash` members of a receiver union and drops a `nil` member (`nil.symbolize_keys` raises; the engine adds `nil` back for
+`&.`); an empty closed shape drops out of the union; a block is ignored as Ruby does. It declines a member that is neither a
+`Hash[K, V]` nominal, a non-empty difference of one, a closed shape, nor `nil`, and an open shape (a `default_proc` can add
+keys). A String-keyed hash read through the overlay alone loses its `Symbol` key and goes silent. The bang forms (`-> self`)
+are unchanged. The hook is the user's coordinator ruling.
 
 ## To undo
 

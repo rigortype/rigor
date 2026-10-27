@@ -654,7 +654,7 @@ module Rigor
           case error_class.to_s.split("::").last
           when "GenericParameterMismatchError"
             "Two signature sources declare the class with a different number of type parameters; make " \
-              "the declarations agree (`rbs validate`) to restore type coverage."
+            "the declarations agree (`rbs validate`) to restore type coverage."
           when "InstanceVariableDuplicationError" then variable_duplication_advice("instance variable", inline)
           when "ClassInstanceVariableDuplicationError"
             variable_duplication_advice("class instance variable", inline)

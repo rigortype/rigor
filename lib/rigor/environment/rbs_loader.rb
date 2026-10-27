@@ -1176,11 +1176,12 @@ module Rigor
         end
 
         # `[owners, shadowable]`. `owners` is `{[class_name, method_name, kind] => [signature_path, member,
-        # visibility]}` for every method-shaped or instance-variable member the project's own `signature_paths:` files declare and
-        # the inline sources also name; the first file in sorted order owns a key two `.rbs` files declare
-        # (that pair fails the definition build anyway). `shadowable` is every `::` segment of every class /
-        # module name the inline sources and the signature files declare — the names a relative reference
-        # might resolve to inside an enclosing namespace ({MemberConsistency::Comparator#faithful?}).
+        # visibility]}` for every method-shaped or instance-variable member the project's own
+        # `signature_paths:` files declare and the inline sources also name; the first file in sorted order
+        # owns a key two `.rbs` files declare (that pair fails the definition build anyway). `shadowable` is
+        # every `::` segment of every class / module name the inline sources and the signature files declare
+        # — the names a relative reference might resolve to inside an enclosing namespace
+        # ({MemberConsistency::Comparator#faithful?}).
         #
         # The parse is scoped by a substring pre-filter over each file's text: a declaration has to spell its
         # own name, so a signature file mentioning none of the names the inline sources declare cannot

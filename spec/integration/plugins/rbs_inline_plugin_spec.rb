@@ -1303,7 +1303,7 @@ RSpec.describe "plugins/rigor-rbs-inline" do
         expect(rules).not_to include("rbs.coverage.definition-build-failed", "rbs.contradicting-signature")
         rows = diagnostics.select { |d| d.qualified_rule == "source-rbs-annotation-not-honoured" }
         expect(rows.map(&:severity)).to eq([:info])
-        expect(rows.first.message).to include(%q(`Greeter#@name`), "with a different type")
+        expect(rows.first.message).to include('`Greeter#@name`', "with a different type")
       end
     end
   end

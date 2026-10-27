@@ -2491,6 +2491,14 @@ RSpec.describe Rigor::Environment::RbsLoader do
       expect(build_both(loader, "Sub").first.values_at(0, 2, 5)).to eq(["Sub", "::Base", nil])
     end
 
+    # A module that declares the variable twice is its own duplicate, however often a class mixes it in.
+    it "carries no mixin count when the owner itself declares the variable twice" do
+      File.write(File.join(tmpdir, "other.rbs"), "module Helper\n  @user: String\nend\n")
+      loader = build_loader("module Helper\n  @user: String\nend\nclass Ctl\n  include Helper\n  include Helper\nend\n",
+                            "")
+      expect(build_both(loader, "Ctl").first.values_at(0, 2, 5)).to eq(["Ctl", "::Helper", nil])
+    end
+
     # The stderr banner names an inline-RBS buffer by the `.rb` file it came from.
     it "labels inline buffers by their .rb file in the stderr warning" do
       loader = described_class.new(virtual_rbs: [["virtual:rbs-inline:/app/lib/b.rb", "class Foo\n  @x: String\nend\n"],

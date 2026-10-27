@@ -1,0 +1,3 @@
+- **[inference]** A parameter declared as a tuple no longer reports an `Array` argument whose elements fit, so `URI.encode_www_form(URI.decode_www_form(s))` after a filter or a push is accepted. ([#2447](https://github.com/rigortype/rigor/pull/2447))
+  - An `Array` does not carry its length, so a wrong-length array passed or returned where a tuple is declared is no longer reported either.
+  - An array whose element a tuple member rejects, such as an `Array[String]` passed to `[Integer, Integer]`, is still reported.

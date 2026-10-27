@@ -608,14 +608,16 @@ module Rigor
         truthy
       end
 
-      # Issue #2443 — the match edge of a call that yields only after it has matched in the caller's frame
-      # ({MatchRebinding::YieldingMatch}): `$~` a `MatchData`, and `$&` and the pre- and post-match a `String`, which
-      # every successful match binds. The numbered groups and `$+` are left unbound, so they read the RBS `String?`:
-      # narrowing them needs the group walk ({#unconditional_capture_groups}) to read the pattern right, which it
-      # does not for every source yet (#2472).
+      # Issue #2443 — `scope` with what every match binds, laid over the bindings it holds, for the block of a call
+      # that yields only after it has matched in the caller's frame ({MatchRebinding::YieldingMatch}): `$~` a
+      # `MatchData`, and `$&` and the pre- and post-match a `String`. The numbered groups and `$+` keep the bindings
+      # `scope` gives them. Typing them from the call's own pattern needs the group walk
+      # ({#unconditional_capture_groups}) to read every source right, which it does not yet (#2472), and forgetting
+      # them would report a group an earlier match in the method narrowed.
       def yielded_match_scope(scope)
-        truthy, = regex_match_predicate_scopes(scope, Set.new)
-        truthy
+        string_t = Type::Combinator.nominal_of("String")
+        scope.with_global(:$~, Type::Combinator.nominal_of("MatchData"))
+             .with_global(:$&, string_t).with_global(:$`, string_t).with_global(:$', string_t)
       end
 
       # Issue #2443 — true when every member of `type` is a String (a project subclass included) or a `Dynamic` that

@@ -2609,9 +2609,9 @@ def match_block_methods(str)
   str&.scan(/x/) { assert_type("MatchData", $~) }
 end
 
-# The entry binds only what every match binds: `$~`, `$&` and the pre- and post-match. Every numbered group, even an
-# unconditional one, keeps the RBS `String?` until the group walk reads every source right (#2472) (Ruby:
-# `"ab".scan(/(\w)(\d)?/) { p $2 }` prints nil).
+# The entry binds only what every match binds: `$~`, `$&` and the pre- and post-match. Every numbered group keeps the
+# binding it had before the block, the RBS `String?` where nothing bound it, even an unconditional one, until the
+# group walk reads every source right (#2472) (Ruby: `"ab".scan(/(\w)(\d)?/) { p $2 }` prints nil).
 def match_block_groups(str)
   str.scan(/(\w)(\d)?/) do
     second = $2
@@ -2619,6 +2619,27 @@ def match_block_groups(str)
     assert_type("String?", Regexp.last_match(1))
     assert_type("MatchData", Regexp.last_match)
     second.upcase # GENUINE-NIL
+  end
+end
+
+# A group an earlier match in the method narrowed keeps that binding in the block, as it did before #2443 (Ruby:
+# `match_block_prior_group("a1")` and `match_block_prior_group_last_match("a1")` return "A1", and
+# `match_block_prior_group_scan("ab1")` returns "ab1").
+def match_block_prior_group(str)
+  return unless str =~ /(\d+)/
+
+  str.gsub(/(\w)/) { assert_type("String", $1); w = $1; w.upcase }
+end
+
+def match_block_prior_group_last_match(str)
+  return unless str =~ /(\d+)/
+
+  str.gsub(/(\w)/) { w = Regexp.last_match(1); w.upcase }
+end
+
+def match_block_prior_group_scan(str)
+  if str =~ /\A(\w+)/
+    str.scan(/(\d)/) { w = $1; w.to_sym }
   end
 end
 
@@ -2634,8 +2655,9 @@ class MatchBlockString2443 < String
   def first_group = gsub(/(x)/) { assert_type("MatchData?", Regexp.last_match) }
 end
 
-# The entry replaces a stale narrowing: on the `=~`'s falsey edge `$1` was nil, but the `gsub` block reads a match
-# of its own (Ruby: `match_block_stale_edge("ab cd")` returns "Ab Cd").
+# Past the `=~`'s falsey edge the `gsub` block keeps the `$1` binding the frame-wide entry gives it, as before #2443,
+# though Ruby reads the block's own group there (#1371); `$~` and `$&` read the block's own match (Ruby:
+# `match_block_stale_edge("ab cd")` returns "Ab Cd").
 def match_block_stale_edge(line)
   return if line =~ /^(#)/
 

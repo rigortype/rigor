@@ -307,9 +307,10 @@ assertions:
   '299': String?
   '300': String?
   '301': MatchData
-  '302': MatchData
+  '302': String
   '303': MatchData
-  '304': MatchData?
-  '305': String?
-  '306': String
-  '307': MatchData?
+  '304': MatchData
+  '305': MatchData?
+  '306': String?
+  '307': String
+  '308': MatchData?

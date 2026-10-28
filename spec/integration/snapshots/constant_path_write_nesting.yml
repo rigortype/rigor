@@ -3,7 +3,7 @@ locals: {}
 assertions:
   '1': singleton(Post)
   '2': bool
-  '3': 'true'
+  '3': 'false'
   '4': singleton(Post)
   '5': singleton(Admin::Post)
   '6': singleton(Post)

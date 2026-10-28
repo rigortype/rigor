@@ -180,14 +180,14 @@ end
 
 # The mutation census (#540) rides on the same key. `Table::ROWS[key] = 1` mutates
 # whatever `Table::ROWS` names HERE, so the census has to reach the entry the write
-# accumulator is now keyed under; left unmatched, the closed empty shape survives and
-# `empty?` folds to `true` on a table the module fills, licensing the negative rules.
+# accumulator is now keyed under; left unmatched, the closed shape survives and
+# `empty?` folds to `false` on a table the module may empty, licensing the negative rules.
 module Admin
   class Table
   end
 
-  Table::ROWS = {}
-  Table::FROZEN = {}
+  Table::ROWS = { seed: 0 }
+  Table::FROZEN = { seed: 0 }
 
   def self.fill(key)
     Table::ROWS[key] = 1
@@ -195,9 +195,9 @@ module Admin
 
   def self.shapes
     assert_type("bool", Table::ROWS.empty?)
-    # Must-still-succeed: an unmutated sibling keeps its empty-shape fold, so the arm
+    # Must-still-succeed: an unmutated sibling keeps its shape fold, so the arm
     # above cannot pass by the widener having gone blanket.
-    assert_type("true", Table::FROZEN.empty?)
+    assert_type("false", Table::FROZEN.empty?)
   end
 end
 

@@ -44,6 +44,7 @@ require_relative "method_dispatcher"
 require_relative "method_parameter_binder"
 require_relative "multi_target_binder"
 require_relative "mutation_widening"
+require_relative "out_buffer_mutation"
 require_relative "narrowing"
 require_relative "operand_effects"
 require_relative "operand_walk"
@@ -1244,13 +1245,17 @@ module Rigor
       # Both mutator-receiver widenings, against one typing of the call's arguments: the bindings the
       # receiver NAMES ({MutationWidening.widen_after_call}) and, when it names none because the
       # receiver is an element read into a local, that element's pin inside its container
-      # ({ElementReadWidening.widen_element_read}, issue #643).
+      # ({ElementReadWidening.widen_element_read}, issue #643) — and, issue #2499, the String a stdlib
+      # out-buffer call fills ({OutBufferMutation}), which names no receiver of the call at all.
       def widen_mutated_receivers(call_node, current_scope)
         arg_types = mutator_arg_types(call_node, current_scope)
         widened = MutationWidening.widen_after_call(call_node: call_node, current_scope: current_scope,
                                                     arg_types: arg_types,
                                                     rewritten_element: rewritten_element(call_node, current_scope))
-        ElementReadWidening.widen_element_read(call_node: call_node, current_scope: widened, arg_types: arg_types)
+        widened = ElementReadWidening.widen_element_read(call_node: call_node, current_scope: widened,
+                                                         arg_types: arg_types)
+        # Issue #2499 — a stdlib call that fills a String argument (`io.read(n, buf)`, `StringIO.new(s)`).
+        OutBufferMutation.floor(call_node, widened)
       end
 
       # Issue #2427 — the element an element rewriter (`map!`, `collect!`, `flatten!`) leaves in its receiver, read

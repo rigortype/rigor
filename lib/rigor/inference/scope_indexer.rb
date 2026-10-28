@@ -48,6 +48,7 @@ require_relative "scope_indexer/declared_ivar_types"
 require_relative "scope_indexer/declared_param_writes"
 require_relative "scope_indexer/constant_ivar_value"
 require_relative "scope_indexer/ivar_contributions"
+require_relative "scope_indexer/empty_seed"
 
 module Rigor
   module Inference
@@ -2042,6 +2043,8 @@ module Rigor
         # `lib/tdiary/configuration.rb:157` for the worked site.
         return if guarded && falsey_constant?(rvalue_type)
 
+        rvalue_type = EmptySeed.erase(node.value, rvalue_type)
+
         rvalue_type = Type::Combinator.union(rvalue_type, Type::Combinator.constant_of(nil)) if guarded
         accumulate_ivar_type(accumulator, class_name, node.name, rvalue_type)
       end
@@ -2071,7 +2074,7 @@ module Rigor
       # `nil`, the guard bound its own ivar, and `ExpressionTyper#compound_write_value` read
       # `truthy(nil) | bot` — an instance method that sig-gen declared `-> bot`.
       def record_ivar_or_write(node, scope, class_name, accumulator)
-        rvalue_type = scope.type_of(node.value)
+        rvalue_type = EmptySeed.erase(node.value, scope.type_of(node.value))
         return if Narrowing.narrow_truthy(rvalue_type).is_a?(Type::Bot)
 
         accumulate_ivar_type(accumulator, class_name, node.name,
@@ -2270,7 +2273,11 @@ module Rigor
 
         rhs_type = scope.type_of(node.value)
         ivars = MultiTargetBinder.bind_marked(node, rhs_type, scope: scope, soften_slots: false).ivars
-        ivars.each { |name, type| accumulate_ivar_type(accumulator, class_name, name, type) }
+        # #2499 — `@a, @b = {}, []` erases each empty seed as a single write does.
+        values = EmptySeed.multi_write_values(node)
+        ivars.each do |name, type|
+          accumulate_ivar_type(accumulator, class_name, name, EmptySeed.erase(values[name], type))
+        end
       end
 
       def falsey_constant?(type)
@@ -2437,7 +2444,7 @@ module Rigor
       end
 
       def record_cvar_write(node, scope, class_name, accumulator)
-        rvalue_type = scope.type_of(node.value)
+        rvalue_type = EmptySeed.erase(node.value, scope.type_of(node.value))
         accumulator[class_name] ||= {}
         existing = accumulator[class_name][node.name]
         accumulator[class_name][node.name] =
@@ -2559,7 +2566,7 @@ module Rigor
       end
 
       def record_global_write(node, scope, accumulator)
-        rvalue_type = scope.type_of(node.value)
+        rvalue_type = EmptySeed.erase(node.value, scope.type_of(node.value))
         existing = accumulator[node.name]
         accumulator[node.name] =
           existing ? Type::Combinator.union(existing, rvalue_type) : rvalue_type
@@ -3324,7 +3331,7 @@ module Rigor
         unless owner.empty?
           body_scope = census_body_scope(default_scope, enclosing_prefix, Type::Combinator.singleton_of(owner))
         end
-        rvalue_type = meta_new_constant_type(node, full) || body_scope.type_of(node.value)
+        rvalue_type = meta_new_constant_type(node, full) || EmptySeed.erase(node.value, body_scope.type_of(node.value))
         existing = accumulator[full]
         accumulator[full] = existing ? Type::Combinator.union(existing, rvalue_type) : rvalue_type
       end

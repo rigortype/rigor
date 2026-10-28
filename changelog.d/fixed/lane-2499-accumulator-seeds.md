@@ -1,0 +1,4 @@
+- **[engine]** An instance, class or global variable or a constant seeded with an empty literal no longer reads as empty in other methods. ([#2500](https://github.com/rigortype/rigor/pull/2500))
+  - `@s = ""`, `@buf ||= +""`, `$list = []` and `PREFIX = ""` are accumulators that a subclass, a mixin, another file, a memoised accessor or an `attr_reader` caller can fill. A read such as `@s.length > 0` no longer folds always-falsey (#2491, #2492, #2496, #2497).
+  - A non-empty literal keeps its exact type, so `@order = "asc"` still satisfies an RBS parameter typed `"asc" | "desc"`.
+  - After `io.read(n, buf)`, `readpartial`, `sysread` or `read_nonblock` with a buffer, and after `StringIO.new(s)`, the buffer no longer reads as the empty literal it was seeded with.

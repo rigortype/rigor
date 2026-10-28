@@ -699,7 +699,9 @@ sees none of those writers.
 Decision, shaped by the accumulator idiom rather than a uniform escape
 analysis:
 
-- A write whose rvalue is `""`, `+""`, `[]` or `{}` seeds the slot as
+- A write whose rvalue is `""`, `+""`, `[]` or `{}`, a `.dup` of one, a
+  chained write ending in one (`@a = @b = ""`), or the matching element
+  of a multiple assignment (`@a, @b = {}, []`) seeds the slot as
   `String`, `Array[untyped]` or `Hash[untyped, untyped]`
   (`ScopeIndexer::EmptySeed`). `String.new`, `Array.new` and `Hash.new`
   already seed their nominal.

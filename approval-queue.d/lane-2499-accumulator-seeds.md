@@ -22,7 +22,8 @@ positives may be lost. This change also amends ADR-58's seed semantics.
   parameters.
 - Track mutations across subclasses, mixins, files and accessors. This is precise, but it is an escape analysis,
   which the maintainer ruled out for this lane.
-- Drop only the emptiness of an empty seed, keyed on the rvalue node (`""`, `+""`, `[]`, `{}`). This is cheap
+- Drop only the emptiness of an empty seed, keyed on the rvalue node (`""`, `+""`, `[]`, `{}`, a `.dup` of one, a chained write ending in one, and
+  the matching element of a multiple assignment such as kaminari's `@url_cache, @partial_cache = {}, {}`). This is cheap
   and needs no new census. It loses only folds that read the seed's emptiness.
 
 ## Decision

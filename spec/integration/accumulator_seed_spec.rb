@@ -252,7 +252,7 @@ RSpec.describe "accumulator seeds (#2499)", type: :runner do
     end
 
     it "widens a buffer that is a union of String literals" do
-      expect_only_control("def u(io, flag)\n  b = flag ? +\"\" : +\"a\"\n  io.read(1, b)\n  puts 1 if b == \"z\"\nend\n")
+      expect_only_control("def u(io, f)\n  b = f ? +\"\" : +\"a\"\n  io.read(1, b)\n  puts 1 if b == \"z\"\nend\n")
     end
 
     it "widens a buffer that is a union of a String literal and the String nominal" do

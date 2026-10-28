@@ -635,9 +635,14 @@ Decision:
   reading `Dynamic[top]`. A new precise entry would narrow a read
   that is `Dynamic` today, and could add rows.
 - **Coarse typing across files.** Another file's write joins as a
-  literal's `Constant` (`nil`, booleans, numbers, strings, symbols),
-  and as `Dynamic[top]` for anything else, an `attr_writer` /
-  `attr_accessor` included. The value is recorded flow-free by the
+  literal's `Constant` (`nil`, booleans, numbers, symbols), a String
+  literal as `String`, and `Dynamic[top]` for anything else, an
+  `attr_writer` / `attr_accessor` included. A String is mutable, and an
+  in-place mutation (`@s << "abc"`) in this file, in another file or in
+  an ancestor is not visible where the literal was written, so its
+  `Constant` would pin the value too narrowly (review S1). An ancestor's
+  value joined from this file's census is widened again by the
+  mutations this file observes. The value is recorded flow-free by the
   discovery pre-pass (`[:own_write_type, …]` in the global write
   census), so no other file is typed. An ancestor declared in the
   same file joins its own census entry, typed as the census types it,
@@ -660,7 +665,11 @@ Accepted losses, under ADR-5: a non-literal write in another file or
 an ancestor widens the entry with `Dynamic[top]`, so checks on that
 ivar's reads in `K` (`call.undefined-method`, argument types, condition
 folds) stop; a write on a path `K` never takes still widens; and a
-literal another file writes but never runs at `K`'s read stops a fold.
+literal another file writes but never runs at `K`'s read stops a fold;
+an all-truthy union (`true` here, `:on` elsewhere) is not folded; a
+String literal written elsewhere reads as `String`; and a write in an
+`other.instance_eval` block of an instance method is credited to `K`
+(#2490). A module's own census takes no chain (#2487).
 
 ## Rejected / deferred alternatives
 

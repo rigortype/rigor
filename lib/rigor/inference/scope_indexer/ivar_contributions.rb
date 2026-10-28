@@ -63,7 +63,8 @@ module Rigor
           # states its own dependency.
           chain.record(scope) if Analysis::DependencyRecorder.active?
           ancestors = chain.entries.filter_map do |entry|
-            # An external entry has no name, so `filter_map` drops it.
+            # An external entry has no name, so `filter_map` drops it. The side check is a guard: an instance chain
+            # holds only instance-side entries.
             entry.name if entry.side == :instance && entry.name != class_name
           end
           [class_name, *ancestors.uniq]

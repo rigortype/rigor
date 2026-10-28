@@ -23,6 +23,9 @@ it as an ADR-58 amendment for ratification.
 - Leave the census per file: keeps every check on those ivars, and every false positive above.
 - Join other files' and the chain's writes into the entries the file already holds, typed coarsely (chosen).
   Fixes the false positives. Creates no entry, so an ivar only another file writes still reads `Dynamic[top]`.
+  A `nil` / boolean / number / symbol literal joins as its `Constant`; a String literal joins as `String` (the
+  coordinator's review amendment: a String may be mutated in place where its write cannot see it, so its literal
+  would pin the value too narrowly); anything else as `Dynamic[top]`.
 - Also create entries for ivars only another file or an ancestor writes: more precision, but narrows reads that
   are `Dynamic` today and could add rows.
 - Type another file's rvalue as the census would: precise, but needs a typed pass over every other file.
@@ -44,6 +47,17 @@ positives are lost (each needs the ivar to already have an entry in the reading 
 - **A `nil` from elsewhere is declaration-sourced.** A `nil` another file or an ancestor writes joins the seed, so,
   as for every seed `nil` (ADR-58 WD1), it is not fuel for `call.possible-nil-receiver`.
 - **A superclass write reaches every subclass's entry**, including a subclass that overrides the writing method.
+- **An all-truthy union loses its fold.** `@mode = true` here and `@mode = :on` in another file join to
+  `true | :on`, which Rigor does not fold, so an `if @mode` that is always truthy no longer reports.
+- **A String literal written elsewhere reads as `String`.** A check that needed the literal (`@s == "a"` folding,
+  a literal-keyed dispatch) stops.
+- **A `nil` here joined with a value elsewhere no longer reports on the `nil`.** `@s = nil` in `initialize` with
+  `@s = "a"` in another file reads `String?`, whose `nil` is declaration-sourced: `@s.even?` reported
+  `undefined method for nil` before and is now quiet, although Ruby raises on either value.
+- **A write inside `other.instance_eval { @x = … }` in an instance method is credited to the class** (#2490). The
+  census already did so in the same file; a reopening in another file now reaches the class's entry too.
+- **A module's own census takes no chain** (#2487): a read inside a module's method does not see the writes of the
+  modules it includes.
 
 What still reports: an ivar whose writes, across every file and ancestor, are all `nil` (or all values of a type
 that lacks the method); a write in a singleton method (`def self.set`) or through `extend`, which never joins an

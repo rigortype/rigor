@@ -2613,7 +2613,8 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       # WD5 — the massign target of `initialize` is an `InstanceVariableTargetNode`, not an
       # `InstanceVariableWriteNode`, so `detect_read_before_write` used to miss it: `@m` was absent from `init_writes`
       # and, being read-before-write in a sibling method, `contribute_read_before_write_nil!` unioned a spurious `nil`,
-      # masking the recorded `Tuple[]` as `T | nil`. The ctor massign must count as an init write.
+      # masking the recorded seed as `T | nil`. The ctor massign must count as an init write.
+      # Since #2499 the empty `[]` seed records as `Array[untyped]`.
       it "does not union a spurious nil for an initialize massign read cross-method" do
         program = parse(<<~RUBY)
           class H
@@ -2629,7 +2630,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
         idx = described_class.index(program, default_scope: default_scope)
         outer = idx[program]
         type = outer.class_ivars_for("H")[:@m]
-        expect(type).to be_a(Rigor::Type::Tuple)
+        expect(type).to eq(Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.untyped]))
         expect(type).not_to be_a(Rigor::Type::Union)
       end
 

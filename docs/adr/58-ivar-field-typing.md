@@ -667,9 +667,21 @@ ivar's reads in `K` (`call.undefined-method`, argument types, condition
 folds) stop; a write on a path `K` never takes still widens; and a
 literal another file writes but never runs at `K`'s read stops a fold;
 an all-truthy union (`true` here, `:on` elsewhere) is not folded; a
-String literal written elsewhere reads as `String`; and a write in an
-`other.instance_eval` block of an instance method is credited to `K`
-(#2490). A module's own census takes no chain (#2487).
+String literal reads as `String` once another file or an ancestor
+writes the ivar, this file's own literal included (`@s = "x"` here and
+`@s = "y"` elsewhere drop the `@s == "q"` always-falsey row); a `nil`
+written anywhere else (another file, an included module, a
+superclass's `initialize`) turns the entry into `T?`, and every method
+check on that ivar in `K` goes quiet, as the same-file census already
+does (`class Base; def initialize = (@x = nil); end` with `class Sub <
+Base; def initialize; super; @x = Integer.sqrt(4); end; def r =
+@x.upcase; end` reported `upcase` for Integer and is now quiet, while
+Ruby raises; so do `@s = 1` here with `@s = nil` elsewhere and
+`@s.upcase`, and `@s = nil` here with `@s = :b` elsewhere and
+`@s.even?`); and a write in an `other.instance_eval` block of an
+instance method is credited to `K` (#2490). A module's own census takes
+no chain (#2487). The coordinator accepted the `nil` and String losses
+under ADR-5, pending ratification.
 
 ## Rejected / deferred alternatives
 

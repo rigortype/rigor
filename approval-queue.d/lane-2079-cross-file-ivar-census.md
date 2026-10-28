@@ -32,6 +32,9 @@ it as an ADR-58 amendment for ratification.
 
 ## Decision
 
+Ruling: **accepted, pending ratification.** The coordinator accepts the two review-round losses below (a `nil`
+written elsewhere, and a String literal read as `String`) under ADR-5.
+
 The second option, recorded as the ADR-58 amendment "cross-file and chain census contributions". These true
 positives are lost (each needs the ivar to already have an entry in the reading file's census for the class):
 
@@ -49,11 +52,22 @@ positives are lost (each needs the ivar to already have an entry in the reading 
 - **A superclass write reaches every subclass's entry**, including a subclass that overrides the writing method.
 - **An all-truthy union loses its fold.** `@mode = true` here and `@mode = :on` in another file join to
   `true | :on`, which Rigor does not fold, so an `if @mode` that is always truthy no longer reports.
-- **A String literal written elsewhere reads as `String`.** A check that needed the literal (`@s == "a"` folding,
-  a literal-keyed dispatch) stops.
-- **A `nil` here joined with a value elsewhere no longer reports on the `nil`.** `@s = nil` in `initialize` with
-  `@s = "a"` in another file reads `String?`, whose `nil` is declaration-sourced: `@s.even?` reported
-  `undefined method for nil` before and is now quiet, although Ruby raises on either value.
+- **A String literal reads as `String` once another file or an ancestor writes the ivar.** That covers this
+  file's own literal too: `@s = "x"` here and `@s = "y"` elsewhere join to `String`, so the `@s == "q"`
+  always-falsey row goes. Any other check that needed the literal (a literal-keyed dispatch) stops as well.
+- **A `nil` written anywhere else makes every method check on the ivar go quiet.** A `nil` written in another
+  file, an included module or a superclass's `initialize` turns `K`'s entry into `T?`, and the seed's `nil` is
+  declaration-sourced, so every method check on that ivar in `K` goes quiet, as the same-file census already
+  does. The common superclass idiom is the witness:
+
+  ```ruby
+  class Base; def initialize = (@x = nil); end
+  class Sub < Base; def initialize; super; @x = Integer.sqrt(4); end; def r = @x.upcase; end
+  ```
+
+  Base reports `upcase` for Integer; head is quiet; Ruby 4.0.5 raises `NoMethodError`. Two more rows go the
+  same way: `@s = 1` here and `@s = nil` elsewhere, then `@s.upcase`; and `@s = nil` here and `@s = :b`
+  elsewhere, then `@s.even?`. Ruby raises on each.
 - **A write inside `other.instance_eval { @x = … }` in an instance method is credited to the class** (#2490). The
   census already did so in the same file; a reopening in another file now reaches the class's entry too.
 - **A module's own census takes no chain** (#2487): a read inside a module's method does not see the writes of the

@@ -578,6 +578,8 @@ module Rigor
         make_reflective_classes_gradual!(accumulator, reflective_opaque)
         # #2079 / #2170 — another file's writes, and the chain's modules' and superclasses', join existing entries.
         IvarContributions.join!(accumulator, writes, default_scope)
+        # An in-place mutation the file observes widens a joined value too (a same-file ancestor's String literal).
+        widen_mutated_ivar_entries!(accumulator, mutated_ivars)
         # #1406 — an RBS `@x: T` or `attr_* x: T` declaration replaces the census's join of the writes.
         DeclaredIvarTypes.apply!(accumulator, default_scope) if declared_ivar_types
         accumulator.transform_values(&:freeze).freeze

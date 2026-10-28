@@ -26,7 +26,7 @@ RSpec.describe "cross-file and chain ivar census (#2079, #2170)", type: :runner 
     end.sort
   end
 
-  %w[reopening mixins cross_file_mixins].each do |fixture|
+  %w[reopening mixins cross_file_mixins mutation].each do |fixture|
     it "reports exactly the marked lines in #{fixture}/" do
       files = fixture_files(fixture)
       expect(reported(analyze(files: files))).to eq(marked(files))

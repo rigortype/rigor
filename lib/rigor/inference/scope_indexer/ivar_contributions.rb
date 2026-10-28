@@ -39,6 +39,8 @@ module Rigor
           path = scope.source_path
           return if path.nil?
 
+          path = canonical(path)
+
           table = table(scope.discovered_global_write_census)
           accumulator.each do |class_name, entries|
             next unless class_name.is_a?(String) && !entries.empty?
@@ -61,7 +63,8 @@ module Rigor
           # states its own dependency.
           chain.record(scope) if Analysis::DependencyRecorder.active?
           ancestors = chain.entries.filter_map do |entry|
-            entry.name if !entry.external? && entry.side == :instance && entry.name != class_name
+            # An external entry has no name, so `filter_map` drops it.
+            entry.name if entry.side == :instance && entry.name != class_name
           end
           [class_name, *ancestors.uniq]
         rescue StandardError
@@ -89,8 +92,22 @@ module Rigor
           types.empty? ? nil : Type::Combinator.union(*types)
         end
 
+        # A String literal joins as `String`, not its `Constant`: a write elsewhere cannot see an in-place mutation of
+        # the String (`@s << "abc"`) in this file, in another or in an ancestor, so the value would be pinned too
+        # narrowly. Every other literal kind is immutable and joins as its `Constant`.
         def value_type(value)
-          value.is_a?(Array) ? Type::Combinator.constant_of(value[1]) : Type::Combinator.untyped
+          return Type::Combinator.untyped unless value.is_a?(Array)
+
+          literal = value[1]
+          literal.is_a?(String) ? Type::Combinator.nominal_of("String") : Type::Combinator.constant_of(literal)
+        end
+
+        # `path` resolved through symlinks, so a file the pre-pass tagged under one spelling (`/tmp/…`) is the one
+        # analysed under another (`/private/tmp/…`); the expanded spelling when it cannot be resolved.
+        def canonical(path)
+          File.realpath(path)
+        rescue SystemCallError
+          File.expand_path(path)
         end
 
         # `{ owner => { ivar => { path => [value, ...] } } }` over `census`'s path-tagged `:own_write_type` entries,
@@ -100,16 +117,17 @@ module Rigor
           return slot[1] if slot && slot[0].equal?(census)
 
           table = {}
+          canonical_paths = {}
           census.each do |entry|
             next unless entry.size == 5 && entry[0] == :own_write_type
 
             by_path = ((table[entry[1]] ||= {})[entry[2]] ||= {})
-            (by_path[entry[4]] ||= []) << entry[3]
+            (by_path[canonical_paths[entry[4]] ||= canonical(entry[4])] ||= []) << entry[3]
           end
           Thread.current[TABLE_KEY] = [census, table]
           table
         end
-        private_class_method :chain_owners, :contributed, :value_type, :table
+        private_class_method :chain_owners, :contributed, :value_type, :canonical, :table
       end
     end
   end

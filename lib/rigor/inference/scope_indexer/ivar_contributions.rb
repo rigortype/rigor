@@ -57,6 +57,8 @@ module Rigor
           return [class_name] if RefinedDispatch::OwnMethod.module_name?(scope, class_name)
 
           chain = Scope::ResolutionChain.for(scope, class_name, :instance, :methods)
+          # A guard: the class body's own `include` / `<` resolution already files these edges; kept so the read
+          # states its own dependency.
           chain.record(scope) if Analysis::DependencyRecorder.active?
           ancestors = chain.entries.filter_map do |entry|
             entry.name if !entry.external? && entry.side == :instance && entry.name != class_name

@@ -114,6 +114,8 @@ module Rigor
       # Issue #2079 — `attr_writer :x` / `attr_accessor :x` in a class body writes `@x` with whatever the caller hands.
       def record_writer_declaration(node, owner)
         return unless owner && WRITER_DECLARATIONS.include?(node.name) && self_receiver?(node)
+        # A guard: an instance body's own `attr_writer` call raises (the method is `Module`'s), so only the class
+        # body's declares a writer.
         return unless instance_owner(node).nil?
 
         (node.arguments&.arguments || NO_ARGUMENTS).each do |argument|

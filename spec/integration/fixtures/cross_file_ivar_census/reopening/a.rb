@@ -36,6 +36,7 @@ class C
   end
 
   def pure = 1
+  def typed_y = assert_type("bool?", @y)
 end
 
 class E
@@ -71,4 +72,16 @@ end
 class T
   def initialize = (@t = "a".upcase)
   def typed = assert_type("\"A\"", @t)
+end
+
+# Review m5 — another file's operator write joins as `Dynamic[top]`, not its operand's literal.
+class Counter
+  def initialize = (@n = 0)
+  def typed = assert_type("0 | Dynamic[top]", @n)
+end
+
+# Review m5 — every distinct literal another file writes to one ivar joins, not only the first.
+class Many
+  def initialize = (@v = nil)
+  def typed = assert_type("1 | 2 | nil", @v)
 end

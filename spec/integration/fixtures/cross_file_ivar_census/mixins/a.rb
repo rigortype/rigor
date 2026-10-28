@@ -91,7 +91,8 @@ class SingletonIncluder
   def get = @s.upcase # FIRES call.undefined-method
 end
 
-# A module's own census takes no chain: `Outer2`'s reads see its own writes, not `Inner2`'s.
+# A module's own census takes no chain: `Outer2`'s reads see its own writes, not `Inner2`'s. The pinned `nil` is
+# not the type Ruby gives `@m` on an includer that called `set`: flip it when #2487 is fixed.
 module Inner2
   def set = (@m = "a")
 end
@@ -100,4 +101,17 @@ module Outer2
   include Inner2
   def reset = (@m = nil)
   def peek = assert_type("nil", @m)
+end
+
+# Review m5 — an ancestor joins its writes as they stand before its read-before-write `nil`: `RbwM#peek` reads `@w`
+# before any write in that method, which adds `nil` to `RbwM`'s own entry but not to `RbwK`'s.
+module RbwM
+  def peek = @w.to_s
+  def set = (@w = "a")
+end
+
+class RbwK
+  include RbwM
+  def initialize = (@w = "b")
+  def typed = assert_type("\"a\" | \"b\"", @w)
 end

@@ -23,8 +23,8 @@ RSpec.describe "cross-file ivar census under a symlinked spelling (#2079)", type
       Dir.chdir(real) do
         configuration = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS.merge("paths" => ["lib"]))
         runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil)
-        rows = guarded_run(runner, [File.join(link, "lib")]).diagnostics
-                 .select { |d| d.rule == "call.undefined-method" }.map { |d| [File.basename(d.path), d.line] }
+        diagnostics = guarded_run(runner, [File.join(link, "lib")]).diagnostics
+        rows = diagnostics.select { |d| d.rule == "call.undefined-method" }.map { |d| [File.basename(d.path), d.line] }
         expect(rows).to eq([["k.rb", 3]])
       end
     end

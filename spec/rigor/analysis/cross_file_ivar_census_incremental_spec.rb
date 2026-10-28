@@ -22,7 +22,8 @@ RSpec.describe "cross-file ivar census — incremental" do
   end
 
   def rows(diagnostics)
-    diagnostics.select { |d| d.rule == "call.undefined-method" }.map { |d| [File.basename(d.path), d.line] }.sort
+    rules = %w[call.undefined-method flow.always-truthy-condition]
+    diagnostics.select { |d| rules.include?(d.rule) }.map { |d| [File.basename(d.path), d.line] }.sort
   end
 
   def full_run(dir)
@@ -39,7 +40,7 @@ RSpec.describe "cross-file ivar census — incremental" do
   # expects the warm run to match the full run, and `a.rb` to be re-checked or not as each step says.
   def expect_steps(files, steps, baseline:)
     Dir.mktmpdir do |dir|
-      write_files(dir, files.merge("a.rb" => reader))
+      write_files(dir, { "a.rb" => reader }.merge(files))
       session = session_for(dir)
       expect([rows(guarded_baseline(session)), full_run(dir)]).to eq([baseline, baseline])
       steps.each { |edit, rechecked, expected| expect_step(dir, session, edit, rechecked, expected) }
@@ -60,6 +61,20 @@ RSpec.describe "cross-file ivar census — incremental" do
         [{ "b.rb" => "class E\n  def set = (@x = nil)\nend\n" }, true, [["a.rb", 3]]],
         [{ "b.rb" => "class E\n  def set = (@x = \"a\")\nend\n" }, true, []],
         [{ "b.rb" => "class E\n  def set = (@x = \"a\"; nil)\nend\n" }, false, []]
+      ],
+      baseline: []
+    )
+  end
+
+  # The issue's acceptance case: `other` in `b.rb` writing `true` keeps `if @y` live; `false` folds it always-falsey
+  # (Ruby 4.0.5 returns 2 from `C.new.m`), and reverting clears it.
+  it "re-checks the reader when a reopening's `true` becomes `false`, and clears it on revert" do
+    caller_source = "class C\n  def m\n    @y = false\n    other\n    if @y then 1 else 2 end\n  end\nend\n"
+    expect_steps(
+      { "a.rb" => caller_source, "b.rb" => "class C\n  def other = (@y = true)\nend\n" },
+      [
+        [{ "b.rb" => "class C\n  def other = (@y = false)\nend\n" }, true, [["a.rb", 5]]],
+        [{ "b.rb" => "class C\n  def other = (@y = true)\nend\n" }, true, []]
       ],
       baseline: []
     )

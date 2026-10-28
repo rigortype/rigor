@@ -21,3 +21,12 @@ end
 class S
   def self.set = (@s = "a")
 end
+
+class Counter
+  def inc = (@n += 1)
+end
+
+class Many
+  def one = (@v = 1)
+  def two = (@v = 2)
+end

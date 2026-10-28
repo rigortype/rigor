@@ -23,12 +23,12 @@ positives may be lost. This change also amends ADR-58's seed semantics.
 - Track mutations across subclasses, mixins, files and accessors. This is precise, but it is an escape analysis,
   which the maintainer ruled out for this lane.
 - Drop only the emptiness of an empty seed, keyed on the rvalue node (`""`, `+""`, `[]`, `{}`, a `.dup` of one, a chained write ending in one, and
-  the matching element of a multiple assignment such as kaminari's `@url_cache, @partial_cache = {}, {}`). This is cheap
+  the matching element of a multiple assignment for a flat (non-nested) target before any splat, such as kaminari's `@url_cache, @partial_cache = {}, {}`). This is cheap
   and needs no new census. It loses only folds that read the seed's emptiness.
 
 ## Decision
 
-The third option. The test is on the rvalue node, so `[].freeze` / `{}.freeze` and an empty value reached
+The third option. The test is on the rvalue node, so `[].freeze` / `{}.freeze` (and `[].freeze.dup`), a nested multiple-assignment target (`(@a, @b), @c = [[], ""], {}`) and an empty value reached
 through another expression keep today's type. The survey diff (mastodon, redmine, mail, Rigor `lib`) moved no
 row, so no true positive was observed lost. The loss accepted under ADR-5: a slot that really stays empty no
 longer folds `empty?`, `size > 0` or `length > 0` from its seed in another method, and a dead branch guarded that

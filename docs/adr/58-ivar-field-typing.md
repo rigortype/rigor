@@ -701,7 +701,8 @@ analysis:
 
 - A write whose rvalue is `""`, `+""`, `[]` or `{}`, a `.dup` of one, a
   chained write ending in one (`@a = @b = ""`), or the matching element
-  of a multiple assignment (`@a, @b = {}, []`) seeds the slot as
+  of a multiple assignment for a flat (non-nested) target before any
+  splat (`@a, @b = {}, []`) seeds the slot as
   `String`, `Array[untyped]` or `Hash[untyped, untyped]`
   (`ScopeIndexer::EmptySeed`). `String.new`, `Array.new` and `Hash.new`
   already seed their nominal.
@@ -714,7 +715,9 @@ analysis:
 
 Accepted loss: a slot that really stays empty no longer folds `empty?`
 or `size > 0` from its seed, a `[].freeze` or `{}.freeze` constant
-excepted, since only the bare spellings count.
+excepted, since only the bare spellings count. Not covered: `[].freeze.dup`
+and a nested multiple-assignment target (`(@a, @b), @c = [[], ""], {}`),
+which keep folding.
 
 ## Rejected / deferred alternatives
 

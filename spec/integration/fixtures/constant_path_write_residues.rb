@@ -78,14 +78,14 @@ end
 # exemption #690 established on the write side, unmirrored on the mutation side.
 
 class Table
-  ROWS = {}
-  UNROOTED = {}
+  ROWS = { seed: 0 }
+  UNROOTED = { seed: 0 }
 end
 
 module Admin
   class Table
-    ROWS = {}
-    UNROOTED = {}
+    ROWS = { seed: 0 }
+    UNROOTED = { seed: 0 }
   end
 
   def self.fill_rooted(key)
@@ -97,7 +97,7 @@ module Admin
   end
 
   def self.shapes
-    assert_type("true", Admin::Table::ROWS.empty?)
+    assert_type("false", Admin::Table::ROWS.empty?)
     assert_type("bool", ::Table::ROWS.empty?)
 
     # Must-still-succeed: an UNROOTED spelling does reach every lexical candidate, so both tables are

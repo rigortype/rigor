@@ -1745,7 +1745,8 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
           RUBY
           members = seed_members(program, "C", :@m)
           expect(members.grep(Rigor::Type::Constant).map(&:value)).to include(nil)
-          expect(members.any?(Rigor::Type::Tuple)).to be(true)
+          # #2499 — an empty seed is never proof of emptiness, so `[]` joins as `Array[untyped]`, not the empty tuple.
+          expect(members).to include(Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.untyped]))
         end
 
         it "skips `@x ||= <falsey literal>` — the write can only leave the ivar falsey" do
@@ -1942,7 +1943,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
             # Thirty distinct tuple writes add two members each: a third pass would dispatch thirty writes on a
             # 61-member union.
             writes = (1..30).map { |i| "def m#{i} = (@x += [:s#{i}])" }
-            expect(seed_of("def initialize = (@x = [])", *writes)).to eq(Rigor::Type::Combinator.untyped)
+            expect(seed_of("def initialize = (@x = [:s0])", *writes)).to eq(Rigor::Type::Combinator.untyped)
           end
 
           it "measures the chain guard on the receiver it dispatches, not on the literals it widens away" do

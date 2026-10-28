@@ -683,6 +683,37 @@ instance method is credited to `K` (#2490). A module's own census takes
 no chain (#2487). The coordinator accepted the `nil` and String losses
 under ADR-5, pending ratification.
 
+### Amendment, 2026-10-29 — empty seeds are not proof of emptiness (#2499)
+
+**Status: proposed, pending ratification** (`approval-queue.d/lane-2499-accumulator-seeds.md`).
+
+The census seeds an ivar from each write's rvalue, and the same
+pre-pass shape seeds class variables, globals and in-source constants.
+An empty literal seed (`@s = ""`, `@buf ||= +""`, `$list = []`,
+`PREFIX = ""`) pinned the slot to the empty value, so a read in another
+method folded `@s.length > 0` always-falsey while a subclass, a mixin,
+another file, a memoised accessor's caller or an `attr_reader` caller
+filled it (#2491, #2492, #2496, #2497). The per-class mutation census
+sees none of those writers.
+
+Decision, shaped by the accumulator idiom rather than a uniform escape
+analysis:
+
+- A write whose rvalue is `""`, `+""`, `[]` or `{}` seeds the slot as
+  `String`, `Array[untyped]` or `Hash[untyped, untyped]`
+  (`ScopeIndexer::EmptySeed`). `String.new`, `Array.new` and `Hash.new`
+  already seed their nominal.
+- A non-empty literal keeps its exact type, so modes and config tables
+  (`@order = "asc"`, `MODES = %w[a b]`, `@opts = { a: 1 }`) still fold
+  and still satisfy a literal-typed RBS parameter.
+- Element evidence the census already collects is unchanged: the seed
+  joins every other write, and a same-class `<<` still widens the entry
+  as before.
+
+Accepted loss: a slot that really stays empty no longer folds `empty?`
+or `size > 0` from its seed, a `[].freeze` or `{}.freeze` constant
+excepted, since only the bare spellings count.
+
 ## Rejected / deferred alternatives
 
 - **Cross-method ivar definite assignment as the headline fix.**

@@ -27,19 +27,51 @@ module Rigor
           Type::Combinator.union(*members.map { |member| unpinned(member) })
         end
 
+        # `{ name => value node }` for each leading target of a multiple assignment whose right-hand side is a literal
+        # list (`@a, @b = {}, []`), so each slot is erased from its own element. Empty for any other right-hand side.
+        def multi_write_values(node)
+          value = node.value
+          return EMPTY_VALUES unless value.is_a?(Prism::ArrayNode)
+
+          elements = value.elements
+          node.lefts.each_with_index.with_object({}) do |(target, index), values|
+            break values if index >= elements.size || elements[index].is_a?(Prism::SplatNode)
+            next unless target.respond_to?(:name)
+
+            values[target.name] = elements[index]
+          end
+        end
+
+        EMPTY_VALUES = {}.freeze
+        private_constant :EMPTY_VALUES
+
+        # A chained write (`@a = @b = ""`) stores the inner write's value in the outer slot too, so it is followed.
         def empty_seed?(node)
           case node
           when Prism::StringNode then node.unescaped.empty?
           when Prism::ArrayNode, Prism::HashNode then node.elements.empty?
-          when Prism::CallNode then empty_string_dup?(node)
+          when Prism::CallNode then copied_empty_seed?(node)
+          when *CHAINED_WRITES then empty_seed?(node.value)
           else false
           end
         end
 
-        # `+""`: the unfrozen empty String the accumulator idiom spells under `# frozen_string_literal: true`.
-        def empty_string_dup?(node)
-          node.name == :+@ && node.arguments.nil? && node.receiver.is_a?(Prism::StringNode) &&
-            node.receiver.unescaped.empty?
+        CHAINED_WRITES = [
+          Prism::LocalVariableWriteNode, Prism::InstanceVariableWriteNode, Prism::ClassVariableWriteNode,
+          Prism::GlobalVariableWriteNode, Prism::ConstantWriteNode, Prism::ConstantPathWriteNode
+        ].freeze
+        private_constant :CHAINED_WRITES
+
+        # `+""`, the unfrozen empty String the accumulator idiom spells under `# frozen_string_literal: true`, and a
+        # `.dup` of an empty seed (`"".dup`, `[].dup`, `{}.dup`).
+        def copied_empty_seed?(node)
+          return false unless node.arguments.nil? && node.block.nil?
+
+          case node.name
+          when :+@ then node.receiver.is_a?(Prism::StringNode) && node.receiver.unescaped.empty?
+          when :dup then empty_seed?(node.receiver)
+          else false
+          end
         end
 
         def unpinned(member)
@@ -60,7 +92,7 @@ module Rigor
           else member
           end
         end
-        private_class_method :empty_string_dup?, :unpinned
+        private_class_method :copied_empty_seed?, :unpinned
       end
     end
   end

@@ -13,11 +13,11 @@ RSpec.describe "accumulator seeds (#2499)", type: :runner do
   end
 
   # A local in straight-line code keeps its precision, so every fixture can also prove it was analysed.
-  def control_source = "def control\n  c = +\"\"\n  puts 1 if c.length > 0\nend\n"
+  def control_source = "def control\n  ctl = +\"\"\n  puts 1 if ctl.length > 0\nend\n"
 
   def expect_only_control(source, name = "code.rb", extra = {})
     files = { name => "#{source}#{control_source}" }.merge(extra)
-    control_line = files[name].lines.index { |l| l.include?("c.length > 0") } + 1
+    control_line = files[name].lines.index { |l| l.include?("ctl.length > 0") } + 1
     expect(folds(files)).to eq([[name, control_line]])
   end
 
@@ -128,6 +128,39 @@ RSpec.describe "accumulator seeds (#2499)", type: :runner do
         HostH.new.table[:k] = 1
       RUBY
     end
+
+    it "does not fold either slot of a multiple assignment of empty seeds" do
+      expect_only_control(<<~RUBY)
+        class Multi
+          def initialize; @c, @d = "", []; end
+          def go_c = (puts 1 if @c.length > 0)
+          def go_d = (puts 1 if @d.size > 0)
+        end
+        class MultiSub < Multi; def add = (@c << "x"; @d << 1); end
+      RUBY
+    end
+
+    it "does not fold a `.dup` of an empty String, Array or Hash" do
+      expect_only_control(<<~RUBY)
+        class Dups
+          def initialize; @e = "".dup; @f = [].dup; @g = {}.dup; end
+          def go_e = (puts 1 if @e.length > 0)
+          def go_f = (puts 1 if @f.size > 0)
+          def go_g = (puts 1 if @g.size > 0)
+        end
+        class DupsSub < Dups; def add = (@e << "x"; @f << 1; @g[:a] = 1); end
+      RUBY
+    end
+
+    it "does not fold the outer slot of a chained write" do
+      expect_only_control(<<~RUBY)
+        class Chain
+          def initialize; @a = @b = ""; end
+          def go = (puts 1 if @a.length > 0)
+        end
+        class ChainSub < Chain; def add = @a << "x"; end
+      RUBY
+    end
   end
 
   describe "rule 2: a non-empty literal keeps its exact type (guards)" do
@@ -216,6 +249,43 @@ RSpec.describe "accumulator seeds (#2499)", type: :runner do
           end
         end
       RUBY
+    end
+
+    it "widens a buffer that is a union of String literals" do
+      expect_only_control("def u(io, flag)\n  b = flag ? +\"\" : +\"a\"\n  io.read(1, b)\n  puts 1 if b == \"z\"\nend\n")
+    end
+
+    it "widens a buffer that is a union of a String literal and the String nominal" do
+      source = "def u2(io, flag)\n  b = flag ? +\"\" : String.new(\"a\")\n  io.read(1, b)\n  dump_type(b)\nend\n"
+      dumped = analyze(files: { "code.rb" => source }).diagnostics.select { |d| d.rule.to_s == "dump.type" }
+      expect(dumped.map(&:message)).to eq(["dump_type: String"])
+    end
+
+    # Each guard keeps a literal local exact: the call is not an out-buffer call, so its fold still fires.
+    def expect_kept(body)
+      source = "def guard\n#{body}end\n"
+      line = source.lines.index { |l| l.include?("puts 1") } + 1
+      expect(folds("code.rb" => source)).to eq([["code.rb", line]])
+    end
+
+    it "keeps a Hash passed as the second argument of a `read` (guard)" do
+      expect_kept("  opts = { expires: 1 }\n  Store.new.read(:k, opts)\n  puts 1 if opts[:expires] == 2\n")
+    end
+
+    it "keeps a String passed to another class's `new` (guard)" do
+      expect_kept("  s = +\"\"\n  Foo.new(s)\n  puts 1 if s.length > 0\n")
+    end
+
+    it "keeps a String passed to a nested `Foo::StringIO.new` (guard)" do
+      expect_kept("  s = +\"\"\n  Foo::StringIO.new(s)\n  puts 1 if s.length > 0\n")
+    end
+
+    it "keeps a String passed to a StringIO class method other than `new` (guard)" do
+      expect_kept("  s = +\"\"\n  StringIO.method_defined?(s)\n  puts 1 if s.length > 0\n")
+    end
+
+    it "keeps the only argument of a one-argument `read` (guard)" do
+      expect_kept("  s = +\"\"\n  File.read(s)\n  puts 1 if s.length > 0\n")
     end
   end
 end

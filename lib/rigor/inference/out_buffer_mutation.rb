@@ -2,6 +2,8 @@
 
 require "prism"
 require_relative "mutation_widening"
+require_relative "receiver_alias"
+require_relative "../type"
 
 module Rigor
   module Inference
@@ -20,12 +22,26 @@ module Rigor
 
       module_function
 
-      # `scope` with the buffer argument of `call_node` widened, or `scope` itself when the call is no such call.
+      # `scope` with the buffer argument of `call_node` widened, or `scope` itself when the call is no such call or the
+      # argument holds no String: `Rails.cache.read(key, opts)` passes an options Hash that keeps its shape.
       def floor(call_node, scope)
         buffer = buffer_argument(call_node)
         return scope if buffer.nil?
 
+        getter, = MutationWidening::ALIAS_ACCESSORS[buffer.class]
+        return scope unless string_carrier?(scope.public_send(getter, ReceiverAlias.read_name(buffer)))
+
         MutationWidening.widen_alias_read(:replace, buffer, scope)
+      end
+
+      # A `Constant<String>` or the `String` nominal, or a union of nothing else.
+      def string_carrier?(type)
+        case type
+        when Type::Constant then type.value.is_a?(String)
+        when Type::Nominal then type.class_name == "String"
+        when Type::Union then type.members.all? { |member| string_carrier?(member) }
+        else false
+        end
       end
 
       def buffer_argument(call_node)
@@ -50,7 +66,7 @@ module Rigor
         else false
         end
       end
-      private_class_method :buffer_argument, :string_io_new?
+      private_class_method :buffer_argument, :string_io_new?, :string_carrier?
     end
   end
 end

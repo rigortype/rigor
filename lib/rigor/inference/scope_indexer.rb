@@ -2273,7 +2273,11 @@ module Rigor
 
         rhs_type = scope.type_of(node.value)
         ivars = MultiTargetBinder.bind_marked(node, rhs_type, scope: scope, soften_slots: false).ivars
-        ivars.each { |name, type| accumulate_ivar_type(accumulator, class_name, name, type) }
+        # #2499 — `@a, @b = {}, []` erases each empty seed as a single write does.
+        values = EmptySeed.multi_write_values(node)
+        ivars.each do |name, type|
+          accumulate_ivar_type(accumulator, class_name, name, EmptySeed.erase(values[name], type))
+        end
       end
 
       def falsey_constant?(type)

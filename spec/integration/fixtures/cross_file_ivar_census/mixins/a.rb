@@ -90,3 +90,14 @@ class SingletonIncluder
   def initialize = (@s = nil)
   def get = @s.upcase # FIRES call.undefined-method
 end
+
+# A module's own census takes no chain: `Outer2`'s reads see its own writes, not `Inner2`'s.
+module Inner2
+  def set = (@m = "a")
+end
+
+module Outer2
+  include Inner2
+  def reset = (@m = nil)
+  def peek = assert_type("nil", @m)
+end

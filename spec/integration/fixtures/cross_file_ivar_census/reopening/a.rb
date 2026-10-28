@@ -66,3 +66,9 @@ class S
   def initialize = (@s = nil)
   def get = @s.upcase # FIRES call.undefined-method
 end
+
+# The file's own non-literal write keeps the type the census gives it: this file's coarse entries are not joined back.
+class T
+  def initialize = (@t = "a".upcase)
+  def typed = assert_type("\"A\"", @t)
+end

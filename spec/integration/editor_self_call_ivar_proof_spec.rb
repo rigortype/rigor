@@ -37,7 +37,9 @@ RSpec.describe "editor publish answers as rigor check across files (#2147)", typ
   let(:base_source) { "class Base\n  def log(message) = warn(message)\nend\n" }
   # The configured spelling of the project root; `lib`, relative, is what a project without `paths:` gets.
   let(:configured_lib) { File.expand_path("lib") }
-  let(:writing_base) { "class Base\n  def log(_message) = (@io = STDOUT)\nend\n" }
+  # A literal write: a superclass's write in another file joins `Holder`'s `@io` census entry, as `Dynamic[top]`
+  # unless it is a literal (#2170). `:closed.string` raises NoMethodError under Ruby 4.0.5 as `STDOUT.string` does.
+  let(:writing_base) { "class Base\n  def log(_message) = (@io = :closed)\nend\n" }
 
   def write(relative, contents)
     FileUtils.mkdir_p(File.dirname(relative))

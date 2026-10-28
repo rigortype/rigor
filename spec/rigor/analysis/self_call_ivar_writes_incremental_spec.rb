@@ -88,10 +88,14 @@ RSpec.describe "self-call ivar-write proof — incremental" do
     files.each { |name, source| File.write(File.join(dir, name), source) }
   end
 
+  # An ancestor's write in another file is a literal (`:closed`): it joins `Holder`'s `@io` census entry, as
+  # `Dynamic[top]` unless it is a literal (#2170), and `:closed.string` raises NoMethodError under Ruby 4.0.5 as
+  # `STDOUT.string` does.
+
   it "re-checks the caller when the callee in another file starts writing the variable" do
     expect_recheck_to_report(
       { "b.rb" => "class Base\n  def log(message) = warn(message)\nend\n" },
-      { "b.rb" => "class Base\n  def log(_message) = (@io = STDOUT)\nend\n" }
+      { "b.rb" => "class Base\n  def log(_message) = (@io = :closed)\nend\n" }
     )
   end
 
@@ -99,7 +103,7 @@ RSpec.describe "self-call ivar-write proof — incremental" do
     expect_recheck_to_report(
       { "b.rb" => "class Base < Root\n  def log(message) = note(message)\nend\n",
         "c.rb" => "class Root\n  def note(message) = warn(message)\nend\n" },
-      { "c.rb" => "class Root\n  def note(_message) = (@io = STDOUT)\nend\n" }
+      { "c.rb" => "class Root\n  def note(_message) = (@io = :closed)\nend\n" }
     )
   end
 
@@ -121,7 +125,7 @@ RSpec.describe "self-call ivar-write proof — incremental" do
   it "re-checks the caller when a new file reopens the callee's owner" do
     expect_recheck_to_report(
       { "b.rb" => "class Base\n  def log(message) = warn(message)\nend\n" },
-      { "e.rb" => "class Base\n  def log(_message) = (@io = STDOUT)\nend\n" }
+      { "e.rb" => "class Base\n  def log(_message) = (@io = :closed)\nend\n" }
     )
   end
 

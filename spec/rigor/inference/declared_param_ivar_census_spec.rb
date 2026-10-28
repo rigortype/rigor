@@ -358,8 +358,9 @@ RSpec.describe "the ADR-58 ivar census types a write from a declared parameter (
         { "lib/setter.rb" => "module Setter\n  def set_x(v) = @x = v\nend\n", include: "include Setter" },
       "an included module's attr_writer" =>
         { "lib/setter.rb" => "module Setter\n  attr_writer :x\nend\n", include: "include Setter" },
+      # Issue #2170 — the superclass's literal write also joins the subclass's census entry.
       "a superclass reached through super" =>
-        { "lib/p.rb" => "class P\n  def initialize(*) = @x = 1\nend\n", superclass: "P" },
+        { "lib/p.rb" => "class P\n  def initialize(*) = @x = 1\nend\n", superclass: "P", dump: "1 | Dynamic[top]" },
       "another object's instance_variable_set" =>
         { "lib/o.rb" => "def poke(o) = o.instance_variable_set(:@x, 2)\n" },
       "another object's instance_eval block" =>
@@ -405,7 +406,7 @@ RSpec.describe "the ADR-58 ivar census types a write from a declared parameter (
                       ))
         write_project("sig/p.rbs" => "class P\nend\n", "sig/setter.rbs" => "module Setter\nend\n")
 
-        expect(dumps).to eq(["dump_type: Dynamic[top]"])
+        expect(dumps).to eq(["dump_type: #{files.fetch(:dump, 'Dynamic[top]')}"])
       end
     end
 
@@ -518,7 +519,6 @@ RSpec.describe "the ADR-58 ivar census types a write from a declared parameter (
       "another object's singleton_class class_eval" =>
         "def poke(o) = o.singleton_class.class_eval { def set_e(v) = @x = v }\n",
       "a class << obj on another object" => "def poke(o)\n  class << o\n    def set(v) = @x = v\n  end\nend\n",
-      "an attr_writer in a reopening" => "class K\n  attr_writer :x\nend\n",
       "an instance_eval of a block argument in another class" =>
         "class Conf\n  def configure(&b) = instance_eval(&b)\nend\n"
     }.each do |shape, poke|
@@ -535,6 +535,23 @@ RSpec.describe "the ADR-58 ivar census types a write from a declared parameter (
 
         expect(rules).to eq([[3, "call.undefined-method"]])
       end
+    end
+
+    # Issue #2079 — a reopening's `attr_writer :x` joins the class's census entry as `Dynamic[top]`, so the credited
+    # write and its literal-write twin both read `Dynamic`-bearing, and parity holds by both going quiet.
+    it "joins an attr_writer in a reopening into the credited write" do
+      write_project("lib/o.rb" => "class K\n  attr_writer :x\nend\n",
+                    "lib/k.rb" => "class K\n  def initialize(x) = @x = x\nend\n#{reader}",
+                    "sig/k.rbs" => "class K\n  def initialize: (String x) -> void\nend\n")
+
+      expect(dumps).to eq(["dump_type: Dynamic[top] | String"])
+    end
+
+    it "joins an attr_writer in a reopening into its literal-write twin" do
+      write_project("lib/o.rb" => "class K\n  attr_writer :x\nend\n",
+                    "lib/k.rb" => "class K\n  def initialize = @x = \"s\"\n  def r = @x.even?\nend\n")
+
+      expect(rules).to eq([])
     end
   end
 end

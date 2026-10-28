@@ -22,6 +22,11 @@ module Rigor
     # - `[:own_write, class_name, name]` — an `@x` write inside an instance body of the class.
     #   {ScopeIndexer#merge_constant_literal_tables} appends the file's path, so a reader can tell whether a second
     #   file writes the same ivar of the same class.
+    # - `[:own_write_type, class_name, name, value]` — issues #2079 / #2170: the same write with its coarse value, a
+    #   literal's as `[:lit, value]` and anything else as {DYNAMIC}, and a class-body `attr_writer` /
+    #   `attr_accessor` of the name as {DYNAMIC}. The path is appended as for `:own_write`. The class-ivar census
+    #   of a file joins another file's entries, and those of the modules and superclasses on the class's chain,
+    #   into the ivars it already holds ({ScopeIndexer::IvarContributions}).
     class IvarWriterCensus
       SEND_CALLS = %i[send __send__ public_send].to_set.freeze
       # The methods a `send` reaching which is an open-world writer.
@@ -34,6 +39,10 @@ module Rigor
         attr_writer attr_accessor send public_send __send__
       ].to_set.freeze
       NO_ARGUMENTS = [].freeze
+      # Issue #2079 — the coarse value of a write that is not a literal.
+      DYNAMIC = :dynamic
+      # The writer declarations a class body records as a {DYNAMIC} write of each name it spells.
+      WRITER_DECLARATIONS = %i[attr_writer attr_accessor].to_set.freeze
 
       # The call names any rule here reads, so every other call returns at one Set probe.
       # (`define_method` is in {SINGLETON_CLASS_CALLS}.)
@@ -44,6 +53,7 @@ module Rigor
         @instance_ranges = []
         @owner_names = {}.compare_by_identity
         @own_writes = {}
+        @typed_writes = Set.new
       end
 
       # Fed each node of a pre-order descent. `owner` is the class whose body the node sits in, as its qualified name
@@ -67,6 +77,7 @@ module Rigor
         owner = instance_owner(node)
         return if owner.nil?
 
+        record_typed_write(owner, node.name, coarse_value(node))
         seen = (@own_writes[owner] ||= {})
         return if seen[node.name]
 
@@ -74,9 +85,49 @@ module Rigor
         @census << [:own_write, owner_name(owner), node.name].freeze
       end
 
+      def record_typed_write(owner, name, value)
+        entry = [:own_write_type, owner_name(owner), name, value].freeze
+        @census << entry if @typed_writes.add?(entry)
+      end
+
+      # Issue #2079 — a literal's value as `[:lit, value]`; any other value, an operator write and a multiple
+      # assignment target as {DYNAMIC}.
+      def coarse_value(node)
+        value = node.value if node.respond_to?(:value) && !node.is_a?(Prism::InstanceVariableOperatorWriteNode)
+        case value
+        when Prism::NilNode then [:lit, nil].freeze
+        when Prism::TrueNode then [:lit, true].freeze
+        when Prism::FalseNode then [:lit, false].freeze
+        when Prism::IntegerNode, Prism::FloatNode then [:lit, value.value].freeze
+        when Prism::SymbolNode, Prism::StringNode then literal_text(value)
+        else DYNAMIC
+        end
+      end
+
+      def literal_text(node)
+        text = node.unescaped
+        return DYNAMIC unless text.valid_encoding?
+
+        [:lit, node.is_a?(Prism::SymbolNode) ? text.to_sym : text.dup.freeze].freeze
+      end
+
+      # Issue #2079 — `attr_writer :x` / `attr_accessor :x` in a class body writes `@x` with whatever the caller hands.
+      def record_writer_declaration(node, owner)
+        return unless owner && WRITER_DECLARATIONS.include?(node.name) && self_receiver?(node)
+        # A guard: an instance body's own `attr_writer` call raises (the method is `Module`'s), so only the class
+        # body's declares a writer.
+        return unless instance_owner(node).nil?
+
+        (node.arguments&.arguments || NO_ARGUMENTS).each do |argument|
+          name = literal_name(argument)
+          record_typed_write(owner, :"@#{name}", DYNAMIC) if name
+        end
+      end
+
       def owner_name(owner) = owner.is_a?(Array) ? (@owner_names[owner] ||= owner.join("::")) : owner
 
       def visit_call(node, owner)
+        record_writer_declaration(node, owner)
         remember(node.block.location, owner) if owner && define_method_block?(node)
         if self_receiver?(node) || own_singleton_class_call?(node)
           return if @instance_ranges.empty? || !(own_singleton_class_call?(node) || open_world?(node))

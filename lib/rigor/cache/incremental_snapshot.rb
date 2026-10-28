@@ -199,7 +199,10 @@ module Rigor
       # 46: issue #2314 — each seed bundle's `global_write_census` also records the global writers
       # (`[:global_writer, name, method]`) the statement walk reads past a call; a pre-46 bundle carries none, so a
       # warm run would keep a global's binding a cold run forgets.
-      SCHEMA = 46
+      # 47: issues #2079 / #2170 — each seed bundle's `global_write_census` also records each instance-side ivar
+      # write's coarse value (`[:own_write_type, class, name, value, path]`), which the class-ivar census joins across
+      # files and along the chain; a pre-47 bundle carries none, so a warm run would keep a seed a cold run widens.
+      SCHEMA = 47
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.

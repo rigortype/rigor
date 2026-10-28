@@ -229,17 +229,17 @@ RSpec.describe "the ADR-58 ivar census counts define_method block writes" do
         .to eq([["box.rb", 6, "call.undefined-method"]])
     end
 
-    # The census is per file (as for `attr_writer`): a reopening's define_method feeds the reopening's own
-    # census, exactly as a `def` written there does, and does not reach the first file's.
+    # A reopening's define_method feeds the reopening's own census, exactly as a `def` written there does. Issue
+    # #2079 — and both join the first file's existing `@x` entry, so `get` reads `"a"?` and goes quiet: under Ruby
+    # 4.0.5 `get` returns "A" after `set`.
     it "credits a define_method in a reopening to that file's census, as a def there is" do
       first = box("def get = @x.upcase")
       with_block = "class Box\n  define_method(:set) { @x = \"a\" }\n  " \
                    "def clear = (@x = nil)\n  def get2 = @x.upcase\nend\n"
       with_def = with_block.sub(%(define_method(:set) { @x = "a" }), %(def set = (@x = "a")))
 
-      expected = [["box.rb", 5, "call.undefined-method"]]
-      expect(diagnostics_for("box.rb" => first, "reopen.rb" => with_def)).to eq(expected)
-      expect(diagnostics_for("box.rb" => first, "reopen.rb" => with_block)).to eq(expected)
+      expect(diagnostics_for("box.rb" => first, "reopen.rb" => with_def)).to eq([])
+      expect(diagnostics_for("box.rb" => first, "reopen.rb" => with_block)).to eq([])
     end
 
     # #1695 left define_method blocks unseeded from the census; they still are, so the block's own read of an ivar

@@ -64,9 +64,11 @@ RSpec.describe "editor --tmp-file mode discovers the project (#2165)", type: :ru
     expect(buffer_rows(caller_source)).to eq([])
   end
 
-  # The positive control: the callee another file declares writes the variable, so both runs report.
+  # The positive control: the callee another file declares writes the variable, so both runs report. The write is a
+  # literal: a superclass's write in another file joins `Holder`'s `@io` census entry, as `Dynamic[top]` unless it
+  # is a literal (#2170), and `:closed.string` raises NoMethodError under Ruby 4.0.5 as `STDOUT.string` does.
   it "still reports when the callee another file declares writes the variable" do
-    File.write("lib/b.rb", "class Base\n  def log(_message) = (@io = STDOUT)\nend\n")
+    File.write("lib/b.rb", "class Base\n  def log(_message) = (@io = :closed)\nend\n")
     expect(plain_rows(caller_source).map(&:first)).to eq([10])
     expect(buffer_rows(caller_source)).to eq(plain_rows(caller_source))
   end

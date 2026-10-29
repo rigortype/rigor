@@ -27,9 +27,15 @@ module Rigor
 
       # Defines `--format=FORMAT` restricted to `formats`, so an unsupported value is an `OptionParser::InvalidArgument`
       # raised while the options are parsed (#2502). A check left to the renderer ran the whole analysis first, and a
-      # renderer that read only `format == "json"` printed text for any other value.
+      # renderer that read only `format == "json"` printed text for any other value. The match is exact: an
+      # OptionParser enum would also complete a prefix (`--format=j`), which then turns ambiguous the day a second
+      # format shares it. The renderers' own "unsupported format" branches remain as a guard against internal drift.
       def add_format(parser, options, description, formats: %w[text json])
-        parser.on("--format=FORMAT", formats, description) { |value| options[:format] = value }
+        parser.on("--format=FORMAT", description) do |value|
+          raise OptionParser::InvalidArgument, value unless formats.include?(value)
+
+          options[:format] = value
+        end
       end
 
       # The `--config` value, checked where the flag is read (#1992). A named file that is not there is an error, not

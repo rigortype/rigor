@@ -1,0 +1,3 @@
+- **[cli]** An unsupported `--format` value is a usage error (exit 64) reported before any analysis runs, on `check`, `coverage`, `type-of`, `type-scan`, `trace` and `unused`. ([#2502](https://github.com/rigortype/rigor/issues/2502), [#2507](https://github.com/rigortype/rigor/pull/2507))
+  - `check`, `coverage`, `type-of` and `type-scan` used to run the whole analysis first; `trace` and `unused` accepted any value and printed text.
+  - The value must match exactly: a prefix such as `--format=j` is rejected rather than completed.

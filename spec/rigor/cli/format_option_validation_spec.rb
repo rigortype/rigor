@@ -45,6 +45,18 @@ RSpec.describe "--format validation at parse time" do
     end
   end
 
+  it "rejects a prefix of a supported format instead of completing it" do
+    with_demo_file do |path|
+      %w[j te s].each do |prefix|
+        status, out, err = run_cli("check", "--format=#{prefix}", "--no-cache", "--no-stats", "--no-ci-detect", path)
+
+        expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+        expect(out).to eq("")
+        expect(err).to include("invalid argument: --format=#{prefix}")
+      end
+    end
+  end
+
   it "still accepts every CI format `rigor check` documents" do
     with_demo_file do |path|
       Rigor::CLI::DiagnosticFormats::FORMATS.each do |format|

@@ -113,8 +113,9 @@ adds the MCP tools and the grammar rules: every non-delegated command's `--help`
   fragment and a stderr notice on every `--format=json` run of the affected command; the next minor
   switches with a `changed` fragment. An MCP tool result keeps stdout and drops stderr
   (`lib/rigor/mcp/server.rb` `tool_result`), so the MCP tools that wrap an affected command
-  (`rigor_type_of`, `rigor_explain`) carry the notice as an extra `text` content block, the way
-  they already carry `config_warnings`.
+  (`rigor_type_of`, `rigor_explain`) each append the notice as an extra `text` content block of its
+  own, the content-block mechanism the config-taking tools use for `config_warnings` (which
+  `rigor_explain` does not take, so it needs the new block).
 
 Both are ADR-50 WD7's pre-1.0 cadence; after v1.0.0 either needs a major.
 

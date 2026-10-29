@@ -139,6 +139,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-123 | [Merge-queue landing and post-hoc approval](123-merge-queue-and-post-hoc-approval.md) | Accepted (merge-queue ruleset on `master` enabled 2026-10-19; approval queue and its release gate landed with the ADR) |
 | ADR-124 | [The editor publish seeds cross-file discovery](124-editor-publish-cross-file-discovery.md) | Accepted (implemented in #2164; follow-ups for the limits it lists) |
 | ADR-125 | [Plugin-declared per-invocation classes](125-per-invocation-classes.md) | Accepted (implemented for #575; rigor-actionmailer adoption is #2308) |
+| ADR-126 | [One CLI grammar, versioned JSON documents, and a gated command catalogue](126-cli-grammar-and-catalogue.md) | Proposed (work filed as #2502–#2505) |
 
 ## Adding a New ADR
 

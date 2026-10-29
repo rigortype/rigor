@@ -57,12 +57,15 @@ ships (skills, doc pages, plugins), whose members grow with every release, takes
 positionally and its modes as flags, so a future member can never collide with a verb. A command
 that acts on project state takes a verb subcommand (`baseline generate|…|prune`,
 `effects update|check|diff|explain`); a project path that collides with a verb is written
-`./update`. No new spelling is added for an existing act; spellings an Accepted ADR keeps
-(`rigor describe`, `skill describe`, `skill --describe` under ADR-73) stay.
+`./update`. No new spelling is added for an existing act, `rigor help <command>` (WD3) excepted as
+the conventional alias of `--help`; spellings an Accepted ADR keeps (`rigor describe`,
+`skill describe`, `skill --describe` under ADR-73) stay.
 
 **Criterion B — what a consumer branches on is a versioned field.** ADR-61's "message text is
 presentation" rule, lifted from fields to documents: a JSON document's top-level shape must not
-depend on input, and the document says which shape it is.
+depend on input, and the document says which shape it is. Where a flag selects a different
+document (`coverage` plain / `--protection` / `--mutation` / fused; `plugins --capabilities`), a
+top-level `"mode"` string names it, and `schema_version` counts per mode.
 
 ### WD1 — Grammar changes ([#2504](https://github.com/rigortype/rigor/issues/2504))
 
@@ -70,8 +73,8 @@ depend on input, and the document says which shape it is.
   `--path <name>`, `--list` (default), `--root`. The verbs are deprecated (WD4).
 - `diff`'s input is "a saved `rigor check --format=json` result", never a baseline; the example file
   becomes `rigor-check.json`. No behaviour change.
-- An unknown command or subcommand suggests the nearest name, which covers `plugin`/`plugins`
-  without a rename.
+- An unknown command, or an unknown `baseline` / `effects` verb, suggests the nearest name, which
+  covers `plugin`/`plugins` without a rename.
 
 ### WD2 — JSON documents are contract ([#2503](https://github.com/rigortype/rigor/issues/2503))
 
@@ -109,7 +112,10 @@ adds the MCP tools and the grammar rules: every non-delegated command's `--help`
   a `changelog.d/removed/` fragment.
 - **A JSON shape** cannot keep its old stdout. The minor before the change ships a `deprecated`
   fragment and a stderr notice on every `--format=json` run of the affected command; the next minor
-  switches with a `changed` fragment.
+  switches with a `changed` fragment. An MCP tool result keeps stdout and drops stderr
+  (`lib/rigor/mcp/server.rb` `tool_result`), so the MCP tools that wrap an affected command
+  (`rigor_type_of`, `rigor_explain`) carry the notice as an extra `text` content block, the way
+  they already carry `config_warnings`.
 
 Both are ADR-50 WD7's pre-1.0 cadence; after v1.0.0 either needs a major.
 
@@ -129,7 +135,7 @@ Both are ADR-50 WD7's pre-1.0 cadence; after v1.0.0 either needs a major.
 
 ## Consequences
 
-- Positive: one spelling per act before the freeze; JSON consumers can detect shape changes; a new
+- Positive: one grammar per kind of command before the freeze; JSON consumers can detect shape changes; a new
   command that skips the grammar rules fails a spec instead of shipping.
 - Negative: the `plugin` verbs warn for one minor, and the `type-of`, `explain` and `trace` JSON
   shapes break for every consumer, announced a minor ahead. Commands that parse by hand keep a

@@ -49,9 +49,7 @@ module Rigor
         options = { format: "text", delay: nil, verbose: false, line: nil, config: nil }
         parser = OptionParser.new do |opts|
           opts.banner = USAGE
-          opts.on("--format=FORMAT", "Output format: text (animation) or json (raw event stream)") do |value|
-            options[:format] = value
-          end
+          Options.add_format(opts, options, "Output format: text (animation) or json (raw event stream)")
           opts.on("--delay=SECONDS", Float,
                   "Autoplay with SECONDS between frames (default: step on key press)") do |value|
             options[:delay] = value

@@ -46,7 +46,7 @@ module Rigor
 
         parser = OptionParser.new do |opts|
           opts.banner = USAGE
-          opts.on("--format=FORMAT", "Output format: text or json") { |value| options[:format] = value }
+          Options.add_format(opts, options, "Output format: text or json")
           Options.add_config(opts, options)
           opts.on("--limit=N", Integer, "Max example events to print (text only)") do |value|
             options[:limit] = value

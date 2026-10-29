@@ -761,7 +761,7 @@ RSpec.describe Rigor::CLI::CheckCommand do
 
     expect do
       run(["--no-cache", "--no-ci-detect", "--no-stats", "--format=xml", "clean.rb"])
-    end.to raise_error(OptionParser::InvalidArgument, /unsupported format: xml/)
+    end.to raise_error(OptionParser::InvalidArgument, /--format=xml/)
   end
 
   it "rejects --tmp-file without --instead-of with a usage exit" do

@@ -25,6 +25,13 @@ module Rigor
         end
       end
 
+      # Defines `--format=FORMAT` restricted to `formats`, so an unsupported value is an `OptionParser::InvalidArgument`
+      # raised while the options are parsed (#2502). A check left to the renderer ran the whole analysis first, and a
+      # renderer that read only `format == "json"` printed text for any other value.
+      def add_format(parser, options, description, formats: %w[text json])
+        parser.on("--format=FORMAT", formats, description) { |value| options[:format] = value }
+      end
+
       # The `--config` value, checked where the flag is read (#1992). A named file that is not there is an error, not
       # a request for the defaults: the run would otherwise analyse under a configuration the caller did not ask for,
       # and an MCP caller would get a result for it with no sign anything was missing. Auto-discovery, with no

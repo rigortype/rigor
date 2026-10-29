@@ -749,10 +749,9 @@ module Rigor
         parser = OptionParser.new do |opts| # rubocop:disable Metrics/BlockLength
           opts.banner = "Usage: rigor check [options] [paths]"
           Options.add_config(opts, options)
-          opts.on("--format=FORMAT",
-                  "Output format: text, json, sarif, github, gitlab, checkstyle, junit, teamcity") do |value|
-            options[:format] = value
-          end
+          Options.add_format(opts, options,
+                             "Output format: text, json, sarif, github, gitlab, checkstyle, junit, teamcity",
+                             formats: %w[text json] + DiagnosticFormats::FORMATS)
           opts.on("--explain", "Surface fail-soft fallback events as :info diagnostics") { options[:explain] = true }
           opts.on("--cache-stats", "Print on-disk cache inventory at end of run") { options[:cache_stats] = true }
           opts.on("--coverage",

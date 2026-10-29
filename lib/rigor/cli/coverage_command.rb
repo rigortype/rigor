@@ -96,7 +96,7 @@ module Rigor
 
       def define_options(opts, options)
         opts.banner = USAGE
-        opts.on("--format=FORMAT", "Output format: text or json") { |v| options[:format] = v }
+        Options.add_format(opts, options, "Output format: text or json")
         Options.add_config(opts, options)
         opts.on("--protection", "Report type-protection coverage (ADR-63 Tier 1) instead of type precision") do
           options[:protection] = true

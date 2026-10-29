@@ -72,7 +72,7 @@ module Rigor
 
         parser = OptionParser.new do |opts|
           opts.banner = USAGE
-          opts.on("--format=FORMAT", "Output format: text or json") { |value| options[:format] = value }
+          Options.add_format(opts, options, "Output format: text or json")
           opts.on("--trace", "Record fail-soft fallbacks via FallbackTracer") { options[:trace] = true }
           Options.add_config(opts, options)
           Options.add_editor_mode(opts, options)

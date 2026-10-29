@@ -1,12 +1,11 @@
 # ADR-126 — One CLI grammar, versioned JSON documents, and a gated command catalogue
 
-Status: **Proposed, 2026-10-30.** Nothing implemented. The work is filed as
+Status: **Accepted, 2026-10-30; not yet implemented.** The work is filed as
 [#2503](https://github.com/rigortype/rigor/issues/2503) (versioned JSON documents, WD2),
 [#2504](https://github.com/rigortype/rigor/issues/2504) (grammar convergence, WD1) and
-[#2505](https://github.com/rigortype/rigor/issues/2505) (catalogue and gate, WD3), each held
-`ready-for-human` until this ADR is Accepted. The one defect that needs no decision,
-[#2502](https://github.com/rigortype/rigor/issues/2502) (`--format` validated after analysis or
-never), is `ready-for-agent` and lands independently.
+[#2505](https://github.com/rigortype/rigor/issues/2505) (catalogue and gate, WD3). The one defect
+that needs no decision, [#2502](https://github.com/rigortype/rigor/issues/2502) (`--format`
+validated after analysis or never), lands independently. ADR-50 WD1's JSON row lands with #2503.
 
 Grounding: Cloudflare's [`cf` CLI launch](https://blog.cloudflare.com/cloudflare-cf-cli-launch/)
 (2026), which replaced Wrangler's hand-grown commands — `d1 info`, `hyperdrive get`,

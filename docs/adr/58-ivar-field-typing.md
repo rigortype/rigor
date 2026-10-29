@@ -613,7 +613,7 @@ moved no diagnostic; the PR itemises the 39 seeds that change.
 
 ### Amendment, 2026-10-28 — cross-file and chain census contributions (#2079, #2170)
 
-**Status: proposed, pending ratification** (`approval-queue.d/lane-2079-cross-file-ivar-census.md`).
+**Status: accepted** (ratified 2026-10-30; recorded in [#2486](https://github.com/rigortype/rigor/pull/2486)).
 
 The class-ivar census is built per file, keyed by each write's lexical
 owner. Two kinds of write that land on `K`'s instances were therefore
@@ -681,11 +681,11 @@ Ruby raises; so do `@s = 1` here with `@s = nil` elsewhere and
 `@s.even?`); and a write in an `other.instance_eval` block of an
 instance method is credited to `K` (#2490). A module's own census takes
 no chain (#2487). The coordinator accepted the `nil` and String losses
-under ADR-5, pending ratification.
+under ADR-5; the maintainer ratified them on 2026-10-30.
 
 ### Amendment, 2026-10-29 — empty seeds are not proof of emptiness (#2499)
 
-**Status: proposed, pending ratification** (`approval-queue.d/lane-2499-accumulator-seeds.md`).
+**Status: accepted** (ratified 2026-10-30; recorded in [#2500](https://github.com/rigortype/rigor/pull/2500)).
 
 The census seeds an ivar from each write's rvalue, and the same
 pre-pass shape seeds class variables, globals and in-source constants.

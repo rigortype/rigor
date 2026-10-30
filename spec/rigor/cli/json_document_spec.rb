@@ -94,13 +94,13 @@ RSpec.describe Rigor::CLI::JsonDocument do
 
   it "stamps coverage --protection --mutation with its mode" do
     _, out, = run("coverage", "--protection", "--mutation", "--format=json", "code.rb")
-    expect(JSON.parse(out).first(2)).to eq([["schema_version", 1], ["mode", "mutation"]])
+    expect(JSON.parse(out).first(2)).to eq([["schema_version", 1], %w[mode mutation]])
   end
 
   it "stamps the fused coverage report with its mode" do
     _, out, = run("coverage", "--protection", "--mutation", "--with-tests", "--test-command", "true",
                   "--format=json", "code.rb")
-    expect(JSON.parse(out).first(2)).to eq([["schema_version", 1], ["mode", "protection-fused"]])
+    expect(JSON.parse(out).first(2)).to eq([["schema_version", 1], %w[mode protection-fused]])
   end
 
   it "stamps effects diff" do

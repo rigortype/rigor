@@ -97,7 +97,7 @@ RSpec.describe "a Const.method call floors the local argument its singleton call
       defs = "def add_format(parser, options) = really(parser, options)\n" \
              "def really(parser, options) = #{writer}"
       source = module_program(defs, in_block("Opts.add_format(opts, options)"))
-                 .sub("class Help\n", "class Help\n  def really(parser, options) = nil\n")
+               .sub("class Help\n", "class Help\n  def really(parser, options) = nil\n")
       expect(rules(source)).to eq([])
     end
   end
@@ -129,7 +129,7 @@ RSpec.describe "a Const.method call floors the local argument its singleton call
       defs = "def add_format(parser, options) = really(parser, options)\n" \
              "def really(parser, options) = #{reader}"
       source = module_program(defs, in_block("Opts.add_format(opts, options)"))
-                 .sub("class Help\n", "class Help\n  def really(parser, options) = #{writer}\n")
+               .sub("class Help\n", "class Help\n  def really(parser, options) = #{writer}\n")
       expect(rules(source)).to eq(always)
     end
   end

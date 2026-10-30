@@ -550,7 +550,7 @@ RSpec.describe Rigor::MCP::Server do
     end
 
     def warning_block(resp)
-      blocks = resp.dig("result", "content").drop(1).reject { |b| b.fetch("text").start_with?("rigor: note") }
+      blocks = resp.dig("result", "content").drop(1)
       expect(blocks.size).to eq(1), resp.inspect
       JSON.parse(blocks.first.fetch("text")).fetch("config_warnings")
     end
@@ -587,7 +587,18 @@ RSpec.describe Rigor::MCP::Server do
 
         expect(JSON.parse(texts.first)).to be_a(Hash)
         expect(texts.grep(/\Arigor: note .*type-of --format=json.*results/).size).to eq(1)
+        expect(texts.last).to start_with("rigor: note")
+        expect(JSON.parse(texts[1])).to have_key("config_warnings")
       end
+    end
+
+    it "appends the ADR-126 shape notice as its own block for rigor_explain" do
+      resp = tool_call("rigor_explain", {})
+      texts = resp.dig("result", "content").map { |b| b.fetch("text") }
+
+      expect(JSON.parse(texts.first)).to be_a(Array).or be_a(Hash)
+      expect(texts.size).to eq(2)
+      expect(texts.last).to match(/\Arigor: note .*explain --format=json.*rules/)
     end
 
     it "leaves rigor_check with its own config_warnings and no second copy" do

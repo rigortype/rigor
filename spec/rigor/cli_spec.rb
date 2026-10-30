@@ -858,7 +858,7 @@ RSpec.describe Rigor::CLI do
 
       status, out, err = run_cli("type-of", "--format=json", "#{path}:1")
 
-      expect(err).to eq("")
+      expect(err.sub(Rigor::CLI::JsonDocument::NOTICE_PATTERN, "").strip).to eq("")
       expect(status).to eq(0)
       payload = JSON.parse(out)
       expect(payload.fetch("results").size).to eq(40)
@@ -1014,7 +1014,7 @@ RSpec.describe Rigor::CLI do
 
         status, out, err = run_cli("type-of", "--format=json", "--config", config, "#{path}:14:8")
 
-        expect(err).to eq("")
+        expect(err.sub(Rigor::CLI::JsonDocument::NOTICE_PATTERN, "").strip).to eq("")
         expect(status).to eq(0)
         # No synthesizer contributes, so `foo` reads exactly as it did before this parity fix — never a crash.
         expect(JSON.parse(out)["type"]).to eq("Dynamic[top]")

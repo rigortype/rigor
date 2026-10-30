@@ -23,7 +23,7 @@ module Rigor
       private
 
       def render_json(report)
-        @out.puts(JSON.pretty_generate(JsonDocument.stamp(report.to_h, mode: "mutation")))
+        @out.puts(JSON.pretty_generate(JsonDocument.stamp(report.to_h)))
       end
 
       def render_text(report)

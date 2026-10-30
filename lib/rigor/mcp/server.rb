@@ -194,8 +194,8 @@ module Rigor
       private
 
       def finish_tool_result(name, args, out, err, exit_code)
-        result = with_shape_notice(tool_result(out, err, exit_code), name, out, err)
-        with_config_warnings(result, name, args, out)
+        result = with_config_warnings(tool_result(out, err, exit_code), name, args, out)
+        with_shape_notice(result, name, out, err)
       end
 
       def with_shape_notice(result, name, out, err)

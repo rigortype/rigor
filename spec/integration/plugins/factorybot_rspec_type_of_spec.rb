@@ -86,7 +86,7 @@ RSpec.describe "rigor-factorybot + rigor-rspec: :factory_index fact binds create
       run_cli("type-of", "--format=json", "--config", ".rigor.yml", "spec/user_spec.rb:5:12")
     end
 
-    expect(err).to eq("")
+    expect(err.sub(Rigor::CLI::JsonDocument::NOTICE_PATTERN, "").strip).to eq("")
     expect(status).to eq(0)
     expect(JSON.parse(out)["type"]).to eq("User")
   end

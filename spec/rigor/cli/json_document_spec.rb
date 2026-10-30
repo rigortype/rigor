@@ -6,8 +6,7 @@ require "tmpdir"
 
 require "rigor/cli"
 
-# ADR-126 WD2 / WD4 — the version marker on object-topped `--format=json` documents and the stderr notice on the
-# three array-topped ones.
+# ADR-126 WD2 / WD4 — the version marker on object-topped `--format=json` documents and the stderr notice on `type-of`, `explain` and `trace`, whose top-level shape changes in the next minor.
 RSpec.describe Rigor::CLI::JsonDocument do
   def run(*argv)
     out = StringIO.new
@@ -66,5 +65,36 @@ RSpec.describe Rigor::CLI::JsonDocument do
     _, out, err = run("trace", "--format=json", "--delay=0", "code.rb")
     expect(JSON.parse(out)).to be_a(Array)
     expect(err).to match(/trace --format=json.*events/)
+  end
+
+  # ADR-126 WD2 — one row per document: the command line and the `mode` its flag selects (nil: one document).
+  {
+    "check" => [%w[check --format=json code.rb], nil],
+    "annotate" => [%w[annotate --format=json code.rb], nil],
+    "doctor" => [%w[doctor --format=json], nil],
+    "type-scan" => [%w[type-scan --format=json code.rb], nil],
+    "unused" => [%w[unused --format=json code.rb], nil],
+    "show-bleedingedge" => [%w[show-bleedingedge --format=json], nil],
+    "effects" => [%w[effects --format=json code.rb], nil],
+    "triage" => [%w[triage --format=json code.rb], nil],
+    "coverage precision" => [%w[coverage --format=json code.rb], "precision"],
+    "coverage protection" => [%w[coverage --protection --format=json code.rb], "protection"],
+    "plugins status" => [%w[plugins --format=json], "status"],
+    "plugins capabilities" => [%w[plugins --capabilities --format=json], "capabilities"]
+  }.each do |label, (argv, mode)|
+    it "stamps #{label} with schema_version 1#{" and mode #{mode}" if mode}" do
+      _, out, = run(*argv)
+      doc = JSON.parse(out)
+      expect(doc.keys.first).to eq("schema_version")
+      expect(doc["schema_version"]).to eq(1)
+      expect(doc["mode"]).to eq(mode)
+    end
+  end
+
+  it "stamps rigor diff, and reads a saved document that has no schema_version" do
+    File.write("saved.json", JSON.generate({ "diagnostics" => [] }))
+    File.write("current.json", JSON.generate({ "diagnostics" => [] }))
+    _, out, = run("diff", "--format=json", "--current=current.json", "saved.json")
+    expect(JSON.parse(out).first(1)).to eq([["schema_version", 1]])
   end
 end

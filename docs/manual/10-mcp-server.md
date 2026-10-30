@@ -209,6 +209,12 @@ Each entry has the shape of `rigor check --format json`'s
 configuration has no warnings, or when it fails to load (the tool
 reports that error itself).
 
+`rigor_type_of` and `rigor_explain` print JSON whose top-level shape changes
+in the next minor release (`{ "schema_version": 1, "results" | "rules" |
+"skip_reasons": [...] }`). Until then, a successful call carries a final
+`text` content block, after any `config_warnings` block, with the one-line
+notice the CLI prints on STDERR. The tool's own document is left unchanged.
+
 ### rigor_check
 
 Analyze one or more Ruby files or directories for type errors,

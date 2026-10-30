@@ -12,6 +12,7 @@ require_relative "../inference/flow_tracer"
 require_relative "../inference/scope_indexer"
 require_relative "command"
 require_relative "trace_renderer"
+require_relative "json_document"
 require_relative "../project_environment"
 
 module Rigor
@@ -85,6 +86,7 @@ module Rigor
 
         if options.fetch(:format) == "json"
           @out.puts(JSON.pretty_generate(frames.map { |event| event_to_h(event) }))
+          @err.puts(JsonDocument::SHAPE_NOTICES.fetch(:trace))
           return 0
         end
 

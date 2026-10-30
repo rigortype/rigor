@@ -17,6 +17,7 @@ require_relative "command"
 require_relative "options"
 require_relative "diagnostic_formats"
 require_relative "../ci_detector"
+require_relative "json_document"
 # ADR-87 WD4 — `coverage_scan` and `check_runner_factory` both pull the inference engine, so they are required
 # lazily (in `invoke_check` / `compute_coverage`) rather than at load time: an ordinary check whose
 # result the run-cache probe serves must reach the hit verdict without `rigor/inference` in $LOADED_FEATURES.
@@ -1157,7 +1158,7 @@ module Rigor
           payload["fail_on"] = fail_on.to_s
           payload["coverage"] = coverage_payload(coverage) if coverage
           payload["config_warnings"] = config_warnings.map(&:to_h) unless config_warnings.empty?
-          @out.puts(JSON.pretty_generate(payload))
+          @out.puts(JSON.pretty_generate(JsonDocument.stamp(payload)))
         when "text"
           write_text_result(result)
           write_coverage_summary(coverage) if coverage

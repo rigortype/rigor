@@ -5,6 +5,7 @@ require_relative "options"
 
 require "json"
 require "optionparser"
+require_relative "json_document"
 
 module Rigor
   class CLI
@@ -125,13 +126,13 @@ module Rigor
       end
 
       def write_diff_json(diff, baseline_path, baseline_count, current_count)
-        @out.puts(JSON.pretty_generate(
-                    "baseline" => baseline_path,
-                    "baseline_count" => baseline_count,
-                    "current_count" => current_count,
-                    "new" => diff[:new],
-                    "fixed" => diff[:fixed]
-                  ))
+        @out.puts(JSON.pretty_generate(JsonDocument.stamp({
+                                                            "baseline" => baseline_path,
+                                                            "baseline_count" => baseline_count,
+                                                            "current_count" => current_count,
+                                                            "new" => diff[:new],
+                                                            "fixed" => diff[:fixed]
+                                                          })))
       end
 
       def write_diff_text(diff, baseline_path, baseline_count, current_count)

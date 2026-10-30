@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "optionparser"
+require_relative "json_document"
 require "json"
 
 require_relative "../configuration"
@@ -418,7 +419,7 @@ module Rigor
       end
 
       def json(report, options, supply)
-        JSON.pretty_generate(
+        payload = {
           declared: report.declared, reachable: report.reachable, roots: report.roots, edges: report.edges,
           namespaces: report.namespaces,
           plugin_roots: supply.supplied, plugin_roots_unmatched: supply.unmatched,
@@ -426,7 +427,8 @@ module Rigor
           undecidable: limited(report.undecidable, options).map do |u|
             { name: u.fqn, path: u.path, line: u.line, reason: u.reason }
           end
-        )
+        }
+        JSON.pretty_generate(JsonDocument.stamp(payload))
       end
 
       def rows_json(rows, options)

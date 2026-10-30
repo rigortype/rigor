@@ -7,6 +7,7 @@ require_relative "../bleeding_edge"
 require_relative "../configuration"
 require_relative "command"
 require_relative "options"
+require_relative "json_document"
 
 module Rigor
   class CLI
@@ -64,13 +65,14 @@ module Rigor
 
       def render_json(configuration)
         selector = configuration.bleeding_edge
-        @out.puts(JSON.pretty_generate(
-                    "overlay" => BleedingEdge.features.map(&:to_h),
-                    "selector" => configuration.to_h.fetch("bleeding_edge"),
-                    "active" => BleedingEdge.active_features(selector).map(&:id),
-                    "unknown_selected" => BleedingEdge.unknown_selected_ids(selector),
-                    "graduated" => BleedingEdge::GRADUATED
-                  ))
+        payload = {
+          "overlay" => BleedingEdge.features.map(&:to_h),
+          "selector" => configuration.to_h.fetch("bleeding_edge"),
+          "active" => BleedingEdge.active_features(selector).map(&:id),
+          "unknown_selected" => BleedingEdge.unknown_selected_ids(selector),
+          "graduated" => BleedingEdge::GRADUATED
+        }
+        @out.puts(JSON.pretty_generate(JsonDocument.stamp(payload)))
       end
 
       def render_text(configuration)

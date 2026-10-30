@@ -576,8 +576,31 @@ RSpec.describe Rigor::MCP::Server do
                                                                "arguments" => { "file" => file, "line" => 1,
                                                                                 "col" => 1 } })))
 
+        # rigor_type_of also carries the ADR-126 shape notice, which is always the last block.
+        resp["result"]["content"].pop
         expect(warning_block(resp).map { |w| w["kind"] }).to contain_exactly("unknown_key", "disabled_rule")
       end
+    end
+
+    it "appends the ADR-126 shape notice as its own block for rigor_type_of" do
+      with_inert_config do |file, config|
+        resp = tool_call("rigor_type_of", { "file" => file, "line" => 1, "col" => 1, "config" => config })
+        texts = resp.dig("result", "content").map { |b| b.fetch("text") }
+
+        expect(JSON.parse(texts.first)).to be_a(Hash)
+        expect(texts.grep(/\Arigor: note .*type-of --format=json.*results/).size).to eq(1)
+        expect(texts.last).to start_with("rigor: note")
+        expect(JSON.parse(texts[1])).to have_key("config_warnings")
+      end
+    end
+
+    it "appends the ADR-126 shape notice as its own block for rigor_explain" do
+      resp = tool_call("rigor_explain", {})
+      texts = resp.dig("result", "content").map { |b| b.fetch("text") }
+
+      expect(JSON.parse(texts.first)).to be_a(Array).or be_a(Hash)
+      expect(texts.size).to eq(2)
+      expect(texts.last).to match(/\Arigor: note .*explain --format=json.*rules/)
     end
 
     it "leaves rigor_check with its own config_warnings and no second copy" do

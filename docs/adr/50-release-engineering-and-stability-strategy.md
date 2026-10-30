@@ -137,6 +137,7 @@ The v1.0.0 contract (enumerated, drafted at v0.2.0) covers:
 | Plugin contract — `Plugin::Base` hooks + the manifest fields (ADR-37's `node_rule` / `dynamic_return` / `narrowing_facts` — renamed from `type_specifier` by ADR-80, old name removed in 0.3.0 — + the declarative fields) | yes (the ADR-37 narrow protocols; the deprecated fat hooks per WD3) |
 | Diagnostic **identifiers** + suppression markers + `severity_overrides:` keys | yes (the *vocabulary*, not the firing set — § Decision 3) |
 | Baseline file format + cache schema version | yes (format; schema bumps invalidate, never mis-read) |
+| The key set of each `--format=json` document (`schema_version`, plus `mode` where a flag selects the document; [ADR-126](126-cli-grammar-and-catalogue.md) WD2) | yes (adding a key is a minor; removing or renaming one is major-only; whitespace is not contract) |
 | `RBS::Extended` annotation grammar (`%a{rigor:v1:…}`) | yes |
 | Engine internals (`Inference::*`, `Scope`, `Type::*`, dispatch tiers) | **no — internal, may change any release** |
 | Which diagnostics fire on a given file | **no — § Decision 3** |

@@ -17,6 +17,7 @@ require_relative "../type/combinator"
 require_relative "check_invocation"
 require_relative "command"
 require_relative "options"
+require_relative "json_document"
 
 module Rigor
   class CLI
@@ -436,7 +437,7 @@ module Rigor
             }
           end
         }
-        @out.puts(JSON.pretty_generate(payload))
+        @out.puts(JSON.pretty_generate(JsonDocument.stamp(payload)))
       end
 
       def report_text(findings)

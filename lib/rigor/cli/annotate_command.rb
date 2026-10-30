@@ -16,6 +16,7 @@ require_relative "../inference/statement_evaluator"
 require_relative "prism_colorizer"
 require_relative "command"
 require_relative "../project_environment"
+require_relative "json_document"
 
 module Rigor
   class CLI
@@ -136,7 +137,7 @@ module Rigor
       # object keys).
       def emit_json(line_types)
         annotations = line_types.keys.sort.to_h { |line| [line.to_s, line_types[line].describe(:short)] }
-        @out.puts(JSON.generate({ "annotations" => annotations }))
+        @out.puts(JSON.generate(JsonDocument.stamp({ "annotations" => annotations })))
       end
 
       # The plugin-aware environment for the annotated file, so a `#=> <type>` matches what `rigor check`

@@ -53,7 +53,7 @@ RSpec.describe Rigor::CLI::PluginsCommand do
       status, out, = run(["--format", "json"])
       expect(status).to eq(0)
       parsed = JSON.parse(out)
-      expect(parsed.keys).to contain_exactly("configuration", "plugins", "summary")
+      expect(parsed.keys).to contain_exactly("schema_version", "mode", "configuration", "plugins", "summary")
       expect(parsed["summary"]).to eq({ "total" => 0, "loaded" => 0, "load_error" => 0 })
     end
   end
@@ -318,7 +318,7 @@ RSpec.describe Rigor::CLI::PluginsCommand do
       status, out, = run(["--capabilities", "--format", "json"])
       expect(status).to eq(0)
       parsed = JSON.parse(out)
-      expect(parsed.keys).to contain_exactly("configuration", "capabilities")
+      expect(parsed.keys).to contain_exactly("schema_version", "mode", "configuration", "capabilities")
       plugin = parsed["capabilities"].first
       expect(plugin.keys).to contain_exactly(
         "id", "gem", "version", "node_rule_types",

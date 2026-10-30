@@ -142,7 +142,7 @@ RSpec.describe "plugins/rigor-actionpack — rigor type-of on an ERB template (#
       status, out, err = run_cli("type-of", "--format=json", "app/views/users/show.html.erb:3:14",
                                  "app/views/users/show.html.erb:3:33")
 
-      expect(err).to eq("")
+      expect(err.sub(Rigor::CLI::JsonDocument::NOTICE_PATTERN, "").strip).to eq("")
       expect(status).to eq(0)
       results = JSON.parse(out).fetch("results")
       expect(results.map { |row| [row["column"], row["type"]] }).to eq([[14, "String"], [33, '"X"']])

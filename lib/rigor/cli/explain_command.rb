@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "json"
+require_relative "json_document"
 require "optionparser"
 
 require_relative "../analysis/rule_catalog"
@@ -65,7 +66,9 @@ module Rigor
 
       def render_index(format)
         case format
-        when "json" then @out.puts(JSON.pretty_generate(Analysis::RuleCatalog.all.map(&:to_h)))
+        when "json"
+          @out.puts(JSON.pretty_generate(Analysis::RuleCatalog.all.map(&:to_h)))
+          @err.puts(JsonDocument::SHAPE_NOTICES.fetch(:explain_rules))
         else render_index_text
         end
       end
@@ -91,6 +94,7 @@ module Rigor
       def render_skip_reason(entry, format)
         if format == "json"
           @out.puts(JSON.pretty_generate(entry.to_h))
+          @err.puts(JsonDocument::SHAPE_NOTICES.fetch(:explain_skip_reasons))
           return
         end
 
@@ -110,7 +114,9 @@ module Rigor
 
       def render_entries(entries, format)
         case format
-        when "json" then @out.puts(JSON.pretty_generate(entries.map(&:to_h)))
+        when "json"
+          @out.puts(JSON.pretty_generate(entries.map(&:to_h)))
+          @err.puts(JsonDocument::SHAPE_NOTICES.fetch(:explain_rules))
         else
           entries.each_with_index do |entry, index|
             @out.puts("") if index.positive?

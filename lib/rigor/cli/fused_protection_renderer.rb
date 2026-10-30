@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "json"
+require_relative "json_document"
 
 module Rigor
   class CLI
@@ -23,7 +24,7 @@ module Rigor
       private
 
       def render_json(report)
-        @out.puts(JSON.pretty_generate(report.to_h))
+        @out.puts(JSON.pretty_generate(JsonDocument.stamp(report.to_h)))
       end
 
       def render_text(report)

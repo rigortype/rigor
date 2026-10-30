@@ -231,7 +231,7 @@ RSpec.describe Rigor::CLI::CoverageCommand do
         # #264 adds the always-present "harness_errors" field and #686 the always-present
         # "unmeasured_files" (both 0 on a clean run); everything else here is the literal pre-#264 payload.
         expect(JSON.parse(off)).to eq(
-          "mode" => "mutation", "killed" => 0, "survived" => 0, "effectiveness_ratio" => 1.0,
+          "schema_version" => 1, "mode" => "mutation", "killed" => 0, "survived" => 0, "effectiveness_ratio" => 1.0,
           "harness_errors" => 0, "unmeasured_files" => 0,
           "files" => [
             { "path" => "lib/account.rb", "killed" => 0, "survived" => 0, "ratio" => 1.0, "harness_errors" => 0 },
@@ -300,7 +300,7 @@ RSpec.describe Rigor::CLI::CoverageCommand do
       # #264 adds the always-present "harness_errors" field and #686 the always-present "unmeasured_files"
       # (both 0 on a clean run); everything else here is the literal pre-#264 payload.
       expect(JSON.parse(unconfigured)).to eq(
-        "mode" => "mutation", "killed" => 0, "survived" => 3, "effectiveness_ratio" => 0.0,
+        "schema_version" => 1, "mode" => "mutation", "killed" => 0, "survived" => 3, "effectiveness_ratio" => 0.0,
         "harness_errors" => 0, "unmeasured_files" => 0,
         "files" => [
           { "path" => "lib/account.rb", "killed" => 0, "survived" => 3, "ratio" => 0.0, "harness_errors" => 0 },

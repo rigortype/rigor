@@ -234,7 +234,7 @@ RSpec.describe Rigor::CLI::SigGenCommand do
       described_class.new(argv: ["--print", "--format=json", "--config=#{File.join(root, '.rigor.yml')}"],
                           out: out, err: StringIO.new).run
 
-      expect(JSON.parse(out.string).keys).to eq(["candidates"])
+      expect(JSON.parse(out.string).keys).to eq(%w[schema_version candidates])
     end
 
     it "keeps the stderr note in text mode" do

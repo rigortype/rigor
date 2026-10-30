@@ -13,6 +13,7 @@ require_relative "../inference/scope_indexer"
 require_relative "../inference/precision_scanner"
 require_relative "../source/node_children"
 require_relative "type_of_renderer"
+require_relative "json_document"
 require_relative "type_of_template_probe"
 require_relative "command"
 require_relative "options"
@@ -106,7 +107,7 @@ module Rigor
         results = results_by_target.compact.flatten(1)
         return 1 if results.empty?
 
-        TypeOfRenderer.new(out: @out).render(results, format: options.fetch(:format))
+        TypeOfRenderer.new(out: @out, err: @err).render(results, format: options.fetch(:format))
         0
       end
 

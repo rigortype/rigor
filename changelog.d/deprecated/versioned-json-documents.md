@@ -1,0 +1,2 @@
+- **[cli]** `rigor type-of`, `rigor explain` and `rigor trace` with `--format=json` print a stderr notice: the next minor prints them as `{ "schema_version": 1, "results" | "rules" | "skip_reasons" | "events": [...] }`. ([#2509](https://github.com/rigortype/rigor/pull/2509))
+  - Stdout is unchanged in this release. `rigor_type_of` and `rigor_explain` over MCP append the same note as an extra text content block.

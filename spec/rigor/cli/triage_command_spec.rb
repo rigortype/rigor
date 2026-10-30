@@ -33,7 +33,7 @@ RSpec.describe Rigor::CLI::TriageCommand do
     status, out, = run(["code.rb", "--format", "json"])
     expect(status).to eq(0)
     parsed = JSON.parse(out)
-    expect(parsed.keys).to contain_exactly("summary", "distribution", "selectors", "hotspots",
+    expect(parsed.keys).to contain_exactly("schema_version", "summary", "distribution", "selectors", "hotspots",
                                            "hints", "include_info")
     expect(parsed["summary"]["total"]).to be >= 1
     expect(parsed["include_info"]).to be(false)

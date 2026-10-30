@@ -6,6 +6,7 @@ require_relative "../effects/definition_lines"
 require_relative "../effects/snapshot"
 require_relative "../effects/snapshot_diff"
 require_relative "renderable"
+require_relative "json_document"
 
 module Rigor
   class CLI
@@ -175,22 +176,22 @@ module Rigor
       end
 
       def render_json(diff)
-        @out.puts(JSON.pretty_generate(
-                    "fresh" => diff.fresh?,
-                    "events" => diff.events.map { |event| event_json(event) },
-                    "footer" => {
-                      "added_symbols" => diff.footer[:added_symbols],
-                      "removed_symbols" => diff.footer[:removed_symbols],
-                      "suppressed" => diff.footer[:suppressed]
-                    },
-                    "regeneration" => diff.regeneration?,
-                    "header" => {
-                      "snapshot" => @path,
-                      "gate" => diff.gate.to_s,
-                      "recorded" => diff.recorded&.header,
-                      "current" => diff.current.header
-                    }
-                  ))
+        @out.puts(JSON.pretty_generate(JsonDocument.stamp({
+                                                            "fresh" => diff.fresh?,
+                                                            "events" => diff.events.map { |event| event_json(event) },
+                                                            "footer" => {
+                                                              "added_symbols" => diff.footer[:added_symbols],
+                                                              "removed_symbols" => diff.footer[:removed_symbols],
+                                                              "suppressed" => diff.footer[:suppressed]
+                                                            },
+                                                            "regeneration" => diff.regeneration?,
+                                                            "header" => {
+                                                              "snapshot" => @path,
+                                                              "gate" => diff.gate.to_s,
+                                                              "recorded" => diff.recorded&.header,
+                                                              "current" => diff.current.header
+                                                            }
+                                                          })))
       end
     end
   end

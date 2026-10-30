@@ -3,6 +3,7 @@
 require "json"
 
 require_relative "../triage"
+require_relative "json_document"
 
 module Rigor
   class CLI
@@ -17,7 +18,7 @@ module Rigor
       end
 
       def json
-        JSON.pretty_generate(Triage.report_to_h(@report))
+        JSON.pretty_generate(JsonDocument.stamp(Triage.report_to_h(@report)))
       end
 
       def text

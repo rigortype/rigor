@@ -551,12 +551,29 @@ module Rigor
       # The `[def, offset]` pairs a self-dispatch `call_node` that passes a local resolves to
       # ({#resolve_self_callees}) — the defs whose census the callee floor reads; empty for any other call.
       def argument_mutating_callees(call_node)
-        return NO_CALLEES unless self_dispatch_call?(call_node)
+        return constant_receiver_callees(call_node) unless self_dispatch_call?(call_node)
         # Fast path — only a local passed as an argument can be reported, so a call with none skips the def
         # resolution and the body scan entirely (the overwhelming common case).
         return NO_CALLEES unless call_passes_local_argument?(call_node)
 
         resolve_self_callees(call_node)
+      end
+
+      # Issue #2510 — the `[def, 0]` pair a `Const.name(local)` call resolves to when `Const` types as a project class
+      # object whose singleton table has `name` (`def self.name`, `class << self`, `module_function`): the same census
+      # a self-call reads then floors the passed local, so `Opts.add_format(opts, options)` handing `options` to a block
+      # that writes it leaves the literal behind. Any other explicit receiver resolves to nothing; `send` hand-offs are
+      # not followed through a constant receiver.
+      def constant_receiver_callees(call_node)
+        receiver = call_node.receiver
+        return NO_CALLEES unless receiver.is_a?(Prism::ConstantReadNode) || receiver.is_a?(Prism::ConstantPathNode)
+        return NO_CALLEES unless call_passes_local_argument?(call_node)
+
+        receiver_type = scope.type_of(receiver)
+        return NO_CALLEES unless receiver_type.is_a?(Type::Singleton)
+
+        found = scope.singleton_def_for(receiver_type.class_name, call_node.name)
+        found.nil? ? NO_CALLEES : [[found, 0]]
       end
 
       # The local-variable reads `call_node` passes to the parameters of `mutated`, a `{ name => slot }` census, the

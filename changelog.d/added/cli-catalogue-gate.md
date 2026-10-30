@@ -1,0 +1,4 @@
+- **[cli]** `rigor help --format=json` prints every command with its flags, accepted formats and MCP tool, and `rigor help <command>` prints that command's help. ([#2508](https://github.com/rigortype/rigor/pull/2508))
+  - The text `rigor help` is rendered from the same catalogue, so its command list cannot drift from the commands the CLI dispatches.
+  - `rigor describe --help` now prints its usage and exits `0` instead of `64`.
+  - `rigor triage`, `doctor`, `plugins`, `effects`, `lens` and `sig-gen` reject an unsupported `--format` as `invalid argument: --format=…` while the options are parsed.

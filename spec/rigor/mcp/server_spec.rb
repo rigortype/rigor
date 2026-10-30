@@ -576,13 +576,15 @@ RSpec.describe Rigor::MCP::Server do
                                                                "arguments" => { "file" => file, "line" => 1,
                                                                                 "col" => 1 } })))
 
+        # rigor_type_of also carries the ADR-126 shape notice, which is always the last block.
+        resp["result"]["content"].pop
         expect(warning_block(resp).map { |w| w["kind"] }).to contain_exactly("unknown_key", "disabled_rule")
       end
     end
 
     it "appends the ADR-126 shape notice as its own block for rigor_type_of" do
-      with_inert_config do |file, _config|
-        resp = tool_call("rigor_type_of", { "file" => file, "line" => 1, "col" => 1 })
+      with_inert_config do |file, config|
+        resp = tool_call("rigor_type_of", { "file" => file, "line" => 1, "col" => 1, "config" => config })
         texts = resp.dig("result", "content").map { |b| b.fetch("text") }
 
         expect(JSON.parse(texts.first)).to be_a(Hash)

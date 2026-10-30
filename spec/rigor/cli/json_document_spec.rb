@@ -6,7 +6,8 @@ require "tmpdir"
 
 require "rigor/cli"
 
-# ADR-126 WD2 / WD4 — the version marker on object-topped `--format=json` documents and the stderr notice on `type-of`, `explain` and `trace`, whose top-level shape changes in the next minor.
+# ADR-126 WD2 / WD4 — the version marker on object-topped `--format=json` documents, and the stderr notice on
+# `type-of`, `explain` and `trace`, whose top-level shape changes in the next minor.
 RSpec.describe Rigor::CLI::JsonDocument do
   def run(*argv)
     out = StringIO.new

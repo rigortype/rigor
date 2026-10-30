@@ -25,7 +25,8 @@ RSpec.describe Rigor::CLI::JsonDocument do
 
   describe ".stamp" do
     it "puts schema_version first, then mode, ahead of the payload" do
-      expect(described_class.stamp({ "a" => 1 }, mode: "m").to_a).to eq([["schema_version", 1], ["mode", "m"], ["a", 1]])
+      expect(described_class.stamp({ "a" => 1 },
+                                   mode: "m").to_a).to eq([["schema_version", 1], %w[mode m], ["a", 1]])
     end
 
     it "omits mode when the command has one document" do
@@ -41,12 +42,12 @@ RSpec.describe Rigor::CLI::JsonDocument do
 
   it "stamps coverage with its mode" do
     _, out, = run("coverage", "--format=json", "code.rb")
-    expect(JSON.parse(out).first(2)).to eq([["schema_version", 1], ["mode", "precision"]])
+    expect(JSON.parse(out).first(2)).to eq([["schema_version", 1], %w[mode precision]])
   end
 
   it "stamps plugins with its mode" do
     _, out, = run("plugins", "--format=json")
-    expect(JSON.parse(out).first(2)).to eq([["schema_version", 1], ["mode", "status"]])
+    expect(JSON.parse(out).first(2)).to eq([["schema_version", 1], %w[mode status]])
   end
 
   it "keeps type-of's single-result object unstamped and names the next shape on stderr" do

@@ -133,7 +133,7 @@ missing file.
 
 Every `--format=json` document whose top level is an object starts with an integer `schema_version` (currently `1`). Where a flag selects which document is printed, `mode` follows it: `rigor coverage` prints `precision`, `protection`, `mutation` or `fused`, and `rigor plugins` prints `status` or `capabilities`. The key set is contract from v1.0.0: a minor release may add a key, and removing or renaming one needs a major.
 
-`rigor lens` (its own `schema` / `revision`), `rigor baseline dump` (`version`) and `rigor check`'s CI formats (`sarif`, `gitlab`, ...) keep their own markers. `rigor type-of`, `rigor explain` and `rigor trace` still print a top-level array; the next minor release switches them to `{ "schema_version": 1, "results" | "rules" | "skip_reasons" | "events": [...] }`. Until then each prints a note on stderr, and the matching MCP tools append the same note as an extra text block.
+`rigor lens` (its own `schema` / `revision`), `rigor baseline dump` (`version`) and `rigor check`'s CI formats (`sarif`, `gitlab`, ...) keep their own markers. `rigor type-of`, `rigor explain` and `rigor trace` still print their current top-level shape; the next minor release switches them to `{ "schema_version": 1, "results" | "rules" | "skip_reasons" | "events": [...] }`. Until then each prints a note on stderr, and the matching MCP tools append the same note as an extra text block.
 
 ## `rigor type-of`
 

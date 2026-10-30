@@ -107,8 +107,7 @@ module Rigor
         results = results_by_target.compact.flatten(1)
         return 1 if results.empty?
 
-        TypeOfRenderer.new(out: @out).render(results, format: options.fetch(:format))
-        @err.puts(JsonDocument::SHAPE_NOTICES.fetch(:type_of)) if options.fetch(:format) == "json"
+        TypeOfRenderer.new(out: @out, err: @err).render(results, format: options.fetch(:format))
         0
       end
 

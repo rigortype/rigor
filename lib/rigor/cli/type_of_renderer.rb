@@ -4,6 +4,7 @@ require "json"
 require "optionparser"
 
 require_relative "renderable"
+require_relative "json_document"
 
 module Rigor
   class CLI
@@ -14,8 +15,9 @@ module Rigor
     class TypeOfRenderer
       include Renderable
 
-      def initialize(out:)
+      def initialize(out:, err: nil)
         @out = out
+        @err = err
       end
 
       private
@@ -96,6 +98,7 @@ module Rigor
         enumerations = line_enumerations(list)
         payload[:line_enumerations] = enumerations unless enumerations.empty?
         @out.puts(JSON.pretty_generate(payload))
+        @err&.puts(JsonDocument::SHAPE_NOTICES.fetch(:type_of))
       end
 
       def line_enumerations(results)

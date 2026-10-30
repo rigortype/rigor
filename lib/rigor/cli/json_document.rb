@@ -31,10 +31,10 @@ module Rigor
       NOTICE_PATTERN = /^rigor: note — `rigor [a-z-]+ --format=json` will print .*$/
 
       SHAPE_NOTICES = {
-        type_of: shape_notice("type-of", '{ "schema_version": 1, "results": [...] }'),
-        trace: shape_notice("trace", '{ "schema_version": 1, "events": [...] }'),
-        explain_rules: shape_notice("explain", '{ "schema_version": 1, "rules": [...] }'),
-        explain_skip_reasons: shape_notice("explain", '{ "schema_version": 1, "skip_reasons": [...] }')
+        type_of: shape_notice("type-of", '{ "schema_version": 1, "results": [...] }').freeze,
+        trace: shape_notice("trace", '{ "schema_version": 1, "events": [...] }').freeze,
+        explain_rules: shape_notice("explain", '{ "schema_version": 1, "rules": [...] }').freeze,
+        explain_skip_reasons: shape_notice("explain", '{ "schema_version": 1, "skip_reasons": [...] }').freeze
       }.freeze
     end
   end

@@ -564,8 +564,8 @@ module Rigor
       # `class << self`, `module_function`): the same census a self-call reads then floors the passed local, so
       # `Opts.add_format(opts, options)` handing `options` to a block that writes it leaves the literal behind. `owner`
       # is an evaluator whose `self` is that class object: the callee's own hand-offs (`really(parser, options)`)
-      # resolve in the class that defines it, not in the caller's, and `resolved_census` keys the shared memo by that class. Any
-      # other explicit receiver resolves to nothing; `send` hand-offs are not followed through a constant receiver.
+      # resolve in the class that defines it, not in the caller's, and `resolved_census` keys the shared memo by that
+      # class. Any other explicit receiver resolves to nothing; `send` hand-offs are not followed through a constant receiver.
       def constant_receiver_callees(call_node)
         receiver = call_node.receiver
         return NO_CALLEES unless receiver.is_a?(Prism::ConstantReadNode) || receiver.is_a?(Prism::ConstantPathNode)

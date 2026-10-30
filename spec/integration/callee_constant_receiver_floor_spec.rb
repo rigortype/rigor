@@ -10,7 +10,6 @@ RSpec.describe "a Const.method call floors the local argument its singleton call
     analyze(source).diagnostics.reject { |d| d.severity == :info }.map { |d| [d.line, d.qualified_rule] }
   end
 
-  #
   def program(callee_body, call)
     <<~RUBY
       module Opts

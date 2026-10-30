@@ -109,38 +109,15 @@ module Rigor
         }
       }.freeze
 
-      # How to reach the parser of each `OptionParser` command: the file to load and a lambda returning the parsers,
-      # as `[subcommand_name_or_nil, parser]` pairs (no name = the command's own parser).
-      PARSERS = {
-        "check" => ["check_command", -> { [[nil, CheckCommand.new(argv: []).option_parser]] }],
-        "annotate" => ["annotate_command", -> { [[nil, AnnotateCommand.new(argv: []).option_parser]] }],
-        "type-of" => ["type_of_command", -> { [[nil, TypeOfCommand.new(argv: []).option_parser]] }],
-        "lens" => ["lens_command", -> { [[nil, LensCommand.new(argv: []).option_parser]] }],
-        "trace" => ["trace_command", -> { [[nil, TraceCommand.new(argv: []).option_parser]] }],
-        "type-scan" => ["type_scan_command", -> { [[nil, TypeScanCommand.new(argv: []).option_parser]] }],
-        "effects" => ["effects_command", lambda {
-          [[nil, EffectsCommand.new(argv: []).option_parser]] +
-            EffectsSnapshotCommand::VERBS.map do |verb|
-              [verb, EffectsSnapshotCommand.new(argv: [], verb: verb).option_parser]
-            end
-        }],
-        "explain" => ["explain_command", -> { [[nil, ExplainCommand.new(argv: []).option_parser]] }],
-        "diff" => ["diff_command", -> { [[nil, DiffCommand.new(argv: []).option_parser]] }],
-        "sig-gen" => ["sig_gen_command", -> { [[nil, SigGenCommand.new(argv: []).option_parser]] }],
-        "lsp" => ["lsp_command", -> { [[nil, LspCommand.new(argv: []).option_parser]] }],
-        "mcp" => ["mcp_command", -> { [[nil, McpCommand.new(argv: []).option_parser]] }],
-        "baseline" => ["baseline_command", lambda {
-          command = BaselineCommand.new(argv: [])
-          BaselineCommand::SUBCOMMANDS.map { |sub| [sub, command.option_parser(sub)] }
-        }],
-        "triage" => ["triage_command", -> { [[nil, TriageCommand.new(argv: []).option_parser]] }],
-        "coverage" => ["coverage_command", -> { [[nil, CoverageCommand.new(argv: []).option_parser]] }],
-        "unused" => ["unused_command", -> { [[nil, UnusedCommand.new(argv: []).option_parser]] }],
-        "plugins" => ["plugins_command", -> { [[nil, PluginsCommand.new(argv: []).option_parser]] }],
-        "show-bleedingedge" => ["show_bleedingedge_command",
-                                -> { [[nil, ShowBleedingedgeCommand.new(argv: []).option_parser]] }],
-        "doctor" => ["doctor_command", -> { [[nil, DoctorCommand.new(argv: []).option_parser]] }]
-      }.freeze
+      # The command files that build an `OptionParser`; the command class is the file's name in camel case.
+      PARSER_FILES = %w[
+        check annotate type_of lens trace type_scan effects explain diff sig_gen lsp mcp baseline triage coverage unused
+        plugins show_bleedingedge doctor
+      ].to_h { |file| [file.tr("_", "-"), "#{file}_command"] }.freeze
+
+      Ractor.make_shareable(SUMMARIES)
+      Ractor.make_shareable(DECLARED)
+      Ractor.make_shareable(PARSER_FILES)
 
       module_function
 
@@ -192,13 +169,15 @@ module Rigor
       # alongside. A command with subcommand parsers (`baseline`, `effects`) reports the union at the top and the detail
       # under each subcommand.
       def parsed_entry(name)
-        spec = PARSERS[name]
-        return {} unless spec
+        file = PARSER_FILES[name]
+        return {} unless file
 
-        require_relative spec.first
-        pairs = spec.last.call
-        own = pairs.find { |sub, _| sub.nil? }&.last
-        subs = pairs.reject { |sub, _| sub.nil? }
+        require_relative file
+        pairs = parser_pairs(name, CLI.const_get(file.split("_").map(&:capitalize).join))
+        merge_subcommands(pairs.find { |sub, _| sub.nil? }&.last, pairs.reject { |sub, _| sub.nil? })
+      end
+
+      def merge_subcommands(own, subs)
         return describe_parser(own) if subs.empty?
 
         top = own ? describe_parser(own) : {}
@@ -209,6 +188,20 @@ module Rigor
           formats: top[:formats] || merged[:formats],
           usage: top[:usage] || merged[:usage]
         )
+      end
+
+      # The `[subcommand, parser]` pairs of a command; a command with no subcommands has one pair with no name.
+      def parser_pairs(name, klass)
+        case name
+        when "effects"
+          [[nil, klass.new(argv: []).option_parser]] +
+            EffectsSnapshotCommand::VERBS.map { |verb| [verb, EffectsSnapshotCommand.new(argv: [], verb: verb).option_parser] }
+        when "baseline"
+          command = klass.new(argv: [])
+          klass::SUBCOMMANDS.map { |sub| [sub, command.option_parser(sub)] }
+        else
+          [[nil, klass.new(argv: []).option_parser]]
+        end
       end
 
       # Reads usage, flags and formats from the switches of `parsers` (the first parser's banner is the usage).

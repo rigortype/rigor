@@ -14,16 +14,13 @@ module Rigor
     # lockstep. It also owns the `--config` check (#1992), so every command and the MCP tools that pass `--config`
     # read the same rule.
     module Options
-      # The formats each parser built by {.add_format} accepts. A block-validated switch carries no list of its own,
-      # so the CLI catalogue (ADR-126 WD3) reads them from here rather than from the switch.
-      ACCEPTED_FORMATS = ObjectSpace::WeakMap.new
-      private_constant :ACCEPTED_FORMATS
-
       module_function
 
-      # The formats `parser` accepts for `--format`, or nil when {.add_format} did not define the switch.
+      # The formats `parser` accepts for `--format`, or nil when {.add_format} did not define the switch. A
+      # block-validated switch carries no list of its own, so {.add_format} leaves it on the parser for the CLI
+      # catalogue (ADR-126 WD3) to read.
       def accepted_formats(parser)
-        ACCEPTED_FORMATS[parser]
+        parser.instance_variable_get(:@rigor_accepted_formats)
       end
 
       # Defines the standard `--config=PATH` flag on `parser`, writing the path into `options[:config]`. Used by every
@@ -41,7 +38,7 @@ module Rigor
       # OptionParser enum would also complete a prefix (`--format=j`), which then turns ambiguous the day a second
       # format shares it. The renderers' own "unsupported format" branches remain as a guard against internal drift.
       def add_format(parser, options, description, formats: %w[text json])
-        ACCEPTED_FORMATS[parser] = formats.dup.freeze
+        parser.instance_variable_set(:@rigor_accepted_formats, formats.dup.freeze)
         parser.on("--format=FORMAT", description) do |value|
           raise OptionParser::InvalidArgument, value unless formats.include?(value)
 

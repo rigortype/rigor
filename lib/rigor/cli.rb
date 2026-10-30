@@ -491,17 +491,28 @@ module Rigor
     # `rigor help [--format=text|json] [<command>]`. `help <command>` behaves as `rigor <command> --help`;
     # `--format=json` prints the whole {Catalogue} document.
     def run_help
-      options = { format: "text" }
-      parser = OptionParser.new do |opts|
-        opts.banner = "Usage: rigor help [--format=text|json] [<command>]"
-        Options.add_format(opts, options, "Output format: text (default) or json")
-      end
-      topics = parser.parse(@argv)
-      return run_help_json(topics) if options.fetch(:format) == "json"
-      return run_help_topic(topics.first) if topics.any?
+      options = parse_help_options
+      topics = @argv
+      return run_help_json(topics) if options[:format] == "json"
+
+      topic = topics.first
+      return run_help_topic(topic) if topic
 
       @out.puts(help)
       0
+    end
+
+    def parse_help_options
+      options = Hash.new("text")
+      help_option_parser(options).parse!(@argv)
+      options
+    end
+
+    def help_option_parser(options)
+      OptionParser.new do |opts|
+        opts.banner = "Usage: rigor help [--format=text|json] [<command>]"
+        Options.add_format(opts, options, "Output format: text (default) or json")
+      end
     end
 
     def run_help_json(topics)

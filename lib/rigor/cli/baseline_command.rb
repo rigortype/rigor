@@ -24,6 +24,7 @@ module Rigor
     #   rigor baseline prune
     class BaselineCommand < Command # rubocop:disable Metrics/ClassLength
       EXIT_USAGE = 64
+      USAGE = "Usage: rigor baseline <subcommand> [options]"
       DEFAULT_BASELINE_PATH = ".rigor-baseline.yml"
       MAX_UNBASELINEABLE_FILES = 10
 
@@ -416,7 +417,7 @@ module Rigor
 
       def help
         <<~HELP
-          Usage: rigor baseline <subcommand> [options]
+          #{USAGE}
 
           Subcommands:
             generate    Write a fresh baseline file from a `rigor check` run.

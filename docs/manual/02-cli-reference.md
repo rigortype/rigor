@@ -1304,7 +1304,7 @@ Each entry of `commands` has:
 | `name` | The command name. |
 | `summary` | The one-line description `rigor help` prints. |
 | `usage` | The usage line (`Usage: rigor …`). |
-| `flags` | The command's own switches, each `{ "name", "arg", "desc" }`. `arg` is `null` for a switch that takes none. `--[no-]x` is listed as the two flags `--x` and `--no-x`. |
+| `flags` | The command's own switches, each `{ "name", "arg", "optional", "desc" }`. `arg` is the argument's name, `null` for a switch that takes none, and `optional` is `true` when the argument may be left out (`--bleeding-edge[=LIST]`). `--[no-]x` is listed as the two flags `--x` and `--no-x`. |
 | `formats` | The values the command's own `--format` accepts, empty when it has none. A command that only has subcommands with the flag (`baseline`) lists none here. |
 | `subcommands` | One `{ "name", "usage", "flags", "formats" }` object per subcommand (`baseline dump`, `effects check`, `plugin list`), with the same meaning as above and empty arrays where the subcommand has nothing to list. |
 | `mcp_tool` | The [MCP](10-mcp-server.md) tool that mirrors the command, or `null`. |

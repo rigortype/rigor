@@ -92,6 +92,14 @@ RSpec.describe Rigor::CLI::Catalogue do
     expect(names.grep(/\[no-\]/)).to be_empty
   end
 
+  it "marks an optional argument instead of keeping its brackets" do
+    flag = by_name.fetch("check").fetch("flags").find { |item| item["name"] == "--bleeding-edge" }
+
+    expect(flag).to include("arg" => "LIST", "optional" => true)
+    expect(by_name.fetch("check").fetch("flags").find { |item| item["name"] == "--config" })
+      .to include("arg" => "PATH", "optional" => false)
+  end
+
   it "takes the effects usage from the command" do
     expect(by_name.fetch("effects").fetch("usage")).to eq(Rigor::CLI::EffectsCommand::USAGE)
   end
@@ -151,8 +159,9 @@ RSpec.describe Rigor::CLI::Catalogue do
       expect(err).to include("takes one command")
     end
 
-    it "still lists the commands for `help -h`" do
+    it "still lists the commands for `help -h`, wherever the flag is" do
       expect(run_cli("help", "-h")).to eq(run_cli("help"))
+      expect(run_cli("help", "--format=json", "-h")).to eq(run_cli("help"))
     end
 
     it "reports an unknown command as a usage error" do
@@ -184,7 +193,7 @@ RSpec.describe Rigor::CLI::Catalogue do
         next if entry.fetch("name") == "playground"
 
         _status, out, = run_cli("help", entry.fetch("name"))
-        expect(out).to start_with("Usage: rigor #{entry.fetch('name')}"), entry.fetch("name")
+        expect(out.lines.first.chomp).to eq(entry.fetch("usage")), entry.fetch("name")
       end
     end
   end

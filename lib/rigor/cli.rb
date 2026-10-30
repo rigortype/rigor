@@ -503,7 +503,7 @@ module Rigor
     # `rigor help [--format=text|json] [<command>]`. `help <command>` behaves as `rigor <command> --help`;
     # `--format=json` prints the whole {Catalogue} document.
     def run_help
-      return print_command_list if %w[-h --help].include?(@argv.first)
+      return print_command_list if @argv.intersect?(%w[-h --help])
 
       options = parse_help_options
       topics = @argv

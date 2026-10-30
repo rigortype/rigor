@@ -78,7 +78,7 @@ module Rigor
           usage: "Usage: rigor docs [<name>] [--path <name>] [--list [<category>]]",
           flags: [
             { name: "--path", arg: "NAME", desc: "Print the absolute path of a doc" },
-            { name: "--list", arg: "[CATEGORY]", desc: "List bundled docs (optionally one category)" }
+            { name: "--list", arg: "CATEGORY", optional: true, desc: "List bundled docs (optionally one category)" }
           ]
         },
         "plugin" => {
@@ -90,9 +90,7 @@ module Rigor
             { name: "root", usage: "Usage: rigor plugin root" }
           ]
         },
-        "baseline" => { usage: "Usage: rigor baseline <generate|regenerate|dump|drift|prune> [options]" },
         "playground" => { usage: "Usage: rigor playground [options]" },
-        "upgrade" => { usage: "Usage: rigor upgrade [options]" },
         "version" => { usage: "Usage: rigor version" }
       }.freeze
 
@@ -102,7 +100,11 @@ module Rigor
         plugins show_bleedingedge doctor
       ].to_h { |file| [file.tr("_", "-"), "#{file}_command"] }.freeze
 
+      # The commands that have no parser of their own at the top, so their usage is their `USAGE` constant.
+      USAGE_FILES = { "baseline" => "baseline_command", "upgrade" => "upgrade_command" }.freeze
+
       Ractor.make_shareable(SUMMARIES)
+      Ractor.make_shareable(USAGE_FILES)
       Ractor.make_shareable(DECLARED)
       Ractor.make_shareable(PARSER_FILES)
 
@@ -144,9 +146,9 @@ module Rigor
         {
           "name" => name,
           "summary" => SUMMARIES.fetch(name),
-          "usage" => declared[:usage] || parsed[:usage],
+          "usage" => declared[:usage] || parsed[:usage] || command_usage(name),
           "subcommands" => parsed[:subcommands] || declared_subcommands(declared),
-          "flags" => parsed[:flags] || stringify(declared[:flags] || []),
+          "flags" => parsed[:flags] || declared_flags(declared),
           "formats" => parsed[:formats] || [],
           "mcp_tool" => mcp_tool(name)
         }
@@ -200,6 +202,22 @@ module Rigor
           end
       end
 
+      # The usage line of a command with no parser to take a banner from, read from the command's own `USAGE`.
+      def command_usage(name)
+        file = USAGE_FILES[name]
+        return nil unless file
+
+        require_relative file
+        CLI.const_get(file.split("_").map(&:capitalize).join)::USAGE
+      end
+
+      def declared_flags(declared)
+        (declared[:flags] || []).map do |flag|
+          { "name" => flag.fetch(:name), "arg" => flag.fetch(:arg), "optional" => flag.fetch(:optional, false),
+            "desc" => flag.fetch(:desc) }
+        end
+      end
+
       def declared_subcommands(declared)
         (declared[:subcommands] || []).map do |sub|
           { "name" => sub.fetch(:name), "usage" => sub.fetch(:usage), "flags" => [], "formats" => [] }
@@ -219,9 +237,16 @@ module Rigor
         long = switch.long.first
         return [] unless long
 
-        arg = switch.arg&.sub(/\A[= ]/, "")
+        arg, optional = arg_of(switch.arg)
         desc = switch.desc.join(" ")
-        flag_names(long).map { |flag| { "name" => flag, "arg" => arg, "desc" => desc } }
+        flag_names(long).map { |flag| { "name" => flag, "arg" => arg, "optional" => optional, "desc" => desc } }
+      end
+
+      # `[arg, optional]`: `=[LIST]` is the argument `LIST`, optional.
+      def arg_of(raw)
+        arg = raw&.sub(/\A[= ]/, "")
+        optional = !arg.nil? && arg.start_with?("[") && arg.end_with?("]")
+        [optional ? arg[1..-2] : arg, optional]
       end
 
       def flag_names(long)
@@ -236,10 +261,6 @@ module Rigor
         require_relative "../mcp/server"
         tool = "rigor_#{name.tr('-', '_')}"
         tool if MCP::Server::TOOLS.any? { |candidate| candidate.fetch(:name) == tool }
-      end
-
-      def stringify(list)
-        list.map { |item| stringify_keys(item) }
       end
 
       def stringify_keys(hash)

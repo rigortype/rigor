@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "did_you_mean"
 require "optionparser"
 
 require_relative "../configuration"
@@ -123,6 +124,8 @@ module Rigor
 
       def run_report
         options = parse_options
+        return CLI::EXIT_USAGE if misspelled_verb?
+
         configuration = Configuration.load(options.fetch(:config)).with_effects_enabled
         return list_labels(configuration) if options.fetch(:list_labels)
 
@@ -135,6 +138,20 @@ module Rigor
         note_scope(scope, report, table)
         EffectsRenderer.new(out: @out, why: options.fetch(:why)).render(report, format: options.fetch(:format))
         0
+      end
+
+      # A first word that is no path but is one edit from a snapshot verb (`rigor effects updat`) is a misspelled verb,
+      # not a scope: the report would otherwise run to completion and say only that no unit lives in `updat`.
+      def misspelled_verb?
+        word = @argv.first
+        return false if word.nil? || word.match?(%r{[/.]}) || File.exist?(word)
+
+        nearest = ::DidYouMean::SpellChecker.new(dictionary: EffectsSnapshotCommand::VERBS).correct(word).first
+        return false unless nearest
+
+        @err.puts("rigor: unknown effects subcommand: #{word}")
+        @err.puts("Did you mean `rigor effects #{nearest}`?")
+        true
       end
 
       # A path argument is a **view**, and the note says so (#439).

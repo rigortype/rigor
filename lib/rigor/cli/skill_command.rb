@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "optparse"
+
 require_relative "command"
 require_relative "../rooted_glob"
 
@@ -77,6 +79,28 @@ module Rigor
       # up.
       SKILLS_ROOT = File.expand_path("../../../skills", __dir__).freeze
 
+      # The parser of `rigor skill`, built without parsing anything: the catalogue reads its flags from it (ADR-126
+      # WD3). The positional grammar is read by hand in {#run}, so this describes the switches and parses nothing.
+      def option_parser(options = {})
+        OptionParser.new do |opts|
+          opts.banner = USAGE.lines.first.chomp
+          opts.on("--full NAME", "Print the SKILL.md body and its references/ inline") { |v| options[:full] = v }
+          opts.on("--path NAME", "Print the absolute path of the SKILL.md file") { |v| options[:path] = v }
+          opts.on("--list", "List bundled skills (name + absolute path)") { options[:list] = true }
+          opts.on("--describe", "Report project state and recommend the next skill") { options[:describe] = true }
+        end
+      end
+
+      # The parser of `rigor skill describe` and `rigor describe`; `banner` is the usage line of the spelling used.
+      def self.describe_option_parser(banner = "Usage: rigor skill describe [--deep]", options = {})
+        OptionParser.new do |opts|
+          opts.banner = banner
+          opts.on("--deep", "Run `rigor check` first and route the recommendation on its result") do
+            options[:deep] = true
+          end
+        end
+      end
+
       # @return CLI exit status.
       def run
         case @argv.first
@@ -87,7 +111,7 @@ module Rigor
           0
         when "describe", "--describe"
           @argv.shift
-          run_describe
+          run_describe("Usage: rigor skill describe [--deep]")
         when "--list"
           @argv.shift
           run_list
@@ -176,9 +200,9 @@ module Rigor
       # `--deep` is the one opt-in that breaks the "never runs `rigor check`" guarantee — and only for the invocation
       # that asks for it (issue #148 / ADR-73 § "Field-trial follow-ups"). It runs a real check and lets the result
       # pick the headline; the un-flagged command is unchanged, down to loading no analysis code at all.
-      def run_describe
+      def run_describe(usage)
         if @argv.intersect?(%w[-h --help])
-          @out.puts("Usage: rigor describe [--deep]")
+          @out.puts(usage)
           return 0
         end
 

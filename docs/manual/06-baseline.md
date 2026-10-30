@@ -105,11 +105,11 @@ snapshot in the repository and compares against it explicitly:
 
 ```sh
 # Once: capture the current diagnostic surface.
-rigor check --format=json > rigor.baseline.json
-git add rigor.baseline.json
+rigor check --format=json > rigor-check.json
+git add rigor-check.json
 
 # Per PR: compare against the committed snapshot.
-rigor diff rigor.baseline.json
+rigor diff rigor-check.json
 ```
 
 [`rigor diff`](02-cli-reference.md#rigor-diff) prints a `+ NEW`

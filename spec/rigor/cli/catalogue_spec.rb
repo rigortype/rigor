@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "fileutils"
 require "json"
 require "stringio"
 require "tmpdir"
@@ -183,9 +184,37 @@ RSpec.describe Rigor::CLI::Catalogue do
       end
     end
 
-    it "is answered by `rigor describe` and `rigor skill describe` with the describe usage" do
+    it "is answered by `rigor describe` and `rigor skill describe` with the usage of the spelling used" do
       expect(run_cli("describe", "--help")).to eq([0, "Usage: rigor describe [--deep]\n", ""])
-      expect(run_cli("skill", "describe", "--help")).to eq([0, "Usage: rigor describe [--deep]\n", ""])
+      expect(run_cli("skill", "describe", "--help")).to eq([0, "Usage: rigor skill describe [--deep]\n", ""])
+      expect(run_cli("skill", "--describe", "--help")).to eq([0, "Usage: rigor skill describe [--deep]\n", ""])
+    end
+
+    it "is answered by `rigor version` with its usage instead of the version" do
+      expect(run_cli("version", "--help")).to eq([0, "Usage: rigor version\n", ""])
+      expect(run_cli("version")).to eq([0, "rigor #{Rigor::VERSION}\n", ""])
+    end
+
+    it "is answered by every catalogued subcommand with that subcommand's usage and exit 0" do
+      pairs = entries.flat_map { |entry| entry.fetch("subcommands").map { |sub| [entry.fetch("name"), sub] } }
+
+      expect(pairs.map { |name, sub| [name, sub.fetch("name")] }).to include(%w[baseline drift], %w[effects check],
+                                                                             %w[skill describe])
+      pairs.each do |name, sub|
+        status, out, err = run_cli(name, sub.fetch("name"), "--help")
+
+        expect([name, sub["name"], status, err]).to eq([name, sub["name"], 0, ""])
+        expect(out.lines.first.chomp).to eq(sub.fetch("usage")), "#{name} #{sub['name']}"
+      end
+    end
+
+    it "is answered by the deprecated `rigor plugin` verbs without running them" do
+      %w[list path print root].each do |verb|
+        status, out, err = run_cli("plugin", verb, "--help")
+
+        expect([verb, status, err]).to eq([verb, 0, ""])
+        expect(out).to start_with("Usage: rigor plugin")
+      end
     end
 
     it "is answered by `rigor help <command>` with the same usage as the catalogue" do
@@ -194,6 +223,66 @@ RSpec.describe Rigor::CLI::Catalogue do
 
         _status, out, = run_cli("help", entry.fetch("name"))
         expect(out.lines.first.chomp).to eq(entry.fetch("usage")), entry.fetch("name")
+      end
+    end
+  end
+
+  describe "the plugin and skill grammars" do
+    it "reads the flags of `plugin` and `skill` from their parsers" do
+      expect(by_name.fetch("plugin").fetch("flags").map { |flag| flag["name"] }).to eq(%w[--path --list --root])
+      expect(by_name.fetch("plugin").fetch("subcommands")).to eq([])
+      expect(by_name.fetch("skill").fetch("flags").map { |flag| flag["name"] })
+        .to eq(%w[--full --path --list --describe])
+    end
+
+    it "lists `skill describe --deep`" do
+      describe_sub = by_name.fetch("skill").fetch("subcommands").find { |sub| sub["name"] == "describe" }
+
+      expect(describe_sub.fetch("flags").map { |flag| flag["name"] }).to eq(["--deep"])
+    end
+  end
+
+  describe "an unknown command" do
+    it "suggests the nearest command" do
+      status, out, err = run_cli("chek")
+
+      expect([status, out]).to eq([Rigor::CLI::EXIT_USAGE, ""])
+      expect(err).to include("Unknown command: chek").and include("Did you mean `rigor check`?")
+    end
+
+    it "suggests nothing when no command is near, and still prints the help" do
+      _status, _out, err = run_cli("zzzzzzzz")
+
+      expect(err).to include("Unknown command: zzzzzzzz").and include("Commands:")
+      expect(err).not_to include("Did you mean")
+    end
+
+    it "suggests the nearest baseline verb" do
+      status, _out, err = run_cli("baseline", "drfit")
+
+      expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+      expect(err).to include("Unknown baseline subcommand: \"drfit\"")
+      expect(err).to include("Did you mean `rigor baseline drift`?")
+    end
+
+    it "suggests the nearest effects verb, and leaves a real path alone" do
+      Dir.mktmpdir do |dir|
+        Dir.chdir(dir) do
+          status, out, err = run_cli("effects", "updat")
+
+          expect([status, out]).to eq([Rigor::CLI::EXIT_USAGE, ""])
+          expect(err).to include("unknown effects subcommand: updat")
+          expect(err).to include("Did you mean `rigor effects update`?")
+
+          %w[check.rb checks/ ./updat].each do |word|
+            _status, _out, err = run_cli("effects", word)
+            expect(err).not_to include("Did you mean"), word
+          end
+
+          FileUtils.mkdir_p("updat")
+          _status, _out, err = run_cli("effects", "updat")
+          expect(err).not_to include("Did you mean")
+        end
       end
     end
   end

@@ -10,6 +10,8 @@ require_relative "version"
 require_relative "analysis/diagnostic"
 require_relative "analysis/result"
 require_relative "cli/options"
+require "did_you_mean"
+
 require_relative "cli/catalogue"
 require_relative "cli/diagnostic_formats"
 require_relative "ci_detector"
@@ -113,8 +115,8 @@ module Rigor
       when "help"
         run_help
       when "version", "-v", "--version"
-        @out.puts("rigor #{Rigor::VERSION}")
-        0
+        run_version
+
       else
         dispatch(command)
       end
@@ -159,6 +161,8 @@ module Rigor
       return arm_jit_deadline { send(handler) } if handler
 
       @err.puts("Unknown command: #{command}")
+      nearest = ::DidYouMean::SpellChecker.new(dictionary: Catalogue.names).correct(command).first
+      @err.puts("Did you mean `rigor #{nearest}`?") if nearest
       @err.puts(help)
       EXIT_USAGE
     end
@@ -174,6 +178,16 @@ module Rigor
       require_relative "runtime/jit"
       Runtime::Jit.enable_after(Runtime::Jit.deadline_seconds)
       yield
+    end
+
+    # `rigor version` and `-v`/`--version` print the version; `rigor version --help` prints the usage instead.
+    def run_version
+      if @argv.intersect?(%w[-h --help])
+        @out.puts("Usage: rigor version")
+      else
+        @out.puts("rigor #{Rigor::VERSION}")
+      end
+      0
     end
 
     def run_check
@@ -460,9 +474,16 @@ module Rigor
     # Surfaced because a bare `rigor describe` is the intuitive guess (the onboarding field trial saw it tried and met
     # "Unknown command").
     def run_describe
+      return print_describe_usage if @argv.intersect?(%w[-h --help])
+
       require_relative "cli/skill_command"
 
       CLI::SkillCommand.new(argv: ["describe", *@argv], out: @out, err: @err).run
+    end
+
+    def print_describe_usage
+      @out.puts("Usage: rigor describe [--deep]")
+      0
     end
 
     def run_docs

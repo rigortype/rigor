@@ -254,8 +254,8 @@ Two ways to wire the RBS, depending on how the plugin is packaged:
    read one as a worked example:
 
    ```sh
-   rigor plugin print rigor-activesupport-core-ext   # see manifest + sig/ layout
-   rigor plugin path  rigor-activesupport-core-ext   # then browse its sig/ dir
+   rigor plugin rigor-activesupport-core-ext         # see manifest + sig/ layout
+   rigor plugin --path rigor-activesupport-core-ext  # then browse its sig/ dir
    ```
 
 2. **A project-private plugin** — the manifest field still works, but
@@ -280,9 +280,9 @@ They compose — many plugins ship both.
 
 > **Browse a real plugin instead of guessing the API.** Because Rigor
 > is installed on disk (`mise` / `gem install`), every bundled plugin's
-> source is readable as a worked example. `rigor plugin list` shows
-> them all with absolute paths; `rigor plugin print <name>` inlines a
-> plugin's main source; `rigor plugin root` points at the engine source
+> source is readable as a worked example. `rigor plugin` shows
+> them all with absolute paths; `rigor plugin <name>` inlines a
+> plugin's main source; `rigor plugin --root` points at the engine source
 > and the public `Rigor::Plugin::Base` API. When the prose here is
 > thinner than you need, read a shipped plugin that does the same thing.
 

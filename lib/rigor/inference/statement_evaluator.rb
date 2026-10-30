@@ -564,7 +564,7 @@ module Rigor
       # `class << self`, `module_function`): the same census a self-call reads then floors the passed local, so
       # `Opts.add_format(opts, options)` handing `options` to a block that writes it leaves the literal behind. `owner`
       # is an evaluator whose `self` is that class object: the callee's own hand-offs (`really(parser, options)`)
-      # resolve in the class that defines it, not in the caller's, and its census memo is keyed by that class. Any
+      # resolve in the class that defines it, not in the caller's, and `resolved_census` keys the shared memo by that class. Any
       # other explicit receiver resolves to nothing; `send` hand-offs are not followed through a constant receiver.
       def constant_receiver_callees(call_node)
         receiver = call_node.receiver
@@ -577,9 +577,7 @@ module Rigor
         found = scope.singleton_def_for(receiver_type.class_name, call_node.name)
         return NO_CALLEES if found.nil?
 
-        owners = (@constant_owner_evaluators ||= {})
-        owner = (owners[receiver_type.class_name] ||= self.class.new(scope: scope.with_self_type(receiver_type)))
-        [[found, 0, owner]]
+        [[found, 0, self.class.new(scope: scope.with_self_type(receiver_type))]]
       end
 
       # `census` (a `callee_*_mutated_parameters` name) of `def_node`, read through `owner`, the evaluator the callee's

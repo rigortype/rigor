@@ -1,0 +1,3 @@
+- **[cli]** `rigor plugin list`, `rigor plugin path <name>`, `rigor plugin print <name>` and `rigor plugin root` are deprecated in favour of the `rigor skill` / `rigor docs` grammar. ([#2512](https://github.com/rigortype/rigor/pull/2512))
+  - `rigor plugin list` becomes `rigor plugin --list` (or plain `rigor plugin`), `rigor plugin print <name>` becomes `rigor plugin <name>`, `rigor plugin path <name>` becomes `rigor plugin --path <name>`, and `rigor plugin root` becomes `rigor plugin --root`.
+  - The old verbs keep working for one minor release with the same output and exit status, and print a notice naming the replacement on stderr.

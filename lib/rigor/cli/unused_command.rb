@@ -123,7 +123,7 @@ module Rigor
         parser = OptionParser.new do |opts|
           opts.banner = USAGE
           Options.add_config(opts, options)
-          opts.on("--format=FORMAT", "Output format: text (default) or json") { |v| options[:format] = v }
+          Options.add_format(opts, options, "Output format: text (default) or json")
           opts.on("--entry-point=GLOB", "Treat declarations in files matching GLOB as roots (repeatable)") do |v|
             options[:entry_points] << v
           end

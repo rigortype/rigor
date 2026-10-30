@@ -2618,7 +2618,7 @@ RSpec.describe Rigor::CLI do
       status, _out, err = run_format("csv")
 
       expect(status).to eq(Rigor::CLI::EXIT_USAGE)
-      expect(err).to include("unsupported format: csv")
+      expect(err).to include("invalid argument: --format=csv")
     end
   end
 

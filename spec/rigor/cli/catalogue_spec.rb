@@ -187,6 +187,7 @@ RSpec.describe Rigor::CLI::Catalogue do
     it "is answered by `rigor describe` and `rigor skill describe` with the usage of the spelling used" do
       expect(run_cli("describe", "--help")).to eq([0, "Usage: rigor describe [--deep]\n", ""])
       expect(run_cli("skill", "describe", "--help")).to eq([0, "Usage: rigor skill describe [--deep]\n", ""])
+      expect(run_cli("skill", "--describe", "--help")).to eq([0, "Usage: rigor skill describe [--deep]\n", ""])
     end
 
     it "is answered by `rigor version` with its usage instead of the version" do
@@ -272,6 +273,11 @@ RSpec.describe Rigor::CLI::Catalogue do
           expect([status, out]).to eq([Rigor::CLI::EXIT_USAGE, ""])
           expect(err).to include("unknown effects subcommand: updat")
           expect(err).to include("Did you mean `rigor effects update`?")
+
+          %w[check.rb checks/ ./updat].each do |word|
+            _status, _out, err = run_cli("effects", word)
+            expect(err).not_to include("Did you mean"), word
+          end
 
           FileUtils.mkdir_p("updat")
           _status, _out, err = run_cli("effects", "updat")

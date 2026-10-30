@@ -74,8 +74,8 @@ Rigor is installed on disk, so both the plugin under review and the
 worked-example plugins are readable source:
 
 ```sh
-rigor plugin                      # every bundled + example plugin, with paths
-rigor plugin rigor-<id>           # a plugin's main source, inline
+rigor plugin                    # every bundled + example plugin, with paths
+rigor plugin rigor-<id>         # a plugin's main source, inline
 rigor plugin --path rigor-<id>  # its directory, to browse
 ```
 

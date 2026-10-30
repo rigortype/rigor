@@ -1,2 +1,3 @@
 - **[cli]** An unknown command, `baseline` verb or `effects` verb now names the nearest one (for example "Did you mean `rigor check`?"), and `rigor diff` says it reads a saved `rigor check --format=json` result. ([#2512](https://github.com/rigortype/rigor/pull/2512))
   - Every subcommand, `rigor version` and the deprecated `rigor plugin` verbs answer `--help` with their usage, and `rigor help --format=json` lists the flags of `rigor plugin`, `rigor skill` and `rigor skill describe --deep`.
+  - `rigor plugin <unknown>` now exits 1 with "Unknown plugin", where it used to exit 64 with "Unknown subcommand".

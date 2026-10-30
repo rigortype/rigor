@@ -2,6 +2,8 @@
 
 require "optparse"
 
+require "did_you_mean"
+
 require_relative "../analysis/baseline"
 require_relative "options"
 require_relative "../analysis/runner"

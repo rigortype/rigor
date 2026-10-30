@@ -108,7 +108,11 @@ module Rigor
 
       def run_grammar
         options = {}
-        option_parser(options).parse!(@argv)
+        begin
+          option_parser(options).parse!(@argv)
+        rescue OptionParser::ParseError => e
+          return usage_error(e.message)
+        end
         return run_path(options[:path]) if options.key?(:path)
         return run_root if options[:root]
         return run_list if options[:list]
@@ -118,8 +122,11 @@ module Rigor
       end
 
       def run_deprecated_verb(verb)
-        @err.puts("rigor: `rigor plugin #{verb}` is deprecated and will be removed in a future minor; " \
+        @err.puts("rigor: `rigor plugin #{verb}` is deprecated and will be removed in the next minor release; " \
                   "use `#{DEPRECATED_VERBS.fetch(verb)}`.")
+        # The verbs' stdout stays byte-identical to what they printed before the grammar changed, so its prose still
+        # names the verb spelling.
+        @legacy = true
         case verb
         when "list" then run_list
         when "path" then run_path(@argv.shift)
@@ -216,7 +223,7 @@ module Rigor
           # The main source body is below; read the other files from the
           # paths above. To suppress `call.undefined-method` for methods a
           # DSL generates, study how an RBS-bundle plugin ships `sig/` (see
-          # `rigor plugin rigor-activesupport-core-ext`).
+          # `#{@legacy ? 'rigor plugin print' : 'rigor plugin'} rigor-activesupport-core-ext`).
         HEADER
       end
 
@@ -251,7 +258,7 @@ module Rigor
       def docker_note
         "\nNote: paths are local to where `rigor` runs. If you run rigor in a " \
           "container,\nread these files from the same filesystem (use " \
-          "`rigor plugin <name>` to inline a body)."
+          "`#{@legacy ? 'rigor plugin print' : 'rigor plugin <name>'}` to inline a body)."
       end
 
       def name_error(name)

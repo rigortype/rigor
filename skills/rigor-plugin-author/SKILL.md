@@ -68,9 +68,9 @@ install`), every plugin bundled in the toolchain is readable source.
 Use it as a worked-example library throughout this skill:
 
 ```sh
-rigor plugin                                   # all bundled + example plugins, with paths
+rigor plugin                                     # all bundled + example plugins, with paths
 rigor plugin rigor-activesupport-core-ext        # a plugin's main source, inline
-rigor plugin --path rigor-units                 # the dir, to browse with your file tool
+rigor plugin --path rigor-units                  # the dir, to browse with your file tool
 rigor plugin --root                              # gem root + public API (lib/rigor/plugin.rb)
 ```
 

@@ -67,8 +67,16 @@ RSpec.describe Rigor::CLI::PluginCommand do
       expect(err).to include("Unknown plugin: no-such-plugin")
     end
 
-    it "raises a parse error, which the CLI reports as a usage error, when no name is given" do
-      expect { run(["--path"]) }.to raise_error(OptionParser::MissingArgument)
+    it "is a usage error with the usage when no name is given" do
+      status, out, err = run(["--path"])
+      expect([status, out]).to eq([Rigor::CLI::EXIT_USAGE, ""])
+      expect(err).to include("missing argument: --path").and include("Usage: rigor plugin")
+    end
+
+    it "is a usage error with the usage for an unknown option" do
+      status, _out, err = run(["--bogus"])
+      expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+      expect(err).to include("invalid option: --bogus").and include("Usage: rigor plugin")
     end
   end
 
@@ -113,11 +121,33 @@ RSpec.describe Rigor::CLI::PluginCommand do
         status_old, out_old, err_old = run(old)
         status_new, out_new, err_new = run(replacement)
 
-        expect([status_old, out_old]).to eq([status_new, out_new])
+        # Only the prose that names the verb differs; the fixed-text example below pins the old wording.
+        legacy_free = out_old.gsub("`rigor plugin print` to inline", "`rigor plugin <name>` to inline")
+                             .gsub("`rigor plugin print rigor-", "`rigor plugin rigor-")
+        expect([status_old, legacy_free]).to eq([status_new, out_new])
         expect(err_old).to start_with("rigor: `rigor plugin #{old.first}` is deprecated")
         expect(err_old).to include("use `rigor plugin")
         expect(err_new).not_to include("deprecated")
       end
+    end
+
+    # What master printed, pinned as fixed text rather than compared with the new spelling in this build.
+    it "keeps the verbs' stdout as it was before the grammar changed" do
+      expect(run(["list"])[1]).to include("(use `rigor plugin print` to inline a body).")
+      expect(run(["root"])[1]).to include("(use `rigor plugin print` to inline a body).")
+      expect(run(%w[print rigor-activerecord])[1])
+        .to include("# DSL generates, study how an RBS-bundle plugin ships `sig/` (see\n" \
+                    "# `rigor plugin print rigor-activesupport-core-ext`).")
+      expect(run(%w[path rigor-activerecord])[1]).to end_with("plugins/rigor-activerecord\n")
+    end
+
+    it "gives the new spellings the new text" do
+      expect(run(["--list"])[1]).to include("(use `rigor plugin <name>` to inline a body).")
+      expect(run(%w[rigor-activerecord])[1]).to include("# `rigor plugin rigor-activesupport-core-ext`).")
+    end
+
+    it "says the verbs go in the next minor release" do
+      expect(run(["list"])[2]).to include("will be removed in the next minor release")
     end
 
     it "names the replacement of each verb" do

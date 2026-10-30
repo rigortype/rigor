@@ -109,12 +109,9 @@ module Rigor
         when "-h", "--help", "help"
           print_usage(@out)
           0
-        when "describe"
+        when "describe", "--describe"
           @argv.shift
           run_describe("Usage: rigor skill describe [--deep]")
-        when "--describe"
-          @argv.shift
-          run_describe("Usage: rigor describe [--deep]")
         when "--list"
           @argv.shift
           run_list

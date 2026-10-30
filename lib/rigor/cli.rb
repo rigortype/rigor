@@ -474,9 +474,16 @@ module Rigor
     # Surfaced because a bare `rigor describe` is the intuitive guess (the onboarding field trial saw it tried and met
     # "Unknown command").
     def run_describe
+      return print_describe_usage if @argv.intersect?(%w[-h --help])
+
       require_relative "cli/skill_command"
 
-      CLI::SkillCommand.new(argv: ["--describe", *@argv], out: @out, err: @err).run
+      CLI::SkillCommand.new(argv: ["describe", *@argv], out: @out, err: @err).run
+    end
+
+    def print_describe_usage
+      @out.puts("Usage: rigor describe [--deep]")
+      0
     end
 
     def run_docs

@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "did_you_mean"
 require "optionparser"
 
 require_relative "../configuration"
@@ -143,7 +144,7 @@ module Rigor
       # not a scope: the report would otherwise run to completion and say only that no unit lives in `updat`.
       def misspelled_verb?
         word = @argv.first
-        return false if word.nil? || File.exist?(word)
+        return false if word.nil? || word.match?(%r{[/.]}) || File.exist?(word)
 
         nearest = ::DidYouMean::SpellChecker.new(dictionary: EffectsSnapshotCommand::VERBS).correct(word).first
         return false unless nearest

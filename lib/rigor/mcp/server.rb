@@ -206,6 +206,7 @@ module Rigor
         exit_code = with_captured_streams(out_io, err_io) { CLI.new(argv, out: out_io, err: err_io).run }
 
         result = tool_result(out_io.string, err_io.string, exit_code)
+        result = with_shape_notice(result, name, out_io.string, err_io.string)
         success(id, with_config_warnings(result, name, args, out_io.string))
       rescue SystemExit => e
         # Defence against any command that exits: it must not take the server down with it.
@@ -241,6 +242,21 @@ module Rigor
 
         block = { type: "text", text: JSON.generate({ "config_warnings" => warnings.map(&:to_h) }) }
         result.merge(content: result.fetch(:content) + [block])
+      end
+
+      # ADR-126 WD4 — `rigor_type_of` and `rigor_explain` print documents whose top-level shape changes in the next
+      # minor, and their CLI says so on stderr, which `tool_result` drops once there is a document. The notice is
+      # carried to the agent as its own `text` content block, the same text the CLI printed, so the document block
+      # stays byte-for-byte what the CLI wrote. When stdout is empty the error text already is stderr.
+      SHAPE_NOTICE_TOOLS = %w[rigor_type_of rigor_explain].freeze
+
+      def with_shape_notice(result, name, out, err)
+        return result unless SHAPE_NOTICE_TOOLS.include?(name) && !out.empty?
+
+        notice = err[CLI::JsonDocument::NOTICE_PATTERN]
+        return result unless notice
+
+        result.merge(content: result.fetch(:content) + [{ type: "text", text: notice }])
       end
 
       def config_warnings(config_path)

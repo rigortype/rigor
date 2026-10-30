@@ -2,6 +2,8 @@
 
 require "json"
 
+require_relative "../cli/json_document"
+
 require_relative "classification"
 require_relative "superclass_spelling"
 require_relative "write_reporter"
@@ -132,7 +134,7 @@ module Rigor
         payload = { candidates: candidates.map(&:to_h) }
         payload[:observation] = observation if observation
         payload[:diagnostics] = diagnostics.map(&:to_h) if diagnostics.any?
-        @out.puts(JSON.pretty_generate(payload))
+        @out.puts(JSON.pretty_generate(CLI::JsonDocument.stamp(payload)))
       end
 
       public

@@ -1,0 +1,2 @@
+- **[cli]** `rigor type-of`, `rigor explain` and `rigor trace` with `--format=json` print a stderr notice: the next minor wraps their top-level array as `{ "schema_version": 1, "results" | "rules" | "skip_reasons" | "events": [...] }`. ([#2503](https://github.com/rigortype/rigor/issues/2503))
+  - Stdout is unchanged in this release. `rigor_type_of` and `rigor_explain` over MCP append the same note as an extra text content block.

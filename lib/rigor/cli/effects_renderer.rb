@@ -3,6 +3,7 @@
 require "json"
 
 require_relative "renderable"
+require_relative "json_document"
 
 module Rigor
   class CLI
@@ -85,7 +86,7 @@ module Rigor
           end
         }
         payload["totals"] = report.totals.to_h.transform_keys(&:to_s) if report.totals
-        @out.puts(JSON.pretty_generate(payload))
+        @out.puts(JSON.pretty_generate(JsonDocument.stamp(payload)))
       end
     end
   end

@@ -13,6 +13,7 @@ require_relative "../inference/scope_indexer"
 require_relative "../inference/precision_scanner"
 require_relative "../source/node_children"
 require_relative "type_of_renderer"
+require_relative "json_document"
 require_relative "type_of_template_probe"
 require_relative "command"
 require_relative "options"
@@ -107,6 +108,7 @@ module Rigor
         return 1 if results.empty?
 
         TypeOfRenderer.new(out: @out).render(results, format: options.fetch(:format))
+        @err.puts(JsonDocument::SHAPE_NOTICES.fetch(:type_of)) if options.fetch(:format) == "json"
         0
       end
 

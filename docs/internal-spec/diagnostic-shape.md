@@ -65,6 +65,9 @@ untouched (they host their own documentation and confidence). The same
 two fields appear on each `Entry#to_h` exposed by `rigor explain`
 / `rigor explain --format json`.
 
+Every `--format json` document that is a top-level object also carries `schema_version` (integer, first key) per
+[ADR-126](../adr/126-cli-grammar-and-catalogue.md) WD2; `CLI::JsonDocument.stamp` is the one place that adds it.
+
 ## Construction and position convention
 
 Two factories internalise the load-bearing position convention so callers

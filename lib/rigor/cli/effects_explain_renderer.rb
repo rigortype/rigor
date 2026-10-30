@@ -3,6 +3,7 @@
 require "json"
 
 require_relative "renderable"
+require_relative "json_document"
 
 module Rigor
   class CLI
@@ -53,18 +54,18 @@ module Rigor
       end
 
       def render_json(rows)
-        @out.puts(JSON.pretty_generate(
-                    "paths" => rows.map do |row|
-                      {
-                        "table" => row.table,
-                        "symbol" => row.symbol,
-                        "label" => row.label,
-                        "path" => row.path,
-                        "origin" => row.origin,
-                        "causes" => row.causes
-                      }
-                    end
-                  ))
+        @out.puts(JSON.pretty_generate(JsonDocument.stamp({
+                                                            "paths" => rows.map do |row|
+                                                              {
+                                                                "table" => row.table,
+                                                                "symbol" => row.symbol,
+                                                                "label" => row.label,
+                                                                "path" => row.path,
+                                                                "origin" => row.origin,
+                                                                "causes" => row.causes
+                                                              }
+                                                            end
+                                                          })))
       end
     end
   end

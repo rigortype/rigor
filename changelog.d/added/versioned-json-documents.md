@@ -1,0 +1,2 @@
+- **[cli]** Every `--format=json` document that is a top-level object now starts with `"schema_version": 1`, plus `"mode"` for `coverage` (`precision`, `protection`, `mutation`, `fused`) and `plugins` (`status`, `capabilities`). ([#2503](https://github.com/rigortype/rigor/issues/2503))
+  - `lens`, `baseline dump` and `check`'s CI formats keep their own markers. Adding a key is a minor change from now on; removing or renaming one is major-only at v1.0.0.

@@ -2,6 +2,7 @@
 
 require "json"
 require_relative "renderable"
+require_relative "json_document"
 
 module Rigor
   class CLI
@@ -93,7 +94,7 @@ module Rigor
       end
 
       def render_json(report)
-        @out.puts(JSON.pretty_generate(json_payload(report)))
+        @out.puts(JSON.pretty_generate(JsonDocument.stamp(json_payload(report), mode: "precision")))
       end
 
       def json_payload(report)

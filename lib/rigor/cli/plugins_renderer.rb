@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "json"
+require_relative "json_document"
 
 module Rigor
   class CLI
@@ -44,7 +45,7 @@ module Rigor
             "available" => @inflection.fetch(:available)
           }
         end
-        JSON.pretty_generate(payload)
+        JSON.pretty_generate(JsonDocument.stamp(payload, mode: "status"))
       end
 
       # ADR-37 § "Machine-readable capability catalogue" — the focused per-plugin extension-protocol dump. Only loaded
@@ -53,10 +54,13 @@ module Rigor
       # type-specifier methods, and produced / consumed facts.
       def capabilities_json
         JSON.pretty_generate(
-          {
-            "configuration" => @configuration_path,
-            "capabilities" => loaded_rows.map { |row| capabilities_json_for(row) }
-          }
+          JsonDocument.stamp(
+            {
+              "configuration" => @configuration_path,
+              "capabilities" => loaded_rows.map { |row| capabilities_json_for(row) }
+            },
+            mode: "capabilities"
+          )
         )
       end
 

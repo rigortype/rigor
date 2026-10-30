@@ -550,7 +550,7 @@ RSpec.describe Rigor::MCP::Server do
     end
 
     def warning_block(resp)
-      blocks = resp.dig("result", "content").drop(1)
+      blocks = resp.dig("result", "content").drop(1).reject { |b| b.fetch("text").start_with?("rigor: note") }
       expect(blocks.size).to eq(1), resp.inspect
       JSON.parse(blocks.first.fetch("text")).fetch("config_warnings")
     end
@@ -577,6 +577,16 @@ RSpec.describe Rigor::MCP::Server do
                                                                                 "col" => 1 } })))
 
         expect(warning_block(resp).map { |w| w["kind"] }).to contain_exactly("unknown_key", "disabled_rule")
+      end
+    end
+
+    it "appends the ADR-126 shape notice as its own block for rigor_type_of" do
+      with_inert_config do |file, _config|
+        resp = tool_call("rigor_type_of", { "file" => file, "line" => 1, "col" => 1 })
+        texts = resp.dig("result", "content").map { |b| b.fetch("text") }
+
+        expect(JSON.parse(texts.first)).to be_a(Hash)
+        expect(texts.grep(/\Arigor: note .*type-of --format=json.*results/).size).to eq(1)
       end
     end
 

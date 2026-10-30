@@ -16,6 +16,7 @@ require_relative "options"
 require_relative "command"
 require_relative "../project_environment"
 require_relative "../rooted_glob"
+require_relative "json_document"
 
 module Rigor
   class CLI
@@ -418,15 +419,15 @@ module Rigor
       end
 
       def json(report, options, supply)
-        JSON.pretty_generate(
-          declared: report.declared, reachable: report.reachable, roots: report.roots, edges: report.edges,
-          namespaces: report.namespaces,
-          plugin_roots: supply.supplied, plugin_roots_unmatched: supply.unmatched,
-          candidates: rows_json(report.candidates, options), test_only: rows_json(report.test_only, options),
-          undecidable: limited(report.undecidable, options).map do |u|
-            { name: u.fqn, path: u.path, line: u.line, reason: u.reason }
-          end
-        )
+        JSON.pretty_generate(JsonDocument.stamp({
+                                                  declared: report.declared, reachable: report.reachable, roots: report.roots, edges: report.edges,
+                                                  namespaces: report.namespaces,
+                                                  plugin_roots: supply.supplied, plugin_roots_unmatched: supply.unmatched,
+                                                  candidates: rows_json(report.candidates, options), test_only: rows_json(report.test_only, options),
+                                                  undecidable: limited(report.undecidable, options).map do |u|
+                                                    { name: u.fqn, path: u.path, line: u.line, reason: u.reason }
+                                                  end
+                                                }))
       end
 
       def rows_json(rows, options)

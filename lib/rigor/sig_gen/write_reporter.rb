@@ -2,6 +2,8 @@
 
 require "json"
 
+require_relative "../cli/json_document"
+
 require_relative "classification"
 
 module Rigor
@@ -36,9 +38,9 @@ module Rigor
         stale = self.class.out_of_date(results)
         case format
         when "json"
-          @out.puts(JSON.pretty_generate({ up_to_date: stale.empty? && refused.empty?,
-                                           results: stale.map { |r| check_entry(r) },
-                                           refused: refused.map(&:to_h) }))
+          @out.puts(JSON.pretty_generate(CLI::JsonDocument.stamp({ up_to_date: stale.empty? && refused.empty?,
+                                                                   results: stale.map { |r| check_entry(r) },
+                                                                   refused: refused.map(&:to_h) })))
         when "text" then render_check_text(stale, refused)
         else raise ArgumentError, "unsupported format: #{format}"
         end
@@ -196,7 +198,7 @@ module Rigor
       def render_write_json(results, refused)
         payload = { results: results.map(&:to_h) }
         payload[:refused] = refused.map(&:to_h) unless refused.empty?
-        @out.puts(JSON.pretty_generate(payload))
+        @out.puts(JSON.pretty_generate(CLI::JsonDocument.stamp(payload)))
       end
     end
   end

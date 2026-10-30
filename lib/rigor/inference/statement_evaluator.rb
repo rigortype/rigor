@@ -542,8 +542,8 @@ module Rigor
         callees = argument_mutating_callees(call_node)
         return NO_ARGUMENT_READS if callees.empty?
 
-        reads = callees.flat_map do |def_node, offset|
-          arguments_for_slots(call_node, callee_content_mutated_parameters(def_node), offset)
+        reads = callees.flat_map do |def_node, offset, owner|
+          arguments_for_slots(call_node, census_of(owner, :callee_content_mutated_parameters, def_node), offset)
         end
         callees.size == 1 ? reads : reads.uniq
       end
@@ -559,11 +559,13 @@ module Rigor
         resolve_self_callees(call_node)
       end
 
-      # Issue #2510 — the `[def, 0]` pair a `Const.name(local)` call resolves to when `Const` types as a project class
-      # object whose singleton table has `name` (`def self.name`, `class << self`, `module_function`): the same census
-      # a self-call reads then floors the passed local, so `Opts.add_format(opts, options)` handing `options` to a block
-      # that writes it leaves the literal behind. Any other explicit receiver resolves to nothing; `send` hand-offs are
-      # not followed through a constant receiver.
+      # Issue #2510 — the `[def, 0, owner]` triple a `Const.name(local)` call resolves to when `Const` (a bare constant
+      # or any constant path) types as a project class object whose singleton table has `name` (`def self.name`,
+      # `class << self`, `module_function`): the same census a self-call reads then floors the passed local, so
+      # `Opts.add_format(opts, options)` handing `options` to a block that writes it leaves the literal behind. `owner`
+      # is an evaluator whose `self` is that class object: the callee's own hand-offs (`really(parser, options)`)
+      # resolve in the class that defines it, not in the caller's, and its census memo is keyed by that class. Any
+      # other explicit receiver resolves to nothing; `send` hand-offs are not followed through a constant receiver.
       def constant_receiver_callees(call_node)
         receiver = call_node.receiver
         return NO_CALLEES unless receiver.is_a?(Prism::ConstantReadNode) || receiver.is_a?(Prism::ConstantPathNode)
@@ -573,8 +575,16 @@ module Rigor
         return NO_CALLEES unless receiver_type.is_a?(Type::Singleton)
 
         found = scope.singleton_def_for(receiver_type.class_name, call_node.name)
-        found.nil? ? NO_CALLEES : [[found, 0]]
+        return NO_CALLEES if found.nil?
+
+        owners = (@constant_owner_evaluators ||= {})
+        owner = (owners[receiver_type.class_name] ||= self.class.new(scope: scope.with_self_type(receiver_type)))
+        [[found, 0, owner]]
       end
+
+      # `census` (a `callee_*_mutated_parameters` name) of `def_node`, read through `owner`, the evaluator the callee's
+      # hand-offs resolve in, or this one when the callee is a self-call's.
+      def census_of(owner, census, def_node) = (owner || self).__send__(census, def_node)
 
       # The local-variable reads `call_node` passes to the parameters of `mutated`, a `{ name => slot }` census, the
       # first `offset` arguments not being the callee's (the `:name` of a `send` hand-off, {#resolve_self_callees}).
@@ -4661,23 +4671,26 @@ module Rigor
         return base_scope if callees.empty?
 
         acc = base_scope
-        callees.each do |def_node, offset|
-          acc = floor_arguments(node, callee_content_mutated_parameters(def_node), acc, offset, climbing) do |type|
+        callees.each do |def_node, offset, owner|
+          acc = floor_arguments(node, census_of(owner, :callee_content_mutated_parameters, def_node), acc, offset,
+                                climbing) do |type|
             content_floor_for(type)
           end
         end
         # Each closure below is only worth computing when an argument holds something its floor could widen.
         if floorable_local_argument?(node, acc) { |type| UnknownStoreWidening.callee_floorable?(type) }
-          callees.each do |def_node, offset|
-            acc = floor_arguments(node, callee_block_mutated_parameters(def_node), acc, offset, climbing) do |type|
+          callees.each do |def_node, offset, owner|
+            acc = floor_arguments(node, census_of(owner, :callee_block_mutated_parameters, def_node), acc, offset,
+                                  climbing) do |type|
               UnknownStoreWidening.callee_block_floor(type)
             end
           end
         end
         return acc unless floorable_local_argument?(node, acc) { |type| SetMutation.carrier_in?(type) }
 
-        callees.each do |def_node, offset|
-          acc = floor_arguments(node, callee_set_mutated_parameters(def_node), acc, offset, climbing) do |type|
+        callees.each do |def_node, offset, owner|
+          acc = floor_arguments(node, census_of(owner, :callee_set_mutated_parameters, def_node), acc, offset,
+                                climbing) do |type|
             UnknownStoreWidening.callee_set_floor(type)
           end
         end

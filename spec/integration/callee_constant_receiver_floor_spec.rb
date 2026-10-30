@@ -6,25 +6,23 @@
 require "spec_helper"
 
 RSpec.describe "a Const.method call floors the local argument its singleton callee mutates (#2510)", type: :runner do
-  def errors(source)
-    analyze(source).diagnostics.reject { |d| d.severity == :info }.map { |d| [d.line, d.qualified_rule] }
+  def rules(source)
+    analyze(source).diagnostics.reject { |d| d.severity == :info }.map(&:qualified_rule)
   end
 
-  def program(callee_body, call)
+  let(:always) { ["flow.always-truthy-condition"] }
+  let(:writer) { 'parser.on("--format=FORMAT") { |value| options[:format] = value }' }
+  let(:reader) { "puts(options.to_s)" }
+
+  # `module_function` defs, the call inside the block of `OptionParser.new` (the issue's shape) unless `call` says so.
+  def module_program(defs, call, namespace: nil)
+    wrap = ->(body) { namespace ? "module #{namespace}\n#{body}\nend" : body }
     <<~RUBY
-      module Opts
-        module_function
-
-        def add_format(parser, options)
-          #{callee_body}
-        end
-      end
-
+      #{wrap.call("module Opts\n  module_function\n#{defs}\nend")}
       class Help
         def run(argv)
           options = { format: "text" }
-          parser = OptionParser.new { |opts| #{call} }
-          parser.parse!(argv)
+          #{call}
           if options[:format] == "json"
             puts "{}"
           else
@@ -35,25 +33,104 @@ RSpec.describe "a Const.method call floors the local argument its singleton call
     RUBY
   end
 
-  let(:capturing) { 'parser.on("--format=FORMAT") { |value| options[:format] = value }' }
-  let(:pure) { "parser.on(\"--format=FORMAT\") { |value| puts value + options.to_s }" }
+  def in_block(call) = "OptionParser.new { |opts| #{call} }.parse!(argv)"
 
-  it "is silent when the callee stores into the hash from a block" do
-    expect(errors(program(capturing, "Opts.add_format(opts, options)"))).to eq([])
+  describe "silent where the singleton callee writes the hash" do
+    it "inside the block of OptionParser.new (the issue)" do
+      defs = "def add_format(parser, options) = #{writer}"
+      expect(rules(module_program(defs, in_block("Opts.add_format(opts, options)")))).to eq([])
+    end
+
+    it "as a plain statement" do
+      defs = "def add_format(options) = (options[:format] = 'x')"
+      expect(rules(module_program(defs, "Opts.add_format(options)"))).to eq([])
+    end
+
+    it "through a ::-rooted constant" do
+      defs = "def add_format(parser, options) = #{writer}"
+      expect(rules(module_program(defs, in_block("::Opts.add_format(opts, options)")))).to eq([])
+    end
+
+    it "through a nested constant path" do
+      defs = "  def add_format(options) = (options[:format] = 'x')"
+      expect(rules(module_program(defs, "A::Opts.add_format(options)", namespace: "A"))).to eq([])
+    end
+
+    it "through a keyword argument" do
+      defs = "def add_format(options:) = (options[:format] = 'x')"
+      expect(rules(module_program(defs, "Opts.add_format(options: options)"))).to eq([])
+    end
+
+    it "for a def self. method" do
+      source = <<~RUBY
+        module Opts
+          def self.add_format(options) = (options[:format] = "x")
+        end
+        options = { format: "text" }
+        Opts.add_format(options)
+        options[:format] == "json" ? 1 : 2
+      RUBY
+      expect(rules(source)).to eq([])
+    end
+
+    it "for a method of class << self" do
+      source = <<~RUBY
+        module Opts
+          class << self
+            def add_format(options) = (options[:format] = "x")
+          end
+        end
+        options = { format: "text" }
+        Opts.add_format(options)
+        options[:format] == "json" ? 1 : 2
+      RUBY
+      expect(rules(source)).to eq([])
+    end
+
+    it "when the module function delegates to an internal helper that writes it" do
+      defs = "def add_format(parser, options) = really(parser, options)\n" \
+             "def really(parser, options) = #{writer}"
+      expect(rules(module_program(defs, in_block("Opts.add_format(opts, options)")))).to eq([])
+    end
+
+    it "when the caller's same-named method is pure" do
+      defs = "def add_format(parser, options) = really(parser, options)\n" \
+             "def really(parser, options) = #{writer}"
+      source = module_program(defs, in_block("Opts.add_format(opts, options)"))
+                 .sub("class Help\n", "class Help\n  def really(parser, options) = nil\n")
+      expect(rules(source)).to eq([])
+    end
   end
 
-  it "is silent through a nested constant path" do
-    source = program(capturing, "::Opts.add_format(opts, options)")
-    expect(errors(source)).to eq([])
-  end
+  describe "keeps the literal where the callee does not write it" do
+    it "when the callee only reads the hash" do
+      defs = "def add_format(parser, options) = #{reader}"
+      expect(rules(module_program(defs, in_block("Opts.add_format(opts, options)")))).to eq(always)
+    end
 
-  it "keeps the literal when the callee never writes the hash" do
-    expect(errors(program(pure, "Opts.add_format(opts, options)")).map(&:last))
-      .to eq(["flow.always-truthy-condition"])
-  end
+    it "when the hash is not passed" do
+      defs = "def add_format(parser, options) = #{writer}"
+      expect(rules(module_program(defs, in_block("Opts.add_format(opts, {})")))).to eq(always)
+    end
 
-  it "keeps the literal when the hash is not passed" do
-    expect(errors(program(capturing, "Opts.add_format(opts, {})")).map(&:last))
-      .to eq(["flow.always-truthy-condition"])
+    it "when only an instance def (no module_function) has the name" do
+      source = <<~RUBY
+        module Opts
+          def add_format(options) = (options[:format] = "x")
+        end
+        options = { format: "text" }
+        Opts.add_format(options)
+        options[:format] == "json" ? 1 : 2
+      RUBY
+      expect(rules(source)).to eq(always)
+    end
+
+    it "when the helper is pure in the callee's own module but writes in the caller's class" do
+      defs = "def add_format(parser, options) = really(parser, options)\n" \
+             "def really(parser, options) = #{reader}"
+      source = module_program(defs, in_block("Opts.add_format(opts, options)"))
+                 .sub("class Help\n", "class Help\n  def really(parser, options) = #{writer}\n")
+      expect(rules(source)).to eq(always)
+    end
   end
 end

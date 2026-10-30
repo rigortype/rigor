@@ -15,6 +15,11 @@ module Rigor
 
       # @return CLI exit status.
       def run
+        if @argv.intersect?(%w[-h --help])
+          @out.puts(USAGE)
+          return 0
+        end
+
         @out.puts("rigor upgrade: No migration target available yet (ADR-50 WD7, queued).")
         @out.puts("Current version: #{Rigor::VERSION}")
         0

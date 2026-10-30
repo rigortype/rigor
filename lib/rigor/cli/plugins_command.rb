@@ -80,6 +80,20 @@ module Rigor
         0
       end
 
+      # The parser this command parses with, built without parsing anything: the catalogue reads the
+      # flags and formats from it (ADR-126 WD3). `options` is only written by the switches' blocks.
+      def option_parser(options = {})
+        OptionParser.new do |opts|
+          opts.banner = USAGE
+          Options.add_config(opts, options)
+          Options.add_format(opts, options, "Output format: text (default) or json")
+          opts.on("--strict", "Exit 1 if any plugin failed to load (CI gate)") { options[:strict] = true }
+          opts.on("--capabilities", "Emit the per-plugin extension-protocol catalogue (ADR-37)") do
+            options[:capabilities] = true
+          end
+        end
+      end
+
       private
 
       # Picks the renderer view. `--capabilities` switches to the focused extension-protocol catalogue (ADR-37 §
@@ -97,23 +111,8 @@ module Rigor
 
       def parse_options
         options = { config: nil, format: "text", strict: false, capabilities: false }
-        OptionParser.new do |opts|
-          opts.banner = USAGE
-          Options.add_config(opts, options)
-          opts.on("--format=FORMAT", "Output format: text (default) or json") { |v| options[:format] = v }
-          opts.on("--strict", "Exit 1 if any plugin failed to load (CI gate)") { options[:strict] = true }
-          opts.on("--capabilities", "Emit the per-plugin extension-protocol catalogue (ADR-37)") do
-            options[:capabilities] = true
-          end
-        end.parse!(@argv)
-        validate!(options)
+        option_parser(options).parse!(@argv)
         options
-      end
-
-      def validate!(options)
-        return if %w[text json].include?(options.fetch(:format))
-
-        raise OptionParser::InvalidArgument, "unsupported format: #{options.fetch(:format)}"
       end
 
       # Runs the plugin loader against the project configuration and returns a row per declared plugin entry. Each row

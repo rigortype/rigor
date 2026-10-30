@@ -67,6 +67,23 @@ module Rigor
         0
       end
 
+      # The parser this command parses with, built without parsing anything: the catalogue reads the
+      # flags and formats from it (ADR-126 WD3). `options` is only written by the switches' blocks.
+      def option_parser(options = {})
+        OptionParser.new do |opts|
+          opts.banner = USAGE
+          Options.add_config(opts, options)
+          Options.add_format(opts, options, "Output format: text (default) or json")
+          opts.on("--entry-point=GLOB", "Treat declarations in files matching GLOB as roots (repeatable)") do |v|
+            options[:entry_points] << v
+          end
+          opts.on("--limit=N", Integer, "Print at most N candidates (default: all)") { |v| options[:limit] = v }
+          # WD5 — refuse rather than silently absorb. A reachability answer is sound only over a full run, and a
+          # user who asked for the fast path must not silently get the slow one.
+          opts.on("--incremental", "(unsupported)") { options[:incremental] = true }
+        end
+      end
+
       private
 
       # A scan's role and the spelling it records depend on the root and the working directory (#1760): a role
@@ -120,20 +137,8 @@ module Rigor
 
       def parse_options
         options = { config: nil, format: "text", entry_points: [], limit: nil }
-        parser = OptionParser.new do |opts|
-          opts.banner = USAGE
-          Options.add_config(opts, options)
-          Options.add_format(opts, options, "Output format: text (default) or json")
-          opts.on("--entry-point=GLOB", "Treat declarations in files matching GLOB as roots (repeatable)") do |v|
-            options[:entry_points] << v
-          end
-          opts.on("--limit=N", Integer, "Print at most N candidates (default: all)") { |v| options[:limit] = v }
-          # WD5 — refuse rather than silently absorb. A reachability answer is sound only over a full run, and a
-          # user who asked for the fast path must not silently get the slow one.
-          opts.on("--incremental", "(unsupported)") { options[:incremental] = true }
-        end
-        parser.parse!(@argv)
-        return usage_error(parser) if options[:incremental]
+        option_parser(options).parse!(@argv)
+        return usage_error if options[:incremental]
 
         options
       rescue OptionParser::ParseError => e
@@ -141,7 +146,7 @@ module Rigor
         :usage_error
       end
 
-      def usage_error(_parser)
+      def usage_error
         @err.puts("rigor unused does not support --incremental: reachability is only sound over a whole-project " \
                   "run, so an incremental pass would report constants as unused merely because the files that " \
                   "reference them were served from cache. Re-run without --incremental.")

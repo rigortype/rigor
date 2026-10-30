@@ -61,19 +61,13 @@ module Rigor
         execute(file, options)
       end
 
-      private
-
-      def parse_options
-        # Default: colour a tty, unless `NO_COLOR` opts out. An explicit `--color` / `--no-color` overrides both.
-        options = { config: nil, color: @out.tty? && !no_color_env?, bat: nil, format: :text }
-
-        parser = OptionParser.new do |opts|
+      # The parser this command parses with, built without parsing anything: the catalogue reads the
+      # flags and formats from it (ADR-126 WD3). `options` is only written by the switches' blocks.
+      def option_parser(options = {})
+        OptionParser.new do |opts|
           opts.banner = USAGE
           Options.add_config(opts, options)
-          opts.on("--format=FORMAT", %w[text json],
-                  "Output format: text (default) or json (a { line => type } map)") do |value|
-            options[:format] = value.to_sym
-          end
+          Options.add_format(opts, options, "Output format: text (default) or json (a { line => type } map)")
           opts.on("--[no-]color",
                   "Force or disable ANSI colour (default: auto-detect a tty; honours NO_COLOR)") do |value|
             options[:color] = value
@@ -83,7 +77,15 @@ module Rigor
             options[:bat] = value
           end
         end
-        parser.parse!(@argv)
+      end
+
+      private
+
+      def parse_options
+        # Default: colour a tty, unless `NO_COLOR` opts out. An explicit `--color` / `--no-color` overrides both.
+        options = { config: nil, color: @out.tty? && !no_color_env?, bat: nil, format: "text" }
+
+        option_parser(options).parse!(@argv)
 
         options
       end
@@ -120,7 +122,7 @@ module Rigor
         line_types = LineTypeCollector.new(scope_index).collect(parse_result.value)
 
         case options.fetch(:format)
-        when :json
+        when "json"
           emit_json(line_types)
         else
           @out.puts(render(annotate(source, line_types), color: options.fetch(:color), bat: options.fetch(:bat)))

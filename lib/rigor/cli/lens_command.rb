@@ -15,7 +15,6 @@ module Rigor
     # computes them (ADR-113; output contract docs/internal-spec/lens.md). Experimental until `lens/v1`.
     class LensCommand < Command
       USAGE = "Usage: rigor lens [--format=text|json] [--config=PATH] [--workers=N] FILE..."
-      FORMATS = %w[text json].freeze
 
       def run
         options = parse_options
@@ -35,17 +34,22 @@ module Rigor
         outcome.targets.any? { |target| target.status == "ok" } ? 0 : 1
       end
 
+      # The parser this command parses with, built without parsing anything: the catalogue reads the
+      # flags and formats from it (ADR-126 WD3). `options` is only written by the switches' blocks.
+      def option_parser(options = {})
+        OptionParser.new do |opts|
+          opts.banner = USAGE
+          Options.add_format(opts, options, "Output format: text (default) or json")
+          opts.on("--workers=N", Integer, "Worker processes for a cold run") { |value| options[:workers] = value }
+          Options.add_config(opts, options)
+        end
+      end
+
       private
 
       def parse_options
         options = { format: "text", config: nil, workers: nil }
-        OptionParser.new do |opts|
-          opts.banner = USAGE
-          opts.on("--format=FORMAT", "Output format: text (default) or json") { |value| options[:format] = value }
-          opts.on("--workers=N", Integer, "Worker processes for a cold run") { |value| options[:workers] = value }
-          Options.add_config(opts, options)
-        end.parse!(@argv)
-        return usage_error("--format must be text or json") unless FORMATS.include?(options[:format])
+        option_parser(options).parse!(@argv)
         return usage_error("no FILE given") if @argv.empty?
 
         options

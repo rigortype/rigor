@@ -77,6 +77,11 @@ module Rigor
         determine_exit(report, options)
       end
 
+      # The parser this command parses with, built without parsing anything (the catalogue reads it, ADR-126 WD3).
+      def option_parser(options = {})
+        OptionParser.new { |opts| define_options(opts, options) }
+      end
+
       private
 
       # Like `rigor check`, fall back to the configured `paths:` when no path is given. The mutation mode keeps its own
@@ -90,7 +95,7 @@ module Rigor
         options = { format: "text", threshold: nil, config: nil, protection: false, mutation: false,
                     with_tests: false, test_command: DEFAULT_TEST_COMMAND, include_dynamic: false,
                     limit: nil, seed: 1, workers: nil, no_cache: false }
-        OptionParser.new { |opts| define_options(opts, options) }.parse!(@argv)
+        option_parser(options).parse!(@argv)
         options
       end
 

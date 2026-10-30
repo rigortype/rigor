@@ -29,7 +29,7 @@ module Rigor
     # Encapsulating the command in its own class keeps `Rigor::CLI` focused on dispatching and lets us evolve the
     # type-of UX (extra flags, watch mode, streaming output) without bloating the CLI shell. Output formatting is
     # delegated to {TypeOfRenderer}.
-    class TypeOfCommand < Command
+    class TypeOfCommand < Command # rubocop:disable Metrics/ClassLength
       include TypeOfTemplateProbe
 
       USAGE = "Usage: rigor type-of [options] FILE:LINE[:COL] [FILE:LINE[:COL] ...]"
@@ -65,19 +65,24 @@ module Rigor
         execute(targets: targets, options: options, buffer: buffer)
       end
 
-      private
-
-      def parse_options
-        options = { format: "text", trace: false, config: nil, tmp_file: nil, instead_of: nil }
-
-        parser = OptionParser.new do |opts|
+      # The parser this command parses with, built without parsing anything: the catalogue reads the
+      # flags and formats from it (ADR-126 WD3). `options` is only written by the switches' blocks.
+      def option_parser(options = {})
+        OptionParser.new do |opts|
           opts.banner = USAGE
           Options.add_format(opts, options, "Output format: text or json")
           opts.on("--trace", "Record fail-soft fallbacks via FallbackTracer") { options[:trace] = true }
           Options.add_config(opts, options)
           Options.add_editor_mode(opts, options)
         end
-        parser.parse!(@argv)
+      end
+
+      private
+
+      def parse_options
+        options = { format: "text", trace: false, config: nil, tmp_file: nil, instead_of: nil }
+
+        option_parser(options).parse!(@argv)
 
         options
       end

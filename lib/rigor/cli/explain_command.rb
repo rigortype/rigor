@@ -46,16 +46,20 @@ module Rigor
         0
       end
 
+      # The parser this command parses with, built without parsing anything: the catalogue reads the
+      # flags and formats from it (ADR-126 WD3). `options` is only written by the switches' blocks.
+      def option_parser(options = {})
+        OptionParser.new do |opt|
+          opt.banner = USAGE
+          Options.add_format(opt, options, "Output format (text | json). Default: text.")
+        end
+      end
+
       private
 
       def parse_options
         options = { format: "text" }
-        OptionParser.new do |opt|
-          opt.banner = USAGE
-          opt.on("--format=FORMAT", %w[text json], "Output format (text | json). Default: text.") do |fmt|
-            options[:format] = fmt
-          end
-        end.parse!(@argv)
+        option_parser(options).parse!(@argv)
         options
       end
 

@@ -43,11 +43,10 @@ module Rigor
         execute(file: file, options: options)
       end
 
-      private
-
-      def parse_options
-        options = { format: "text", delay: nil, verbose: false, line: nil, config: nil }
-        parser = OptionParser.new do |opts|
+      # The parser this command parses with, built without parsing anything: the catalogue reads the
+      # flags and formats from it (ADR-126 WD3). `options` is only written by the switches' blocks.
+      def option_parser(options = {})
+        OptionParser.new do |opts|
           opts.banner = USAGE
           Options.add_format(opts, options, "Output format: text (animation) or json (raw event stream)")
           opts.on("--delay=SECONDS", Float,
@@ -60,7 +59,13 @@ module Rigor
           opts.on("--verbose", "Include every expression enter/result frame") { options[:verbose] = true }
           Options.add_config(opts, options)
         end
-        parser.parse!(@argv)
+      end
+
+      private
+
+      def parse_options
+        options = { format: "text", delay: nil, verbose: false, line: nil, config: nil }
+        option_parser(options).parse!(@argv)
         options
       end
 

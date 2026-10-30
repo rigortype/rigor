@@ -16,6 +16,13 @@ module Rigor
     module Options
       module_function
 
+      # The formats `parser` accepts for `--format`, or nil when {.add_format} did not define the switch. A
+      # block-validated switch carries no list of its own, so {.add_format} leaves it on the parser for the CLI
+      # catalogue (ADR-126 WD3) to read.
+      def accepted_formats(parser)
+        parser.instance_variable_get(:@rigor_accepted_formats)
+      end
+
       # Defines the standard `--config=PATH` flag on `parser`, writing the path into `options[:config]`. Used by every
       # subcommand that loads a `.rigor.yml`; the few whose `--config` help text is intentionally bespoke (`diff`,
       # `mcp`, `show-bleedingedge`) keep their own `parser.on` and call {.config_path} for the same check.
@@ -31,6 +38,7 @@ module Rigor
       # OptionParser enum would also complete a prefix (`--format=j`), which then turns ambiguous the day a second
       # format shares it. The renderers' own "unsupported format" branches remain as a guard against internal drift.
       def add_format(parser, options, description, formats: %w[text json])
+        parser.instance_variable_set(:@rigor_accepted_formats, formats.dup.freeze)
         parser.on("--format=FORMAT", description) do |value|
           raise OptionParser::InvalidArgument, value unless formats.include?(value)
 

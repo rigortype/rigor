@@ -38,13 +38,10 @@ module Rigor
         determine_exit(report, options)
       end
 
-      private
-
-      def parse_options
-        options = { format: "text", limit: 10, show_recognized: false, threshold: nil,
-                    config: nil }
-
-        parser = OptionParser.new do |opts|
+      # The parser this command parses with, built without parsing anything: the catalogue reads the
+      # flags and formats from it (ADR-126 WD3). `options` is only written by the switches' blocks.
+      def option_parser(options = {})
+        OptionParser.new do |opts|
           opts.banner = USAGE
           Options.add_format(opts, options, "Output format: text or json")
           Options.add_config(opts, options)
@@ -58,7 +55,15 @@ module Rigor
             options[:threshold] = value
           end
         end
-        parser.parse!(@argv)
+      end
+
+      private
+
+      def parse_options
+        options = { format: "text", limit: 10, show_recognized: false, threshold: nil,
+                    config: nil }
+
+        option_parser(options).parse!(@argv)
 
         options
       end

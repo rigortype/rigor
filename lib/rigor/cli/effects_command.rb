@@ -50,6 +50,38 @@ module Rigor
         run_report
       end
 
+      # The parser this command parses with, built without parsing anything: the catalogue reads the
+      # flags and formats from it (ADR-126 WD3). `options` is only written by the switches' blocks.
+      def option_parser(options = {})
+        OptionParser.new do |opts|
+          opts.banner = USAGE
+          Options.add_config(opts, options)
+          Options.add_format(opts, options, "Output format: text (default) or json")
+          opts.on("--full", "List every method, including the ones with nothing to say") do
+            options[:full] = true
+          end
+          opts.on("--label=LABEL", "Only methods carrying LABEL (or a label under it), in either lane") do |value|
+            options[:label].concat(value.split(",").map(&:strip).reject(&:empty?))
+          end
+          opts.on("--pure", "Only methods proven to do nothing beyond mutate.local — the %a{pure} set") do
+            options[:pure] = true
+          end
+          opts.on("--limit=N", Integer, "Print at most N methods") { |value| options[:limit] = value }
+          opts.on("--why", "Expand each method's unresolved reasons and declared-lane sources") do
+            options[:why] = true
+          end
+          opts.on("--list-labels", "Print the effect vocabulary this project can name, and exit") do
+            options[:list_labels] = true
+          end
+          # Accepted here and deliberately inert, exactly as it is on `update`: the report is an
+          # observation, and observations are undischarged. Only a JUDGMENT reads `effects.tolerated:` —
+          # `rigor effects check` / `diff`, and `rigor check`'s envelope contract.
+          opts.on("--no-tolerated-effects", "Judge as if effects.tolerated: were empty (inert on the report)") do
+            options[:no_tolerated] = true
+          end
+        end
+      end
+
       private
 
       def run_verb(verb)
@@ -91,8 +123,6 @@ module Rigor
 
       def run_report
         options = parse_options
-        return usage_error("unsupported format: #{options.fetch(:format)}") unless FORMATS.include?(options[:format])
-
         configuration = Configuration.load(options.fetch(:config)).with_effects_enabled
         return list_labels(configuration) if options.fetch(:list_labels)
 
@@ -131,46 +161,11 @@ module Rigor
                   "label is the one the whole-project run reports")
       end
 
-      FORMATS = %w[text json].freeze
-      private_constant :FORMATS
-
       def parse_options
         options = { config: nil, format: "text", full: false, no_tolerated: false, label: [], pure: false,
                     limit: nil, why: false, list_labels: false }
-        OptionParser.new do |opts|
-          opts.banner = USAGE
-          Options.add_config(opts, options)
-          opts.on("--format=FORMAT", "Output format: text (default) or json") { |value| options[:format] = value }
-          opts.on("--full", "List every method, including the ones with nothing to say") do
-            options[:full] = true
-          end
-          opts.on("--label=LABEL", "Only methods carrying LABEL (or a label under it), in either lane") do |value|
-            options[:label].concat(value.split(",").map(&:strip).reject(&:empty?))
-          end
-          opts.on("--pure", "Only methods proven to do nothing beyond mutate.local — the %a{pure} set") do
-            options[:pure] = true
-          end
-          opts.on("--limit=N", Integer, "Print at most N methods") { |value| options[:limit] = value }
-          opts.on("--why", "Expand each method's unresolved reasons and declared-lane sources") do
-            options[:why] = true
-          end
-          opts.on("--list-labels", "Print the effect vocabulary this project can name, and exit") do
-            options[:list_labels] = true
-          end
-          # Accepted here and deliberately inert, exactly as it is on `update`: the report is an
-          # observation, and observations are undischarged. Only a JUDGMENT reads `effects.tolerated:` —
-          # `rigor effects check` / `diff`, and `rigor check`'s envelope contract.
-          opts.on("--no-tolerated-effects", "Judge as if effects.tolerated: were empty (inert on the report)") do
-            options[:no_tolerated] = true
-          end
-        end.parse!(@argv)
+        option_parser(options).parse!(@argv)
         options
-      end
-
-      def usage_error(message)
-        @err.puts(message)
-        @err.puts(USAGE)
-        CLI::EXIT_USAGE
       end
 
       # Sequential and cache-backed, through the same ADR-45 whole-run result cache `rigor check` uses:

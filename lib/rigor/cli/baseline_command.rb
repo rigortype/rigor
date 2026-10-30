@@ -50,7 +50,75 @@ module Rigor
         EXIT_USAGE
       end
 
+      # The parser of `subcommand`, built without parsing anything (the catalogue reads it, ADR-126 WD3).
+      def option_parser(subcommand, options = {})
+        case subcommand
+        when "generate", "regenerate" then generate_parser(subcommand, options)
+        when "dump" then dump_parser(options)
+        when "drift" then drift_parser(options)
+        when "prune" then prune_parser(options)
+        else raise ArgumentError, "unknown baseline subcommand: #{subcommand.inspect}"
+        end
+      end
+
       private
+
+      def generate_parser(subcommand, options)
+        OptionParser.new do |opts|
+          opts.banner = "Usage: rigor baseline #{subcommand} [options]"
+          Options.add_config(opts, options)
+          opts.on("--output=PATH", "Write baseline to PATH (default: #{DEFAULT_BASELINE_PATH})") do |v|
+            options[:output] = v
+          end
+          opts.on("--match-mode=MODE", %i[rule message],
+                  "Row form: rule (default) or message") do |v|
+            options[:match_mode] = v
+          end
+          # `regenerate` always overwrites — no `--force` to offer.
+          if subcommand == "generate"
+            opts.on("--force", "Overwrite an existing baseline file") { options[:force] = true }
+          end
+        end
+      end
+
+      def dump_parser(options)
+        OptionParser.new do |opts|
+          opts.banner = "Usage: rigor baseline dump [options]"
+          opts.on("--baseline=PATH", "Path to the baseline file (default: #{DEFAULT_BASELINE_PATH})") do |v|
+            options[:baseline] = v
+          end
+          opts.on("--format=FORMAT", %i[text json], "Output format: text (default) or json") do |v|
+            options[:format] = v
+          end
+          opts.on("--rule=RULE", "Filter rows by exact rule id") { |v| options[:rule] = v }
+          opts.on("--file=GLOB", "Filter rows by File.fnmatch? glob") { |v| options[:file] = v }
+        end
+      end
+
+      def drift_parser(options)
+        OptionParser.new do |opts|
+          opts.banner = "Usage: rigor baseline drift [options]"
+          Options.add_config(opts, options)
+          opts.on("--baseline=PATH", "Path to the baseline file (default: #{DEFAULT_BASELINE_PATH})") do |v|
+            options[:baseline] = v
+          end
+          opts.on("--only=STATUS", %i[within over cleared reducible],
+                  "Show only buckets with the given status (within|over|cleared|reducible)") do |v|
+            options[:only] = v
+          end
+        end
+      end
+
+      def prune_parser(options)
+        OptionParser.new do |opts|
+          opts.banner = "Usage: rigor baseline prune [options]"
+          Options.add_config(opts, options)
+          opts.on("--baseline=PATH", "Path to the baseline file (default: #{DEFAULT_BASELINE_PATH})") do |v|
+            options[:baseline] = v
+          end
+          opts.on("--dry-run", "Show what would be dropped without writing the file") { options[:dry_run] = true }
+        end
+      end
 
       def run_generate
         options = parse_generate_options
@@ -140,22 +208,7 @@ module Rigor
           match_mode: :rule,
           force: false
         }
-        parser = OptionParser.new do |opts|
-          opts.banner = "Usage: rigor baseline #{subcommand} [options]"
-          Options.add_config(opts, options)
-          opts.on("--output=PATH", "Write baseline to PATH (default: #{DEFAULT_BASELINE_PATH})") do |v|
-            options[:output] = v
-          end
-          opts.on("--match-mode=MODE", %i[rule message],
-                  "Row form: rule (default) or message") do |v|
-            options[:match_mode] = v
-          end
-          # `regenerate` always overwrites — no `--force` to offer.
-          if subcommand == "generate"
-            opts.on("--force", "Overwrite an existing baseline file") { options[:force] = true }
-          end
-        end
-        parser.parse!(@argv)
+        generate_parser(subcommand, options).parse!(@argv)
         options
       end
 
@@ -195,18 +248,7 @@ module Rigor
 
       def parse_dump_options
         options = { baseline: DEFAULT_BASELINE_PATH, format: :text, rule: nil, file: nil }
-        parser = OptionParser.new do |opts|
-          opts.banner = "Usage: rigor baseline dump [options]"
-          opts.on("--baseline=PATH", "Path to the baseline file (default: #{DEFAULT_BASELINE_PATH})") do |v|
-            options[:baseline] = v
-          end
-          opts.on("--format=FORMAT", %i[text json], "Output format: text (default) or json") do |v|
-            options[:format] = v
-          end
-          opts.on("--rule=RULE", "Filter rows by exact rule id") { |v| options[:rule] = v }
-          opts.on("--file=GLOB", "Filter rows by File.fnmatch? glob") { |v| options[:file] = v }
-        end
-        parser.parse!(@argv)
+        dump_parser(options).parse!(@argv)
         options
       end
 
@@ -287,18 +329,7 @@ module Rigor
           baseline: DEFAULT_BASELINE_PATH,
           only: nil
         }
-        parser = OptionParser.new do |opts|
-          opts.banner = "Usage: rigor baseline drift [options]"
-          Options.add_config(opts, options)
-          opts.on("--baseline=PATH", "Path to the baseline file (default: #{DEFAULT_BASELINE_PATH})") do |v|
-            options[:baseline] = v
-          end
-          opts.on("--only=STATUS", %i[within over cleared reducible],
-                  "Show only buckets with the given status (within|over|cleared|reducible)") do |v|
-            options[:only] = v
-          end
-        end
-        parser.parse!(@argv)
+        drift_parser(options).parse!(@argv)
         options
       end
 
@@ -361,15 +392,7 @@ module Rigor
           baseline: DEFAULT_BASELINE_PATH,
           dry_run: false
         }
-        parser = OptionParser.new do |opts|
-          opts.banner = "Usage: rigor baseline prune [options]"
-          Options.add_config(opts, options)
-          opts.on("--baseline=PATH", "Path to the baseline file (default: #{DEFAULT_BASELINE_PATH})") do |v|
-            options[:baseline] = v
-          end
-          opts.on("--dry-run", "Show what would be dropped without writing the file") { options[:dry_run] = true }
-        end
-        parser.parse!(@argv)
+        prune_parser(options).parse!(@argv)
         options
       end
 

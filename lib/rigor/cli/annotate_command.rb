@@ -61,13 +61,10 @@ module Rigor
         execute(file, options)
       end
 
-      private
-
-      def parse_options
-        # Default: colour a tty, unless `NO_COLOR` opts out. An explicit `--color` / `--no-color` overrides both.
-        options = { config: nil, color: @out.tty? && !no_color_env?, bat: nil, format: :text }
-
-        parser = OptionParser.new do |opts|
+      # The parser this command parses with, built without parsing anything: the catalogue reads the
+      # flags and formats from it (ADR-126 WD3). `options` is only written by the switches' blocks.
+      def option_parser(options = {})
+        OptionParser.new do |opts|
           opts.banner = USAGE
           Options.add_config(opts, options)
           opts.on("--format=FORMAT", %w[text json],
@@ -83,7 +80,15 @@ module Rigor
             options[:bat] = value
           end
         end
-        parser.parse!(@argv)
+      end
+
+      private
+
+      def parse_options
+        # Default: colour a tty, unless `NO_COLOR` opts out. An explicit `--color` / `--no-color` overrides both.
+        options = { config: nil, color: @out.tty? && !no_color_env?, bat: nil, format: :text }
+
+        option_parser(options).parse!(@argv)
 
         options
       end

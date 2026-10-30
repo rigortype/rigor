@@ -353,7 +353,7 @@ RSpec.describe Rigor::CLI::DoctorCommand do
 
       status, _out, err = run(["--format=xml"])
       expect(status).to eq(Rigor::CLI::EXIT_USAGE)
-      expect(err).to include("unsupported format: xml")
+      expect(err).to include("invalid argument: --format=xml")
     end
   end
 

@@ -42,12 +42,10 @@ module Rigor
         0
       end
 
-      private
-
-      def parse_options
-        options = { transport: "stdio", config: nil }
-
-        parser = OptionParser.new do |opts|
+      # The parser this command parses with, built without parsing anything: the catalogue reads the
+      # flags and formats from it (ADR-126 WD3). `options` is only written by the switches' blocks.
+      def option_parser(options = {})
+        OptionParser.new do |opts|
           opts.banner = USAGE
           opts.on("--transport=NAME",
                   "Transport (default: stdio; only stdio is supported in v1)") do |value|
@@ -58,7 +56,14 @@ module Rigor
             options[:config] = Options.config_path(value)
           end
         end
-        parser.parse!(@argv)
+      end
+
+      private
+
+      def parse_options
+        options = { transport: "stdio", config: nil }
+
+        option_parser(options).parse!(@argv)
         options
       rescue OptionParser::ParseError => e
         @err.puts(e.message)

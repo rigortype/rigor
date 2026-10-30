@@ -177,6 +177,11 @@ module Rigor
       # that asks for it (issue #148 / ADR-73 § "Field-trial follow-ups"). It runs a real check and lets the result
       # pick the headline; the un-flagged command is unchanged, down to loading no analysis code at all.
       def run_describe
+        if @argv.intersect?(%w[-h --help])
+          @out.puts("Usage: rigor describe [--deep]")
+          return 0
+        end
+
         deep = !@argv.delete("--deep").nil?
         unknown = @argv.first
         return usage_error("unknown option for `describe`: #{unknown}") unless unknown.nil?

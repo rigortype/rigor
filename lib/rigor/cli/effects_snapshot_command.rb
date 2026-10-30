@@ -38,9 +38,6 @@ module Rigor
     class EffectsSnapshotCommand < Command
       VERBS = %w[update check diff explain].freeze
 
-      FORMATS = %w[text json].freeze
-      private_constant :FORMATS
-
       # The verbs that read a committed record, and so accept `--baseline PATH` —
       # `--baseline <(git show origin/main:.rigor-effects.yml)` is the bot form.
       COMPARING_VERBS = %w[check diff explain].freeze
@@ -54,14 +51,28 @@ module Rigor
       # @return 0 fresh / written, 1 on drift under `check`, 64 on a usage error.
       def run
         options = parse_options
-        return usage_error("unsupported format: #{options.fetch(:format)}") unless
-          FORMATS.include?(options[:format])
         return usage_error("rigor effects #{@verb} takes no paths; it records the configured paths:") unless
           @argv.empty?
 
         execute(options)
       rescue OptionParser::ParseError => e
         usage_error(e.message)
+      end
+
+      # The parser this command parses with, built without parsing anything: the catalogue reads the
+      # flags and formats from it (ADR-126 WD3). `options` is only written by the switches' blocks.
+      def option_parser(options = {})
+        OptionParser.new do |opts|
+          opts.banner = "Usage: rigor effects #{@verb} [options]"
+          Options.add_config(opts, options)
+          add_common_options(opts, options)
+          add_comparison_options(opts, options) if COMPARING_VERBS.include?(@verb)
+          if @verb == "explain"
+            opts.on("--symbol=KEY", "Explain this unit instead of the changed ones") do |value|
+              options[:symbol] = value
+            end
+          end
+        end
       end
 
       private
@@ -273,17 +284,7 @@ module Rigor
       def parse_options
         options = { config: nil, format: "text", full: false, baseline: nil, symbol: nil,
                     strict_tolerated: false, no_tolerated: false }
-        OptionParser.new do |opts|
-          opts.banner = "Usage: rigor effects #{@verb} [options]"
-          Options.add_config(opts, options)
-          add_common_options(opts, options)
-          add_comparison_options(opts, options) if COMPARING_VERBS.include?(@verb)
-          if @verb == "explain"
-            opts.on("--symbol=KEY", "Explain this unit instead of the changed ones") do |value|
-              options[:symbol] = value
-            end
-          end
-        end.parse!(@argv)
+        option_parser(options).parse!(@argv)
         options
       end
 
@@ -292,7 +293,7 @@ module Rigor
       # byte-identical files. A flag that changed the record would make the file a function of policy and
       # a policy change indistinguishable from a code change.
       def add_common_options(opts, options)
-        opts.on("--format=FORMAT", "Output format: text (default) or json") { |value| options[:format] = value }
+        Options.add_format(opts, options, "Output format: text (default) or json")
         opts.on("--full", "Record every method, including the omitted trivial and synthesised ones") do
           options[:full] = true
         end

@@ -92,6 +92,97 @@ module Rigor
         exit_code
       end
 
+      # The parser this command parses with, built without parsing anything: the catalogue reads the
+      # flags and formats from it (ADR-126 WD3). `options` is only written by the switches' blocks.
+      def option_parser(options = {}) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
+        OptionParser.new do |opts| # rubocop:disable Metrics/BlockLength
+          opts.banner = "Usage: rigor check [options] [paths]"
+          Options.add_config(opts, options)
+          Options.add_format(opts, options,
+                             "Output format: text, json, sarif, github, gitlab, checkstyle, junit, teamcity",
+                             formats: %w[text json] + DiagnosticFormats::FORMATS)
+          opts.on("--explain", "Surface fail-soft fallback events as :info diagnostics") { options[:explain] = true }
+          opts.on("--cache-stats", "Print on-disk cache inventory at end of run") { options[:cache_stats] = true }
+          opts.on("--coverage",
+                  "Add a type-precision coverage block (an extra precision pass over the analyzed files)") do
+            options[:coverage] = true
+          end
+          opts.on("--clear-cache", "Remove the .rigor/cache directory before running") { options[:clear_cache] = true }
+          opts.on("--no-cache",
+                  "Disable the persistent cache for this run (with --incremental: no snapshot is read or written)") do
+            options[:no_cache] = true
+          end
+          opts.on("--[no-]stats",
+                  "Print run summary (files, classes, memory, wall time) to stderr (default: on)") do |value|
+            options[:stats] = value
+          end
+          opts.on("--workers=N", Integer,
+                  "Dispatch per-file analysis across N Ractor workers (default: 0; sequential)") do |value|
+            options[:workers] = value
+          end
+          Options.add_editor_mode(opts, options)
+          opts.on("--baseline=PATH",
+                  "load baseline from PATH (overrides .rigor.yml `baseline:`)") do |value|
+            options[:baseline] = value
+          end
+          opts.on("--no-baseline",
+                  "ignore any configured baseline for this run") do
+            options[:baseline] = false
+          end
+          opts.on("--baseline-strict",
+                  "fail the run on any baseline drift (CI gate)") do
+            options[:baseline_strict] = true
+          end
+          opts.on("--fail-on=SEVERITY",
+                  "exit non-zero on a diagnostic at or above SEVERITY: error (default), warning, or info") do |value|
+            # Validated post-parse (`valid_fail_on_option?`, called from `run`) rather than here — see its
+            # comment for why an unrecognised value is not raised from inside this block.
+            options[:fail_on] = value.to_s.downcase.to_sym
+          end
+          opts.on("--treat-all-as-inline-rbs",
+                  "force-load rigor-rbs-inline with require_magic_comment: false") do
+            options[:treat_all_as_inline_rbs] = true
+          end
+          opts.on("--verify-incremental",
+                  "assert incremental analysis matches a full run, then exit") do
+            options[:verify_incremental] = true
+          end
+          opts.on("--verify-incremental-edits=N", Integer,
+                  "with --verify-incremental, also replay edits (empty, class/module skeleton, up to 2 " \
+                  "one-statement drops) on N files") do |value|
+            if value.negative?
+              raise OptionParser::InvalidArgument, "--verify-incremental-edits=#{value} (must be 0 or more)"
+            end
+
+            options[:verify_incremental] = true
+            options[:verify_incremental_edits] = value
+          end
+          opts.on("--incremental",
+                  "re-analyze only files changed since the last run (cross-process cache)") do
+            options[:incremental] = true
+          end
+          opts.on("--no-ci-detect",
+                  "do not auto-emit CI-native output when a CI environment is detected") do
+            options[:ci_detect] = false
+          end
+          # ADR-50 § WD2 — `=[LIST]` (not ` [LIST]`) so a bare `--bleeding-edge` never swallows a following positional
+          # path: `rigor check --bleeding-edge lib` adopts the whole overlay and checks `lib`.
+          opts.on("--bleeding-edge=[LIST]",
+                  "adopt the bleeding-edge overlay for this run " \
+                  "(all features, or a comma-separated feature-id list)") do |value|
+            options[:bleeding_edge] = value.nil? || value.split(",").map(&:strip).reject(&:empty?)
+          end
+          opts.on("--no-bleeding-edge",
+                  "ignore any configured bleeding_edge: selection for this run") do
+            options[:bleeding_edge] = false
+          end
+          opts.on("--no-tolerated-effects",
+                  "check effect envelopes as if effects.tolerated: were empty") do
+            options[:no_tolerated_effects] = true
+          end
+        end
+      end
+
       private
 
       # True when `diagnostics` (already baseline-filtered and severity-resolved — the same list
@@ -687,7 +778,7 @@ module Rigor
         )
       end
 
-      def parse_check_options # rubocop:disable Metrics/AbcSize,Metrics/MethodLength
+      def parse_check_options
         options = {
           config: nil,
           format: "text",
@@ -746,93 +837,7 @@ module Rigor
           # one-line coverage summary.
           coverage: false
         }
-        parser = OptionParser.new do |opts| # rubocop:disable Metrics/BlockLength
-          opts.banner = "Usage: rigor check [options] [paths]"
-          Options.add_config(opts, options)
-          Options.add_format(opts, options,
-                             "Output format: text, json, sarif, github, gitlab, checkstyle, junit, teamcity",
-                             formats: %w[text json] + DiagnosticFormats::FORMATS)
-          opts.on("--explain", "Surface fail-soft fallback events as :info diagnostics") { options[:explain] = true }
-          opts.on("--cache-stats", "Print on-disk cache inventory at end of run") { options[:cache_stats] = true }
-          opts.on("--coverage",
-                  "Add a type-precision coverage block (an extra precision pass over the analyzed files)") do
-            options[:coverage] = true
-          end
-          opts.on("--clear-cache", "Remove the .rigor/cache directory before running") { options[:clear_cache] = true }
-          opts.on("--no-cache",
-                  "Disable the persistent cache for this run (with --incremental: no snapshot is read or written)") do
-            options[:no_cache] = true
-          end
-          opts.on("--[no-]stats",
-                  "Print run summary (files, classes, memory, wall time) to stderr (default: on)") do |value|
-            options[:stats] = value
-          end
-          opts.on("--workers=N", Integer,
-                  "Dispatch per-file analysis across N Ractor workers (default: 0; sequential)") do |value|
-            options[:workers] = value
-          end
-          Options.add_editor_mode(opts, options)
-          opts.on("--baseline=PATH",
-                  "load baseline from PATH (overrides .rigor.yml `baseline:`)") do |value|
-            options[:baseline] = value
-          end
-          opts.on("--no-baseline",
-                  "ignore any configured baseline for this run") do
-            options[:baseline] = false
-          end
-          opts.on("--baseline-strict",
-                  "fail the run on any baseline drift (CI gate)") do
-            options[:baseline_strict] = true
-          end
-          opts.on("--fail-on=SEVERITY",
-                  "exit non-zero on a diagnostic at or above SEVERITY: error (default), warning, or info") do |value|
-            # Validated post-parse (`valid_fail_on_option?`, called from `run`) rather than here — see its
-            # comment for why an unrecognised value is not raised from inside this block.
-            options[:fail_on] = value.to_s.downcase.to_sym
-          end
-          opts.on("--treat-all-as-inline-rbs",
-                  "force-load rigor-rbs-inline with require_magic_comment: false") do
-            options[:treat_all_as_inline_rbs] = true
-          end
-          opts.on("--verify-incremental",
-                  "assert incremental analysis matches a full run, then exit") do
-            options[:verify_incremental] = true
-          end
-          opts.on("--verify-incremental-edits=N", Integer,
-                  "with --verify-incremental, also replay edits (empty, class/module skeleton, up to 2 " \
-                  "one-statement drops) on N files") do |value|
-            if value.negative?
-              raise OptionParser::InvalidArgument, "--verify-incremental-edits=#{value} (must be 0 or more)"
-            end
-
-            options[:verify_incremental] = true
-            options[:verify_incremental_edits] = value
-          end
-          opts.on("--incremental",
-                  "re-analyze only files changed since the last run (cross-process cache)") do
-            options[:incremental] = true
-          end
-          opts.on("--no-ci-detect",
-                  "do not auto-emit CI-native output when a CI environment is detected") do
-            options[:ci_detect] = false
-          end
-          # ADR-50 § WD2 — `=[LIST]` (not ` [LIST]`) so a bare `--bleeding-edge` never swallows a following positional
-          # path: `rigor check --bleeding-edge lib` adopts the whole overlay and checks `lib`.
-          opts.on("--bleeding-edge=[LIST]",
-                  "adopt the bleeding-edge overlay for this run " \
-                  "(all features, or a comma-separated feature-id list)") do |value|
-            options[:bleeding_edge] = value.nil? || value.split(",").map(&:strip).reject(&:empty?)
-          end
-          opts.on("--no-bleeding-edge",
-                  "ignore any configured bleeding_edge: selection for this run") do
-            options[:bleeding_edge] = false
-          end
-          opts.on("--no-tolerated-effects",
-                  "check effect envelopes as if effects.tolerated: were empty") do
-            options[:no_tolerated_effects] = true
-          end
-        end
-        parser.parse!(@argv)
+        option_parser(options).parse!(@argv)
         options
       end
 

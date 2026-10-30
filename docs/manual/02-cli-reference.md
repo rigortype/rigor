@@ -10,6 +10,8 @@ rigor <command> [options] [arguments]
 `rigor help` prints the command list; `rigor version` prints
 the installed version. An unknown command, or a malformed
 option, exits `64` — the conventional "usage error" code.
+See [`rigor help`](#rigor-help) for a single command's help and
+the machine-readable list of commands and flags.
 
 Every command that loads your project configuration also
 accepts `--config=PATH` to point at a specific config file
@@ -1278,6 +1280,30 @@ rigor upgrade
 
 Until then it prints the current version and notes that upgrade is
 queued. Exits `0`.
+
+## `rigor help`
+
+```sh
+rigor help                  # the command list
+rigor help <command>        # the same as `rigor <command> --help`
+rigor help --format=json    # every command, its flags and formats
+```
+
+`rigor help --format=json` prints the whole CLI surface as one JSON
+document, for tools and agents that would otherwise parse the help
+text:
+
+```json
+{ "schema_version": 1, "version": "…", "commands": [ … ] }
+```
+
+Each entry of `commands` has `name`, `summary`, `usage`,
+`subcommands`, `flags` (each with `name`, `arg` and `desc`),
+`formats` (the values its `--format` accepts, empty when it has no
+such flag) and `mcp_tool` (the [MCP](10-mcp-server.md) tool that
+mirrors the command, or `null`). The list covers every command
+above plus `help` and `version`. The text help is rendered from
+the same list.
 
 ## Environment variables
 

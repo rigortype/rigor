@@ -2,7 +2,7 @@
 
 # Catch drift between docs/manual/ prose and the implementation it describes.  Five axes:
 #
-#   1. CLI subcommands — every key in CLI::HANDLERS must appear in the CLI reference, and vice versa.
+#   1. CLI subcommands — every command in CLI::Catalogue must appear in the CLI reference, and vice versa.
 #   2. Config keys — every top-level key in Configuration::DEFAULTS must be mentioned in the configuration reference.
 #   3. Rule IDs — every ID in CheckRules::ALL_RULES must appear in the diagnostic catalogue or the handbook
 #      errors chapter.
@@ -138,15 +138,15 @@ RSpec.describe "manual accuracy" do
   # ── 1. CLI subcommand coverage ──────────────────────────────────
 
   describe "CLI subcommands (02-cli-reference.md)" do
-    let(:handler_keys) { Rigor::CLI::HANDLERS.keys }
+    let(:handler_keys) { Rigor::CLI::Catalogue.names }
     let(:cli_doc) { File.read(File.join(MANUAL_DRIFT_MANUAL_DIR, "02-cli-reference.md"), encoding: "utf-8") }
 
-    it "every HANDLERS subcommand is mentioned in the reference" do
+    it "every catalogued command is mentioned in the reference" do
       undocumented = handler_keys.reject do |cmd|
         cli_doc.include?("`rigor #{cmd}`") || cli_doc.include?("`#{cmd}`")
       end
       expect(undocumented).to be_empty,
-                              "CLI::HANDLERS keys not mentioned in 02-cli-reference.md: " \
+                              "CLI::Catalogue commands not mentioned in 02-cli-reference.md: " \
                               "#{undocumented.inspect}\nAdd a section for each missing subcommand."
     end
   end

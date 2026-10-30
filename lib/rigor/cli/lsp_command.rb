@@ -46,6 +46,21 @@ module Rigor
         server.exit_code || 0
       end
 
+      # The parser this command parses with, built without parsing anything: the catalogue reads the
+      # flags and formats from it (ADR-126 WD3). `options` is only written by the switches' blocks.
+      def option_parser(options = {})
+        OptionParser.new do |opts|
+          opts.banner = USAGE
+          opts.on("--transport=NAME", "Transport (default: stdio; only stdio supported in v1)") do |value|
+            options[:transport] = value
+          end
+          opts.on("--log=PATH", "Write LSP wire log + server debug to PATH (default: stderr)") do |value|
+            options[:log] = value
+          end
+          Options.add_config(opts, options)
+        end
+      end
+
       private
 
       # Builds the full collaborator graph from a fresh `Configuration` + `ProjectContext`. Returns `[server, loop]` so
@@ -99,17 +114,7 @@ module Rigor
       def parse_options
         options = { transport: "stdio", log: nil, config: nil }
 
-        parser = OptionParser.new do |opts|
-          opts.banner = USAGE
-          opts.on("--transport=NAME", "Transport (default: stdio; only stdio supported in v1)") do |value|
-            options[:transport] = value
-          end
-          opts.on("--log=PATH", "Write LSP wire log + server debug to PATH (default: stderr)") do |value|
-            options[:log] = value
-          end
-          Options.add_config(opts, options)
-        end
-        parser.parse!(@argv)
+        option_parser(options).parse!(@argv)
         options
       rescue OptionParser::ParseError => e
         @err.puts(e.message)

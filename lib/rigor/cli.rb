@@ -10,6 +10,7 @@ require_relative "version"
 require_relative "analysis/diagnostic"
 require_relative "analysis/result"
 require_relative "cli/options"
+require_relative "cli/catalogue"
 require_relative "cli/diagnostic_formats"
 require_relative "ci_detector"
 require_relative "analysis/check_rules/rule_ids"
@@ -89,9 +90,11 @@ module Rigor
       command = @argv.shift
 
       case command
-      when nil, "help", "-h", "--help"
+      when nil, "-h", "--help"
         @out.puts(help)
         0
+      when "help"
+        run_help
       when "version", "-v", "--version"
         @out.puts("rigor #{Rigor::VERSION}")
         0
@@ -480,41 +483,53 @@ module Rigor
       CLI::UpgradeCommand.new(argv: @argv, out: @out, err: @err).run
     end
 
+    # The text help is rendered from {Catalogue}, so the command list cannot drift from the dispatch table.
     def help
-      <<~HELP
-        Usage: rigor <command> [options]
+      Catalogue.help_text
+    end
 
-        Commands:
-          check      Analyze Ruby source files
-          init       Create a starter .rigor.yml
-          annotate   Print FILE with each line's last-expression type
-          type-of    Print inferred types at FILE:LINE[:COL] positions
-          lens       Map a file's declarations with their types and provenance (experimental)
-          trace      Replay how the engine typed FILE as a terminal animation
-          type-scan  Report Scope#type_of coverage across PATHs
-          effects    Report each method's effect labels, and the committed effect snapshot
-                     (opt-in; effects update/check/diff/explain)
-          explain    Print the description of one or all CheckRules
-          diff       Compare current diagnostics to a saved baseline JSON
-          baseline   Manage the baseline file (baseline generate/regenerate/dump/drift/prune)
-          sig-gen    Emit RBS skeletons inferred from .rb sources
-          lsp        Run the Rigor Language Server (LSP) over stdio
-          mcp        Run the Rigor MCP server over stdio
-          triage     Summarise diagnostics: distribution, hotspots, hints
-          coverage   Report type-precision coverage (precise vs Dynamic ratio)
-          unused     Report unreferenced classes, modules and constants as removal candidates
-          plugins    Report activation status of every configured plugin
-          plugin     Browse bundled plugin source as worked examples (list/path/print/root)
-          playground Start the browser playground (requires rigor-playground gem)
-          describe   Recommend the next skill for this project (alias for `skill describe`)
-          skill      Recommend the next skill + list/print bundled Agent Skills (skill describe, skill <name>)
-          docs       Print the bundled docs offline (docs <name>, docs --list)
-          show-bleedingedge  Show the bleeding-edge overlay + what your config adopts
-          doctor     Classify setup problems vs clean run with routed next actions
-          upgrade    Migration command skeleton (queued)
-          version    Print the Rigor version
-          help       Print this help
-      HELP
+    # `rigor help [--format=text|json] [<command>]`. `help <command>` behaves as `rigor <command> --help`;
+    # `--format=json` prints the whole {Catalogue} document.
+    def run_help
+      options = { format: "text" }
+      parser = OptionParser.new do |opts|
+        opts.banner = "Usage: rigor help [--format=text|json] [<command>]"
+        Options.add_format(opts, options, "Output format: text (default) or json")
+      end
+      topics = parser.parse(@argv)
+      return run_help_json(topics) if options.fetch(:format) == "json"
+      return run_help_topic(topics.first) if topics.any?
+
+      @out.puts(help)
+      0
+    end
+
+    def run_help_json(topics)
+      if topics.any?
+        @err.puts("rigor help --format=json takes no command; it prints every command")
+        return EXIT_USAGE
+      end
+
+      @out.puts(JSON.pretty_generate(Catalogue.document))
+      0
+    end
+
+    def run_help_topic(topic)
+      case topic
+      when "help"
+        @out.puts(help)
+        0
+      when "version"
+        @out.puts("Usage: rigor version")
+        0
+      when *HANDLERS.keys
+        @argv = ["--help"]
+        dispatch(topic)
+      else
+        @err.puts("Unknown command: #{topic}")
+        @err.puts(help)
+        EXIT_USAGE
+      end
     end
   end
 end

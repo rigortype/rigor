@@ -250,7 +250,7 @@ RSpec.describe Rigor::CLI::EffectsCommand do
     status, _out, err = run(["--format=xml", fixture])
 
     expect(status).to eq(Rigor::CLI::EXIT_USAGE)
-    expect(err).to include("unsupported format: xml")
+    expect(err).to include("invalid argument: --format=xml")
   end
 
   it "is registered as a CLI subcommand" do

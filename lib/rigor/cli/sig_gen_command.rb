@@ -38,7 +38,6 @@ module Rigor
 
       VALID_MODES = %w[print diff write check].freeze
       VALID_PARAM_POLICIES = %w[untyped observed observed-strict].freeze
-      VALID_FORMATS = %w[text json].freeze
 
       # The skip reasons {#report_skipped} counts. The four left out each have a report of their own
       # ({#report_unrenderable}, {#report_unresolvable_superclasses}, {#report_inline_declared}, and the refusal
@@ -88,6 +87,11 @@ module Rigor
         report_withheld_annotations(candidates, options)
         report_unrenderable(generator.unrenderable)
         report_unresolvable_superclasses(generator.unresolvable_superclasses, generator)
+      end
+
+      # The parser `run` parses with, built without parsing anything (the catalogue reads it, ADR-126 WD3).
+      def option_parser(options = {})
+        build_option_parser(options)
       end
 
       private
@@ -455,7 +459,7 @@ module Rigor
           opts.on("--no-cache", "Do not read or write the analysis cache (effect collection only)") do
             options[:no_cache] = true
           end
-          opts.on("--format=FORMAT", "Output format: text or json") { |value| options[:format] = value }
+          Options.add_format(opts, options, "Output format: text or json")
           opts.on("--params=POLICY", "Parameter policy: untyped (default), observed, observed-strict") do |value|
             options[:params] = value
           end
@@ -485,11 +489,9 @@ module Rigor
 
       def validation_error(options)
         mode = options.fetch(:mode)
-        format = options.fetch(:format)
         params = options.fetch(:params)
 
         return "--print, --diff, --write, and --check are mutually exclusive flags; pick one" if mode == "conflict"
-        return "unsupported --format=#{format}" unless VALID_FORMATS.include?(format)
         return "unsupported --params=#{params}" unless VALID_PARAM_POLICIES.include?(params)
         if params == "observed-strict"
           return "--params=observed-strict is reserved until the capability-role catalog ships"

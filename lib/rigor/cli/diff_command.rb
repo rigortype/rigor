@@ -51,10 +51,9 @@ module Rigor
         diff[:new].any? ? 1 : 0
       end
 
-      private
-
-      def parse_options
-        options = { format: "text", current_path: nil, config: nil }
+      # The parser this command parses with, built without parsing anything: the catalogue reads the
+      # flags and formats from it (ADR-126 WD3). `options` is only written by the switches' blocks.
+      def option_parser(options = {})
         OptionParser.new do |opt|
           opt.banner = USAGE
           opt.on("--format=FORMAT", %w[text json], "Output format (text | json). Default: text.") do |fmt|
@@ -66,7 +65,14 @@ module Rigor
           opt.on("--config=PATH", "Path to .rigor.yml. Forwarded to the implicit `rigor check` run.") do |path|
             options[:config] = Options.config_path(path)
           end
-        end.parse!(@argv)
+        end
+      end
+
+      private
+
+      def parse_options
+        options = { format: "text", current_path: nil, config: nil }
+        option_parser(options).parse!(@argv)
         options
       end
 

@@ -34,7 +34,7 @@ RSpec.describe Rigor::CLI do
   it "documents every dispatchable verb in the help text" do
     _status, out, _err = run_cli("help")
 
-    undocumented = described_class::HANDLERS.keys.reject do |verb|
+    undocumented = described_class::Catalogue.names.reject do |verb|
       out.lines.any? { |line| line.match?(/\A {2}#{Regexp.escape(verb)}\s/) }
     end
 

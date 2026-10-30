@@ -4,6 +4,7 @@ require "optparse"
 
 require_relative "options"
 require_relative "../version"
+require_relative "json_document"
 
 module Rigor
   class CLI
@@ -16,7 +17,7 @@ module Rigor
     # {SUMMARIES}, which `rigor help` prints, so the text help and `rigor help --format=json` cannot disagree about
     # which commands exist. `spec/rigor/cli/catalogue_spec.rb` gates the names against `CLI::HANDLERS`.
     module Catalogue
-      SCHEMA_VERSION = 1
+      SCHEMA_VERSION = JsonDocument::SCHEMA_VERSION
 
       # `help` and `version` are dispatched by `CLI#run` itself, outside `CLI::HANDLERS`.
       BUILTINS = %w[help version].freeze

@@ -92,6 +92,30 @@ RSpec.describe Rigor::CLI::JsonDocument do
     end
   end
 
+  it "stamps coverage --protection --mutation with its mode" do
+    _, out, = run("coverage", "--protection", "--mutation", "--format=json", "code.rb")
+    expect(JSON.parse(out).first(2)).to eq([["schema_version", 1], ["mode", "mutation"]])
+  end
+
+  it "stamps the fused coverage report with its mode" do
+    _, out, = run("coverage", "--protection", "--mutation", "--with-tests", "--test-command", "true",
+                  "--format=json", "code.rb")
+    expect(JSON.parse(out).first(2)).to eq([["schema_version", 1], ["mode", "protection-fused"]])
+  end
+
+  it "stamps effects diff" do
+    File.write(".rigor.yml", "paths:\n  - \".\"\neffects:\n  snapshot:\n    reach: [\"*.rb\"]\n")
+    run("effects", "update")
+    File.write("code.rb", "def y = puts(1)\n")
+    _, out, = run("effects", "diff", "--format=json")
+    expect(JSON.parse(out).first(1)).to eq([["schema_version", 1]])
+  end
+
+  it "stamps sig-gen --check" do
+    _, out, = run("sig-gen", "--check", "--format=json", "code.rb")
+    expect(JSON.parse(out).first(1)).to eq([["schema_version", 1]])
+  end
+
   it "stamps rigor diff, and reads a saved document that has no schema_version" do
     File.write("saved.json", JSON.generate({ "diagnostics" => [] }))
     File.write("current.json", JSON.generate({ "diagnostics" => [] }))

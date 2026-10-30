@@ -56,9 +56,7 @@ module Rigor
       def option_parser(options = {})
         OptionParser.new do |opt|
           opt.banner = USAGE
-          opt.on("--format=FORMAT", %w[text json], "Output format (text | json). Default: text.") do |fmt|
-            options[:format] = fmt
-          end
+          Options.add_format(opt, options, "Output format (text | json). Default: text.")
           opt.on("--current=PATH", "Compare to the saved current JSON instead of running `rigor check`.") do |path|
             options[:current_path] = path
           end

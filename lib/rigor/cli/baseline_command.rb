@@ -87,9 +87,7 @@ module Rigor
           opts.on("--baseline=PATH", "Path to the baseline file (default: #{DEFAULT_BASELINE_PATH})") do |v|
             options[:baseline] = v
           end
-          opts.on("--format=FORMAT", %i[text json], "Output format: text (default) or json") do |v|
-            options[:format] = v
-          end
+          Options.add_format(opts, options, "Output format: text (default) or json")
           opts.on("--rule=RULE", "Filter rows by exact rule id") { |v| options[:rule] = v }
           opts.on("--file=GLOB", "Filter rows by File.fnmatch? glob") { |v| options[:file] = v }
         end
@@ -240,14 +238,14 @@ module Rigor
 
         rows = filter_dump_rows(baseline.buckets, options)
         case options.fetch(:format)
-        when :json then @out.puts(JSON.pretty_generate(dump_to_json(rows)))
+        when "json" then @out.puts(JSON.pretty_generate(dump_to_json(rows)))
         else dump_text(rows, options)
         end
         0
       end
 
       def parse_dump_options
-        options = { baseline: DEFAULT_BASELINE_PATH, format: :text, rule: nil, file: nil }
+        options = { baseline: DEFAULT_BASELINE_PATH, format: "text", rule: nil, file: nil }
         dump_parser(options).parse!(@argv)
         options
       end

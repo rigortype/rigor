@@ -63,6 +63,39 @@ RSpec.describe Rigor::CLI::Catalogue do
     expect(drift.fetch("flags").map { |flag| flag.fetch("name") }).to include("--only")
   end
 
+  it "gives every subcommand the same entry shape, declared or parsed" do
+    shapes = entries.flat_map { |entry| entry.fetch("subcommands") }.map { |sub| sub.keys.sort }
+
+    expect(shapes.uniq).to eq([%w[flags formats name usage]])
+  end
+
+  it "reports a command's formats from its own --format only" do
+    baseline = by_name.fetch("baseline")
+    dump = baseline.fetch("subcommands").find { |sub| sub["name"] == "dump" }
+
+    expect(baseline.fetch("formats")).to eq([])
+    expect(dump.fetch("formats")).to eq(%w[text json])
+  end
+
+  it "lists a command's --format formats whenever it has the flag" do
+    flagged = entries + entries.flat_map { |entry| entry.fetch("subcommands") }
+    flagged = flagged.select { |item| item.fetch("flags").any? { |flag| flag["name"] == "--format" } }
+
+    expect(flagged).not_to be_empty
+    expect(flagged.map { |item| item.fetch("formats") }).to all(include("text"))
+  end
+
+  it "expands --[no-]x into the literal flags" do
+    names = by_name.fetch("check").fetch("flags").map { |flag| flag.fetch("name") }
+
+    expect(names).to include("--stats", "--no-stats")
+    expect(names.grep(/\[no-\]/)).to be_empty
+  end
+
+  it "takes the effects usage from the command" do
+    expect(by_name.fetch("effects").fetch("usage")).to eq(Rigor::CLI::EffectsCommand::USAGE)
+  end
+
   it "lists the CI formats `rigor check` accepts" do
     expect(by_name.fetch("check").fetch("formats")).to include("text", "json", "sarif", "teamcity")
   end
@@ -107,6 +140,21 @@ RSpec.describe Rigor::CLI::Catalogue do
       expect(via_help).to start_with("Usage: rigor type-of")
     end
 
+    it "does not parse the flags of the command it describes" do
+      expect(run_cli("help", "type-of", "--workers=2")).to eq(run_cli("help", "type-of"))
+    end
+
+    it "refuses a second word instead of answering with the parent's help" do
+      status, out, err = run_cli("help", "baseline", "drift")
+
+      expect([status, out]).to eq([Rigor::CLI::EXIT_USAGE, ""])
+      expect(err).to include("takes one command")
+    end
+
+    it "still lists the commands for `help -h`" do
+      expect(run_cli("help", "-h")).to eq(run_cli("help"))
+    end
+
     it "reports an unknown command as a usage error" do
       status, _out, err = run_cli("help", "nonesuch")
 
@@ -118,31 +166,42 @@ RSpec.describe Rigor::CLI::Catalogue do
   # `playground` hands its argv to the optional `rigor-playground` gem, which may not be installed.
   describe "--help" do
     (Rigor::CLI::HANDLERS.keys - %w[playground]).each do |name|
-      it "is answered by `rigor #{name}` with exit 0" do
+      it "is answered by `rigor #{name}` with its usage and exit 0" do
         status, out, = run_cli(name, "--help")
 
         expect(status).to eq(0)
-        expect(out).not_to be_empty
+        expect(out).to start_with("Usage: rigor #{name}")
       end
     end
 
-    it "is answered by `rigor describe` with its usage" do
+    it "is answered by `rigor describe` and `rigor skill describe` with the describe usage" do
       expect(run_cli("describe", "--help")).to eq([0, "Usage: rigor describe [--deep]\n", ""])
+      expect(run_cli("skill", "describe", "--help")).to eq([0, "Usage: rigor describe [--deep]\n", ""])
+    end
+
+    it "is answered by `rigor help <command>` with the same usage as the catalogue" do
+      entries.each do |entry|
+        next if entry.fetch("name") == "playground"
+
+        _status, out, = run_cli("help", entry.fetch("name"))
+        expect(out).to start_with("Usage: rigor #{entry.fetch('name')}"), entry.fetch("name")
+      end
     end
   end
 
   describe "--format validation" do
     def formatted_invocations
       entries.flat_map do |entry|
-        next [] unless entry.fetch("formats").include?("json")
-
-        subs = entry.fetch("subcommands").select { |sub| sub.fetch("formats", []).include?("json") }
-        subs.empty? ? [[entry.fetch("name")]] : subs.map { |sub| [entry.fetch("name"), sub.fetch("name")] }
+        own = entry.fetch("formats").include?("json") ? [[entry.fetch("name")]] : []
+        subs = entry.fetch("subcommands").select { |sub| sub.fetch("formats").include?("json") }
+        own + subs.map { |sub| [entry.fetch("name"), sub.fetch("name")] }
       end
     end
 
-    it "covers every command that lists json among its formats" do
-      expect(formatted_invocations.map(&:first).uniq).to include("check", "triage", "doctor", "plugins", "effects")
+    it "covers each command and subcommand that lists json among its formats" do
+      expect(formatted_invocations).to include(%w[check], %w[triage], %w[doctor], %w[plugins], %w[help], %w[annotate],
+                                               %w[effects], %w[effects check], %w[baseline dump])
+      expect(formatted_invocations).not_to include(%w[baseline])
     end
 
     it "rejects an unknown --format with exit 64 before running" do

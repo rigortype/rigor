@@ -1297,13 +1297,25 @@ text:
 { "schema_version": 1, "version": "…", "commands": [ … ] }
 ```
 
-Each entry of `commands` has `name`, `summary`, `usage`,
-`subcommands`, `flags` (each with `name`, `arg` and `desc`),
-`formats` (the values its `--format` accepts, empty when it has no
-such flag) and `mcp_tool` (the [MCP](10-mcp-server.md) tool that
-mirrors the command, or `null`). The list covers every command
-above plus `help` and `version`. The text help is rendered from
-the same list.
+Each entry of `commands` has:
+
+| Key | Value |
+| --- | --- |
+| `name` | The command name. |
+| `summary` | The one-line description `rigor help` prints. |
+| `usage` | The usage line (`Usage: rigor …`). |
+| `flags` | The command's own switches, each `{ "name", "arg", "desc" }`. `arg` is `null` for a switch that takes none. `--[no-]x` is listed as the two flags `--x` and `--no-x`. |
+| `formats` | The values the command's own `--format` accepts, empty when it has none. A command that only has subcommands with the flag (`baseline`) lists none here. |
+| `subcommands` | One `{ "name", "usage", "flags", "formats" }` object per subcommand (`baseline dump`, `effects check`, `plugin list`), with the same meaning as above and empty arrays where the subcommand has nothing to list. |
+| `mcp_tool` | The [MCP](10-mcp-server.md) tool that mirrors the command, or `null`. |
+
+The list covers every command above plus `help` and `version`. The
+text help is rendered from the same list.
+
+`rigor help <command>` takes one command: a second word
+(`rigor help baseline drift`) is refused with exit `64`, and an
+unknown command exits `64` too. Flags after the command name are
+ignored rather than parsed.
 
 ## Environment variables
 

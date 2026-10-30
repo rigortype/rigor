@@ -55,16 +55,9 @@ module Rigor
       }.freeze
 
       # The commands whose `argv` is read by hand, so there is no parser to read: their switches, subcommands and
-      # formats are stated here. `init` parses with an inline parser in `CLI#run_init`; `playground` is delegated to the
-      # optional `rigor-playground` gem and is listed without flags.
+      # formats are stated here. `playground` is delegated to the optional `rigor-playground` gem and is listed without
+      # flags.
       DECLARED = {
-        "init" => {
-          usage: "Usage: rigor init [options]",
-          flags: [
-            { name: "--force", arg: nil, desc: "Overwrite an existing configuration file" },
-            { name: "--path", arg: "PATH", desc: "Configuration file path" }
-          ]
-        },
         "skill" => {
           usage: "Usage: rigor skill [<name>] [--full <name>] [--path <name>] [--list] [--describe]",
           subcommands: [{ name: "describe", usage: "Usage: rigor skill describe [--deep]" }],
@@ -98,15 +91,9 @@ module Rigor
           ]
         },
         "baseline" => { usage: "Usage: rigor baseline <generate|regenerate|dump|drift|prune> [options]" },
-        "effects" => { usage: "Usage: rigor effects [update|check|diff|explain] [options] [paths]" },
         "playground" => { usage: "Usage: rigor playground [options]" },
         "upgrade" => { usage: "Usage: rigor upgrade [options]" },
-        "version" => { usage: "Usage: rigor version" },
-        "help" => {
-          usage: "Usage: rigor help [--format=text|json] [<command>]",
-          flags: [{ name: "--format", arg: "FORMAT", desc: "Output format: text (default) or json" }],
-          formats: %w[text json]
-        }
+        "version" => { usage: "Usage: rigor version" }
       }.freeze
 
       # The command files that build an `OptionParser`; the command class is the file's name in camel case.
@@ -158,81 +145,90 @@ module Rigor
           "name" => name,
           "summary" => SUMMARIES.fetch(name),
           "usage" => declared[:usage] || parsed[:usage],
-          "subcommands" => parsed[:subcommands] || stringify(declared[:subcommands] || []),
+          "subcommands" => parsed[:subcommands] || declared_subcommands(declared),
           "flags" => parsed[:flags] || stringify(declared[:flags] || []),
-          "formats" => parsed[:formats] || declared[:formats] || [],
+          "formats" => parsed[:formats] || [],
           "mcp_tool" => mcp_tool(name)
         }
       end
 
-      # The `OptionParser` view of a command: its own flags and formats, with each subcommand's
-      # alongside. A command with subcommand parsers (`baseline`, `effects`) reports the union at the top and the detail
-      # under each subcommand.
+      # The `OptionParser` view of a command: its own flags and formats at the top, and under `subcommands` the same
+      # shape for each subcommand's parser. A command with no parser of its own (`baseline`) has empty top-level
+      # `flags` and `formats`; none of them is a union over its subcommands.
       def parsed_entry(name)
+        pairs = parser_pairs(name)
+        return {} if pairs.nil?
+
+        own = pairs.find { |sub, _| sub.nil? }&.last
+        subs = pairs.reject { |sub, _| sub.nil? }
+        top = own ? describe_parser(own) : { flags: [], formats: [] }
+        return top if subs.empty?
+
+        top.merge(subcommands: subs.map do |sub, parser|
+          { "name" => sub }.merge(stringify_keys(describe_parser(parser)))
+        end)
+      end
+
+      # The `[subcommand, parser]` pairs of a command (no name for its own parser), or nil when it has no parser.
+      def parser_pairs(name)
+        case name
+        when "init" then [[nil, CLI.init_option_parser]]
+        when "help" then [[nil, CLI.help_option_parser]]
+        else command_parser_pairs(name)
+        end
+      end
+
+      def command_parser_pairs(name)
         file = PARSER_FILES[name]
-        return {} unless file
+        return nil unless file
 
         require_relative file
-        pairs = parser_pairs(name, CLI.const_get(file.split("_").map(&:capitalize).join))
-        merge_subcommands(pairs.find { |sub, _| sub.nil? }&.last, pairs.reject { |sub, _| sub.nil? })
-      end
-
-      def merge_subcommands(own, subs)
-        return describe_parser(own) if subs.empty?
-
-        top = own ? describe_parser(own) : {}
-        merged = describe_parser(*subs.map(&:last))
-        top.merge(
-          subcommands: subs.map { |sub, parser| { "name" => sub }.merge(stringify_keys(describe_parser(parser))) },
-          flags: top[:flags] || merged[:flags],
-          formats: top[:formats] || merged[:formats],
-          usage: top[:usage] || merged[:usage]
-        )
-      end
-
-      # The `[subcommand, parser]` pairs of a command; a command with no subcommands has one pair with no name.
-      def parser_pairs(name, klass)
+        klass = CLI.const_get(file.split("_").map(&:capitalize).join)
         case name
-        when "effects"
-          [[nil, klass.new(argv: []).option_parser]] +
-            EffectsSnapshotCommand::VERBS.map { |verb| [verb, EffectsSnapshotCommand.new(argv: [], verb: verb).option_parser] }
+        when "effects" then effects_parser_pairs(klass)
         when "baseline"
           command = klass.new(argv: [])
           klass::SUBCOMMANDS.map { |sub| [sub, command.option_parser(sub)] }
-        else
-          [[nil, klass.new(argv: []).option_parser]]
+        else [[nil, klass.new(argv: []).option_parser]]
         end
       end
 
-      # Reads usage, flags and formats from the switches of `parsers` (the first parser's banner is the usage).
-      def describe_parser(*parsers)
-        flags = {}
-        formats = nil
-        parsers.each do |parser|
-          parser.top.list.each do |switch|
-            flag = flag_of(switch)
-            next unless flag
-
-            flags[flag["name"]] ||= flag
-            formats ||= formats_of(parser, switch) if flag["name"] == "--format"
+      def effects_parser_pairs(klass)
+        [[nil, klass.new(argv: []).option_parser]] +
+          EffectsSnapshotCommand::VERBS.map do |verb|
+            [verb, EffectsSnapshotCommand.new(argv: [], verb: verb).option_parser]
           end
+      end
+
+      def declared_subcommands(declared)
+        (declared[:subcommands] || []).map do |sub|
+          { "name" => sub.fetch(:name), "usage" => sub.fetch(:usage), "flags" => [], "formats" => [] }
         end
-        { usage: parsers.first.banner.to_s.lines.first&.strip, flags: flags.values, formats: formats || [] }
       end
 
-      def flag_of(switch)
+      # Reads usage, flags and formats from the switches of `parser`.
+      def describe_parser(parser)
+        flags = parser.top.list.flat_map { |switch| flags_of(switch) }
+        format_switch = parser.top.list.any? { |switch| switch.long.first == "--format" }
+        { usage: parser.banner.to_s.lines.first&.strip, flags: flags,
+          formats: format_switch ? Options.accepted_formats(parser) || [] : [] }
+      end
+
+      # A switch's literal flags: `--[no-]color` is the two flags `--color` and `--no-color`.
+      def flags_of(switch)
         long = switch.long.first
-        return nil unless long
+        return [] unless long
 
-        { "name" => long, "arg" => arg_of(switch.arg), "desc" => switch.desc.join(" ") }
+        arg = switch.arg&.sub(/\A[= ]/, "")
+        desc = switch.desc.join(" ")
+        flag_names(long).map { |flag| { "name" => flag, "arg" => arg, "desc" => desc } }
       end
 
-      def arg_of(arg)
-        arg&.sub(/\A[= ]/, "")
-      end
+      def flag_names(long)
+        return [long] unless long.start_with?("--[no-]")
 
-      def formats_of(parser, switch)
-        Options.accepted_formats(parser) || (switch.pattern.keys.map(&:to_s) if switch.pattern.respond_to?(:keys))
+        bare = long.delete_prefix("--[no-]")
+        ["--#{bare}", "--no-#{bare}"]
       end
 
       # `rigor_check` mirrors `check`, `rigor_sig_gen` mirrors `sig-gen`: a tool is named for its command.

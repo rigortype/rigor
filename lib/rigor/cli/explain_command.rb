@@ -51,9 +51,7 @@ module Rigor
       def option_parser(options = {})
         OptionParser.new do |opt|
           opt.banner = USAGE
-          opt.on("--format=FORMAT", %w[text json], "Output format (text | json). Default: text.") do |fmt|
-            options[:format] = fmt
-          end
+          Options.add_format(opt, options, "Output format (text | json). Default: text.")
         end
       end
 

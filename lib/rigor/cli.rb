@@ -80,6 +80,23 @@ module Rigor
       new(argv.dup, out: out, err: err).run
     end
 
+    # The parser `rigor init` parses with, built without parsing anything (the catalogue reads it, ADR-126 WD3).
+    def self.init_option_parser(options = {})
+      OptionParser.new do |opts|
+        opts.banner = "Usage: rigor init [options]"
+        opts.on("--force", "Overwrite an existing configuration file") { options[:force] = true }
+        opts.on("--path=PATH", "Configuration file path") { |value| options[:path] = value }
+      end
+    end
+
+    # The parser `rigor help` parses with, built without parsing anything (the catalogue reads it, ADR-126 WD3).
+    def self.help_option_parser(options = {})
+      OptionParser.new do |opts|
+        opts.banner = "Usage: rigor help [--format=text|json] [<command>]"
+        Options.add_format(opts, options, "Output format: text (default) or json")
+      end
+    end
+
     def initialize(argv = ARGV.dup, out: $stdout, err: $stderr)
       @argv = argv
       @out = out
@@ -174,12 +191,7 @@ module Rigor
         path: ".rigor.dist.yml"
       }
 
-      parser = OptionParser.new do |opts|
-        opts.banner = "Usage: rigor init [options]"
-        opts.on("--force", "Overwrite an existing configuration file") { options[:force] = true }
-        opts.on("--path=PATH", "Configuration file path") { |value| options[:path] = value }
-      end
-      parser.parse!(@argv)
+      self.class.init_option_parser(options).parse!(@argv)
 
       path = options.fetch(:path)
       if File.exist?(path) && !options.fetch(:force)
@@ -491,28 +503,28 @@ module Rigor
     # `rigor help [--format=text|json] [<command>]`. `help <command>` behaves as `rigor <command> --help`;
     # `--format=json` prints the whole {Catalogue} document.
     def run_help
+      return print_command_list if %w[-h --help].include?(@argv.first)
+
       options = parse_help_options
       topics = @argv
       return run_help_json(topics) if options[:format] == "json"
 
       topic = topics.first
-      return run_help_topic(topic) if topic
+      return run_help_topic(topic, topics.drop(1)) if topic
 
+      print_command_list
+    end
+
+    def print_command_list
       @out.puts(help)
       0
     end
 
     def parse_help_options
       options = Hash.new("text")
-      help_option_parser(options).parse!(@argv)
+      # `order!` stops at the first positional, so the flags of the command being asked about are never parsed here.
+      self.class.help_option_parser(options).order!(@argv)
       options
-    end
-
-    def help_option_parser(options)
-      OptionParser.new do |opts|
-        opts.banner = "Usage: rigor help [--format=text|json] [<command>]"
-        Options.add_format(opts, options, "Output format: text (default) or json")
-      end
     end
 
     def run_help_json(topics)
@@ -525,10 +537,18 @@ module Rigor
       0
     end
 
-    def run_help_topic(topic)
+    def run_help_topic(topic, rest)
+      # Flags after the command name (`help type-of --workers=2`) are not parsed; a second word is not a subcommand's
+      # help, so it is refused rather than answered with the parent's.
+      extra = rest.reject { |word| word.start_with?("-") }
+      unless extra.empty?
+        @err.puts("rigor help takes one command, got: #{[topic, *extra].join(' ')}")
+        return EXIT_USAGE
+      end
+
       case topic
       when "help"
-        @out.puts(help)
+        @out.puts(self.class.help_option_parser.help)
         0
       when "version"
         @out.puts("Usage: rigor version")

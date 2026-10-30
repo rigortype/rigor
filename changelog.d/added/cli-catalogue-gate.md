@@ -1,4 +1,6 @@
 - **[cli]** `rigor help --format=json` prints every command with its flags, accepted formats and MCP tool, and `rigor help <command>` prints that command's help. ([#2508](https://github.com/rigortype/rigor/pull/2508))
   - The text `rigor help` is rendered from the same catalogue, so its command list cannot drift from the commands the CLI dispatches.
-  - `rigor describe --help` now prints its usage and exits `0` instead of `64`.
-  - `rigor triage`, `doctor`, `plugins`, `effects`, `lens` and `sig-gen` reject an unsupported `--format` as `invalid argument: --format=…` while the options are parsed.
+  - `rigor help <command>` takes one command: `rigor help nonesuch` and `rigor help baseline drift` now exit `64`, and flags after the command name are not parsed. `rigor help -h` still lists the commands.
+  - `rigor describe --help`, `rigor skill describe --help` and `rigor upgrade --help` print their usage and exit `0`; `describe` exited `64` and `upgrade` ignored the flag.
+  - `rigor triage`, `doctor`, `plugins`, `effects`, `lens`, `sig-gen`, `annotate`, `diff`, `explain`, `baseline dump` and `show-bleedingedge` match `--format` exactly and reject an unsupported value as `invalid argument: --format=…` while the options are parsed. `annotate`, `diff`, `explain`, `baseline dump` and `show-bleedingedge` no longer complete a prefix such as `--format=j`.
+  - The old messages are gone: `sig-gen:` no longer prefixes its format error, and `rigor effects` no longer prints its usage after a bad `--format`.

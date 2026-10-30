@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "optionparser"
+require_relative "json_document"
 require "json"
 
 require_relative "../configuration"
@@ -16,7 +17,6 @@ require_relative "options"
 require_relative "command"
 require_relative "../project_environment"
 require_relative "../rooted_glob"
-require_relative "json_document"
 
 module Rigor
   class CLI

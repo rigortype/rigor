@@ -33,7 +33,7 @@ module Rigor
         "effects" => "Report each method's effect labels, and the committed effect snapshot " \
                      "(opt-in; effects update/check/diff/explain)",
         "explain" => "Print the description of one or all CheckRules",
-        "diff" => "Compare current diagnostics to a saved baseline JSON",
+        "diff" => "Compare current diagnostics to a saved `rigor check --format=json` result",
         "baseline" => "Manage the baseline file (baseline generate/regenerate/dump/drift/prune)",
         "sig-gen" => "Emit RBS skeletons inferred from .rb sources",
         "lsp" => "Run the Rigor Language Server (LSP) over stdio",
@@ -42,7 +42,7 @@ module Rigor
         "coverage" => "Report type-precision coverage (precise vs Dynamic ratio)",
         "unused" => "Report unreferenced classes, modules and constants as removal candidates",
         "plugins" => "Report activation status of every configured plugin",
-        "plugin" => "Browse bundled plugin source as worked examples (list/path/print/root)",
+        "plugin" => "Browse bundled plugin source as worked examples (plugin <name>, plugin --list)",
         "playground" => "Start the browser playground (requires rigor-playground gem)",
         "describe" => "Recommend the next skill for this project (alias for `skill describe`)",
         "skill" => "Recommend the next skill + list/print bundled Agent Skills (skill describe, skill <name>)",
@@ -58,16 +58,6 @@ module Rigor
       # formats are stated here. `playground` is delegated to the optional `rigor-playground` gem and is listed without
       # flags.
       DECLARED = {
-        "skill" => {
-          usage: "Usage: rigor skill [<name>] [--full <name>] [--path <name>] [--list] [--describe]",
-          subcommands: [{ name: "describe", usage: "Usage: rigor skill describe [--deep]" }],
-          flags: [
-            { name: "--full", arg: "NAME", desc: "Print the SKILL.md body and its references/ inline" },
-            { name: "--path", arg: "NAME", desc: "Print the absolute path of the SKILL.md file" },
-            { name: "--list", arg: nil, desc: "List bundled skills (name + absolute path)" },
-            { name: "--describe", arg: nil, desc: "Report project state and recommend the next skill" }
-          ]
-        },
         "describe" => {
           usage: "Usage: rigor describe [--deep]",
           flags: [
@@ -81,15 +71,6 @@ module Rigor
             { name: "--list", arg: "CATEGORY", optional: true, desc: "List bundled docs (optionally one category)" }
           ]
         },
-        "plugin" => {
-          usage: "Usage: rigor plugin <subcommand> [args]",
-          subcommands: [
-            { name: "list", usage: "Usage: rigor plugin list" },
-            { name: "path", usage: "Usage: rigor plugin path <name>" },
-            { name: "print", usage: "Usage: rigor plugin print <name>" },
-            { name: "root", usage: "Usage: rigor plugin root" }
-          ]
-        },
         "playground" => { usage: "Usage: rigor playground [options]" },
         "version" => { usage: "Usage: rigor version" }
       }.freeze
@@ -97,7 +78,7 @@ module Rigor
       # The command files that build an `OptionParser`; the command class is the file's name in camel case.
       PARSER_FILES = %w[
         check annotate type_of lens trace type_scan effects explain diff sig_gen lsp mcp baseline triage coverage unused
-        plugins show_bleedingedge doctor
+        plugins show_bleedingedge doctor skill plugin
       ].to_h { |file| [file.tr("_", "-"), "#{file}_command"] }.freeze
 
       # The commands that have no parser of their own at the top, so their usage is their `USAGE` constant.
@@ -188,6 +169,9 @@ module Rigor
         klass = CLI.const_get(file.split("_").map(&:capitalize).join)
         case name
         when "effects" then effects_parser_pairs(klass)
+        when "skill"
+          [[nil, klass.new(argv: []).option_parser],
+           ["describe", klass.describe_option_parser("Usage: rigor skill describe [--deep]")]]
         when "baseline"
           command = klass.new(argv: [])
           klass::SUBCOMMANDS.map { |sub| [sub, command.option_parser(sub)] }

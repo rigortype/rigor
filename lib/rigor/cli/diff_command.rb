@@ -8,8 +8,8 @@ require "optionparser"
 
 module Rigor
   class CLI
-    # Executes `rigor diff <baseline.json> [paths...]`. Compares the current `rigor check` diagnostics against a saved
-    # baseline JSON (the output of a previous `rigor check --format=json` run) and prints the delta:
+    # Executes `rigor diff <rigor-check.json> [paths...]`. Compares the current `rigor check` diagnostics against a
+    # saved `rigor check --format=json` result and prints the delta:
     #
     # - **new** — diagnostics in the current run that were not
     #   in the baseline (typically a regression introduced in
@@ -21,11 +21,11 @@ module Rigor
     # diagnostic to a new line surfaces as one fixed + one new pair, which lines up with the user's mental model of "you
     # changed the line, the analyzer's position changed too."
     #
-    # CI usage: commit a `rigor.baseline.json` produced once with `rigor check --format=json > rigor.baseline.json`,
-    # then run `rigor diff rigor.baseline.json` in CI. Exit code is `1` when any new diagnostic appears, `0` otherwise —
+    # CI usage: commit a `rigor-check.json` produced once with `rigor check --format=json > rigor-check.json`, then
+    # run `rigor diff rigor-check.json` in CI. Exit code is `1` when any new diagnostic appears, `0` otherwise —
     # so adding new errors fails CI but legacy errors recorded in the baseline don't.
     class DiffCommand < Command
-      USAGE = "Usage: rigor diff [options] <baseline.json> [paths...]"
+      USAGE = "Usage: rigor diff [options] <rigor-check.json> [paths...]"
 
       # @return CLI exit status.
       def run

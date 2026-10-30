@@ -43,6 +43,8 @@ module Rigor
         when "prune" then run_prune
         else
           @err.puts("Unknown baseline subcommand: #{subcommand.inspect}")
+          nearest = ::DidYouMean::SpellChecker.new(dictionary: SUBCOMMANDS).correct(subcommand.to_s).first
+          @err.puts("Did you mean `rigor baseline #{nearest}`?") if nearest
           @err.puts(help)
           EXIT_USAGE
         end

@@ -527,11 +527,11 @@ a severity or a suppression line.
 
 ## `rigor diff`
 
-Compare the current diagnostics against a saved baseline JSON
-and report only what is new.
+Compare the current diagnostics against a saved
+`rigor check --format=json` result and report only what is new.
 
 ```sh
-rigor diff [options] <baseline.json> [paths...]
+rigor diff [options] <rigor-check.json> [paths...]
 ```
 
 `--current=PATH` compares against a saved diagnostics JSON
@@ -1017,15 +1017,22 @@ toolchain, so you can read a real, working plugin as a worked
 example when authoring your own.
 
 ```sh
-rigor plugin <list|path|print|root> [name]
+rigor plugin [<name>] [--path <name>] [--list] [--root]
 ```
 
-| Subcommand | Purpose |
+The positional slot is a plugin *name*; alternative outputs are
+flags, the same grammar as `rigor skill` and `rigor docs`.
+
+| Form | Purpose |
 | --- | --- |
-| `list` | Table of every bundled plugin and example, name + absolute directory path (default when no subcommand given). |
-| `path <name>` | One-line absolute path to the plugin's directory. |
-| `print <name>` | A header (dir / lib / sig / README paths) followed by the plugin's main source body inlined. |
-| `root` | The `rigortype` gem root and its key subdirectories. |
+| `rigor plugin`, `--list` | Table of every bundled plugin and example, name + absolute directory path (the default). |
+| `<name>` | A header (dir / lib / sig / README paths) followed by the plugin's main source body inlined. |
+| `--path <name>` | One-line absolute path to the plugin's directory. |
+| `--root` | The `rigortype` gem root and its key subdirectories. |
+
+The earlier verbs `list`, `path <name>`, `print <name>` and `root`
+still work for one minor release and print a deprecation notice on
+stderr naming the replacement; the output on stdout is the same.
 
 Paths resolve at runtime from the gem location (a documented
 caveat for container / cross-filesystem setups).
@@ -1306,7 +1313,7 @@ Each entry of `commands` has:
 | `usage` | The usage line (`Usage: rigor …`). |
 | `flags` | The command's own switches, each `{ "name", "arg", "optional", "desc" }`. `arg` is the argument's name, `null` for a switch that takes none, and `optional` is `true` when the argument may be left out (`--bleeding-edge[=LIST]`). `--[no-]x` is listed as the two flags `--x` and `--no-x`. |
 | `formats` | The values the command's own `--format` accepts, empty when it has none. A command that only has subcommands with the flag (`baseline`) lists none here. |
-| `subcommands` | One `{ "name", "usage", "flags", "formats" }` object per subcommand (`baseline dump`, `effects check`, `plugin list`), with the same meaning as above and empty arrays where the subcommand has nothing to list. |
+| `subcommands` | One `{ "name", "usage", "flags", "formats" }` object per subcommand (`baseline dump`, `effects check`, `skill describe`), with the same meaning as above and empty arrays where the subcommand has nothing to list. |
 | `mcp_tool` | The [MCP](10-mcp-server.md) tool that mirrors the command, or `null`. |
 
 The list covers every command above plus `help` and `version`. The

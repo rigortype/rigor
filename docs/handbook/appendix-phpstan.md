@@ -20,7 +20,7 @@ unchanged. This appendix maps the vocabulary.
 | Default behaviour | Inference, fall back silent | Inference, fall back silent |
 | "Levels" | 0 – 10 (numeric) | `lenient` / `balanced` / `strict` (named) |
 | Per-rule control | `ignoreErrors:` regex, level demotion | `disable:`, `severity_overrides:` |
-| Baseline | `phpstan-baseline.neon` | `.rigor-baseline.yml` (managed) / `rigor.baseline.json` (ad-hoc) |
+| Baseline | `phpstan-baseline.neon` | `.rigor-baseline.yml` (managed) / `rigor-check.json` (ad-hoc) |
 | Stub format | PHP stub files | RBS files |
 | Custom narrowing | Type-Specifying Extensions | Plugins (Chapter 9) |
 | Custom return shape | Dynamic Return Type Extensions | Plugin `dynamic_return` |
@@ -140,10 +140,10 @@ severity controls, and includes.
 | `ignoreErrors:` (regex / pattern) | `disable:` (rule identifier or wildcard) |
 | `parameters: ignoreErrors:` per-path | `# rigor:disable-file <rule>` at the file head |
 | `includes:` | `includes:` |
-| `phpstan-baseline.neon` | `.rigor-baseline.yml` (managed) — or `rigor.baseline.json` (ad-hoc) |
-| `phpstan analyse --generate-baseline` | `rigor baseline generate` (managed) — or `rigor check --format=json > rigor.baseline.json` (ad-hoc) |
+| `phpstan-baseline.neon` | `.rigor-baseline.yml` (managed) — or `rigor-check.json` (ad-hoc) |
+| `phpstan analyse --generate-baseline` | `rigor baseline generate` (managed) — or `rigor check --format=json > rigor-check.json` (ad-hoc) |
 | `phpstan analyse` | `rigor check` |
-| `phpstan analyse --baseline` | `rigor check` with `baseline: .rigor-baseline.yml` configured (managed) — or `rigor diff rigor.baseline.json` (ad-hoc) |
+| `phpstan analyse --baseline` | `rigor check` with `baseline: .rigor-baseline.yml` configured (managed) — or `rigor diff rigor-check.json` (ad-hoc) |
 | Path resolution: relative to declaring file | Path resolution: relative to declaring file (same rule). |
 
 Rigor has two baseline mechanisms: a **managed** baseline

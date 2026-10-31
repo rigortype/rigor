@@ -142,7 +142,7 @@ module Rigor
       def open_wire_log(path)
         return nil if path.nil?
 
-        io = File.open(path, "a")
+        io = File.new(path, "a")
         io.sync = true
         WireLog.new(io)
       rescue SystemCallError => e

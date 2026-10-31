@@ -16,7 +16,7 @@ RSpec.describe Rigor::CLI::LspCommand do
     allow(Rigor::Configuration).to receive(:load).and_call_original
 
     server, = command.send(:build_server, writer: StringIO.new,
-                                          reader: ::LanguageServer::Protocol::Transport::Io::Reader.new(StringIO.new),
+                                          reader: LanguageServer::Protocol::Transport::Io::Reader.new(StringIO.new),
                                           config_path: "tmp-missing.yml")
     context = server.instance_variable_get(:@project_context)
     loader = context.instance_variable_get(:@configuration_loader)
@@ -30,9 +30,10 @@ RSpec.describe Rigor::CLI::LspCommand do
   it "exits with a usage error and a stderr message when --log cannot be opened" do
     err = StringIO.new
     command = described_class.new(argv: ["--log=/nonexistent-rigor-dir/wire.log"], out: StringIO.new, err: err)
+    allow(command).to receive(:serve)
 
-    expect(command).not_to receive(:serve)
     expect(command.run).to eq(Rigor::CLI::EXIT_USAGE)
+    expect(command).not_to have_received(:serve)
     expect(err.string).to include("cannot open --log file")
   end
 
@@ -43,11 +44,12 @@ RSpec.describe Rigor::CLI::LspCommand do
       command = described_class.new(argv: [], out: StringIO.new, err: StringIO.new)
       log = command.send(:open_wire_log, path)
       original_stderr = $stderr
-      loop_runner = double("loop")
+      loop_runner = instance_double(Rigor::LanguageServer::Loop)
       allow(loop_runner).to receive(:run) { warn "debug marker" }
-      allow(command).to receive(:build_server).and_return([double("server", exit_code: 0), loop_runner])
-      allow(::LanguageServer::Protocol::Transport::Io::Reader).to receive(:new).and_return(StringIO.new)
-      allow(::LanguageServer::Protocol::Transport::Io::Writer).to receive(:new).and_return(StringIO.new)
+      server = instance_double(Rigor::LanguageServer::Server, exit_code: 0)
+      allow(command).to receive(:build_server).and_return([server, loop_runner])
+      allow(LanguageServer::Protocol::Transport::Io::Reader).to receive(:new).and_return(StringIO.new)
+      allow(LanguageServer::Protocol::Transport::Io::Writer).to receive(:new).and_return(StringIO.new)
 
       expect(command.send(:serve, config_path: nil, log: log)).to eq(0)
       expect($stderr).to be(original_stderr)

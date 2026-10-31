@@ -1,0 +1,3 @@
+- **[rbs]** Calling `full_gem_path` on a `Gem.loaded_specs` entry, or `dependencies` on a `Bundler::LockfileParser`, no longer reports a false `undefined method`. ([#2544](https://github.com/rigortype/rigor/issues/2544))
+  - Rigor's bundled RBS now declares `full_gem_path` on `Gem::BasicSpecification`, which is the class `Gem.loaded_specs` returns, and `LockfileParser#dependencies` as a Hash keyed by gem name.
+  - `Gem::Specification` still has the method through its superclass, so setting `full_gem_path` on one keeps working.

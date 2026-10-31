@@ -871,7 +871,8 @@ full run, so the snapshot can never wedge or stale an analysis.
    `dependencies.source_inference` gem that resolves (no part for a project that lists none; #1814), the project's RBS
    (the `signature_paths` roots,
    or the auto-detected `<root>/sig` when `signature_paths` is nil — the
-   contents of its `.rbs` files), and the **contents** of every `pre_eval:`
+   contents of its `.rbs` files), the contents of the `.rbs` files under a selected `core_root:` (a `core:` part, none
+   for the default core; [#2517](https://github.com/rigortype/rigor/issues/2517)), and the **contents** of every `pre_eval:`
    file (its path is in the configuration; a file outside the analysed paths
    would otherwise leave the snapshot stale) — but **not** the analyzed source
    contents. A missing `pre_eval:` file digests as absent, so creating one also
@@ -2180,6 +2181,13 @@ cache invalidates when one changes or first appears. It is
 omitted entirely when the loader has no `virtual_rbs` entries, so
 a project with no synthesizer-emitting plugin pays no descriptor
 cost for it.
+
+A selected `core_root:` ([#2517](https://github.com/rigortype/rigor/issues/2517)) is keyed twice, and both
+halves are absent for the default core, whose identity is the `rbs` gem row. Its `.rbs` files lead `files`
+(and its root leads `globs`), so an edit in place, a new file and a removed one all move the key; and an
+env-only `rbs.core_root` row hashes the selected directory, so switching between two roots with
+byte-identical files re-keys too. The run-result key needs no row of its own: it digests
+`Configuration#to_h`, which carries `core_root`, and its dependency descriptor validates the same file rows.
 
 Sharing the builder means a single signature change or rbs gem
 bump invalidates every RBS-derived cached producer in lockstep.

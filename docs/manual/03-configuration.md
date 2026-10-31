@@ -24,7 +24,7 @@ Relative paths in a config file resolve against that file's own directory, with 
 `rigor` runs from. They match only when you run `rigor` from the directory that holds the config file, which is
 the usual case; with `--config path/to/.rigor.yml` from elsewhere, give these three as absolute paths.
 A leading `~/` (or a bare `~`) in a path setting expands to your home directory; `~name` is an ordinary
-directory called `~name`, not another user's home. This covers `paths:`, `signature_paths:`, `test_paths:`,
+directory called `~name`, not another user's home. This covers `paths:`, `signature_paths:`, `core_root:`, `test_paths:`,
 `pre_eval:`, `plugins_io.allowed_paths:`, `includes:`, `bundler.bundle_path:`, `bundler.lockfile:` and
 `rbs_collection.lockfile:`. It does not apply to `cache.path:`, `baseline:` or `effects.snapshot.path:`, which stay
 literal and relative to the working directory.
@@ -78,8 +78,36 @@ cache:
 | --- | --- | --- | --- |
 | `libraries` | Array | `[]` | Standard-library / gem names whose bundled RBS to load. |
 | `signature_paths` | Array | `nil` | Extra directories of `.rbs` files. Relative entries resolve against the config file's directory. |
+| `core_root` | String | `nil` | A directory of core `.rbs` files loaded **instead of** the `rbs` gem's own core, such as one [rbs-shifter](https://github.com/rigortype/rbs-shifter) generates for an older CRuby. A relative path resolves against the config file's directory. `nil` loads the gem's core. See [Analysing for an older Ruby](#analysing-for-an-older-ruby). |
 | `pre_eval` | Array | `[]` | Files (or globs) walked before per-file analysis, to register project monkey-patches and publish their top-level constants project-wide. The walker does not follow `require` / `require_relative`, so list the files in load order: a method declared in two files takes the last-listed one, and a file that requires a later-listed one is still read in list order. `type-of`, `type-scan`, `trace`, `annotate` and `sig-gen` read the patches too, so they type a patched method as `rigor check` does. |
 | `plugins` | Array | `[]` | Plugins to activate — see [Using plugins](07-plugins.md). |
+
+#### Analysing for an older Ruby
+
+Rigor runs on Ruby 4.0, and its bundled core signatures describe Ruby 4.0. A project that runs on an older
+Ruby can call a method that version does not have, and Rigor accepts the call. To check against the older
+API, point `core_root:` at a core signature directory written for it:
+
+```yaml
+target_ruby: "3.3"
+core_root: vendor/rbs-shifter/3.3/core
+```
+
+`core_root:` replaces the core, while `signature_paths:` only adds to it. A method that a signature directory
+omits stays declared by the default core, so `signature_paths:` cannot remove one. With the core above,
+`[1, 2].rfind { ... }` reports `call.undefined-method` and `" text ".strip(" ")` reports `call.wrong-arity`.
+Project signatures, plugins and `libraries:` still load on top of it. `target_ruby:` sets the syntax Rigor
+parses; it does not choose a core.
+
+A `core_root:` that does not exist, is not a directory, holds no `.rbs` file, or does not build an RBS
+environment stops the run with exit code 64:
+
+```
+rigor: core_root: "/path/to/vendor/rbs-shifter/3.3/core" does not exist
+```
+
+The cache keys on the directory and on the contents of its files, so switching cores or regenerating one
+invalidates cached results, including in a running language server.
 
 ### Signature generation
 

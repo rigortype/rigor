@@ -267,6 +267,8 @@ module Rigor
       # @param cache_store — persistent cache threaded into the underlying
       #   {Environment::RbsLoader} so constant lookups consult the cache. Pass `nil` (the default) to skip
       #   caching for this environment.
+      # @param core_root — issue #2517 — a core signature directory loaded in place of the `rbs` gem's `core/`
+      #   ({Configuration#core_root}); nil (the default) loads the gem's core.
       # rubocop:disable-next Metrics/MethodLength, Metrics/ParameterLists
       def for_project(root: Dir.pwd, libraries: [], signature_paths: nil, cache_store: nil, # rubocop:disable Metrics/AbcSize
                       plugin_registry: nil, dependency_source_index: nil,
@@ -276,7 +278,7 @@ module Rigor
                       bundler_lockfile: nil,
                       rbs_collection_lockfile: nil, rbs_collection_auto_detect: false,
                       synthetic_method_index: nil, project_patched_methods: nil,
-                      source_files: [], locked_gems: nil, required_features: nil)
+                      source_files: [], locked_gems: nil, required_features: nil, core_root: nil)
         resolved_paths = project_signature_roots(signature_paths, root: root)
         # O4 MVP — append per-gem `sig/` directories discovered under the target project's bundler install
         # root. Empty array when neither an explicit path nor auto-detection finds a bundle. Order: user
@@ -366,7 +368,8 @@ module Rigor
           # the bundle walk and `rbs collection install` all stay authoritative.
           deferred_signature_paths: plugin_sig_paths,
           project_signature_paths: resolved_paths,
-          required_features: required_features || RequiredFeatures.scan(source_files, sig_paths: resolved_paths)
+          required_features: required_features || RequiredFeatures.scan(source_files, sig_paths: resolved_paths),
+          core_root: core_root
         )
         # Issues #824 / #1075 — the rows ADR-112 WD5's consistency rule reports for members the project's
         # own `sig/` and an inline source both declare: an error per contradiction (or per refinement that
@@ -376,6 +379,10 @@ module Rigor
         # on every run, so the member-level outcome needs no plumbing of its own. Costs nothing for a project
         # with no inline RBS: the loader's reader short-circuits on an empty `virtual_rbs`.
         record_member_consistency(loader, source_rbs_synthesis_reporter, root)
+        # Issue #2517 — a selected core is built here, not lazily. The env is first demanded from inside a file's
+        # analysis, under rescues that turn any raise into one `internal analyzer error` row per file; building it
+        # now raises the {CoreRootError} once, before analysis, where the CLI reports it as a configuration error.
+        loader.verify_core_root!
         # ADR-20 slice 2c + 2e — seed hkt_registry with the bundled builtins. The Environment's
         # `#hkt_registry` getter then LAZILY merges in the RBS env scan on first call so fast paths that
         # don't consult HKT (e.g. `rigor check --cache-stats --no-stats`) don't pay the eager env-build cost

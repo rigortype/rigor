@@ -75,8 +75,11 @@ module RbsEnvMemo
       value
     end
 
-    def digest(libraries, signature_paths, virtual_rbs, deferred_signature_paths = [], project_signature_paths = [])
+    def digest(libraries, signature_paths, virtual_rbs, deferred_signature_paths = [], project_signature_paths = [],
+               core_root = nil)
       parts = ["lib\0#{Array(libraries).map(&:to_s).sort.join(',')}"]
+      # Issue #2517 — a selected core replaces the gem's, so its files are inputs like the signature paths'.
+      signature_files(core_root).each { |path| parts << "core\0#{path}\0#{file_digest(path)}" } if core_root
       # Issue #610 — which paths are DEFERRED changes the built env (a deferred file stands down against a
       # colliding generic arity), so it is an input like any other. Digesting the path list is enough: the
       # files themselves are already digested below, since every deferred path is also a signature path.
@@ -139,11 +142,11 @@ module RbsEnvMemo
   # `Cache::RbsEnvironment.compute` on a cache miss.
   module Interception
     def build_env_for(libraries:, signature_paths:, virtual_rbs: [], deferred_signature_paths: [],
-                      project_signature_paths: [])
+                      project_signature_paths: [], core_root: nil)
       return super unless RbsEnvMemo.enabled?
 
       key = RbsEnvMemo.digest(libraries, signature_paths, virtual_rbs, deferred_signature_paths,
-                              project_signature_paths)
+                              project_signature_paths, core_root)
       cached = RbsEnvMemo.fetch(key)
       return cached if cached
 

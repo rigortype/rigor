@@ -14,28 +14,33 @@ module Rigor
     # least fixpoint, so a recursive or mutually recursive chain terminates and a cycle with no mutation on it mutates
     # nothing.
     #
-    # The walk reads at most {MAX_NODES} nodes per closure. A hand-off to a node past the cap is read as no hand-off,
-    # as the one-level floor reads a callee it cannot resolve: flooring there would drop a literal shape on evidence
-    # the walk never saw, and a floored `Array[Dynamic[top]]` then fails a declared tuple on correct code.
+    # The walk reads at most {MAX_NODES} nodes per parameter, so one parameter's walk cannot starve another's. A
+    # hand-off to a node past the cap is read as a mutation (a {BudgetTrace::CALLEE_CHAIN_CAP} hit): the walk did not
+    # see the callee, and a literal shape kept on evidence it never saw reports a false positive on correct code.
     module CalleeMutationChain
       # `name` and `slot` are the forwarding def's parameter, `callee` the def it is handed to, and `callee_names`
-      # the callee's parameters it may bind there.
-      Edge = Data.define(:name, :slot, :callee, :callee_names)
+      # the callee's parameters it may bind there. Issue #2515 — `owner` is the evaluator the callee's own census and
+      # hand-offs resolve in when the hand-off crosses classes (`Help.c(p, o)`, `Helper.new.c(p, o)`), nil for a
+      # self-call, which stays in the evaluator the hop started in.
+      Edge = Data.define(:name, :slot, :callee, :callee_names, :owner) do
+        def initialize(name:, slot:, callee:, callee_names:, owner: nil) = super
+      end
 
       MAX_NODES = 32
 
       module_function
 
+      # `own` and `edges` take the def and the owner evaluator its hop resolves in (nil: the closure's own).
       def close(root, own:, edges:)
-        census = own.call(root)
-        handed = edges.call(root).reject { |edge| census.key?(edge.name) }
+        census = own.call(root, nil)
+        handed = edges.call(root, nil).reject { |edge| census.key?(edge.name) }
         return census if handed.empty?
 
         flow = Flow.new(own, edges)
-        handed.each { |edge| flow.visit(root, edge.name) }
+        handed.each { |edge| flow.visit(root, edge.name, nil) }
         flow.settle
         handed.each_with_object(census.dup) do |edge, result|
-          result[edge.name] = edge.slot if flow.mutated?(root, edge.name)
+          result[edge.name] = edge.slot if flow.mutated?(root, edge.name, nil)
         end
       end
 
@@ -43,29 +48,43 @@ module Rigor
       # nodes it hands itself on to.
       class Flow
         Node = Struct.new(:mutated, :successors)
+        NO_SUCCESSORS = [].freeze
 
         def initialize(own, edges)
           @own = own
           @edges = edges
           @nodes = {}.compare_by_identity
-          @count = 0
         end
 
-        def mutated?(def_node, name)
-          node = @nodes.dig(def_node, name)
+        # A node is one parameter of one def under one owner context: the same def reached under another owner
+        # (another `self`) is a different node.
+        def mutated?(def_node, name, owner)
+          node = @nodes.dig(def_node, owner, name)
           !node.nil? && node.mutated
         end
 
-        # Reads the nodes reachable from `def_node`'s `name`, breadth first, while fewer than {MAX_NODES} are read.
-        def visit(def_node, name)
-          queue = [[def_node, name]]
+        # Reads the nodes reachable from `def_node`'s `name`, breadth first, while fewer than {MAX_NODES} are read for
+        # this parameter. A node still unread when the budget runs out is taken as mutated, so the cut answers "maybe
+        # mutated" (the floor, the direction that cannot report a false positive) and records a
+        # {BudgetTrace::CALLEE_CHAIN_CAP} hit.
+        def visit(def_node, name, owner)
+          queue = [[def_node, name, owner]]
+          read = 0
+          cut = false
           until queue.empty?
-            current, parameter = queue.shift
-            next if known?(current, parameter)
-            break if @count >= MAX_NODES
+            current, parameter, current_owner = queue.shift
+            next if known?(current, parameter, current_owner)
 
-            queue.concat(add(current, parameter))
+            if read >= MAX_NODES
+              cut = true
+              store(current, parameter, current_owner, Node.new(true, NO_SUCCESSORS))
+              next
+            end
+
+            read += 1
+            queue.concat(add(current, parameter, current_owner))
           end
+          BudgetTrace.hit(BudgetTrace::CALLEE_CHAIN_CAP) if cut
         end
 
         def settle
@@ -74,7 +93,7 @@ module Rigor
             changed = false
             each_node do |node|
               next if node.mutated
-              next unless node.successors.any? { |callee, name| mutated?(callee, name) }
+              next unless node.successors.any? { |callee, name, owner| mutated?(callee, name, owner) }
 
               node.mutated = true
               changed = true
@@ -84,30 +103,33 @@ module Rigor
 
         private
 
-        def known?(def_node, name)
-          by_name = @nodes[def_node]
+        def known?(def_node, name, owner)
+          by_name = @nodes.dig(def_node, owner)
           !by_name.nil? && by_name.key?(name)
         end
 
         # Records the node and answers its successors. A node its def mutates needs none.
-        def add(def_node, name)
-          @count += 1
-          mutated = @own.call(def_node).key?(name)
-          successors = mutated ? [] : successors_of(def_node, name)
-          (@nodes[def_node] ||= {})[name] = Node.new(mutated, successors)
+        def add(def_node, name, owner)
+          mutated = @own.call(def_node, owner).key?(name)
+          successors = mutated ? [] : successors_of(def_node, name, owner)
+          store(def_node, name, owner, Node.new(mutated, successors))
           successors
         end
 
-        def successors_of(def_node, name)
-          @edges.call(def_node).each_with_object([]) do |edge, successors|
+        def successors_of(def_node, name, owner)
+          @edges.call(def_node, owner).each_with_object([]) do |edge, successors|
             next unless edge.name == name
 
-            edge.callee_names.each { |callee_name| successors << [edge.callee, callee_name] }
+            edge.callee_names.each { |callee_name| successors << [edge.callee, callee_name, edge.owner || owner] }
           end
         end
 
+        def store(def_node, name, owner, node)
+          ((@nodes[def_node] ||= {})[owner] ||= {})[name] = node
+        end
+
         def each_node(&)
-          @nodes.each_value { |by_name| by_name.each_value(&) }
+          @nodes.each_value { |by_owner| by_owner.each_value { |by_name| by_name.each_value(&) } }
         end
       end
     end

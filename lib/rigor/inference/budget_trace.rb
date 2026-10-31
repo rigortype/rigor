@@ -54,6 +54,9 @@ module Rigor
       # `Dynamic[top]` (the escaping-block floor). Shared by slice B's loop-body fixpoint and by slice C's
       # content-evidence fixpoint, where the collapsed name is one element / key / value slot of a collection join.
       BLOCK_WRITEBACK_CAP = :block_writeback_cap
+      # `CalleeMutationChain` read {CalleeMutationChain::MAX_NODES} nodes of one parameter's hand-off walk and took the
+      # unread rest as mutating (the callee floor's FP-safe cut).
+      CALLEE_CHAIN_CAP = :callee_chain_cap
 
       # ADR-57 return-memo profile counters (not cutoffs — see the module doc). All bumped by
       # `ExpressionTyper#infer_user_method_return` / `#compute_user_method_return`.
@@ -84,7 +87,7 @@ module Rigor
 
       CATEGORIES = [
         RECURSION_GUARD, ANCESTOR_WALK_LIMIT, HKT_FUEL_EXHAUSTED, RECURSION_UNROLL_FUEL,
-        RECURSION_FIXPOINT_CAP, BLOCK_WRITEBACK_CAP,
+        RECURSION_FIXPOINT_CAP, BLOCK_WRITEBACK_CAP, CALLEE_CHAIN_CAP,
         MEMO_ENTRIES, MEMO_HITS, MEMO_MISSES, MEMO_BODY_EVALS,
         MEMO_REFUSE_ON_STACK, MEMO_REFUSE_UNROLL, MEMO_REFUSE_TRANSIENT
       ].freeze

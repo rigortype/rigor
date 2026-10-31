@@ -551,7 +551,7 @@ module Rigor
       # The `[def, offset]` pairs a self-dispatch `call_node` that passes a local resolves to
       # ({#resolve_self_callees}) — the defs whose census the callee floor reads; empty for any other call.
       def argument_mutating_callees(call_node)
-        return constant_receiver_callees(call_node) unless self_dispatch_call?(call_node)
+        return receiver_callees(call_node) unless self_dispatch_call?(call_node)
         # Fast path — only a local passed as an argument can be reported, so a call with none skips the def
         # resolution and the body scan entirely (the overwhelming common case).
         return NO_CALLEES unless call_passes_local_argument?(call_node)
@@ -559,31 +559,235 @@ module Rigor
         resolve_self_callees(call_node)
       end
 
-      # Issue #2510 — the `[def, 0, owner]` triple a `Const.name(local)` call resolves to when `Const` (a bare constant
-      # or any constant path) types as a project class object whose singleton table has `name` (`def self.name`,
-      # `class << self`, `module_function`): the same census a self-call reads then floors the passed local, so
-      # `Opts.add_format(opts, options)` handing `options` to a block that writes it leaves the literal behind. `owner`
-      # is an evaluator whose `self` is that class object: the callee's own hand-offs (`really(parser, options)`)
-      # resolve in the class that defines it, not in the caller's, and `resolved_census` keys the shared memo by that
-      # class. Any other explicit receiver resolves to nothing; `send` hand-offs are not followed through a constant
-      # receiver.
-      def constant_receiver_callees(call_node)
+      # Issue #2510, #2515 — the `[def, 0, owner]` triple an explicit-receiver `recv.name(local)` call resolves to when
+      # `recv` types as a project class object (`Const`, a bare constant or any constant path, or a local holding
+      # one), whose singleton chain has `name` (`def self.name`, `class << self`, `module_function`, an `extend`ed
+      # module, the project superclass's), or as an instance of a project class (`Opts.new.add_format(...)`,
+      # `h = Opts.new; h.add_format(...)`), whose own instance table has `name`: the same census a self-call reads then
+      # floors the passed local, so `Opts.add_format(opts, options)` handing `options` to a block that writes it
+      # leaves the literal behind. `owner` is a {CalleeOwner}: the receiver type the callee's own hand-offs
+      # (`really(parser, options)`) resolve self-calls in, not the caller's class, and the class that defines the def,
+      # whose lexical nesting its constants resolve in. `resolved_census` keys the shared memo by the receiver's
+      # class. An instance receiver finds the class's own defs only (no ancestor walk, as {#resolve_self_callees});
+      # a receiver of any other type resolves to nothing, as does `Const.new` of a class that defines its own
+      # `self.new`; `send` hand-offs are not followed through an explicit receiver. `require_local: false` (the
+      # hand-offs inside a callee, whose arguments are parameters) skips the caller-scope check that a local is passed
+      # and types the receiver in the def's own nesting ({#hand_off_scopes}), not the caller's.
+      def receiver_callees(call_node, require_local: true)
         receiver = call_node.receiver
-        return NO_CALLEES unless receiver.is_a?(Prism::ConstantReadNode) || receiver.is_a?(Prism::ConstantPathNode)
-        return NO_CALLEES unless call_passes_local_argument?(call_node)
+        return NO_CALLEES if receiver.nil?
+        return NO_CALLEES if require_local && !call_passes_local_argument?(call_node)
 
-        receiver_type = scope.type_of(receiver)
-        return NO_CALLEES unless receiver_type.is_a?(Type::Singleton)
-
-        found = scope.singleton_def_for(receiver_type.class_name, call_node.name)
-        return NO_CALLEES if found.nil?
-
-        [[found, 0, self.class.new(scope: scope.with_self_type(receiver_type))]]
+        require_local ? receiver_callees_in(scope, call_node) : hand_off_receiver_callees(call_node)
       end
 
-      # `census` (a `callee_*_mutated_parameters` name) of `def_node`, read through `owner`, the evaluator the callee's
-      # hand-offs resolve in, or this one when the callee is a self-call's.
-      def census_of(owner, census, def_node) = (owner || self).__send__(census, def_node)
+      # {#receiver_callees} for one scope `call_node`'s receiver is typed in.
+      def receiver_callees_in(typing_scope, call_node)
+        receiver = call_node.receiver
+        return NO_CALLEES if overridden_constructor?(receiver, typing_scope)
+
+        callees_for_receiver_type(typing_scope.type_of(receiver), call_node.name)
+      end
+
+      # `[def, 0, owner]` for `name` called on a receiver of `receiver_type`, or none.
+      def callees_for_receiver_type(receiver_type, name)
+        found, defining =
+          case receiver_type
+          when Type::Singleton then scope.singleton_def_through_ancestors(receiver_type.class_name, name)
+          when Type::Nominal then [scope.user_def_for(receiver_type.class_name, name), receiver_type.class_name]
+          end
+        return NO_CALLEES if found.nil?
+
+        [[found, 0, defining == receiver_type.class_name ? CalleeOwner.new(receiver_type) : FLOOR_ALL]]
+      end
+
+      # What a cross-class hand-off carries instead of an evaluator: the receiver type, which is `self` in the callee
+      # (the class that defines the def, so its lexical nesting). Holds no scope, so the run-scoped census memo that
+      # keeps an {CalleeMutationChain::Edge} alive keeps no caller state alive.
+      CalleeOwner = Data.define(:self_type)
+
+      # The owner of a def reached through an inherited lookup (the defining class is not the receiver's or `self`'s
+      # class): its census and hand-offs are not walked, the owner context being another class's. Every content
+      # parameter reads as mutated, so the argument is floored, and a {BudgetTrace::CALLEE_CHAIN_CAP} hit is recorded.
+      FLOOR_ALL = :floor_all
+      private_constant :CalleeOwner, :FLOOR_ALL
+
+      # True for `Const.new` where the class defines its own `self.new`, whose result is not an instance of `Const`.
+      def overridden_constructor?(receiver, typing_scope)
+        return false unless receiver.is_a?(Prism::CallNode) && receiver.name == :new
+
+        klass = typing_scope.type_of(receiver.receiver) if constant_node?(receiver.receiver)
+        klass.is_a?(Type::Singleton) &&
+          !typing_scope.singleton_def_through_ancestors(klass.class_name, :new).first.nil?
+      end
+
+      # The callees a hand-off inside a callee's body (`Help.c(p, o)`, `Helper.new.c(p, o)`) resolves to: the union of
+      # two resolutions of the receiver constant, both in the nesting of the def the hand-off sits in, never the call
+      # site's, so the answer cannot depend on which caller reached the memoised edges first. The discovery index does
+      # not record how the defining class was spelled (`module A; class B::C` has the nesting `["A::B::C", "A"]`,
+      # `class A::B::C` has `["A::B::C"]`), so each resolution tries every spelling it could have had.
+      #
+      # - By name: a bare constant `K` as each prefix of the class name followed by `K`, and as the top-level `K`
+      #   (`n + 1` lookups); a rooted one (`::K`) as `K` alone. Cheap, and blind to an alias, an inherited or included
+      #   constant, and a constant holding an instance.
+      # - Typed ({#typed_hand_off_callees}): the receiver typed under each truncation of the nesting, which sees
+      #   those, and resolved as a caller-side call is.
+      #
+      # Both always run: a name that resolves by name can still be shadowed in the real lookup by an alias or an
+      # inherited constant, and the callee found by only one of them would be missed. Each result only adds callees,
+      # so the floor only widens.
+      def hand_off_receiver_callees(call_node)
+        receiver = call_node.receiver
+        constructed = receiver.is_a?(Prism::CallNode) && receiver.name == :new
+        constant = constructed ? receiver.receiver : receiver
+        written = constant_name(constant)
+        return NO_CALLEES if written.nil?
+
+        found = hand_off_class_names(written).flat_map do |class_name|
+          hand_off_callee_in(class_name, constructed, call_node.name)
+        end
+        found.concat(typed_hand_off_callees(call_node, written))
+        found.size > 1 ? found.uniq { |callee, _, owner| [callee.object_id, owner] } : found
+      end
+
+      # The receiver typed under each truncation of the nested-spelling nesting of the def's class (`["A::B::C", "A::B",
+      # "A"]` gives `["A::B::C"]`, `["A::B::C", "A::B"]` and the whole chain), the compact spelling to the nested one,
+      # and resolved by type. A rooted constant and a top-level def are typed once.
+      def typed_hand_off_callees(call_node, written)
+        typed_receiver_types(call_node.receiver, written).flat_map do |receiver_type|
+          callees_for_receiver_type(receiver_type, call_node.name)
+        end
+      end
+
+      # The types `receiver` (a constant, or `Const.new`) has under each nesting truncation, a `Const.new` of a class
+      # with its own `self.new` left out. They depend on the receiver's spelling and the def's class alone, so the run
+      # memoises them per class and spelling (bypassed while a dependency recorder is active, which must see each
+      # constant read).
+      def typed_receiver_types(receiver, written)
+        return compute_typed_receiver_types(receiver, written) if hand_off_memo_bypassed?
+
+        by_written = hand_off_memo(:types, written)
+        constructed = receiver.is_a?(Prism::CallNode)
+        by_written.fetch(constructed) { by_written[constructed] = compute_typed_receiver_types(receiver, written) }
+      end
+
+      # The `{ written => ... }` table of `kind` for the class `self` is and its side, in the run's per-discovery memo
+      # of hand-off resolutions that depend on a constant's spelling, the def's class and which side of it (class
+      # object or instance) the nesting is read for: a constant's ancestor lookup differs between the two.
+      def hand_off_memo(kind, written)
+        table = (Thread.current[TYPED_RECEIVER_KEY] ||= ObjectSpace::WeakKeyMap.new)
+        by_kind = (table[scope.discovery] ||= {})[kind] ||= {}
+        self_type = scope.self_type
+        by_side = (by_kind[self_type.is_a?(Type::Singleton)] ||= {})
+        (by_side[enclosing_class_name_for(self_type)] ||= {})[written] ||= {}
+      end
+
+      # True when the hand-off memo must not be read or written: a dependency recorder is active (it must see each
+      # constant read), or this scope carries guard narrowings of constants (`if INST.is_a?(Sub)`), which survive
+      # `with_self_type` and change what the constant types as, so the answer is no longer the def's alone.
+      def hand_off_memo_bypassed?
+        Analysis::DependencyRecorder.active? || !scope.constant_narrowings.empty?
+      end
+
+      TYPED_RECEIVER_KEY = RunScopedSlots.register(:rigor_callee_typed_receivers)
+      private_constant :TYPED_RECEIVER_KEY
+
+      def compute_typed_receiver_types(receiver, written)
+        name = enclosing_class_name_for(scope.self_type)
+        parts = name.nil? ? [] : name.to_s.split("::")
+        scopes =
+          if parts.empty? then [scope.with_lexical_nesting([])]
+          elsif written.start_with?("::") then [scope]
+          else
+            chain = parts.each_index.map { |i| parts[0..(parts.size - 1 - i)].join("::") }
+            chain.each_index.map { |k| scope.with_lexical_nesting(chain[0..k]) }
+          end
+        types = scopes.filter_map do |typing_scope|
+          typing_scope.type_of(receiver) unless overridden_constructor?(receiver, typing_scope)
+        end
+        types.uniq
+      end
+
+      # `[def, 0, owner]` for `name` called on `class_name` (or on its `new`), or none.
+      def hand_off_callee_in(class_name, constructed, name)
+        if constructed
+          return NO_CALLEES unless scope.singleton_def_through_ancestors(class_name, :new).first.nil?
+
+          found = scope.user_def_for(class_name, name)
+          return found.nil? ? NO_CALLEES : [[found, 0, CalleeOwner.new(Type::Combinator.nominal_of(class_name))]]
+        end
+
+        found, defining = scope.singleton_def_through_ancestors(class_name, name)
+        return NO_CALLEES if found.nil?
+
+        [[found, 0, defining == class_name ? CalleeOwner.new(Type::Combinator.singleton_of(class_name)) : FLOOR_ALL]]
+      end
+
+      # The class names a constant written as `written` (`K`, `A::K`, `::K`) can name from the def's nesting.
+      def hand_off_class_names(written)
+        return [written.delete_prefix("::")] if written.start_with?("::")
+
+        name = enclosing_class_name_for(scope.self_type)
+        return [written] if name.nil?
+        return compute_hand_off_class_names(name, written) if hand_off_memo_bypassed?
+
+        memo = hand_off_memo(:names, written)
+        memo.fetch(:names) { memo[:names] = compute_hand_off_class_names(name, written) }
+      end
+
+      def compute_hand_off_class_names(name, written)
+        parts = name.to_s.split("::")
+        parts.each_index.map { |i| "#{parts[0..i].join('::')}::#{written}" } << written
+      end
+
+      # The name a constant node is written with, or nil when part of it is not a constant (`foo::Bar`).
+      def constant_name(node)
+        node.full_name if constant_node?(node)
+      rescue Prism::ConstantPathNode::DynamicPartsInConstantPathError, Prism::ConstantPathNode::MissingNodesInConstantPathError
+        nil
+      end
+
+      # The evaluator a hand-off's {CalleeOwner} stands for, built from this one's scope and kept on it.
+      def owner_evaluator(owner)
+        (@owner_evaluators ||= {})[owner] ||=
+          self.class.new(scope: scope.with_self_type(owner.self_type))
+      end
+
+      # The `[def, offset, owner]` triples a call inside a callee's body hands its parameter to: a self-call
+      # ({#resolve_self_callees}, owner nil) or a call on a constant / `Const.new` receiver ({#hand_off_receiver?}).
+      def hand_off_callees(call_node)
+        return receiver_callees(call_node, require_local: false) unless self_dispatch_call?(call_node)
+
+        resolve_self_callees(call_node)
+      end
+
+      # True for a call on a receiver the callee's body can type without its locals: a constant or `Const.new`.
+      def hand_off_receiver?(node)
+        return false unless node.is_a?(Prism::CallNode)
+
+        receiver = node.receiver
+        case receiver
+        when Prism::ConstantReadNode, Prism::ConstantPathNode then true
+        when Prism::CallNode then receiver.name == :new && constant_node?(receiver.receiver)
+        else false
+        end
+      end
+
+      def constant_node?(node) = node.is_a?(Prism::ConstantReadNode) || node.is_a?(Prism::ConstantPathNode)
+
+      # `census` (a `callee_*_mutated_parameters` name) of `def_node`, read through `owner`, the {CalleeOwner} the
+      # callee's hand-offs resolve in, or this evaluator when the callee is a self-call's.
+      def census_of(owner, census, def_node)
+        return floor_all_census(census, def_node) if owner == FLOOR_ALL
+
+        (owner.nil? ? self : owner_evaluator(owner)).__send__(census, def_node)
+      end
+
+      # The {FLOOR_ALL} answer: every content parameter mutated, no hand-offs.
+      def floor_all_census(census, def_node)
+        BudgetTrace.hit(BudgetTrace::CALLEE_CHAIN_CAP)
+        census == :forwarding_edges ? NO_FORWARDS : content_parameter_slots(def_node)
+      end
 
       # The local-variable reads `call_node` passes to the parameters of `mutated`, a `{ name => slot }` census, the
       # first `offset` arguments not being the callee's (the `:name` of a `send` hand-off, {#resolve_self_callees}).
@@ -4807,17 +5011,22 @@ module Rigor
       def callee_content_mutated_parameters(def_node)
         cache = (@callee_mutated_param_cache ||= {}.compare_by_identity)
         cache[def_node] ||= resolved_census(:close, def_node) do
-          CalleeMutationChain.close(def_node, own: method(:own_content_parameters), edges: method(:forwarding_edges))
+          CalleeMutationChain.close(def_node, own: hop_census(:own_content_parameters),
+                                              edges: hop_census(:forwarding_edges))
         end
       end
+
+      # Issue #2515 — `census` as the `(def, owner)` callback {CalleeMutationChain} reads a hop through: `owner` is the
+      # evaluator a cross-class hand-off resolves in, nil for the evaluator the closure started in.
+      def hop_census(census) = ->(def_node, owner) { census_of(owner, census, def_node) }
 
       # Issue #2296 — the `{ name => slot }` parameters the callee mutates inside a block in its body
       # ({#own_block_content_parameters}), closed over hand-offs as {#callee_content_mutated_parameters} is.
       def callee_block_mutated_parameters(def_node)
         cache = (@callee_block_param_cache ||= {}.compare_by_identity)
         cache[def_node] ||= resolved_census(:close_block, def_node) do
-          CalleeMutationChain.close(def_node, own: method(:own_block_content_parameters),
-                                              edges: method(:forwarding_edges))
+          CalleeMutationChain.close(def_node, own: hop_census(:own_block_content_parameters),
+                                              edges: hop_census(:forwarding_edges))
         end
       end
 
@@ -4826,8 +5035,8 @@ module Rigor
       def callee_set_mutated_parameters(def_node)
         cache = (@callee_set_param_cache ||= {}.compare_by_identity)
         cache[def_node] ||= resolved_census(:close_set, def_node) do
-          CalleeMutationChain.close(def_node, own: method(:own_set_content_parameters),
-                                              edges: method(:forwarding_edges))
+          CalleeMutationChain.close(def_node, own: hop_census(:own_set_content_parameters),
+                                              edges: hop_census(:forwarding_edges))
         end
       end
 
@@ -4941,13 +5150,14 @@ module Rigor
         slots = content_parameter_slots(def_node)
         edges = []
         each_forwarding_call(def_node, slots) do |call_node, forwarded|
-          resolve_self_callees(call_node).each do |callee, offset|
+          hand_off_callees(call_node).each do |callee, offset, owner|
             callee_slots = content_parameter_slots(callee)
             forwarded.each do |name, index|
               names = bound_parameter_names(callee_slots, index.is_a?(Integer) ? index - offset : index)
               next if names.empty?
 
-              edges << CalleeMutationChain::Edge.new(name: name, slot: slots[name], callee: callee, callee_names: names)
+              edges << CalleeMutationChain::Edge.new(name: name, slot: slots[name], callee: callee, callee_names: names,
+                                                     owner: owner)
             end
           end
         end
@@ -4965,7 +5175,7 @@ module Rigor
       def forwarding_calls(def_node, slots)
         calls = []
         each_node_in_method_scope(def_node.body, 0) do |descendant, depth|
-          next unless self_dispatch_call?(descendant)
+          next unless self_dispatch_call?(descendant) || hand_off_receiver?(descendant)
 
           forwarded = forwarded_parameters(descendant, slots, depth)
           calls << [descendant, forwarded] unless forwarded.empty?
@@ -5053,17 +5263,35 @@ module Rigor
         class_name = enclosing_class_name_for(self_type)
         if class_name.nil?
           found = side_callee(node) { |name| scope.top_level_def_for(name) }
-          return found.nil? ? NO_CALLEES : [found]
+          return found.nil? ? NO_CALLEES : [[*found, nil]]
         end
 
         instance = side_callee(node) { |name| scope.user_def_for(class_name, name) }
+        instance &&= [*instance, nil]
         return (instance.nil? ? NO_CALLEES : [instance]) unless self_type.is_a?(Type::Singleton)
 
-        singleton = side_callee(node) { |name| scope.singleton_def_for(class_name, name) }
+        singleton = inherited_singleton_callee(node, self_type)
         return (singleton.nil? ? NO_CALLEES : [singleton]) if instance.nil?
         return [instance] if singleton.nil? || singleton.first.equal?(instance.first)
 
         [singleton, instance]
+      end
+
+      # The `[def, offset, owner]` a singleton-side self-call resolves to along the singleton chain. A def the class
+      # inherits is written in another class, whose lexical nesting and `self` its hand-offs would resolve in; that
+      # context is not threaded, so such a def is not walked: its owner is {FLOOR_ALL}. A def of the class itself has
+      # no owner.
+      def inherited_singleton_callee(node, self_type)
+        class_name = self_type.class_name
+        defining = nil
+        found = side_callee(node) do |name|
+          def_node, owner = scope.singleton_def_through_ancestors(class_name, name)
+          defining = owner unless def_node.nil?
+          def_node
+        end
+        return if found.nil?
+
+        [*found, (defining.nil? || defining == class_name ? nil : FLOOR_ALL)]
       end
 
       # The `[def, offset]` `node` resolves to on one side, whose def table the block looks a name up in, or nil.

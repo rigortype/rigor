@@ -128,14 +128,20 @@ RSpec.describe "a callee chain that mutates an argument floors it (#2104)" do
     RUBY
   end
 
-  it "does not floor an argument a chain hands past the read cap, even when its end mutates it" do
-    # Pins a decision: past `CalleeMutationChain::MAX_NODES` a hand-off reads as none, as an unresolved callee does.
+  it "floors an argument a chain hands past the read cap, whatever its end does, and records the cut" do
+    # Pins a decision: past `CalleeMutationChain::MAX_NODES` a hand-off reads as a mutation (the walk did not see the
+    # callee), the direction that cannot report a false positive on correct code.
     chain = (1..40).map { |i| "def hop#{i}(acc) = hop#{i + 1}(acc)" }
-    expect(diagnostics(<<~RUBY)).to eq(undefined_upcase)
+    Rigor::Inference::BudgetTrace.enable!
+    Rigor::Inference::BudgetTrace.reset
+    expect(diagnostics(<<~RUBY)).to eq([])
       def stripes(acc) = hop1(acc)
       #{chain.join("\n")}
       def hop41(acc) = (acc[0] = "x")
     RUBY
+    expect(Rigor::Inference::BudgetTrace.snapshot[Rigor::Inference::BudgetTrace::CALLEE_CHAIN_CAP]).to be >= 1
+  ensure
+    Rigor::Inference::BudgetTrace.disable!
   end
 
   it "keeps the true positive when the def hands a different parameter to sixteen other methods" do

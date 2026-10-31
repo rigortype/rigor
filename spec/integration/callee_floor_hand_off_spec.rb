@@ -906,8 +906,9 @@ RSpec.describe "a hand-off inside a callee resolves its constants in the callee'
     end
 
     it "stays silent when the guard and the read are in one method (n1)" do
+      prefix = narrowed_source(first_guard: "", sub_body: "").sub(/class Caller.*\z/m, "")
       source = <<~RUBY
-        #{narrowed_source(first_guard: "", sub_body: "").sub(/class Caller.*\z/m, '')}
+        #{prefix}
         class Caller
           def first(argv)
             o = { format: "text" }

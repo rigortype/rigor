@@ -287,6 +287,88 @@ RSpec.describe Rigor::CLI::Catalogue do
     end
   end
 
+  # ADR-126 WD3 / #2511 — the MCP server turns each `inputSchema` property into a flag, a positional, or something it
+  # handles itself. The server's own argv builder is probed with a distinct value per property, so the flag a property
+  # becomes is read from the server rather than restated here; each one must be a flag its catalogued command accepts.
+  # A property that becomes no flag must be listed below, so a new positional or self-handled property is a conscious
+  # addition, and a stale entry fails too.
+  describe "the MCP tools' inputSchema against the catalogue flags" do
+    let(:non_flag_properties) do
+      {
+        "rigor_check" => %w[paths],
+        "rigor_type_of" => %w[file line col],
+        "rigor_triage" => %w[paths],
+        "rigor_lens" => %w[files],
+        "rigor_annotate" => %w[file],
+        "rigor_sig_gen" => %w[paths],
+        "rigor_explain" => %w[rule],
+        "rigor_coverage" => %w[paths]
+      }
+    end
+
+    # One distinct, recognisable value per property: a string or array names its property, an integer is numbered.
+    def probe_arguments(tool)
+      tool.dig(:inputSchema, :properties).each_with_index.to_h do |(name, schema), index|
+        value = case schema.fetch(:type)
+                when "integer" then 90_000 + index
+                when "array" then ["sentinel-#{name}"]
+                else "sentinel-#{name}"
+                end
+        [name.to_s, value]
+      end
+    end
+
+    def probe_text(value)
+      value.is_a?(Array) ? value.first.to_s : value.to_s
+    end
+
+    # The argv tokens after the command word and before the `--` that ends the options: the flags the server passed,
+    # not the positionals.
+    def option_tokens(argv)
+      argv.drop(1).take_while { |token| token != "--" }
+    end
+
+    def flag_name(token)
+      token.split("=", 2).first
+    end
+
+    it "names a catalogued flag for every property that becomes one, and lists the rest" do
+      server = Rigor::MCP::Server.new
+
+      Rigor::MCP::Server::TOOLS.each do |tool|
+        name = tool.fetch(:name)
+        command = entries.find { |entry| entry.fetch("mcp_tool") == name }
+        catalogued = command.fetch("flags").map { |flag| flag.fetch("name") }
+        probes = probe_arguments(tool)
+        options = option_tokens(server.send(:build_argv, name, probes))
+
+        flag_of = probes.to_h do |property, value|
+          token = options.find { |option| option.include?(probe_text(value)) }
+          [property, token && flag_name(token)]
+        end
+
+        expect(flag_of.compact.reject { |_, flag| catalogued.include?(flag) })
+          .to eq({}), "#{name}: properties become flags the command #{command.fetch('name')} does not accept"
+        expect(flag_of.select { |_, flag| flag.nil? }.keys)
+          .to match_array(non_flag_properties.fetch(name)), "#{name}: properties that become no flag"
+      end
+    end
+
+    it "checks every flag the server passes, not only those a property sets" do
+      server = Rigor::MCP::Server.new
+
+      Rigor::MCP::Server::TOOLS.each do |tool|
+        name = tool.fetch(:name)
+        command = entries.find { |entry| entry.fetch("mcp_tool") == name }
+        catalogued = command.fetch("flags").map { |flag| flag.fetch("name") }
+        options = option_tokens(server.send(:build_argv, name, probe_arguments(tool)))
+
+        expect(options.map { |token| flag_name(token) } - catalogued)
+          .to eq([]), "#{name}: flags the server passes that #{command.fetch('name')} does not accept"
+      end
+    end
+  end
+
   describe "--format validation" do
     def formatted_invocations
       entries.flat_map do |entry|

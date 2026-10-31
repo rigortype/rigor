@@ -101,7 +101,8 @@ parses; it does not choose a core.
 
 A `core_root:` that does not exist, is not a directory, holds no `.rbs` file, lies inside (or contains) one of
 your `signature_paths:`, or does not build an RBS environment stops the run with exit code 64. A core class
-whose definition does not build is reported as an `rbs.coverage.definition-build-failed` error:
+whose definition fails to build because of the core's own files is reported as an
+`rbs.coverage.definition-build-failed` error:
 
 ```
 rigor: core_root: "/path/to/vendor/rbs-shifter/3.3/core" does not exist

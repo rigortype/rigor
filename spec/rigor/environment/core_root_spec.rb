@@ -138,6 +138,14 @@ RSpec.describe "core_root: (#2517)" do
         end
         expect { Rigor::Environment::RbsLoader.new(core_root: core, project_signature_paths: [File.join(dir, "si")]) }
           .not_to raise_error
+
+        vendored = File.join(dir, "vendor", "core")
+        FileUtils.mkdir_p(File.dirname(vendored))
+        FileUtils.mv(core, vendored)
+        File.symlink(vendored, File.join(dir, "sig", "corelink"))
+        linked = File.join(dir, "sig", "corelink")
+        expect { Rigor::Environment::RbsLoader.new(core_root: linked, project_signature_paths: [File.join(dir, "sig")]) }
+          .not_to raise_error
       end
     end
 
@@ -272,6 +280,20 @@ RSpec.describe "core_root: (#2517)" do
 
       expect(status).to eq(1)
       expect(out).to match(/error: .*failed to build: .*String.*\[rbs\.coverage\.definition-build-failed\]/)
+    end
+
+    it "keeps a project sig/ collision with the selected core a warning" do
+      shifted_core(Dir.pwd)
+      FileUtils.mkdir_p("sig")
+      File.write("sig/s.rbs", "class String\n  def strip: () -> String\nend\n")
+      File.write("lib/demo.rb", "\" text \".strip\n")
+      File.write(".rigor.yml", "paths: [lib]\ncore_root: core33\n")
+
+      status = out = nil
+      expect { status, out, = check(".rigor.yml") }.to output(/RBS definition build failed for `String`/).to_stderr
+
+      expect(status).to eq(0)
+      expect(out).to match(/warning: .*failed to build: .*String.*\[rbs\.coverage\.definition-build-failed\]/)
     end
 
     it "re-checks an --incremental snapshot when a selected core file changes in place" do

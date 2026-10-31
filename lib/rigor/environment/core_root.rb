@@ -35,14 +35,29 @@ module Rigor
       # @param signature_paths — the project's own signature roots.
       # @raise CoreRootError — the two overlap.
       def reject_overlap!(core_root, signature_paths)
-        core = File.join(core_root, "")
+        core = File.join(real_path(core_root), "")
         Array(signature_paths).each do |path|
-          root = File.join(File.expand_path(path.to_s), "")
+          root = File.join(real_path(path), "")
           next unless core.start_with?(root) || root.start_with?(core)
 
           raise CoreRootError, "core_root: #{core_root.inspect} overlaps the signature path #{path.to_s.inspect}, so " \
                                "its signatures would load twice; move the core outside the project's signature paths"
         end
+      end
+
+      # Compared resolved, because the project-signature walk does not follow a symlinked directory: a `sig/core`
+      # link to a core kept elsewhere loads once, as core, and must not be rejected. A path that does not exist yet
+      # resolves through its nearest existing ancestor, so the two sides of a comparison are spelled alike.
+      def real_path(path)
+        absolute = File.expand_path(path.to_s)
+        missing = []
+        until File.exist?(absolute) || File.dirname(absolute) == absolute
+          missing.unshift(File.basename(absolute))
+          absolute = File.dirname(absolute)
+        end
+        File.join(File.realpath(absolute), *missing)
+      rescue SystemCallError
+        File.expand_path(path.to_s)
       end
 
       def invalid_reason(absolute)

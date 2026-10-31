@@ -70,7 +70,11 @@ project's signature roots, which would load its files twice (`Environment::CoreR
 is not done at load, because a command that only reads a configuration, such as the language server's reload,
 must not fail on a core that is not generated yet. A class of the selected core that builds an environment
 but not a definition is not raised (definitions build lazily, mid-analysis); its
-`rbs.coverage.definition-build-failed` row is authored `:error` instead of `:warning` under a selected core. Both raise
+`rbs.coverage.definition-build-failed` row is authored `:error` instead of `:warning` when every signature file a
+failure names is under the selected core. A failure that also names a project file, such as a `sig/` collision,
+keeps its warning, so selecting a core does not turn an already tolerated collision into a failing build. The
+overlap test compares resolved paths: the project-signature walk does not follow a symlinked directory, so a
+`sig/` link to a core kept elsewhere loads once and is accepted. Both raise
 `Rigor::Environment::CoreRootError`, a `ConfigurationError`, so the run stops with a `rigor:` line and exit `64`.
 Unlike a `signature_paths:` entry, an unusable selected core is never tier 3: the run has no fallback that is not
 wrong. The default core would accept the APIs the selection removes, and the empty environment a failed build

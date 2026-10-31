@@ -136,6 +136,15 @@ RSpec.describe "a hand-off inside a callee resolves its constants in the callee'
       expect(rules(source)).to eq([])
     end
 
+    it "records the floor as a callee-chain-cap trace hit" do
+      Rigor::Inference::BudgetTrace.enable!
+      Rigor::Inference::BudgetTrace.reset
+      rules("#{library}\n#{sub(true)}\n#{caller_of('CallsLeaf', 'Sub.leaf(opts, options)')}")
+      expect(Rigor::Inference::BudgetTrace.snapshot[Rigor::Inference::BudgetTrace::CALLEE_CHAIN_CAP]).to be >= 1
+    ensure
+      Rigor::Inference::BudgetTrace.disable!
+    end
+
     it "floors without walking when neither Helper writes (the inherited def is not read)" do
       pure = library.sub('parser.on("--f") { |v| options[:format] = v }', "puts(options.to_s)")
       source = "#{pure}\n#{sub(true)}\n#{caller_of('CallsLeaf', 'Sub.leaf(opts, options)')}"

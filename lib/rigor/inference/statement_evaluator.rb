@@ -573,13 +573,20 @@ module Rigor
       # a receiver of any other type resolves to nothing, as does `Const.new` of a class that defines its own
       # `self.new`; `send` hand-offs are not followed through an explicit receiver. `require_local: false` (the
       # hand-offs inside a callee, whose arguments are parameters) skips the caller-scope check that a local is passed
-      # and types the receiver in the def's own nesting ({#hand_off_scope}), not the caller's.
+      # and types the receiver in the def's own nesting ({#hand_off_scopes}), not the caller's.
       def receiver_callees(call_node, require_local: true)
         receiver = call_node.receiver
         return NO_CALLEES if receiver.nil?
         return NO_CALLEES if require_local && !call_passes_local_argument?(call_node)
 
-        typing_scope = require_local ? scope : hand_off_scope
+        scopes = require_local ? [scope] : hand_off_scopes
+        found = scopes.flat_map { |typing_scope| receiver_callees_in(typing_scope, call_node) }
+        found.size > 1 ? found.uniq { |callee, _, owner| [callee.object_id, owner] } : found
+      end
+
+      # {#receiver_callees} for one scope `call_node`'s receiver is typed in.
+      def receiver_callees_in(typing_scope, call_node)
+        receiver = call_node.receiver
         return NO_CALLEES if overridden_constructor?(receiver, typing_scope)
 
         receiver_type = typing_scope.type_of(receiver)
@@ -609,14 +616,19 @@ module Rigor
           !typing_scope.singleton_def_through_ancestors(klass.class_name, :new).first.nil?
       end
 
-      # This scope with the constant lookup nesting of the def a hand-off sits in: the nesting its defining class
-      # names (the nested spelling `module A; class B`: `["A::B", "A"]`), not the call site's. A callee's constants
-      # resolve where the callee is written, so the answer cannot depend on which caller reached it first, which the
-      # memo ({#resolved_census}) would otherwise freeze. A top-level def is `[]`.
-      def hand_off_scope
+      # The scopes a hand-off's receiver is typed in: this scope with the constant lookup nesting of the def it sits in,
+      # never the call site's, so the answer cannot depend on which caller reached the memoised edges first. The
+      # nesting is a property of how the defining class was spelled, which the discovery index does not record: a
+      # `module A; class B` body has `["A::B", "A"]`, a compact `class A::B` has `["A::B"]`. A qualified name is
+      # therefore typed under each spelling it could have had (its nesting truncated after each prefix), and a
+      # callee found under any of them is followed: the floor only ever widens. A top-level def is `[]`.
+      def hand_off_scopes
         name = @defining_class || enclosing_class_name_for(scope.self_type)
         parts = name.nil? ? [] : name.to_s.split("::")
-        scope.with_lexical_nesting(parts.each_index.map { |i| parts[0..-(i + 1)].join("::") })
+        return [scope.with_lexical_nesting([])] if parts.empty?
+
+        chain = parts.each_index.map { |i| parts[0..-(i + 1)].join("::") }
+        chain.each_index.map { |k| scope.with_lexical_nesting(chain[0..k]) }
       end
 
       # The evaluator a hand-off's {CalleeOwner} stands for, built from this one's scope and kept on it.
@@ -630,7 +642,7 @@ module Rigor
       def hand_off_callees(call_node)
         return receiver_callees(call_node, require_local: false) unless self_dispatch_call?(call_node)
 
-        resolve_self_callees(call_node).map { |callee, offset| [callee, offset, nil] }
+        resolve_self_callees(call_node)
       end
 
       # True for a call on a receiver the callee's body can type without its locals: a constant or `Const.new`.
@@ -4908,7 +4920,10 @@ module Rigor
       # weakly: a table dropped with its index), the class by name. A run builds hundreds of
       # thousands of evaluators, and a per-evaluator memo alone recomputed each closure and each def's edges about
       # thirty times over (#2295's cost on the release gate). Issue #2297 — the side self-calls resolve on
-      # ({#resolve_self_callees}) keys it too: a singleton-side table apart from the instance-side one.
+      # ({#resolve_self_callees}) keys it too: a singleton-side table apart from the instance-side one. Issue #2515 —
+      # so does the class a def is written in when it is not the self class (an inherited singleton def): its
+      # hand-offs resolve constants in that class's nesting ({#hand_off_scopes}), so no path can fill the memo with
+      # another path's answer.
       #
       # While a dependency recorder is active the memo is bypassed: a resolution records an ADR-46 read in the file
       # and in each capture window open at the time, and a hit would leave that read out of them.
@@ -4921,7 +4936,7 @@ module Rigor
         self_type = scope.self_type
         by_class = (slot[self_type.is_a?(Type::Singleton) ? 1 : 0][kind] ||= {})
         class_name = enclosing_class_name_for(self_type)
-        by_def = (by_class[class_name] ||= {}.compare_by_identity)
+        by_def = (by_class[@defining_class ? [class_name, @defining_class] : class_name] ||= {}.compare_by_identity)
         by_def.fetch(def_node) { by_def[def_node] = yield }
       end
 
@@ -5125,17 +5140,34 @@ module Rigor
         class_name = enclosing_class_name_for(self_type)
         if class_name.nil?
           found = side_callee(node) { |name| scope.top_level_def_for(name) }
-          return found.nil? ? NO_CALLEES : [found]
+          return found.nil? ? NO_CALLEES : [[*found, nil]]
         end
 
         instance = side_callee(node) { |name| scope.user_def_for(class_name, name) }
+        instance &&= [*instance, nil]
         return (instance.nil? ? NO_CALLEES : [instance]) unless self_type.is_a?(Type::Singleton)
 
-        singleton = side_callee(node) { |name| scope.singleton_def_through_ancestors(class_name, name).first }
+        singleton = inherited_singleton_callee(node, self_type)
         return (singleton.nil? ? NO_CALLEES : [singleton]) if instance.nil?
         return [instance] if singleton.nil? || singleton.first.equal?(instance.first)
 
         [singleton, instance]
+      end
+
+      # The `[def, offset, owner]` a singleton-side self-call resolves to along the singleton chain. A def the class
+      # inherits is written in its defining class, so its owner is a {CalleeOwner} naming that class, whose lexical
+      # nesting the def's own hand-offs resolve constants in; a def of the class itself has no owner.
+      def inherited_singleton_callee(node, self_type)
+        class_name = self_type.class_name
+        defining = nil
+        found = side_callee(node) do |name|
+          def_node, owner = scope.singleton_def_through_ancestors(class_name, name)
+          defining = owner unless def_node.nil?
+          def_node
+        end
+        return if found.nil?
+
+        [*found, (defining.nil? || defining == class_name ? nil : CalleeOwner.new(self_type, defining))]
       end
 
       # The `[def, offset]` `node` resolves to on one side, whose def table the block looks a name up in, or nil.

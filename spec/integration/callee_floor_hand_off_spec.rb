@@ -70,4 +70,100 @@ RSpec.describe "a hand-off inside a callee resolves its constants in the callee'
     ba = rules(program(writes, reads, [%w[B HelpB], %w[A HelpA]]))
     expect([ab, ba]).to eq([always * 2, always * 2])
   end
+
+  describe "an inherited singleton def" do
+    let(:library) do
+      <<~RUBY
+        module X
+          module Helper
+            def self.c(parser, options) = parser.on("--f") { |v| options[:format] = v }
+          end
+          class Base
+            def self.leaf(parser, options) = Helper.c(parser, options)
+          end
+        end
+        module Helper
+          def self.c(parser, options) = puts(options.to_s)
+        end
+      RUBY
+    end
+
+    def sub(with_go)
+      go = with_go ? "  def self.go(parser, options) = leaf(parser, options)\n" : ""
+      "class Sub < X::Base\n#{go}end\n"
+    end
+
+    def caller_of(name, call)
+      <<~RUBY
+        class #{name}
+          def run(argv)
+            options = { format: "text" }
+            OptionParser.new { |opts| #{call} }.parse!(argv)
+            if options[:format] == "json"
+              puts "{}"
+            end
+          end
+        end
+      RUBY
+    end
+
+    it "resolves the base's constants in the base's nesting whatever the file order and the other callers" do
+      leaf = caller_of("CallsLeaf", "Sub.leaf(opts, options)")
+      via_go = caller_of("CallsGo", "Sub.go(opts, options)")
+      orders = [[leaf, via_go], [via_go, leaf], [leaf], [via_go]]
+      results = [true, false].product(orders).filter_map do |with_go, callers|
+        next if !with_go && callers.include?(via_go)
+
+        pieces = [library, sub(with_go), *callers]
+        [rules(pieces.join("\n")), rules([sub(with_go), *callers, library].join("\n"))]
+      end
+      expect(results.flatten(1).uniq).to eq([[]])
+    end
+
+    it "follows a self-call to the inherited def made from inside the subclass" do
+      source = <<~RUBY
+        #{library}
+        class Sub < X::Base
+          def self.run(argv)
+            options = { format: "text" }
+            OptionParser.new { |opts| leaf(opts, options) }.parse!(argv)
+            if options[:format] == "json"
+              puts "{}"
+            end
+          end
+        end
+      RUBY
+      expect(rules(source)).to eq([])
+    end
+
+    it "keeps the literal when neither Helper writes" do
+      pure = library.sub('parser.on("--f") { |v| options[:format] = v }', "puts(options.to_s)")
+      source = "#{pure}\n#{sub(true)}\n#{caller_of('CallsLeaf', 'Sub.leaf(opts, options)')}"
+      expect(rules(source)).to eq(always)
+    end
+  end
+
+  describe "a compact class name" do
+    it "follows a bare constant to the top-level one, as a compact nesting reads it" do
+      source = <<~RUBY
+        module Helper; def self.c(parser, options) = parser.on("--f") { |v| options[:format] = v }; end
+        module B
+          module Helper; def self.c(parser, options) = puts(options.to_s); end
+        end
+        class B::Opts
+          def self.a(parser, options) = Helper.c(parser, options)
+        end
+        class Help
+          def run(argv)
+            options = { format: "text" }
+            OptionParser.new { |opts| B::Opts.a(opts, options) }.parse!(argv)
+            if options[:format] == "json"
+              puts "{}"
+            end
+          end
+        end
+      RUBY
+      expect(rules(source)).to eq([])
+    end
+  end
 end

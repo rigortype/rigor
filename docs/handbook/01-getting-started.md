@@ -283,7 +283,7 @@ If you used the [AI-assisted setup](#the-fast-path-let-an-ai-agent-set-it-up),
 the `rigor-project-init` skill already wrote one for you. To
 write a starter by hand, `rigor init` emits `.rigor.dist.yml`
 — the project default that gets committed, with `paths` and a
-`severity_profile` filled in, `target_ruby` commented out until
+`severity_profile` filled in, the bundled plugins your `Gemfile.lock` declares listed under `plugins`, `target_ruby` commented out until
 you set it to your project's Ruby, and the rest commented out. That is all most projects need; the key
 reference, the JSON-schema editor integration, and `includes:`
 composition are in

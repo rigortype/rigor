@@ -586,7 +586,8 @@ module Rigor
         found, defining =
           case receiver_type
           when Type::Singleton then scope.singleton_def_through_ancestors(receiver_type.class_name, call_node.name)
-          when Type::Nominal then [scope.user_def_for(receiver_type.class_name, call_node.name), receiver_type.class_name]
+          when Type::Nominal
+            [scope.user_def_for(receiver_type.class_name, call_node.name), receiver_type.class_name]
           end
         return NO_CALLEES if found.nil?
 

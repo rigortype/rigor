@@ -175,6 +175,30 @@ RSpec.describe "a hand-off inside a callee resolves its constants in the callee'
       expect(rules(source)).to eq([])
     end
 
+    it "floors a hand-off from a callee to an inherited def instead of typing its constants in the subclass's nesting" do
+      source = <<~RUBY
+        module X
+          module Helper
+            def self.c(parser, options) = parser.on("--f F") { |v| options[:format] = v }
+          end
+          class Base
+            def self.leaf(parser, options) = Helper.c(parser, options)
+          end
+        end
+        module Y
+          module Helper
+            def self.c(parser, options) = puts(options.to_s)
+          end
+          class Sub < X::Base; end
+        end
+        class Driver
+          def self.go(parser, options) = Y::Sub.leaf(parser, options)
+        end
+        #{caller_of('Caller', 'Driver.go(opts, options)')}
+      RUBY
+      expect(rules(source)).to eq([])
+    end
+
     it "answers the same when two subclasses reach the inherited def, in either order" do
       def_set = <<~RUBY
         class Base

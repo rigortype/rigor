@@ -21,17 +21,26 @@ constraint envelope, and the gate that proves it done. When in doubt, `ready-for
 
 ## Known limitations
 
-`known-limitation` marks soundness or precision given up on purpose, or a current limit of the
-engine or tooling, kept as future work. It is added on top of the triage and area labels, not in
-place of them. File one when a change lands a deliberate tradeoff (a conservative floor that loses
-true positives, a budget cut, an over-approximation) or leaves a known false-positive shape
-unhandled; label the issue that still tracks a shape instead of filing a duplicate. The body
-states:
+`known-limitation` marks a limit a change knowingly lands and keeps as future work: soundness or
+precision given up on purpose, or a shape the binding spec (`docs/type-specification/`,
+`docs/internal-spec/`) records as not handled. It is part of the documented contract, not an
+unfixed defect, which is what separates it from an ordinary `bug`: a false-positive report nobody
+has decided to leave is a `bug`. It is added on top of one triage label and one area label, never
+in place of them.
 
-- **Kind** — which way it errs: a false positive left on correct code, or true positives (precision)
-  traded for false-positive safety.
-- **Why** — the constraint that forced it, linking the PR and any `approval-queue.d/` entry.
+File one when a change lands a deliberate tradeoff (a conservative floor that loses true positives,
+a budget cut, an over-approximated resolution set) or ships with a shape it documents as not
+followed. When an open issue already tracks the shape, label it instead of filing a duplicate, and
+add a comment carrying the fields below. A limit that will never be lifted is not this label: say so
+in the spec, or close the issue as `wontfix`. Close the issue when the limit is lifted.
+
+The body (or, for a labelled existing issue, a comment) covers:
+
+- **Kind** — which way it errs: a false positive left on correct code (soundness), precision traded
+  for false-positive safety (lost true positives), or another limit (tooling, performance).
+- **Why** — the constraint that forced it, linking the PR that made the call. An `approval-queue.d/`
+  entry is deleted when it is ratified, so cite it only alongside the PR.
 - **Cost** — the measured or reproduced effect, with a minimal example.
 - **Revisit when** — the change that would lift it, and what proves it done.
 
-List them with `gh issue list --label known-limitation`.
+List them with `gh issue list --label known-limitation --state all`.

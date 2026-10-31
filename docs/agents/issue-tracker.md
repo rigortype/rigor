@@ -11,7 +11,8 @@ issues to a milestone.
 ## Conventions
 
 - **Create an issue**: `gh issue create --title "..." --body "..."`. Use a heredoc for multi-line
-  bodies. Apply one `area:*` label and one triage label (see `triage-labels.md`).
+  bodies. Apply one `area:*` label and one triage label (see `triage-labels.md`), plus
+  `known-limitation` for a limit a change knowingly leaves (`triage-labels.md` § "Known limitations").
 - **Read an issue**: `gh issue view <number> --comments`.
 - **List issues**: `gh issue list --state open --json number,title,labels` with `--label` /
   `--milestone` filters.

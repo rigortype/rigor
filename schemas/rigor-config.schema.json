@@ -48,6 +48,13 @@
         { "type": "array", "items": { "type": "string" } }
       ]
     },
+    "core_root": {
+      "description": "A core RBS signature directory loaded in place of the `rbs` gem's own `core/` (for example one rbs-shifter generates for an older CRuby), resolved relative to the config file's directory. `nil` (the default) loads the gem's core. Unlike `signature_paths:`, which only adds, this replaces the default core; a missing or unusable directory fails the run.",
+      "oneOf": [
+        { "type": "null" },
+        { "type": "string", "minLength": 1 }
+      ]
+    },
     "test_paths": {
       "description": "The project's test roots: directories (or files) holding its tests, resolved relative to the config file's directory. `nil` (the default) auto-detects whichever of `spec/` and `test/` exist under the project root; `[]` declares that the project has none. `rigor sig-gen --params=observed` harvests call-site observations from them when no `--observe=PATH` is given.",
       "oneOf": [

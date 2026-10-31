@@ -12,6 +12,7 @@ require_relative "gated_signature_guard"
 require_relative "gated_signature_plan"
 require_relative "deferred_signature_plan"
 require_relative "ruby_library_roots"
+require_relative "core_root"
 require_relative "../rooted_glob"
 
 module Rigor
@@ -101,9 +102,29 @@ module Rigor
         # @param project_signature_paths — issue #2422 — the project's own `signature_paths:` (not the collection,
         #   gem or plugin directories also on `signature_paths`): a plugin member another source declares composes
         #   with it as an overload unless that source is the project's own ({DeferredSignaturePlan}).
+        # @param core_root — issue #2517 — a validated {CoreRoot} directory loaded in place of the `rbs` gem's
+        #   `core/`, or nil for the default core.
         def build_env_for(libraries:, signature_paths:, virtual_rbs: [], deferred_signature_paths: [],
-                          project_signature_paths: [])
+                          project_signature_paths: [], core_root: nil)
           inputs = [signature_paths, virtual_rbs, deferred_signature_paths, project_signature_paths]
+          with_core_root(core_root) { build_env_from(libraries, inputs) }
+        end
+
+        # Issue #2517 — the core root {.library_loader} builds every loader of one environment build against. Held
+        # for the build rather than threaded through each attempt, because every trial and fallback of
+        # {.build_env_from} must read the same core, and a parameter missed on one of them would build that attempt
+        # against the default core without a sign. Thread-local, so a concurrent build on another thread keeps its
+        # own.
+        def with_core_root(core_root)
+          previous = Thread.current[:rigor_rbs_core_root]
+          Thread.current[:rigor_rbs_core_root] = core_root
+          yield
+        ensure
+          Thread.current[:rigor_rbs_core_root] = previous
+        end
+
+        def build_env_from(libraries, inputs)
+          signature_paths, virtual_rbs = inputs
           env, gated_dirs = whole_gated_attempt(libraries, inputs)
           return env if gated_dirs.empty?
 
@@ -229,7 +250,8 @@ module Rigor
 
         # An `RBS::EnvironmentLoader` with every library of `libraries` that resolves added, and those libraries.
         def library_loader(libraries)
-          rbs_loader = RBS::EnvironmentLoader.new
+          core_root = Thread.current[:rigor_rbs_core_root]
+          rbs_loader = core_root ? RBS::EnvironmentLoader.new(core_root: Pathname(core_root)) : RBS::EnvironmentLoader.new
           # Issue #1700 — a `RequiredFeatures` token names a gated vendored directory, never an RBS library.
           loaded_libraries = libraries.select do |library|
             next false if RequiredFeatures.feature_of_token(library)
@@ -1689,7 +1711,7 @@ module Rigor
       end
 
       attr_reader :libraries, :signature_paths, :cache_store, :virtual_rbs, :deferred_signature_paths,
-                  :project_signature_paths
+                  :project_signature_paths, :core_root
 
       # @param libraries — stdlib library names to load on top of core (e.g.,
       #   `["pathname", "json"]`). Empty by default. Each entry MUST correspond to a directory under the
@@ -1710,8 +1732,12 @@ module Rigor
       #   contributed (issue #610): loaded last and allowed to stand down against a colliding generic
       #   arity. Read back by the env-cache producer, which rebuilds the env from the loader's readers on
       #   a miss — a list it cannot read is a stand-down that runs only on a `--no-cache` build.
-      def initialize(libraries: [], signature_paths: [], cache_store: nil, virtual_rbs: [],
-                     deferred_signature_paths: [], project_signature_paths: [], required_features: [])
+      # @param core_root — issue #2517 — a directory loaded in place of the `rbs` gem's `core/`, or nil (the
+      #   default) for that core. Validated here, so a bad selection fails at construction ({CoreRoot.validate!}).
+      def initialize(libraries: [], signature_paths: [], cache_store: nil, virtual_rbs: [], # rubocop:disable Metrics/ParameterLists
+                     deferred_signature_paths: [], project_signature_paths: [], required_features: [], core_root: nil)
+        @core_root = core_root.nil? ? nil : CoreRoot.validate!(core_root)
+        CoreRoot.reject_overlap!(@core_root, project_signature_paths) if @core_root
         @libraries = libraries.map(&:to_s).freeze
         @signature_paths = signature_paths.map { |p| Pathname(p) }.freeze
         assign_reopen_inputs(project_signature_paths, required_features)
@@ -2026,8 +2052,24 @@ module Rigor
       # the interpreter implements, as opposed to a stdlib library written in Ruby (`Logger` rewrites `@level` in
       # its `initialize`). Same attribution, same cache behaviour.
       def core_class?(class_name)
-        (@state[:core_classes] ||= build_core_stdlib_classes(CORE_ROOTS)).include?(class_name.to_s.delete_prefix("::"))
+        (@state[:core_classes] ||= build_core_stdlib_classes(core_roots)).include?(class_name.to_s.delete_prefix("::"))
       end
+
+      # Issue #2517 — the `core/` prefixes a declaration's buffer name is tested against: the selected
+      # {#core_root} when there is one, which is what the environment loaded core from, else the `rbs` gem's.
+      def core_roots
+        @core_root ? ["#{@core_root}/".freeze].freeze : CORE_ROOTS
+      end
+      private :core_roots
+
+      # {CORE_STDLIB_ROOTS} with {#core_roots} in place of the `rbs` gem's `core/`.
+      def core_stdlib_roots
+        return CORE_STDLIB_ROOTS unless @core_root
+        return [].freeze if CORE_STDLIB_ROOTS.empty?
+
+        (core_roots + (CORE_STDLIB_ROOTS - CORE_ROOTS)).freeze
+      end
+      private :core_stdlib_roots
 
       CORE_ROOTS = begin
         [::RBS::EnvironmentLoader::DEFAULT_CORE_ROOT].compact.map { |root| "#{root}/".freeze }.freeze
@@ -2036,7 +2078,7 @@ module Rigor
       end
       private_constant :CORE_ROOTS
 
-      def build_core_stdlib_classes(roots = CORE_STDLIB_ROOTS)
+      def build_core_stdlib_classes(roots = core_stdlib_roots)
         environment = env
         return Set.new.freeze if environment.nil? || roots.empty?
 
@@ -2096,7 +2138,7 @@ module Rigor
           next if type.is_a?(Type::Bot)
 
           path = self.class.declaration_buffer_name(entry.decl)
-          acc[name.to_sym] = [type, !path.nil? && CORE_STDLIB_ROOTS.any? { |root| path.start_with?(root) }].freeze
+          acc[name.to_sym] = [type, !path.nil? && core_stdlib_roots.any? { |root| path.start_with?(root) }].freeze
         end
         table.freeze
       rescue ::RBS::BaseError
@@ -2118,6 +2160,13 @@ module Rigor
       def env_build_failure
         env unless @state[:env_loaded]
         @state[:env_build_failure]
+      end
+
+      # Issue #2517 — builds the environment now when a core is selected, so a core it does not build from raises
+      # its {CoreRootError} at the caller rather than at the first query inside analysis. No-op for the default core.
+      def verify_core_root!
+        env if @core_root
+        nil
       end
 
       # Issue #696 — the PER-CLASS sibling of {#env_build_failure}, one tier quieter in consequence: an
@@ -3017,6 +3066,7 @@ module Rigor
       # per AST node touched during analysis, multiplying per-file analysis cost by ~100x. Failures
       # short-circuit to `nil` here and are surfaced to the user via `warn_about_env_build_failure_once`.
       def env
+        raise @state[:core_root_error] if @state[:core_root_error]
         return @state[:env] if @state[:env_loaded]
 
         @state[:env_loaded] = true
@@ -3025,10 +3075,23 @@ module Rigor
         warn_about_virtual_rbs_collisions
         @state[:env]
       rescue ::RBS::BaseError => e
+        # Issue #2517 — an environment that does not build from an explicitly selected core is not analysed
+        # against at all: the degraded `Dynamic[top]` env would report the very APIs the selection removes as
+        # fine. Memoised like the nil env, so every later reader raises the same error instead of rebuilding.
+        raise(@state[:core_root_error] = core_root_build_error(e)) if @core_root
+
         record_env_build_failure(e)
         warn_about_env_build_failure_once(e)
         @state[:env] = nil
       end
+
+      def core_root_build_error(error)
+        CoreRootError.new(
+          "core_root: #{@core_root.inspect} did not build an RBS environment " \
+          "(#{error.class.name}: #{error.message.lines.first.to_s.strip})"
+        )
+      end
+      private :core_root_build_error
 
       # Tell the user, once per run, which of their `signature_paths:` `.rbs` files were skipped because they
       # do not parse ({RbsLoader.add_project_signatures} quarantines them so the rest of the env survives). A
@@ -3179,7 +3242,8 @@ module Rigor
           signature_paths: @signature_paths,
           virtual_rbs: @virtual_rbs,
           deferred_signature_paths: @deferred_signature_paths,
-          project_signature_paths: @project_signature_paths
+          project_signature_paths: @project_signature_paths,
+          core_root: @core_root
         )
       end
 

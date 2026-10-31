@@ -62,6 +62,24 @@ unaffected. The message is the whole diagnostic — it MUST name the offending k
 is knowable it MUST carry it (`effects.snapshot.reach`'s unregistered-preset error enumerates the
 presets this project's plugins did register).
 
+`core_root:` ([#2517](https://github.com/rigortype/rigor/issues/2517)) is tier 2 on both halves, and only its
+shape is checked at load (a non-empty String). The directory itself is checked where the environment is built:
+it must exist, be a readable directory, hold at least one `.rbs`, and neither sit inside nor contain one of the
+project's signature roots, which would load its files twice (`Environment::CoreRoot.validate!` and
+`.reject_overlap!`). The environment built from it is checked there too (`RbsLoader#verify_core_root!`). This
+is not done at load, because a command that only reads a configuration, such as the language server's reload,
+must not fail on a core that is not generated yet. A class of the selected core that builds an environment
+but not a definition is not raised (definitions build lazily, mid-analysis); its
+`rbs.coverage.definition-build-failed` row is authored `:error` instead of `:warning` when every signature file a
+failure names is under the selected core. A failure that also names a project file, such as a `sig/` collision,
+keeps its warning, so selecting a core does not turn an already tolerated collision into a failing build. The
+overlap test compares resolved paths: the project-signature walk does not follow a symlinked directory, so a
+`sig/` link to a core kept elsewhere loads once and is accepted. Both raise
+`Rigor::Environment::CoreRootError`, a `ConfigurationError`, so the run stops with a `rigor:` line and exit `64`.
+Unlike a `signature_paths:` entry, an unusable selected core is never tier 3: the run has no fallback that is not
+wrong. The default core would accept the APIs the selection removes, and the empty environment a failed build
+otherwise degrades to would accept every call.
+
 One tier-2 check does not run at load: an `effects.snapshot.reach` **preset name** is validated where
 the snapshot expands it, because presets are registered by plugins and the plugins load *from* the
 configuration being validated. Load time checks the entry's shape; the registry is only complete once
@@ -118,7 +136,7 @@ Home-directory spelling follows `File.expand_path` for exactly two forms:
   when that user does not exist, which crashed `rigor check` on a project directory named `~drafts` (#1510).
   Resolution never raises on a `~`.
 
-The rule covers `paths:`, `signature_paths:`, `test_paths:`, `pre_eval:`, the nested `plugins_io.allowed_paths:`,
+The rule covers `paths:`, `signature_paths:`, `core_root:`, `test_paths:`, `pre_eval:`, the nested `plugins_io.allowed_paths:`,
 each `includes:` entry, `bundler.bundle_path:`, `bundler.lockfile:`, and `rbs_collection.lockfile:`, plus the
 `BUNDLE_PATH` value read from `.bundle/config` (project or user-global). It does not cover `cache.path:`,
 `baseline:`, or `effects.snapshot.path:`, which stay literal and relative to the working directory.

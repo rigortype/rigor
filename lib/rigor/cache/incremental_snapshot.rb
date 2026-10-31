@@ -333,6 +333,7 @@ module Rigor
           "sig:#{digest_signature_paths(project_sig_roots(configuration))}",
           "pre_eval:#{digest_pre_eval(configuration.pre_eval)}"
         ]
+        parts.concat(core_root_parts(configuration))
         parts.concat(dependency_source_parts(configuration))
         identity = EngineSource.process_identity
         parts << "engine-source:#{identity}" if identity
@@ -355,6 +356,15 @@ module Rigor
         # read and no nil-keyed blob is written for the next equally-unidentifiable run to match against.
         nil
       end
+
+      # Issue #2517 — a selected core is read like the project's own `sig/`, so an edit in place to one of its files
+      # must drop the snapshot (and the language server's session, which keys on this fingerprint). No part for the
+      # default core, so every other project's fingerprint is as it was.
+      def self.core_root_parts(configuration)
+        core_root = configuration.core_root
+        core_root.nil? ? [] : ["core:#{digest_signature_paths([core_root])}"]
+      end
+      private_class_method :core_root_parts
 
       def self.required_features(configuration, roots)
         files = Analysis::PathExpansion.ruby_files(roots, configuration.exclude_patterns,

@@ -104,6 +104,13 @@ RSpec.describe Rigor::Cache::RbsDescriptor do
               "member.rbs" => "class DigestGateMember\n  def m: () -> String\nend\n")
     end
     let(:extra_sig_dir) { sig_dir("extra_sig", "extra.rbs", "class DigestGateExtra\nend\n") }
+    # Issue #2517 — a selected core: the gem's own plus one class, so the env builds and still reads apart.
+    let(:core_dir) do
+      path = File.join(tmpdir, "core")
+      FileUtils.cp_r(RBS::EnvironmentLoader::DEFAULT_CORE_ROOT.to_s, path)
+      File.write(File.join(path, "digest_gate_core.rbs"), "class DigestGateCore\nend\n")
+      path
+    end
 
     after { FileUtils.rm_rf(tmpdir) }
 
@@ -135,7 +142,8 @@ RSpec.describe Rigor::Cache::RbsDescriptor do
                           [project_sig_dir, plugin_sig_dir, extra_sig_dir]],
         virtual_rbs: [[], [["digest_gate_virtual.rbs", "class DigestGateVirtual\nend\n"]]],
         deferred_signature_paths: [[plugin_sig_dir], []],
-        project_signature_paths: [[], [project_sig_dir]]
+        project_signature_paths: [[], [project_sig_dir]],
+        core_root: [nil, core_dir]
       }
     end
 

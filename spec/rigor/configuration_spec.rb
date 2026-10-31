@@ -77,6 +77,24 @@ RSpec.describe Rigor::Configuration do
       end
     end
 
+    it "resolves core_root: relative to the config file's directory, and leaves it nil by default (#2517)" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, ".rigor.yml")
+        File.write(path, "core_root: vendor/rbs-shifter/3.3/core\n")
+        configuration = described_class.load(path)
+
+        expect(configuration.core_root).to eq(File.join(File.expand_path(dir), "vendor/rbs-shifter/3.3/core"))
+        expect(configuration.to_h["core_root"]).to eq(configuration.core_root)
+        expect(described_class.new.core_root).to be_nil
+      end
+    end
+
+    it "rejects a core_root: that is not a path string (#2517)" do
+      expect { described_class.new("core_root" => ["core"]) }
+        .to raise_error(Rigor::ConfigurationError, /core_root must be a directory path/)
+      expect { described_class.new("core_root" => " ") }.to raise_error(Rigor::ConfigurationError, /must not be empty/)
+    end
+
     it "accepts target_ruby in `<major>.<minor>` and `<major>.<minor>.<patch>` forms" do
       Dir.mktmpdir do |dir|
         path = File.join(dir, ".rigor.yml")

@@ -62,6 +62,10 @@ module Rigor
       "disable" => [],
       "libraries" => [],
       "signature_paths" => nil,
+      # Issue #2517 — a core signature directory loaded IN PLACE OF the `rbs` gem's `core/` (a provider such as
+      # rbs-shifter writes one for an older CRuby). `nil` (the default) loads the gem's core. Unlike
+      # `signature_paths:`, which only adds, this replaces: the default core is not loaded beside it.
+      "core_root" => nil,
       # The project's test roots: the directories (or files) holding its tests. `nil` (the default) auto-detects
       # whichever of `spec/` and `test/` exist, the same way `signature_paths: nil` auto-detects `sig/`; `[]`
       # declares that the project has none. `rigor sig-gen --params=observed` harvests call-site observations
@@ -228,6 +232,11 @@ module Rigor
     PATH_KEYS = %w[paths signature_paths test_paths pre_eval].freeze
     private_constant :PATH_KEYS
 
+    # The single-path sibling of {PATH_KEYS}: resolved the same way, but kept a String rather than wrapped in an
+    # Array.
+    SCALAR_PATH_KEYS = %w[core_root].freeze
+    private_constant :SCALAR_PATH_KEYS
+
     # Top-level keys this implementation DECLARES but never reads — see `docs/internal-spec/config.md`
     # § "Reserved namespaces" and ADR-99.
     #
@@ -270,7 +279,8 @@ module Rigor
 
     attr_reader :target_ruby, :paths, :exclude_patterns, :plugins, :cache_path, :cache_max_bytes,
                 :cache_validation, :disabled_rules,
-                :libraries, :signature_paths, :test_paths, :fold_platform_specific_paths, :parameter_inference,
+                :libraries, :signature_paths, :core_root, :test_paths, :fold_platform_specific_paths,
+                :parameter_inference,
                 :plugins_isolation,
                 :plugins_io_network, :plugins_io_allowed_paths,
                 :plugins_io_allowed_url_hosts,
@@ -489,6 +499,7 @@ module Rigor
 
       out = data.dup
       PATH_KEYS.each { |key| resolve_path_key!(out, key, base_dir) }
+      SCALAR_PATH_KEYS.each { |key| resolve_scalar_path_key!(out, key, base_dir) }
       resolve_plugins_io_paths!(out, base_dir)
       out
     end
@@ -497,6 +508,12 @@ module Rigor
       return unless out.key?(key) && !out[key].nil?
 
       out[key] = Array(out[key]).map { |p| ConfigPath.absolute(p.to_s, base_dir) }
+    end
+
+    def self.resolve_scalar_path_key!(out, key, base_dir)
+      return unless out.key?(key) && out[key].is_a?(String)
+
+      out[key] = ConfigPath.absolute(out[key], base_dir)
     end
 
     def self.resolve_plugins_io_paths!(out, base_dir)
@@ -581,6 +598,7 @@ module Rigor
       @libraries = Array(data.fetch("libraries", DEFAULTS.fetch("libraries"))).map(&:to_s).freeze
       sig_paths = data.fetch("signature_paths", DEFAULTS.fetch("signature_paths"))
       @signature_paths = sig_paths.nil? ? nil : Array(sig_paths).map(&:to_s).freeze
+      @core_root = coerce_core_root(data.fetch("core_root", DEFAULTS.fetch("core_root")))
       test_paths = data.fetch("test_paths", DEFAULTS.fetch("test_paths"))
       @test_paths = test_paths.nil? ? nil : Array(test_paths).map(&:to_s).freeze
       @sig_gen_inline_declared = coerce_sig_gen_inline_declared(data.fetch("sig_gen", nil))
@@ -671,6 +689,7 @@ module Rigor
         "disable" => disabled_rules,
         "libraries" => libraries,
         "signature_paths" => signature_paths,
+        "core_root" => core_root,
         # `test_paths:` is deliberately absent, as `effects:` is: `to_h` feeds the run cache key and the
         # incremental-snapshot fingerprint, and the test roots change no diagnostic, so editing them must not
         # invalidate either. `sig_gen:` is absent for the same reason: only `rigor sig-gen` reads it.
@@ -1096,6 +1115,18 @@ module Rigor
     # ADR-22 WD2 (b) — `baseline: <path>` activates the file; `baseline: false` is the explicit-disable form
     # (useful in `.rigor.yml` to override an upstream `.rigor.dist.yml` that names a baseline). `nil`
     # (default / absent key) is also "no baseline".
+    # Issue #2517 — the directory's existence and contents are checked where the environment is built
+    # ({Environment::CoreRoot.validate!}), not here: `rigor init`, `rigor doctor` and the language server's reload
+    # load a configuration without building an environment, and must still be able to read one naming a core that
+    # is not generated yet.
+    def coerce_core_root(value)
+      return nil if value.nil?
+      raise ConfigurationError, "core_root must be a directory path, got #{value.inspect}" unless value.is_a?(String)
+      raise ConfigurationError, "core_root must not be empty" if value.strip.empty?
+
+      value.dup.freeze
+    end
+
     def coerce_baseline_path(value)
       return nil if value.nil? || value == false
 

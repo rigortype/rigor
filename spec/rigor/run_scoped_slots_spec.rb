@@ -80,6 +80,7 @@ RSpec.describe Rigor::RunScopedSlots do
       rigor_io_boundary_attribution: "thread-variable frame, installed and restored around a block",
       rigor_next_sink: "jump sink frame, installed and restored around a block",
       rigor_provisional_returns: "return sink frame, installed and restored around a body",
+      rigor_rbs_core_root: "RbsLoader.with_core_root frame, installed and restored around an env build",
       rigor_retry_frames: "frame stack of the enclosing `begin` / `retry` edges",
       rigor_return_sink: "return sink frame, installed and restored around a body",
       rigor_run_disclosure_attribution: "thread-variable frame, installed and restored around a block",

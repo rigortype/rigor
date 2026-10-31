@@ -72,6 +72,9 @@ module Rigor
         required_features: features,
         **dependency_discovery_options(configuration)
       )
+    rescue Environment::CoreRootError
+      # Issue #2517 — an unusable selected core is the user's to fix, never a reason to type against the default.
+      raise
     rescue StandardError
       bare(configuration, features)
     end
@@ -111,8 +114,12 @@ module Rigor
     # The dependency-discovery axes `check` reads off the configuration, as a keyword hash. Extracted so the
     # list lives in one place: every command that types against the project's real dependencies passes exactly
     # these, and adding an axis to `Environment.for_project` means adding it here once.
+    #
+    # Issue #2517 — `core_root:` rides here too although it is not discovered: it is the other half of the RBS
+    # universe `check` reads off the configuration, and every site that builds one already passes this hash.
     def dependency_discovery_options(configuration)
       {
+        core_root: configuration.core_root,
         bundler_bundle_path: configuration.bundler_bundle_path,
         bundler_auto_detect: configuration.bundler_auto_detect,
         bundler_lockfile: configuration.bundler_lockfile,
@@ -166,17 +173,21 @@ module Rigor
         required_features: features,
         **dependency_discovery_options(configuration)
       )
+    rescue Environment::CoreRootError
+      raise
     rescue StandardError
       minimal(configuration, features)
     end
 
     # The last floor: RBS core plus the project's own signature paths, which cannot fail on anything outside
-    # the project itself.
+    # the project itself. The core is still the selected one (issue #2517): a floor that dropped it would type
+    # the project against APIs its Ruby does not have.
     def minimal(configuration, features = [])
       Environment.for_project(
         libraries: configuration.libraries,
         signature_paths: configuration.signature_paths,
-        required_features: features
+        required_features: features,
+        core_root: configuration.core_root
       )
     end
   end

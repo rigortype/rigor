@@ -77,8 +77,37 @@ module Rigor
       # reconstructs {.config_entries} without loading a plugin, so an entry there that it cannot rebuild
       # would turn the warm fast lane into a permanent miss on every project that enables a bundled plugin.
       def self.env_only_config_entries(loader)
-        [deferred_signature_paths_entry(loader), project_signature_paths_entry(loader)].compact
+        [deferred_signature_paths_entry(loader), project_signature_paths_entry(loader), core_root_entry(loader)].compact
       end
+
+      # Issue #2517 — which directory the env loaded core from. The selected core's files are digested by
+      # {.file_entries} too, so this row is the identity of the choice and those rows its contents: switching
+      # between two roots with byte-identical files still re-keys. Absent for the default core, whose identity
+      # is the `rbs` gem row, so every project without the setting keeps its key.
+      def self.core_root_entry(loader)
+        core_root = selected_core_root(loader)
+        return nil if core_root.nil?
+
+        Descriptor::ConfigEntry.new(key: "rbs.core_root", value_hash: Digest::SHA256.hexdigest(core_root.to_s))
+      end
+
+      private_class_method :core_root_entry
+
+      # The loader's issue #2517 core root as a Pathname, or nil for the default core.
+      def self.selected_core_root(loader)
+        core_root = loader.respond_to?(:core_root) ? loader.core_root : nil
+        core_root.nil? ? nil : Pathname(core_root)
+      end
+
+      private_class_method :selected_core_root
+
+      # {.selected_core_root} as the signature roots it adds: none for the default core.
+      def self.core_root_dirs(loader)
+        core_root = selected_core_root(loader)
+        core_root.nil? ? [] : [core_root]
+      end
+
+      private_class_method :core_root_dirs
 
       # Issue #2422 — which of the loader's `signature_paths:` are the project's own changes the env built from
       # byte-identical files: a bundled plugin's method composes with another source's as an overload, but stands
@@ -123,7 +152,9 @@ module Rigor
       #   value must be deterministic; `:stat` (ADR-87 WD1) for the validation-only run-dependency descriptor
       #   ({RunDescriptor#files}), where the stat tier short-circuits the SHA-256 on an unmoved file.
       def self.file_entries(loader, comparator: :digest)
-        roots = loader.signature_paths +
+        # Issue #2517 — a selected core is project input like `signature_paths:`, not the engine-versioned `rbs`
+        # gem tree, so an edit in place must move the key.
+        roots = core_root_dirs(loader) + loader.signature_paths +
                 Rigor::Environment::RbsLoader.vendored_gem_sig_paths +
                 Rigor::Environment::RbsLoader.core_overlay_sig_paths +
                 Rigor::Environment::RbsLoader.capability_role_sig_paths
@@ -168,7 +199,8 @@ module Rigor
       def self.glob_entries(loader)
         # Deduplicated by path: a root reachable twice (an explicit `signature_paths:` entry that is also a
         # bundled plugin's `sig/`, #610) would otherwise contribute two rows whose stat signatures race.
-        loader.signature_paths.uniq(&:to_s).filter_map do |root|
+        # Issue #2517 — and the selected core's root, where a file appearing is as much a new input.
+        (core_root_dirs(loader) + loader.signature_paths).uniq(&:to_s).filter_map do |root|
           next unless root.directory?
 
           Descriptor::GlobEntry.compute(root: root.to_s, pattern: File.join("**", "*.rbs"), mode: :names)

@@ -283,6 +283,23 @@ RSpec.describe Rigor::LanguageServer::ProjectContext do
       expect(rebaselines? { File.write(sig, "class Foo\n  def bar: (String) -> String\nend\n") }).to be(true)
     end
 
+    # #2517 — a selected core is an input the session reads like `sig/`, so regenerating it in place reaches the
+    # next save round.
+    it "matches a cold run after a file of the selected core_root: changes" do
+      core = File.join(project_dir, "core")
+      FileUtils.cp_r(RBS::EnvironmentLoader::DEFAULT_CORE_ROOT.to_s, core)
+      string = File.join(core, "string.rbs")
+      upstream = File.read(string)
+      File.write(string, upstream.sub("  def strip: (*selector) -> String", "  def strip: () -> String"))
+      File.write(File.join(project_dir, "b.rb"), "\" text \".strip(\" \")\n")
+      write_config("core_root: core\n")
+      expect(messages.map(&:last)).to include(a_string_matching(/wrong number of arguments to `strip'/))
+
+      expect(rebaselines? { File.write(string, upstream) }).to be(true)
+      expect(messages.map(&:last)).not_to include(a_string_matching(/`strip'/))
+      expect(messages).to eq(cold)
+    end
+
     it "keeps the recheck path when nothing changed" do
       messages
       session = context.instance_variable_get(:@incremental_session)

@@ -633,10 +633,24 @@ module Rigor
                      "Rigor still treats each class as KNOWN, so calls into it — real methods and typos " \
                      "alike — silently read `Dynamic[top]` instead of resolving, and this run is quieter " \
                      "than it should be rather than cleaner. #{definition_build_advice(failures.first)}",
-            severity: :warning,
+            severity: selected_core_failure?(failures) ? :error : :warning,
             rule: "rbs.coverage.definition-build-failed",
             source_family: :builtin
           )
+        end
+
+        # Issue #2517 — a class that does not build from the selected `core_root:` alone is that explicit choice
+        # failing, not a Rigor release disagreeing with the user's `sig/`, so it is an error. A failure that also
+        # names a file outside the core (a project `sig/` collision) keeps the warning it has without one.
+        def selected_core_failure?(failures)
+          core_root = @configuration.core_root
+          return false if core_root.nil?
+
+          prefix = File.join(core_root, "")
+          failures.any? do |failure|
+            buffers = Array(failure[3]).map(&:to_s)
+            !buffers.empty? && buffers.all? { |name| name.start_with?(prefix) }
+          end
         end
 
         # The closing advice follows the FIRST failure's error class: `GenericParameterMismatchError` is two

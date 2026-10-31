@@ -625,7 +625,9 @@ module Rigor
       # `["A::B::C", "A"]`, `class A::B::C` has `["A::B::C"]`), so a bare constant `K` is tried as each prefix of the
       # class name followed by `K` and as the top-level `K` (`n + 1` lookups), a rooted one (`::K`) as `K` alone, and a
       # callee found under any of them is followed: the union holds what any spelling resolves to, so the floor only
-      # widens. A constant the name lookup cannot reach (an alias, an inherited constant) resolves to nothing.
+      # widens. A receiver the name lookup finds nothing for (an alias, an inherited or included constant, a constant
+      # holding an instance) is typed once, in the nested-spelling nesting, and resolved as a caller-side call is
+      # ({#typed_hand_off_callees}).
       def hand_off_receiver_callees(call_node)
         receiver = call_node.receiver
         constructed = receiver.is_a?(Prism::CallNode) && receiver.name == :new
@@ -636,7 +638,21 @@ module Rigor
         found = hand_off_class_names(written).flat_map do |class_name|
           hand_off_callee_in(class_name, constructed, call_node.name)
         end
+        return typed_hand_off_callees(call_node) if found.empty?
+
         found.size > 1 ? found.uniq { |callee, _, owner| [callee.object_id, owner] } : found
+      end
+
+      # The fallback for a receiver the name lookup found nothing for: a constant that is an alias (`H = Helper`), is
+      # inherited or comes from an included module, or holds an instance (`INST = Helper.new`) names no class by its
+      # spelling. Types the receiver once, in the nested-spelling nesting of the def's class (the richest one, and the
+      # one a constant's ancestors are searched from), and resolves it as a caller-side call is. Only reached on a
+      # miss, so the by-name lookup stays the cheap path.
+      def typed_hand_off_callees(call_node)
+        name = enclosing_class_name_for(scope.self_type)
+        parts = name.nil? ? [] : name.to_s.split("::")
+        nesting = parts.each_index.map { |i| parts[0..(parts.size - 1 - i)].join("::") }
+        receiver_callees_in(scope.with_lexical_nesting(nesting), call_node)
       end
 
       # `[def, 0, owner]` for `name` called on `class_name` (or on its `new`), or none.

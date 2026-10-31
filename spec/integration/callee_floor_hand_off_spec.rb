@@ -297,4 +297,141 @@ RSpec.describe "a hand-off inside a callee resolves its constants in the callee'
       expect(rules(source)).to eq([])
     end
   end
+
+  describe "a receiver the name lookup cannot reach is typed in the def's nesting" do
+    it "follows a top-level alias (H = Helper)" do
+      source = <<~RUBY
+        module Helper
+          def self.c(parser, options) = parser.on("--f F") { |v| options[:format] = v }
+        end
+        H = Helper
+        class Wrap
+          def self.a(parser, options) = H.c(parser, options)
+        end
+        class Caller
+          def run(argv)
+            options = { format: "text" }
+            OptionParser.new { |opts| Wrap.a(opts, options) }.parse!(argv)
+            if options[:format] == "json"
+              puts "{}"
+            end
+          end
+        end
+      RUBY
+      expect(rules(source)).to eq([])
+    end
+
+    it "follows an alias inside the class" do
+      source = <<~RUBY
+        module Helper
+          def self.c(parser, options) = parser.on("--f F") { |v| options[:format] = v }
+        end
+        class Wrap
+          H = Helper
+          def self.a(parser, options) = H.c(parser, options)
+        end
+        class Caller
+          def run(argv)
+            options = { format: "text" }
+            OptionParser.new { |opts| Wrap.a(opts, options) }.parse!(argv)
+            if options[:format] == "json"
+              puts "{}"
+            end
+          end
+        end
+      RUBY
+      expect(rules(source)).to eq([])
+    end
+
+    it "follows a constant inherited from the superclass" do
+      source = <<~RUBY
+        class Base
+          module Helper
+            def self.c(parser, options) = parser.on("--f F") { |v| options[:format] = v }
+          end
+        end
+        class Sub < Base
+          def self.a(parser, options) = Helper.c(parser, options)
+        end
+        class Caller
+          def run(argv)
+            options = { format: "text" }
+            OptionParser.new { |opts| Sub.a(opts, options) }.parse!(argv)
+            if options[:format] == "json"
+              puts "{}"
+            end
+          end
+        end
+      RUBY
+      expect(rules(source)).to eq([])
+    end
+
+    it "follows a constant from an included module" do
+      source = <<~RUBY
+        module Mix
+          module Helper
+            def self.c(parser, options) = parser.on("--f F") { |v| options[:format] = v }
+          end
+        end
+        class Sub
+          include Mix
+          def a(parser, options) = Helper.c(parser, options)
+        end
+        class Caller
+          def run(argv)
+            options = { format: "text" }
+            OptionParser.new { |opts| Sub.new.a(opts, options) }.parse!(argv)
+            if options[:format] == "json"
+              puts "{}"
+            end
+          end
+        end
+      RUBY
+      expect(rules(source)).to eq([])
+    end
+
+    it "follows a constant holding an instance" do
+      source = <<~RUBY
+        class Helper
+          def c(parser, options) = parser.on("--f F") { |v| options[:format] = v }
+        end
+        INST = Helper.new
+        class Wrap
+          def self.a(parser, options) = INST.c(parser, options)
+        end
+        class Caller
+          def run(argv)
+            options = { format: "text" }
+            OptionParser.new { |opts| Wrap.a(opts, options) }.parse!(argv)
+            if options[:format] == "json"
+              puts "{}"
+            end
+          end
+        end
+      RUBY
+      expect(rules(source)).to eq([])
+    end
+
+    it "keeps the literal when the aliased helper only reads" do
+      source = <<~RUBY
+        module Helper
+          def self.c(parser, options) = puts(options.to_s)
+        end
+        H = Helper
+        class Wrap
+          def self.a(parser, options) = H.c(parser, options)
+        end
+        class Caller
+          def run(argv)
+            options = { format: "text" }
+            OptionParser.new { |opts| Wrap.a(opts, options) }.parse!(argv)
+            if options[:format] == "json"
+              puts "{}"
+            end
+          end
+        end
+      RUBY
+      expect(rules(source)).to eq(always)
+    end
+  end
 end

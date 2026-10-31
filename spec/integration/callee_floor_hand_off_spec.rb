@@ -434,4 +434,230 @@ RSpec.describe "a hand-off inside a callee resolves its constants in the callee'
       expect(rules(source)).to eq(always)
     end
   end
+
+  describe "the by-name and the typed resolution are always unioned" do
+    it "follows an alias that shadows a class of the same name" do
+      source = <<~RUBY
+        module Helper
+          def self.c(parser, options) = parser.on("--f F") { |v| options[:format] = v }
+        end
+        module H
+          def self.c(parser, options) = parser.on("--f F") { |v| puts options[:format] }
+        end
+        class Wrap
+          H = Helper
+          def self.a(parser, options) = H.c(parser, options)
+        end
+        class Caller
+          def run(argv)
+            options = { format: "text" }
+            OptionParser.new { |opts| Wrap.a(opts, options) }.parse!(argv)
+            if options[:format] == "json"
+              puts "{}"
+            end
+          end
+        end
+      RUBY
+      expect(rules(source)).to eq([])
+    end
+
+    it "follows an inherited constant that a top-level class of the same name shadows by name" do
+      source = <<~RUBY
+        class Helper
+          def self.c(parser, options) = parser.on("--f F") { |v| puts options[:format] }
+        end
+        class Base
+          class Helper
+            def self.c(parser, options) = parser.on("--f F") { |v| options[:format] = v }
+          end
+        end
+        class Wrap < Base
+          def self.a(parser, options) = Helper.c(parser, options)
+        end
+        class Caller
+          def run(argv)
+            options = { format: "text" }
+            OptionParser.new { |opts| Wrap.a(opts, options) }.parse!(argv)
+            if options[:format] == "json"
+              puts "{}"
+            end
+          end
+        end
+      RUBY
+      expect(rules(source)).to eq([])
+    end
+
+    it "follows an alias, called through new, that shadows a class of the same name" do
+      source = <<~RUBY
+        class Helper
+          def c(parser, options) = parser.on("--f F") { |v| options[:format] = v }
+        end
+        class H
+          def c(parser, options) = parser.on("--f F") { |v| puts options[:format] }
+        end
+        class Wrap
+          H = Helper
+          def self.a(parser, options) = H.new.c(parser, options)
+        end
+        class Caller
+          def run(argv)
+            options = { format: "text" }
+            OptionParser.new { |opts| Wrap.a(opts, options) }.parse!(argv)
+            if options[:format] == "json"
+              puts "{}"
+            end
+          end
+        end
+      RUBY
+      expect(rules(source)).to eq([])
+    end
+
+    it "follows a constant from an included module that a top-level class shadows by name" do
+      source = <<~RUBY
+        class Helper
+          def self.c(parser, options) = parser.on("--f F") { |v| puts options[:format] }
+        end
+        module Mixin
+          class Helper
+            def self.c(parser, options) = parser.on("--f F") { |v| options[:format] = v }
+          end
+        end
+        class Wrap
+          include Mixin
+          def self.a(parser, options) = Helper.c(parser, options)
+        end
+        class Caller
+          def run(argv)
+            options = { format: "text" }
+            OptionParser.new { |opts| Wrap.a(opts, options) }.parse!(argv)
+            if options[:format] == "json"
+              puts "{}"
+            end
+          end
+        end
+      RUBY
+      expect(rules(source)).to eq([])
+    end
+
+    def compact_ancestor_source
+      <<~RUBY
+        module Helper
+          def self.c(parser, options) = parser.on("--f F") { |v| options[:format] = v }
+        end
+        module Pure
+          def self.c(parser, options) = parser.on("--f F") { |v| puts options[:format] }
+        end
+        class Base
+          H = Helper
+        end
+        module A
+          H = Pure
+        end
+        class A::Wrap < Base
+          def self.a(parser, options) = H.c(parser, options)
+        end
+        class Caller
+          def run(argv)
+            options = { format: "text" }
+            OptionParser.new { |opts| A::Wrap.a(opts, options) }.parse!(argv)
+            if options[:format] == "json"
+              puts "{}"
+            end
+          end
+        end
+      RUBY
+    end
+
+    it "follows a compact class name whose inherited constant differs from the lexical one" do
+      expect(rules(compact_ancestor_source)).to eq([])
+    end
+
+    it "keeps the literal for an aliased helper that only reads" do
+      source = <<~RUBY
+        module Helper
+          def self.c(parser, options) = parser.on("--f F") { |v| puts options[:format] }
+        end
+        H = Helper
+        class Wrap
+          def self.a(parser, options) = H.c(parser, options)
+        end
+        class Caller
+          def run(argv)
+            options = { format: "text" }
+            OptionParser.new { |opts| Wrap.a(opts, options) }.parse!(argv)
+            if options[:format] == "json"
+              puts "{}"
+            end
+          end
+        end
+      RUBY
+      expect(rules(source)).to eq(always)
+    end
+
+    it "keeps the literal for a constant holding an instance whose method only reads" do
+      source = <<~RUBY
+        class Helper
+          def c(parser, options) = parser.on("--f F") { |v| puts options[:format] }
+        end
+        class Wrap
+          INST = Helper.new
+          def self.a(parser, options) = INST.c(parser, options)
+        end
+        class Caller
+          def run(argv)
+            options = { format: "text" }
+            OptionParser.new { |opts| Wrap.a(opts, options) }.parse!(argv)
+            if options[:format] == "json"
+              puts "{}"
+            end
+          end
+        end
+      RUBY
+      expect(rules(source)).to eq(always)
+    end
+
+    def odd_constants_source
+      <<~RUBY
+        module Helper
+          def self.c(parser, options) = parser.on("--f F") { |v| options[:format] = v }
+        end
+        class Wrap
+          K1 = 1
+          K2 = [Helper].first
+          K3 = nil
+          K4 = Helper.new rescue nil
+          K5 = Struct.new(:x)
+          K6 = Class.new
+          R = R rescue nil
+          def self.a(parser, options)
+            K1.c(parser, options)
+            K2.c(parser, options)
+            K3.c(parser, options)
+            K4.c(parser, options)
+            K5.c(parser, options)
+            K5.new.c(parser, options)
+            K6.new.c(parser, options)
+            R.c(parser, options)
+            Undefined::Deep.c(parser, options)
+            K1::X.c(parser, options)
+          end
+        end
+        def top_a(parser, options) = HH.c(parser, options)
+        HH = Helper
+        class Caller
+          def run(argv)
+            options = { format: "text" }
+            OptionParser.new { |opts| Wrap.a(opts, options); top_a(opts, options) }.parse!(argv)
+            if options[:format] == "json"
+              puts "{}"
+            end
+          end
+        end
+      RUBY
+    end
+
+    it "does not crash on odd constants (numbers, nil, Class.new, self-referencing, undefined)" do
+      expect(rules(odd_constants_source).grep(/internal/)).to eq([])
+    end
+  end
 end

@@ -618,16 +618,21 @@ module Rigor
           !typing_scope.singleton_def_through_ancestors(klass.class_name, :new).first.nil?
       end
 
-      # The callees a hand-off inside a callee's body (`Help.c(p, o)`, `Helper.new.c(p, o)`) resolves to. The receiver
-      # constant is resolved by name in the nesting of the def the hand-off sits in, never the call site's, so the
-      # answer cannot depend on which caller reached the memoised edges first; it is not typed, so no scope is built.
-      # The discovery index does not record how the defining class was spelled (`module A; class B::C` has the nesting
-      # `["A::B::C", "A"]`, `class A::B::C` has `["A::B::C"]`), so a bare constant `K` is tried as each prefix of the
-      # class name followed by `K` and as the top-level `K` (`n + 1` lookups), a rooted one (`::K`) as `K` alone, and a
-      # callee found under any of them is followed: the union holds what any spelling resolves to, so the floor only
-      # widens. A receiver the name lookup finds nothing for (an alias, an inherited or included constant, a constant
-      # holding an instance) is typed once, in the nested-spelling nesting, and resolved as a caller-side call is
-      # ({#typed_hand_off_callees}).
+      # The callees a hand-off inside a callee's body (`Help.c(p, o)`, `Helper.new.c(p, o)`) resolves to: the union of
+      # two resolutions of the receiver constant, both in the nesting of the def the hand-off sits in, never the call
+      # site's, so the answer cannot depend on which caller reached the memoised edges first. The discovery index does
+      # not record how the defining class was spelled (`module A; class B::C` has the nesting `["A::B::C", "A"]`,
+      # `class A::B::C` has `["A::B::C"]`), so each resolution tries every spelling it could have had.
+      #
+      # - By name: a bare constant `K` as each prefix of the class name followed by `K`, and as the top-level `K`
+      #   (`n + 1` lookups); a rooted one (`::K`) as `K` alone. Cheap, and blind to an alias, an inherited or included
+      #   constant, and a constant holding an instance.
+      # - Typed ({#typed_hand_off_callees}): the receiver typed under each truncation of the nesting, which sees
+      #   those, and resolved as a caller-side call is.
+      #
+      # Both always run: a name that resolves by name can still be shadowed in the real lookup by an alias or an
+      # inherited constant, and the callee found by only one of them would be missed. Each result only adds callees,
+      # so the floor only widens.
       def hand_off_receiver_callees(call_node)
         receiver = call_node.receiver
         constructed = receiver.is_a?(Prism::CallNode) && receiver.name == :new
@@ -638,21 +643,21 @@ module Rigor
         found = hand_off_class_names(written).flat_map do |class_name|
           hand_off_callee_in(class_name, constructed, call_node.name)
         end
-        return typed_hand_off_callees(call_node) if found.empty?
-
+        found.concat(typed_hand_off_callees(call_node, written))
         found.size > 1 ? found.uniq { |callee, _, owner| [callee.object_id, owner] } : found
       end
 
-      # The fallback for a receiver the name lookup found nothing for: a constant that is an alias (`H = Helper`), is
-      # inherited or comes from an included module, or holds an instance (`INST = Helper.new`) names no class by its
-      # spelling. Types the receiver once, in the nested-spelling nesting of the def's class (the richest one, and the
-      # one a constant's ancestors are searched from), and resolves it as a caller-side call is. Only reached on a
-      # miss, so the by-name lookup stays the cheap path.
-      def typed_hand_off_callees(call_node)
+      # The receiver typed under each truncation of the nested-spelling nesting of the def's class (`["A::B::C", "A::B",
+      # "A"]` gives `["A::B::C"]`, `["A::B::C", "A::B"]` and the whole chain), the compact spelling to the nested one,
+      # and resolved through {#receiver_callees_in}. A rooted constant and a top-level def are typed once.
+      def typed_hand_off_callees(call_node, written)
         name = enclosing_class_name_for(scope.self_type)
         parts = name.nil? ? [] : name.to_s.split("::")
-        nesting = parts.each_index.map { |i| parts[0..(parts.size - 1 - i)].join("::") }
-        receiver_callees_in(scope.with_lexical_nesting(nesting), call_node)
+        return receiver_callees_in(scope.with_lexical_nesting([]), call_node) if parts.empty?
+        return receiver_callees_in(scope, call_node) if written.start_with?("::")
+
+        chain = parts.each_index.map { |i| parts[0..(parts.size - 1 - i)].join("::") }
+        chain.each_index.flat_map { |k| receiver_callees_in(scope.with_lexical_nesting(chain[0..k]), call_node) }
       end
 
       # `[def, 0, owner]` for `name` called on `class_name` (or on its `new`), or none.

@@ -125,6 +125,30 @@ RSpec.describe "core_root: (#2517)" do
         expect { loader.instance_definition("Broken") }.to raise_error(Rigor::Environment::CoreRootError)
       end
     end
+
+    it "rejects a core inside, or containing, a project signature root" do
+      Dir.mktmpdir do |dir|
+        core = File.join(dir, "sig", "core")
+        FileUtils.mkdir_p(core)
+        File.write(File.join(core, "object.rbs"), "class Object\nend\n")
+
+        [File.join(dir, "sig"), File.join(core, "inner")].each do |sig|
+          expect { Rigor::Environment::RbsLoader.new(core_root: core, project_signature_paths: [sig]) }
+            .to raise_error(Rigor::Environment::CoreRootError, /overlaps the signature path/)
+        end
+        expect { Rigor::Environment::RbsLoader.new(core_root: core, project_signature_paths: [File.join(dir, "si")]) }
+          .not_to raise_error
+      end
+    end
+
+    it "keeps the selected core through every fail-soft floor of a probe's environment" do
+      Dir.mktmpdir do |dir|
+        configuration = Rigor::Configuration.new("paths" => [], "core_root" => File.join(dir, "missing"))
+
+        expect { Rigor::ProjectEnvironment.build(configuration: configuration, source_files: []) }
+          .to raise_error(Rigor::Environment::CoreRootError, /does not exist/)
+      end
+    end
   end
 
   describe "cache identity" do
@@ -151,6 +175,8 @@ RSpec.describe "core_root: (#2517)" do
 
         File.write(File.join(core, "object.rbs"), "class Object\n  def x: () -> Integer\nend\n")
         expect(descriptor_rows(loader)).not_to eq(before)
+        expect(Rigor::Cache::RbsDescriptor.glob_entries(loader).map { |row| row.root.to_s })
+          .to include(loader.core_root)
       end
     end
 
@@ -173,11 +199,15 @@ RSpec.describe "core_root: (#2517)" do
   end
 
   describe "rigor check" do
-    def check(config)
+    def run_cli(argv)
       out = StringIO.new
       err = StringIO.new
-      status = Rigor::CLI.new(["check", "--no-cache", "--no-stats", "--config", config, "lib"], out: out, err: err).run
+      status = Rigor::CLI.new(argv, out: out, err: err).run
       [status, out.string, err.string]
+    end
+
+    def check(config, *flags)
+      run_cli(["check", "--no-stats", *(flags.empty? ? ["--no-cache"] : flags), "--config", config, "lib"])
     end
 
     around do |example|
@@ -216,6 +246,52 @@ RSpec.describe "core_root: (#2517)" do
       expect(status).to eq(Rigor::CLI::EXIT_USAGE)
       expect(err).to match(/\Arigor: core_root: ".*missing" does not exist$/)
       expect(out).to be_empty
+    end
+
+    it "fails before analysis with one configuration error for a core that does not build" do
+      FileUtils.mkdir_p("broken")
+      File.write("broken/broken.rbs", "class Broken\n  def x: ( -> Integer\nend\n")
+      File.write(".rigor.yml", "paths: [lib]\ncore_root: broken\n")
+
+      status, out, err = check(".rigor.yml")
+
+      expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+      expect(err).to match(/\Arigor: core_root: .* did not build an RBS environment \(RBS::ParsingError/)
+      expect(out).to be_empty
+    end
+
+    it "reports a core class whose definition does not build as an error" do
+      core = shifted_core(Dir.pwd)
+      string = File.join(core, "string.rbs")
+      strip = "  def strip: () -> String"
+      File.write(string, File.read(string).sub(strip, "#{strip}\n#{strip}"))
+      File.write(".rigor.yml", "paths: [lib]\ncore_root: core33\n")
+
+      status = out = nil
+      expect { status, out, = check(".rigor.yml") }.to output(/RBS definition build failed for `String`/).to_stderr
+
+      expect(status).to eq(1)
+      expect(out).to match(/error: .*failed to build: .*String.*\[rbs\.coverage\.definition-build-failed\]/)
+    end
+
+    it "re-checks an --incremental snapshot when a selected core file changes in place" do
+      core = shifted_core(Dir.pwd)
+      File.write(".rigor.yml", "paths: [lib]\ncore_root: core33\n")
+      expect(check(".rigor.yml", "--incremental")[1]).to include("undefined method `rfind'")
+      expect(check(".rigor.yml", "--incremental")[1]).to include("undefined method `rfind'")
+
+      FileUtils.cp(File.join(RBS::EnvironmentLoader::DEFAULT_CORE_ROOT.to_s, "array.rbs"), File.join(core, "array.rbs"))
+
+      expect(check(".rigor.yml", "--incremental")[1]).not_to include("`rfind'")
+    end
+
+    it "stops rigor unused rather than answering against no core" do
+      File.write(".rigor.yml", "paths: [lib]\ncore_root: missing\n")
+
+      status, _, err = run_cli(["unused", "--config", ".rigor.yml", "lib"])
+
+      expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+      expect(err).to match(/\Arigor: core_root: ".*missing" does not exist$/)
     end
   end
 end

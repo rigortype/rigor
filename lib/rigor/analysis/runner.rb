@@ -1561,7 +1561,9 @@ module Rigor
       # change time it cannot read, and passes over a `pinned` one.
       BaselineRows = Data.define(:owned, :pinned)
 
-      SignatureRoots = Struct.new(:signature_paths)
+      # A loader's two readers {Cache::RbsDescriptor} takes signature roots from. `core_root` (issue #2517) is the
+      # selected core, which the slot key names by path only, so its files are `owned` rows like the project's own.
+      SignatureRoots = Struct.new(:signature_paths, :core_root)
       private_constant :SignatureRoots
 
       # @param files — the run's analysed-path set.
@@ -1582,8 +1584,9 @@ module Rigor
 
       # The signature tree's rows, the project's own and the rest.
       def signature_rows
-        roots = SignatureRoots.new(@snapshots.signature_paths)
-        own = signature_root_candidates.map { |root| File.join(File.absolute_path(root.to_s), "") }
+        roots = SignatureRoots.new(@snapshots.signature_paths, @configuration.core_root)
+        own = (signature_root_candidates + [@configuration.core_root].compact)
+              .map { |root| File.join(File.absolute_path(root.to_s), "") }
         own_files, other_files = Cache::RbsDescriptor.file_entries(roots, comparator: :stat)
                                                      .partition { |row| within?(row.path, own) }
         own_globs, other_globs = Cache::RbsDescriptor.glob_entries(roots).partition { |row| within?(row.root, own) }

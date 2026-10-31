@@ -63,10 +63,14 @@ is knowable it MUST carry it (`effects.snapshot.reach`'s unregistered-preset err
 presets this project's plugins did register).
 
 `core_root:` ([#2517](https://github.com/rigortype/rigor/issues/2517)) is tier 2 on both halves, and only its
-shape is checked at load (a non-empty String). The directory itself — that it exists, is a readable directory
-and holds at least one `.rbs` — and the environment built from it are checked where the environment is built
-(`Environment::CoreRoot.validate!`, `RbsLoader#verify_core_root!`), because `rigor init`, `rigor doctor` and the
-language server's reload read a configuration without building one. Both raise
+shape is checked at load (a non-empty String). The directory itself is checked where the environment is built:
+it must exist, be a readable directory, hold at least one `.rbs`, and neither sit inside nor contain one of the
+project's signature roots, which would load its files twice (`Environment::CoreRoot.validate!` and
+`.reject_overlap!`). The environment built from it is checked there too (`RbsLoader#verify_core_root!`). This
+is not done at load, because a command that only reads a configuration, such as the language server's reload,
+must not fail on a core that is not generated yet. A class of the selected core that builds an environment
+but not a definition is not raised (definitions build lazily, mid-analysis); its
+`rbs.coverage.definition-build-failed` row is authored `:error` instead of `:warning` under a selected core. Both raise
 `Rigor::Environment::CoreRootError`, a `ConfigurationError`, so the run stops with a `rigor:` line and exit `64`.
 Unlike a `signature_paths:` entry, an unusable selected core is never tier 3: the run has no fallback that is not
 wrong. The default core would accept the APIs the selection removes, and the empty environment a failed build

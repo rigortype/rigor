@@ -99,8 +99,9 @@ omits stays declared by the default core, so `signature_paths:` cannot remove on
 Project signatures, plugins and `libraries:` still load on top of it. `target_ruby:` sets the syntax Rigor
 parses; it does not choose a core.
 
-A `core_root:` that does not exist, is not a directory, holds no `.rbs` file, or does not build an RBS
-environment stops the run with exit code 64:
+A `core_root:` that does not exist, is not a directory, holds no `.rbs` file, lies inside (or contains) one of
+your `signature_paths:`, or does not build an RBS environment stops the run with exit code 64. A core class
+whose definition does not build is reported as an `rbs.coverage.definition-build-failed` error:
 
 ```
 rigor: core_root: "/path/to/vendor/rbs-shifter/3.3/core" does not exist

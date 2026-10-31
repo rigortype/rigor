@@ -1737,6 +1737,7 @@ module Rigor
       def initialize(libraries: [], signature_paths: [], cache_store: nil, virtual_rbs: [], # rubocop:disable Metrics/ParameterLists
                      deferred_signature_paths: [], project_signature_paths: [], required_features: [], core_root: nil)
         @core_root = core_root.nil? ? nil : CoreRoot.validate!(core_root)
+        CoreRoot.reject_overlap!(@core_root, project_signature_paths) if @core_root
         @libraries = libraries.map(&:to_s).freeze
         @signature_paths = signature_paths.map { |p| Pathname(p) }.freeze
         assign_reopen_inputs(project_signature_paths, required_features)

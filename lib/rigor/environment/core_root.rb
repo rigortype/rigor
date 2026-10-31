@@ -28,6 +28,23 @@ module Rigor
         absolute.dup.freeze
       end
 
+      # A selected core inside a signature root, or one containing it, loads its files twice — once as core and once
+      # as project signatures — and every class it declares then fails to build on its duplicated methods.
+      #
+      # @param core_root — a {.validate!}d directory.
+      # @param signature_paths — the project's own signature roots.
+      # @raise CoreRootError — the two overlap.
+      def reject_overlap!(core_root, signature_paths)
+        core = File.join(core_root, "")
+        Array(signature_paths).each do |path|
+          root = File.join(File.expand_path(path.to_s), "")
+          next unless core.start_with?(root) || root.start_with?(core)
+
+          raise CoreRootError, "core_root: #{core_root.inspect} overlaps the signature path #{path.to_s.inspect}, so " \
+                               "its signatures would load twice; move the core outside the project's signature paths"
+        end
+      end
+
       def invalid_reason(absolute)
         return "does not exist" unless File.exist?(absolute)
         return "is not a directory" unless File.directory?(absolute)

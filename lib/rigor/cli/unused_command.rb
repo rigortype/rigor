@@ -385,6 +385,9 @@ module Rigor
                                       required_features: ProjectEnvironment.required_features(configuration),
                                       **ProjectEnvironment.dependency_discovery_options(configuration))
         ->(fqn) { !env.singleton_for_name(fqn).nil? }
+      rescue Environment::CoreRootError
+        # Issue #2517 — answering "unknown" for every name would report against no core at all.
+        raise
       rescue StandardError
         ->(_fqn) { false }
       end

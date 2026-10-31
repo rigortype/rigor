@@ -633,7 +633,9 @@ module Rigor
                      "Rigor still treats each class as KNOWN, so calls into it — real methods and typos " \
                      "alike — silently read `Dynamic[top]` instead of resolving, and this run is quieter " \
                      "than it should be rather than cleaner. #{definition_build_advice(failures.first)}",
-            severity: :warning,
+            # Issue #2517 — under a selected `core_root:` the run chose its core explicitly, so a class that does not
+            # build is that choice failing rather than a Rigor release disagreeing with the user's `sig/`.
+            severity: @configuration.core_root ? :error : :warning,
             rule: "rbs.coverage.definition-build-failed",
             source_family: :builtin
           )

@@ -36,6 +36,13 @@ holding an instance are seen), and the callees of the two are unioned. The user 
 fallback on a miss ("Add fallback") and then to always take the union ("Always union"): a by-name hit can be shadowed by
 an alias or an inherited constant in the real lookup. The union only adds callees.
 
+The typed resolution is memoised per class, side and spelling. Review found two holes in that key: it ignored whether
+the nesting is read for the class object or an instance (a constant's ancestor lookup differs), and it ignored the
+caller's constant narrowings, which survive a `self` swap. The user chose "Fix the memo key": the side joins the key and
+the memo is bypassed while narrowings are present. The per-def leak through `resolved_census` (a def's edges computed
+under one caller's narrowings and reused) is a known limitation, not fixed here.
+
+
 ## To undo
 
 Return the owner from `inherited_singleton_callee` and `receiver_callees_in` instead of `FLOOR_ALL` and give

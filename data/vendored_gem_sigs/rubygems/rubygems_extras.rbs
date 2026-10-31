@@ -127,13 +127,13 @@ class Gem::Specification
   # `#version`'s READER is declared by `sig/shims/rubygems.rbs` (`attr_reader version (): Version`);
   # only the writer is ours.
   def version=: (Gem::Version) -> Gem::Version
-  attr_accessor full_gem_path: String
   attr_accessor loaded_from: String?
   attr_accessor post_install_message: String?
 end
 
 class Gem::BasicSpecification
   def version: () -> Gem::Version
+  attr_accessor full_gem_path: String
   def executables: () -> Array[String]
   def name: () -> String
   def full_name: () -> String

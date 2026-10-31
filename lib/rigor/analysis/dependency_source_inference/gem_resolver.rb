@@ -44,7 +44,7 @@ module Rigor
           Resolved.new(
             gem_name: entry.gem,
             version: spec.version.to_s,
-            gem_dir: spec.full_gem_path, # rigor:disable undefined-method
+            gem_dir: spec.full_gem_path,
             mode: entry.mode,
             roots: entry.roots
           )

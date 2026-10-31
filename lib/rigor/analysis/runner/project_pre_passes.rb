@@ -409,7 +409,7 @@ module Rigor
           return nil if gem_name.nil? || gem_name.empty?
 
           spec = Gem.loaded_specs[gem_name]
-          spec&.full_gem_path # rigor:disable undefined-method
+          spec&.full_gem_path
         rescue StandardError
           nil
         end

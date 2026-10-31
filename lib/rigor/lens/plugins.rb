@@ -29,7 +29,7 @@ module Rigor
         return Rigor::VERSION if absolute.start_with?("#{BUNDLED_PLUGINS}/")
 
         spec = Gem.loaded_specs.each_value.find do |gem|
-          absolute.start_with?("#{gem.full_gem_path}/") # rigor:disable undefined-method
+          absolute.start_with?("#{gem.full_gem_path}/")
         end
         spec&.version&.to_s
       rescue StandardError

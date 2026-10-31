@@ -666,10 +666,17 @@ module Rigor
       def typed_receiver_types(receiver, written)
         return compute_typed_receiver_types(receiver, written) if Analysis::DependencyRecorder.active?
 
+        by_written = hand_off_memo(:types, written)
+        constructed = receiver.is_a?(Prism::CallNode)
+        by_written.fetch(constructed) { by_written[constructed] = compute_typed_receiver_types(receiver, written) }
+      end
+
+      # The `{ written => ... }` table of `kind` for the class `self` is, in the run's per-discovery memo of hand-off
+      # resolutions that depend on a constant's spelling and the def's class alone.
+      def hand_off_memo(kind, written)
         table = (Thread.current[TYPED_RECEIVER_KEY] ||= ObjectSpace::WeakKeyMap.new)
-        memo = (table[scope.discovery] ||= {})
-        key = [enclosing_class_name_for(scope.self_type), written, receiver.is_a?(Prism::CallNode)]
-        memo.fetch(key) { memo[key] = compute_typed_receiver_types(receiver, written) }
+        by_kind = (table[scope.discovery] ||= {})[kind] ||= {}
+        (by_kind[enclosing_class_name_for(scope.self_type)] ||= {})[written] ||= {}
       end
 
       TYPED_RECEIVER_KEY = RunScopedSlots.register(:rigor_callee_typed_receivers)
@@ -712,7 +719,13 @@ module Rigor
 
         name = enclosing_class_name_for(scope.self_type)
         return [written] if name.nil?
+        return compute_hand_off_class_names(name, written) if Analysis::DependencyRecorder.active?
 
+        memo = hand_off_memo(:names, written)
+        memo.fetch(:names) { memo[:names] = compute_hand_off_class_names(name, written) }
+      end
+
+      def compute_hand_off_class_names(name, written)
         parts = name.to_s.split("::")
         parts.each_index.map { |i| "#{parts[0..i].join('::')}::#{written}" } << written
       end

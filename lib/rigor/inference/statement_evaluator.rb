@@ -331,9 +331,8 @@ module Rigor
       def initialize(scope:, tracer: nil, on_enter: nil, class_context: [].freeze, # rubocop:disable Metrics/ParameterLists
                      lexical_nesting: EMPTY_NESTING, converged_loop_recording: false, next_scope_sink: nil,
                      operand_scope: nil, in_operand: false, operand_recorder: nil, operand_types: nil,
-                     opaque_class: false, widen_clauses: false, defining_class: nil)
+                     opaque_class: false, widen_clauses: false)
         @scope = scope
-        @defining_class = defining_class
         @widen_clauses = widen_clauses
         @opaque_class = opaque_class
         @tracer = tracer
@@ -579,7 +578,7 @@ module Rigor
         return NO_CALLEES if receiver.nil?
         return NO_CALLEES if require_local && !call_passes_local_argument?(call_node)
 
-        scopes = require_local ? [scope] : hand_off_scopes
+        scopes = require_local ? [scope] : hand_off_scopes(receiver)
         found = scopes.flat_map { |typing_scope| receiver_callees_in(typing_scope, call_node) }
         found.size > 1 ? found.uniq { |callee, _, owner| [callee.object_id, owner] } : found
       end
@@ -598,14 +597,19 @@ module Rigor
           end
         return NO_CALLEES if found.nil?
 
-        [[found, 0, CalleeOwner.new(receiver_type, defining)]]
+        [[found, 0, defining == receiver_type.class_name ? CalleeOwner.new(receiver_type) : FLOOR_ALL]]
       end
 
-      # What a cross-class hand-off carries instead of an evaluator: the receiver type (`self` in the callee) and the
-      # class that defines the def (its lexical nesting). Holds no scope, so the run-scoped census memo that keeps an
-      # {CalleeMutationChain::Edge} alive keeps no caller state alive.
-      CalleeOwner = Data.define(:self_type, :defining_class)
-      private_constant :CalleeOwner
+      # What a cross-class hand-off carries instead of an evaluator: the receiver type, which is `self` in the callee
+      # (the class that defines the def, so its lexical nesting). Holds no scope, so the run-scoped census memo that
+      # keeps an {CalleeMutationChain::Edge} alive keeps no caller state alive.
+      CalleeOwner = Data.define(:self_type)
+
+      # The owner of a def reached through an inherited lookup (the defining class is not the receiver's or `self`'s
+      # class): its census and hand-offs are not walked, the owner context being another class's. Every content
+      # parameter reads as mutated, so the argument is floored, and a {BudgetTrace::CALLEE_CHAIN_CAP} hit is recorded.
+      FLOOR_ALL = :floor_all
+      private_constant :CalleeOwner, :FLOOR_ALL
 
       # True for `Const.new` where the class defines its own `self.new`, whose result is not an instance of `Const`.
       def overridden_constructor?(receiver, typing_scope)
@@ -619,22 +623,31 @@ module Rigor
       # The scopes a hand-off's receiver is typed in: this scope with the constant lookup nesting of the def it sits in,
       # never the call site's, so the answer cannot depend on which caller reached the memoised edges first. The
       # nesting is a property of how the defining class was spelled, which the discovery index does not record: a
-      # `module A; class B` body has `["A::B", "A"]`, a compact `class A::B` has `["A::B"]`. A qualified name is
-      # therefore typed under each spelling it could have had (its nesting truncated after each prefix), and a
-      # callee found under any of them is followed: the floor only ever widens. A top-level def is `[]`.
-      def hand_off_scopes
-        name = @defining_class || enclosing_class_name_for(scope.self_type)
+      # `module A; class B` body has `["A::B", "A"]`, a compact `class A::B` has `["A::B"]`, `module A; class B::C`
+      # has `["A::B::C", "A"]`. A bare constant resolves in the first nesting entry that has it, else at the top
+      # level, so it is typed once per prefix of the class name, each alone as the nesting (the top level is the
+      # fall-through of each): `n` lookups, whose union holds what any spelling resolves to. A rooted constant
+      # (`::Opts`) needs one, and so does a top-level def.
+      def hand_off_scopes(receiver)
+        name = enclosing_class_name_for(scope.self_type)
         parts = name.nil? ? [] : name.to_s.split("::")
         return [scope.with_lexical_nesting([])] if parts.empty?
+        return [scope] if rooted_constant?(receiver)
 
-        chain = parts.each_index.map { |i| parts[0..-(i + 1)].join("::") }
-        chain.each_index.map { |k| scope.with_lexical_nesting(chain[0..k]) }
+        parts.each_index.map { |i| scope.with_lexical_nesting([parts[0..i].join("::")]) }
+      end
+
+      # True for `::Const` / `::A::B` and `::Const.new`, whose lookup starts at the top level.
+      def rooted_constant?(receiver)
+        receiver = receiver.receiver if receiver.is_a?(Prism::CallNode)
+        receiver = receiver.parent while receiver.is_a?(Prism::ConstantPathNode) && !receiver.parent.nil?
+        receiver.is_a?(Prism::ConstantPathNode) && receiver.parent.nil?
       end
 
       # The evaluator a hand-off's {CalleeOwner} stands for, built from this one's scope and kept on it.
       def owner_evaluator(owner)
         (@owner_evaluators ||= {})[owner] ||=
-          self.class.new(scope: scope.with_self_type(owner.self_type), defining_class: owner.defining_class)
+          self.class.new(scope: scope.with_self_type(owner.self_type))
       end
 
       # The `[def, offset, owner]` triples a call inside a callee's body hands its parameter to: a self-call
@@ -661,7 +674,17 @@ module Rigor
 
       # `census` (a `callee_*_mutated_parameters` name) of `def_node`, read through `owner`, the {CalleeOwner} the
       # callee's hand-offs resolve in, or this evaluator when the callee is a self-call's.
-      def census_of(owner, census, def_node) = (owner.nil? ? self : owner_evaluator(owner)).__send__(census, def_node)
+      def census_of(owner, census, def_node)
+        return floor_all_census(census, def_node) if owner == FLOOR_ALL
+
+        (owner.nil? ? self : owner_evaluator(owner)).__send__(census, def_node)
+      end
+
+      # The {FLOOR_ALL} answer: every content parameter mutated, no hand-offs.
+      def floor_all_census(census, def_node)
+        BudgetTrace.hit(BudgetTrace::CALLEE_CHAIN_CAP)
+        census == :forwarding_edges ? NO_FORWARDS : content_parameter_slots(def_node)
+      end
 
       # The local-variable reads `call_node` passes to the parameters of `mutated`, a `{ name => slot }` census, the
       # first `offset` arguments not being the callee's (the `:name` of a `send` hand-off, {#resolve_self_callees}).
@@ -4920,10 +4943,7 @@ module Rigor
       # weakly: a table dropped with its index), the class by name. A run builds hundreds of
       # thousands of evaluators, and a per-evaluator memo alone recomputed each closure and each def's edges about
       # thirty times over (#2295's cost on the release gate). Issue #2297 — the side self-calls resolve on
-      # ({#resolve_self_callees}) keys it too: a singleton-side table apart from the instance-side one. Issue #2515 —
-      # so does the class a def is written in when it is not the self class (an inherited singleton def): its
-      # hand-offs resolve constants in that class's nesting ({#hand_off_scopes}), so no path can fill the memo with
-      # another path's answer.
+      # ({#resolve_self_callees}) keys it too: a singleton-side table apart from the instance-side one.
       #
       # While a dependency recorder is active the memo is bypassed: a resolution records an ADR-46 read in the file
       # and in each capture window open at the time, and a hit would leave that read out of them.
@@ -4936,7 +4956,7 @@ module Rigor
         self_type = scope.self_type
         by_class = (slot[self_type.is_a?(Type::Singleton) ? 1 : 0][kind] ||= {})
         class_name = enclosing_class_name_for(self_type)
-        by_def = (by_class[@defining_class ? [class_name, @defining_class] : class_name] ||= {}.compare_by_identity)
+        by_def = (by_class[class_name] ||= {}.compare_by_identity)
         by_def.fetch(def_node) { by_def[def_node] = yield }
       end
 
@@ -5155,8 +5175,9 @@ module Rigor
       end
 
       # The `[def, offset, owner]` a singleton-side self-call resolves to along the singleton chain. A def the class
-      # inherits is written in its defining class, so its owner is a {CalleeOwner} naming that class, whose lexical
-      # nesting the def's own hand-offs resolve constants in; a def of the class itself has no owner.
+      # inherits is written in another class, whose lexical nesting and `self` its hand-offs would resolve in; that
+      # context is not threaded, so such a def is not walked: its owner is {FLOOR_ALL}. A def of the class itself has
+      # no owner.
       def inherited_singleton_callee(node, self_type)
         class_name = self_type.class_name
         defining = nil
@@ -5167,7 +5188,7 @@ module Rigor
         end
         return if found.nil?
 
-        [*found, (defining.nil? || defining == class_name ? nil : CalleeOwner.new(self_type, defining))]
+        [*found, (defining.nil? || defining == class_name ? nil : FLOOR_ALL)]
       end
 
       # The `[def, offset]` `node` resolves to on one side, whose def table the block looks a name up in, or nil.

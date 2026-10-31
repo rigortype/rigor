@@ -40,7 +40,7 @@ module Rigor
         handed.each { |edge| flow.visit(root, edge.name, nil) }
         flow.settle
         handed.each_with_object(census.dup) do |edge, result|
-          result[edge.name] = edge.slot if flow.mutated?(root, edge.name)
+          result[edge.name] = edge.slot if flow.mutated?(root, edge.name, nil)
         end
       end
 
@@ -56,8 +56,10 @@ module Rigor
           @nodes = {}.compare_by_identity
         end
 
-        def mutated?(def_node, name)
-          node = @nodes.dig(def_node, name)
+        # A node is one parameter of one def under one owner context: the same def reached under another owner
+        # (another `self`) is a different node.
+        def mutated?(def_node, name, owner)
+          node = @nodes.dig(def_node, [name, owner])
           !node.nil? && node.mutated
         end
 
@@ -71,11 +73,11 @@ module Rigor
           cut = false
           until queue.empty?
             current, parameter, current_owner = queue.shift
-            next if known?(current, parameter)
+            next if known?(current, parameter, current_owner)
 
             if read >= MAX_NODES
               cut = true
-              (@nodes[current] ||= {})[parameter] = Node.new(true, NO_SUCCESSORS)
+              (@nodes[current] ||= {})[[parameter, current_owner]] = Node.new(true, NO_SUCCESSORS)
               next
             end
 
@@ -91,7 +93,7 @@ module Rigor
             changed = false
             each_node do |node|
               next if node.mutated
-              next unless node.successors.any? { |callee, name, _owner| mutated?(callee, name) }
+              next unless node.successors.any? { |callee, name, owner| mutated?(callee, name, owner) }
 
               node.mutated = true
               changed = true
@@ -101,16 +103,16 @@ module Rigor
 
         private
 
-        def known?(def_node, name)
+        def known?(def_node, name, owner)
           by_name = @nodes[def_node]
-          !by_name.nil? && by_name.key?(name)
+          !by_name.nil? && by_name.key?([name, owner])
         end
 
         # Records the node and answers its successors. A node its def mutates needs none.
         def add(def_node, name, owner)
           mutated = @own.call(def_node, owner).key?(name)
           successors = mutated ? [] : successors_of(def_node, name, owner)
-          (@nodes[def_node] ||= {})[name] = Node.new(mutated, successors)
+          (@nodes[def_node] ||= {})[[name, owner]] = Node.new(mutated, successors)
           successors
         end
 

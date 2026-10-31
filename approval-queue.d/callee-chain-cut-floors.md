@@ -3,7 +3,7 @@
 - **PR:** [#2516](https://github.com/rigortype/rigor/pull/2516)
 - **Issue:** [#2515](https://github.com/rigortype/rigor/issues/2515)
 - **Class:** open-choice
-- **Precedent:** [#2295](https://github.com/rigortype/rigor/pull/2295)
+- **Precedent:** none — sets one
 - **Decided:** 2026-10-31
 
 ## Background

@@ -136,9 +136,107 @@ RSpec.describe "a hand-off inside a callee resolves its constants in the callee'
       expect(rules(source)).to eq([])
     end
 
-    it "keeps the literal when neither Helper writes" do
+    it "floors without walking when neither Helper writes (the inherited def is not read)" do
       pure = library.sub('parser.on("--f") { |v| options[:format] = v }', "puts(options.to_s)")
       source = "#{pure}\n#{sub(true)}\n#{caller_of('CallsLeaf', 'Sub.leaf(opts, options)')}"
+      expect(rules(source)).to eq([])
+    end
+
+    it "does not walk back from the inherited def into the subclass (the subclass's helper writes)" do
+      source = <<~RUBY
+        module X
+          module Helper
+            def self.c(parser, options) = puts(options.to_s)
+          end
+          class Base
+            def self.leaf(parser, options) = helper(parser, options)
+            def self.helper(parser, options) = nil
+          end
+        end
+        module Y
+          module Helper
+            def self.c(parser, options) = parser.on("--f F") { |v| options[:format] = v }
+          end
+          class Sub < X::Base
+            def self.helper(parser, options) = Helper.c(parser, options)
+          end
+        end
+        #{caller_of('Caller', 'Y::Sub.leaf(opts, options)')}
+      RUBY
+      expect(rules(source)).to eq([])
+    end
+
+    it "answers the same when two subclasses reach the inherited def, in either order" do
+      def_set = <<~RUBY
+        class Base
+          def self.leaf(parser, options) = helper(parser, options)
+        end
+        class Sub1 < Base
+          def self.helper(parser, options) = puts(options.to_s)
+        end
+        class Sub2 < Base
+          def self.helper(parser, options) = parser.on("--f F") { |v| options[:format] = v }
+        end
+      RUBY
+      drivers = [%w[Sub1 Sub2], %w[Sub2 Sub1]].map do |first, second|
+        "#{def_set}\nclass Driver\n  def self.go(parser, options)\n    #{first}.leaf(parser, options)\n    " \
+          "#{second}.leaf(parser, options)\n  end\nend\n" \
+          "#{caller_of('Caller', 'Driver.go(opts, options)')}"
+      end
+      expect(drivers.map { |source| rules(source) }).to eq([[], []])
+    end
+  end
+
+  describe "a mixed spelling of the defining class" do
+    it "finds the outer module's constant under `module A; class B::C`" do
+      source = <<~RUBY
+        module A
+          module Helper; def self.c(parser, options) = parser.on("--f F") { |v| options[:format] = v }; end
+          module B
+            module Helper; def self.c(parser, options) = puts(options.to_s); end
+          end
+        end
+        module A
+          class B::C
+            def self.a(parser, options) = Helper.c(parser, options)
+          end
+        end
+        class Caller
+          def run(argv)
+            options = { format: "text" }
+            OptionParser.new { |opts| A::B::C.a(opts, options) }.parse!(argv)
+            if options[:format] == "json"
+              puts "{}"
+            end
+          end
+        end
+      RUBY
+      expect(rules(source)).to eq([])
+    end
+
+    it "keeps the literal when no candidate Helper writes" do
+      source = <<~RUBY
+        module A
+          module Helper; def self.c(parser, options) = puts(options.to_s); end
+          module B
+            module Helper; def self.c(parser, options) = puts(options.to_s); end
+          end
+        end
+        module A
+          class B::C
+            def self.a(parser, options) = Helper.c(parser, options)
+          end
+        end
+        class Caller
+          def run(argv)
+            options = { format: "text" }
+            OptionParser.new { |opts| A::B::C.a(opts, options) }.parse!(argv)
+            if options[:format] == "json"
+              puts "{}"
+            end
+          end
+        end
+      RUBY
       expect(rules(source)).to eq(always)
     end
   end

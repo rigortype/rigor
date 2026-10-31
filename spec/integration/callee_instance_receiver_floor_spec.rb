@@ -109,12 +109,17 @@ RSpec.describe "the callee floor follows instance receivers, chained hand-offs a
   describe "a singleton method inherited from a project superclass" do
     let(:base) { "class Base\n  def self.add_format(parser, options) = #{writer}\nend\nclass Opts < Base\nend" }
 
-    it "is followed" do
+    it "is floored without walking the inherited def" do
       expect(rules(program(base, in_block("Opts.add_format(opts, options)")))).to eq([])
     end
 
-    it "keeps the literal when the inherited method only reads" do
+    it "floors even when the inherited method only reads (the inherited def is not walked)" do
       defs = "class Base\n  def self.add_format(parser, options) = #{reader}\nend\nclass Opts < Base\nend"
+      expect(rules(program(defs, in_block("Opts.add_format(opts, options)")))).to eq([])
+    end
+
+    it "keeps the literal when the method is defined on the receiver itself and only reads" do
+      defs = "class Base\nend\nclass Opts < Base\n  def self.add_format(parser, options) = #{reader}\nend"
       expect(rules(program(defs, in_block("Opts.add_format(opts, options)")))).to eq(always)
     end
   end

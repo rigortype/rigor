@@ -231,7 +231,8 @@ not there. Tell the user about the decision in your report as well; the entry is
 when the session is gone. A decision that gives up soundness or precision, and is meant to be
 lifted later, also gets a `known-limitation` issue
 ([`triage-labels.md`](triage-labels.md) § "Known limitations"): the entry is deleted at
-ratification, and the issue is what carries the revisit.
+ratification, and the issue is what carries the revisit. For a lane, the coordinator files or labels it from
+the lane's `Known limits` ([`parallel-lanes.md`](parallel-lanes.md)), once per limit.
 
 No entry is needed for a decision that only tightens (a residue pin moving down, a check that now
 checks more) or that writes down an outcome a `ready-for-agent` issue already stated.

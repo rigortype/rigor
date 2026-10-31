@@ -175,7 +175,7 @@ RSpec.describe "a hand-off inside a callee resolves its constants in the callee'
       expect(rules(source)).to eq([])
     end
 
-    it "floors a hand-off from a callee to an inherited def instead of typing its constants in the subclass's nesting" do
+    it "floors a callee's hand-off to an inherited def instead of reading its constants in the subclass's nesting" do
       source = <<~RUBY
         module X
           module Helper

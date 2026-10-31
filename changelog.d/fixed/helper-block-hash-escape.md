@@ -1,0 +1,3 @@
+- **[inference]** A hash passed to a module function that stores into it from a block no longer keeps its literal entries after the call, so a condition on the hash no longer reports a false `flow.always-truthy-condition`. ([#2510](https://github.com/rigortype/rigor/issues/2510), [#2514](https://github.com/rigortype/rigor/pull/2514))
+  - Covers the OptionParser idiom with a helper: `options = { format: "text" }; OptionParser.new { |o| Opts.add_format(o, options) }.parse!(argv)` with `def self.add_format` or `module_function` writing `options[:format]` in an `on` block.
+  - The call may name the module as `Opts` or `::Opts`; a callee that never writes the hash, or a hash that is not passed, keeps its literal.

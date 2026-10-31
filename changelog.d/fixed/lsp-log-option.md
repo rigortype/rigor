@@ -1,3 +1,3 @@
-- **[lsp]** `rigor lsp --log=PATH` now writes the LSP wire log and server debug output to PATH. ([#2539](https://github.com/rigortype/rigor/issues/2539))
+- **[lsp]** `rigor lsp --log=PATH` now writes the LSP wire log and server debug output to PATH. ([#2556](https://github.com/rigortype/rigor/pull/2556))
   - The flag was parsed and documented but never used, so no trace reached the file. Each message in and out is one timestamped line; the file is appended to and opened before the server starts.
   - Without `--log`, nothing changes: no wire log is written and stdout carries only the protocol.

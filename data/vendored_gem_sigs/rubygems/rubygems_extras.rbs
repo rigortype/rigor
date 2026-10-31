@@ -112,8 +112,9 @@ class Gem::Specification
 
   # Instance-side surface widely used by bundler / rubygems
   # internals. `attr_accessor` mirrors the writer + reader pair
-  # so the survey's `.name=` / `.version=` / `.full_gem_path=` /
-  # `.loaded_from=` / `.post_install_message=` writes resolve too.
+  # so the survey's `.name=` / `.version=` / `.loaded_from=` /
+  # `.post_install_message=` writes resolve too. `.full_gem_path` is declared on `Gem::BasicSpecification`,
+  # which this class inherits from.
   def activate: () -> untyped
   def specification_version: () -> Integer
   def files: () -> Array[String]

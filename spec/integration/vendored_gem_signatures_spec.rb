@@ -19,10 +19,10 @@ RSpec.describe "vendored gem signatures for Gem.loaded_specs and Bundler::Lockfi
     RUBY
   end
 
-  # Guard, not a pin: the block parameter types as untyped, so this stays clean with or without the declaration.
-  it "keeps the full_gem_path writer on Gem::Specification, which inherits it (guard)" do
+  it "writes full_gem_path on a typed Gem::Specification, which inherits the writer from BasicSpecification" do
     expect(undefined_methods(<<~RUBY)).to eq([])
-      Gem::Specification.new { |s| s.full_gem_path = "/tmp/x" }
+      spec = Gem::Specification.new
+      spec.full_gem_path = "/tmp"
     RUBY
   end
 

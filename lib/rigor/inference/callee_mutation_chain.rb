@@ -14,9 +14,9 @@ module Rigor
     # least fixpoint, so a recursive or mutually recursive chain terminates and a cycle with no mutation on it mutates
     # nothing.
     #
-    # The walk reads at most {MAX_NODES} nodes per closure. A hand-off to a node past the cap is read as no hand-off,
-    # as the one-level floor reads a callee it cannot resolve: flooring there would drop a literal shape on evidence
-    # the walk never saw, and a floored `Array[Dynamic[top]]` then fails a declared tuple on correct code.
+    # The walk reads at most {MAX_NODES} nodes per parameter, so one parameter's walk cannot starve another's. A
+    # hand-off to a node past the cap is read as a mutation (a {BudgetTrace::CALLEE_CHAIN_CAP} hit): the walk did not
+    # see the callee, and a literal shape kept on evidence it never saw reports a false positive on correct code.
     module CalleeMutationChain
       # `name` and `slot` are the forwarding def's parameter, `callee` the def it is handed to, and `callee_names`
       # the callee's parameters it may bind there. Issue #2515 — `owner` is the evaluator the callee's own census and
@@ -48,12 +48,12 @@ module Rigor
       # nodes it hands itself on to.
       class Flow
         Node = Struct.new(:mutated, :successors)
+        NO_SUCCESSORS = [].freeze
 
         def initialize(own, edges)
           @own = own
           @edges = edges
           @nodes = {}.compare_by_identity
-          @count = 0
         end
 
         def mutated?(def_node, name)
@@ -61,16 +61,28 @@ module Rigor
           !node.nil? && node.mutated
         end
 
-        # Reads the nodes reachable from `def_node`'s `name`, breadth first, while fewer than {MAX_NODES} are read.
+        # Reads the nodes reachable from `def_node`'s `name`, breadth first, while fewer than {MAX_NODES} are read for
+        # this parameter. A node still unread when the budget runs out is taken as mutated, so the cut answers "maybe
+        # mutated" (the floor, the direction that cannot report a false positive) and records a
+        # {BudgetTrace::CALLEE_CHAIN_CAP} hit.
         def visit(def_node, name, owner)
           queue = [[def_node, name, owner]]
+          read = 0
+          cut = false
           until queue.empty?
             current, parameter, current_owner = queue.shift
             next if known?(current, parameter)
-            break if @count >= MAX_NODES
 
+            if read >= MAX_NODES
+              cut = true
+              (@nodes[current] ||= {})[parameter] = Node.new(true, NO_SUCCESSORS)
+              next
+            end
+
+            read += 1
             queue.concat(add(current, parameter, current_owner))
           end
+          BudgetTrace.hit(BudgetTrace::CALLEE_CHAIN_CAP) if cut
         end
 
         def settle
@@ -96,7 +108,6 @@ module Rigor
 
         # Records the node and answers its successors. A node its def mutates needs none.
         def add(def_node, name, owner)
-          @count += 1
           mutated = @own.call(def_node, owner).key?(name)
           successors = mutated ? [] : successors_of(def_node, name, owner)
           (@nodes[def_node] ||= {})[name] = Node.new(mutated, successors)

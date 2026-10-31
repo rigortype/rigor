@@ -331,8 +331,9 @@ module Rigor
       def initialize(scope:, tracer: nil, on_enter: nil, class_context: [].freeze, # rubocop:disable Metrics/ParameterLists
                      lexical_nesting: EMPTY_NESTING, converged_loop_recording: false, next_scope_sink: nil,
                      operand_scope: nil, in_operand: false, operand_recorder: nil, operand_types: nil,
-                     opaque_class: false, widen_clauses: false)
+                     opaque_class: false, widen_clauses: false, defining_class: nil)
         @scope = scope
+        @defining_class = defining_class
         @widen_clauses = widen_clauses
         @opaque_class = opaque_class
         @tracer = tracer
@@ -565,27 +566,62 @@ module Rigor
       # module, the project superclass's), or as an instance of a project class (`Opts.new.add_format(...)`,
       # `h = Opts.new; h.add_format(...)`), whose own instance table has `name`: the same census a self-call reads then
       # floors the passed local, so `Opts.add_format(opts, options)` handing `options` to a block that writes it
-      # leaves the literal behind. `owner` is an evaluator whose `self` is that receiver type: the callee's own
-      # hand-offs (`really(parser, options)`) resolve in the class that receives them, not in the caller's, and
-      # `resolved_census` keys the shared memo by that class. An instance receiver finds the class's own defs only (no
-      # ancestor walk, as {#resolve_self_callees}); a receiver of any other type resolves to nothing; `send` hand-offs
-      # are not followed through an explicit receiver. `require_local: false` (the hand-offs inside a callee, whose
-      # arguments are parameters) skips the caller-scope check that a local is passed.
+      # leaves the literal behind. `owner` is a {CalleeOwner}: the receiver type the callee's own hand-offs
+      # (`really(parser, options)`) resolve self-calls in, not the caller's class, and the class that defines the def,
+      # whose lexical nesting its constants resolve in. `resolved_census` keys the shared memo by the receiver's
+      # class. An instance receiver finds the class's own defs only (no ancestor walk, as {#resolve_self_callees});
+      # a receiver of any other type resolves to nothing, as does `Const.new` of a class that defines its own
+      # `self.new`; `send` hand-offs are not followed through an explicit receiver. `require_local: false` (the
+      # hand-offs inside a callee, whose arguments are parameters) skips the caller-scope check that a local is passed
+      # and types the receiver in the def's own nesting ({#hand_off_scope}), not the caller's.
       def receiver_callees(call_node, require_local: true)
         receiver = call_node.receiver
         return NO_CALLEES if receiver.nil?
         return NO_CALLEES if require_local && !call_passes_local_argument?(call_node)
 
-        receiver_type = scope.type_of(receiver)
-        found =
+        typing_scope = require_local ? scope : hand_off_scope
+        return NO_CALLEES if overridden_constructor?(receiver, typing_scope)
+
+        receiver_type = typing_scope.type_of(receiver)
+        found, defining =
           case receiver_type
-          when Type::Singleton
-            scope.singleton_def_through_ancestors(receiver_type.class_name, call_node.name).first
-          when Type::Nominal then scope.user_def_for(receiver_type.class_name, call_node.name)
+          when Type::Singleton then scope.singleton_def_through_ancestors(receiver_type.class_name, call_node.name)
+          when Type::Nominal then [scope.user_def_for(receiver_type.class_name, call_node.name), receiver_type.class_name]
           end
         return NO_CALLEES if found.nil?
 
-        [[found, 0, self.class.new(scope: scope.with_self_type(receiver_type))]]
+        [[found, 0, CalleeOwner.new(receiver_type, defining)]]
+      end
+
+      # What a cross-class hand-off carries instead of an evaluator: the receiver type (`self` in the callee) and the
+      # class that defines the def (its lexical nesting). Holds no scope, so the run-scoped census memo that keeps an
+      # {CalleeMutationChain::Edge} alive keeps no caller state alive.
+      CalleeOwner = Data.define(:self_type, :defining_class)
+      private_constant :CalleeOwner
+
+      # True for `Const.new` where the class defines its own `self.new`, whose result is not an instance of `Const`.
+      def overridden_constructor?(receiver, typing_scope)
+        return false unless receiver.is_a?(Prism::CallNode) && receiver.name == :new
+
+        klass = typing_scope.type_of(receiver.receiver) if constant_node?(receiver.receiver)
+        klass.is_a?(Type::Singleton) &&
+          !typing_scope.singleton_def_through_ancestors(klass.class_name, :new).first.nil?
+      end
+
+      # This scope with the constant lookup nesting of the def a hand-off sits in: the nesting its defining class
+      # names (the nested spelling `module A; class B`: `["A::B", "A"]`), not the call site's. A callee's constants
+      # resolve where the callee is written, so the answer cannot depend on which caller reached it first, which the
+      # memo ({#resolved_census}) would otherwise freeze. A top-level def is `[]`.
+      def hand_off_scope
+        name = @defining_class || enclosing_class_name_for(scope.self_type)
+        parts = name.nil? ? [] : name.to_s.split("::")
+        scope.with_lexical_nesting(parts.each_index.map { |i| parts[0..-(i + 1)].join("::") })
+      end
+
+      # The evaluator a hand-off's {CalleeOwner} stands for, built from this one's scope and kept on it.
+      def owner_evaluator(owner)
+        (@owner_evaluators ||= {})[owner] ||=
+          self.class.new(scope: scope.with_self_type(owner.self_type), defining_class: owner.defining_class)
       end
 
       # The `[def, offset, owner]` triples a call inside a callee's body hands its parameter to: a self-call
@@ -610,9 +646,9 @@ module Rigor
 
       def constant_node?(node) = node.is_a?(Prism::ConstantReadNode) || node.is_a?(Prism::ConstantPathNode)
 
-      # `census` (a `callee_*_mutated_parameters` name) of `def_node`, read through `owner`, the evaluator the callee's
-      # hand-offs resolve in, or this one when the callee is a self-call's.
-      def census_of(owner, census, def_node) = (owner || self).__send__(census, def_node)
+      # `census` (a `callee_*_mutated_parameters` name) of `def_node`, read through `owner`, the {CalleeOwner} the
+      # callee's hand-offs resolve in, or this evaluator when the callee is a self-call's.
+      def census_of(owner, census, def_node) = (owner.nil? ? self : owner_evaluator(owner)).__send__(census, def_node)
 
       # The local-variable reads `call_node` passes to the parameters of `mutated`, a `{ name => slot }` census, the
       # first `offset` arguments not being the callee's (the `:name` of a `send` hand-off, {#resolve_self_callees}).
@@ -5094,7 +5130,7 @@ module Rigor
         instance = side_callee(node) { |name| scope.user_def_for(class_name, name) }
         return (instance.nil? ? NO_CALLEES : [instance]) unless self_type.is_a?(Type::Singleton)
 
-        singleton = side_callee(node) { |name| scope.singleton_def_for(class_name, name) }
+        singleton = side_callee(node) { |name| scope.singleton_def_through_ancestors(class_name, name).first }
         return (singleton.nil? ? NO_CALLEES : [singleton]) if instance.nil?
         return [instance] if singleton.nil? || singleton.first.equal?(instance.first)
 

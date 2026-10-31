@@ -948,6 +948,7 @@ module Rigor
         @err.puts("  recursion-unroll-fuel hits: #{counts[Inference::BudgetTrace::RECURSION_UNROLL_FUEL]}")
         @err.puts("  recursion-fixpoint-cap hits: #{counts[Inference::BudgetTrace::RECURSION_FIXPOINT_CAP]}")
         @err.puts("  block-writeback-cap hits:  #{counts[Inference::BudgetTrace::BLOCK_WRITEBACK_CAP]}")
+        @err.puts("  callee-chain-cap hits:     #{counts[Inference::BudgetTrace::CALLEE_CHAIN_CAP]}")
         write_budget_distributions
         write_memo_profile(counts)
       end

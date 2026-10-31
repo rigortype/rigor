@@ -719,7 +719,8 @@ module Rigor
         if constructed
           return NO_CALLEES unless scope.singleton_def_through_ancestors(class_name, :new).first.nil?
 
-          return callees_for_receiver_type(Type::Combinator.nominal_of(class_name), name)
+          found = scope.user_def_for(class_name, name)
+          return found.nil? ? NO_CALLEES : [[found, 0, CalleeOwner.new(Type::Combinator.nominal_of(class_name))]]
         end
 
         found, defining = scope.singleton_def_through_ancestors(class_name, name)

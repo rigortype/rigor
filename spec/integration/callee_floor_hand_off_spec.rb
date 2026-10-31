@@ -905,6 +905,24 @@ RSpec.describe "a hand-off inside a callee resolves its constants in the callee'
       RUBY
     end
 
+    it "stays silent when the guard and the read are in one method (n1)" do
+      source = <<~RUBY
+        #{narrowed_source(first_guard: "", sub_body: "").sub(/class Caller.*\z/m, '')}
+        class Caller
+          def first(argv)
+            o = { format: "text" }
+            if INST.is_a?(SubHelper)
+              OptionParser.new { |p| Wrap.a(p, o) }.parse!(argv)
+              if o[:format] == "json"
+                puts "{}"
+              end
+            end
+          end
+        end
+      RUBY
+      expect(rules(source)).to eq([])
+    end
+
     it "stays silent for the inherited narrowed subclass (m3c)" do
       expect(rules(narrowed_source(first_guard: first, sub_body: ""))).to eq([])
     end

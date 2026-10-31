@@ -30,9 +30,11 @@ The user chose the conservative reading ("推奨で進めて", accepting the coo
 class differs from the receiver's or `self`'s class is not walked; every content parameter reads as mutated. The same
 holds for a chain node reached under a different owner: a node is one parameter of one def under one owner, so no
 owner's answer fills another's. The direct inherited shapes (`Sub.leaf`, `leaf` inside `Sub`) stay silent through the
-floor rather than the walk. A hand-off receiver is resolved by name over the defining class's prefixes plus the top level;
-when that finds nothing (an alias, an inherited or included constant, a constant holding an instance) it is typed once
-under the def's nesting and resolved as a caller-side call is, the user having chosen this fallback ("Add fallback").
+floor rather than the walk. A hand-off receiver is resolved by name over the defining class's prefixes plus the top level
+AND typed under each truncation of the def's nesting (so an alias, an inherited or included constant and a constant
+holding an instance are seen), and the callees of the two are unioned. The user chose the typed resolution first as a
+fallback on a miss ("Add fallback") and then to always take the union ("Always union"): a by-name hit can be shadowed by
+an alias or an inherited constant in the real lookup. The union only adds callees.
 
 ## To undo
 

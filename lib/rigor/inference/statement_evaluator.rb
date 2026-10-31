@@ -664,19 +664,29 @@ module Rigor
       # memoises them per class and spelling (bypassed while a dependency recorder is active, which must see each
       # constant read).
       def typed_receiver_types(receiver, written)
-        return compute_typed_receiver_types(receiver, written) if Analysis::DependencyRecorder.active?
+        return compute_typed_receiver_types(receiver, written) if hand_off_memo_bypassed?
 
         by_written = hand_off_memo(:types, written)
         constructed = receiver.is_a?(Prism::CallNode)
         by_written.fetch(constructed) { by_written[constructed] = compute_typed_receiver_types(receiver, written) }
       end
 
-      # The `{ written => ... }` table of `kind` for the class `self` is, in the run's per-discovery memo of hand-off
-      # resolutions that depend on a constant's spelling and the def's class alone.
+      # The `{ written => ... }` table of `kind` for the class `self` is and its side, in the run's per-discovery memo
+      # of hand-off resolutions that depend on a constant's spelling, the def's class and which side of it (class
+      # object or instance) the nesting is read for: a constant's ancestor lookup differs between the two.
       def hand_off_memo(kind, written)
         table = (Thread.current[TYPED_RECEIVER_KEY] ||= ObjectSpace::WeakKeyMap.new)
         by_kind = (table[scope.discovery] ||= {})[kind] ||= {}
-        (by_kind[enclosing_class_name_for(scope.self_type)] ||= {})[written] ||= {}
+        self_type = scope.self_type
+        by_side = (by_kind[self_type.is_a?(Type::Singleton)] ||= {})
+        (by_side[enclosing_class_name_for(self_type)] ||= {})[written] ||= {}
+      end
+
+      # True when the hand-off memo must not be read or written: a dependency recorder is active (it must see each
+      # constant read), or this scope carries guard narrowings of constants (`if INST.is_a?(Sub)`), which survive
+      # `with_self_type` and change what the constant types as, so the answer is no longer the def's alone.
+      def hand_off_memo_bypassed?
+        Analysis::DependencyRecorder.active? || !scope.constant_narrowings.empty?
       end
 
       TYPED_RECEIVER_KEY = RunScopedSlots.register(:rigor_callee_typed_receivers)
@@ -719,7 +729,7 @@ module Rigor
 
         name = enclosing_class_name_for(scope.self_type)
         return [written] if name.nil?
-        return compute_hand_off_class_names(name, written) if Analysis::DependencyRecorder.active?
+        return compute_hand_off_class_names(name, written) if hand_off_memo_bypassed?
 
         memo = hand_off_memo(:names, written)
         memo.fetch(:names) { memo[:names] = compute_hand_off_class_names(name, written) }

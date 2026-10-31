@@ -287,6 +287,139 @@ RSpec.describe Rigor::CLI::Catalogue do
     end
   end
 
+  # ADR-126 WD3 / #2511 — the MCP server turns each `inputSchema` property into a flag or into a positional it handles
+  # itself. The server's argv builder is probed with a distinct value per property, so the flag a property becomes is
+  # read from the server rather than restated here. Each flag it becomes must be one the catalogued command accepts,
+  # with an argument exactly when the catalogue says so. A property that becomes no flag must be listed in
+  # `non_flag_properties`, so a new positional or self-handled property is a conscious addition, and a stale entry
+  # fails.
+  describe "the MCP tools' inputSchema against the catalogue flags" do
+    let(:non_flag_properties) do
+      {
+        "rigor_check" => %w[paths],
+        "rigor_type_of" => %w[file line col],
+        "rigor_triage" => %w[paths],
+        "rigor_lens" => %w[files],
+        "rigor_annotate" => %w[file],
+        "rigor_sig_gen" => %w[paths],
+        "rigor_explain" => %w[rule],
+        "rigor_coverage" => %w[paths]
+      }
+    end
+
+    # One distinct value per property: a string or array is wrapped in `<name>`,
+    # which no other property's text contains;
+    # an integer is numbered; a boolean is probed both ways by {#flag_tokens}.
+    def probe_value(schema, name, index)
+      case schema.fetch(:type)
+      when "integer" then 90_000 + index
+      when "boolean" then true
+      when "array" then ["<#{name}>"]
+      else "<#{name}>"
+      end
+    end
+
+    def probe_arguments(tool)
+      tool.dig(:inputSchema, :properties).each_with_index.to_h do |(name, schema), index|
+        [name.to_s, probe_value(schema, name, index)]
+      end
+    end
+
+    def probe_text(value)
+      value.is_a?(Array) ? value.first.to_s : value.to_s
+    end
+
+    def build(server, tool_name, args)
+      server.send(:build_argv, tool_name, args)
+    end
+
+    # The option tokens of an argv: after the command word, before the `--` that ends the options.
+    def option_tokens(argv)
+      argv.drop(1).take_while { |token| token != "--" }
+    end
+
+    def flag_name(token)
+      token.split("=", 2).first
+    end
+
+    def catalogued_flags(command)
+      command.fetch("flags").to_h { |flag| [flag.fetch("name"), flag] }
+    end
+
+    # The flag tokens a property becomes. A string, array or integer is found as the whole value of a `--x=VALUE` token;
+    # a boolean is found as the tokens its `true` and `false` differ on, either way round. The gate deliberately accepts
+    # only the catalogue's first long spelling in `--x=VALUE` form: a short flag, a second alias or a split `--x VALUE`
+    # does not match, so the property is left unmatched and the gate fails loudly.
+    def flag_tokens(server, tool_name, probes, property, schema)
+      return boolean_flag_tokens(server, tool_name, probes, property) if schema.fetch(:type) == "boolean"
+
+      text = probe_text(probes.fetch(property))
+      option_tokens(build(server, tool_name, probes)).select do |token|
+        token.include?("=") && token.split("=", 2).last == text
+      end
+    end
+
+    # The tokens a boolean changes, read from the argv built with it true and with it false. A token that is another
+    # property's whole value is that property's flag, so it is dropped here rather than credited to the boolean.
+    def boolean_flag_tokens(server, tool_name, probes, property)
+      on = option_tokens(build(server, tool_name, probes.merge(property => true)))
+      off = option_tokens(build(server, tool_name, probes.merge(property => false)))
+      others = probes.except(property).values.map { |value| probe_text(value) }
+      ((on - off) + (off - on)).reject { |token| token.include?("=") && others.include?(token.split("=", 2).last) }
+    end
+
+    # Why a flag token does not fit the catalogue, or nil. A `--x=VALUE` token needs a flag that takes an argument; a
+    # bare token needs one that takes none or takes it optionally.
+    def flag_problem(token, catalogued)
+      flag = catalogued[flag_name(token)]
+      return "#{token} is not a flag the command accepts" unless flag
+
+      if token.include?("=")
+        "#{token} gives a value to a flag that takes none" if flag["arg"].nil?
+      elsif !(flag["arg"].nil? || flag["optional"])
+        "#{token} gives no value to a flag that requires #{flag['arg']}"
+      end
+    end
+
+    it "ties each property that becomes a flag to a catalogued flag of the same arity, and lists the rest" do
+      server = Rigor::MCP::Server.new
+
+      Rigor::MCP::Server::TOOLS.each do |tool|
+        name = tool.fetch(:name)
+        command = entries.find { |entry| entry.fetch("mcp_tool") == name }
+        catalogued = catalogued_flags(command)
+        probes = probe_arguments(tool)
+        expect(build(server, name, probes).first).to eq(command.fetch("name")),
+                                                     "#{name}: argv no longer starts with the command name"
+
+        problems = []
+        flagged = probes.keys.select do |property|
+          tokens = flag_tokens(server, name, probes, property, tool.dig(:inputSchema, :properties, property.to_sym))
+          problems.concat(tokens.filter_map { |token| flag_problem(token, catalogued) }.map { |p| "#{property}: #{p}" })
+          tokens.any?
+        end
+
+        expect(problems).to eq([]), "#{name}: properties that become a flag the command does not take as declared"
+        expect(probes.keys - flagged).to match_array(non_flag_properties.fetch(name)),
+                                         "#{name}: properties that become no flag"
+      end
+    end
+
+    it "checks every flag the server passes, not only those a property sets" do
+      server = Rigor::MCP::Server.new
+
+      Rigor::MCP::Server::TOOLS.each do |tool|
+        name = tool.fetch(:name)
+        command = entries.find { |entry| entry.fetch("mcp_tool") == name }
+        catalogued = catalogued_flags(command)
+        argv = build(server, name, probe_arguments(tool))
+
+        expect(option_tokens(argv).filter_map { |token| flag_problem(token, catalogued) })
+          .to eq([]), "#{name}: flags the server passes that #{command.fetch('name')} does not accept as declared"
+      end
+    end
+  end
+
   describe "--format validation" do
     def formatted_invocations
       entries.flat_map do |entry|

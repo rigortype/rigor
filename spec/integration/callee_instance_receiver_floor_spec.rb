@@ -198,10 +198,10 @@ RSpec.describe "callee floor budget, inherited self-calls and overridden constru
 
   let(:always) { ["flow.always-truthy-condition"] }
 
-  it "keeps a self-call writer when sixteen constant-receiver hand-offs of another parameter precede it" do
+  def fan_out_program(store_body)
     utils = (0..15).map { |i| "def self.h#{i}(parser, options) = puts(parser, options)" }.join("\n  ")
     calls = (0..15).map { |i| "Util.h#{i}(parser, options)" }.join("\n    ")
-    source = <<~RUBY
+    <<~RUBY
       module Util
         #{utils}
       end
@@ -217,10 +217,17 @@ RSpec.describe "callee floor budget, inherited self-calls and overridden constru
           #{calls}
           store(parser, options)
         end
-        def store(parser, options) = options[:format] = "json"
+        def store(parser, options) = #{store_body}
       end
     RUBY
-    expect(rules(source)).to eq([])
+  end
+
+  it "keeps a self-call writer when sixteen constant-receiver hand-offs of another parameter precede it" do
+    expect(rules(fan_out_program('options[:format] = "json"'))).to eq([])
+  end
+
+  it "keeps the literal of the second parameter when the first one's thirty-odd hand-off nodes used up a shared budget" do
+    expect(rules(fan_out_program("puts(options.to_s)"))).to eq(always)
   end
 
   it "follows an inherited singleton method that hands to a singleton helper of the base" do

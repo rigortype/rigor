@@ -586,12 +586,15 @@ module Rigor
         receiver = call_node.receiver
         return NO_CALLEES if overridden_constructor?(receiver, typing_scope)
 
-        receiver_type = typing_scope.type_of(receiver)
+        callees_for_receiver_type(typing_scope.type_of(receiver), call_node.name)
+      end
+
+      # `[def, 0, owner]` for `name` called on a receiver of `receiver_type`, or none.
+      def callees_for_receiver_type(receiver_type, name)
         found, defining =
           case receiver_type
-          when Type::Singleton then scope.singleton_def_through_ancestors(receiver_type.class_name, call_node.name)
-          when Type::Nominal
-            [scope.user_def_for(receiver_type.class_name, call_node.name), receiver_type.class_name]
+          when Type::Singleton then scope.singleton_def_through_ancestors(receiver_type.class_name, name)
+          when Type::Nominal then [scope.user_def_for(receiver_type.class_name, name), receiver_type.class_name]
           end
         return NO_CALLEES if found.nil?
 
@@ -649,15 +652,43 @@ module Rigor
 
       # The receiver typed under each truncation of the nested-spelling nesting of the def's class (`["A::B::C", "A::B",
       # "A"]` gives `["A::B::C"]`, `["A::B::C", "A::B"]` and the whole chain), the compact spelling to the nested one,
-      # and resolved through {#receiver_callees_in}. A rooted constant and a top-level def are typed once.
+      # and resolved by type. A rooted constant and a top-level def are typed once.
       def typed_hand_off_callees(call_node, written)
+        typed_receiver_types(call_node.receiver, written).flat_map do |receiver_type|
+          callees_for_receiver_type(receiver_type, call_node.name)
+        end
+      end
+
+      # The types `receiver` (a constant, or `Const.new`) has under each nesting truncation, a `Const.new` of a class
+      # with its own `self.new` left out. They depend on the receiver's spelling and the def's class alone, so the run
+      # memoises them per class and spelling (bypassed while a dependency recorder is active, which must see each
+      # constant read).
+      def typed_receiver_types(receiver, written)
+        return compute_typed_receiver_types(receiver, written) if Analysis::DependencyRecorder.active?
+
+        table = (Thread.current[TYPED_RECEIVER_KEY] ||= ObjectSpace::WeakKeyMap.new)
+        memo = (table[scope.discovery] ||= {})
+        key = [enclosing_class_name_for(scope.self_type), written, receiver.is_a?(Prism::CallNode)]
+        memo.fetch(key) { memo[key] = compute_typed_receiver_types(receiver, written) }
+      end
+
+      TYPED_RECEIVER_KEY = RunScopedSlots.register(:rigor_callee_typed_receivers)
+      private_constant :TYPED_RECEIVER_KEY
+
+      def compute_typed_receiver_types(receiver, written)
         name = enclosing_class_name_for(scope.self_type)
         parts = name.nil? ? [] : name.to_s.split("::")
-        return receiver_callees_in(scope.with_lexical_nesting([]), call_node) if parts.empty?
-        return receiver_callees_in(scope, call_node) if written.start_with?("::")
-
-        chain = parts.each_index.map { |i| parts[0..(parts.size - 1 - i)].join("::") }
-        chain.each_index.flat_map { |k| receiver_callees_in(scope.with_lexical_nesting(chain[0..k]), call_node) }
+        scopes =
+          if parts.empty? then [scope.with_lexical_nesting([])]
+          elsif written.start_with?("::") then [scope]
+          else
+            chain = parts.each_index.map { |i| parts[0..(parts.size - 1 - i)].join("::") }
+            chain.each_index.map { |k| scope.with_lexical_nesting(chain[0..k]) }
+          end
+        types = scopes.filter_map do |typing_scope|
+          typing_scope.type_of(receiver) unless overridden_constructor?(receiver, typing_scope)
+        end
+        types.uniq
       end
 
       # `[def, 0, owner]` for `name` called on `class_name` (or on its `new`), or none.

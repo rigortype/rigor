@@ -1,0 +1,3 @@
+- **[cli]** `rigor init` fills `plugins:` with the bundled plugins whose gems the project's `Gemfile.lock` declares, and `--no-plugins` keeps the empty list. ([#2557](https://github.com/rigortype/rigor/pull/2557))
+  - The detection is the read `rigor doctor` already makes, so the two agree on what the project depends on. Without a `Gemfile.lock`, or when it names no gem a bundled plugin models, the template is unchanged.
+  - The detected entries are active, under a comment saying they came from `Gemfile.lock`. A Rails project's `rails` brings in the whole Rails family, so the list can be long; delete the lines you do not want.

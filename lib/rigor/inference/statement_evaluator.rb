@@ -551,7 +551,7 @@ module Rigor
       # The `[def, offset]` pairs a self-dispatch `call_node` that passes a local resolves to
       # ({#resolve_self_callees}) — the defs whose census the callee floor reads; empty for any other call.
       def argument_mutating_callees(call_node)
-        return constant_receiver_callees(call_node) unless self_dispatch_call?(call_node)
+        return receiver_callees(call_node) unless self_dispatch_call?(call_node)
         # Fast path — only a local passed as an argument can be reported, so a call with none skips the def
         # resolution and the body scan entirely (the overwhelming common case).
         return NO_CALLEES unless call_passes_local_argument?(call_node)
@@ -559,27 +559,55 @@ module Rigor
         resolve_self_callees(call_node)
       end
 
-      # Issue #2510 — the `[def, 0, owner]` triple a `Const.name(local)` call resolves to when `Const` (a bare constant
-      # or any constant path) types as a project class object whose singleton table has `name` (`def self.name`,
-      # `class << self`, `module_function`): the same census a self-call reads then floors the passed local, so
-      # `Opts.add_format(opts, options)` handing `options` to a block that writes it leaves the literal behind. `owner`
-      # is an evaluator whose `self` is that class object: the callee's own hand-offs (`really(parser, options)`)
-      # resolve in the class that defines it, not in the caller's, and `resolved_census` keys the shared memo by that
-      # class. Any other explicit receiver resolves to nothing; `send` hand-offs are not followed through a constant
-      # receiver.
-      def constant_receiver_callees(call_node)
+      # Issue #2510, #2515 — the `[def, 0, owner]` triple an explicit-receiver `recv.name(local)` call resolves to when
+      # `recv` types as a project class object (`Const`, a bare constant or any constant path, or a local holding
+      # one), whose singleton chain has `name` (`def self.name`, `class << self`, `module_function`, an `extend`ed
+      # module, the project superclass's), or as an instance of a project class (`Opts.new.add_format(...)`,
+      # `h = Opts.new; h.add_format(...)`), whose own instance table has `name`: the same census a self-call reads then
+      # floors the passed local, so `Opts.add_format(opts, options)` handing `options` to a block that writes it
+      # leaves the literal behind. `owner` is an evaluator whose `self` is that receiver type: the callee's own
+      # hand-offs (`really(parser, options)`) resolve in the class that receives them, not in the caller's, and
+      # `resolved_census` keys the shared memo by that class. An instance receiver finds the class's own defs only (no
+      # ancestor walk, as {#resolve_self_callees}); a receiver of any other type resolves to nothing; `send` hand-offs
+      # are not followed through an explicit receiver. `require_local: false` (the hand-offs inside a callee, whose
+      # arguments are parameters) skips the caller-scope check that a local is passed.
+      def receiver_callees(call_node, require_local: true)
         receiver = call_node.receiver
-        return NO_CALLEES unless receiver.is_a?(Prism::ConstantReadNode) || receiver.is_a?(Prism::ConstantPathNode)
-        return NO_CALLEES unless call_passes_local_argument?(call_node)
+        return NO_CALLEES if receiver.nil?
+        return NO_CALLEES if require_local && !call_passes_local_argument?(call_node)
 
         receiver_type = scope.type_of(receiver)
-        return NO_CALLEES unless receiver_type.is_a?(Type::Singleton)
-
-        found = scope.singleton_def_for(receiver_type.class_name, call_node.name)
+        found =
+          case receiver_type
+          when Type::Singleton then scope.singleton_def_through_ancestors(receiver_type.class_name, call_node.name).first
+          when Type::Nominal then scope.user_def_for(receiver_type.class_name, call_node.name)
+          end
         return NO_CALLEES if found.nil?
 
         [[found, 0, self.class.new(scope: scope.with_self_type(receiver_type))]]
       end
+
+      # The `[def, offset, owner]` triples a call inside a callee's body hands its parameter to: a self-call
+      # ({#resolve_self_callees}, owner nil) or a call on a constant / `Const.new` receiver ({#hand_off_receiver?}).
+      def hand_off_callees(call_node)
+        return receiver_callees(call_node, require_local: false) unless self_dispatch_call?(call_node)
+
+        resolve_self_callees(call_node).map { |callee, offset| [callee, offset, nil] }
+      end
+
+      # True for a call on a receiver the callee's body can type without its locals: a constant or `Const.new`.
+      def hand_off_receiver?(node)
+        return false unless node.is_a?(Prism::CallNode)
+
+        receiver = node.receiver
+        case receiver
+        when Prism::ConstantReadNode, Prism::ConstantPathNode then true
+        when Prism::CallNode then receiver.name == :new && constant_node?(receiver.receiver)
+        else false
+        end
+      end
+
+      def constant_node?(node) = node.is_a?(Prism::ConstantReadNode) || node.is_a?(Prism::ConstantPathNode)
 
       # `census` (a `callee_*_mutated_parameters` name) of `def_node`, read through `owner`, the evaluator the callee's
       # hand-offs resolve in, or this one when the callee is a self-call's.
@@ -4807,17 +4835,21 @@ module Rigor
       def callee_content_mutated_parameters(def_node)
         cache = (@callee_mutated_param_cache ||= {}.compare_by_identity)
         cache[def_node] ||= resolved_census(:close, def_node) do
-          CalleeMutationChain.close(def_node, own: method(:own_content_parameters), edges: method(:forwarding_edges))
+          CalleeMutationChain.close(def_node, own: hop_census(:own_content_parameters), edges: hop_census(:forwarding_edges))
         end
       end
+
+      # Issue #2515 — `census` as the `(def, owner)` callback {CalleeMutationChain} reads a hop through: `owner` is the
+      # evaluator a cross-class hand-off resolves in, nil for the evaluator the closure started in.
+      def hop_census(census) = ->(def_node, owner) { census_of(owner, census, def_node) }
 
       # Issue #2296 — the `{ name => slot }` parameters the callee mutates inside a block in its body
       # ({#own_block_content_parameters}), closed over hand-offs as {#callee_content_mutated_parameters} is.
       def callee_block_mutated_parameters(def_node)
         cache = (@callee_block_param_cache ||= {}.compare_by_identity)
         cache[def_node] ||= resolved_census(:close_block, def_node) do
-          CalleeMutationChain.close(def_node, own: method(:own_block_content_parameters),
-                                              edges: method(:forwarding_edges))
+          CalleeMutationChain.close(def_node, own: hop_census(:own_block_content_parameters),
+                                              edges: hop_census(:forwarding_edges))
         end
       end
 
@@ -4826,8 +4858,8 @@ module Rigor
       def callee_set_mutated_parameters(def_node)
         cache = (@callee_set_param_cache ||= {}.compare_by_identity)
         cache[def_node] ||= resolved_census(:close_set, def_node) do
-          CalleeMutationChain.close(def_node, own: method(:own_set_content_parameters),
-                                              edges: method(:forwarding_edges))
+          CalleeMutationChain.close(def_node, own: hop_census(:own_set_content_parameters),
+                                              edges: hop_census(:forwarding_edges))
         end
       end
 
@@ -4941,13 +4973,13 @@ module Rigor
         slots = content_parameter_slots(def_node)
         edges = []
         each_forwarding_call(def_node, slots) do |call_node, forwarded|
-          resolve_self_callees(call_node).each do |callee, offset|
+          hand_off_callees(call_node).each do |callee, offset, owner|
             callee_slots = content_parameter_slots(callee)
             forwarded.each do |name, index|
               names = bound_parameter_names(callee_slots, index.is_a?(Integer) ? index - offset : index)
               next if names.empty?
 
-              edges << CalleeMutationChain::Edge.new(name: name, slot: slots[name], callee: callee, callee_names: names)
+              edges << CalleeMutationChain::Edge.new(name: name, slot: slots[name], callee: callee, callee_names: names, owner: owner)
             end
           end
         end
@@ -4965,7 +4997,7 @@ module Rigor
       def forwarding_calls(def_node, slots)
         calls = []
         each_node_in_method_scope(def_node.body, 0) do |descendant, depth|
-          next unless self_dispatch_call?(descendant)
+          next unless self_dispatch_call?(descendant) || hand_off_receiver?(descendant)
 
           forwarded = forwarded_parameters(descendant, slots, depth)
           calls << [descendant, forwarded] unless forwarded.empty?

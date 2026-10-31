@@ -19,20 +19,25 @@ module Rigor
     # the walk never saw, and a floored `Array[Dynamic[top]]` then fails a declared tuple on correct code.
     module CalleeMutationChain
       # `name` and `slot` are the forwarding def's parameter, `callee` the def it is handed to, and `callee_names`
-      # the callee's parameters it may bind there.
-      Edge = Data.define(:name, :slot, :callee, :callee_names)
+      # the callee's parameters it may bind there. Issue #2515 — `owner` is the evaluator the callee's own census and
+      # hand-offs resolve in when the hand-off crosses classes (`Help.c(p, o)`, `Helper.new.c(p, o)`), nil for a
+      # self-call, which stays in the evaluator the hop started in.
+      Edge = Data.define(:name, :slot, :callee, :callee_names, :owner) do
+        def initialize(name:, slot:, callee:, callee_names:, owner: nil) = super
+      end
 
       MAX_NODES = 32
 
       module_function
 
+      # `own` and `edges` take the def and the owner evaluator its hop resolves in (nil: the closure's own).
       def close(root, own:, edges:)
-        census = own.call(root)
-        handed = edges.call(root).reject { |edge| census.key?(edge.name) }
+        census = own.call(root, nil)
+        handed = edges.call(root, nil).reject { |edge| census.key?(edge.name) }
         return census if handed.empty?
 
         flow = Flow.new(own, edges)
-        handed.each { |edge| flow.visit(root, edge.name) }
+        handed.each { |edge| flow.visit(root, edge.name, nil) }
         flow.settle
         handed.each_with_object(census.dup) do |edge, result|
           result[edge.name] = edge.slot if flow.mutated?(root, edge.name)
@@ -57,14 +62,14 @@ module Rigor
         end
 
         # Reads the nodes reachable from `def_node`'s `name`, breadth first, while fewer than {MAX_NODES} are read.
-        def visit(def_node, name)
-          queue = [[def_node, name]]
+        def visit(def_node, name, owner)
+          queue = [[def_node, name, owner]]
           until queue.empty?
-            current, parameter = queue.shift
+            current, parameter, current_owner = queue.shift
             next if known?(current, parameter)
             break if @count >= MAX_NODES
 
-            queue.concat(add(current, parameter))
+            queue.concat(add(current, parameter, current_owner))
           end
         end
 
@@ -74,7 +79,7 @@ module Rigor
             changed = false
             each_node do |node|
               next if node.mutated
-              next unless node.successors.any? { |callee, name| mutated?(callee, name) }
+              next unless node.successors.any? { |callee, name, _owner| mutated?(callee, name) }
 
               node.mutated = true
               changed = true
@@ -90,19 +95,19 @@ module Rigor
         end
 
         # Records the node and answers its successors. A node its def mutates needs none.
-        def add(def_node, name)
+        def add(def_node, name, owner)
           @count += 1
-          mutated = @own.call(def_node).key?(name)
-          successors = mutated ? [] : successors_of(def_node, name)
+          mutated = @own.call(def_node, owner).key?(name)
+          successors = mutated ? [] : successors_of(def_node, name, owner)
           (@nodes[def_node] ||= {})[name] = Node.new(mutated, successors)
           successors
         end
 
-        def successors_of(def_node, name)
-          @edges.call(def_node).each_with_object([]) do |edge, successors|
+        def successors_of(def_node, name, owner)
+          @edges.call(def_node, owner).each_with_object([]) do |edge, successors|
             next unless edge.name == name
 
-            edge.callee_names.each { |callee_name| successors << [edge.callee, callee_name] }
+            edge.callee_names.each { |callee_name| successors << [edge.callee, callee_name, edge.owner || owner] }
           end
         end
 

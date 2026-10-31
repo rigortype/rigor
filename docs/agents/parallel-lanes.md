@@ -33,7 +33,8 @@ coordinator keeps these in its own loop and spawns an agent only for implementat
   included) goes back to the lane; once the lane has ended, make it in the
   lane's own worktree and push with `bin/lane-push`. Never rewrite a lane's pushed history: a squash
   or rebase makes the lane's next `bin/lane-push` refuse.
-- **Rulings, issues and landing**: decide open choices, file scope expansion, run `bin/land-pr`.
+- **Rulings, issues and landing**: decide open choices, file scope expansion and a `known-limitation`
+  issue for each line under a lane's `Known limits`, run `bin/land-pr`.
 
 Keep what comes back short. Lanes report in the shape the `rigor-lane` skill gives and reviewers in
 the shape below; the detail lives in the PR body and the issues, which the coordinator reads only when

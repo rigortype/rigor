@@ -70,6 +70,11 @@ brief that contradicts this skill wins for that lane.
 - **Decisions.** Make only the decisions the brief delegates, and record each in an
   `approval-queue.d/` entry (its README has the format). Stop and report every other open choice for
   the coordinator to rule on.
+- **Known limits.** When the PR lands a conservative reading on purpose (a floor that drops a fact,
+  a decline to `Dynamic`, a cap, a gate that withholds findings, a shape the spec records as not
+  handled), name each under `Known limits` in the report with its cost and what would lift it. The
+  coordinator files the `known-limitation` issue (`docs/agents/triage-labels.md` § "Known
+  limitations"); a limit nobody records is rediscovered by the next lane.
 - **Closing keywords.** `Fixes #N` only when the PR closes all of #N, on its own line, in the PR body
   and commit messages alike; otherwise `Refs #N`. Start every GitHub body with a one-line note that it
   was AI-generated.
@@ -97,6 +102,7 @@ Mutations: <example> <- <removed line>; ... (guards labelled)
 Engine cost: <alloc A/B delta, or "not an engine change">
 Fragment: <path, or why none>
 Decisions: <approval-queue entry, one line each>
+Known limits: <a conservative reading this PR lands on purpose, one line each, or "none">
 Filed or for the coordinator to file: <one line each>
 Open: <anything the coordinator must decide>
 ```

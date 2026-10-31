@@ -174,9 +174,10 @@ module Rigor
                  "it had written `effects: {}` — effect collection, the `rigor effects` verbs' cache sharing, " \
                  "and `effects.check` all turn on with every sub-key at its default. Writing `effects: false` " \
                  "explicitly still opts out, and a project that writes its own `effects:` block keeps that " \
-                 "block's shape untouched either way. Graduates to default-on at v0.4.0 (owner ruling, " \
-                 "2026-08-17): ADR-50 § WD7 reads \"at a major\" as \"at v0.4.0\" for this feature on the 0.x " \
-                 "evaluation line. See ADR-103 § WD15 for the preconditions that gate the flip."
+                 "block's shape untouched either way. Graduates to default-on at v0.5.0 (owner ruling, " \
+                 "2026-10-26, moving the v0.4.0 date of 2026-08-17): ADR-50 § WD7 reads \"at a major\" as the " \
+                 "version that ruling names, for this feature on the 0.x evaluation line. See ADR-103 § WD15 " \
+                 "for the preconditions that gate the flip and § WD18 for the move."
       )
     ].freeze
 

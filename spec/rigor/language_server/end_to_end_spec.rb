@@ -3,6 +3,7 @@
 require "json"
 require "open3"
 require "timeout"
+require "tmpdir"
 
 # Spawns the real `exe/rigor lsp` binary and runs a full LSP
 # session over stdin / stdout. Asserts that:
@@ -81,7 +82,46 @@ RSpec.describe "rigor lsp end-to-end session", type: :integration do
     expect(shutdown_response[:result]).to be_nil
   end
 
+  # `--log=PATH` appends every message, both directions, to PATH and leaves stdout as the protocol channel.
+  it "appends each message in both directions to the --log file and keeps stdout unchanged" do
+    Dir.mktmpdir("rigor-lsp-log-") do |dir|
+      path = File.join(dir, "wire.log")
+      stdout_bytes, exit_status = run_session(lifecycle_session, args: ["--log=#{path}"])
+
+      expect(exit_status).to eq(0)
+      expect(parse_frames(stdout_bytes).map { |f| f[:id] }).to eq([1, 2])
+
+      lines = File.readlines(path, chomp: true)
+      expect(lines).to all(match(/\A\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}[+-]\d\d:\d\d (<-|->) \{/))
+      inbound = lines.grep(/ <- /).map { |line| JSON.parse(line.split(" <- ", 2).last) }
+      outbound = lines.grep(/ -> /).map { |line| JSON.parse(line.split(" -> ", 2).last) }
+      expect(inbound.map { |m| m["method"] || "response" }).to eq(%w[initialize shutdown exit])
+      expect(outbound.map { |m| m["id"] }).to eq([1, 2])
+      expect(outbound.first.dig("result", "capabilities")).to include("hoverProvider")
+    end
+  end
+
+  # Without `--log`, no wire log is written anywhere: the session's working directory stays empty.
+  it "writes no log file and leaves stdout unchanged when --log is not given" do
+    Dir.mktmpdir("rigor-lsp-cwd-") do |dir|
+      stdout_bytes, exit_status, stderr_bytes = run_session(lifecycle_session, chdir: dir)
+
+      expect(exit_status).to eq(0)
+      expect(stderr_bytes).not_to match(/ (<-|->) \{/)
+      expect(parse_frames(stdout_bytes).map { |f| f[:id] }).to eq([1, 2])
+      expect(Dir.children(dir)).to be_empty
+    end
+  end
+
   private
+
+  def lifecycle_session
+    [
+      request(1, "initialize", { capabilities: {} }),
+      request(2, "shutdown"),
+      notification("exit")
+    ]
+  end
 
   def request(id, method, params = {})
     payload = { jsonrpc: "2.0", id: id, method: method }
@@ -95,12 +135,13 @@ RSpec.describe "rigor lsp end-to-end session", type: :integration do
     payload
   end
 
-  def run_session(messages)
+  def run_session(messages, args: [], chdir: Dir.pwd)
     framed = messages.map { |msg| frame(msg) }.join
     stdout_bytes = +""
+    stderr_bytes = +""
     exit_status = nil
 
-    Open3.popen3(binary, "lsp") do |stdin, stdout, _stderr, wait_thread|
+    Open3.popen3(binary, "lsp", *args, chdir: chdir) do |stdin, stdout, stderr, wait_thread|
       stdin.binmode
       stdout.binmode
       stdin.write(framed)
@@ -108,11 +149,12 @@ RSpec.describe "rigor lsp end-to-end session", type: :integration do
 
       Timeout.timeout(LSP_E2E_TIMEOUT_SECONDS) do
         stdout_bytes << stdout.read
+        stderr_bytes << stderr.read
         exit_status = wait_thread.value.exitstatus
       end
     end
 
-    [stdout_bytes, exit_status]
+    [stdout_bytes, exit_status, stderr_bytes]
   end
 
   def frame(payload)

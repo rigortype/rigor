@@ -646,10 +646,14 @@ Run the Language Server over stdio. See
 rigor lsp [--transport=stdio] [--log=PATH] [--config=PATH]
 ```
 
-`stdio` is the only transport in v1. `--log=PATH` is accepted
-but not yet wired in this release — it is reserved for routing
-the server's wire log to a file; until then logging stays on
-stderr.
+`stdio` is the only transport in v1. `--log=PATH` appends the LSP
+wire log to PATH: each JSON-RPC message the client sends (`<-`) and
+each one the server writes (`->`), one line per message with a
+timestamp, plus the server's debug output. The file is opened for
+appending before the server starts, so an unwritable PATH exits with
+a usage error. Without `--log`, no wire log is written and the
+server's debug output goes to stderr; stdout carries only the
+protocol.
 
 ## `rigor baseline`
 

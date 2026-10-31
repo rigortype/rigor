@@ -4,6 +4,7 @@ require_relative "command"
 require_relative "options"
 require_relative "../runtime/jit"
 
+require "json"
 require "optionparser"
 
 module Rigor
@@ -14,6 +15,62 @@ module Rigor
     # design.
     class LspCommand < Command
       USAGE = "Usage: rigor lsp [options]"
+
+      # Records each JSON-RPC message one per line, prefixed with the direction (`<-` read from the client, `->`
+      # written to it) and a timestamp. Only the message framing is logged; the server's own debug output joins the
+      # same file through `$stderr` (see {#with_debug_output}).
+      class WireLog
+        attr_reader :io
+
+        def initialize(io)
+          @io = io
+        end
+
+        def record(direction, message)
+          @io.puts("#{Time.now.strftime('%FT%T.%6N%:z')} #{direction} #{JSON.generate(message)}")
+        end
+
+        def close
+          @io.close
+        end
+      end
+
+      # Wraps the framed reader so every request or notification it yields is logged before the Loop dispatches it.
+      class WireLogReader
+        def initialize(inner, log)
+          @inner = inner
+          @log = log
+        end
+
+        def read(&block)
+          @inner.read do |message|
+            @log.record("<-", message)
+            block.call(message)
+          end
+        end
+
+        def close
+          @inner.close
+        end
+      end
+
+      # Wraps the framed writer so every outgoing message is logged as it goes on the wire. It sits inside
+      # `SynchronizedWriter`, so the log line and the frame it describes are written under the same lock.
+      class WireLogWriter
+        def initialize(inner, log)
+          @inner = inner
+          @log = log
+        end
+
+        def write(message)
+          @log.record("->", message.merge(jsonrpc: "2.0"))
+          @inner.write(message)
+        end
+
+        def close
+          @inner.close
+        end
+      end
 
       # @return CLI exit status.
       def run
@@ -26,6 +83,9 @@ module Rigor
           return CLI::EXIT_USAGE
         end
 
+        log = open_wire_log(options.fetch(:log))
+        return CLI::EXIT_USAGE if log == :usage_error
+
         # A long-lived server always outlasts the JIT compile cost, so enable
         # YJIT at boot rather than on the analysis deadline (Runtime::Jit).
         Runtime::Jit.enable_now
@@ -34,16 +94,11 @@ module Rigor
         require_relative "../configuration"
         require "language_server-protocol"
 
-        # STDIN is read frame-by-frame via the gem's `Io::Reader`; STDOUT is wrapped in `SynchronizedWriter` so
-        # concurrent writes from the main dispatch thread + the Debouncer's async threads don't interleave frames. The
-        # Loop runs until either STDIN hits EOF or `server.exited?`; the process then exits with the server's recorded
-        # code (0 after a clean shutdown+exit, 1 otherwise).
-        writer = LanguageServer::SynchronizedWriter.new(
-          ::LanguageServer::Protocol::Transport::Io::Writer.new($stdout)
-        )
-        server, loop_runner = build_server(writer: writer, config_path: options.fetch(:config))
-        loop_runner.run
-        server.exit_code || 0
+        begin
+          serve(config_path: options.fetch(:config), log: log)
+        ensure
+          log&.close
+        end
       end
 
       # The parser this command parses with, built without parsing anything: the catalogue reads the
@@ -54,7 +109,9 @@ module Rigor
           opts.on("--transport=NAME", "Transport (default: stdio; only stdio supported in v1)") do |value|
             options[:transport] = value
           end
-          opts.on("--log=PATH", "Write LSP wire log + server debug to PATH (default: stderr)") do |value|
+          opts.on("--log=PATH",
+                  "Append the LSP wire log and server debug output to PATH " \
+                  "(default: no wire log; debug output goes to stderr)") do |value|
             options[:log] = value
           end
           Options.add_config(opts, options)
@@ -63,9 +120,53 @@ module Rigor
 
       private
 
+      # STDIN is read frame-by-frame via the gem's `Io::Reader`; STDOUT is wrapped in `SynchronizedWriter` so
+      # concurrent writes from the main dispatch thread + the Debouncer's async threads don't interleave frames. The
+      # Loop runs until either STDIN hits EOF or `server.exited?`; the process then exits with the server's recorded
+      # code (0 after a clean shutdown+exit, 1 otherwise). With a wire log, both directions are logged inside the lock.
+      def serve(config_path:, log:)
+        reader = ::LanguageServer::Protocol::Transport::Io::Reader.new($stdin)
+        frame_writer = ::LanguageServer::Protocol::Transport::Io::Writer.new($stdout)
+        if log
+          reader = WireLogReader.new(reader, log)
+          frame_writer = WireLogWriter.new(frame_writer, log)
+        end
+        writer = LanguageServer::SynchronizedWriter.new(frame_writer)
+        server, loop_runner = build_server(writer: writer, reader: reader, config_path: config_path)
+        with_debug_output(log) { loop_runner.run }
+        server.exit_code || 0
+      end
+
+      # Opens PATH for appending with synchronous writes, so a crash loses no logged line. Returns nil without a
+      # PATH, the open file, or `:usage_error` after reporting why it could not be opened.
+      def open_wire_log(path)
+        return nil if path.nil?
+
+        io = File.open(path, "a")
+        io.sync = true
+        WireLog.new(io)
+      rescue SystemCallError => e
+        @err.puts("rigor lsp: cannot open --log file #{path.inspect}: #{e.message}")
+        :usage_error
+      end
+
+      # Routes the server's debug output (`warn` and the Ruby runtime's warnings, both written to `$stderr`) into the
+      # wire log for the length of the session. Without a log, `$stderr` is left alone.
+      def with_debug_output(log)
+        return yield if log.nil?
+
+        saved = $stderr
+        begin
+          $stderr = log.io
+          yield
+        ensure
+          $stderr = saved
+        end
+      end
+
       # Builds the full collaborator graph from a fresh `Configuration` + `ProjectContext`. Returns `[server, loop]` so
       # the caller drives the loop and reads `server.exit_code` for the process exit status.
-      def build_server(writer:, config_path:) # rubocop:disable Metrics/MethodLength
+      def build_server(writer:, reader:, config_path:) # rubocop:disable Metrics/MethodLength
         configuration = Configuration.load(config_path)
         # ProjectContext caches Environment + Cache::Store across requests so hover / publish hit the warm path.
         # Invalidated by `workspace/didChangeWatchedFiles` and `workspace/didChangeConfiguration`; every save round
@@ -104,7 +205,7 @@ module Rigor
           project_context: project_context
         )
         loop_runner = LanguageServer::Loop.new(
-          reader: ::LanguageServer::Protocol::Transport::Io::Reader.new($stdin),
+          reader: reader,
           writer: writer,
           server: server
         )

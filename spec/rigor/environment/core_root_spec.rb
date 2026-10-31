@@ -25,7 +25,9 @@ RSpec.describe "core_root: (#2517)" do
 
   def buffer_names(loader)
     env = loader.send(:env)
-    env.each_rbs_source.map { |source| source.buffer.name.to_s }
+    # rbs 4.x lists its sources through `each_rbs_source`; rbs 3.x keys `signatures` by `Buffer`.
+    buffers = env.respond_to?(:each_rbs_source) ? env.each_rbs_source.map(&:buffer) : env.signatures.keys
+    buffers.map { |buffer| buffer.name.to_s }
   end
 
   describe Rigor::Environment::CoreRoot, ".validate!" do

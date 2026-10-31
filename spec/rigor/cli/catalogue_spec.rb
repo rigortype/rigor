@@ -347,20 +347,25 @@ RSpec.describe Rigor::CLI::Catalogue do
     end
 
     # The flag tokens a property becomes. A string, array or integer is found as the whole value of a `--x=VALUE` token;
-    # a boolean is found as the bare token its `true` adds and its `false` does not. The gate deliberately accepts only
-    # the catalogue's first long spelling in `--x=VALUE` form: a short flag, a second alias or a split `--x VALUE` does
-    # not match, so the property is left unmatched and the gate fails loudly.
+    # a boolean is found as the tokens its `true` and `false` differ on, either way round. The gate deliberately accepts
+    # only the catalogue's first long spelling in `--x=VALUE` form: a short flag, a second alias or a split `--x VALUE`
+    # does not match, so the property is left unmatched and the gate fails loudly.
     def flag_tokens(server, tool_name, probes, property, schema)
-      if schema.fetch(:type) == "boolean"
-        on = option_tokens(build(server, tool_name, probes.merge(property => true)))
-        off = option_tokens(build(server, tool_name, probes.merge(property => false)))
-        return on - off
-      end
+      return boolean_flag_tokens(server, tool_name, probes, property) if schema.fetch(:type) == "boolean"
 
       text = probe_text(probes.fetch(property))
       option_tokens(build(server, tool_name, probes)).select do |token|
         token.include?("=") && token.split("=", 2).last == text
       end
+    end
+
+    # The tokens a boolean changes, read from the argv built with it true and with it false. A token that is another
+    # property's whole value is that property's flag, so it is dropped here rather than credited to the boolean.
+    def boolean_flag_tokens(server, tool_name, probes, property)
+      on = option_tokens(build(server, tool_name, probes.merge(property => true)))
+      off = option_tokens(build(server, tool_name, probes.merge(property => false)))
+      others = probes.except(property).values.map { |value| probe_text(value) }
+      ((on - off) + (off - on)).reject { |token| token.include?("=") && others.include?(token.split("=", 2).last) }
     end
 
     # Why a flag token does not fit the catalogue, or nil. A `--x=VALUE` token needs a flag that takes an argument; a

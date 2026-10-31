@@ -660,4 +660,140 @@ RSpec.describe "a hand-off inside a callee resolves its constants in the callee'
       expect(rules(odd_constants_source).grep(/internal/)).to eq([])
     end
   end
+
+  describe "the typed hand-off memo does not leak between sides or under narrowings" do
+    def m2c_class_self_source
+      <<~RUBY
+        require "optparse"
+        class Helper
+          def self.c(parser, options) = parser.on("--f F") { |v| options[:format] = v }
+        end
+        Status = Helper
+        class Foo
+          include Process
+          class << self
+            def s(parser, options) = Status.c(parser, options)
+          end
+          def i(parser, options) = Status.c(parser, options)
+        end
+        class Caller
+          def first(argv)
+            o = { format: "text" }
+            OptionParser.new { |p| Foo.new.i(p, o) }.parse!(argv) if argv.empty? && false
+            o
+          end
+
+          def second(argv)
+            options = { format: "text" }
+            OptionParser.new { |p| Foo.s(p, options) }.parse!(argv)
+            if options[:format] == "json"
+              puts "{}"
+            end
+          end
+        end
+      RUBY
+    end
+
+    it "follows a class-side and an instance-side use of the same constant" do
+      # `Status` also names Process::Status here, a genuine call.undefined-method; only the floor is under test.
+      expect(rules(m2c_class_self_source)).not_to include(*always)
+    end
+
+    def m2d_class_self_no_first_source
+      <<~RUBY
+        require "optparse"
+        class Helper
+          def self.c(parser, options) = parser.on("--f F") { |v| options[:format] = v }
+        end
+        Status = Helper
+        class Foo
+          include Process
+          class << self
+            def s(parser, options) = Status.c(parser, options)
+          end
+          def i(parser, options) = Status.c(parser, options)
+        end
+        class Caller
+
+          def second(argv)
+            options = { format: "text" }
+            OptionParser.new { |p| Foo.s(p, options) }.parse!(argv)
+            if options[:format] == "json"
+              puts "{}"
+            end
+          end
+        end
+      RUBY
+    end
+
+    it "follows the class-side use of the constant alone (control)" do
+      # `Status` also names Process::Status here, a genuine call.undefined-method; only the floor is under test.
+      expect(rules(m2d_class_self_no_first_source)).not_to include(*always)
+    end
+
+    def m3_narrow_leak_source
+      <<~RUBY
+        require "optparse"
+        class Helper
+          def c(parser, options) = parser.on("--f F") { |v| options[:format] = v }
+        end
+        class SubHelper < Helper; end
+        INST = Helper.new
+        class Wrap
+          def self.a(parser, options) = INST.c(parser, options)
+          def self.b(parser, options) = INST.c(parser, options)
+        end
+        class Caller
+          def first(argv)
+            o = { format: "text" }
+            if INST.is_a?(SubHelper)
+              OptionParser.new { |p| Wrap.a(p, o) }.parse!(argv)
+            end
+            o
+          end
+
+          def second(argv)
+            options = { format: "text" }
+            OptionParser.new { |p| Wrap.b(p, options) }.parse!(argv)
+            if options[:format] == "json"
+              puts "{}"
+            end
+          end
+        end
+      RUBY
+    end
+
+    it "follows a constant narrowed by a guard in an earlier method" do
+      expect(rules(m3_narrow_leak_source)).to eq([])
+    end
+
+    def m3b_no_first_source
+      <<~RUBY
+        require "optparse"
+        class Helper
+          def c(parser, options) = parser.on("--f F") { |v| options[:format] = v }
+        end
+        class SubHelper < Helper; end
+        INST = Helper.new
+        class Wrap
+          def self.a(parser, options) = INST.c(parser, options)
+          def self.b(parser, options) = INST.c(parser, options)
+        end
+        class Caller
+
+          def second(argv)
+            options = { format: "text" }
+            OptionParser.new { |p| Wrap.b(p, options) }.parse!(argv)
+            if options[:format] == "json"
+              puts "{}"
+            end
+          end
+        end
+      RUBY
+    end
+
+    it "follows the same constant without the earlier guard (control)" do
+      expect(rules(m3b_no_first_source)).to eq([])
+    end
+  end
 end

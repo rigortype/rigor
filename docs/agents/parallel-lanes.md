@@ -33,8 +33,8 @@ coordinator keeps these in its own loop and spawns an agent only for implementat
   included) goes back to the lane; once the lane has ended, make it in the
   lane's own worktree and push with `bin/lane-push`. Never rewrite a lane's pushed history: a squash
   or rebase makes the lane's next `bin/lane-push` refuse.
-- **Rulings, issues and landing**: decide open choices, file scope expansion, run `bin/land-pr`. At
-  landing, triage each line of the lane's final `Known limits` per [`triage-labels.md`](triage-labels.md)
+- **Rulings, issues and landing**: decide open choices, file scope expansion, run `bin/land-pr`. Once
+  the merge lands, triage each line of the lane's final `Known limits` per [`triage-labels.md`](triage-labels.md)
   § "Known limitations" (file it, or label the issue already tracking it): one issue per limit,
   whichever report line or ruling of yours names it.
 

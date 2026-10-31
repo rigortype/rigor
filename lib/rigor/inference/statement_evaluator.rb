@@ -578,9 +578,7 @@ module Rigor
         return NO_CALLEES if receiver.nil?
         return NO_CALLEES if require_local && !call_passes_local_argument?(call_node)
 
-        scopes = require_local ? [scope] : hand_off_scopes(receiver)
-        found = scopes.flat_map { |typing_scope| receiver_callees_in(typing_scope, call_node) }
-        found.size > 1 ? found.uniq { |callee, _, owner| [callee.object_id, owner] } : found
+        require_local ? receiver_callees_in(scope, call_node) : hand_off_receiver_callees(call_node)
       end
 
       # {#receiver_callees} for one scope `call_node`'s receiver is typed in.
@@ -620,28 +618,58 @@ module Rigor
           !typing_scope.singleton_def_through_ancestors(klass.class_name, :new).first.nil?
       end
 
-      # The scopes a hand-off's receiver is typed in: this scope with the constant lookup nesting of the def it sits in,
-      # never the call site's, so the answer cannot depend on which caller reached the memoised edges first. The
-      # nesting is a property of how the defining class was spelled, which the discovery index does not record: a
-      # `module A; class B` body has `["A::B", "A"]`, a compact `class A::B` has `["A::B"]`, `module A; class B::C`
-      # has `["A::B::C", "A"]`. A bare constant resolves in the first nesting entry that has it, else at the top
-      # level, so it is typed once per prefix of the class name, each alone as the nesting (the top level is the
-      # fall-through of each): `n` lookups, whose union holds what any spelling resolves to. A rooted constant
-      # (`::Opts`) needs one, and so does a top-level def.
-      def hand_off_scopes(receiver)
-        name = enclosing_class_name_for(scope.self_type)
-        parts = name.nil? ? [] : name.to_s.split("::")
-        return [scope.with_lexical_nesting([])] if parts.empty?
-        return [scope] if rooted_constant?(receiver)
+      # The callees a hand-off inside a callee's body (`Help.c(p, o)`, `Helper.new.c(p, o)`) resolves to. The receiver
+      # constant is resolved by name in the nesting of the def the hand-off sits in, never the call site's, so the
+      # answer cannot depend on which caller reached the memoised edges first; it is not typed, so no scope is built.
+      # The discovery index does not record how the defining class was spelled (`module A; class B::C` has the nesting
+      # `["A::B::C", "A"]`, `class A::B::C` has `["A::B::C"]`), so a bare constant `K` is tried as each prefix of the
+      # class name followed by `K` and as the top-level `K` (`n + 1` lookups), a rooted one (`::K`) as `K` alone, and a
+      # callee found under any of them is followed: the union holds what any spelling resolves to, so the floor only
+      # widens. A constant the name lookup cannot reach (an alias, an inherited constant) resolves to nothing.
+      def hand_off_receiver_callees(call_node)
+        receiver = call_node.receiver
+        constructed = receiver.is_a?(Prism::CallNode) && receiver.name == :new
+        constant = constructed ? receiver.receiver : receiver
+        written = constant_name(constant)
+        return NO_CALLEES if written.nil?
 
-        parts.each_index.map { |i| scope.with_lexical_nesting([parts[0..i].join("::")]) }
+        found = hand_off_class_names(written).flat_map do |class_name|
+          hand_off_callee_in(class_name, constructed, call_node.name)
+        end
+        found.size > 1 ? found.uniq { |callee, _, owner| [callee.object_id, owner] } : found
       end
 
-      # True for `::Const` / `::A::B` and `::Const.new`, whose lookup starts at the top level.
-      def rooted_constant?(receiver)
-        receiver = receiver.receiver if receiver.is_a?(Prism::CallNode)
-        receiver = receiver.parent while receiver.is_a?(Prism::ConstantPathNode) && !receiver.parent.nil?
-        receiver.is_a?(Prism::ConstantPathNode) && receiver.parent.nil?
+      # `[def, 0, owner]` for `name` called on `class_name` (or on its `new`), or none.
+      def hand_off_callee_in(class_name, constructed, name)
+        if constructed
+          return NO_CALLEES unless scope.singleton_def_through_ancestors(class_name, :new).first.nil?
+
+          found = scope.user_def_for(class_name, name)
+          return found.nil? ? NO_CALLEES : [[found, 0, CalleeOwner.new(Type::Combinator.nominal_of(class_name))]]
+        end
+
+        found, defining = scope.singleton_def_through_ancestors(class_name, name)
+        return NO_CALLEES if found.nil?
+
+        [[found, 0, defining == class_name ? CalleeOwner.new(Type::Combinator.singleton_of(class_name)) : FLOOR_ALL]]
+      end
+
+      # The class names a constant written as `written` (`K`, `A::K`, `::K`) can name from the def's nesting.
+      def hand_off_class_names(written)
+        return [written.delete_prefix("::")] if written.start_with?("::")
+
+        name = enclosing_class_name_for(scope.self_type)
+        return [written] if name.nil?
+
+        parts = name.to_s.split("::")
+        parts.each_index.map { |i| "#{parts[0..i].join('::')}::#{written}" } << written
+      end
+
+      # The name a constant node is written with, or nil when part of it is not a constant (`foo::Bar`).
+      def constant_name(node)
+        node.full_name if constant_node?(node)
+      rescue Prism::ConstantPathNode::DynamicPartsInConstantPathError, Prism::ConstantPathNode::MissingNodesInConstantPathError
+        nil
       end
 
       # The evaluator a hand-off's {CalleeOwner} stands for, built from this one's scope and kept on it.

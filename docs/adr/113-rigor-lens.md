@@ -1,10 +1,11 @@
 # ADR-113 — `rigor lens`: a declaration map with type provenance, for agents and tools
 
-Status: **Accepted, 2026-09-19; amended 2026-10-15 (§ Amendment).** #1081 (xxh3) and #1082
-(`declared_members`) are implemented; the command is not. Adds a `rigor lens` command. It is the
-"Rigor lens" that ZARD's `CONTEXT.md` and ADR-0003 already name. This ADR reverses #512's ruling for
-`rigor type-of`: that command stops printing "unseeded" and adopts WD2's computation. Implementation
-is tracked by #1080–#1085.
+Status: **Accepted, 2026-09-19; amended 2026-10-15 (§ Amendment).** #1081 (xxh3), #1082
+(`declared_members`) and phase 1 (#1083, `rigor lens FILE…` and the `rigor_lens` MCP tool, #1923)
+are implemented; symbol targets (#1080), phase 2 (#1085) and the `type-of` convergence are not.
+Adds a `rigor lens` command. It is the "Rigor lens" that ZARD's `CONTEXT.md` and ADR-0003 already
+name. This ADR reverses #512's ruling for `rigor type-of`: that command stops printing "unseeded" and
+adopts WD2's computation. Implementation is tracked by #1080–#1085.
 
 Grounding: an adversarial review on 2026-09-19 found five premises of the first draft that do not
 hold on current code. WD2, WD3, WD4, WD5 and WD6 are the corrected shapes. For the anchor format:

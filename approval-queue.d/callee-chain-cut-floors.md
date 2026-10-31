@@ -20,7 +20,7 @@ reads as "not mutated" turned that starvation into a false positive.
 - Keep "read as no hand-off" and only make the budget per parameter. Cheapest, but any chain or fan-out past the cap
   still reports `flow.always-truthy-condition` on a hash a callee does write.
 - Floor on a cut (taken). A cut is a hit on the new `BudgetTrace::CALLEE_CHAIN_CAP` category, and the argument loses
-  its literal shape. Flooring only drops facts, so it cannot add a false positive. It costs true positives: a literal
+  its literal shape. Flooring drops facts, so it removes the `flow.always-truthy-condition` reports a kept literal caused; it can still surface a mismatch against a declared type (a floored `Array[Dynamic[top]]` against a declared tuple, the case #2295 cited). It costs true positives: a literal
   collection that fans out to more than 32 non-mutating callees now loses its shape (the reviewer's `c1_fanout_tp.rb`
   and `c3_fanout_opts.rb`).
 

@@ -19,8 +19,9 @@ constant lookup each had to carry it), each a false positive on correct code.
 - Thread an owner that carries both the `self` class and the defining class through the memo, the chain nodes and the
   constant lookup. Precise, but each round found another place the pair leaked (a self-call back into the subclass, two
   subclasses reaching one base def).
-- Do not walk such a def: floor the passed argument and record a `BudgetTrace::CALLEE_CHAIN_CAP` hit. Flooring only
-  drops facts, so it cannot add a false positive. It costs precision: a literal passed to an inherited singleton method
+- Do not walk such a def: floor the passed argument and record a `BudgetTrace::CALLEE_CHAIN_CAP` hit. Flooring drops
+  facts, so it removes the literal-shape reports threading caused; like any floor it can surface a mismatch against a
+  declared type. It costs precision: a literal passed to an inherited singleton method
   that only reads it now loses its shape.
 
 ## Decision
@@ -29,7 +30,9 @@ The user chose the conservative reading ("推奨で進めて", accepting the coo
 class differs from the receiver's or `self`'s class is not walked; every content parameter reads as mutated. The same
 holds for a chain node reached under a different owner: a node is one parameter of one def under one owner, so no
 owner's answer fills another's. The direct inherited shapes (`Sub.leaf`, `leaf` inside `Sub`) stay silent through the
-floor rather than the walk.
+floor rather than the walk. A hand-off receiver is resolved by name over the defining class's prefixes plus the top level;
+when that finds nothing (an alias, an inherited or included constant, a constant holding an instance) it is typed once
+under the def's nesting and resolved as a caller-side call is, the user having chosen this fallback ("Add fallback").
 
 ## To undo
 

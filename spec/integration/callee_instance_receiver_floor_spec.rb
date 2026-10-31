@@ -5,7 +5,8 @@
 # and a singleton method inherited from a project superclass.
 require "spec_helper"
 
-RSpec.describe "the callee floor follows instance receivers, chained hand-offs and inherited singletons (#2515)", type: :runner do
+RSpec.describe "the callee floor follows instance receivers, chained hand-offs and inherited singletons (#2515)",
+               type: :runner do
   def rules(source)
     analyze(source).diagnostics.reject { |d| d.severity == :info }.map(&:qualified_rule)
   end
@@ -48,8 +49,8 @@ RSpec.describe "the callee floor follows instance receivers, chained hand-offs a
     end
 
     it "when the instance method delegates to a helper that writes" do
-      defs = "class Opts\n  def add_format(parser, options) = really(parser, options)\n" \
-             "  def really(parser, options) = #{writer}\nend"
+      defs = "class Opts\n  def add_format(parser, options) = really(parser, options)\n  " \
+             "def really(parser, options) = #{writer}\nend"
       expect(rules(program(defs, in_block("Opts.new.add_format(opts, options)")))).to eq([])
     end
 
@@ -64,8 +65,8 @@ RSpec.describe "the callee floor follows instance receivers, chained hand-offs a
     end
 
     it "reads the instance def, not a same-named singleton that writes" do
-      defs = "class Opts\n  def add_format(parser, options) = #{reader}\n" \
-             "  def self.add_format(parser, options) = #{writer}\nend"
+      defs = "class Opts\n  def add_format(parser, options) = #{reader}\n  " \
+             "def self.add_format(parser, options) = #{writer}\nend"
       expect(rules(program(defs, in_block("Opts.new.add_format(opts, options)")))).to eq(always)
     end
   end
@@ -74,15 +75,15 @@ RSpec.describe "the callee floor follows instance receivers, chained hand-offs a
     let(:help) { "module HelpC\n  def self.c(parser, options) = #{writer}\nend" }
 
     it "to a constant receiver" do
-      defs = "class Opts\n  def self.a(parser, options) = b(parser, options)\n" \
-             "  def self.b(parser, options) = HelpC.c(parser, options)\nend"
+      defs = "class Opts\n  def self.a(parser, options) = b(parser, options)\n  " \
+             "def self.b(parser, options) = HelpC.c(parser, options)\nend"
       expect(rules(program(defs, in_block("Opts.a(opts, options)"), extra: help))).to eq([])
     end
 
     it "to a callee that writes through its own self-call helper" do
       defs = "class Opts\n  def self.a(parser, options) = HelpC.c(parser, options)\nend"
-      extra = "module HelpC\n  def self.c(parser, options) = really(parser, options)\n" \
-              "  def self.really(parser, options) = #{writer}\nend"
+      extra = "module HelpC\n  def self.c(parser, options) = really(parser, options)\n  " \
+              "def self.really(parser, options) = #{writer}\nend"
       expect(rules(program(defs, in_block("Opts.a(opts, options)"), extra: extra))).to eq([])
     end
 

@@ -579,7 +579,8 @@ module Rigor
         receiver_type = scope.type_of(receiver)
         found =
           case receiver_type
-          when Type::Singleton then scope.singleton_def_through_ancestors(receiver_type.class_name, call_node.name).first
+          when Type::Singleton
+            scope.singleton_def_through_ancestors(receiver_type.class_name, call_node.name).first
           when Type::Nominal then scope.user_def_for(receiver_type.class_name, call_node.name)
           end
         return NO_CALLEES if found.nil?
@@ -4835,7 +4836,8 @@ module Rigor
       def callee_content_mutated_parameters(def_node)
         cache = (@callee_mutated_param_cache ||= {}.compare_by_identity)
         cache[def_node] ||= resolved_census(:close, def_node) do
-          CalleeMutationChain.close(def_node, own: hop_census(:own_content_parameters), edges: hop_census(:forwarding_edges))
+          CalleeMutationChain.close(def_node, own: hop_census(:own_content_parameters),
+                                              edges: hop_census(:forwarding_edges))
         end
       end
 
@@ -4979,7 +4981,8 @@ module Rigor
               names = bound_parameter_names(callee_slots, index.is_a?(Integer) ? index - offset : index)
               next if names.empty?
 
-              edges << CalleeMutationChain::Edge.new(name: name, slot: slots[name], callee: callee, callee_names: names, owner: owner)
+              edges << CalleeMutationChain::Edge.new(name: name, slot: slots[name], callee: callee, callee_names: names,
+                                                     owner: owner)
             end
           end
         end

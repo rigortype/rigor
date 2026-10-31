@@ -59,7 +59,7 @@ module Rigor
         # A node is one parameter of one def under one owner context: the same def reached under another owner
         # (another `self`) is a different node.
         def mutated?(def_node, name, owner)
-          node = @nodes.dig(def_node, [name, owner])
+          node = @nodes.dig(def_node, owner, name)
           !node.nil? && node.mutated
         end
 
@@ -77,7 +77,7 @@ module Rigor
 
             if read >= MAX_NODES
               cut = true
-              (@nodes[current] ||= {})[[parameter, current_owner]] = Node.new(true, NO_SUCCESSORS)
+              store(current, parameter, current_owner, Node.new(true, NO_SUCCESSORS))
               next
             end
 
@@ -104,15 +104,15 @@ module Rigor
         private
 
         def known?(def_node, name, owner)
-          by_name = @nodes[def_node]
-          !by_name.nil? && by_name.key?([name, owner])
+          by_name = @nodes.dig(def_node, owner)
+          !by_name.nil? && by_name.key?(name)
         end
 
         # Records the node and answers its successors. A node its def mutates needs none.
         def add(def_node, name, owner)
           mutated = @own.call(def_node, owner).key?(name)
           successors = mutated ? [] : successors_of(def_node, name, owner)
-          (@nodes[def_node] ||= {})[[name, owner]] = Node.new(mutated, successors)
+          store(def_node, name, owner, Node.new(mutated, successors))
           successors
         end
 
@@ -124,8 +124,12 @@ module Rigor
           end
         end
 
+        def store(def_node, name, owner, node)
+          ((@nodes[def_node] ||= {})[owner] ||= {})[name] = node
+        end
+
         def each_node(&)
-          @nodes.each_value { |by_name| by_name.each_value(&) }
+          @nodes.each_value { |by_owner| by_owner.each_value { |by_name| by_name.each_value(&) } }
         end
       end
     end

@@ -1,6 +1,11 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+require "fileutils"
+require "json"
+require "stringio"
+require "tmpdir"
+require "rigor/cli/check_command"
 
 # A mutator whose ARGUMENTS do not describe what it stores — `map!`, `collect!`, a block-form `fill`, `flatten!`,
 # `transform_values!`, `transform_keys!`, `merge!` / `update`, `Hash#replace` — rewrites the parameter it stores
@@ -326,6 +331,452 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
     it "keeps a partially rewritten literal's pinning, which the hand-written type accepts" do
       expect(return_rules("t = [:multi, :multi]\nt.fill(:multi, 1)\nt\n", "Array[:multi]")).to be_empty
       expect(return_rules("t = [:other]\nt.fill(:multi, 1)\nt\n", "Array[:multi]")).to eq(["def.return-type-mismatch"])
+    end
+  end
+
+  # Issue #2555 L3 — the `:synthesised` construction fact. A local the engine built itself (a collection literal, or
+  # a core `Array.new` / `Hash.new` / `Set.new` / `Set[...]` constructor) re-grows precisely at the straight-line
+  # seam, with no `Dynamic[top]` floor; a carrier whose binding does not carry the fact keeps today's #561 answer.
+  # Each example pairs the stamped binding with an unstamped control in the same position.
+  describe "the :synthesised construction fact (issue #2555)" do
+    def return_rules(body, sig_line)
+      sig = { "maker.rbs" => "class Maker\n  def call: () -> #{sig_line}\n  def helper: () -> #{sig_line}\nend\n" }
+      rules("class Maker\n  def helper = []\n  def call\n#{body.gsub(/^/, '    ')}  end\nend\n", "def.", sig: sig)
+    end
+
+    # Issue #1119.
+    it "re-grows a constructor-seeded Array with the stored element and no floor" do
+      expect(dumped_types(<<~RUBY)).to eq(["Array[Integer | String]", "Array[Integer | String]"])
+        n = gets.to_i
+        a = Array.new(n, 0)
+        a << "s"
+        dump_type(a.dup)
+        b = Array.new(n) { 0 }
+        b[0] = "s"
+        dump_type(b.dup)
+      RUBY
+      expect(undefined_method_rules(<<~RUBY)).to be_empty
+        n = gets.to_i
+        a = Array.new(n, 0)
+        a << "s"
+        a.last.upcase
+      RUBY
+    end
+
+    it "keeps the floor on a precise carrier a signature declared" do
+      expect(dumped_types(<<~RUBY)).to eq(["Array[Dynamic[top] | String]"])
+        s = gets.to_s.split(",")
+        s << 1
+        dump_type(s.dup)
+      RUBY
+    end
+
+    # Issue #1289 — a literal closed by a value-preserving mutator.
+    it "lets a Hash literal closed by `delete` take a later rewrite" do
+      expect(undefined_method_rules(<<~RUBY)).to be_empty
+        g = { a: 1 }
+        g.delete(:b)
+        g.transform_values!(&:to_s)
+        g[:a].upcase
+      RUBY
+      expect(dumped_types(<<~RUBY)).to eq(["Hash[Symbol, Dynamic[top]]"])
+        g = { a: 1 }
+        g.delete(:b)
+        g.transform_values!(&:to_s)
+        dump_type(g.dup)
+      RUBY
+    end
+
+    # The control: an alias copy carries no fact (issue #2335), so the rewrite through it is declined as before.
+    it "declines the same rewrite through an alias copy, which carries no fact" do
+      expect(undefined_method_rules(<<~RUBY)).to eq(["call.undefined-method"])
+        g = { a: 1 }
+        g.delete(:b)
+        h = g
+        h.transform_values!(&:to_s)
+        h[:a].upcase
+      RUBY
+    end
+
+    it "joins an adder's store into a literal closed by `sort!`" do
+      expect(dumped_types(<<~RUBY)).to eq(["1 | 2 | String", "1 | 2 | Dynamic[top]"])
+        a = [1, 2]
+        a.sort!
+        a << "s"
+        dump_type(a.first)
+        c = [1, 2]
+        c.sort!
+        d = c
+        d << "s"
+        dump_type(d.first)
+      RUBY
+    end
+
+    it "widens a block-captured rewrite of a closed literal honestly" do
+      expect(undefined_method_rules(<<~RUBY)).to be_empty
+        a = [1, 2]
+        [0].each { a.sort!; a.map!(&:to_s) }
+        a.first.upcase
+      RUBY
+    end
+
+    it "lets a Hash literal built as a nominal take a rewrite, and keeps its value under `compact!`" do
+      expect(undefined_method_rules(<<~RUBY)).to be_empty
+        h = { ENV["A"].to_s => 1 }
+        h.transform_values!(&:to_s)
+        h.each_value { |v| v.upcase }
+      RUBY
+      expect(undefined_method_rules(<<~RUBY)).to eq(["call.undefined-method"])
+        h = { ENV["A"].to_s => 1 }
+        h.compact!
+        h.each_value { |v| v.upcase }
+      RUBY
+    end
+
+    # The straight-line seam types a store's arguments only for a receiver it will join into, so a precise Hash
+    # counts as one when its binding carries the fact.
+    it "joins a stored pair into a Hash literal built as a nominal" do
+      expect(dumped_types(<<~RUBY)).to eq(["Hash[String, Integer | String]"])
+        h = { ENV["A"].to_s => 1 }
+        h["k"] = "v"
+        dump_type(h.dup)
+      RUBY
+    end
+
+    # A constructor-shaped call on anything but the core class is a declared return, not a construction.
+    it "gives no fact to a `[]` whose receiver is not the core class" do
+      sig = { "maker.rbs" => "module Maker\n  def self.[]: () -> Array[Integer]\nend\n" }
+      source = "module Maker\n  def self.[] = [1]\nend\na = Maker[]\na << \"s\"\ndump_type(a.dup)\n"
+      dumped = diagnostics(source, sig: sig).filter_map do |diagnostic|
+        diagnostic.message.delete_prefix("dump_type: ") if diagnostic.message.start_with?("dump_type")
+      end
+      expect(dumped).to eq(["Array[Dynamic[top] | Integer]"])
+    end
+
+    # The #561 boundary on a declared carrier: a foreign store joins as the floor, so the declared return accepts it.
+    it "keeps a declared carrier's foreign store behind the floor, and the declared return accepting it" do
+      expect(return_rules("t = helper\nt << [:static, \"x\"]\nt\n", "Array[:multi]")).to be_empty
+    end
+
+    def fact_free_sig
+      "class F\n  def push: (Array[Integer] xs) -> untyped\n  " \
+        "def pick: (bool c, Array[Integer] param) -> untyped\n  " \
+        "def rebind: (Array[Integer] param) -> untyped\nend\n"
+    end
+
+    def fact_free_source
+      <<~RUBY
+        class F
+          def push(xs)
+            xs << "s"
+            dump_type(xs.dup)
+          end
+
+          def pick(c, param)
+            if c
+              a = [1]
+              a.sort!
+            else
+              a = param
+            end
+            a << "s"
+            dump_type(a.dup)
+          end
+
+          def rebind(param)
+            a = [1]
+            a.sort!
+            a = param
+            a << "s"
+            dump_type(a.dup)
+          end
+        end
+      RUBY
+    end
+
+    it "gives no fact to a parameter, a merge with an unstamped arm, or a rebind" do
+      dumped = diagnostics(fact_free_source, sig: { "f.rbs" => fact_free_sig }).filter_map do |diagnostic|
+        diagnostic.message.delete_prefix("dump_type: ") if diagnostic.message.start_with?("dump_type")
+      end
+      expect(dumped).to eq(["Array[Dynamic[top] | Integer]",
+                            "Array[Dynamic[top] | Integer]",
+                            "Array[Dynamic[top] | Integer]"])
+    end
+
+    it "keeps the fact through a merge both arms establish" do
+      expect(dumped_types(<<~RUBY)).to eq(["1 | 2 | String"])
+        if gets
+          a = [1]
+        else
+          a = [2]
+        end
+        a.sort!
+        a << "s"
+        dump_type(a.first)
+      RUBY
+    end
+
+    # Review round 1 — a remover or filter can take a stored member out again, and nothing narrows the carrier
+    # back, so on a carrier a store has grown it restores the reading the carrier has without the fact: the floor,
+    # with the stored `nil` gone when the remover can take a `nil` out.
+    {
+      "Array#compact!" => "p = Array.new(n, \"a\")\np << (gets ? nil : \"b\")\np.compact!\np.each { |s| s.upcase }",
+      "Array#compact! after an untyped store" =>
+        "def f(n, x)\n  p = Array.new(n, \"a\")\n  p << (x.empty? ? nil : x)\n  " \
+        "p.compact!\n  p.each { |s| s.upcase }\nend",
+      "Array#delete" => "p = Array.new(n, \"a\")\np << nil\np.delete(nil)\np.each { |s| s.upcase }",
+      "Array#reject!" => "p = Array.new(n, \"a\")\np << nil\np.reject!(&:nil?)\np.each { |s| s.upcase }",
+      "Array#select!" => "p = Array.new(n, \"a\")\np << nil\np.select! { |e| e }\np.each { |s| s.upcase }",
+      "Array#pop" => "p = %w[b a]\np.sort!\np << 1\np.pop\np.each { |s| s.upcase }",
+      "Hash#delete" => "h = { ENV[\"A\"].to_s => \"x\" }\nh[\"k\"] = 1\n" \
+                       "h.delete(\"k\")\nh.each_value { |v| v.upcase }",
+      "Hash#delete of a nil value" => "h = { ENV[\"A\"].to_s => \"x\" }\nh[\"k\"] = nil\nh.delete(\"k\")\n" \
+                                      "h.each_value { |v| v.upcase }",
+      "Hash#reject!" => "h = { a: \"x\" }\nh.delete(:zz)\nh[:k] = nil\nh.reject! { |_, v| v.nil? }\n" \
+                        "h.each_value { |v| v.upcase }",
+      "Hash#compact!" => "h = { ENV[\"A\"].to_s => \"x\" }\nh[\"k\"] = nil\nh.compact!\nh.each_value { |v| v.upcase }",
+      "Set#delete" => "s = Set[\"a\"]\ns << nil\ns.delete(nil)\ns.each { |v| v.upcase }"
+    }.each do |remover, body|
+      it "floors a grown synthesised carrier under #{remover}" do
+        expect(rules("n = gets.to_i\n#{body}\n", "call.")).to be_empty
+      end
+    end
+
+    # A remover that cannot take the `nil` out leaves it, so a read reports it as the reading without the fact does.
+    # A positional remover may take the stored `nil` out, so it drops the `nil` arm (review round 3).
+    {
+      "Array#slice!" => "def f(n)\n  a = Array.new(n, \"a\")\n  a << nil\n  a.slice!(-1)\n  " \
+                        "a.each { |s| s.upcase }\nend",
+      "Array#pop" => "def f\n  a = [1, 2]\n  a.sort!\n  a << nil\n  a.pop\n  a.each { |v| v + 1 }\nend"
+    }.each do |remover, body|
+      it "drops a stored nil under #{remover}" do
+        expect(rules("#{body}\n", "call.")).to be_empty
+      end
+    end
+
+    it "keeps a stored nil under a remover that cannot remove it" do
+      expect(rules("s = Set[1]\ns << nil\ns.delete(1)\ns.each { |v| v + 1 }\n",
+                   "call.")).to eq(["call.possible-nil-receiver"])
+    end
+
+    it "keeps a remover with no prior store on today's answer, and answers the floored reading after one" do
+      expect(dumped_types(<<~RUBY)).to eq(["Array[String]", "1 | 2", "Array[Dynamic[top] | Integer | String]"])
+        n = gets.to_i
+        a = Array.new(n, "a")
+        a.compact!
+        dump_type(a.dup)
+        b = [1, 2]
+        b.sort!
+        b.delete(1)
+        dump_type(b.first)
+        c = Array.new(n, "a")
+        c << nil
+        c.compact!
+        c << 1
+        dump_type(c.dup)
+      RUBY
+    end
+
+    # What `a = Array.new(n, 0); a << :x` reads when the local keeps its fact: the escape examples below must not.
+    def precise_regrowth = "Array[Integer | Symbol]"
+
+    it "regrows a local that does not escape precisely, the escape examples' positive control" do
+      expect(dumped_types("n = gets.to_i\na = Array.new(n, 0)\na << :x\ndump_type(a.dup)\n")).to eq([precise_regrowth])
+    end
+
+    # Review round 1 — a store through another holder of the object is one the seam never sees, so a local that may
+    # escape anywhere in its body carries no fact and answers as a carrier without one.
+    {
+      "an alias" => "b = a\nb << \"s\"",
+      "a tap block" => "a.tap { |arr| arr << \"s\" }",
+      "itself" => "x = a.itself\nx << \"s\"",
+      "an array element" => "[a].each { |y| y << \"s\" }",
+      "a hash value" => "h = { k: a }\nh[:k] << \"s\"",
+      "an instance variable" => "@a = a\n@a << \"s\"",
+      "public_send" => "a.public_send(:<<, \"s\")",
+      "send" => "a.send(:push, \"s\")",
+      "a method object" => "a.method(:<<).call(\"s\")",
+      "instance_exec" => "a.instance_exec { self << \"s\" }",
+      "binding" => "binding.local_variable_set(:a, [\"s\"])",
+      "eval" => "eval(\"a << 's'\")",
+      "a lambda that returns it" => "pr = -> { return a }\nb = pr.call\nb << \"s\"",
+      "a lambda" => "pr = -> { a << \"s\"; nil }\npr.call",
+      "a chained <<" => "a << :y << \"s\"",
+      "a chained push" => "a.push(:y).push(\"s\")",
+      "a chained rewrite" => "a.unshift(:y).map!(&:to_s)",
+      "a chained tap" => "a.push(:y).tap { |z| z << \"s\" }",
+      "a constructor argument" => "class Box\n  def initialize(i) = @i = i\n  def add(x) = @i << x\nend\n" \
+                                  "Box.new(a).add(\"s\")",
+      "an attribute writer" => "class Holder\n  attr_accessor :items\nend\n" \
+                               "h = Holder.new\nh.items = a\nh.items << \"s\"",
+      "Kernel#Array" => "b = Array(a)\nb << \"s\"",
+      "a user method that returns it" => "def ident(x) = x\nb = ident(a)\nb << \"s\"",
+      "a fetch default" => "{}.fetch(:k, a) << \"s\"",
+      "a Hash default" => "h = Hash.new(a)\nh[:k] << \"s\"",
+      "an Array.new fill" => "Array.new(1, a)[0] << \"s\"",
+      "a Struct member" => "st = Struct.new(:v).new(a)\nst.v << \"s\"",
+      "a Thread argument" => "Thread.new(a) { |x| x << \"s\" }.join",
+      "an each_with_object memo" => "[1].each_with_object(a) { |_i, acc| acc << \"s\" }",
+      "an inject seed" => "[1].inject(a) { |acc, _i| acc << \"s\" }",
+      "an each_with_object result" => "b = [1].each_with_object(a) { |_i, _m| nil }\nb << \"s\"",
+      "a method the project defines on Array" => "class Array\n  def add_label = push(\"s\")\nend\na.add_label",
+      "a listed reader the project redefines" =>
+        "class Array\n  def first\n    push(\"s\")\n    self[0]\n  end\nend\na.first",
+      "a storing argument" => "list = []\nlist << a\nlist.last << \"s\""
+    }.each do |escape, body|
+      it "gives no fact to a local that escapes through #{escape}" do
+        dumped = dumped_types("n = gets.to_i\na = Array.new(n, 0)\na << :x\n#{body}\ndump_type(a.dup)\n")
+        expect(dumped.last).not_to eq(precise_regrowth)
+      end
+    end
+
+    # A Set call that answers the receiver itself, used, hands it on as an alias does.
+    { "Set#merge" => "t = s.merge([2])\nt << \"s\"", "Set#add?" => "t = s.add?(2)\nt << \"s\"" }.each do |call, body|
+      it "gives no fact to a Set whose #{call} value is used" do
+        expect(dumped_types("s = Set[1]\ns << :x\n#{body}\ndump_type(s.dup)\n").last).not_to eq("Set[Integer | Symbol]")
+      end
+    end
+
+    it "regrows a Set that does not escape precisely, the Set escape examples' positive control" do
+      expect(dumped_types("s = Set[1]\ns << :x\ns.merge([2])\ndump_type(s.dup)\n")).to eq(["Set[Integer | Symbol]"])
+    end
+
+    it "gives no fact through a chained write, and keeps it for a plain statement-position store" do
+      expect(dumped_types(<<~RUBY)).to eq(["Array[Dynamic[top] | Integer]", "Array[Integer | String]"])
+        n = gets.to_i
+        a = b = Array.new(n, 0)
+        b << "s"
+        dump_type(b.dup)
+        c = Array.new(n, 0)
+        c << "s"
+        dump_type(c.dup)
+      RUBY
+    end
+
+    # A read in the body's value position (`return a`) hands the object on only once nothing in the body runs.
+    it "keeps the fact across an early `return a` and a final bare `a`" do
+      expect(dumped_types(<<~RUBY)).to eq(["Array[Integer | String]"])
+        def early(n)
+          a = Array.new(n, 0)
+          return a if n.zero?
+
+          a << "s"
+          dump_type(a.dup)
+          a
+        end
+      RUBY
+    end
+
+    it "floors a local a user method mutates through its argument, as before" do
+      dumped = dumped_types(<<~RUBY)
+        def add_label(arr) = arr << "label"
+        n = gets.to_i
+        a = Array.new(n, 0)
+        a << :x
+        add_label(a)
+        dump_type(a.dup)
+      RUBY
+      expect(dumped.last).not_to eq(precise_regrowth)
+    end
+
+    it "joins a store into a merged union of synthesised hashes, and drops a slot write's value pin" do
+      merged = "Hash[String, Integer | String] | Hash[String, String | Symbol]"
+      expect(dumped_types(<<~RUBY)).to eq([merged, "Array[Integer]"])
+        if gets
+          h = { ENV["A"].to_s => 1 }
+        else
+          h = { ENV["B"].to_s => :x }
+        end
+        h["k"] = "v"
+        dump_type(h.dup)
+        a = [1, 2]
+        a.sort!
+        a[0] = 5
+        dump_type(a.dup)
+      RUBY
+    end
+
+    # Issue #2534 — the Set floor came off, so a member read reports what the member class does not answer. A
+    # union of two classes stays silent by the diagnostic policy, so the true positive needs a same-class store.
+    it "reports a Set member read once the synthesised Set grows without a floor" do
+      expect(undefined_method_rules(<<~RUBY)).to eq(%w[call.undefined-method call.undefined-method])
+        s = Set[1]
+        s << 2
+        s.to_a.first.upcase
+        t = Set.new([1])
+        t << 2
+        t.to_a.first.upcase
+      RUBY
+      expect(dumped_types(<<~RUBY)).to eq(["Set[Integer | String]", "Set[Dynamic[top] | String]"])
+        s = Set[1]
+        s << "a"
+        dump_type(s.dup)
+        u = ARGV.to_set
+        u << 1
+        dump_type(u.dup)
+      RUBY
+    end
+  end
+
+  # Fix-only checks on #2606 — a listed reader the project defines in ANOTHER file escapes the local, whoever owns
+  # the def: a reopen of Array (the def-node table holds the cross-file def `discovered_methods` withholds on an
+  # RBS-declared class), a module Array prepends, or a refinement. A project that defines no such name keeps the
+  # regrowth.
+  describe "a project definition of a listed reader in another file (issue #2555)" do
+    around do |example|
+      Dir.mktmpdir { |dir| Dir.chdir(dir) { example.run } }
+    end
+
+    def check(*flags)
+      out = StringIO.new
+      argv = ["--no-ci-detect", "--no-stats", "--no-baseline", "--format", "json", *flags]
+      Rigor::CLI::CheckCommand.new(argv: argv, out: out, err: StringIO.new).run
+      JSON.parse(out.string).fetch("diagnostics").filter_map do |d|
+        "#{File.basename(d.fetch('path'))}:#{d.fetch('line')} #{d.fetch('rule')}" unless d.fetch("severity") == "info"
+      end.sort
+    end
+
+    size = "def size\n    push(\"label\")\n    length\n  end"
+    ext = "module CoreExt\n  #{size}\nend\n"
+    patches = {
+      "a reopen" => ["class Array\n  #{size}\nend\n", ""],
+      "a module Array prepends" => ["#{ext}Array.prepend(CoreExt)\n", ""],
+      "a prepend inside the class body" => ["#{ext}class Array\n  prepend CoreExt\nend\n", ""],
+      "a refinement" => ["module CoreExt\n  refine Array do\n    #{size}\n  end\nend\n", "using CoreExt\n"]
+    }
+
+    def write_project(patch, prelude = "")
+      File.write(".rigor.yml", "paths:\n  - lib\n")
+      FileUtils.mkdir_p("lib")
+      File.write("lib/patch.rb", patch) if patch
+      File.write("lib/use.rb", "#{prelude}class User\n  def go(n)\n    a = Array.new(n, 0)\n    a << :x\n    " \
+                               "c = a.size\n    a.last.bytesize if c\n  end\nend\n")
+    end
+
+    patches.each do |label, (patch, prelude)|
+      it "escapes the local past #{label}, with workers and on a warm incremental recheck after an edit" do
+        write_project(patch, prelude)
+        cold = check("--no-cache")
+        expect(cold).to eq([])
+        expect(check("--no-cache", "--workers=2")).to eq(cold)
+        2.times { check("--incremental") }
+        File.write("lib/use.rb", "#{File.read('lib/use.rb')}# edited\n")
+        expect(check("--incremental")).to eq(cold)
+      end
+    end
+
+    # The name set and the escape verdicts are run-scoped slots, so a second run in the same process reads the
+    # edited project rather than the first run's answer.
+    it "reads the edited project on a second run in the same process" do
+      write_project("class Array\n  def size\n    push(\"label\")\n    length\n  end\nend\n")
+      expect(check("--no-cache")).to eq([])
+      File.delete("lib/patch.rb")
+      expect(check("--no-cache")).to eq(["use.rb:6 call.undefined-method"])
+    end
+
+    it "keeps the regrowth in a project that defines no such name (control)" do
+      write_project(nil)
+      expect(check("--no-cache")).to eq(["use.rb:6 call.undefined-method"])
     end
   end
 end

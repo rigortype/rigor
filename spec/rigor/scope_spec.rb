@@ -188,6 +188,43 @@ RSpec.describe Rigor::Scope do
       expect(rebound.optimistic_local_miss(:r)).to be(Rigor::Inference::OptimisticOrigin::UNKNOWN_MISS)
     end
 
+    # Issue #2555 L3 — the construction-fact table follows the optimistic marks' transitions, except at a merge.
+    it "keeps a construction fact across a mutation's rebind and drops it at a write" do
+      stamped = scope.with_local(:a, type).with_construction_fact(:a, :synthesised)
+      mutated = stamped.with_mutated_local(:a, Rigor::Type::Combinator.nominal_of("P"))
+      expect([stamped.construction_fact?(:a), mutated.construction_fact?(:a)]).to eq([true, true])
+      expect(mutated.with_local(:a, type).construction_fact?(:a)).to be(false)
+      expect(scope.with_local(:a, type).construction_fact?(:a)).to be(false)
+    end
+
+    it "keeps a construction fact through a merge only when both arms hold it" do
+      stamped = scope.with_local(:a, type).with_construction_fact(:a, :synthesised)
+      unstamped = scope.with_local(:a, type)
+      expect(stamped.join(unstamped).construction_fact?(:a)).to be(false)
+      expect(unstamped.join(stamped).construction_fact?(:a)).to be(false)
+      expect(stamped.join(stamped.with_local(:b, type)).construction_fact?(:a)).to be(true)
+    end
+
+    it "keeps only the facts both arms agree on, and a second fact joins the entry" do
+      both = scope.with_local(:a, type).with_construction_fact(:a, :synthesised).with_construction_fact(:a, :defaulted)
+      one = scope.with_local(:a, type).with_construction_fact(:a, :defaulted)
+      joined = both.join(one)
+      expect([both.construction_fact?(:a), both.construction_fact?(:a, :defaulted)]).to eq([true, true])
+      expect([joined.construction_fact?(:a), joined.construction_fact?(:a, :defaulted)]).to eq([false, true])
+    end
+
+    it "unions :grown within an entry both arms keep" do
+      grown = scope.with_local(:a, type).with_construction_fact(:a, :synthesised).with_construction_fact(:a, :grown)
+      plain = scope.with_local(:a, type).with_construction_fact(:a, :synthesised)
+      expect([grown.join(plain).construction_fact?(:a, :grown), plain.join(grown).construction_fact?(:a, :grown)])
+        .to eq([true, true])
+    end
+
+    it "tells two scopes apart by their construction facts" do
+      bound = scope.with_local(:a, type)
+      expect(bound.with_construction_fact(:a, :synthesised)).not_to eq(bound)
+    end
+
     it "adds no mark at an in-place mutation's rebind of an unmarked local" do
       mutated = scope.with_local(:r, type).with_mutated_local(:r, type)
       expect(mutated.declaration_sourced?(:local, :r)).to be(false)
@@ -744,8 +781,8 @@ RSpec.describe Rigor::Scope do
           indexed_narrowings method_chain_narrowings declaration_sourced
           published_constant_sourced
           struct_fold_safe_locals opaque_block_self block_self_unknown singleton_class_body
-          local_origins ivar_origins optimistic_locals optimistic_ivars repeated_or_writes match_frame
-          constant_narrowings guard_records bot_guard_classes declared_refinements
+          local_origins ivar_origins optimistic_locals optimistic_ivars construction_facts repeated_or_writes
+          match_frame constant_narrowings guard_records bot_guard_classes declared_refinements
         ],
         receiver: %i[
           discovery source_path lexical_nesting
@@ -794,6 +831,7 @@ RSpec.describe Rigor::Scope do
         optimistic_origins: { node => :cause }.compare_by_identity,
         optimistic_locals: { x: :cause }.freeze,
         optimistic_ivars: { :@i => :cause }.freeze,
+        construction_facts: { x: Set[:synthesised].freeze }.freeze,
         repeated_or_writes: { node => true }.compare_by_identity.freeze,
         match_frame: Rigor::Inference::MatchRebinding::Frame.new(node),
         constant_narrowings: { "C" => type }.freeze,

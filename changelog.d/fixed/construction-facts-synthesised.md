@@ -1,0 +1,5 @@
+- **[engine]** A collection a method builds itself keeps learning what later in-place mutations store into it, instead of reporting on correct code. ([#2606](https://github.com/rigortype/rigor/pull/2606))
+  - `g = { a: 1 }; g.delete(:b); g.transform_values!(&:to_s); g[:a].upcase` and `h = { ENV["A"].to_s => 1 }; h.transform_values!(&:to_s)` no longer report `undefined method 'upcase'` for the old value ([#1289](https://github.com/rigortype/rigor/issues/1289)).
+  - `a = Array.new(n, 0); a << "s"` reads `Array[Integer | String]` rather than `Array[Dynamic[top] | Integer]` ([#1119](https://github.com/rigortype/rigor/issues/1119)).
+  - A Set built with `Set[...]` or `Set.new` grows without an unknown member, so `s = Set[1]; s << 2; s.to_a.first.upcase` reports the Integer it holds ([#2534](https://github.com/rigortype/rigor/issues/2534)).
+  - A collection that came from a parameter, a signature-declared return, an instance variable, or another local keeps the earlier, more cautious reading.

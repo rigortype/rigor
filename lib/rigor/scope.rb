@@ -3,6 +3,7 @@
 require_relative "type"
 require_relative "environment"
 require_relative "scope/discovery_index"
+require_relative "run_scoped_slots"
 require_relative "scope/resolution_chain"
 require_relative "inference/definer_resolution"
 require_relative "inference/in_effect_refinements"
@@ -30,7 +31,7 @@ module Rigor
                 :opaque_block_self, :block_self_unknown, :singleton_class_body, :lexical_nesting,
                 :dynamic_origins, :local_origins, :ivar_origins,
                 :void_origins, :plugin_typed_calls,
-                :optimistic_origins, :optimistic_locals, :optimistic_ivars,
+                :optimistic_origins, :optimistic_locals, :optimistic_ivars, :construction_facts,
                 :repeated_or_writes, :match_frame,
                 :constant_narrowings, :guard_records, :bot_guard_classes, :declared_refinements
 
@@ -322,6 +323,8 @@ module Rigor
       @plugin_typed_calls.key?(node)
     end
 
+    # Every keyword past the 31st takes CRuby's allocating unspecified-keywords path when omitted with a non-literal
+    # default; see the note at {#rebuild} before adding a field.
     def initialize( # rubocop:disable Metrics/AbcSize, Metrics/MethodLength -- one keyword and assignment per field
       environment:, locals:,
       fact_store: Analysis::FactStore.empty,
@@ -348,6 +351,7 @@ module Rigor
       optimistic_origins: {}.compare_by_identity,
       optimistic_locals: EMPTY_ORIGINS,
       optimistic_ivars: EMPTY_ORIGINS,
+      construction_facts: EMPTY_ORIGINS,
       repeated_or_writes: EMPTY_REPEATED_OR_WRITES,
       match_frame: nil,
       constant_narrowings: EMPTY_CONSTANT_NARROWINGS,
@@ -381,6 +385,7 @@ module Rigor
       @optimistic_origins = optimistic_origins
       @optimistic_locals = optimistic_locals
       @optimistic_ivars = optimistic_ivars
+      @construction_facts = construction_facts
       @repeated_or_writes = repeated_or_writes
       @match_frame = match_frame
       @constant_narrowings = constant_narrowings
@@ -431,6 +436,41 @@ module Rigor
 
       mark = Inference::OptimisticOrigin.bound_mark(cause, miss)
       rebuild(optimistic_ivars: @optimistic_ivars.merge(name.to_sym => mark).freeze)
+    end
+
+    # Issue #2555 L3 — the construction facts a LOCAL's binding carries: what the engine knows about how the object
+    # bound to it was made, as opposed to what its type says about its contents. `:synthesised` means the engine
+    # built the object itself (a collection literal, or an `Array.new` / `Hash.new` / `Set.new` / `X[...]`
+    # constructor on the core class), so its element types are this engine's own inference and no declaration's
+    # claim: the mutation seams may re-grow such a carrier precisely, where a declared one (a parameter, an RBS
+    # return) keeps the issue #561 boundary. The table is `{ name => frozen Set[Symbol] }`, so a second fact joins
+    # an existing entry without reshaping it.
+    #
+    # Locals only. An instance variable's binding is seeded across methods from the class-ivar index, whose
+    # construction no single body witnesses, so an ivar never carries a fact. Like {#optimistic_locals} the facts
+    # are kept by {#with_mutated_local} (the binding still names the same object), dropped by {#with_local} (a
+    # source-level rebind names a new one), intersected at a merge, and reset with the locals at a method body's
+    # entry. No fact is copied by an alias write (`b = a`): the type is shared, the provenance is not tracked
+    # through a second name (issue #2335), and a local that may escape anywhere in its body is never stamped
+    # ({Inference::ConstructionEscape}). Within an entry `:synthesised` intersects at a merge and `:grown` (a store
+    # has grown the carrier since construction) unions.
+    CONSTRUCTION_FACT_SETS = Ractor.make_shareable({ synthesised: Set[:synthesised] })
+    NO_CONSTRUCTION_FACTS = Set.new.freeze
+    private_constant :CONSTRUCTION_FACT_SETS, :NO_CONSTRUCTION_FACTS
+
+    def construction_fact?(name, fact = :synthesised)
+      @construction_facts.fetch(name.to_sym, NO_CONSTRUCTION_FACTS).include?(fact)
+    end
+
+    # Records `fact` on the local `name`. Applied AFTER the {#with_local} that binds the value, which drops any
+    # fact the old binding held.
+    def with_construction_fact(name, fact)
+      key = name.to_sym
+      existing = @construction_facts[key]
+      return self if existing&.include?(fact)
+
+      facts = existing ? (existing | [fact]).freeze : (CONSTRUCTION_FACT_SETS[fact] || Set[fact].freeze)
+      rebuild(@construction_facts.merge(key => facts).freeze)
     end
 
     # ADR-82 WD1 — the propagated origin of the `Dynamic` value currently bound to a local / instance
@@ -487,7 +527,8 @@ module Rigor
       # longer holds (the new value may carry a method-local nil). `with_declaration_sourced_local` re-establishes
       # the mark afterward when the RHS is a pure copy of a declaration-sourced ivar read; the default is to drop
       # it.
-      rebuild(locals: new_locals, fact_store: new_fact_store,
+      rebuild(keep_marks ? @construction_facts : drop_origin(@construction_facts, name),
+              locals: new_locals, fact_store: new_fact_store,
               indexed_narrowings: new_indexed_narrowings,
               method_chain_narrowings: new_chain_narrowings,
               declaration_sourced: keep_marks ? @declaration_sourced : drop_local_declaration_marks(name),
@@ -1228,6 +1269,31 @@ module Rigor
       record_discovered_method(class_name, method_name) if Analysis::DependencyRecorder.active?
       true
     end
+
+    # Issue #2555 — whether the project defines a method named `method_name` anywhere: on any class or module,
+    # instance or singleton side (the def-node tables, which hold a plain cross-file `def` on an RBS-declared class
+    # that `discovered_methods` withholds, and `discovered_methods`), or in a `refine` block. The name set is built
+    # once per discovery index.
+    def project_method_name?(method_name)
+      table = (Thread.current[PROJECT_METHOD_NAMES_KEY] ||= ObjectSpace::WeakKeyMap.new)
+      return true if (table[@discovery] ||= collect_project_method_names).include?(method_name.to_sym)
+
+      false
+    end
+
+    def collect_project_method_names
+      names = Set.new
+      [@discovery.discovered_methods, @discovery.discovered_def_nodes, @discovery.discovered_singleton_def_nodes,
+       @discovery.discovered_refinements].each do |by_owner|
+        by_owner.each_value { |methods| methods.each_key { |method_name| names << method_name.to_sym } }
+      end
+      names.freeze
+    end
+    private :collect_project_method_names
+
+    # A run-scoped slot ({RunScopedSlots}): emptied when a run ends, so an edited project is read afresh.
+    PROJECT_METHOD_NAMES_KEY = RunScopedSlots.register(:__rigor_project_method_names)
+    private_constant :PROJECT_METHOD_NAMES_KEY
 
     def record_discovered_method(class_name, method_name)
       record_class_dependency(class_name)
@@ -2226,11 +2292,13 @@ module Rigor
 
     private
 
-    # The marks {#==} compares: ADR-58's, issue #667's and the repeated `||=` sites, and #1429's guard state.
+    # The marks {#==} compares: ADR-58's, issue #667's, the repeated `||=` sites, #2555's construction facts (they
+    # change what a mutation seam answers), and #1429's guard state.
     def same_marks?(other)
       @declaration_sourced == other.declaration_sourced &&
         @published_constant_sourced == other.published_constant_sourced &&
         @repeated_or_writes == other.repeated_or_writes &&
+        @construction_facts == other.construction_facts &&
         same_guard_state?(other)
     end
 
@@ -2239,7 +2307,15 @@ module Rigor
         @bot_guard_classes == other.bot_guard_classes
     end
 
+    # `construction_facts` is the one positional parameter. CRuby records which keywords a call left out in a bit
+    # field indexed by each keyword's position among ALL the method's keywords, required and optional
+    # (`VM_KW_SPECIFIED_BITS_MAX`, 31); a keyword past that index whose default is not a literal makes every call that
+    # omits it allocate the record instead. A 32nd keyword here did that on every scope transition, about 1% of an
+    # analysis's allocations (issue #2555). `#initialize` is already past the index: `bot_guard_classes` and
+    # `declared_refinements` take the allocating path whenever a caller omits them. The next Scope field crosses it in
+    # this method again, so it needs a positional slot or a restructuring, not a 32nd keyword.
     def rebuild(
+      construction_facts = @construction_facts,
       locals: @locals, fact_store: @fact_store, self_type: @self_type,
       ivars: @ivars, cvars: @cvars, globals: @globals,
       discovery: @discovery,
@@ -2290,7 +2366,7 @@ module Rigor
         plugin_typed_calls: plugin_typed_calls,
         optimistic_origins: optimistic_origins,
         optimistic_locals: optimistic_locals,
-        optimistic_ivars: optimistic_ivars,
+        optimistic_ivars: optimistic_ivars, construction_facts: construction_facts,
         repeated_or_writes: repeated_or_writes,
         match_frame: match_frame,
         constant_narrowings: constant_narrowings,
@@ -2383,6 +2459,8 @@ module Rigor
         optimistic_origins: @optimistic_origins,
         optimistic_locals: join_optimistic_marks(@optimistic_locals, other.optimistic_locals),
         optimistic_ivars: join_optimistic_marks(@optimistic_ivars, other.optimistic_ivars),
+        # Issue #2555 L3 — INTERSECTION: a construction fact holds after a merge only when both arms established it.
+        construction_facts: join_construction_facts(@construction_facts, other.construction_facts),
         # UNION, the published-constant mark's direction: the mark only withholds the memoizing `||=`
         # reading, so keeping a site either arm holds is the wider answer.
         repeated_or_writes: join_repeated_or_writes(other),
@@ -2478,6 +2556,31 @@ module Rigor
 
       theirs.merge(mine) { |_name, their_mark, my_mark| Inference::OptimisticOrigin.join_bound_marks(my_mark, their_mark) }
             .freeze
+    end
+
+    # Issue #2555 L3 — a fact survives a merge only for a name both arms hold it for, and only the facts both agree
+    # on. Zero-alloc when either side is empty or both are the same table.
+    def join_construction_facts(mine, theirs)
+      return mine if mine.equal?(theirs)
+      return EMPTY_ORIGINS if mine.empty? || theirs.empty?
+
+      joined = {}
+      mine.each do |name, facts|
+        their_facts = theirs[name]
+        next if their_facts.nil?
+
+        common = facts == their_facts ? facts : join_fact_sets(facts, their_facts)
+        joined[name] = common unless common.empty?
+      end
+      joined.empty? ? EMPTY_ORIGINS : joined.freeze
+    end
+
+    # `:grown` joins by UNION among the names both arms keep: a store on either arm may reach the carrier, and the
+    # fact only ever floors it ({Inference::MutationRejoin.floors_grown_carrier?}). Every other fact intersects.
+    def join_fact_sets(facts, their_facts)
+      common = facts & their_facts
+      common << :grown if facts.include?(:grown) || their_facts.include?(:grown)
+      common.freeze
     end
 
     # ADR-82 WD1 — rebinding drops any propagated origin for the name (the new value's provenance is set

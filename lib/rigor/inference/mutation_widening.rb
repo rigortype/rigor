@@ -336,8 +336,8 @@ module Rigor
 
       # Issue #2555 — a remover or filter on a synthesised carrier a store has grown. Nothing narrows the carrier back,
       # so the stored arm would outlive the values the call removes (`parts << nil; parts.compact!`); the carrier takes
-      # the `Dynamic[top]` floor it would have carried without the fact. The binding keeps its facts: the floored carrier
-      # is gradual, so the synthesised re-join no longer applies to it, and a later remover floors it again.
+      # the `Dynamic[top]` floor it would have carried without the fact. The binding keeps its facts: the floored
+      # carrier is gradual, so the synthesised re-join no longer applies to it, and a later remover floors it again.
       def floor_grown_carrier(scope, builder, name, current, method_name, getter, removes_nil)
         drop_nil = removes_nil || (method_name == :delete && MutationRejoin.hash_carrier?(current))
         floored = MutationRejoin.floor_parameters(current, drop_nil:)

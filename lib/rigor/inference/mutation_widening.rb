@@ -144,16 +144,24 @@ module Rigor
                                                                                   removes_nil: removes_nil?(call_node))
       end
 
-      # Issue #2555 — the removers that can take a `nil` out: `compact!`, the block filters, `clear`, and `delete` /
-      # `delete?` given a literal `nil`. `Hash#delete` removes by key, so whatever value the key held may go, a `nil`
-      # included ({.floor_grown_carrier} reads the receiver for it).
-      NIL_REMOVERS = %i[compact! reject! select! filter! delete_if keep_if clear].to_set.freeze
+      # Issue #2555 — the removers that may take a `nil` out, which is every one but a `delete` / `delete?` given a
+      # non-nil literal: false positives outrank, so a positional remover (`pop`, `shift`, `slice!`), `subtract`
+      # (whose argument may hold `nil`) and a `delete` of an unknown value count. `Hash#delete` removes by key, so
+      # whatever value the key held may go ({.floor_grown_carrier} reads the receiver for it).
+      NIL_REMOVERS = %i[compact! reject! select! filter! delete_if keep_if clear pop shift slice!
+                        subtract].to_set.freeze
+      NON_NIL_LITERALS = [
+        Prism::IntegerNode, Prism::FloatNode, Prism::RationalNode, Prism::ImaginaryNode, Prism::StringNode,
+        Prism::SymbolNode, Prism::TrueNode, Prism::FalseNode
+      ].freeze
+      private_constant :NON_NIL_LITERALS
 
       def removes_nil?(call_node)
         return true if NIL_REMOVERS.include?(call_node.name)
         return false unless %i[delete delete?].include?(call_node.name)
 
-        call_node.arguments&.arguments&.first.is_a?(Prism::NilNode)
+        argument = call_node.arguments&.arguments&.first
+        NON_NIL_LITERALS.none? { |klass| argument.is_a?(klass) }
       end
 
       # True when `receiver` names at least one variable whose CURRENT binding is a literal-shape

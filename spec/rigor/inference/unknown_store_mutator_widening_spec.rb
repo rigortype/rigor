@@ -538,6 +538,17 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
     end
 
     # A remover that cannot take the `nil` out leaves it, so a read reports it as the reading without the fact does.
+    # A positional remover may take the stored `nil` out, so it drops the `nil` arm (review round 3).
+    {
+      "Array#slice!" => "def f(n)\n  a = Array.new(n, \"a\")\n  a << nil\n  a.slice!(-1)\n  " \
+                        "a.each { |s| s.upcase }\nend",
+      "Array#pop" => "def f\n  a = [1, 2]\n  a.sort!\n  a << nil\n  a.pop\n  a.each { |v| v + 1 }\nend"
+    }.each do |remover, body|
+      it "drops a stored nil under #{remover}" do
+        expect(rules("#{body}\n", "call.")).to be_empty
+      end
+    end
+
     it "keeps a stored nil under a remover that cannot remove it" do
       expect(rules("s = Set[1]\ns << nil\ns.delete(1)\ns.each { |v| v + 1 }\n",
                    "call.")).to eq(["call.possible-nil-receiver"])

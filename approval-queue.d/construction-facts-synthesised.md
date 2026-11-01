@@ -28,14 +28,14 @@ the fact.
     `a << :x << "s"`, `a.push(x).push(y)`), reflection (`send`, `method(:<<)`, `instance_exec`) or frame access
     (`binding`, `eval`).
   The fixes: a content adder marks the binding `:grown`, and a remover or filter on a grown carrier restores the
-  reading it has without the fact (the floor, with `nil` dropped only by a remover that can take it out:
-  `compact!`, the block filters, `clear`, `delete(nil)`, `Hash#delete`); and `ConstructionEscape` withholds
+  reading it has without the fact (the floor, with `nil` dropped by every remover that may take it out, which is
+  every one but `delete` / `delete?` given a non-nil literal; review round 3 ruled that false positives outrank, so
+  `pop`, `shift`, `slice!`, `subtract` and a `delete` of an unknown value drop it too); and `ConstructionEscape` withholds
   the fact from any local that may escape anywhere in its body, by one allowlist of non-escaping positions (round 2
   inverted it: every argument escapes, and a receiver is safe only for a per-class core reader, or for an iterator
   or a modelled mutator whose value is discarded, unless the project defines that method on the class). What is
-  left: a remover after a store answers the floored reading rather than a precise one; `pop`, `shift`, `slice!`,
-  `subtract` and a non-nil `delete` keep a stored `nil` (as ruled in review round 2), so `a << nil; a.pop` still
-  reads `nil`; and a local that escapes anywhere, including as any argument, answers as before for its whole body. A literal handed to a hand-written `-> Array[:multi]` after a
+  left: a remover after a store answers the floored reading rather than a precise one; a stored `nil` is dropped under any remover
+  but a non-nil-literal `delete`, so a `nil` that really survives (`a << nil; a << nil; a.pop`) reads as gone; and a local that escapes anywhere, including as any argument, answers as before for its whole body. A literal handed to a hand-written `-> Array[:multi]` after a
   value-preserving closer and a foreign store (`t = [:multi]; t.sort!; t << [:static, s]; t`) would report the
   mismatch the store really causes.
 - Stamp instance variables too. Their bindings are seeded across methods from the class-ivar index, whose

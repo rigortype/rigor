@@ -1,0 +1,2 @@
+- **[engine]** An instance variable's class-guard narrowing no longer survives an implicit-self call when a `refine` block defines methods Rigor cannot name. ([#2590](https://github.com/rigortype/rigor/pull/2590))
+  - A `define_method` of a computed name or an `import_methods` in any refinement now gives up the proof that the call writes no instance variable, as a literal `def` of the called name already did ([#2203](https://github.com/rigortype/rigor/issues/2203)).

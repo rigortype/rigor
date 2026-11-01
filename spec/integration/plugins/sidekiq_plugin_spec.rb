@@ -614,5 +614,82 @@ RSpec.describe "plugins/rigor-sidekiq" do
         end
       end
     end
+
+    # #2222 — an absolute `schedule_paths:` entry is watched where it lies. Joined under the working directory it read
+    # `./abs` and matched nothing.
+    describe "with an absolute path" do
+      def run_with_schedule(dir, cache_root, schedule_path)
+        Rigor::Plugin.unregister!
+        store = Rigor::Cache::Store.new(root: cache_root)
+        Dir.chdir(dir) do
+          configuration = Rigor::Configuration.new(
+            "paths" => ["demo.rb"],
+            "plugins" => [{ "gem" => "rigor-sidekiq", "config" => { "schedule_paths" => [schedule_path] } }]
+          )
+          runner = Rigor::Analysis::Runner.new(
+            configuration: configuration, cache_store: store, collect_stats: false,
+            plugin_requirer: build_plugin_requirer
+          )
+          guarded_run(runner)
+        end
+        store
+      end
+
+      def scheduled_stats(store)
+        store.stats.fetch(:by_producer).fetch("plugin.sidekiq.scheduled_workers", { hits: 0, misses: 0 })
+      end
+
+      it "watches the schedule file the absolute path names" do
+        Dir.mktmpdir do |raw_project|
+          Dir.mktmpdir do |cache_root|
+            dir = File.realpath(raw_project)
+            FileUtils.mkdir_p(File.join(dir, "config"))
+            schedule = File.join(dir, "config", "sidekiq[1].yml")
+            File.write(schedule, "nightly:\n  class: WelcomeEmailWorker\n")
+            File.write(File.join(dir, "demo.rb"), "x = 1\n")
+
+            covers = watched_for_schedule(dir, cache_root, schedule)
+            expect(covers).to include([schedule])
+          end
+        end
+      end
+
+      # Regression guard: this passes without the watch fix too. The schedule's own read records the absent file,
+      # and its creation moves that row. The watch-entry example above is the pin for the fix.
+      it "re-analyzes the warm run once the absolute schedule file is CREATED (regression guard)" do
+        Dir.mktmpdir do |raw_project|
+          Dir.mktmpdir do |cache_root|
+            dir = File.realpath(raw_project)
+            materialize_files(dir, DEFAULT_WORKERS.merge("demo.rb" => "ReportWorker.perform_async(1)\n"))
+            schedule = File.join(dir, "config", "sidekiq.yml")
+            FileUtils.mkdir_p(File.dirname(schedule))
+            run_with_schedule(dir, cache_root, schedule)
+
+            File.write(schedule, SIDEKIQ_SCHEDULE_YAML)
+            warm = run_with_schedule(dir, cache_root, schedule)
+            expect(scheduled_stats(warm)[:misses]).to be >= 1
+            expect(scheduled_stats(warm)[:hits]).to eq(0)
+          end
+        end
+      end
+
+      # #2222 — the same for a schedule outside the project: the absolute path is watched under its own directory,
+      # not joined under the working directory.
+      it "watches the schedule file outside the project that the absolute path names" do
+        Dir.mktmpdir do |raw_project|
+          Dir.mktmpdir do |cache_root|
+            Dir.mktmpdir do |outside|
+              dir = File.realpath(raw_project)
+              schedule = File.join(File.realpath(outside), "sidekiq[1].yml")
+              File.write(schedule, "nightly:\n  class: WelcomeEmailWorker\n")
+              File.write(File.join(dir, "demo.rb"), "x = 1\n")
+
+              covers = watched_for_schedule(dir, cache_root, schedule)
+              expect(covers).to include([schedule])
+            end
+          end
+        end
+      end
+    end
   end
 end

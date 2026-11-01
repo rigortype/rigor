@@ -369,5 +369,78 @@ RSpec.describe "plugins/rigor-activejob" do
         end
       end
     end
+
+    # #2222 — an absolute `recurring_paths:` entry is watched where it lies. Joined under the working directory it read
+    # `./abs` and matched nothing, so only the schedule's own read (present or absent) could see a change to it.
+    describe "with an absolute path" do
+      let(:schedule_path) { File.join(Dir.pwd, "config/recurring[1].yml") }
+
+      it "watches the schedule file the absolute path names" do
+        Dir.mktmpdir do |raw_project|
+          Dir.chdir(File.realpath(raw_project)) do
+            File.write("demo.rb", "x = 1\n")
+            write_schedule("WelcomeEmailJob")
+            watched = []
+            allow(Rigor::Cache::Descriptor::GlobEntry).to receive(:compute).and_wrap_original do |original, **kwargs|
+              watched << kwargs
+              original.call(**kwargs)
+            end
+            run_activejob(cache_store: Rigor::Cache::Store.new(root: cache_root))
+
+            covers = watched.map { |kwargs| Rigor::RootedGlob.glob(kwargs[:root], kwargs[:pattern]) }
+            expect(covers).to include([schedule_path])
+          end
+        end
+      end
+
+      # Regression guard: this passes without the watch fix too. The schedule's own read records the absent file,
+      # and its creation moves that row. The watch-entry example above is the pin for the fix.
+      it "re-analyzes the warm run once the absolute schedule file is CREATED (regression guard)" do
+        Dir.mktmpdir do |raw_project|
+          Dir.chdir(File.realpath(raw_project)) do
+            DEFAULT_JOBS.each do |path, source|
+              FileUtils.mkdir_p(File.dirname(path))
+              File.write(path, source)
+            end
+            File.write("demo.rb", "x = 1\n")
+            FileUtils.mkdir_p(File.dirname(schedule_path))
+            run_activejob(cache_store: Rigor::Cache::Store.new(root: cache_root))
+
+            write_schedule("WelcomeEmailJob")
+            second_store = Rigor::Cache::Store.new(root: cache_root)
+            expect(run_activejob(cache_store: second_store)).to eq(["WelcomeEmailJob"])
+            expect(recurring_stats(second_store)[:misses]).to be >= 1
+            expect(recurring_stats(second_store)[:hits]).to eq(0)
+          end
+        end
+      end
+
+      # #2222 — the same for a schedule outside the project: the absolute path is watched under its own directory,
+      # not joined under the working directory.
+      describe "with a schedule outside the project" do
+        let(:outside) { File.realpath(Dir.mktmpdir("rigor-activejob-outside-")) }
+        let(:schedule_path) { File.join(outside, "config/recurring[1].yml") }
+
+        after { FileUtils.rm_rf(outside) }
+
+        it "watches the schedule file outside the project that the absolute path names" do
+          Dir.mktmpdir do |raw_project|
+            Dir.chdir(File.realpath(raw_project)) do
+              File.write("demo.rb", "x = 1\n")
+              write_schedule("WelcomeEmailJob")
+              watched = []
+              allow(Rigor::Cache::Descriptor::GlobEntry).to receive(:compute).and_wrap_original do |original, **kwargs|
+                watched << kwargs
+                original.call(**kwargs)
+              end
+              run_activejob(cache_store: Rigor::Cache::Store.new(root: cache_root))
+
+              covers = watched.map { |kwargs| Rigor::RootedGlob.glob(kwargs[:root], kwargs[:pattern]) }
+              expect(covers).to include([schedule_path])
+            end
+          end
+        end
+      end
+    end
   end
 end

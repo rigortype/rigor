@@ -1,0 +1,2 @@
+- **[plugins]** `rigor-activejob` and `rigor-sidekiq` now watch an absolute `recurring_paths:` or `schedule_paths:` entry where it lies. ([#2584](https://github.com/rigortype/rigor/pull/2584))
+  - The watch used to read the entry under the working directory, where an absolute path matched nothing; a relative entry is unchanged.

@@ -32,5 +32,19 @@ module Rigor
     def literal(name)
       name.to_s.gsub(METACHARACTERS, "\\\\\\0")
     end
+
+    # A configured file path (#2222), absolute or relative to the working directory, as the `[root, pattern]` pair
+    # that `glob(root, pattern)` reads as exactly that file. A relative path stays under the working directory, as
+    # it always did. An absolute one is split into its own directory and a literal basename: `File.join(".", "/abs")`
+    # reads `./abs`, so an absolute path joined under `"."` matched nothing.
+    #
+    # @param path — a file path, taken literally
+    # @return `[root, pattern]`: `"."` and the literal path when relative, else the directory and the literal basename
+    def split_file(path)
+      path = path.to_s
+      return [".", literal(path)] unless File.absolute_path?(path)
+
+      [File.dirname(path), literal(File.basename(path))]
+    end
   end
 end

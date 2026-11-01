@@ -39,6 +39,12 @@ RSpec.describe "rbs collection entries for the project's own path gems" do
     write_collection("mygem", "module Mygem\n  def self.deprecator: () -> String\nend\n")
   end
 
+  # #2592 — a path gem counts as the project's own only when it holds Ruby the file walker analyses.
+  def write_ruby(file)
+    FileUtils.mkdir_p(File.dirname(file))
+    File.write(file, "")
+  end
+
   def write_collection(name, rbs)
     FileUtils.mkdir_p(".gem_rbs_collection/#{name}/1.0")
     File.write(".gem_rbs_collection/#{name}/1.0/#{name}.rbs", rbs)
@@ -106,6 +112,7 @@ RSpec.describe "rbs collection entries for the project's own path gems" do
 
   it "skips the collection entry of a gem the lockfile sources from the project root, which contains paths:" do
     write_project
+    write_ruby("lib/mygem.rb")
     write_path_lockfile(".")
     rbs_loader = loader
     expect(collection_loaded?(rbs_loader)).to be(false)
@@ -114,7 +121,7 @@ RSpec.describe "rbs collection entries for the project's own path gems" do
 
   it "skips the collection entry of a path gem whose lib/ is a paths: entry (the rails layout)" do
     write_project
-    FileUtils.mkdir_p("mygem/lib")
+    write_ruby("mygem/lib/mygem.rb")
     write_path_lockfile("mygem")
     expect(collection_loaded?(loader(paths: ["mygem/lib"]))).to be(false)
   end
@@ -129,7 +136,7 @@ RSpec.describe "rbs collection entries for the project's own path gems" do
     FileUtils.mkdir_p("sig")
     File.write("sig/own.rbs", "class MyX < Foo::Base\nend\n")
     write_collection("foo", "module Foo\n  class Base\n    def bar: () -> Integer\n  end\nend\n")
-    FileUtils.mkdir_p("vendor/gems/foo")
+    write_ruby("vendor/gems/foo/lib/foo.rb")
     write_path_lockfile("vendor/gems/foo", name: "foo")
     rbs_loader = loader
     expect(collection_loaded?(rbs_loader, "foo")).to be(true)
@@ -140,11 +147,26 @@ RSpec.describe "rbs collection entries for the project's own path gems" do
 
   it "keeps the collection entry of a path gem under paths: [.] that exclude: leaves out" do
     write_collection("foo", "module Foo\n  class Base\n    def bar: () -> Integer\n  end\nend\n")
-    FileUtils.mkdir_p("vendor/gems/foo")
+    write_ruby("vendor/gems/foo/lib/foo.rb")
     write_path_lockfile("vendor/gems/foo", name: "foo")
     expect(collection_loaded?(loader(paths: ["."], exclude_patterns: ["vendor/**"]), "foo")).to be(true)
     # Control: without the exclude, `paths: [.]` reaches the gem and its entry is skipped.
     expect(collection_loaded?(loader(paths: ["."]), "foo")).to be(false)
+  end
+
+  # #2592 — the gem's directory itself does not match these patterns, but every Ruby file of it does.
+  ["vendor/**/*.rb", "vendor/gems/foo/lib/**"].each do |pattern|
+    it "keeps the collection entry of a path gem under paths: [.] whose every .rb file #{pattern} excludes" do
+      FileUtils.mkdir_p("sig")
+      File.write("sig/own.rbs", "class MyX < Foo::Base\nend\n")
+      write_collection("foo", "module Foo\n  class Base\n    def bar: () -> Integer\n  end\nend\n")
+      write_ruby("vendor/gems/foo/lib/foo.rb")
+      write_path_lockfile("vendor/gems/foo", name: "foo")
+      rbs_loader = loader(paths: ["."], exclude_patterns: [pattern])
+      expect(collection_loaded?(rbs_loader, "foo")).to be(true)
+      expect(rbs_loader.instance_method(class_name: "MyX", method_name: :bar)&.method_types&.map(&:to_s))
+        .to eq(["() -> ::Integer"])
+    end
   end
 
   # Guard (positive control): no line of the fix is what keeps it passing; it fails if the skip widens to every
@@ -164,7 +186,8 @@ RSpec.describe "rbs collection entries for the project's own path gems" do
   it "does not load the activesupport overlay for the project's own activesupport" do
     # Skipping the collection entry left `activesupport` classified `:missing`, so the ADR-72 overlay loaded
     # beside the project's own sig and `Object` failed to build against `core_ext.rbs`.
-    FileUtils.mkdir_p(["sig", "activesupport/lib"])
+    FileUtils.mkdir_p("sig")
+    write_ruby("activesupport/lib/active_support.rb")
     File.write("sig/blank.rbs", "class Object\n  def blank?: () -> bool\nend\n")
     write_collection("activesupport", "module ActiveSupport\nend\n")
     write_path_lockfile("activesupport", name: "activesupport")

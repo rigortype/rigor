@@ -82,7 +82,8 @@ module Rigor
       module_function
 
       # True when the local `name`, bound to a carrier of `class_name`, may escape somewhere in `body`, or when
-      # `body` is unknown. `scope` answers whether the project defines one of the admitted calls on the class.
+      # `body` is unknown. `scope` answers whether the project defines one of the admitted calls on the class
+      # ({.project_defines?}).
       def escaped?(body, name, class_name, scope)
         return true if body.nil? || class_name.nil?
 
@@ -93,7 +94,15 @@ module Rigor
         reason = result.escapes[name]
         return true if !reason.nil? && (reason.equal?(ALL) || reason.include?(class_name))
 
-        result.calls.fetch(name, EMPTY_CALLS).any? { |call| scope.discovered_method?(class_name, call, :instance) }
+        result.calls.fetch(name, EMPTY_CALLS).any? { |call| project_defines?(scope, class_name, call) }
+      end
+
+      # Whether the project writes `def call` in a body of `class_name` itself, in any file. `discovered_methods` is not
+      # enough: it withholds a plain cross-file `def` on an RBS-declared class (ADR-17), which is exactly a reopen of
+      # Array, Hash or Set. The def-node table holds it (a `DefHandle` on a bundle-rebuilt index; the lookup records the
+      # cross-file dependency for incremental runs). A `def` in a module the class includes is not read here.
+      def project_defines?(scope, class_name, call)
+        scope.discovered_method?(class_name, call, :instance) || !scope.user_def_for(class_name, call).nil?
       end
 
       # The receiver mutators the seams model for `class_name` ({MutationWidening}, {HashLookupMutation},

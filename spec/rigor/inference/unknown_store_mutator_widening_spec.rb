@@ -1,6 +1,11 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+require "fileutils"
+require "json"
+require "stringio"
+require "tmpdir"
+require "rigor/cli/check_command"
 
 # A mutator whose ARGUMENTS do not describe what it stores — `map!`, `collect!`, a block-form `fill`, `flatten!`,
 # `transform_values!`, `transform_keys!`, `merge!` / `update`, `Hash#replace` — rewrites the parameter it stores
@@ -710,6 +715,47 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
         u << 1
         dump_type(u.dup)
       RUBY
+    end
+  end
+
+  # Fix-only check on #2606 — a project reopen of a listed reader in ANOTHER file (`class Array; def size` that
+  # pushes) escapes the local as a same-file one does: the def-node table holds the cross-file def that
+  # `discovered_methods` withholds on an RBS-declared class. A control without the patch keeps the regrowth.
+  describe "a reopen of a listed reader in another file (issue #2555)" do
+    around do |example|
+      Dir.mktmpdir { |dir| Dir.chdir(dir) { example.run } }
+    end
+
+    def check(*flags)
+      out = StringIO.new
+      argv = ["--no-ci-detect", "--no-stats", "--no-baseline", "--format", "json", *flags]
+      Rigor::CLI::CheckCommand.new(argv: argv, out: out, err: StringIO.new).run
+      JSON.parse(out.string).fetch("diagnostics").filter_map do |d|
+        "#{File.basename(d.fetch('path'))}:#{d.fetch('line')} #{d.fetch('rule')}" unless d.fetch("severity") == "info"
+      end.sort
+    end
+
+    def write_project(patch:)
+      File.write(".rigor.yml", "paths:\n  - lib\n")
+      FileUtils.mkdir_p("lib")
+      File.write("lib/patch.rb", "class Array\n  def size\n    push(\"label\")\n    length\n  end\nend\n") if patch
+      File.write("lib/use.rb", "class User\n  def go(n)\n    a = Array.new(n, 0)\n    a << :x\n    c = a.size\n    " \
+                               "a.last.bytesize if c\n  end\nend\n")
+    end
+
+    it "escapes the local, with workers and on a warm incremental recheck after an edit" do
+      write_project(patch: true)
+      cold = check("--no-cache")
+      expect(cold).to eq([])
+      expect(check("--no-cache", "--workers=2")).to eq(cold)
+      2.times { check("--incremental") }
+      File.write("lib/use.rb", "#{File.read('lib/use.rb')}# edited\n")
+      expect(check("--incremental")).to eq(cold)
+    end
+
+    it "keeps the regrowth without the patch file (control)" do
+      write_project(patch: false)
+      expect(check("--no-cache")).to eq(["use.rb:6 call.undefined-method"])
     end
   end
 end

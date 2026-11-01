@@ -124,11 +124,11 @@ RSpec.describe Rigor::Inference::DirectIvarWrites do
      ["@tag = nil", "(@a, @tag), @b = [1, 2], 3"],
      ["@tag = nil", "@tag = [@k]"],
      ["@tag = nil", "@tag = -> { 1 }"],
-     ["@tag = nil", "@tag, @b = 'x'"],
      ["@tag = nil", "notify", "@tag = 'x'"]].each do |lines|
       expect(writes(body_of(*lines))).to eq(Set[]), lines.join("; ")
     end
     expect(writes("def r = (@tag = nil; @tag = 'x')")).to eq(Set[])
+    expect(writes(body_of("@tag = nil", "@tag, @b = 'x'"))).to eq(Set[:@b])
     expect(writes("def clear = (@tag = nil)\n  #{body_of('clear', "@tag = 'x'")}")).to eq(Set[])
   end
 

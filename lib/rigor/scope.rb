@@ -465,7 +465,7 @@ module Rigor
       return self if existing&.include?(fact)
 
       facts = existing ? (existing | [fact]).freeze : (CONSTRUCTION_FACT_SETS[fact] || Set[fact].freeze)
-      rebuild(construction_facts: @construction_facts.merge(key => facts).freeze)
+      rebuild(@construction_facts.merge(key => facts).freeze)
     end
 
     # ADR-82 WD1 — the propagated origin of the `Dynamic` value currently bound to a local / instance
@@ -522,7 +522,8 @@ module Rigor
       # longer holds (the new value may carry a method-local nil). `with_declaration_sourced_local` re-establishes
       # the mark afterward when the RHS is a pure copy of a declaration-sourced ivar read; the default is to drop
       # it.
-      rebuild(locals: new_locals, fact_store: new_fact_store,
+      rebuild(keep_marks ? @construction_facts : drop_origin(@construction_facts, name),
+              locals: new_locals, fact_store: new_fact_store,
               indexed_narrowings: new_indexed_narrowings,
               method_chain_narrowings: new_chain_narrowings,
               declaration_sourced: keep_marks ? @declaration_sourced : drop_local_declaration_marks(name),
@@ -532,7 +533,6 @@ module Rigor
               published_constant_sourced: drop_published_constant_sourced_for(:local, name),
               local_origins: drop_origin(@local_origins, name),
               optimistic_locals: keep_marks ? @optimistic_locals : drop_origin(@optimistic_locals, name),
-              construction_facts: keep_marks ? @construction_facts : drop_origin(@construction_facts, name),
               bot_guard_classes: drop_bot_guard_class(:local, name))
     end
     private :bind_local
@@ -2277,7 +2277,11 @@ module Rigor
         @bot_guard_classes == other.bot_guard_classes
     end
 
+    # `construction_facts` is the one positional parameter: a 32nd optional keyword would cross CRuby's
+    # `KW_SPECIFIED_BITS_MAX` (31), past which every keyword call allocates its unspecified-keywords record —
+    # measured at about 1% of an analysis's allocations, since every scope transition calls this.
     def rebuild(
+      construction_facts = @construction_facts,
       locals: @locals, fact_store: @fact_store, self_type: @self_type,
       ivars: @ivars, cvars: @cvars, globals: @globals,
       discovery: @discovery,
@@ -2299,7 +2303,6 @@ module Rigor
       optimistic_origins: @optimistic_origins,
       optimistic_locals: @optimistic_locals,
       optimistic_ivars: @optimistic_ivars,
-      construction_facts: @construction_facts,
       repeated_or_writes: @repeated_or_writes,
       match_frame: @match_frame,
       constant_narrowings: @constant_narrowings,

@@ -46,4 +46,17 @@ RSpec.describe Rigor::CLI do
     expect(out).to include("Created conf/x.yml")
     expect(File.exist?("conf/x.yml")).to be(true)
   end
+
+  it "reports a destination that is a directory on one stderr line and exits 64 without a backtrace" do
+    FileUtils.mkdir_p("conf")
+    out = StringIO.new
+    err = StringIO.new
+
+    status = described_class.new(["init", "--path=conf", "--force"], out: out, err: err).run
+
+    expect(status).to eq(64)
+    expect(err.string).to eq("rigor init: cannot write conf: Is a directory\n")
+    expect(err.string).not_to match(/Errno|\.rb:\d+|from /)
+    expect(out.string).to be_empty
+  end
 end

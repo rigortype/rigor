@@ -202,14 +202,14 @@ module Rigor
         #
         # Issue #2470 — re-made without each {VendoredSignaturePlan} taker the attempt quarantined
         # ({.quarantined_takers}), so a vendored member stands down only to a file the env keeps. Each round adds
-        # at least one file to the excluded set, so the loop ends.
+        # at least one file to the excluded set, and a round that adds none returns, so the loop ends.
         def build_env_attempt(libraries, *inputs, gated_plan: nil)
           excluded = Set.new
           loop do
             env, gated_dirs, plan = planned_env_attempt(libraries, *inputs, gated_plan: gated_plan,
                                                                             vendored_excluded: excluded)
             dropped = quarantined_takers(env, plan)
-            return [env, gated_dirs] if dropped.empty?
+            return [env, gated_dirs] if dropped.empty? || dropped.subset?(excluded)
 
             excluded |= dropped
           end

@@ -62,6 +62,7 @@ RSpec.describe Rigor::CLI::SigGenCommand do
 
       expect(status).to eq(1)
       expect(out).to include("REFUSED").and include("sig/errors.rbs").and include("does not parse as RBS")
+      expect(out).to match(%r{sig/errors\.rbs:\d+:\d+})
       expect(out).not_to include("up to date")
       expect(err).to include("out of date")
     end
@@ -81,6 +82,7 @@ RSpec.describe Rigor::CLI::SigGenCommand do
       expect(status).to eq(1)
       expect(entry.fetch("action")).to eq("skipped_unparseable")
       expect(entry.fetch("error")).to include("sig/errors.rbs").and include("does not parse as RBS")
+      expect(entry.fetch("error")).to match(%r{sig/errors\.rbs:\d+:\d+})
       expect(entry.keys).to contain_exactly("source", "target", "action", "applied", "skipped", "error")
       expect(File.read(sig_file)).to eq(unparseable_sig)
     end

@@ -200,7 +200,8 @@ module Rigor
       # The EXISTING target file does not parse as RBS, so the writer will not merge into it (#2480). Like the
       # encoding refusal the fix is the user's: the file is quarantined whole by `rigor check` until it parses.
       def render_write_unparseable(result)
-        @out.puts("REFUSED #{result.target_path} — the existing file does not parse as RBS, so it was not updated")
+        @out.puts("REFUSED #{result.target_path} — the existing file was not updated")
+        @out.puts("  #{result.error}")
         @out.puts("  Fix the syntax error and re-run; sig-gen never modifies a file it cannot parse.")
       end
 

@@ -343,11 +343,11 @@ module Rigor
         # An existing file that does not parse is refused like a mis-encoded one, not skipped as `:noop` (#2480):
         # `--check` must fail on it, because a `--write` that cannot touch the file is not an up-to-date `sig/`.
         # `rigor check` quarantines such a file whole; this refusal names it at the sig-gen boundary too.
-        decls = parse_signature(source)
+        decls, parse_detail = parse_target_signature(target, source)
         if decls.nil?
           return WriteResult.new(source_path: source_path, target_path: target,
                                  action: :skipped_unparseable,
-                                 error: "#{target} does not parse as RBS")
+                                 error: "#{target} does not parse as RBS: #{parse_detail}")
         end
 
         state = MergeState.new(source: source, decls: decls, applied: [], skipped: [], left_unreadable: [],
@@ -599,6 +599,15 @@ module Rigor
         decls
       rescue RBS::ParsingError
         nil
+      end
+
+      # Parses an EXISTING target, naming it as the buffer so the parse error carries `path:line:col` (a bare
+      # String would be named `a.rbs`). Returns `[decls, nil]`, or `[nil, first_line_of_message]` on a parse error.
+      def parse_target_signature(target, source)
+        _, _, decls = RBS::Parser.parse_signature(RBS::Buffer.new(name: target.to_s, content: source))
+        [decls, nil]
+      rescue RBS::ParsingError => e
+        [nil, e.message.to_s.lines.first.to_s.strip]
       end
 
       def merge_class(state, class_name, methods, kinds, supers)

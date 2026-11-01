@@ -108,6 +108,45 @@ RSpec.describe Rigor::Inference::DirectIvarWrites do
     expect(writes("def r = ((@a, @tag), @b = pair, 3)")).to eq(Set[])
   end
 
+  # Issue #2482 — the straight-line last-write rule: a later top-level unconditional write of a value not counted as
+  # `nil` drops an earlier `nil` write, unless control may leave the method between them.
+  def body_of(*lines) = "def r\n#{lines.map { |line| "    #{line}\n" }.join}  end"
+
+  it "drops a nil write that a later top-level write of a value overwrites" do
+    [["@tag = @parts.first || nil", "@tag = 'x'", "yield if block_given?"],
+     ["@tag = @parts.first || nil", "@tag ||= 'default'"],
+     ["@a, @tag = 1", "@tag = 'x'"],
+     ["@tag = nil", "@tag = 'x'"],
+     ["@a, @tag = 1, nil", "@tag = 'x'"],
+     ["@tag = nil", "@tag ||= 'd'"],
+     ["@tag = @peer&.tag", "@tag = 'x'"],
+     ["@tag = nil", "@a, @tag = 1, 2"],
+     ["@tag = nil", "(@a, @tag), @b = [1, 2], 3"],
+     ["@tag = nil", "notify", "@tag = 'x'"]].each do |lines|
+      expect(writes(body_of(*lines))).to eq(Set[]), lines.join("; ")
+    end
+    expect(writes("def r = (@tag = nil; @tag = 'x')")).to eq(Set[])
+    expect(writes("def clear = (@tag = nil)\n  #{body_of('clear', "@tag = 'x'")}")).to eq(Set[])
+  end
+
+  it "keeps a nil write the later write may not reach or does not overwrite" do
+    [["@tag = nil", "@tag = 'x' if ready?"],
+     ["@tag = nil", "return if ready?", "@tag = 'x'"],
+     ["@tag = nil", "raise 'no' if ready?", "@tag = 'x'"],
+     ["@tag = nil", "yield", "@tag = 'x'"],
+     ["@tag = nil", "@items.each { |i| i }", "@tag = 'x'"],
+     ["@tag = nil", "[1].each { @tag = 'x' }"],
+     ["@tag = nil", "@tag = @items.map { |i| i }"],
+     ["@tag = nil", "@tag &&= 'x'"],
+     ["@tag = 'x'", "@tag = nil"],
+     ["@tag = nil", "@tag = 'x'", "rescue StandardError", "nil"]].each do |lines|
+      expect(writes(body_of(*lines))).to eq(Set[:@tag]), lines.join("; ")
+    end
+    # Guard: pins the current answer. Ruby binds `@tag` to 2, but a rest target is no overwrite, as the census
+    # declines it.
+    expect(writes(body_of("@tag = nil", "@a, @tag, *@r = 1, 2"))).to eq(Set[:@tag])
+  end
+
   it "reads a block's body but not a lambda's, a nested def's or a class body's" do
     expect(writes("def r = [1].each { @tag = nil }")).to eq(Set[:@tag])
     expect(writes("def r = (f = -> { @tag = nil }; f.arity)")).to eq(Set[])

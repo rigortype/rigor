@@ -33,7 +33,7 @@ project does not analyse.
 
 The `paths:` predicate. It follows #2424's principle: the project's own declaration wins over a
 third-party copy. Because the whole gem is the project's own code, it applies that principle at gem
-granularity rather than per member. A gem directory the configuration's `exclude:` patterns leave out (`paths: [.]` with `exclude: ["vendor/**"]`) is not project source either, matched as the file walker matches a file inside it. The same gems are also not classified `:missing`, so they make
+granularity rather than per member. A gem whose Ruby files the configuration's `exclude:` patterns all leave out is not project source either: [#2592](https://github.com/rigortype/rigor/issues/2592) counts the gem only when one of its `**/*.rb` files under a `paths:` entry survives the file walker's `reject_excluded`, so `vendor/**/*.rb` and `vendor/gems/foo/lib/**` keep the collection as `vendor/**` does. The same gems are also not classified `:missing`, so they make
 no ADR-72 overlay or WD9 missing-gem entry eligible. Revisit when a survey shows a project whose own
 path gem sits outside `paths:`.
 

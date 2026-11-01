@@ -13,10 +13,14 @@ module Rigor
     # "Analysed as project source" means the gem's directory is at or under one of the configured `paths:`
     # entries, or contains one: rails lists `actionpack/lib` in `paths:` and locks `actionpack` from
     # `PATH remote: actionpack`. A `PATH` gem no `paths:` entry reaches — a vendored `vendor/gems/foo`, a sibling
-    # checkout — is a dependency and keeps its collection RBS, and so does one the configuration's `exclude:`
-    # patterns exclude (`paths: [.]` with `exclude: ["vendor/**"]`), matched as the file walker matches a file
-    # directly inside the gem's directory. Both sides are compared as real paths, so a symlinked spelling of the
-    # same directory matches.
+    # checkout — is a dependency and keeps its collection RBS.
+    #
+    # #2592 — a reached gem counts only when the file walker would analyse at least one of its Ruby files: some
+    # `**/*.rb` under the part of the gem a `paths:` entry covers survives `Analysis::PathExpansion.reject_excluded`.
+    # A gem whose Ruby the configuration's `exclude:` patterns all leave out — `vendor/**`, `vendor/**/*.rb`, or
+    # `vendor/gems/foo/lib/**` when `lib/` holds all of it — keeps its collection RBS, and so does a reached
+    # directory with no Ruby at all. Both sides are compared as real paths, so a symlinked spelling of the same
+    # directory matches.
     module ProjectPathGems
       module_function
 
@@ -33,9 +37,12 @@ module Rigor
           next unless dir
 
           dir = real(dir)
-          next unless roots.any? { |path| at_or_under?(path, dir) || at_or_under?(dir, path) }
-
-          gem.name unless excluded?(dir, exclude_patterns, exclude_base)
+          covered = roots.filter_map do |path|
+            if at_or_under?(dir, path) then dir
+            elsif at_or_under?(path, dir) then path
+            end
+          end
+          gem.name if analysed_ruby?(covered.uniq, exclude_patterns, exclude_base)
         end.to_set.freeze
       end
 
@@ -47,14 +54,22 @@ module Rigor
         path.start_with?(dir.end_with?("/") ? dir : "#{dir}/")
       end
 
-      # A probe name with no `.rb` suffix, so a pattern over Ruby file names (`**/*_spec.rb`) does not exclude the
-      # gem while a directory pattern (`vendor/**`) does.
-      EXCLUDE_PROBE = "rigor-exclude-probe"
+      # Files are matched in slices, so a large gem stops at the first slice holding a surviving file.
+      EXCLUDE_SLICE = 256
+      private_constant :EXCLUDE_SLICE
 
-      def excluded?(dir, patterns, base)
-        return false if patterns.nil? || patterns.empty?
+      # True when some `.rb` file under one of `dirs` survives the `exclude:` patterns, as the file walker
+      # ({Analysis::PathExpansion.directory_files}) reads them.
+      def analysed_ruby?(dirs, patterns, base)
+        patterns = Array(patterns)
+        dirs.any? do |dir|
+          files = RootedGlob.glob(dir, Analysis::PathExpansion::RUBY_GLOB)
+          next !files.empty? if patterns.empty?
 
-        Analysis::PathExpansion.reject_excluded([File.join(dir, EXCLUDE_PROBE)], patterns, base: base.to_s).empty?
+          files.each_slice(EXCLUDE_SLICE).any? do |slice|
+            !Analysis::PathExpansion.reject_excluded(slice, patterns, base: base.to_s).empty?
+          end
+        end
       end
 
       def real(path)

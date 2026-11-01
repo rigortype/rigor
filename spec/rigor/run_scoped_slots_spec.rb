@@ -233,6 +233,11 @@ RSpec.describe Rigor::RunScopedSlots do
   # A dynamic key (a local variable read from a list of constants) is not scanned here; its constants are.
   def scan_thread_keys(source, path, keys, unresolved)
     source = source.gsub(/^\s*#.*$/, "") # whole-line comments name keys in prose; blanking keeps line numbers
+    scan_thread_accesses(source, path, keys, unresolved, scan_thread_constants(source, path, keys))
+  end
+
+  # The constants a file defines as symbols, by name; a `*_KEY` / `*MEMO*` one with a `rigor` symbol is a key.
+  def scan_thread_constants(source, path, keys)
     constants = {}
     source.scan(/^\s*([A-Z][A-Z0-9_]*) = (?:RunScopedSlots\.register\()?(:[A-Za-z0-9_]+)\)?\s*(?:#.*)?$/) do
       name, symbol = Regexp.last_match.captures
@@ -241,6 +246,10 @@ RSpec.describe Rigor::RunScopedSlots do
 
       keys[symbol.delete_prefix(":").to_sym] = path if symbol.include?("rigor")
     end
+    constants
+  end
+
+  def scan_thread_accesses(source, path, keys, unresolved, constants)
     access = /Thread\.current(?:\[|\.thread_variable_[gs]et\()\s*(?:[A-Z]\w*::)*([A-Z][A-Z0-9_]*|:[A-Za-z0-9_]+)/
     source.scan(access) do
       match = Regexp.last_match

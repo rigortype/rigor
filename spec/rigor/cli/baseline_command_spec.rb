@@ -212,6 +212,38 @@ RSpec.describe Rigor::CLI::BaselineCommand do
     end
   end
 
+  # Issue #2466 — the baseline covers the configured `paths:`; positional arguments are rejected, not silently ignored.
+  describe "positional paths" do
+    before { write_demo_project }
+
+    it "rejects paths on generate and writes no baseline" do
+      status, _out, err = run_cli("baseline", "generate", "lib", "nope2", cwd: tmpdir)
+      expect(status).to eq(described_class::EXIT_USAGE)
+      expect(err).to include("rigor baseline generate: unexpected argument(s) lib nope2")
+      expect(err).to include("generated from the configured `paths:`")
+      expect(File.exist?(File.join(tmpdir, ".rigor-baseline.yml"))).to be(false)
+    end
+
+    it "rejects paths on regenerate and leaves an existing baseline untouched" do
+      File.write(File.join(tmpdir, ".rigor-baseline.yml"), "stale: content\n")
+      status, _out, err = run_cli("baseline", "regenerate", "lib", cwd: tmpdir)
+      expect(status).to eq(described_class::EXIT_USAGE)
+      expect(err).to include("rigor baseline regenerate: unexpected argument(s) lib")
+      expect(File.read(File.join(tmpdir, ".rigor-baseline.yml"))).to eq("stale: content\n")
+    end
+
+    it "leaves a flag-only generate and regenerate unchanged" do
+      status, _out, err = run_cli("baseline", "generate", "--output=custom.yml", "--match-mode=message", cwd: tmpdir)
+      expect(status).to eq(0)
+      expect(err).not_to include("unexpected argument")
+      expect(YAML.safe_load_file(File.join(tmpdir, "custom.yml"))["version"]).to eq(1)
+
+      status, _out, err = run_cli("baseline", "regenerate", "--output=custom.yml", cwd: tmpdir)
+      expect(status).to eq(0)
+      expect(err).to include("regenerated baseline")
+    end
+  end
+
   describe "files the baseline cannot key (parse errors)" do
     before do
       write_demo_project(diagnostic_source: "x = nil\nx.foo\n")

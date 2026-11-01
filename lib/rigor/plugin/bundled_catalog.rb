@@ -137,10 +137,11 @@ module Rigor
           end
         end
 
-        # A bundled plugin's entry file requires its own tree by bare feature name (`require
-        # "rigor/plugin/activestorage"`), which resolves only with that plugin's `lib` on the load path — the
-        # loader gets it from the bundle, and this catalogue has to arrange it itself. Prepending the engine's
-        # own copies matches ADR-93 WD5's anti-skew rule, where the bundled copy always wins.
+        # A bundled plugin can require another bundled plugin by gem name (`require "rigor-ffi"` from
+        # `rigor-ethon`, `rigor-rbnacl`, `rigor-sassc` and `rigor-ffi-rzmq`), which resolves only with that
+        # plugin's `lib` on the load path. The loader gets it from the bundle, and this catalogue has to
+        # arrange it itself. Prepending the engine's own copies matches ADR-93 WD5's anti-skew rule, where
+        # the bundled copy always wins.
         def add_bundled_lib_dirs
           Dir.children(BUNDLED_PLUGINS_ROOT).sort.each do |gem_name|
             dir = File.join(BUNDLED_PLUGINS_ROOT, gem_name, "lib")

@@ -14,10 +14,15 @@ module Rigor
     # whatever else it runs.
     #
     # A write counts only when its value can be `nil` by its syntax alone ({.nil_value?}): a `nil` literal, a
-    # safe-navigation call, or a conditional with a missing arm or an arm that is one of these. A method call's
-    # result, a parameter or any other computed value does not (`@tag = @tag.strip` rewrites a value the guard
-    # proved present). A multiple assignment counts a target whose own value in a literal list is one of these, or
-    # is missing; a splat or a value that is not a literal list counts nothing.
+    # safe-navigation call, a conditional with a missing arm or an arm that is one of these, an `a || b` whose `b` is
+    # one and whose `a` is no truthy literal, or an `a && b` whose `a` is one, or whose `b` is one and whose `a` is
+    # not `false`. A method call's result, a parameter or any other computed value does not (`@tag = @tag.strip`
+    # rewrites a value the guard proved present), nor does a call past a safe-navigation call (`@peer&.tag.upcase`
+    # raises on a `nil` receiver rather than answering `nil`). A multiple assignment counts a target whose own value
+    # in a literal list is one of these, or is missing; every target when the value is one of these; every target
+    # after the first when the value is a literal Ruby does not splat (`@a, @b = 1`); and a nested target
+    # (`(@a, @b), @c = ...`) on the same rule against its own value. A splat, a rest target, or any other value
+    # (`@a, @b = pair`, which Ruby splats when it is an Array) counts nothing.
     #
     # The callee is the first `def` of the call's name found on `self`'s class or, failing that, a project entry of
     # its instance chain (`Scope#user_def_for`). An implicit-self or `self.` call in a read body is read the same
@@ -30,9 +35,19 @@ module Rigor
       NON_RUNNING_NODES = [
         Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode, Prism::LambdaNode
       ].freeze
+      # Literals that are never `nil` or `false` and that a multiple assignment does not splat (no Array literal).
+      TRUTHY_LITERALS = [
+        Prism::IntegerNode, Prism::FloatNode, Prism::RationalNode, Prism::ImaginaryNode, Prism::StringNode,
+        Prism::InterpolatedStringNode, Prism::XStringNode, Prism::InterpolatedXStringNode, Prism::SymbolNode,
+        Prism::InterpolatedSymbolNode, Prism::RegularExpressionNode, Prism::InterpolatedRegularExpressionNode,
+        Prism::TrueNode, Prism::HashNode, Prism::RangeNode, Prism::SourceFileNode, Prism::SourceLineNode,
+        Prism::SourceEncodingNode
+      ].freeze
+      # Calls by these names leave the method (or may, through a `catch` or a `rescue` above it).
+      LEAVING_CALLS = %i[raise fail throw exit exit! abort].freeze
       # The most `def` bodies one read follows.
       DEF_BUDGET = 8
-      private_constant :NON_RUNNING_NODES, :DEF_BUDGET
+      private_constant :NON_RUNNING_NODES, :TRUTHY_LITERALS, :LEAVING_CALLS, :DEF_BUDGET
 
       module_function
 
@@ -49,8 +64,9 @@ module Rigor
         Set.new
       end
 
-      # Whether `node`, a value, can be `nil` by its syntax alone: a `nil` literal, a safe-navigation call, or an
-      # `if` / `unless` / ternary / `case` with a missing arm or an arm whose value is one of these.
+      # Whether `node`, a value, can be `nil` by its syntax alone: a `nil` literal, a safe-navigation call, an
+      # `if` / `unless` / ternary / `case` with a missing arm or an arm whose value is one of these (a `case ... in`
+      # with no `else` raises instead), or an `||` / `&&` that can answer one of these.
       def nil_value?(node)
         case node
         when nil, Prism::NilNode then true
@@ -58,9 +74,26 @@ module Rigor
         when Prism::ParenthesesNode then nil_value?(last_value(node.body))
         when Prism::IfNode then nil_value?(last_value(node.statements)) || else_nil?(node.subsequent)
         when Prism::UnlessNode then nil_value?(last_value(node.statements)) || else_nil?(node.else_clause)
-        when Prism::CaseNode, Prism::CaseMatchNode
-          node.conditions.any? { |arm| nil_value?(last_value(arm.statements)) } || else_nil?(node.else_clause)
+        when Prism::CaseNode, Prism::CaseMatchNode then case_nil?(node)
+        when Prism::OrNode, Prism::AndNode then logical_nil?(node)
         else false
+        end
+      end
+
+      # A `case ... in` with no `else` raises NoMatchingPatternError rather than answering `nil`.
+      def case_nil?(node)
+        return true if node.conditions.any? { |arm| nil_value?(last_value(arm.statements)) }
+        return false if node.is_a?(Prism::CaseMatchNode) && node.else_clause.nil?
+
+        else_nil?(node.else_clause)
+      end
+
+      # `a || b` answers `b` unless `a` is truthy; `a && b` answers `a` unless `a` is truthy, and `b` otherwise.
+      def logical_nil?(node)
+        if node.is_a?(Prism::OrNode)
+          nil_value?(node.right) && !truthy_literal?(node.left)
+        else
+          nil_value?(node.left) || (nil_value?(node.right) && !node.left.is_a?(Prism::FalseNode))
         end
       end
 
@@ -69,8 +102,107 @@ module Rigor
         return if def_node.nil? || visited.key?(def_node) || visited.size >= DEF_BUDGET
 
         visited[def_node] = true
-        collect(def_node.body, names) do |call|
-          read_callee(call, class_name, scope, names, visited)
+        read_body(def_node.body, names) { |call, into| read_callee(call, class_name, scope, into, visited) }
+      end
+
+      # Issue #2482 — the straight-line last-write rule. Over the top-level statements of a `def` body, in source
+      # order, a `nil` write to `@x` is dropped when a later top-level statement writes `@x` unconditionally (a plain
+      # `@x = v`, `@x ||= v` or a multiple-assignment target) with a value that is not `nil` by its syntax alone
+      # ({.non_nil_value?}). A value this module merely does not count as `nil` (`@user = User.find_by(id)`) drops
+      # nothing: a call's result may be `nil` at run time.
+      # Nothing is dropped across a statement that may leave the method first ({.may_leave?}), and a statement that
+      # may leave keeps its own `nil` writes. A write nested in a conditional, a loop, a `rescue`, a block or an
+      # `&&` / `||` is not unconditional and drops nothing. A body with a `rescue` or `ensure` is read whole.
+      def read_body(body, names, &on_self_call)
+        statements = straight_line(body)
+        return collect(body, names) { |call| on_self_call.call(call, names) } unless statements
+
+        live = Set.new
+        statements.each do |statement|
+          own = Set.new
+          collect(statement, own) { |call| on_self_call.call(call, own) }
+          if may_leave?(statement)
+            names.merge(live).merge(own)
+            live.clear
+          else
+            live.subtract(overwritten(statement)).merge(own)
+          end
+        end
+        names.merge(live)
+      end
+
+      # The top-level statements of a `def` body, seen through a lone parenthesised group (`def r = (a; b)`); nil
+      # for a body with a `rescue` / `ensure` clause, which is no straight line.
+      def straight_line(body)
+        return nil unless body.is_a?(Prism::StatementsNode)
+
+        only = body.body.first if body.body.size == 1
+        return straight_line(only.body) if only.is_a?(Prism::ParenthesesNode) && only.body.is_a?(Prism::StatementsNode)
+
+        body.body
+      end
+
+      # The instance variables the top-level `statement` writes unconditionally with a value that is not `nil` by its
+      # syntax alone.
+      def overwritten(statement)
+        case statement
+        when Prism::InstanceVariableWriteNode, Prism::InstanceVariableOrWriteNode
+          non_nil_value?(statement.value) ? [statement.name] : []
+        when Prism::MultiWriteNode then non_nil_targets(statement, statement.value)
+        else []
+        end
+      end
+
+      # The ivar targets of `targets` that `value` binds to a value not `nil` by its syntax alone: each against its own
+      # element of an Array literal, or the first against a literal Ruby does not splat. A rest target answers none,
+      # since the census declines it ({.destructure_nil_writes}); so does any other value (`@a, @tag = pair`, where
+      # `pair` may answer `[1]`).
+      def non_nil_targets(targets, value)
+        return [] unless targets.rest.nil?
+
+        elements =
+          if value.is_a?(Prism::ArrayNode)
+            return [] if value.elements.any?(Prism::SplatNode)
+
+            value.elements
+          elsif truthy_literal?(value) then [value]
+          else
+            []
+          end
+        targets.lefts.zip(elements).flat_map { |target, element| non_nil_target(target, element) }
+      end
+
+      def non_nil_target(target, value)
+        case target
+        when Prism::InstanceVariableTargetNode then non_nil_value?(value) ? [target.name] : []
+        when Prism::MultiTargetNode then non_nil_targets(target, value)
+        else []
+        end
+      end
+
+      # Whether `node` is never `nil` by its syntax alone: a truthy literal, an Array literal or a lambda literal.
+      def non_nil_value?(node) = truthy_literal?(node) || node.is_a?(Prism::ArrayNode) || node.is_a?(Prism::LambdaNode)
+
+      # Whether control may leave the method from inside `node` before its next statement runs: a `return`,
+      # `break`, `next`, `redo`, `retry`, `yield` or `super` (which may pass the block on), a call with a block or a
+      # `&` argument (whose block may `break` or `throw`), or a `raise` / `throw` / `exit` call. Read through every
+      # child, a lambda's body included, so it answers yes rather than miss one.
+      def may_leave?(node)
+        return false unless node.is_a?(Prism::Node)
+        return true if leaving_node?(node)
+
+        found = false
+        node.rigor_each_child { |child| found ||= may_leave?(child) }
+        found
+      end
+
+      def leaving_node?(node)
+        case node
+        when Prism::ReturnNode, Prism::BreakNode, Prism::NextNode, Prism::RedoNode, Prism::RetryNode, Prism::YieldNode,
+             Prism::SuperNode, Prism::ForwardingSuperNode
+          true
+        when Prism::CallNode then !node.block.nil? || LEAVING_CALLS.include?(node.name)
+        else false
         end
       end
 
@@ -111,18 +243,38 @@ module Rigor
         end
       end
 
-      # A target of `@a, @b = 1, nil` against its own element of a literal list; a missing element is `nil`.
-      def multi_nil_writes(node, names)
-        values = node.value
-        return unless values.is_a?(Prism::ArrayNode)
-        return if values.elements.any?(Prism::SplatNode) || !node.rest.nil?
+      def multi_nil_writes(node, names) = destructure_nil_writes(node, node.value, names)
 
-        node.lefts.each_with_index do |target, index|
-          next unless target.is_a?(Prism::InstanceVariableTargetNode)
+      # The targets of `targets` (a `MultiWriteNode`, or a nested `MultiTargetNode`) that `value` (nil for a missing
+      # element) may bind to `nil`: each against its own element of a literal list (a missing element is `nil`),
+      # every one when `value` itself may be `nil`, and every one after the first when `value` is a literal Ruby does
+      # not splat. A splat, a rest target or a computed value answers nothing, since it may be an Array.
+      def destructure_nil_writes(targets, value, names)
+        return unless targets.rest.nil?
 
-          names << target.name if nil_value?(values.elements[index])
+        if value.is_a?(Prism::ArrayNode)
+          return if value.elements.any?(Prism::SplatNode)
+
+          targets.lefts.each_with_index { |target, index| target_nil_write(target, value.elements[index], names) }
+        elsif nil_value?(value)
+          targets.lefts.each { |target| target_nil_write(target, nil, names) }
+        elsif truthy_literal?(value)
+          first, *others = targets.lefts
+          target_nil_write(first, value, names)
+          others.each { |target| target_nil_write(target, nil, names) }
         end
       end
+
+      def target_nil_write(target, value, names)
+        case target
+        when Prism::InstanceVariableTargetNode then names << target.name if nil_value?(value)
+        when Prism::MultiTargetNode then destructure_nil_writes(target, value, names)
+        end
+      end
+
+      # Whether `node` is a literal that is never `nil` or `false` and is no Array literal: `1 || nil` is never `nil`,
+      # and `@a, @b = 1` does not splat its value.
+      def truthy_literal?(node) = TRUTHY_LITERALS.any? { |klass| node.is_a?(klass) }
 
       def last_value(statements)
         statements.is_a?(Prism::StatementsNode) ? statements.body.last : statements
@@ -137,8 +289,12 @@ module Rigor
         else nil_value?(clause)
         end
       end
-      private_class_method :read_callee, :callee_def, :def_node, :collect, :self_call?, :nil_writes,
-                           :multi_nil_writes, :last_value, :else_nil?
+      private_class_method :read_callee, :read_body, :straight_line, :overwritten, :non_nil_targets,
+                           :non_nil_target, :non_nil_value?,
+                           :may_leave?, :leaving_node?, :callee_def, :def_node, :collect, :self_call?, :nil_writes,
+                           :case_nil?, :logical_nil?, :multi_nil_writes,
+                           :destructure_nil_writes,
+                           :target_nil_write, :truthy_literal?, :last_value, :else_nil?
     end
   end
 end

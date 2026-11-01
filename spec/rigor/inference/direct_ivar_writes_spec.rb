@@ -58,6 +58,108 @@ RSpec.describe Rigor::Inference::DirectIvarWrites do
     expect(writes("def r = (@a, @tag = pair)")).to eq(Set[])
   end
 
+  # Issue #2482 — a `case ... in` with no `else` raises NoMatchingPatternError instead of answering `nil`.
+  it "counts a `case ... in` with a nil arm or an empty `else`, and not one with no `else`" do
+    expect(writes("def r = (@tag = case @k\n in Integer then nil\n else 'b'\n end)")).to eq(Set[:@tag])
+    expect(writes("def r = (@tag = case @k\n in Integer then 'a'\n else\n end)")).to eq(Set[:@tag])
+    expect(writes("def r = (@tag = case @k\n in Integer then 'a'\n end)")).to eq(Set[])
+    expect(writes("def r = (@tag = case @k\n in Integer then 'a'\n else 'b'\n end)")).to eq(Set[])
+  end
+
+  it "counts an `||` whose right side may be nil unless its left side is a truthy literal" do
+    expect(writes("def r = (@tag = @items.first || nil)")).to eq(Set[:@tag])
+    expect(writes("def r = (@tag = @items.first || (@x if ready?))")).to eq(Set[:@tag])
+    expect(writes("def r = (@tag = 'a' || nil)")).to eq(Set[])
+    expect(writes("def r = (@tag = \"\#{@k}\" || nil)")).to eq(Set[])
+    expect(writes("def r = (@tag = @items.first || 'a')")).to eq(Set[])
+    expect(writes("def r = (@tag = @peer&.tag || 'a')")).to eq(Set[])
+  end
+
+  it "counts an `&&` whose left side may be nil, or whose right side may be nil past a left side that is not false" do
+    expect(writes("def r = (@tag = ready? && nil)")).to eq(Set[:@tag])
+    expect(writes("def r = (@tag = @peer&.tag && 'a')")).to eq(Set[:@tag])
+    expect(writes("def r = (@tag = false && nil)")).to eq(Set[])
+    expect(writes("def r = (@tag = ready? && 'a')")).to eq(Set[])
+  end
+
+  # Guard: both already answer so before #2482; Ruby's `&.` does not skip the rest of a chain.
+  it "counts a chained safe-navigation call, and not a plain call past one, which raises on nil" do
+    expect(writes("def r = (@tag = @peer&.tag&.upcase)")).to eq(Set[:@tag])
+    expect(writes("def r = (@tag = @peer&.tag.upcase)")).to eq(Set[])
+  end
+
+  it "counts every target after the first against a literal Ruby does not splat, and none against a computed value" do
+    expect(writes("def r = (@a, @tag = 1)")).to eq(Set[:@tag])
+    expect(writes("def r = (@a, @b, @tag = 's')")).to eq(Set[:@b, :@tag])
+    expect(writes("def r = (@a, @tag = { k: 1 })")).to eq(Set[:@tag])
+    expect(writes("def r = (@a, @tag = nil)")).to eq(Set[:@a, :@tag])
+    expect(writes("def r = (@a, @tag = @peer&.pair)")).to eq(Set[:@a, :@tag])
+    expect(writes("def r = (@a, @tag = [1, 2])")).to eq(Set[])
+    expect(writes("def r = (@a, @tag = @items)")).to eq(Set[])
+    # Guard: pins the current answer. Ruby binds `@tag` to `nil` here, but a rest target keeps the decline.
+    expect(writes("def r = (@a, @tag, *@r = 1)")).to eq(Set[])
+  end
+
+  it "judges a nested target on the same rule against its own element" do
+    expect(writes("def r = ((@a, @tag), @b = [1, nil], 2)")).to eq(Set[:@tag])
+    expect(writes("def r = ((@a, @tag), @b = 1, 2)")).to eq(Set[:@tag])
+    expect(writes("def r = (@b, (@a, @tag) = 1)")).to eq(Set[:@a, :@tag])
+    expect(writes("def r = ((@a, @tag), @b = [1, 2], 3)")).to eq(Set[])
+    expect(writes("def r = ((@a, @tag), @b = pair, 3)")).to eq(Set[])
+  end
+
+  # Issue #2482 — the straight-line last-write rule: a later top-level unconditional write of a value that is not
+  # `nil` by its syntax alone drops an earlier `nil` write, unless control may leave the method between them.
+  def body_of(*lines) = "def r\n#{lines.map { |line| "    #{line}\n" }.join}  end"
+
+  it "drops a nil write that a later top-level write of a value overwrites" do
+    [["@tag = @parts.first || nil", "@tag = 'x'", "yield if block_given?"],
+     ["@tag = @parts.first || nil", "@tag ||= 'default'"],
+     ["@a, @tag = 1", "@tag = 'x'"],
+     ["@tag = nil", "@tag = 'x'"],
+     ["@a, @tag = 1, nil", "@tag = 'x'"],
+     ["@tag = nil", "@tag ||= 'd'"],
+     ["@tag = @peer&.tag", "@tag = 'x'"],
+     ["@tag = nil", "@a, @tag = 1, 2"],
+     ["@tag = nil", "(@a, @tag), @b = [1, 2], 3"],
+     ["@tag = nil", "@tag = [@k]"],
+     ["@tag = nil", "@tag = -> { 1 }"],
+     ["@tag = nil", "notify", "@tag = 'x'"]].each do |lines|
+      expect(writes(body_of(*lines))).to eq(Set[]), lines.join("; ")
+    end
+    expect(writes("def r = (@tag = nil; @tag = 'x')")).to eq(Set[])
+    expect(writes(body_of("@tag = nil", "@tag, @b = 'x'"))).to eq(Set[:@b])
+    expect(writes("def clear = (@tag = nil)\n  #{body_of('clear', "@tag = 'x'")}")).to eq(Set[])
+  end
+
+  it "keeps a nil write the later write may not reach or does not overwrite" do
+    [["@tag = nil", "@tag = 'x' if ready?"],
+     ["@tag = nil", "return if ready?", "@tag = 'x'"],
+     ["@tag = nil", "raise 'no' if ready?", "@tag = 'x'"],
+     ["@tag = nil", "yield", "@tag = 'x'"],
+     ["@tag = nil", "@items.each { |i| i }", "@tag = 'x'"],
+     ["@tag = nil", "[1].each { @tag = 'x' }"],
+     ["@tag = nil", "@tag = @items.map { |i| i }"],
+     ["@tag = nil", "@tag &&= 'x'"],
+     ["@tag = 'x'", "@tag = nil"],
+     ["@tag = nil", "@tag = find"],
+     ["@tag = nil", "@tag = ENV['X']"],
+     ["@tag = nil", "@tag ||= find"],
+     ["@tag = nil", "@tag = Integer(@s) rescue nil"],
+     ["@tag = nil", "@tag = defined?(Zzz)"],
+     ["@tag = nil", "@tag = (nil while false)"],
+     ["@tag = nil", "@a, @tag = pair"],
+     ["@tag = nil", "@a, @tag = 1"],
+     ["@tag = nil", "@a, @tag = [1, find]"],
+     ["@tag = nil", "@a, @tag = *pre, 'x'"],
+     ["@tag = nil", "@tag = 'x'", "rescue StandardError", "nil"]].each do |lines|
+      expect(writes(body_of(*lines))).to eq(Set[:@tag]), lines.join("; ")
+    end
+    # Guard: pins the current answer. Ruby binds `@tag` to 2, but a rest target is no overwrite, as the census
+    # declines it.
+    expect(writes(body_of("@tag = nil", "@a, @tag, *@r = 1, 2"))).to eq(Set[:@tag])
+  end
+
   it "reads a block's body but not a lambda's, a nested def's or a class body's" do
     expect(writes("def r = [1].each { @tag = nil }")).to eq(Set[:@tag])
     expect(writes("def r = (f = -> { @tag = nil }; f.arity)")).to eq(Set[])

@@ -1802,7 +1802,7 @@ RSpec.describe "Rigor type construction (integration)" do
       "guards.rb" => 7, "invalidation.rb" => 1, "bot_receivers.rb" => 5, "writes.rb" => 2, "self_calls.rb" => 27,
       "condition_calls.rb" => 16, "case_when_calls.rb" => 19,
       "statement_calls.rb" => 6, "statement_call_writers.rb" => 0,
-      "statement_call_rewriters.rb" => 15
+      "statement_call_rewriters.rb" => 24
     }.freeze
 
     def fixture_source(name) = File.read(File.join(__dir__, "fixtures/ivar_class_guards", name))

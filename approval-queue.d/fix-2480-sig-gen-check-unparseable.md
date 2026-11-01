@@ -14,7 +14,7 @@ UTF-8 was already refused with exit 1. The issue asks for the unparseable case t
 `--check` should then fail and name the file.
 
 The issue did not say what exit status the refusal should carry. A `rigor check` run already reports an
-unparseable `.rbs` as the `rbs.coverage.quarantined-signature` warning, as a warning. The choice was between a warning and a refusal with exit 1.
+unparseable `.rbs` as the `rbs.coverage.quarantined-signature` warning. The choice was between a warning and a refusal with exit 1.
 
 ## Options and trade-offs
 

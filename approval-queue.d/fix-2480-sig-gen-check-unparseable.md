@@ -14,8 +14,7 @@ UTF-8 was already refused with exit 1. The issue asks for the unparseable case t
 `--check` should then fail and name the file.
 
 The issue did not say what exit status the refusal should carry. A `rigor check` run already reports an
-unparseable `.rbs` as the `rbs.coverage.quarantined-signature` warning, which exits 0 under the default
-`--fail-on`. The choice was between a warning and a refusal with exit 1.
+unparseable `.rbs` as the `rbs.coverage.quarantined-signature` warning, as a warning. The choice was between a warning and a refusal with exit 1.
 
 ## Options and trade-offs
 
@@ -36,7 +35,8 @@ untouched. The precedent is the invalid-UTF-8 refusal in #231, which also refuse
 target sig-gen cannot read faithfully. The fit is close on the exit status and on the refusal, but not on the
 trade-off: an encoding fault does not come and go with a bundled-rbs release, and a parse fault can. The
 maintainer should weigh that difference. `docs/type-specification/diagnostic-policy.md` keeps
-`rbs.coverage.quarantined-signature` a warning for this reason; this exit code has no such protection.
+`rbs.coverage.quarantined-signature` a warning, so a bundled-rbs bump cannot turn a check red by itself; this
+exit code has no such protection.
 
 ## To undo
 

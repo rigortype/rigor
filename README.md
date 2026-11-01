@@ -131,7 +131,7 @@ and [CI guide](https://rigor.typedduck.fail/manual/11-ci/).
 
 ```sh
 rigor check lib                 # find bugs (caches under .rigor/ — gitignore it)
-rigor init                      # drop a starter .rigor.yml
+rigor init                      # drop a starter .rigor.yml (suggests plugins from Gemfile.lock)
 rigor annotate lib/foo.rb       # reprint a file with inferred types in the margin
 rigor triage lib                # summarise diagnostics: distribution, hotspots
 rigor sig-gen --diff lib/foo.rb # emit RBS from inference (--write to save)

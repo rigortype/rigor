@@ -49,6 +49,14 @@ module Rigor
     # 2026-07-17 and nothing noticed. See `docs/internal-spec/config.md`.
     CONFIG_SCHEMA_URL = "https://github.com/rigortype/rigor/raw/master/schemas/rigor-config.schema.json"
 
+    # The comment `rigor init` writes under `plugins: []` when Gemfile.lock names a gem a bundled plugin models. The
+    # plugins are suggested, not enabled: ADR-96 Criterion 2 keeps a lockfile's presence from opting a project into a
+    # plugin's code, so the user uncomments the ones they want (#2536).
+    DETECTED_PLUGINS_HEADER = [
+      "# Detected from Gemfile.lock (suggested, not enabled). To load them, delete the `[]` above, uncomment the",
+      "# entries you want, then run `rigor plugins --strict`."
+    ].freeze
+
     HANDLERS = {
       "check" => :run_check,
       "init" => :run_init,
@@ -88,6 +96,9 @@ module Rigor
         opts.banner = "Usage: rigor init [options]"
         opts.on("--force", "Overwrite an existing configuration file") { options[:force] = true }
         opts.on("--path=PATH", "Configuration file path") { |value| options[:path] = value }
+        opts.on("--no-plugins", "Write no commented plugin suggestions from Gemfile.lock") do
+          options[:plugins] = false
+        end
       end
     end
 
@@ -202,7 +213,8 @@ module Rigor
       # present; no implicit merge).
       options = {
         force: false,
-        path: ".rigor.dist.yml"
+        path: ".rigor.dist.yml",
+        plugins: true
       }
 
       self.class.init_option_parser(options).parse!(@argv)
@@ -213,21 +225,40 @@ module Rigor
         return 1
       end
 
-      File.write(path, init_template(path))
+      plugins = options.fetch(:plugins) ? detected_plugins : []
+      File.write(path, init_template(path, plugins: plugins))
       @out.puts("Created #{path}")
-      print_init_next_steps(path)
+      print_init_next_steps(path, plugins)
       0
     end
 
-    # `rigor init`'s template ships empty `plugins:` so a fresh init has nothing to validate — but the moment the user
-    # adds any plugin entry, the activation-failure surfaces enumerated in `rigor plugins`'s docstring become real.
+    # The bundled plugins whose target gems the project's `Gemfile.lock` declares: the read `rigor doctor` makes,
+    # through {PluginGapAdvisory}, so the two cannot disagree about what the project depends on. Empty without a
+    # lockfile, which leaves the template as it was before detection existed. The advisory is required lazily:
+    # it loads every bundled plugin's entry file, a cost a plain `rigor init` in a directory with no lockfile never
+    # pays.
+    def detected_plugins
+      require_relative "plugin_gap_advisory"
+
+      PluginGapAdvisory.gaps(project_root: Dir.pwd, plugins: []).map(&:plugin_gem)
+    end
+
+    # `rigor init`'s template lists the plugins Gemfile.lock detected, or ships empty `plugins:` so a fresh init has
+    # nothing to validate — but the moment the user adds any plugin entry, the activation-failure surfaces enumerated
+    # in `rigor plugins`'s docstring become real.
     # Point them at the verification command + the canonical readiness flow so silent failures (the cwd / Gemfile /
     # signature_paths mismatches that surfaced during the Mastodon trial) get caught the first time the user wires a
     # plugin, not the first time `rigor check` reports false positives that should have been covered.
-    def print_init_next_steps(path)
+    def print_init_next_steps(path, plugins = [])
       @out.puts ""
       @out.puts "Next steps:"
-      @out.puts "  1. Edit #{path} — add the `plugins:` your project needs."
+      if plugins.empty?
+        @out.puts "  1. Edit #{path} — add the `plugins:` your project needs."
+      else
+        @out.puts "  1. Edit #{path} — to load a detected plugin, delete the `[]` on the `plugins:` line and"
+        @out.puts "     uncomment the entries you want:"
+        plugins.each { |gem| @out.puts "       #{gem}" }
+      end
       @out.puts "  2. Run `rigor plugins` to verify every configured plugin loads."
       @out.puts "     (`--strict` exits 1 on failure; ideal CI gate.)"
       @out.puts "  3. Run `rigor check` to analyse your code."
@@ -259,8 +290,9 @@ module Rigor
 
     # Renders the starter `.rigor.yml` body. The template serialises `Configuration::DEFAULTS` (so the on-disk file
     # round-trips through `Configuration.load`) and prepends a short header that points the user at the keys they are
-    # most likely to want to edit.
-    def init_template(path = ".rigor.dist.yml")
+    # most likely to want to edit. `plugins:` stays the empty list the defaults ship; detected gems appear beneath it as
+    # comments, so a project with no lockfile gets the template it always did.
+    def init_template(path = ".rigor.dist.yml", plugins: [])
       <<~YAML
         # yaml-language-server: $schema=#{CONFIG_SCHEMA_URL}
         # Rigor configuration. The full key reference is
@@ -316,8 +348,22 @@ module Rigor
         # `target_ruby` is left commented: the default only picks the syntax Rigor parses. Set it to the lowest
         # Ruby your project runs on, and Rigor also reports what that Ruby deprecates.
         # target_ruby: #{Configuration::DEFAULTS.fetch('target_ruby').dump}
-        #{YAML.dump(init_settings(path)).sub(/\A---\n/, '')}
+        #{settings_yaml(path, plugins)}
       YAML
+    end
+
+    # The serialised settings. `plugins: []` stays valid YAML and schema-clean; when `Gemfile.lock` named a modelled
+    # gem, the suggestion block sits under it as comments, so nothing loads until the user uncomments a line.
+    def settings_yaml(path, plugins)
+      yaml = YAML.dump(init_settings(path)).sub(/\A---\n/, "")
+      return yaml if plugins.empty?
+
+      yaml.sub(/^plugins: \[\]\n/) { "plugins: []\n#{detected_plugins_block(plugins)}" }
+    end
+
+    def detected_plugins_block(plugins)
+      lines = DETECTED_PLUGINS_HEADER + plugins.map { |gem| "#   - #{gem}" }
+      lines.map { |line| "#{line}\n" }.join
     end
 
     # The settings `rigor init` writes: the defaults, with `test_paths:` spelled out as the test roots found now, so

@@ -3103,6 +3103,12 @@ RSpec.describe Rigor::CLI do
   # landing without a template update silently reintroduces that drift. Running `init` for real (not reading the
   # template constant) is the only way to catch the CLI's actual `rigor explain`-eligible id set going stale.
   describe "init" do
+    # `rigor init` reads the working directory's Gemfile.lock for its plugin suggestions, so these run in a temporary
+    # directory rather than the repository's own lockfile.
+    around do |example|
+      Dir.mktmpdir { |dir| Dir.chdir(dir) { example.run } }
+    end
+
     it "lists every ALL_RULES id, and only ALL_RULES ids, as rule identifiers in the written config" do
       Dir.mktmpdir do |dir|
         path = File.join(dir, ".rigor.yml")

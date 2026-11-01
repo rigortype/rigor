@@ -108,8 +108,8 @@ RSpec.describe Rigor::Inference::DirectIvarWrites do
     expect(writes("def r = ((@a, @tag), @b = pair, 3)")).to eq(Set[])
   end
 
-  # Issue #2482 — the straight-line last-write rule: a later top-level unconditional write of a value not counted as
-  # `nil` drops an earlier `nil` write, unless control may leave the method between them.
+  # Issue #2482 — the straight-line last-write rule: a later top-level unconditional write of a value that is not
+  # `nil` by its syntax alone drops an earlier `nil` write, unless control may leave the method between them.
   def body_of(*lines) = "def r\n#{lines.map { |line| "    #{line}\n" }.join}  end"
 
   it "drops a nil write that a later top-level write of a value overwrites" do
@@ -122,6 +122,8 @@ RSpec.describe Rigor::Inference::DirectIvarWrites do
      ["@tag = @peer&.tag", "@tag = 'x'"],
      ["@tag = nil", "@a, @tag = 1, 2"],
      ["@tag = nil", "(@a, @tag), @b = [1, 2], 3"],
+     ["@tag = nil", "@tag = [@k]"],
+     ["@tag = nil", "@tag = -> { 1 }"],
      ["@tag = nil", "notify", "@tag = 'x'"]].each do |lines|
       expect(writes(body_of(*lines))).to eq(Set[]), lines.join("; ")
     end
@@ -139,6 +141,15 @@ RSpec.describe Rigor::Inference::DirectIvarWrites do
      ["@tag = nil", "@tag = @items.map { |i| i }"],
      ["@tag = nil", "@tag &&= 'x'"],
      ["@tag = 'x'", "@tag = nil"],
+     ["@tag = nil", "@tag = find"],
+     ["@tag = nil", "@tag = ENV['X']"],
+     ["@tag = nil", "@tag ||= find"],
+     ["@tag = nil", "@tag = Integer(@s) rescue nil"],
+     ["@tag = nil", "@tag = defined?(Zzz)"],
+     ["@tag = nil", "@tag = (nil while false)"],
+     ["@tag = nil", "@a, @tag = pair"],
+     ["@tag = nil", "@a, @tag = 1"],
+     ["@tag = nil", "@a, @tag = [1, find]"],
      ["@tag = nil", "@tag = 'x'", "rescue StandardError", "nil"]].each do |lines|
       expect(writes(body_of(*lines))).to eq(Set[:@tag]), lines.join("; ")
     end

@@ -123,8 +123,9 @@ end
 
 # Issue #2482 — an `||` / `&&` that can answer `nil`, a multiple assignment of a single literal (Ruby binds every
 # target after the first to `nil`), a nested target and a chained safe-navigation call are `nil` writes too. The
-# `yield` makes the proof decline, and `r_return` may leave before its later write. Under Ruby 4.0.5 every
-# `probe_*` raises NoMethodError on `nil`.
+# `yield` makes the proof decline, `r_return` may leave before its later write, and a later write of a call's
+# result (`r_find`, `r_env`, `r_pair`) may itself be `nil`. Under Ruby 4.0.5 every `probe_*` raises NoMethodError on
+# `nil`.
 class ShapeWriters
   def initialize
     @tag = "t"
@@ -138,6 +139,11 @@ class ShapeWriters
   def r_nested = ((@a, @tag), @b = [1, nil], 2; yield if block_given?)
   def r_chain = (@tag = @peer&.tag&.upcase; yield if block_given?)
   def r_return = (@tag = nil; return if @items.empty?; @tag = "x"; yield if block_given?)
+  def r_find = (@tag = nil; @tag = find_tag; yield if block_given?)
+  def r_env = (@tag = nil; @tag = ENV["RIGOR_FIXTURE_UNSET_2482"]; yield if block_given?)
+  def r_pair = (@tag = nil; @a, @tag = one; yield if block_given?)
+  def find_tag = @items.first
+  def one = [1]
 
   def probe_or; return unless @tag; r_or; t = @tag; t.upcase; end # FIRES-1446 call.possible-nil-receiver
   def probe_and; return unless @tag; r_and; t = @tag; t.upcase; end # FIRES-1446 call.possible-nil-receiver
@@ -145,4 +151,7 @@ class ShapeWriters
   def probe_nested; return unless @tag; r_nested; t = @tag; t.upcase; end # FIRES-1446 call.possible-nil-receiver
   def probe_chain; return unless @tag; r_chain; t = @tag; t.upcase; end # FIRES-1446 call.possible-nil-receiver
   def probe_return; return unless @tag; r_return; t = @tag; t.upcase; end # FIRES-1446 call.possible-nil-receiver
+  def probe_find; return unless @tag; r_find; t = @tag; t.upcase; end # FIRES-1446 call.possible-nil-receiver
+  def probe_env; return unless @tag; r_env; t = @tag; t.upcase; end # FIRES-1446 call.possible-nil-receiver
+  def probe_pair; return unless @tag; r_pair; t = @tag; t.upcase; end # FIRES-1446 call.possible-nil-receiver
 end

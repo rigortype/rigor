@@ -29,9 +29,14 @@ rule existed to reuse.
 
 The coordinator ruled for the straight-line rule. Among the top-level statements of a `def` body (seen through
 a lone parenthesised group), in source order, a `nil` write to `@x` is dropped when a later top-level
-statement writes `@x` unconditionally with a value the module does not count as `nil`. A plain `@x = v`,
-`@x ||= v` and a multiple-assignment target count; `@x &&= v` does not. A multiple assignment with a rest
-target is not an overwrite, since the census declines it.
+statement writes `@x` unconditionally with a value that is not `nil` by its syntax alone. That means a numeric,
+string, symbol, regexp, range, hash, Array or lambda literal, or `true`. A plain `@x = v` and `@x ||= v` count
+when `v` is such a literal. A multiple-assignment target counts when an Array literal binds it to such an element,
+or when it is the first target of a non-splatting literal. `@x &&= v` does not count, and neither does a
+multiple assignment with a rest target, since the census declines it. A value the module merely does not count
+as `nil` drops nothing (`@user = nil; @user = User.find_by(id)` keeps the `nil` write), because a call's result,
+`ENV[...]`, `defined?` or a `rescue nil` modifier may be `nil` at run time. Review round 2 caught a first draft
+that read the module's "not counted as nil" as "non-nil".
 
 Nothing is dropped across a statement that may leave the method first: a `return`, `break`, `next`,
 `redo`, `retry`, `yield` or `super`, a call with a block or `&` argument, or a `raise` / `fail` / `throw`

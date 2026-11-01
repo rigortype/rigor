@@ -107,7 +107,9 @@ module Rigor
 
       # Issue #2482 — the straight-line last-write rule. Over the top-level statements of a `def` body, in source
       # order, a `nil` write to `@x` is dropped when a later top-level statement writes `@x` unconditionally (a plain
-      # `@x = v`, `@x ||= v` or a multiple-assignment target) with a value this module does not count as `nil`.
+      # `@x = v`, `@x ||= v` or a multiple-assignment target) with a value that is not `nil` by its syntax alone
+      # ({.non_nil_value?}). A value this module merely does not count as `nil` (`@user = User.find_by(id)`) drops
+      # nothing: a call's result may be `nil` at run time.
       # Nothing is dropped across a statement that may leave the method first ({.may_leave?}), and a statement that
       # may leave keeps its own `nil` writes. A write nested in a conditional, a loop, a `rescue`, a block or an
       # `&&` / `||` is not unconditional and drops nothing. A body with a `rescue` or `ensure` is read whole.
@@ -140,29 +142,46 @@ module Rigor
         body.body
       end
 
-      # The instance variables the top-level `statement` writes unconditionally. The caller adds back the ones it
-      # writes a possibly-nil value (`own`), so only a write of a value not counted as `nil` drops an earlier one.
+      # The instance variables the top-level `statement` writes unconditionally with a value that is not `nil` by its
+      # syntax alone.
       def overwritten(statement)
         case statement
-        when Prism::InstanceVariableWriteNode, Prism::InstanceVariableOrWriteNode then [statement.name]
-        when Prism::MultiWriteNode then target_names(statement)
+        when Prism::InstanceVariableWriteNode, Prism::InstanceVariableOrWriteNode
+          non_nil_value?(statement.value) ? [statement.name] : []
+        when Prism::MultiWriteNode then non_nil_targets(statement, statement.value)
         else []
         end
       end
 
-      # The ivar targets of a multiple assignment. One with a rest target answers none, since the census declines
-      # it ({.destructure_nil_writes}) and so cannot tell a `nil` it binds (`@a, @tag, *r = 1`) from a value.
-      def target_names(targets)
+      # The ivar targets of `targets` that `value` binds to a value not `nil` by its syntax alone: each against its own
+      # element of an Array literal, or the first against a literal Ruby does not splat. A rest target answers none,
+      # since the census declines it ({.destructure_nil_writes}); so does any other value (`@a, @tag = pair`, where
+      # `pair` may answer `[1]`).
+      def non_nil_targets(targets, value)
         return [] unless targets.rest.nil?
 
-        targets.lefts.flat_map do |target|
-          case target
-          when Prism::InstanceVariableTargetNode then [target.name]
-          when Prism::MultiTargetNode then target_names(target)
-          else []
+        elements =
+          if value.is_a?(Prism::ArrayNode)
+            return [] if value.elements.any?(Prism::SplatNode)
+
+            value.elements
+          elsif truthy_literal?(value) then [value]
+          else
+            []
           end
+        targets.lefts.zip(elements).flat_map { |target, element| non_nil_target(target, element) }
+      end
+
+      def non_nil_target(target, value)
+        case target
+        when Prism::InstanceVariableTargetNode then non_nil_value?(value) ? [target.name] : []
+        when Prism::MultiTargetNode then non_nil_targets(target, value)
+        else []
         end
       end
+
+      # Whether `node` is never `nil` by its syntax alone: a truthy literal, an Array literal or a lambda literal.
+      def non_nil_value?(node) = truthy_literal?(node) || node.is_a?(Prism::ArrayNode) || node.is_a?(Prism::LambdaNode)
 
       # Whether control may leave the method from inside `node` before its next statement runs: a `return`,
       # `break`, `next`, `redo`, `retry`, `yield` or `super` (which may pass the block on), a call with a block or a
@@ -270,7 +289,8 @@ module Rigor
         else nil_value?(clause)
         end
       end
-      private_class_method :read_callee, :read_body, :straight_line, :overwritten, :target_names,
+      private_class_method :read_callee, :read_body, :straight_line, :overwritten, :non_nil_targets,
+                           :non_nil_target, :non_nil_value?,
                            :may_leave?, :leaving_node?, :callee_def, :def_node, :collect, :self_call?, :nil_writes,
                            :case_nil?, :logical_nil?, :multi_nil_writes,
                            :destructure_nil_writes,

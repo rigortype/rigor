@@ -1,0 +1,2 @@
+- **[plugins]** `rigor doctor` and `rigor init` now suggest `rigor-rspec` for a project whose Gemfile declares `rspec` or `rspec-rails`. ([#2567](https://github.com/rigortype/rigor/pull/2567))
+  - Both spellings expand to the rspec gems `rigor-rspec` models; `rspec-rails` also suggests `rigor-rspec-rails`.

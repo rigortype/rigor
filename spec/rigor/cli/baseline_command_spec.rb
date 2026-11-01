@@ -219,16 +219,22 @@ RSpec.describe Rigor::CLI::BaselineCommand do
     it "rejects paths on generate and writes no baseline" do
       status, _out, err = run_cli("baseline", "generate", "lib", "nope2", cwd: tmpdir)
       expect(status).to eq(described_class::EXIT_USAGE)
-      expect(err).to include("rigor baseline generate: unexpected argument(s) lib nope2")
+      expect(err).to include('rigor baseline generate: unexpected argument(s) "lib" "nope2"')
       expect(err).to include("generated from the configured `paths:`")
       expect(File.exist?(File.join(tmpdir, ".rigor-baseline.yml"))).to be(false)
+    end
+
+    it "shows an empty-string argument, so it is not invisible in the message" do
+      status, _out, err = run_cli("baseline", "generate", "", cwd: tmpdir)
+      expect(status).to eq(described_class::EXIT_USAGE)
+      expect(err).to include('unexpected argument(s) ""')
     end
 
     it "rejects paths on regenerate and leaves an existing baseline untouched" do
       File.write(File.join(tmpdir, ".rigor-baseline.yml"), "stale: content\n")
       status, _out, err = run_cli("baseline", "regenerate", "lib", cwd: tmpdir)
       expect(status).to eq(described_class::EXIT_USAGE)
-      expect(err).to include("rigor baseline regenerate: unexpected argument(s) lib")
+      expect(err).to include('rigor baseline regenerate: unexpected argument(s) "lib"')
       expect(File.read(File.join(tmpdir, ".rigor-baseline.yml"))).to eq("stale: content\n")
     end
 

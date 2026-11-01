@@ -149,10 +149,11 @@ module Rigor
       end
 
       # Issue #2466 — the baseline covers the configured `paths:`, never the positional arguments: a baseline built
-      # over a subset would silently drop the entries of every other file. Reject them, as `rigor effects snapshot`
-      # does (`effects_snapshot_command.rb`), rather than honour them.
+      # over a subset would silently drop the entries of every other file. Reject them, as `rigor effects update`
+      # does (`effects_snapshot_command.rb:54`), rather than honour them.
       def positional_paths_error(subcommand)
-        @err.puts("rigor baseline #{subcommand}: unexpected argument(s) #{@argv.join(' ')}; the baseline is " \
+        @err.puts("rigor baseline #{subcommand}: unexpected argument(s) #{@argv.map(&:inspect).join(' ')}; " \
+                  "the baseline is " \
                   "generated from the configured `paths:`, so pass none")
         EXIT_USAGE
       end

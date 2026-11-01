@@ -260,8 +260,9 @@ RSpec.describe Rigor::CLI::DoctorCommand do
       status, out, = run([])
       expect(status).to eq(1)
       expect(out).to include("none is enabled")
-      expect(out).to include("rigor-rspec-rails")
-      expect(out).to include("rigor-rspec")
+      # Asserted as the whole list: `rigor-rspec` is a substring of `rigor-rspec-rails`, so a bare include would
+      # pass with only the rails plugin suggested.
+      expect(out).to include("(rigor-rspec, rigor-rspec-rails)")
     end
   end
 

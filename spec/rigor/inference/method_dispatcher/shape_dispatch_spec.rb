@@ -321,6 +321,42 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
         mixed = tuple(constant(1), Rigor::Type::Combinator.nominal_of("Integer"))
         expect(dispatch(receiver: mixed, method_name: :compact)).to be_nil
       end
+
+      context "with a non-Constant element that may be nil (#2519)" do
+        def nominal(name) = Rigor::Type::Combinator.nominal_of(name)
+        def union(*members) = Rigor::Type::Combinator.union(*members)
+        def array_of(element) = Rigor::Type::Combinator.nominal_of("Array", type_args: [element])
+
+        it "strips nil from a union that also carries Dynamic[top], widening to Array" do
+          element = union(Rigor::Type::Combinator.untyped, nominal("Pathname"), constant(nil))
+          expect(dispatch(receiver: tuple(element), method_name: :compact))
+            .to eq(array_of(union(Rigor::Type::Combinator.untyped, nominal("Pathname"))))
+        end
+
+        it "strips nil from a nilable nominal: [Pathname?] → Array[Pathname], never a fixed Tuple" do
+          element = union(nominal("Pathname"), constant(nil))
+          expect(dispatch(receiver: tuple(element), method_name: :compact)).to eq(array_of(nominal("Pathname")))
+        end
+
+        it "joins every element without nil: [1, String?] → Array[1 | String]" do
+          receiver = tuple(constant(1), union(nominal("String"), constant(nil)))
+          expect(dispatch(receiver: receiver, method_name: :compact))
+            .to eq(array_of(union(constant(1), nominal("String"))))
+        end
+
+        it "drops a Constant[nil] element beside a nilable one: [nil, String?] → Array[String]" do
+          receiver = tuple(constant(nil), union(nominal("String"), constant(nil)))
+          expect(dispatch(receiver: receiver, method_name: :compact)).to eq(array_of(nominal("String")))
+        end
+
+        it "folds to the empty Tuple when every element is only nil: [NilClass] → []" do
+          expect(dispatch(receiver: tuple(nominal("NilClass")), method_name: :compact)).to eq(tuple)
+        end
+
+        it "declines for a lone Dynamic[top] element (nothing to strip; RBS answers)" do
+          expect(dispatch(receiver: tuple(Rigor::Type::Combinator.untyped), method_name: :compact)).to be_nil
+        end
+      end
     end
 
     describe "Tuple#take (Slice 5 phase 2)" do

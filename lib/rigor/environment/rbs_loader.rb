@@ -755,9 +755,9 @@ module Rigor
           decls.each do |decl|
             case decl
             when ::RBS::AST::Declarations::Module
-              each_declared_class(decl.members, prefix + [decl.name.to_s], &block)
+              each_declared_class(decl.members, declared_class_path(decl, prefix), &block)
             when ::RBS::AST::Declarations::Class
-              inner = prefix + [decl.name.to_s]
+              inner = declared_class_path(decl, prefix)
               block.call("::#{inner.join('::')}", decl.type_params.size)
               each_declared_class(decl.members, inner, &block)
             end
@@ -1269,7 +1269,7 @@ module Rigor
           Array(decls).each do |decl|
             next unless declaration_with_members?(decl)
 
-            inner = prefix + [decl.name.to_s.delete_prefix("::")]
+            inner = declared_class_path(decl, prefix)
             nesting = written + [decl.name.to_s]
             class_name = inner.join("::")
             decl.members.reject! do |member|
@@ -1279,6 +1279,16 @@ module Rigor
             end
             strip_members!(decl.members, keys, inner, nesting)
           end
+        end
+
+        # The class path a declaration contributes to member keys: its name `::`-stripped, under the enclosing
+        # path unless the name is absolute. A leading `::` resets the path, as RBS resolves `module A; class
+        # ::Abs` to the top-level `Abs` (issue #2474), and so do the children of that declaration. The
+        # `nesting` a mixin is keyed by is not reset: it keeps the names as written, which is the lexical
+        # scope a relative mixin name resolves through.
+        def declared_class_path(decl, prefix)
+          base = decl.name.to_s.start_with?("::") ? [] : prefix
+          base + [decl.name.to_s.delete_prefix("::")]
         end
 
         # Yields `[class_name, member, visibility, nesting]` for every member of every class / module
@@ -1293,7 +1303,7 @@ module Rigor
           Array(decls).each do |decl|
             next unless declaration_with_members?(decl)
 
-            inner = prefix + [decl.name.to_s.delete_prefix("::")]
+            inner = declared_class_path(decl, prefix)
             nesting = written + [decl.name.to_s]
             class_name = inner.join("::")
             section = :public

@@ -147,7 +147,7 @@ it "does not hand a later analysing run the collections of an earlier run served
     # A file the served run never saw: the next run must analyse it, and its collections must not be
     # replaced by the served run's blob, which lacks it.
     added = File.join(dir, "added.rb")
-    File.write(added, "class Added < String; end\n")
+    File.write(added, "class Base; end\nclass Added < Base; end\n")
     guarded_run(runner, files.values + [added], allow_plugin_crash: true)
     fresh = runner_for(dir, workers: 0, effects: true, cache: true)
     guarded_run(fresh, files.values + [added], allow_plugin_crash: true)

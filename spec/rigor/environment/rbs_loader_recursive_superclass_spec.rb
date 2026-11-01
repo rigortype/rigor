@@ -29,7 +29,6 @@ RSpec.describe Rigor::Environment::RbsLoader do
   end
 
   it "records a stack overflow inside a singleton build as that class's build failure" do
-    # Backstop: an ancestry loop the instance walk does not catch still must not abort the run.
     allow_any_instance_of(RBS::DefinitionBuilder).to receive(:build_singleton).and_raise(SystemStackError) # rubocop:disable RSpec/AnyInstance
     expect(loader.singleton_method(class_name: "M::N", method_name: :new)).to be_nil
     expect(loader.definition_build_failures.map { |row| row.first(2) }).to eq([["M::N", "SystemStackError"]])

@@ -219,8 +219,7 @@ module Rigor
         prior.with(
           variants: [*prior.variants, [entry.version, entry.platform]],
           version: rep.version, platform: rep.platform,
-          git_source: prior.git_source || entry.git_source,
-          path_source: prior.path_source || entry.path_source
+          git_source: prior.git_source || entry.git_source
         )
       end
       private_class_method :merge_variant

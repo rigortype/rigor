@@ -3267,8 +3267,8 @@ module Rigor
 
         builder.build_instance(rbs_name)
       rescue ::RBS::BaseError, SystemStackError => e
-        # `SystemStackError` is the backstop {#build_singleton_definition} explains: an ancestry loop rbs does not
-        # detect is this class's build failure, never a run abort.
+        # `SystemStackError`: see {#build_singleton_definition}. An ancestry loop rbs does not detect is this
+        # class's build failure, never a run abort.
         store_definition_build_detail(class_name, e)
         warn_about_definition_build_failure(class_name, e)
         nil
@@ -3282,20 +3282,16 @@ module Rigor
         rbs_name = canonical_module_name(rbs_name)
         return nil unless env.class_decls.key?(rbs_name)
 
-        # rbs's `AncestorBuilder#singleton_ancestors` has no cycle check: a class whose superclass chain loops
-        # (`class S < ::S`, which a collection copy of the same class used to hide, #2441) recurses until the stack
-        # runs out, where `#instance_ancestors` raises `RBS::RecursiveAncestorError`. Walking the instance side
-        # first turns the loop into that error, so it becomes this class's build failure instead of aborting the
-        # run. Memoised by the builder, so a class whose instance side was already built pays nothing.
-        builder.ancestor_builder.instance_ancestors(rbs_name) if env.class_decls[rbs_name].is_a?(::RBS::Environment::ClassEntry)
         builder.build_singleton(rbs_name)
       rescue ::RBS::BaseError => e
         store_definition_build_detail(class_name, e)
         warn_about_definition_build_failure(class_name, e)
         nil
       rescue SystemStackError => e
-        # Backstop for an ancestry loop the instance walk above does not see: still this class's build failure,
-        # never a run abort.
+        # rbs's `AncestorBuilder#singleton_ancestors` has no cycle check: a class whose superclass chain loops
+        # (`class S < ::S`, which a collection copy of the same class used to hide, #2441) recurses until the
+        # stack runs out, where the instance side raises `RBS::RecursiveAncestorError`. It is this class's
+        # build failure like any other, never a run abort; the report prefers the instance side's named error.
         store_definition_build_detail(class_name, e)
         warn_about_definition_build_failure(class_name, e)
         nil

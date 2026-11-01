@@ -2542,7 +2542,7 @@ RSpec.describe Rigor::Environment::RbsLoader do
       pairs
     end
 
-    it "keys a class relative to the enclosing module" do
+    it "keys a class relative to the enclosing module (guard)" do
       expect(keyed_declarations("module A\n  class Abs\n    def m: () -> untyped\n  end\nend\n"))
         .to eq([["A::Abs", "A/Abs"]])
     end
@@ -2558,7 +2558,7 @@ RSpec.describe Rigor::Environment::RbsLoader do
         .to eq([["B::C", "A/::B::C"]])
     end
 
-    it "keys a relative qualified class under the enclosing module" do
+    it "keys a relative qualified class under the enclosing module (guard)" do
       expect(keyed_declarations("module A\n  class B::C\n    def m: () -> untyped\n  end\nend\n"))
         .to eq([["A::B::C", "A/B::C"]])
     end

@@ -511,6 +511,117 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
       RUBY
     end
 
+    # Review round 1 — a remover or filter can take a stored member out again, and nothing narrows the carrier
+    # back, so on a carrier a store has grown it restores the reading the carrier has without the fact: the floor,
+    # with the stored `nil` gone, and no fact from then on.
+    {
+      "Array#compact!" => "p = Array.new(n, \"a\")\np << (gets ? nil : \"b\")\np.compact!\np.each { |s| s.upcase }",
+      "Array#compact! after an untyped store" =>
+        "def f(n, x)\n  p = Array.new(n, \"a\")\n  p << (x.empty? ? nil : x)\n  " \
+        "p.compact!\n  p.each { |s| s.upcase }\nend",
+      "Array#delete" => "p = Array.new(n, \"a\")\np << nil\np.delete(nil)\np.each { |s| s.upcase }",
+      "Array#reject!" => "p = Array.new(n, \"a\")\np << nil\np.reject!(&:nil?)\np.each { |s| s.upcase }",
+      "Array#select!" => "p = Array.new(n, \"a\")\np << nil\np.select! { |e| e }\np.each { |s| s.upcase }",
+      "Array#pop" => "p = %w[b a]\np.sort!\np << nil\np.pop\np.each { |s| s.upcase }",
+      "Hash#delete" => "h = { ENV[\"A\"].to_s => \"x\" }\nh[\"k\"] = nil\n" \
+                       "h.delete(\"k\")\nh.each_value { |v| v.upcase }",
+      "Hash#reject!" => "h = { a: \"x\" }\nh.delete(:zz)\nh[:k] = nil\nh.reject! { |_, v| v.nil? }\n" \
+                        "h.each_value { |v| v.upcase }",
+      "Hash#compact!" => "h = { ENV[\"A\"].to_s => \"x\" }\nh[\"k\"] = nil\nh.compact!\nh.each_value { |v| v.upcase }",
+      "Set#delete" => "s = Set[\"a\"]\ns << nil\ns.delete(nil)\ns.each { |v| v.upcase }"
+    }.each do |remover, body|
+      it "floors a grown synthesised carrier under #{remover}" do
+        expect(rules("n = gets.to_i\n#{body}\n", "call.")).to be_empty
+      end
+    end
+
+    it "keeps a remover with no prior store on today's answer, and drops the fact after a floored remover" do
+      expect(dumped_types(<<~RUBY)).to eq(["Array[String]", "Array[1 | 2]", "Array[Dynamic[top] | Integer | String]"])
+        n = gets.to_i
+        a = Array.new(n, "a")
+        a.compact!
+        dump_type(a)
+        b = [1, 2]
+        b.sort!
+        b.delete(1)
+        dump_type(b)
+        c = Array.new(n, "a")
+        c << nil
+        c.compact!
+        c << 1
+        dump_type(c)
+      RUBY
+    end
+
+    # Review round 1 — a store through another holder of the object is one the seam never sees, so a local that may
+    # escape anywhere in its body carries no fact and answers as a carrier without one.
+    {
+      "an alias" => "b = a\nb << \"s\"",
+      "a tap block" => "a.tap { |arr| arr << \"s\" }",
+      "itself" => "x = a.itself\nx << \"s\"",
+      "an array element" => "[a].each { |y| y << \"s\" }",
+      "a hash value" => "h = { k: a }\nh[:k] << \"s\"",
+      "an instance variable" => "@a = a\n@a << \"s\"",
+      "public_send" => "a.public_send(:<<, \"s\")",
+      "send" => "a.send(:push, \"s\")",
+      "a method object" => "a.method(:<<).call(\"s\")",
+      "instance_exec" => "a.instance_exec { self << \"s\" }",
+      "binding" => "binding.local_variable_set(:a, [\"s\"])",
+      "eval" => "eval(\"a << 's'\")",
+      "a lambda" => "pr = -> { a << \"s\"; nil }\npr.call",
+      "a chained <<" => "a << :y << \"s\"",
+      "a chained push" => "a.push(:y).push(\"s\")",
+      "a chained rewrite" => "a.unshift(:y).map!(&:to_s)",
+      "a chained tap" => "a.push(:y).tap { |z| z << \"s\" }",
+      "a storing argument" => "list = []\nlist << a\nlist.last << \"s\""
+    }.each do |escape, body|
+      it "gives no fact to a local that escapes through #{escape}" do
+        dumped = dumped_types("n = gets.to_i\na = Array.new(n, 0)\na << :x\n#{body}\ndump_type(a)\n")
+        expect(dumped.last).to include("Dynamic[top]")
+      end
+    end
+
+    it "gives no fact through a chained write, and keeps it for a plain statement-position store" do
+      expect(dumped_types(<<~RUBY)).to eq(["Array[Dynamic[top] | Integer]", "Array[Integer | String]"])
+        n = gets.to_i
+        a = b = Array.new(n, 0)
+        b << "s"
+        dump_type(b)
+        c = Array.new(n, 0)
+        c << "s"
+        dump_type(c)
+      RUBY
+    end
+
+    it "floors a local a user method mutates through its argument, as before" do
+      dumped = dumped_types(<<~RUBY)
+        def add_label(arr) = arr << "label"
+        n = gets.to_i
+        a = Array.new(n, 0)
+        a << :x
+        add_label(a)
+        dump_type(a)
+      RUBY
+      expect(dumped.last).to include("Dynamic[top]")
+    end
+
+    it "joins a store into a merged union of synthesised hashes, and drops a slot write's value pin" do
+      merged = "Hash[String, Integer | String] | Hash[String, String | Symbol]"
+      expect(dumped_types(<<~RUBY)).to eq([merged, "Array[Integer]"])
+        if gets
+          h = { ENV["A"].to_s => 1 }
+        else
+          h = { ENV["B"].to_s => :x }
+        end
+        h["k"] = "v"
+        dump_type(h)
+        a = [1, 2]
+        a.sort!
+        a[0] = 5
+        dump_type(a)
+      RUBY
+    end
+
     # Issue #2534 — the Set floor came off, so a member read reports what the member class does not answer. A
     # union of two classes stays silent by the diagnostic policy, so the true positive needs a same-class store.
     it "reports a Set member read once the synthesised Set grows without a floor" do

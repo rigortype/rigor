@@ -15,6 +15,9 @@ module Rigor
       # `$_` (issue #1359), whose frame-wide answers ({#last_line_closure?}, {#last_line_fallback?}) are kept here
       # too, asked only while `$_` is narrowed.
       class Frame
+        # The body the frame runs, which issue #2555's escape scan reads ({ConstructionEscape.escaped?}).
+        attr_reader :body
+
         # The nodes that bind a local in a body: the writes, and a block's, lambda's, `rescue`'s or pattern's own
         # parameters and targets.
         LOCAL_BINDINGS = Set[

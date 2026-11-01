@@ -221,6 +221,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     with_struct_fold_safe(req:locals)
     without_constant_narrowing(req:key)
     without_constant_narrowings_named(req:name)
+    without_construction_facts(req:name)
     without_indexed_narrowing(req:receiver_kind,req:receiver_name,req:key)
     without_indexed_narrowings_for(req:receiver_kind,req:receiver_name)
     without_inferred_param_mark(req:name)

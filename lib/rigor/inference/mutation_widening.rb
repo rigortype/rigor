@@ -307,11 +307,28 @@ module Rigor
 
         name = ReceiverAlias.read_name(read)
         current = scope.public_send(getter, name)
-        widened = widen_for_mutator(current, method_name, values:, arg_types:, unread_arguments:, rewritten_element:,
-                                                          synthesised: synthesised_binding?(scope, getter, name))
-        return scope if widened.nil?
+        synthesised = synthesised_binding?(scope, getter, name)
+        if synthesised && MutationRejoin.floors_grown_carrier?(scope, name, method_name)
+          return floor_grown_carrier(scope, builder, name, current, method_name, getter)
+        end
 
-        MutationRejoin.rebind(scope, builder, name, widened, pre_state: current, kind: getter)
+        widened = widen_for_mutator(current, method_name, values:, arg_types:, unread_arguments:, rewritten_element:,
+                                                          synthesised:)
+        scope = MutationRejoin.rebind(scope, builder, name, widened, pre_state: current, kind: getter) if widened
+        return scope unless synthesised && MutationRejoin.content_adder?(method_name)
+
+        MutationRejoin.grew_unfloored?(current, widened) ? scope.with_construction_fact(name, :grown) : scope
+      end
+
+      # Issue #2555 — a remover or filter on a synthesised carrier a store has grown. Nothing narrows the carrier back,
+      # so the stored arm would outlive the values the call removes (`parts << nil; parts.compact!`); the carrier takes
+      # the `Dynamic[top]` floor it would have carried without the fact, and the binding drops its facts, so it answers
+      # as a carrier without them from here on.
+      def floor_grown_carrier(scope, builder, name, current, method_name, getter)
+        floored = MutationRejoin.floor_parameters(current)
+        floored = widen_for_mutator(floored, method_name) || floored
+        MutationRejoin.rebind(scope, builder, name, floored, pre_state: current, kind: getter)
+                      .without_construction_facts(name)
       end
 
       # Mutators that can land a NEW value in an EXISTING slot, falsifying that slot's value pinning

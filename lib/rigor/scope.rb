@@ -322,6 +322,8 @@ module Rigor
       @plugin_typed_calls.key?(node)
     end
 
+    # Every keyword past the 31st takes CRuby's allocating unspecified-keywords path when omitted with a non-literal
+    # default; see the note at {#rebuild} before adding a field.
     def initialize( # rubocop:disable Metrics/AbcSize, Metrics/MethodLength -- one keyword and assignment per field
       environment:, locals:,
       fact_store: Analysis::FactStore.empty,
@@ -448,7 +450,9 @@ module Rigor
     # are kept by {#with_mutated_local} (the binding still names the same object), dropped by {#with_local} (a
     # source-level rebind names a new one), intersected at a merge, and reset with the locals at a method body's
     # entry. No fact is copied by an alias write (`b = a`): the type is shared, the provenance is not tracked
-    # through a second name (issue #2335).
+    # through a second name (issue #2335), and a local that may escape anywhere in its body is never stamped
+    # ({Inference::ConstructionEscape}). Within an entry `:synthesised` intersects at a merge and `:grown` (a store
+    # has grown the carrier since construction) unions.
     CONSTRUCTION_FACT_SETS = Ractor.make_shareable({ synthesised: Set[:synthesised] })
     NO_CONSTRUCTION_FACTS = Set.new.freeze
     private_constant :CONSTRUCTION_FACT_SETS, :NO_CONSTRUCTION_FACTS
@@ -466,6 +470,12 @@ module Rigor
 
       facts = existing ? (existing | [fact]).freeze : (CONSTRUCTION_FACT_SETS[fact] || Set[fact].freeze)
       rebuild(@construction_facts.merge(key => facts).freeze)
+    end
+
+    # Issue #2555 — drops every fact the local `name` carries: its binding answers as an unmarked one from here on.
+    def without_construction_facts(name)
+      table = drop_origin(@construction_facts, name)
+      table.equal?(@construction_facts) ? self : rebuild(table)
     end
 
     # ADR-82 WD1 — the propagated origin of the `Dynamic` value currently bound to a local / instance
@@ -2277,9 +2287,13 @@ module Rigor
         @bot_guard_classes == other.bot_guard_classes
     end
 
-    # `construction_facts` is the one positional parameter: a 32nd optional keyword would cross CRuby's
-    # `KW_SPECIFIED_BITS_MAX` (31), past which every keyword call allocates its unspecified-keywords record —
-    # measured at about 1% of an analysis's allocations, since every scope transition calls this.
+    # `construction_facts` is the one positional parameter. CRuby records which keywords a call left out in a bit
+    # field indexed by each keyword's position among ALL the method's keywords, required and optional
+    # (`VM_KW_SPECIFIED_BITS_MAX`, 31); a keyword past that index whose default is not a literal makes every call that
+    # omits it allocate the record instead. A 32nd keyword here did that on every scope transition, about 1% of an
+    # analysis's allocations (issue #2555). `#initialize` is already past the index: `bot_guard_classes` and
+    # `declared_refinements` take the allocating path whenever a caller omits them. The next Scope field crosses it in
+    # this method again, so it needs a positional slot or a restructuring, not a 32nd keyword.
     def rebuild(
       construction_facts = @construction_facts,
       locals: @locals, fact_store: @fact_store, self_type: @self_type,
@@ -2535,10 +2549,18 @@ module Rigor
         their_facts = theirs[name]
         next if their_facts.nil?
 
-        common = facts == their_facts ? facts : (facts & their_facts).freeze
+        common = facts == their_facts ? facts : join_fact_sets(facts, their_facts)
         joined[name] = common unless common.empty?
       end
       joined.empty? ? EMPTY_ORIGINS : joined.freeze
+    end
+
+    # `:grown` joins by UNION among the names both arms keep: a store on either arm may reach the carrier, and the
+    # fact only ever floors it ({Inference::MutationRejoin.floors_grown_carrier?}). Every other fact intersects.
+    def join_fact_sets(facts, their_facts)
+      common = facts & their_facts
+      common << :grown if facts.include?(:grown) || their_facts.include?(:grown)
+      common.freeze
     end
 
     # ADR-82 WD1 — rebinding drops any propagated origin for the name (the new value's provenance is set

@@ -27,6 +27,7 @@ require_relative "../analysis/check_rules/published_constant_guard"
 require_relative "struct_fold_safety"
 require_relative "closure_escape_analyzer"
 require_relative "content_join"
+require_relative "construction_escape"
 require_relative "define_method_block_self"
 require_relative "macro_block_self_type"
 require_relative "global_writer_reach"
@@ -1170,7 +1171,7 @@ module Rigor
       def eval_local_write(node)
         rhs_type, post_rhs = sub_eval(node.value, scope)
         bound = bind_local_write(node, rhs_type, post_rhs)
-        bound = bound.with_construction_fact(node.name, :synthesised) if synthesised_construction?(node.value, rhs_type)
+        bound = bound.with_construction_fact(node.name, :synthesised) if synthesised_write?(node, rhs_type)
         # Issue #667 — `m = AppConfig::MODE` makes `m` a copy of a constant the reader's file does not
         # declare, so `m == :production` folding to `true` is the project's configuration and not a logic
         # error the author can see. Stamped LAST, across every binding path above: an RHS can be both an
@@ -1186,6 +1187,14 @@ module Rigor
       # `{...}`), or a constructor call on the core class (`Array.new(n, 0)`, `Hash.new(0)`, `Set.new(xs)`,
       # `Set[1]`) whose value is a carrier of that class. Nothing else is stamped: not a copy of another binding
       # (`b = a`), a call whose return a signature declares, a parameter, or an instance variable.
+      # The fact is withheld from a local that may escape anywhere in the body ({ConstructionEscape}): a store through
+      # another holder of the object is one no seam sees, and the fact would leave the carrier without the floor that
+      # covered it.
+      def synthesised_write?(node, rhs_type)
+        synthesised_construction?(node.value, rhs_type) &&
+          !ConstructionEscape.escaped?(scope.match_frame&.body, node.name, constructed_carrier_class(rhs_type))
+      end
+
       def synthesised_construction?(value_node, rhs_type)
         case value_node
         when Prism::ArrayNode, Prism::HashNode then true

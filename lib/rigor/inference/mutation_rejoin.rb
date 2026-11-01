@@ -156,9 +156,10 @@ module Rigor
       #   nothing.
       #
       # The floor the ordinary re-join adds exists because a carrier it closed could not re-grow; this one stays
-      # re-growable for as long as the binding keeps the fact, so every later store is seen. What it does not see is
-      # a remover taking a store out again: `a << 1; a.pop` leaves the `Integer` arm, the carrier's honest "may
-      # hold" summary.
+      # re-growable while the binding keeps the fact, so every later store made THROUGH THE BINDING is seen. A store
+      # through another holder is not, which is why a local that may escape anywhere in its body never carries the
+      # fact ({ConstructionEscape}). Nor is a remover taking a store out again, which is why a remover on a carrier a
+      # store has grown restores the floor and drops the fact ({MutationWidening.floor_grown_carrier}).
       def widen_synthesised(nominal, method_name, values:, arg_types:)
         pre_state = values == :widen ? value_pin_widened_args(nominal) : nominal
         rejoined =
@@ -173,6 +174,66 @@ module Rigor
             synthesised_hash_join(RewriteMutation.arm(pre_state, method_name), method_name, arg_types)
           end
         rejoined == nominal ? nil : rejoined
+      end
+
+      # Issue #2555 — the removers and filters of an Array, a Hash or a Set: each can take a stored member out again,
+      # which nothing narrows the carrier back from.
+      SYNTHESISED_REMOVERS = %i[
+        pop shift slice! delete delete? delete_at delete_if reject! select! filter! keep_if compact! clear subtract
+      ].to_set.freeze
+
+      # The adders whose store marks a synthesised binding `:grown`.
+      def content_adder?(method_name)
+        ContentJoin::CONTENT_ADDERS.include?(method_name) || SetMutation::CONTENT_ADDERS.include?(method_name)
+      end
+
+      # Whether a store turned `current` into `widened` by changing an Array / Hash / Set parameter that carried no
+      # `Dynamic` arm before it: a member joined where no floor covered it, which a later remover could leave stale.
+      # A store the parameter already held, or one that joined beside an earlier floor (`Hash.new(0)`'s key side),
+      # grows nothing.
+      def grew_unfloored?(current, widened)
+        return false if widened.nil?
+
+        before = ContentJoin.union_members(current)
+        ContentJoin.union_members(widened).any? do |member|
+          next false unless member.is_a?(Type::Nominal) && %w[Array Hash Set].include?(member.class_name)
+
+          prior = before.find { |b| same_carrier?(b, member) }
+          member.type_args.each_with_index.any? do |arg, i|
+            prior.nil? || (!gradual_parameter?(prior.type_args[i]) && prior.type_args[i] != arg)
+          end
+        end
+      end
+
+      def same_carrier?(type, nominal)
+        type.is_a?(Type::Nominal) && type.class_name == nominal.class_name &&
+          type.type_args.size == nominal.type_args.size
+      end
+
+      # Whether `method_name` on the synthesised local `name` takes the floor: a remover on a carrier a store grew.
+      def floors_grown_carrier?(scope, name, method_name)
+        SYNTHESISED_REMOVERS.include?(method_name) && scope.construction_fact?(name, :grown)
+      end
+
+      # `type` with every Array / Hash / Set parameter joined with `Dynamic[top]` and its `nil` member dropped,
+      # member-wise through a union: the reading the carrier would have had without the fact, where a stored member the
+      # seed did not accept joined as the floor alone ({#precise_admitted}). A `nil` kept beside the floor would still
+      # draw `call.possible-nil-receiver` after `parts << nil; parts.compact!`; any other kept member dispatches quietly
+      # beside it.
+      def floor_parameters(type)
+        case type
+        when Type::Union then Type::Combinator.union(*type.members.map { |member| floor_parameters(member) })
+        when Type::Nominal
+          return type unless %w[Array Hash Set].include?(type.class_name) && !type.type_args.empty?
+
+          Type::Combinator.nominal_of(type.class_name, type_args: type.type_args.map { |arg| floored_parameter(arg) })
+        else type
+        end
+      end
+
+      def floored_parameter(arg)
+        kept = ContentJoin.union_members(arg).reject { |member| member.is_a?(Type::Constant) && member.value.nil? }
+        Type::Combinator.union(*kept, Type::Combinator.untyped)
       end
 
       def synthesised_array_join(carrier, method_name, arg_types)

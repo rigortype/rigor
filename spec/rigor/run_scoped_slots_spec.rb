@@ -249,18 +249,20 @@ RSpec.describe Rigor::RunScopedSlots do
     constants
   end
 
-  # The one alias `lib/` may name: `release` in the registry itself, which empties the slots through it.
-  def alias_allowlist = { "lib/rigor/run_scoped_slots.rb" => %w[thread] }
+  # The one assignment `lib/` may make of `Thread.current`: the `thread = Thread.current` that `release` empties the
+  # slots through. It is allowed only as the file's sole such assignment, and only inside `def release`.
+  def alias_allowlist = { "lib/rigor/run_scoped_slots.rb" => { line: "thread = Thread.current", in_def: "release" } }
 
   # #2572: the access shapes are `Thread.current[`, `thread_variable_get` / `_set` with or without parentheses, and
   # `fetch` / `key?` / `store` on the thread. A key is a symbol or a constant of this file; a dynamic key (a local
   # variable) is skipped, and the constants it is read from are scanned. Anything else is unresolved: a quoted or
   # top-level key, a namespaced constant (never resolved to this file's own), and an access the scan cannot name.
   def scan_thread_accesses(source, path, keys, unresolved, constants)
-    direct, dynamic = scan_thread_key_reads(source, path, keys, unresolved, constants)
-    scan_fiber_reads(source, path, unresolved)
-    scan_alias_assignments(source, path, unresolved)
-    scan_unread_key_constants(source, path, unresolved, constants, direct) if dynamic
+    code = source.gsub(/[ \t]#(?!\{).*$/, "") # a trailing comment names keys in prose; dropping it keeps line numbers
+    direct, dynamic = scan_thread_key_reads(code, path, keys, unresolved, constants)
+    scan_fiber_reads(code, path, unresolved)
+    scan_alias_assignments(code, path, unresolved)
+    scan_unread_key_constants(code, path, unresolved, constants, direct) if dynamic
   end
 
   def thread_key_read
@@ -300,6 +302,8 @@ RSpec.describe Rigor::RunScopedSlots do
     constant ? constant[1] : arg
   end
 
+  # A `Fiber[...]` access always fails, whatever its key, until it gets its own allowlist entry. That is the intended
+  # fail-closed rule: fiber storage is not a thread key this registry releases.
   def scan_fiber_reads(source, path, unresolved)
     source.scan(/Fiber(?:\.current)?\[([^\]\n]*)/) do
       match = Regexp.last_match
@@ -307,24 +311,46 @@ RSpec.describe Rigor::RunScopedSlots do
     end
   end
 
+  # Any assignment of `Thread.current` to a name, in any form: `t = Thread.current; t[:k]`, `(t = Thread.current)[:k]`,
+  # `@t = Thread.current`, `def t = Thread.current`, a modifier `if`. An access through the thread is read by the scans
+  # above, so the assignment is reported whatever follows it.
   def scan_alias_assignments(source, path, unresolved)
-    source.scan(/^[ \t]*([a-z_]\w*)[ \t]*=[ \t]*Thread\.current[ \t]*(?:#.*)?$/) do
-      match = Regexp.last_match
-      next if alias_allowlist.any? { |file, names| path.end_with?(file) && names.include?(match[1]) }
+    offsets = []
+    source.scan(/=[ \t]*Thread\.current\b(?![\[.])/) { offsets << Regexp.last_match.begin(0) }
+    offsets.each do |offset|
+      next if alias_allowed?(source, path, offset, offsets.size)
 
-      unresolved << "#{path}:#{line_at(source, match.begin(0))} alias #{match[1]} = Thread.current"
+      unresolved << "#{path}:#{line_at(source, offset)} Thread.current alias"
     end
   end
 
+  def alias_allowed?(source, path, offset, count)
+    alias_allowlist.any? do |file, rule|
+      path.end_with?(file) && count == 1 && line_text(source, offset).strip == rule[:line] &&
+        source[0...offset].scan(/^[ \t]*def (?:self\.)?(\w+)/).last&.first == rule[:in_def]
+    end
+  end
+
+  def line_text(source, offset)
+    start = (source.rindex("\n", offset) || -1) + 1
+    source[start...(source.index("\n", offset) || source.length)]
+  end
+
   # A `*_KEY` constant without a `rigor` symbol is a key only where the file reads it directly. In a file that reads a
-  # key through a local variable, one it does not read directly is read through that variable, so it is unresolved.
+  # key through a local variable, one it does not read directly is read through that variable, so it is unresolved,
+  # unless {declared_hash_key_constants} declares it as something other than a thread key.
   def scan_unread_key_constants(source, path, unresolved, constants, direct)
     constants.each do |name, symbol|
       next unless name.end_with?("_KEY") && !symbol.include?("rigor") && !direct.include?(name)
+      next if declared_hash_key_constants.key?(name)
 
       unresolved << "#{path}:#{line_at(source, source.index(/^[ \t]*#{name} = /))} #{name}"
     end
   end
+
+  # The `*_KEY` constants a file uses for something other than a thread key, such as a Hash key, each with why. The
+  # sibling of {not_run_scoped}: a name listed here is not reported as read through a variable. Empty today.
+  def declared_hash_key_constants = {}
 
   def line_at(source, offset) = source[0...offset].count("\n") + 1
 
@@ -386,7 +412,7 @@ RSpec.describe Rigor::RunScopedSlots do
     expect(keys.keys).to contain_exactly(:__shape_bare_probe__, :__shape_fetch_probe__, :__shape_key_probe__,
                                          :__shape_store_probe__)
     expect(unresolved).to contain_exactly("fixture.rb:5 Fiber[:__shape_fiber_probe__]",
-                                          "fixture.rb:7 alias thread = Thread.current")
+                                          "fixture.rb:7 Thread.current alias")
   end
 
   # #2572 class 2: a key literal outside the symbol token class is unresolved, never dropped.
@@ -432,6 +458,98 @@ RSpec.describe Rigor::RunScopedSlots do
 
     expect(keys.keys).to eq([:rigor_own_probe])
     expect(unresolved).to eq(["fixture.rb:2 OWN_KEY", "fixture.rb:3 Mixed_Probe_KEY"])
+  end
+
+  # #2572 class 1, the alias: an assignment of `Thread.current` is reported in any form, not only at end of line.
+  it "reports a Thread.current assignment in every form, not only a whole line" do
+    keys = {}
+    unresolved = []
+    scan_thread_keys(<<~RUBY, "fixture.rb", keys, unresolved)
+      def semi
+        t = Thread.current; t[:__semi_probe__]
+      end
+      def paren = (u = Thread.current)[:__paren_probe__]
+      @ivar = Thread.current
+      def thread = Thread.current
+      def modified
+        v = Thread.current if ready?
+      end
+    RUBY
+
+    expect(keys).to be_empty
+    expect(unresolved).to contain_exactly("fixture.rb:2 Thread.current alias", "fixture.rb:4 Thread.current alias",
+                                          "fixture.rb:5 Thread.current alias", "fixture.rb:6 Thread.current alias",
+                                          "fixture.rb:8 Thread.current alias")
+  end
+
+  # #2572 class 3's escape hatch: a `*_KEY` constant the file declares as something other than a thread key is not
+  # reported, and nothing else in the file is excused by it.
+  it "accepts a *_KEY constant that is declared as something other than a thread key" do
+    allow(self).to receive(:declared_hash_key_constants).and_return("A_PROBE_KEY" => "a Hash key, not a thread key")
+    keys = {}
+    unresolved = []
+    scan_thread_keys(<<~RUBY, "fixture.rb", keys, unresolved)
+      A_PROBE_KEY = :__void_probe_a__
+      B_PROBE_KEY = :__void_probe_b__
+      def sweep = [A_PROBE_KEY, B_PROBE_KEY].each { |k| Thread.current[k] }
+    RUBY
+
+    expect(unresolved).to eq(["fixture.rb:2 B_PROBE_KEY"])
+  end
+
+  # #2572: the registry's one allowed alias is pinned to `thread = Thread.current` inside `def self.release`, and
+  # nothing else in the registry is excused by the allowlist.
+  def registry_aliases(source)
+    keys = {}
+    unresolved = []
+    scan_thread_keys(source, "lib/rigor/run_scoped_slots.rb", keys, unresolved)
+    unresolved
+  end
+
+  it "allows the registry's alias only as the assignment inside release" do
+    expect(registry_aliases(<<~RUBY)).to be_empty
+      def self.release
+        thread = Thread.current
+        thread[:x] = nil
+      end
+    RUBY
+    expect(registry_aliases(<<~RUBY)).to eq(["lib/rigor/run_scoped_slots.rb:2 Thread.current alias"])
+      def self.release
+        other = Thread.current
+        other[:x] = nil
+      end
+    RUBY
+    expect(registry_aliases(<<~RUBY)).to eq(["lib/rigor/run_scoped_slots.rb:2 Thread.current alias"])
+      def self.other
+        thread = Thread.current
+      end
+    RUBY
+  end
+
+  it "reports every alias in the registry when there is more than one" do
+    both = <<~RUBY
+      def self.release
+        thread = Thread.current
+      end
+      def self.other
+        thread = Thread.current
+      end
+    RUBY
+
+    expect(registry_aliases(both)).to eq(["lib/rigor/run_scoped_slots.rb:2 Thread.current alias",
+                                          "lib/rigor/run_scoped_slots.rb:5 Thread.current alias"])
+  end
+
+  # #2572 nit: a trailing comment names no access, so an access it spells out is not read.
+  it "does not read a per-thread access that only a trailing comment spells out" do
+    keys = {}
+    unresolved = []
+    scan_thread_keys(<<~RUBY, "fixture.rb", keys, unresolved)
+      def probe = 1 # Thread.current[:__commented_probe__]
+    RUBY
+
+    expect(keys).to be_empty
+    expect(unresolved).to be_empty
   end
 
   it "registers a key once and hands it back" do

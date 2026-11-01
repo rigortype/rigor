@@ -427,6 +427,26 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
       RUBY
     end
 
+    # The straight-line seam types a store's arguments only for a receiver it will join into, so a precise Hash
+    # counts as one when its binding carries the fact.
+    it "joins a stored pair into a Hash literal built as a nominal" do
+      expect(dumped_types(<<~RUBY)).to eq(["Hash[String, Integer | String]"])
+        h = { ENV["A"].to_s => 1 }
+        h["k"] = "v"
+        dump_type(h)
+      RUBY
+    end
+
+    # A constructor-shaped call on anything but the core class is a declared return, not a construction.
+    it "gives no fact to a `[]` whose receiver is not the core class" do
+      sig = { "maker.rbs" => "module Maker\n  def self.[]: () -> Array[Integer]\nend\n" }
+      source = "module Maker\n  def self.[] = [1]\nend\na = Maker[]\na << \"s\"\ndump_type(a)\n"
+      dumped = diagnostics(source, sig: sig).filter_map do |diagnostic|
+        diagnostic.message.delete_prefix("dump_type: ") if diagnostic.message.start_with?("dump_type")
+      end
+      expect(dumped).to eq(["Array[Dynamic[top] | Integer]"])
+    end
+
     # The #561 boundary on a declared carrier: a foreign store joins as the floor, so the declared return accepts it.
     it "keeps a declared carrier's foreign store behind the floor, and the declared return accepting it" do
       expect(return_rules("t = helper\nt << [:static, \"x\"]\nt\n", "Array[:multi]")).to be_empty

@@ -50,7 +50,7 @@ RSpec.describe "a reused pool-mode Runner reports each run as a fresh Runner wou
 
   after { Rigor::Plugin.unregister! }
 
-  def runner_for(dir, workers:, record_dependencies: false, effects: false)
+  def runner_for(dir, workers:, record_dependencies: false, effects: false, cache: false)
     settings = { "paths" => [dir], "plugins" => ["rigor-pool-run-reset-probe"] }
     settings["effects"] = {} if effects
     configuration = Rigor::Configuration.new(settings)
@@ -59,7 +59,8 @@ RSpec.describe "a reused pool-mode Runner reports each run as a fresh Runner wou
       true
     end
     Rigor::Analysis::Runner.new(
-      configuration: configuration, cache_store: nil, plugin_requirer: requirer, workers: workers,
+      configuration: configuration, workers: workers,
+      cache_store: (cache ? Rigor::Cache::Store.new(root: File.join(dir, ".rigor")) : nil), plugin_requirer: requirer,
       record_dependencies: record_dependencies
     )
   end
@@ -134,6 +135,23 @@ RSpec.describe "a reused pool-mode Runner reports each run as a fresh Runner wou
         expect(runner.effect_collections_by_path.size).to eq(1)
       end
     end
+
+it "does not hand a later analysing run the collections of an earlier run served from the effect cache" do
+  Dir.mktmpdir do |dir|
+    files = write_files(dir)
+    runner = runner_for(dir, workers: 0, effects: true, cache: true)
+    guarded_run(runner, files.values, allow_plugin_crash: true)
+    guarded_run(runner, files.values, allow_plugin_crash: true)
+    expect(runner.effects_served_from_cache?).to be(true)
+
+    guarded_run(runner, [files["trigger"]], allow_plugin_crash: true)
+    fresh = runner_for(dir, workers: 0, effects: true, cache: true)
+    guarded_run(fresh, [files["trigger"]], allow_plugin_crash: true)
+
+    expect(runner.effects_served_from_cache?).to be(false)
+    expect(runner.effect_collections_by_path.keys).to eq(fresh.effect_collections_by_path.keys)
+  end
+end
 
     it "does not re-emit a run-scoped disclosure from a file the second run no longer analyses" do
       Dir.mktmpdir do |dir|

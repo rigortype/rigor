@@ -105,8 +105,7 @@ module Rigor
         node = scope.singleton_def_for(owner, method_name)
         return nil if node.nil?
 
-        nesting = scope.discovery.discovered_def_nestings[node] || DefNodeResolver.rehydrated_nesting(node)
-        nesting&.first
+        scope.discovery.recorded_def_nesting(node)&.first
       end
 
       # Issue #1722 — the hook-capable test for one chain entry, asked by `call.undefined-method` of a project module

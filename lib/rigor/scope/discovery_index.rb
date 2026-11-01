@@ -526,6 +526,15 @@ module Rigor
         recorded == kind || (!recorded.nil? && recorded == METHOD_KIND_BOTH)
       end
 
+      # Issue #681 / #707 — the `Module.nesting` the declaration walk recorded for `def_node`, or nil when it recorded
+      # none: {#discovered_def_nestings} first, then its rehydration for a def served from an ADR-85 seed bundle, whose
+      # node {Inference::DefNodeResolver} mints from its own parse ({Inference::DefNodeResolver.rehydrated_nesting}).
+      # The one reader of the table outside its owners; `ExpressionTyper#recorded_def_nesting` says why the order is
+      # safe.
+      def recorded_def_nesting(def_node)
+        discovered_def_nestings[def_node] || Inference::DefNodeResolver.rehydrated_nesting(def_node)
+      end
+
       # ADR-119 WD1 — whether `path` (`[class, name]`, or `[class, [kind, name]]` for an envelope) is a contested
       # entry of `member`, one of the single-valued members {SIBLINGS} pairs. Internal to the candidate-set read.
       def contested?(member, path)

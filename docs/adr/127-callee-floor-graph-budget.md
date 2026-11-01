@@ -138,7 +138,7 @@ which may vary with order, while the floor itself does not.
   (`b48ed7393`); K = 48 would roughly meet it, at the price of floored walks rising to about 276.
 - **Carry-over:** the cross-file edges memo (rejected above) once the audit mode exists. #2521 after
   #2522 and instance-side ancestor self-calls. A separate decision on whether an inherited def that
-  only reads keeps the literal (the pinned reading in `approval-queue.d/callee-floor-inherited-no-walk.md`).
+  only reads keeps the literal (now walked; see `approval-queue.d/callee-floor-lexical-owner.md`).
 
 ## Relationship to other ADRs
 

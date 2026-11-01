@@ -113,6 +113,7 @@ RSpec.describe "the callee floor follows instance receivers, chained hand-offs a
       expect(rules(program(base, in_block("Opts.add_format(opts, options)")))).to eq([])
     end
 
+    # Flip when #2521 is lifted, after the own-def census covers its blind spots (#2336).
     it "floors even when the inherited method only reads (the inherited def is not walked)" do
       defs = "class Base\n  def self.add_format(parser, options) = #{reader}\nend\nclass Opts < Base\nend"
       expect(rules(program(defs, in_block("Opts.add_format(opts, options)")))).to eq([])

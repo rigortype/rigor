@@ -137,8 +137,6 @@ members:
   discovered_def_nestings:
     reads:
     - lib/rigor/analysis/runner.rb
-    - lib/rigor/inference/expression_typer.rb
-    - lib/rigor/inference/singleton_hook_decline.rb
     copies:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/project_seed_tables.rb

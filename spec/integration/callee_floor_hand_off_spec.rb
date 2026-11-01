@@ -145,6 +145,7 @@ RSpec.describe "a hand-off inside a callee resolves its constants in the callee'
       Rigor::Inference::BudgetTrace.disable!
     end
 
+    # Flip when #2521 is lifted, after the own-def census covers its blind spots (#2336).
     it "floors without walking when neither Helper writes (the inherited def is not read)" do
       pure = library.sub('parser.on("--f") { |v| options[:format] = v }', "puts(options.to_s)")
       source = "#{pure}\n#{sub(true)}\n#{caller_of('CallsLeaf', 'Sub.leaf(opts, options)')}"

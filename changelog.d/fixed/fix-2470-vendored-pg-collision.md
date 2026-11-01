@@ -1,0 +1,4 @@
+- **[rbs]** A method that a project's `sig/`, an `rbs collection` entry or a gem's `sig/` declares on a class Rigor's vendored gem signatures also declare now binds from that source instead of failing the class's definition build. ([#2600](https://github.com/rigortype/rigor/pull/2600))
+  - The activerecord 8.1 collection's `PG::Connection#async_exec` collided with the vendored `pg` alias, so every call into `PG::Connection` read `Dynamic[top]`.
+  - A cache-enabled run printed `RBS definition build failed for PG::Connection` even when the program never used the class, because the cache path builds every class's definition; with `--no-cache` the warning appeared only when the program called into `PG::Connection`.
+  - A collection's overload continuation (`def m: ... | ...`) still composes onto the vendored method.

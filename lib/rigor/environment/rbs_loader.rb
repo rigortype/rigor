@@ -11,6 +11,7 @@ require_relative "required_features"
 require_relative "gated_signature_guard"
 require_relative "gated_signature_plan"
 require_relative "deferred_signature_plan"
+require_relative "vendored_signature_plan"
 require_relative "ruby_library_roots"
 require_relative "core_root"
 require_relative "../rooted_glob"
@@ -198,8 +199,27 @@ module Rigor
         #
         # @param gated_plan — issue #1713 — a {GatedSignaturePlan} loaded in place of the gated directories: its
         #   kept declarations where the directories would have loaded, its shells after the project's signatures.
-        def build_env_attempt(libraries, signature_paths, virtual_rbs, deferred_signature_paths,
-                              project_signature_paths = [], gated_plan: nil)
+        #
+        # Issue #2470 — re-made without each {VendoredSignaturePlan} taker the attempt quarantined
+        # ({.quarantined_takers}), so a vendored member stands down only to a file the env keeps. Each round adds
+        # at least one file to the excluded set, and a round that adds none returns, so the loop ends.
+        def build_env_attempt(libraries, *inputs, gated_plan: nil)
+          excluded = Set.new
+          loop do
+            env, gated_dirs, plan = planned_env_attempt(libraries, *inputs, gated_plan: gated_plan,
+                                                                            vendored_excluded: excluded)
+            dropped = quarantined_takers(env, plan)
+            return [env, gated_dirs] if dropped.empty? || dropped.subset?(excluded)
+
+            excluded |= dropped
+          end
+        end
+
+        # One {.build_env_attempt} round, which also returns its {VendoredSignaturePlan}.
+        #
+        # @param vendored_excluded — signature files the vendored plan is made without.
+        def planned_env_attempt(libraries, signature_paths, virtual_rbs, deferred_signature_paths,
+                                project_signature_paths = [], gated_plan: nil, vendored_excluded: Set.new)
           libraries = libraries_without_shadowed_bigdecimal_math(libraries)
           rbs_loader, loaded_libraries = library_loader(libraries)
           gated_dirs = loadable_gated_dirs(libraries, loaded_libraries)
@@ -209,15 +229,16 @@ module Rigor
           # type-of query then degrades to `Dynamic[top]` — the "sig looks harmful" failure of the 2026-07-06
           # mastodon coverage note). Per-file loading quarantines the broken file instead. Vendored / core-overlay
           # sigs are Rigor-shipped and trusted, so they stay on the loader's fast batch path.
-          add_bundled_signatures(rbs_loader, loaded_libraries.to_set(&:to_s), gated_plan ? [] : gated_dirs)
-          env = unload_upstream_core_shims(RBS::Environment.from_loader(rbs_loader), rbs_loader)
-          gated_plan&.leading&.each { |source| add_parsed_decls(env, *source) }
           project_files = project_sig_files(signature_paths)
+          undeferred_files = project_files - project_sig_files(deferred_signature_paths)
+          env, vendored_plan = bundled_env(rbs_loader, loaded_libraries, gated_plan ? [] : gated_dirs,
+                                           undeferred_files, vendored_excluded)
+          gated_plan&.leading&.each { |source| add_parsed_decls(env, *source) }
           # Issue #1075 — decided from the inputs before either side enters `env`: the consistency rule may
           # stand the `.rbs` member down, and that has to happen before its file is added.
           # Issue #2422 — a bundled plugin's deferred files are not the project's: they never take part in the
           # inline-vs-`.rbs` consistency rule, and stand down to an inline member like to any other source.
-          consistency = member_consistency_for(project_files - project_sig_files(deferred_signature_paths), virtual_rbs)
+          consistency = member_consistency_for(undeferred_files, virtual_rbs)
           add_project_signatures(env, signature_paths, deferred_signature_paths,
                                  standdowns: consistency.signature_standdowns)
           gated_plan&.shells&.each { |source| add_parsed_decls(env, *source) }
@@ -237,7 +258,32 @@ module Rigor
           # Issue #777 — resolve-time backstop: also unload colliding PROJECT buffers (class-vs-module /
           # constant redeclarations against bundled RBS). Virtual culprits are preferred when both appear.
           env, resolved = resolve_quarantining_virtual_collisions(env, virtual_rbs, project_files: project_files)
-          [stub_missing_referenced_types(env, resolved, project_files), gated_dirs]
+          [stub_missing_referenced_types(env, resolved, project_files), gated_dirs, vendored_plan]
+        end
+
+        # Issue #2470 — the {VendoredSignaturePlan} takers `env` does not hold: a file the build quarantined after a
+        # vendored member stood down to it (a `DuplicatedDeclarationError`, a class-vs-module clash). The answer reads
+        # only the build's inputs, so a cold, a warm and a `--no-cache` run agree.
+        def quarantined_takers(env, plan)
+          return Set.new if plan.takers.empty? || env.nil?
+
+          buffers = loaded_signature_buffers(env)
+          return Set.new if buffers.nil?
+
+          present = buffers.to_set { |buffer| buffer.name.to_s }
+          plan.takers.reject { |file| present.include?(file) }.to_set
+        end
+
+        # The environment of the loader's libraries and the Rigor-shipped signatures. Issue #2470 — a vendored
+        # directory with a member a `signature_files` file also declares loads from its {VendoredSignaturePlan},
+        # right after the batch, instead of whole on it.
+        def bundled_env(rbs_loader, loaded_libraries, gated_dirs, signature_files, excluded)
+          loaded_library_names = loaded_libraries.to_set(&:to_s)
+          plan = vendored_signature_plan(loaded_library_names, signature_files, excluded)
+          add_bundled_signatures(rbs_loader, loaded_library_names, gated_dirs, planned: plan.dirs)
+          env = unload_upstream_core_shims(RBS::Environment.from_loader(rbs_loader), rbs_loader)
+          plan.sources.each { |source| add_parsed_decls(env, *source) }
+          [env, plan]
         end
 
         # Issue #2422 — {.add_deferred_signatures} over the plugins' files, with the buffer names of the project's
@@ -1516,8 +1562,12 @@ module Rigor
         #
         # @param loaded_library_names — libraries that actually resolved on this loader.
         # @param gated_dirs — the {RequiredFeatures}-gated directory basenames this library list activates.
-        def add_bundled_signatures(rbs_loader, loaded_library_names, gated_dirs = [])
+        #
+        # @param planned — issue #2470 — the {VendoredSignaturePlan} directories, which load from the plan instead.
+        def add_bundled_signatures(rbs_loader, loaded_library_names, gated_dirs = [], planned: [])
           vendored_gem_sig_paths.each do |path|
+            next if planned.include?(path)
+
             rbs_loader.add(path: path) if vendored_dir_loads?(path, loaded_library_names, gated_dirs)
           end
           core_overlay_sig_paths.each do |dir|
@@ -1531,6 +1581,18 @@ module Rigor
               rbs_loader.add(path: file)
             end
           end
+        end
+
+        # Issue #2470 — the ungated vendored directories this build loads, planned against the signature files
+        # that outrank them ({VendoredSignaturePlan}). The gated ones have their own plan (#1713).
+        #
+        # @param signature_files — the `signature_paths:` files a bundled plugin did not contribute: the project's
+        #   own, a collection's and a gem's. A plugin's files are planned against the env instead (#2422).
+        def vendored_signature_plan(loaded_library_names, signature_files, excluded = Set.new)
+          roots = vendored_gem_sig_paths.select do |path|
+            !RequiredFeatures.gated_dir?(path.basename.to_s) && vendored_dir_loads?(path, loaded_library_names, [])
+          end
+          VendoredSignaturePlan.build(roots, signature_files, excluded)
         end
 
         # Issue #1700 — the {RequiredFeatures}-gated directories `libraries` activates, less one whose feature

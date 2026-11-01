@@ -13,20 +13,22 @@ require "tmpdir"
 require "rigor/environment"
 
 RSpec.describe "rbs collection entries for the project's own path gems" do
-  COLLECTION_LOCK = <<~YAML
-    ---
-    path: ".gem_rbs_collection"
-    gems:
-    - name: mygem
-      version: '1.0'
-      source:
-        type: git
-        name: ruby/gem_rbs_collection
-        remote: https://github.com/ruby/gem_rbs_collection.git
-        revision: abc
-        repo_dir: gems
-    gemfile_lock_path: Gemfile.lock
-  YAML
+  let(:collection_lock) do
+    <<~YAML
+      ---
+      path: ".gem_rbs_collection"
+      gems:
+      - name: mygem
+        version: '1.0'
+        source:
+          type: git
+          name: ruby/gem_rbs_collection
+          remote: https://github.com/ruby/gem_rbs_collection.git
+          revision: abc
+          repo_dir: gems
+      gemfile_lock_path: Gemfile.lock
+    YAML
+  end
 
   # The project's `sig/` and the collection both declare `Mygem.deprecator`, with different returns so the one
   # that loaded is visible.
@@ -35,7 +37,7 @@ RSpec.describe "rbs collection entries for the project's own path gems" do
     File.write("sig/mygem.rbs", "module Mygem\n  def self.deprecator: () -> Integer\nend\n")
     FileUtils.mkdir_p(".gem_rbs_collection/mygem/1.0")
     File.write(".gem_rbs_collection/mygem/1.0/mygem.rbs", "module Mygem\n  def self.deprecator: () -> String\nend\n")
-    File.write("rbs_collection.lock.yaml", COLLECTION_LOCK)
+    File.write("rbs_collection.lock.yaml", collection_lock)
   end
 
   def write_path_lockfile(remote)
@@ -117,12 +119,15 @@ RSpec.describe "rbs collection entries for the project's own path gems" do
     expect(collection_loaded?(loader)).to be(true)
   end
 
+  # Guard (positive control): no line of the fix is what keeps it passing; it fails if the skip widens to every
+  # locked gem.
   it "keeps the collection entry of the same gem sourced from rubygems" do
     write_project
     write_gem_lockfile
     expect(collection_loaded?(loader)).to be(true)
   end
 
+  # Guard: behaviour without a lockfile is unchanged.
   it "keeps the collection entry when the project has no Gemfile.lock" do
     write_project
     expect(collection_loaded?(loader)).to be(true)

@@ -222,9 +222,9 @@ RSpec.describe Rigor::CLI::SigGenCommand do
       expect(rbs_validate).to eq([0, ""])
     end
 
-    it "repairs a file whose every proposal is already declared or untyped" do
+    it "repairs a file the run writes no member into" do
       write("sig/ext.rbs", "class Array\n  def second_or_nil: () -> 1\nend\n")
-      write("lib/ext.rb", "class Array\n  def second_or_nil = 1\n  def dunno(x) = x.foo\nend\n")
+      write("lib/ext.rb", "class Array\n  def dunno(x) = x.foo\nend\n")
 
       status, out, = sig_gen("--write", "lib")
 

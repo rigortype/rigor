@@ -410,13 +410,14 @@ module Rigor
         kinds = merged_namespace_kinds(candidates)
         shells = collect_class_shells(candidates)
         @type_params = merged_type_params(candidates)
-        repair_generic_headers(state)
         groups = candidates.group_by(&:class_name)
         # Ancestors first, so `Foo` is created (or found) before `Foo::Bar` looks for a parent to nest under.
         # A plain sort suffices: a name always sorts before every name it is a strict prefix of.
         groups.keys.sort.each { |name| merge_class(state, name, groups.fetch(name), kinds, supers) }
         merge_class_shells(state, shells, kinds, supers)
         collapse_nested_declarations(state, groups.keys + shells.to_a)
+        # Last, so the members this run merged count towards {#shadowed_by_parameter?}.
+        repair_generic_headers(state)
       end
 
       # Issue #2580 — a declaration this file already holds for a class the loaded RBS declares generic, opened
@@ -427,15 +428,40 @@ module Rigor
       # header gets the same spelling a new header would ({Generator#stamp_generic_reopenings}: plain
       # parameters only). A header that spells parameters of its own is the project's and is left alone, as is
       # every class the run's stamp does not name.
+      #
+      # A declaration whose body names a type like one of the parameters (`def old: () -> E` for a project class
+      # `E`) is left bare: under `class Array[unchecked out E]` that `E` would bind to the parameter, silently
+      # changing what the member says. The body is matched as text, so a comment or a nested declaration that
+      # spells the name also keeps the header bare, which is the state the file was already in.
+      # `repaired_headers` gets one entry per declaration repaired.
       def repair_generic_headers(state)
         @type_params.keys.sort.each do |name|
-          bare = find_class_decls(state.decls, name).select { |d| d.type_params.empty? && d.location&.[](:name) }
+          spelling = @type_params.fetch(name)
+          bare = find_class_decls(state.decls, name).select do |d|
+            d.type_params.empty? && d.location&.[](:name) && !shadowed_by_parameter?(state.source, d, spelling)
+          end
           next if bare.empty?
 
-          spelling = @type_params.fetch(name)
           insert_type_params(state, bare, spelling)
-          state.repaired_headers << "#{name}#{spelling}"
+          bare.each { state.repaired_headers << "#{name}#{spelling}" }
         end
+      end
+
+      # Whether the declaration's text after its name (superclass, members, nested declarations) names one of
+      # the parameters `spelling` declares as a relative constant (`E`, `E::X`, not `::E` or `Foo::E`).
+      def shadowed_by_parameter?(source, decl, spelling)
+        names = parameter_names(spelling)
+        return true if names.nil?
+
+        body = source[decl.location[:name].end_pos...decl.location.end_pos]
+        body.match?(/(?<![\w:])(?:#{names.map { |n| Regexp.escape(n) }.join('|')})(?!\w)/)
+      end
+
+      # The parameter names `[unchecked out K, unchecked out V]` declares; nil when it does not parse.
+      def parameter_names(spelling)
+        decls = parse_signature("class RigorSigGenProbe#{spelling}\nend\n")
+        probe = decls&.first
+        probe&.type_params&.map { |param| param.name.to_s }
       end
 
       # Splices `spelling` right after each declaration's name, last one first so earlier offsets stay valid.

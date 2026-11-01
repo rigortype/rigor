@@ -1246,6 +1246,48 @@ end
 ")
     end
 
+    it "counts every declaration it repairs" do
+      target = write_target("class Array\n  def x: () -> 1\nend\n\nclass Array\n  def y: () -> 1\nend\n")
+
+      result = writer.write("lib/foo.rb", [generic(method_name: :a, class_name: "Array", params: params)])
+
+      expect(result.repaired_headers).to eq(["Array[unchecked out E]", "Array[unchecked out E]"])
+      expect(File.read(target).scan("class Array[unchecked out E]").size).to eq(2)
+    end
+
+    # Review of #2602: under `class Array[unchecked out E]` a member's bare `E` binds to the parameter, so a header
+    # whose body names the project's class `E` that way stays as it was rather than change what the member says.
+    describe "a body that names a type like a parameter" do
+      it "leaves the header bare when an existing member spells it" do
+        original = "class E\nend\n\nclass Array\n  def old: () -> E\nend\n"
+        target = write_target(original)
+
+        result = writer.write("lib/foo.rb", [generic(method_name: :a, class_name: "Array", params: params)])
+
+        expect(result.repaired_headers).to eq([])
+        expect(File.read(target)).to eq("class E\nend\n\nclass Array\n  def old: () -> E\n  def a: () -> 1\nend\n")
+      end
+
+      it "leaves the header bare when a member this run merges spells it" do
+        target = write_target("class Hash\n  def old: () -> 1\nend\n")
+        merged = candidate(method_name: :k, class_name: "Hash", rbs: "def k: () -> K").with_class_type_params(params)
+
+        result = writer.write("lib/foo.rb", [merged])
+
+        expect(result.repaired_headers).to eq([])
+        expect(File.read(target)).to start_with("class Hash\n")
+      end
+
+      it "repairs the header when the member anchors the name" do
+        target = write_target("class Array\n  def old: () -> ::E\n  def e: () -> Foo::E\nend\n")
+
+        result = writer.write("lib/foo.rb", [generic(method_name: :a, class_name: "Array", params: params)])
+
+        expect(result.repaired_headers).to eq(["Array[unchecked out E]"])
+        expect(File.read(target)).to start_with("class Array[unchecked out E]\n")
+      end
+    end
+
     # Guard: no line of the fix fails it; it holds the repair to the classes the run stamped.
     it "leaves a bare header the stamp does not name" do
       target = write_target("class Array

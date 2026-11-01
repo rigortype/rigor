@@ -33,7 +33,10 @@ the fact.
   `pop`, `shift`, `slice!`, `subtract` and a `delete` of an unknown value drop it too); and `ConstructionEscape` withholds
   the fact from any local that may escape anywhere in its body, by one allowlist of non-escaping positions (round 2
   inverted it: every argument escapes, and a receiver is safe only for a per-class core reader, or for an iterator
-  or a modelled mutator whose value is discarded, unless the project defines that method on the class). What is
+  or a modelled mutator whose value is discarded, unless the project defines a method of that name anywhere: any
+  class or module, either side, a refine body, any file, since a reopen, a prepended or included module or a
+  refinement can put it on the receiver. `lib/` itself defines 21 of the 43 reader names, `each`, and `<<`, `[]=`,
+  `add`, `clear`, `merge`, `store`, so on Rigor the fact rarely survives; that is the base reading). What is
   left: a remover after a store answers the floored reading rather than a precise one; a stored `nil` is dropped under any remover
   but a non-nil-literal `delete`, so a `nil` that really survives (`a << nil; a << nil; a.pop`) reads as gone; and a local that escapes anywhere, including as any argument, answers as before for its whole body. A literal handed to a hand-written `-> Array[:multi]` after a
   value-preserving closer and a foreign store (`t = [:multi]; t.sort!; t << [:static, s]; t`) would report the

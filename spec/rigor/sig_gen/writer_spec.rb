@@ -101,7 +101,8 @@ RSpec.describe Rigor::SigGen::Writer do
       expect(result.action).to eq(:skipped_unparseable)
       expect(result.error).to include(target)
       expect(result.error).to include("does not parse as RBS")
-      # The parse location is part of the refusal: the buffer is named by the target, so the message reads `path:line:col`.
+      # The parse location is part of the refusal: the buffer is named by the target, so the message reads
+      # `path:line:col`.
       expect(result.error).to match(/#{Regexp.escape(target.to_s)}:\d+:\d+/)
       expect(File.read(target)).to eq(original)
     end

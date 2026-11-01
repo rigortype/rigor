@@ -29,11 +29,13 @@ module Rigor
     # see it. A write whose value is used (`a = b = …`, `foo(a = [])`) escapes the written name. The scan is flow
     # insensitive and runs once per body ({.escaped?} keeps it), so an escape anywhere in the body drops the fact
     # for the whole body: the conservative direction, since without the fact the seams answer as before.
+    # A nested `def` or class body is scanned too, though its locals are its own: a same-named local there can only
+    # over-report an escape, the same conservative direction.
     module ConstructionEscape
       # Calls on the receiver that hand it to code the seam does not trace, whatever happens to their value.
       ESCAPING_RECEIVER_CALLS = %i[
         send public_send __send__ method public_method singleton_method define_singleton_method
-        tap then yield_self itself instance_exec instance_eval extend singleton_class
+        tap then yield_self itself instance_exec instance_eval
         instance_variable_set instance_variable_get to_enum enum_for
       ].to_set.freeze
 
@@ -63,7 +65,6 @@ module Rigor
       STRING_EVAL_CALLS = %i[instance_eval class_eval module_eval].to_set.freeze
 
       CLOSURES = [Prism::BlockNode, Prism::LambdaNode].freeze
-      NESTED_SCOPES = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
       LOCAL_REFERENCES = [
         Prism::LocalVariableReadNode, Prism::LocalVariableWriteNode, Prism::LocalVariableOperatorWriteNode,
         Prism::LocalVariableOrWriteNode, Prism::LocalVariableAndWriteNode, Prism::LocalVariableTargetNode
@@ -78,7 +79,7 @@ module Rigor
       ].freeze
       ALL = :all
       CACHE_KEY = :__rigor_construction_escape
-      private_constant :CLOSURES, :NESTED_SCOPES, :LOCAL_REFERENCES, :LOCAL_WRITES, :RECEIVER_WRITES, :ALL,
+      private_constant :CLOSURES, :LOCAL_REFERENCES, :LOCAL_WRITES, :RECEIVER_WRITES, :ALL,
                        :CACHE_KEY, :STRING_EVAL_CALLS
 
       module_function
@@ -101,7 +102,6 @@ module Rigor
       def scan(body)
         escaped = {}
         Source::NodeWalker.each_with_ancestors(body) do |node, ancestors|
-          next if ancestors.any? { |a| NESTED_SCOPES.any? { |k| a.is_a?(k) } }
           return ALL if frame_call?(node)
           next unless LOCAL_REFERENCES.any? { |k| node.is_a?(k) }
 

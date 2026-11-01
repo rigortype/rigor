@@ -57,6 +57,9 @@ module Rigor
       "# entries you want, then run `rigor plugins --strict`."
     ].freeze
 
+    # The file whose presence marks a Rails application for `rigor init`'s `paths:` suggestion (#2560).
+    RAILS_APPLICATION_FILE = "config/application.rb"
+
     HANDLERS = {
       "check" => :run_check,
       "init" => :run_init,
@@ -226,8 +229,9 @@ module Rigor
       end
 
       plugins = options.fetch(:plugins) ? detected_plugins : []
+      paths_suggestion = detected_paths
       begin
-        File.write(path, init_template(path, plugins: plugins))
+        File.write(path, init_template(path, plugins: plugins, paths_suggestion: paths_suggestion))
       rescue SystemCallError => e
         # A destination whose directory is missing or not writable is a bad path argument, the same usage error
         # `--config=PATH` gives for a file that does not exist (exit 64, docs/manual/02-cli-reference.md). The bare
@@ -237,7 +241,7 @@ module Rigor
         return EXIT_USAGE
       end
       @out.puts("Created #{path}")
-      print_init_next_steps(path, plugins)
+      print_init_next_steps(path, plugins, paths_suggestion)
       0
     end
 
@@ -258,7 +262,7 @@ module Rigor
     # Point them at the verification command + the canonical readiness flow so silent failures (the cwd / Gemfile /
     # signature_paths mismatches that surfaced during the Mastodon trial) get caught the first time the user wires a
     # plugin, not the first time `rigor check` reports false positives that should have been covered.
-    def print_init_next_steps(path, plugins = [])
+    def print_init_next_steps(path, plugins = [], paths_suggestion = nil)
       @out.puts ""
       @out.puts "Next steps:"
       if plugins.empty?
@@ -271,6 +275,10 @@ module Rigor
       @out.puts "  2. Run `rigor plugins` to verify every configured plugin loads."
       @out.puts "     (`--strict` exits 1 on failure; ideal CI gate.)"
       @out.puts "  3. Run `rigor check` to analyse your code."
+      return if paths_suggestion.nil?
+
+      @out.puts "     `rigor check` analyses only `lib` until you edit `paths:` in #{path}. " \
+                "The suggestion is commented beneath it."
     end
 
     # Word-wraps `CheckRules::ALL_RULES` into a comma-separated, `#`-commented block for `init_template`, so the
@@ -301,7 +309,7 @@ module Rigor
     # round-trips through `Configuration.load`) and prepends a short header that points the user at the keys they are
     # most likely to want to edit. `plugins:` stays the empty list the defaults ship; detected gems appear beneath it as
     # comments, so a project with no lockfile gets the template it always did.
-    def init_template(path = ".rigor.dist.yml", plugins: [])
+    def init_template(path = ".rigor.dist.yml", plugins: [], paths_suggestion: nil)
       <<~YAML
         # yaml-language-server: $schema=#{CONFIG_SCHEMA_URL}
         # Rigor configuration. The full key reference is
@@ -357,17 +365,42 @@ module Rigor
         # `target_ruby` is left commented: the default only picks the syntax Rigor parses. Set it to the lowest
         # Ruby your project runs on, and Rigor also reports what that Ruby deprecates.
         # target_ruby: #{Configuration::DEFAULTS.fetch('target_ruby').dump}
-        #{settings_yaml(path, plugins)}
+        #{settings_yaml(path, plugins, paths_suggestion)}
       YAML
     end
 
     # The serialised settings. `plugins: []` stays valid YAML and schema-clean; when `Gemfile.lock` named a modelled
-    # gem, the suggestion block sits under it as comments, so nothing loads until the user uncomments a line.
-    def settings_yaml(path, plugins)
+    # gem, the suggestion block sits under it as comments, so nothing loads until the user uncomments a line. The
+    # `paths:` suggestion sits under the active `paths:` list the same way, and the active list stays `lib`.
+    def settings_yaml(path, plugins, paths_suggestion = nil)
       yaml = YAML.dump(init_settings(path)).sub(/\A---\n/, "")
-      return yaml if plugins.empty?
+      yaml = yaml.sub(/^plugins: \[\]\n/) { "plugins: []\n#{detected_plugins_block(plugins)}" } unless plugins.empty?
+      return yaml if paths_suggestion.nil?
 
-      yaml.sub(/^plugins: \[\]\n/) { "plugins: []\n#{detected_plugins_block(plugins)}" }
+      yaml.sub(/^paths:\n(?:- .*\n)+/) { |active| active + paths_suggestion_block(paths_suggestion, path) }
+    end
+
+    # The commented `paths:` suggestion: one line naming what was detected and why, then the value to uncomment, written
+    # relative to the config file's directory like the active list (#1399).
+    def paths_suggestion_block(suggestion, path)
+      named = suggestion.fetch(:dirs).join(", ")
+      written = roots_relative_to(suggestion.fetch(:dirs), config_dir_of(path)).join(", ")
+      pronoun = suggestion.fetch(:dirs).one? ? "it" : "them"
+      "# #{suggestion.fetch(:reason)}: #{named}. To scan #{pronoun}, delete the `paths:` list above and " \
+        "uncomment the line below:\n# paths: [#{written}]\n"
+    end
+
+    # The source directories `rigor init` suggests for `paths:`, read from the project root (the cwd, like the plugin
+    # detection). A Rails application (config/application.rb) has app/ and lib/, each listed only if it exists. Any
+    # other layout gets no suggestion: the template's `lib` already covers it, and no other directory is guessed
+    # (#2560). Nil when there is nothing to add to today's `paths: [lib]`.
+    def detected_paths
+      return nil unless File.file?(RAILS_APPLICATION_FILE)
+
+      dirs = %w[app lib].select { |dir| File.directory?(dir) }
+      return nil if dirs.empty? || dirs == ["lib"]
+
+      { dirs: dirs, reason: "Detected a Rails app (#{RAILS_APPLICATION_FILE})" }
     end
 
     def detected_plugins_block(plugins)

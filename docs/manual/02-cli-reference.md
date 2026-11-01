@@ -128,8 +128,16 @@ Suggesting rather than enabling follows ADR-96 Criterion 2: a
 lockfile's presence does not by itself opt a project into a
 plugin's code.
 
-`--no-plugins` writes the template with no suggestions, even when a
-lockfile is present.
+In a Rails application (a `config/application.rb` in the working
+directory), `rigor init` also suggests the source directories that
+exist, `app` and `lib`. The active `paths:` stays `lib`; the
+suggestion is a commented `paths:` line under it, which names what
+was detected. A bare `rigor check` analyses only `lib` until you
+delete the `paths:` list above and uncomment the line below. Other
+layouts get no directory suggestion.
+
+`--no-plugins` writes the template with no plugin suggestions, even
+when a lockfile is present.
 
 ## `rigor annotate`
 

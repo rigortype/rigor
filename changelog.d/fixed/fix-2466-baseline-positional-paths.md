@@ -1,0 +1,2 @@
+- **[cli]** `rigor baseline generate` and `regenerate` reject positional paths with a usage error (exit `64`) instead of silently ignoring them; the baseline always covers the configured `paths:`. ([#2575](https://github.com/rigortype/rigor/pull/2575))
+  - A path argument used to be dropped without a word, so `rigor baseline generate lib` wrote a baseline over every configured path.

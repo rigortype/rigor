@@ -158,6 +158,8 @@ RSpec.describe "a reused pool-mode Runner reports each run as a fresh Runner wou
         expect(runner.effect_collections_by_path.keys).to include(added)
         expect(runner.effect_ancestry).not_to be_empty
         expect(runner.effect_ancestry).to eq(fresh.effect_ancestry)
+        expect(runner.effect_sources).to eq(fresh.effect_sources)
+        expect(runner.effect_sources).not_to be_empty
       end
     end
 

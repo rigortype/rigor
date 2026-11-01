@@ -638,7 +638,7 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
     end
 
     # A read in the body's value position (`return a`) hands the object on only once nothing in the body runs.
-    it "keeps the fact across an early `return a`" do
+    it "keeps the fact across an early `return a` and a final bare `a`" do
       expect(dumped_types(<<~RUBY)).to eq(["Array[Integer | String]"])
         def early(n)
           a = Array.new(n, 0)
@@ -646,6 +646,7 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
 
           a << "s"
           dump_type(a.dup)
+          a
         end
       RUBY
     end

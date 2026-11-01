@@ -765,6 +765,15 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
       end
     end
 
+    # The name set and the escape verdicts are run-scoped slots, so a second run in the same process reads the
+    # edited project rather than the first run's answer.
+    it "reads the edited project on a second run in the same process" do
+      write_project("class Array\n  def size\n    push(\"label\")\n    length\n  end\nend\n")
+      expect(check("--no-cache")).to eq([])
+      File.delete("lib/patch.rb")
+      expect(check("--no-cache")).to eq(["use.rb:6 call.undefined-method"])
+    end
+
     it "keeps the regrowth in a project that defines no such name (control)" do
       write_project(nil)
       expect(check("--no-cache")).to eq(["use.rb:6 call.undefined-method"])

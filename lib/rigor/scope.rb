@@ -3,6 +3,7 @@
 require_relative "type"
 require_relative "environment"
 require_relative "scope/discovery_index"
+require_relative "run_scoped_slots"
 require_relative "scope/resolution_chain"
 require_relative "inference/definer_resolution"
 require_relative "inference/in_effect_refinements"
@@ -1290,7 +1291,8 @@ module Rigor
     end
     private :collect_project_method_names
 
-    PROJECT_METHOD_NAMES_KEY = :__rigor_project_method_names
+    # A run-scoped slot ({RunScopedSlots}): emptied when a run ends, so an edited project is read afresh.
+    PROJECT_METHOD_NAMES_KEY = RunScopedSlots.register(:__rigor_project_method_names)
     private_constant :PROJECT_METHOD_NAMES_KEY
 
     def record_discovered_method(class_name, method_name)

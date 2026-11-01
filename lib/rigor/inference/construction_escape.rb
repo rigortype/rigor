@@ -3,6 +3,7 @@
 require "prism"
 require_relative "../source/node_walker"
 require_relative "../source/node_children"
+require_relative "../run_scoped_slots"
 
 module Rigor
   module Inference
@@ -72,7 +73,9 @@ module Rigor
       ].freeze
       ALL = :all
       EMPTY_CALLS = Set.new.freeze
-      CACHE_KEY = :__rigor_construction_escape
+      # A run-scoped slot ({RunScopedSlots}): emptied when a run ends, so a long-lived process never serves a verdict
+      # from a body an earlier run parsed.
+      CACHE_KEY = RunScopedSlots.register(:__rigor_construction_escape)
       private_constant :CLOSURES, :LOCAL_REFERENCES, :LOCAL_WRITES, :ALL, :EMPTY_CALLS, :CACHE_KEY,
                        :STRING_EVAL_CALLS
 

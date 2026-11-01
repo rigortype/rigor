@@ -56,15 +56,20 @@ module Rigor
           action: action.to_s,
           applied: applied.map(&:to_h),
           skipped: skipped.map { |c, reason| c.to_h.merge(write_skip_reason: reason.to_s) }
-        }.tap do |h|
-          h[:error] = error if error
-          # Absent when nothing was replaced, so a run that only adds lines keeps its pre-#1076 payload.
-          h[:replaced] = replaced.map(&:to_h) unless replaced.empty?
-          h[:repaired_headers] = repaired_headers unless repaired_headers.empty?
-          # Absent rather than empty when nothing was left: an effects-off payload stays byte-identical
-          # to a pre-#391 one.
-          h[:effect_left_unreadable] = left_unreadable.map(&:to_h) unless left_unreadable.empty?
-        end
+        }.tap { |h| add_optional_entries(h) }
+      end
+
+      private
+
+      def add_optional_entries(hash)
+        hash[:error] = error if error
+        # Absent when nothing was replaced, so a run that only adds lines keeps its pre-#1076 payload.
+        hash[:replaced] = replaced.map(&:to_h) unless replaced.empty?
+        # Absent when no header was repaired (#2580), for the same reason.
+        hash[:repaired_headers] = repaired_headers unless repaired_headers.empty?
+        # Absent rather than empty when nothing was left: an effects-off payload stays byte-identical
+        # to a pre-#391 one.
+        hash[:effect_left_unreadable] = left_unreadable.map(&:to_h) unless left_unreadable.empty?
       end
     end
   end

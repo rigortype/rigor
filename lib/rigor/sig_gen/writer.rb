@@ -381,12 +381,7 @@ module Rigor
 
         state = MergeState.new(source: source, decls: decls, applied: [], skipped: [], left_unreadable: [],
                                replaced: [], repaired_headers: [])
-        if repair_only
-          @type_params = merged_type_params(candidates)
-          repair_generic_headers(state)
-        else
-          merge_candidates(state, candidates)
-        end
+        repair_only ? repair_only_candidates(state, candidates) : merge_candidates(state, candidates)
 
         action = state.applied.empty? && state.repaired_headers.empty? ? :noop : :updated
         unless action == :updated
@@ -438,17 +433,27 @@ module Rigor
       # every class the run's stamp does not name.
       def repair_generic_headers(state)
         @type_params.keys.sort.each do |name|
-          spelling = @type_params.fetch(name)
           bare = find_class_decls(state.decls, name).select { |d| d.type_params.empty? && d.location&.[](:name) }
           next if bare.empty?
 
-          bare.sort_by { |d| -d.location[:name].end_pos }.each do |decl|
-            pos = decl.location[:name].end_pos
-            state.source = state.source[0...pos] + spelling + state.source[pos..]
-          end
-          state.decls = parse_signature(state.source) || state.decls
+          spelling = @type_params.fetch(name)
+          insert_type_params(state, bare, spelling)
           state.repaired_headers << "#{name}#{spelling}"
         end
+      end
+
+      # Splices `spelling` right after each declaration's name, last one first so earlier offsets stay valid.
+      def insert_type_params(state, decls, spelling)
+        decls.map { |d| d.location[:name].end_pos }.sort.reverse_each do |pos|
+          state.source = state.source[0...pos] + spelling + state.source[pos..]
+        end
+        state.decls = parse_signature(state.source) || state.decls
+      end
+
+      # {#repair_only_results}' merge step: the run's stamp, and the header repair alone.
+      def repair_only_candidates(state, candidates)
+        @type_params = merged_type_params(candidates)
+        repair_generic_headers(state)
       end
 
       # ADR-14 gap-#3 (e): for every requested class shell that isn't already declared in the target file,

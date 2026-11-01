@@ -1,0 +1,2 @@
+- **[cli]** `rigor init --path` into a directory that does not exist prints one `rigor init: cannot write` line and exits `64`, instead of a Ruby backtrace. ([#2574](https://github.com/rigortype/rigor/pull/2574))
+  - The directory is not created. The same one-line form and exit cover a path that cannot be written.

@@ -19,19 +19,104 @@ module Rigor
       # Records each JSON-RPC message one per line, prefixed with the direction (`<-` read from the client, `->`
       # written to it) and a timestamp. Only the message framing is logged; the server's own debug output joins the
       # same file through `$stderr` (see {#with_debug_output}).
+      #
+      # It never raises into the protocol path. A message the JSON encoder rejects (raw invalid UTF-8 in a string) is
+      # logged as a scrubbed rendering, so its line is still written. Any IO failure disables the log for the rest of
+      # the session: records are dropped, and debug output falls back to `fallback` (the real stderr). Nothing is
+      # `warn`ed into the failing log.
       class WireLog
-        attr_reader :io
-
-        def initialize(io)
+        def initialize(io, fallback)
           @io = io
+          @fallback = fallback
+          @broken = false
         end
 
         def record(direction, message)
-          @io.puts("#{Time.now.strftime('%FT%T.%6N%:z')} #{direction} #{JSON.generate(message)}")
+          deliver { "#{stamp} #{direction} #{render(message)}\n" }
+          nil
+        end
+
+        # Debug output written to `$stderr` while the session runs (`Kernel#warn` calls `write`).
+        def write(*parts)
+          text = parts.join
+          @fallback.write(text) unless deliver { text }
+          text.bytesize
+        end
+
+        def print(*parts)
+          write(*parts)
+          nil
+        end
+
+        def puts(*args)
+          lines = if args.empty?
+                    ["\n"]
+                  else
+                    args.flatten.map { |arg| arg.to_s.end_with?("\n") ? arg.to_s : "#{arg}\n" }
+                  end
+          write(*lines)
+          nil
+        end
+
+        def <<(part)
+          write(part)
+          self
+        end
+
+        def flush
+          self
+        end
+
+        # The exception that escaped the server loop, with its backtrace, so a crash is in the log, not only on stderr.
+        def crash(error)
+          lines = ["#{stamp} ! #{error.class}: #{error.message}\n"]
+          lines.concat((error.backtrace || []).map { |frame| "    #{frame}\n" })
+          text = lines.join
+          @fallback.write(text) unless deliver { text }
+          nil
         end
 
         def close
-          @io.close
+          @io.close unless @io.closed?
+        end
+
+        private
+
+        # Writes the text the block builds. Returns false when the log is (or just became) unusable.
+        def deliver
+          return false if @broken
+
+          @io.write(yield)
+          true
+        rescue StandardError
+          @broken = true
+          false
+        end
+
+        def stamp
+          Time.now.strftime("%FT%T.%6N%:z")
+        end
+
+        # The JSON line for `message`; a message the encoder rejects is rendered from its scrubbed copy, or from its
+        # `inspect` when even that does not encode.
+        def render(message)
+          JSON.generate(message)
+        rescue JSON::GeneratorError, EncodingError
+          begin
+            JSON.generate(scrub(message))
+          rescue JSON::GeneratorError, EncodingError
+            JSON.generate(message.inspect)
+          end
+        end
+
+        def scrub(value)
+          case value
+          when Hash then value.to_h { |key, val| [scrub(key), scrub(val)] }
+          when Array then value.map { |item| scrub(item) }
+          when Symbol then scrub(value.to_s).to_sym
+          when String then value.dup.force_encoding(Encoding::UTF_8).scrub
+          else value
+          end
         end
       end
 
@@ -144,21 +229,25 @@ module Rigor
 
         io = File.new(path, "a")
         io.sync = true
-        WireLog.new(io)
+        WireLog.new(io, $stderr)
       rescue SystemCallError => e
         @err.puts("rigor lsp: cannot open --log file #{path.inspect}: #{e.message}")
         :usage_error
       end
 
       # Routes the server's debug output (`warn` and the Ruby runtime's warnings, both written to `$stderr`) into the
-      # wire log for the length of the session. Without a log, `$stderr` is left alone.
+      # wire log for the length of the session. An exception that escapes the loop is written to the log before
+      # `$stderr` is restored and the exception is re-raised. Without a log, `$stderr` is left alone.
       def with_debug_output(log)
         return yield if log.nil?
 
         saved = $stderr
         begin
-          $stderr = log.io
+          $stderr = log
           yield
+        rescue StandardError, ScriptError, SystemStackError => e
+          log.crash(e)
+          raise
         ensure
           $stderr = saved
         end

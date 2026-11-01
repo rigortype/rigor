@@ -53,8 +53,9 @@ rigor lsp [--transport=stdio] [--log=PATH] [--config=PATH]
 - `--transport=stdio` — default; only value accepted in v1. TCP /
   Unix-socket transports are queued.
 - `--log=PATH` — append the wire log (each message in and out, one
-  line each) and the server's debug output to a file. Without it, no
-  wire log is written and server-side logs go to stderr.
+  line each) and the server's debug output from the start of the loop to
+  a file. Output before the loop starts still goes to stderr. Without
+  it, no wire log is written and server-side logs go to stderr.
 - `--config=PATH` — mirrors `rigor check --config=PATH`. Without
   it, `Configuration.discover` walks `.rigor.yml` / `.rigor.dist.yml`
   from the project root.

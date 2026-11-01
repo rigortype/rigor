@@ -97,7 +97,29 @@ RSpec.describe "rigor lsp end-to-end session", type: :integration do
       outbound = lines.grep(/ -> /).map { |line| JSON.parse(line.split(" -> ", 2).last) }
       expect(inbound.map { |m| m["method"] || "response" }).to eq(%w[initialize shutdown exit])
       expect(outbound.map { |m| m["id"] }).to eq([1, 2])
+      expect(lines.grep(/ -> /)).to all(include('"jsonrpc":"2.0"'))
       expect(outbound.first.dig("result", "capabilities")).to include("hoverProvider")
+    end
+  end
+
+  # Raw invalid UTF-8 inside a didOpen string: the session still answers, and the log keeps a line for the message.
+  it "keeps serving a didOpen holding invalid UTF-8 under --log, and logs it" do
+    Dir.mktmpdir("rigor-lsp-log-") do |dir|
+      path = File.join(dir, "wire.log")
+      bad_text = "x = \\\"".b + "\xFF\xFE".b + "\\\"\\nputs x\\n".b
+      bad_open = '{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":' \
+                 '{"uri":"file:///tmp/rigor_lsp_bad_utf8.rb","languageId":"ruby","version":1,"text":"'.b +
+                 bad_text + '"}}}'.b
+      session = [request(1, "initialize", { capabilities: {} }), bad_open,
+                 request(2, "shutdown"), notification("exit")]
+
+      stdout_bytes, exit_status = run_session(session, args: ["--log=#{path}"])
+
+      expect(exit_status).to eq(0)
+      expect(parse_frames(stdout_bytes).filter_map { |f| f[:id] }).to eq([1, 2])
+      line = File.readlines(path, chomp: true).find { |l| l.include?(" <- ") && l.include?("textDocument/didOpen") }
+      expect(line).not_to be_nil
+      expect(JSON.parse(line.split(" <- ", 2).last)["method"]).to eq("textDocument/didOpen")
     end
   end
 
@@ -137,8 +159,8 @@ RSpec.describe "rigor lsp end-to-end session", type: :integration do
 
   def run_session(messages, args: [], chdir: Dir.pwd)
     framed = messages.map { |msg| frame(msg) }.join
-    stdout_bytes = +""
-    stderr_bytes = +""
+    stdout_bytes = +"".b
+    stderr_bytes = +"".b
     exit_status = nil
 
     Open3.popen3(binary, "lsp", *args, chdir: chdir) do |stdin, stdout, stderr, wait_thread|
@@ -158,8 +180,8 @@ RSpec.describe "rigor lsp end-to-end session", type: :integration do
   end
 
   def frame(payload)
-    body = JSON.generate(payload)
-    "Content-Length: #{body.bytesize}\r\n\r\n#{body}"
+    body = (payload.is_a?(String) ? payload : JSON.generate(payload)).b
+    "Content-Length: #{body.bytesize}\r\n\r\n".b + body
   end
 
   def parse_frames(raw)

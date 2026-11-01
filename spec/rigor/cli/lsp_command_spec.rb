@@ -10,6 +10,8 @@ require "rigor/language_server"
 require "language_server-protocol"
 
 RSpec.describe Rigor::CLI::LspCommand do
+  let(:wire_log_class) { Rigor::CLI::LspCommand::WireLog }
+
   # #1613 — a save round re-reads `.rigor.yml` through the loader the command wires in.
   it "wires a configuration_loader that re-loads the configuration at the given path" do
     command = described_class.new(argv: [], out: StringIO.new, err: StringIO.new)
@@ -58,6 +60,27 @@ RSpec.describe Rigor::CLI::LspCommand do
     end
   end
 
+  # An exception escaping the loop is written to the log, and `$stderr` is still restored.
+  it "restores $stderr and writes the exception to the log when the loop raises" do
+    Dir.mktmpdir("rigor-lsp-log-") do |dir|
+      path = File.join(dir, "wire.log")
+      command = described_class.new(argv: [], out: StringIO.new, err: StringIO.new)
+      log = command.send(:open_wire_log, path)
+      original_stderr = $stderr
+      loop_runner = instance_double(Rigor::LanguageServer::Loop)
+      allow(loop_runner).to receive(:run) { raise "loop boom" }
+      server = instance_double(Rigor::LanguageServer::Server, exit_code: 0)
+      allow(command).to receive(:build_server).and_return([server, loop_runner])
+      allow(LanguageServer::Protocol::Transport::Io::Reader).to receive(:new).and_return(StringIO.new)
+      allow(LanguageServer::Protocol::Transport::Io::Writer).to receive(:new).and_return(StringIO.new)
+
+      expect { command.send(:serve, config_path: nil, log: log) }.to raise_error(RuntimeError, "loop boom")
+      expect($stderr).to be(original_stderr)
+      log.close
+      expect(File.read(path)).to include("RuntimeError: loop boom")
+    end
+  end
+
   # The wire log is synchronous: a logged line is on disk before the file is closed.
   it "writes each wire-log line through to the file without waiting for close" do
     Dir.mktmpdir("rigor-lsp-log-") do |dir|
@@ -70,5 +93,27 @@ RSpec.describe Rigor::CLI::LspCommand do
       expect(File.read(path)).to match(/ -> \{"id":1,"result":null\}\n\z/)
       log.close
     end
+  end
+
+  # A message the JSON encoder rejects is still logged, as a scrubbed rendering, and never raises into the caller.
+  it "logs a message holding invalid UTF-8 as a scrubbed line instead of raising" do
+    io = StringIO.new
+    log = wire_log_class.new(io, StringIO.new)
+    bad = { method: "textDocument/didOpen", params: { text: "a\xFFb".b } }
+
+    expect { log.record("<-", bad) }.not_to raise_error
+    expect(io.string).to include("a\u{FFFD}b")
+  end
+
+  # An IO failure disables the log for the rest of the session; debug output goes to the fallback, never to the log.
+  it "disables the wire log after an IO failure and sends debug output to the fallback" do
+    io = StringIO.new
+    fallback = StringIO.new
+    log = wire_log_class.new(io, fallback)
+    io.close
+
+    expect { log.record("<-", { id: 1 }) }.not_to raise_error
+    expect { log.write("debug line\n") }.not_to raise_error
+    expect(fallback.string).to eq("debug line\n")
   end
 end

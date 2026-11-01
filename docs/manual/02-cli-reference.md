@@ -133,7 +133,7 @@ directory), `rigor init` also suggests the source directories that
 exist, `app` and `lib`. The active `paths:` stays `lib`; the
 suggestion is a commented `paths:` line under it, which names what
 was detected. A bare `rigor check` analyses only `lib` until you
-replace the active `paths:` list with the suggested one. Other
+delete the `paths:` list above and uncomment the line below. Other
 layouts get no directory suggestion.
 
 `--no-plugins` writes the template with no plugin suggestions, even

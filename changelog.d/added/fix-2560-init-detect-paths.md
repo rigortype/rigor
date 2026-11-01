@@ -1,3 +1,3 @@
 - **[cli]** In a Rails application, `rigor init` writes a commented `paths:` suggestion naming `app` and `lib` below the unchanged `paths: [lib]`. ([#2594](https://github.com/rigortype/rigor/pull/2594))
-  - A Rails application is one with a `config/application.rb`; each directory is suggested only if it exists. Uncomment the suggestion to analyse `app/`.
+  - A Rails application is one with a `config/application.rb`; each directory is suggested only if it exists. To scan them, delete the `paths:` list above and uncomment the line below.
   - Every other layout gets the same template as before.

@@ -241,7 +241,7 @@ module Rigor
         return EXIT_USAGE
       end
       @out.puts("Created #{path}")
-      print_init_next_steps(path, plugins)
+      print_init_next_steps(path, plugins, paths_suggestion)
       0
     end
 
@@ -262,7 +262,7 @@ module Rigor
     # Point them at the verification command + the canonical readiness flow so silent failures (the cwd / Gemfile /
     # signature_paths mismatches that surfaced during the Mastodon trial) get caught the first time the user wires a
     # plugin, not the first time `rigor check` reports false positives that should have been covered.
-    def print_init_next_steps(path, plugins = [])
+    def print_init_next_steps(path, plugins = [], paths_suggestion = nil)
       @out.puts ""
       @out.puts "Next steps:"
       if plugins.empty?
@@ -275,6 +275,10 @@ module Rigor
       @out.puts "  2. Run `rigor plugins` to verify every configured plugin loads."
       @out.puts "     (`--strict` exits 1 on failure; ideal CI gate.)"
       @out.puts "  3. Run `rigor check` to analyse your code."
+      return if paths_suggestion.nil?
+
+      @out.puts "     `rigor check` analyses only `lib` until you edit `paths:` in #{path}. " \
+                "The suggestion is commented beneath it."
     end
 
     # Word-wraps `CheckRules::ALL_RULES` into a comma-separated, `#`-commented block for `init_template`, so the
@@ -381,8 +385,9 @@ module Rigor
     def paths_suggestion_block(suggestion, path)
       named = suggestion.fetch(:dirs).join(", ")
       written = roots_relative_to(suggestion.fetch(:dirs), config_dir_of(path)).join(", ")
-      "# #{suggestion.fetch(:reason)}: #{named}. To scan them, replace the paths list above with:\n" \
-        "# paths: [#{written}]\n"
+      pronoun = suggestion.fetch(:dirs).one? ? "it" : "them"
+      "# #{suggestion.fetch(:reason)}: #{named}. To scan #{pronoun}, delete the `paths:` list above and " \
+        "uncomment the line below:\n# paths: [#{written}]\n"
     end
 
     # The source directories `rigor init` suggests for `paths:`, read from the project root (the cwd, like the plugin

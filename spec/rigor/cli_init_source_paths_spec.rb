@@ -17,10 +17,15 @@ RSpec.describe Rigor::CLI do
   end
 
   def run_init(path = ".rigor.dist.yml")
+    run_init_output(path)
+  end
+
+  def run_init_output(path = ".rigor.dist.yml")
     out = StringIO.new
     err = StringIO.new
     status = described_class.new(["init", "--path=#{path}"], out: out, err: err).run
     expect(status).to eq(0), err.string
+    out.string
   end
 
   def written_text(path = ".rigor.dist.yml")
@@ -45,8 +50,15 @@ RSpec.describe Rigor::CLI do
 
       expect(YAML.safe_load_file(".rigor.dist.yml")["paths"]).to eq(["lib"])
       expect(written_text).to include(
-        "- lib\n# Detected a Rails app (config/application.rb): app, lib. To scan them, replace the paths list above " \
-        "with:\n# paths: [app, lib]\nexclude: []\n"
+        "- lib\n# Detected a Rails app (config/application.rb): app, lib. To scan them, delete the `paths:` list " \
+        "above and uncomment the line below:\n# paths: [app, lib]\nexclude: []\n"
+      )
+    end
+
+    it "tells the user in Next steps that rigor check analyses only lib until they edit paths:" do
+      expect(run_init_output).to include(
+        "     `rigor check` analyses only `lib` until you edit `paths:` in .rigor.dist.yml. The suggestion is " \
+        "commented beneath it.\n"
       )
     end
 
@@ -81,6 +93,56 @@ RSpec.describe Rigor::CLI do
       expect(YAML.safe_load_file(".rigor.dist.yml")["paths"]).to eq(["lib"])
       expect(written_text).to include("# paths: [app]\n")
     end
+
+    it "says it, not them, when only app/ is suggested" do
+      run_init
+
+      expect(written_text).to include("To scan it, delete the `paths:` list above and uncomment the line below:\n")
+      expect(written_text).not_to include("To scan them")
+    end
+  end
+
+  describe "in a Rails application with neither app/ nor lib/" do
+    before do
+      FileUtils.mkdir_p("config")
+      FileUtils.touch("config/application.rb")
+    end
+
+    it "writes no suggestion and no Next steps line" do
+      output = run_init_output
+
+      expect(written_text).not_to include("app, lib")
+      expect(written_text).not_to include("# paths:")
+      expect(written_text).not_to include("Detected a Rails app")
+      expect(output).not_to include("analyses only `lib`")
+    end
+  end
+
+  describe "in a Rails application where app is a regular file" do
+    before do
+      FileUtils.mkdir_p(%w[lib config])
+      FileUtils.touch(%w[app config/application.rb])
+    end
+
+    it "writes no suggestion, since app/ is not a directory" do
+      run_init
+
+      expect(written_text).not_to include("Detected a Rails app")
+      expect(written_text).not_to include("# paths:")
+    end
+  end
+
+  describe "in a Rails application where config/application.rb is a directory" do
+    before do
+      FileUtils.mkdir_p(%w[app lib config/application.rb])
+    end
+
+    it "writes no suggestion, since the marker is not a file" do
+      run_init
+
+      expect(written_text).not_to include("Detected a Rails app")
+      expect(written_text).not_to include("# paths:")
+    end
   end
 
   describe "in a Rails application with only lib/" do
@@ -113,12 +175,13 @@ RSpec.describe Rigor::CLI do
   end
 
   describe "in an empty directory" do
-    it "writes the unchanged template with no paths: suggestion" do
-      run_init
+    it "writes the unchanged template with no paths: suggestion and no Next steps line" do
+      output = run_init_output
 
       expect(YAML.safe_load_file(".rigor.dist.yml")["paths"]).to eq(["lib"])
       expect(written_text).not_to include("Detected a Rails app")
       expect(written_text).not_to include("# paths:")
+      expect(output).not_to include("analyses only `lib`")
     end
   end
 end

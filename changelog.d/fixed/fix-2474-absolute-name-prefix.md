@@ -1,0 +1,3 @@
+- **[rbs]** A `sig/` declaration written as `module A; class ::Abs` now names the top-level `Abs`, so it no longer collides with an inline `A::Abs`. ([#2582](https://github.com/rigortype/rigor/pull/2582))
+  - The member-consistency check used to key it `A::Abs`, reporting a false collision for members the two sides never shared.
+  - A real collision on the one absolute name still reports.

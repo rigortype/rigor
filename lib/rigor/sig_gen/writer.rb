@@ -379,13 +379,9 @@ module Rigor
                                  error: "#{target} does not parse as RBS: #{parse_detail}")
         end
 
-        state = MergeState.new(source: source, decls: decls, applied: [], skipped: [], left_unreadable: [],
-                               replaced: [], repaired_headers: [])
-        repair_only ? repair_only_candidates(state, candidates) : merge_candidates(state, candidates)
-
-        action = state.applied.empty? && state.repaired_headers.empty? ? :noop : :updated
-        unless action == :updated
-          return WriteResult.new(source_path: source_path, target_path: target, action: action,
+        state = merged_state(source, decls, candidates, repair_only)
+        unless state_changed?(state)
+          return WriteResult.new(source_path: source_path, target_path: target, action: :noop,
                                  applied: state.applied, skipped: state.skipped,
                                  left_unreadable: state.left_unreadable)
         end
@@ -402,7 +398,7 @@ module Rigor
 
         target.write(state.source) unless @dry_run
         WriteResult.new(source_path: source_path, target_path: target,
-                        action: action, applied: state.applied, skipped: state.skipped,
+                        action: :updated, applied: state.applied, skipped: state.skipped,
                         left_unreadable: state.left_unreadable, replaced: state.replaced,
                         repaired_headers: state.repaired_headers)
       end
@@ -448,6 +444,17 @@ module Rigor
           state.source = state.source[0...pos] + spelling + state.source[pos..]
         end
         state.decls = parse_signature(state.source) || state.decls
+      end
+
+      def merged_state(source, decls, candidates, repair_only)
+        state = MergeState.new(source: source, decls: decls, applied: [], skipped: [], left_unreadable: [],
+                               replaced: [], repaired_headers: [])
+        repair_only ? repair_only_candidates(state, candidates) : merge_candidates(state, candidates)
+        state
+      end
+
+      def state_changed?(state)
+        !(state.applied.empty? && state.repaired_headers.empty?)
       end
 
       # {#repair_only_results}' merge step: the run's stamp, and the header repair alone.

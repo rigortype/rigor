@@ -84,6 +84,8 @@ RSpec.describe Rigor::Environment::LockfileResolver do
       expect(result.fetch("rack").path_source).to be_nil
     end
 
+    # Guard: `merge_variant` folds variants with `Data#with`, which carries `path_source` over; this fails if
+    # the fold ever rebuilds the entry without it.
     it "keeps a multi-platform PATH gem's directory when its platform variants are folded together" do
       body = <<~LOCKFILE
         PATH

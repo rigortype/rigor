@@ -58,6 +58,53 @@ RSpec.describe Rigor::Inference::DirectIvarWrites do
     expect(writes("def r = (@a, @tag = pair)")).to eq(Set[])
   end
 
+  # Issue #2482 — a `case ... in` with no `else` raises NoMatchingPatternError instead of answering `nil`.
+  it "counts a `case ... in` with a nil arm or an empty `else`, and not one with no `else`" do
+    expect(writes("def r = (@tag = case @k\n in Integer then nil\n else 'b'\n end)")).to eq(Set[:@tag])
+    expect(writes("def r = (@tag = case @k\n in Integer then 'a'\n else\n end)")).to eq(Set[:@tag])
+    expect(writes("def r = (@tag = case @k\n in Integer then 'a'\n end)")).to eq(Set[])
+    expect(writes("def r = (@tag = case @k\n in Integer then 'a'\n else 'b'\n end)")).to eq(Set[])
+  end
+
+  it "counts an `||` whose right side may be nil unless its left side is a truthy literal" do
+    expect(writes("def r = (@tag = @items.first || nil)")).to eq(Set[:@tag])
+    expect(writes("def r = (@tag = @items.first || (@x if ready?))")).to eq(Set[:@tag])
+    expect(writes("def r = (@tag = 'a' || nil)")).to eq(Set[])
+    expect(writes("def r = (@tag = @items.first || 'a')")).to eq(Set[])
+    expect(writes("def r = (@tag = @peer&.tag || 'a')")).to eq(Set[])
+  end
+
+  it "counts an `&&` whose left side may be nil, or whose right side may be nil past a left side that is not false" do
+    expect(writes("def r = (@tag = ready? && nil)")).to eq(Set[:@tag])
+    expect(writes("def r = (@tag = @peer&.tag && 'a')")).to eq(Set[:@tag])
+    expect(writes("def r = (@tag = false && nil)")).to eq(Set[])
+    expect(writes("def r = (@tag = ready? && 'a')")).to eq(Set[])
+  end
+
+  # Guard: both already answer so before #2482; Ruby's `&.` does not skip the rest of a chain.
+  it "counts a chained safe-navigation call, and not a plain call past one, which raises on nil" do
+    expect(writes("def r = (@tag = @peer&.tag&.upcase)")).to eq(Set[:@tag])
+    expect(writes("def r = (@tag = @peer&.tag.upcase)")).to eq(Set[])
+  end
+
+  it "counts every target after the first against a literal Ruby does not splat, and none against a computed value" do
+    expect(writes("def r = (@a, @tag = 1)")).to eq(Set[:@tag])
+    expect(writes("def r = (@a, @b, @tag = 's')")).to eq(Set[:@b, :@tag])
+    expect(writes("def r = (@a, @tag = { k: 1 })")).to eq(Set[:@tag])
+    expect(writes("def r = (@a, @tag = nil)")).to eq(Set[:@a, :@tag])
+    expect(writes("def r = (@a, @tag = @peer&.pair)")).to eq(Set[:@a, :@tag])
+    expect(writes("def r = (@a, @tag = [1, 2])")).to eq(Set[])
+    expect(writes("def r = (@a, @tag = @items)")).to eq(Set[])
+  end
+
+  it "judges a nested target on the same rule against its own element" do
+    expect(writes("def r = ((@a, @tag), @b = [1, nil], 2)")).to eq(Set[:@tag])
+    expect(writes("def r = ((@a, @tag), @b = 1, 2)")).to eq(Set[:@tag])
+    expect(writes("def r = (@b, (@a, @tag) = 1)")).to eq(Set[:@a, :@tag])
+    expect(writes("def r = ((@a, @tag), @b = [1, 2], 3)")).to eq(Set[])
+    expect(writes("def r = ((@a, @tag), @b = pair, 3)")).to eq(Set[])
+  end
+
   it "reads a block's body but not a lambda's, a nested def's or a class body's" do
     expect(writes("def r = [1].each { @tag = nil }")).to eq(Set[:@tag])
     expect(writes("def r = (f = -> { @tag = nil }; f.arity)")).to eq(Set[])

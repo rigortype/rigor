@@ -48,3 +48,34 @@ class H
 
   def clear_tag = (@tag = nil)
 end
+
+# Issue #2482 — values that look nil-capable but that Ruby never binds to `nil`: an `||` whose left side is a truthy
+# literal, an Array literal or an Array-valued call splatted across the targets, a plain call past a safe-navigation
+# call (which raises on a `nil` receiver), and a `case ... in` with no `else` (which raises NoMatchingPatternError).
+# Under Ruby 4.0.5 every `q*` returns a String.
+class ShapeRewriters
+  attr_reader :items
+
+  def initialize
+    @tag = "t"
+    @items = []
+    @peer = "p"
+    @k = 1
+  end
+
+  def or_lit; @tag = "a" || nil; items.any?; end
+  def multi_arr; @a, @tag = [1, "s"]; items.any?; end
+  def multi_call; @a, @tag = pair; items.any?; end
+  def chain_plain; @tag = @peer&.upcase.strip; items.any?; end
+  def case_in; @tag = case @k
+                      in Integer then "a"
+                      end; items.any?; end
+
+  def pair = [1, "s"]
+
+  def q1; return unless @tag; or_lit;      t = @tag; t.upcase; end # QUIET-1446
+  def q2; return unless @tag; multi_arr;   t = @tag; t.upcase; end # QUIET-1446
+  def q3; return unless @tag; multi_call;  t = @tag; t.upcase; end # QUIET-1446
+  def q4; return unless @tag; chain_plain; t = @tag; t.upcase; end # QUIET-1446
+  def q5; return unless @tag; case_in;     t = @tag; t.upcase; end # QUIET-1446
+end

@@ -1,0 +1,1 @@
+- **[engine]** A signature whose superclass chain loops back to itself (`class S < ::M::S`, or `A < B` with `B < A`) is reported as that class's `rbs.coverage.definition-build-failed` (`RecursiveAncestorError`) instead of aborting the run with `SystemStackError`. ([#2573](https://github.com/rigortype/rigor/pull/2573))

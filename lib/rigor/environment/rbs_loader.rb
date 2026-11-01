@@ -3280,6 +3280,15 @@ module Rigor
         rbs_name = canonical_module_name(rbs_name)
         return nil unless env.class_decls.key?(rbs_name)
 
+        # rbs's `AncestorBuilder#singleton_ancestors` has no cycle check: a class whose superclass chain loops
+        # (`class S < ::S`, which a collection copy of the same class used to hide, #2441) recurses until the stack
+        # runs out and aborts the run, where `#instance_ancestors` raises `RBS::RecursiveAncestorError`. Walking the
+        # instance side first turns the loop into that error, so it is this class's build failure. Memoised by the
+        # builder, so a class whose instance side was already built pays nothing. Any other stack exhaustion stays
+        # fatal: it depends on how deep the analysis already was, and must not be memoised as a build failure.
+        if env.class_decls[rbs_name].is_a?(::RBS::Environment::ClassEntry)
+          builder.ancestor_builder.instance_ancestors(rbs_name)
+        end
         builder.build_singleton(rbs_name)
       rescue ::RBS::BaseError => e
         store_definition_build_detail(class_name, e)

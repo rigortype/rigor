@@ -136,27 +136,30 @@ RSpec.describe "a reused pool-mode Runner reports each run as a fresh Runner wou
       end
     end
 
-it "does not hand a later analysing run the collections of an earlier run served from the effect cache" do
-  Dir.mktmpdir do |dir|
-    files = write_files(dir)
-    runner = runner_for(dir, workers: 0, effects: true, cache: true)
-    guarded_run(runner, files.values, allow_plugin_crash: true)
-    guarded_run(runner, files.values, allow_plugin_crash: true)
-    expect(runner.effects_served_from_cache?).to be(true)
+    # A served run adopts the effect summary (its table, sources and ancestry) and a collections loader; the
+    # next analysing run must rebuild all of them from its own files, not inherit the served run's.
+    it "does not hand a later analysing run the effect tables of an earlier run served from the cache" do
+      Dir.mktmpdir do |dir|
+        files = write_files(dir)
+        runner = runner_for(dir, workers: 0, effects: true, cache: true)
+        guarded_run(runner, files.values, allow_plugin_crash: true)
+        guarded_run(runner, files.values, allow_plugin_crash: true)
+        expect(runner.effects_served_from_cache?).to be(true)
 
-    # A file the served run never saw: the next run must analyse it, and its collections must not be
-    # replaced by the served run's blob, which lacks it.
-    added = File.join(dir, "added.rb")
-    File.write(added, "class Base\n  def m; end\nend\n\nclass Added < Base\n  def n; end\nend\n")
-    guarded_run(runner, files.values + [added], allow_plugin_crash: true)
-    fresh = runner_for(dir, workers: 0, effects: true, cache: true)
-    guarded_run(fresh, files.values + [added], allow_plugin_crash: true)
+        # A file the served run never saw, with a superclass the served run's ancestry lacks.
+        added = File.join(dir, "added.rb")
+        File.write(added, "class Base\n  def m; end\nend\n\nclass Added < Base\n  def n; end\nend\n")
+        guarded_run(runner, files.values + [added], allow_plugin_crash: true)
+        fresh = runner_for(dir, workers: 0, effects: true, cache: true)
+        guarded_run(fresh, files.values + [added], allow_plugin_crash: true)
 
-    expect(runner.effects_served_from_cache?).to be(false)
-    expect(runner.effect_collections_by_path.keys).to eq(fresh.effect_collections_by_path.keys)
-    expect(runner.effect_collections_by_path.keys).to include(added)
-  end
-end
+        expect(runner.effects_served_from_cache?).to be(false)
+        expect(runner.effect_collections_by_path.keys).to eq(fresh.effect_collections_by_path.keys)
+        expect(runner.effect_collections_by_path.keys).to include(added)
+        expect(runner.effect_ancestry).not_to be_empty
+        expect(runner.effect_ancestry).to eq(fresh.effect_ancestry)
+      end
+    end
 
     it "does not re-emit a run-scoped disclosure from a file the second run no longer analyses" do
       Dir.mktmpdir do |dir|

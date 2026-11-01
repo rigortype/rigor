@@ -19,8 +19,9 @@ module Rigor
     # `**/*.rb` under the part of the gem a `paths:` entry covers survives `Analysis::PathExpansion.reject_excluded`.
     # A gem whose Ruby the configuration's `exclude:` patterns all leave out — `vendor/**`, `vendor/**/*.rb`, or
     # `vendor/gems/foo/lib/**` when `lib/` holds all of it — keeps its collection RBS, and so does a reached
-    # directory with no Ruby at all. Both sides are compared as real paths, so a symlinked spelling of the same
-    # directory matches.
+    # directory with no Ruby at all. A `paths:` entry naming one `.rb` file inside the gem counts that file. The
+    # overlap is found on real paths, so a symlinked spelling of the same directory matches, but the files are
+    # walked and matched against `exclude:` through the `paths:` entry as written, as the walker matches them.
     module ProjectPathGems
       module_function
 
@@ -29,21 +30,32 @@ module Rigor
       # @param exclude_patterns — the configuration's `exclude_patterns`, matched against `exclude_base`.
       # @return frozen set of gem names. Empty when `paths` is nil or empty.
       def names(locked, paths:, root: Dir.pwd, exclude_patterns: [], exclude_base: root)
-        roots = Array(paths).map { |path| real(File.expand_path(path.to_s, root.to_s)) }.uniq
-        return Set.new.freeze if roots.empty?
+        entries = Array(paths).map do |path|
+          logical = File.expand_path(path.to_s, root.to_s)
+          [logical, real(logical)]
+        end.uniq
+        return Set.new.freeze if entries.empty?
 
         locked.each_value.filter_map do |gem|
           dir = gem.path_source
           next unless dir
 
           dir = real(dir)
-          covered = roots.filter_map do |path|
-            if at_or_under?(dir, path) then dir
-            elsif at_or_under?(path, dir) then path
-            end
-          end
-          gem.name if analysed_ruby?(covered.uniq, exclude_patterns, exclude_base)
+          covered = entries.filter_map { |logical, real_entry| covered_part(dir, logical, real_entry) }
+          gem.name if covered.uniq.any? { |part| analysed_ruby?(part, Array(exclude_patterns), exclude_base.to_s) }
         end.to_set.freeze
+      end
+
+      # The part of the gem at real directory `dir` that the `paths:` entry covers, spelled through the entry as
+      # written (`logical`), as the file walker spells the files it matches `exclude:` against: the entry itself
+      # when it lies at or under the gem, or the gem's directory reached through the entry when the gem lies under
+      # it. Nil when they do not overlap.
+      def covered_part(dir, logical, real_entry)
+        return logical if at_or_under?(real_entry, dir)
+        return unless at_or_under?(dir, real_entry)
+
+        rest = dir.byteslice(real_entry.bytesize..).delete_prefix("/")
+        rest.empty? ? logical : File.join(logical, rest)
       end
 
       # True when `path` is `dir` or lies under it. Joined with a `/` only when `dir` does not already end in one,
@@ -54,22 +66,52 @@ module Rigor
         path.start_with?(dir.end_with?("/") ? dir : "#{dir}/")
       end
 
-      # Files are matched in slices, so a large gem stops at the first slice holding a surviving file.
-      EXCLUDE_SLICE = 256
+      # Files are matched in slices as the walk finds them, so a large gem stops at the first slice holding a
+      # surviving file instead of listing its whole tree first (`Dir.glob` with a block still builds the list).
+      EXCLUDE_SLICE = 64
       private_constant :EXCLUDE_SLICE
 
-      # True when some `.rb` file under one of `dirs` survives the `exclude:` patterns, as the file walker
-      # ({Analysis::PathExpansion.directory_files}) reads them.
-      def analysed_ruby?(dirs, patterns, base)
-        patterns = Array(patterns)
-        dirs.any? do |dir|
-          files = RootedGlob.glob(dir, Analysis::PathExpansion::RUBY_GLOB)
-          next !files.empty? if patterns.empty?
+      # True when the file walker ({Analysis::PathExpansion.ruby_files}) would analyse some `.rb` file of `part`:
+      # the `.rb` file itself when `part` names one, else a `**/*.rb` under the directory, that survives `patterns`.
+      def analysed_ruby?(part, patterns, base)
+        return surviving?([part], patterns, base) if File.file?(part)
+        return false unless File.directory?(part)
 
-          files.each_slice(EXCLUDE_SLICE).any? do |slice|
-            !Analysis::PathExpansion.reject_excluded(slice, patterns, base: base.to_s).empty?
+        slice = []
+        found = each_ruby_file(part) do |file|
+          slice << file
+          next false if slice.size < EXCLUDE_SLICE
+
+          hit = surviving?(slice, patterns, base)
+          slice = []
+          hit
+        end
+        found || surviving?(slice, patterns, base)
+      end
+
+      # Walks `dir` as `Dir.glob("dir/**/*.rb")` matches: sorted, no dot-named entries, no descent through a
+      # symlinked directory. Stops and returns true as soon as the block returns true.
+      def each_ruby_file(dir, &)
+        Dir.children(dir).sort.each do |name|
+          next if name.start_with?(".")
+
+          path = File.join(dir, name)
+          if name.end_with?(".rb") && !File.directory?(path)
+            return true if File.exist?(path) && yield(path)
+          elsif File.directory?(path) && !File.symlink?(path)
+            return true if each_ruby_file(path, &)
           end
         end
+        false
+      rescue SystemCallError
+        false
+      end
+
+      def surviving?(files, patterns, base)
+        return false if files.empty?
+        return files.any? { |file| file.end_with?(".rb") } if patterns.empty?
+
+        Analysis::PathExpansion.reject_excluded(files, patterns, base: base).any? { |file| file.end_with?(".rb") }
       end
 
       def real(path)

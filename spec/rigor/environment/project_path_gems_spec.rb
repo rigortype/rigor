@@ -44,6 +44,23 @@ RSpec.describe Rigor::Environment::ProjectPathGems do
     expect(described_class.names(gem_at(at("gems/own")), paths: ["linked"], root: tmp_root)).to eq(Set["own"])
   end
 
+  it "counts a gem when a paths: entry names one of its .rb files" do
+    write_ruby(at("gems/own/lib/own.rb"))
+    expect(described_class.names(gem_at(at("gems/own")), paths: ["gems/own/lib/own.rb"], root: tmp_root))
+      .to eq(Set["own"])
+    expect(described_class.names(gem_at(at("gems/own")), paths: ["gems/own/lib/own.rb"], root: tmp_root,
+                                                         exclude_patterns: ["**/own.rb"], exclude_base: tmp_root))
+      .to be_empty
+  end
+
+  it "matches exclude: against the files through a symlinked paths: entry, as the walker does" do
+    write_ruby(at("gems/own/lib/own.rb"))
+    File.symlink(at("gems/own/lib"), at("linked"))
+    expect(described_class.names(gem_at(at("gems/own")), paths: ["linked"], root: tmp_root,
+                                                         exclude_patterns: ["linked/**"], exclude_base: tmp_root))
+      .to be_empty
+  end
+
   it "counts nothing without paths:" do
     write_ruby(at("own.rb"))
     expect(described_class.names(gem_at(tmp_root), paths: nil, root: tmp_root)).to be_empty
@@ -83,6 +100,13 @@ RSpec.describe Rigor::Environment::ProjectPathGems do
       write_ruby(at("vendor/gems/foo/test/foo_test.rb"))
       expect(names(["vendor/gems/foo/lib/**"], paths: ["vendor/gems/foo/lib"])).to be_empty
       expect(names(["vendor/gems/foo/lib/**"], paths: ["vendor/gems/foo"])).to eq(Set["foo"])
+    end
+
+    it "walks the gem as Dir.glob(\"**/*.rb\") does, skipping dot-directories and symlinked directories" do
+      FileUtils.rm_rf(at("vendor/gems/foo/lib"))
+      write_ruby(at("vendor/gems/foo/.hidden/a.rb"), at("elsewhere/b.rb"))
+      File.symlink(at("elsewhere"), at("vendor/gems/foo/linked"))
+      expect(names([])).to be_empty
     end
 
     it "does not count a reached gem directory with no Ruby" do

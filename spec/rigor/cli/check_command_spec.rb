@@ -470,8 +470,9 @@ RSpec.describe Rigor::CLI::CheckCommand do
         write_slot_project
         argv = ["--no-ci-detect", "--no-stats", "--incremental", *extra, "lib"]
         if extra.include?("--baseline=baseline.yml")
-          Rigor::CLI.new(["baseline", "generate", "--output=baseline.yml", "lib"], out: StringIO.new,
-                                                                                   err: StringIO.new).run
+          # No positional path: the baseline covers the default `paths:` (`lib`), which holds the findings above.
+          Rigor::CLI.new(["baseline", "generate", "--output=baseline.yml"], out: StringIO.new,
+                                                                            err: StringIO.new).run
           File.write(File.join("lib", "d.rb"), "class Fresh\n  def go\n    2.nope\n  end\nend\n")
         end
         run(argv.dup) # the option parser consumes its argv

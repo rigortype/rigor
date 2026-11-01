@@ -5,11 +5,12 @@ require "tmpdir"
 require "rigor/plugin/base"
 
 # Issue #2392 — `PoolCoordinator` accumulates run-scoped tables (run disclosures, trust refusals, the
-# dependency / analysis-read / analysis-disclosure / effect graphs) through `merge_*` and `collect_*`. Only
-# `#initialize` cleared them, so a long-lived process that reuses one pool-mode `Runner` (the LSP, MCP) had
-# run N's rows re-emitted by run N+1: a disclosure from a file that run N+1 no longer analyses stayed, and
-# refusal counts summed across runs. `Runner#run_analysis` now resets those tables once at the top of each
-# run. A fresh Runner is the reference: a reused one must report exactly what it would.
+# dependency / analysis-read / analysis-disclosure / effect graphs) through `merge_*` and `collect_*`, and
+# `Runner` keeps its sequential per-file dependency and effect tables the same way. Only `#initialize`
+# cleared them, so a reused Runner re-emitted run N's rows in run N+1 and kept files run N+1 no longer
+# analyses. No shipped caller reuses a Runner (each builds a fresh one per run), but a reused Runner must
+# report what a fresh one would. `Runner#run_analysis` resets these tables once at the top of each run, in
+# both modes.
 RSpec.describe "a reused pool-mode Runner reports each run as a fresh Runner would (#2392)" do
   def write_files(dir)
     %w[a b trigger].to_h do |name|
@@ -49,14 +50,15 @@ RSpec.describe "a reused pool-mode Runner reports each run as a fresh Runner wou
 
   after { Rigor::Plugin.unregister! }
 
-  def runner_for(dir, workers:)
+  def runner_for(dir, workers:, record_dependencies: false)
     configuration = Rigor::Configuration.new("paths" => [dir], "plugins" => ["rigor-pool-run-reset-probe"])
     requirer = lambda do |_name|
       Rigor::Plugin.register(probe_class)
       true
     end
     Rigor::Analysis::Runner.new(
-      configuration: configuration, cache_store: nil, plugin_requirer: requirer, workers: workers
+      configuration: configuration, cache_store: nil, plugin_requirer: requirer, workers: workers,
+      record_dependencies: record_dependencies
     )
   end
 
@@ -101,4 +103,34 @@ RSpec.describe "a reused pool-mode Runner reports each run as a fresh Runner wou
       expect(second).to eq(first)
     end
   end
+
+describe "sequential (--workers 0)" do
+  it "drops a file's dependency record when the next run on the same Runner no longer analyses it" do
+    Dir.mktmpdir do |dir|
+      files = write_files(dir)
+      runner = runner_for(dir, workers: 0, record_dependencies: true)
+      guarded_run(runner, files.values, allow_plugin_crash: true)
+      guarded_run(runner, [files["trigger"]], allow_plugin_crash: true)
+      fresh = runner_for(dir, workers: 0, record_dependencies: true)
+      guarded_run(fresh, [files["trigger"]], allow_plugin_crash: true)
+
+      expect(runner.file_dependencies.keys).to eq(fresh.file_dependencies.keys)
+      expect(runner.file_dependencies.size).to eq(1)
+    end
+  end
+
+  it "does not re-emit a run-scoped disclosure from a file the second run no longer analyses" do
+    Dir.mktmpdir do |dir|
+      files = write_files(dir)
+      runner = runner_for(dir, workers: 0)
+
+      guarded_run(runner, [files["a"], files["trigger"]], allow_plugin_crash: true)
+      second = guarded_run(runner, [files["a"], files["b"]], allow_plugin_crash: true).diagnostics
+      fresh = guarded_run(runner_for(dir, workers: 0), [files["a"], files["b"]], allow_plugin_crash: true).diagnostics
+
+      expect(disclosure_rows(second)).to be_empty
+      expect(refusal_rows(second)).to eq(refusal_rows(fresh))
+    end
+  end
+end
 end

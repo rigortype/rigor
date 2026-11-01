@@ -320,7 +320,7 @@ module Rigor
         # Issue #1700 — plus the gated vendored directories this run's source activates ({#feature_tokens}).
         merged_libraries = (DEFAULT_LIBRARIES + libraries.map(&:to_s) +
                             feature_tokens(required_features, source_files, libraries)).uniq
-        skip_gem_names = collection_skip_gem_names(merged_libraries)
+        skip_gem_names = collection_skip_gem_names(merged_libraries) + project_path_gem_names(locked, root)
         collection_paths = RbsCollectionDiscovery.discover(
           lockfile_path: rbs_collection_lockfile,
           project_root: root,
@@ -425,6 +425,19 @@ module Rigor
       # copy of its declarations (`GatedSignatureGuard`), so the collection's copy is kept and wins.
       def collection_skip_gem_names(library_names)
         library_names + RbsLoader.vendored_gem_names.reject { |name| RequiredFeatures.gated_dir?(name) }
+      end
+
+      # Issue #2441 — the locked gems a `PATH` stanza resolves inside the project root: the project's own code,
+      # which `rbs collection install` still fetches community RBS for (its generator skips only a `gemspec`
+      # source). The project's `sig/` declares those classes, so the collection copy would only double-declare
+      # them. A `PATH` gem outside the root (a sibling checkout) is a dependency like any other and keeps its
+      # collection RBS.
+      def project_path_gem_names(locked, root)
+        root_dir = File.expand_path(root.to_s)
+        locked.each_value.filter_map do |gem|
+          dir = gem.path_source
+          gem.name if dir && (dir == root_dir || dir.start_with?("#{root_dir}/"))
+        end
       end
 
       def default_signature_paths(root)

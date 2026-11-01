@@ -38,8 +38,12 @@ module Rigor
       # variant for the readers that want a single version (coverage report, doctor): the `ruby` one when the
       # lockfile has it, otherwise the last parsed. Defaults to the single `[version, platform]` pair, and the
       # pair must be one of `variants`.
-      LockedGem = Data.define(:name, :version, :platform, :git_source, :variants) do
-        def initialize(name:, version:, platform:, git_source: false, variants: nil)
+      #
+      # `path_source` is the absolute directory a lockfile `PATH` stanza resolved this gem from (its `remote:`
+      # expanded against the lockfile's directory), and `nil` for every other source, `GIT` included. Issue
+      # #2441 reads it to tell the project's own path gems apart from the rest of the bundle. Defaults `nil`.
+      LockedGem = Data.define(:name, :version, :platform, :git_source, :variants, :path_source) do
+        def initialize(name:, version:, platform:, git_source: false, variants: nil, path_source: nil)
           version = -version.to_s
           platform = -platform.to_s
           variants = (variants || [[version, platform]]).map { |v, p| [-v.to_s, -p.to_s].freeze }.uniq.freeze
@@ -52,7 +56,8 @@ module Rigor
             version: version,
             platform: platform,
             git_source: git_source ? true : false,
-            variants: variants
+            variants: variants,
+            path_source: path_source && -path_source.to_s
           )
         end
       end
@@ -181,7 +186,8 @@ module Rigor
           # instead of letting the last one overwrite the rest (#1844).
           entry = LockedGem.new(
             name: spec.name, version: spec.version.to_s, platform: platform,
-            git_source: spec.source.is_a?(Bundler::Source::Git)
+            git_source: spec.source.is_a?(Bundler::Source::Git),
+            path_source: path_source_dir(spec.source, path)
           )
           h[entry.name] = (prior = h[entry.name]) ? merge_variant(prior, entry) : entry
         end
@@ -195,6 +201,17 @@ module Rigor
       end
       private_class_method :do_parse
 
+      # The absolute directory a `PATH` stanza names, resolved against the lockfile's own directory — never
+      # against `Bundler.root`, which is Rigor's process and not the analysed project. `Bundler::Source::Git`
+      # subclasses `Path`, so a `GIT` stanza is excluded by name.
+      def self.path_source_dir(source, lockfile_path)
+        return nil unless source.is_a?(Bundler::Source::Path)
+        return nil if source.is_a?(Bundler::Source::Git)
+
+        File.expand_path(source.path.to_s, File.dirname(File.expand_path(lockfile_path.to_s)))
+      end
+      private_class_method :path_source_dir
+
       # Folds a further platform variant of an already-parsed name into it. The representative keeps a `ruby`
       # variant once seen; otherwise the last variant wins, as it did before variants were kept.
       def self.merge_variant(prior, entry)
@@ -202,7 +219,8 @@ module Rigor
         prior.with(
           variants: [*prior.variants, [entry.version, entry.platform]],
           version: rep.version, platform: rep.platform,
-          git_source: prior.git_source || entry.git_source
+          git_source: prior.git_source || entry.git_source,
+          path_source: prior.path_source || entry.path_source
         )
       end
       private_class_method :merge_variant

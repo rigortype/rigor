@@ -796,4 +796,224 @@ RSpec.describe "a hand-off inside a callee resolves its constants in the callee'
       expect(rules(m3b_no_first_source)).to eq([])
     end
   end
+
+  describe "an instance receiver whose method is inherited floors the argument (#2515)" do
+    let(:header) do
+      <<~RUBY
+        require "optparse"
+        class Helper
+          def c(parser, options) = parser.on("--f F") { |v| options[:format] = v }
+        end
+        class SubHelper < Helper; end
+      RUBY
+    end
+
+    def guarded(body)
+      <<~RUBY
+        class Caller
+          def run(argv)
+            o = { format: "text" }
+            #{body}
+            if o[:format] == "json"
+              puts "{}"
+            end
+          end
+        end
+      RUBY
+    end
+
+    it "floors a direct call on an inherited instance method (n4)" do
+      expect(rules("#{header}\n#{guarded('OptionParser.new { |p| SubHelper.new.c(p, o) }.parse!(argv)')}")).to eq([])
+    end
+
+    it "floors a callee's hand-off to an inherited instance method (n2)" do
+      source = <<~RUBY
+        #{header}
+        class Wrap
+          def self.a(parser, options) = SubHelper.new.c(parser, options)
+        end
+        #{guarded('OptionParser.new { |p| Wrap.a(p, o) }.parse!(argv)')}
+      RUBY
+      expect(rules(source)).to eq([])
+    end
+
+    it "floors an instance method that an included module defines" do
+      source = <<~RUBY
+        require "optparse"
+        module Writes
+          def c(parser, options) = parser.on("--f F") { |v| options[:format] = v }
+        end
+        class Mixed
+          include Writes
+        end
+        #{guarded('OptionParser.new { |p| Mixed.new.c(p, o) }.parse!(argv)')}
+      RUBY
+      expect(rules(source)).to eq([])
+    end
+
+    it "still reports when the inherited method is never called (control)" do
+      expect(rules("#{header}\n#{guarded('SubHelper.new')}")).to eq(always)
+    end
+
+    it "still reports when the instance method is the class's own and only reads (control)" do
+      source = <<~RUBY
+        class Reader
+          def c(parser, options) = puts(options.to_s)
+        end
+        #{guarded('Reader.new.c(nil, o)')}
+      RUBY
+      expect(rules(source)).to eq(always)
+    end
+  end
+
+  describe "a census computed under a constant narrowing is not memoised for other callers (#2524)" do
+    def narrowed_source(first_guard:, sub_body:)
+      <<~RUBY
+        require "optparse"
+        class Helper
+          def c(parser, options) = parser.on("--f F") { |v| options[:format] = v }
+        end
+        class SubHelper < Helper
+          #{sub_body}
+        end
+        INST = Helper.new
+        class Wrap
+          def self.a(parser, options) = INST.c(parser, options)
+        end
+        class Caller
+          #{first_guard}
+          def second(argv)
+            options = { format: "text" }
+            OptionParser.new { |p| Wrap.a(p, options) }.parse!(argv)
+            if options[:format] == "json"
+              puts "{}"
+            end
+          end
+        end
+      RUBY
+    end
+
+    let(:first) do
+      <<~RUBY
+        def first(argv)
+          o = { format: "text" }
+          if INST.is_a?(SubHelper)
+            OptionParser.new { |p| Wrap.a(p, o) }.parse!(argv)
+          end
+          o
+        end
+      RUBY
+    end
+
+    it "stays silent when the guard and the read are in one method (n1)" do
+      prefix = narrowed_source(first_guard: "", sub_body: "").sub(/class Caller.*\z/m, "")
+      source = <<~RUBY
+        #{prefix}
+        class Caller
+          def first(argv)
+            o = { format: "text" }
+            if INST.is_a?(SubHelper)
+              OptionParser.new { |p| Wrap.a(p, o) }.parse!(argv)
+              if o[:format] == "json"
+                puts "{}"
+              end
+            end
+          end
+        end
+      RUBY
+      expect(rules(source)).to eq([])
+    end
+
+    it "stays silent for the inherited narrowed subclass (m3c)" do
+      expect(rules(narrowed_source(first_guard: first, sub_body: ""))).to eq([])
+    end
+
+    it "stays silent when the narrowed subclass overrides the method with a read-only one" do
+      source = narrowed_source(first_guard: first, sub_body: "def c(parser, options) = puts(options.to_s)")
+      expect(rules(source)).to eq([])
+    end
+
+    it "stays silent without the guarded caller (control)" do
+      expect(rules(narrowed_source(first_guard: "", sub_body: "def c(parser, options) = puts(options.to_s)"))).to eq([])
+    end
+  end
+
+  describe "the census bypass and the union arm, each pinned on its own (#2524)" do
+    let(:direct) do
+      <<~RUBY
+        require "optparse"
+        class Helper
+          def c(parser, options) = parser.on("--f F") { |v| options[:format] = v }
+        end
+        class SubHelper < Helper
+        end
+        INST = Helper.new
+        class Wrap
+          def self.a(parser, options) = INST.c(parser, options)
+        end
+        class Caller
+          FIRST
+          def second(argv)
+            options = { format: "text" }
+            Wrap.a(OptionParser.new, options)
+            if options[:format] == "json"
+              puts "{}"
+            end
+          end
+        end
+      RUBY
+    end
+
+    it "stays silent for the direct-call form after a guarded caller (d3)" do
+      first = <<~RUBY
+        def first(argv)
+          o = { format: "text" }
+          if INST.is_a?(SubHelper)
+            Wrap.a(OptionParser.new, o)
+          end
+          o
+        end
+      RUBY
+      expect(rules(direct.sub("FIRST", first))).to eq([])
+    end
+
+    it "stays silent for the direct-call form without the guarded caller (control)" do
+      expect(rules(direct.sub("FIRST", ""))).to eq([])
+    end
+
+    def union_source(expression)
+      <<~RUBY
+        require "optparse"
+        class W
+          def c(parser, options) = parser.on("--f F") { |v| options[:format] = v }
+        end
+        class R
+          def c(parser, options) = puts(options.to_s)
+        end
+        class SubW < W; end
+        class Caller
+          def run(argv, flag)
+            o = { format: "text" }
+            h = #{expression}
+            OptionParser.new { |p| h.c(p, o) }.parse!(argv)
+            if o[:format] == "json"
+              puts "{}"
+            end
+          end
+        end
+      RUBY
+    end
+
+    it "floors a local union whose one member writes (u2)" do
+      expect(rules(union_source("flag ? R.new : W.new"))).to eq([])
+    end
+
+    it "floors a local union whose member inherits the writer (u3)" do
+      expect(rules(union_source("flag ? R.new : SubW.new"))).to eq([])
+    end
+
+    it "still reports a union whose members only read or are not project classes (u6)" do
+      expect(rules(union_source('flag ? R.new : "s"'))).to eq(always)
+    end
+  end
 end

@@ -563,13 +563,14 @@ module Rigor
       # `recv` types as a project class object (`Const`, a bare constant or any constant path, or a local holding
       # one), whose singleton chain has `name` (`def self.name`, `class << self`, `module_function`, an `extend`ed
       # module, the project superclass's), or as an instance of a project class (`Opts.new.add_format(...)`,
-      # `h = Opts.new; h.add_format(...)`), whose own instance table has `name`: the same census a self-call reads then
+      # `h = Opts.new; h.add_format(...)`), whose instance chain has `name`: the same census a self-call reads then
       # floors the passed local, so `Opts.add_format(opts, options)` handing `options` to a block that writes it
       # leaves the literal behind. `owner` is a {CalleeOwner}: the receiver type the callee's own hand-offs
       # (`really(parser, options)`) resolve self-calls in, not the caller's class, and the class that defines the def,
       # whose lexical nesting its constants resolve in. `resolved_census` keys the shared memo by the receiver's
-      # class. An instance receiver finds the class's own defs only (no ancestor walk, as {#resolve_self_callees});
-      # a receiver of any other type resolves to nothing, as does `Const.new` of a class that defines its own
+      # class. An instance receiver whose def is inherited (a superclass's, an included module's) resolves to
+      # {FLOOR_ALL}, as the singleton side does: the def is not followed (its owner's context is not threaded).
+      # A receiver of any other type resolves to nothing, as does `Const.new` of a class that defines its own
       # `self.new`; `send` hand-offs are not followed through an explicit receiver. `require_local: false` (the
       # hand-offs inside a callee, whose arguments are parameters) skips the caller-scope check that a local is passed
       # and types the receiver in the def's own nesting ({#hand_off_scopes}), not the caller's.
@@ -591,10 +592,15 @@ module Rigor
 
       # `[def, 0, owner]` for `name` called on a receiver of `receiver_type`, or none.
       def callees_for_receiver_type(receiver_type, name)
+        if receiver_type.is_a?(Type::Union)
+          return receiver_type.members.flat_map { |member| callees_for_receiver_type(member, name) }
+                              .uniq { |callee, _, owner| [callee.object_id, owner] }
+        end
+
         found, defining =
           case receiver_type
           when Type::Singleton then scope.singleton_def_through_ancestors(receiver_type.class_name, name)
-          when Type::Nominal then [scope.user_def_for(receiver_type.class_name, name), receiver_type.class_name]
+          when Type::Nominal then scope.user_def_through_ancestors(receiver_type.class_name, name)
           end
         return NO_CALLEES if found.nil?
 
@@ -682,8 +688,8 @@ module Rigor
         (by_side[enclosing_class_name_for(self_type)] ||= {})[written] ||= {}
       end
 
-      # True when the hand-off memo must not be read or written: a dependency recorder is active (it must see each
-      # constant read), or this scope carries guard narrowings of constants (`if INST.is_a?(Sub)`), which survive
+      # True when a hand-off or census memo must not be read or written: a dependency recorder is active (it must see
+      # each constant read), or this scope carries guard narrowings of constants (`if INST.is_a?(Sub)`), which survive
       # `with_self_type` and change what the constant types as, so the answer is no longer the def's alone.
       def hand_off_memo_bypassed?
         Analysis::DependencyRecorder.active? || !scope.constant_narrowings.empty?
@@ -5049,9 +5055,12 @@ module Rigor
       # ({#resolve_self_callees}) keys it too: a singleton-side table apart from the instance-side one.
       #
       # While a dependency recorder is active the memo is bypassed: a resolution records an ADR-46 read in the file
-      # and in each capture window open at the time, and a hit would leave that read out of them.
+      # and in each capture window open at the time, and a hit would leave that read out of them. It is bypassed, read
+      # and write, while this scope carries guard narrowings of constants ({#hand_off_memo_bypassed?}, #2524): they
+      # survive `with_self_type` and change what a constant in the def's body types as, so the census is no longer
+      # the def's alone, and the first caller's narrowing must not become every later caller's answer.
       def resolved_census(kind, def_node)
-        return yield if Analysis::DependencyRecorder.active?
+        return yield if hand_off_memo_bypassed?
 
         discovery = scope.discovery
         table = (Thread.current[RESOLVED_CENSUS_KEY] ||= ObjectSpace::WeakKeyMap.new)

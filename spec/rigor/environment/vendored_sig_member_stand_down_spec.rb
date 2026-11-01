@@ -133,7 +133,19 @@ RSpec.describe "issue #2470 vendored signature member stand-down" do
       "a class the vendored file declares as a class, written as a module" =>
         "module PG::Connection\n  def async_exec: (*untyped) -> untyped\nend\n"
     }.each do |shape, rbs|
-      it "keeps the vendored member for #{shape}, uncached and through the cache alike" do
+      # rbs 3.x has no `sources` table, so `RbsLoader.add_project_parsed_decls` cannot drop the file and the
+      # whole env build fails, as it does on master; the quarantine, and so the re-plan, exist on rbs 4.x only.
+      it "reports the total env-build failure rbs 3.x raises for #{shape}, as before this change",
+         if: RBS::VERSION.start_with?("3.") do
+        Dir.mktmpdir do |dir|
+          loader = as_loader([write_sig(dir, rbs)])
+          expect(loader.class_known?("PG::Connection")).to be(false)
+          expect(loader.env_build_failure&.first.to_s).to eq("RBS::DuplicatedDeclarationError")
+        end
+      end
+
+      it "keeps the vendored member for #{shape}, uncached and through the cache alike",
+         if: RBS::VERSION.start_with?("4.") do
         Dir.mktmpdir do |dir|
           sig = write_sig(dir, rbs)
           store = Rigor::Cache::Store.new(root: File.join(dir, "cache"))

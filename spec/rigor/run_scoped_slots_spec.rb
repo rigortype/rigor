@@ -217,35 +217,90 @@ RSpec.describe Rigor::RunScopedSlots do
     expect(loop_keys.map { |key| Thread.current[key] }).to all(be_nil)
   end
 
-  # Every per-thread key `lib/` names: a `rigor` symbol read through `Thread.current[...]` or
-  # `thread_variable_get` / `_set`, directly or through a constant, and every `*_KEY` / `*MEMO*` constant holding
-  # one (a key passed on through a variable, as the RBS ancestor-dispatch memos are).
+  # Every per-thread key `lib/` names, and the accesses it cannot resolve. A key is a symbol read through
+  # `Thread.current[...]` or `thread_variable_get` / `_set`, directly or through a constant whatever its symbol is
+  # spelled (#2458: a trailing comment on the constant or no `rigor` in the name), and every `*_KEY` / `*MEMO*`
+  # constant whose `rigor` symbol is a key passed on through a variable, as the RBS ancestor-dispatch memos are.
   def thread_keys_in_lib
     lib = File.expand_path("../../lib", __dir__)
-    Dir[File.join(lib, "**/*.rb")].each_with_object({}) do |path, keys|
-      source = File.read(path)
-      constants = {}
-      source.scan(/^\s*([A-Z][A-Z0-9_]*) = (?:RunScopedSlots\.register\()?:([a-z_]*rigor[a-z_]*)\)?$/) do |name, sym|
-        constants[name] = sym
-        keys[sym.to_sym] = path if name.end_with?("_KEY") || name.include?("MEMO")
-      end
-      access = /Thread\.current(?:\[|\.thread_variable_[gs]et\()\s*([A-Z][A-Z0-9_]*|:[a-z_]*rigor[a-z_]*)/
-      source.scan(access).flatten.each do |used|
-        sym = used.start_with?(":") ? used.delete_prefix(":") : constants[used]
-        keys[sym.to_sym] = path if sym
+    keys = {}
+    unresolved = []
+    Dir[File.join(lib, "**/*.rb")].each { |path| scan_thread_keys(File.read(path), path, keys, unresolved) }
+    [keys, unresolved]
+  end
+
+  # Adds one file's keys (symbol => path) and its unresolved accesses ("path:line NAME") to `keys` and `unresolved`.
+  # A dynamic key (a local variable read from a list of constants) is not scanned here; its constants are.
+  def scan_thread_keys(source, path, keys, unresolved)
+    source = source.gsub(/^\s*#.*$/, "") # whole-line comments name keys in prose; blanking keeps line numbers
+    scan_thread_accesses(source, path, keys, unresolved, scan_thread_constants(source, path, keys))
+  end
+
+  # The constants a file defines as symbols, by name; a `*_KEY` / `*MEMO*` one with a `rigor` symbol is a key.
+  def scan_thread_constants(source, path, keys)
+    constants = {}
+    source.scan(/^\s*([A-Z][A-Z0-9_]*) = (?:RunScopedSlots\.register\()?(:[A-Za-z0-9_]+)\)?\s*(?:#.*)?$/) do
+      name, symbol = Regexp.last_match.captures
+      constants[name] = symbol
+      next unless name.end_with?("_KEY") || name.include?("MEMO")
+
+      keys[symbol.delete_prefix(":").to_sym] = path if symbol.include?("rigor")
+    end
+    constants
+  end
+
+  def scan_thread_accesses(source, path, keys, unresolved, constants)
+    access = /Thread\.current(?:\[|\.thread_variable_[gs]et\()\s*(?:[A-Z]\w*::)*([A-Z][A-Z0-9_]*|:[A-Za-z0-9_]+)/
+    source.scan(access) do
+      match = Regexp.last_match
+      used = match[1]
+      if used.start_with?(":")
+        keys[used.delete_prefix(":").to_sym] = path
+      elsif constants.key?(used)
+        keys[constants[used].delete_prefix(":").to_sym] = path
+      else
+        line = source[0...match.begin(0)].count("\n") + 1
+        unresolved << "#{path}:#{line} #{used}"
       end
     end
   end
 
   # A memo slot a new owner adds is caught here even when no fixture fills it.
   it "registers every per-thread key in lib/ that is not a listed frame slot" do
-    keys = thread_keys_in_lib
+    keys, unresolved = thread_keys_in_lib
 
+    expect(unresolved).to be_empty
     unlisted = keys.keys - described_class.keys - not_run_scoped.keys
     expect(unlisted.to_h { |key| [key, keys[key]] }).to be_empty
     expect(described_class.keys - keys.keys).to be_empty
     expect(not_run_scoped.keys - keys.keys).to be_empty
     expect(not_run_scoped.keys & described_class.keys).to be_empty
+  end
+
+  # #2458: the two shapes the scan used to drop, a trailing comment on the constant and a key spelled without `rigor`.
+  it "finds a per-thread key whose constant has a trailing comment or whose symbol has no `rigor`" do
+    keys = {}
+    unresolved = []
+    scan_thread_keys(<<~RUBY, "fixture.rb", keys, unresolved)
+      EXTRA_MEMO_KEY = :__rigor_extra_probe_memo__ # per-run memo
+      VOID_TAIL_MEMO_KEY = :__void_tail_extra_memo__
+      def probe = [Thread.current[EXTRA_MEMO_KEY], Thread.current[VOID_TAIL_MEMO_KEY]]
+      def literal = Thread.current[:__void_literal_memo__]
+    RUBY
+
+    expect(keys.keys).to contain_exactly(:__rigor_extra_probe_memo__, :__void_tail_extra_memo__, :__void_literal_memo__)
+    expect(unresolved).to be_empty
+  end
+
+  it "reports a per-thread access whose constant the file does not define" do
+    keys = {}
+    unresolved = []
+    scan_thread_keys(<<~RUBY, "fixture.rb", keys, unresolved)
+      def probe = Thread.current[Elsewhere::MISSING_KEY]
+    RUBY
+
+    expect(keys).to be_empty
+    expect(unresolved).to eq(["fixture.rb:1 MISSING_KEY"])
   end
 
   it "registers a key once and hands it back" do

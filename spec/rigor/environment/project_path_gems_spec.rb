@@ -21,13 +21,12 @@ RSpec.describe Rigor::Environment::ProjectPathGems do
   end
 
   around do |example|
-    Dir.mktmpdir("rigor-project-path-gems-") do |dir|
-      @dir = File.realpath(dir)
-      example.run
-    end
+    Dir.mktmpdir("rigor-project-path-gems-") { |dir| Dir.chdir(dir) { example.run } }
   end
 
-  def at(path) = File.join(@dir, path)
+  def tmp_root = File.realpath(Dir.pwd)
+
+  def at(path) = File.join(tmp_root, path)
 
   it "does not count a remote that only shares a paths: entry's prefix (/proj/lib2 against /proj/lib)" do
     write_ruby(at("lib2/a.rb"), at("lib/b.rb"))
@@ -42,19 +41,19 @@ RSpec.describe Rigor::Environment::ProjectPathGems do
   it "matches a paths: entry spelled through a symlink against the gem's real directory" do
     write_ruby(at("gems/own/lib/own.rb"))
     File.symlink(at("gems/own/lib"), at("linked"))
-    expect(described_class.names(gem_at(at("gems/own")), paths: ["linked"], root: @dir)).to eq(Set["own"])
+    expect(described_class.names(gem_at(at("gems/own")), paths: ["linked"], root: tmp_root)).to eq(Set["own"])
   end
 
   it "counts nothing without paths:" do
     write_ruby(at("own.rb"))
-    expect(described_class.names(gem_at(@dir), paths: nil, root: @dir)).to be_empty
+    expect(described_class.names(gem_at(tmp_root), paths: nil, root: tmp_root)).to be_empty
   end
 
   # #2592 — the gem counts only when the file walker would analyse one of its Ruby files.
   describe "exclude: patterns" do
     def names(exclude_patterns, paths: ["."])
       described_class.names(gem_at(at("vendor/gems/foo"), name: "foo"),
-                            paths: paths, root: @dir, exclude_patterns: exclude_patterns, exclude_base: @dir)
+                            paths: paths, root: tmp_root, exclude_patterns: exclude_patterns, exclude_base: tmp_root)
     end
 
     before { write_ruby(at("app/x.rb"), at("vendor/gems/foo/lib/foo.rb"), at("vendor/gems/foo/lib/foo/base.rb")) }

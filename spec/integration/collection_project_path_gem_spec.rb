@@ -156,7 +156,7 @@ RSpec.describe "rbs collection entries for the project's own path gems" do
 
   # #2592 — the gem's directory itself does not match these patterns, but every Ruby file of it does.
   ["vendor/**/*.rb", "vendor/gems/foo/lib/**"].each do |pattern|
-    it "keeps the collection entry of a path gem under paths: [.] whose every .rb file exclude: #{pattern} leaves out" do
+    it "keeps the collection entry of a path gem under paths: [.] whose every .rb file #{pattern} excludes" do
       FileUtils.mkdir_p("sig")
       File.write("sig/own.rbs", "class MyX < Foo::Base\nend\n")
       write_collection("foo", "module Foo\n  class Base\n    def bar: () -> Integer\n  end\nend\n")

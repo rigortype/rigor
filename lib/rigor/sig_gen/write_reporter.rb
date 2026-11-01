@@ -91,6 +91,7 @@ module Rigor
           when :created, :updated then render_check_change(result)
           when :skipped_invalid_rbs then render_write_invalid(result)
           when :skipped_invalid_encoding then render_write_invalid_encoding(result)
+          when :skipped_unparseable then render_write_unparseable(result)
           end
         end
       end
@@ -119,6 +120,7 @@ module Rigor
           when :skipped_outside_sig_root then render_write_skipped(result)
           when :skipped_invalid_rbs then render_write_invalid(result)
           when :skipped_invalid_encoding then render_write_invalid_encoding(result)
+          when :skipped_unparseable then render_write_unparseable(result)
           end
         end
       end
@@ -193,6 +195,13 @@ module Rigor
       def render_write_invalid_encoding(result)
         @out.puts("REFUSED #{result.target_path} — the existing file is not valid UTF-8, so it was not updated")
         @out.puts("  Re-save the file as UTF-8 and re-run; sig-gen never modifies a file it cannot read faithfully.")
+      end
+
+      # The EXISTING target file does not parse as RBS, so the writer will not merge into it (#2480). Like the
+      # encoding refusal the fix is the user's: the file is quarantined whole by `rigor check` until it parses.
+      def render_write_unparseable(result)
+        @out.puts("REFUSED #{result.target_path} — the existing file does not parse as RBS, so it was not updated")
+        @out.puts("  Fix the syntax error and re-run; sig-gen never modifies a file it cannot parse.")
       end
 
       def render_write_json(results, refused)

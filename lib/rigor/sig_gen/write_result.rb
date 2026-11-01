@@ -11,7 +11,7 @@ module Rigor
     # - `target_path` — `.rbs` file the writer was responsible for (`nil` when the source path falls outside
     #   the project signature tree, in which case `action` is `:skipped_outside_sig_root`).
     # - `action` — one of `:created` / `:updated` / `:noop` / `:skipped_outside_sig_root` /
-    #   `:skipped_invalid_rbs` / `:skipped_invalid_encoding`.
+    #   `:skipped_invalid_rbs` / `:skipped_invalid_encoding` / `:skipped_unparseable`.
     # - `applied` — the {MethodCandidate}s that actually landed on disk.
     # - `replaced` — the subset of `applied` that replaced an existing declaration rather than adding one
     #   (`--overwrite`'s tighter returns, and inline updates).
@@ -27,7 +27,8 @@ module Rigor
     #   assembled does not parse, so it was NOT written (writing it would poison the project's sig tree — the
     #   consumer quarantines an unparseable `.rbs`, taking every other type in that file down with it); for
     #   `:skipped_invalid_encoding` the EXISTING target file is not valid UTF-8, so the writer refuses to merge
-    #   into content it cannot read faithfully.
+    #   into content it cannot read faithfully; for `:skipped_unparseable` the EXISTING target file does not parse
+    #   as RBS, so the writer refuses to merge into it (#2480).
     class WriteResult
       attr_reader :source_path, :target_path, :action, :applied, :skipped, :error, :left_unreadable, :replaced
 

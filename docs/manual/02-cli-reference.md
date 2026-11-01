@@ -655,7 +655,11 @@ would take every other type in the file down with it. Under
 **refused** (the existing file is left untouched) and the command
 exits `1`: you asked for a write and did not get one. Such a skip
 is a bug in Rigor's RBS rendering, not in your code — please
-report it.
+report it. An existing target that does not parse as RBS in the
+first place is refused the same way, named on stderr as `REFUSED`
+(the JSON action is `skipped_unparseable`); `--check` fails on it
+too, so an unparseable `sig/` file is never reported as up to date.
+Fix its syntax error and re-run.
 
 A method the generator declined for any other reason (a body
 that proves only `untyped`, a user-authored declaration it will

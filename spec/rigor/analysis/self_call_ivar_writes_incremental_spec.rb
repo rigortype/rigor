@@ -215,6 +215,7 @@ RSpec.describe "self-call ivar-write proof — incremental" do
     )
   end
 
+  # A guard for the `refinement:*` edge: the start example pins it; this one is re-checked without it.
   it "re-checks the caller when a file whose declarations stay stops a computed define_method in a refinement" do
     expect_recheck_to_clear(
       { "b.rb" => base_source, "x.rb" => wildcard_refine }, { "x.rb" => "module R\nend\n" }
@@ -223,15 +224,18 @@ RSpec.describe "self-call ivar-write proof — incremental" do
 
   # The cold reads: the refine sits in `x.rb`, the callee in `b.rb`, the caller in `a.rb`. A wildcard row refines
   # every name on any class whether or not a `using` activates it, as a literal row does; a literal `define_method`
-  # of another name leaves the proof standing, and so does one in the callee's own file.
+  # of another name leaves the proof standing, and so does one in the callee's own file: those two rows
+  # are guards against over-reading the wildcard, which no removal of the fix fails.
   {
-    "activated by a `using` in the callee's file" => [-> { { "b.rb" => base_source("using R\n"), "x.rb" => wildcard_refine } },
-                                                      [["a.rb", 10]]],
+    "activated by a `using` in the callee's file" => [
+      -> { { "b.rb" => base_source("using R\n"), "x.rb" => wildcard_refine } }, [["a.rb", 10]]
+    ],
     "not activated" => [-> { { "b.rb" => base_source, "x.rb" => wildcard_refine } }, [["a.rb", 10]]],
     "of an unrelated class" => [-> { { "b.rb" => base_source, "x.rb" => wildcard_refine("String") } }, [["a.rb", 10]]],
     "of another literal name" => [-> { { "b.rb" => base_source, "x.rb" => wildcard_refine("Kernel", ":other") } }, []],
-    "of another literal name in the callee's file" => [-> { { "b.rb" => wildcard_refine("Kernel", ":other") + base_source } },
-                                                       []]
+    "of another literal name in the callee's file" => [
+      -> { { "b.rb" => wildcard_refine("Kernel", ":other") + base_source } }, []
+    ]
   }.each do |label, (files, expected)|
     it "reads a refinement's define_method #{label} as a cold run does" do
       Dir.mktmpdir do |dir|

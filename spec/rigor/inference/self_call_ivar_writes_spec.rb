@@ -73,7 +73,8 @@ RSpec.describe Rigor::Inference::SelfCallIvarWrites do
   # as a literal row refines its own name; a literal row of another name refines nothing the read calls.
   it "proves nothing past a names-wildcard refine row, whatever class it refines" do
     [{ "Kernel" => { "*" => ["R"] } }, { "String" => { "*" => ["R"] } }, { "*" => { "*" => ["R"] } }].each do |rows|
-      expect(described_class.of(call("log"), scope_for("def log = warn('x')", refinements: rows))).to be_nil, rows.inspect
+      scope = scope_for("def log = warn('x')", refinements: rows)
+      expect(described_class.of(call("log"), scope)).to be_nil, rows.inspect
     end
     literal = scope_for("def log = warn('x')", refinements: { "Kernel" => { other: ["R"] } })
     expect(described_class.of(call("log"), literal)).to eq(Set[])

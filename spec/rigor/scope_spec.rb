@@ -213,12 +213,11 @@ RSpec.describe Rigor::Scope do
       expect([joined.construction_fact?(:a), joined.construction_fact?(:a, :defaulted)]).to eq([false, true])
     end
 
-    it "unions :grown within an entry both arms keep, and drops every fact on request" do
+    it "unions :grown within an entry both arms keep" do
       grown = scope.with_local(:a, type).with_construction_fact(:a, :synthesised).with_construction_fact(:a, :grown)
       plain = scope.with_local(:a, type).with_construction_fact(:a, :synthesised)
       expect([grown.join(plain).construction_fact?(:a, :grown), plain.join(grown).construction_fact?(:a, :grown)])
         .to eq([true, true])
-      expect(grown.without_construction_facts(:a).construction_fact?(:a)).to be(false)
     end
 
     it "tells two scopes apart by their construction facts" do

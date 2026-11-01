@@ -159,7 +159,7 @@ module Rigor
       # re-growable while the binding keeps the fact, so every later store made THROUGH THE BINDING is seen. A store
       # through another holder is not, which is why a local that may escape anywhere in its body never carries the
       # fact ({ConstructionEscape}). Nor is a remover taking a store out again, which is why a remover on a carrier a
-      # store has grown restores the floor and drops the fact ({MutationWidening.floor_grown_carrier}).
+      # store has grown restores the floor ({MutationWidening.floor_grown_carrier}).
       def widen_synthesised(nominal, method_name, values:, arg_types:)
         pre_state = values == :widen ? value_pin_widened_args(nominal) : nominal
         rejoined =
@@ -215,24 +215,31 @@ module Rigor
         SYNTHESISED_REMOVERS.include?(method_name) && scope.construction_fact?(name, :grown)
       end
 
-      # `type` with every Array / Hash / Set parameter joined with `Dynamic[top]` and its `nil` member dropped,
-      # member-wise through a union: the reading the carrier would have had without the fact, where a stored member the
-      # seed did not accept joined as the floor alone ({#precise_admitted}). A `nil` kept beside the floor would still
-      # draw `call.possible-nil-receiver` after `parts << nil; parts.compact!`; any other kept member dispatches quietly
-      # beside it.
-      def floor_parameters(type)
+      # `type` with every Array / Hash / Set parameter joined with `Dynamic[top]`, member-wise through a union: the
+      # reading the carrier would have had without the fact. With `drop_nil` (a remover that can take a `nil` out,
+      # {MutationWidening.removes_nil?}) the parameter's `nil` member goes too: on the path without the fact a stored
+      # `nil` the seed did not accept joined as the floor alone ({#precise_admitted}), and a `nil` kept beside the floor
+      # would still draw `call.possible-nil-receiver` after `parts << nil; parts.compact!`. Any other remover keeps the
+      # `nil`, which it may leave behind (`s << nil; s.delete(1)`).
+      def floor_parameters(type, drop_nil: false)
         case type
-        when Type::Union then Type::Combinator.union(*type.members.map { |member| floor_parameters(member) })
+        when Type::Union then Type::Combinator.union(*type.members.map { |member| floor_parameters(member, drop_nil:) })
         when Type::Nominal
           return type unless %w[Array Hash Set].include?(type.class_name) && !type.type_args.empty?
 
-          Type::Combinator.nominal_of(type.class_name, type_args: type.type_args.map { |arg| floored_parameter(arg) })
+          Type::Combinator.nominal_of(type.class_name,
+                                      type_args: type.type_args.map { |arg| floored_parameter(arg, drop_nil) })
         else type
         end
       end
 
-      def floored_parameter(arg)
-        kept = ContentJoin.union_members(arg).reject { |member| member.is_a?(Type::Constant) && member.value.nil? }
+      def hash_carrier?(type)
+        ContentJoin.union_members(type).any? { |member| member.is_a?(Type::Nominal) && member.class_name == "Hash" }
+      end
+
+      def floored_parameter(arg, drop_nil)
+        kept = ContentJoin.union_members(arg)
+        kept = kept.reject { |member| member.is_a?(Type::Constant) && member.value.nil? } if drop_nil
         Type::Combinator.union(*kept, Type::Combinator.untyped)
       end
 

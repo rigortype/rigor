@@ -345,10 +345,10 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
         n = gets.to_i
         a = Array.new(n, 0)
         a << "s"
-        dump_type(a)
+        dump_type(a.dup)
         b = Array.new(n) { 0 }
         b[0] = "s"
-        dump_type(b)
+        dump_type(b.dup)
       RUBY
       expect(undefined_method_rules(<<~RUBY)).to be_empty
         n = gets.to_i
@@ -362,7 +362,7 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
       expect(dumped_types(<<~RUBY)).to eq(["Array[Dynamic[top] | String]"])
         s = gets.to_s.split(",")
         s << 1
-        dump_type(s)
+        dump_type(s.dup)
       RUBY
     end
 
@@ -378,7 +378,7 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
         g = { a: 1 }
         g.delete(:b)
         g.transform_values!(&:to_s)
-        dump_type(g)
+        dump_type(g.dup)
       RUBY
     end
 
@@ -394,16 +394,16 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
     end
 
     it "joins an adder's store into a literal closed by `sort!`" do
-      expect(dumped_types(<<~RUBY)).to eq(["Array[1 | 2 | String]", "Array[1 | 2 | Dynamic[top]]"])
+      expect(dumped_types(<<~RUBY)).to eq(["1 | 2 | String", "1 | 2 | Dynamic[top]"])
         a = [1, 2]
         a.sort!
         a << "s"
-        dump_type(a)
+        dump_type(a.first)
         c = [1, 2]
         c.sort!
         d = c
         d << "s"
-        dump_type(d)
+        dump_type(d.first)
       RUBY
     end
 
@@ -434,14 +434,14 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
       expect(dumped_types(<<~RUBY)).to eq(["Hash[String, Integer | String]"])
         h = { ENV["A"].to_s => 1 }
         h["k"] = "v"
-        dump_type(h)
+        dump_type(h.dup)
       RUBY
     end
 
     # A constructor-shaped call on anything but the core class is a declared return, not a construction.
     it "gives no fact to a `[]` whose receiver is not the core class" do
       sig = { "maker.rbs" => "module Maker\n  def self.[]: () -> Array[Integer]\nend\n" }
-      source = "module Maker\n  def self.[] = [1]\nend\na = Maker[]\na << \"s\"\ndump_type(a)\n"
+      source = "module Maker\n  def self.[] = [1]\nend\na = Maker[]\na << \"s\"\ndump_type(a.dup)\n"
       dumped = diagnostics(source, sig: sig).filter_map do |diagnostic|
         diagnostic.message.delete_prefix("dump_type: ") if diagnostic.message.start_with?("dump_type")
       end
@@ -464,7 +464,7 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
         class F
           def push(xs)
             xs << "s"
-            dump_type(xs)
+            dump_type(xs.dup)
           end
 
           def pick(c, param)
@@ -475,7 +475,7 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
               a = param
             end
             a << "s"
-            dump_type(a)
+            dump_type(a.dup)
           end
 
           def rebind(param)
@@ -483,7 +483,7 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
             a.sort!
             a = param
             a << "s"
-            dump_type(a)
+            dump_type(a.dup)
           end
         end
       RUBY
@@ -494,12 +494,12 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
         diagnostic.message.delete_prefix("dump_type: ") if diagnostic.message.start_with?("dump_type")
       end
       expect(dumped).to eq(["Array[Dynamic[top] | Integer]",
-                            "Array[1 | Dynamic[top]] | Array[Dynamic[top] | Integer]",
+                            "Array[Dynamic[top] | Integer]",
                             "Array[Dynamic[top] | Integer]"])
     end
 
     it "keeps the fact through a merge both arms establish" do
-      expect(dumped_types(<<~RUBY)).to eq(["Array[1 | String] | Array[2 | String]"])
+      expect(dumped_types(<<~RUBY)).to eq(["1 | 2 | String"])
         if gets
           a = [1]
         else
@@ -507,13 +507,13 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
         end
         a.sort!
         a << "s"
-        dump_type(a)
+        dump_type(a.first)
       RUBY
     end
 
     # Review round 1 — a remover or filter can take a stored member out again, and nothing narrows the carrier
     # back, so on a carrier a store has grown it restores the reading the carrier has without the fact: the floor,
-    # with the stored `nil` gone, and no fact from then on.
+    # with the stored `nil` gone when the remover can take a `nil` out.
     {
       "Array#compact!" => "p = Array.new(n, \"a\")\np << (gets ? nil : \"b\")\np.compact!\np.each { |s| s.upcase }",
       "Array#compact! after an untyped store" =>
@@ -522,9 +522,11 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
       "Array#delete" => "p = Array.new(n, \"a\")\np << nil\np.delete(nil)\np.each { |s| s.upcase }",
       "Array#reject!" => "p = Array.new(n, \"a\")\np << nil\np.reject!(&:nil?)\np.each { |s| s.upcase }",
       "Array#select!" => "p = Array.new(n, \"a\")\np << nil\np.select! { |e| e }\np.each { |s| s.upcase }",
-      "Array#pop" => "p = %w[b a]\np.sort!\np << nil\np.pop\np.each { |s| s.upcase }",
-      "Hash#delete" => "h = { ENV[\"A\"].to_s => \"x\" }\nh[\"k\"] = nil\n" \
+      "Array#pop" => "p = %w[b a]\np.sort!\np << 1\np.pop\np.each { |s| s.upcase }",
+      "Hash#delete" => "h = { ENV[\"A\"].to_s => \"x\" }\nh[\"k\"] = 1\n" \
                        "h.delete(\"k\")\nh.each_value { |v| v.upcase }",
+      "Hash#delete of a nil value" => "h = { ENV[\"A\"].to_s => \"x\" }\nh[\"k\"] = nil\nh.delete(\"k\")\n" \
+                                      "h.each_value { |v| v.upcase }",
       "Hash#reject!" => "h = { a: \"x\" }\nh.delete(:zz)\nh[:k] = nil\nh.reject! { |_, v| v.nil? }\n" \
                         "h.each_value { |v| v.upcase }",
       "Hash#compact!" => "h = { ENV[\"A\"].to_s => \"x\" }\nh[\"k\"] = nil\nh.compact!\nh.each_value { |v| v.upcase }",
@@ -535,22 +537,35 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
       end
     end
 
-    it "keeps a remover with no prior store on today's answer, and drops the fact after a floored remover" do
-      expect(dumped_types(<<~RUBY)).to eq(["Array[String]", "Array[1 | 2]", "Array[Dynamic[top] | Integer | String]"])
+    # A remover that cannot take the `nil` out leaves it, so a read reports it as the reading without the fact does.
+    it "keeps a stored nil under a remover that cannot remove it" do
+      expect(rules("s = Set[1]\ns << nil\ns.delete(1)\ns.each { |v| v + 1 }\n",
+                   "call.")).to eq(["call.possible-nil-receiver"])
+    end
+
+    it "keeps a remover with no prior store on today's answer, and answers the floored reading after one" do
+      expect(dumped_types(<<~RUBY)).to eq(["Array[String]", "1 | 2", "Array[Dynamic[top] | Integer | String]"])
         n = gets.to_i
         a = Array.new(n, "a")
         a.compact!
-        dump_type(a)
+        dump_type(a.dup)
         b = [1, 2]
         b.sort!
         b.delete(1)
-        dump_type(b)
+        dump_type(b.first)
         c = Array.new(n, "a")
         c << nil
         c.compact!
         c << 1
-        dump_type(c)
+        dump_type(c.dup)
       RUBY
+    end
+
+    # What `a = Array.new(n, 0); a << :x` reads when the local keeps its fact: the escape examples below must not.
+    def precise_regrowth = "Array[Integer | Symbol]"
+
+    it "regrows a local that does not escape precisely, the escape examples' positive control" do
+      expect(dumped_types("n = gets.to_i\na = Array.new(n, 0)\na << :x\ndump_type(a.dup)\n")).to eq([precise_regrowth])
     end
 
     # Review round 1 — a store through another holder of the object is one the seam never sees, so a local that may
@@ -568,17 +583,46 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
       "instance_exec" => "a.instance_exec { self << \"s\" }",
       "binding" => "binding.local_variable_set(:a, [\"s\"])",
       "eval" => "eval(\"a << 's'\")",
+      "a lambda that returns it" => "pr = -> { return a }\nb = pr.call\nb << \"s\"",
       "a lambda" => "pr = -> { a << \"s\"; nil }\npr.call",
       "a chained <<" => "a << :y << \"s\"",
       "a chained push" => "a.push(:y).push(\"s\")",
       "a chained rewrite" => "a.unshift(:y).map!(&:to_s)",
       "a chained tap" => "a.push(:y).tap { |z| z << \"s\" }",
+      "a constructor argument" => "class Box\n  def initialize(i) = @i = i\n  def add(x) = @i << x\nend\n" \
+                                  "Box.new(a).add(\"s\")",
+      "an attribute writer" => "class Holder\n  attr_accessor :items\nend\n" \
+                               "h = Holder.new\nh.items = a\nh.items << \"s\"",
+      "Kernel#Array" => "b = Array(a)\nb << \"s\"",
+      "a user method that returns it" => "def ident(x) = x\nb = ident(a)\nb << \"s\"",
+      "a fetch default" => "{}.fetch(:k, a) << \"s\"",
+      "a Hash default" => "h = Hash.new(a)\nh[:k] << \"s\"",
+      "an Array.new fill" => "Array.new(1, a)[0] << \"s\"",
+      "a Struct member" => "st = Struct.new(:v).new(a)\nst.v << \"s\"",
+      "a Thread argument" => "Thread.new(a) { |x| x << \"s\" }.join",
+      "an each_with_object memo" => "[1].each_with_object(a) { |_i, acc| acc << \"s\" }",
+      "an inject seed" => "[1].inject(a) { |acc, _i| acc << \"s\" }",
+      "an each_with_object result" => "b = [1].each_with_object(a) { |_i, _m| nil }\nb << \"s\"",
+      "a method the project defines on Array" => "class Array\n  def add_label = push(\"s\")\nend\na.add_label",
+      "a listed reader the project redefines" =>
+        "class Array\n  def first\n    push(\"s\")\n    self[0]\n  end\nend\na.first",
       "a storing argument" => "list = []\nlist << a\nlist.last << \"s\""
     }.each do |escape, body|
       it "gives no fact to a local that escapes through #{escape}" do
-        dumped = dumped_types("n = gets.to_i\na = Array.new(n, 0)\na << :x\n#{body}\ndump_type(a)\n")
-        expect(dumped.last).to include("Dynamic[top]")
+        dumped = dumped_types("n = gets.to_i\na = Array.new(n, 0)\na << :x\n#{body}\ndump_type(a.dup)\n")
+        expect(dumped.last).not_to eq(precise_regrowth)
       end
+    end
+
+    # A Set call that answers the receiver itself, used, hands it on as an alias does.
+    { "Set#merge" => "t = s.merge([2])\nt << \"s\"", "Set#add?" => "t = s.add?(2)\nt << \"s\"" }.each do |call, body|
+      it "gives no fact to a Set whose #{call} value is used" do
+        expect(dumped_types("s = Set[1]\ns << :x\n#{body}\ndump_type(s.dup)\n").last).not_to eq("Set[Integer | Symbol]")
+      end
+    end
+
+    it "regrows a Set that does not escape precisely, the Set escape examples' positive control" do
+      expect(dumped_types("s = Set[1]\ns << :x\ns.merge([2])\ndump_type(s.dup)\n")).to eq(["Set[Integer | Symbol]"])
     end
 
     it "gives no fact through a chained write, and keeps it for a plain statement-position store" do
@@ -586,10 +630,10 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
         n = gets.to_i
         a = b = Array.new(n, 0)
         b << "s"
-        dump_type(b)
+        dump_type(b.dup)
         c = Array.new(n, 0)
         c << "s"
-        dump_type(c)
+        dump_type(c.dup)
       RUBY
     end
 
@@ -601,7 +645,7 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
           return a if n.zero?
 
           a << "s"
-          dump_type(a)
+          dump_type(a.dup)
         end
       RUBY
     end
@@ -613,9 +657,9 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
         a = Array.new(n, 0)
         a << :x
         add_label(a)
-        dump_type(a)
+        dump_type(a.dup)
       RUBY
-      expect(dumped.last).to include("Dynamic[top]")
+      expect(dumped.last).not_to eq(precise_regrowth)
     end
 
     it "joins a store into a merged union of synthesised hashes, and drops a slot write's value pin" do
@@ -627,11 +671,11 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
           h = { ENV["B"].to_s => :x }
         end
         h["k"] = "v"
-        dump_type(h)
+        dump_type(h.dup)
         a = [1, 2]
         a.sort!
         a[0] = 5
-        dump_type(a)
+        dump_type(a.dup)
       RUBY
     end
 
@@ -649,10 +693,10 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
       expect(dumped_types(<<~RUBY)).to eq(["Set[Integer | String]", "Set[Dynamic[top] | String]"])
         s = Set[1]
         s << "a"
-        dump_type(s)
+        dump_type(s.dup)
         u = ARGV.to_set
         u << 1
-        dump_type(u)
+        dump_type(u.dup)
       RUBY
     end
   end

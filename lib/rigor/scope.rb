@@ -472,12 +472,6 @@ module Rigor
       rebuild(@construction_facts.merge(key => facts).freeze)
     end
 
-    # Issue #2555 — drops every fact the local `name` carries: its binding answers as an unmarked one from here on.
-    def without_construction_facts(name)
-      table = drop_origin(@construction_facts, name)
-      table.equal?(@construction_facts) ? self : rebuild(table)
-    end
-
     # ADR-82 WD1 — the propagated origin of the `Dynamic` value currently bound to a local / instance
     # variable, or `nil` when none is tracked. Consulted by `Inference::ProtectionScanner` when a dispatch's
     # receiver is a bare `x` / `@x` read whose own node carries no origin.

@@ -1192,7 +1192,7 @@ module Rigor
       # covered it.
       def synthesised_write?(node, rhs_type)
         synthesised_construction?(node.value, rhs_type) &&
-          !ConstructionEscape.escaped?(scope.match_frame&.body, node.name, constructed_carrier_class(rhs_type))
+          !ConstructionEscape.escaped?(scope.match_frame&.body, node.name, constructed_carrier_class(rhs_type), scope)
       end
 
       def synthesised_construction?(value_node, rhs_type)

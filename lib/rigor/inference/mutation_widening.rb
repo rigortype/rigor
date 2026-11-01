@@ -140,7 +140,20 @@ module Rigor
       def widen_after_call(call_node:, current_scope:, arg_types: NO_ARG_TYPES, rewritten_element: nil)
         return current_scope if pure_self_returner?(call_node.name)
 
-        widen_receiver_aliases(call_node.receiver, call_node.name, current_scope, arg_types:, rewritten_element:)
+        widen_receiver_aliases(call_node.receiver, call_node.name, current_scope, arg_types:, rewritten_element:,
+                                                                                  removes_nil: removes_nil?(call_node))
+      end
+
+      # Issue #2555 — the removers that can take a `nil` out: `compact!`, the block filters, `clear`, and `delete` /
+      # `delete?` given a literal `nil`. `Hash#delete` removes by key, so whatever value the key held may go, a `nil`
+      # included ({.floor_grown_carrier} reads the receiver for it).
+      NIL_REMOVERS = %i[compact! reject! select! filter! delete_if keep_if clear].to_set.freeze
+
+      def removes_nil?(call_node)
+        return true if NIL_REMOVERS.include?(call_node.name)
+        return false unless %i[delete delete?].include?(call_node.name)
+
+        call_node.arguments&.arguments&.first.is_a?(Prism::NilNode)
       end
 
       # True when `receiver` names at least one variable whose CURRENT binding is a literal-shape
@@ -192,11 +205,12 @@ module Rigor
 
       # Widens every variable `receiver` can evaluate to ({ReceiverAlias.mutated_reads}), against `method_name`'s
       # mutator table.
-      def widen_receiver_aliases(receiver, method_name, current_scope, arg_types: NO_ARG_TYPES, rewritten_element: nil)
+      def widen_receiver_aliases(receiver, method_name, current_scope, arg_types: NO_ARG_TYPES, rewritten_element: nil,
+                                 removes_nil: false)
         return current_scope if receiver.nil?
 
         ReceiverAlias.mutated_reads(receiver).reduce(current_scope) do |acc, read|
-          widen_alias_read(method_name, read, acc, arg_types:, rewritten_element:)
+          widen_alias_read(method_name, read, acc, arg_types:, rewritten_element:, removes_nil:)
         end
       end
 
@@ -300,8 +314,8 @@ module Rigor
 
       # `unread_arguments` says the call passes arguments this seam did not type (the block-capture path): a Set,
       # which has no block content join, takes one unknown store for it ({SetMutation.widen}).
-      def widen_alias_read(method_name, read, scope, values: :widen, arg_types: NO_ARG_TYPES, unread_arguments: false,
-                           rewritten_element: nil)
+      def widen_alias_read(method_name, read, scope, values: :widen, arg_types: NO_ARG_TYPES, unread_arguments: false, # rubocop:disable Metrics/ParameterLists
+                           rewritten_element: nil, removes_nil: false)
         getter, builder = ALIAS_ACCESSORS[read.class]
         return scope if getter.nil?
 
@@ -309,7 +323,7 @@ module Rigor
         current = scope.public_send(getter, name)
         synthesised = synthesised_binding?(scope, getter, name)
         if synthesised && MutationRejoin.floors_grown_carrier?(scope, name, method_name)
-          return floor_grown_carrier(scope, builder, name, current, method_name, getter)
+          return floor_grown_carrier(scope, builder, name, current, method_name, getter, removes_nil)
         end
 
         widened = widen_for_mutator(current, method_name, values:, arg_types:, unread_arguments:, rewritten_element:,
@@ -322,13 +336,13 @@ module Rigor
 
       # Issue #2555 — a remover or filter on a synthesised carrier a store has grown. Nothing narrows the carrier back,
       # so the stored arm would outlive the values the call removes (`parts << nil; parts.compact!`); the carrier takes
-      # the `Dynamic[top]` floor it would have carried without the fact, and the binding drops its facts, so it answers
-      # as a carrier without them from here on.
-      def floor_grown_carrier(scope, builder, name, current, method_name, getter)
-        floored = MutationRejoin.floor_parameters(current)
+      # the `Dynamic[top]` floor it would have carried without the fact. The binding keeps its facts: the floored carrier
+      # is gradual, so the synthesised re-join no longer applies to it, and a later remover floors it again.
+      def floor_grown_carrier(scope, builder, name, current, method_name, getter, removes_nil)
+        drop_nil = removes_nil || (method_name == :delete && MutationRejoin.hash_carrier?(current))
+        floored = MutationRejoin.floor_parameters(current, drop_nil:)
         floored = widen_for_mutator(floored, method_name) || floored
         MutationRejoin.rebind(scope, builder, name, floored, pre_state: current, kind: getter)
-                      .without_construction_facts(name)
       end
 
       # Mutators that can land a NEW value in an EXISTING slot, falsifying that slot's value pinning

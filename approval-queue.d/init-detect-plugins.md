@@ -14,7 +14,7 @@ The first version wrote the matching plugins as active entries. Review found tha
 
 ## Options and trade-offs
 
-- **Commented suggestions under `plugins: []` (taken).** Nothing loads until the user acts, and the detection still tells them what their stack needs. The cost is one manual step: delete the `[]`, uncomment `plugins:` and the entries, then run `rigor plugins --strict`.
+- **Commented suggestions under `plugins: []` (taken).** Nothing loads until the user acts, and the detection still tells them what their stack needs. The cost is one manual step: delete the `[]` on the `plugins:` line and uncomment the entries, then run `rigor plugins --strict`.
 - **Active entries.** The project gets the plugins on the first run. This loads plugin code the user has not chosen, which ADR-96 Criterion 2 rules out without opt-in, and a Rails lockfile yields about ten entries the user may not want.
 - **A prompt during init.** Interactive, which `rigor init` does not do today, and it breaks the non-interactive CI use the command already has.
 

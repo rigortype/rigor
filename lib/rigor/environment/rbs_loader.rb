@@ -3283,15 +3283,12 @@ module Rigor
         return nil unless env.class_decls.key?(rbs_name)
 
         builder.build_singleton(rbs_name)
-      rescue ::RBS::BaseError => e
-        store_definition_build_detail(class_name, e)
-        warn_about_definition_build_failure(class_name, e)
-        nil
-      rescue SystemStackError => e
-        # rbs's `AncestorBuilder#singleton_ancestors` has no cycle check: a class whose superclass chain loops
-        # (`class S < ::S`, which a collection copy of the same class used to hide, #2441) recurses until the
-        # stack runs out, where the instance side raises `RBS::RecursiveAncestorError`. It is this class's
-        # build failure like any other, never a run abort; the report prefers the instance side's named error.
+      rescue ::RBS::BaseError, SystemStackError => e
+        # `SystemStackError`: rbs's `AncestorBuilder#singleton_ancestors` has no cycle check, so a class whose
+        # superclass chain loops (`class S < ::S`, which a collection copy of the same class used to hide, #2441)
+        # recurses until the stack runs out, where the instance side raises `RBS::RecursiveAncestorError`. It is
+        # this class's build failure like any other, never a run abort; the report prefers the instance side's
+        # named error.
         store_definition_build_detail(class_name, e)
         warn_about_definition_build_failure(class_name, e)
         nil

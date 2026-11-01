@@ -1,0 +1,1 @@
+- **[engine]** A signature whose superclass chain loops back to itself (`class S < ::M::S`) is reported as that class's `rbs.coverage.definition-build-failed` instead of aborting the run with `SystemStackError`.

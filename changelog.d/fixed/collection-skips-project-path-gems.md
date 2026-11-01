@@ -2,4 +2,3 @@
   - `rbs collection install` fetches community RBS for such gems (on rails, `actionpack`, `activesupport` and the rest); loaded beside `sig/`, every class they share failed to build with `DuplicatedMethodDefinitionError`.
   - Those gems are no longer reported as missing RBS, and do not load Rigor's bundled overlay for them (`activesupport`'s core extensions) beside your `sig/`.
   - A `path:` gem no `paths:` entry reaches, and any gem from rubygems or git, still loads its collection RBS.
-- **[engine]** A signature whose superclass chain loops back to itself (`class S < ::M::S`) is reported as that class's `rbs.coverage.definition-build-failed` instead of aborting the run with `SystemStackError`.

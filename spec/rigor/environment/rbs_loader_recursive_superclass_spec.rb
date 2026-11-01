@@ -12,16 +12,15 @@ require "tmpdir"
 require "rigor/environment"
 
 RSpec.describe Rigor::Environment::RbsLoader do
-  around do |example|
-    Dir.mktmpdir("rigor-recursive-superclass-") do |dir|
+  let(:root) do
+    Dir.mktmpdir("rigor-recursive-superclass-").tap do |dir|
       FileUtils.mkdir_p(File.join(dir, "sig"))
       File.write(File.join(dir, "sig", "m.rbs"), "module M\n  class S < ::M::S\n  end\n  class N\n  end\nend\n")
-      @root = dir
-      example.run
     end
   end
+  let(:loader) { Rigor::Environment.for_project(root: root).rbs_loader }
 
-  let(:loader) { Rigor::Environment.for_project(root: @root).rbs_loader }
+  after { FileUtils.rm_rf(root) }
 
   it "reports a self-superclass's singleton side as a RecursiveAncestorError build failure, not a stack overflow" do
     expect(loader.singleton_method(class_name: "M::S", method_name: :new)).to be_nil

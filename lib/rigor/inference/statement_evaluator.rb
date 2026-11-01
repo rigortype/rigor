@@ -580,9 +580,9 @@ module Rigor
         receiver_callees_in(scope, call_node)
       end
 
-      # {#receiver_callees} for one scope `call_node`'s receiver is typed in.
-      def receiver_callees_in(typing_scope, call_node)
-        receiver = call_node.receiver
+      # {#receiver_callees} for one scope `call_node`'s receiver (or `receiver`, the constant form a callee's local
+      # receiver was assigned) is typed in.
+      def receiver_callees_in(typing_scope, call_node, receiver = call_node.receiver)
         return NO_CALLEES if overridden_constructor?(receiver, typing_scope)
 
         callees_for_receiver_type(typing_scope.type_of(receiver), call_node.name)
@@ -661,11 +661,11 @@ module Rigor
       # `B::Helper`). The nesting is a function of the def node, never of the caller, so the answer cannot depend on
       # which caller reached the memoised edges first. A def with no recorded nesting takes
       # {#unrecorded_hand_off_callees}.
-      def hand_off_receiver_callees(call_node, def_node)
+      def hand_off_receiver_callees(call_node, def_node, receiver = call_node.receiver)
         nesting = exact_def_nesting(def_node)
-        return unrecorded_hand_off_callees(call_node) if nesting.nil?
+        return unrecorded_hand_off_callees(call_node, receiver) if nesting.nil?
 
-        receiver_callees_in(scope.with_lexical_nesting(nesting), call_node)
+        receiver_callees_in(scope.with_lexical_nesting(nesting), call_node, receiver)
       end
 
       # The def's recorded `Module.nesting` ({Scope::DiscoveryIndex#recorded_def_nesting}), nil when the declaration
@@ -695,28 +695,29 @@ module Rigor
       # - Typed: the receiver typed under each truncation of the nested-spelling nesting (`["A::B::C", "A::B", "A"]`
       #   gives `["A::B::C"]`, `["A::B::C", "A::B"]` and the whole chain), which sees an alias, an inherited or
       #   included constant and a constant holding an instance.
-      def unrecorded_hand_off_callees(call_node)
-        receiver = call_node.receiver
+      def unrecorded_hand_off_callees(call_node, receiver = call_node.receiver)
         constructed = receiver.is_a?(Prism::CallNode) && receiver.name == :new
         written = constant_name(constructed ? receiver.receiver : receiver)
         return NO_CALLEES if written.nil?
-        return compute_unrecorded_hand_off_callees(call_node, written, constructed) if hand_off_memo_bypassed?
+        return compute_unrecorded_hand_off_callees(call_node, receiver, written, constructed) if hand_off_memo_bypassed?
 
         memo = unrecorded_hand_off_memo(written)
         key = [constructed, call_node.name]
-        return memo[key] = compute_unrecorded_hand_off_callees(call_node, written, constructed) unless memo.key?(key)
+        unless memo.key?(key)
+          return memo[key] = compute_unrecorded_hand_off_callees(call_node, receiver, written, constructed)
+        end
 
         MemoAudit.check("unrecorded hand-off", memo[key], written, key) do
-          compute_unrecorded_hand_off_callees(call_node, written, constructed)
+          compute_unrecorded_hand_off_callees(call_node, receiver, written, constructed)
         end
       end
 
-      def compute_unrecorded_hand_off_callees(call_node, written, constructed)
+      def compute_unrecorded_hand_off_callees(call_node, receiver, written, constructed)
         found = hand_off_class_names(written).flat_map do |class_name|
           hand_off_callee_in(class_name, constructed, call_node.name)
         end
         hand_off_typing_scopes(written).each do |typing_scope|
-          found.concat(receiver_callees_in(typing_scope, call_node))
+          found.concat(receiver_callees_in(typing_scope, call_node, receiver))
         end
         found.size > 1 ? found.uniq { |callee, _, owner| [callee.object_id, owner] } : found
       end
@@ -797,23 +798,218 @@ module Rigor
       # The `[def, offset, owner]` triples a call inside `def_node`'s body hands its parameter to: a self-call
       # ({#resolve_self_callees}, owner nil) or a call on a constant / `Const.new` receiver ({#hand_off_receiver?},
       # {#hand_off_receiver_callees}).
-      def hand_off_callees(call_node, def_node)
-        return hand_off_receiver_callees(call_node, def_node) unless self_dispatch_call?(call_node)
+      def hand_off_callees(call_node, def_node, depth = 0)
+        return resolve_self_callees(call_node) if self_dispatch_call?(call_node)
 
-        resolve_self_callees(call_node)
+        receiver = call_node.receiver
+        if receiver.is_a?(Prism::LocalVariableReadNode) || receiver.is_a?(Prism::ItLocalVariableReadNode)
+          return local_receiver_callees(call_node, def_node, depth)
+        end
+
+        hand_off_receiver_callees(call_node, def_node)
       end
 
-      # True for a call on a receiver the callee's body can type without its locals: a constant or `Const.new`.
+      # True for a call on a receiver the callee's body can type without its locals (a constant or `Const.new`), or on
+      # a local of the callee (#2515: {#local_receiver_callees}).
       def hand_off_receiver?(node)
         return false unless node.is_a?(Prism::CallNode)
 
         receiver = node.receiver
+        receiver.is_a?(Prism::LocalVariableReadNode) || receiver.is_a?(Prism::ItLocalVariableReadNode) ||
+          constant_receiver_form?(receiver)
+      end
+
+      def constant_receiver_form?(receiver)
         case receiver
         when Prism::ConstantReadNode, Prism::ConstantPathNode then true
         when Prism::CallNode then receiver.name == :new && constant_node?(receiver.receiver)
         else false
         end
       end
+
+      # Issue #2515 — the callees of `local.name(p, o)` inside `def_node`, where `local` is a parameter or a local of
+      # the def. A local every assignment of which in the def is a constant receiver form (`Const`, `Const.new`) is
+      # typed inside the callee, as the constant receiver is ({#hand_off_receiver_callees}). Any other receiver (a
+      # parameter, a local assigned anything else, a block-local) has a type that depends on the caller, which is
+      # not a function of the graph node, so the call resolves by name instead ({#named_instance_callees}).
+      def local_receiver_callees(call_node, def_node, depth)
+        receiver = call_node.receiver
+        typed = receiver.is_a?(Prism::LocalVariableReadNode) && receiver.depth == depth
+        forms = typed_local_forms(def_node, receiver.name) if typed
+        forms = nil if forms && local_object_opened?(def_node, call_node)
+        return named_instance_callees(call_node.name) if forms.nil?
+
+        found = forms.flat_map { |form| hand_off_receiver_callees(call_node, def_node, form) }
+        found.size > 1 ? found.uniq { |callee, _, owner| [callee.object_id, owner] } : found
+      end
+
+      # The constant receiver forms every assignment of the local `name` in `def_node` holds, or nil when `name` is a
+      # parameter, is never assigned, or may hold anything else. The whole body is read, including the scopes the
+      # hand-off walk leaves out (a lambda, an `instance_exec` / `class_exec` / `define_method` block, a block that
+      # shadows the name), so a write there counts. The local is untyped when any write is not a constant form (an
+      # op-write, a multiple assignment, `for` or `rescue =>` target, a pattern capture, any other value), when it is
+      # the receiver of `send` / `public_send` / `__send__` / `singleton_class` or is assigned to another local
+      # (`g = h`), and, for every local, when the body calls `binding`, `eval`, `instance_eval` or
+      # `local_variable_set` on any receiver, which can write a local no node names. A local whose object the syntax
+      # gives methods ({#local_object_opened?}) is untyped at that call. A per-def AST fact, memoised as {#def_census}.
+      def typed_local_forms(def_node, name)
+        def_census(:local_forms, def_node) { local_forms_of(def_node) }[name]
+      end
+
+      # True when the file's syntax gives the receiver local's object methods the declaration tables do not show
+      # (`def h.x`, `h.extend(M)`, `h.define_singleton_method`, `h.singleton_class...`, `class << h`, an
+      # `h.instance_eval` that defines): {Analysis::CheckRules::LexicalMethodSites}, asked once per def for every
+      # call on a local.
+      def local_object_opened?(def_node, call_node)
+        def_census(:opened_local_calls, def_node) { opened_local_call_offsets(def_node) }
+          .include?(call_node.location.start_offset)
+      end
+
+      def opened_local_call_offsets(def_node)
+        require_relative "../analysis/check_rules/lexical_method_sites"
+        sites = Analysis::CheckRules::LexicalMethodSites.new(def_node)
+        offsets = Set.new
+        Source::NodeWalker.each(def_node.body) do |node|
+          next unless node.is_a?(Prism::CallNode) && node.receiver.is_a?(Prism::LocalVariableReadNode)
+
+          offsets << node.location.start_offset if sites.singleton_local_def?(node)
+        end
+        offsets.freeze
+      end
+
+      DYNAMIC_LOCAL_CALLS = Set[:binding, :eval, :instance_eval, :local_variable_set].freeze
+      DISPATCHING_CALLS = Set[:send, :public_send, :__send__, :singleton_class].freeze
+      private_constant :DYNAMIC_LOCAL_CALLS, :DISPATCHING_CALLS
+
+      def local_forms_of(def_node)
+        forms = {}
+        tainted = Set.new
+        return NO_FORMS if collect_local_forms(def_node.body, forms, tainted)
+
+        params = def_node.parameters
+        forms.each_value(&:uniq!)
+        forms.delete_if do |name, values|
+          tainted.include?(name) || !values.all? { |value| constant_receiver_form?(value) } ||
+            parameter_named?(params, name)
+        end
+        forms.empty? ? NO_FORMS : forms
+      end
+
+      # Fills `forms` (`{ name => written values }`) and `tainted` from `node` and everything under it, a nested `def`
+      # body excepted (its locals are its own). True when the body may write locals the nodes do not show.
+      def collect_local_forms(node, forms, tainted)
+        return false if node.nil?
+
+        return false if node.is_a?(Prism::DefNode)
+        return true if node.is_a?(Prism::CallNode) && dynamic_local_call?(node, tainted)
+
+        note_local_write(node, forms, tainted)
+        dynamic = false
+        node.rigor_each_child { |child| dynamic = true if collect_local_forms(child, forms, tainted) }
+        dynamic
+      end
+
+      def note_local_write(node, forms, tainted)
+        case node
+        when Prism::LocalVariableWriteNode
+          (forms[node.name] ||= []) << node.value
+          tainted << node.value.name if node.value.is_a?(Prism::LocalVariableReadNode)
+        when Prism::LocalVariableOperatorWriteNode, Prism::LocalVariableOrWriteNode,
+             Prism::LocalVariableAndWriteNode, Prism::LocalVariableTargetNode
+          (forms[node.name] ||= []) << node
+        end
+      end
+
+      # True for a `binding` / `eval` / ... call on any receiver (`Kernel.binding` included), which can write a local no
+      # node names. A local receiving a dispatching call (`send`, `singleton_class`, ...) is tainted as a side effect.
+      def dynamic_local_call?(node, tainted)
+        return true if DYNAMIC_LOCAL_CALLS.include?(node.name)
+
+        tainted << node.receiver.name if DISPATCHING_CALLS.include?(node.name) &&
+                                         node.receiver.is_a?(Prism::LocalVariableReadNode)
+        false
+      end
+
+      NO_FORMS = {}.freeze
+      private_constant :NO_FORMS
+
+      def parameter_named?(params, name)
+        return false if params.nil?
+
+        all = [params.requireds, params.optionals, params.posts, params.keywords,
+               [params.rest, params.keyword_rest, params.block]]
+        all.flatten.compact.any? { |param| param.respond_to?(:name) && param.name == name }
+      end
+
+      # Issue #2515 — the `[def, 0, owner]` triples of every user instance def named `name`, for a hand-off on a
+      # receiver whose type the callee cannot know. It over-approximates (it favours flooring, ADR-5), as
+      # {#unrecorded_hand_off_callees} unions spellings. A def on a class nothing subclasses is walked under that
+      # class. A def on a module, or on a class a project class names as its superclass, is {FLOOR_ALL}: the real
+      # receiver may be an includer or a subclass whose overrides the walk would not see (ADR-127 WD4, as an inherited
+      # def, {#walked_owner}). A name no user def has (a core or gem method) contributes nothing; a name with more
+      # than {NAMED_HAND_OFF_CAP} defs answers {CAPPED_HAND_OFF}, which floors the handed parameter outright.
+      def named_instance_callees(name)
+        owners = instance_def_owners(name)
+        return NO_CALLEES if owners.empty?
+        return CAPPED_HAND_OFF if owners.size > NAMED_HAND_OFF_CAP
+
+        opaque = subclassing_opaque?
+        owners.filter_map do |class_name, open|
+          found = scope.user_def_for(class_name, name)
+          next if found.nil?
+
+          [found, 0, open || opaque ? FLOOR_ALL : CalleeOwner.new(Type::Combinator.nominal_of(class_name))]
+        end
+      end
+
+      # The most defs one name may have for {#named_instance_callees} to walk them; more floors the parameter. A cap
+      # on the name key's fan-out that floors, not a cut of the walk, so ADR-127's rejection of out-degree caps does
+      # not apply: the answer stays a function of the graph node.
+      NAMED_HAND_OFF_CAP = 8
+
+      # The answer for a name above the cap; {#compute_forwarding_edges} turns it into a floor of each handed
+      # parameter.
+      CAPPED_HAND_OFF = [[nil, 0, nil].freeze].freeze
+      private_constant :NAMED_HAND_OFF_CAP, :CAPPED_HAND_OFF
+
+      # The `[class, open]` owners of `name` ({Scope#user_instance_def_owners}). A function of the discovery and the
+      # name alone, so its run-scoped memo is keyed by both; the answer reads no constant and no narrowing, so
+      # {#hand_off_memo_bypassed?} does not bypass it. A hit does not reach the scope, so a dependency recorder is told
+      # of the reads here. Built per name, not as a whole index: a run holds a discovery per file, and a whole-index
+      # build per file cost more than the walks it served.
+      def instance_def_owners(name)
+        return scope.user_instance_def_owners(name) if MemoAudit.suspended?
+
+        table = (Thread.current[INSTANCE_DEF_INDEX_KEY] ||= ObjectSpace::WeakKeyMap.new)
+        by_name = (table[scope.discovery] ||= {})
+        return by_name[name] = scope.user_instance_def_owners(name) unless by_name.key?(name)
+
+        record_instance_def_owner_reads(name, by_name[name]) if Analysis::DependencyRecorder.active?
+        MemoAudit.check("instance def owners", by_name[name], name) { scope.user_instance_def_owners(name) }
+      end
+
+      # {Scope#subclassing_opacity}'s flag, memoised beside the owners per discovery; a recorder is told its keys on
+      # every call, hit or not.
+      def subclassing_opaque?
+        return scope.subclassing_opacity.first if MemoAudit.suspended?
+
+        table = (Thread.current[INSTANCE_DEF_INDEX_KEY] ||= ObjectSpace::WeakKeyMap.new)
+        by_name = (table[scope.discovery] ||= {})
+        entry = by_name[OPACITY_ENTRY] ||= scope.subclassing_opacity
+        Analysis::DependencyRecorder.read_keys(entry.last) if Analysis::DependencyRecorder.active?
+        MemoAudit.check("subclassing opacity", entry, OPACITY_ENTRY) { scope.subclassing_opacity }.first
+      end
+
+      OPACITY_ENTRY = :"<subclassing-opacity>"
+      private_constant :OPACITY_ENTRY
+
+      def record_instance_def_owner_reads(name, owners)
+        Analysis::DependencyRecorder.read_name(:defines, name)
+        owners.map(&:first).each { |owner| Analysis::DependencyRecorder.read_last_segment(:subclass_of, owner) }
+      end
+
+      INSTANCE_DEF_INDEX_KEY = RunScopedSlots.register(:rigor_callee_instance_def_index)
+      private_constant :INSTANCE_DEF_INDEX_KEY
 
       def constant_node?(node) = node.is_a?(Prism::ConstantReadNode) || node.is_a?(Prism::ConstantPathNode)
 
@@ -5349,8 +5545,17 @@ module Rigor
       def compute_forwarding_edges(def_node)
         slots = content_parameter_slots(def_node)
         edges = []
-        each_forwarding_call(def_node, slots) do |call_node, forwarded|
-          hand_off_callees(call_node, def_node).each do |callee, offset, owner|
+        each_forwarding_call(def_node, slots) do |call_node, forwarded, depth|
+          callees = hand_off_callees(call_node, def_node, depth)
+          if callees.equal?(CAPPED_HAND_OFF)
+            forwarded.map(&:first).each do |name|
+              edges << CalleeMutationChain::Edge.new(name: name, slot: slots[name], callee: def_node,
+                                                     callee_names: [name], owner: FLOOR_ALL)
+            end
+            next
+          end
+
+          callees.each do |callee, offset, owner|
             callee_slots = content_parameter_slots(callee)
             forwarded.each do |name, index|
               names = bound_parameter_names(callee_slots, index.is_a?(Integer) ? index - offset : index)
@@ -5379,7 +5584,7 @@ module Rigor
           next unless self_dispatch_call?(descendant) || hand_off_receiver?(descendant)
 
           forwarded = forwarded_parameters(descendant, slots, depth)
-          calls << [descendant, forwarded] unless forwarded.empty?
+          calls << [descendant, forwarded, depth] unless forwarded.empty?
         end
         calls.empty? ? NO_FORWARDS : calls
       end

@@ -242,7 +242,7 @@ module Rigor
             if reach.include?(refined)
               methods.key?(name) || methods.key?(wildcard)
             else
-              methods.key?(name) && (refined == wildcard || InEffectRefinements.class_wildcard_key?(@scope, refined))
+              methods.key?(name) && InEffectRefinements.class_wildcard_key?(@scope, refined)
             end
           end
         end

@@ -226,11 +226,11 @@ RSpec.describe "self-call ivar-write proof — incremental" do
   # Issue #2203 — a module the project mixes into `Object` reaches every project class, so a file whose declarations
   # stay that starts mixing a refined one in must re-check the caller: only the `Object` chain the reach reads (and
   # records) sees it.
-  it "re-checks the caller when a file starts mixing a module with a computed refine into Object" do
+  it "re-checks the caller when a file reopening Object starts mixing in a module with a computed refine" do
     refined = "module M\n  def z = 1\nend\n\n#{wildcard_refine('M')}"
     expect_recheck_to_report(
-      { "b.rb" => base_source, "x.rb" => refined, "y.rb" => "module Y\nend\n" },
-      { "y.rb" => "module Y\nend\n\nclass Object\n  include M\nend\n" }
+      { "b.rb" => base_source, "x.rb" => refined, "y.rb" => "class Object\n  def y = 1\nend\n" },
+      { "y.rb" => "class Object\n  include M\n  def y = 1\nend\n" }
     )
   end
 

@@ -8,20 +8,25 @@ module Rigor
     # store and `def_census`) recomputes the value and raises {Mismatch} when it differs from the stored one, so a key
     # defect fails on the first hit instead of waiting for an order that exposes it.
     #
-    # Like {BudgetTrace}, a switch for specs and CI: off by default, a single boolean check when off. A recomputation
-    # runs with the audit suspended on its thread, so the memos it reads are answered as stored and the cost stays
-    # linear in the hits.
+    # Like {BudgetTrace}, a switch for specs and CI (`RIGOR_MEMO_AUDIT=1` in the environment, read once at load, or
+    # {enable!}): off by default, a single boolean check when off. A recomputation
+    # runs with the audit suspended on its thread and the memos bypassed ({suspended?}), so it reads nothing stored.
     module MemoAudit
       # A memo hit whose stored value differs from a fresh computation.
       class Mismatch < StandardError; end
 
       SUSPENDED_KEY = :rigor_memo_audit_suspended
 
-      @enabled = false
+      @enabled = !ENV["RIGOR_MEMO_AUDIT"].to_s.empty?
 
       module_function
 
       def enabled? = @enabled
+
+      # True while an audit recomputation runs on this thread. The callee floor's memos are then bypassed (read and
+      # write), so the recomputation reads no stored entry of another memo: a defect shared across a table (a stale
+      # `resolved_census(:edges)` entry) would otherwise make the recomputed value match the stored one.
+      def suspended? = Thread.current[SUSPENDED_KEY]
 
       def enable! = (@enabled = true)
 

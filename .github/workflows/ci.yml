@@ -814,6 +814,12 @@ jobs:
       - name: Run mutation-cache gate
         run: make check-mutation-cache
 
+      # ADR-127 WD3 — the memo audit over Rigor's own source: every hit in the callee floor's memos is recomputed and
+      # compared (`MemoAudit`), and a key that misses an input raises. A separate step; its output is the run's
+      # diagnostics, which the self-check already gates.
+      - name: Run the callee-floor memo audit
+        run: RIGOR_MEMO_AUDIT=1 bundle exec exe/rigor check --no-cache --workers 0 lib > /dev/null
+
   # ── 5. Warm-vs-cold diagnostic diff ─────────────────────────────
   # The two self-check variants must agree on every diagnostic.  Any
   # difference means the cache is altering analysis results — a bug.

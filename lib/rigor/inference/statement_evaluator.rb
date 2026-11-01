@@ -775,9 +775,10 @@ module Rigor
 
       # True when a census memo must not be read or written: a dependency recorder is active (it must see each
       # constant read), or this scope carries guard narrowings of constants (`if INST.is_a?(Sub)`), which survive
-      # `with_self_type` and change what the constant types as, so the answer is no longer the def's alone.
+      # `with_self_type` and change what the constant types as, so the answer is no longer the def's alone. An audit
+      # recomputation ({MemoAudit}) bypasses them too, so it reads no stored entry.
       def hand_off_memo_bypassed?
-        Analysis::DependencyRecorder.active? || !scope.constant_narrowings.empty?
+        Analysis::DependencyRecorder.active? || !scope.constant_narrowings.empty? || MemoAudit.suspended?
       end
 
       # The name a constant node is written with, or nil when part of it is not a constant (`foo::Bar`).

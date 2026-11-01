@@ -12,6 +12,20 @@ RSpec.describe "a hand-off inside a callee resolves its constants in the callee'
     Rigor::Inference::MemoAudit.disable!
   end
 
+  # The evaluators are built all over the engine, so the defect is put back on every instance.
+  def break_with(name, &)
+    allow_any_instance_of(Rigor::Inference::StatementEvaluator).to receive(name, &) # rubocop:disable RSpec/AnyInstance
+  end
+
+  # `:mismatch` when the audit raised (the runner reports a raise in a rule as an internal analyzer error).
+  def audited_rules(source)
+    analyze(source)
+  rescue InternalAnalyzerErrorGuard::AnalyzerCrashed => e
+    raise unless e.message.include?("MemoAudit::Mismatch")
+
+    :mismatch
+  end
+
   def rules(source)
     analyze(source).diagnostics.reject { |d| d.severity == :info }.map(&:qualified_rule)
   end
@@ -1023,6 +1037,44 @@ RSpec.describe "a hand-off inside a callee resolves its constants in the callee'
 
     it "still reports a union whose members only read or are not project classes (u6)" do
       expect(rules(union_source('flag ? R.new : "s"'))).to eq(always)
+    end
+  end
+
+  # ADR-127 WD3 — the audit catches a memo-key defect on the first hit. Each example removes one input from a key and
+  # expects `MemoAudit::Mismatch`; with the key intact the same program passes under the audit above.
+  describe "the memo audit catches a key that misses an input" do
+    let(:two_sides) do
+      <<~RUBY
+        class Mut
+          def self.poke(acc) = (acc[0] = "x")
+          def self.go(acc) = stripes(acc)
+          def poke(acc) = acc.size
+          def stripes(acc) = poke(acc)
+          def head_of(acc) = acc[0]
+
+          def run
+            acc = [7, 9]
+            stripes(acc)
+            Mut.go(acc)
+            head_of(acc).upcase
+          end
+        end
+      RUBY
+    end
+
+    it "fails when the side is dropped from the census key" do
+      break_with(:resolved_census) do |evaluator, kind, def_node, &block|
+        next block.call if evaluator.send(:hand_off_memo_bypassed?)
+
+        scope = evaluator.send(:scope)
+        table = (Thread.current[:rigor_callee_resolved_census] ||= ObjectSpace::WeakKeyMap.new)
+        by_class = ((table[scope.discovery] ||= [{}, {}])[0][kind] ||= {})
+        by_def = (by_class[evaluator.send(:enclosing_class_name_for, scope.self_type)] ||= {}.compare_by_identity)
+        next by_def[def_node] = block.call unless by_def.key?(def_node)
+
+        Rigor::Inference::MemoAudit.check("resolved census", by_def[def_node], kind, &block)
+      end
+      expect(audited_rules(two_sides)).to eq(:mismatch)
     end
   end
 end

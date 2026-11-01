@@ -98,4 +98,50 @@ RSpec.describe Rigor::Inference::CalleeMutationChain do
   ensure
     Rigor::Inference::MemoAudit.disable!
   end
+
+  it "keeps a def reached under two owners as two nodes in the store" do
+    owner_a = :owner_a
+    owner_b = :owner_b
+    writer = def_class.new(9, true, [])
+    target = def_class.new(1, false, [])
+    root = def_class.new(0, false, [])
+    own = ->(d, _owner) { d.mutated ? { p: 0 } : {} }
+    edges = lambda do |d, owner|
+      if d.equal?(root)
+        [owner_a, owner_b].map { |o| edge_class.new(name: :p, slot: 0, callee: target, callee_names: [:p], owner: o) }
+      elsif d.equal?(target) && owner == owner_b
+        [edge_class.new(name: :p, slot: 0, callee: writer, callee_names: [:p])]
+      else
+        []
+      end
+    end
+    store = {}.compare_by_identity
+    expect(chain.close(root, own: own, edges: edges, store: store, ctx: :ctx)).to eq({ p: 0 })
+    expect(store[target].keys).to contain_exactly(owner_a, owner_b)
+  end
+
+  describe "the successor store of a closure (ADR-127 WD2)" do
+    let(:source) { "class Mut\n  def run(acc)\n    stripes(acc)\n  end\n\n  def stripes(acc) = acc\nend\n" }
+    let(:program) { Prism.parse(source).value }
+    let(:index) { Rigor::Inference::ScopeIndexer.index(program, default_scope: Rigor::Scope.empty) }
+    let(:call) do
+      found = nil
+      Rigor::Source::NodeWalker.each(program) { |n| found ||= n if n.is_a?(Prism::CallNode) && n.name == :stripes }
+      found
+    end
+
+    it "is the run's store for a plain scope and no store under a constant narrowing" do
+      scope = index[call]
+      plain = Rigor::Inference::StatementEvaluator.new(scope: scope).send(:callee_chain_store)
+      narrowed_scope = scope.with_constant_narrowing("Mut", Rigor::Type::Combinator.nominal_of("Mut"), Rigor::Type::Combinator.untyped)
+      narrowed = Rigor::Inference::StatementEvaluator.new(scope: narrowed_scope).send(:callee_chain_store)
+      expect([plain.key?(:store), narrowed]).to eq([true, {}])
+    end
+
+    it "is no store while an audit recomputation runs" do
+      evaluator = Rigor::Inference::StatementEvaluator.new(scope: index[call])
+      inside = Rigor::Inference::MemoAudit.suspended { evaluator.send(:callee_chain_store) }
+      expect(inside).to eq({})
+    end
+  end
 end

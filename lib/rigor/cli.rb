@@ -379,9 +379,10 @@ module Rigor
     # The commented `paths:` suggestion: one line naming what was detected and why, then the value to uncomment, written
     # relative to the config file's directory like the active list (#1399).
     def paths_suggestion_block(suggestion, path)
-      dirs = roots_relative_to(suggestion.fetch(:dirs), config_dir_of(path))
-      "# #{suggestion.fetch(:reason)}: #{suggestion.fetch(:dirs).join(', ')}. To scan them, replace the paths list above " \
-        "with:\n# paths: [#{dirs.join(', ')}]\n"
+      named = suggestion.fetch(:dirs).join(", ")
+      written = roots_relative_to(suggestion.fetch(:dirs), config_dir_of(path)).join(", ")
+      "# #{suggestion.fetch(:reason)}: #{named}. To scan them, replace the paths list above with:\n" \
+        "# paths: [#{written}]\n"
     end
 
     # The source directories `rigor init` suggests for `paths:`, read from the project root (the cwd, like the plugin

@@ -52,7 +52,9 @@ RSpec.describe "rigor lsp end-to-end session", type: :integration do
       request(4, "shutdown"),
       notification("exit")
     ]
-    stdout_bytes, exit_status = run_session(session_inputs)
+    # Run in a throwaway directory: with the repo as the working directory the first
+    # hover analyses the whole project, which is slow enough to time out under CI load.
+    stdout_bytes, exit_status = Dir.mktmpdir("rigor-lsp-e2e-") { |dir| run_session(session_inputs, chdir: dir) }
     frames = parse_frames(stdout_bytes)
 
     request_responses = frames.reject { |f| f[:method] == "textDocument/publishDiagnostics" }
@@ -86,7 +88,7 @@ RSpec.describe "rigor lsp end-to-end session", type: :integration do
   it "appends each message in both directions to the --log file and keeps stdout unchanged" do
     Dir.mktmpdir("rigor-lsp-log-") do |dir|
       path = File.join(dir, "wire.log")
-      stdout_bytes, exit_status = run_session(lifecycle_session, args: ["--log=#{path}"])
+      stdout_bytes, exit_status = run_session(lifecycle_session, args: ["--log=#{path}"], chdir: dir)
 
       expect(exit_status).to eq(0)
       expect(parse_frames(stdout_bytes).map { |f| f[:id] }).to eq([1, 2])
@@ -113,7 +115,7 @@ RSpec.describe "rigor lsp end-to-end session", type: :integration do
       session = [request(1, "initialize", { capabilities: {} }), bad_open,
                  request(2, "shutdown"), notification("exit")]
 
-      stdout_bytes, exit_status = run_session(session, args: ["--log=#{path}"])
+      stdout_bytes, exit_status = run_session(session, args: ["--log=#{path}"], chdir: dir)
 
       expect(exit_status).to eq(0)
       expect(parse_frames(stdout_bytes).filter_map { |f| f[:id] }).to eq([1, 2])
@@ -169,14 +171,53 @@ RSpec.describe "rigor lsp end-to-end session", type: :integration do
       stdin.write(framed)
       stdin.close
 
-      Timeout.timeout(LSP_E2E_TIMEOUT_SECONDS) do
-        stdout_bytes << stdout.read
-        stderr_bytes << stderr.read
-        exit_status = wait_thread.value.exitstatus
+      begin
+        Timeout.timeout(LSP_E2E_TIMEOUT_SECONDS) do
+          # Read incrementally so the bytes already received survive a timeout.
+          loop { stdout_bytes << stdout.readpartial(65_536) }
+        rescue EOFError
+          stderr_bytes << stderr.read
+          exit_status = wait_thread.value.exitstatus
+        end
+      rescue Timeout::Error
+        stop_child(wait_thread)
+        raise Timeout::Error, "rigor lsp did not exit within #{LSP_E2E_TIMEOUT_SECONDS}s " \
+                              "(slow or hung); response ids read so far: " \
+                              "#{response_ids_read(stdout_bytes).inspect}"
       end
     end
 
     [stdout_bytes, exit_status, stderr_bytes]
+  end
+
+  # Stop the child so popen3's join returns and the failure is reported, not hung.
+  # TERM first lets the server remove its temp files; KILL only if it ignores TERM.
+  def stop_child(wait_thread)
+    Process.kill("TERM", wait_thread.pid)
+    wait_thread.join(1) || Process.kill("KILL", wait_thread.pid)
+  rescue Errno::ESRCH
+    nil
+  end
+
+  # Ids of the responses in a possibly truncated stream; tolerates a partial trailing frame.
+  def response_ids_read(raw)
+    ids = []
+    offset = 0
+    while (match = raw.byteslice(offset..).match(/Content-Length: (\d+)\r\n\r\n/i))
+      length = match[1].to_i
+      header_end = offset + match.end(0)
+      break if header_end + length > raw.bytesize
+
+      body = raw.byteslice(header_end, length)
+      offset = header_end + length
+      frame = begin
+        JSON.parse(body, symbolize_names: true)
+      rescue JSON::ParserError
+        next
+      end
+      ids << frame[:id] if frame.is_a?(Hash) && !frame.key?(:method)
+    end
+    ids
   end
 
   def frame(payload)

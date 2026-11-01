@@ -180,12 +180,7 @@ RSpec.describe "rigor lsp end-to-end session", type: :integration do
           exit_status = wait_thread.value.exitstatus
         end
       rescue Timeout::Error
-        # Kill the child so popen3's join returns and the failure is reported, not hung.
-        begin
-          Process.kill("KILL", wait_thread.pid)
-        rescue Errno::ESRCH
-          nil
-        end
+        stop_child(wait_thread)
         raise Timeout::Error, "rigor lsp did not exit within #{LSP_E2E_TIMEOUT_SECONDS}s " \
                               "(slow or hung); response ids read so far: " \
                               "#{response_ids_read(stdout_bytes).inspect}"
@@ -193,6 +188,15 @@ RSpec.describe "rigor lsp end-to-end session", type: :integration do
     end
 
     [stdout_bytes, exit_status, stderr_bytes]
+  end
+
+  # Stop the child so popen3's join returns and the failure is reported, not hung.
+  # TERM first lets the server remove its temp files; KILL only if it ignores TERM.
+  def stop_child(wait_thread)
+    Process.kill("TERM", wait_thread.pid)
+    wait_thread.join(1) || Process.kill("KILL", wait_thread.pid)
+  rescue Errno::ESRCH
+    nil
   end
 
   # Ids of the responses in a possibly truncated stream; tolerates a partial trailing frame.
@@ -204,9 +208,14 @@ RSpec.describe "rigor lsp end-to-end session", type: :integration do
       header_end = offset + match.end(0)
       break if header_end + length > raw.bytesize
 
-      frame = JSON.parse(raw.byteslice(header_end, length), symbolize_names: true)
-      ids << frame[:id] unless frame.key?(:method)
+      body = raw.byteslice(header_end, length)
       offset = header_end + length
+      frame = begin
+        JSON.parse(body, symbolize_names: true)
+      rescue JSON::ParserError
+        next
+      end
+      ids << frame[:id] if frame.is_a?(Hash) && !frame.key?(:method)
     end
     ids
   end

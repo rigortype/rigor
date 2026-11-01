@@ -125,6 +125,8 @@ module Rigor
 
       def run_generate
         options = parse_generate_options
+        return positional_paths_error("generate") unless @argv.empty?
+
         path = options.fetch(:output)
 
         if File.exist?(path) && !options.fetch(:force)
@@ -141,7 +143,19 @@ module Rigor
       # so `rigor baseline regenerate` reads cleanly as "make the baseline match reality again".
       def run_regenerate
         options = parse_generate_options(subcommand: "regenerate")
+        return positional_paths_error("regenerate") unless @argv.empty?
+
         write_baseline(options, verb: "regenerated baseline")
+      end
+
+      # Issue #2466 — the baseline covers the configured `paths:`, never the positional arguments: a baseline built
+      # over a subset would silently drop the entries of every other file. Reject them, as `rigor effects update`
+      # does (`effects_snapshot_command.rb:54`), rather than honour them.
+      def positional_paths_error(subcommand)
+        @err.puts("rigor baseline #{subcommand}: unexpected argument(s) #{@argv.map(&:inspect).join(' ')}; " \
+                  "the baseline is " \
+                  "generated from the configured `paths:`, so pass none")
+        EXIT_USAGE
       end
 
       def write_baseline(options, verb:)

@@ -77,7 +77,7 @@ a diagnostic another layer has already suppressed.
 | `rigor baseline drift` | Show how buckets have moved — `--only=over` for buckets that grew, `reducible` for ones you have already improved past, `cleared` for empty ones. |
 | `rigor baseline prune` | Drop buckets that match nothing any more. `--dry-run` previews. |
 
-`generate` and `regenerate` analyse with your loaded configuration unchanged except that `baseline:` is off, so options such as `bleeding_edge`, `target_ruby` or `severity_overrides` shape the recorded set exactly as they shape `rigor check`.
+`generate` and `regenerate` analyse with your loaded configuration unchanged except that `baseline:` is off, so options such as `bleeding_edge`, `target_ruby` or `severity_overrides` shape the recorded set exactly as they shape `rigor check`. They analyse the configured `paths:` only: a positional path argument is rejected with a usage error (exit `64`), since a baseline over a subset of files would silently drop the entries of every other file.
 
 The summary counts only the diagnostics the written buckets cover. A diagnostic with no rule — a **parse error** in a file Rigor could not parse, a missing `paths:` entry, or an internal error — or no path cannot be keyed, so it never enters the baseline. The command prints a second line saying how many, why, and which files. The exit status stays 0, but the next `rigor check` with `baseline:` wired still reports them and exits non-zero until you fix those files, exclude them, or remove a bad `paths:` entry.
 

@@ -11,7 +11,7 @@ require "rigor/plugin/base"
 # analyses. No shipped caller reuses a Runner (each builds a fresh one per run), but a reused Runner must
 # report what a fresh one would. `Runner#run_analysis` resets these tables once at the top of each run, in
 # both modes.
-RSpec.describe "a reused pool-mode Runner reports each run as a fresh Runner would (#2392)" do
+RSpec.describe "a reused Runner reports each run as a fresh Runner would (#2392)" do
   def write_files(dir)
     %w[a b trigger].to_h do |name|
       path = File.join(dir, "#{name}.rb")

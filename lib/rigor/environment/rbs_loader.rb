@@ -3286,7 +3286,9 @@ module Rigor
         # instance side first turns the loop into that error, so it is this class's build failure. Memoised by the
         # builder, so a class whose instance side was already built pays nothing. Any other stack exhaustion stays
         # fatal: it depends on how deep the analysis already was, and must not be memoised as a build failure.
-        builder.ancestor_builder.instance_ancestors(rbs_name) if env.class_decls[rbs_name].is_a?(::RBS::Environment::ClassEntry)
+        if env.class_decls[rbs_name].is_a?(::RBS::Environment::ClassEntry)
+          builder.ancestor_builder.instance_ancestors(rbs_name)
+        end
         builder.build_singleton(rbs_name)
       rescue ::RBS::BaseError => e
         store_definition_build_detail(class_name, e)

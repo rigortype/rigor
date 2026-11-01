@@ -263,11 +263,7 @@ module Rigor
           )
           # Issue #2441 — the project's own path gems are not dependencies missing RBS; the environment skips
           # their collection copy, so the same set leaves the report here.
-          own = Environment::ProjectPathGems.names(
-            locked, paths: @configuration.paths, root: Dir.pwd,
-            exclude_patterns: @configuration.exclude_patterns, exclude_base: @configuration.exclude_base
-          )
-          locked = locked.except(*own)
+          locked = locked.except(*project_own_gem_names(locked))
           return [] if locked.empty?
 
           bundle_sig_paths = Environment::BundleSigDiscovery.discover(
@@ -292,6 +288,16 @@ module Rigor
 
           [build_rbs_coverage_missing_diagnostic(missing)]
         end
+
+        # Issue #2441 — the same project-own set `Environment.for_project` skips the collection copy of.
+        def project_own_gem_names(locked)
+          Environment::ProjectPathGems.names(
+            locked,
+            paths: @configuration.paths, root: Dir.pwd,
+            exclude_patterns: @configuration.exclude_patterns, exclude_base: @configuration.exclude_base
+          )
+        end
+        private :project_own_gem_names
 
         # ADR-93 WD3 — the standalone residual. A bare `gem install rigortype` has no `rbs-inline` library,
         # so the spec's "annotations are official type sources whenever present" cannot be satisfied: the

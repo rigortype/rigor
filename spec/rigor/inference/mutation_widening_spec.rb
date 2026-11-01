@@ -868,6 +868,7 @@ RSpec.describe Rigor::Inference::MutationWidening do
       )
     end
   end
+
   # Issue #2555 L3 — `synthesised:` is the binding's `:synthesised` construction fact, which the scope-level seam
   # reads off `Scope#construction_fact?`. Each example pairs it with the same call without the fact.
   describe ".widen_for_mutator on a synthesised carrier" do

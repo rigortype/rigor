@@ -328,6 +328,7 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
       expect(return_rules("t = [:other]\nt.fill(:multi, 1)\nt\n", "Array[:multi]")).to eq(["def.return-type-mismatch"])
     end
   end
+
   # Issue #2555 L3 — the `:synthesised` construction fact. A local the engine built itself (a collection literal, or
   # a core `Array.new` / `Hash.new` / `Set.new` / `Set[...]` constructor) re-grows precisely at the straight-line
   # seam, with no `Dynamic[top]` floor; a carrier whose binding does not carry the fact keeps today's #561 answer.
@@ -452,11 +453,14 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
       expect(return_rules("t = helper\nt << [:static, \"x\"]\nt\n", "Array[:multi]")).to be_empty
     end
 
-    it "gives no fact to a parameter, a merge with an unstamped arm, or a rebind" do
-      sig = { "f.rbs" => "class F\n  def push: (Array[Integer] xs) -> untyped\n  " \
-                         "def pick: (bool c, Array[Integer] param) -> untyped\n  " \
-                         "def rebind: (Array[Integer] param) -> untyped\nend\n" }
-      source = <<~RUBY
+    def fact_free_sig
+      "class F\n  def push: (Array[Integer] xs) -> untyped\n  " \
+        "def pick: (bool c, Array[Integer] param) -> untyped\n  " \
+        "def rebind: (Array[Integer] param) -> untyped\nend\n"
+    end
+
+    def fact_free_source
+      <<~RUBY
         class F
           def push(xs)
             xs << "s"
@@ -483,7 +487,10 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
           end
         end
       RUBY
-      dumped = diagnostics(source, sig: sig).filter_map do |diagnostic|
+    end
+
+    it "gives no fact to a parameter, a merge with an unstamped arm, or a rebind" do
+      dumped = diagnostics(fact_free_source, sig: { "f.rbs" => fact_free_sig }).filter_map do |diagnostic|
         diagnostic.message.delete_prefix("dump_type: ") if diagnostic.message.start_with?("dump_type")
       end
       expect(dumped).to eq(["Array[Dynamic[top] | Integer]",

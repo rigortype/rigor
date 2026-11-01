@@ -339,13 +339,15 @@ module Rigor
       end
 
       # {#widen_for_mutator} for a carrier no typed element rewrite answered.
-      def widen_carrier(type, method_name, values:, arg_types:, unread_arguments:, rewritten_element:, # rubocop:disable Metrics/ParameterLists
+      def widen_carrier(type, method_name, values:, arg_types:, unread_arguments:, rewritten_element:,
                         synthesised: false)
         values = :keep unless VALUE_REWRITING_MUTATORS.include?(method_name)
         values = RewriteMutation.values_mode(type, method_name, values)
 
         return nil if type.nil?
-        return SetMutation.widen(type, method_name, arg_types, unread_arguments:, synthesised:) if SetMutation.set?(type)
+        if SetMutation.set?(type)
+          return SetMutation.widen(type, method_name, arg_types, unread_arguments:, synthesised:)
+        end
 
         case type
         when Type::Nominal then MutationRejoin.widen_nominal(type, method_name, values:, arg_types:, synthesised:)
@@ -380,7 +382,7 @@ module Rigor
       #
       # `nil` when no member widened — a union with no carrier member, or one whose carriers are
       # already nominal, is untouched exactly as the scalar path leaves them.
-      def widen_union(union, method_name, values: :widen, arg_types: NO_ARG_TYPES, unread_arguments: false, # rubocop:disable Metrics/ParameterLists
+      def widen_union(union, method_name, values: :widen, arg_types: NO_ARG_TYPES, unread_arguments: false,
                       rewritten_element: nil, synthesised: false)
         widened_any = false
         members = union.members.map do |member|

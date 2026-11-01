@@ -115,7 +115,7 @@ module Rigor
         else
           return carrier if !MutationRejoin.gradual_parameter?(seed) && MutationRejoin.already_held?(seed, stored)
 
-          added = admitted(seed, stored.map { |t| widened_member(t) }, synthesised)
+          added = admitted(seed, stored.map { |t| widened_member(t) }, synthesised:)
         end
         floor = synthesised && !added.empty? ? [] : [Type::Combinator.untyped]
         element = Type::Combinator.union(carrier.type_args.first, *added, *floor)
@@ -124,7 +124,7 @@ module Rigor
 
       # `added` as {MutationRejoin.precise_admitted} admits it into a precise seed; a gradual or synthesised seed
       # admits all.
-      def admitted(seed, added, synthesised = false)
+      def admitted(seed, added, synthesised: false)
         return added if synthesised || MutationRejoin.gradual_parameter?(seed)
 
         MutationRejoin.precise_admitted(seed, added)

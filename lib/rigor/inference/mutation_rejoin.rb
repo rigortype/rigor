@@ -33,7 +33,9 @@ module Rigor
       # keys to the old value, and paying that for an identical type is a straight loss.
       def widen_nominal(nominal, method_name, values: :widen, arg_types: MutationWidening::NO_ARG_TYPES,
                         synthesised: false)
-        return widen_synthesised(nominal, method_name, values:, arg_types:) if synthesised && synthesised_carrier?(nominal)
+        if synthesised && synthesised_carrier?(nominal)
+          return widen_synthesised(nominal, method_name, values:, arg_types:)
+        end
         return widen_precise_array(nominal, method_name, values:, arg_types:) if precise_array?(nominal)
         return nil unless regrowable_carrier?(nominal)
 

@@ -345,10 +345,12 @@ module Rigor
         # opt-in plugin twin is REACHABLE — loaded as a plugin, or wired in by `signature_paths:` (#672) —
         # so the two never both declare the methods. The paths ride in `loader_signature_paths`, so the env
         # cache descriptor digests them for free.
+        # Issue #2441 — the project's own path gems are neither missing RBS nor overlay-eligible: the project's
+        # `sig/` declares them, and an overlay (`data/gem_overlay/activesupport`) would collide with it.
         missing_gems, overlay_paths = missing_gems_and_overlay_paths(
-          locked: locked, default_libraries: merged_libraries, bundle_sig_paths: gem_sig_paths,
+          locked: locked.except(*project_gems), default_libraries: merged_libraries, bundle_sig_paths: gem_sig_paths,
           rbs_collection_paths: collection_paths, plugin_registry: plugin_registry,
-          signature_paths: resolved_paths, bundle_root: bundle_root, project_gem_names: project_gems
+          signature_paths: resolved_paths, bundle_root: bundle_root
         )
         loader_signature_paths = resolved_paths + plugin_sig_paths + gem_sig_paths +
                                  collection_paths + overlay_paths
@@ -462,15 +464,12 @@ module Rigor
       # index, and as the eligible-gem set for the ADR-72 overlay resolution. Returns `[entries, overlay_paths]`.
       def missing_gems_and_overlay_paths(locked:, default_libraries:, bundle_sig_paths:,
                                          rbs_collection_paths:, plugin_registry:, signature_paths: [],
-                                         bundle_root: nil, project_gem_names: Set.new)
+                                         bundle_root: nil)
         if locked.empty?
           return unlocked_missing_gems(default_libraries, bundle_sig_paths, rbs_collection_paths, bundle_root)
         end
 
-        # Issue #2441 — the project's own path gems are neither missing RBS nor overlay-eligible: the project's
-        # `sig/` declares them, and an overlay (`data/gem_overlay/activesupport`) would collide with it.
         rows = missing_rows(locked, default_libraries, bundle_sig_paths, rbs_collection_paths)
-               .reject { |row| project_gem_names.include?(row.gem_name) }
         overlays = gem_overlay_paths(
           missing_gem_names: rows.map(&:gem_name), plugin_registry: plugin_registry,
           signature_paths: signature_paths

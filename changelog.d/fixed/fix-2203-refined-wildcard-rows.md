@@ -1,0 +1,5 @@
+- **[engine]** An instance variable's class-guard narrowing no longer survives an implicit-self call that a refinement of `self`'s class or an ancestor may reroute, including one whose methods Rigor cannot name. ([#2590](https://github.com/rigortype/rigor/pull/2590))
+  - A `define_method` of a computed name or an `import_methods` in a refinement of a class `self` reaches (its own, a superclass, `Object` or `Kernel`) now gives up the proof that the call writes no instance variable, as a literal `def` of the called name does ([#2203](https://github.com/rigortype/rigor/issues/2203)).
+  - A refinement of a class `self` cannot reach, such as `refine String`, no longer gives that proof up, so the narrowing stays and no `call.undefined-method` is reported.
+  - Where Rigor cannot read `self`'s whole ancestry (a `Struct.new` or `Data.define` superclass, an ancestor outside the project), the proof follows the earlier rule unchanged.
+  - A `refine:` hash key or keyword argument, and a `:refine` Symbol compared with `==`, `!=` or `===`, no longer record a refinement Rigor cannot read.

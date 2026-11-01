@@ -3629,7 +3629,8 @@ module Rigor
       REFINEMENT_WILDCARD = Scope::DiscoveryIndex::REFINEMENT_WILDCARD
       REFINE_WORD = /\brefine\b/
       HEREDOC_OPENER = /<<[~-]?["'`A-Za-z_]/
-      private_constant :EMPTY_REFINEMENTS, :REFINEMENT_WILDCARD, :REFINE_WORD, :HEREDOC_OPENER
+      COMPARISON_OPERATORS = Set[:==, :!=, :===].freeze
+      private_constant :EMPTY_REFINEMENTS, :REFINEMENT_WILDCARD, :REFINE_WORD, :HEREDOC_OPENER, :COMPARISON_OPERATORS
 
       NO_OFFSETS = [].freeze
       private_constant :NO_OFFSETS
@@ -3722,7 +3723,8 @@ module Rigor
       # `self`, charged to its module or the wildcard), `:literal` (A3's `:refine` / eval-string literal), `:nested` (a
       # `refine` in a refine body, or in a singleton method of one), `:dsl` (where `self` is a class, #1689) and
       # `:raises` (no block, a Proc as the block, another receiver, or a computed target where `self` is `main`), and
-      # `:data` (a `:refine` literal where `self` is a plain class or one of its instances).
+      # `:data` (a `:refine` literal where `self` is a plain class or one of its instances), and `:inert` (issue #2203:
+      # a `:refine` Symbol that is a hash key or a comparison operand, which no call reads as a method name).
       def refine_census(root)
         census = []
         refinements = build_methods_and_def_nodes(root, census: census)[3]
@@ -3901,6 +3903,8 @@ module Rigor
           end
 
           census_call(node, qualified_prefix, tables, refine_body)
+        when Prism::AssocNode
+          census_assoc_key(node, tables)
         when Prism::SymbolNode
           census_symbol(node, tables)
         end
@@ -3956,6 +3960,8 @@ module Rigor
         arguments = node.arguments&.arguments
         return if arguments.nil?
 
+        return census_compared_literal(arguments.first, tables) if COMPARISON_OPERATORS.include?(node.name)
+
         strings = RefineCensus.string_literal_call?(node)
         arguments.each do |argument|
           next unless RefineCensus.refine_symbol?(argument) || (strings && RefineCensus.refine_string?(argument))
@@ -3989,6 +3995,26 @@ module Rigor
       end
 
       def constant_shaped?(node) = node.is_a?(Prism::ConstantReadNode) || node.is_a?(Prism::ConstantPathNode)
+
+      # Issue #2203 — a `:refine` Symbol a comparison reads (`node.name == :refine`, `!=`, `===`) is a value compared,
+      # never a method name a call runs: it is inert (`:inert`), and records no row.
+      def census_compared_literal(argument, tables)
+        return unless RefineCensus.refine_symbol?(argument) && !tables.literal_seen?(argument)
+
+        tables.see_literal(argument)
+        tables.account(argument, :inert)
+      end
+
+      # Issue #2203 — a `:refine` Symbol that is a hash key (`h(x, refine: true)`, `{ refine: 1 }`, `{ :refine => 1 }`)
+      # names an option, not `Module#refine`: it is inert (`:inert`), and records no row. A `:refine` value stays a
+      # literal.
+      def census_assoc_key(node, tables)
+        key = node.key
+        return unless RefineCensus.refine_symbol?(key) && !tables.literal_seen?(key)
+
+        tables.see_literal(key)
+        tables.account(key, :inert)
+      end
 
       # A3 — a `:refine` Symbol anywhere else (`alias my_refine refine`, `%i[refine]`, a hash) names `Module#refine`
       # for code the walk cannot follow, run on the module the in-effect walk says `self` is there; where `self` is a
@@ -4261,6 +4287,8 @@ module Rigor
             end
           end
           return
+        when Prism::AssocNode
+          census_assoc_key(node, methods_acc) if methods_acc.mentions_refine?
         when Prism::SymbolNode
           census_symbol(node, methods_acc) if methods_acc.mentions_refine?
         when Prism::CallNode

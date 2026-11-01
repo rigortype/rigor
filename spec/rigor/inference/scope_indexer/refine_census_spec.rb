@@ -94,6 +94,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer, ".refine_census" do
     case outcome
     when :dsl then "a DSL the walk activates" unless context.here == census::CLASS
     when :data then "data the walk charges" unless context.literal == census::CLASS
+    when :inert then nil
     when :recorded, :targets_wildcard, :class_unknown then activation_problem(query, node, context, charged)
     when :literal
       expected = census.charged_modules(context, literal: true)
@@ -613,6 +614,22 @@ RSpec.describe Rigor::Inference::ScopeIndexer, ".refine_census" do
     # refines for the `MyMod` instance that calls it.
     "a :refine Symbol in a plain class's method" => [
       "class Controller\n  def action_name = :refine\nend\n", %i[data], {}
+    ],
+    # Issue #2203: a hash key names an option, and a comparison reads a value; neither runs `Module#refine`. The
+    # `:refine` value of a hash stays a literal.
+    "a refine: keyword key in a module's method" => [
+      "module M\n  def self.h(x, refine:) = x\n  def self.go(x) = h(x, refine: true)\nend\n", %i[inert], {}
+    ],
+    "a refine: key at the top level" => [
+      "x = { refine: 1 }\ny = { :refine => 2 }\n", %i[inert inert], {}
+    ],
+    "a :refine Symbol compared in a module's method" => [
+      "module M\n  def self.a(n) = n.name == :refine\n  def self.b(n) = n.name != :refine\n  " \
+      "def self.c(n) = :x === :refine\nend\n",
+      %i[inert inert inert], {}
+    ],
+    "a :refine hash value in a module's method" => [
+      "module M\n  def self.go = { mode: :refine }\nend\n", %i[literal], { any => { any => ["M"] } }
     ],
     # R3-M1: a parameter's default runs in the method's body, a superclass expression where `class` is. Ruby 4.0.5
     # prints `:refine` for `Search.build`'s `@mode`, `M::Base` for `M::C.superclass` and `:refine` for `M.dflt`.

@@ -210,14 +210,9 @@ module Rigor
           # type-of query then degrades to `Dynamic[top]` — the "sig looks harmful" failure of the 2026-07-06
           # mastodon coverage note). Per-file loading quarantines the broken file instead. Vendored / core-overlay
           # sigs are Rigor-shipped and trusted, so they stay on the loader's fast batch path.
-          loaded_library_names = loaded_libraries.to_set(&:to_s)
           project_files = project_sig_files(signature_paths)
           undeferred_files = project_files - project_sig_files(deferred_signature_paths)
-          vendored_plan = vendored_signature_plan(loaded_library_names, undeferred_files)
-          add_bundled_signatures(rbs_loader, loaded_library_names, gated_plan ? [] : gated_dirs,
-                                 planned: vendored_plan.dirs)
-          env = unload_upstream_core_shims(RBS::Environment.from_loader(rbs_loader), rbs_loader)
-          vendored_plan.sources.each { |source| add_parsed_decls(env, *source) }
+          env = bundled_env(rbs_loader, loaded_libraries, gated_plan ? [] : gated_dirs, undeferred_files)
           gated_plan&.leading&.each { |source| add_parsed_decls(env, *source) }
           # Issue #1075 — decided from the inputs before either side enters `env`: the consistency rule may
           # stand the `.rbs` member down, and that has to happen before its file is added.
@@ -244,6 +239,18 @@ module Rigor
           # constant redeclarations against bundled RBS). Virtual culprits are preferred when both appear.
           env, resolved = resolve_quarantining_virtual_collisions(env, virtual_rbs, project_files: project_files)
           [stub_missing_referenced_types(env, resolved, project_files), gated_dirs]
+        end
+
+        # The environment of the loader's libraries and the Rigor-shipped signatures. Issue #2470 — a vendored
+        # directory with a member a `signature_files` file also declares loads from its {VendoredSignaturePlan},
+        # right after the batch, instead of whole on it.
+        def bundled_env(rbs_loader, loaded_libraries, gated_dirs, signature_files)
+          loaded_library_names = loaded_libraries.to_set(&:to_s)
+          plan = vendored_signature_plan(loaded_library_names, signature_files)
+          add_bundled_signatures(rbs_loader, loaded_library_names, gated_dirs, planned: plan.dirs)
+          env = unload_upstream_core_shims(RBS::Environment.from_loader(rbs_loader), rbs_loader)
+          plan.sources.each { |source| add_parsed_decls(env, *source) }
+          env
         end
 
         # Issue #2422 — {.add_deferred_signatures} over the plugins' files, with the buffer names of the project's

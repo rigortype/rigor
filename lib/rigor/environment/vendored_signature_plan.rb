@@ -37,25 +37,34 @@ module Rigor
       def build(roots, signature_files)
         return EMPTY if roots.empty? || signature_files.empty?
 
-        files_by_root = roots.to_h { |root| [root, RootedGlob.glob(root, "*.rbs").sort.map { |file| Pathname(file) }] }
-        parsed = files_by_root.values.flatten.to_h { |file| [file, RbsLoader.parse_signature_file(file)] }
-        taken = taken_keys(signature_files, header_pattern(parsed.values))
+        parsed = roots.to_h { |root| [root, parsed_sources(root)] }
+        taken = taken_keys(signature_files, header_pattern(parsed.values.flatten(1)))
         return EMPTY if taken.empty?
 
-        planned = files_by_root.filter_map do |root, files|
-          sources = files.filter_map { |file| parsed[file] }
-          kept = sources.map { |buffer, directives, decls| [buffer, directives, plan_decls(decls, nil, taken)] }
-          [root, kept] unless kept.zip(sources).all? { |(_, _, after), (_, _, before)| unchanged?(after, before) }
+        planned = parsed.filter_map do |root, sources|
+          kept = plan_sources(sources, taken)
+          [root, kept] if kept
         end
         return EMPTY if planned.empty?
 
         Plan.new(dirs: planned.map(&:first), sources: planned.flat_map(&:last))
       end
 
+      # A vendored directory's files, parsed, under the Pathname buffer names the loader's batch path gives them.
+      def parsed_sources(root)
+        RootedGlob.glob(root, "*.rbs").sort.filter_map { |file| RbsLoader.parse_signature_file(Pathname(file)) }
+      end
+
+      # `sources` with the taken members left out, or nil when nothing is taken from any of them.
+      def plan_sources(sources, taken)
+        kept = sources.map { |buffer, directives, decls| [buffer, directives, plan_decls(decls, nil, taken)] }
+        kept unless kept.zip(sources).all? { |(_, _, after), (_, _, before)| unchanged?(after, before) }
+      end
+
       # A `class` / `module` header naming one of the vendored top-level types, which every declaration of a
       # vendored type (nested or `A::B`-qualified) starts from. A pre-filter only: the matches are parsed.
       def header_pattern(parsed)
-        heads = parsed.compact.flat_map do |_buffer, _directives, decls|
+        heads = parsed.flat_map do |_buffer, _directives, decls|
           decls.filter_map { |decl| GatedSignaturePlan.type_declaration?(decl) && decl.name.to_s.delete_prefix("::") }
         end
         segments = heads.map { |name| Regexp.escape(name.split("::").first) }.uniq

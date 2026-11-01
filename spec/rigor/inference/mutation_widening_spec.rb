@@ -937,6 +937,14 @@ RSpec.describe Rigor::Inference::MutationWidening do
         .to eq(nominal("Set", [union(nominal("Integer"), untyped)]))
     end
 
+    # `replace` drops every old member, so a synthesised Set takes the rewrite arm a gradual one takes.
+    it "drops a precise synthesised Set's old members under `replace`" do
+      set = nominal("Set", [nominal("Integer")])
+      replaced = described_class.widen_for_mutator(set, :replace, arg_types: [Rigor::Type::Combinator.tuple_of(constant("a"))],
+                                                                  synthesised: true)
+      expect(replaced).to eq(nominal("Set", [union(untyped, nominal("String"))]))
+    end
+
     it "keeps the floor on an empty constant Set, whose members say nothing" do
       expect(described_class.widen_for_mutator(constant(Set.new), :delete, synthesised: true))
         .to eq(nominal("Set", [untyped]))

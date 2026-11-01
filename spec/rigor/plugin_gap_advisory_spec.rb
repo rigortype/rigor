@@ -84,6 +84,21 @@ RSpec.describe Rigor::PluginGapAdvisory do
       expect(described_class.gaps(project_root: root, plugins: []).map(&:plugin_gem))
         .to include("rigor-activerecord", "rigor-railties")
     end
+
+    # `bundle gem` writes `gem "rspec"`, and a Rails app's rspec setup names `rspec-rails`; neither names
+    # `rspec-core`, the gem rigor-rspec targets, so each spelling must expand to it.
+    it "expands a direct `rspec` dependency to the gems rigor-rspec models" do
+      write_lock("rspec", direct: ["rspec"])
+
+      expect(described_class.gaps(project_root: root, plugins: []).map(&:plugin_gem)).to eq(["rigor-rspec"])
+    end
+
+    it "suggests both rspec plugins for a direct `rspec-rails` dependency" do
+      write_lock("rspec-rails", direct: ["rspec-rails"])
+
+      expect(described_class.gaps(project_root: root, plugins: []).map(&:plugin_gem))
+        .to eq(%w[rigor-rspec rigor-rspec-rails])
+    end
   end
 
   describe ".unconfigured?" do

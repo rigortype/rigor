@@ -122,6 +122,33 @@ RSpec.describe Rigor::CLI do
     end
   end
 
+  # A Rails app's rspec setup declares `rspec-rails` and never `rspec-core`, the gem rigor-rspec targets. The
+  # umbrella expansion is what puts rigor-rspec in the suggestion block beside rigor-rspec-rails.
+  describe "with a Gemfile.lock whose only direct dependency is rspec-rails" do
+    before do
+      File.write("Gemfile.lock", <<~LOCK)
+        GEM
+          remote: https://rubygems.org/
+          specs:
+            rspec-rails (7.1.0)
+
+        PLATFORMS
+          ruby
+
+        DEPENDENCIES
+          rspec-rails
+      LOCK
+    end
+
+    it "suggests both rspec plugins as comments" do
+      status, = run_init
+
+      expect(status).to eq(0)
+      expect(suggested_gems).to eq(%w[rigor-rspec rigor-rspec-rails])
+      expect(YAML.safe_load_file(".rigor.dist.yml")["plugins"]).to eq([])
+    end
+  end
+
   it "writes the template unchanged when there is no Gemfile.lock" do
     status, out, = run_init
 

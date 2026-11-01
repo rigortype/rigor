@@ -249,6 +249,21 @@ RSpec.describe Rigor::CLI::DoctorCommand do
       expect(status).to eq(0)
       expect(out).to include("rigor-railties models it")
     end
+
+    # A Rails app's rspec setup declares `rspec-rails` and never `rspec-core`; doctor must name both rspec
+    # plugins from that one direct dependency, the way `rigor init` does.
+    it "fails and names both rspec plugins for a direct `rspec-rails` dependency" do
+      File.write("clean.rb", "x = 1\n")
+      File.write(".rigor.yml", "paths:\n  - .\n")
+      File.write("Gemfile.lock", "GEM\n  specs:\n    rspec-rails (7.1.0)\n\nDEPENDENCIES\n  rspec-rails\n")
+
+      status, out, = run([])
+      expect(status).to eq(1)
+      expect(out).to include("none is enabled")
+      # Asserted as the whole list: `rigor-rspec` is a substring of `rigor-rspec-rails`, so a bare include would
+      # pass with only the rails plugin suggested.
+      expect(out).to include("(rigor-rspec, rigor-rspec-rails)")
+    end
   end
 
   # ADR-27 — Rigor resolved as one of the project's own dependencies. The gem's own guardrails fire at install

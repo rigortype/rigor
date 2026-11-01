@@ -26,7 +26,11 @@ module Rigor
       "rails" => %w[
         actioncable actionmailer actionpack actiontext actionview activejob activemodel
         activerecord activestorage activesupport railties
-      ].freeze
+      ].freeze,
+      # `rspec` and `rspec-rails` are the same shape: a project names the umbrella and never `rspec-core`, the
+      # gem rigor-rspec targets. rspec-rails depends on the three rspec gems listed here.
+      "rspec" => %w[rspec-core rspec-expectations rspec-mocks].freeze,
+      "rspec-rails" => %w[rspec-core rspec-expectations rspec-mocks].freeze
     }.freeze
 
     class << self

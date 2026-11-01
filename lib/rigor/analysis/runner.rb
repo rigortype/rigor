@@ -568,6 +568,9 @@ module Rigor
         @project_discovery_expansion = project_discovery_expansion(paths, expansion)
         @discovery_widened = widen_discovery_to_project?(paths)
         @snapshots.reset_for_run
+        # Issue #2392 — the coordinator's run-accumulated tables (disclosures, trust refusals, the dependency and
+        # effect graphs) are per run too: a reused Runner must not re-emit or sum the previous run's rows.
+        @pool_coordinator.reset_for_run
         # Per-run reset of the deferred-discovery memo (see `#ensure_project_discovery`).
         @project_discovery_done = false
         # #392 — re-derive the template units each run: their source files can change between two runs of

@@ -1,0 +1,104 @@
+# frozen_string_literal: true
+
+require "spec_helper"
+require "tmpdir"
+require "rigor/plugin/base"
+
+# Issue #2392 — `PoolCoordinator` accumulates run-scoped tables (run disclosures, trust refusals, the
+# dependency / analysis-read / analysis-disclosure / effect graphs) through `merge_*` and `collect_*`. Only
+# `#initialize` cleared them, so a long-lived process that reuses one pool-mode `Runner` (the LSP, MCP) had
+# run N's rows re-emitted by run N+1: a disclosure from a file that run N+1 no longer analyses stayed, and
+# refusal counts summed across runs. `Runner#run_analysis` now resets those tables once at the top of each
+# run. A fresh Runner is the reference: a reused one must report exactly what it would.
+RSpec.describe "a reused pool-mode Runner reports each run as a fresh Runner would (#2392)" do
+  def write_files(dir)
+    %w[a b trigger].to_h do |name|
+      path = File.join(dir, "#{name}.rb")
+      File.write(path, "#{name} = 1\n")
+      [name, path]
+    end
+  end
+
+  # Every file reads one refused path (a trust refusal per analysed file), and `trigger.rb` also registers a
+  # run-scoped disclosure. Both are reached only through per-file analysis, so the rows arrive from the
+  # workers' payloads and are merged on the coordinator.
+  let(:probe_class) do
+    Class.new(Rigor::Plugin::Base) do
+      manifest(id: "pool-run-reset-probe", version: "0.1.0")
+
+      def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
+        if File.basename(path) == "trigger.rb"
+          disclose_once(:trigger_seen, message: "trigger file analysed",
+                                       severity: :info)
+        end
+        begin
+          io_boundary.read_file("/rigor-refused-#{File.basename(path)}")
+        rescue Rigor::Plugin::AccessDeniedError
+          nil
+        end
+        []
+      end
+    end
+  end
+
+  before do
+    skip "fork is unavailable on this platform" unless Process.respond_to?(:fork)
+    Rigor::Plugin.unregister!
+    stub_const("PoolRunResetProbe", probe_class)
+  end
+
+  after { Rigor::Plugin.unregister! }
+
+  def runner_for(dir, workers:)
+    configuration = Rigor::Configuration.new("paths" => [dir], "plugins" => ["rigor-pool-run-reset-probe"])
+    requirer = lambda do |_name|
+      Rigor::Plugin.register(probe_class)
+      true
+    end
+    Rigor::Analysis::Runner.new(
+      configuration: configuration, cache_store: nil, plugin_requirer: requirer, workers: workers
+    )
+  end
+
+  def disclosure_rows(diagnostics)
+    diagnostics.select { |d| d.message == "trigger file analysed" }.map(&:to_h)
+  end
+
+  def refusal_rows(diagnostics)
+    diagnostics.select { |d| d.rule == "plugin_trust.read-refused" }.map(&:to_h)
+  end
+
+  def read_count(row)
+    Integer(row["message"][/had (\d+) read\(s\)/, 1])
+  end
+
+  it "does not re-emit a run-scoped disclosure from a file the second run no longer analyses" do
+    Dir.mktmpdir do |dir|
+      files = write_files(dir)
+      runner = runner_for(dir, workers: 2)
+
+      first = guarded_run(runner, [files["a"], files["trigger"]], allow_plugin_crash: true).diagnostics
+      second = guarded_run(runner, [files["a"], files["b"]], allow_plugin_crash: true).diagnostics
+      fresh = guarded_run(runner_for(dir, workers: 2), [files["a"], files["b"]], allow_plugin_crash: true).diagnostics
+
+      expect(disclosure_rows(first).size).to eq(1)
+      expect(disclosure_rows(second)).to be_empty
+      expect(refusal_rows(second)).to eq(refusal_rows(fresh))
+    end
+  end
+
+  it "does not sum a trust refusal across runs on the same Runner" do
+    Dir.mktmpdir do |dir|
+      files = write_files(dir)
+      runner = runner_for(dir, workers: 2)
+      paths = files.values
+
+      first = refusal_rows(guarded_run(runner, paths, allow_plugin_crash: true).diagnostics)
+      second = refusal_rows(guarded_run(runner, paths, allow_plugin_crash: true).diagnostics)
+
+      expect(first.size).to eq(1)
+      expect(read_count(first.first)).to eq(3)
+      expect(second).to eq(first)
+    end
+  end
+end

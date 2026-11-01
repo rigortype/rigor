@@ -1053,6 +1053,50 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
     end
   end
 
+  # Issue #2392 — `#reset_for_run` empties each run-accumulated table. Every table is filled through the same
+  # path a pooled run uses (`#absorb_worker_payload` and the trust-refusal merge), so the precondition
+  # assertions prove the reset is what clears it.
+  describe "#reset_for_run (#2392)" do
+    def worker_payload(dependencies: {}, analysis_reads: {}, analysis_disclosures: {}, disclosures: [], effects: nil)
+      Rigor::Analysis::Runner::WorkerPayload.new(
+        results: {}, reporters: { rbs_extended: { unresolved_payloads: [], lossy_projections: [] },
+                                  boundary_cross: [], source_rbs_synthesis: [] },
+        dependencies: dependencies, analysis_reads: analysis_reads, analysis_disclosures: analysis_disclosures,
+        disclosures: disclosures, refusals: [], effects: effects
+      )
+    end
+
+    it "empties every run-accumulated table and leaves the configuration-derived state in place" do
+      configuration = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS.merge("effects" => {}))
+      coordinator = build_coordinator(configuration: configuration, workers: 2, record_dependencies: true)
+      coordinator.absorb_worker_payload(
+        worker_payload(
+          dependencies: { "a.rb" => ["b.rb"] }, analysis_reads: { "a.rb" => [:read] },
+          analysis_disclosures: { "a.rb" => [:disclosure] },
+          disclosures: [{ plugin_id: "p", key: :k, message: "m" }], effects: { "a.rb" => :effects }
+        )
+      )
+      coordinator.merge_trust_refusals([{ plugin_id: "p", count: 2, first_path: "a.rb", nearest_root: "." }])
+
+      expect(coordinator.collected_dependencies).not_to be_empty
+      expect(coordinator.collected_analysis_reads).not_to be_empty
+      expect(coordinator.collected_analysis_disclosures).not_to be_empty
+      expect(coordinator.collected_effects).not_to be_empty
+      expect(coordinator.collected_run_disclosures).not_to be_empty
+      expect(coordinator.collected_trust_refusals).not_to be_empty
+
+      coordinator.reset_for_run
+
+      expect(coordinator.collected_dependencies).to eq({})
+      expect(coordinator.collected_analysis_reads).to eq({})
+      expect(coordinator.collected_analysis_disclosures).to eq({})
+      expect(coordinator.collected_effects).to eq({})
+      expect(coordinator.collected_run_disclosures).to eq([])
+      expect(coordinator.collected_trust_refusals).to eq([])
+      expect(coordinator.pool_mode?).to be(true)
+    end
+  end
+
   # Mirrors `runner_fork_pool_spec.rb`'s established "deferred YJIT" pattern (`allocate` + a session double,
   # `exit!` stubbed to keep the worker body in-process — a real fork would run in a child process where a spy
   # on the parent cannot observe the call). Extended here to also cover the rescue branch, since this file's

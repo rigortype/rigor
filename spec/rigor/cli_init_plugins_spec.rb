@@ -64,7 +64,7 @@ RSpec.describe Rigor::CLI do
   # What the user has after doing the step the Next steps describe: `[]` deleted, `plugins:` and the entries
   # uncommented.
   def uncommented_text
-    written_text.sub("plugins: []\n", "").sub("# plugins:\n", "plugins:\n").gsub(/^#   - /, "  - ")
+    written_text.sub("plugins: []\n", "plugins:\n").gsub(/^#   - /, "  - ")
   end
 
   describe "with a Gemfile.lock that names rails and rspec-core" do
@@ -74,8 +74,10 @@ RSpec.describe Rigor::CLI do
       status, = run_init
 
       expect(status).to eq(0)
-      expect(suggested_gems).to include("rigor-activerecord", "rigor-railties", "rigor-rspec")
-      expect(suggested_gems).not_to include("rigor-sidekiq")
+      expect(suggested_gems).to eq(
+        %w[rigor-actioncable rigor-actionmailer rigor-actionpack rigor-activejob rigor-activerecord
+           rigor-activestorage rigor-activesupport-core-ext rigor-rails-routes rigor-railties rigor-rspec]
+      )
       expect(YAML.safe_load_file(".rigor.dist.yml")["plugins"]).to eq([])
       expect(Rigor::Configuration.load(".rigor.dist.yml").plugins).to be_empty
     end
@@ -85,15 +87,14 @@ RSpec.describe Rigor::CLI do
 
       expect(written_text).to include(
         "plugins: []\n# Detected from Gemfile.lock (suggested, not enabled). To load them, delete the `[]` above, " \
-        "uncomment the\n# `plugins:` line and the entries you want, then run `rigor plugins --strict`.\n" \
-        "# plugins:\n#   - rigor-"
+        "uncomment the\n# entries you want, then run `rigor plugins --strict`.\n#   - rigor-"
       )
     end
 
     it "lists each suggested plugin on its own line in the next steps" do
       _status, out, = run_init
 
-      expect(out).to include("delete the `[]` under `plugins:`, uncomment")
+      expect(out).to include("delete the `[]` on the `plugins:` line and")
       suggested_gems.each { |gem| expect(out).to include("\n       #{gem}\n") }
     end
 

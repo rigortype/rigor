@@ -115,7 +115,7 @@ When the project has a `Gemfile.lock` in the working directory,
 declares (the same read as [`rigor doctor`](#rigor-doctor)'s
 plugin-gap check). The suggestions are commented out under
 `plugins: []`, so nothing loads until you enable one: delete the
-`[]`, uncomment the `plugins:` line and the entries you want, then
+`[]` on the `plugins:` line, uncomment the entries you want, then
 run `rigor plugins --strict`. A Rails project's `rails` also brings
 in the Rails family, so the list can be long. Without a lockfile,
 or when no locked gem has a bundled plugin, the template has no

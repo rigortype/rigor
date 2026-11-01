@@ -3,7 +3,7 @@
 - **PR:** [#2557](https://github.com/rigortype/rigor/pull/2557)
 - **Issue:** [#2536](https://github.com/rigortype/rigor/issues/2536)
 - **Class:** open-choice
-- **Precedent:** [#2536](https://github.com/rigortype/rigor/issues/2536)
+- **Precedent:** [ADR-96](../docs/adr/96-plugin-target-gems.md)
 - **Decided:** 2026-11-01
 
 ## Background

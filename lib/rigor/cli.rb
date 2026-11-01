@@ -54,7 +54,7 @@ module Rigor
     # plugin's code, so the user uncomments the ones they want (#2536).
     DETECTED_PLUGINS_HEADER = [
       "# Detected from Gemfile.lock (suggested, not enabled). To load them, delete the `[]` above, uncomment the",
-      "# `plugins:` line and the entries you want, then run `rigor plugins --strict`."
+      "# entries you want, then run `rigor plugins --strict`."
     ].freeze
 
     HANDLERS = {
@@ -96,7 +96,7 @@ module Rigor
         opts.banner = "Usage: rigor init [options]"
         opts.on("--force", "Overwrite an existing configuration file") { options[:force] = true }
         opts.on("--path=PATH", "Configuration file path") { |value| options[:path] = value }
-        opts.on("--no-plugins", "Write an empty plugins: list instead of the plugins detected from Gemfile.lock") do
+        opts.on("--no-plugins", "Write no commented plugin suggestions from Gemfile.lock") do
           options[:plugins] = false
         end
       end
@@ -255,8 +255,8 @@ module Rigor
       if plugins.empty?
         @out.puts "  1. Edit #{path} — add the `plugins:` your project needs."
       else
-        @out.puts "  1. Edit #{path} — to load a detected plugin, delete the `[]` under `plugins:`, uncomment"
-        @out.puts "     the `plugins:` line and the entries you want:"
+        @out.puts "  1. Edit #{path} — to load a detected plugin, delete the `[]` on the `plugins:` line and"
+        @out.puts "     uncomment the entries you want:"
         plugins.each { |gem| @out.puts "       #{gem}" }
       end
       @out.puts "  2. Run `rigor plugins` to verify every configured plugin loads."
@@ -362,7 +362,7 @@ module Rigor
     end
 
     def detected_plugins_block(plugins)
-      lines = DETECTED_PLUGINS_HEADER + ["# plugins:"] + plugins.map { |gem| "#   - #{gem}" }
+      lines = DETECTED_PLUGINS_HEADER + plugins.map { |gem| "#   - #{gem}" }
       lines.map { |line| "#{line}\n" }.join
     end
 

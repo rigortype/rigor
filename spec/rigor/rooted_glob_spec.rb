@@ -58,6 +58,21 @@ RSpec.describe Rigor::RootedGlob do
     expect(described_class.glob(parent, described_class.literal("a[1].rb"))).to eq([File.join(parent, "a[1].rb")])
   end
 
+  # #2222 — an absolute configured file is read where it lies. Joined under "." it read "./abs" and matched nothing.
+  it "splits an absolute configured file path into its directory and its literal basename" do
+    write(File.join(parent, "config", "recurring[1].yml"))
+    write(File.join(parent, "config", "recurring1.yml"))
+    absolute = File.join(parent, "config", "recurring[1].yml")
+
+    root, pattern = described_class.split_file(absolute)
+
+    expect(described_class.glob(root, pattern)).to eq([absolute])
+  end
+
+  it "splits a relative configured file path under the working directory, as the plugins always did" do
+    expect(described_class.split_file("config/recurring[1].yml")).to eq([".", "config/recurring\\[1\\].yml"])
+  end
+
   it "does not leave a root named `{..,zz}`" do
     root = File.join(parent, "proj", "{..,zz}")
     write(File.join(root, "in.rb"))

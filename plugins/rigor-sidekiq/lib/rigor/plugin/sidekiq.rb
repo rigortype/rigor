@@ -98,9 +98,10 @@ module Rigor
       # Cached separately from `:worker_index` because the two invalidate on different files: editing a
       # schedule changes which workers are reached without touching `app/workers` at all. The `watch:` roots
       # the glob at the working directory so that CREATING a schedule file — not just editing one — is seen. Each
-      # configured path is escaped to a literal name, so `sidekiq[1].yml` is watched as that file.
+      # configured path is escaped to a literal name, so `sidekiq[1].yml` is watched as that file, and an
+      # absolute path is watched under its own directory (`RootedGlob.split_file`, #2222).
       producer :scheduled_workers,
-               watch: -> { [[".", *@schedule_paths.map { |path| Rigor::RootedGlob.literal(path) }]] } do |_params|
+               watch: -> { @schedule_paths.map { |path| Rigor::RootedGlob.split_file(path) } } do |_params|
         ScheduleScan.new(
           io_boundary: io_boundary,
           schedule_paths: @schedule_paths

@@ -98,9 +98,10 @@ module Rigor
       # Cached separately from `:job_index` because the two invalidate on different files: editing a
       # schedule changes which jobs are reached without touching `app/jobs` at all. The `watch:` roots the
       # glob at the working directory so that CREATING a schedule file — not just editing one — is seen. Each
-      # configured path is escaped to a literal name, so `recurring[1].yml` is watched as that file.
+      # configured path is escaped to a literal name, so `recurring[1].yml` is watched as that file, and an
+      # absolute path is watched under its own directory (`RootedGlob.split_file`, #2222).
       producer :recurring_jobs,
-               watch: -> { [[".", *@recurring_paths.map { |path| Rigor::RootedGlob.literal(path) }]] } do |_params|
+               watch: -> { @recurring_paths.map { |path| Rigor::RootedGlob.split_file(path) } } do |_params|
         RecurringScan.new(
           io_boundary: io_boundary,
           recurring_paths: @recurring_paths

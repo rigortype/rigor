@@ -23,9 +23,10 @@ module Rigor
     # - a bare read whose value is discarded.
     #
     # A listed name the project defines anywhere (a reopen, a prepended or included module, a refinement, any
-    # class at all) escapes all the same ({.project_method_names}). Every argument position escapes, and so does any reference inside a block or
-    # lambda, a write whose value is used (`a = b = …`), and every local of a body that calls `binding`, `eval`,
-    # `local_variable_set`, `instance_variable_set` or a string-form `instance_eval` / `class_eval` / `module_eval`.
+    # class at all) escapes all the same ({.project_method_names}). Every argument position escapes, and so does
+    # any reference inside a block or lambda, a write whose value is used (`a = b = …`), and every local of a
+    # body that calls `binding`, `eval`, `local_variable_set`, `instance_variable_set` or a string-form
+    # `instance_eval` / `class_eval` / `module_eval`.
     # The scan is flow insensitive and runs once per body, so an escape anywhere drops the fact for the whole body:
     # the conservative direction, since without the fact the seams answer as before. A nested `def` or class body is
     # scanned too, though its locals are its own; a same-named local there can only over-report an escape.
@@ -96,8 +97,7 @@ module Rigor
         return true if !reason.nil? && (reason.equal?(ALL) || reason.include?(class_name))
 
         defined = project_method_names(scope)
-        calls = result.calls.fetch(name, EMPTY_CALLS)
-        defined.equal?(ALL) ? !calls.empty? : calls.any? { |call| defined.include?(call) }
+        result.calls.fetch(name, EMPTY_CALLS).any? { |call| defined.include?(call) }
       end
 
       # Every method name the project defines anywhere: on any class or module, instance or singleton side, in a
@@ -113,15 +113,12 @@ module Rigor
         table[discovery] ||= collect_method_names(discovery)
       end
 
-      # ALL when a `refine` body defines names the walk cannot enumerate (the refinement wildcard).
       def collect_method_names(discovery)
         names = Set.new
         [discovery.discovered_methods, discovery.discovered_def_nodes, discovery.discovered_singleton_def_nodes,
          discovery.discovered_refinements].each do |by_owner|
           by_owner.each_value do |methods|
             methods.each_key do |method_name|
-              return ALL if method_name == Scope::DiscoveryIndex::REFINEMENT_WILDCARD
-
               names << method_name.to_sym
             end
           end

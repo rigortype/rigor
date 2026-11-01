@@ -69,6 +69,7 @@ RSpec.describe Rigor::RunScopedSlots do
       __rigor_user_method_transient_event_depths__: "ADR-55 state, cleared when the guard stack drains",
       __rigor_user_method_unroll_fuel__: "ADR-55 state, cleared when the guard stack drains",
       __rigor_yield_value_type__: "frame slot, installed and restored around a block",
+      rigor_memo_audit_suspended: "frame flag of MemoAudit, installed and restored around a recomputation",
       rigor_break_sink: "jump sink frame, installed and restored around a loop",
       rigor_break_value_sink: "jump sink frame, installed and restored around a loop",
       rigor_cache_file_digest_memo: "Cache::FileDigest.with_run frame",

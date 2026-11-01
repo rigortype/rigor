@@ -14,6 +14,7 @@ require_relative "block_call_timing"
 require_relative "block_repetition"
 require_relative "block_parameter_binder"
 require_relative "body_fixpoint"
+require_relative "memo_audit"
 require_relative "callee_mutation_chain"
 require_relative "captured_locals"
 require_relative "dynamic_origin"
@@ -703,7 +704,11 @@ module Rigor
 
         memo = unrecorded_hand_off_memo(written)
         key = [constructed, call_node.name]
-        memo.fetch(key) { memo[key] = compute_unrecorded_hand_off_callees(call_node, written, constructed) }
+        return memo[key] = compute_unrecorded_hand_off_callees(call_node, written, constructed) unless memo.key?(key)
+
+        MemoAudit.check("unrecorded hand-off", memo[key], written, key) do
+          compute_unrecorded_hand_off_callees(call_node, written, constructed)
+        end
       end
 
       def compute_unrecorded_hand_off_callees(call_node, written, constructed)
@@ -770,9 +775,10 @@ module Rigor
 
       # True when a census memo must not be read or written: a dependency recorder is active (it must see each
       # constant read), or this scope carries guard narrowings of constants (`if INST.is_a?(Sub)`), which survive
-      # `with_self_type` and change what the constant types as, so the answer is no longer the def's alone.
+      # `with_self_type` and change what the constant types as, so the answer is no longer the def's alone. An audit
+      # recomputation ({MemoAudit}) bypasses them too, so it reads no stored entry.
       def hand_off_memo_bypassed?
-        Analysis::DependencyRecorder.active? || !scope.constant_narrowings.empty?
+        Analysis::DependencyRecorder.active? || !scope.constant_narrowings.empty? || MemoAudit.suspended?
       end
 
       # The name a constant node is written with, or nil when part of it is not a constant (`foo::Bar`).
@@ -5077,7 +5083,7 @@ module Rigor
         cache = (@callee_mutated_param_cache ||= {}.compare_by_identity)
         cache[def_node] ||= resolved_census(:close, def_node) do
           CalleeMutationChain.close(def_node, own: hop_census(:own_content_parameters),
-                                              edges: hop_census(:forwarding_edges))
+                                              edges: hop_census(:forwarding_edges), **callee_chain_store)
         end
       end
 
@@ -5085,13 +5091,31 @@ module Rigor
       # evaluator a cross-class hand-off resolves in, nil for the evaluator the closure started in.
       def hop_census(census) = ->(def_node, owner) { census_of(owner, census, def_node) }
 
+      # ADR-127 WD2 — the run's successor store for {CalleeMutationChain} keyed by discovery: `def => owner => name =>
+      # [callee, name, owner, ...]`, a graph fact (the nodes a parameter is handed to), never a walk's conclusion. The
+      # edges do not depend on which census a closure reads, so one store serves all three. The nil owner is stored
+      # under the side and class the closure runs in, the same context {#resolved_census} keys by. Bypassed (nothing
+      # read or written) under {#hand_off_memo_bypassed?}, as the memos it sits beside.
+      def callee_chain_store
+        return NO_CHAIN_STORE if hand_off_memo_bypassed?
+
+        table = (Thread.current[CHAIN_STORE_KEY] ||= ObjectSpace::WeakKeyMap.new)
+        self_type = scope.self_type
+        { store: (table[scope.discovery] ||= {}.compare_by_identity),
+          ctx: [self_type.is_a?(Type::Singleton), enclosing_class_name_for(self_type)] }
+      end
+
+      CHAIN_STORE_KEY = RunScopedSlots.register(:rigor_callee_chain_successors)
+      NO_CHAIN_STORE = {}.freeze
+      private_constant :CHAIN_STORE_KEY, :NO_CHAIN_STORE
+
       # Issue #2296 — the `{ name => slot }` parameters the callee mutates inside a block in its body
       # ({#own_block_content_parameters}), closed over hand-offs as {#callee_content_mutated_parameters} is.
       def callee_block_mutated_parameters(def_node)
         cache = (@callee_block_param_cache ||= {}.compare_by_identity)
         cache[def_node] ||= resolved_census(:close_block, def_node) do
           CalleeMutationChain.close(def_node, own: hop_census(:own_block_content_parameters),
-                                              edges: hop_census(:forwarding_edges))
+                                              edges: hop_census(:forwarding_edges), **callee_chain_store)
         end
       end
 
@@ -5101,7 +5125,7 @@ module Rigor
         cache = (@callee_set_param_cache ||= {}.compare_by_identity)
         cache[def_node] ||= resolved_census(:close_set, def_node) do
           CalleeMutationChain.close(def_node, own: hop_census(:own_set_content_parameters),
-                                              edges: hop_census(:forwarding_edges))
+                                              edges: hop_census(:forwarding_edges), **callee_chain_store)
         end
       end
 
@@ -5118,7 +5142,7 @@ module Rigor
       # and write, while this scope carries guard narrowings of constants ({#hand_off_memo_bypassed?}, #2524): they
       # survive `with_self_type` and change what a constant in the def's body types as, so the census is no longer
       # the def's alone, and the first caller's narrowing must not become every later caller's answer.
-      def resolved_census(kind, def_node)
+      def resolved_census(kind, def_node, &)
         return yield if hand_off_memo_bypassed?
 
         discovery = scope.discovery
@@ -5128,7 +5152,9 @@ module Rigor
         by_class = (slot[self_type.is_a?(Type::Singleton) ? 1 : 0][kind] ||= {})
         class_name = enclosing_class_name_for(self_type)
         by_def = (by_class[class_name] ||= {}.compare_by_identity)
-        by_def.fetch(def_node) { by_def[def_node] = yield }
+        return by_def[def_node] = yield unless by_def.key?(def_node)
+
+        MemoAudit.check("resolved census", by_def[def_node], kind, class_name, &)
       end
 
       RESOLVED_CENSUS_KEY = RunScopedSlots.register(:rigor_callee_resolved_census)
@@ -5299,10 +5325,12 @@ module Rigor
       private_constant :NO_PARAMETER_SLOTS, :NO_BLOCK_AND_SET
 
       # Issue #2104 — the per-thread memo of a census that reads nothing but `def_node`'s AST, under `kind`.
-      def def_census(kind, def_node)
+      def def_census(kind, def_node, &)
         table = (Thread.current[DEF_CENSUS_KEY] ||= ObjectSpace::WeakKeyMap.new)
         entry = (table[def_node] ||= {})
-        entry.fetch(kind) { entry[kind] = yield }
+        return entry[kind] = yield unless entry.key?(kind)
+
+        MemoAudit.check("def census", entry[kind], kind, &)
       end
 
       DEF_CENSUS_KEY = RunScopedSlots.register(:rigor_callee_def_census)

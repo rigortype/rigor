@@ -8,15 +8,16 @@ module Rigor
     #
     # This module is the closure over a parameter-flow graph, independent of how the graph is read. `own` answers a
     # def's own census, `{ name => slot }` (a slot is a positional index or a keyword symbol); `edges` answers the
-    # {Edge}s along which a def hands one of its parameters to a resolved callee. A node is one parameter of one def,
-    # and the walk follows only the edges that hand on the parameter the node is, so a def's hand-offs of its OTHER
-    # parameters cost nothing. A node is mutated when its def mutates it or it hands itself to a mutated node: the
-    # least fixpoint, so a recursive or mutually recursive chain terminates and a cycle with no mutation on it mutates
-    # nothing.
+    # {Edge}s along which a def hands one of its parameters to a resolved callee. A node is one parameter of one def
+    # under one owner context, and the walk follows only the edges that hand on the parameter the node is, so a def's
+    # hand-offs of its OTHER parameters cost nothing.
     #
-    # The walk reads at most {MAX_NODES} nodes per parameter, so one parameter's walk cannot starve another's. A
-    # hand-off to a node past the cap is read as a mutation (a {BudgetTrace::CALLEE_CHAIN_CAP} hit): the walk did not
-    # see the callee, and a literal shape kept on evidence it never saw reports a false positive on correct code.
+    # ADR-127 — the answer is a property of that graph, not of a walk. A parameter `r` is mutated iff an own-mutated
+    # node is reachable from `r` through nodes that are not themselves own-mutated, or more than {MAX_NODES} distinct
+    # nodes are reachable from `r` (a cut: the walk did not see them, and a literal shape kept on evidence it never saw
+    # reports a false positive on correct code). Nothing a walk concludes is kept, so what one walk did cannot change
+    # another's answer; only graph facts are persisted (the successor `store`). Which label an answer carries (an
+    # exact one, or a cut and its {BudgetTrace::CALLEE_CHAIN_CAP} hit) may vary with the order, the floor does not.
     module CalleeMutationChain
       # `name` and `slot` are the forwarding def's parameter, `callee` the def it is handed to, and `callee_names`
       # the callee's parameters it may bind there. Issue #2515 — `owner` is the evaluator the callee's own census and
@@ -26,111 +27,98 @@ module Rigor
         def initialize(name:, slot:, callee:, callee_names:, owner: nil) = super
       end
 
-      MAX_NODES = 32
+      # ADR-127 — the most distinct nodes one parameter may reach before the walk is cut and reads as mutated.
+      MAX_NODES = 64
+
+      NO_TRIPLES = [].freeze
+      private_constant :NO_TRIPLES
 
       module_function
 
-      # `own` and `edges` take the def and the owner evaluator its hop resolves in (nil: the closure's own).
-      def close(root, own:, edges:)
+      # `own` and `edges` take the def and the owner evaluator its hop resolves in (nil: the closure's own). `store`
+      # (nil: none) is the run's successor store, `{ def => { owner_key => { name => triples } } }`, and `ctx` the key
+      # the nil owner is stored under (the side and class the closure runs in).
+      def close(root, own:, edges:, store: nil, ctx: nil)
         census = own.call(root, nil)
-        handed = edges.call(root, nil).reject { |edge| census.key?(edge.name) }
+        handed = edges.call(root, nil)
         return census if handed.empty?
 
-        flow = Flow.new(own, edges)
-        handed.each { |edge| flow.visit(root, edge.name, nil) }
-        flow.settle
-        handed.each_with_object(census.dup) do |edge, result|
-          result[edge.name] = edge.slot if flow.mutated?(root, edge.name, nil)
+        result = nil
+        handed.each do |edge|
+          name = edge.name
+          next if census.key?(name) || result&.key?(name)
+          next unless reaches_mutation?(root, name, own, edges, store, ctx)
+
+          (result ||= census.dup)[name] = edge.slot
         end
+        result || census
       end
 
-      # The parameter-flow graph one closure reads: per def, per parameter name, whether the node is mutated and the
-      # nodes it hands itself on to.
-      class Flow
-        Node = Struct.new(:mutated, :successors)
-        NO_SUCCESSORS = [].freeze
+      # Breadth first from `root`'s `name`, over a walk-local `seen`. A node counts when it is first discovered and its
+      # own mutation is checked then, so more than {MAX_NODES} discovered nodes is decided without computing the
+      # frontier's edges. The first own-mutated node proves the parameter mutated; it is reachable through nodes that
+      # are not own-mutated by construction, since those are the only ones expanded.
+      def reaches_mutation?(root, name, own, edges, store, ctx)
+        seen = {}.compare_by_identity
+        mark(seen, root, name, nil)
+        queue = [root, name, nil]
+        discovered = 1
+        i = 0
+        while i < queue.size
+          triples = successors(queue[i], queue[i + 1], queue[i + 2], edges, store, ctx)
+          i += 3
+          j = 0
+          while j < triples.size
+            callee = triples[j]
+            callee_name = triples[j + 1]
+            owner = triples[j + 2]
+            j += 3
+            next unless mark(seen, callee, callee_name, owner)
 
-        def initialize(own, edges)
-          @own = own
-          @edges = edges
-          @nodes = {}.compare_by_identity
-        end
-
-        # A node is one parameter of one def under one owner context: the same def reached under another owner
-        # (another `self`) is a different node.
-        def mutated?(def_node, name, owner)
-          node = @nodes.dig(def_node, owner, name)
-          !node.nil? && node.mutated
-        end
-
-        # Reads the nodes reachable from `def_node`'s `name`, breadth first, while fewer than {MAX_NODES} are read for
-        # this parameter. A node still unread when the budget runs out is taken as mutated, so the cut answers "maybe
-        # mutated" (the floor, the direction that cannot report a false positive) and records a
-        # {BudgetTrace::CALLEE_CHAIN_CAP} hit.
-        def visit(def_node, name, owner)
-          queue = [[def_node, name, owner]]
-          read = 0
-          cut = false
-          until queue.empty?
-            current, parameter, current_owner = queue.shift
-            next if known?(current, parameter, current_owner)
-
-            if read >= MAX_NODES
-              cut = true
-              store(current, parameter, current_owner, Node.new(true, NO_SUCCESSORS))
-              next
+            discovered += 1
+            if discovered > MAX_NODES
+              BudgetTrace.hit(BudgetTrace::CALLEE_CHAIN_CAP)
+              return true
             end
+            return true if own.call(callee, owner).key?(callee_name)
 
-            read += 1
-            queue.concat(add(current, parameter, current_owner))
-          end
-          BudgetTrace.hit(BudgetTrace::CALLEE_CHAIN_CAP) if cut
-        end
-
-        def settle
-          changed = true
-          while changed
-            changed = false
-            each_node do |node|
-              next if node.mutated
-              next unless node.successors.any? { |callee, name, owner| mutated?(callee, name, owner) }
-
-              node.mutated = true
-              changed = true
-            end
+            queue.push(callee, callee_name, owner)
           end
         end
+        false
+      end
 
-        private
+      # True when the node was not yet in the walk-local `seen`, which now holds it.
+      def mark(seen, def_node, name, owner)
+        by_name = ((seen[def_node] ||= {})[owner] ||= {})
+        return false if by_name.key?(name)
 
-        def known?(def_node, name, owner)
-          by_name = @nodes.dig(def_node, owner)
-          !by_name.nil? && by_name.key?(name)
-        end
+        by_name[name] = true
+      end
 
-        # Records the node and answers its successors. A node its def mutates needs none.
-        def add(def_node, name, owner)
-          mutated = @own.call(def_node, owner).key?(name)
-          successors = mutated ? [] : successors_of(def_node, name, owner)
-          store(def_node, name, owner, Node.new(mutated, successors))
-          successors
-        end
+      # The flat `[callee, name, owner, ...]` triples the node `(def_node, name, owner)` hands itself to: a graph fact,
+      # persisted in `store` when there is one. A node its def mutates is never asked.
+      def successors(def_node, name, owner, edges, store, ctx)
+        return compute_successors(def_node, name, owner, edges) if store.nil?
 
-        def successors_of(def_node, name, owner)
-          @edges.call(def_node, owner).each_with_object([]) do |edge, successors|
-            next unless edge.name == name
-
-            edge.callee_names.each { |callee_name| successors << [edge.callee, callee_name, edge.owner || owner] }
+        by_name = ((store[def_node] ||= {})[owner.nil? ? ctx : owner] ||= {})
+        if by_name.key?(name)
+          return MemoAudit.check("successor", by_name[name], name, owner) do
+            compute_successors(def_node, name, owner, edges)
           end
         end
 
-        def store(def_node, name, owner, node)
-          ((@nodes[def_node] ||= {})[owner] ||= {})[name] = node
-        end
+        by_name[name] = compute_successors(def_node, name, owner, edges)
+      end
 
-        def each_node(&)
-          @nodes.each_value { |by_owner| by_owner.each_value { |by_name| by_name.each_value(&) } }
+      def compute_successors(def_node, name, owner, edges)
+        triples = nil
+        edges.call(def_node, owner).each do |edge|
+          next unless edge.name == name
+
+          edge.callee_names.each { |callee_name| (triples ||= []).push(edge.callee, callee_name, edge.owner || owner) }
         end
+        triples.nil? ? NO_TRIPLES : triples.freeze
       end
     end
   end

@@ -40,7 +40,10 @@ RSpec.describe "a callee chain that mutates an argument floors it (#2104)" do
   end
 
   around do |example|
+    Rigor::Inference::MemoAudit.enable!
     Dir.mktmpdir("rigor-callee-chain-") { |dir| Dir.chdir(dir) { example.run } }
+  ensure
+    Rigor::Inference::MemoAudit.disable!
   end
 
   let(:undefined_upcase) { [[8, "call.undefined-method"]] }
@@ -129,19 +132,50 @@ RSpec.describe "a callee chain that mutates an argument floors it (#2104)" do
   end
 
   it "floors an argument a chain hands past the read cap, whatever its end does, and records the cut" do
-    # Pins a decision: past `CalleeMutationChain::MAX_NODES` a hand-off reads as a mutation (the walk did not see the
-    # callee), the direction that cannot report a false positive on correct code.
-    chain = (1..40).map { |i| "def hop#{i}(acc) = hop#{i + 1}(acc)" }
+    # Pins a decision: past `CalleeMutationChain::MAX_NODES` (64, ADR-127) a hand-off reads as a mutation (the walk did
+    # not see the callee), the direction that cannot report a false positive on correct code. The chain is K + 9 hops
+    # long and its end only reads, so only the cut can floor it.
+    k = Rigor::Inference::CalleeMutationChain::MAX_NODES
+    chain = (1..(k + 8)).map { |i| "def hop#{i}(acc) = hop#{i + 1}(acc)" }
     Rigor::Inference::BudgetTrace.enable!
     Rigor::Inference::BudgetTrace.reset
     expect(diagnostics(<<~RUBY)).to eq([])
       def stripes(acc) = hop1(acc)
       #{chain.join("\n")}
-      def hop41(acc) = (acc[0] = "x")
+      def hop#{k + 9}(acc) = acc.size
     RUBY
     expect(Rigor::Inference::BudgetTrace.snapshot[Rigor::Inference::BudgetTrace::CALLEE_CHAIN_CAP]).to be >= 1
   ensure
     Rigor::Inference::BudgetTrace.disable!
+  end
+
+  it "keeps the true positive through a chain that never mutates and stays inside the read cap" do
+    chain = (1..60).map { |i| "def hop#{i}(acc) = hop#{i + 1}(acc)" }
+    expect(diagnostics(<<~RUBY)).to eq(undefined_upcase)
+      def stripes(acc) = hop1(acc)
+      #{chain.join("\n")}
+      def hop61(acc) = acc.size
+    RUBY
+  end
+
+  # Issue #2520 — a literal handed to many pure leaves kept its facts up to the read cap, and is floored past it.
+  it "keeps the true positive through a forty-leaf fan-out that never mutates (#2520)" do
+    calls = (1..40).map { |i| "leaf#{i}(acc)" }.join("; ")
+    leaves = (1..40).map { |i| "def leaf#{i}(acc) = acc.size" }
+    expect(diagnostics(<<~RUBY)).to eq(undefined_upcase)
+      def stripes(acc) = (#{calls})
+      #{leaves.join("\n")}
+    RUBY
+  end
+
+  it "floors a fan-out wider than the read cap that never mutates" do
+    n = Rigor::Inference::CalleeMutationChain::MAX_NODES + 6
+    calls = (1..n).map { |i| "leaf#{i}(acc)" }.join("; ")
+    leaves = (1..n).map { |i| "def leaf#{i}(acc) = acc.size" }
+    expect(diagnostics(<<~RUBY)).to eq([])
+      def stripes(acc) = (#{calls})
+      #{leaves.join("\n")}
+    RUBY
   end
 
   it "keeps the true positive when the def hands a different parameter to sixteen other methods" do

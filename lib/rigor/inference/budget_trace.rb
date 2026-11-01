@@ -54,8 +54,9 @@ module Rigor
       # `Dynamic[top]` (the escaping-block floor). Shared by slice B's loop-body fixpoint and by slice C's
       # content-evidence fixpoint, where the collapsed name is one element / key / value slot of a collection join.
       BLOCK_WRITEBACK_CAP = :block_writeback_cap
-      # `CalleeMutationChain` read {CalleeMutationChain::MAX_NODES} nodes of one parameter's hand-off walk and took the
-      # unread rest as mutating (the callee floor's FP-safe cut).
+      # `CalleeMutationChain` discovered more than {CalleeMutationChain::MAX_NODES} nodes from one parameter and took
+      # the rest as mutating (the callee floor's FP-safe cut). A label: it may vary with the order, the floor does not
+      # (ADR-127).
       CALLEE_CHAIN_CAP = :callee_chain_cap
 
       # ADR-57 return-memo profile counters (not cutoffs — see the module doc). All bumped by

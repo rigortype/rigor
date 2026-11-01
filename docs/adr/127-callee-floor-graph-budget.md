@@ -1,6 +1,6 @@
 # ADR-127 — The callee mutation floor answers a graph property, not a walk
 
-Status: **Accepted, 2026-11-01, with K = 64.** Nothing is implemented yet. The prototype measurements below were taken
+Status: **Accepted, 2026-11-01, with K = 64.** Implemented in [#2564](https://github.com/rigortype/rigor/pull/2564). The prototype measurements below were taken
 on `a53b68c4d` with an env-switched prototype and a reference patch. The work closes
 [#2520](https://github.com/rigortype/rigor/issues/2520) and leaves
 [#2521](https://github.com/rigortype/rigor/issues/2521) and

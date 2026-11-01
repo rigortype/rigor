@@ -1,0 +1,3 @@
+- **[inference]** A local literal handed to many read-only callees keeps its facts: the callee floor now reads up to 64 hand-off nodes per parameter, where it read 32. ([#2520](https://github.com/rigortype/rigor/issues/2520))
+  - A literal passed to a def that hands it on to 40 pure helpers, or down a read-only chain of 40, is no longer floored, so a call that is wrong on the literal is reported again.
+  - A parameter that reaches more than 64 nodes, counting itself, is still floored.

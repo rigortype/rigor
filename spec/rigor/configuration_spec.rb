@@ -533,6 +533,85 @@ RSpec.describe Rigor::Configuration do
           expect(config.with_bleeding_edge(true).with_bleeding_edge(false).bleeding_edge_active?("feat-b"))
             .to be(false)
         end
+
+        # #2339 — the `effects:` default is derived from the same selector, so `--bleeding-edge` must turn effect
+        # collection on exactly as a `bleeding_edge:` key in the file does. Compared on every ivar rather than a
+        # hand-picked list, so a derived ivar added to `#initialize` later is covered without an edit here.
+        describe "re-deriving what #initialize derives (#2339)" do
+          # Every ivar, compared by value: plain objects (such as `Dependencies`) have identity `==`, so they are
+          # unfolded into their own ivars instead of compared as the instances they are.
+          def ivars_of(configuration)
+            state_of(configuration)
+          end
+
+          def state_of(value)
+            case value
+            when Hash then value.to_h { |key, entry| [key, state_of(entry)] }
+            when Array then value.map { |entry| state_of(entry) }
+            when Module, Symbol, String, Numeric, Regexp, NilClass, TrueClass, FalseClass then value
+            else
+              [value.class, value.instance_variables.to_h do |name|
+                [name, state_of(value.instance_variable_get(name))]
+              end]
+            end
+          end
+
+          let(:selectors) do
+            [true, false, ["effects-on-by-default"], { "all" => true, "except" => ["effects-on-by-default"] }]
+          end
+
+          {
+            "no effects: key" => {},
+            "effects: false" => { "effects" => false },
+            "effects: true" => { "effects" => true },
+            "an effects: block" => { "effects" => { "check" => false } }
+          }.each do |label, written|
+            it "matches a configuration built with the same bleeding_edge: selector, for a file with #{label}" do
+              selectors.each do |selector|
+                from_start = described_class.new(written.merge("bleeding_edge" => selector))
+                re_derived = described_class.new(written).with_bleeding_edge(selector)
+
+                expect(ivars_of(re_derived)).to eq(ivars_of(from_start)), "selector #{selector.inspect}"
+              end
+            end
+          end
+
+          it "turns effect collection on for --bleeding-edge against a file that writes no effects: key" do
+            expect(described_class.new({}).with_bleeding_edge(true).effects_enabled?).to be(true)
+            expect(described_class.new({}).with_bleeding_edge(true).effects).to eq({})
+          end
+
+          it "keeps effects off for --bleeding-edge against an explicit effects: false" do
+            expect(described_class.new({ "effects" => false }).with_bleeding_edge(true).effects_enabled?).to be(false)
+          end
+
+          it "stays Ractor.shareable? when the file carries a nested effects: block" do
+            configured = described_class.new({ "effects" => { "snapshot" => { "path" => "effects.yml" } } })
+
+            expect(Ractor.shareable?(configured.with_bleeding_edge(true))).to be(true)
+          end
+
+          it "turns the default back off when --no-bleeding-edge follows a bleeding-edge config" do
+            enabled = described_class.new({ "bleeding_edge" => true })
+
+            expect(enabled.effects_enabled?).to be(true)
+            expect(enabled.with_bleeding_edge(false).effects_enabled?).to be(false)
+          end
+
+          it "keeps an effects: block written in the file when the selector changes" do
+            configured = described_class.new({ "effects" => { "check" => false } })
+
+            expect(configured.with_bleeding_edge(true).effects).to eq({ "check" => false })
+            expect(configured.with_bleeding_edge(true).effects_check?).to be(false)
+          end
+
+          it "keeps effects enabled by with_effects_enabled when the selector later changes" do
+            enabled = described_class.new({ "paths" => ["app"] }).with_effects_enabled
+
+            expect(enabled.with_bleeding_edge(false).effects_enabled?).to be(true)
+            expect(enabled.with_bleeding_edge(false).effects_check?).to be(true)
+          end
+        end
       end
 
       # ADR-50 § WD2 — how a *behaviour* feature (one that moves no severity) reaches its call site.

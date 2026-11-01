@@ -2528,6 +2528,108 @@ RSpec.describe Rigor::Environment::RbsLoader do
     end
   end
 
+  # A declaration name with a leading `::` is absolute: it resets the enclosing prefix, so the class it
+  # keys under is the one RBS defines, not the one its text sits in (issue #2474).
+  describe "declaration names resolve as RBS resolves them before keying (issue #2474)" do
+    # The `[class key, nesting]` pair {RbsLoader.each_declared_member} yields for each method of one source.
+    # A nested declaration is yielded too, as a member of its parent, so only method definitions are kept.
+    def keyed_declarations(source)
+      decls = described_class.send(:parse_signature_source, "table.rbs", source)
+      pairs = []
+      described_class.each_declared_member(decls) do |class_name, member, _visibility, nesting|
+        pairs << [class_name, nesting] if member.is_a?(RBS::AST::Members::MethodDefinition)
+      end
+      pairs
+    end
+
+    it "keys a class relative to the enclosing module (guard)" do
+      expect(keyed_declarations("module A\n  class Abs\n    def m: () -> untyped\n  end\nend\n"))
+        .to eq([["A::Abs", "A/Abs"]])
+    end
+
+    # The nesting keeps the written `::Abs`, so a mixin inside it still keys by the spelling it has.
+    it "keys an absolute class as the top-level name, not under the enclosing module" do
+      expect(keyed_declarations("module A\n  class ::Abs\n    def m: () -> untyped\n  end\nend\n"))
+        .to eq([["Abs", "A/::Abs"]])
+    end
+
+    it "keys an absolute qualified class as its own qualified name" do
+      expect(keyed_declarations("module A\n  class ::B::C\n    def m: () -> untyped\n  end\nend\n"))
+        .to eq([["B::C", "A/::B::C"]])
+    end
+
+    it "keys a relative qualified class under the enclosing module (guard)" do
+      expect(keyed_declarations("module A\n  class B::C\n    def m: () -> untyped\n  end\nend\n"))
+        .to eq([["A::B::C", "A/B::C"]])
+    end
+
+    it "nests the children of an absolute declaration under the reset prefix" do
+      source = "module A\n  module ::X\n    class Y\n      def m: () -> untyped\n    end\n  end\nend\n"
+      expect(keyed_declarations(source))
+        .to eq([["X::Y", "A/::X/Y"]])
+    end
+
+    # The same reset applies to the class names the generic-arity check looks up (`each_declared_class`).
+    it "yields the absolute name of every class declaration, resetting at a leading ::" do
+      decls = described_class.send(:parse_signature_source, "table.rbs",
+                                   "module A\n  class Abs\n  end\n  class ::Abs2\n  end\n  class B::C\n  end\n  " \
+                                   "module ::X\n    class Y\n    end\n  end\nend\n")
+      names = []
+      described_class.send(:each_declared_class, decls) { |name, _arity| names << name }
+      expect(names).to eq(["::A::Abs", "::Abs2", "::A::B::C", "::X::Y"])
+    end
+
+    # The issue's shape end to end: `sig/` declares the top-level `::Abs` inside `module A`, next to an
+    # inline `A::Abs`. They are different classes, so no member collides and neither side is stood down.
+    describe "a sig/ absolute declaration beside an inline class of the enclosing name" do
+      let(:tmpdir) { Dir.mktmpdir("rigor-rbs-loader-absolute-name-spec-") }
+      let(:sig_file) { File.join(tmpdir, "abs.rbs") }
+      let(:virtual_name) { "virtual:rbs-inline:/app/lib/abs.rb" }
+
+      after { FileUtils.rm_rf(tmpdir) }
+
+      def build_loader(sig, inline)
+        File.write(sig_file, sig)
+        loader = described_class.new(signature_paths: [tmpdir], virtual_rbs: [[virtual_name, inline]])
+        allow(loader).to receive(:warn)
+        loader
+      end
+
+      def rows(loader)
+        loader.member_consistency(proof: Rigor::Environment::MemberConsistency::RbsProof.new(loader))
+              .map { |r| [r.class_name, r.method_name, r.outcome] }
+      end
+
+      it "reports no collision for the false match and keeps both classes' members" do
+        loader = build_loader("module A\n  class ::Abs\n    def shared: () -> ::Integer\n  end\nend\n",
+                              "module A\n  class Abs\n    def shared: () -> ::String\n  end\nend\n")
+        expect(rows(loader)).to be_empty
+        expect(loader.instance_definition("Abs").methods[:shared].method_types.map(&:to_s))
+          .to eq(["() -> ::Integer"])
+        expect(loader.instance_definition("A::Abs").methods[:shared].method_types.map(&:to_s))
+          .to eq(["() -> ::String"])
+      end
+
+      # The real collision stays: two declarations of the one absolute name `::Abs`, one in `sig/` under
+      # `module A` and one inline at the top level, do report.
+      it "still reports a real collision between two declarations of the same absolute name" do
+        loader = build_loader("module A\n  class ::Abs\n    def shared: () -> ::Integer\n  end\nend\n",
+                              "class Abs\n  def shared: () -> ::String\nend\n")
+        expect(rows(loader)).to eq([["Abs", :shared, :contradiction]])
+      end
+
+      # When the inline side binds, the `sig/` member under `module A; class ::Abs` is stood down by its
+      # absolute key, so the definition builds with the inline member alone instead of two `shared` methods.
+      it "stands down the sig/ member of an absolute declaration when the inline side binds" do
+        loader = build_loader("module A\n  class ::Abs\n    def name: () -> untyped\n  end\nend\n",
+                              "class Abs\n  %a{rigor:v1:return: non-empty-string}\n  def name: () -> ::String\nend\n")
+        expect(rows(loader).map(&:last)).to eq([:inline])
+        expect(loader.definition_build_failures).to be_empty
+        expect(loader.instance_definition("Abs").methods[:name].method_types.map(&:to_s)).to eq(["() -> ::String"])
+      end
+    end
+  end
+
   # Issue #1713 — a gated vendored directory loads less what another source declares.
   describe "partial stand-down of a required-feature-gated vendored directory" do
     let(:tmpdir) { Dir.mktmpdir("rigor-rbs-loader-gated-spec-") }

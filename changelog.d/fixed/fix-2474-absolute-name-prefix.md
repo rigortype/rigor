@@ -1,0 +1,4 @@
+- **[rbs]** A `sig/` declaration written as `module A; class ::Abs` now names the top-level `Abs`, so it no longer collides with an inline `A::Abs`. ([#2582](https://github.com/rigortype/rigor/pull/2582))
+  - The member-consistency check used to key it `A::Abs`. On the released version this fails the whole class with `rbs.coverage.definition-build-failed` (`DuplicatedMethodDefinitionError`), so its methods read as `Dynamic`, and a not-honoured row names the wrong class.
+  - A real collision on the one absolute name still reports.
+  - A plugin's `module P; class ::Foo[T]` now triggers the generic-arity stand-down (#2424) against an environment `class Foo`; before, the plugin declaration was added anyway.

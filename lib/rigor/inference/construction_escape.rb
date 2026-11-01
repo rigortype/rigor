@@ -23,7 +23,7 @@ module Rigor
     # - a bare read whose value is discarded.
     #
     # A listed name the project defines anywhere (a reopen, a prepended or included module, a refinement, any
-    # class at all) escapes all the same ({.project_method_names}). Every argument position escapes, and so does
+    # class at all) escapes all the same ({.project_defines?}). Every argument position escapes, and so does
     # any reference inside a block or lambda, a write whose value is used (`a = b = …`), and every local of a
     # body that calls `binding`, `eval`, `local_variable_set`, `instance_variable_set` or a string-form
     # `instance_eval` / `class_eval` / `module_eval`.
@@ -73,8 +73,7 @@ module Rigor
       ALL = :all
       EMPTY_CALLS = Set.new.freeze
       CACHE_KEY = :__rigor_construction_escape
-      NAMES_KEY = :__rigor_construction_escape_names
-      private_constant :CLOSURES, :LOCAL_REFERENCES, :LOCAL_WRITES, :ALL, :EMPTY_CALLS, :CACHE_KEY, :NAMES_KEY,
+      private_constant :CLOSURES, :LOCAL_REFERENCES, :LOCAL_WRITES, :ALL, :EMPTY_CALLS, :CACHE_KEY,
                        :STRING_EVAL_CALLS
 
       # One body's answer: per name, ALL or the classes it escapes as, and the calls the scan admitted on it.
@@ -96,34 +95,18 @@ module Rigor
         reason = result.escapes[name]
         return true if !reason.nil? && (reason.equal?(ALL) || reason.include?(class_name))
 
-        defined = project_method_names(scope)
-        result.calls.fetch(name, EMPTY_CALLS).any? { |call| defined.include?(call) }
+        result.calls.fetch(name, EMPTY_CALLS).any? { |call| project_defines?(scope, class_name, call) }
       end
 
-      # Every method name the project defines anywhere: on any class or module, instance or singleton side, in a
-      # `refine` block, in any file. An admitted call of such a name escapes the local whatever the receiver's class,
-      # because a prepended or included module, a refinement or a reopen can put that name on Array, Hash or Set, and
-      # telling which owner reaches the receiver is not worth the precision it buys: without the fact the seams answer
-      # as before. Read from the def-node tables, which hold a plain cross-file `def` on an RBS-declared class that
-      # `discovered_methods` withholds (ADR-17), from `discovered_methods`, and from the refinement table; kept per
-      # discovery index.
-      def project_method_names(scope)
-        discovery = scope.discovery
-        table = (Thread.current[NAMES_KEY] ||= ObjectSpace::WeakKeyMap.new)
-        table[discovery] ||= collect_method_names(discovery)
-      end
-
-      def collect_method_names(discovery)
-        names = Set.new
-        [discovery.discovered_methods, discovery.discovered_def_nodes, discovery.discovered_singleton_def_nodes,
-         discovery.discovered_refinements].each do |by_owner|
-          by_owner.each_value do |methods|
-            methods.each_key do |method_name|
-              names << method_name.to_sym
-            end
-          end
-        end
-        names.freeze
+      # Whether the project defines a method named `call` anywhere ({Scope#project_method_name?}): on any class or
+      # module, instance or singleton side, in a `refine` block, in any file. An admitted call of such a name escapes
+      # the local whatever the receiver's class, because a prepended or included module, a refinement or a reopen can
+      # put that name on Array, Hash or Set, and telling which owner reaches the receiver is not worth the precision
+      # it buys: without the fact the seams answer as before. When no def is found the def-node lookup on the class
+      # itself still runs, so an incremental run records the missing `Array#size` and a later reopen re-analyses
+      # this file.
+      def project_defines?(scope, class_name, call)
+        scope.project_method_name?(call) || !scope.user_def_for(class_name, call).nil?
       end
 
       # The receiver mutators the seams model for `class_name` ({MutationWidening}, {HashLookupMutation},

@@ -247,6 +247,7 @@ module Rigor
     def optimistic_local_miss: (String | Symbol name) -> Object?
     def optimistic_ivar_miss: (String | Symbol name) -> Object?
     def construction_fact?: (String | Symbol name, ?Symbol fact) -> bool
+    def project_method_name?: (untyped) -> (false | true)
     def with_construction_fact: (untyped, untyped) -> Rigor::Scope
     def with_local: (String | Symbol name, Type::t type) -> Scope
     def with_rejoined_locals: (untyped) -> Rigor::Scope

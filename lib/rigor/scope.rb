@@ -1269,6 +1269,30 @@ module Rigor
       true
     end
 
+    # Issue #2555 — whether the project defines a method named `method_name` anywhere: on any class or module,
+    # instance or singleton side (the def-node tables, which hold a plain cross-file `def` on an RBS-declared class
+    # that `discovered_methods` withholds, and `discovered_methods`), or in a `refine` block. The name set is built
+    # once per discovery index.
+    def project_method_name?(method_name)
+      table = (Thread.current[PROJECT_METHOD_NAMES_KEY] ||= ObjectSpace::WeakKeyMap.new)
+      return true if (table[@discovery] ||= collect_project_method_names).include?(method_name.to_sym)
+
+      false
+    end
+
+    def collect_project_method_names
+      names = Set.new
+      [@discovery.discovered_methods, @discovery.discovered_def_nodes, @discovery.discovered_singleton_def_nodes,
+       @discovery.discovered_refinements].each do |by_owner|
+        by_owner.each_value { |methods| methods.each_key { |method_name| names << method_name.to_sym } }
+      end
+      names.freeze
+    end
+    private :collect_project_method_names
+
+    PROJECT_METHOD_NAMES_KEY = :__rigor_project_method_names
+    private_constant :PROJECT_METHOD_NAMES_KEY
+
     def record_discovered_method(class_name, method_name)
       record_class_dependency(class_name)
       Analysis::DependencyRecorder.read_name(:defines, method_name)

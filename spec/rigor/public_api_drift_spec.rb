@@ -138,6 +138,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     plugin_typed_call?(req:node)
     plugin_typed_calls()
     program_globals()
+    project_method_name?(req:method_name)
     published_constant?(req:name)
     published_constant_ivars_for(req:class_name)
     published_constant_names()

@@ -1,2 +1,2 @@
-- **[sig-gen]** `sig-gen --check` no longer reports `sig/` as up to date when an existing target `.rbs` does not parse; it now fails and names the file, and `--write` refuses it and leaves the file untouched. ([#2587](https://github.com/rigortype/rigor/pull/2587))
+- **[sig-gen]** `sig-gen --check` no longer reports `sig/` as up to date when an existing target `.rbs` that sig-gen would write into does not parse; it now fails and names the file with the parse location, and `--write` refuses it and leaves the file untouched. ([#2587](https://github.com/rigortype/rigor/pull/2587))
   - `--format=json` lists the refusal as a result whose `action` is `skipped_unparseable`, with the same keys as the other refusals.

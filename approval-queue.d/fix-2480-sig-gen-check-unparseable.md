@@ -27,6 +27,13 @@ unparseable `.rbs` as the `rbs.coverage.quarantined-signature` warning. The choi
   catch exactly that.
 - **Refuse, but exit 0 on `--check` and 1 only on `--write`.** Avoids the red-CI risk on a bump. It splits the
   two commands' contract and leaves `--check` silent on the defect. Rejected for the same reason as warn-only.
+- **Flag-gated exit status (alternative, not taken).** Print the same `REFUSED` line as text, and exit 1 under
+  `--write` and `--check` only when `reject-unparseable-signatures` is on; with the flag off, exit 0. This follows
+  `diagnostic-policy.md`: the flag already promotes `rbs.coverage.quarantined-signature` from warning to error, so
+  it gates this refusal the same way, and a bundled-rbs bump cannot turn a default project's check red. The cost:
+  with the flag off, `--check` passes an unparseable target it has named as REFUSED, which is the exit status
+  #2480 reports, and `--write` returns 0 without the write the user asked for. The manual's "you asked for a write
+  and did not get one" rule then holds only for projects that opt in.
 
 ## Decision
 
@@ -37,6 +44,10 @@ trade-off: an encoding fault does not come and go with a bundled-rbs release, an
 maintainer should weigh that difference. `docs/type-specification/diagnostic-policy.md` keeps
 `rbs.coverage.quarantined-signature` a warning, so a bundled-rbs bump cannot turn a check red by itself; this
 exit code has no such protection.
+
+The maintainer can instead pick the flag-gated option above. To switch, gate the exit status in
+`lib/rigor/cli/sig_gen_command.rb` (the refusal list near line 303) on `reject-unparseable-signatures`, and keep
+the `REFUSED` text and the `skipped_unparseable` action as they are. This PR does not implement it.
 
 ## To undo
 

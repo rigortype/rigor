@@ -144,12 +144,17 @@ it "does not hand a later analysing run the collections of an earlier run served
     guarded_run(runner, files.values, allow_plugin_crash: true)
     expect(runner.effects_served_from_cache?).to be(true)
 
-    guarded_run(runner, [files["trigger"]], allow_plugin_crash: true)
+    # A file the served run never saw: the next run must analyse it, and its collections must not be
+    # replaced by the served run's blob, which lacks it.
+    added = File.join(dir, "added.rb")
+    File.write(added, "class Added < String; end\n")
+    guarded_run(runner, files.values + [added], allow_plugin_crash: true)
     fresh = runner_for(dir, workers: 0, effects: true, cache: true)
-    guarded_run(fresh, [files["trigger"]], allow_plugin_crash: true)
+    guarded_run(fresh, files.values + [added], allow_plugin_crash: true)
 
     expect(runner.effects_served_from_cache?).to be(false)
     expect(runner.effect_collections_by_path.keys).to eq(fresh.effect_collections_by_path.keys)
+    expect(runner.effect_collections_by_path.keys).to include(added)
   end
 end
 

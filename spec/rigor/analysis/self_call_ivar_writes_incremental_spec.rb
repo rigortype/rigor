@@ -238,6 +238,13 @@ RSpec.describe "self-call ivar-write proof — incremental" do
     "of Kernel, not activated" => [{ "b.rb" => base, "x.rb" => wild.call }, [["a.rb", 10]]],
     "of Object" => [{ "b.rb" => base, "x.rb" => wild.call("Object") }, [["a.rb", 10]]],
     "of self's class" => [{ "b.rb" => base, "x.rb" => wild.call("Holder") }, [["a.rb", 10]]],
+    # Ruby 4.0.5 runs the refined `warn` for both: a module the project mixes into `Object` sits ahead of `Kernel`, and
+    # so does `PP::ObjectMixin`, an `Object` ancestor only RBS declares.
+    "of a module the project mixes into Object" => [
+      { "b.rb" => base, "x.rb" => "module M\n  def z = 1\nend\n\nclass Object\n  include M\nend\n\n#{wild.call('M')}" },
+      [["a.rb", 10]]
+    ],
+    "of an RBS ancestor of Object" => [{ "b.rb" => base, "x.rb" => wild.call("PP::ObjectMixin") }, [["a.rb", 10]]],
     "of String, an unrelated class" => [{ "b.rb" => base, "x.rb" => wild.call("String") }, []],
     "of String, defining the literal name" => [
       { "b.rb" => base, "x.rb" => "module R\n  refine String do\n    def warn(*) = 1\n  end\nend\n" }, []

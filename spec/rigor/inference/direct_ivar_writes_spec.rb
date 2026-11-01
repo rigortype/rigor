@@ -124,6 +124,7 @@ RSpec.describe Rigor::Inference::DirectIvarWrites do
      ["@tag = nil", "(@a, @tag), @b = [1, 2], 3"],
      ["@tag = nil", "@tag = [@k]"],
      ["@tag = nil", "@tag = -> { 1 }"],
+     ["@tag = nil", "@tag, @b = 'x'"],
      ["@tag = nil", "notify", "@tag = 'x'"]].each do |lines|
       expect(writes(body_of(*lines))).to eq(Set[]), lines.join("; ")
     end
@@ -150,6 +151,7 @@ RSpec.describe Rigor::Inference::DirectIvarWrites do
      ["@tag = nil", "@a, @tag = pair"],
      ["@tag = nil", "@a, @tag = 1"],
      ["@tag = nil", "@a, @tag = [1, find]"],
+     ["@tag = nil", "@a, @tag = *pre, 'x'"],
      ["@tag = nil", "@tag = 'x'", "rescue StandardError", "nil"]].each do |lines|
       expect(writes(body_of(*lines))).to eq(Set[:@tag]), lines.join("; ")
     end

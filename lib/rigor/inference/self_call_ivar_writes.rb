@@ -86,7 +86,9 @@ module Rigor
         :to_r, :to_c, :to_proc, :to_path, :to_sym, :to_io, :coerce, :exception, :divmod, :each, :respond_to?,
         :respond_to_missing?, :method_missing, :initialize_copy, :marshal_dump, :pretty_print
       ].freeze
-      private_constant :UNPROVABLE_NODES, :LITERAL_CLASSES, :SELF_SAFE_NAMES, :PROTOCOL_NAMES
+      # Issue #2203 — the classes and module every project class's instances reach past its own chain.
+      IMPLICIT_ROOTS = %w[Object Kernel BasicObject].freeze
+      private_constant :UNPROVABLE_NODES, :LITERAL_CLASSES, :SELF_SAFE_NAMES, :PROTOCOL_NAMES, :IMPLICIT_ROOTS
 
       # Raised inside a proof to abandon it.
       class Unprovable < StandardError
@@ -155,7 +157,7 @@ module Rigor
         # Reads the method an implicit-self or `self.` call to `call_node`'s name runs.
         def self_call(call_node)
           name = call_node.name
-          unprovable! if GuardRebinding.code_running_name?(name) || refined?(name)
+          unprovable! if GuardRebinding.code_running_name?(name) || refined?(name, on_self: true)
 
           if ProjectMethodOwnership.defines?(@class_name, name, :instance, @scope)
             read_def(proven_def(name))
@@ -212,8 +214,9 @@ module Rigor
 
         private
 
-        # Whether a `refine` block anywhere in the project defines `name`, on any class: a `using` in effect where the
-        # read code sits may route the call to it (`refine Kernel do def warn …`), whatever the receiver.
+        # Whether a `refine` block in the project defines `name` on a class the call may reach: a `using` in effect
+        # where the read code sits may route the call to it (`refine Kernel do def warn …`). A call on another
+        # receiver counts a row on any class.
         #
         # Issue #2163 — the answer reads every file's refinements whole, and a refined class off the chain (`Kernel`,
         # `IO`, `String`) is no `mark:` the chain read files, so it records `refinement:<name>` and `refinement:*`
@@ -221,17 +224,54 @@ module Rigor
         # name re-checks the reader.
         #
         # Issue #2203 — a names-wildcard row (a refine body the walk cannot enumerate: a computed `define_method`,
-        # `import_methods`) counts as a refinement of every name, on any class, as `ExpressionTyper#refined_anywhere?`
-        # reads it. `InEffectRefinements.refining_modules` narrows rows by the receiver's reach, but a project class's
-        # ancestry through `Object` and `Kernel` is unknown to `Environment#class_ordering`, so that narrowing would
-        # keep the proof for the `refine Kernel` the issue reports.
-        def refined?(name)
+        # `import_methods`) counts as a refinement of every name, as `InEffectRefinements.refining_modules` reads it.
+        # A call on `self` (`on_self:`) counts a row only when its class can reach `self`: {#self_reach} names
+        # `self`'s ancestors, and a class the walk could not name (`InEffectRefinements.class_wildcard_key?`) counts
+        # too. A refinement of `String` does not reach a `Holder`, and dropping the proof there is no safer: the
+        # intervening-call reset restores the class-ivar seed, and a class guard's narrowing then reports.
+        def refined?(name, on_self: false)
           wildcard = Scope::DiscoveryIndex::REFINEMENT_WILDCARD
           if Analysis::DependencyRecorder.active?
             Analysis::DependencyRecorder.read_name(:refinement, name)
             Analysis::DependencyRecorder.read_name(:refinement, wildcard)
           end
-          @scope.discovered_refinements.any? { |_refined, methods| methods.key?(name) || methods.key?(wildcard) }
+          @scope.discovered_refinements.any? do |refined, methods|
+            (methods.key?(name) || methods.key?(wildcard)) && (!on_self || reaches_self?(refined))
+          end
+        end
+
+        def reaches_self?(refined)
+          reach = self_reach
+          reach.nil? || reach.include?(refined) || InEffectRefinements.class_wildcard_key?(@scope, refined)
+        end
+
+        # Issue #2203 — the classes and modules on the instance chain of `self`'s class or a project subclass of it,
+        # with `Object`, `Kernel` and `BasicObject`, the modules the project mixes into them, and `Object`'s RBS
+        # ancestors (`PP::ObjectMixin`); nil when a chain is cut, mixes in a module the tables cannot name, ends in a
+        # superclass they do not know, or holds an external entry, so every row counts. Each chain is recorded, so a
+        # file that changes the ancestry re-checks the reader.
+        def self_reach
+          return @self_reach if defined?(@self_reach)
+
+          @self_reach = read_self_reach
+        end
+
+        def read_self_reach
+          classes = [@class_name.to_s]
+          RefinedDispatch::OwnMethod.each_subclass(@scope, @class_name, possible_only: true) { |sub| classes << sub.to_s }
+          names = Set.new
+          (classes + IMPLICIT_ROOTS).each do |class_name|
+            chain = Scope::ResolutionChain.for(@scope, class_name, :instance, :methods)
+            chain.record(@scope) if Analysis::DependencyRecorder.active?
+            return nil if chain.truncated? || chain.wildcard_mixin? || chain.opaque_tail?(@scope)
+            return nil if chain.entries.any?(&:external?)
+
+            chain.entries.each { |entry| names << entry.name }
+          end
+          loader = @scope.environment&.rbs_loader
+          return nil if loader.nil?
+
+          names.merge(loader.ancestor_names_for("Object"))
         end
 
         def call_receiver(node) = node.is_a?(Prism::CallNode) ? node.receiver : nil

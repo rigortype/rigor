@@ -69,15 +69,24 @@ RSpec.describe Rigor::Inference::SelfCallIvarWrites do
     expect(described_class.of(call("log"), refined)).to be_nil
   end
 
-  # Issue #2203 — a names-wildcard row (a computed `define_method`, `import_methods`) refines every name, on any class,
-  # as a literal row refines its own name; a literal row of another name refines nothing the read calls.
-  it "proves nothing past a names-wildcard refine row, whatever class it refines" do
-    [{ "Kernel" => { "*" => ["R"] } }, { "String" => { "*" => ["R"] } }, { "*" => { "*" => ["R"] } }].each do |rows|
+  # Issue #2203 — a names-wildcard row (a computed `define_method`, `import_methods`) refines every name, as a literal
+  # row refines its own name. A call on `self` counts a row only on a class `self` can reach: `Holder`'s chain,
+  # `Object`, `Kernel`, `BasicObject`, or a class the walk could not name. A literal row of another name refines
+  # nothing the read calls.
+  it "proves nothing past a refine row of a name the read calls on a class self reaches" do
+    [{ "Kernel" => { "*" => ["R"] } }, { "Object" => { "*" => ["R"] } }, { "Holder" => { "*" => ["R"] } },
+     { "*" => { "*" => ["R"] } }, { "Kernel" => { warn: ["R"] } }].each do |rows|
       scope = scope_for("def log = warn('x')", refinements: rows)
       expect(described_class.of(call("log"), scope)).to be_nil, rows.inspect
     end
-    literal = scope_for("def log = warn('x')", refinements: { "Kernel" => { other: ["R"] } })
-    expect(described_class.of(call("log"), literal)).to eq(Set[])
+  end
+
+  it "keeps the proof past a refine row on a class self cannot reach, or of another name" do
+    [{ "String" => { "*" => ["R"] } }, { "Integer" => { warn: ["R"] } }, { "Kernel" => { other: ["R"] } }]
+      .each do |rows|
+        scope = scope_for("def log = warn('x')", refinements: rows)
+        expect(described_class.of(call("log"), scope)).to eq(Set[]), rows.inspect
+      end
   end
 
   it "gives up past its def budget" do

@@ -566,20 +566,17 @@ module Rigor
       # `h = Opts.new; h.add_format(...)`), whose instance chain has `name`: the same census a self-call reads then
       # floors the passed local, so `Opts.add_format(opts, options)` handing `options` to a block that writes it
       # leaves the literal behind. `owner` is a {CalleeOwner}: the receiver type the callee's own hand-offs
-      # (`really(parser, options)`) resolve self-calls in, not the caller's class, and the class that defines the def,
-      # whose lexical nesting its constants resolve in. `resolved_census` keys the shared memo by the receiver's
-      # class. An instance receiver whose def is inherited (a superclass's, an included module's) resolves to
-      # {FLOOR_ALL}, as the singleton side does: the def is not followed (its owner's context is not threaded).
-      # A receiver of any other type resolves to nothing, as does `Const.new` of a class that defines its own
-      # `self.new`; `send` hand-offs are not followed through an explicit receiver. `require_local: false` (the
-      # hand-offs inside a callee, whose arguments are parameters) skips the caller-scope check that a local is passed
-      # and types the receiver in the def's own nesting ({#hand_off_scopes}), not the caller's.
-      def receiver_callees(call_node, require_local: true)
-        receiver = call_node.receiver
-        return NO_CALLEES if receiver.nil?
-        return NO_CALLEES if require_local && !call_passes_local_argument?(call_node)
+      # (`really(parser, options)`) resolve self-calls in, not the caller's class. `resolved_census` keys the shared
+      # memo by the receiver's class and the def node, whose recorded nesting its constants resolve in. A def the
+      # receiver inherits (a superclass's, an included module's) resolves to {FLOOR_ALL} ({#walked_owner}). A receiver
+      # of any other type resolves to nothing, as does `Const.new` of a class that defines its own `self.new`; `send`
+      # hand-offs are not followed through an explicit receiver. The hand-offs inside a callee, whose arguments are
+      # parameters, take {#hand_off_receiver_callees}.
+      def receiver_callees(call_node)
+        return NO_CALLEES if call_node.receiver.nil?
+        return NO_CALLEES unless call_passes_local_argument?(call_node)
 
-        require_local ? receiver_callees_in(scope, call_node) : hand_off_receiver_callees(call_node)
+        receiver_callees_in(scope, call_node)
       end
 
       # {#receiver_callees} for one scope `call_node`'s receiver is typed in.
@@ -597,23 +594,52 @@ module Rigor
                               .uniq { |callee, _, owner| [callee.object_id, owner] }
         end
 
+        singleton = receiver_type.is_a?(Type::Singleton)
+        return NO_CALLEES unless singleton || receiver_type.is_a?(Type::Nominal)
+
+        class_name = receiver_type.class_name
         found, defining =
-          case receiver_type
-          when Type::Singleton then scope.singleton_def_through_ancestors(receiver_type.class_name, name)
-          when Type::Nominal then scope.user_def_through_ancestors(receiver_type.class_name, name)
+          if singleton then scope.singleton_def_through_ancestors(class_name, name)
+          else scope.user_def_through_ancestors(class_name, name)
+          end
+        side = singleton ? :singleton : :instance
+        return method_missing_callees(class_name, side, name, 0) if found.nil?
+
+        [[found, 0, walked_owner(defining, class_name, CalleeOwner.new(receiver_type))]]
+      end
+
+      # `owner`, the owner a def found on `defining` by a lookup on `class_name` is walked under, or {FLOOR_ALL} for a
+      # def the class inherits (`defining` is not `class_name`). An inherited def is not walked (#2521): walking it
+      # exposes every blind spot of the own-def census (`h.merge!`, a local alias, `tap`, a write through another
+      # object, #2336), which the floor masks.
+      def walked_owner(defining, class_name, owner)
+        defining == class_name ? owner : FLOOR_ALL
+      end
+
+      # Issue #2521 (#2570 review) — the `[def, offset, FLOOR_ALL]` a call of `name` that resolves to no def on
+      # `class_name`'s `side` chain reaches when the chain defines `method_missing` and `name` is not a method every
+      # object (`Object`, or `Class` on the singleton side) answers: Ruby calls `method_missing(name, *args)`, so its
+      # parameters sit `offset` places ahead of the call's arguments (-1; 0 for a `send(:name, ...)` hand-off).
+      def method_missing_callees(class_name, side, name, offset)
+        found =
+          if side == :singleton then scope.singleton_def_through_ancestors(class_name, :method_missing).first
+          else scope.user_def_through_ancestors(class_name, :method_missing).first
           end
         return NO_CALLEES if found.nil?
 
-        [[found, 0, defining == receiver_type.class_name ? CalleeOwner.new(receiver_type) : FLOOR_ALL]]
+        base = side == :singleton ? "Class" : "Object"
+        return NO_CALLEES if Reflection.instance_method_definition(base, name, scope: scope)
+
+        [[found, offset - 1, FLOOR_ALL]]
       end
 
-      # What a cross-class hand-off carries instead of an evaluator: the receiver type, which is `self` in the callee
-      # (the class that defines the def, so its lexical nesting). Holds no scope, so the run-scoped census memo that
-      # keeps an {CalleeMutationChain::Edge} alive keeps no caller state alive.
+      # What a cross-class hand-off carries instead of an evaluator: the receiver type, which is `self` in the callee.
+      # The def's lexical nesting is not carried: it is a property of the def node ({#recorded_def_nesting}), which
+      # keys the census memo and the chain's nodes beside it. Holds no scope, so the run-scoped census memo that keeps
+      # an {CalleeMutationChain::Edge} alive keeps no caller state alive.
       CalleeOwner = Data.define(:self_type)
 
-      # The owner of a def reached through an inherited lookup (the defining class is not the receiver's or `self`'s
-      # class): its census and hand-offs are not walked, the owner context being another class's. Every content
+      # The owner of an inherited def ({#walked_owner}): its census and hand-offs are not walked. Every content
       # parameter reads as mutated, so the argument is floored, and a {BudgetTrace::CALLEE_CHAIN_CAP} hit is recorded.
       FLOOR_ALL = :floor_all
       private_constant :CalleeOwner, :FLOOR_ALL
@@ -627,91 +653,92 @@ module Rigor
           !typing_scope.singleton_def_through_ancestors(klass.class_name, :new).first.nil?
       end
 
-      # The callees a hand-off inside a callee's body (`Help.c(p, o)`, `Helper.new.c(p, o)`) resolves to: the union of
-      # two resolutions of the receiver constant, both in the nesting of the def the hand-off sits in, never the call
-      # site's, so the answer cannot depend on which caller reached the memoised edges first. The discovery index does
-      # not record how the defining class was spelled (`module A; class B::C` has the nesting `["A::B::C", "A"]`,
-      # `class A::B::C` has `["A::B::C"]`), so each resolution tries every spelling it could have had.
+      # Issue #2522 — the callees a hand-off inside `def_node`'s body (`Help.c(p, o)`, `Helper.new.c(p, o)`) resolves
+      # to: the receiver typed once under the `Module.nesting` the declaration walk recorded for `def_node`, so a bare
+      # constant follows Ruby's lookup (the lexical chain, the innermost cref's ancestors, the top level) for the
+      # spelling the def is actually written under (`class B::Opts` reads `::Helper`, `module B; class Opts` reads
+      # `B::Helper`). The nesting is a function of the def node, never of the caller, so the answer cannot depend on
+      # which caller reached the memoised edges first. A def with no recorded nesting takes
+      # {#unrecorded_hand_off_callees}.
+      def hand_off_receiver_callees(call_node, def_node)
+        nesting = exact_def_nesting(def_node)
+        return unrecorded_hand_off_callees(call_node) if nesting.nil?
+
+        receiver_callees_in(scope.with_lexical_nesting(nesting), call_node)
+      end
+
+      # The def's recorded `Module.nesting` ({Scope::DiscoveryIndex#recorded_def_nesting}), nil when the declaration
+      # walk recorded none.
+      def recorded_def_nesting(def_node) = scope.discovery.recorded_def_nesting(def_node)
+
+      # The nesting the hand-offs of `def_node`, run with `self_type`, resolve their constants in exactly, or nil. A
+      # def in a `class << self` body answers nil: there Ruby's cref is the singleton class, whose ancestors are not
+      # the class's (#2570 review), and the recorded nesting does not name it. Such a def is receiverless, runs on the
+      # class object, and is not in its cref's instance def table, which a `module_function` / `extend self` def or an
+      # `extend`ed module's def (whose cref is the module itself) is.
+      def exact_def_nesting(def_node, self_type = scope.self_type)
+        nesting = recorded_def_nesting(def_node)
+        return nesting unless self_type.is_a?(Type::Singleton) && def_node.receiver.nil?
+        return nil if nesting.nil? || nesting.empty?
+
+        scope.user_def_for(nesting.first, def_node.name).equal?(def_node) ? nesting : nil
+      end
+
+      # A hand-off in a def whose nesting was not recorded (a def under a header that renders no name, a bundle-served
+      # def outside a rehydrating run): the spelling of the defining class is unknown (`module A; class B::C` has the
+      # nesting `["A::B::C", "A"]`, `class A::B::C` has `["A::B::C"]`), so the union of two resolutions that try
+      # every spelling it could have had, each of which only adds callees:
       #
-      # - By name: a bare constant `K` as each prefix of the class name followed by `K`, and as the top-level `K`
-      #   (`n + 1` lookups); a rooted one (`::K`) as `K` alone. Cheap, and blind to an alias, an inherited or included
-      #   constant, and a constant holding an instance.
-      # - Typed ({#typed_hand_off_callees}): the receiver typed under each truncation of the nesting, which sees
-      #   those, and resolved as a caller-side call is.
-      #
-      # Both always run: a name that resolves by name can still be shadowed in the real lookup by an alias or an
-      # inherited constant, and the callee found by only one of them would be missed. Each result only adds callees,
-      # so the floor only widens.
-      def hand_off_receiver_callees(call_node)
+      # - By name: a bare constant `K` as each prefix of the class name followed by `K`, and as the top-level `K`; a
+      #   rooted one (`::K`) as `K` alone.
+      # - Typed: the receiver typed under each truncation of the nested-spelling nesting (`["A::B::C", "A::B", "A"]`
+      #   gives `["A::B::C"]`, `["A::B::C", "A::B"]` and the whole chain), which sees an alias, an inherited or
+      #   included constant and a constant holding an instance.
+      def unrecorded_hand_off_callees(call_node)
         receiver = call_node.receiver
         constructed = receiver.is_a?(Prism::CallNode) && receiver.name == :new
-        constant = constructed ? receiver.receiver : receiver
-        written = constant_name(constant)
+        written = constant_name(constructed ? receiver.receiver : receiver)
         return NO_CALLEES if written.nil?
+        return compute_unrecorded_hand_off_callees(call_node, written, constructed) if hand_off_memo_bypassed?
 
+        memo = unrecorded_hand_off_memo(written)
+        key = [constructed, call_node.name]
+        memo.fetch(key) { memo[key] = compute_unrecorded_hand_off_callees(call_node, written, constructed) }
+      end
+
+      def compute_unrecorded_hand_off_callees(call_node, written, constructed)
         found = hand_off_class_names(written).flat_map do |class_name|
           hand_off_callee_in(class_name, constructed, call_node.name)
         end
-        found.concat(typed_hand_off_callees(call_node, written))
+        hand_off_typing_scopes(written).each do |typing_scope|
+          found.concat(receiver_callees_in(typing_scope, call_node))
+        end
         found.size > 1 ? found.uniq { |callee, _, owner| [callee.object_id, owner] } : found
       end
 
-      # The receiver typed under each truncation of the nested-spelling nesting of the def's class (`["A::B::C", "A::B",
-      # "A"]` gives `["A::B::C"]`, `["A::B::C", "A::B"]` and the whole chain), the compact spelling to the nested one,
-      # and resolved by type. A rooted constant and a top-level def are typed once.
-      def typed_hand_off_callees(call_node, written)
-        typed_receiver_types(call_node.receiver, written).flat_map do |receiver_type|
-          callees_for_receiver_type(receiver_type, call_node.name)
-        end
-      end
-
-      # The types `receiver` (a constant, or `Const.new`) has under each nesting truncation, a `Const.new` of a class
-      # with its own `self.new` left out. They depend on the receiver's spelling and the def's class alone, so the run
-      # memoises them per class and spelling (bypassed while a dependency recorder is active, which must see each
-      # constant read).
-      def typed_receiver_types(receiver, written)
-        return compute_typed_receiver_types(receiver, written) if hand_off_memo_bypassed?
-
-        by_written = hand_off_memo(:types, written)
-        constructed = receiver.is_a?(Prism::CallNode)
-        by_written.fetch(constructed) { by_written[constructed] = compute_typed_receiver_types(receiver, written) }
-      end
-
-      # The `{ written => ... }` table of `kind` for the class `self` is and its side, in the run's per-discovery memo
-      # of hand-off resolutions that depend on a constant's spelling, the def's class and which side of it (class
-      # object or instance) the nesting is read for: a constant's ancestor lookup differs between the two.
-      def hand_off_memo(kind, written)
-        table = (Thread.current[TYPED_RECEIVER_KEY] ||= ObjectSpace::WeakKeyMap.new)
-        by_kind = (table[scope.discovery] ||= {})[kind] ||= {}
+      # The run's per-discovery memo of {#unrecorded_hand_off_callees}: the answer depends on the receiver's spelling,
+      # the class `self` is and its side (a constant's ancestor lookup differs between the class object and an
+      # instance), and the called name, not on the def it sits in.
+      def unrecorded_hand_off_memo(written)
+        table = (Thread.current[UNRECORDED_HAND_OFF_KEY] ||= ObjectSpace::WeakKeyMap.new)
         self_type = scope.self_type
-        by_side = (by_kind[self_type.is_a?(Type::Singleton)] ||= {})
+        by_side = ((table[scope.discovery] ||= {})[self_type.is_a?(Type::Singleton)] ||= {})
         (by_side[enclosing_class_name_for(self_type)] ||= {})[written] ||= {}
       end
 
-      # True when a hand-off or census memo must not be read or written: a dependency recorder is active (it must see
-      # each constant read), or this scope carries guard narrowings of constants (`if INST.is_a?(Sub)`), which survive
-      # `with_self_type` and change what the constant types as, so the answer is no longer the def's alone.
-      def hand_off_memo_bypassed?
-        Analysis::DependencyRecorder.active? || !scope.constant_narrowings.empty?
-      end
+      UNRECORDED_HAND_OFF_KEY = RunScopedSlots.register(:rigor_callee_unrecorded_hand_offs)
+      private_constant :UNRECORDED_HAND_OFF_KEY
 
-      TYPED_RECEIVER_KEY = RunScopedSlots.register(:rigor_callee_typed_receivers)
-      private_constant :TYPED_RECEIVER_KEY
-
-      def compute_typed_receiver_types(receiver, written)
+      # The scopes {#unrecorded_hand_off_callees} types a receiver written as `written` in. A rooted constant and a
+      # top-level def are typed once.
+      def hand_off_typing_scopes(written)
         name = enclosing_class_name_for(scope.self_type)
-        parts = name.nil? ? [] : name.to_s.split("::")
-        scopes =
-          if parts.empty? then [scope.with_lexical_nesting([])]
-          elsif written.start_with?("::") then [scope]
-          else
-            chain = parts.each_index.map { |i| parts[0..(parts.size - 1 - i)].join("::") }
-            chain.each_index.map { |k| scope.with_lexical_nesting(chain[0..k]) }
-          end
-        types = scopes.filter_map do |typing_scope|
-          typing_scope.type_of(receiver) unless overridden_constructor?(receiver, typing_scope)
-        end
-        types.uniq
+        return [scope.with_lexical_nesting([])] if name.nil?
+        return [scope] if written.start_with?("::")
+
+        parts = name.to_s.split("::")
+        chain = parts.each_index.map { |i| parts[0..(parts.size - 1 - i)].join("::") }
+        chain.each_index.map { |k| scope.with_lexical_nesting(chain[0..k]) }
       end
 
       # `[def, 0, owner]` for `name` called on `class_name` (or on its `new`), or none.
@@ -726,24 +753,26 @@ module Rigor
         found, defining = scope.singleton_def_through_ancestors(class_name, name)
         return NO_CALLEES if found.nil?
 
-        [[found, 0, defining == class_name ? CalleeOwner.new(Type::Combinator.singleton_of(class_name)) : FLOOR_ALL]]
+        owner = CalleeOwner.new(Type::Combinator.singleton_of(class_name))
+        [[found, 0, walked_owner(defining, class_name, owner)]]
       end
 
-      # The class names a constant written as `written` (`K`, `A::K`, `::K`) can name from the def's nesting.
+      # The class names a constant written as `written` (`K`, `A::K`, `::K`) can name from the def's class name.
       def hand_off_class_names(written)
         return [written.delete_prefix("::")] if written.start_with?("::")
 
         name = enclosing_class_name_for(scope.self_type)
         return [written] if name.nil?
-        return compute_hand_off_class_names(name, written) if hand_off_memo_bypassed?
 
-        memo = hand_off_memo(:names, written)
-        memo.fetch(:names) { memo[:names] = compute_hand_off_class_names(name, written) }
-      end
-
-      def compute_hand_off_class_names(name, written)
         parts = name.to_s.split("::")
         parts.each_index.map { |i| "#{parts[0..i].join('::')}::#{written}" } << written
+      end
+
+      # True when a census memo must not be read or written: a dependency recorder is active (it must see each
+      # constant read), or this scope carries guard narrowings of constants (`if INST.is_a?(Sub)`), which survive
+      # `with_self_type` and change what the constant types as, so the answer is no longer the def's alone.
+      def hand_off_memo_bypassed?
+        Analysis::DependencyRecorder.active? || !scope.constant_narrowings.empty?
       end
 
       # The name a constant node is written with, or nil when part of it is not a constant (`foo::Bar`).
@@ -759,10 +788,11 @@ module Rigor
           self.class.new(scope: scope.with_self_type(owner.self_type))
       end
 
-      # The `[def, offset, owner]` triples a call inside a callee's body hands its parameter to: a self-call
-      # ({#resolve_self_callees}, owner nil) or a call on a constant / `Const.new` receiver ({#hand_off_receiver?}).
-      def hand_off_callees(call_node)
-        return receiver_callees(call_node, require_local: false) unless self_dispatch_call?(call_node)
+      # The `[def, offset, owner]` triples a call inside `def_node`'s body hands its parameter to: a self-call
+      # ({#resolve_self_callees}, owner nil) or a call on a constant / `Const.new` receiver ({#hand_off_receiver?},
+      # {#hand_off_receiver_callees}).
+      def hand_off_callees(call_node, def_node)
+        return hand_off_receiver_callees(call_node, def_node) unless self_dispatch_call?(call_node)
 
         resolve_self_callees(call_node)
       end
@@ -801,12 +831,41 @@ module Rigor
         return NO_ARGUMENT_READS if mutated.empty?
 
         argument_nodes = call_node.arguments.arguments
-        mutated.values.uniq.filter_map do |slot|
+        values = mutated.values.uniq
+        reads = values.filter_map do |slot|
+          next if slot == ANY_SLOT || slot == ANY_KEYWORD || (slot.is_a?(Integer) && (slot + offset).negative?)
+
           argument = slot.is_a?(Symbol) ? keyword_argument(argument_nodes, slot) : argument_nodes[slot + offset]
           argument = argument.value if argument.is_a?(Prism::ImplicitNode)
           argument if argument.is_a?(Prism::LocalVariableReadNode)
         end
+        reads += rest_arguments(argument_nodes, offset) if values.include?(ANY_SLOT)
+        reads += keyword_rest_arguments(argument_nodes) if values.include?(ANY_KEYWORD)
+        reads.uniq
       end
+
+      # Every local read passed positionally from `offset` on: what a callee that hands its rest parameter to `super`
+      # may mutate ({#super_forwarded_parameters}).
+      def rest_arguments(argument_nodes, offset)
+        argument_nodes.drop([offset, 0].max).grep(Prism::LocalVariableReadNode)
+      end
+
+      # Every local read passed as a keyword value: what a callee that hands its keyword rest parameter to `super` may
+      # mutate ({#super_forwarded_parameters}).
+      def keyword_rest_arguments(argument_nodes)
+        hash = argument_nodes.last
+        return NO_ARGUMENT_READS unless hash.is_a?(Prism::KeywordHashNode)
+
+        hash.elements.filter_map do |pair|
+          value = pair.value if pair.is_a?(Prism::AssocNode)
+          value = value.value if value.is_a?(Prism::ImplicitNode)
+          value if value.is_a?(Prism::LocalVariableReadNode)
+        end
+      end
+
+      # The slot {#super_forwarded_parameters} gives a keyword rest parameter: every keyword value of the call.
+      ANY_KEYWORD = :__any_keyword__
+      private_constant :ANY_KEYWORD
 
       # The value `argument_nodes` pass for the keyword `name` (`poke(acc: a)`), or nil.
       def keyword_argument(argument_nodes, name)
@@ -5081,7 +5140,111 @@ module Rigor
       # ({#def_census}) rather than per evaluator: a chain reads its callees' census from every evaluator that floors a
       # call into it.
       def own_content_parameters(def_node)
-        def_census(:own, def_node) { escaped_content_parameters(def_node).merge(direct_content_parameters(def_node)) }
+        def_census(:own, def_node) do
+          own = escaped_content_parameters(def_node).merge(direct_content_parameters(def_node))
+          handed = super_forwarded_parameters(def_node)
+          handed.empty? ? own : own.merge(handed)
+        end
+      end
+
+      # Issue #2521 (#2570 review) — the parameters `def_node` hands to the method it overrides: every content
+      # parameter under a zsuper (`super`, which passes them all), and each one an explicit `super(...)` passes as an
+      # argument or keyword value, at the block depth the call sits at. The overridden def is not followed; the
+      # parameter reads as mutated, so a literal handed through an override that forwards it is floored.
+      #
+      # A rest parameter (`*`, `*args`, `...`) handed on whole (a zsuper, `super(*args)`, `super(...)`) reads as
+      # mutated under {REST_PARAMETER}, the name an argument the call binds to the rest parameter reaches
+      # ({#compute_forwarding_edges}), at {ANY_SLOT} ({#arguments_for_slots}).
+      def super_forwarded_parameters(def_node)
+        # A cheap gate first: the walk below runs for the few defs whose source mentions `super` at all.
+        body = def_node.body
+        return NO_PARAMETER_SLOTS if body.nil? || !body.slice.include?("super")
+
+        slots = content_parameter_slots(def_node)
+        rests = rest_parameters(def_node)
+        return NO_PARAMETER_SLOTS if slots.empty? && rests.empty?
+
+        names = super_forwarded_names(def_node, slots, rests)
+        return NO_PARAMETER_SLOTS if names.nil?
+
+        found = slots.slice(*names)
+        found[REST_PARAMETER] = ANY_SLOT if names.include?(REST_PARAMETER)
+        found[KEYWORD_REST_PARAMETER] = ANY_KEYWORD if names.include?(KEYWORD_REST_PARAMETER)
+        found
+      end
+
+      # The parameter names `def_node` hands to `super` ({#super_forwarded_parameters}), or nil when it calls none.
+      # `rests` holds the rest names the def has ({#rest_parameters}).
+      def super_forwarded_names(def_node, slots, rests)
+        names = nil
+        each_node_in_method_scope(def_node.body, 0) do |node, depth|
+          case node
+          when Prism::ForwardingSuperNode
+            (names ||= Set.new).merge(slots.keys).merge(rests)
+          when Prism::SuperNode
+            (names ||= Set.new).merge(super_argument_parameters(node, slots, depth))
+            names.merge(rests & splatted_rests(node))
+          end
+        end
+        names
+      end
+
+      # The names {#super_forwarded_parameters} records a positional and a keyword rest parameter handed to `super`
+      # under; no local can be named with a leading `*`.
+      REST_PARAMETER = :"*rest"
+      KEYWORD_REST_PARAMETER = :"**rest"
+      REST_NAMES = [REST_PARAMETER].freeze
+      KEYWORD_REST_NAMES = [KEYWORD_REST_PARAMETER].freeze
+      private_constant :REST_PARAMETER, :KEYWORD_REST_PARAMETER, :REST_NAMES, :KEYWORD_REST_NAMES
+
+      # The rest names an argument the call binds to no named parameter of `callee` reaches, when `callee` hands that
+      # rest parameter to `super` ({#super_forwarded_parameters}); empty otherwise. `slot` is the call's positional
+      # index, or the keyword.
+      def handed_rest_names(callee, slot)
+        own = own_content_parameters(callee)
+        if slot.is_a?(Symbol) then own.key?(KEYWORD_REST_PARAMETER) ? KEYWORD_REST_NAMES : NO_FORWARDS
+        else own.key?(REST_PARAMETER) ? REST_NAMES : NO_FORWARDS
+        end
+      end
+
+      # The rest parameters `def_node` has, as {REST_PARAMETER} / {KEYWORD_REST_PARAMETER}: `*args` / `*`, `**kw` /
+      # `**`, both for `...`.
+      def rest_parameters(def_node)
+        params = def_node.parameters
+        return NO_FORWARDS if params.nil?
+
+        forwarding = params.keyword_rest.is_a?(Prism::ForwardingParameterNode)
+        rests = []
+        rests << REST_PARAMETER if forwarding || params.rest.is_a?(Prism::RestParameterNode)
+        rests << KEYWORD_REST_PARAMETER if forwarding || params.keyword_rest.is_a?(Prism::KeywordRestParameterNode)
+        rests
+      end
+
+      # The rests an explicit `super(...)` passes on whole: a splat (`*args`, `*`), a double splat (`**kw`, `**`) in its
+      # keywords, or `...` for both.
+      def splatted_rests(node)
+        (node.arguments&.arguments || []).flat_map do |argument|
+          case argument
+          when Prism::SplatNode then REST_NAMES
+          when Prism::ForwardingArgumentsNode then [REST_PARAMETER, KEYWORD_REST_PARAMETER]
+          when Prism::KeywordHashNode
+            argument.elements.any?(Prism::AssocSplatNode) ? KEYWORD_REST_NAMES : NO_FORWARDS
+          else NO_FORWARDS
+          end
+        end
+      end
+
+      def super_argument_parameters(node, slots, depth)
+        arguments = node.arguments&.arguments || []
+        arguments.flat_map do |argument|
+          if argument.is_a?(Prism::KeywordHashNode)
+            argument.elements.filter_map do |pair|
+              parameter_read_name(pair.value, slots, depth) if pair.is_a?(Prism::AssocNode)
+            end
+          else
+            [parameter_read_name(argument, slots, depth)].compact
+          end
+        end
       end
 
       # Issue #2296 — the parameters `def_node` content-mutates inside a block of its body, at any nesting: a
@@ -5159,10 +5322,11 @@ module Rigor
         slots = content_parameter_slots(def_node)
         edges = []
         each_forwarding_call(def_node, slots) do |call_node, forwarded|
-          hand_off_callees(call_node).each do |callee, offset, owner|
+          hand_off_callees(call_node, def_node).each do |callee, offset, owner|
             callee_slots = content_parameter_slots(callee)
             forwarded.each do |name, index|
               names = bound_parameter_names(callee_slots, index.is_a?(Integer) ? index - offset : index)
+              names = handed_rest_names(callee, index) if names.empty? && index != ANY_SLOT
               next if names.empty?
 
               edges << CalleeMutationChain::Edge.new(name: name, slot: slots[name], callee: callee, callee_names: names,
@@ -5251,9 +5415,9 @@ module Rigor
       end
 
       # The `[def, offset]` pairs a self-dispatch `node` resolves to in the enclosing class, `offset` being how many
-      # leading arguments of `node` are not the def's. Reuses the discovery index `Scope#user_def_for` reads; no
-      # ancestor walk (the boundary-escape idiom is same-class), keeping this off the hot path for the overwhelming
-      # majority of self-calls that resolve to nothing escaping.
+      # leading arguments of `node` are not the def's. Issue #2521 — the instance def is looked up along the class's
+      # ancestors ({Scope#user_def_through_ancestors}), as Ruby dispatches the call: an inherited def is now walked
+      # under the receiver's class, so a self-call inside it to another inherited def must still be found there.
       #
       # Issue #2297 — in a singleton-side body (`def self.x`, a `def` in `class << self`), whose `self` is the class
       # object, a self-call resolves to the singleton def of that name AND to the same-named instance def, so the floor
@@ -5275,32 +5439,48 @@ module Rigor
           return found.nil? ? NO_CALLEES : [[*found, nil]]
         end
 
-        instance = side_callee(node) { |name| scope.user_def_for(class_name, name) }
-        instance &&= [*instance, nil]
-        return (instance.nil? ? NO_CALLEES : [instance]) unless self_type.is_a?(Type::Singleton)
-
-        singleton = inherited_singleton_callee(node, self_type)
-        return (singleton.nil? ? NO_CALLEES : [singleton]) if instance.nil?
-        return [instance] if singleton.nil? || singleton.first.equal?(instance.first)
+        instance = ancestor_side_callee(node, class_name) do |name|
+          scope.user_def_through_ancestors(class_name, name)
+        end
+        side = self_type.is_a?(Type::Singleton) ? :singleton : :instance
+        singleton = inherited_singleton_callee(node, self_type) if side == :singleton
+        return self_method_missing_callees(node, class_name, side) unless instance || singleton
+        return [instance] if singleton.nil?
+        return [singleton] if instance.nil?
+        return [instance] if singleton.first.equal?(instance.first)
 
         [singleton, instance]
       end
 
-      # The `[def, offset, owner]` a singleton-side self-call resolves to along the singleton chain. A def the class
-      # inherits is written in another class, whose lexical nesting and `self` its hand-offs would resolve in; that
-      # context is not threaded, so such a def is not walked: its owner is {FLOOR_ALL}. A def of the class itself has
-      # no owner.
+      # The `[def, offset, owner]` a singleton-side self-call resolves to along the singleton chain: owner nil for a
+      # def of the class itself, {FLOOR_ALL} for one it inherits ({#walked_owner}).
       def inherited_singleton_callee(node, self_type)
         class_name = self_type.class_name
+        ancestor_side_callee(node, class_name) do |name|
+          scope.singleton_def_through_ancestors(class_name, name)
+        end
+      end
+
+      # The `[def, offset, owner]` `node` resolves to through a lookup on `class_name` that answers `[def, defining]`
+      # (the block), owner nil, or {FLOOR_ALL} ({#walked_owner}); nil when nothing answers.
+      def ancestor_side_callee(node, class_name)
         defining = nil
         found = side_callee(node) do |name|
-          def_node, owner = scope.singleton_def_through_ancestors(class_name, name)
+          def_node, owner = yield(name)
           defining = owner unless def_node.nil?
           def_node
         end
-        return if found.nil?
+        found && [*found, walked_owner(defining, class_name, nil)]
+      end
 
-        [*found, (defining.nil? || defining == class_name ? nil : FLOOR_ALL)]
+      # {#method_missing_callees} for a self-call `node` that resolves to nothing; a `send(:name, ...)` hand-off
+      # passes the name as `method_missing`'s own first argument.
+      def self_method_missing_callees(node, class_name, side)
+        if send_hand_off?(node)
+          method_missing_callees(class_name, side, node.arguments.arguments.first.unescaped.to_sym, 1)
+        else
+          method_missing_callees(class_name, side, node.name, 0)
+        end
       end
 
       # The `[def, offset]` `node` resolves to on one side, whose def table the block looks a name up in, or nil.

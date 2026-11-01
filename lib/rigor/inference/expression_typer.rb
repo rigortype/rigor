@@ -4073,7 +4073,7 @@ module Rigor
         body_scope.with_repeated_or_writes(RepeatedOrWrites.straight_line_sites(def_node.body, body_scope))
       end
 
-      # Issue #681 / #707 — the ONE place in `lib/` that answers "what `Module.nesting` was recorded for this
+      # Issue #681 / #707 — the typer's answer to "what `Module.nesting` was recorded for this
       # def node". `Scope::DiscoveryIndex#discovered_def_nestings` is the owner; the resolver memo is that
       # table's REHYDRATION for the one population it cannot hold — a def served from an ADR-85 seed bundle,
       # whose node {Inference::DefNodeResolver} mints from its own parse, so no table keyed by the identities
@@ -4088,7 +4088,7 @@ module Rigor
       # run and an `--incremental` recheck answering the same constant for the same body; the rehydration half
       # is populated only inside `DefNodeResolver.with_run`, and outside it this falls back to the peel.
       def recorded_def_nesting(def_node)
-        scope.discovery.discovered_def_nestings[def_node] || DefNodeResolver.rehydrated_nesting(def_node)
+        scope.discovery.recorded_def_nesting(def_node)
       end
 
       # The body scope's fold-safe set: the body's own struct locals, plus issue #525's `:self` sentinel

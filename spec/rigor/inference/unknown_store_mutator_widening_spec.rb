@@ -593,6 +593,19 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
       RUBY
     end
 
+    # A read in the body's value position (`return a`) hands the object on only once nothing in the body runs.
+    it "keeps the fact across an early `return a`" do
+      expect(dumped_types(<<~RUBY)).to eq(["Array[Integer | String]"])
+        def early(n)
+          a = Array.new(n, 0)
+          return a if n.zero?
+
+          a << "s"
+          dump_type(a)
+        end
+      RUBY
+    end
+
     it "floors a local a user method mutates through its argument, as before" do
       dumped = dumped_types(<<~RUBY)
         def add_label(arr) = arr << "label"

@@ -1,0 +1,3 @@
+- **[engine]** `compact` on an array literal whose element may be `nil` now strips `nil` from the element type, so a correct call on a compacted element no longer reports `call.possible-nil-receiver`. ([#2569](https://github.com/rigortype/rigor/pull/2569))
+  - `[x].compact` with `x: Dynamic[top] | Pathname | nil` now answers `Array[Dynamic[top] | Pathname]`; it used to keep the `nil`.
+  - The result is `Array[E]`, never a fixed-size tuple, because an element that may be `nil` leaves the size unknown.

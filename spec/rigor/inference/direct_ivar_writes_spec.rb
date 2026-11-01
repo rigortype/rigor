@@ -70,6 +70,7 @@ RSpec.describe Rigor::Inference::DirectIvarWrites do
     expect(writes("def r = (@tag = @items.first || nil)")).to eq(Set[:@tag])
     expect(writes("def r = (@tag = @items.first || (@x if ready?))")).to eq(Set[:@tag])
     expect(writes("def r = (@tag = 'a' || nil)")).to eq(Set[])
+    expect(writes("def r = (@tag = \"\#{@k}\" || nil)")).to eq(Set[])
     expect(writes("def r = (@tag = @items.first || 'a')")).to eq(Set[])
     expect(writes("def r = (@tag = @peer&.tag || 'a')")).to eq(Set[])
   end
@@ -95,6 +96,8 @@ RSpec.describe Rigor::Inference::DirectIvarWrites do
     expect(writes("def r = (@a, @tag = @peer&.pair)")).to eq(Set[:@a, :@tag])
     expect(writes("def r = (@a, @tag = [1, 2])")).to eq(Set[])
     expect(writes("def r = (@a, @tag = @items)")).to eq(Set[])
+    # Guard: pins the current answer. Ruby binds `@tag` to `nil` here, but a rest target keeps the decline.
+    expect(writes("def r = (@a, @tag, *@r = 1)")).to eq(Set[])
   end
 
   it "judges a nested target on the same rule against its own element" do

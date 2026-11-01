@@ -1000,6 +1000,34 @@ RSpec.describe "a hand-off inside a callee resolves its constants in the callee'
       expect(rules(direct.sub("FIRST", first))).to eq([])
     end
 
+    # Only `resolved_census` loses its narrowing bypass (every other memo keeps its bypass), so the audit's own
+    # suspension is what makes the stale census hit raise.
+    it "fails the memo audit when only the census loses the narrowing bypass (d3)" do
+      first = <<~RUBY
+        def first(argv)
+          o = { format: "text" }
+          if INST.is_a?(SubHelper)
+            Wrap.a(OptionParser.new, o)
+          end
+          o
+        end
+      RUBY
+      break_with(:resolved_census) do |evaluator, kind, def_node, &block|
+        next block.call if Rigor::Analysis::DependencyRecorder.active? || Rigor::Inference::MemoAudit.suspended?
+
+        scope = evaluator.send(:scope)
+        table = (Thread.current[:rigor_callee_resolved_census] ||= ObjectSpace::WeakKeyMap.new)
+        slot = (table[scope.discovery] ||= [{}, {}])
+        self_type = scope.self_type
+        by_class = (slot[self_type.is_a?(Rigor::Type::Singleton) ? 1 : 0][kind] ||= {})
+        by_def = (by_class[evaluator.send(:enclosing_class_name_for, self_type)] ||= {}.compare_by_identity)
+        next by_def[def_node] = block.call unless by_def.key?(def_node)
+
+        Rigor::Inference::MemoAudit.check("resolved census", by_def[def_node], kind, &block)
+      end
+      expect(audited_rules(direct.sub("FIRST", first))).to eq(:mismatch)
+    end
+
     it "stays silent for the direct-call form without the guarded caller (control)" do
       expect(rules(direct.sub("FIRST", ""))).to eq([])
     end

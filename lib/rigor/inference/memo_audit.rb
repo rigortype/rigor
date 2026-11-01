@@ -17,7 +17,7 @@ module Rigor
 
       SUSPENDED_KEY = :rigor_memo_audit_suspended
 
-      @enabled = !ENV["RIGOR_MEMO_AUDIT"].to_s.empty?
+      @enabled = %w[1 true].include?(ENV["RIGOR_MEMO_AUDIT"].to_s.downcase)
 
       module_function
 

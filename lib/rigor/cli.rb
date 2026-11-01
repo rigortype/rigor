@@ -226,7 +226,16 @@ module Rigor
       end
 
       plugins = options.fetch(:plugins) ? detected_plugins : []
-      File.write(path, init_template(path, plugins: plugins))
+      begin
+        File.write(path, init_template(path, plugins: plugins))
+      rescue SystemCallError => e
+        # A destination whose directory is missing or not writable is a bad path argument, the same usage error
+        # `--config=PATH` gives for a file that does not exist (exit 64, docs/manual/02-cli-reference.md). The bare
+        # Errno::ENOENT backtrace read as an internal crash.
+        reason = e.message.sub(/ @ .*\z/m, "")
+        @err.puts("rigor init: cannot write #{path}: #{reason}")
+        return EXIT_USAGE
+      end
       @out.puts("Created #{path}")
       print_init_next_steps(path, plugins)
       0

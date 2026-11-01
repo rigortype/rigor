@@ -95,8 +95,8 @@ module Rigor
 
       # Whether {#write_target} would write to `target` at all, asked before any candidate is rendered (#2461): a
       # target inside the sig root that is missing (the create path), or that exists, is valid UTF-8 and parses.
-      # {#update_existing} refuses an unparseable or mis-encoded file and leaves it untouched, so a class shell on it never
-      # reaches disk. A spliced result {RbsValidity} rejects is a writer defect and is not predicted here.
+      # {#update_existing} refuses an unparseable or mis-encoded file and leaves it untouched, so a class shell on it
+      # never reaches disk. A spliced result {RbsValidity} rejects is a writer defect and is not predicted here.
       def accepts_target?(target)
         return false unless inside_sig_root?(target)
         return true unless target.exist?

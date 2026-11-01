@@ -262,7 +262,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     "key:bundler_bundle_path,key:bundler_auto_detect," \
     "key:bundler_lockfile,key:rbs_collection_lockfile,key:rbs_collection_auto_detect," \
     "key:synthetic_method_index,key:project_patched_methods,key:source_files,key:locked_gems," \
-    "key:required_features,key:core_root,key:paths)",
+    "key:required_features,key:core_root,key:paths,key:exclude_patterns,key:exclude_base)",
     "project_signature_roots(req:signature_paths,key:root)"
   ].freeze
 

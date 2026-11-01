@@ -280,7 +280,7 @@ module Rigor
                       rbs_collection_lockfile: nil, rbs_collection_auto_detect: false,
                       synthetic_method_index: nil, project_patched_methods: nil,
                       source_files: [], locked_gems: nil, required_features: nil, core_root: nil,
-                      paths: nil)
+                      paths: nil, exclude_patterns: nil, exclude_base: nil)
         resolved_paths = project_signature_roots(signature_paths, root: root)
         # O4 MVP — append per-gem `sig/` directories discovered under the target project's bundler install
         # root. Empty array when neither an explicit path nor auto-detection finds a bundle. Order: user
@@ -324,7 +324,8 @@ module Rigor
                             feature_tokens(required_features, source_files, libraries)).uniq
         # Issue #2441 — plus the project's own path gems ({ProjectPathGems}), whose collection copy would
         # double-declare the project's `sig/`.
-        project_gems = ProjectPathGems.names(locked, paths: paths, root: root)
+        project_gems = ProjectPathGems.names(locked, paths: paths, root: root, exclude_patterns: exclude_patterns,
+                                                     exclude_base: exclude_base || root)
         skip_gem_names = collection_skip_gem_names(merged_libraries) + project_gems.to_a
         collection_paths = RbsCollectionDiscovery.discover(
           lockfile_path: rbs_collection_lockfile,

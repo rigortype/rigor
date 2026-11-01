@@ -263,7 +263,10 @@ module Rigor
           )
           # Issue #2441 — the project's own path gems are not dependencies missing RBS; the environment skips
           # their collection copy, so the same set leaves the report here.
-          own = Environment::ProjectPathGems.names(locked, paths: @configuration.paths, root: Dir.pwd)
+          own = Environment::ProjectPathGems.names(
+            locked, paths: @configuration.paths, root: Dir.pwd,
+            exclude_patterns: @configuration.exclude_patterns, exclude_base: @configuration.exclude_base
+          )
           locked = locked.except(*own)
           return [] if locked.empty?
 

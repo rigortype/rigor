@@ -85,9 +85,10 @@ RSpec.describe "rbs collection entries for the project's own path gems" do
     LOCK
   end
 
-  def loader(paths: ["lib"])
+  def loader(paths: ["lib"], exclude_patterns: [])
     Rigor::Environment.for_project(
-      root: Dir.pwd, bundler_auto_detect: true, rbs_collection_auto_detect: true, paths: paths
+      root: Dir.pwd, bundler_auto_detect: true, rbs_collection_auto_detect: true, paths: paths,
+      exclude_patterns: exclude_patterns
     ).rbs_loader
   end
 
@@ -135,6 +136,15 @@ RSpec.describe "rbs collection entries for the project's own path gems" do
     # `Foo::Base.new.bar.upcase` still reports: `bar` answers the collection's Integer through the subclass too.
     expect(rbs_loader.instance_method(class_name: "MyX", method_name: :bar)&.method_types&.map(&:to_s))
       .to eq(["() -> ::Integer"])
+  end
+
+  it "keeps the collection entry of a path gem under paths: [.] that exclude: leaves out" do
+    write_collection("foo", "module Foo\n  class Base\n    def bar: () -> Integer\n  end\nend\n")
+    FileUtils.mkdir_p("vendor/gems/foo")
+    write_path_lockfile("vendor/gems/foo", name: "foo")
+    expect(collection_loaded?(loader(paths: ["."], exclude_patterns: ["vendor/**"]), "foo")).to be(true)
+    # Control: without the exclude, `paths: [.]` reaches the gem and its entry is skipped.
+    expect(collection_loaded?(loader(paths: ["."]), "foo")).to be(false)
   end
 
   # Guard (positive control): no line of the fix is what keeps it passing; it fails if the skip widens to every

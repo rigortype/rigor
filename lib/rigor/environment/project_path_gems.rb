@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "../analysis/path_expansion"
+
 module Rigor
   class Environment
     # Issue #2441 — the locked gems that ARE the analysed project: a `PATH` stanza whose directory Rigor analyses
@@ -11,15 +13,18 @@ module Rigor
     # "Analysed as project source" means the gem's directory is at or under one of the configured `paths:`
     # entries, or contains one: rails lists `actionpack/lib` in `paths:` and locks `actionpack` from
     # `PATH remote: actionpack`. A `PATH` gem no `paths:` entry reaches — a vendored `vendor/gems/foo`, a sibling
-    # checkout — is a dependency and keeps its collection RBS. Both sides are compared as real paths, so a
-    # symlinked spelling of the same directory matches.
+    # checkout — is a dependency and keeps its collection RBS, and so does one the configuration's `exclude:`
+    # patterns exclude (`paths: [.]` with `exclude: ["vendor/**"]`), matched as the file walker matches a file
+    # directly inside the gem's directory. Both sides are compared as real paths, so a symlinked spelling of the
+    # same directory matches.
     module ProjectPathGems
       module_function
 
       # @param locked — `{name => LockfileResolver::LockedGem}`.
       # @param paths — the configured `paths:` entries; relative ones resolve against `root`.
+      # @param exclude_patterns — the configuration's `exclude_patterns`, matched against `exclude_base`.
       # @return frozen set of gem names. Empty when `paths` is nil or empty.
-      def names(locked, paths:, root: Dir.pwd)
+      def names(locked, paths:, root: Dir.pwd, exclude_patterns: [], exclude_base: root)
         roots = Array(paths).map { |path| real(File.expand_path(path.to_s, root.to_s)) }.uniq
         return Set.new.freeze if roots.empty?
 
@@ -28,7 +33,9 @@ module Rigor
           next unless dir
 
           dir = real(dir)
-          gem.name if roots.any? { |path| at_or_under?(path, dir) || at_or_under?(dir, path) }
+          next unless roots.any? { |path| at_or_under?(path, dir) || at_or_under?(dir, path) }
+
+          gem.name unless excluded?(dir, exclude_patterns, exclude_base)
         end.to_set.freeze
       end
 
@@ -38,6 +45,16 @@ module Rigor
         return true if path == dir
 
         path.start_with?(dir.end_with?("/") ? dir : "#{dir}/")
+      end
+
+      # A probe name with no `.rb` suffix, so a pattern over Ruby file names (`**/*_spec.rb`) does not exclude the
+      # gem while a directory pattern (`vendor/**`) does.
+      EXCLUDE_PROBE = "rigor-exclude-probe"
+
+      def excluded?(dir, patterns, base)
+        return false if patterns.nil? || patterns.empty?
+
+        Analysis::PathExpansion.reject_excluded([File.join(dir, EXCLUDE_PROBE)], patterns, base: base.to_s).empty?
       end
 
       def real(path)

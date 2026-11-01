@@ -121,6 +121,8 @@ module Rigor
       {
         core_root: configuration.core_root,
         paths: configuration.paths,
+        exclude_patterns: configuration.exclude_patterns,
+        exclude_base: configuration.exclude_base,
         bundler_bundle_path: configuration.bundler_bundle_path,
         bundler_auto_detect: configuration.bundler_auto_detect,
         bundler_lockfile: configuration.bundler_lockfile,

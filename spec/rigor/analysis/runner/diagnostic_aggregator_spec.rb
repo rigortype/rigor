@@ -253,6 +253,27 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
       expect(diagnostic.message).to include("first-gem, second-gem")
     end
 
+    it "leaves the project's own path gems out of the uncovered set (#2441)" do
+      # A PATH gem whose directory holds a `paths:` entry is the analysed project, not a dependency missing RBS.
+      locked = {
+        "own-gem" => Rigor::Environment::LockfileResolver::LockedGem.new(
+          name: "own-gem", version: "1.0.0", platform: "ruby", path_source: File.join(Dir.pwd, "own-gem")
+        ),
+        "third-gem" => Rigor::Environment::LockfileResolver::LockedGem.new(
+          name: "third-gem", version: "1.0.0", platform: "ruby"
+        )
+      }
+      allow(Rigor::Environment::LockfileResolver).to receive(:locked_gems).and_return(locked)
+      allow(Rigor::Environment::BundleSigDiscovery).to receive(:discover).and_return([])
+      allow(Rigor::Environment::RbsCollectionDiscovery).to receive(:discover).and_return([])
+      configuration = Rigor::Configuration.new("paths" => ["own-gem/lib"])
+
+      message = build_aggregator(configuration: configuration).rbs_coverage_diagnostics.first.message
+
+      expect(message).to include("1 gem(s)").and include("third-gem")
+      expect(message).not_to include("own-gem")
+    end
+
     it "is silent when the project has no lockfile (nothing locked to classify)" do
       allow(Rigor::Environment::LockfileResolver).to receive(:locked_gems).and_return({})
 

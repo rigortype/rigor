@@ -2564,7 +2564,8 @@ RSpec.describe Rigor::Environment::RbsLoader do
     end
 
     it "nests the children of an absolute declaration under the reset prefix" do
-      expect(keyed_declarations("module A\n  module ::X\n    class Y\n      def m: () -> untyped\n    end\n  end\nend\n"))
+      source = "module A\n  module ::X\n    class Y\n      def m: () -> untyped\n    end\n  end\nend\n"
+      expect(keyed_declarations(source))
         .to eq([["X::Y", "A/::X/Y"]])
     end
 

@@ -11,6 +11,7 @@
 require "spec_helper"
 require "fileutils"
 require "tmpdir"
+require "prism"
 require "rigor/language_server"
 
 RSpec.describe Rigor::RunScopedSlots do
@@ -231,8 +232,20 @@ RSpec.describe Rigor::RunScopedSlots do
 
   # Adds one file's keys (symbol => path) and its unresolved accesses ("path:line NAME") to `keys` and `unresolved`.
   # A dynamic key (a local variable read from a list of constants) is not scanned here; its constants are.
+  # The source with every real comment blanked to spaces, so an access a comment spells out is not read, while a `#`
+  # inside a string or a regexp hides nothing. Prism gives comment ranges as byte offsets, so the blanking works on a
+  # binary copy; the spaces keep every offset and line number.
+  def blank_comments(source)
+    bytes = source.b
+    Prism.parse(source).comments.each do |comment|
+      location = comment.location
+      bytes[location.start_offset, location.length] = " " * location.length
+    end
+    bytes.force_encoding(source.encoding)
+  end
+
   def scan_thread_keys(source, path, keys, unresolved)
-    source = source.gsub(/^\s*#.*$/, "") # whole-line comments name keys in prose; blanking keeps line numbers
+    source = blank_comments(source)
     scan_thread_accesses(source, path, keys, unresolved, scan_thread_constants(source, path, keys))
   end
 
@@ -258,7 +271,7 @@ RSpec.describe Rigor::RunScopedSlots do
   # variable) is skipped, and the constants it is read from are scanned. Anything else is unresolved: a quoted or
   # top-level key, a namespaced constant (never resolved to this file's own), and an access the scan cannot name.
   def scan_thread_accesses(source, path, keys, unresolved, constants)
-    code = source.gsub(/[ \t]#(?!\{).*$/, "") # a trailing comment names keys in prose; dropping it keeps line numbers
+    code = source
     direct, dynamic = scan_thread_key_reads(code, path, keys, unresolved, constants)
     scan_fiber_reads(code, path, unresolved)
     scan_alias_assignments(code, path, unresolved)
@@ -316,7 +329,7 @@ RSpec.describe Rigor::RunScopedSlots do
   # above, so the assignment is reported whatever follows it.
   def scan_alias_assignments(source, path, unresolved)
     offsets = []
-    source.scan(/=[ \t]*Thread\.current\b(?![\[.])/) { offsets << Regexp.last_match.begin(0) }
+    source.scan(/(?<![=!<>])=(?![=~>])[ \t]*Thread\.current\b(?![\[.])/) { offsets << Regexp.last_match.begin(0) }
     offsets.each do |offset|
       next if alias_allowed?(source, path, offset, offsets.size)
 
@@ -342,14 +355,15 @@ RSpec.describe Rigor::RunScopedSlots do
   def scan_unread_key_constants(source, path, unresolved, constants, direct)
     constants.each do |name, symbol|
       next unless name.end_with?("_KEY") && !symbol.include?("rigor") && !direct.include?(name)
-      next if declared_hash_key_constants.key?(name)
+      next if declared_hash_key_constants.any? { |file, names| path.end_with?(file) && names.key?(name) }
 
       unresolved << "#{path}:#{line_at(source, source.index(/^[ \t]*#{name} = /))} #{name}"
     end
   end
 
-  # The `*_KEY` constants a file uses for something other than a thread key, such as a Hash key, each with why. The
-  # sibling of {not_run_scoped}: a name listed here is not reported as read through a variable. Empty today.
+  # The `*_KEY` constants a file uses for something other than a thread key, such as a Hash key, keyed by file and then
+  # by constant name, each with why. The sibling of {not_run_scoped}: a name listed here is not reported as read through
+  # a variable in that file. Empty today.
   def declared_hash_key_constants = {}
 
   def line_at(source, offset) = source[0...offset].count("\n") + 1
@@ -485,7 +499,8 @@ RSpec.describe Rigor::RunScopedSlots do
   # #2572 class 3's escape hatch: a `*_KEY` constant the file declares as something other than a thread key is not
   # reported, and nothing else in the file is excused by it.
   it "accepts a *_KEY constant that is declared as something other than a thread key" do
-    allow(self).to receive(:declared_hash_key_constants).and_return("A_PROBE_KEY" => "a Hash key, not a thread key")
+    hatch = { "fixture.rb" => { "A_PROBE_KEY" => "a Hash key, not a thread key" } }
+    allow(self).to receive(:declared_hash_key_constants).and_return(hatch)
     keys = {}
     unresolved = []
     scan_thread_keys(<<~RUBY, "fixture.rb", keys, unresolved)
@@ -541,15 +556,45 @@ RSpec.describe Rigor::RunScopedSlots do
   end
 
   # #2572 nit: a trailing comment names no access, so an access it spells out is not read.
-  it "does not read a per-thread access that only a trailing comment spells out" do
+  it "does not read a per-thread access that only a real trailing comment spells out" do
     keys = {}
     unresolved = []
     scan_thread_keys(<<~RUBY, "fixture.rb", keys, unresolved)
       def probe = 1 # Thread.current[:__commented_probe__]
+      x = 1 # Thread.current[:k]
     RUBY
 
     expect(keys).to be_empty
     expect(unresolved).to be_empty
+  end
+
+  # A `#` inside a string or a regexp is not a comment, so it hides no access on its line.
+  it "does not drop an access that follows a # inside a string or a regexp" do
+    keys = {}
+    unresolved = []
+    scan_thread_keys(<<~RUBY, "fixture.rb", keys, unresolved)
+      warn "see #2572"; Thread.current[:__void_h3__] = 1
+      re = / #/; Thread.current[UNDEFINED_KEY]
+      puts "x #y"; t = Thread.current
+    RUBY
+
+    expect(keys.keys).to eq([:__void_h3__])
+    expect(unresolved).to eq(["fixture.rb:2 UNDEFINED_KEY", "fixture.rb:3 Thread.current alias"])
+  end
+
+  # A comparison of `Thread.current` is not an assignment of it; a default value is one.
+  it "reports an assignment of Thread.current but not a comparison with it" do
+    keys = {}
+    unresolved = []
+    scan_thread_keys(<<~RUBY, "fixture.rb", keys, unresolved)
+      def same(t) = t == Thread.current
+      def differs(owner) = owner != Thread.current
+      def ordered(x) = x <= Thread.current
+      def f(t = Thread.current) = t
+    RUBY
+
+    expect(keys).to be_empty
+    expect(unresolved).to eq(["fixture.rb:4 Thread.current alias"])
   end
 
   it "registers a key once and hands it back" do

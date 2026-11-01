@@ -1,6 +1,6 @@
 # Slice 1 of L3 leaves the each_with_object memo floors, the typed Set literal's floor and rewrite stamping alone
 
-- **PR:** [#0000](https://github.com/rigortype/rigor/pull/0000)
+- **PR:** [#2606](https://github.com/rigortype/rigor/pull/2606)
 - **Issue:** [#2534](https://github.com/rigortype/rigor/issues/2534)
 - **Class:** scope
 - **Precedent:** none — sets one

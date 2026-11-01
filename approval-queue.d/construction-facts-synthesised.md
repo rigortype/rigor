@@ -1,6 +1,6 @@
 # An engine-built local re-grows precisely, with no floor and no admissibility gate, and only locals carry the fact
 
-- **PR:** [#0000](https://github.com/rigortype/rigor/pull/0000)
+- **PR:** [#2606](https://github.com/rigortype/rigor/pull/2606)
 - **Issue:** [#2555](https://github.com/rigortype/rigor/issues/2555)
 - **Class:** open-choice
 - **Precedent:** [#2423](https://github.com/rigortype/rigor/pull/2423)

@@ -1170,6 +1170,7 @@ module Rigor
       def eval_local_write(node)
         rhs_type, post_rhs = sub_eval(node.value, scope)
         bound = bind_local_write(node, rhs_type, post_rhs)
+        bound = bound.with_construction_fact(node.name, :synthesised) if synthesised_construction?(node.value, rhs_type)
         # Issue #667 — `m = AppConfig::MODE` makes `m` a copy of a constant the reader's file does not
         # declare, so `m == :production` folding to `true` is the project's configuration and not a logic
         # error the author can see. Stamped LAST, across every binding path above: an RHS can be both an
@@ -1178,6 +1179,45 @@ module Rigor
         return [rhs_type, bound] unless published_constant_copy?(node.value, rhs_type, post_rhs)
 
         [rhs_type, bound.with_published_constant_mark(:local, node.name)]
+      end
+
+      # Issue #2555 L3 — whether the object a local write binds is one the engine built itself, so the binding
+      # carries the `:synthesised` construction fact ({Scope#construction_fact?}): a collection literal (`[...]`,
+      # `{...}`), or a constructor call on the core class (`Array.new(n, 0)`, `Hash.new(0)`, `Set.new(xs)`,
+      # `Set[1]`) whose value is a carrier of that class. Nothing else is stamped: not a copy of another binding
+      # (`b = a`), a call whose return a signature declares, a parameter, or an instance variable.
+      def synthesised_construction?(value_node, rhs_type)
+        case value_node
+        when Prism::ArrayNode, Prism::HashNode then true
+        when Prism::CallNode then core_constructor_call?(value_node, rhs_type)
+        else false
+        end
+      end
+
+      CORE_CONSTRUCTOR_NAMES = %i[new []].to_set.freeze
+      private_constant :CORE_CONSTRUCTOR_NAMES
+
+      # The constant receiver must resolve to the core class itself (a project's own `Admin::Set` does not), and the
+      # value must be a carrier of that class.
+      def core_constructor_call?(call, rhs_type)
+        receiver = call.receiver
+        return false unless CORE_CONSTRUCTOR_NAMES.include?(call.name)
+        return false unless receiver.is_a?(Prism::ConstantReadNode) || receiver.is_a?(Prism::ConstantPathNode)
+
+        class_name = constructed_carrier_class(rhs_type)
+        return false if class_name.nil?
+
+        receiver_type = scope.type_of(receiver, tracer: tracer)
+        receiver_type.is_a?(Type::Singleton) && receiver_type.class_name == class_name
+      end
+
+      def constructed_carrier_class(type)
+        case type
+        when Type::Tuple then "Array"
+        when Type::HashShape then "Hash"
+        when Type::Nominal then type.class_name if %w[Array Hash Set].include?(type.class_name)
+        when Type::Constant then "Set" if type.value.is_a?(::Set)
+        end
       end
 
       # The binding half of {#eval_local_write}: the three mutually exclusive provenance paths a local write

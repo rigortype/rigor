@@ -151,8 +151,17 @@ module Rigor
 
         ReceiverAlias.mutated_reads(receiver).any? do |read|
           getter, = ALIAS_ACCESSORS[read.class]
-          getter && shape_carrier?(scope.public_send(getter, ReceiverAlias.read_name(read)))
+          next false if getter.nil?
+
+          name = ReceiverAlias.read_name(read)
+          shape_carrier?(scope.public_send(getter, name), synthesised: synthesised_binding?(scope, getter, name))
         end
+      end
+
+      # Issue #2555 L3 — whether the binding `getter` / `name` reads carries the `:synthesised` construction fact
+      # ({Scope#construction_fact?}). Only a local can: an instance, class or global variable never carries one.
+      def synthesised_binding?(scope, getter, name)
+        getter == :local && scope.construction_fact?(name)
       end
 
       # A union carrying a shape member is joinable too (issue #645): {#widen_union} widens that
@@ -163,7 +172,9 @@ module Rigor
       # An empty-witness `Difference` counts too (issue #936): the `non-empty-array[T]` arm joins the
       # mutator's added element now, so its arguments are evidence this seam consumes rather than
       # arguments nothing will read.
-      def shape_carrier?(type)
+      # A precise `Hash` counts too when its binding carries the `:synthesised` construction fact (issue #2555): the
+      # re-join grows it from these arguments.
+      def shape_carrier?(type, synthesised: false)
         case type
         when Type::Tuple, Type::HashShape then true
         when Type::Constant then StringMutation.constant?(type) || SetMutation.constant?(type)
@@ -172,9 +183,9 @@ module Rigor
         # A precise `Array[E]` / `Set[E]` counts since issue #2361, which re-grows it from these arguments.
         when Type::Nominal
           MutationRejoin.regrowable_carrier?(type) || MutationRejoin.precise_array?(type) ||
-            SetMutation.regrowable?(type)
+            SetMutation.regrowable?(type) || (synthesised && MutationRejoin.synthesised_carrier?(type))
         when Type::Difference then type.removes_empty_witness?
-        when Type::Union then type.members.any? { |m| shape_carrier?(m) }
+        when Type::Union then type.members.any? { |m| shape_carrier?(m, synthesised:) }
         else false
         end
       end
@@ -296,7 +307,8 @@ module Rigor
 
         name = ReceiverAlias.read_name(read)
         current = scope.public_send(getter, name)
-        widened = widen_for_mutator(current, method_name, values:, arg_types:, unread_arguments:, rewritten_element:)
+        widened = widen_for_mutator(current, method_name, values:, arg_types:, unread_arguments:, rewritten_element:,
+                                                          synthesised: synthesised_binding?(scope, getter, name))
         return scope if widened.nil?
 
         MutationRejoin.rebind(scope, builder, name, widened, pre_state: current, kind: getter)
@@ -315,24 +327,28 @@ module Rigor
       # stands for, OR the method is not a mutator for that shape, OR the carrier is a PRECISE
       # nominal the call stores nothing into — see {MutationRejoin.widen_precise_array}).
       # A `rewritten_element` answers first for the carriers {RewriteMutation.typed} types (issue #2427).
+      # `synthesised` says the binding carries the `:synthesised` construction fact (issue #2555,
+      # {Scope#construction_fact?}): a precise nominal or Set it holds re-grows without the `Dynamic[top]` floor
+      # ({MutationRejoin.widen_synthesised}, {SetMutation.widen}).
       def widen_for_mutator(type, method_name, values: :widen, arg_types: NO_ARG_TYPES, unread_arguments: false,
-                            rewritten_element: nil)
+                            rewritten_element: nil, synthesised: false)
         typed = rewritten_element && type && RewriteMutation.typed(type, method_name, rewritten_element)
         return typed == type ? nil : typed if typed
 
-        widen_carrier(type, method_name, values:, arg_types:, unread_arguments:, rewritten_element:)
+        widen_carrier(type, method_name, values:, arg_types:, unread_arguments:, rewritten_element:, synthesised:)
       end
 
       # {#widen_for_mutator} for a carrier no typed element rewrite answered.
-      def widen_carrier(type, method_name, values:, arg_types:, unread_arguments:, rewritten_element:)
+      def widen_carrier(type, method_name, values:, arg_types:, unread_arguments:, rewritten_element:, # rubocop:disable Metrics/ParameterLists
+                        synthesised: false)
         values = :keep unless VALUE_REWRITING_MUTATORS.include?(method_name)
         values = RewriteMutation.values_mode(type, method_name, values)
 
         return nil if type.nil?
-        return SetMutation.widen(type, method_name, arg_types, unread_arguments:) if SetMutation.set?(type)
+        return SetMutation.widen(type, method_name, arg_types, unread_arguments:, synthesised:) if SetMutation.set?(type)
 
         case type
-        when Type::Nominal then MutationRejoin.widen_nominal(type, method_name, values:, arg_types:)
+        when Type::Nominal then MutationRejoin.widen_nominal(type, method_name, values:, arg_types:, synthesised:)
         when Type::Tuple
           return nil unless ARRAY_MUTATORS.include?(method_name)
 
@@ -346,7 +362,7 @@ module Rigor
         when Type::Difference
           widen_difference(type, method_name, arg_types: arg_types)
         when Type::Union
-          widen_union(type, method_name, values:, arg_types:, unread_arguments:, rewritten_element:)
+          widen_union(type, method_name, values:, arg_types:, unread_arguments:, rewritten_element:, synthesised:)
         end
       end
 
@@ -364,13 +380,14 @@ module Rigor
       #
       # `nil` when no member widened — a union with no carrier member, or one whose carriers are
       # already nominal, is untouched exactly as the scalar path leaves them.
-      def widen_union(union, method_name, values: :widen, arg_types: NO_ARG_TYPES, unread_arguments: false,
-                      rewritten_element: nil)
+      def widen_union(union, method_name, values: :widen, arg_types: NO_ARG_TYPES, unread_arguments: false, # rubocop:disable Metrics/ParameterLists
+                      rewritten_element: nil, synthesised: false)
         widened_any = false
         members = union.members.map do |member|
           next member unless mutation_carrier?(member, method_name)
 
-          widened = widen_for_mutator(member, method_name, values:, arg_types:, unread_arguments:, rewritten_element:)
+          widened = widen_for_mutator(member, method_name, values:, arg_types:, unread_arguments:, rewritten_element:,
+                                                           synthesised:)
           next member if widened.nil?
 
           widened_any = true

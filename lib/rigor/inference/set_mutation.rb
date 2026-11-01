@@ -76,14 +76,21 @@ module Rigor
       # so a remover on an already-widened Set does not rebind it. That is a guard, not a behaviour: a Set has no
       # `receiver[key] ||=` slot narrowings for a rebind to drop, so the identical carrier would read the same either
       # way, and declining only saves rebuilding the scope.
-      def widen(type, method_name, arg_types, unread_arguments: false)
+      #
+      # Issue #2555 L3 — `synthesised` says the binding carries the `:synthesised` construction fact: the engine built
+      # the Set itself (`s = Set[1]`, `Set.new(...)`), so no declaration made a claim about its elements, and the
+      # carrier stays re-growable for as long as the binding keeps the fact. Such a Set joins without the floor
+      # ({#floored}'s and {#join}'s) and without the precise seed's admissibility gate: `s = Set[1]; s << 2` reads
+      # `Set[Integer]`, and a read of its member reports what an Integer does not answer.
+      def widen(type, method_name, arg_types, unread_arguments: false, synthesised: false)
         return nil unless MUTATORS.include?(method_name)
 
         if constant?(type)
-          seed = floored(type.value.map { |v| Type::Combinator.constant_of(v) })
-          join(seed, method_name, arg_types, unread_arguments)
+          members = type.value.map { |v| Type::Combinator.constant_of(v) }
+          seed = synthesised && !members.empty? ? exact(members) : floored(members)
+          join(seed, method_name, arg_types, unread_arguments, synthesised:)
         elsif type.is_a?(Type::Nominal) && regrowable?(type)
-          joined = join(type, method_name, arg_types, unread_arguments)
+          joined = join(type, method_name, arg_types, unread_arguments, synthesised:)
           joined == type ? nil : joined
         end
       end
@@ -91,10 +98,12 @@ module Rigor
       # Every join carries the `Dynamic[top]` floor, a precise seed's included (issue #2361): a later remover or
       # rewriter (`subtract`, `delete`, `map!`) can take the stored members out again, and nothing narrows the
       # carrier back, so a closed `Set[Integer | String]` would reject a declared `Set[String]` the program meets.
-      def join(carrier, method_name, arg_types, unread_arguments)
+      # A synthesised carrier (issue #2555) takes the rewrite arm a gradual one takes, admits every added member, and
+      # joins no floor: an untyped store joins `Dynamic[top]` as the one unknown member it is.
+      def join(carrier, method_name, arg_types, unread_arguments, synthesised: false)
         seed = carrier.type_args.first
         # A precise seed takes no rewrite arm, as a precise `Array` does not ({MutationRejoin.widen_precise_array}).
-        carrier = RewriteMutation.arm(carrier, method_name) if MutationRejoin.gradual_parameter?(seed)
+        carrier = RewriteMutation.arm(carrier, method_name) if synthesised || MutationRejoin.gradual_parameter?(seed)
         return carrier unless CONTENT_ADDERS.include?(method_name)
 
         stored = added_elements(method_name, arg_types)
@@ -106,15 +115,17 @@ module Rigor
         else
           return carrier if !MutationRejoin.gradual_parameter?(seed) && MutationRejoin.already_held?(seed, stored)
 
-          added = admitted(seed, stored.map { |t| widened_member(t) })
+          added = admitted(seed, stored.map { |t| widened_member(t) }, synthesised)
         end
-        element = Type::Combinator.union(carrier.type_args.first, *added, Type::Combinator.untyped)
+        floor = synthesised && !added.empty? ? [] : [Type::Combinator.untyped]
+        element = Type::Combinator.union(carrier.type_args.first, *added, *floor)
         Type::Combinator.nominal_of("Set", type_args: [element])
       end
 
-      # `added` as {MutationRejoin.precise_admitted} admits it into a precise seed; a gradual seed admits all.
-      def admitted(seed, added)
-        return added if MutationRejoin.gradual_parameter?(seed)
+      # `added` as {MutationRejoin.precise_admitted} admits it into a precise seed; a gradual or synthesised seed
+      # admits all.
+      def admitted(seed, added, synthesised = false)
+        return added if synthesised || MutationRejoin.gradual_parameter?(seed)
 
         MutationRejoin.precise_admitted(seed, added)
       end
@@ -127,6 +138,11 @@ module Rigor
         when :merge, :replace then arg_types.flat_map { |t| element_types(t) }
         else [arg_types.first || Type::Combinator.untyped]
         end
+      end
+
+      # `Set[E]` over `members`, value pins dropped: a constant Set a synthesised binding holds (issue #2555).
+      def exact(members)
+        Type::Combinator.nominal_of("Set", type_args: [Type::Combinator.union(*members.map { |m| widened_member(m) })])
       end
 
       # `Set[E | Dynamic[top]]` over `members`, the #2290 typed-Set floor. An empty seed (`Set.new`) is

@@ -328,4 +328,181 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
       expect(return_rules("t = [:other]\nt.fill(:multi, 1)\nt\n", "Array[:multi]")).to eq(["def.return-type-mismatch"])
     end
   end
+  # Issue #2555 L3 — the `:synthesised` construction fact. A local the engine built itself (a collection literal, or
+  # a core `Array.new` / `Hash.new` / `Set.new` / `Set[...]` constructor) re-grows precisely at the straight-line
+  # seam, with no `Dynamic[top]` floor; a carrier whose binding does not carry the fact keeps today's #561 answer.
+  # Each example pairs the stamped binding with an unstamped control in the same position.
+  describe "the :synthesised construction fact (issue #2555)" do
+    def return_rules(body, sig_line)
+      sig = { "maker.rbs" => "class Maker\n  def call: () -> #{sig_line}\n  def helper: () -> #{sig_line}\nend\n" }
+      rules("class Maker\n  def helper = []\n  def call\n#{body.gsub(/^/, '    ')}  end\nend\n", "def.", sig: sig)
+    end
+
+    # Issue #1119.
+    it "re-grows a constructor-seeded Array with the stored element and no floor" do
+      expect(dumped_types(<<~RUBY)).to eq(["Array[Integer | String]", "Array[Integer | String]"])
+        n = gets.to_i
+        a = Array.new(n, 0)
+        a << "s"
+        dump_type(a)
+        b = Array.new(n) { 0 }
+        b[0] = "s"
+        dump_type(b)
+      RUBY
+      expect(undefined_method_rules(<<~RUBY)).to be_empty
+        n = gets.to_i
+        a = Array.new(n, 0)
+        a << "s"
+        a.last.upcase
+      RUBY
+    end
+
+    it "keeps the floor on a precise carrier a signature declared" do
+      expect(dumped_types(<<~RUBY)).to eq(["Array[Dynamic[top] | String]"])
+        s = gets.to_s.split(",")
+        s << 1
+        dump_type(s)
+      RUBY
+    end
+
+    # Issue #1289 — a literal closed by a value-preserving mutator.
+    it "lets a Hash literal closed by `delete` take a later rewrite" do
+      expect(undefined_method_rules(<<~RUBY)).to be_empty
+        g = { a: 1 }
+        g.delete(:b)
+        g.transform_values!(&:to_s)
+        g[:a].upcase
+      RUBY
+      expect(dumped_types(<<~RUBY)).to eq(["Hash[Symbol, Dynamic[top]]"])
+        g = { a: 1 }
+        g.delete(:b)
+        g.transform_values!(&:to_s)
+        dump_type(g)
+      RUBY
+    end
+
+    # The control: an alias copy carries no fact (issue #2335), so the rewrite through it is declined as before.
+    it "declines the same rewrite through an alias copy, which carries no fact" do
+      expect(undefined_method_rules(<<~RUBY)).to eq(["call.undefined-method"])
+        g = { a: 1 }
+        g.delete(:b)
+        h = g
+        h.transform_values!(&:to_s)
+        h[:a].upcase
+      RUBY
+    end
+
+    it "joins an adder's store into a literal closed by `sort!`" do
+      expect(dumped_types(<<~RUBY)).to eq(["Array[1 | 2 | String]", "Array[1 | 2 | Dynamic[top]]"])
+        a = [1, 2]
+        a.sort!
+        a << "s"
+        dump_type(a)
+        c = [1, 2]
+        c.sort!
+        d = c
+        d << "s"
+        dump_type(d)
+      RUBY
+    end
+
+    it "widens a block-captured rewrite of a closed literal honestly" do
+      expect(undefined_method_rules(<<~RUBY)).to be_empty
+        a = [1, 2]
+        [0].each { a.sort!; a.map!(&:to_s) }
+        a.first.upcase
+      RUBY
+    end
+
+    it "lets a Hash literal built as a nominal take a rewrite, and keeps its value under `compact!`" do
+      expect(undefined_method_rules(<<~RUBY)).to be_empty
+        h = { ENV["A"].to_s => 1 }
+        h.transform_values!(&:to_s)
+        h.each_value { |v| v.upcase }
+      RUBY
+      expect(undefined_method_rules(<<~RUBY)).to eq(["call.undefined-method"])
+        h = { ENV["A"].to_s => 1 }
+        h.compact!
+        h.each_value { |v| v.upcase }
+      RUBY
+    end
+
+    # The #561 boundary on a declared carrier: a foreign store joins as the floor, so the declared return accepts it.
+    it "keeps a declared carrier's foreign store behind the floor, and the declared return accepting it" do
+      expect(return_rules("t = helper\nt << [:static, \"x\"]\nt\n", "Array[:multi]")).to be_empty
+    end
+
+    it "gives no fact to a parameter, a merge with an unstamped arm, or a rebind" do
+      sig = { "f.rbs" => "class F\n  def push: (Array[Integer] xs) -> untyped\n  " \
+                         "def pick: (bool c, Array[Integer] param) -> untyped\n  " \
+                         "def rebind: (Array[Integer] param) -> untyped\nend\n" }
+      source = <<~RUBY
+        class F
+          def push(xs)
+            xs << "s"
+            dump_type(xs)
+          end
+
+          def pick(c, param)
+            if c
+              a = [1]
+              a.sort!
+            else
+              a = param
+            end
+            a << "s"
+            dump_type(a)
+          end
+
+          def rebind(param)
+            a = [1]
+            a.sort!
+            a = param
+            a << "s"
+            dump_type(a)
+          end
+        end
+      RUBY
+      dumped = diagnostics(source, sig: sig).filter_map do |diagnostic|
+        diagnostic.message.delete_prefix("dump_type: ") if diagnostic.message.start_with?("dump_type")
+      end
+      expect(dumped).to eq(["Array[Dynamic[top] | Integer]",
+                            "Array[1 | Dynamic[top]] | Array[Dynamic[top] | Integer]",
+                            "Array[Dynamic[top] | Integer]"])
+    end
+
+    it "keeps the fact through a merge both arms establish" do
+      expect(dumped_types(<<~RUBY)).to eq(["Array[1 | String] | Array[2 | String]"])
+        if gets
+          a = [1]
+        else
+          a = [2]
+        end
+        a.sort!
+        a << "s"
+        dump_type(a)
+      RUBY
+    end
+
+    # Issue #2534 — the Set floor came off, so a member read reports what the member class does not answer. A
+    # union of two classes stays silent by the diagnostic policy, so the true positive needs a same-class store.
+    it "reports a Set member read once the synthesised Set grows without a floor" do
+      expect(undefined_method_rules(<<~RUBY)).to eq(%w[call.undefined-method call.undefined-method])
+        s = Set[1]
+        s << 2
+        s.to_a.first.upcase
+        t = Set.new([1])
+        t << 2
+        t.to_a.first.upcase
+      RUBY
+      expect(dumped_types(<<~RUBY)).to eq(["Set[Integer | String]", "Set[Dynamic[top] | String]"])
+        s = Set[1]
+        s << "a"
+        dump_type(s)
+        u = ARGV.to_set
+        u << 1
+        dump_type(u)
+      RUBY
+    end
+  end
 end

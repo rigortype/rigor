@@ -868,4 +868,78 @@ RSpec.describe Rigor::Inference::MutationWidening do
       )
     end
   end
+  # Issue #2555 L3 — `synthesised:` is the binding's `:synthesised` construction fact, which the scope-level seam
+  # reads off `Scope#construction_fact?`. Each example pairs it with the same call without the fact.
+  describe ".widen_for_mutator on a synthesised carrier" do
+    def constant(value) = Rigor::Type::Combinator.constant_of(value)
+    def nominal(name, args = []) = Rigor::Type::Combinator.nominal_of(name, type_args: args)
+    def untyped = Rigor::Type::Combinator.untyped
+    def union(*members) = Rigor::Type::Combinator.union(*members)
+
+    it "joins a precise Array's store as itself, without the floor or the admissibility gate" do
+      carrier = nominal("Array", [nominal("Integer")])
+      args = { arg_types: [constant("s")] }
+      expect(described_class.widen_for_mutator(carrier, :<<, **args, synthesised: true))
+        .to eq(nominal("Array", [union(nominal("Integer"), nominal("String"))]))
+      expect(described_class.widen_for_mutator(carrier, :<<, **args))
+        .to eq(nominal("Array", [union(nominal("Integer"), untyped)]))
+    end
+
+    it "keeps a value-pinned seed the store does not rewrite" do
+      carrier = nominal("Array", [union(constant(1), constant(2))])
+      expect(described_class.widen_for_mutator(carrier, :<<, arg_types: [constant("s")], synthesised: true))
+        .to eq(nominal("Array", [union(constant(1), constant(2), nominal("String"))]))
+    end
+
+    it "takes a precise Hash's rewrite, which a declared one declines" do
+      carrier = nominal("Hash", [nominal("Symbol"), constant(1)])
+      expect(described_class.widen_for_mutator(carrier, :transform_values!, synthesised: true))
+        .to eq(nominal("Hash", [nominal("Symbol"), untyped]))
+      expect(described_class.widen_for_mutator(carrier, :transform_values!)).to be_nil
+    end
+
+    it "joins a precise Hash's stored pair" do
+      carrier = nominal("Hash", [nominal("Symbol"), nominal("Integer")])
+      widened = described_class.widen_for_mutator(carrier, :[]=, arg_types: [constant("k"), constant("v")],
+                                                                 synthesised: true)
+      expect(widened).to eq(nominal("Hash", [union(nominal("Symbol"), nominal("String")),
+                                             union(nominal("Integer"), nominal("String"))]))
+    end
+
+    it "joins one unknown member for a store whose arguments yield no evidence, and nothing with no arguments" do
+      carrier = nominal("Array", [nominal("Integer")])
+      expect(described_class.widen_for_mutator(carrier, :concat, arg_types: [untyped], synthesised: true))
+        .to eq(nominal("Array", [union(nominal("Integer"), untyped)]))
+      expect(described_class.widen_for_mutator(carrier, :<<, synthesised: true)).to be_nil
+    end
+
+    it "leaves a carrier that is already gradual to the ordinary re-join" do
+      carrier = nominal("Array", [union(nominal("Integer"), untyped)])
+      expect(described_class.widen_for_mutator(carrier, :<<, arg_types: [constant("s")], synthesised: true))
+        .to eq(described_class.widen_for_mutator(carrier, :<<, arg_types: [constant("s")]))
+    end
+
+    it "grows a constant Set without the floor" do
+      set = constant(Set[1])
+      expect(described_class.widen_for_mutator(set, :<<, arg_types: [constant(2)], synthesised: true))
+        .to eq(nominal("Set", [nominal("Integer")]))
+      expect(described_class.widen_for_mutator(set, :<<, arg_types: [constant(2)]))
+        .to eq(nominal("Set", [union(nominal("Integer"), untyped)]))
+    end
+
+    it "admits a foreign member into a precise synthesised Set, and joins an unread store as one unknown member" do
+      set = nominal("Set", [nominal("Integer")])
+      expect(described_class.widen_for_mutator(set, :<<, arg_types: [constant("a")], synthesised: true))
+        .to eq(nominal("Set", [union(nominal("Integer"), nominal("String"))]))
+      expect(described_class.widen_for_mutator(set, :<<, arg_types: [constant("a")]))
+        .to eq(nominal("Set", [union(nominal("Integer"), untyped)]))
+      expect(described_class.widen_for_mutator(set, :<<, unread_arguments: true, synthesised: true))
+        .to eq(nominal("Set", [union(nominal("Integer"), untyped)]))
+    end
+
+    it "keeps the floor on an empty constant Set, whose members say nothing" do
+      expect(described_class.widen_for_mutator(constant(Set.new), :delete, synthesised: true))
+        .to eq(nominal("Set", [untyped]))
+    end
+  end
 end

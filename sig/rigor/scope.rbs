@@ -18,6 +18,7 @@ module Rigor
     # its bare cause (issue #1302).
     attr_reader optimistic_locals: Hash[Symbol, Symbol | Inference::OptimisticOrigin::BoundMark]
     attr_reader optimistic_ivars: Hash[Symbol, Symbol | Inference::OptimisticOrigin::BoundMark]
+    attr_reader construction_facts: Hash[Symbol, Set[untyped]]
     attr_reader repeated_or_writes: Hash[untyped, bool]
     # sig-gen gap: #2323 — the same reader shape; `Inference::MatchRebinding::Frame` carries no signature.
     attr_reader match_frame: untyped
@@ -218,7 +219,7 @@ module Rigor
 
     def self.empty: (?environment: Environment, ?source_path: String?) -> Scope
 
-    def initialize: (environment: Environment, locals: Hash[Symbol, Type::t], ?fact_store: Analysis::FactStore, ?self_type: Type::t?, ?ivars: Hash[Symbol, Type::t], ?cvars: Hash[Symbol, Type::t], ?globals: Hash[Symbol, Type::t], ?discovery: DiscoveryIndex, ?source_path: String?, ?opaque_block_self: bool, ?block_self_unknown: bool | :refinement, ?singleton_class_body: bool, ?dynamic_origins: Hash[untyped, Symbol], ?indexed_narrowings: Hash[IndexedKey, Type::t], ?method_chain_narrowings: Hash[ChainKey, Type::t], ?declaration_sourced: Set[[Symbol, Symbol] | [Symbol, Symbol, Symbol]], ?published_constant_sourced: Set[[Symbol, Symbol]], ?struct_fold_safe_locals: Set[Symbol], ?lexical_nesting: Array[String]?, ?local_origins: Hash[Symbol, Symbol], ?ivar_origins: Hash[Symbol, Symbol], ?void_origins: Hash[untyped, Inference::VoidOrigin], ?plugin_typed_calls: Hash[untyped, bool], ?optimistic_origins: Hash[untyped, Symbol], ?optimistic_locals: Hash[Symbol, Symbol | Inference::OptimisticOrigin::BoundMark], ?optimistic_ivars: Hash[Symbol, Symbol | Inference::OptimisticOrigin::BoundMark], ?repeated_or_writes: Hash[untyped, bool], ?match_frame: untyped, ?constant_narrowings: Hash[String, Type::t], ?guard_records: Hash[[Symbol, Symbol | String], Type::t], ?bot_guard_classes: Hash[[Symbol, Symbol | String], Array[String]], ?declared_refinements: Array[String | Symbol]) -> void
+    def initialize: (environment: Environment, locals: Hash[Symbol, Type::t], ?fact_store: Analysis::FactStore, ?self_type: Type::t?, ?ivars: Hash[Symbol, Type::t], ?cvars: Hash[Symbol, Type::t], ?globals: Hash[Symbol, Type::t], ?discovery: DiscoveryIndex, ?source_path: String?, ?opaque_block_self: bool, ?block_self_unknown: bool | :refinement, ?singleton_class_body: bool, ?dynamic_origins: Hash[untyped, Symbol], ?indexed_narrowings: Hash[IndexedKey, Type::t], ?method_chain_narrowings: Hash[ChainKey, Type::t], ?declaration_sourced: Set[[Symbol, Symbol] | [Symbol, Symbol, Symbol]], ?published_constant_sourced: Set[[Symbol, Symbol]], ?struct_fold_safe_locals: Set[Symbol], ?lexical_nesting: Array[String]?, ?local_origins: Hash[Symbol, Symbol], ?ivar_origins: Hash[Symbol, Symbol], ?void_origins: Hash[untyped, Inference::VoidOrigin], ?plugin_typed_calls: Hash[untyped, bool], ?optimistic_origins: Hash[untyped, Symbol], ?optimistic_locals: Hash[Symbol, Symbol | Inference::OptimisticOrigin::BoundMark], ?optimistic_ivars: Hash[Symbol, Symbol | Inference::OptimisticOrigin::BoundMark], ?construction_facts: Hash[Symbol, Set[Symbol]], ?repeated_or_writes: Hash[untyped, bool], ?match_frame: untyped, ?constant_narrowings: Hash[String, Type::t], ?guard_records: Hash[[Symbol, Symbol | String], Type::t], ?bot_guard_classes: Hash[[Symbol, Symbol | String], Array[String]], ?declared_refinements: Array[String | Symbol]) -> void
     def with_source_path: (String? path) -> Scope
     def with_struct_fold_safe: (Set[Symbol] locals) -> Scope
     def with_lexical_nesting: (Array[String]? chain) -> Scope
@@ -245,6 +246,8 @@ module Rigor
     def optimistic_ivar: (String | Symbol name) -> Symbol?
     def optimistic_local_miss: (String | Symbol name) -> Object?
     def optimistic_ivar_miss: (String | Symbol name) -> Object?
+    def construction_fact?: (String | Symbol name, ?Symbol fact) -> bool
+    def with_construction_fact: (untyped, untyped) -> Rigor::Scope
     def with_local: (String | Symbol name, Type::t type) -> Scope
     def with_rejoined_locals: (untyped) -> Rigor::Scope
     def with_ivar: (String | Symbol name, Type::t type) -> Scope

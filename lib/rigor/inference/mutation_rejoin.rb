@@ -31,7 +31,9 @@ module Rigor
       # `nil` when the re-join changed nothing, so a non-adder (`pop`, `sort!`) on an already-widened
       # carrier does not rebind the binding at all: a rebind drops the per-slot narrowings `with_local`
       # keys to the old value, and paying that for an identical type is a straight loss.
-      def widen_nominal(nominal, method_name, values: :widen, arg_types: MutationWidening::NO_ARG_TYPES)
+      def widen_nominal(nominal, method_name, values: :widen, arg_types: MutationWidening::NO_ARG_TYPES,
+                        synthesised: false)
+        return widen_synthesised(nominal, method_name, values:, arg_types:) if synthesised && synthesised_carrier?(nominal)
         return widen_precise_array(nominal, method_name, values:, arg_types:) if precise_array?(nominal)
         return nil unless regrowable_carrier?(nominal)
 
@@ -116,13 +118,75 @@ module Rigor
       # This is a superset of "mutation-widened": a DECLARED `Array[untyped]` or
       # `Array[Integer | untyped]` matches too. Deliberate — the soundness argument above is about
       # the carrier being open, not about who opened it, and a declared gradual arm is the author
-      # saying the collection may hold anything. Distinguishing the two needs provenance travelling
-      # WITH the value (a field on `Type::Nominal`, reopening structural equality, `Marshal`, and the
-      # cache schema); nothing on this axis needs it yet.
+      # saying the collection may hold anything.
+      #
+      # Issue #2555 L3 — the provenance this boundary turns on travels beside the binding, not with the value: a
+      # local whose object the engine built carries the `:synthesised` construction fact ({Scope#construction_fact?}),
+      # and {#widen_synthesised} answers for it before this predicate is asked. A field on `Type::Nominal` was the
+      # other route; `Combinator.union`'s structural dedupe would keep whichever tagged twin it met first.
       def regrowable_carrier?(nominal)
         return false unless %w[Array Hash].include?(nominal.class_name)
 
         nominal.type_args.any? { |arg| gradual_parameter?(arg) }
+      end
+
+      # Issue #2555 L3 — a PRECISE `Array` / `Hash` nominal (no parameter carries a `Dynamic` arm), the carrier
+      # {#widen_synthesised} re-grows when its binding carries the `:synthesised` fact. A carrier that already carries
+      # a gradual arm keeps the ordinary re-join, whose floor it holds already.
+      def synthesised_carrier?(nominal)
+        %w[Array Hash].include?(nominal.class_name) && !nominal.type_args.empty? &&
+          nominal.type_args.none? { |arg| gradual_parameter?(arg) }
+      end
+
+      # Issue #2555 L3 — the re-join for a precise carrier the engine built itself: a collection literal closed by a
+      # value-preserving mutator (`a = [1, 2]; a.sort!` is `Array[1 | 2]`, `g = { a: 1 }; g.delete(:b)` is
+      # `Hash[Symbol, 1]`), a constructor fold (`Array.new(n, 0)` is `Array[Integer]`), or a literal built as a
+      # nominal outright (`{ ENV["A"].to_s => 1 }`). Its element types are this engine's inference, not a claim a
+      # declaration made, so the #561 boundary ({#regrowable_carrier?}, {#precise_admitted}) does not apply:
+      #
+      # - an added member joins as itself (value pin and literal shape dropped, {MutationWidening.value_pin_widened}),
+      #   with no seed-admissibility gate and no `Dynamic[top]` floor — `Array.new(n, 0) << "s"` reads
+      #   `Array[Integer | String]`;
+      # - a rewriter takes {RewriteMutation.arm}'s gradual position, as a gradual carrier does —
+      #   `g.transform_values!(&:to_s)` reads `Hash[Symbol, Dynamic[top]]`;
+      # - an adder whose arguments yield no evidence is one unknown store and joins `Dynamic[top]`; one called with no
+      #   argument types at all (the block-capture seam, whose content join adds the stores afterwards) changes
+      #   nothing.
+      #
+      # The floor the ordinary re-join adds exists because a carrier it closed could not re-grow; this one stays
+      # re-growable for as long as the binding keeps the fact, so every later store is seen. What it does not see is
+      # a remover taking a store out again: `a << 1; a.pop` leaves the `Integer` arm, the carrier's honest "may
+      # hold" summary.
+      def widen_synthesised(nominal, method_name, values:, arg_types:)
+        pre_state = values == :widen ? value_pin_widened_args(nominal) : nominal
+        rejoined =
+          case nominal.class_name
+          when "Array"
+            return nil unless MutationWidening::ARRAY_MUTATORS.include?(method_name)
+
+            synthesised_array_join(RewriteMutation.arm(pre_state, method_name), method_name, arg_types)
+          when "Hash"
+            return nil unless MutationWidening::HASH_MUTATORS.include?(method_name)
+
+            synthesised_hash_join(RewriteMutation.arm(pre_state, method_name), method_name, arg_types)
+          end
+        rejoined == nominal ? nil : rejoined
+      end
+
+      def synthesised_array_join(carrier, method_name, arg_types)
+        return carrier unless ContentJoin::ARRAY_CONTENT_ADDERS.include?(method_name) && !arg_types.empty?
+
+        added = MutationWidening.value_pin_widened(ContentJoin.array_added_elements(method_name, arg_types))
+        ContentJoin.join_array_content(carrier, added.empty? ? [Type::Combinator.untyped] : added)
+      end
+
+      def synthesised_hash_join(carrier, method_name, arg_types)
+        return carrier unless ContentJoin::HASH_CONTENT_ADDERS.include?(method_name) && !arg_types.empty?
+
+        # A `nil` key marks a splat, an unknown key ({MutationWidening.join_added_pairs}).
+        key, value = MutationWidening.value_pin_widened([arg_types.first || Type::Combinator.untyped, arg_types.last])
+        value ||= Type::Combinator.untyped
+        ContentJoin.join_hash_content(carrier, [[key, value]])
       end
 
       def gradual_parameter?(type)

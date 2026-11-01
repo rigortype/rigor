@@ -95,8 +95,8 @@ module Rigor
 
       # Whether {#write_target} would write to `target` at all, asked before any candidate is rendered (#2461): a
       # target inside the sig root that is missing (the create path), or that exists, is valid UTF-8 and parses.
-      # {#update_existing} leaves an unparseable or mis-encoded file untouched, so a class shell on it never
-      # reaches disk. A spliced result {RbsValidity} rejects is a writer defect and is not predicted here.
+      # {#update_existing} refuses an unparseable or mis-encoded file and leaves it untouched, so a class shell on it
+      # never reaches disk. A spliced result {RbsValidity} rejects is a writer defect and is not predicted here.
       def accepts_target?(target)
         return false unless inside_sig_root?(target)
         return true unless target.exist?
@@ -332,8 +332,7 @@ module Rigor
         # Pre-parser encoding guard, mirroring `Environment::RbsLoader.invalid_encoding?`: handed invalid
         # UTF-8, `RBS::Parser` raises a bare `ArgumentError` on rbs 4.1 (not the `ParsingError` that
         # `parse_signature` below rescues) and could hang outright on the older releases the gemspec
-        # supports. The refusal is loud — unlike an unparseable file (`:noop`, surfaced by `rigor check`'s
-        # own quarantine warning), a mojibake file would otherwise fail with a stack trace naming neither
+        # supports. The refusal is loud — a mojibake file would otherwise fail with a stack trace naming neither
         # the file nor the fix.
         unless source.valid_encoding?
           return WriteResult.new(source_path: source_path, target_path: target,
@@ -341,8 +340,15 @@ module Rigor
                                  error: "#{target} is not valid UTF-8")
         end
 
-        decls = parse_signature(source)
-        return WriteResult.new(source_path: source_path, target_path: target, action: :noop) if decls.nil?
+        # An existing file that does not parse is refused like a mis-encoded one, not skipped as `:noop` (#2480):
+        # `--check` must fail on it, because a `--write` that cannot touch the file is not an up-to-date `sig/`.
+        # `rigor check` quarantines such a file whole; this refusal names it at the sig-gen boundary too.
+        decls, parse_detail = parse_target_signature(target, source)
+        if decls.nil?
+          return WriteResult.new(source_path: source_path, target_path: target,
+                                 action: :skipped_unparseable,
+                                 error: "#{target} does not parse as RBS: #{parse_detail}")
+        end
 
         state = MergeState.new(source: source, decls: decls, applied: [], skipped: [], left_unreadable: [],
                                replaced: [])
@@ -593,6 +599,15 @@ module Rigor
         decls
       rescue RBS::ParsingError
         nil
+      end
+
+      # Parses an EXISTING target, naming it as the buffer so the parse error carries `path:line:col` (a bare
+      # String would be named `a.rbs`). Returns `[decls, nil]`, or `[nil, first_line_of_message]` on a parse error.
+      def parse_target_signature(target, source)
+        _, _, decls = RBS::Parser.parse_signature(RBS::Buffer.new(name: target.to_s, content: source))
+        [decls, nil]
+      rescue RBS::ParsingError => e
+        [nil, e.message.to_s.lines.first.to_s.strip]
       end
 
       def merge_class(state, class_name, methods, kinds, supers)

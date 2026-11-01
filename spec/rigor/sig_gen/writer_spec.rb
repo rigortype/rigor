@@ -89,6 +89,55 @@ RSpec.describe Rigor::SigGen::Writer do
     end
   end
 
+  # #2480: an existing target that does not parse is REFUSED, not skipped as `:noop`. `--check` must fail on it, and
+  # the file must stay byte-for-byte untouched. A parseable target that already declares the method stays `:noop`.
+  describe "target-parse guard" do
+    it "refuses to update an existing file that does not parse, naming it, leaving it untouched" do
+      original = "class Foo\n  def existing: () -> String\n" # missing the closing `end`
+      target = write_target(original)
+
+      result = writer.write("lib/foo.rb", [candidate(method_name: :h, rbs: "def h: () -> Integer")])
+
+      expect(result.action).to eq(:skipped_unparseable)
+      expect(result.error).to include(target)
+      expect(result.error).to include("does not parse as RBS")
+      # The parse location is part of the refusal: the buffer is named by the target, so the message reads
+      # `path:line:col`.
+      expect(result.error).to match(/#{Regexp.escape(target.to_s)}:\d+:\d+/)
+      expect(File.read(target)).to eq(original)
+    end
+
+    # An empty file and a comments-only file parse to zero declarations. They are valid RBS, so they are written
+    # like any other parseable target, not refused.
+    it "still writes into an empty existing file, because it parses" do
+      target = write_target("")
+
+      result = writer.write("lib/foo.rb", [candidate(method_name: :h, rbs: "def h: () -> Integer")])
+
+      expect(result.action).to eq(:updated)
+      expect(File.read(target)).to include("def h: () -> Integer")
+    end
+
+    it "still writes into a comments-only existing file, because it parses" do
+      target = write_target("# just a comment\n")
+
+      result = writer.write("lib/foo.rb", [candidate(method_name: :h, rbs: "def h: () -> Integer")])
+
+      expect(result.action).to eq(:updated)
+      expect(File.read(target)).to include("# just a comment").and include("def h: () -> Integer")
+    end
+
+    it "keeps a parseable existing file that already declares the method as :noop" do
+      original = "class Foo\n  def h: () -> Integer\nend\n"
+      target = write_target(original)
+
+      result = writer.write("lib/foo.rb", [candidate(method_name: :h, rbs: "def h: () -> Integer")])
+
+      expect(result.action).to eq(:noop)
+      expect(File.read(target)).to eq(original)
+    end
+  end
+
   describe "create new sig file" do
     it "writes a class declaration with the candidate methods when no target exists" do
       result = writer.write("lib/foo.rb", [candidate(method_name: :n, rbs: "def n: () -> Integer")])

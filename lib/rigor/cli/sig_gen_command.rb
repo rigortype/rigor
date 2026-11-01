@@ -296,11 +296,11 @@ module Rigor
         refused = refused_candidates(candidates)
         SigGen::Renderer.new(out: @out).render_write(results: results, format: options.fetch(:format), refused: refused)
         SigGen::Renderer.refusal_lines(refused).each { |line| @err.puts(line) }
-        # A refused write (an assembled file that does not parse, an existing target that is not valid UTF-8,
-        # or a method whose inline and `sig/` declarations disagree without `--overwrite`) means the user asked for a
-        # write and did not get one, so the command must not report success — a green `sig-gen --write` in CI
-        # would otherwise mean nothing.
-        refusals = %i[skipped_invalid_rbs skipped_invalid_encoding]
+        # A refused write (an assembled file that does not parse, an existing target that is not valid UTF-8 or
+        # does not parse, or a method whose inline and `sig/` declarations disagree without `--overwrite`) means the
+        # user asked for a write and did not get one, so the command must not report success — a green
+        # `sig-gen --write` in CI would otherwise mean nothing.
+        refusals = %i[skipped_invalid_rbs skipped_invalid_encoding skipped_unparseable]
         results.any? { |result| refusals.include?(result.action) } || !refused.empty? ? 1 : 0
       end
 

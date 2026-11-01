@@ -140,7 +140,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-124 | [The editor publish seeds cross-file discovery](124-editor-publish-cross-file-discovery.md) | Accepted (implemented in #2164; follow-ups for the limits it lists) |
 | ADR-125 | [Plugin-declared per-invocation classes](125-per-invocation-classes.md) | Accepted (implemented for #575; rigor-actionmailer adoption is #2308) |
 | ADR-126 | [One CLI grammar, versioned JSON documents, and a gated command catalogue](126-cli-grammar-and-catalogue.md) | Accepted (not yet implemented; work filed as #2502–#2505) |
-| ADR-127 | [The callee mutation floor answers a graph property, not a walk](127-callee-floor-graph-budget.md) | Proposed (prototype measured; closes #2520 once implemented) |
+| ADR-127 | [The callee mutation floor answers a graph property, not a walk](127-callee-floor-graph-budget.md) | Accepted (K = 64; implementation pending, closes #2520) |
 
 ## Adding a New ADR
 

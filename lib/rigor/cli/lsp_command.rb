@@ -32,14 +32,15 @@ module Rigor
         end
 
         def record(direction, message)
-          deliver { "#{stamp} #{direction} #{render(message)}\n" }
+          deliver("#{stamp} #{direction} #{render(message)}\n")
           nil
         end
 
-        # Debug output written to `$stderr` while the session runs (`Kernel#warn` calls `write`).
+        # Debug output written to `$stderr` while the session runs (`Kernel#warn` calls `write`). The parts are joined
+        # as binary, so an odd encoding in one part cannot raise here.
         def write(*parts)
-          text = parts.join
-          @fallback.write(text) unless deliver { text }
+          text = parts.map { |part| part.to_s.b }.join
+          @fallback.write(text) unless deliver(text)
           text.bytesize
         end
 
@@ -58,6 +59,20 @@ module Rigor
           nil
         end
 
+        def printf(format_string, *)
+          write(format(format_string, *))
+          nil
+        end
+
+        def putc(char)
+          write(char.is_a?(Integer) ? char.chr : char.to_s[0])
+          char
+        end
+
+        def syswrite(text)
+          write(text)
+        end
+
         def <<(part)
           write(part)
           self
@@ -72,7 +87,7 @@ module Rigor
           lines = ["#{stamp} ! #{error.class}: #{error.message}\n"]
           lines.concat((error.backtrace || []).map { |frame| "    #{frame}\n" })
           text = lines.join
-          @fallback.write(text) unless deliver { text }
+          @fallback.write(text) unless deliver(text)
           nil
         end
 
@@ -80,13 +95,30 @@ module Rigor
           @io.close unless @io.closed?
         end
 
+        # Every other IO method (`tty?`, `closed?`, `fileno`, `sync=`, `to_io` for `system(err: $stderr)`, ...) goes to
+        # the current sink: the file while the log works, the real stderr once it has failed.
+        def method_missing(name, ...)
+          return super unless sink.respond_to?(name)
+
+          sink.public_send(name, ...)
+        end
+
+        def respond_to_missing?(name, include_private = false)
+          sink.respond_to?(name) || super
+        end
+
         private
 
-        # Writes the text the block builds. Returns false when the log is (or just became) unusable.
-        def deliver
+        def sink
+          @broken ? @fallback : @io
+        end
+
+        # Writes `text` to the file. Returns false when the log is (or just became) unusable. Only a failure of the
+        # write itself disables the log.
+        def deliver(text)
           return false if @broken
 
-          @io.write(yield)
+          @io.write(text)
           true
         rescue StandardError
           @broken = true
@@ -97,14 +129,14 @@ module Rigor
           Time.now.strftime("%FT%T.%6N%:z")
         end
 
-        # The JSON line for `message`; a message the encoder rejects is rendered from its scrubbed copy, or from its
-        # `inspect` when even that does not encode.
+        # The JSON line for `message`. One the encoder rejects (invalid UTF-8, nesting past its limit, a `to_json` that
+        # raises) is rendered from its scrubbed copy, or from its `inspect` when even that does not encode.
         def render(message)
           JSON.generate(message)
-        rescue JSON::GeneratorError, EncodingError
+        rescue StandardError
           begin
             JSON.generate(scrub(message))
-          rescue JSON::GeneratorError, EncodingError
+          rescue StandardError
             JSON.generate(message.inspect)
           end
         end

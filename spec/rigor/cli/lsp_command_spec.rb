@@ -116,4 +116,85 @@ RSpec.describe Rigor::CLI::LspCommand do
     expect { log.write("debug line\n") }.not_to raise_error
     expect(fallback.string).to eq("debug line\n")
   end
+
+  # An IO whose first write fails and whose later writes succeed: the log latches off after the failure.
+  it "keeps the wire log off after the first failed write, even once the file would accept writes again" do
+    flaky = Class.new do
+      attr_reader :written
+
+      def initialize
+        @written = []
+        @failed = false
+      end
+
+      def write(text)
+        raise IOError, "gone" unless @failed
+
+        @written << text
+        text.bytesize
+      ensure
+        @failed = true
+      end
+    end.new
+    fallback = StringIO.new
+    log = wire_log_class.new(flaky, fallback)
+
+    log.record("<-", { id: 1 })
+    log.record("<-", { id: 2 })
+    log.write("debug line\n")
+
+    expect(flaky.written).to be_empty
+    expect(fallback.string).to eq("debug line\n")
+  end
+
+  # A message nested past the JSON encoder's depth limit still gets its line, and the log stays enabled.
+  it "logs a message nested past the encoder's depth limit and keeps the log enabled" do
+    io = StringIO.new
+    fallback = StringIO.new
+    log = wire_log_class.new(io, fallback)
+    deep = (1..120).reduce("leaf") { |acc, _| { "k" => acc } }
+
+    expect { log.record("<-", deep) }.not_to raise_error
+    expect(io.string).to match(/ <- ".*leaf/)
+    log.write("still on\n")
+    expect(io.string).to include("still on\n")
+    expect(fallback.string).to be_empty
+  end
+
+  # `$stderr` under --log behaves as an IO for the callers that probe it (Bundler's shell, RubyGems' resolver).
+  it "answers IO probes on $stderr under --log without raising" do
+    Dir.mktmpdir("rigor-lsp-log-") do |dir|
+      path = File.join(dir, "wire.log")
+      command = described_class.new(argv: [], out: StringIO.new, err: StringIO.new)
+      log = command.send(:open_wire_log, path)
+      original_stderr = $stderr
+      probes = nil
+      loop_runner = instance_double(Rigor::LanguageServer::Loop)
+      allow(loop_runner).to receive(:run) do
+        probes = [$stderr.tty?, $stderr.closed?]
+        $stderr.printf("printf marker %d\n", 7)
+      end
+      server = instance_double(Rigor::LanguageServer::Server, exit_code: 0)
+      allow(command).to receive(:build_server).and_return([server, loop_runner])
+      allow(LanguageServer::Protocol::Transport::Io::Reader).to receive(:new).and_return(StringIO.new)
+      allow(LanguageServer::Protocol::Transport::Io::Writer).to receive(:new).and_return(StringIO.new)
+
+      command.send(:serve, config_path: nil, log: log)
+      expect($stderr).to be(original_stderr)
+      log.close
+      expect(probes).to eq([false, false])
+      expect(File.read(path)).to include("printf marker 7")
+    end
+  end
+
+  # A write-type call on a dead log goes through the never-raise path, not the file's own method.
+  it "does not raise from printf on a closed log" do
+    io = StringIO.new
+    fallback = StringIO.new
+    log = wire_log_class.new(io, fallback)
+    io.close
+
+    expect { log.printf("%s\n", "printed") }.not_to raise_error
+    expect(fallback.string).to eq("printed\n")
+  end
 end

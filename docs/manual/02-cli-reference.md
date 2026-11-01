@@ -649,10 +649,11 @@ rigor lsp [--transport=stdio] [--log=PATH] [--config=PATH]
 `stdio` is the only transport in v1. `--log=PATH` appends the LSP
 wire log to PATH: each JSON-RPC message the client sends (`<-`) and
 each one the server writes (`->`), one line per message with a
-timestamp, plus the server's debug output from the start of the server loop to its end. The file is opened for
-appending before the server starts, so an unwritable PATH exits with
-a usage error. An exception that escapes the loop is written to the file
-with its backtrace. Output written before the loop starts (configuration
+timestamp, plus the server's debug output from the start of the
+server loop to its end. The file is opened for appending before the
+server starts, so an unwritable PATH exits with a usage error. An
+exception that escapes the loop is written to the file with its
+backtrace. Output written before the loop starts (configuration
 loading and server setup) and any crash outside the loop still go to
 stderr, as does the server's output when the file becomes unwritable
 mid-session. A message the JSON encoder rejects (raw invalid UTF-8) is

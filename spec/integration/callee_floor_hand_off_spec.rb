@@ -937,4 +937,83 @@ RSpec.describe "a hand-off inside a callee resolves its constants in the callee'
       expect(rules(narrowed_source(first_guard: "", sub_body: "def c(parser, options) = puts(options.to_s)"))).to eq([])
     end
   end
+
+  describe "the census bypass and the union arm, each pinned on its own (#2524)" do
+    let(:direct) do
+      <<~RUBY
+        require "optparse"
+        class Helper
+          def c(parser, options) = parser.on("--f F") { |v| options[:format] = v }
+        end
+        class SubHelper < Helper
+        end
+        INST = Helper.new
+        class Wrap
+          def self.a(parser, options) = INST.c(parser, options)
+        end
+        class Caller
+          FIRST
+          def second(argv)
+            options = { format: "text" }
+            Wrap.a(OptionParser.new, options)
+            if options[:format] == "json"
+              puts "{}"
+            end
+          end
+        end
+      RUBY
+    end
+
+    it "stays silent for the direct-call form after a guarded caller (d3)" do
+      first = <<~RUBY
+        def first(argv)
+          o = { format: "text" }
+          if INST.is_a?(SubHelper)
+            Wrap.a(OptionParser.new, o)
+          end
+          o
+        end
+      RUBY
+      expect(rules(direct.sub("FIRST", first))).to eq([])
+    end
+
+    it "stays silent for the direct-call form without the guarded caller (control)" do
+      expect(rules(direct.sub("FIRST", ""))).to eq([])
+    end
+
+    def union_source(expression)
+      <<~RUBY
+        require "optparse"
+        class W
+          def c(parser, options) = parser.on("--f F") { |v| options[:format] = v }
+        end
+        class R
+          def c(parser, options) = puts(options.to_s)
+        end
+        class SubW < W; end
+        class Caller
+          def run(argv, flag)
+            o = { format: "text" }
+            h = #{expression}
+            OptionParser.new { |p| h.c(p, o) }.parse!(argv)
+            if o[:format] == "json"
+              puts "{}"
+            end
+          end
+        end
+      RUBY
+    end
+
+    it "floors a local union whose one member writes (u2)" do
+      expect(rules(union_source("flag ? R.new : W.new"))).to eq([])
+    end
+
+    it "floors a local union whose member inherits the writer (u3)" do
+      expect(rules(union_source("flag ? R.new : SubW.new"))).to eq([])
+    end
+
+    it "still reports a union whose members only read or are not project classes (u6)" do
+      expect(rules(union_source('flag ? R.new : "s"'))).to eq(always)
+    end
+  end
 end

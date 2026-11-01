@@ -249,21 +249,84 @@ RSpec.describe Rigor::RunScopedSlots do
     constants
   end
 
+  # The one alias `lib/` may name: `release` in the registry itself, which empties the slots through it.
+  def alias_allowlist = { "lib/rigor/run_scoped_slots.rb" => %w[thread] }
+
+  # #2572: the access shapes are `Thread.current[`, `thread_variable_get` / `_set` with or without parentheses, and
+  # `fetch` / `key?` / `store` on the thread. A key is a symbol or a constant of this file; a dynamic key (a local
+  # variable) is skipped, and the constants it is read from are scanned. Anything else is unresolved: a quoted or
+  # top-level key, a namespaced constant (never resolved to this file's own), and an access the scan cannot name.
   def scan_thread_accesses(source, path, keys, unresolved, constants)
-    access = /Thread\.current(?:\[|\.thread_variable_[gs]et\()\s*(?:[A-Z]\w*::)*([A-Z][A-Z0-9_]*|:[A-Za-z0-9_]+)/
-    source.scan(access) do
+    direct, dynamic = scan_thread_key_reads(source, path, keys, unresolved, constants)
+    scan_fiber_reads(source, path, unresolved)
+    scan_alias_assignments(source, path, unresolved)
+    scan_unread_key_constants(source, path, unresolved, constants, direct) if dynamic
+  end
+
+  def thread_key_read
+    /Thread\.current(?:\[|\.(?:thread_variable_[gs]et|thread_variable\?|fetch|key\?|store)(?!\w)\(?)[ \t]*([^\]),\n]*)/
+  end
+
+  # Returns the constants the file reads directly, and whether it reads a key through a local variable.
+  def scan_thread_key_reads(source, path, keys, unresolved, constants)
+    direct = []
+    dynamic = false
+    source.scan(thread_key_read) do
       match = Regexp.last_match
-      used = match[1]
-      if used.start_with?(":")
-        keys[used.delete_prefix(":").to_sym] = path
-      elsif constants.key?(used)
-        keys[constants[used].delete_prefix(":").to_sym] = path
+      arg = match[1].strip
+      if (symbol = arg[/\A:([a-z_]\w*)\z/i, 1])
+        keys[symbol.to_sym] = path
+      elsif arg.match?(/\A[a-z_]\w*\z/)
+        dynamic = true
+      elsif (name = resolved_constant(arg, constants))
+        direct << name
+        keys[constants[name].delete_prefix(":").to_sym] = path
       else
-        line = source[0...match.begin(0)].count("\n") + 1
-        unresolved << "#{path}:#{line} #{used}"
+        unresolved << "#{path}:#{line_at(source, match.begin(0))} #{unresolved_label(arg)}"
       end
     end
+    [direct, dynamic]
   end
+
+  # The file's own constant an access names, or nil. A namespaced reference (`Other::KEY`, `::KEY`) names nothing here.
+  def resolved_constant(arg, constants)
+    constant = arg.match(/\A([A-Z]\w*)\z/)
+    constant && constants.key?(constant[1]) ? constant[1] : nil
+  end
+
+  # The report label of an unresolved argument: a constant's whole name without its namespace, otherwise as written.
+  def unresolved_label(arg)
+    constant = arg.match(/\A(?:::)?(?:[A-Z]\w*::)*([A-Z]\w*)\z/)
+    constant ? constant[1] : arg
+  end
+
+  def scan_fiber_reads(source, path, unresolved)
+    source.scan(/Fiber(?:\.current)?\[([^\]\n]*)/) do
+      match = Regexp.last_match
+      unresolved << "#{path}:#{line_at(source, match.begin(0))} Fiber[#{match[1]}]"
+    end
+  end
+
+  def scan_alias_assignments(source, path, unresolved)
+    source.scan(/^[ \t]*([a-z_]\w*)[ \t]*=[ \t]*Thread\.current[ \t]*(?:#.*)?$/) do
+      match = Regexp.last_match
+      next if alias_allowlist.any? { |file, names| path.end_with?(file) && names.include?(match[1]) }
+
+      unresolved << "#{path}:#{line_at(source, match.begin(0))} alias #{match[1]} = Thread.current"
+    end
+  end
+
+  # A `*_KEY` constant without a `rigor` symbol is a key only where the file reads it directly. In a file that reads a
+  # key through a local variable, one it does not read directly is read through that variable, so it is unresolved.
+  def scan_unread_key_constants(source, path, unresolved, constants, direct)
+    constants.each do |name, symbol|
+      next unless name.end_with?("_KEY") && !symbol.include?("rigor") && !direct.include?(name)
+
+      unresolved << "#{path}:#{line_at(source, source.index(/^[ \t]*#{name} = /))} #{name}"
+    end
+  end
+
+  def line_at(source, offset) = source[0...offset].count("\n") + 1
 
   # A memo slot a new owner adds is caught here even when no fixture fills it.
   it "registers every per-thread key in lib/ that is not a listed frame slot" do
@@ -301,6 +364,74 @@ RSpec.describe Rigor::RunScopedSlots do
 
     expect(keys).to be_empty
     expect(unresolved).to eq(["fixture.rb:1 MISSING_KEY"])
+  end
+
+  # #2572 class 1: access shapes other than `Thread.current[` and `thread_variable_get(`. The symbol keys register;
+  # `Fiber[`, and an alias line that assigns `Thread.current` to a local, are unresolved.
+  it "finds a per-thread access in a shape the scan did not read" do
+    keys = {}
+    unresolved = []
+    scan_thread_keys(<<~RUBY, "fixture.rb", keys, unresolved)
+      def bare = Thread.current.thread_variable_get :__shape_bare_probe__
+      def fetched = Thread.current.fetch(:__shape_fetch_probe__, nil)
+      def tested = Thread.current.key?(:__shape_key_probe__)
+      def stored = Thread.current.store(:__shape_store_probe__, 1)
+      def fiber = Fiber[:__shape_fiber_probe__]
+      def alias_reader
+        thread = Thread.current
+        thread[:__shape_alias_probe__]
+      end
+    RUBY
+
+    expect(keys.keys).to contain_exactly(:__shape_bare_probe__, :__shape_fetch_probe__, :__shape_key_probe__,
+                                         :__shape_store_probe__)
+    expect(unresolved).to contain_exactly("fixture.rb:5 Fiber[:__shape_fiber_probe__]",
+                                          "fixture.rb:7 alias thread = Thread.current")
+  end
+
+  # #2572 class 2: a key literal outside the symbol token class is unresolved, never dropped.
+  it "reports a per-thread key written as a quoted symbol, a string or a top-level constant" do
+    keys = {}
+    unresolved = []
+    scan_thread_keys(<<~RUBY, "fixture.rb", keys, unresolved)
+      def quoted = Thread.current[:"__quoted_probe__"]
+      def string = Thread.current["__string_probe__"]
+      def top = Thread.current[::TOP_PROBE_KEY]
+    RUBY
+
+    expect(keys).to be_empty
+    expect(unresolved).to eq(["fixture.rb:1 :\"__quoted_probe__\"", "fixture.rb:2 \"__string_probe__\"",
+                              "fixture.rb:3 TOP_PROBE_KEY"])
+  end
+
+  # #2572 class 3: a non-rigor `*_KEY` constant the file never reads as a direct thread key is read through a variable,
+  # which the scan cannot follow, so it is unresolved.
+  it "reports a non-rigor key constant that is read only through a variable" do
+    keys = {}
+    unresolved = []
+    scan_thread_keys(<<~RUBY, "fixture.rb", keys, unresolved)
+      A_PROBE_KEY = :__void_probe_a__
+      B_PROBE_KEY = :__void_probe_b__
+      def sweep = [A_PROBE_KEY, B_PROBE_KEY].each { |k| Thread.current[k] }
+    RUBY
+
+    expect(keys).to be_empty
+    expect(unresolved).to eq(["fixture.rb:1 A_PROBE_KEY", "fixture.rb:2 B_PROBE_KEY"])
+  end
+
+  # #2572 class 4: a namespaced constant is never resolved to the file's own constant of the same name, and a
+  # mixed-case constant is reported whole.
+  it "does not resolve a namespaced constant to the file's own, and reports a mixed-case constant whole" do
+    keys = {}
+    unresolved = []
+    scan_thread_keys(<<~RUBY, "fixture.rb", keys, unresolved)
+      OWN_KEY = :rigor_own_probe
+      def other = Thread.current[Other::OWN_KEY]
+      def mixed = Thread.current[Mixed_Probe_KEY]
+    RUBY
+
+    expect(keys.keys).to eq([:rigor_own_probe])
+    expect(unresolved).to eq(["fixture.rb:2 OWN_KEY", "fixture.rb:3 Mixed_Probe_KEY"])
   end
 
   it "registers a key once and hands it back" do

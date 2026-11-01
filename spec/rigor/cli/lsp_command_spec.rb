@@ -171,7 +171,7 @@ RSpec.describe Rigor::CLI::LspCommand do
       probes = nil
       loop_runner = instance_double(Rigor::LanguageServer::Loop)
       allow(loop_runner).to receive(:run) do
-        probes = [$stderr.tty?, $stderr.closed?]
+        probes = [$stderr.tty?, $stderr.closed?, $stderr.respond_to?(:fileno)]
         $stderr.printf("printf marker %d\n", 7)
       end
       server = instance_double(Rigor::LanguageServer::Server, exit_code: 0)
@@ -182,7 +182,7 @@ RSpec.describe Rigor::CLI::LspCommand do
       command.send(:serve, config_path: nil, log: log)
       expect($stderr).to be(original_stderr)
       log.close
-      expect(probes).to eq([false, false])
+      expect(probes).to eq([false, false, true])
       expect(File.read(path)).to include("printf marker 7")
     end
   end

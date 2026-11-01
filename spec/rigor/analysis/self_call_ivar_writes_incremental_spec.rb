@@ -198,4 +198,46 @@ RSpec.describe "self-call ivar-write proof — incremental" do
       )
     end
   end
+
+  # Issue #2203 — a refine body that defines a name the walk cannot read (`define_method` of a computed name) records a
+  # names-wildcard row, which refines every name: the proof gives up as it does for a literal `def warn`, and only the
+  # `refinement:*` edge `refined?` files re-checks the caller when a file whose declarations stay starts or stops
+  # writing one.
+  def wildcard_refine(target = "Kernel", name = "N")
+    "module R\n  refine #{target} do\n    N = :warn\n    define_method(#{name}) { |*| 1 }\n  end\nend\n"
+  end
+
+  def base_source(prefix = "") = "#{prefix}class Base\n  def log(message) = warn(message)\nend\n"
+
+  it "re-checks the caller when a file whose declarations stay starts a computed define_method in a refinement" do
+    expect_recheck_to_report(
+      { "b.rb" => base_source, "x.rb" => "module R\nend\n" }, { "x.rb" => wildcard_refine }
+    )
+  end
+
+  it "re-checks the caller when a file whose declarations stay stops a computed define_method in a refinement" do
+    expect_recheck_to_clear(
+      { "b.rb" => base_source, "x.rb" => wildcard_refine }, { "x.rb" => "module R\nend\n" }
+    )
+  end
+
+  # The cold reads: the refine sits in `x.rb`, the callee in `b.rb`, the caller in `a.rb`. A wildcard row refines
+  # every name on any class whether or not a `using` activates it, as a literal row does; a literal `define_method`
+  # of another name leaves the proof standing, and so does one in the callee's own file.
+  {
+    "activated by a `using` in the callee's file" => [-> { { "b.rb" => base_source("using R\n"), "x.rb" => wildcard_refine } },
+                                                      [["a.rb", 10]]],
+    "not activated" => [-> { { "b.rb" => base_source, "x.rb" => wildcard_refine } }, [["a.rb", 10]]],
+    "of an unrelated class" => [-> { { "b.rb" => base_source, "x.rb" => wildcard_refine("String") } }, [["a.rb", 10]]],
+    "of another literal name" => [-> { { "b.rb" => base_source, "x.rb" => wildcard_refine("Kernel", ":other") } }, []],
+    "of another literal name in the callee's file" => [-> { { "b.rb" => wildcard_refine("Kernel", ":other") + base_source } },
+                                                       []]
+  }.each do |label, (files, expected)|
+    it "reads a refinement's define_method #{label} as a cold run does" do
+      Dir.mktmpdir do |dir|
+        write_files(dir, instance_exec(&files).merge("a.rb" => caller_source))
+        expect(full_run(dir)).to eq(expected)
+      end
+    end
+  end
 end

@@ -219,12 +219,19 @@ module Rigor
         # `IO`, `String`) is no `mark:` the chain read files, so it records `refinement:<name>` and `refinement:*`
         # whichever way it answers, as `InEffectRefinements` consumers do: a file that starts or stops refining the
         # name re-checks the reader.
+        #
+        # Issue #2203 — a names-wildcard row (a refine body the walk cannot enumerate: a computed `define_method`,
+        # `import_methods`) counts as a refinement of every name, on any class, as `ExpressionTyper#refined_anywhere?`
+        # reads it. `InEffectRefinements.refining_modules` narrows rows by the receiver's reach, but a project class's
+        # ancestry through `Object` and `Kernel` is unknown to `Environment#class_ordering`, so that narrowing would
+        # keep the proof for the `refine Kernel` the issue reports.
         def refined?(name)
+          wildcard = Scope::DiscoveryIndex::REFINEMENT_WILDCARD
           if Analysis::DependencyRecorder.active?
             Analysis::DependencyRecorder.read_name(:refinement, name)
-            Analysis::DependencyRecorder.read_name(:refinement, Scope::DiscoveryIndex::REFINEMENT_WILDCARD)
+            Analysis::DependencyRecorder.read_name(:refinement, wildcard)
           end
-          @scope.discovered_refinements.any? { |_refined, methods| methods.key?(name) }
+          @scope.discovered_refinements.any? { |_refined, methods| methods.key?(name) || methods.key?(wildcard) }
         end
 
         def call_receiver(node) = node.is_a?(Prism::CallNode) ? node.receiver : nil

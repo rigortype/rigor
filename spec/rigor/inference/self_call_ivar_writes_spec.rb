@@ -69,6 +69,16 @@ RSpec.describe Rigor::Inference::SelfCallIvarWrites do
     expect(described_class.of(call("log"), refined)).to be_nil
   end
 
+  # Issue #2203 — a names-wildcard row (a computed `define_method`, `import_methods`) refines every name, on any class,
+  # as a literal row refines its own name; a literal row of another name refines nothing the read calls.
+  it "proves nothing past a names-wildcard refine row, whatever class it refines" do
+    [{ "Kernel" => { "*" => ["R"] } }, { "String" => { "*" => ["R"] } }, { "*" => { "*" => ["R"] } }].each do |rows|
+      expect(described_class.of(call("log"), scope_for("def log = warn('x')", refinements: rows))).to be_nil, rows.inspect
+    end
+    literal = scope_for("def log = warn('x')", refinements: { "Kernel" => { other: ["R"] } })
+    expect(described_class.of(call("log"), literal)).to eq(Set[])
+  end
+
   it "gives up past its def budget" do
     count = described_class::DEF_BUDGET
     chain = (0...count).map { |i| "def m#{i} = m#{i + 1}" }.join("\n")

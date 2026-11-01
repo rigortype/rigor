@@ -657,7 +657,7 @@ exits `1`: you asked for a write and did not get one. Such a skip
 is a bug in Rigor's RBS rendering, not in your code — please
 report it. An existing target that does not parse as RBS in the
 first place, and that sig-gen would write into, is refused the same
-way, named on stderr as `REFUSED` with the parse location (the JSON
+way, named on stdout as `REFUSED` with the parse location (the JSON
 action is `skipped_unparseable`); `--check` fails on it too, so such a
 target is never reported as up to date. An unparseable `sig/` file that
 no emittable candidate maps to is not refused and still passes

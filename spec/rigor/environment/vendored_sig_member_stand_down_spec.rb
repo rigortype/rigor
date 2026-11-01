@@ -98,7 +98,7 @@ RSpec.describe "issue #2470 vendored signature member stand-down" do
     end
   end
 
-  it "narrows a member that declares two methods to the half no other source declares" do
+  it "leaves out each member another source declares, and keeps an alias following the method it names" do
     Dir.mktmpdir do |dir|
       sig = write_sig(dir, "module PG\n  class Connection\n    def async_exec: (*untyped) -> untyped\n    " \
                            "def exec: (*untyped) -> Symbol\n  end\nend\n")

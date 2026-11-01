@@ -1171,4 +1171,94 @@ RSpec.describe Rigor::SigGen::Writer do
       expect { build_definitions("C") }.not_to raise_error
     end
   end
+
+  # #2580 — a file an earlier run wrote opens a core generic class with no type parameters (`class Array`, as
+  # sig-gen spelled it before #2436). rbs rejects it (`GenericParameterMismatchError`) and every class whose
+  # ancestry reaches it fails to build, `Object` included; merging into that header must repair it.
+  describe "a parameterless header of a generic class (#2580)" do
+    def generic(method_name:, class_name:, params:)
+      candidate(method_name: method_name, class_name: class_name, rbs: "def #{method_name}: () -> 1")
+        .with_class_type_params(params)
+    end
+
+    let(:params) { { "Array" => "[unchecked out E]", "Hash" => "[unchecked out K, unchecked out V]" } }
+
+    it "copies the stamped parameters onto every bare opening it merges into" do
+      target = write_target("class Array
+  def old: () -> 1
+end
+
+class Hash
+  class Nested
+  end
+end
+")
+
+      result = writer.write("lib/foo.rb", [generic(method_name: :a, class_name: "Array", params: params),
+                                           generic(method_name: :n, class_name: "Hash::Nested", params: params)])
+
+      expect(result.action).to eq(:updated)
+      expect(result.repaired_headers).to eq(["Array[unchecked out E]", "Hash[unchecked out K, unchecked out V]"])
+      expect(File.read(target)).to eq(<<~RBS)
+        class Array[unchecked out E]
+          def old: () -> 1
+          def a: () -> 1
+        end
+
+        class Hash[unchecked out K, unchecked out V]
+          class Nested
+            def n: () -> 1
+          end
+        end
+      RBS
+    end
+
+    it "writes the repair even when every proposed member is already declared" do
+      target = write_target("class Array
+  def a: () -> 1
+end
+")
+
+      result = writer.write("lib/foo.rb", [generic(method_name: :a, class_name: "Array", params: params)])
+
+      expect(result.action).to eq(:updated)
+      expect(result.to_h[:repaired_headers]).to eq(["Array[unchecked out E]"])
+      expect(File.read(target)).to eq("class Array[unchecked out E]
+  def a: () -> 1
+end
+")
+    end
+
+    it "leaves a header that spells parameters of its own" do
+      original = "class Array[T]
+  def old: () -> 1
+end
+"
+      target = write_target(original)
+
+      result = writer.write("lib/foo.rb", [generic(method_name: :a, class_name: "Array", params: params)])
+
+      expect(result.repaired_headers).to eq([])
+      expect(File.read(target)).to eq("class Array[T]
+  def old: () -> 1
+  def a: () -> 1
+end
+")
+    end
+
+    it "leaves a bare header the stamp does not name" do
+      target = write_target("class Array
+  def a: () -> 1
+end
+")
+
+      result = writer.write("lib/foo.rb", [candidate(method_name: :a, class_name: "Array", rbs: "def a: () -> 1")])
+
+      expect(result.action).to eq(:noop)
+      expect(File.read(target)).to eq("class Array
+  def a: () -> 1
+end
+")
+    end
+  end
 end

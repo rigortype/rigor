@@ -23,6 +23,8 @@ module Rigor
     #   target declaration already carries annotations, so its bytes were left alone
     #   (`sig.effect.left-unreadable`; see {Writer#splice_annotations}). The signature line itself was
     #   still updated.
+    # - `repaired_headers` — the existing class or module headers the writer gave a generic class's type
+    #   parameters (`"Array[unchecked out E]"`), because the file opened it with none (#2580).
     # - `error` — the refusal cause, when `action` is a refusal: for `:skipped_invalid_rbs` the file the writer
     #   assembled does not parse, so it was NOT written (writing it would poison the project's sig tree — the
     #   consumer quarantines an unparseable `.rbs`, taking every other type in that file down with it); for
@@ -30,10 +32,11 @@ module Rigor
     #   into content it cannot read faithfully; for `:skipped_unparseable` the EXISTING target file does not parse
     #   as RBS, so the writer refuses to merge into it (#2480).
     class WriteResult
-      attr_reader :source_path, :target_path, :action, :applied, :skipped, :error, :left_unreadable, :replaced
+      attr_reader :source_path, :target_path, :action, :applied, :skipped, :error, :left_unreadable, :replaced,
+                  :repaired_headers
 
       def initialize(source_path:, target_path:, action:, applied: [], skipped: [], error: nil, # rubocop:disable Metrics/ParameterLists
-                     left_unreadable: [], replaced: [])
+                     left_unreadable: [], replaced: [], repaired_headers: [])
         @source_path = source_path
         @target_path = target_path
         @action = action
@@ -42,6 +45,7 @@ module Rigor
         @error = error
         @left_unreadable = left_unreadable.freeze
         @replaced = replaced.freeze
+        @repaired_headers = repaired_headers.freeze
         freeze
       end
 
@@ -56,6 +60,7 @@ module Rigor
           h[:error] = error if error
           # Absent when nothing was replaced, so a run that only adds lines keeps its pre-#1076 payload.
           h[:replaced] = replaced.map(&:to_h) unless replaced.empty?
+          h[:repaired_headers] = repaired_headers unless repaired_headers.empty?
           # Absent rather than empty when nothing was left: an effects-off payload stays byte-identical
           # to a pre-#391 one.
           h[:effect_left_unreadable] = left_unreadable.map(&:to_h) unless left_unreadable.empty?

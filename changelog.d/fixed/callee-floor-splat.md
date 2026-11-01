@@ -1,0 +1,3 @@
+- **[engine]** A hash or array literal put in an array and passed with a splat (`args = [parser, options]; Opts.add_format(*args)`) no longer reports `flow.always-truthy-condition` when the callee writes it. ([#2515](https://github.com/rigortype/rigor/issues/2515))
+  - A tuple spliced at a fixed position maps each element to the callee's parameter, so an element bound to a parameter the callee only reads keeps its literal.
+  - An array that was pushed to, a splat after another splat, and an element that reaches the callee's rest parameter floor every element the callee may write. A rest parameter that is forwarded (`def forward(*args) = add_format(*args)`) follows the forwarded call.

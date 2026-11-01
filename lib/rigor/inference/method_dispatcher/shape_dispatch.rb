@@ -1249,15 +1249,32 @@ module Rigor
             Type::Combinator.tuple_of(*tuple.elements, *other.elements)
           end
 
-          # `tuple.compact` — removes every element that is `Constant[nil]`. Folds only when every element
-          # is a `Constant` (so the nil set is decidable). Mixed-shape elements decline so the RBS tier
-          # widens.
+          # `tuple.compact` — removes every element that is `Constant[nil]`. When every element is a
+          # `Constant` the nil set is decidable and the result is the exact Tuple of the kept elements.
+          # Otherwise an element that may be nil leaves the arity unknown, so the result is `Array[E]` with
+          # `E` the elements' union minus its `nil` constituent (#2519) — never a fixed-arity Tuple. When
+          # no element carries a `nil` constituent there is nothing to strip and the method declines so
+          # the RBS tier answers (an element such as `Dynamic[top]` may still be nil at runtime, so the
+          # Tuple is not kept either).
           def tuple_compact(tuple, _method_name, args)
             return nil unless args.empty?
-            return nil unless tuple.elements.all?(Type::Constant)
 
-            kept = tuple.elements.reject { |e| e.is_a?(Type::Constant) && e.value.nil? }
-            Type::Combinator.tuple_of(*kept)
+            if tuple.elements.all?(Type::Constant)
+              kept = tuple.elements.reject { |e| e.value.nil? }
+              return Type::Combinator.tuple_of(*kept)
+            end
+
+            tuple_compact_widened(tuple.elements)
+          end
+
+          def tuple_compact_widened(elements)
+            stripped = elements.map { |e| strip_nil_constituent(e) }
+            return nil if stripped.zip(elements).all? { |s, e| s.equal?(e) }
+
+            element = Type::Combinator.union(*stripped)
+            return Type::Combinator.tuple_of if element.is_a?(Type::Bot)
+
+            Type::Combinator.nominal_of("Array", type_args: [element])
           end
 
           # `uniq` (no block) → `Tuple` of the first occurrence of each distinct value. Folds only when

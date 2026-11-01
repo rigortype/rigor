@@ -11,6 +11,7 @@ require_relative "required_features"
 require_relative "gated_signature_guard"
 require_relative "gated_signature_plan"
 require_relative "deferred_signature_plan"
+require_relative "vendored_signature_plan"
 require_relative "ruby_library_roots"
 require_relative "core_root"
 require_relative "../rooted_glob"
@@ -209,15 +210,20 @@ module Rigor
           # type-of query then degrades to `Dynamic[top]` — the "sig looks harmful" failure of the 2026-07-06
           # mastodon coverage note). Per-file loading quarantines the broken file instead. Vendored / core-overlay
           # sigs are Rigor-shipped and trusted, so they stay on the loader's fast batch path.
-          add_bundled_signatures(rbs_loader, loaded_libraries.to_set(&:to_s), gated_plan ? [] : gated_dirs)
-          env = unload_upstream_core_shims(RBS::Environment.from_loader(rbs_loader), rbs_loader)
-          gated_plan&.leading&.each { |source| add_parsed_decls(env, *source) }
+          loaded_library_names = loaded_libraries.to_set(&:to_s)
           project_files = project_sig_files(signature_paths)
+          undeferred_files = project_files - project_sig_files(deferred_signature_paths)
+          vendored_plan = vendored_signature_plan(loaded_library_names, undeferred_files)
+          add_bundled_signatures(rbs_loader, loaded_library_names, gated_plan ? [] : gated_dirs,
+                                 planned: vendored_plan.dirs)
+          env = unload_upstream_core_shims(RBS::Environment.from_loader(rbs_loader), rbs_loader)
+          vendored_plan.sources.each { |source| add_parsed_decls(env, *source) }
+          gated_plan&.leading&.each { |source| add_parsed_decls(env, *source) }
           # Issue #1075 — decided from the inputs before either side enters `env`: the consistency rule may
           # stand the `.rbs` member down, and that has to happen before its file is added.
           # Issue #2422 — a bundled plugin's deferred files are not the project's: they never take part in the
           # inline-vs-`.rbs` consistency rule, and stand down to an inline member like to any other source.
-          consistency = member_consistency_for(project_files - project_sig_files(deferred_signature_paths), virtual_rbs)
+          consistency = member_consistency_for(undeferred_files, virtual_rbs)
           add_project_signatures(env, signature_paths, deferred_signature_paths,
                                  standdowns: consistency.signature_standdowns)
           gated_plan&.shells&.each { |source| add_parsed_decls(env, *source) }
@@ -1516,8 +1522,12 @@ module Rigor
         #
         # @param loaded_library_names — libraries that actually resolved on this loader.
         # @param gated_dirs — the {RequiredFeatures}-gated directory basenames this library list activates.
-        def add_bundled_signatures(rbs_loader, loaded_library_names, gated_dirs = [])
+        #
+        # @param planned — issue #2470 — the {VendoredSignaturePlan} directories, which load from the plan instead.
+        def add_bundled_signatures(rbs_loader, loaded_library_names, gated_dirs = [], planned: [])
           vendored_gem_sig_paths.each do |path|
+            next if planned.include?(path)
+
             rbs_loader.add(path: path) if vendored_dir_loads?(path, loaded_library_names, gated_dirs)
           end
           core_overlay_sig_paths.each do |dir|
@@ -1531,6 +1541,18 @@ module Rigor
               rbs_loader.add(path: file)
             end
           end
+        end
+
+        # Issue #2470 — the ungated vendored directories this build loads, planned against the signature files
+        # that outrank them ({VendoredSignaturePlan}). The gated ones have their own plan (#1713).
+        #
+        # @param signature_files — the `signature_paths:` files a bundled plugin did not contribute: the project's
+        #   own, a collection's and a gem's. A plugin's files are planned against the env instead (#2422).
+        def vendored_signature_plan(loaded_library_names, signature_files)
+          roots = vendored_gem_sig_paths.select do |path|
+            !RequiredFeatures.gated_dir?(path.basename.to_s) && vendored_dir_loads?(path, loaded_library_names, [])
+          end
+          VendoredSignaturePlan.build(roots, signature_files)
         end
 
         # Issue #1700 — the {RequiredFeatures}-gated directories `libraries` activates, less one whose feature

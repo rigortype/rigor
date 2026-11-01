@@ -555,6 +555,21 @@ module Rigor
       end
       private :reset_analysis_attribution
 
+      # Issue #2392 — the sequential half of the per-run reset, beside {#reset_analysis_attribution}: the
+      # dependency graph and per-file effect collections a `--workers 0` run records, and the effect-slot state a
+      # served run leaves behind. The loader is the one that matters: a served run's collections loader would
+      # otherwise feed the next analysing run the previous run's collections. Runs before any `adopt_*`, which the
+      # served lanes call later in the same run, so an adopted slot is this run's own.
+      def reset_sequential_run_tables
+        @file_dependencies = {}
+        @file_effects = {}
+        @cached_effect_sources = nil
+        @cached_effect_ancestry = nil
+        @cached_collections_loader = nil
+        @effects_served_from_cache = false
+      end
+      private :reset_sequential_run_tables
+
       def run_analysis(paths)
         Inference::MethodDispatcher::FileFolding.fold_platform_specific_paths =
           @configuration.fold_platform_specific_paths
@@ -568,6 +583,10 @@ module Rigor
         @project_discovery_expansion = project_discovery_expansion(paths, expansion)
         @discovery_widened = widen_discovery_to_project?(paths)
         @snapshots.reset_for_run
+        # Issue #2392 — the coordinator's run-accumulated tables (disclosures, trust refusals, the dependency and
+        # effect graphs) are per run too: a reused Runner must not re-emit or sum the previous run's rows.
+        @pool_coordinator.reset_for_run
+        reset_sequential_run_tables
         # Per-run reset of the deferred-discovery memo (see `#ensure_project_discovery`).
         @project_discovery_done = false
         # #392 — re-derive the template units each run: their source files can change between two runs of

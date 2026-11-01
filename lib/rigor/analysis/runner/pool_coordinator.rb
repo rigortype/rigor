@@ -171,6 +171,21 @@ module Rigor
           end
         end
 
+        # Issue #2392 — clears every table a run accumulates on the coordinator: the dependency, analysis-read,
+        # analysis-disclosure and effect graphs, and the run disclosures and trust refusals. {Runner#run_analysis}
+        # calls it once at the top of each run, beside `@snapshots.reset_for_run`, so a long-lived Runner's next
+        # run starts as a fresh Runner's would. Never called between the passes of one run, which must see each
+        # other's collections. Configuration-derived state (`@record_dependencies`, `@record_effects`, the readers,
+        # the reporters) is per-coordinator and is not touched.
+        def reset_for_run
+          @collected_dependencies = {}
+          @collected_analysis_reads = {}
+          @collected_analysis_disclosures = {}
+          @collected_effects = {}
+          @collected_run_disclosures = {}
+          @collected_trust_refusals = {}
+        end
+
         # ADR-15 Phase 4b — pool mode is enabled when `@workers > 0`. Editor mode (`buffer:` non-nil)
         # silently overrides pool mode to sequential: per design § "Ractor pool mode", the pool's warm-up
         # cost dominates one-file wall time, so the pool gains nothing on a per-buffer invocation. The

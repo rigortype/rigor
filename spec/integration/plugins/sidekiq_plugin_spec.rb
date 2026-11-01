@@ -672,6 +672,24 @@ RSpec.describe "plugins/rigor-sidekiq" do
           end
         end
       end
+
+      # #2222 — the same for a schedule outside the project: the absolute path is watched under its own directory,
+      # not joined under the working directory.
+      it "watches the schedule file outside the project that the absolute path names" do
+        Dir.mktmpdir do |raw_project|
+          Dir.mktmpdir do |cache_root|
+            Dir.mktmpdir do |outside|
+              dir = File.realpath(raw_project)
+              schedule = File.join(File.realpath(outside), "sidekiq[1].yml")
+              File.write(schedule, "nightly:\n  class: WelcomeEmailWorker\n")
+              File.write(File.join(dir, "demo.rb"), "x = 1\n")
+
+              covers = watched_for_schedule(dir, cache_root, schedule)
+              expect(covers).to include([schedule])
+            end
+          end
+        end
+      end
     end
   end
 end

@@ -414,6 +414,33 @@ RSpec.describe "plugins/rigor-activejob" do
           end
         end
       end
+
+      # #2222 — the same for a schedule outside the project: the absolute path is watched under its own directory,
+      # not joined under the working directory.
+      describe "with a schedule outside the project" do
+        let(:outside) { File.realpath(Dir.mktmpdir("rigor-activejob-outside-")) }
+        let(:schedule_path) { File.join(outside, "config/recurring[1].yml") }
+
+        after { FileUtils.rm_rf(outside) }
+
+        it "watches the schedule file outside the project that the absolute path names" do
+          Dir.mktmpdir do |raw_project|
+            Dir.chdir(File.realpath(raw_project)) do
+              File.write("demo.rb", "x = 1\n")
+              write_schedule("WelcomeEmailJob")
+              watched = []
+              allow(Rigor::Cache::Descriptor::GlobEntry).to receive(:compute).and_wrap_original do |original, **kwargs|
+                watched << kwargs
+                original.call(**kwargs)
+              end
+              run_activejob(cache_store: Rigor::Cache::Store.new(root: cache_root))
+
+              covers = watched.map { |kwargs| Rigor::RootedGlob.glob(kwargs[:root], kwargs[:pattern]) }
+              expect(covers).to include([schedule_path])
+            end
+          end
+        end
+      end
     end
   end
 end

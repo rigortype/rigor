@@ -108,7 +108,10 @@ rigor init [--path=PATH] [--force] [--no-plugins]
 
 Writes `.rigor.dist.yml` by default. `--path` chooses a
 different target; `--force` overwrites an existing file.
-Exit `1` if the file exists and `--force` was not given.
+Exit `1` if the file exists and `--force` was not given. A `--path` whose
+directory does not exist, or that cannot be written, is a usage error: one
+`rigor init: cannot write PATH: REASON` line on stderr and exit `64`. The
+directory is not created.
 
 When the project has a `Gemfile.lock` in the working directory,
 `rigor init` suggests the bundled plugins whose gems the lockfile

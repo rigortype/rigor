@@ -104,6 +104,26 @@ RSpec.describe Rigor::SigGen::Writer do
       expect(File.read(target)).to eq(original)
     end
 
+    # An empty file and a comments-only file parse to zero declarations. They are valid RBS, so they are written
+    # like any other parseable target, not refused.
+    it "still writes into an empty existing file, because it parses" do
+      target = write_target("")
+
+      result = writer.write("lib/foo.rb", [candidate(method_name: :h, rbs: "def h: () -> Integer")])
+
+      expect(result.action).to eq(:updated)
+      expect(File.read(target)).to include("def h: () -> Integer")
+    end
+
+    it "still writes into a comments-only existing file, because it parses" do
+      target = write_target("# just a comment\n")
+
+      result = writer.write("lib/foo.rb", [candidate(method_name: :h, rbs: "def h: () -> Integer")])
+
+      expect(result.action).to eq(:updated)
+      expect(File.read(target)).to include("# just a comment").and include("def h: () -> Integer")
+    end
+
     it "keeps a parseable existing file that already declares the method as :noop" do
       original = "class Foo\n  def h: () -> Integer\nend\n"
       target = write_target(original)

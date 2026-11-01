@@ -41,11 +41,11 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     File.write(path, body)
   end
 
-  def sig_gen(*argv)
+  def sig_gen(*argv, paths: ["lib/errors.rb"])
     write(".rigor.yml", config)
     out = StringIO.new
     err = StringIO.new
-    status = described_class.new(argv: [*argv, "--config=#{File.join(root, '.rigor.yml')}", "lib/errors.rb"],
+    status = described_class.new(argv: [*argv, "--config=#{File.join(root, '.rigor.yml')}", *paths],
                                  out: out, err: err).run
     [status, out.string, err.string]
   end
@@ -92,6 +92,26 @@ RSpec.describe Rigor::CLI::SigGenCommand do
       expect(status).to eq(1)
       expect(payload.fetch("up_to_date")).to be(false)
       expect(payload.fetch("results").first.fetch("action")).to eq("skipped_unparseable")
+    end
+  end
+
+  # A refusal is per target: the parseable and empty targets in the same run are still written, and the exit is 1.
+  context "when one of three targets does not parse" do
+    before do
+      write("lib/a.rb", "class A\n  def a\n    1\n  end\nend\n") # new file: sig/a.rbs is created
+      write("lib/b.rb", "class B\n  def b\n    2\n  end\nend\n")
+      write("sig/b.rbs", "") # empty existing target: it parses, so it is updated
+      write("sig/errors.rbs", unparseable_sig)
+    end
+
+    it "--write writes the other two, refuses the unparseable one, and exits 1" do
+      status, out, = sig_gen("--write", paths: ["lib"])
+
+      expect(status).to eq(1)
+      expect(out).to include("REFUSED").and include("sig/errors.rbs")
+      expect(File.read(File.join(root, "sig/a.rbs"))).to include("class A")
+      expect(File.read(File.join(root, "sig/b.rbs"))).to include("class B")
+      expect(File.read(sig_file)).to eq(unparseable_sig)
     end
   end
 

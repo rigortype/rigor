@@ -223,6 +223,17 @@ RSpec.describe "self-call ivar-write proof — incremental" do
     )
   end
 
+  # Issue #2203 — a module the project mixes into `Object` reaches every project class, so a file whose declarations
+  # stay that starts mixing a refined one in must re-check the caller: only the `Object` chain the reach reads (and
+  # records) sees it.
+  it "re-checks the caller when a file starts mixing a module with a computed refine into Object" do
+    refined = "module M\n  def z = 1\nend\n\n#{wildcard_refine('M')}"
+    expect_recheck_to_report(
+      { "b.rb" => base_source, "x.rb" => refined, "y.rb" => "module Y\nend\n" },
+      { "y.rb" => "module Y\nend\n\nclass Object\n  include M\nend\n" }
+    )
+  end
+
   # The cold reads: the refine sits in `x.rb`, the callee in `b.rb`, the caller in `a.rb`. A row refines a call on
   # `self` when its class is one `self` reaches (`Holder`, `Object`, `Kernel`), whether or not a `using` activates it;
   # a refinement of a class `self` cannot reach, however its body is spelled, leaves the proof standing, and so does a
@@ -232,12 +243,25 @@ RSpec.describe "self-call ivar-write proof — incremental" do
     "module R\n  refine #{target} do\n    N = :warn\n    define_method(#{name}) { |*| 1 }\n  end\nend\n"
   end
   base = "class Base\n  def log(message) = warn(message)\nend\n"
+  literal_module = ->(expression) { "module M\n  def self.f(o)\n    #{expression}\n  end\nend\n" }
+  struct_caller = lambda do |superclass|
+    "require \"stringio\"\n\nclass Holder < #{superclass}\n  def initialize = (@io = STDOUT)\n\n  def dump\n    " \
+      "return unless @io.is_a?(StringIO)\n\n    log(\"dumping\")\n    @io.string\n  end\n\n  " \
+      "def log(message) = warn(message)\nend\n"
+  end
   {
     "of Kernel, activated by a `using` in the callee's file" => [{ "b.rb" => "using R\n#{base}", "x.rb" => wild.call },
                                                                  [["a.rb", 10]]],
     "of Kernel, not activated" => [{ "b.rb" => base, "x.rb" => wild.call }, [["a.rb", 10]]],
     "of Object" => [{ "b.rb" => base, "x.rb" => wild.call("Object") }, [["a.rb", 10]]],
     "of self's class" => [{ "b.rb" => base, "x.rb" => wild.call("Holder") }, [["a.rb", 10]]],
+    "of self's superclass" => [{ "b.rb" => base, "x.rb" => wild.call("Base") }, [["a.rb", 10]]],
+    "of a module the superclass includes" => [
+      { "b.rb" => "module Mix\n  def z = 1\nend\n\nclass Base\n  include Mix\n  " \
+                  "def log(message) = warn(message)\nend\n",
+        "x.rb" => wild.call("Mix") },
+      [["a.rb", 10]]
+    ],
     # Ruby 4.0.5 runs the refined `warn` for both: a module the project mixes into `Object` sits ahead of `Kernel`, and
     # so does `PP::ObjectMixin`, an `Object` ancestor only RBS declares.
     "of a module the project mixes into Object" => [
@@ -257,11 +281,30 @@ RSpec.describe "self-call ivar-write proof — incremental" do
     ],
     "of Kernel, of another literal name" => [{ "b.rb" => base, "x.rb" => wild.call("Kernel", ":other") }, []],
     "of Kernel, of another literal name in the callee's file" => [{ "b.rb" => wild.call("Kernel", ":other") + base },
-                                                                  []]
+                                                                  []],
+    # Where the chain ends in a superclass the tables cannot name, the reach is unknown and a names-wildcard row counts
+    # for no call on `self`, as before #2203; so does an unattributed `:refine` literal's `{"*" => {"*" => …}}` row.
+    "of Kernel, past a superclass a constant holds as a Struct" => [
+      { "b.rb" => "Base = Struct.new(:a) do\n  def log(message) = warn(message)\nend\n", "x.rb" => wild.call }, []
+    ],
+    "of Kernel, past a Struct.new superclass" => [
+      { "a.rb" => struct_caller.call("Struct.new(:a)"), "x.rb" => wild.call }, []
+    ],
+    "of Kernel, past a Data.define superclass" => [
+      { "a.rb" => struct_caller.call("Data.define(:a)"), "x.rb" => wild.call }, []
+    ],
+    "beside an indexed :refine" => [{ "b.rb" => base, "x.rb" => literal_module.call("o[:refine]") }, []],
+    "beside a fetched :refine" => [{ "b.rb" => base, "x.rb" => literal_module.call("o.fetch(:refine)") }, []],
+    "beside a key? :refine" => [{ "b.rb" => base, "x.rb" => literal_module.call("o.key?(:refine)") }, []],
+    "beside a when :refine" => [
+      { "b.rb" => base, "x.rb" => literal_module.call("case o\n    when :refine then 1\n    end") }, []
+    ],
+    "beside a :refine compared as the receiver" => [{ "b.rb" => base, "x.rb" => literal_module.call(":refine == o") },
+                                                    []]
   }.each do |label, (files, expected)|
     it "reads a refinement #{label} as a cold run does" do
       Dir.mktmpdir do |dir|
-        write_files(dir, files.merge("a.rb" => caller_source))
+        write_files(dir, { "a.rb" => caller_source }.merge(files))
         expect(full_run(dir)).to eq(expected)
       end
     end

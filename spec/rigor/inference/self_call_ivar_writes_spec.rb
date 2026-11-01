@@ -70,19 +70,20 @@ RSpec.describe Rigor::Inference::SelfCallIvarWrites do
   end
 
   # Issue #2203 — a names-wildcard row (a computed `define_method`, `import_methods`) refines every name, as a literal
-  # row refines its own name. A call on `self` counts a row only on a class `self` can reach: `Holder`'s chain,
-  # `Object`, `Kernel`, `BasicObject`, or a class the walk could not name. A literal row of another name refines
-  # nothing the read calls.
+  # row refines its own name, but only on a class `self` can reach (`Holder`'s chain, `Object`, `Kernel`,
+  # `BasicObject`). A literal row of the name also counts on a class the walk could not name; a names-wildcard row
+  # there (`{"*" => {"*" => …}}`, an unattributed `:refine` literal) does not, nor does a literal row of another name.
   it "proves nothing past a refine row of a name the read calls on a class self reaches" do
     [{ "Kernel" => { "*" => ["R"] } }, { "Object" => { "*" => ["R"] } }, { "Holder" => { "*" => ["R"] } },
-     { "*" => { "*" => ["R"] } }, { "Kernel" => { warn: ["R"] } }].each do |rows|
+     { "*" => { warn: ["R"] } }, { "Kernel" => { warn: ["R"] } }].each do |rows|
       scope = scope_for("def log = warn('x')", refinements: rows)
       expect(described_class.of(call("log"), scope)).to be_nil, rows.inspect
     end
   end
 
   it "keeps the proof past a refine row on a class self cannot reach, or of another name" do
-    [{ "String" => { "*" => ["R"] } }, { "Integer" => { warn: ["R"] } }, { "Kernel" => { other: ["R"] } }]
+    [{ "String" => { "*" => ["R"] } }, { "Integer" => { warn: ["R"] } }, { "Kernel" => { other: ["R"] } },
+     { "*" => { "*" => ["R"] } }]
       .each do |rows|
         scope = scope_for("def log = warn('x')", refinements: rows)
         expect(described_class.of(call("log"), scope)).to eq(Set[]), rows.inspect

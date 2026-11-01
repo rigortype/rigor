@@ -1246,6 +1246,7 @@ end
 ")
     end
 
+    # Guard: no line of the fix fails it; it holds the repair to the classes the run stamped.
     it "leaves a bare header the stamp does not name" do
       target = write_target("class Array
   def a: () -> 1

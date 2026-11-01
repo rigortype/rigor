@@ -612,18 +612,13 @@ module Rigor
       # ADR-67 WD6a — resolve to a strict Boolean so a truthy non-`true` value (e.g. a stray String) does not
       # silently enable the gate; only the literal `true` activates the check-walk collector pre-pass.
       @parameter_inference = data.fetch("parameter_inference", DEFAULTS.fetch("parameter_inference")) == true
-      # Resolved before `@effects` — ADR-103 WD15's "effects-on-by-default" reads {#bleeding_edge_active?},
-      # which reads `@bleeding_edge_active_ids`.
-      @bleeding_edge = coerce_bleeding_edge(
-        data.fetch("bleeding_edge", DEFAULTS.fetch("bleeding_edge"))
-      )
-      @bleeding_edge_severity_overrides = BleedingEdge.severity_overrides_for(@bleeding_edge)
-      @bleeding_edge_active_ids = BleedingEdge.active_ids_for(@bleeding_edge)
       # ADR-103 WD13 — presence, not truthiness: `effects:` written with no body parses as nil and still
-      # means "on", so the key's presence in the loaded data is what {#effects_enabled?} reads.
-      @effects = coerce_effects(data, effects_key_present: effects_key_present)
-      coerce_effects_snapshot(@effects)
-      coerce_effects_policy(@effects)
+      # means "on", so the key's presence in the loaded data is what {#effects_enabled?} reads. The raw
+      # input is kept so {#with_bleeding_edge} re-derives the effects block from the same source.
+      @effects_key_present = effects_key_present
+      @effects_written = Ractor.make_shareable(data.fetch("effects", false))
+      derive_bleeding_edge(data.fetch("bleeding_edge", DEFAULTS.fetch("bleeding_edge")))
+      derive_effects
       @cache_path = cache.fetch("path").to_s
       raw_max = cache.fetch("max_bytes")
       @cache_max_bytes = raw_max.nil? ? nil : Integer(raw_max)
@@ -770,15 +765,14 @@ module Rigor
     # It is a frozen `dup` with the bleeding-edge ivars re-set: `dup` returns an unfrozen shallow copy
     # (every other ivar is the receiver's deeply-frozen value, safe to share read-only), the replacements
     # are themselves deeply frozen, and the re-`freeze` keeps the result `Ractor.shareable?` for the worker
-    # path. **Every ivar `#initialize` derives from `@bleeding_edge` has to be re-derived here** — the
-    # selector, the severity map, and the active-id set the {#bleeding_edge_active?} predicate reads.
+    # path. **Every ivar `#initialize` derives from the bleeding-edge selector has to be re-derived here** — it
+    # calls the same {#derive_bleeding_edge} and {#derive_effects} that `#initialize` does, so the selector,
+    # the severity map, the active-id set and the `effects:` default (ADR-103 WD15's "effects-on-by-default")
+    # all follow the new value, and a derived ivar added to `#initialize` is picked up without a second edit.
     def with_bleeding_edge(value)
-      selector = coerce_bleeding_edge(value)
       copy = dup
-      copy.instance_variable_set(:@bleeding_edge, selector)
-      copy.instance_variable_set(:@bleeding_edge_severity_overrides,
-                                 BleedingEdge.severity_overrides_for(selector))
-      copy.instance_variable_set(:@bleeding_edge_active_ids, BleedingEdge.active_ids_for(selector))
+      copy.send(:derive_bleeding_edge, value)
+      copy.send(:derive_effects)
       copy.freeze
     end
 
@@ -812,18 +806,37 @@ module Rigor
     #
     # Same `dup` + re-`freeze` shape as {#with_bleeding_edge}: every other ivar is the receiver's deeply
     # frozen value, safe to share read-only, and the result stays `Ractor.shareable?` for the worker path.
+    # The implicit block is recorded as a written empty one, so a later {#with_bleeding_edge} re-derives
+    # it instead of falling back to the absent-key default and dropping it.
     def with_effects_enabled
       return self if effects_enabled?
 
       copy = dup
-      copy.instance_variable_set(:@effects, {}.freeze)
-      # The implicit block defaults like a written one. `rigor effects` emits no diagnostic either way,
-      # but the two configurations must not differ in a field a later reader could branch on.
-      copy.instance_variable_set(:@effects_check, true)
+      copy.instance_variable_set(:@effects_key_present, true)
+      copy.instance_variable_set(:@effects_written, {}.freeze)
+      copy.send(:derive_effects)
       copy.freeze
     end
 
     private
+
+    # ADR-50 § WD2 / ADR-103 WD15 — derives the bleeding-edge selector and the two ivars the
+    # {#bleeding_edge_active?} predicate and the severity resolution read. `#initialize` and
+    # {#with_bleeding_edge} both call this, so there is one derivation to keep in step.
+    def derive_bleeding_edge(value)
+      @bleeding_edge = coerce_bleeding_edge(value)
+      @bleeding_edge_severity_overrides = BleedingEdge.severity_overrides_for(@bleeding_edge)
+      @bleeding_edge_active_ids = BleedingEdge.active_ids_for(@bleeding_edge)
+    end
+
+    # ADR-103 WD13 / WD15 — derives the `effects:` block and its snapshot and policy ivars from the raw
+    # `effects:` input the instance kept (`@effects_written`, `@effects_key_present`). The effects-on-by-default
+    # default reads the active-id set, so {#derive_bleeding_edge} must run first.
+    def derive_effects
+      @effects = coerce_effects(@effects_written, effects_key_present: @effects_key_present)
+      coerce_effects_snapshot(@effects)
+      coerce_effects_policy(@effects)
+    end
 
     # ADR-103 WD13 — the `effects:` block, or nil when the key is absent or explicitly `false`. A
     # present-but-empty key (`effects:` alone, which YAML parses as nil) and `effects: {}` are the same
@@ -836,8 +849,7 @@ module Rigor
     # as `effects: {}` when the "effects-on-by-default" bleeding-edge feature is adopted. An explicit
     # `effects: false` — `effects_key_present == true` — always stays off regardless of the feature, and a
     # written block always wins outright: the feature can only fill an *absence*.
-    def coerce_effects(data, effects_key_present:)
-      value = data.fetch("effects", false)
+    def coerce_effects(value, effects_key_present:)
       return {}.freeze if value == false && !effects_key_present && effects_forced_on_by_bleeding_edge?
       return nil if value == false
 

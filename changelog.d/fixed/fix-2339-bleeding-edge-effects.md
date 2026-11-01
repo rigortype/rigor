@@ -1,0 +1,3 @@
+- **[config]** `--bleeding-edge` now turns effect collection on, as a `bleeding_edge:` key in the file does, instead of reporting the `effects-on-by-default` feature active while effects stayed off. ([#2578](https://github.com/rigortype/rigor/pull/2578))
+  - `--no-bleeding-edge` after a bleeding-edge configuration turns the default back off again.
+  - An explicit `effects: false` in the file still wins over the feature, and an `effects:` block written in the file is kept as written.

@@ -22,8 +22,8 @@ module Rigor
     # - the body's value position (its last statement, or `return a`), after which nothing in the body runs;
     # - a bare read whose value is discarded.
     #
-    # A listed name the project defines on the class itself (`class Array; def first …`) escapes all the same
-    # ({.escaped?} asks the scope). Every argument position escapes, and so does any reference inside a block or
+    # A listed name the project defines anywhere (a reopen, a prepended or included module, a refinement, any
+    # class at all) escapes all the same ({.project_method_names}). Every argument position escapes, and so does any reference inside a block or
     # lambda, a write whose value is used (`a = b = …`), and every local of a body that calls `binding`, `eval`,
     # `local_variable_set`, `instance_variable_set` or a string-form `instance_eval` / `class_eval` / `module_eval`.
     # The scan is flow insensitive and runs once per body, so an escape anywhere drops the fact for the whole body:
@@ -72,7 +72,8 @@ module Rigor
       ALL = :all
       EMPTY_CALLS = Set.new.freeze
       CACHE_KEY = :__rigor_construction_escape
-      private_constant :CLOSURES, :LOCAL_REFERENCES, :LOCAL_WRITES, :ALL, :EMPTY_CALLS, :CACHE_KEY,
+      NAMES_KEY = :__rigor_construction_escape_names
+      private_constant :CLOSURES, :LOCAL_REFERENCES, :LOCAL_WRITES, :ALL, :EMPTY_CALLS, :CACHE_KEY, :NAMES_KEY,
                        :STRING_EVAL_CALLS
 
       # One body's answer: per name, ALL or the classes it escapes as, and the calls the scan admitted on it.
@@ -94,15 +95,38 @@ module Rigor
         reason = result.escapes[name]
         return true if !reason.nil? && (reason.equal?(ALL) || reason.include?(class_name))
 
-        result.calls.fetch(name, EMPTY_CALLS).any? { |call| project_defines?(scope, class_name, call) }
+        defined = project_method_names(scope)
+        calls = result.calls.fetch(name, EMPTY_CALLS)
+        defined.equal?(ALL) ? !calls.empty? : calls.any? { |call| defined.include?(call) }
       end
 
-      # Whether the project writes `def call` in a body of `class_name` itself, in any file. `discovered_methods` is not
-      # enough: it withholds a plain cross-file `def` on an RBS-declared class (ADR-17), which is exactly a reopen of
-      # Array, Hash or Set. The def-node table holds it (a `DefHandle` on a bundle-rebuilt index; the lookup records the
-      # cross-file dependency for incremental runs). A `def` in a module the class includes is not read here.
-      def project_defines?(scope, class_name, call)
-        scope.discovered_method?(class_name, call, :instance) || !scope.user_def_for(class_name, call).nil?
+      # Every method name the project defines anywhere: on any class or module, instance or singleton side, in a
+      # `refine` block, in any file. An admitted call of such a name escapes the local whatever the receiver's class,
+      # because a prepended or included module, a refinement or a reopen can put that name on Array, Hash or Set, and
+      # telling which owner reaches the receiver is not worth the precision it buys: without the fact the seams answer
+      # as before. Read from the def-node tables, which hold a plain cross-file `def` on an RBS-declared class that
+      # `discovered_methods` withholds (ADR-17), from `discovered_methods`, and from the refinement table; kept per
+      # discovery index.
+      def project_method_names(scope)
+        discovery = scope.discovery
+        table = (Thread.current[NAMES_KEY] ||= ObjectSpace::WeakKeyMap.new)
+        table[discovery] ||= collect_method_names(discovery)
+      end
+
+      # ALL when a `refine` body defines names the walk cannot enumerate (the refinement wildcard).
+      def collect_method_names(discovery)
+        names = Set.new
+        [discovery.discovered_methods, discovery.discovered_def_nodes, discovery.discovered_singleton_def_nodes,
+         discovery.discovered_refinements].each do |by_owner|
+          by_owner.each_value do |methods|
+            methods.each_key do |method_name|
+              return ALL if method_name == Scope::DiscoveryIndex::REFINEMENT_WILDCARD
+
+              names << method_name.to_sym
+            end
+          end
+        end
+        names.freeze
       end
 
       # The receiver mutators the seams model for `class_name` ({MutationWidening}, {HashLookupMutation},

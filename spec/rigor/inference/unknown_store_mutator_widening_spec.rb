@@ -718,10 +718,11 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
     end
   end
 
-  # Fix-only check on #2606 — a project reopen of a listed reader in ANOTHER file (`class Array; def size` that
-  # pushes) escapes the local as a same-file one does: the def-node table holds the cross-file def that
-  # `discovered_methods` withholds on an RBS-declared class. A control without the patch keeps the regrowth.
-  describe "a reopen of a listed reader in another file (issue #2555)" do
+  # Fix-only checks on #2606 — a listed reader the project defines in ANOTHER file escapes the local, whoever owns
+  # the def: a reopen of Array (the def-node table holds the cross-file def `discovered_methods` withholds on an
+  # RBS-declared class), a module Array prepends, or a refinement. A project that defines no such name keeps the
+  # regrowth.
+  describe "a project definition of a listed reader in another file (issue #2555)" do
     around do |example|
       Dir.mktmpdir { |dir| Dir.chdir(dir) { example.run } }
     end
@@ -735,26 +736,37 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
       end.sort
     end
 
-    def write_project(patch:)
+    size = "def size\n    push(\"label\")\n    length\n  end"
+    ext = "module CoreExt\n  #{size}\nend\n"
+    patches = {
+      "a reopen" => ["class Array\n  #{size}\nend\n", ""],
+      "a module Array prepends" => ["#{ext}Array.prepend(CoreExt)\n", ""],
+      "a prepend inside the class body" => ["#{ext}class Array\n  prepend CoreExt\nend\n", ""],
+      "a refinement" => ["module CoreExt\n  refine Array do\n    #{size}\n  end\nend\n", "using CoreExt\n"]
+    }
+
+    def write_project(patch, prelude = "")
       File.write(".rigor.yml", "paths:\n  - lib\n")
       FileUtils.mkdir_p("lib")
-      File.write("lib/patch.rb", "class Array\n  def size\n    push(\"label\")\n    length\n  end\nend\n") if patch
-      File.write("lib/use.rb", "class User\n  def go(n)\n    a = Array.new(n, 0)\n    a << :x\n    c = a.size\n    " \
-                               "a.last.bytesize if c\n  end\nend\n")
+      File.write("lib/patch.rb", patch) if patch
+      File.write("lib/use.rb", "#{prelude}class User\n  def go(n)\n    a = Array.new(n, 0)\n    a << :x\n    " \
+                               "c = a.size\n    a.last.bytesize if c\n  end\nend\n")
     end
 
-    it "escapes the local, with workers and on a warm incremental recheck after an edit" do
-      write_project(patch: true)
-      cold = check("--no-cache")
-      expect(cold).to eq([])
-      expect(check("--no-cache", "--workers=2")).to eq(cold)
-      2.times { check("--incremental") }
-      File.write("lib/use.rb", "#{File.read('lib/use.rb')}# edited\n")
-      expect(check("--incremental")).to eq(cold)
+    patches.each do |label, (patch, prelude)|
+      it "escapes the local past #{label}, with workers and on a warm incremental recheck after an edit" do
+        write_project(patch, prelude)
+        cold = check("--no-cache")
+        expect(cold).to eq([])
+        expect(check("--no-cache", "--workers=2")).to eq(cold)
+        2.times { check("--incremental") }
+        File.write("lib/use.rb", "#{File.read('lib/use.rb')}# edited\n")
+        expect(check("--incremental")).to eq(cold)
+      end
     end
 
-    it "keeps the regrowth without the patch file (control)" do
-      write_project(patch: false)
+    it "keeps the regrowth in a project that defines no such name (control)" do
+      write_project(nil)
       expect(check("--no-cache")).to eq(["use.rb:6 call.undefined-method"])
     end
   end

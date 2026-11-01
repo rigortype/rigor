@@ -1,0 +1,1 @@
+- **[plugins]** `rigor-activestorage` now loads when Rigor runs from a source checkout with `ruby -I lib exe/rigor`, where it failed with a load error. ([#2565](https://github.com/rigortype/rigor/pull/2565))

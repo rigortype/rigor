@@ -115,9 +115,9 @@ module Rigor
       def self.do_parse_dependency_names(path)
         parser = Bundler::LockfileParser.new(File.read(path.to_s))
         # `#dependencies` is the parsed `DEPENDENCIES` section keyed by gem name, so the version constraint
-        # and the pinned-source `!` suffix are already stripped for us. The upstream bundler RBS shim does
-        # not declare it.
-        parser.dependencies.keys.to_set { |name| -name.to_s }.freeze # rigor:disable undefined-method
+        # and the pinned-source `!` suffix are already stripped for us. Rigor's vendored bundler
+        # signature declares it as a Hash keyed by gem name.
+        parser.dependencies.keys.to_set { |name| -name.to_s }.freeze
       rescue ::Ractor::IsolationError => e
         warn_isolated(path, e)
         EMPTY_NAMES
@@ -171,10 +171,9 @@ module Rigor
         parser = Bundler::LockfileParser.new(body)
         locked = parser.specs.each_with_object({}) do |spec, h|
           # `Bundler::LazySpecification` carries name, version, platform. Platform is `Gem::Platform` or the
-          # symbol `:ruby`; both stringify cleanly. The upstream bundler RBS shim
-          # (references/rbs/sig/shims/bundler.rbs) does NOT declare `LazySpecification#platform` so the call
-          # site needs a suppression marker.
-          platform = spec.platform.to_s # rigor:disable undefined-method
+          # symbol `:ruby`; both stringify cleanly. Rigor's vendored bundler signature declares
+          # `LazySpecification#platform`, so the call needs no suppression.
+          platform = spec.platform.to_s
           # `#source` is the `Bundler::Source::*` this spec resolved from — `Git` for a `GIT` lockfile
           # stanza, `Rubygems` for a `GEM` one, `Path`/`Gemspec` for `path:`. Only `Git` sources land under
           # {BundleSigDiscovery}'s `bundler/gems/` walk.

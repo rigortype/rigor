@@ -150,7 +150,7 @@ module Bundler
     # `#initialize`, `#specs` — declared by `sig/shims/bundler.rbs` with the same types.
     def platforms: () -> Array[untyped]
     def sources: () -> Array[untyped]
-    def dependencies: () -> Array[Dependency]
+    def dependencies: () -> Hash[String, Dependency]
     def ruby_version: () -> untyped
     def bundler_version: () -> untyped
   end

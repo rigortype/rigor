@@ -16,6 +16,7 @@ require_relative "environment/bundle_sig_discovery"
 require_relative "environment/lockfile_resolver"
 require_relative "environment/installed_gem_set"
 require_relative "environment/rbs_collection_discovery"
+require_relative "environment/project_path_gems"
 require_relative "environment/source_rbs_synthesis"
 require_relative "plugin/isolation"
 require_relative "cache/engine_source"
@@ -278,7 +279,8 @@ module Rigor
                       bundler_lockfile: nil,
                       rbs_collection_lockfile: nil, rbs_collection_auto_detect: false,
                       synthetic_method_index: nil, project_patched_methods: nil,
-                      source_files: [], locked_gems: nil, required_features: nil, core_root: nil)
+                      source_files: [], locked_gems: nil, required_features: nil, core_root: nil,
+                      paths: nil)
         resolved_paths = project_signature_roots(signature_paths, root: root)
         # O4 MVP — append per-gem `sig/` directories discovered under the target project's bundler install
         # root. Empty array when neither an explicit path nor auto-detection finds a bundle. Order: user
@@ -320,7 +322,10 @@ module Rigor
         # Issue #1700 — plus the gated vendored directories this run's source activates ({#feature_tokens}).
         merged_libraries = (DEFAULT_LIBRARIES + libraries.map(&:to_s) +
                             feature_tokens(required_features, source_files, libraries)).uniq
-        skip_gem_names = collection_skip_gem_names(merged_libraries) + project_path_gem_names(locked, root)
+        # Issue #2441 — plus the project's own path gems ({ProjectPathGems}), whose collection copy would
+        # double-declare the project's `sig/`.
+        project_gems = ProjectPathGems.names(locked, paths: paths, root: root)
+        skip_gem_names = collection_skip_gem_names(merged_libraries) + project_gems.to_a
         collection_paths = RbsCollectionDiscovery.discover(
           lockfile_path: rbs_collection_lockfile,
           project_root: root,
@@ -343,7 +348,7 @@ module Rigor
         missing_gems, overlay_paths = missing_gems_and_overlay_paths(
           locked: locked, default_libraries: merged_libraries, bundle_sig_paths: gem_sig_paths,
           rbs_collection_paths: collection_paths, plugin_registry: plugin_registry,
-          signature_paths: resolved_paths, bundle_root: bundle_root
+          signature_paths: resolved_paths, bundle_root: bundle_root, project_gem_names: project_gems
         )
         loader_signature_paths = resolved_paths + plugin_sig_paths + gem_sig_paths +
                                  collection_paths + overlay_paths
@@ -427,19 +432,6 @@ module Rigor
         library_names + RbsLoader.vendored_gem_names.reject { |name| RequiredFeatures.gated_dir?(name) }
       end
 
-      # Issue #2441 — the locked gems a `PATH` stanza resolves inside the project root: the project's own code,
-      # which `rbs collection install` still fetches community RBS for (its generator skips only a `gemspec`
-      # source). The project's `sig/` declares those classes, so the collection copy would only double-declare
-      # them. A `PATH` gem outside the root (a sibling checkout) is a dependency like any other and keeps its
-      # collection RBS.
-      def project_path_gem_names(locked, root)
-        root_dir = File.expand_path(root.to_s)
-        locked.each_value.filter_map do |gem|
-          dir = gem.path_source
-          gem.name if dir && (dir == root_dir || dir.start_with?("#{root_dir}/"))
-        end
-      end
-
       def default_signature_paths(root)
         sig = Pathname(root) / DEFAULT_PROJECT_SIG_DIR
         sig.directory? ? [sig] : []
@@ -470,12 +462,15 @@ module Rigor
       # index, and as the eligible-gem set for the ADR-72 overlay resolution. Returns `[entries, overlay_paths]`.
       def missing_gems_and_overlay_paths(locked:, default_libraries:, bundle_sig_paths:,
                                          rbs_collection_paths:, plugin_registry:, signature_paths: [],
-                                         bundle_root: nil)
+                                         bundle_root: nil, project_gem_names: Set.new)
         if locked.empty?
           return unlocked_missing_gems(default_libraries, bundle_sig_paths, rbs_collection_paths, bundle_root)
         end
 
+        # Issue #2441 — the project's own path gems are neither missing RBS nor overlay-eligible: the project's
+        # `sig/` declares them, and an overlay (`data/gem_overlay/activesupport`) would collide with it.
         rows = missing_rows(locked, default_libraries, bundle_sig_paths, rbs_collection_paths)
+               .reject { |row| project_gem_names.include?(row.gem_name) }
         overlays = gem_overlay_paths(
           missing_gem_names: rows.map(&:gem_name), plugin_registry: plugin_registry,
           signature_paths: signature_paths

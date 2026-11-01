@@ -227,7 +227,7 @@ project Ruby's gem home without running your toolchain. If `rigor check`'s
 `--stats` shows gems whose RBS it could not find, point it at the bundle
 explicitly with `bundler.bundle_path:`, or supply signatures another way:
 `rbs collection install` (auto-discovered) or `dependencies.source_inference:`.
-| `rbs_collection.auto_detect` | Boolean | `true` | Auto-discover `rbs_collection.lock.yaml`. An entry for a gem your `Gemfile.lock` sources from a `path:` inside the project (the project's own code, which your `sig/` declares) is not loaded. |
+| `rbs_collection.auto_detect` | Boolean | `true` | Auto-discover `rbs_collection.lock.yaml`. An entry is not loaded for a gem your `Gemfile.lock` sources from a `path:` directory that is at or under one of your `paths:` entries, or contains one (the gem is code Rigor analyses, which your `sig/` declares). |
 | `rbs_collection.lockfile` | String | `nil` | Explicit `rbs_collection.lock.yaml` path. |
 | `dependencies.source_inference` | Array | `[]` | Per-gem source-inference modes (ADR-10). |
 | `dependencies.budget_per_gem` | Integer | `5000` | Per-gem source-walk cap, counted in **method definitions** (not time): the walker stops harvesting a gem's catalog once it reaches this many `def`s, then emits `dynamic.dependency-source.budget-exceeded` and degrades the rest to `Dynamic[top]`. Range 1250–20000. |

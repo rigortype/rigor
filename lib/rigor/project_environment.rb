@@ -120,6 +120,7 @@ module Rigor
     def dependency_discovery_options(configuration)
       {
         core_root: configuration.core_root,
+        paths: configuration.paths,
         bundler_bundle_path: configuration.bundler_bundle_path,
         bundler_auto_detect: configuration.bundler_auto_detect,
         bundler_lockfile: configuration.bundler_lockfile,

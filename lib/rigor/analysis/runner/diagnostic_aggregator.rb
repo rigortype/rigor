@@ -261,6 +261,10 @@ module Rigor
             project_root: Dir.pwd,
             auto_detect: @configuration.bundler_auto_detect
           )
+          # Issue #2441 — the project's own path gems are not dependencies missing RBS; the environment skips
+          # their collection copy, so the same set leaves the report here.
+          own = Environment::ProjectPathGems.names(locked, paths: @configuration.paths, root: Dir.pwd)
+          locked = locked.except(*own)
           return [] if locked.empty?
 
           bundle_sig_paths = Environment::BundleSigDiscovery.discover(

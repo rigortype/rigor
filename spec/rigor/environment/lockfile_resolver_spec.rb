@@ -84,6 +84,22 @@ RSpec.describe Rigor::Environment::LockfileResolver do
       expect(result.fetch("rack").path_source).to be_nil
     end
 
+    it "keeps a multi-platform PATH gem's directory when its platform variants are folded together" do
+      body = <<~LOCKFILE
+        PATH
+          remote: gems/own
+          specs:
+            own (0.1.0)
+            own (0.1.0-arm64-darwin)
+
+        #{simple_lockfile_body}
+      LOCKFILE
+      path = write_lockfile(body)
+      own = described_class.locked_gems(lockfile_path: path, project_root: Dir.pwd, auto_detect: false).fetch("own")
+      expect(own.variants.size).to eq(2)
+      expect(own.path_source).to eq(File.join(File.expand_path(tmpdir), "gems/own"))
+    end
+
     it "resolves relative lockfile_path against project_root" do
       sub = File.join(tmpdir, "app")
       FileUtils.mkdir_p(sub)

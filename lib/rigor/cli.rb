@@ -49,9 +49,13 @@ module Rigor
     # 2026-07-17 and nothing noticed. See `docs/internal-spec/config.md`.
     CONFIG_SCHEMA_URL = "https://github.com/rigortype/rigor/raw/master/schemas/rigor-config.schema.json"
 
-    # The line `rigor init` writes above a `plugins:` list it filled from Gemfile.lock, so the user can tell the
-    # entries were detected rather than typed.
-    DETECTED_PLUGINS_COMMENT = "# Detected from Gemfile.lock by `rigor init`. Remove any you do not want."
+    # The comment `rigor init` writes under `plugins: []` when Gemfile.lock names a gem a bundled plugin models. The
+    # plugins are suggested, not enabled: ADR-96 Criterion 2 keeps a lockfile's presence from opting a project into a
+    # plugin's code, so the user uncomments the ones they want (#2536).
+    DETECTED_PLUGINS_HEADER = [
+      "# Detected from Gemfile.lock (suggested, not enabled). To load them, delete the `[]` above, uncomment the",
+      "# `plugins:` line and the entries you want, then run `rigor plugins --strict`."
+    ].freeze
 
     HANDLERS = {
       "check" => :run_check,
@@ -251,7 +255,9 @@ module Rigor
       if plugins.empty?
         @out.puts "  1. Edit #{path} — add the `plugins:` your project needs."
       else
-        @out.puts "  1. Edit #{path} — review the plugins detected from Gemfile.lock (#{plugins.join(', ')})."
+        @out.puts "  1. Edit #{path} — to load a detected plugin, delete the `[]` under `plugins:`, uncomment"
+        @out.puts "     the `plugins:` line and the entries you want:"
+        plugins.each { |gem| @out.puts "       #{gem}" }
       end
       @out.puts "  2. Run `rigor plugins` to verify every configured plugin loads."
       @out.puts "     (`--strict` exits 1 on failure; ideal CI gate.)"
@@ -284,8 +290,8 @@ module Rigor
 
     # Renders the starter `.rigor.yml` body. The template serialises `Configuration::DEFAULTS` (so the on-disk file
     # round-trips through `Configuration.load`) and prepends a short header that points the user at the keys they are
-    # most likely to want to edit. `plugins:` carries the detected gems when there are any; otherwise it is the empty
-    # list the defaults ship, so a project with no lockfile gets the template it always did.
+    # most likely to want to edit. `plugins:` stays the empty list the defaults ship; detected gems appear beneath it as
+    # comments, so a project with no lockfile gets the template it always did.
     def init_template(path = ".rigor.dist.yml", plugins: [])
       <<~YAML
         # yaml-language-server: $schema=#{CONFIG_SCHEMA_URL}
@@ -346,13 +352,18 @@ module Rigor
       YAML
     end
 
-    # The serialised settings, with a comment above `plugins:` when `Gemfile.lock` filled it. The comment is added to
-    # the text rather than the hash, because `YAML.dump` cannot carry one, and the list keeps its place among the keys.
+    # The serialised settings. `plugins: []` stays valid YAML and schema-clean; when `Gemfile.lock` named a modelled
+    # gem, the suggestion block sits under it as comments, so nothing loads until the user uncomments a line.
     def settings_yaml(path, plugins)
-      yaml = YAML.dump(init_settings(path, plugins)).sub(/\A---\n/, "")
+      yaml = YAML.dump(init_settings(path)).sub(/\A---\n/, "")
       return yaml if plugins.empty?
 
-      yaml.sub(/^plugins:/) { "#{DETECTED_PLUGINS_COMMENT}\nplugins:" }
+      yaml.sub(/^plugins: \[\]\n/) { "plugins: []\n#{detected_plugins_block(plugins)}" }
+    end
+
+    def detected_plugins_block(plugins)
+      lines = DETECTED_PLUGINS_HEADER + ["# plugins:"] + plugins.map { |gem| "#   - #{gem}" }
+      lines.map { |line| "#{line}\n" }.join
     end
 
     # The settings `rigor init` writes: the defaults, with `test_paths:` spelled out as the test roots found now, so
@@ -363,11 +374,10 @@ module Rigor
     #
     # `target_ruby` is left out (the template writes it commented): a written key is a statement about the runtime
     # (#1692), and the starter must not make one the user never chose.
-    def init_settings(path, plugins = [])
+    def init_settings(path)
       config_dir = config_dir_of(path)
       settings = Configuration::DEFAULTS.except("target_ruby")
       settings = settings.merge("paths" => roots_relative_to(settings.fetch("paths"), config_dir))
-      settings = settings.merge("plugins" => plugins) unless plugins.empty?
       test_paths = Configuration.new.resolved_test_paths
       return settings if test_paths.empty?
 

@@ -111,16 +111,21 @@ different target; `--force` overwrites an existing file.
 Exit `1` if the file exists and `--force` was not given.
 
 When the project has a `Gemfile.lock` in the working directory,
-`rigor init` fills `plugins:` with the bundled plugins whose
-gems the lockfile declares (the same read as
-[`rigor doctor`](#rigor-doctor)'s plugin-gap check). The entries
-are active and preceded by a comment saying they were detected
-from `Gemfile.lock`; a Rails project's `rails` also brings in the
-Rails family, so the list can be long. Remove any line you do
-not want. Without a lockfile, or when no locked gem has a bundled
-plugin, `plugins:` is the empty list.
+`rigor init` suggests the bundled plugins whose gems the lockfile
+declares (the same read as [`rigor doctor`](#rigor-doctor)'s
+plugin-gap check). The suggestions are commented out under
+`plugins: []`, so nothing loads until you enable one: delete the
+`[]`, uncomment the `plugins:` line and the entries you want, then
+run `rigor plugins --strict`. A Rails project's `rails` also brings
+in the Rails family, so the list can be long. Without a lockfile,
+or when no locked gem has a bundled plugin, the template has no
+suggestions.
 
-`--no-plugins` keeps the empty `plugins:` list even when a
+Suggesting rather than enabling follows ADR-96 Criterion 2: a
+lockfile's presence does not by itself opt a project into a
+plugin's code.
+
+`--no-plugins` writes the template with no suggestions, even when a
 lockfile is present.
 
 ## `rigor annotate`

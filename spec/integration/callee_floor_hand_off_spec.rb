@@ -4,6 +4,14 @@
 require "spec_helper"
 
 RSpec.describe "a hand-off inside a callee resolves its constants in the callee's own nesting (#2515)", type: :runner do
+  # ADR-127 WD3 — every memo hit is recomputed and compared, so a memo key that misses an input fails here.
+  around do |example|
+    Rigor::Inference::MemoAudit.enable!
+    example.run
+  ensure
+    Rigor::Inference::MemoAudit.disable!
+  end
+
   def rules(source)
     analyze(source).diagnostics.reject { |d| d.severity == :info }.map(&:qualified_rule)
   end

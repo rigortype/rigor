@@ -101,6 +101,10 @@ ALLOWED_ANCESTRY_WALKERS = {
     "existential over the project's own superclass chain (does any ancestor `include`/`extend Typelizer::DSL`), " \
     "read from the plugin's cached file scan, which has no Scope or discovery tables to build a chain from; " \
     "order-independent, and it only ever ADDS a root for a class the scan itself declared",
+  "lib/rigor/scope.rb#user_instance_def_owners" =>
+    "descendant scan over the superclass table (via `open_to_override?`): does any project class name the owner " \
+    "as its superclass, or is the owner a module, so the callee floor reads the def as floor-all (#2515); " \
+    "walks no ancestor and answers no definer, order-independent",
   "lib/rigor/scope.rb#singleton_extends_of" =>
     "union of every `extend` up the superclass chain, read by `Narrowing` only to withhold a `Bot`; " \
     "order-independent"

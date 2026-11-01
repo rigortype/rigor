@@ -1395,7 +1395,8 @@ module Rigor
         keys = moved.map { |(class_name, _mark)| "mark:#{class_name.split('::').last}" }.uniq
         keys.concat(mixin_keys(tainted))
         extended = Scope::DiscoveryIndex::ENVELOPE_OBJECT_EXTENDED_MARK
-        keys << "mark:*" if moved.any? { |(_class_name, mark)| mark == extended }
+        meta = Scope::DiscoveryIndex::ENVELOPE_META_SUPERCLASS_MARK
+        keys << "mark:*" if moved.any? { |(_class_name, mark)| mark == extended || mark == meta }
         Incremental.negative_closure(keys, @negative_dependents)
       end
 

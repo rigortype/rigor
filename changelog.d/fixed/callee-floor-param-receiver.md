@@ -1,0 +1,3 @@
+- **[engine]** A hash or array literal handed through a callee that passes it to a parameter or local receiver (`def self.a(p, o, h) = h.c(p, o)`) no longer reports `flow.always-truthy-condition` when `c` writes it. ([#2515](https://github.com/rigortype/rigor/issues/2515))
+  - A local assigned only a constant or `Const.new` is typed inside the callee.
+  - Any other receiver resolves to every user instance def of that name, and a name with more than eight defs floors the parameter.

@@ -1271,6 +1271,86 @@ module Rigor
       Inference::DefNodeResolver.resolve(entry)
     end
 
+    # Issue #2515 — `[class_name, open]` for each class or module whose instance def table holds `method_name`, in
+    # table order (frozen; empty when no user def has the name). The callee floor's hand-off on a receiver it cannot
+    # type reads every def of the name, so the answer depends on the whole project's defs of that name: a recorder
+    # files the `defines:<name>` name edge, which fires when a file starts or stops defining it. `open` is true when
+    # the real receiver may not be the class the def sits on: the owner is a module (an includer's methods are
+    # called from it), or a project class names it as its superclass (a subclass may override what the def calls).
+    # A recorder files `subclass_of:<owner>` for the second.
+    def user_instance_def_owners(method_name)
+      Analysis::DependencyRecorder.read_name(:defines, method_name) if Analysis::DependencyRecorder.active?
+      name = method_name.to_sym
+      owners = nil
+      @discovery.discovered_def_nodes.each do |class_name, defs|
+        next unless defs.key?(name) && class_name != Inference::ScopeIndexer::TOP_LEVEL_DEF_KEY
+
+        (owners ||= []) << [class_name, open_to_override?(class_name)].freeze
+      end
+      owners.nil? ? EMPTY_OWNERS : owners.freeze
+    end
+
+    EMPTY_OWNERS = [].freeze
+    private_constant :EMPTY_OWNERS
+
+    # Issue #2515 — `[opaque, keys]`: whether the project holds a subclass relation the superclass table does not
+    # spell as `class X < Name`, so that no owner can be called free of an override. It holds when a class takes
+    # `Class.new(Parent)` ({DiscoveryIndex::ENVELOPE_META_SUPERCLASS_MARK}), when a class's superclass expression is
+    # unreadable (`nil` in the table), or when a written superclass is not a declared class and some file assigns a
+    # constant of that name (`H2 = Helper; class Sub < H2`; the writer census {#bound_constant_names} or this file's
+    # constant table).
+    # `keys` are the frozen ADR-46 name keys a recorder files for the answer; the caller files them, since the answer
+    # is memoised per discovery.
+    def subclassing_opacity
+      keys = OPACITY_KEYS.dup
+      opaque = @discovery.discovered_parameter_envelopes.each_value.any? do |bucket|
+        bucket.key?(DiscoveryIndex::ENVELOPE_META_SUPERCLASS_MARK)
+      end
+      segments = {}
+      @discovery.discovered_superclasses.each_value do |parent|
+        opaque = true if parent.nil? || alias_superclass?(parent, segments, keys)
+      end
+      [opaque ? true : false, keys.each(&:freeze).freeze].freeze
+    end
+
+    # True when `parent`, a written superclass that is no declared class, names a constant some file assigns. Files
+    # the `constant:<segment>` key for it once per segment.
+    def alias_superclass?(parent, segments, keys)
+      return false if @discovery.discovered_classes.key?(parent)
+
+      cut = parent.rindex("::")
+      segment = cut ? parent.byteslice(cut + 2, parent.bytesize - cut - 2) : parent
+      return false if segments.key?(segment)
+
+      segments[segment] = true
+      keys << "constant:#{segment}"
+      @discovery.constant_writers.key?(segment) || @discovery.in_source_constants.key?(parent)
+    end
+    private :alias_superclass?
+
+    OPACITY_KEYS = %w[subclass_of:* mark:*].freeze
+    private_constant :OPACITY_KEYS
+
+    def open_to_override?(class_name)
+      Analysis::DependencyRecorder.read_last_segment(:subclass_of, class_name) if Analysis::DependencyRecorder.active?
+      return true if @discovery.discovered_parameter_envelopes[class_name]&.key?(DiscoveryIndex::ENVELOPE_MODULE_MARK)
+
+      @discovery.discovered_superclasses.any? do |child, parent|
+        child != class_name && parent && names_class?(parent, class_name)
+      end
+    end
+    private :open_to_override?
+
+    # True when a superclass written as `written` (`Helper`, `A::Helper`, `::Helper`) may name `qualified`.
+    def names_class?(written, qualified)
+      written = written[2..] if written.start_with?("::")
+      return true if written == qualified
+      return false unless qualified.end_with?(written)
+
+      qualified.getbyte(qualified.bytesize - written.bytesize - 1) == 58
+    end
+    private :names_class?
+
     # Module-singleton call resolution (ADR-57 follow-up) — companion of {#user_def_for} for SINGLETON-side defs
     # (`def self.x`, `def Foo.x`, `class << self` bodies, and `module_function` defs). Returns the
     # `Prism::DefNode` for `class_name.method_name` invoked on the module/class constant itself, or nil. The

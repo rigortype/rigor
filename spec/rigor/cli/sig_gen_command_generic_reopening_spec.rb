@@ -192,6 +192,57 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     expect(rbs_validate).to eq([0, ""])
   end
 
+  # #2580 — a `sig/` an earlier run wrote (before #2436) opens `Array` and `Hash` bare. rbs rejects the file and
+  # every class whose ancestry reaches them, `Object` included, fails its definition build; the next `--write`
+  # gives the header the core declaration's parameters.
+  describe "a parameterless header an earlier run wrote" do
+    before do
+      write("sig/ext.rbs", "class Array\n  def second_or_nil: () -> 1\nend\n\nclass Hash\n  def old: () -> 1\nend\n")
+      write("lib/ext.rb", "class Array\n  def second_or_nil = 1\nend\nclass Hash\n  def to_liquid = \"h\"\nend\n")
+    end
+
+    it "repairs the header and the signature tree builds again" do
+      expect(rbs_validate.first).not_to eq(0)
+
+      status, out, = sig_gen("--write", "lib")
+
+      expect(status).to eq(0)
+      expect(out).to include("repaired 2 generic header(s): Array[unchecked out E], Hash[unchecked out K, " \
+                             "unchecked out V]")
+      expect(written("ext")).to eq(<<~RBS)
+        class Array[unchecked out E]
+          def second_or_nil: () -> 1
+        end
+
+        class Hash[unchecked out K, unchecked out V]
+          def old: () -> 1
+          def to_liquid: () -> "h"
+        end
+      RBS
+      expect(rbs_validate).to eq([0, ""])
+    end
+
+    it "repairs a file the run writes no member into" do
+      write("sig/ext.rbs", "class Array\n  def second_or_nil: () -> 1\nend\n")
+      write("lib/ext.rb", "class Array\n  def dunno(x) = x.foo\nend\n")
+
+      status, out, = sig_gen("--write", "lib")
+
+      expect(status).to eq(0)
+      expect(out).to include("(+0, repaired 1 generic header(s): Array[unchecked out E]")
+      expect(written("ext")).to eq("class Array[unchecked out E]\n  def second_or_nil: () -> 1\nend\n")
+      expect(rbs_validate).to eq([0, ""])
+    end
+
+    it "fails --check until the header is repaired" do
+      status, out, = sig_gen("--check", "lib")
+
+      expect(status).to eq(1)
+      expect(out).to include("repaired 2 generic header(s)")
+      expect(written("ext")).to start_with("class Array\n")
+    end
+  end
+
   describe "a class the project's sig/ declares generic" do
     before do
       write("sig/box.rbs",

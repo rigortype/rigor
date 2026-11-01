@@ -1,0 +1,4 @@
+- **[sig-gen]** `rigor sig-gen --write` now repairs a `sig/` header that opens a generic class such as `class Array` or `class Hash` without its type parameters, so `Object` and every class that reaches it build again. ([#2602](https://github.com/rigortype/rigor/pull/2602))
+  - Earlier releases wrote such headers, and `rbs` rejects them with `GenericParameterMismatchError`; later runs kept writing members into them.
+  - The plain parameters of the first loaded declaration are inserted after the class name, in any file the run maps a method to, even when it adds no member there; `--write` reports `repaired N generic header(s)`, counting each declaration, and `--check` fails until the repair is written.
+  - A header that spells type parameters of its own is left as written, and so is a bare one whose body names a type like a parameter (`def old: () -> E`), since the parameter would capture it.

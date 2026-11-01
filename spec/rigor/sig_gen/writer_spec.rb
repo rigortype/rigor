@@ -1171,4 +1171,137 @@ RSpec.describe Rigor::SigGen::Writer do
       expect { build_definitions("C") }.not_to raise_error
     end
   end
+
+  # #2580 — a file an earlier run wrote opens a core generic class with no type parameters (`class Array`, as
+  # sig-gen spelled it before #2436). rbs rejects it (`GenericParameterMismatchError`) and every class whose
+  # ancestry reaches it fails to build, `Object` included; merging into that header must repair it.
+  describe "a parameterless header of a generic class (#2580)" do
+    def generic(method_name:, class_name:, params:)
+      candidate(method_name: method_name, class_name: class_name, rbs: "def #{method_name}: () -> 1")
+        .with_class_type_params(params)
+    end
+
+    let(:params) { { "Array" => "[unchecked out E]", "Hash" => "[unchecked out K, unchecked out V]" } }
+
+    it "copies the stamped parameters onto every bare opening it merges into" do
+      target = write_target("class Array
+  def old: () -> 1
+end
+
+class Hash
+  class Nested
+  end
+end
+")
+
+      result = writer.write("lib/foo.rb", [generic(method_name: :a, class_name: "Array", params: params),
+                                           generic(method_name: :n, class_name: "Hash::Nested", params: params)])
+
+      expect(result.action).to eq(:updated)
+      expect(result.repaired_headers).to eq(["Array[unchecked out E]", "Hash[unchecked out K, unchecked out V]"])
+      expect(File.read(target)).to eq(<<~RBS)
+        class Array[unchecked out E]
+          def old: () -> 1
+          def a: () -> 1
+        end
+
+        class Hash[unchecked out K, unchecked out V]
+          class Nested
+            def n: () -> 1
+          end
+        end
+      RBS
+    end
+
+    it "writes the repair even when every proposed member is already declared" do
+      target = write_target("class Array
+  def a: () -> 1
+end
+")
+
+      result = writer.write("lib/foo.rb", [generic(method_name: :a, class_name: "Array", params: params)])
+
+      expect(result.action).to eq(:updated)
+      expect(result.to_h[:repaired_headers]).to eq(["Array[unchecked out E]"])
+      expect(File.read(target)).to eq("class Array[unchecked out E]
+  def a: () -> 1
+end
+")
+    end
+
+    it "leaves a header that spells parameters of its own" do
+      original = "class Array[T]
+  def old: () -> 1
+end
+"
+      target = write_target(original)
+
+      result = writer.write("lib/foo.rb", [generic(method_name: :a, class_name: "Array", params: params)])
+
+      expect(result.repaired_headers).to eq([])
+      expect(File.read(target)).to eq("class Array[T]
+  def old: () -> 1
+  def a: () -> 1
+end
+")
+    end
+
+    it "counts every declaration it repairs" do
+      target = write_target("class Array\n  def x: () -> 1\nend\n\nclass Array\n  def y: () -> 1\nend\n")
+
+      result = writer.write("lib/foo.rb", [generic(method_name: :a, class_name: "Array", params: params)])
+
+      expect(result.repaired_headers).to eq(["Array[unchecked out E]", "Array[unchecked out E]"])
+      expect(File.read(target).scan("class Array[unchecked out E]").size).to eq(2)
+    end
+
+    # Review of #2602: under `class Array[unchecked out E]` a member's bare `E` binds to the parameter, so a header
+    # whose body names the project's class `E` that way stays as it was rather than change what the member says.
+    describe "a body that names a type like a parameter" do
+      it "leaves the header bare when an existing member spells it" do
+        original = "class E\nend\n\nclass Array\n  def old: () -> E\nend\n"
+        target = write_target(original)
+
+        result = writer.write("lib/foo.rb", [generic(method_name: :a, class_name: "Array", params: params)])
+
+        expect(result.repaired_headers).to eq([])
+        expect(File.read(target)).to eq("class E\nend\n\nclass Array\n  def old: () -> E\n  def a: () -> 1\nend\n")
+      end
+
+      it "leaves the header bare when a member this run merges spells it" do
+        target = write_target("class Hash\n  def old: () -> 1\nend\n")
+        merged = candidate(method_name: :k, class_name: "Hash", rbs: "def k: () -> K").with_class_type_params(params)
+
+        result = writer.write("lib/foo.rb", [merged])
+
+        expect(result.repaired_headers).to eq([])
+        expect(File.read(target)).to start_with("class Hash\n")
+      end
+
+      it "repairs the header when the member anchors the name" do
+        target = write_target("class Array\n  def old: () -> ::E\n  def e: () -> Foo::E\nend\n")
+
+        result = writer.write("lib/foo.rb", [generic(method_name: :a, class_name: "Array", params: params)])
+
+        expect(result.repaired_headers).to eq(["Array[unchecked out E]"])
+        expect(File.read(target)).to start_with("class Array[unchecked out E]\n")
+      end
+    end
+
+    # Guard: no line of the fix fails it; it holds the repair to the classes the run stamped.
+    it "leaves a bare header the stamp does not name" do
+      target = write_target("class Array
+  def a: () -> 1
+end
+")
+
+      result = writer.write("lib/foo.rb", [candidate(method_name: :a, class_name: "Array", rbs: "def a: () -> 1")])
+
+      expect(result.action).to eq(:noop)
+      expect(File.read(target)).to eq("class Array
+  def a: () -> 1
+end
+")
+    end
+  end
 end

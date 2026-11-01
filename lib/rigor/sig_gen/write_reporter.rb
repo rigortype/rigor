@@ -129,7 +129,9 @@ module Rigor
       # because "added 2" when one of them rewrote a line the project already had would understate the change.
       def applied_counts(result)
         added = "+#{result.applied.size - result.replaced.size}"
-        result.replaced.empty? ? added : "#{added}, replaced #{result.replaced.size}"
+        added = "#{added}, replaced #{result.replaced.size}" unless result.replaced.empty?
+        repaired = result.repaired_headers
+        repaired.empty? ? added : "#{added}, repaired #{repaired.size} generic header(s): #{repaired.join(', ')}"
       end
 
       def render_write_created(result)

@@ -303,19 +303,18 @@ module Rigor
       # each generic class the run may open a header for — its own class, the classes it is nested in, and the
       # file's class shells and theirs — so the writer and `--print` spell the same header. Method bodies keep
       # `untyped` for element types; nothing here names `E` in a member.
+      #
+      # Issue #2580 — a skipped candidate is stamped too, and its class counts towards the map: the writer
+      # repairs a parameterless header an earlier run wrote into the file a candidate routes to, and a file whose
+      # every proposal is already declared (or untyped) would otherwise keep a header rbs rejects.
       def stamp_generic_reopenings(candidates)
         loader = @environment&.rbs_loader
         return candidates if loader.nil?
 
-        emittable = candidates.select { |c| Classification::EMITTABLE.include?(c.classification) }
-        spelled = header_type_params(loader, emittable.flat_map { |c| [c.class_name, *c.class_shells] })
+        spelled = header_type_params(loader, candidates.flat_map { |c| [c.class_name, *c.class_shells] }.compact)
         return candidates if spelled.empty?
 
-        candidates.map do |candidate|
-          next candidate unless Classification::EMITTABLE.include?(candidate.classification)
-
-          candidate.with_class_type_params(spelled)
-        end
+        candidates.map { |candidate| candidate.with_class_type_params(spelled) }
       end
 
       # `{ class name => "[unchecked out E]" }` for every name in `names`, or a namespace it is nested in, whose

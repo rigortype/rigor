@@ -79,3 +79,23 @@ class ShapeRewriters
   def q4; return unless @tag; chain_plain; t = @tag; t.upcase; end # QUIET-1446
   def q5; return unless @tag; case_in;     t = @tag; t.upcase; end # QUIET-1446
 end
+
+# Issue #2482 — a `nil` write that a later straight-line write of a value overwrites leaves the variable present when
+# the callee returns, so the reset marks and the read stays quiet. The `yield` after the last write makes the proof
+# decline. Under Ruby 4.0.5 every `q*` returns a String.
+class OverwrittenWrites
+  def initialize
+    @tag = "t"
+    @parts = []
+  end
+
+  def w_or; @tag = @parts.first || nil; @tag = "x"; yield if block_given?; end
+  def w_memo; @tag = @parts.first || nil; @tag ||= "default"; yield if block_given?; end
+  def w_multi; @a, @tag = 1; @tag = "x"; yield if block_given?; end
+  def w_nil; @tag = nil; @tag = "x"; yield if block_given?; end
+
+  def q1; return unless @tag; w_or;    t = @tag; t.upcase; end # QUIET-1446
+  def q2; return unless @tag; w_memo;  t = @tag; t.upcase; end # QUIET-1446
+  def q3; return unless @tag; w_multi; t = @tag; t.upcase; end # QUIET-1446
+  def q4; return unless @tag; w_nil;   t = @tag; t.upcase; end # QUIET-1446
+end

@@ -123,7 +123,8 @@ end
 
 # Issue #2482 — an `||` / `&&` that can answer `nil`, a multiple assignment of a single literal (Ruby binds every
 # target after the first to `nil`), a nested target and a chained safe-navigation call are `nil` writes too. The
-# `yield` makes the proof decline. Under Ruby 4.0.5 every `probe_*` raises NoMethodError on `nil`.
+# `yield` makes the proof decline, and `r_return` may leave before its later write. Under Ruby 4.0.5 every
+# `probe_*` raises NoMethodError on `nil`.
 class ShapeWriters
   def initialize
     @tag = "t"
@@ -136,10 +137,12 @@ class ShapeWriters
   def r_single = (@a, @tag = 1; yield if block_given?)
   def r_nested = ((@a, @tag), @b = [1, nil], 2; yield if block_given?)
   def r_chain = (@tag = @peer&.tag&.upcase; yield if block_given?)
+  def r_return = (@tag = nil; return if @items.empty?; @tag = "x"; yield if block_given?)
 
   def probe_or; return unless @tag; r_or; t = @tag; t.upcase; end # FIRES-1446 call.possible-nil-receiver
   def probe_and; return unless @tag; r_and; t = @tag; t.upcase; end # FIRES-1446 call.possible-nil-receiver
   def probe_single; return unless @tag; r_single; t = @tag; t.upcase; end # FIRES-1446 call.possible-nil-receiver
   def probe_nested; return unless @tag; r_nested; t = @tag; t.upcase; end # FIRES-1446 call.possible-nil-receiver
   def probe_chain; return unless @tag; r_chain; t = @tag; t.upcase; end # FIRES-1446 call.possible-nil-receiver
+  def probe_return; return unless @tag; r_return; t = @tag; t.upcase; end # FIRES-1446 call.possible-nil-receiver
 end

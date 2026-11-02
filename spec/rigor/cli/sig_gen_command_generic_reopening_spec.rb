@@ -39,6 +39,11 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     File.read(File.join(root, "sig/#{name}.rbs"))
   end
 
+  # The path the writer reports: the project root resolved, as `/private/tmp` for a macOS `/tmp` root.
+  def sig_path(name)
+    File.join(File.realpath(root), "sig/#{name}.rbs")
+  end
+
   # `rbs -I sig validate`, in process: its exit status and what it logged.
   def rbs_validate
     log = StringIO.new
@@ -240,6 +245,86 @@ RSpec.describe Rigor::CLI::SigGenCommand do
       expect(status).to eq(1)
       expect(out).to include("repaired 2 generic header(s)")
       expect(written("ext")).to start_with("class Array\n")
+    end
+
+    # #2603 — a file no candidate routes to (its source is gone, or no longer reopens the class) is repaired too.
+    it "repairs a file no candidate of the run routes to" do
+      write("sig/old_ext.rbs", "class Array\n  def gone: () -> 1\nend\n")
+
+      status, out, = sig_gen("--write", "lib")
+
+      expect(status).to eq(0)
+      expect(out).to include("updated #{sig_path('old_ext')} (+0, repaired 1 generic header(s): " \
+                             "Array[unchecked out E]")
+      expect(written("old_ext")).to eq("class Array[unchecked out E]\n  def gone: () -> 1\nend\n")
+      expect(rbs_validate).to eq([0, ""])
+    end
+
+    it "repairs a file no candidate routes to when the run has no candidate at all" do
+      write("lib/ext.rb", "")
+      write("sig/old_ext.rbs", "class Hash\n  def gone: () -> 1\nend\n")
+      File.delete(sig_path("ext"))
+
+      expect(sig_gen("--check", "lib").first).to eq(1)
+      expect(sig_gen("--write", "lib").first).to eq(0)
+      expect(written("old_ext")).to start_with("class Hash[unchecked out K, unchecked out V]\n")
+    end
+
+    # #2605 — rbs rejects the class while any one bare opening is left, so either every opening is repaired or none.
+    describe "a class one of whose openings is held back" do
+      before do
+        write("sig/held.rbs", "class E\nend\n\nclass Array\n  def held: () -> E\nend\n")
+      end
+
+      it "repairs none of its openings and reports the one that blocks" do
+        status, out, = sig_gen("--write", "lib")
+
+        expect(status).to eq(0)
+        expect(written("ext")).to start_with("class Array\n")
+        expect(written("ext")).to include("class Hash[unchecked out K, unchecked out V]\n")
+        expect(written("held")).to eq("class E\nend\n\nclass Array\n  def held: () -> E\nend\n")
+        expect(out).to include("generic header left bare: Array in #{sig_path('ext')}, " \
+                               "#{sig_path('held')} (#{sig_path('held')} names E, " \
+                               "which the type parameter would capture)")
+      end
+
+      it "reports it in place of No changes when nothing else changes" do
+        write("lib/ext.rb", "")
+        File.delete(sig_path("ext"))
+
+        _, out, = sig_gen("--write", "lib")
+
+        expect(out).not_to include("No changes")
+        expect(out).to start_with("generic header left bare: Array in #{sig_path('held')} (")
+      end
+
+      it "names it under left_bare in --format=json, and --check does not fail on it alone" do
+        sig_gen("--write", "lib")
+
+        status, out, = sig_gen("--check", "--format=json", "lib")
+
+        expect(status).to eq(0)
+        expect(JSON.parse(out).fetch("left_bare")).to eq(
+          [{ "class" => "Array", "targets" => [sig_path("ext"), sig_path("held")],
+             "blocking" => [{ "target" => sig_path("held"), "names" => ["E"] }] }]
+        )
+      end
+    end
+
+    it "omits left_bare from --format=json when nothing is held back" do
+      _, out, = sig_gen("--write", "--format=json", "lib")
+
+      expect(JSON.parse(out)).not_to have_key("left_bare")
+    end
+
+    # #2605 — a method's own type parameter binds every `E` in its type, so the class's parameter cannot capture it.
+    it "repairs a header whose body names a parameter only as a method's own type parameter" do
+      write("sig/ext.rbs", "class Array\n  def pick: [E] (E) -> E\nend\n")
+
+      sig_gen("--write", "lib")
+
+      expect(written("ext")).to start_with("class Array[unchecked out E]\n  def pick: [E] (E) -> E\n")
+      expect(rbs_validate).to eq([0, ""])
     end
   end
 

@@ -70,8 +70,8 @@ module Rigor
         candidates = generator.run
 
         status = case mode
-                 when :write then dispatch_write(candidates, configuration, options)
-                 when :check then dispatch_check(candidates, configuration, options)
+                 when :write then dispatch_write(candidates, configuration, options, generator)
+                 when :check then dispatch_check(candidates, configuration, options, generator)
                  else
                    dispatch_print_or_diff(candidates, mode, options, observation_roots, path_errors)
                    0
@@ -290,11 +290,13 @@ module Rigor
       end
 
       # @return exit status — non-zero when a file the user asked to write could not be written.
-      def dispatch_write(candidates, configuration, options)
-        results = build_writer(configuration, options).write_all(candidates)
+      def dispatch_write(candidates, configuration, options, generator)
+        writer = build_writer(configuration, options)
+        results = writer.write_all(candidates, header_spelling: generator.method(:generic_header_spelling))
 
         refused = refused_candidates(candidates)
-        SigGen::Renderer.new(out: @out).render_write(results: results, format: options.fetch(:format), refused: refused)
+        SigGen::Renderer.new(out: @out).render_write(results: results, format: options.fetch(:format), refused: refused,
+                                                     left_bare: writer.left_bare)
         SigGen::Renderer.refusal_lines(refused).each { |line| @err.puts(line) }
         # A refused write (an assembled file that does not parse, an existing target that is not valid UTF-8 or
         # does not parse, or a method whose inline and `sig/` declarations disagree without `--overwrite`) means the
@@ -317,11 +319,15 @@ module Rigor
       # --overwrite` would apply it.
       #
       # @return 1 when `sig/` is out of date (or a write would be refused), 0 when it is current.
-      def dispatch_check(candidates, configuration, options)
-        results = build_writer(configuration, options, dry_run: true).write_all(candidates)
+      #
+      # A generic header held back from the repair (#2605) is reported, but does not fail the check: `--write`
+      # cannot change it, and it was failing the project's env build before the run as well.
+      def dispatch_check(candidates, configuration, options, generator)
+        writer = build_writer(configuration, options, dry_run: true)
+        results = writer.write_all(candidates, header_spelling: generator.method(:generic_header_spelling))
         refused = refused_candidates(candidates)
         SigGen::Renderer.new(out: @out).render_check(results: results, format: options.fetch(:format),
-                                                     refused: refused)
+                                                     refused: refused, left_bare: writer.left_bare)
         stale = SigGen::Renderer.out_of_date(results)
         return 0 if stale.empty? && refused.empty?
 

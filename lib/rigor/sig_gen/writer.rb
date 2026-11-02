@@ -4,6 +4,7 @@ require "fileutils"
 require "rbs"
 
 require_relative "classification"
+require_relative "generic_header_scan"
 require_relative "layout_index"
 require_relative "superclass_spelling"
 require_relative "write_result"
@@ -34,11 +35,16 @@ module Rigor
       # Per-`update_existing` accumulator. The merge_class helper mutates `source` / `decls` / `applied` /
       # `skipped` in place as each class is processed so the next class sees the latest byte positions.
       MergeState = Struct.new(:source, :decls, :applied, :skipped, :left_unreadable, :replaced, :repaired_headers,
-                              keyword_init: true)
+                              :target, keyword_init: true)
       private_constant :MergeState
 
       # The target routing this writer applies; the generator maps candidates through it to ask {#accepts_target?}.
       attr_reader :path_mapper
+
+      # #2605 — the generic classes whose bare headers the last {#write_all} (or {#write}) left bare, because a
+      # body names one of the parameters: `{ class:, targets:, blocking: [{ target:, names: }] }` each
+      # ({GenericHeaderScan#left_bare}).
+      attr_reader :left_bare
 
       # @param dry_run — assemble and validate every target exactly as a write would, and report it, without
       #   creating or changing a file. `sig-gen --check` (ADR-112 WD4) is this, so it can only ever disagree
@@ -54,6 +60,13 @@ module Rigor
         @global_superclasses = {}
         # #2436 — the target being rendered's view of {MethodCandidate#class_type_params}, set per target.
         @type_params = {}
+        # #2603/#2605 — the run-wide repair decision {#write_all} reads from the sig root before writing: the
+        # classes cleared for repair with their spelling, and the classes held back. {#write} leaves both empty and
+        # decides per file.
+        @scan_repairs = {}
+        @held_back = []
+        @left_bare = []
+        @repair_targets = []
       end
 
       # Process the full candidate list by resolving each candidate's target sig file via the path mapper (which
@@ -63,17 +76,19 @@ module Rigor
       # ADR-14 follow-up: this is the consolidated-layout entry point. The legacy `write(source_path,
       # candidates)` below assumes all candidates share a target and remains for spec convenience.
       #
+      # @param header_spelling [#call, nil] class name => the header spelling of a generic class the run does not
+      #   stamp (#2603: a bare header in a file no candidate routes to); the generator's
+      #   {Generator#generic_header_spelling}. Without it only the run's stamp counts.
       # @return one per target sig file.
-      def write_all(candidates)
+      def write_all(candidates, header_spelling: nil)
         emittable = candidates.select { |c| EMITTABLE.include?(c.classification) }
-        repairable = candidates.reject { |c| EMITTABLE.include?(c.classification) }.select { |c| repairable?(c) }
-        return [] if emittable.empty? && repairable.empty?
+        scan_generic_headers(candidates, header_spelling)
 
         @global_namespace_kinds = build_namespace_kinds(candidates)
         @global_superclasses = build_superclasses(candidates)
         grouped = emittable.group_by { |c| target_of(c) }
         results = grouped.map { |target, group| write_target(target, group) }
-        results + repair_only_results(repairable.group_by { |c| target_of(c) }.except(*grouped.keys))
+        results + repair_only_results(candidates, grouped.keys.map { |target| target.expand_path.to_s })
       end
 
       def target_of(candidate)
@@ -82,23 +97,32 @@ module Rigor
       end
       private :target_of
 
-      # Issue #2580 — a candidate the writer emits nothing for still names the file its class lives in, and that
-      # file may open a generic class with no type parameters (an earlier run's header). Only a candidate the
-      # generator stamped with a generic spelling, routed to an existing file, is worth opening the file for.
-      def repairable?(candidate)
-        candidate.path && candidate.class_name && candidate.respond_to?(:class_type_params) &&
-          !candidate.class_type_params.empty?
+      # Issues #2603 and #2605 — reads every file under the sig root for bare openings of generic classes before
+      # anything is written ({GenericHeaderScan}). A class is repaired in every file or in none: one bare opening
+      # rbs still rejects keeps the class failing, so repairing its other openings would be churn.
+      def scan_generic_headers(candidates, header_spelling)
+        stamp = merged_type_params(candidates)
+        scan = GenericHeaderScan.scan(sig_root: @path_mapper.sig_root_dir,
+                                      spelling_for: ->(name) { stamp[name] || header_spelling&.call(name) })
+        @scan_repairs = scan.repairs
+        @held_back = scan.left_bare.map { |entry| entry.fetch(:class) }
+        @left_bare = scan.left_bare
+        @repair_targets = scan.repair_targets
       end
-      private :repairable?
+      private :scan_generic_headers
 
-      # The targets only skipped candidates route to: each existing file inside the sig root gets its bare generic
-      # headers repaired and nothing else. A file with nothing to repair, or one the writer would not open (not UTF-8,
-      # unparseable), reports nothing, so a run that writes no member reads as it did before.
-      def repair_only_results(groups)
-        groups.filter_map do |target, group|
-          next unless target.exist? && inside_sig_root?(target)
+      # The files with a bare header to repair that no emitted member routes to: each gets the repair and nothing
+      # else (#2580), whether a skipped candidate routes to it or none does (#2603). The row names a candidate's
+      # source when one routes there. A file the writer would not open (not UTF-8, unparseable) is never listed.
+      def repair_only_results(candidates, written)
+        sources = candidates.each_with_object({}) do |candidate, acc|
+          acc[target_of(candidate).expand_path.to_s] ||= candidate.path if candidate.path
+        end
+        @repair_targets.filter_map do |path|
+          target = Pathname(path)
+          next if written.include?(target.expand_path.to_s) || !inside_sig_root?(target)
 
-          result = update_existing(group.first.path, target, group, repair_only: true)
+          result = update_existing(sources[target.expand_path.to_s], target, [], repair_only: true)
           result if %i[updated skipped_invalid_rbs].include?(result.action)
         end
       end
@@ -109,6 +133,9 @@ module Rigor
         emittable = candidates.select { |c| EMITTABLE.include?(c.classification) }
         return WriteResult.new(source_path: source_path, target_path: nil, action: :noop) if emittable.empty?
 
+        @scan_repairs = {}
+        @held_back = []
+        @left_bare = []
         target = @path_mapper.target_for(source_path, class_name: emittable.first.class_name)
         write_target(target, emittable, source_path: source_path)
       end
@@ -379,7 +406,7 @@ module Rigor
                                  error: "#{target} does not parse as RBS: #{parse_detail}")
         end
 
-        state = merged_state(source, decls, candidates, repair_only)
+        state = merged_state(source, decls, candidates, repair_only, target)
         unless state_changed?(state)
           return WriteResult.new(source_path: source_path, target_path: target, action: :noop,
                                  applied: state.applied, skipped: state.skipped,
@@ -416,8 +443,8 @@ module Rigor
         groups.keys.sort.each { |name| merge_class(state, name, groups.fetch(name), kinds, supers) }
         merge_class_shells(state, shells, kinds, supers)
         collapse_nested_declarations(state, groups.keys + shells.to_a)
-        # Last, so the members this run merged count towards {#shadowed_by_parameter?}.
-        repair_generic_headers(state)
+        # Last, so the members this run merged count towards {#shadowed_after_merge?}.
+        repair_generic_headers(state, state.target)
       end
 
       # Issue #2580 — a declaration this file already holds for a class the loaded RBS declares generic, opened
@@ -427,41 +454,46 @@ module Rigor
       # fails its definition build. Writing more members into that header would keep the file broken, so the
       # header gets the same spelling a new header would ({Generator#stamp_generic_reopenings}: plain
       # parameters only). A header that spells parameters of its own is the project's and is left alone, as is
-      # every class the run's stamp does not name.
+      # every class neither the run's stamp nor {#write_all}'s scan names.
       #
       # A declaration whose body names a type like one of the parameters (`def old: () -> E` for a project class
       # `E`) is left bare: under `class Array[unchecked out E]` that `E` would bind to the parameter, silently
       # changing what the member says. The body is matched as text, so a comment or a nested declaration that
-      # spells the name also keeps the header bare, which is the state the file was already in.
+      # spells the name also keeps the header bare, which is the state the file was already in; a method type that
+      # declares the name as its own parameter (`def m: [E] (E) -> E`) does not (#2605).
+      #
+      # Under {#write_all} the class is repaired in every file under the sig root or in none ({GenericHeaderScan},
+      # #2605): a class held back there is not repaired here, and a class the run does not stamp is repaired with the
+      # scan's spelling (#2603). The check below runs again after the merge, so a member this run merged counts
+      # too; the generator anchors a member's type that a parameter would capture (#2436), so it holds back a class
+      # the scan cleared only for a member written without that anchor, and is then reported in {#left_bare}.
       # `repaired_headers` gets one entry per declaration repaired.
-      def repair_generic_headers(state)
-        @type_params.keys.sort.each do |name|
-          spelling = @type_params.fetch(name)
-          bare = find_class_decls(state.decls, name).select do |d|
-            d.type_params.empty? && d.location&.[](:name) && !shadowed_by_parameter?(state.source, d, spelling)
-          end
-          next if bare.empty?
+      def repair_generic_headers(state, target)
+        spellings = @scan_repairs.merge(@type_params).except(*@held_back)
+        spellings.keys.sort.each do |name|
+          spelling = spellings.fetch(name)
+          bare = find_class_decls(state.decls, name).select { |d| d.type_params.empty? && d.location&.[](:name) }
+          next if bare.empty? || shadowed_after_merge?(state.source, bare, name, spelling, target)
 
           insert_type_params(state, bare, spelling)
           bare.each { state.repaired_headers << "#{name}#{spelling}" }
         end
       end
 
-      # Whether the declaration's text after its name (superclass, members, nested declarations) names one of
-      # the parameters `spelling` declares as a relative constant (`E`, `E::X`, not `::E` or `Foo::E`).
-      def shadowed_by_parameter?(source, decl, spelling)
-        names = parameter_names(spelling)
-        return true if names.nil?
+      # Whether any of `bare` names one of the parameters `spelling` declares ({GenericHeaderScan.shadowing_names});
+      # each such opening is recorded in {#left_bare}.
+      def shadowed_after_merge?(source, bare, name, spelling, target)
+        params = GenericHeaderScan.parameter_names(spelling)
+        return true if params.nil?
 
-        body = source[decl.location[:name].end_pos...decl.location.end_pos]
-        body.match?(/(?<![\w:])(?:#{names.map { |n| Regexp.escape(n) }.join('|')})(?!\w)/)
-      end
+        blocking = bare.filter_map do |decl|
+          names = GenericHeaderScan.shadowing_names(source, decl, params)
+          { target: target.to_s, names: names } unless names.empty?
+        end
+        return false if blocking.empty?
 
-      # The parameter names `[unchecked out K, unchecked out V]` declares; nil when it does not parse.
-      def parameter_names(spelling)
-        decls = parse_signature("class RigorSigGenProbe#{spelling}\nend\n")
-        probe = decls&.first
-        probe&.type_params&.map { |param| param.name.to_s }
+        @left_bare << { class: name, targets: [target.to_s], blocking: blocking }
+        true
       end
 
       # Splices `spelling` right after each declaration's name, last one first so earlier offsets stay valid.
@@ -472,9 +504,9 @@ module Rigor
         state.decls = parse_signature(state.source) || state.decls
       end
 
-      def merged_state(source, decls, candidates, repair_only)
+      def merged_state(source, decls, candidates, repair_only, target)
         state = MergeState.new(source: source, decls: decls, applied: [], skipped: [], left_unreadable: [],
-                               replaced: [], repaired_headers: [])
+                               replaced: [], repaired_headers: [], target: target)
         repair_only ? repair_only_candidates(state, candidates) : merge_candidates(state, candidates)
         state
       end
@@ -486,7 +518,7 @@ module Rigor
       # {#repair_only_results}' merge step: the run's stamp, and the header repair alone.
       def repair_only_candidates(state, candidates)
         @type_params = merged_type_params(candidates)
-        repair_generic_headers(state)
+        repair_generic_headers(state, state.target)
       end
 
       # ADR-14 gap-#3 (e): for every requested class shell that isn't already declared in the target file,

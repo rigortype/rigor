@@ -303,5 +303,12 @@ RSpec.describe "a callee chain that mutates an argument floors it (#2104)" do
       evaluator = Rigor::Inference::StatementEvaluator.new(scope: Rigor::Scope.empty)
       expect(evaluator.content_mutated_parameter_positions(def_node)).to eq([0, 1])
     end
+
+    # Issue #2595 — an element of a named rest handed on reports the rest's slot, not a nil one.
+    it "reports a rest whose element is handed on at the any-positional slot" do
+      def_node = Prism.parse("def stripes(*args) = poke(args.first)").value.statements.body.first
+      evaluator = Rigor::Inference::StatementEvaluator.new(scope: Rigor::Scope.empty)
+      expect(evaluator.content_mutated_parameter_positions(def_node)).to eq([:__any_positional__])
+    end
   end
 end

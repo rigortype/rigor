@@ -217,4 +217,61 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(validation_errors).to be_empty
     end
   end
+
+  # Issue #2579 — a superclass token that names the class being opened. Ruby evaluates the superclass expression
+  # before the new constant exists, so `class B < B` inside `module C` inside `module A` reads the enclosing `A::B`,
+  # not the `A::C::B` it declares. The header was written `class A::C::B < A::C::B`, which RBS rejects as a
+  # recursive ancestor, so the declaration was dropped with the whole class unsigned.
+  describe "a superclass that names the class being opened (#2579)" do
+    it "resolves a nested superclass of the same short name to the outer class" do
+      run_generator(
+        "lib/nested.rb" => <<~RUBY
+          module Lib
+            class B
+              def hi = 1
+            end
+            module C
+              class B < B
+                def ho = 2
+              end
+            end
+          end
+        RUBY
+      )
+
+      expect(sig("nested")).to include("class B < ::Lib::B\n")
+      expect(sig("nested")).not_to include("< ::Lib::C::B")
+      expect(validation_errors).to be_empty
+    end
+
+    it "resolves a superclass named like a class of the outer namespace (rails shape)" do
+      run_generator(
+        "lib/schema.rb" => <<~RUBY
+          module Lib
+            class SchemaDumper
+              def dump = "x"
+            end
+            module ConnectionAdapters
+              class SchemaDumper < SchemaDumper
+                def adapter = "pg"
+              end
+            end
+          end
+        RUBY
+      )
+
+      expect(sig("schema")).to include("class SchemaDumper < ::Lib::SchemaDumper\n")
+      expect(sig("schema")).not_to include("< ::Lib::ConnectionAdapters::SchemaDumper")
+      expect(validation_errors).to be_empty
+    end
+
+    # A guard (control): with no outer class of that name, the token stays what it was before this change.
+    it "never writes a superclass that names the class itself when no other class answers" do
+      run_generator("lib/lone.rb" => "class Lone < Lone\n  def x = 1\nend\n")
+
+      expect(sig("lone")).to include("class Lone\n")
+      expect(sig("lone")).not_to include("< ")
+      expect(validation_errors).to be_empty
+    end
+  end
 end

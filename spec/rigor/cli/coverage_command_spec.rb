@@ -382,7 +382,26 @@ RSpec.describe Rigor::CLI::CoverageCommand do
       status, _out, err = run([])
 
       expect(status).to eq(Rigor::CLI::EXIT_USAGE)
-      expect(err).to include("not a file or directory: lib")
+      expect(err).to include("lib:1:1: error: no such file or directory")
+    end
+
+    # #2206 — a missing path is worded and graded the way `rigor check` words it, not as "not a file or directory".
+    it "reports a missing path on stderr in the form rigor check uses, and exits with the usage code" do
+      status, out, err = run(["missing.rb"])
+
+      expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+      expect(out).to be_empty
+      expect(err).to eq("missing.rb:1:1: error: no such file or directory\n")
+    end
+
+    it "warns that a missing path is skipped beside a file it will read, and still analyses that file" do
+      File.write("ok.rb", "x = 1\n")
+
+      status, out, err = run(["--format", "json", "missing.rb", "ok.rb"])
+
+      expect(status).to eq(0)
+      expect(err).to eq("missing.rb:1:1: warning: no such file or directory (skipped)\n")
+      expect(JSON.parse(out).fetch("by_file").map { |f| f.fetch("file") }).to eq(["ok.rb"])
     end
 
     it "exits 1 when the precision ratio is below --threshold, 0 when it meets it" do

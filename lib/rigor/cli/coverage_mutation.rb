@@ -137,7 +137,7 @@ module Rigor
       # warm loop), then re-analyses each target file's mutants against its clean baseline. Defaults to the git-changed
       # `.rb` files; explicit paths override (and enable the whole-project opt-in, which is minutes).
       def run_mutation_protection(options)
-        explicit = collect_paths(@argv, command_name: "coverage")
+        explicit = collect_paths_reporting(@argv)
         return CLI::EXIT_USAGE if explicit.nil?
 
         target_files = explicit.empty? ? changed_ruby_files : explicit

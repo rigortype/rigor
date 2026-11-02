@@ -69,6 +69,15 @@ RSpec.describe Rigor::CLI do
     expect(err).to include("rigor: config path is a directory: lib")
   end
 
+  # #2206 — `lens` takes its own path to the shared check; a directory there is named as one, not as a missing file.
+  it "says a lens --config naming a directory is a directory, not a missing file" do
+    status, _out, err = run_cli(*with_config(%w[lens -- lib/a.rb], "lib"))
+
+    expect(status).to eq(described_class::EXIT_USAGE)
+    expect(err).to include("rigor: config path is a directory: lib")
+    expect(err).not_to include("no configuration file")
+  end
+
   it "says an empty --config is an empty path" do
     status, _out, err = run_cli(*with_config(%w[check --format=json -- lib/a.rb], ""))
 

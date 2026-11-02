@@ -479,11 +479,13 @@ RSpec.describe Rigor::MCP::Server do
       expect(JSON.parse(text_of(resp))).to have_key("candidates")
     end
 
-    it "reports a flag-shaped rigor_coverage path as a missing path" do
+    # #2206 — the MCP tool and the CLI word a missing path the same way, as `rigor check` does.
+    it "reports a flag-shaped rigor_coverage path as a missing path, worded as the CLI words it" do
       resp = tool_call("rigor_coverage", { "paths" => ["--workers=4"] })
 
       expect(resp.dig("result", "isError")).to be(true)
-      expect(text_of(resp)).to include("not a file or directory: --workers=4")
+      expect(text_of(resp)).to include("--workers=4:1:1: error: no such file or directory")
+      expect(text_of(resp)).not_to include("not a file or directory")
     end
 
     it "reports a flag-shaped rigor_annotate file as a missing file" do

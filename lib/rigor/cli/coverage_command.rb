@@ -88,7 +88,7 @@ module Rigor
       # git-changed-files default and returns before this.
       def resolve_paths(configuration)
         args = @argv.empty? ? configuration.paths : @argv
-        collect_paths(args, command_name: "coverage")
+        collect_paths_reporting(args)
       end
 
       def parse_options

@@ -1467,6 +1467,102 @@ module Rigor
       Inference::DefNodeResolver.resolve(entry)
     end
 
+    # Issue #2515 — why the `<toplevel>` table's def for `method_name` may not be the method a receiverless call of that
+    # name runs, or nil when the project's own tables show nothing else that could be. The table keeps one def per name
+    # (the last writer's) and also files the defs of an anonymous `Class.new` body, so:
+    #
+    # - `:contested` — a def in a block or under a condition wrote the slot last;
+    # - `:several` — the project holds more than one ownerless definition row of the name: two top-level defs (across
+    #   files, or redefined), a def in a block or in another def, `define_method` or `alias_method` of the name;
+    # - `:main_singleton` — a `def self.name` (or a `class << self` def) at the top level defines it on `main`;
+    # - `:aliased` — an `alias` statement or `alias_method` call names it as the new name;
+    # - `:anonymous` — an anonymous class body defines it;
+    # - `:object` — `Object` itself defines it (`class Object; def name`, `define_method`) or has a module prepended,
+    #   which Ruby searches ahead of the top-level def. A module included at the top level is searched after `Object`'s
+    #   own methods, so it is no reason.
+    #
+    # A name with no row at all (a scope built without the project pre-pass) is not `:several`: the rows say nothing.
+    # The answer depends on every file, so an incremental run records the `defines:<name>` edge and the census edge of
+    # an alias either way. The two project-wide scans are built once per table, not per call.
+    def toplevel_def_ambiguity(method_name)
+      name = method_name.to_sym
+      record_toplevel_ambiguity_reads(name) if Analysis::DependencyRecorder.active?
+      key = Inference::ScopeIndexer::TOP_LEVEL_DEF_KEY
+      return :contested if @discovery.contested_discovered_def_nodes.include?([key, name])
+
+      rows = toplevel_definition_rows[name]
+      return :main_singleton if rows == MAIN_SINGLETON_ROWS
+      return :several if rows > 1
+      return :aliased if method_alias_names.include?(name)
+
+      return :anonymous if @discovery.discovered_def_nodes.any? do |class_name, defs|
+        defs.key?(name) && class_name.start_with?(Type::AnonymousClassName::PREFIX)
+      end
+
+      :object if object_answers_first?(name)
+    end
+
+    # True when `Object` defines `name` itself or has a module prepended (see {#toplevel_def_ambiguity}).
+    def object_answers_first?(name)
+      !user_def_for("Object", name).nil? || discovered_method?("Object", name, :instance) ||
+        !(@discovery.discovered_prepends["Object"] || EMPTY_PREPENDS).empty?
+    end
+    private :object_answers_first?
+
+    EMPTY_PREPENDS = [].freeze
+    private_constant :EMPTY_PREPENDS
+
+    # True for a class or module the project declares, even one with no method of its own.
+    def declared_class?(class_name) = @discovery.discovered_classes.key?(class_name.to_s)
+
+    def record_toplevel_ambiguity_reads(name)
+      Analysis::DependencyRecorder.read_name(:defines, name)
+      Analysis::DependencyRecorder.read_name(:global_census, "method_alias:#{name}")
+      Analysis::DependencyRecorder.read_last_segment(:class, "Object")
+      record_class_dependency("Object")
+    end
+    private :record_toplevel_ambiguity_reads
+
+    # `{ name => ownerless definition rows }` over `discovered_deferred_ranges`, {MAIN_SINGLETON_ROWS} for a name with
+    # a singleton row. Held by the table's identity (a file's merged copy and the seed), released with the run.
+    def toplevel_definition_rows
+      ranges = @discovery.discovered_deferred_ranges
+      slots = (Thread.current[TOPLEVEL_ROWS_KEY] ||= [])
+      slot = slots.find { |entry| entry[0].equal?(ranges) }
+      return slot[1] if slot
+
+      rows = Hash.new(0)
+      ranges.each_value do |entries|
+        entries.each do |(_start, _finish, name, kind, owner)|
+          next if name.nil? || !owner.nil?
+
+          rows[name] = kind == :singleton || rows[name] == MAIN_SINGLETON_ROWS ? MAIN_SINGLETON_ROWS : rows[name] + 1
+        end
+      end
+      slots.unshift([ranges, rows.freeze]).slice!(2..)
+      rows
+    end
+    private :toplevel_definition_rows
+
+    # The names an `alias` statement or `alias_method` call introduces, from the global write census; held by the
+    # census's identity as {#toplevel_definition_rows} is.
+    def method_alias_names
+      census = @discovery.discovered_global_write_census
+      slots = (Thread.current[METHOD_ALIASES_KEY] ||= [])
+      slot = slots.find { |entry| entry[0].equal?(census) }
+      return slot[1] if slot
+
+      names = census.each_with_object(Set.new) { |entry, acc| acc << entry[1] if entry[0] == :method_alias }.freeze
+      slots.unshift([census, names]).slice!(2..)
+      names
+    end
+    private :method_alias_names
+
+    MAIN_SINGLETON_ROWS = -1
+    TOPLEVEL_ROWS_KEY = RunScopedSlots.register(:__rigor_toplevel_definition_rows)
+    METHOD_ALIASES_KEY = RunScopedSlots.register(:__rigor_method_alias_names)
+    private_constant :MAIN_SINGLETON_ROWS, :TOPLEVEL_ROWS_KEY, :METHOD_ALIASES_KEY
+
     # Issue #316 — the CONFIDENCE-GATED companion of {#top_level_def_for}, and the only accessor the type
     # inference may bind through. {#top_level_def_for} stays unrestricted because it also serves the
     # *suppression* side (`call.unresolved-toplevel`, `call.undefined-method`): a name the project defines at

@@ -346,6 +346,8 @@ module Rigor
     # sig-gen gap: #1167 — the instance-side twin: the same untyped `call_node`, the same untyped-return skip.
     def instance_def_shadows_call?: (String | Symbol class_name, String | Symbol method_name, untyped call_node) -> bool
     def top_level_def_for: (String | Symbol method_name) -> ::Prism::DefNode?
+    def toplevel_def_ambiguity: (String | Symbol method_name) -> (:contested | :several | :main_singleton | :aliased | :anonymous | :object)?
+    def declared_class?: (String | Symbol class_name) -> bool
     def bindable_top_level_def_for: (String | Symbol method_name) -> ::Prism::DefNode?
     def toplevel?: () -> bool
     def discovered_method_visibility: (String | Symbol class_name, String | Symbol method_name) -> Symbol?

@@ -20,10 +20,13 @@ module Rigor
       # @param refused — methods refused as `sig.skipped.inline-differs`; the JSON payload names them under
       #   `refused` (absent when there are none, so an ordinary payload is unchanged), and text mode leaves them
       #   to the command's stderr `REFUSED` lines.
-      def render_write(results:, format:, refused: [])
+      # @param left_bare — the generic classes whose bare headers the writer held back from the repair (#2605,
+      #   {Writer#left_bare}); the JSON payload names them under `left_bare` (absent when there are none), and text
+      #   mode prints one `generic header left bare` line each.
+      def render_write(results:, format:, refused: [], left_bare: [])
         case format
-        when "json" then render_write_json(results, refused)
-        when "text" then render_write_text(results)
+        when "json" then render_write_json(results, refused, left_bare)
+        when "text" then render_write_text_with_left_bare(results, left_bare)
         else raise ArgumentError, "unsupported format: #{format}"
         end
       end
@@ -34,14 +37,19 @@ module Rigor
       #
       # @param refused — the methods the generator refused to reconcile (`sig.skipped.inline-differs`):
       #   `sig/` is not up to date while one stands, and `--write` cannot fix it.
-      def render_check(results:, format:, refused: [])
+      #
+      # @param left_bare — as for {#render_write}; reported, but it does not make `sig/` out of date.
+      def render_check(results:, format:, refused: [], left_bare: [])
         stale = self.class.out_of_date(results)
         case format
         when "json"
-          @out.puts(JSON.pretty_generate(CLI::JsonDocument.stamp({ up_to_date: stale.empty? && refused.empty?,
-                                                                   results: stale.map { |r| check_entry(r) },
-                                                                   refused: refused.map(&:to_h) })))
-        when "text" then render_check_text(stale, refused)
+          payload = { up_to_date: stale.empty? && refused.empty?, results: stale.map { |r| check_entry(r) },
+                      refused: refused.map(&:to_h) }
+          payload[:left_bare] = left_bare unless left_bare.empty?
+          @out.puts(JSON.pretty_generate(CLI::JsonDocument.stamp(payload)))
+        when "text"
+          render_check_text(stale, refused)
+          render_left_bare(left_bare)
         else raise ArgumentError, "unsupported format: #{format}"
         end
       end
@@ -106,12 +114,17 @@ module Rigor
         end
       end
 
-      def render_write_text(results)
+      # "No changes" only when nothing at all is reported: a header held back is news even when no file changed.
+      def render_write_text_with_left_bare(results, left_bare)
         if results.all? { |r| r.action == :noop && r.skipped.empty? }
-          @out.puts("No changes")
-          return
+          @out.puts("No changes") if left_bare.empty?
+        else
+          render_write_text(results)
         end
+        render_left_bare(left_bare)
+      end
 
+      def render_write_text(results)
         results.each do |result|
           case result.action
           when :created then render_write_created(result)
@@ -132,6 +145,26 @@ module Rigor
         added = "#{added}, replaced #{result.replaced.size}" unless result.replaced.empty?
         repaired = result.repaired_headers
         repaired.empty? ? added : "#{added}, repaired #{repaired.size} generic header(s): #{repaired.join(', ')}"
+      end
+
+      # #2605 — one line per generic class the writer left with a bare header: every file holding one, and the
+      # parameter names the blocking bodies spell. rbs keeps rejecting the class until those names are anchored
+      # (`::E`) or the headers are given parameters by hand.
+      def render_left_bare(left_bare)
+        left_bare.each do |entry|
+          reasons = entry.fetch(:blocking).map { |blocking| left_bare_reason(blocking) }
+          @out.puts("generic header left bare: #{entry.fetch(:class)} in #{entry.fetch(:targets).join(', ')} " \
+                    "(#{reasons.join('; ')})")
+        end
+      end
+
+      def left_bare_reason(blocking)
+        if blocking.fetch(:reason) == "outside_sig_root"
+          "an opening outside the sig root at #{blocking.fetch(:target)}, which --write does not rewrite"
+        else
+          "#{blocking.fetch(:target)} names #{blocking.fetch(:names).join(', ')}, which the type parameter would " \
+            "capture"
+        end
       end
 
       def render_write_created(result)
@@ -207,9 +240,11 @@ module Rigor
         @out.puts("  Fix the syntax error and re-run; sig-gen never modifies a file it cannot parse.")
       end
 
-      def render_write_json(results, refused)
+      def render_write_json(results, refused, left_bare)
         payload = { results: results.map(&:to_h) }
         payload[:refused] = refused.map(&:to_h) unless refused.empty?
+        # Absent when every bare generic header was repaired, so an ordinary payload is unchanged (#2605).
+        payload[:left_bare] = left_bare unless left_bare.empty?
         @out.puts(JSON.pretty_generate(CLI::JsonDocument.stamp(payload)))
       end
     end

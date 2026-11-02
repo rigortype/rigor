@@ -311,18 +311,30 @@ module Rigor
         loader = @environment&.rbs_loader
         return candidates if loader.nil?
 
-        spelled = header_type_params(loader, candidates.flat_map { |c| [c.class_name, *c.class_shells] }.compact)
+        spelled = header_type_params(candidates.flat_map { |c| [c.class_name, *c.class_shells] }.compact)
         return candidates if spelled.empty?
 
         candidates.map { |candidate| candidate.with_class_type_params(spelled) }
       end
 
+      # #2603 — the header spelling {#header_type_params} gives `class_name` alone, or nil when the loaded RBS does
+      # not declare it generic with plain parameters only. The writer asks it for a bare header in a `sig/` file no
+      # candidate of the run routes to. Nil before {#run} has built the environment.
+      def generic_header_spelling(class_name)
+        loader = @environment&.rbs_loader
+        return nil if loader.nil?
+
+        params = loader.class_declaration_type_params(class_name)
+        "[#{params.join(', ')}]" if !params.empty? && params.all? { |p| plain_type_param?(p) }
+      end
+      public :generic_header_spelling
+
       # `{ class name => "[unchecked out E]" }` for every name in `names`, or a namespace it is nested in, whose
       # loaded declaration is generic with plain parameters only.
-      def header_type_params(loader, names)
+      def header_type_params(names)
         names.uniq.flat_map { |name| namespace_prefixes(name) }.uniq.each_with_object({}) do |name, acc|
-          params = loader.class_declaration_type_params(name)
-          acc[name] = "[#{params.join(', ')}]" if !params.empty? && params.all? { |p| plain_type_param?(p) }
+          spelling = generic_header_spelling(name)
+          acc[name] = spelling if spelling
         end.freeze
       end
 

@@ -1340,10 +1340,15 @@ end
         target = write_target("class Hash\n  def old: () -> 1\nend\n")
         merged = candidate(method_name: :k, class_name: "Hash", rbs: "def k: () -> K").with_class_type_params(params)
 
-        result = writer.write("lib/foo.rb", [merged])
+        w = writer
+        result = w.write("lib/foo.rb", [merged])
 
         expect(result.repaired_headers).to eq([])
         expect(File.read(target)).to start_with("class Hash\n")
+        # #2605 — and the class is reported as left bare.
+        expect(w.left_bare).to eq([{ class: "Hash", targets: [Pathname(target).to_s],
+                                     blocking: [{ target: Pathname(target).to_s, reason: "names_parameter",
+                                                  names: ["K"] }] }])
       end
 
       it "repairs the header when the member anchors the name" do
@@ -1370,6 +1375,195 @@ end
   def a: () -> 1
 end
 ")
+    end
+
+    # #2605 — rbs rejects the class while one bare opening is left, so {#write_all} repairs every opening under the
+    # sig root or none, and names the class it held back.
+    describe "a class one of whose bare openings is held back (#2605)" do
+      def sig(rel, content)
+        path = File.join(tmpdir, "sig", rel)
+        FileUtils.mkdir_p(File.dirname(path))
+        File.write(path, content)
+        path
+      end
+
+      it "repairs neither opening in one file when one names a parameter" do
+        original = "class E\nend\nclass Array\n  def a: () -> E\nend\n\nclass Array\n  def b: () -> 1\nend\n"
+        target = write_target(original)
+        w = writer
+
+        results = w.write_all([generic(method_name: :b, class_name: "Array", params: params)])
+
+        expect(File.read(target)).to eq(original)
+        expect(results.flat_map(&:repaired_headers)).to eq([])
+        expect(w.left_bare).to eq([{ class: "Array", targets: [Pathname(target).to_s],
+                                     blocking: [{ target: Pathname(target).to_s, reason: "names_parameter",
+                                                  names: ["E"] }] }])
+      end
+
+      it "repairs no opening when the one that names a parameter is in another file" do
+        held = sig("held.rbs", "class E\nend\nclass Array\n  def h: () -> E\nend\n")
+        target = write_target("class Array\n  def b: () -> 1\nend\n")
+        w = writer
+
+        w.write_all([generic(method_name: :c, class_name: "Array", params: params)])
+
+        expect(File.read(target)).to start_with("class Array\n")
+        expect(File.read(held)).to eq("class E\nend\nclass Array\n  def h: () -> E\nend\n")
+        expect(w.left_bare.map { |entry| entry.fetch(:class) }).to eq(["Array"])
+        expect(w.left_bare.first.fetch(:targets)).to contain_exactly(held, target)
+      end
+
+      it "repairs a file an emitted member routes to once, not again as a repair-only file" do
+        write_target("class Array\n  def b: () -> 1\nend\n")
+
+        results = writer(dry_run: true).write_all([generic(method_name: :c, class_name: "Array", params: params)])
+
+        expect(results.map(&:repaired_headers)).to eq([["Array[unchecked out E]"]])
+      end
+
+      it "leaves left_bare empty when every opening is repaired" do
+        write_target("class Array\n  def b: () -> 1\nend\n")
+        w = writer
+
+        w.write_all([generic(method_name: :c, class_name: "Array", params: params)])
+
+        expect(w.left_bare).to eq([])
+      end
+    end
+
+    # #2605 review — rbs loads every `signature_paths:` entry, but the writer rewrites only the sig root, so a bare
+    # opening in another signature path holds its class back everywhere.
+    # #2605 review — RBS resolves `module Foo; class ::Set` to the top-level `Set`, so the scan and the writer key it
+    # `Set` alike (#2654) and the class is repaired in both files, not in one.
+    it "repairs a rooted opening nested in a module together with the top-level one" do
+      top = File.join(tmpdir, "sig/a.rbs")
+      rooted = File.join(tmpdir, "sig/d.rbs")
+      FileUtils.mkdir_p(File.dirname(top))
+      File.write(top, "class Set\n  def a: () -> 1\nend\n")
+      File.write(rooted, "module Foo\n  class ::Set\n    def d: () -> 1\n  end\nend\n")
+      w = writer
+
+      w.write_all([], header_spelling: ->(name) { { "Set" => "[unchecked out A]" }[name] })
+
+      expect(File.read(top)).to eq("class Set[unchecked out A]\n  def a: () -> 1\nend\n")
+      expect(File.read(rooted)).to eq("module Foo\n  class ::Set[unchecked out A]\n    def d: () -> 1\n  end\nend\n")
+      expect(w.left_bare).to eq([])
+    end
+
+    describe "a bare opening in a signature path outside the sig root" do
+      def file(rel, content)
+        path = File.join(tmpdir, rel)
+        FileUtils.mkdir_p(File.dirname(path))
+        File.write(path, content)
+        path
+      end
+
+      def extra_writer
+        mapper = Rigor::SigGen::PathMapper.new(configuration: configuration(signature_paths: %w[sig extra]),
+                                               project_root: tmpdir)
+        described_class.new(path_mapper: mapper)
+      end
+
+      let(:range) { ->(name) { { "Range" => "[unchecked out Elem]", "Array" => "[unchecked out E]" }[name] } }
+
+      it "holds the class back in the sig root and reports the opening outside it" do
+        inside = file("sig/vendor/f.rbs", "class Range\n  def f: () -> 1\nend\n")
+        outside = file("extra/e.rbs", "class Range\n  def e: () -> 1\nend\n")
+        w = extra_writer
+
+        expect(w.write_all([], header_spelling: range)).to eq([])
+        expect(File.read(inside)).to eq("class Range\n  def f: () -> 1\nend\n")
+        expect(File.read(outside)).to eq("class Range\n  def e: () -> 1\nend\n")
+        expect(w.left_bare).to eq([{ class: "Range", targets: [inside, outside],
+                                     blocking: [{ target: outside, reason: "outside_sig_root" }] }])
+      end
+
+      it "holds the class back when the body outside the sig root names a parameter" do
+        inside = file("sig/foo.rbs", "class Array\n  def b: () -> 1\nend\n")
+        file("extra/e.rbs", "class E\nend\nclass Array\n  def h: () -> E\nend\n")
+        w = extra_writer
+
+        w.write_all([generic(method_name: :c, class_name: "Array", params: params)], header_spelling: range)
+
+        expect(File.read(inside)).to start_with("class Array\n")
+        expect(w.left_bare.map { |entry| entry.fetch(:class) }).to eq(["Array"])
+      end
+    end
+
+    # #2603 — a bare header in a file no candidate routes to: its source is gone, or no longer reopens the class.
+    describe "a bare header in a file no candidate routes to (#2603)" do
+      it "repairs it with the spelling the run's header_spelling gives" do
+        orphan = File.join(tmpdir, "sig/old_ext.rbs")
+        FileUtils.mkdir_p(File.dirname(orphan))
+        File.write(orphan, "class Array\n  def gone: () -> 1\nend\n")
+        spelling = ->(name) { params[name] }
+
+        results = writer.write_all([], header_spelling: spelling)
+
+        expect(results.map { |r| [r.target_path.to_s, r.action, r.source_path] }).to eq([[orphan, :updated, nil]])
+        expect(File.read(orphan)).to eq("class Array[unchecked out E]\n  def gone: () -> 1\nend\n")
+      end
+
+      it "names the source of a skipped candidate that routes to the file" do
+        target = write_target("class Array\n  def a: () -> 1\nend\n")
+        skipped = candidate(method_name: :a, class_name: "Array", rbs: "def a: () -> 1",
+                            classification: Rigor::SigGen::Classification::SKIPPED).with_class_type_params(params)
+
+        results = writer.write_all([skipped])
+
+        expect(results.map { |r| [r.target_path.to_s, r.source_path] }).to eq([[target, "lib/foo.rb"]])
+      end
+
+      it "leaves it when the class is not generic" do
+        orphan = File.join(tmpdir, "sig/old_ext.rbs")
+        FileUtils.mkdir_p(File.dirname(orphan))
+        File.write(orphan, "class Array\n  def gone: () -> 1\nend\n")
+
+        expect(writer.write_all([], header_spelling: ->(_) {})).to eq([])
+        expect(File.read(orphan)).to eq("class Array\n  def gone: () -> 1\nend\n")
+      end
+
+      it "repairs it in --check mode without writing" do
+        orphan = File.join(tmpdir, "sig/old_ext.rbs")
+        FileUtils.mkdir_p(File.dirname(orphan))
+        File.write(orphan, "class Array\n  def gone: () -> 1\nend\n")
+
+        results = writer(dry_run: true).write_all([], header_spelling: ->(name) { params[name] })
+
+        expect(results.map(&:action)).to eq([:updated])
+        expect(File.read(orphan)).to eq("class Array\n  def gone: () -> 1\nend\n")
+      end
+    end
+
+    # #2605 — `def m: [E] (E) -> E` binds every `E` in its own type, so the class's parameter cannot capture it.
+    describe "a method's own type parameter (#2605)" do
+      it "does not hold the header back" do
+        target = write_target("class Array\n  def pick: [E] (E) -> E\n         | () -> 1\nend\n")
+
+        result = writer.write("lib/foo.rb", [generic(method_name: :a, class_name: "Array", params: params)])
+
+        expect(result.repaired_headers).to eq(["Array[unchecked out E]"])
+        expect(File.read(target)).to start_with("class Array[unchecked out E]\n")
+      end
+
+      it "still holds it back for an `E` outside that method type" do
+        target = write_target("class Array\n  def pick: [E] (E) -> E\n         | () -> E\nend\n")
+
+        result = writer.write("lib/foo.rb", [generic(method_name: :a, class_name: "Array", params: params)])
+
+        expect(result.repaired_headers).to eq([])
+        expect(File.read(target)).to start_with("class Array\n")
+      end
+
+      it "still holds it back when the method binds a different name" do
+        target = write_target("class Array\n  def pick: [T] (T) -> E\nend\n")
+
+        result = writer.write("lib/foo.rb", [generic(method_name: :a, class_name: "Array", params: params)])
+
+        expect(result.repaired_headers).to eq([])
+        expect(File.read(target)).to start_with("class Array\n")
+      end
     end
   end
 end

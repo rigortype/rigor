@@ -141,12 +141,14 @@ module Rigor
 
       # The per-source-file outcomes of a `--write` run, and the `--check` verdict, are reported by
       # {WriteReporter}; these delegate so the command keeps one renderer.
-      def render_write(results:, format:, refused: [])
-        WriteReporter.new(out: @out).render_write(results: results, format: format, refused: refused)
+      def render_write(results:, format:, refused: [], left_bare: [])
+        WriteReporter.new(out: @out).render_write(results: results, format: format, refused: refused,
+                                                  left_bare: left_bare)
       end
 
-      def render_check(results:, format:, refused: [])
-        WriteReporter.new(out: @out).render_check(results: results, format: format, refused: refused)
+      def render_check(results:, format:, refused: [], left_bare: [])
+        WriteReporter.new(out: @out).render_check(results: results, format: format, refused: refused,
+                                                  left_bare: left_bare)
       end
 
       def self.refusal_lines(refused)

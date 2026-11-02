@@ -142,7 +142,9 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     before do
       result = Rigor::SigGen::WriteResult.new(source_path: "lib/errors.rb", target_path: sig_file,
                                               action: :skipped_invalid_rbs, error: "generated RBS does not parse")
-      allow_any_instance_of(Rigor::SigGen::Writer).to receive(:write_all).and_return([result])
+      allow(Rigor::SigGen::Writer).to receive(:new).and_wrap_original do |original, **kwargs|
+        original.call(**kwargs).tap { |writer| allow(writer).to receive(:write_all).and_return([result]) }
+      end
     end
 
     it "--check counts it as refused with no hand-fix list and no trailing parenthesis, and exits 1" do

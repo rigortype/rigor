@@ -103,8 +103,9 @@ RSpec.describe "collection remover narrowing", type: :runner do
         "tap" => ["", "l.tap { |t| t << nil }"],
         "binding" => ["", "binding"],
         "a Hash value" => ["hh = { k: l }", "hh[:k] << 1"],
-        "an Array element" => ["box = [l]", "box[0] << 1"],
-        "a splat" => ["box = [*l]", ""],
+        "an Array element" => ["", "[l].each { |b| b << 1 }"],
+        "an Array element assigned to a local" => ["box = [l]", "box[0] << 1"],
+        "a splat" => ["", "puts [*l].size"],
         "a constructor argument that keeps it" =>
           ["class Keep\n  def initialize(a) = @a = a\n  def add = @a << 1\nend\nkp = Keep.new(l)", "kp.add"],
         "a keyword argument" => ["def keep(into:) = into", "keep(into: l)"],

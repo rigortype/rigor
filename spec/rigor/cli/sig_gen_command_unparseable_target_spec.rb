@@ -64,7 +64,12 @@ RSpec.describe Rigor::CLI::SigGenCommand do
       expect(out).to include("REFUSED").and include("sig/errors.rbs").and include("does not parse as RBS")
       expect(out).to match(%r{sig/errors\.rbs:\d+:\d+})
       expect(out).not_to include("up to date")
-      expect(err).to include("out of date")
+      # A refusal-only run has nothing `--write` would update, so it names the file for a hand fix and says nothing
+      # about running `--write`.
+      expect(err).to include("1 signature file(s) refused")
+      expect(err).to match(%r{Repair by hand: \S*sig/errors\.rbs\.})
+      expect(err).not_to include("out of date")
+      expect(err).not_to include("run `rigor sig-gen --write`")
     end
 
     it "--write refuses it and leaves the file byte-for-byte untouched" do
@@ -114,6 +119,43 @@ RSpec.describe Rigor::CLI::SigGenCommand do
       expect(File.read(File.join(root, "sig/a.rbs"))).to include("class A")
       expect(File.read(File.join(root, "sig/b.rbs"))).to include("class B")
       expect(File.read(sig_file)).to eq(unparseable_sig)
+    end
+
+    # The summary counts the two targets `--write` would update apart from the refused one, named for a hand fix.
+    it "--check counts the pending targets as out of date and the refused one apart, and exits 1" do
+      status, _out, err = sig_gen("--check", paths: ["lib"])
+
+      expect(status).to eq(1)
+      expect(err).to include("rigor sig-gen --check: 2 signature file(s) out of date; " \
+                             "run `rigor sig-gen --write` with the same options to update them.")
+      expect(err).to include("rigor sig-gen --check: 1 signature file(s) refused")
+      expect(err).to match(%r{Repair by hand: \S*sig/errors\.rbs\.})
+      expect(err.lines.grep(/out of date/).join).not_to include("errors.rbs")
+      expect(File.exist?(File.join(root, "sig/a.rbs"))).to be(false)
+      expect(File.read(sig_file)).to eq(unparseable_sig)
+    end
+  end
+
+  # `skipped_invalid_rbs` is a generated file that does not parse: a Rigor rendering bug, not a file the user repairs.
+  # The writer cannot be made to emit one from a real project, so the result is stubbed; the summary is what is pinned.
+  context "when the generated RBS for a target does not parse (skipped_invalid_rbs)" do
+    before do
+      result = Rigor::SigGen::WriteResult.new(source_path: "lib/errors.rb", target_path: sig_file,
+                                              action: :skipped_invalid_rbs, error: "generated RBS does not parse")
+      allow(Rigor::SigGen::Writer).to receive(:new).and_wrap_original do |original, **kwargs|
+        original.call(**kwargs).tap { |writer| allow(writer).to receive(:write_all).and_return([result]) }
+      end
+    end
+
+    it "--check counts it as refused with no hand-fix list and no trailing parenthesis, and exits 1" do
+      status, _out, err = sig_gen("--check")
+
+      expect(status).to eq(1)
+      expect(err).to include("rigor sig-gen --check: 1 signature file(s) refused; `--write` does not update them.")
+      expect(err).to include("a Rigor bug, see its REFUSED line on stdout.")
+      expect(err).not_to include("Repair by hand")
+      expect(err).not_to include("out of date")
+      expect(err.chomp).to end_with("REFUSED line on stdout.")
     end
   end
 

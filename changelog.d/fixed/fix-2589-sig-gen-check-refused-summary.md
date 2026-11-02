@@ -1,0 +1,2 @@
+- **[sig-gen]** `sig-gen --check` counts a target that `--write` refuses apart from the out-of-date ones, and names the existing files you must repair by hand instead of telling you to run `--write`. ([#2659](https://github.com/rigortype/rigor/pull/2659))
+  - A refusal-only run no longer says "out of date" or points at `--write`. A generated file that does not parse is a Rigor rendering bug: it is counted but not listed as a hand fix, and its REFUSED line says to report it. The exit status is unchanged.

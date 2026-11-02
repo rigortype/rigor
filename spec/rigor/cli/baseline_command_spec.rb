@@ -248,6 +248,45 @@ RSpec.describe Rigor::CLI::BaselineCommand do
       expect(status).to eq(0)
       expect(err).to include("regenerated baseline")
     end
+
+    # Issue #2577 — dump, drift and prune reject positional arguments too; the guard runs before the baseline is read.
+    describe "dump, drift and prune" do
+      let(:baseline_path) { File.join(tmpdir, ".rigor-baseline.yml") }
+
+      it "rejects paths on dump and prints nothing" do
+        File.write(baseline_path, "version: 1\nignored: []\n")
+        status, out, err = run_cli("baseline", "dump", "lib", cwd: tmpdir)
+        expect(status).to eq(described_class::EXIT_USAGE)
+        expect(out).to eq("")
+        expect(err).to include('rigor baseline dump: unexpected argument(s) "lib"')
+        expect(err).to include("generated from the configured `paths:`")
+      end
+
+      it "rejects paths on drift and reports no drift" do
+        run_cli("baseline", "generate", cwd: tmpdir)
+        status, out, err = run_cli("baseline", "drift", "lib", cwd: tmpdir)
+        expect(status).to eq(described_class::EXIT_USAGE)
+        expect(out).not_to include("Drift report")
+        expect(err).to include('rigor baseline drift: unexpected argument(s) "lib"')
+      end
+
+      it "rejects paths on prune and leaves the baseline untouched" do
+        run_cli("baseline", "generate", cwd: tmpdir)
+        File.write(File.join(tmpdir, "lib", "demo.rb"), "x = 1\n")
+        before = File.read(baseline_path)
+
+        status, _out, err = run_cli("baseline", "prune", "lib", cwd: tmpdir)
+        expect(status).to eq(described_class::EXIT_USAGE)
+        expect(err).to include('rigor baseline prune: unexpected argument(s) "lib"')
+        expect(File.read(baseline_path)).to eq(before)
+      end
+
+      it "rejects an empty-string argument on prune so it is not invisible in the message" do
+        status, _out, err = run_cli("baseline", "prune", "", cwd: tmpdir)
+        expect(status).to eq(described_class::EXIT_USAGE)
+        expect(err).to include('unexpected argument(s) ""')
+      end
+    end
   end
 
   describe "files the baseline cannot key (parse errors)" do

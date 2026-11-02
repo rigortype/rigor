@@ -148,9 +148,10 @@ module Rigor
         write_baseline(options, verb: "regenerated baseline")
       end
 
-      # Issue #2466 — the baseline covers the configured `paths:`, never the positional arguments: a baseline built
-      # over a subset would silently drop the entries of every other file. Reject them, as `rigor effects update`
-      # does (`effects_snapshot_command.rb:54`), rather than honour them.
+      # Issues #2466 and #2577 — the baseline covers the configured `paths:`, never the positional arguments: a
+      # baseline built over a subset would silently drop the entries of every other file. `drift` and `prune`
+      # analyse the configured `paths:` and `dump` prints the whole file, so none of the five reads a path argument.
+      # Reject them, as `rigor effects update` does (`effects_snapshot_command.rb:54`), rather than honour them.
       def positional_paths_error(subcommand)
         @err.puts("rigor baseline #{subcommand}: unexpected argument(s) #{@argv.map(&:inspect).join(' ')}; " \
                   "the baseline is " \
@@ -252,6 +253,8 @@ module Rigor
 
       def run_dump
         options = parse_dump_options
+        return positional_paths_error("dump") unless @argv.empty?
+
         baseline = load_baseline_or_exit(options.fetch(:baseline))
         return EXIT_USAGE if baseline == :error
 
@@ -318,6 +321,8 @@ module Rigor
 
       def run_drift
         options = parse_drift_options
+        return positional_paths_error("drift") unless @argv.empty?
+
         baseline = load_baseline_or_exit(options.fetch(:baseline))
         return EXIT_USAGE if baseline == :error
 
@@ -381,6 +386,8 @@ module Rigor
 
       def run_prune
         options = parse_prune_options
+        return positional_paths_error("prune") unless @argv.empty?
+
         baseline = load_baseline_or_exit(options.fetch(:baseline))
         return EXIT_USAGE if baseline == :error
 

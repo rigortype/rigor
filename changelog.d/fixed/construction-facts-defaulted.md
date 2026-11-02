@@ -1,0 +1,1 @@
+- **[engine]** `h = Hash.new(0); h[:y] = "s"; h[:y].upcase` no longer reports `undefined method 'upcase' for Integer`: a store into a Hash built with a default joins its value type. ([#2616](https://github.com/rigortype/rigor/pull/2616))

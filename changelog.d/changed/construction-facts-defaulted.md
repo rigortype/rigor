@@ -1,0 +1,4 @@
+- **[engine]** A Hash a method builds itself with no default now reads a lookup by an unknown key as possibly `nil`, so an unguarded miss reports. ([#2616](https://github.com/rigortype/rigor/pull/2616))
+  - `h = { name => "x" }; v = h[key]; v.upcase` reports `call.possible-nil-receiver`; a `key?` guard, `fetch`, `&.` or a truthiness check keeps it quiet.
+  - A Hash built with `Hash.new(0)`, `Hash.new { ... }`, or given a default later (`default=`, `default_proc=`, `replace`), and any Hash from a parameter, instance variable, constant, method call, or passed to another method, keeps the earlier reading.
+  - A project that defines a method named `[]` anywhere gets the earlier reading for every Hash, and a chained `h[key].upcase` does not report.

@@ -1,6 +1,6 @@
 # Rigor starts reporting a Hash#[] miss on a local Hash the method built with no default
 
-- **PR:** [#0](https://github.com/rigortype/rigor/pull/0)
+- **PR:** [#2616](https://github.com/rigortype/rigor/pull/2616)
 - **Issue:** [#2555](https://github.com/rigortype/rigor/issues/2555)
 - **Class:** open-choice
 - **Precedent:** [#1278](https://github.com/rigortype/rigor/pull/1278)

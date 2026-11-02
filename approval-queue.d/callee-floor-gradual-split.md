@@ -43,9 +43,9 @@ Split by certainty, for the direct-write channel. It keeps every floor that #260
 
 The splat channel stays gradual throughout, per #2611. It does not need to split, because an element there is matched by type, which is always a guess.
 
-The block channel is not covered. `callee_block_floor` still floors a String to the nominal `String`, whatever the owner. One example still reports `got String` on correct code: a block in the callee writes the String, and the call goes through the #2607 union to a non-writing candidate. That is tracked as its own fix in [#2638](https://github.com/rigortype/rigor/issues/2638).
+The block channel takes the same split. Before [#2646](https://github.com/rigortype/rigor/pull/2646), `callee_block_floor` floored a String to the nominal `String` whatever the owner, so a block-only writer reached through the #2607 union reported `got String` on correct code ([#2638](https://github.com/rigortype/rigor/issues/2638)). Now both channels go through `StatementEvaluator#callee_gradual_floor`. Under `FLOOR_ALL` and `FLOOR_EVERY` the block channel is never reached on its own, because the direct-write channel has already floored the String gradually.
 
-Hash and Array carriers already floor to `Hash[untyped, untyped]` and `Array[untyped]`, which no record or tuple parameter rejects. Any new carrier the floor learns must answer the same question: does its floored type reject a value the callee never changed?
+The direct-write channel floors Hash and Array carriers to `Hash[untyped, untyped]` and `Array[untyped]`, which no record or tuple parameter rejects. The block and Set channels do not yet: they widen a literal element to `Dynamic[top] | String` (or `| Integer`), and an element read back out can fail a literal-typed parameter. That is tracked in [#2647](https://github.com/rigortype/rigor/issues/2647). Any carrier the floor learns must answer the same question: does its floored type reject a value the callee never changed?
 
 `docs/internal-spec/inference-engine.md` carries the normative sentence in the #2104/#2515 bullet.
 

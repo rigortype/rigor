@@ -28,13 +28,28 @@ RSpec.describe Rigor::SigGen::GenericHeaderScan do
 
     expect(scan.repairs).to eq({})
     expect(scan.left_bare).to eq([{ class: "Array", targets: [clear, held],
-                                    blocking: [{ target: held, names: ["E"] }] }])
+                                    blocking: [{ target: held, reason: "names_parameter", names: ["E"] }] }])
 
     File.write(held, "class Array\n  def h: () -> ::E\nend\n")
 
     expect(scan.repairs).to eq({ "Array" => "[unchecked out E]" })
     expect(scan.repair_targets).to eq([clear, held])
     expect(scan.left_bare).to eq([])
+  end
+
+  it "keys a rooted declaration by the top-level class it opens" do
+    rooted = sig("rooted.rbs", "module Foo\n  class ::Array\n    def a: () -> 1\n  end\nend\n")
+
+    expect(scan.repair_targets).to eq([rooted])
+  end
+
+  it "reads a file under the sig root once, as one the writer may rewrite, when a signature path covers it too" do
+    path = sig("a.rbs", "class Array\n  def a: () -> 1\nend\n")
+    both = described_class.scan(sig_root: root, signature_dirs: [root],
+                                spelling_for: ->(name) { { "Array" => "[unchecked out E]" }[name] })
+
+    expect(both.repair_targets).to eq([path])
+    expect(both.left_bare).to eq([])
   end
 
   it "skips a file that does not parse or is not UTF-8" do

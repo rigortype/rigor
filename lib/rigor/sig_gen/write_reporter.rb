@@ -152,9 +152,18 @@ module Rigor
       # (`::E`) or the headers are given parameters by hand.
       def render_left_bare(left_bare)
         left_bare.each do |entry|
-          named = entry.fetch(:blocking).map { |b| "#{b.fetch(:target)} names #{b.fetch(:names).join(', ')}" }
+          reasons = entry.fetch(:blocking).map { |blocking| left_bare_reason(blocking) }
           @out.puts("generic header left bare: #{entry.fetch(:class)} in #{entry.fetch(:targets).join(', ')} " \
-                    "(#{named.join('; ')}, which the type parameter would capture)")
+                    "(#{reasons.join('; ')})")
+        end
+      end
+
+      def left_bare_reason(blocking)
+        if blocking.fetch(:reason) == "outside_sig_root"
+          "an opening outside the sig root at #{blocking.fetch(:target)}, which --write does not rewrite"
+        else
+          "#{blocking.fetch(:target)} names #{blocking.fetch(:names).join(', ')}, which the type parameter would " \
+            "capture"
         end
       end
 

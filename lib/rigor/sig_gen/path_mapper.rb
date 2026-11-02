@@ -74,6 +74,12 @@ module Rigor
         @sig_root_dir ||= @project_root / sig_root_name
       end
 
+      # Every directory the project's RBS env loads signatures from (`signature_paths:`), resolved against the
+      # project root. The writer reads them to decide a repair (#2605) and writes only under {#sig_root_dir}.
+      def signature_dirs
+        Array(@configuration.signature_paths).map { |path| @project_root / path }
+      end
+
       private
 
       def source_relative_to_root(source_path)

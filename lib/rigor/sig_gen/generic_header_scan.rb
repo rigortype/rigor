@@ -2,6 +2,7 @@
 
 require "rbs"
 
+require_relative "../environment/rbs_loader"
 require_relative "../rooted_glob"
 
 module Rigor
@@ -10,22 +11,30 @@ module Rigor
     # sig-gen spelled it before #2436) that `sig/` holds, read before the writer changes anything.
     #
     # rbs rejects a class with `GenericParameterMismatchError` while any one of its declarations opens it bare, so
-    # the repair is decided per class, across every file under the sig root: either every bare opening of the class
-    # is repaired, or none is. A class is held back ({#left_bare}) when the body of any of its bare openings names
-    # one of the parameters as a relative constant ({.shadowing_names}), because the inserted parameter would capture
-    # that name. Every file under the sig root is read, not only those a candidate of the run routes to, so a bare
-    # header whose source file is gone is repaired too (#2603).
+    # the repair is decided per class, across every file the project's RBS env loads from `signature_paths:`: either
+    # every bare opening of the class is repaired, or none is. A class is held back ({#left_bare}) when the body of
+    # any of its bare openings names one of the parameters as a relative constant ({.shadowing_names}), because the
+    # inserted parameter would capture that name, or when one of its bare openings lies outside the sig root, which
+    # the writer never rewrites. Every file under the sig root is read, not only those a candidate of the run routes
+    # to, so a bare header whose source file is gone is repaired too (#2603); the other signature paths are read
+    # and never written.
     #
     # A file that is not valid UTF-8, or does not parse, is not read: rbs never loads it, and the writer refuses it.
     class GenericHeaderScan
-      # One bare opening: the file it is in, the class it opens, and the parameter names its body spells.
-      Opening = Data.define(:target, :class_name, :names)
+      # One bare opening: the file it is in, the class it opens, the parameter names its body spells, and whether
+      # the file is under the sig root (the writer may rewrite it).
+      Opening = Data.define(:target, :class_name, :names, :writable)
 
-      # @param sig_root — the directory the writer writes to; nothing outside it is read.
+      # @param sig_root — the directory the writer writes to; the only files it may rewrite.
+      # @param signature_dirs — the other directories the RBS env loads (`signature_paths:`), read only. A file
+      #   under the sig root is read once, as a writable one.
       # @param spelling_for — called with a class name, returns the header spelling to insert
       #   (`"[unchecked out E]"`), or nil for a class that is not generic with plain parameters only.
-      def self.scan(sig_root:, spelling_for:)
-        new(spelling_for).tap { |scan| scan.read_tree(sig_root) }
+      def self.scan(sig_root:, spelling_for:, signature_dirs: [])
+        new(spelling_for).tap do |scan|
+          scan.read_tree(sig_root, writable: true)
+          signature_dirs.each { |dir| scan.read_tree(dir, writable: false) }
+        end
       end
 
       # The names in `names` that the declaration's text after its name (superclass, members, nested declarations)
@@ -79,11 +88,12 @@ module Rigor
       def initialize(spelling_for)
         @spelling_for = spelling_for
         @openings = []
+        @seen = Set.new
       end
 
       # Every class to repair, with the spelling to insert: each bare opening of it, in every file read, is clear.
       def repairs
-        @repairs ||= by_class.reject { |_, openings| openings.any? { |o| !o.names.empty? } }
+        @repairs ||= by_class.reject { |_, openings| openings.any? { |o| blocking?(o) } }
                              .to_h { |name, _| [name, spelling(name)] }
       end
 
@@ -92,25 +102,44 @@ module Rigor
         @openings.select { |o| repairs.key?(o.class_name) }.map(&:target).uniq
       end
 
-      # One entry per class held back: `{ class:, targets:, blocking: [{ target:, names: }] }`, where `targets` is
-      # every file with a bare opening of it and `blocking` the openings whose body names a parameter.
+      # One entry per class held back: `{ class:, targets:, blocking: [...] }`, where `targets` is every file with a
+      # bare opening of it and `blocking` the openings that hold it back, each `{ target:, reason:
+      # "outside_sig_root" }` (a file the writer does not rewrite) or `{ target:, reason: "names_parameter", names: }`.
       def left_bare
         by_class.filter_map do |name, openings|
-          blocking = openings.reject { |o| o.names.empty? }
+          blocking = openings.select { |o| blocking?(o) }
           next if blocking.empty?
 
-          { class: name, targets: openings.map(&:target).uniq,
-            blocking: blocking.map { |o| { target: o.target, names: o.names } } }
+          { class: name, targets: openings.map(&:target).uniq, blocking: blocking.map { |o| blocking_entry(o) } }
         end
       end
 
-      def read_tree(sig_root)
-        return unless sig_root.directory?
+      def read_tree(dir, writable:)
+        return unless dir.directory?
 
-        RootedGlob.glob(sig_root.to_s, "**/*.rbs").sort.each { |path| read_file(Pathname(path)) }
+        RootedGlob.glob(dir.to_s, "**/*.rbs").sort.each do |path|
+          key = realpath(path)
+          read_file(Pathname(path), writable) if @seen.add?(key)
+        end
       end
 
       private
+
+      def blocking?(opening)
+        !opening.writable || !opening.names.empty?
+      end
+
+      def blocking_entry(opening)
+        return { target: opening.target, reason: "outside_sig_root" } unless opening.writable
+
+        { target: opening.target, reason: "names_parameter", names: opening.names }
+      end
+
+      def realpath(path)
+        File.realpath(path)
+      rescue SystemCallError
+        File.expand_path(path)
+      end
 
       def by_class
         @by_class ||= @openings.group_by(&:class_name).sort.to_h
@@ -123,12 +152,12 @@ module Rigor
         @spellings[name] = @spelling_for.call(name)
       end
 
-      def read_file(path)
+      def read_file(path, writable)
         source = path.read
         return unless source.valid_encoding?
 
         _, _, decls = RBS::Parser.parse_signature(source)
-        collect(path.to_s, source, decls, [])
+        collect([path.to_s, writable], source, decls, [])
       rescue RBS::ParsingError, SystemCallError
         nil
       end
@@ -137,11 +166,10 @@ module Rigor
         decls.each do |decl|
           next unless decl.is_a?(RBS::AST::Declarations::Class) || decl.is_a?(RBS::AST::Declarations::Module)
 
-          local = decl.name.to_s.delete_prefix("::")
-          # The naming {Writer#find_class_decls} uses, so a class this scan clears is the one the writer repairs.
-          name = prefix.empty? ? local : "#{prefix.join('::')}::#{local}"
-          record(target, source, decl, name)
-          collect(target, source, decl.members, prefix + [local])
+          # RBS resolves `module Foo; class ::Set` to the top-level `Set`, and so does this key (#2654).
+          path = Environment::RbsLoader.declared_class_path(decl, prefix)
+          record(target, source, decl, path.join("::"))
+          collect(target, source, decl.members, path)
         end
       end
 
@@ -152,7 +180,8 @@ module Rigor
         params = spelled && self.class.parameter_names(spelled)
         return if params.nil?
 
-        @openings << Opening.new(target: target, class_name: name,
+        file, writable = target
+        @openings << Opening.new(target: file, class_name: name, writable: writable,
                                  names: self.class.shadowing_names(source, decl, params))
       end
     end

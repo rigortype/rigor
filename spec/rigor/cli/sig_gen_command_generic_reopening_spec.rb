@@ -306,7 +306,7 @@ RSpec.describe Rigor::CLI::SigGenCommand do
         expect(status).to eq(0)
         expect(JSON.parse(out).fetch("left_bare")).to eq(
           [{ "class" => "Array", "targets" => [sig_path("ext"), sig_path("held")],
-             "blocking" => [{ "target" => sig_path("held"), "names" => ["E"] }] }]
+             "blocking" => [{ "target" => sig_path("held"), "reason" => "names_parameter", "names" => ["E"] }] }]
         )
       end
     end
@@ -317,6 +317,19 @@ RSpec.describe Rigor::CLI::SigGenCommand do
       _, out, = sig_gen("--write", "--format=json", "lib")
 
       expect(JSON.parse(out).fetch("left_bare").map { |entry| entry.fetch("class") }).to eq(["Array"])
+    end
+
+    # #2605 review — a signature path the writer does not rewrite still feeds rbs.
+    it "holds a class back when another signature path opens it bare" do
+      write(".rigor.yml", "paths:\n  - lib\nsignature_paths:\n  - sig\n  - extra\n")
+      write("sig/vendor/f.rbs", "class Range\n  def f: () -> 1\nend\n")
+      write("extra/e.rbs", "class Range\n  def e: () -> 1\nend\n")
+
+      _, out, = sig_gen("--write", "lib")
+
+      expect(written("vendor/f")).to eq("class Range\n  def f: () -> 1\nend\n")
+      expect(out).to include("generic header left bare: Range in #{sig_path('vendor/f')}, ")
+      expect(out).to include("(an opening outside the sig root at ")
     end
 
     it "omits left_bare from --format=json when nothing is held back" do

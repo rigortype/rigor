@@ -1347,7 +1347,8 @@ end
         expect(File.read(target)).to start_with("class Hash\n")
         # #2605 — and the class is reported as left bare.
         expect(w.left_bare).to eq([{ class: "Hash", targets: [Pathname(target).to_s],
-                                     blocking: [{ target: Pathname(target).to_s, names: ["K"] }] }])
+                                     blocking: [{ target: Pathname(target).to_s, reason: "names_parameter",
+                                                  names: ["K"] }] }])
       end
 
       it "repairs the header when the member anchors the name" do
@@ -1396,7 +1397,8 @@ end
         expect(File.read(target)).to eq(original)
         expect(results.flat_map(&:repaired_headers)).to eq([])
         expect(w.left_bare).to eq([{ class: "Array", targets: [Pathname(target).to_s],
-                                     blocking: [{ target: Pathname(target).to_s, names: ["E"] }] }])
+                                     blocking: [{ target: Pathname(target).to_s, reason: "names_parameter",
+                                                  names: ["E"] }] }])
       end
 
       it "repairs no opening when the one that names a parameter is in another file" do
@@ -1427,6 +1429,48 @@ end
         w.write_all([generic(method_name: :c, class_name: "Array", params: params)])
 
         expect(w.left_bare).to eq([])
+      end
+    end
+
+    # #2605 review — rbs loads every `signature_paths:` entry, but the writer rewrites only the sig root, so a bare
+    # opening in another signature path holds its class back everywhere.
+    describe "a bare opening in a signature path outside the sig root" do
+      def file(rel, content)
+        path = File.join(tmpdir, rel)
+        FileUtils.mkdir_p(File.dirname(path))
+        File.write(path, content)
+        path
+      end
+
+      def extra_writer
+        mapper = Rigor::SigGen::PathMapper.new(configuration: configuration(signature_paths: %w[sig extra]),
+                                               project_root: tmpdir)
+        described_class.new(path_mapper: mapper)
+      end
+
+      let(:range) { ->(name) { { "Range" => "[unchecked out Elem]", "Array" => "[unchecked out E]" }[name] } }
+
+      it "holds the class back in the sig root and reports the opening outside it" do
+        inside = file("sig/vendor/f.rbs", "class Range\n  def f: () -> 1\nend\n")
+        outside = file("extra/e.rbs", "class Range\n  def e: () -> 1\nend\n")
+        w = extra_writer
+
+        expect(w.write_all([], header_spelling: range)).to eq([])
+        expect(File.read(inside)).to eq("class Range\n  def f: () -> 1\nend\n")
+        expect(File.read(outside)).to eq("class Range\n  def e: () -> 1\nend\n")
+        expect(w.left_bare).to eq([{ class: "Range", targets: [inside, outside],
+                                     blocking: [{ target: outside, reason: "outside_sig_root" }] }])
+      end
+
+      it "holds the class back when the body outside the sig root names a parameter" do
+        inside = file("sig/foo.rbs", "class Array\n  def b: () -> 1\nend\n")
+        file("extra/e.rbs", "class E\nend\nclass Array\n  def h: () -> E\nend\n")
+        w = extra_writer
+
+        w.write_all([generic(method_name: :c, class_name: "Array", params: params)], header_spelling: range)
+
+        expect(File.read(inside)).to start_with("class Array\n")
+        expect(w.left_bare.map { |entry| entry.fetch(:class) }).to eq(["Array"])
       end
     end
 

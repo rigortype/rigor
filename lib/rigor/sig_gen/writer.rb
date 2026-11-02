@@ -97,12 +97,13 @@ module Rigor
       end
       private :target_of
 
-      # Issues #2603 and #2605 — reads every file under the sig root for bare openings of generic classes before
-      # anything is written ({GenericHeaderScan}). A class is repaired in every file or in none: one bare opening
-      # rbs still rejects keeps the class failing, so repairing its other openings would be churn.
+      # Issues #2603 and #2605 — reads every file under the signature paths for bare openings of generic classes
+      # before anything is written ({GenericHeaderScan}). A class is repaired in every file or in none: one bare
+      # opening rbs still rejects keeps the class failing, so repairing its other openings would be churn. Only files
+      # under the sig root are rewritten; a bare opening anywhere else holds its class back.
       def scan_generic_headers(candidates, header_spelling)
         stamp = merged_type_params(candidates)
-        scan = GenericHeaderScan.scan(sig_root: @path_mapper.sig_root_dir,
+        scan = GenericHeaderScan.scan(sig_root: @path_mapper.sig_root_dir, signature_dirs: @path_mapper.signature_dirs,
                                       spelling_for: ->(name) { stamp[name] || header_spelling&.call(name) })
         @scan_repairs = scan.repairs
         @held_back = scan.left_bare.map { |entry| entry.fetch(:class) }
@@ -488,7 +489,7 @@ module Rigor
 
         blocking = bare.filter_map do |decl|
           names = GenericHeaderScan.shadowing_names(source, decl, params)
-          { target: target.to_s, names: names } unless names.empty?
+          { target: target.to_s, reason: "names_parameter", names: names } unless names.empty?
         end
         return false if blocking.empty?
 

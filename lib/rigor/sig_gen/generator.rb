@@ -1108,9 +1108,22 @@ module Rigor
             @certain_definers << stmt
             # A `begin … end` statement's body (and `ensure`) runs whenever the statement does.
             mark_certain_body(stmt) if stmt.is_a?(Prism::BeginNode)
+            mark_visibility_definers(stmt)
           end
           walk_defs(stmt, prefix, in_singleton_class, active, out)
         end
+      end
+
+      # The visibility calls whose `def` arguments run whenever the call does (`private def x`, #2254).
+      VISIBILITY_CALLS = %i[private public protected module_function].freeze
+      private_constant :VISIBILITY_CALLS
+
+      # A `def` passed directly to a receiverless visibility call is evaluated before the call, so it is a certain
+      # definer when the statement that holds the call is one ({#walk_statements}).
+      def mark_visibility_definers(stmt)
+        return unless stmt.is_a?(Prism::CallNode) && stmt.receiver.nil? && VISIBILITY_CALLS.include?(stmt.name)
+
+        stmt.arguments&.arguments&.each { |arg| @certain_definers << arg if arg.is_a?(Prism::DefNode) }
       end
 
       def collect_def_node(node, prefix, in_singleton_class, module_function_active, out)

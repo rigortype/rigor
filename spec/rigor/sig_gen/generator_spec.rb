@@ -709,8 +709,8 @@ RSpec.describe Rigor::SigGen::Generator do
         "class K\n  def x = 1\n  begin\n    nil\n  ensure\n    def x = \"s\"\n  end\nend\n",
         "K", ['def x: () -> "s"'], -> { it.new.x }, "s"
       ],
-      "a def passed to public after a def (one this reading cannot rank, so nothing is written)" => [
-        "class K\n  def x = 1\n  public def x = \"s\"\nend\n", "K", [], -> { it.new.x }, "s"
+      "a def passed to public after a def" => [
+        "class K\n  def x = 1\n  public def x = \"s\"\nend\n", "K", ['def x: () -> "s"'], -> { it.new.x }, "s"
       ],
       "an attr_reader of two names, one redefined" => [
         "class K\n  attr_reader :x, :y\n  def x = 1\n  def initialize = (@x = \"s\"; @y = :t)\nend\n",
@@ -759,6 +759,7 @@ RSpec.describe Rigor::SigGen::Generator do
         "class K\n  def x = 1\n  raise LoadError if COND\n  def x = \"s\"\nrescue LoadError\nend\n", :x
       ],
       "a case-arm redefinition" => ["class K\n  def x = 1\n  case COND when true then def x = \"s\" end\nend\n", :x],
+      "a public def under a condition" => ["class K\n  def x = 1\n  public(def x = \"s\") if COND\nend\n", :x],
       "a redefinition in a lambda" => ["class K\n  def x = 1\n  L = -> { def x = \"s\" }\n  L.call if COND\nend\n", :x],
       "a guarded polyfill" => [
         "class K\n  def x = 1\n  remove_method(:x) if COND\n  def x = \"s\" unless method_defined?(:x)\nend\n", :x

@@ -295,7 +295,7 @@ RSpec.describe Rigor::MCP::Server do
 
         payload = JSON.parse(text_of(resp))
         expect(payload.fetch("observation")).to eq("paths" => [File.join(dir, "spec")], "missing" => [])
-        expect(payload.fetch("candidates").map { it["rbs"] }).to include("def m: (42) -> 1")
+        expect(payload.fetch("candidates").map { it["rbs"] }).to include("def m: (Integer) -> 1")
       end
     end
 

@@ -598,6 +598,25 @@ RSpec.describe Rigor::SigGen::Generator do
 
       expect([get.classification, get.rbs]).to eq([Rigor::SigGen::Classification::NEW_METHOD, "def get: () -> T"])
     end
+
+    # #2583: `module A; class ::Box[T]` in sig/ is the top-level `Box`, so its type parameters are read for the
+    # top-level inline `Box`; keyed as `A::Box` they were unreadable and the members were refused.
+    it "writes the members into an absolute declaration nested in a module that the sig/ carries" do
+      write_fixture("sig/a.rbs", "module A\n  class ::Box[T]\n  end\nend\n")
+      path = write_fixture("lib/a.rb", <<~RUBY)
+        module A
+          # @rbs generic T
+          class ::Box
+            #: () -> T
+            def get = @v
+          end
+        end
+      RUBY
+
+      get = Dir.chdir(tmpdir) { find(run_generator(path, sig: true), :get) }
+
+      expect([get.classification, get.rbs]).to eq([Rigor::SigGen::Classification::NEW_METHOD, "def get: () -> T"])
+    end
   end
 
   describe "with inline_declared: skip" do

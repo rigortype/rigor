@@ -249,8 +249,11 @@ When `.rigor.yml` has [configuration warnings](03-configuration.md)
 them under `config_warnings`, as `rigor check --format json` does.
 
 `isError` is `false` when the run completes normally, even if
-diagnostics were found. `isError: true` signals a configuration or
-runtime failure (bad path, unreadable config, etc.).
+diagnostics were found. `isError: true` signals a usage or runtime
+failure: an unreadable `config`, or a `rigor_coverage` call whose
+`paths` leave nothing to measure. A missing path given to `rigor_check`
+is not one of these: it is reported in the diagnostics, and the call
+returns `isError: false`.
 
 **Typical agent use:** call `rigor_check` on the files an agent is
 about to edit, record the baseline, apply the edit, call again, diff
@@ -509,6 +512,13 @@ as `Constant` / `Nominal` / shaped / refined (precise) versus
 | `config` | `string` | no |
 
 **Returns:** JSON — the same as `rigor coverage --format json`.
+
+A `paths` entry that is missing, or is not a Ruby file, is reported as
+`rigor coverage` reports it. Beside files that are measured it is skipped. The result
+then carries a second text block with the CLI's stderr, unfiltered: path
+warnings such as `missing.rb:1:1: warning: no such file or directory (skipped)`,
+and any other warnings. When no entry holds a Ruby file, the call is
+`isError: true` and the block says so.
 
 ```json
 {

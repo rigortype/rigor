@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../rooted_glob"
+require_relative "../analysis/path_expansion"
 
 module Rigor
   class CLI
@@ -37,6 +38,19 @@ module Rigor
           end
         end
         paths.uniq
+      end
+
+      # #2206 — the `.rb` paths `args` names, with a path that is neither a directory nor a `.rb` file reported the way
+      # `rigor check` reports it ({Analysis::PathExpansion.diagnostics}): a warning beside files that will be read, an
+      # error when nothing will be. The diagnostics go to stderr. Returns nil when one is an error, so the caller exits.
+      def collect_paths_reporting(args)
+        bad = Analysis::PathExpansion.unusable(args)
+        files = Analysis::PathExpansion.ruby_files(args, [])
+        diagnostics = Analysis::PathExpansion.diagnostics(bad, any_files: files.any?)
+        diagnostics.each { |diagnostic| @err.puts(diagnostic.to_s) }
+        return nil if diagnostics.any?(&:error?)
+
+        files.uniq
       end
     end
   end

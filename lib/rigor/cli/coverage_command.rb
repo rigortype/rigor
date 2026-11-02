@@ -68,7 +68,7 @@ module Rigor
         configuration = Configuration.load(options.fetch(:config))
         paths = resolve_paths(configuration)
         return CLI::EXIT_USAGE if paths.nil?
-        return usage_error if paths.empty?
+        return no_ruby_files_error(configuration) if paths.empty?
 
         return run_protection(paths, options, configuration) if options[:protection]
 
@@ -88,7 +88,7 @@ module Rigor
       # git-changed-files default and returns before this.
       def resolve_paths(configuration)
         args = @argv.empty? ? configuration.paths : @argv
-        collect_paths(args, command_name: "coverage")
+        collect_paths_reporting(args)
       end
 
       def parse_options
@@ -253,6 +253,15 @@ module Rigor
 
       def usage_error
         @err.puts("coverage: at least one path is required")
+        @err.puts(USAGE)
+        CLI::EXIT_USAGE
+      end
+
+      # #2206 — paths were named, or configured, but none holds a Ruby file. Said as such, not as "no path given".
+      def no_ruby_files_error(configuration)
+        return usage_error if @argv.empty? && Array(configuration.paths).empty?
+
+        @err.puts("coverage: no Ruby files under the given paths")
         @err.puts(USAGE)
         CLI::EXIT_USAGE
       end

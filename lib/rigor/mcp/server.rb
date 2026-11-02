@@ -200,7 +200,8 @@ module Rigor
       end
 
       # #2206 — `rigor coverage` writes its path warnings (a missing path skipped beside files it measures) to stderr,
-      # which a successful run drops. The tool carries them as a second text block, so an agent sees what was skipped.
+      # which a successful run drops. The tool carries the CLI's whole stderr (path warnings and any other warnings)
+      # as a second text block, unfiltered, so an agent sees what was skipped.
       def with_path_warnings(result, name, out, err)
         return result unless name == "rigor_coverage" && !out.empty? && !err.strip.empty?
 

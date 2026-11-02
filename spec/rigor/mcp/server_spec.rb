@@ -479,7 +479,6 @@ RSpec.describe Rigor::MCP::Server do
       expect(JSON.parse(text_of(resp))).to have_key("candidates")
     end
 
-    # #2206 — the MCP tool and the CLI word a missing path the same way, as `rigor check` does.
     # #2206 — a skipped path beside a measured file is named in the result, not dropped with stderr.
     it "names a path rigor_coverage skips beside a measured file in a second text block" do
       Dir.mktmpdir do |dir|
@@ -497,6 +496,7 @@ RSpec.describe Rigor::MCP::Server do
       end
     end
 
+    # #2206 — the MCP tool and the CLI word a missing path the same way, as `rigor check` does.
     it "reports a flag-shaped rigor_coverage path as a missing path, worded as the CLI words it" do
       resp = tool_call("rigor_coverage", { "paths" => ["--workers=4"] })
 

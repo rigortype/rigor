@@ -304,6 +304,13 @@ RSpec.describe "the callee floor follows the remaining hand-off shapes (#2336)",
       end
     end
 
+    # A definer row may be the receiver's own, which answers ahead of its core method (`Hash#store`).
+    it "floors through a definer of a name the receiver's class declares" do
+      defs = "class Bag < Hash\nend\nBag.define_method(:store) { |k, h| h[:format] = \"json\" }"
+      source = program(defs, "Bag.new.store(:k, options)")
+      expect(rules_with_sig(source, "class Bag < ::Hash[untyped, untyped]\nend\n")).to eq([])
+    end
+
     # A top-level def lives on `Object`, so the receiver's own core method (`Hash#store`) answers ahead of it.
     it "keeps the literal when the receiver's class declares the name a top-level def has" do
       defs = "def store(k, v) = v[:format] = \"json\"\nclass Bag < Hash\nend"

@@ -17,6 +17,7 @@ require_relative "body_fixpoint"
 require_relative "memo_audit"
 require_relative "callee_mutation_chain"
 require_relative "toplevel_def_census"
+require_relative "callee_write_census"
 require_relative "captured_locals"
 require_relative "dynamic_origin"
 require_relative "error_info"
@@ -528,7 +529,7 @@ module Rigor
       # Issue #2296 — the parameters the def mutates inside a block, or through a Set-only adder, count too: they
       # floor the caller's argument through {#floor_callee_escaped_args_for_call}'s element-keeping channels.
       def content_mutated_parameter_positions(def_node)
-        slots = content_parameter_slots(def_node)
+        slots = forwarding_slots(def_node)
         census = callee_content_mutated_parameters(def_node).values +
                  own_block_content_parameters(def_node).values + own_set_content_parameters(def_node).values
         each_forwarding_call(def_node, slots) { |_, forwarded| census += forwarded.map { |name, _| slots[name] } }
@@ -613,8 +614,8 @@ module Rigor
 
       # `owner`, the owner a def found on `defining` by a lookup on `class_name` is walked under, or {FLOOR_ALL} for a
       # def the class inherits (`defining` is not `class_name`). An inherited def is not walked (#2521): walking it
-      # exposes every blind spot of the own-def census (`h.merge!`, a local alias, `tap`, a write through another
-      # object, #2336), which the floor masks.
+      # exposed the own-def census's blind spots, which #2595 closes ({#callee_write_census}), and the hand-offs #2336
+      # lists, which stay open and which the floor masks.
       def walked_owner(defining, class_name, owner)
         defining == class_name ? owner : FLOOR_ALL
       end
@@ -818,6 +819,7 @@ module Rigor
         if receiver.is_a?(Prism::LocalVariableReadNode) || receiver.is_a?(Prism::ItLocalVariableReadNode)
           return local_receiver_callees(call_node, def_node, depth)
         end
+        return named_instance_callees(call_node.name) if receiver.is_a?(Prism::InstanceVariableReadNode)
 
         hand_off_receiver_callees(call_node, def_node)
       end
@@ -841,14 +843,15 @@ module Rigor
         UnionCallees.new(found + named)
       end
 
-      # True for a call on a receiver the callee's body can type without its locals (a constant or `Const.new`), or on
-      # a local of the callee (#2515: {#local_receiver_callees}).
+      # True for a call on a receiver the callee's body can type without its locals (a constant or `Const.new`), on a
+      # local of the callee (#2515: {#local_receiver_callees}), or, issue #2595, on an ivar, whose type the def's AST
+      # does not show, so it resolves by name ({#named_instance_callees}) as an untyped local does.
       def hand_off_receiver?(node)
         return false unless node.is_a?(Prism::CallNode)
 
         receiver = node.receiver
         receiver.is_a?(Prism::LocalVariableReadNode) || receiver.is_a?(Prism::ItLocalVariableReadNode) ||
-          constant_receiver_form?(receiver)
+          receiver.is_a?(Prism::InstanceVariableReadNode) || constant_receiver_form?(receiver)
       end
 
       def constant_receiver_form?(receiver)
@@ -1065,10 +1068,11 @@ module Rigor
         census == :forwarding_edges ? NO_FORWARDS : EVERY_ARGUMENT
       end
 
-      # The {FLOOR_ALL} answer: every content parameter mutated, no hand-offs.
+      # The {FLOOR_ALL} answer: every content parameter mutated, and (issue #2595) a named rest or keyword rest at
+      # {ANY_SLOT} / {ANY_KEYWORD} ({#forwarding_slots}), no hand-offs.
       def floor_all_census(census, def_node)
         BudgetTrace.hit(BudgetTrace::CALLEE_CHAIN_CAP)
-        census == :forwarding_edges ? NO_FORWARDS : content_parameter_slots(def_node)
+        census == :forwarding_edges ? NO_FORWARDS : forwarding_slots(def_node)
       end
 
       # The local-variable reads `call_node` passes to the parameters of `mutated`, a `{ name => slot }` census, the
@@ -5760,9 +5764,57 @@ module Rigor
       def own_content_parameters(def_node)
         def_census(:own, def_node) do
           own = escaped_content_parameters(def_node).merge(direct_content_parameters(def_node))
+          written = callee_write_census(def_node).written
+          own = own.merge(written_slots(def_node, written)) unless written.empty?
           handed = super_forwarded_parameters(def_node)
           handed.empty? ? own : own.merge(handed)
         end
+      end
+
+      # Issue #2595 — the parameter writes the content scans above miss: a shape mutator they do not count
+      # (`h.merge!(x)`), a write through an alias (`other = h`, `h.tap { |x| }`, `[h].each { |x| }`, `@x = h`), and
+      # the aliases themselves, which {#forwarded_parameters} follows as hand-offs ({CalleeWriteCensus}). A property
+      # of the def's AST alone, memoised per def node for the thread.
+      def callee_write_census(def_node)
+        def_census(:writes, def_node) do
+          CalleeWriteCensus.scan(def_node.body, census_seeds(def_node),
+                                 mutators: CALLEE_WRITE_MUTATORS, handled: CONTENT_MUTATORS, fresh: FRESH_RESULTS,
+                                 copiers: CENSUS_COPIERS,
+                                 rebinds: parameter_rebinds(def_node))
+        end
+      end
+
+      # The parameters {#callee_write_census} follows: each content parameter holds the caller's argument itself
+      # (`:same`); a named rest (`*args`) or keyword rest (`**kw`) holds the caller's arguments as elements (`:held`).
+      def census_seeds(def_node)
+        seeds = content_parameter_slots(def_node).transform_values { :same }
+        rest_parameter_names(def_node).each_key { |name| seeds[name] = :held }
+        seeds
+      end
+
+      # `{ name => census key }` for a named rest (`*args` reads as {REST_PARAMETER}) and keyword rest (`**kw` reads as
+      # {KEYWORD_REST_PARAMETER}) of `def_node`.
+      def rest_parameter_names(def_node)
+        params = def_node.parameters
+        return NO_PARAMETER_SLOTS if params.nil?
+
+        rest = params.rest
+        keyword_rest = params.keyword_rest
+        names = {}
+        names[rest.name] = REST_PARAMETER if rest.is_a?(Prism::RestParameterNode) && rest.name
+        names[keyword_rest.name] = KEYWORD_REST_PARAMETER if keyword_rest.is_a?(Prism::KeywordRestParameterNode) &&
+                                                             keyword_rest.name
+        names
+      end
+
+      # The own-census entries for the parameter names {#callee_write_census} wrote: a content parameter at its slot,
+      # a rest at {ANY_SLOT} and a keyword rest at {ANY_KEYWORD}, the slots every argument they bind reaches.
+      def written_slots(def_node, written)
+        found = content_parameter_slots(def_node).slice(*written)
+        rest_parameter_names(def_node).each do |name, key|
+          found[key] = key == REST_PARAMETER ? ANY_SLOT : ANY_KEYWORD if written.include?(name)
+        end
+        found
       end
 
       # Issue #2521 (#2570 review) — the parameters `def_node` hands to the method it overrides: every content
@@ -5947,7 +5999,7 @@ module Rigor
       end
 
       def compute_forwarding_edges(def_node)
-        slots = content_parameter_slots(def_node)
+        slots = forwarding_slots(def_node)
         edges = []
         each_forwarding_call(def_node, slots) do |call_node, forwarded, depth|
           callees = hand_off_callees(call_node, def_node, depth)
@@ -5984,10 +6036,12 @@ module Rigor
 
       def forwarding_calls(def_node, slots)
         calls = []
+        context = HandOffContext.new(census: callee_write_census(def_node), seeds: census_seeds(def_node),
+                                     rests: rest_parameter_names(def_node))
         each_node_in_method_scope(def_node.body, 0) do |descendant, depth|
           next unless self_dispatch_call?(descendant) || hand_off_receiver?(descendant)
 
-          forwarded = forwarded_parameters(descendant, slots, depth)
+          forwarded = forwarded_parameters(descendant, slots, depth, context)
           calls << [descendant, forwarded, depth] unless forwarded.empty?
         end
         calls.empty? ? NO_FORWARDS : calls
@@ -6001,7 +6055,9 @@ module Rigor
       # argument after a splat or `...` has an index that says nothing about the parameter it binds, so it binds
       # {ANY_SLOT}, any positional parameter of the callee; one before the first splat keeps its index among the call's
       # arguments, which {#compute_forwarding_edges} shifts by each callee's offset ({#resolve_self_callees}).
-      def forwarded_parameters(call_node, slots, depth)
+      # Issue #2595 — an argument that reads an alias of a parameter (`other = h; poke(other)`, `@x = h; poke(@x)`, a
+      # block parameter of `h.tap`) hands on that parameter too (`census`, {#callee_write_census}).
+      def forwarded_parameters(call_node, slots, depth, context = NO_HAND_OFF_CONTEXT)
         args = call_node.arguments
         return NO_FORWARDS unless args.is_a?(Prism::ArgumentsNode)
 
@@ -6009,11 +6065,14 @@ module Rigor
         forwarded = []
         args.arguments.each_with_index do |argument, index|
           if argument.is_a?(Prism::KeywordHashNode)
-            forwarded.concat(forwarded_keywords(argument, slots, depth))
+            forwarded.concat(forwarded_keywords(argument, slots, depth, context))
           elsif argument.is_a?(Prism::SplatNode) || argument.is_a?(Prism::ForwardingArgumentsNode)
             spread = true
-          elsif (name = parameter_read_name(argument, slots, depth))
-            forwarded << [name, spread ? ANY_SLOT : index]
+            rest = splatted_rest(argument, depth, context)
+            forwarded << [rest, ANY_SLOT] if rest
+          else
+            slot = spread ? ANY_SLOT : index
+            handed_names(argument, slots, depth, context) { |name| forwarded << [name, slot] }
           end
         end
         forwarded
@@ -6037,13 +6096,57 @@ module Rigor
         end
       end
 
-      def forwarded_keywords(hash_node, slots, depth)
-        hash_node.elements.filter_map do |pair|
+      def forwarded_keywords(hash_node, slots, depth, context)
+        found = []
+        hash_node.elements.each do |pair|
           next unless pair.is_a?(Prism::AssocNode) && pair.key.is_a?(Prism::SymbolNode)
 
-          name = parameter_read_name(pair.value, slots, depth)
-          [name, pair.key.unescaped.to_sym] if name
+          keyword = pair.key.unescaped.to_sym
+          handed_names(pair.value, slots, depth, context) { |name| found << [name, keyword] }
         end
+        found
+      end
+
+      # Yields each parameter `node` may hand on: the one it reads ({#parameter_read_name}) and those it may be through
+      # an alias or an expression ({CalleeWriteCensus.handed_aliases}). An element of a named rest or keyword rest
+      # (`x = args[0]; poke(x)`, `poke(kw[:h])`) hands on that rest, under {REST_PARAMETER} / {KEYWORD_REST_PARAMETER}
+      # ({#forwarding_slots}).
+      def handed_names(node, slots, depth, context)
+        name = parameter_read_name(node, slots, depth)
+        yield name if name
+        node = node.value if node.is_a?(Prism::ImplicitNode)
+        aliases = CalleeWriteCensus.handed_aliases(context.census, context.seeds, node, depth,
+                                                   fresh: FRESH_RESULTS, copiers: CENSUS_COPIERS)
+        aliases.each do |aliased|
+          next if aliased == name
+
+          if slots.key?(aliased) then yield aliased
+          elsif (rest = context.rests[aliased]) then yield rest
+          end
+        end
+      end
+
+      # The rest key a `*args` splat of the def's own named rest hands on whole (`poke(*args)`), or nil.
+      def splatted_rest(argument, depth, context)
+        read = argument.is_a?(Prism::SplatNode) ? argument.expression : nil
+        return unless read.is_a?(Prism::LocalVariableReadNode) && read.depth == depth
+
+        rest = context.rests[read.name]
+        rest if rest == REST_PARAMETER
+      end
+
+      # What {#forwarded_parameters} reads a def's hand-offs with: its write census, its census seeds and its named
+      # rests.
+      HandOffContext = Data.define(:census, :seeds, :rests)
+      NO_HAND_OFF_CONTEXT = HandOffContext.new(census: CalleeWriteCensus::EMPTY, seeds: {}.freeze, rests: {}.freeze)
+      private_constant :HandOffContext, :NO_HAND_OFF_CONTEXT
+
+      # The slots a hand-off's forwarded name maps to: each content parameter's, and {ANY_SLOT} / {ANY_KEYWORD} for the
+      # rest keys an element of a named rest or keyword rest hands on under ({#handed_names}).
+      def forwarding_slots(def_node)
+        slots = content_parameter_slots(def_node)
+        rest_parameter_names(def_node).each_value { |key| slots[key] = key == REST_PARAMETER ? ANY_SLOT : ANY_KEYWORD }
+        slots
       end
 
       # The parameter `node` reads when it is a read of one of `slots`' names at `depth` (a keyword shorthand
@@ -6341,7 +6444,19 @@ module Rigor
       FRESH_CONSTRUCTED = %i[Array Hash String Set].to_set.freeze
       FRESH_COPIERS = %i[map collect select reject merge + -].to_set.freeze
       FRESH_OPERATORS = %i[+ -].to_set.freeze
-      private_constant :FRESH_DUPLICATORS, :FRESH_CONSTRUCTED, :FRESH_COPIERS, :FRESH_OPERATORS
+      # The calls whose result {#callee_write_census} reads as a new object rather than an alias of the receiver.
+      # The calls {#callee_write_census} reads as a new container of the receiver's elements, on an Array, a Hash and a
+      # String alike: a write to the result misses the receiver, an element of it may be a part. `to_a`, `to_h`
+      # (without a block; `to_h { }` is read as one in {CalleeWriteCensus}), `to_s`, `each_slice`, `each_cons` and
+      # `each_with_index` stay out: each returns its receiver on one of them.
+      CENSUS_COPIERS = %i[
+        slice except compact transform_values transform_keys filter_map group_by partition sort sort_by uniq flatten
+        reverse keys values inspect zip filter flat_map collect_concat take drop
+      ].to_set.freeze
+      # The calls whose result {#callee_write_census} reads as a new object holding nothing of the receiver's.
+      FRESH_RESULTS = (FRESH_DUPLICATORS | FRESH_COPIERS | %i[join]).freeze
+      private_constant :FRESH_DUPLICATORS, :FRESH_CONSTRUCTED, :FRESH_COPIERS, :FRESH_OPERATORS, :CENSUS_COPIERS,
+                       :FRESH_RESULTS
 
       # The statements a def body runs in order: a statements list, with a parenthesised list (an endless def's
       # `= (a; b)`) read in place, or the lone expression. A body with a `rescue` / `ensure` clause (a `BeginNode`)
@@ -7756,6 +7871,12 @@ module Rigor
       # only a Set argument on them.
       SET_ONLY_ADDERS = (SetMutation::CONTENT_ADDERS - CONTENT_MUTATORS).freeze
       private_constant :SET_ONLY_ADDERS
+
+      # Issue #2595 — every name the callee write census ({#callee_write_census}) counts as a write: the shape mutators
+      # the widening reads ({MutationWidening::SHAPE_MUTATORS}) and the content scans' own names. A Set-only adder
+      # stays out: `merge` on a Hash returns a new Hash.
+      CALLEE_WRITE_MUTATORS = (MutationWidening::SHAPE_MUTATORS | CONTENT_MUTATORS).freeze
+      private_constant :CALLEE_WRITE_MUTATORS
 
       # The shared "not a content mutation" answer. This predicate runs on every node of every block, loop and
       # method body it censuses (~950k calls on the lib self-check) and almost always declines, so a fresh

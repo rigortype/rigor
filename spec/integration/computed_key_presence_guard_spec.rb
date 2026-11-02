@@ -149,7 +149,10 @@ RSpec.describe "a key? guard with a non-literal key withholds the nil-receiver r
           if h.key?(k)
             purge(h, k)
             r = h[k]
-            r[:y] = 1 # fires
+            # Silent since #2595: `purge`'s `h.delete(k)` is a counted write, so the callee floor reads `h` bare
+            # (`Hash[untyped, untyped]`) and the miss `nil` goes with it. The conservative direction: the callee does
+            # mutate. A remover-only floor that keeps the miss is #2634.
+            r[:y] = 1
           end
         end
 
@@ -200,7 +203,9 @@ RSpec.describe "a key? guard with a non-literal key withholds the nil-receiver r
           k = name.to_sym
           if h.key?(k) && purge(h, k)
             r = h[k]
-            r[:y] = 1 # fires
+            # Silent since #2595, as in `receiver_passed` (#2634); the `&&` edge also re-narrows the `key?` guard the
+            # call dropped (#2635).
+            r[:y] = 1
           end
         end
 

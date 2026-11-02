@@ -184,7 +184,11 @@ RSpec.describe "collection remover narrowing", type: :runner do
         end
       RUBY
       sig = { "c.rbs" => "class C\n  def f: (Array[Integer?]) -> Integer\n  def g: (Array[Integer?]) -> void\nend\n" }
-      expect(dumped_types(source, sig: sig)).to eq(["Array[Integer]", "Array[Integer?]"])
+      callee, caller = dumped_types(source, sig: sig)
+      expect(callee).to eq("Array[Integer]")
+      # Since #2595 the callee's `compact!` is a counted write, so the callee floor reads `ys` bare (`Array`) rather
+      # than keeping `Array[Integer?]` (a remover-only floor is #2634). Either way the caller is not narrowed.
+      expect(caller).not_to eq("Array[Integer]")
       expect(rules(source, sig: sig)).to be_empty
     end
   end

@@ -1695,7 +1695,9 @@ end
           File.write(File.join(dir, "b.rb"), before)
           session = described_class.new(configuration: configuration(dir), environment: shared_environment)
           baseline = guarded_baseline(session)
-          expect(baseline.select { |diagnostic| diagnostic.path == d }.map(&:rule)).to eq(["call.possible-nil-receiver"] - expected)
+          expect(baseline.select do |diagnostic|
+            diagnostic.path == d
+          end.map(&:rule)).to eq(["call.possible-nil-receiver"] - expected)
 
           File.write(File.join(dir, "b.rb"), after)
           recheck = guarded_recheck(session)

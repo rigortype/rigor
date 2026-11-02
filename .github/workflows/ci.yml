@@ -1193,7 +1193,8 @@ jobs:
       # Not attesting only costs the queue a full run, so a failure here
       # does not fail the job.
       - name: Attest the tested tree
-        # Pinned by commit: the only job here that can mint an OIDC token.
+        # Pinned by commit through actions.lock: the only job here that can
+        # mint an OIDC token.
         uses: actions/attest-build-provenance@v4.2.2
         continue-on-error: true
         with:

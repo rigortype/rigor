@@ -539,7 +539,9 @@ module Rigor
         parent_name = segments[0...-1].join("::")
         parent = find_class_decl(state.decls, parent_name)
         decl = parent && find_class_decl(state.decls, qualified)
-        return if decl.nil? || overlapping?(parent, decl)
+        # A rooted declaration (`module A; class ::B::C`) keeps the layout the user wrote: cutting it out of its
+        # enclosing module would leave that module empty, so the member merges in place instead.
+        return if decl.nil? || overlapping?(parent, decl) || decl.name.to_s.start_with?("::")
 
         region = decl_region(state.source, decl)
         block = region && relocated_block(state.source, decl, parent, segments.last, region)

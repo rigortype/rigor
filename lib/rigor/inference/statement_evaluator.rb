@@ -16,6 +16,7 @@ require_relative "block_parameter_binder"
 require_relative "body_fixpoint"
 require_relative "memo_audit"
 require_relative "callee_mutation_chain"
+require_relative "toplevel_def_census"
 require_relative "captured_locals"
 require_relative "dynamic_origin"
 require_relative "error_info"
@@ -644,7 +645,18 @@ module Rigor
       # The owner of an inherited def ({#walked_owner}): its census and hand-offs are not walked. Every content
       # parameter reads as mutated, so the argument is floored, and a {BudgetTrace::CALLEE_CHAIN_CAP} hit is recorded.
       FLOOR_ALL = :floor_all
-      private_constant :CalleeOwner, :FLOOR_ALL
+
+      # Issue #2515 — the owner of a top-level def that may not be the method the call runs (several defs of the name,
+      # an alias, a class chain that may answer it first; {ToplevelDefCensus}, {#top_level_callees}): the def is not
+      # read, and EVERY argument the call passes reads as written, whatever the def's own parameters are, since another
+      # def of the name may take more of them. A hand-off to it floors the handed parameter outright.
+      FLOOR_EVERY = :floor_every
+
+      # The owner of a top-level def reached from inside a class: its hand-offs resolve at the top level, where `self`
+      # is no instance of the caller's class.
+      TOPLEVEL_OWNER = CalleeOwner.new(nil)
+      OVER_APPROXIMATING = [FLOOR_ALL, FLOOR_EVERY].freeze
+      private_constant :CalleeOwner, :FLOOR_ALL, :FLOOR_EVERY, :TOPLEVEL_OWNER, :OVER_APPROXIMATING
 
       # True for `Const.new` where the class defines its own `self.new`, whose result is not an instance of `Const`.
       def overridden_constructor?(receiver, typing_scope)
@@ -800,7 +812,7 @@ module Rigor
       # ({#resolve_self_callees}, owner nil) or a call on a constant / `Const.new` receiver ({#hand_off_receiver?},
       # {#hand_off_receiver_callees}).
       def hand_off_callees(call_node, def_node, depth = 0)
-        return resolve_self_callees(call_node) if self_dispatch_call?(call_node)
+        return self_hand_off_callees(call_node) if self_dispatch_call?(call_node)
 
         receiver = call_node.receiver
         if receiver.is_a?(Prism::LocalVariableReadNode) || receiver.is_a?(Prism::ItLocalVariableReadNode)
@@ -808,6 +820,25 @@ module Rigor
         end
 
         hand_off_receiver_callees(call_node, def_node)
+      end
+
+      # {#resolve_self_callees} for a self-call that is a hand-off inside a def. In a def the evaluator is the top
+      # level's (`self` nil), the def a top-level one, and a top-level def is a private method on `Object`: it may be
+      # called from any object, so a same-named instance def of the caller's class answers the hand-off before the
+      # top-level one. Issue #2515 — the project's same-named instance defs are unioned in as a receiver the callee
+      # cannot type is ({#named_instance_callees}): they floor, never narrow.
+      def self_hand_off_callees(call_node)
+        found = resolve_self_callees(call_node)
+        return found unless enclosing_class_name_for(scope.self_type).nil?
+
+        send_hand_off = send_hand_off?(call_node)
+        target = send_hand_off ? call_node.arguments.arguments.first.unescaped.to_sym : call_node.name
+        named = named_instance_callees(target)
+        return named if named.equal?(CAPPED_HAND_OFF)
+        return found if named.empty?
+
+        named = named.map { |def_node, _offset, owner| [def_node, 1, owner] } if send_hand_off
+        UnionCallees.new(found + named)
       end
 
       # True for a call on a receiver the callee's body can type without its locals (a constant or `Const.new`), or on
@@ -955,13 +986,18 @@ module Rigor
         return CAPPED_HAND_OFF if owners.size > NAMED_HAND_OFF_CAP
 
         opaque = subclassing_opaque?
-        owners.filter_map do |class_name, open|
+        UnionCallees.new(owners.filter_map do |class_name, open|
           found = scope.user_def_for(class_name, name)
           next if found.nil?
 
           [found, 0, open || opaque ? FLOOR_ALL : CalleeOwner.new(Type::Combinator.nominal_of(class_name))]
-        end
+        end)
       end
+
+      # A resolution by name, whose candidates are guesses at the receiver: every edge it yields is an
+      # over-approximation ({CalleeMutationChain::Edge#approx}), as is any hand-off with more than one candidate.
+      class UnionCallees < Array; end
+      private_constant :UnionCallees
 
       # The most defs one name may have for {#named_instance_callees} to walk them; more floors the parameter. A cap
       # on the name key's fan-out that floors, not a cut of the walk, so ADR-127's rejection of out-degree caps does
@@ -1018,8 +1054,15 @@ module Rigor
       # callee's hand-offs resolve in, or this evaluator when the callee is a self-call's.
       def census_of(owner, census, def_node)
         return floor_all_census(census, def_node) if owner == FLOOR_ALL
+        return floor_every_census(census) if owner == FLOOR_EVERY
 
         (owner.nil? ? self : owner_evaluator(owner)).__send__(census, def_node)
+      end
+
+      # The {FLOOR_EVERY} answer: every positional and keyword argument mutated, no hand-offs.
+      def floor_every_census(census)
+        BudgetTrace.hit(BudgetTrace::CALLEE_CHAIN_CAP)
+        census == :forwarding_edges ? NO_FORWARDS : EVERY_ARGUMENT
       end
 
       # The {FLOOR_ALL} answer: every content parameter mutated, no hand-offs.
@@ -5193,7 +5236,7 @@ module Rigor
         callees.each do |def_node, offset, owner|
           acc = floor_arguments(node, census_of(owner, :callee_content_mutated_parameters, def_node), acc, offset,
                                 climbing) do |type|
-            content_floor_for(type)
+            callee_content_floor(type, def_node, owner, callees.size > 1)
           end
         end
         acc = floor_splat_arguments(node, callees, acc)
@@ -5469,6 +5512,48 @@ module Rigor
         return Type::Combinator.union(*type.members.map { |member| gradual_floor(member) }) if type.is_a?(Type::Union)
 
         string_carrier?(type) ? Type::Combinator.dynamic(type) : type
+      end
+
+      # {#content_floor_for} for an argument of a call to `def_node` under `owner`, gradual when the floor is an
+      # over-approximation ({#over_approximating_callee?}).
+      def callee_content_floor(type, def_node, owner, several)
+        floored = content_floor_for(type)
+        # Only a String carrier turns gradual, so the callee is walked only for one (this runs per floored argument).
+        return floored unless string_carrier_in?(floored)
+
+        several || over_approximating_callee?(def_node, owner) ? gradual_floor(floored) : floored
+      end
+
+      def string_carrier_in?(type)
+        type.is_a?(Type::Union) ? type.members.any? { |member| string_carrier?(member) } : string_carrier?(type)
+      end
+
+      # Issue #2515 — true when the floor a call applies to `def_node`'s arguments is an over-approximation, with no
+      # proof that the callee writes the argument it floors: the owner is {FLOOR_ALL} (an inherited def, a
+      # `method_missing`) or {FLOOR_EVERY} (a top-level def that may not be the one called), or the callee hands a
+      # parameter on, through any hop, to one of those, by name or to several candidates. A def read as written that
+      # writes the argument keeps the
+      # precise floor, which is what a later `Integer` parameter or `no_such_method` on the String needs to report.
+      # The walk is bounded by {CalleeMutationChain::MAX_NODES}; past it the answer is true.
+      def over_approximating_callee?(def_node, owner)
+        return true if OVER_APPROXIMATING.include?(owner)
+
+        seen = {}.compare_by_identity
+        queue = [[def_node, owner]]
+        until queue.empty?
+          node, node_owner = queue.shift
+          next if (seen[node] ||= {}).key?(node_owner)
+
+          seen[node][node_owner] = true
+          return true if seen.sum { |_, owners| owners.size } > CalleeMutationChain::MAX_NODES
+
+          census_of(node_owner, :forwarding_edges, node).each do |edge|
+            return true if edge.approx || OVER_APPROXIMATING.include?(edge.owner)
+
+            queue << [edge.callee, edge.owner || node_owner]
+          end
+        end
+        false
       end
 
       def string_carrier?(type) = type.is_a?(Type::Nominal) && type.class_name == "String"
@@ -5853,12 +5938,20 @@ module Rigor
         cache[def_node] ||= resolved_census(:edges, def_node) { compute_forwarding_edges(def_node) }
       end
 
+      # True for a hand-off answer that reads the handed parameter as written whatever the callee is: a name with too
+      # many defs ({CAPPED_HAND_OFF}) or a top-level def that may not be the one called ({FLOOR_EVERY}).
+      def approximate_hand_off?(callees) = callees.size > 1 || callees.is_a?(UnionCallees)
+
+      def floors_outright?(callees)
+        callees.equal?(CAPPED_HAND_OFF) || callees.any? { |_callee, _offset, owner| owner == FLOOR_EVERY }
+      end
+
       def compute_forwarding_edges(def_node)
         slots = content_parameter_slots(def_node)
         edges = []
         each_forwarding_call(def_node, slots) do |call_node, forwarded, depth|
           callees = hand_off_callees(call_node, def_node, depth)
-          if callees.equal?(CAPPED_HAND_OFF)
+          if floors_outright?(callees)
             forwarded.map(&:first).each do |name|
               edges << CalleeMutationChain::Edge.new(name: name, slot: slots[name], callee: def_node,
                                                      callee_names: [name], owner: FLOOR_ALL)
@@ -5874,7 +5967,7 @@ module Rigor
               next if names.empty?
 
               edges << CalleeMutationChain::Edge.new(name: name, slot: slots[name], callee: callee, callee_names: names,
-                                                     owner: owner)
+                                                     owner: owner, approx: approximate_hand_off?(callees))
             end
           end
         end
@@ -5928,7 +6021,11 @@ module Rigor
 
       # The `callee_slot` of an argument whose parameter the call does not show (one after a splat).
       ANY_SLOT = :__any_positional__
-      private_constant :ANY_SLOT
+
+      # The census {FLOOR_EVERY} answers: the rest and keyword-rest slots, which {#arguments_for_slots} reads as every
+      # positional argument and every keyword value of the call.
+      EVERY_ARGUMENT = { REST_PARAMETER => ANY_SLOT, KEYWORD_REST_PARAMETER => ANY_KEYWORD }.freeze
+      private_constant :ANY_SLOT, :EVERY_ARGUMENT
 
       # The names of the callee's parameters (`callee_slots`, {#content_parameter_slots}) an argument bound to `slot`
       # may reach: the one at that slot, or every positional one for {ANY_SLOT}.
@@ -5978,22 +6075,84 @@ module Rigor
       def resolve_self_callees(node)
         self_type = scope.self_type
         class_name = enclosing_class_name_for(self_type)
-        if class_name.nil?
-          found = side_callee(node) { |name| scope.top_level_def_for(name) }
-          return found.nil? ? NO_CALLEES : [[*found, nil]]
-        end
+        return top_level_callees(node, nil) if class_name.nil?
 
         instance = ancestor_side_callee(node, class_name) do |name|
           scope.user_def_through_ancestors(class_name, name)
         end
         side = self_type.is_a?(Type::Singleton) ? :singleton : :instance
         singleton = inherited_singleton_callee(node, self_type) if side == :singleton
-        return self_method_missing_callees(node, class_name, side) unless instance || singleton
+        return unanswered_self_callees(node, class_name, side) unless instance || singleton
         return [instance] if singleton.nil?
         return [singleton] if instance.nil?
         return [instance] if singleton.first.equal?(instance.first)
 
         [singleton, instance]
+      end
+
+      # Issue #2515 — the `[def, offset, owner]` a receiverless call resolves to in the project's top-level defs: a
+      # top-level def is a private method on `Object`, so a call outside any class body, and a call in a class whose
+      # chain does not answer the name, reaches it. `class_name` is nil outside a class (the callee's own hand-offs
+      # resolve in this evaluator, owner nil), else the class and side the chain was searched on. The def is read as
+      # written only when nothing else can answer it ({ToplevelDefCensus.reliable?}, and for a class the chain
+      # {#chain_may_answer?}); otherwise it reads as {FLOOR_EVERY}, every argument written. Nothing when no top-level
+      # def has the name.
+      def top_level_callees(node, class_name, side = nil)
+        target = nil
+        found = side_callee(node) do |name|
+          def_node = scope.top_level_def_for(name)
+          target = name unless def_node.nil?
+          def_node
+        end
+        return NO_CALLEES if found.nil?
+
+        def_node, offset = found
+        floor = !ToplevelDefCensus.reliable?(scope, target) ||
+                (!class_name.nil? && chain_may_answer?(class_name, side, target))
+        [[def_node, offset, if floor
+                              FLOOR_EVERY
+                            else
+                              (class_name.nil? ? nil : TOPLEVEL_OWNER)
+                            end]]
+      end
+
+      # A self-call the class's own chain found no def for: the chain's `method_missing` answers it, else the project's
+      # top-level def of that name (Ruby searches `Object` before `method_missing`, so with both the top-level def runs
+      # and the `method_missing` reading is the over-approximation; both are returned and the top-level one floors
+      # every argument).
+      def unanswered_self_callees(node, class_name, side)
+        missing = self_method_missing_callees(node, class_name, side)
+        top = top_level_callees(node, class_name, side)
+        return top if missing.empty?
+        return missing if top.empty?
+
+        missing + top.map { |def_node, offset, _owner| [def_node, offset, FLOOR_EVERY] }
+      end
+
+      # True when something besides `Object` may answer a receiverless call of `name` in `class_name`'s `side`: the
+      # class is no project class, a definer other than a `def` sits on its chain (`attr_*`, `define_method`, a budget
+      # cut), or an ancestor the project does not declare is unknown to RBS or declares the name there (a
+      # `< ActiveRecord::Base` the environment has no RBS for may define anything). The project's own `def`s were
+      # searched already ({#resolve_self_callees}).
+      def chain_may_answer?(class_name, side, name)
+        return true unless project_class?(class_name)
+        return true if scope.discovered_method_through_ancestors?(class_name, name, side)
+        return true if rbs_declares?(class_name, name) || (side == :singleton && rbs_declares?("Class", name))
+
+        external = scope.external_ancestor_name_candidates(class_name)
+        external += scope.singleton_extends_of(class_name).map { |module_name| [module_name] } if side == :singleton
+        external.any? do |candidates|
+          known = candidates.find { |candidate| Reflection.rbs_class_known?(candidate, scope: scope) }
+          known.nil? ? candidates.none? { |candidate| project_class?(candidate) } : rbs_declares?(known, name)
+        end
+      end
+
+      # A class or module the project declares, even one with no method of its own.
+      def project_class?(name) = scope.known_user_class?(name) || scope.declared_class?(name)
+
+      def rbs_declares?(class_name, name)
+        !Reflection.instance_method_definition(class_name, name, scope: scope).nil? ||
+          !Reflection.singleton_method_definition(class_name, name, scope: scope).nil?
       end
 
       # The `[def, offset, owner]` a singleton-side self-call resolves to along the singleton chain: owner nil for a

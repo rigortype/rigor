@@ -22,9 +22,10 @@ module Rigor
       # `name` and `slot` are the forwarding def's parameter, `callee` the def it is handed to, and `callee_names`
       # the callee's parameters it may bind there. Issue #2515 — `owner` is the evaluator the callee's own census and
       # hand-offs resolve in when the hand-off crosses classes (`Help.c(p, o)`, `Helper.new.c(p, o)`), nil for a
-      # self-call, which stays in the evaluator the hop started in.
-      Edge = Data.define(:name, :slot, :callee, :callee_names, :owner) do
-        def initialize(name:, slot:, callee:, callee_names:, owner: nil) = super
+      # self-call, which stays in the evaluator the hop started in. `approx` is true when the hand-off resolved to more
+      # than one candidate, or by name; the floor it implies is an over-approximation, not proof the callee writes.
+      Edge = Data.define(:name, :slot, :callee, :callee_names, :owner, :approx) do
+        def initialize(name:, slot:, callee:, callee_names:, owner: nil, approx: false) = super
       end
 
       # ADR-127 — the most distinct nodes one parameter may reach before the walk is cut and reads as mutated.

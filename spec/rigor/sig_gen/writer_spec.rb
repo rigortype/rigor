@@ -224,7 +224,8 @@ RSpec.describe Rigor::SigGen::Writer do
         writer.write("lib/foo.rb", [candidate(method_name: :y, rbs: "def y: () -> String", class_name: "B::C")])
 
         expect(File.read(File.join(tmpdir, "sig/foo.rbs")))
-          .to eq("class B\nend\nmodule A\n  class ::B::C\n    def x: () -> Integer\n    def y: () -> String\n  end\nend\n")
+          .to eq("class B\nend\nmodule A\n  class ::B::C\n    " \
+                 "def x: () -> Integer\n    def y: () -> String\n  end\nend\n")
       end
 
       it "nests a `Box::Inner` candidate under a rooted `::Box` declaration inside a module" do

@@ -2142,6 +2142,8 @@ module Rigor
     # narrowed type. Receiver-rebind and `[]=`/mutator invalidation rules are documented at the call sites in
     # `Inference::StatementEvaluator`.
     def indexed_narrowing(receiver_kind, receiver_name, key)
+      return nil if @indexed_narrowings.empty?
+
       @indexed_narrowings[indexed_key(receiver_kind, receiver_name, key)]
     end
 
@@ -2153,6 +2155,8 @@ module Rigor
     end
 
     def without_indexed_narrowing(receiver_kind, receiver_name, key)
+      return self if @indexed_narrowings.empty?
+
       lookup = indexed_key(receiver_kind, receiver_name, key)
       return self unless @indexed_narrowings.key?(lookup)
 
@@ -2174,6 +2178,8 @@ module Rigor
     # Address shape mirrors {.indexed_narrowing}: stable root variable + no-arg single-hop method name. See
     # {ChainKey} for the precise contract.
     def method_chain_narrowing(receiver_kind, receiver_name, method_name)
+      return nil if @method_chain_narrowings.empty?
+
       @method_chain_narrowings[chain_key(receiver_kind, receiver_name, method_name)]
     end
 
@@ -2185,6 +2191,8 @@ module Rigor
     end
 
     def without_method_chain_narrowing(receiver_kind, receiver_name, method_name)
+      return self if @method_chain_narrowings.empty?
+
       lookup = chain_key(receiver_kind, receiver_name, method_name)
       return self unless @method_chain_narrowings.key?(lookup)
 
@@ -2378,11 +2386,18 @@ module Rigor
       )
     end
 
+    # A join with an empty side has no key in common (usually both are empty, the common case at a branch merge), so
+    # its answer is this one frozen hash rather than a fresh one.
+    EMPTY_BINDINGS = {}.freeze
+    private_constant :EMPTY_BINDINGS
+
     def join_bindings(left, right)
       # Keys present in both, unioned. Iterating `left` and probing `right.key?` yields the same keys in the same
       # order as the prior `(left.keys & right.keys)` while avoiding the two key arrays and the intersection
       # array — this is the control-flow join, run at every branch merge, and was a top allocation site (~75% of
       # `Hash#keys`).
+      return EMPTY_BINDINGS if left.empty? || right.empty?
+
       result = {}
       left.each do |name, ltype|
         next unless right.key?(name)
@@ -2646,19 +2661,12 @@ module Rigor
     end
 
     def indexed_key(receiver_kind, receiver_name, key)
-      IndexedKey.new(
-        receiver_kind: receiver_kind.to_sym,
-        receiver_name: receiver_name.to_sym,
-        key: key
-      )
+      # Positional `new` (field-definition order) skips the keyword hash a keyword `new` allocates.
+      IndexedKey.new(receiver_kind.to_sym, receiver_name.to_sym, key)
     end
 
     def chain_key(receiver_kind, receiver_name, method_name)
-      ChainKey.new(
-        receiver_kind: receiver_kind.to_sym,
-        receiver_name: receiver_name.to_sym,
-        method_name: method_name.to_sym
-      )
+      ChainKey.new(receiver_kind.to_sym, receiver_name.to_sym, method_name.to_sym)
     end
 
     def drop_indexed_narrowings_for(receiver_kind, receiver_name)

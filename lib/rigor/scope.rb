@@ -452,9 +452,8 @@ module Rigor
     # source-level rebind names a new one), intersected at a merge, and reset with the locals at a method body's
     # entry. No fact is copied by an alias write (`b = a`): the type is shared, the provenance is not tracked
     # through a second name (issue #2335), and a local that may escape anywhere in its body is never stamped
-    # ({Inference::ConstructionEscape}). Within an entry `:synthesised` intersects at a merge, and `:grown` (a store
-    # has grown the carrier since construction) and `:defaulted` (the Hash may answer a miss with a default: a
-    # `Hash.new` given an argument or a block, a `default=` / `default_proc=` / `replace` since) union.
+    # ({Inference::ConstructionEscape}). Within an entry `:synthesised` intersects at a merge and `:grown` (a store
+    # has grown the carrier since construction) unions.
     CONSTRUCTION_FACT_SETS = Ractor.make_shareable({ synthesised: Set[:synthesised] })
     NO_CONSTRUCTION_FACTS = Set.new.freeze
     private_constant :CONSTRUCTION_FACT_SETS, :NO_CONSTRUCTION_FACTS
@@ -2578,16 +2577,11 @@ module Rigor
       joined.empty? ? EMPTY_ORIGINS : joined.freeze
     end
 
-    # `:grown` and `:defaulted` join by UNION among the names both arms keep: each only ever withholds a reading the
-    # bare `:synthesised` fact would give. A store on either arm may reach the carrier, and `:grown` only floors it
-    # ({Inference::MutationRejoin.floors_grown_carrier?}); a default on either arm may answer a miss, and `:defaulted`
-    # only keeps `Hash#[]` optimistic ({Inference::PlainHashMiss}). Every other fact intersects.
-    UNION_FACTS = %i[grown defaulted].freeze
-    private_constant :UNION_FACTS
-
+    # `:grown` joins by UNION among the names both arms keep: a store on either arm may reach the carrier, and the
+    # fact only ever floors it ({Inference::MutationRejoin.floors_grown_carrier?}). Every other fact intersects.
     def join_fact_sets(facts, their_facts)
       common = facts & their_facts
-      UNION_FACTS.each { |fact| common << fact if facts.include?(fact) || their_facts.include?(fact) }
+      common << :grown if facts.include?(:grown) || their_facts.include?(:grown)
       common.freeze
     end
 

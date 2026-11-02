@@ -140,7 +140,7 @@ module Rigor
           nominal.type_args.none? { |arg| gradual_parameter?(arg) }
       end
 
-      # Issue #2555 L3, slice 2 — a `Hash` with one gradual parameter and one precise one: `Hash.new(0)` is
+      # Issue #2555 L3 — a `Hash` with one gradual parameter and one precise one: `Hash.new(0)` is
       # `Hash[Dynamic[top], Integer]`. On a synthesised binding the precise side is this engine's own fold of the
       # default, not a declaration, so {#keep_precise_parameters} must not restore it over a store:
       # `h = Hash.new(0); h[:y] = "s"` reads `Hash[Dynamic[top] | Symbol, Integer | String]`, not

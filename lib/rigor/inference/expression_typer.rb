@@ -40,7 +40,6 @@ require_relative "method_dispatcher"
 require_relative "mutation_widening"
 require_relative "narrowing"
 require_relative "optimistic_origin"
-require_relative "plain_hash_miss"
 require_relative "receiver_alias"
 require_relative "repeated_or_writes"
 require_relative "singleton_object_constant"
@@ -1904,7 +1903,7 @@ module Rigor
       # that normal return is `untyped` — the result's declared type — so `loop { e.next }` is not `bot` and
       # `loop { x = e.next; break x if x }` keeps its arm beside it.
       def call_dispatch_type_for(node, receiver_override: nil)
-        result = key_guarded_type(node, plain_hash_miss_type(node, call_result_type_for(node, receiver_override:)))
+        result = key_guarded_type(node, call_result_type_for(node, receiver_override: receiver_override))
         result = loop_completion_type(node, result)
         arms = call_break_arm_types(node, receiver_override: receiver_override)
         if exactly_once_block_never_completes?(node, receiver_override)
@@ -1913,15 +1912,6 @@ module Rigor
 
         combined = arms.empty? ? result : Type::Combinator.union(result, *arms)
         widen_optimistic_predicate_constant(node, combined)
-      end
-
-      # Issue #2555 L3, slice 2 — `h[k]` on a local Hash this body built with no default, which has not escaped, reads
-      # `V | nil` ({PlainHashMiss}); `RbsDispatch` records no optimistic mark for it. Applied before the #1703 key
-      # guard, so `h.key?(k)` still drops the `nil` in the guarded re-walk.
-      def plain_hash_miss_type(node, type)
-        return type unless node.name == :[] && PlainHashMiss.applies?(node, scope)
-
-        PlainHashMiss.with_miss(type)
       end
 
       # Issue #1703 — `H[k]` under a true `H.key?(k)` with a non-literal key drops the miss `nil`

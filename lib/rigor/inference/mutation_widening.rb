@@ -307,12 +307,6 @@ module Rigor
         widened && scope.with_mutated_local(read.name, widened)
       end
 
-      # Issue #2555 L3, slice 2 — the in-place calls after which a Hash may answer a miss with a default: the two
-      # setters, and `replace`, which copies the other hash's default (`{}.replace(Hash.new(0))[:k]` is `0`). On a
-      # synthesised local each adds `:defaulted`, so `Hash#[]` keeps reading the optimistic `V` ({PlainHashMiss}).
-      # `compare_by_identity` changes which key hits, not what a miss answers.
-      DEFAULTING_MUTATORS = %i[default= default_proc= replace].to_set.freeze
-
       # The arms per kind of binding differ only in which pair of `Scope` accessors they use, so they are read out
       # of one table rather than written once per kind: a carrier the widening responds to must not be widened on
       # one kind of binding and left on another. `$g << x; $g == "k"` folded always-truthy on a `$g` Ruby holds
@@ -336,9 +330,6 @@ module Rigor
         name = ReceiverAlias.read_name(read)
         current = scope.public_send(getter, name)
         synthesised = synthesised_binding?(scope, getter, name)
-        if synthesised && DEFAULTING_MUTATORS.include?(method_name)
-          scope = scope.with_construction_fact(name, :defaulted)
-        end
         if synthesised && MutationRejoin.floors_grown_carrier?(scope, name, method_name)
           return floor_grown_carrier(scope, builder, name, current, method_name, getter, removes_nil)
         end

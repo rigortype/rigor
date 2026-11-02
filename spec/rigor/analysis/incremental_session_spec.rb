@@ -1666,6 +1666,49 @@ end
     end
   end
 
+  # Issue #2555 — a local's construction fact is withheld when the project defines a method of a reader's name
+  # anywhere (`Scope#project_method_name?`), and slice 2 makes that fact decide whether `h[k]` reports a miss. The
+  # reader's file records a `defines:[]` edge whatever the answer, so a file that starts or stops defining `[]`
+  # re-checks it.
+  describe "a project definition of a Hash reader's name anywhere (#2555)" do
+    miss = "call.possible-nil-receiver"
+    plain = "class Lookup\n  def other = nil\nend\n"
+    reader_def = "class Lookup\n  def [](key) = key\nend\n"
+
+    def miss_source
+      <<~RUBY
+        def m(k, s)
+          h = { s => "x" }
+          v = h[k]
+          v.upcase
+        end
+      RUBY
+    end
+
+    {
+      "a def of [] in another class" => [plain, reader_def, []],
+      "the def of [] removed" => [reader_def, plain, [miss]]
+    }.each do |label, (before, after, expected)|
+      it "re-checks the reader after #{label}" do
+        Dir.mktmpdir do |dir|
+          d = File.join(dir, "d.rb")
+          File.write(d, miss_source)
+          File.write(File.join(dir, "b.rb"), before)
+          session = described_class.new(configuration: configuration(dir), environment: shared_environment)
+          baseline = guarded_baseline(session)
+          expect(baseline.select { |diagnostic| diagnostic.path == d }.map(&:rule)).to eq([miss] - expected)
+
+          File.write(File.join(dir, "b.rb"), after)
+          recheck = guarded_recheck(session)
+
+          expect(recheck.affected).to include(d)
+          expect(recheck.diagnostics.select { |diagnostic| diagnostic.path == d }.map(&:rule)).to eq(expected)
+          expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+        end
+      end
+    end
+  end
+
   describe "singleton-method symbol granularity" do
     def write_util(dir, unused_body:)
       util = File.join(dir, "util.rb")

@@ -1432,6 +1432,16 @@ end
         expect(File.read(orphan)).to eq("class Array[unchecked out E]\n  def gone: () -> 1\nend\n")
       end
 
+      it "names the source of a skipped candidate that routes to the file" do
+        target = write_target("class Array\n  def a: () -> 1\nend\n")
+        skipped = candidate(method_name: :a, class_name: "Array", rbs: "def a: () -> 1",
+                            classification: Rigor::SigGen::Classification::SKIPPED).with_class_type_params(params)
+
+        results = writer.write_all([skipped])
+
+        expect(results.map { |r| [r.target_path.to_s, r.source_path] }).to eq([[target, "lib/foo.rb"]])
+      end
+
       it "leaves it when the class is not generic" do
         orphan = File.join(tmpdir, "sig/old_ext.rbs")
         FileUtils.mkdir_p(File.dirname(orphan))

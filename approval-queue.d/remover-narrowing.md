@@ -1,4 +1,4 @@
-# A remover narrows only a receiver no seen holder can write, locals and instance variables, and a Symbol-key delete keeps a closed hash shape
+# A remover narrows only a local no seen holder can write, and a Symbol-key delete keeps a closed hash shape
 
 - **PR:** [#2621](https://github.com/rigortype/rigor/pull/2621)
 - **Issue:** [#2608](https://github.com/rigortype/rigor/issues/2608)
@@ -15,28 +15,37 @@ literal-key `delete` (until now every `delete` erased a shape to a nominal).
 
 ## Options and trade-offs
 
-- Writes that reach the object without going through the receiver's binding. A narrowing is a claim about the object
-  that a later write through another holder falsifies, and the narrowed reading then reports on correct code: a write
-  through an alias (`al = l; l.select! { |x| x.is_a?(String) }; al << 1; l.last.even?`), through a closure that runs
-  later (`pr = proc { l << 1 }` before or after the filter, then `pr.call`), or through `send` / `instance_eval`.
-  The options were full alias and capture tracking (#2335, not available), no narrowing at all, or narrowing with a
-  cheap floor. Taken: a flow-insensitive scan per frame body (`RemoverHolderScan`) skips the narrowing for a binding
-  referenced inside a lambda or a block passed to anything but a catalogued iterator or `tap` / `then` /
-  `yield_self`, for both names of a copy into a variable (`al = l`, `@x = l`, a multiple assignment), for the
-  receiver of a reflective call (`send`, `public_send`, `__send__`, `instance_eval`, `instance_exec`, `tap`, `then`,
-  `yield_self`, `itself`, `method`, `define_singleton_method`), for a name placed in an Array or Hash literal or a
-  splat (`hh = { k: l }`), for a name passed as an argument to any call, `yield` or `super` (`Keep.new(l)`; no
-  callee is exempt, as #2555's `ConstructionEscape::READERS` lists receivers, not argument readers), and for every
-  binding of a body that calls `binding`, `eval`, `local_variable_set` or `instance_variable_set`. Such a receiver
-  keeps the reading it had before this change. What remains unseen is a holder reached through another object's
-  state without any of these positions, which needs alias tracking (#2335).
-- The floor costs precision on correct code that copies or captures a collection and never writes through the copy,
-  and narrowing a receiver some unseen holder can write loses the true positive that holder's later store would
-  cause (accepted: the narrowed reading is what the code states, and a missed report outranks a false one).
-- Binding kinds: locals only, locals and instance variables, or every kind `MutationWidening` widens (class variables,
-  globals). A guard already narrows a local or an ivar, and the intervening-call reset (B2.2) restores an ivar
-  narrowed below its class seed, so locals and ivars match the guard rule (taken). Class variables and globals are
-  shared more widely and keep today's reading.
+- Writes that reach the object without going through the receiver's binding. A narrowing is a claim about the object,
+  and any later write through another holder falsifies it; the narrowed reading then reports on correct code. The
+  holders review found: an alias (`al = l`, `al = c ? l : []`, `al = l.push(1)`, `case l; in al`), a closure that runs
+  later (`pr = proc { l << 1 }` before or after the filter), a container or a kept argument (`hh = { k: l }`,
+  `Keep.new(l)`), and `send` / `instance_eval`. The options were full alias and capture tracking (#2335, not
+  available), no narrowing at all, or narrowing behind a cheap conservative floor. Taken: a flow-insensitive scan per
+  frame body (`RemoverHolderScan`) skips the narrowing for a local that is:
+  - referenced inside a lambda or a block passed to anything but a catalogued iterator or `tap` / `then` /
+    `yield_self`;
+  - read anywhere inside the value of any write (variable, constant, index, attribute or operator write, a multiple
+    assignment) or the subject of a `case`/`in`, `=>` or `in` pattern, with no attempt to tell a receiver-position read
+    apart (`n = l.size` counts), together with the local that write or pattern binds unless its value is a fresh
+    literal or `new` / `[]` on a constant;
+  - read inside an Array element, a Hash key or value, a splat, or an argument of any call, `yield` or `super`, except
+    as the receiver of a #2555 `ConstructionEscape::READERS` reader (the per-class union less `to_a` / `to_h` /
+    `to_set`, which return self on another class), so `puts(l.size)` and `dump_type(l.dup)` keep it;
+  - the receiver of a reflective call (`send`, `public_send`, `__send__`, `instance_eval`, `instance_exec`, `tap`,
+    `then`, `yield_self`, `itself`, `method`, `define_singleton_method`);
+  - or in a body that calls `binding`, `eval`, `local_variable_get` or `local_variable_set` on any receiver, or a
+    receiverless `instance_variable_set`.
+  Such a receiver keeps the reading it had before this change. What stays reachable is a holder the body never names
+  in any of those positions: an object reached through global state (`ObjectSpace.each_object(Array) { |o| o << 1 }`),
+  which needs alias tracking (#2335).
+- The floor costs precision on correct code that copies, captures, stores or passes a collection and never writes
+  through the other holder (`n = l.size; l.compact!` does not narrow). And narrowing a receiver an unseen holder can
+  write loses the true positive that holder's later store causes, accepted because a missed report outranks a false
+  one.
+- Binding kinds: locals only (taken), or instance variables too. An instance variable's object is reachable from every
+  method of the class and from any object it was handed to (`@b = @a` in `initialize`, `W.new(@a)`, `-> { @a << 1 }`,
+  `self.add`, `z = add`), none of which one body's scan sees, so an ivar receiver never narrows. Class variables and
+  globals are shared more widely still and keep today's reading.
 - A closed shape under `delete(:k)`: erase it as before, or keep the shape without the key. Keeping it is exact for a
   closed shape and lets the shape's own rewrite rules keep working after the call (taken), for a Symbol key only:
   under `compare_by_identity` an equal String or a large Integer need not be the stored key. An open shape, a
@@ -44,13 +53,13 @@ literal-key `delete` (until now every `delete` erased a shape to a nominal).
 
 ## Decision
 
-Narrow a local or instance-variable receiver only when the body scan finds no closure, copy, container, argument,
-reflective call or frame access that could hand it on, and keep a closed shape minus a Symbol key a literal `delete`
-names. The corpus A/B (`lib/`, haml, mail, kramdown, yard) moved no diagnostic and the `lib/` census is unchanged.
-One #2606 control moved with it: the #1289 alias control now closes its literal with a `delete` of an untyped key.
+Narrow a local receiver only when the body scan finds no closure, write, pattern, container, argument, reflective
+call or frame access that could hand it on, never an instance variable, and keep a closed shape minus a Symbol key a
+literal `delete` names. The corpus A/B (`lib/`, haml, mail, kramdown, yard) moved no diagnostic and the `lib/` census
+is unchanged. One #2606 control moved with it: the #1289 alias control now closes its literal with a `delete` of an
+untyped key.
 
 ## To undo
 
-Restrict `RemoverNarrowing::NARROWING_RECEIVERS` to `LocalVariableReadNode` for locals only, make
-`RemoverNarrowing.narrow_shape` answer `nil` to restore the erasure, or widen or narrow `RemoverHolderScan`'s holder
-list. Nothing else depends on them; alias tracking (#2335) would replace the scan.
+Make `RemoverNarrowing.narrow_shape` answer `nil` to restore the erasure, or widen or narrow `RemoverHolderScan`'s
+holder positions. Nothing else depends on them; alias tracking (#2335) would replace the scan.

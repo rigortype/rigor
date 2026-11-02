@@ -71,8 +71,10 @@ RSpec.describe "collection remover narrowing", type: :runner do
         .to eq(["Array[Integer?]"])
     end
 
-    it "narrows an instance variable" do
-      expect(dumped_types("#{maybe_one}@a = [mk, 2]\n@a.compact!\ndump_type(@a.dup)\n")).to eq(["Array[Integer]"])
+    # Guard (review round 2 of #2621): a narrowing is a fact about the object, and any method or any other object
+    # that holds an instance variable can write it, so an ivar receiver never narrows.
+    it "does not narrow an instance variable (guard)" do
+      expect(dumped_types("#{maybe_one}@a = [mk, 2]\n@a.compact!\ndump_type(@a.dup)\n")).to eq(["Array[Integer?]"])
     end
 
     # Review round 1 of #2621 — a write through another holder after the call would outlive the narrowing, so a
@@ -94,6 +96,19 @@ RSpec.describe "collection remover narrowing", type: :runner do
         "a copy into another local" => ["al = l", ""],
         "a copy made from the receiver's alias" => ["al = l\nl = al", ""],
         "a multiple assignment" => ["al, x = l, 1", ""],
+        "a conditional copy" => ["al = gets ? l : []", ""],
+        "a `||` copy" => ["al = l || []", ""],
+        "a begin-block copy" => ["al = begin\n  l\nend", ""],
+        "a parenthesised sequence copy" => ["al = (nil; l)", ""],
+        "a self-returning call's value" => ["al = l.push(1)", ""],
+        "a self-returning iterator's value" => ["al = l.each { nil }", ""],
+        "an index write's value" => ["box = {}", "box[:k] = l.to_a"],
+        "an attribute write's value" => ["S = Struct.new(:v)\nst = S.new(1)", "st.v = (l if gets)"],
+        "an operator write's value" => ["acc = []", "acc += [l]"],
+        "a case/in subject" => ["", "case l\nin al then al << nil\nend"],
+        "a rightward pattern" => ["", "l => al"],
+        "an argument a self-returning call hands on" => ["def keep(x) = x", "keep(l.push(1))"],
+        "a parenthesised reflective receiver" => ["", "(l).send(:<<, nil)"],
         "an instance-variable copy" => ["@k = l", ""],
         "a proc created earlier" => ["pr = proc { l << nil }", "pr.call"],
         "a lambda created later" => ["", "pr = -> { l << nil }\npr.call"],
@@ -102,6 +117,7 @@ RSpec.describe "collection remover narrowing", type: :runner do
         "instance_eval" => ["", "l.instance_eval { push(nil) }"],
         "tap" => ["", "l.tap { |t| t << nil }"],
         "binding" => ["", "binding"],
+        "another closure's binding" => ["", "-> {}.binding.local_variable_get(:l) << nil"],
         "a Hash value" => ["hh = { k: l }", "hh[:k] << 1"],
         "an Array element" => ["", "[l].each { |b| b << 1 }"],
         "an Array element assigned to a local" => ["box = [l]", "box[0] << 1"],
@@ -109,7 +125,8 @@ RSpec.describe "collection remover narrowing", type: :runner do
         "a constructor argument that keeps it" =>
           ["class Keep\n  def initialize(a) = @a = a\n  def add = @a << 1\nend\nkp = Keep.new(l)", "kp.add"],
         "a keyword argument" => ["def keep(into:) = into", "keep(into: l)"],
-        "a block-pass argument" => ["", "[1].each(&l)"]
+        "a block-pass argument" => ["", "[1].each(&l)"],
+        "a keyword splat" => ["def ks(**o) = o", "ks(**l)"]
       }.each do |holder, (prefix, suffix)|
         it "keeps the ordinary reading under #{holder}" do
           expect(narrowed(prefix, suffix)).not_to eq("Array[Integer]")
@@ -124,6 +141,17 @@ RSpec.describe "collection remover narrowing", type: :runner do
 
       it "still narrows a local only an iterator block reads (control)" do
         expect(narrowed("[1].each { l.size }")).to eq("Array[Integer]")
+      end
+
+      it "keeps the ordinary reading of a multiple assignment's target" do
+        source = "#{maybe_one}l2 = [mk, 2]\nl, z = l2, 1\nl.select! { |x| x.is_a?(Integer) }\ndump_type(l.dup)\n"
+        expect(dumped_types(source)).to eq(["Array[Integer?]"])
+      end
+
+      it "keeps the ordinary reading of a pattern's binding" do
+        source = "#{maybe_one}l2 = [mk, 2]\ncase l2\nin l then l.select! { |x| x.is_a?(Integer) }\nend\n" \
+                 "dump_type(l.dup)\n"
+        expect(dumped_types(source).first).to eq("Array[Integer?]")
       end
 
       it "keeps the ordinary reading of both names of an alias" do
@@ -160,6 +188,35 @@ RSpec.describe "collection remover narrowing", type: :runner do
 
   # Guard: a call that narrows nothing answers the scope it was given, so a rebind does not drop the binding's
   # origins and facts the way a write would.
+  # Inside a method body: `yield l` and `super(l)` hand the local on as any argument does.
+  {
+    "a yield argument" => "def f\n  l = [mk, 2]\n  yield l\n  l.select! { |x| x.is_a?(Integer) }\n  " \
+                          "dump_type(l.dup)\nend\n",
+    "a super argument" => "class P\n  def f(x) = x\nend\nclass Q < P\n  def f(_y)\n    l = [mk, 2]\n    " \
+                          "super(l)\n    l.select! { |x| x.is_a?(Integer) }\n    dump_type(l.dup)\n  end\nend\n"
+  }.each do |holder, body|
+    it "keeps the ordinary reading under #{holder}" do
+      expect(dumped_types("#{maybe_one}#{body}")).to eq(["Array[Integer?]"])
+    end
+  end
+
+  it "still narrows inside a method body with no holder (control)" do
+    source = "#{maybe_one}def f\n  l = [mk, 2]\n  l.select! { |x| x.is_a?(Integer) }\n  dump_type(l.dup)\nend\n"
+    expect(dumped_types(source)).to eq(["Array[Integer]"])
+  end
+
+  it "narrows nothing in a scope with no known body (guard)" do
+    program = Prism.parse("a = []\na.compact!").value
+    call = program.statements.body.last
+    maybe = Rigor::Type::Combinator.union(Rigor::Type::Combinator.nominal_of("Integer"),
+                                          Rigor::Type::Combinator.constant_of(nil))
+    optional = Rigor::Type::Combinator.nominal_of("Array", type_args: [maybe])
+    framed = Rigor::Scope.empty.with_match_frame(program.statements).with_local(:a, optional)
+    expect(Rigor::Inference::MutationWidening.narrow_remover_receiver(call, framed, [])).not_to be_nil
+    bare = Rigor::Scope.empty.with_local(:a, optional)
+    expect(Rigor::Inference::MutationWidening.narrow_remover_receiver(call, bare, [])).to be_nil
+  end
+
   it "answers the same scope when the narrowing changes nothing (guard)" do
     program = Prism.parse("a = []\na.compact!").value
     call = program.statements.body.last

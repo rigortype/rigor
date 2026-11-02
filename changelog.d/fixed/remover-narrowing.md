@@ -3,3 +3,4 @@
   - `reject!`, `select!`, `filter!`, `keep_if` and `delete_if` with a one-expression block such as `{ |x| x.nil? }`, `{ |x| x }`, `{ |x| x.is_a?(String) }`, or `(&:nil?)`, narrow the elements as the matching `if` would; the Hash `{ |k, v| ... }` form narrows the key and value.
   - `h = { a: 1, b: 2 }; h.delete(:a)` reads `{ b: 2 }`.
   - `pop`, `shift`, `slice!`, `subtract`, `clear` and a `delete` of a value the analyzer cannot see keep the earlier reading.
+  - The narrowing applies to a local variable the method does not also hand to another holder; an instance variable, or a local that is copied, stored, passed as an argument, or captured by a block that may run later, keeps the earlier reading.

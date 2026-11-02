@@ -4,53 +4,64 @@ require "prism"
 
 require_relative "../run_scoped_slots"
 require_relative "closure_escape_analyzer"
+require_relative "construction_escape"
 
 module Rigor
   module Inference
-    # Issue #2608, review round 1 of #2621 — which bindings of a body another holder may write, so a remover on them
-    # is not narrowed ({RemoverNarrowing}): a write through that holder after the call would outlive the narrowing.
+    # Issue #2608, review rounds 1 and 2 of #2621 — which locals of a body another holder may write, so a remover on
+    # them is not narrowed ({RemoverNarrowing}): a narrowing is a fact about the object, and a write through any other
+    # holder after the call would outlive it. One flow-insensitive scan per frame body; a local is a holder's when:
+    #
+    # - a closure that may run later references it: a lambda, or a block passed to a call that is not a catalogued
+    #   iterator or `tap` / `then` / `yield_self` (`proc { l << 1 }`), created before or after the remover;
+    # - it is read anywhere inside the value of any write (local, instance, class, global or constant variable, an
+    #   index or attribute write, an operator or `||=` / `&&=` write, a multiple assignment) or inside the subject of a
+    #   `case`/`in`, `=>` or `in` pattern: `al = c ? l : []`, `al = l.push(1)`, `@k = l`, `case l; in al`. The local
+    #   such a write or pattern binds is a holder too (both names of a copy), unless the write's value is a fresh
+    #   object: an Array or Hash literal, or `new` / `[]` on a constant (`a = Array.new(n, "a")`);
+    # - it is read inside an Array element, a Hash key or value, a splat, or an argument of any call, `yield` or
+    #   `super` (positional, keyword, splat or block-pass), unless the read is the receiver of a call that answers
+    #   a value other than the receiver and keeps no reference to it ({PURE_READERS}: #2555's per-class
+    #   `ConstructionEscape::READERS`, less the conversions that return self on another class): `puts(l.size)`,
+    #   `dump_type(l.dup)` and `dump_type(l.first)` hold nothing, `Keep.new(l)` and `foo(l.push(1))` do;
+    # - it receives a reflective call (`l.send(...)`, `l.instance_eval { }`, `l.tap { }`);
+    # - and every local, when the body calls `binding`, `eval`, `local_variable_get` or `local_variable_set` on any
+    #   receiver (`-> {}.binding`), or a receiverless `instance_variable_set`.
+    #
+    # A receiver position, a `return` and a body's last expression hand nothing on.
     module RemoverHolderScan
-      # The holders the body scan sees: a closure that may run later (a lambda, or a block passed to a call that is
-      # not a catalogued iterator or `tap` / `then` / `yield_self`, such as `proc { l << 1 }`), a copy of the binding
-      # into another variable (`al = l`, `@x = l`, `a, b = l, 1`, or the receiver itself being such a copy), a
-      # reflective call on it (`l.send(...)`, `l.instance_eval { }`, `l.tap { }`), and `binding` / `eval` anywhere in
-      # the body. A container, an argument and a method of another object stay unseen (issue #2335 tracks aliases).
       REFLECTIVE_CALLS = %i[
         send public_send __send__ instance_eval instance_exec tap then yield_self itself method
         define_singleton_method
       ].to_set.freeze
+      # A conversion one class lists as a reader returns the receiver itself on another (`Array#to_a`, `Hash#to_h`,
+      # `Set#to_set`), so the union of the per-class lists leaves them out.
+      SELF_CONVERSIONS = %i[to_a to_h to_set].freeze
+      PURE_READERS = (ConstructionEscape::READERS.values.reduce(:|) - SELF_CONVERSIONS).freeze
       IMMEDIATE_BLOCK_CALLS = %i[tap then yield_self].to_set.freeze
-      FRAME_CALLS = %i[binding eval local_variable_set instance_variable_set].to_set.freeze
-      VARIABLE_READS = [Prism::LocalVariableReadNode, Prism::InstanceVariableReadNode].freeze
-      VARIABLE_REFERENCES = [
+      FRAME_CALLS = %i[binding eval local_variable_get local_variable_set instance_variable_set].to_set.freeze
+      # Frame calls that reach the locals whatever their receiver (`pr.binding`, `Kernel.eval`).
+      ANY_RECEIVER_FRAME_CALLS = %i[binding eval local_variable_get local_variable_set].to_set.freeze
+      NON_WRITER_OPERATORS = %i[== != <= >= ===].to_set.freeze
+      LOCAL_REFERENCES = [
         Prism::LocalVariableReadNode, Prism::LocalVariableWriteNode, Prism::LocalVariableOperatorWriteNode,
-        Prism::LocalVariableOrWriteNode, Prism::LocalVariableAndWriteNode, Prism::LocalVariableTargetNode,
-        Prism::InstanceVariableReadNode, Prism::InstanceVariableWriteNode, Prism::InstanceVariableOperatorWriteNode,
-        Prism::InstanceVariableOrWriteNode, Prism::InstanceVariableAndWriteNode, Prism::InstanceVariableTargetNode
+        Prism::LocalVariableOrWriteNode, Prism::LocalVariableAndWriteNode, Prism::LocalVariableTargetNode
       ].freeze
-      COPYING_WRITES = [
+      LOCAL_WRITES = [
         Prism::LocalVariableWriteNode, Prism::LocalVariableOperatorWriteNode, Prism::LocalVariableOrWriteNode,
-        Prism::LocalVariableAndWriteNode, Prism::InstanceVariableWriteNode, Prism::InstanceVariableOperatorWriteNode,
-        Prism::InstanceVariableOrWriteNode, Prism::InstanceVariableAndWriteNode, Prism::ClassVariableWriteNode,
-        Prism::ClassVariableOrWriteNode, Prism::GlobalVariableWriteNode, Prism::GlobalVariableOrWriteNode,
-        Prism::ConstantWriteNode, Prism::ConstantOrWriteNode
-      ].freeze
-      NAMED_WRITES = [
-        Prism::LocalVariableWriteNode, Prism::LocalVariableOperatorWriteNode, Prism::LocalVariableOrWriteNode,
-        Prism::LocalVariableAndWriteNode, Prism::InstanceVariableWriteNode, Prism::InstanceVariableOperatorWriteNode,
-        Prism::InstanceVariableOrWriteNode, Prism::InstanceVariableAndWriteNode
+        Prism::LocalVariableAndWriteNode
       ].freeze
       ALL = :all
-      EMPTY = [].freeze
       # A run-scoped slot ({RunScopedSlots}): emptied when a run ends, so no verdict outlives the body it read.
       UNSAFE_CACHE_KEY = RunScopedSlots.register(:__rigor_remover_narrowing_unsafe)
-      private_constant :REFLECTIVE_CALLS, :IMMEDIATE_BLOCK_CALLS, :FRAME_CALLS, :VARIABLE_READS, :VARIABLE_REFERENCES,
-                       :COPYING_WRITES, :NAMED_WRITES, :ALL, :EMPTY, :UNSAFE_CACHE_KEY
+      private_constant :REFLECTIVE_CALLS, :SELF_CONVERSIONS, :PURE_READERS, :IMMEDIATE_BLOCK_CALLS, :FRAME_CALLS,
+                       :ANY_RECEIVER_FRAME_CALLS, :NON_WRITER_OPERATORS,
+                       :LOCAL_REFERENCES, :LOCAL_WRITES, :ALL, :UNSAFE_CACHE_KEY
 
       module_function
 
-      # Whether the binding `name` (a local, or an `@ivar`) may be written through another holder somewhere in the
-      # body `scope` runs, by one flow-insensitive scan per body. A scope with no known body answers true.
+      # Whether the local `name` may be written through another holder somewhere in the body `scope` runs. A scope
+      # with no known body answers true.
       def unsafe_receiver?(scope, name)
         body = scope.match_frame&.body
         return true if body.nil?
@@ -71,7 +82,8 @@ module Rigor
 
       def collect_unsafe(node, in_closure, names)
         in_closure ||= node.is_a?(Prism::LambdaNode)
-        record_node(node, in_closure, names)
+        names << node.name if in_closure && LOCAL_REFERENCES.any? { |k| node.is_a?(k) }
+        record_node(node, names)
 
         node.compact_child_nodes.each do |child|
           child_in_closure = in_closure || (child.is_a?(Prism::BlockNode) && deferred_block?(node))
@@ -79,72 +91,114 @@ module Rigor
         end
       end
 
-      def record_node(node, in_closure, names) # rubocop:disable Metrics/CyclomaticComplexity
+      def record_node(node, names) # rubocop:disable Metrics/CyclomaticComplexity
         case node
-        when Prism::CallNode
-          throw ALL if node.receiver.nil? && FRAME_CALLS.include?(node.name)
-
-          record_reflective(node, names)
-        when Prism::MultiWriteNode then copied_names(node.value).each { |n| names << n } if node.value
-        end
-        names << node.name if in_closure && VARIABLE_REFERENCES.any? { |k| node.is_a?(k) }
-        record_copy(node, names) if COPYING_WRITES.any? { |k| node.is_a?(k) }
-        held_positions(node).each { |held| record_read(held, names) }
-      end
-
-      # Review round 1 of #2621 — the positions that hand a value to another holder: an Array element, a Hash key or
-      # value, a splat, and every argument of a call, `yield` or `super` (positional, keyword, splat or block-pass).
-      # A receiver position, a `return` and a body's last expression hand nothing on. No callee is exempt: the
-      # #2555 `ConstructionEscape::READERS` list is per receiver class, not a list of calls that only read an argument.
-      def held_positions(node)
-        case node
-        when Prism::ArrayNode then node.elements
-        when Prism::AssocNode then [node.key, node.value]
-        when Prism::AssocSplatNode then [node.value]
-        when Prism::SplatNode, Prism::BlockArgumentNode then [node.expression]
-        when Prism::CallNode, Prism::YieldNode, Prism::SuperNode then node.arguments&.arguments || EMPTY
-        else EMPTY
+        when Prism::CallNode then record_call(node, names)
+        when Prism::YieldNode, Prism::SuperNode then node.arguments&.arguments&.each { |a| record_held(a, names) }
+        when Prism::ArrayNode then node.elements.each { |element| record_held(element, names) }
+        when Prism::AssocNode then [node.key, node.value].each { |part| record_held(part, names) }
+        when Prism::SplatNode, Prism::BlockArgumentNode then record_held(node.expression, names)
+        when Prism::CaseMatchNode then record_pattern(node.predicate, node.conditions, names)
+        when Prism::MatchRequiredNode, Prism::MatchPredicateNode then record_pattern(node.value, [node.pattern], names)
+        when Prism::MultiWriteNode then record_multi_write(node, names)
+        else record_write(node, names)
         end
       end
 
-      def record_read(node, names)
-        node = unparenthesised(node)
-        names << node.name if VARIABLE_READS.any? { |k| node.is_a?(k) }
-      end
+      def record_call(node, names)
+        throw ALL if frame_call?(node)
 
-      def record_reflective(call_node, names)
-        receiver = unparenthesised(call_node.receiver)
-        return unless VARIABLE_READS.any? { |k| receiver.is_a?(k) } && REFLECTIVE_CALLS.include?(call_node.name)
-
-        names << receiver.name
-      end
-
-      def record_copy(node, names)
-        copied = copied_names(node.value)
-        return if copied.empty?
-
-        copied.each { |n| names << n }
-        names << node.name if NAMED_WRITES.any? { |k| node.is_a?(k) }
-      end
-
-      # The variables a written value hands on: a bare read, or a read among an Array literal's elements (a multiple
-      # assignment's right-hand side).
-      def copied_names(value)
-        value = unparenthesised(value)
-        return [value.name] if VARIABLE_READS.any? { |k| value.is_a?(k) }
-        return [] unless value.is_a?(Prism::ArrayNode)
-
-        value.elements.filter_map do |element|
-          element = element.expression if element.is_a?(Prism::SplatNode)
-          element.name if VARIABLE_READS.any? { |k| element.is_a?(k) }
+        receiver = unparenthesised(node.receiver)
+        names << receiver.name if receiver.is_a?(Prism::LocalVariableReadNode) && REFLECTIVE_CALLS.include?(node.name)
+        arguments = node.arguments&.arguments || []
+        if writer_call?(node) && !arguments.empty?
+          *keys, value = arguments
+          keys.each { |key| record_held(key, names) }
+          every_read(value, names)
+        else
+          arguments.each { |argument| record_held(argument, names) }
         end
+      end
+
+      def frame_call?(node)
+        ANY_RECEIVER_FRAME_CALLS.include?(node.name) || (node.receiver.nil? && FRAME_CALLS.include?(node.name))
       end
 
       def unparenthesised(node)
-        while node.is_a?(Prism::ParenthesesNode) && node.body.is_a?(Prism::StatementsNode) && node.body.body.size == 1
-          node = node.body.body.first
-        end
+        node = node.body.body.first while node.is_a?(Prism::ParenthesesNode) && node.body&.body&.size == 1
         node
+      end
+
+      # An index or attribute write (`h[k] = v`, `o.x = v`, `o&.x = v`): its value is a write's value.
+      def writer_call?(node)
+        name = node.name
+        name.end_with?("=") && !NON_WRITER_OPERATORS.include?(name)
+      end
+
+      # A write's value hands on every local read anywhere inside it, and the local it binds holds what it read.
+      def record_write(node, names)
+        return unless node.class.name.end_with?("WriteNode") && node.respond_to?(:value)
+        return unless every_read(node.value, names)
+
+        names << node.name if LOCAL_WRITES.any? { |k| node.is_a?(k) } && !fresh_value?(node.value)
+      end
+
+      # A value that is a new object whatever it reads, so the local it binds aliases nothing.
+      def fresh_value?(value)
+        case value
+        when Prism::ArrayNode, Prism::HashNode then true
+        when Prism::CallNode
+          %i[new []].include?(value.name) &&
+            (value.receiver.is_a?(Prism::ConstantReadNode) || value.receiver.is_a?(Prism::ConstantPathNode))
+        else false
+        end
+      end
+
+      def record_multi_write(node, names)
+        return unless every_read(node.value, names)
+
+        local_targets([*node.lefts, node.rest, *node.rights], names)
+      end
+
+      def record_pattern(subject, patterns, names)
+        return unless every_read(subject, names)
+
+        local_targets(patterns, names)
+      end
+
+      # Adds every local `node` reads, at any depth; answers whether it read any.
+      def every_read(node, names)
+        return false if node.nil?
+
+        found = node.is_a?(Prism::LocalVariableReadNode)
+        names << node.name if found
+        node.compact_child_nodes.reduce(found) { |acc, child| every_read(child, names) || acc }
+      end
+
+      def local_targets(nodes, names)
+        nodes.compact.each do |node|
+          names << node.name if node.is_a?(Prism::LocalVariableTargetNode)
+          local_targets(node.compact_child_nodes, names)
+        end
+      end
+
+      # A held position: every local read inside it but the receiver of a {PURE_READERS} call.
+      def record_held(node, names)
+        return if node.nil?
+        return if pure_read?(node, names)
+
+        names << node.name if node.is_a?(Prism::LocalVariableReadNode)
+        node.compact_child_nodes.each { |child| record_held(child, names) }
+      end
+
+      # A {PURE_READERS} call on a local hands the local on to nothing; its own arguments and block are still held.
+      def pure_read?(node, names)
+        return false unless node.is_a?(Prism::CallNode) && PURE_READERS.include?(node.name) &&
+                            node.receiver.is_a?(Prism::LocalVariableReadNode)
+
+        node.arguments&.arguments&.each { |argument| record_held(argument, names) }
+        record_held(node.block, names)
+        true
       end
 
       # A block that may run after its call returns: any but a catalogued iterator's, or `tap` / `then` /

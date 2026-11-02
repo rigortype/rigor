@@ -23,16 +23,17 @@ module Rigor
     # Everything else (`pop`, `shift`, `slice!`, `subtract`, `delete` of a non-literal, a block whose predicate the
     # narrowing does not read) answers `nil`: which members remain is not provable, and the caller keeps its reading.
     #
-    # Only a receiver that is itself a local or instance-variable read narrows: a receiver selecting among bindings
+    # Only a receiver that is itself a local read narrows, and only when no other holder in its body may write the
+    # object ({RemoverHolderScan}): the narrowing is a fact about the object. A receiver selecting among bindings
     # (`(f ? a : b).compact!`) mutates one of them, and narrowing every candidate would drop a member from the one the
-    # call never touched. An alias of the receiver keeps its own, wider, binding (still true of the object).
+    # call never touched. An instance variable never narrows: any method, or any object that holds it, can write it.
     module RemoverNarrowing
       NIL_REJECTORS = %i[compact!].to_set.freeze
       NIL_LITERAL_DELETERS = %i[delete delete?].to_set.freeze
       FALSEY_KEEPERS = %i[reject! delete_if].to_set.freeze
       TRUTHY_KEEPERS = %i[select! filter! keep_if].to_set.freeze
       CANDIDATES = (NIL_REJECTORS | NIL_LITERAL_DELETERS | FALSEY_KEEPERS | TRUTHY_KEEPERS).freeze
-      NARROWING_RECEIVERS = [Prism::LocalVariableReadNode, Prism::InstanceVariableReadNode].freeze
+      NARROWING_RECEIVERS = [Prism::LocalVariableReadNode].freeze
       CARRIERS = %w[Array Hash Set].freeze
       # Nodes that make a one-expression block's value something other than its predicate, or rebind a parameter.
       OPAQUE_BLOCK_NODES = [

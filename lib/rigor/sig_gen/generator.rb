@@ -1347,14 +1347,21 @@ module Rigor
       # return position it is not parenthesised.
       def positional_type(observations, index, prefix, owner = nil)
         types = observations.filter_map { |obs| obs.positional[index] }
-        "#{prefix}#{union_erase(types, owner: owner)}"
+        "#{prefix}#{union_erase(widen_observed_params(types), owner: owner)}"
       end
 
       def render_keyword_param(keyword, observations, owner = nil)
         optional_marker = keyword.is_a?(Prism::OptionalKeywordParameterNode) ? "?" : ""
         types = observations.filter_map { |obs| obs.keyword[keyword.name] }
-        rendered = types.empty? ? "untyped" : paren_wrap_union(union_erase(types, owner: owner))
+        rendered = types.empty? ? "untyped" : paren_wrap_union(union_erase(widen_observed_params(types), owner: owner))
         "#{optional_marker}#{keyword.name}: #{rendered}"
+      end
+
+      # #2254 — an observed argument is one call's value, so a literal (`"hello"`) proposes its class (`String`), as
+      # {#widen_value_literals} does for a return. Widening always: a parameter the body only compares against a
+      # literal (a discriminant) is widened too, which loses precision and never adds a false positive.
+      def widen_observed_params(types)
+        types.map { |type| widen_value_literals(type) }
       end
 
       # Issue #2459 — a ROOTED path (`::Hash`, `::A::B`) keeps its leading `::`: it names exactly one class, and the

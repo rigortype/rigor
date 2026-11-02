@@ -92,7 +92,7 @@ RSpec.describe Rigor::CLI::SigGenCommand do
       end
     RUBY
 
-    expect(run_observed).to include("def bar: (1) -> 1")
+    expect(run_observed).to include("def bar: (Integer) -> 1")
   end
 
   it "observes an RSpec before-block ivar receiver read in an example" do
@@ -103,7 +103,7 @@ RSpec.describe Rigor::CLI::SigGenCommand do
       end
     RUBY
 
-    expect(run_observed).to include("def bar: (1) -> 1")
+    expect(run_observed).to include("def bar: (Integer) -> 1")
   end
 
   it "keeps the scope's own receiver type over a same-name before-block ivar" do
@@ -118,7 +118,7 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     RUBY
 
     out = run_observed
-    expect(out[/^class Foo\n.*?^end/m]).to include("def bar: (1) -> 1")
+    expect(out[/^class Foo\n.*?^end/m]).to include("def bar: (Integer) -> 1")
     expect(out[/^class Bar\n.*?^end/m]).to include("def bar: (untyped) -> 1")
   end
 
@@ -137,7 +137,7 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     RUBY
 
     out = run_observed
-    expect(section(out, "Account")).to include("def deposit: (10) -> 10")
+    expect(section(out, "Account")).to include("def deposit: (Integer) -> 10")
     expect(section(out, "Label")).to include('def deposit: ("a") -> 20')
   end
 
@@ -201,7 +201,7 @@ RSpec.describe Rigor::CLI::SigGenCommand do
       end
     RUBY
 
-    expect(section(run_observed, "Account")).to include("def deposit: (10) -> 10")
+    expect(section(run_observed, "Account")).to include("def deposit: (Integer) -> 10")
   end
 
   it "keeps a context nested in an iteration block, without the befores outside it" do
@@ -221,7 +221,7 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     RUBY
 
     out = run_observed
-    expect(section(out, "Account")).to include("def deposit: (10) -> 10")
+    expect(section(out, "Account")).to include("def deposit: (Integer) -> 10")
     expect(section(out, "Label")).to include("def deposit: (untyped) -> 20")
   end
 
@@ -265,7 +265,7 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     expect(out).to include("def ==: (untyped) -> false")
     expect(out).to include("def respond_to?: (untyped, ?untyped) -> true")
     expect(out).to include("def is_a?: (untyped) -> true")
-    expect(out).to include("def save: (1) -> 30")
+    expect(out).to include("def save: (Integer) -> 30")
   end
 
   it "credits a safe-navigation call of a method nil answers, since &. skips it on nil" do
@@ -277,7 +277,7 @@ RSpec.describe Rigor::CLI::SigGenCommand do
   it "treats an RBS NilClass member as nil" do
     write("test/widget_test.rb", "w = Finder.widget\nw.spin(1)\n")
 
-    expect(section(run_observed, "Widget")).to include("def spin: (1) -> 40")
+    expect(section(run_observed, "Widget")).to include("def spin: (Integer) -> 40")
   end
 
   it "observes a safe-navigation call on a Foo | nil receiver" do
@@ -288,7 +288,7 @@ RSpec.describe Rigor::CLI::SigGenCommand do
       end
     RUBY
 
-    expect(run_observed).to include("def bar: (1) -> 1")
+    expect(run_observed).to include("def bar: (Integer) -> 1")
   end
 
   it "routes a singleton(Foo) | nil receiver's .new to initialize and leaves .build to the singleton rule" do
@@ -303,7 +303,7 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     RUBY
 
     out = run_observed
-    expect(out).to include("def initialize: (?1) -> void")
+    expect(out).to include("def initialize: (?Integer) -> void")
     expect(out).to include("def self.build: (untyped) -> 1")
   end
 
@@ -322,7 +322,7 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     RUBY
 
     out = run_observed
-    expect(out).to include("def bar: (4) -> 2")
+    expect(out).to include("def bar: (Integer) -> 2")
     expect(out).to include("def bar: (5) -> 3")
     expect(out).to include("def bar: (untyped) -> 1")
   end

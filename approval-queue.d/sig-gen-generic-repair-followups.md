@@ -1,6 +1,6 @@
 # sig-gen --write repairs a bare generic header in every sig/ file, and reports a held-back one without failing --check
 
-- **PR:** [#0000](https://github.com/rigortype/rigor/pull/0000)
+- **PR:** [#2655](https://github.com/rigortype/rigor/pull/2655)
 - **Issue:** [#2603](https://github.com/rigortype/rigor/issues/2603)
 - **Class:** open-choice
 - **Precedent:** [#2602](https://github.com/rigortype/rigor/pull/2602)

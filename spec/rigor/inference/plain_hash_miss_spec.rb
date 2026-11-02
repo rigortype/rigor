@@ -91,6 +91,8 @@ RSpec.describe "plain Hash miss on an engine-built local (issue #2555)", type: :
     end
   end
 
+  # `Hash.new { }` and `replace` are guards: both read `Dynamic[top]` today, so they stay quiet with or without the
+  # `:defaulted` stamp; the stamp keeps them quiet once their values are typed.
   describe "a Hash that may answer a miss with a default" do
     {
       "`Hash.new(0)`" => ["h = Hash.new(0)", "v + 1"],
@@ -108,6 +110,16 @@ RSpec.describe "plain Hash miss on an engine-built local (issue #2555)", type: :
           end
         RUBY
       end
+    end
+
+    it "leaves a gradual value side without the nil" do
+      expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]"])
+        def m(k, s)
+          h = Hash.new
+          h[s] = "x"
+          dump_type(h[k])
+        end
+      RUBY
     end
 
     it "keeps a store on Hash.new(0) in the value side (the master false positive)" do

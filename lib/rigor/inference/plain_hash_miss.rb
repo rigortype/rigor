@@ -12,8 +12,8 @@ module Rigor
     # The optimism exists because the type cannot tell a plain Hash from one with a default: `Hash.new(0)`,
     # `Hash.new { }` and a `default_proc` never miss, and honouring the annotation wholesale drew 25 false positives
     # on Rigor's own `lib/`. A local whose binding carries the `:synthesised` construction fact
-    # ({Scope#construction_fact?}) and not `:defaulted` is a Hash this body built itself, with no default (a literal,
-    # `Hash.new` with no argument or block, `Hash[...]`), that has not escaped ({ConstructionEscape}) and that no
+    # ({Scope#construction_fact?}) and not `:defaulted` is a Hash this body built itself, with no default (a literal, or
+    # `Hash.new` with no argument or block), that has not escaped ({ConstructionEscape}) and that no
     # `default=` / `default_proc=` / `replace` has given a default since ({MutationWidening::DEFAULTING_MUTATORS}). A
     # miss on it answers `nil`, so `h[k]` reads `V | nil`, and `RbsDispatch` records no {OptimisticOrigin} mark for it.
     #

@@ -1203,13 +1203,13 @@ module Rigor
       end
 
       # Issue #2555 L3, slice 2 — whether a synthesised Hash may answer a miss with a default, so its binding also
-      # carries `:defaulted` and `h[k]` keeps the optimistic `V` ({PlainHashMiss}). Only a literal, an argument-less
-      # and block-less `Hash.new`, and `Hash[...]` (which copies no default) are plain; any other constructor call is
-      # `:defaulted`, including `Hash.new(capacity: n)`, since telling a capacity keyword from a default value buys
-      # nothing worth the risk. The fact is harmless on an Array or Set: only a `Hash#[]` read consults it.
+      # carries `:defaulted` and `h[k]` keeps the optimistic `V` ({PlainHashMiss}). Only a literal and an
+      # argument-less, block-less `Hash.new` are plain; any constructor call given an argument or a block is
+      # `:defaulted`, including `Hash.new(capacity: n)` and `Hash[pairs]`, which have none: telling them from a default
+      # buys nothing worth the risk (both read `Dynamic[top]` today). The fact is harmless on an Array or Set: only a
+      # `Hash#[]` read consults it.
       def defaulted_construction?(value_node)
         return false unless value_node.is_a?(Prism::CallNode)
-        return false if value_node.name == :[]
 
         !value_node.arguments.nil? || !value_node.block.nil?
       end

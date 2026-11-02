@@ -235,12 +235,14 @@ RSpec.describe Rigor::RunScopedSlots do
   # A dynamic key (a local variable read from a list of constants) is not scanned here; its constants are.
   # The source with every real comment blanked to spaces, so an access a comment spells out is not read, while a `#`
   # inside a string or a regexp hides nothing. Prism gives comment ranges as byte offsets, so the blanking works on a
-  # binary copy; the spaces keep every offset and line number.
+  # binary copy. Each non-newline byte becomes a space and each newline stays, so every offset and line number holds,
+  # including those below an `=begin` block, whose range spans its own newlines.
   def blank_comments(source)
     bytes = source.b
     Prism.parse(source).comments.each do |comment|
       location = comment.location
-      bytes[location.start_offset, location.length] = " " * location.length
+      bytes[location.start_offset, location.length] =
+        bytes.byteslice(location.start_offset, location.length).gsub(/[^\n]/, " ")
     end
     bytes.force_encoding(source.encoding)
   end
@@ -567,6 +569,24 @@ RSpec.describe Rigor::RunScopedSlots do
 
     expect(keys).to be_empty
     expect(unresolved).to be_empty
+  end
+
+  # #2591: an `=begin`/`=end` block spans newlines, and blanking it must keep them, so an access below it reports its
+  # own line. The block's own access is not read.
+  it "reports the line of an access below an =begin block, and reads none inside it" do
+    keys = {}
+    unresolved = []
+    scan_thread_keys(<<~RUBY, "fixture.rb", keys, unresolved)
+      x = 1
+      =begin
+      Thread.current[INSIDE_BLOCK_KEY]
+      =end
+      y = 2
+      Thread.current[UNDEFINED_KEY]
+    RUBY
+
+    expect(keys).to be_empty
+    expect(unresolved).to eq(["fixture.rb:6 UNDEFINED_KEY"])
   end
 
   # A `#` inside a string or a regexp is not a comment, so it hides no access on its line.

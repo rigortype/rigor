@@ -79,8 +79,8 @@ Verify a reference-reading gate actually **executed** (not `pending` /
 
 **Push with an explicit refspec, never `-u`.** A worktree branch
 created from `master` can carry `branch.<name>.merge = refs/heads/master`
-(autoSetupMerge), and this environment sets `push.default = tracking` —
-so `git push -u origin <branch>` resolves the destination through the
+(autoSetupMerge), and on a host whose `push.default` is `tracking` (or
+`upstream`), `git push -u origin <branch>` resolves the destination through the
 upstream config and lands the branch's commits on **remote `master`**
 directly, bypassing the PR flow. Always push as
 `git push origin <branch>:refs/heads/<branch>` (which also makes the

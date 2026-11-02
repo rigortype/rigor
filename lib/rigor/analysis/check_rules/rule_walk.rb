@@ -146,12 +146,14 @@ module Rigor
             qualified_prefix = extend_prefix(node, context.qualified_prefix)
             detached_ivar_facet = context.detached_ivar_facet || detached_ivar_facet?(node)
 
-            Context.new(
-              in_loop_or_block: in_loop_or_block,
-              qualified_prefix: qualified_prefix,
-              inside_def: inside_def,
-              detached_ivar_facet: detached_ivar_facet
-            )
+            # Nearly every node leaves all four fields as they were, and a {Context} is immutable, so the parent's
+            # is the child's. This runs once per node and was a top allocation site (a Data per node).
+            if in_loop_or_block == context.in_loop_or_block && inside_def == context.inside_def &&
+               qualified_prefix.equal?(context.qualified_prefix) && detached_ivar_facet == context.detached_ivar_facet
+              return context
+            end
+
+            Context.new(in_loop_or_block, qualified_prefix, inside_def, detached_ivar_facet)
           end
 
           # True for a node whose descendants write ivars to a store the enclosing class name does not name:

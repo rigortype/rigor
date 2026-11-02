@@ -28,12 +28,13 @@ jobs:
         working-directory: editors/vscode
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           submodules: false
+          persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@v7.1.0
         with:
           node-version: "24"
           cache: npm
@@ -52,7 +53,7 @@ jobs:
         run: npx --no-install @vscode/vsce package --no-dependencies --out rigor.vsix
 
       - name: Upload .vsix artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: rigor-vsix
           path: editors/vscode/rigor.vsix

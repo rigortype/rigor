@@ -69,9 +69,10 @@ jobs:
       tree: ${{ steps.tree.outputs.tree }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           submodules: false
+          persist-credentials: false
           fetch-depth: 0
 
       # The tree every job of this run checks out (GITHUB_SHA: on a
@@ -212,7 +213,7 @@ jobs:
     steps:
       - name: Find the newest timing cache
         id: lookup
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@v6.1.0
         with:
           path: tmp/binpacker.timings
           # Never saved, so only the restore-keys prefix can match.
@@ -250,12 +251,13 @@ jobs:
         shard: [1, 2, 3]
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           submodules: false
+          persist-credentials: false
 
       - name: Set up Ruby ${{ matrix.ruby }}
-        uses: ruby/setup-ruby@v1
+        uses: ruby/setup-ruby@v1.336.0
         with:
           ruby-version: ${{ matrix.ruby }}
           bundler-cache: true
@@ -296,7 +298,7 @@ jobs:
       # renamed, or deleted; one run then re-measures from filesize weighting.
       - name: Restore binpacker timing file
         if: needs.timing-cache.outputs.key != ''
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@v6.1.0
         with:
           path: tmp/binpacker.timings
           key: ${{ needs.timing-cache.outputs.key }}
@@ -335,7 +337,7 @@ jobs:
       # against the 10 GB cache budget. The restore above still reads master's timings.
       - name: Save binpacker timing file
         if: success() && github.event_name != 'merge_group'
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@v6.1.0
         with:
           path: tmp/binpacker.timings
           key: binpacker-timings-v2-${{ runner.os }}-ruby${{ matrix.ruby }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}
@@ -351,7 +353,7 @@ jobs:
       # creation order — so `latest` is no fix either.)
       - name: Upload shard run report
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: binpacker-report-${{ matrix.shard }}-attempt-${{ github.run_attempt }}
           path: |
@@ -383,12 +385,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           submodules: false
+          persist-credentials: false
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
+        uses: ruby/setup-ruby@v1.336.0
         with:
           ruby-version: "4.0"
           bundler-cache: true
@@ -432,12 +435,13 @@ jobs:
     if: always() && needs.changes.outputs.code == 'true' && needs.test.result != 'cancelled'
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           submodules: false
+          persist-credentials: false
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
+        uses: ruby/setup-ruby@v1.336.0
         with:
           ruby-version: "4.0"
           bundler-cache: true
@@ -447,7 +451,7 @@ jobs:
       # attempt survives. Unmerged, each artifact gets its own directory
       # (or `reports/` itself when only one matched).
       - name: Download shard run reports
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.2
         with:
           pattern: binpacker-report-*
           path: reports
@@ -476,12 +480,13 @@ jobs:
             expected_major: "4"
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           submodules: false
+          persist-credentials: false
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
+        uses: ruby/setup-ruby@v1.336.0
         with:
           ruby-version: "4.0"
 
@@ -533,12 +538,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           submodules: false
+          persist-credentials: false
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
+        uses: ruby/setup-ruby@v1.336.0
         with:
           ruby-version: "4.0"
           bundler-cache: true
@@ -549,7 +555,7 @@ jobs:
       # reuses the warm cache and skips re-inspecting unchanged files.
       - name: Restore RuboCop cache
         id: restore-rubocop
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@v6.1.0
         with:
           path: ~/.cache/rubocop_cache
           key: rubocop-${{ runner.os }}-${{ hashFiles('.rubocop.yml', '.rubocop_todo.yml', 'Gemfile.lock') }}
@@ -562,7 +568,7 @@ jobs:
       # (#2139). An exact key hit has nothing new to save.
       - name: Save RuboCop cache
         if: success() && github.event_name != 'merge_group' && steps.restore-rubocop.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@v6.1.0
         with:
           path: ~/.cache/rubocop_cache
           key: ${{ steps.restore-rubocop.outputs.cache-primary-key }}
@@ -582,12 +588,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           submodules: false
+          persist-credentials: false
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
+        uses: ruby/setup-ruby@v1.336.0
         with:
           ruby-version: "4.0"
           bundler-cache: true
@@ -622,12 +629,13 @@ jobs:
     # slots it should serve.
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           submodules: false
+          persist-credentials: false
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
+        uses: ruby/setup-ruby@v1.336.0
         with:
           ruby-version: "4.0"
           bundler-cache: true
@@ -653,7 +661,7 @@ jobs:
       - name: Restore Rigor analysis cache
         id: restore-cache
         if: matrix.cache == 'warm'
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@v6.1.0
         with:
           path: .rigor/cache
           key: rigor-cache-${{ runner.os }}-${{ hashFiles('Gemfile.lock') }}-${{ hashFiles('lib/**/*.rb', 'sig/**/*.rbs', 'data/builtins/**/*.yml') }}
@@ -725,7 +733,7 @@ jobs:
       # has both artifacts to compare.
       - name: Upload diagnostics artifact
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: rigor-diagnostics-${{ matrix.cache }}
           path: rigor-diagnostics-${{ matrix.cache }}.json
@@ -741,7 +749,7 @@ jobs:
       # exact hit, and never on a merge-queue ref, whose entry no other run can read (#2139).
       - name: Save the Rigor analysis cache
         if: matrix.cache == 'warm' && success() && github.event_name != 'merge_group' && steps.restore-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@v6.1.0
         with:
           path: .rigor/cache
           key: ${{ steps.restore-cache.outputs.cache-primary-key }}
@@ -768,12 +776,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           submodules: false
+          persist-credentials: false
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
+        uses: ruby/setup-ruby@v1.336.0
         with:
           ruby-version: "4.0"
           bundler-cache: true
@@ -836,13 +845,13 @@ jobs:
     if: always() && needs.changes.outputs.code == 'true' && needs.self-check.result != 'cancelled'
     steps:
       - name: Download warm diagnostics
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.2
         with:
           name: rigor-diagnostics-warm
           path: .
 
       - name: Download cold diagnostics
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.2
         with:
           name: rigor-diagnostics-cold
           path: .
@@ -880,12 +889,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           submodules: false
+          persist-credentials: false
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
+        uses: ruby/setup-ruby@v1.336.0
         with:
           ruby-version: "4.0"
           bundler-cache: true
@@ -913,13 +923,14 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           submodules: false
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
+        uses: ruby/setup-ruby@v1.336.0
         with:
           ruby-version: "4.0"
           bundler-cache: true
@@ -1000,13 +1011,14 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           submodules: false
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
+        uses: ruby/setup-ruby@v1.336.0
         with:
           ruby-version: "4.0"
           bundler-cache: true
@@ -1056,18 +1068,18 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           submodules: false
           persist-credentials: false
 
       - name: Install Nix
-        uses: cachix/install-nix-action@v31
+        uses: cachix/install-nix-action@v31.11.3
 
       # Keyed on the derivation's inputs, so a hash or resolution change
       # misses and a stale `sha256` can never be served from the cache.
       - name: Cache the Nix store
-        uses: nix-community/cache-nix-action@v7
+        uses: nix-community/cache-nix-action@v7.0.2
         with:
           primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock', 'nix/Gemfile.lock', 'nix/gemset.nix') }}
 
@@ -1182,7 +1194,7 @@ jobs:
       # does not fail the job.
       - name: Attest the tested tree
         # Pinned by commit: the only job here that can mint an OIDC token.
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        uses: actions/attest-build-provenance@v4.2.2
         continue-on-error: true
         with:
           subject-path: ${{ runner.temp }}/tested-tree

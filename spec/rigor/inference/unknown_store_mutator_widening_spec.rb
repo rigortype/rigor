@@ -387,11 +387,13 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
       RUBY
     end
 
-    # The control: an alias copy carries no fact (issue #2335), so the rewrite through it is declined as before.
+    # The control: an alias copy carries no fact (issue #2335), so the rewrite through it is declined as before. Since
+    # issue #2608 a literal-key `delete` keeps a closed shape open to the shape's own rewrite, so the closer here is a
+    # `delete` of a key nothing types, which still erases the literal to a precise nominal.
     it "declines the same rewrite through an alias copy, which carries no fact" do
       expect(undefined_method_rules(<<~RUBY)).to eq(["call.undefined-method"])
         g = { a: 1 }
-        g.delete(:b)
+        g.delete(gets.to_s.to_sym)
         h = g
         h.transform_values!(&:to_s)
         h[:a].upcase
@@ -559,8 +561,11 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
                    "call.")).to eq(["call.possible-nil-receiver"])
     end
 
+    # Since issue #2608 `compact!` narrows by what it removes, so the store it takes out leaves the precise reading
+    # (`c`); a positional remover still cannot say which member went, so it answers the floored reading (`d`).
     it "keeps a remover with no prior store on today's answer, and answers the floored reading after one" do
-      expect(dumped_types(<<~RUBY)).to eq(["Array[String]", "1 | 2", "Array[Dynamic[top] | Integer | String]"])
+      expected = ["Array[String]", "1 | 2", "Array[Integer | String]", "Array[Dynamic[top] | Integer | String]"]
+      expect(dumped_types(<<~RUBY)).to eq(expected)
         n = gets.to_i
         a = Array.new(n, "a")
         a.compact!
@@ -574,6 +579,11 @@ RSpec.describe "unknown-store mutator widening", type: :runner do
         c.compact!
         c << 1
         dump_type(c.dup)
+        d = Array.new(n, "a")
+        d << nil
+        d.pop
+        d << 1
+        dump_type(d.dup)
       RUBY
     end
 

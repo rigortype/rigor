@@ -1,0 +1,6 @@
+- **[engine]** A collection remover or filter narrows the collection by what it removes, so code that strips `nil` before using the elements no longer reports a possible-nil receiver. ([#2621](https://github.com/rigortype/rigor/pull/2621))
+  - `compact!` drops `nil` from an Array's elements or a Hash's values, and `delete(nil)` from an Array's or Set's elements ([#2608](https://github.com/rigortype/rigor/issues/2608)).
+  - `reject!`, `select!`, `filter!`, `keep_if` and `delete_if` with a one-expression block such as `{ |x| x.nil? }`, `{ |x| x }`, `{ |x| x.is_a?(String) }`, or `(&:nil?)`, narrow the elements as the matching `if` would; the Hash `{ |k, v| ... }` form narrows the key and value.
+  - `h = { a: 1, b: 2 }; h.delete(:a)` reads `{ b: 2 }`.
+  - `pop`, `shift`, `slice!`, `subtract`, `clear` and a `delete` of a value the analyzer cannot see keep the earlier reading.
+  - The narrowing applies to a local variable the method does not also hand to another holder; an instance variable, or a local that is copied, stored, passed as an argument, or captured by a block that may run later, keeps the earlier reading.

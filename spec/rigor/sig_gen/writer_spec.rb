@@ -1340,10 +1340,14 @@ end
         target = write_target("class Hash\n  def old: () -> 1\nend\n")
         merged = candidate(method_name: :k, class_name: "Hash", rbs: "def k: () -> K").with_class_type_params(params)
 
-        result = writer.write("lib/foo.rb", [merged])
+        w = writer
+        result = w.write("lib/foo.rb", [merged])
 
         expect(result.repaired_headers).to eq([])
         expect(File.read(target)).to start_with("class Hash\n")
+        # #2605 — and the class is reported as left bare.
+        expect(w.left_bare).to eq([{ class: "Hash", targets: [Pathname(target).to_s],
+                                     blocking: [{ target: Pathname(target).to_s, names: ["K"] }] }])
       end
 
       it "repairs the header when the member anchors the name" do
@@ -1406,6 +1410,14 @@ end
         expect(File.read(held)).to eq("class E\nend\nclass Array\n  def h: () -> E\nend\n")
         expect(w.left_bare.map { |entry| entry.fetch(:class) }).to eq(["Array"])
         expect(w.left_bare.first.fetch(:targets)).to contain_exactly(held, target)
+      end
+
+      it "repairs a file an emitted member routes to once, not again as a repair-only file" do
+        write_target("class Array\n  def b: () -> 1\nend\n")
+
+        results = writer(dry_run: true).write_all([generic(method_name: :c, class_name: "Array", params: params)])
+
+        expect(results.map(&:repaired_headers)).to eq([["Array[unchecked out E]"]])
       end
 
       it "leaves left_bare empty when every opening is repaired" do

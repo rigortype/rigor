@@ -311,6 +311,14 @@ RSpec.describe Rigor::CLI::SigGenCommand do
       end
     end
 
+    it "names a held-back class under left_bare in --write --format=json" do
+      write("sig/held.rbs", "class E\nend\n\nclass Array\n  def held: () -> E\nend\n")
+
+      _, out, = sig_gen("--write", "--format=json", "lib")
+
+      expect(JSON.parse(out).fetch("left_bare").map { |entry| entry.fetch("class") }).to eq(["Array"])
+    end
+
     it "omits left_bare from --format=json when nothing is held back" do
       _, out, = sig_gen("--write", "--format=json", "lib")
 

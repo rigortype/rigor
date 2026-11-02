@@ -259,7 +259,9 @@ RSpec.describe Rigor::CLI::BaselineCommand do
         expect(status).to eq(described_class::EXIT_USAGE)
         expect(out).to eq("")
         expect(err).to include('rigor baseline dump: unexpected argument(s) "lib"')
-        expect(err).to include("generated from the configured `paths:`")
+        expect(err).to include("dump reads the baseline file, so pass none")
+        expect(err).to include("--file=GLOB")
+        expect(err).not_to include("generated from the configured")
       end
 
       it "rejects paths on drift and reports no drift" do
@@ -268,6 +270,7 @@ RSpec.describe Rigor::CLI::BaselineCommand do
         expect(status).to eq(described_class::EXIT_USAGE)
         expect(out).not_to include("Drift report")
         expect(err).to include('rigor baseline drift: unexpected argument(s) "lib"')
+        expect(err).to include("drift audits the configured `paths:`, so pass none")
       end
 
       it "rejects paths on prune and leaves the baseline untouched" do
@@ -278,6 +281,7 @@ RSpec.describe Rigor::CLI::BaselineCommand do
         status, _out, err = run_cli("baseline", "prune", "lib", cwd: tmpdir)
         expect(status).to eq(described_class::EXIT_USAGE)
         expect(err).to include('rigor baseline prune: unexpected argument(s) "lib"')
+        expect(err).to include("prune audits the configured `paths:`, so pass none")
         expect(File.read(baseline_path)).to eq(before)
       end
 

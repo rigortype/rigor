@@ -720,7 +720,7 @@ also accepts `--format=text|json` for machine-readable output.
 
 No subcommand takes a positional path: `generate` and `regenerate`
 analyse the configured `paths:`, `drift` and `prune` audit them, and
-`dump` prints the whole baseline file. A path argument is a usage error
+`dump` reads the baseline file and filters with `--rule`/`--file`. A path argument is a usage error
 (exit `64`). Narrow the scope with `paths:` in the configuration, not on
 the command line.
 

@@ -154,9 +154,19 @@ module Rigor
       # Reject them, as `rigor effects update` does (`effects_snapshot_command.rb:54`), rather than honour them.
       def positional_paths_error(subcommand)
         @err.puts("rigor baseline #{subcommand}: unexpected argument(s) #{@argv.map(&:inspect).join(' ')}; " \
-                  "the baseline is " \
-                  "generated from the configured `paths:`, so pass none")
+                  "#{positional_paths_hint(subcommand)}")
         EXIT_USAGE
+      end
+
+      def positional_paths_hint(subcommand)
+        case subcommand
+        when "dump"
+          "dump reads the baseline file, so pass none: use --file=GLOB to filter rows or --baseline=PATH to pick a file"
+        when "drift", "prune"
+          "#{subcommand} audits the configured `paths:`, so pass none"
+        else
+          "the baseline is generated from the configured `paths:`, so pass none"
+        end
       end
 
       def write_baseline(options, verb:)

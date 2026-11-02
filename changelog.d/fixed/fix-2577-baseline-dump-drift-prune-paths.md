@@ -1,2 +1,0 @@
-- **[cli]** `rigor baseline dump`, `drift` and `prune` reject positional paths with a usage error (exit `64`) instead of silently ignoring them, as `generate` and `regenerate` already do. ([#2650](https://github.com/rigortype/rigor/pull/2650))
-  - A path argument used to be dropped without a word, so `rigor baseline drift lib` audited every configured path.

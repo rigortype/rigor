@@ -206,7 +206,8 @@ RSpec.describe "collection remover narrowing", type: :runner do
   it "keeps the ordinary reading of a parameter a zero-argument super passes on" do
     source = "#{maybe_one}class P\n  def f(x) = x\nend\nclass Q < P\n  def f(l)\n    super\n    " \
              "l.select! { |x| x.is_a?(Integer) }\n    dump_type(l.dup)\n  end\nend\n"
-    sig = { "q.rbs" => "class P\n  def f: (Array[Integer?]) -> untyped\nend\nclass Q < P\n  def f: (Array[Integer?]) -> untyped\nend\n" }
+    method_sig = "def f: (Array[Integer?]) -> untyped"
+    sig = { "q.rbs" => "class P\n  #{method_sig}\nend\nclass Q < P\n  #{method_sig}\nend\n" }
     expect(dumped_types(source, sig: sig)).to eq(["Array[Integer?]"])
   end
 

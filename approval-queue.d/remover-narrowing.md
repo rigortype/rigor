@@ -27,7 +27,8 @@ literal-key `delete` (until now every `delete` erased a shape to a nominal).
   - read anywhere inside the value of any write (variable, constant, index, attribute or operator write, a multiple
     assignment) or the subject of a `case`/`in`, `=>` or `in` pattern, with no attempt to tell a receiver-position read
     apart (`n = l.size` counts), together with the local that write or pattern binds unless its value is a fresh
-    literal or `new` / `[]` on a constant;
+    literal or `new` / `[]` on a bare or top-level `Array`, `Hash` or `Set`;
+  - a parameter of a method whose body calls `super` with no arguments, which passes every parameter on;
   - read inside an Array element, a Hash key or value, a splat, or an argument of any call, `yield` or `super`, except
     as the receiver of a #2555 `ConstructionEscape::READERS` reader (the per-class union less `to_a` / `to_h` /
     `to_set`, which return self on another class), so `puts(l.size)` and `dump_type(l.dup)` keep it;

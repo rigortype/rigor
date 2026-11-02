@@ -76,8 +76,8 @@ module Rigor
       # ADR-14 follow-up: this is the consolidated-layout entry point. The legacy `write(source_path,
       # candidates)` below assumes all candidates share a target and remains for spec convenience.
       #
-      # @param header_spelling [#call, nil] class name => the header spelling of a generic class the run does not
-      #   stamp (#2603: a bare header in a file no candidate routes to); the generator's
+      # @param header_spelling — called with a class name, returns the header spelling of a generic class the run
+      #   does not stamp (#2603: a bare header in a file no candidate routes to); the generator's
       #   {Generator#generic_header_spelling}. Without it only the run's stamp counts.
       # @return one per target sig file.
       def write_all(candidates, header_spelling: nil)

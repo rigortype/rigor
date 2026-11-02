@@ -2,6 +2,8 @@
 
 require "rbs"
 
+require_relative "../rooted_glob"
+
 module Rigor
   module SigGen
     # Issues #2603 and #2605 — the run-wide view of the parameterless headers of generic classes (`class Array`, as
@@ -19,9 +21,9 @@ module Rigor
       # One bare opening: the file it is in, the class it opens, and the parameter names its body spells.
       Opening = Data.define(:target, :class_name, :names)
 
-      # @param sig_root [Pathname] the directory the writer writes to; nothing outside it is read.
-      # @param spelling_for [#call] class name => the header spelling to insert (`"[unchecked out E]"`), or nil for a
-      #   class that is not generic with plain parameters only.
+      # @param sig_root — the directory the writer writes to; nothing outside it is read.
+      # @param spelling_for — called with a class name, returns the header spelling to insert
+      #   (`"[unchecked out E]"`), or nil for a class that is not generic with plain parameters only.
       def self.scan(sig_root:, spelling_for:)
         new(spelling_for).tap { |scan| scan.read_tree(sig_root) }
       end
@@ -105,7 +107,7 @@ module Rigor
       def read_tree(sig_root)
         return unless sig_root.directory?
 
-        Pathname.glob(sig_root.join("**", "*.rbs").to_s).sort.each { |path| read_file(path) }
+        RootedGlob.glob(sig_root.to_s, "**/*.rbs").sort.each { |path| read_file(Pathname(path)) }
       end
 
       private

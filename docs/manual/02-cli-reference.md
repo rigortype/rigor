@@ -72,8 +72,9 @@ that want the stricter reading.
 ### Editor mode scope
 
 `--tmp-file` / `--instead-of` on their own analyse **only** the
-buffer's file. It still reads the rest of the project's declarations
-(the classes and methods other files define), as `rigor check FILE`
+buffer's file. The `--instead-of` logical path is analysed even when it
+lies outside `paths:`, as it always has been. It still reads the rest of the
+project's declarations (the classes and methods other files define), as `rigor check FILE`
 does, but it reports nothing about what the unsaved edit does to the
 rest of the project.
 
@@ -190,7 +191,8 @@ wraps several results in a `results` array. Line queries add a
 `line_enumerations` array whose `shown` and `total` counts make
 truncation explicit. `--trace` records fail-soft fallbacks,
 after the rows of a line table in text output. The editor-mode
-`--tmp-file` / `--instead-of` pair is accepted as on `check`.
+`--tmp-file` / `--instead-of` pair is accepted as on `check`, and a repeated flag is a usage error
+(exit `64`) there too.
 
 A class or constant that another project file declares reads as
 `rigor check` types it (`singleton(User)`) when a bare

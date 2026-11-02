@@ -189,6 +189,15 @@ module Rigor
         @entries.keys.sort
       end
 
+      # Issue #2233 — whether a plugin claims `path` by one of its `template_globs:`, in any spelling a caller holds it
+      # (absolute, `./`-prefixed, relative). A claimed template is analysed as a unit, never as a plain `.rb` file, so
+      # the incremental session must not admit its buffer to the `.rb` set.
+      def claims?(path)
+        return false if @claimed_globs.empty?
+
+        TemplateUnitPaths.claims?(@claimed_globs, TemplateUnitPaths.relative(path, @root))
+      end
+
       def [](path)
         entry_for(path)
       end

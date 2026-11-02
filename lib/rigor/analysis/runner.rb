@@ -2089,7 +2089,13 @@ module Rigor
           # The logical path joins even when it is not on disk under `paths:` (design § "Failure envelope"),
           # the same allowance option A makes below.
           files = files.select { |path| @analyze_only.include?(path) }
-          files |= [@buffer.logical_path] if @buffer && @analyze_only.include?(@buffer.logical_path)
+          # Issue #2233 — a buffer that is a claimed template joins as its unit, appended by
+          # {#template_unit_targets}, never as a `.rb` file: the logical path in its absolute spelling would
+          # otherwise analyse the same template twice. The registry is loaded by now, which is why the test is here
+          # and not in the incremental session, where it is not.
+          if @buffer && @analyze_only.include?(@buffer.logical_path) && !template_path?(@buffer.logical_path)
+            files |= [@buffer.logical_path]
+          end
           return template_unit_targets(files)
         end
         return template_unit_targets(files) if @buffer.nil?
@@ -2124,6 +2130,14 @@ module Rigor
         template_units.paths
       end
       public :template_unit_paths
+
+      # Issue #2233 — whether `path` is a template of this run: a claimed glob matches it, or it names a unit. The
+      # incremental session asks before it admits a buffer to the `.rb` set, so a template buffer is analysed once,
+      # as a unit ({#template_unit_targets} appends it), and never also as a plain `.rb` file.
+      def template_path?(path)
+        template_units.claims?(path) ||
+          template_unit_paths.include?(Analysis::TemplateUnitPaths.relative(path, Dir.pwd))
+      end
 
       # Editor mode (`buffer:` non-nil) auto-flips the cache store to `read_only: true` so multiple
       # debounced editor invocations against the same project don't churn the on-disk cache or race on

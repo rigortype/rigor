@@ -2132,8 +2132,8 @@ module Rigor
       public :template_unit_paths
 
       # Issue #2233 — whether `path` is a template of this run: a claimed glob matches it, or it names a unit. The
-      # incremental session asks before it admits a buffer to the `.rb` set, so a template buffer is analysed once,
-      # as a unit ({#template_unit_targets} appends it), and never also as a plain `.rb` file.
+      # runner keeps the buffer's logical path out of the targets when this is true, so a template buffer is
+      # analysed once, as a unit ({#template_unit_targets} appends it), and never also as a plain `.rb` file.
       def template_path?(path)
         template_units.claims?(path) ||
           template_unit_paths.include?(Analysis::TemplateUnitPaths.relative(path, Dir.pwd))

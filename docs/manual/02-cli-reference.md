@@ -81,6 +81,7 @@ rest of the project.
 Adding `--incremental` analyses the **whole project with the buffer
 substituted** — the edited file and the files that depend on it are
 re-analysed, everything else is served from the incremental snapshot.
+A buffer for a claimed template is analysed as its template unit, once.
 An unsaved change to a method's return type therefore surfaces in its
 callers, not just in the file being edited.
 

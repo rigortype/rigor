@@ -1,0 +1,2 @@
+- **[sig-gen]** A `def` or `attr_*` inside a `class_methods do … end` block is no longer written as an instance method of the module. ([#2666](https://github.com/rigortype/rigor/pull/2666))
+  - A concern module's `class_methods` members belong to the including class's singleton, so sig-gen omits them rather than writing them on the module.

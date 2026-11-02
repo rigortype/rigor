@@ -262,12 +262,17 @@ module Rigor
         result.merge(content: result.fetch(:content) + [block])
       end
 
+      # Only a configuration that does not load is "no warnings to show": the CLI has already reported that error.
+      # A failure in ConfigAudit itself is a bug and surfaces as an internal error rather than reading as clean.
       def config_warnings(config_path)
         require_relative "../configuration"
         require_relative "../config_audit"
-        ConfigAudit.warnings(Configuration.load(config_path))
-      rescue StandardError
-        []
+        begin
+          configuration = Configuration.load(config_path)
+        rescue ConfigurationError
+          return []
+        end
+        ConfigAudit.warnings(configuration)
       end
 
       def carries_config_warnings?(out)

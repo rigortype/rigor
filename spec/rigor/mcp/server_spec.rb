@@ -620,5 +620,33 @@ RSpec.describe Rigor::MCP::Server do
         expect(resp.dig("result", "content").size).to eq(1)
       end
     end
+
+    # Guard: rigor_explain takes no `config` argument and reads no configuration, so a session default that carries
+    # warnings must not add a block to its output (the CONFIG_TOOLS filter).
+    it "adds nothing to rigor_explain, which reads no configuration" do
+      with_inert_config do |_file, config|
+        s = described_class.new(config_path: config, err: StringIO.new)
+        resp = JSON.parse(JSON.generate(s.handle("id" => 1, "method" => "tools/call",
+                                                 "params" => { "name" => "rigor_explain", "arguments" => {} })))
+
+        texts = resp.dig("result", "content").map { |b| b.fetch("text") }
+        expect(texts.grep(/config_warnings/)).to be_empty
+      end
+    end
+
+    # Guard: a configuration that does not load is the CLI's own error to report; the warnings lookup must not turn
+    # it into an "Internal error".
+    it "reports a broken configuration as the CLI's error, not an internal error" do
+      with_inert_config do |file, _config|
+        broken = File.join(File.dirname(file), "broken.yml")
+        File.write(broken, "disable: [\n")
+
+        resp = tool_call("rigor_annotate", { "file" => file, "config" => broken })
+
+        text = resp.dig("result", "content", 0, "text")
+        expect(text).not_to start_with("Internal error")
+        expect(resp.dig("result", "content").size).to eq(1)
+      end
+    end
   end
 end

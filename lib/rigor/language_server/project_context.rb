@@ -71,24 +71,23 @@ module Rigor
         @project_scan = nil
         @incremental_session = nil
         @session_primed = false
-        @announced_config_warnings = nil
+        @announced_config_warnings = Set.new
         @announce_lock = Mutex.new
       end
 
       # Issue #2231 — the {ConfigAudit} warnings for the configuration as last loaded that the editor has not been
       # shown yet, or an empty array. `rigor check` prints these on every run; the server is one long run, so it
-      # announces a warning set once: at `initialized` for the configuration it started with, and again only when
-      # a later reload (every save round re-reads `.rigor.yml`) changes the set. A save that leaves the warnings
-      # as they were says nothing more, and a fix followed by the same mistake announces it again. Called from the
-      # dispatch thread and the save round's thread alike, hence the lock.
+      # announces each warning once: at `initialized` for the configuration it started with, and after a later reload
+      # (every save round re-reads `.rigor.yml`) only the warnings that were not in the previous reload's set. The
+      # comparison is by message, not by order, so reordering entries announces nothing, and fixing one of two
+      # warnings does not show the other again. A warning that was fixed and then comes back is new and is shown.
+      # Called from the dispatch thread and the save round's thread alike, hence the lock.
       def unannounced_config_warnings
-        warnings = ConfigAudit.warnings(@configuration)
-        messages = warnings.map(&:message)
         @announce_lock.synchronize do
-          next [] if messages == @announced_config_warnings
-
-          @announced_config_warnings = messages
-          warnings
+          warnings = ConfigAudit.warnings(@configuration)
+          fresh = warnings.reject { |warning| @announced_config_warnings.include?(warning.message) }
+          @announced_config_warnings = warnings.to_set(&:message)
+          fresh
         end
       end
 
@@ -289,7 +288,8 @@ module Rigor
       def reload_configuration
         return unless @configuration_loader
 
-        @configuration = @configuration_loader.call
+        loaded = @configuration_loader.call
+        @announce_lock.synchronize { @configuration = loaded }
       rescue StandardError
         nil
       end

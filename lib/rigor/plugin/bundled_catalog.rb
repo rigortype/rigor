@@ -127,25 +127,13 @@ module Rigor
         def require_bundled_plugins
           return {} unless File.directory?(BUNDLED_PLUGINS_ROOT)
 
-          add_bundled_lib_dirs
+          Loader.add_bundled_lib_dirs
           Dir.children(BUNDLED_PLUGINS_ROOT).sort.each_with_object({}) do |gem_name, resolved|
             path = Loader.bundled_plugin_path(gem_name)
             next if path.nil?
 
             resolved[gem_name.delete_prefix(FirstParty::GEM_PREFIX)] = gem_name
             require_and_record(gem_name, path)
-          end
-        end
-
-        # A bundled plugin can require another bundled plugin by gem name (`require "rigor-ffi"` from
-        # `rigor-ethon`, `rigor-rbnacl`, `rigor-sassc` and `rigor-ffi-rzmq`), which resolves only with that
-        # plugin's `lib` on the load path. The loader gets it from the bundle, and this catalogue has to
-        # arrange it itself. Prepending the engine's own copies matches ADR-93 WD5's anti-skew rule, where
-        # the bundled copy always wins.
-        def add_bundled_lib_dirs
-          Dir.children(BUNDLED_PLUGINS_ROOT).sort.each do |gem_name|
-            dir = File.join(BUNDLED_PLUGINS_ROOT, gem_name, "lib")
-            $LOAD_PATH.unshift(dir) if File.directory?(dir) && !$LOAD_PATH.include?(dir)
           end
         end
 

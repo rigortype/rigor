@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+require "open3"
+require "tmpdir"
 
 # ADR-25 — named plugin classes for the signature_paths load-time-validation tests. Defined in this file, so the gem
 # root resolves (no `/lib/` segment) to this file's directory; `"."` therefore points at an existing directory and the
@@ -664,6 +666,27 @@ RSpec.describe Rigor::Plugin::Loader do
       expect(described_class::FEATURE_RESOLVER.call("rigor-anchor-probe")).to eq(probe_path)
     ensure
       $LOADED_FEATURES.delete(probe_path)
+    end
+  end
+
+  # #2566 — the FFI sub-plugins `require "rigor-ffi"` by gem name. In-process the suite already has every bundled
+  # `lib` on the load path, so this runs the CLI in a child process with no Bundler and a cwd outside the
+  # repository, the way `ruby -I lib exe/rigor` runs in development.
+  describe "bundled plugins that require a sibling by gem name (#2566)" do
+    it "activates the FFI sub-plugins from a cwd outside the repository without Bundler" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "ffi.yml"), "plugins:\n  - rigor-ethon\n  - rigor-sassc\n  - rigor-ffi-rzmq\n")
+        engine_root = Rigor::Plugin::Loader::ENGINE_ROOT
+        env = { "RUBYOPT" => nil, "BUNDLE_GEMFILE" => nil, "BUNDLE_BIN_PATH" => nil }
+
+        out, err, status = Open3.capture3(
+          env, RbConfig.ruby, "-I", File.join(engine_root, "lib"), File.join(engine_root, "exe", "rigor"),
+          "plugins", "--strict", "--config=ffi.yml", chdir: dir, stdin_data: ""
+        )
+
+        expect(status.exitstatus).to eq(0), err
+        expect(out).to include("load-error: 0", "[OK ] ethon", "[OK ] sassc", "[OK ] ffi-rzmq")
+      end
     end
   end
 end

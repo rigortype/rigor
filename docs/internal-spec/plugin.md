@@ -1438,6 +1438,16 @@ whichever installation's `require_paths` happens to win is
 skew-prone by definition: a stale installed `rigortype` gem could
 otherwise displace the engine's own copy silently (the [#194][i194]
 hazard). Anchoring loads the engine's own vendored file instead.
+Anchoring fixes the entry file only. A bundled plugin can also
+`require` a sibling bundled plugin by gem name (`rigor-ffi` from
+`rigor-ethon`, `rigor-sassc`, `rigor-ffi-rzmq` and `rigor-rbnacl`),
+so before the first bundled plugin loads, the loader prepends every
+`<engine root>/plugins/*/lib` to `$LOAD_PATH`. This is process-wide
+and idempotent, and the engine's copies go first, so an installed
+gem of the same name cannot win the sibling `require` either
+([ADR-93](../adr/93-default-rbs-inline-ingestion.md) WD5: the engine
+copy wins over an installed gem). A trimmed packaging with no
+`plugins/` tree adds nothing.
 When the anchored file does **not** exist — a trimmed packaging,
 the [ADR-27](../adr/27-tool-distribution-model.md) single-binary
 target — the loader falls back to the bare gem-name `require`, so no

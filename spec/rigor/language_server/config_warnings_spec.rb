@@ -106,6 +106,52 @@ RSpec.describe "Language server configuration warnings" do
     end
   end
 
+  # Fixing one of two warnings must not show the one still in place again: only a warning the editor has not been
+  # shown yet is announced.
+  it "does not show a remaining warning again when another one is fixed" do
+    with_project(inert_config) do |dir|
+      server, publisher = boot_server(dir)
+      server.dispatch("initialized", {})
+      File.write(File.join(dir, ".rigor.yml"), "paths:\n  - lib\ndisable:\n  - call.undefined-methdo\n")
+
+      publisher.publish_project("file://#{File.join(dir, 'lib', 'a.rb')}")
+
+      expect(shown_messages.size).to eq(2)
+    end
+  end
+
+  # Reordering the entries of an unchanged set of warnings is not a new warning.
+  it "does not repeat the warnings when the same warnings come back in another order" do
+    two_tokens = "paths:\n  - lib\ndisable:\n  - call.undefined-methdo\n  - call.nope-zz\n"
+    with_project(two_tokens) do |dir|
+      server, publisher = boot_server(dir)
+      server.dispatch("initialized", {})
+      expect(shown_messages.size).to eq(2)
+      File.write(File.join(dir, ".rigor.yml"),
+                 "paths:\n  - lib\ndisable:\n  - call.nope-zz\n  - call.undefined-methdo\n")
+
+      publisher.publish_project("file://#{File.join(dir, 'lib', 'a.rb')}")
+
+      expect(shown_messages.size).to eq(2)
+    end
+  end
+
+  # Guard: a warning that was fixed and then comes back is a new mistake and is shown again.
+  it "shows a warning again once it was fixed and then comes back" do
+    with_project(inert_config) do |dir|
+      server, publisher = boot_server(dir)
+      server.dispatch("initialized", {})
+      File.write(File.join(dir, ".rigor.yml"), "paths:\n  - lib\n")
+      publisher.publish_project("file://#{File.join(dir, 'lib', 'a.rb')}")
+      File.write(File.join(dir, ".rigor.yml"), "paths:\n  - lib\nundefined-method: \"off\"\n")
+
+      publisher.publish_project("file://#{File.join(dir, 'lib', 'a.rb')}")
+
+      expect(shown_messages.size).to eq(3)
+      expect(shown_messages.last[:message]).to include("`undefined-method` is not a recognized configuration key")
+    end
+  end
+
   # Guard: no line of the fix can make a clean configuration announce something; this pins that it stays silent.
   it "shows nothing for a configuration with no warnings" do
     with_project("paths:\n  - lib\n") do |dir|

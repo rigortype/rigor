@@ -51,12 +51,13 @@ jobs:
         working-directory: apps/rigor-playground/wasm
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           submodules: false
+          persist-credentials: false
 
       - name: Set up Ruby 4.0
-        uses: ruby/setup-ruby@v1
+        uses: ruby/setup-ruby@v1.336.0
         with:
           ruby-version: "4.0"
 
@@ -64,7 +65,7 @@ jobs:
       # build relies on the runner image's preinstalled Node. Keep the
       # version in sync with vscode-extension.yml.
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@v7.1.0
         with:
           node-version: "24"
 
@@ -72,7 +73,7 @@ jobs:
       # the ~30-minute cold build. Keyed on the ruby_wasm version + the wasm
       # build inputs.
       - name: Cache ruby_wasm toolchain + build
-        uses: actions/cache@v6
+        uses: actions/cache@v6.1.0
         with:
           path: apps/rigor-playground/wasm/build
           key: ruby-wasm-${{ runner.os }}-${{ hashFiles('apps/rigor-playground/wasm/Gemfile') }}
@@ -94,7 +95,7 @@ jobs:
       # Always keep the artifact even without R2 secrets, so the build is
       # verifiable on PRs and forks.
       - name: Upload build artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: rigor-playground-wasm-${{ steps.ver.outputs.v }}
           path: apps/rigor-playground/wasm/rigor-playground.wasm

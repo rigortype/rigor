@@ -27,7 +27,7 @@ tracking was heavy.
 The floor at every call, kept narrow: only the parameter itself or an alias that is it counts, as the def's last
 expression (through branches, `begin` clauses, parentheses, a write's value and `||` / `&&`) or a `return` outside
 a lambda. A call's result never counts, not even `h.tap { }` or `h.to_s`, so the readers #2595 pinned keep their
-true positives; a part of the parameter (`h.fetch(:k)`) does not count; `initialize` and setters are left out,
+true positives; a part of the parameter (`h.fetch(:k)`) does not count; `initialize` and setters (an identifier followed by `=`, and `[]=`) are left out,
 since the caller's syntax drops their value; a parameter rebound to a copy first does not count.
 
 ## To undo

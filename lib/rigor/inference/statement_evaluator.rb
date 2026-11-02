@@ -579,8 +579,11 @@ module Rigor
       def opaque_sink_call?(call_node)
         name = call_node.name
         return !CalleeWriteCensus.literal_send?(call_node) if SEND_HAND_OFFS.include?(name)
+        return false unless OPAQUE_SINKS.include?(name)
 
-        OPAQUE_SINKS.include?(name) && !self_dispatch_call?(call_node)
+        # A receiverless `call` is a self-call to a def of that name; `instance_exec` and the rest run their block on
+        # any receiver.
+        name != :call || !self_dispatch_call?(call_node)
       end
 
       OPAQUE_SINKS = %i[call instance_exec class_exec module_exec].to_set.freeze
@@ -666,7 +669,7 @@ module Rigor
       # does not hold, walked as a class method; else the chain's `method_missing`.
       def unresolved_receiver_callees(receiver_type, side, name)
         class_name = receiver_type.class_name
-        return OPAQUE_CALLEES if ownerless_body?(name)
+        return OPAQUE_CALLEES if ownerless_body?(name, class_name, side)
 
         if side == :singleton
           found, defining = scope.user_def_through_ancestors(class_name, name)
@@ -679,8 +682,16 @@ module Rigor
 
       # Issue #2336 — true when the project gives `name` a body no def table holds, through an ownerless definition row
       # ({Scope#ownerless_definition?}: a `define_method`, `define_singleton_method` or `alias_method` call of that
-      # literal name on any receiver, or a def outside every class).
-      def ownerless_body?(name) = scope.ownerless_definition?(name)
+      # literal name on any receiver, or a def in a block or outside every class). A name RBS declares on `Object`
+      # (`Class` on the singleton side) or on `class_name` is answered by that method first, so it is never such a
+      # body (`warn(msg)`, `Kernel#warn`); a refinement of it is `InEffectRefinements`' to read.
+      def ownerless_body?(name, class_name, side)
+        base = side == :singleton ? "Class" : "Object"
+        return false if Reflection.instance_method_definition(base, name, scope: scope)
+        return false if project_class?(class_name) && rbs_declares?(class_name, name)
+
+        scope.ownerless_definition?(name)
+      end
 
       # Issue #2521 (#2570 review) — the `[def, offset, FLOOR_ALL]` a call of `name` that resolves to no def on
       # `class_name`'s `side` chain reaches when the chain defines `method_missing` and `name` is not a method every
@@ -5873,7 +5884,7 @@ module Rigor
         def_census(:writes, def_node) do
           CalleeWriteCensus.scan(def_node.body, census_seeds(def_node),
                                  tables: CENSUS_TABLES, rebinds: parameter_rebinds(def_node),
-                                 returns: returns_counted?(def_node))
+                                 returns: returns_counted?(def_node), anonymous: anonymous_rests?(def_node))
         end
       end
 
@@ -5888,7 +5899,22 @@ module Rigor
       # not for `initialize`, whose value `new` drops, nor for a setter (`x=`, `[]=`), whose value an assignment drops.
       def returns_counted?(def_node)
         name = def_node.name
-        name != :initialize && !name.end_with?("=")
+        name != :initialize && name != :[]= && !SETTER_NAME.match?(name)
+      end
+
+      # An attribute writer's name: an identifier followed by `=` (`format=`), not an operator (`==`, `<=`, `===`).
+      SETTER_NAME = /\A[A-Za-z_][A-Za-z0-9_]*=\z/
+      private_constant :SETTER_NAME
+
+      # Issue #2336 — true when `def_node` has an anonymous rest (`*`), keyword rest (`**`) or `...`, whose arguments
+      # an opaque sink may receive ({CalleeWriteCensus::ANONYMOUS_REST}).
+      def anonymous_rests?(def_node)
+        params = def_node.parameters
+        return false if params.nil?
+
+        (params.rest.is_a?(Prism::RestParameterNode) && params.rest.name.nil?) ||
+          (params.keyword_rest.is_a?(Prism::KeywordRestParameterNode) && params.keyword_rest.name.nil?) ||
+          params.keyword_rest.is_a?(Prism::ForwardingParameterNode)
       end
 
       # The parameters {#callee_write_census} follows: each content parameter holds the caller's argument itself
@@ -5916,10 +5942,20 @@ module Rigor
 
       # The own-census entries for the parameter names {#callee_write_census} wrote: a content parameter at its slot,
       # a rest at {ANY_SLOT} and a keyword rest at {ANY_KEYWORD}, the slots every argument they bind reaches.
+      #
+      # Issue #2336 — an anonymous rest, keyword rest or `...` an opaque sink received
+      # ({CalleeWriteCensus::ANONYMOUS_REST}) is written at its slot too.
       def written_slots(def_node, written)
         found = content_parameter_slots(def_node).slice(*written)
         rest_parameter_names(def_node).each do |name, key|
           found[key] = key == REST_PARAMETER ? ANY_SLOT : ANY_KEYWORD if written.include?(name)
+        end
+        rests = rest_parameters(def_node)
+        if written.include?(CalleeWriteCensus::ANONYMOUS_REST) && rests.include?(REST_PARAMETER)
+          found[REST_PARAMETER] = ANY_SLOT
+        end
+        if written.include?(CalleeWriteCensus::ANONYMOUS_KEYWORD_REST) && rests.include?(KEYWORD_REST_PARAMETER)
+          found[KEYWORD_REST_PARAMETER] = ANY_KEYWORD
         end
         found
       end
@@ -6361,7 +6397,7 @@ module Rigor
         top = top_level_callees(node, class_name, side)
         if missing.empty? && top.empty?
           name = send_hand_off?(node) ? send_target(node) : node.name
-          return ownerless_body?(name) ? OPAQUE_CALLEES : NO_CALLEES
+          return ownerless_body?(name, class_name, side) ? OPAQUE_CALLEES : NO_CALLEES
         end
         return top if missing.empty?
         return missing if top.empty?

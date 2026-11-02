@@ -68,6 +68,36 @@ RSpec.describe "the callee floor follows the remaining hand-off shapes (#2336)",
       end
     end
 
+    {
+      "instance_exec" => ["def run_it(h, &blk) = instance_exec(h, &blk)", "Base.new.run_it(options)"],
+      "self.instance_exec" => ["def run_it(h, &blk) = self.instance_exec(h, &blk)", "Base.new.run_it(options)"],
+      "class_exec" => ["def self.run_it(h, &blk) = class_exec(h, &blk)", "Base.run_it(options)"],
+      "module_exec" => ["def self.run_it(h, &blk) = module_exec(h, &blk)", "Base.run_it(options)"]
+    }.each do |label, (defn, call)|
+      it "follows #{label} on self running the caller's block" do
+        source = program("class Base\n  #{defn}\nend", "#{call} { |x| x[:format] = \"json\" }")
+        expect(rules(source)).to eq([])
+      end
+    end
+
+    it "floors the caller's argument to instance_exec on self" do
+      expect(rules(program("", 'instance_exec(options) { |x| x[:format] = "json" }'))).to eq([])
+    end
+
+    {
+      "an anonymous rest to a block's call" => ["def run_it(*, &b) = b.call(*)", "Base.new.run_it(options)"],
+      "an anonymous rest to yield" => ["def run_it(*) = yield(*)", "Base.new.run_it(options)"],
+      "an anonymous keyword rest to yield" => ["def run_it(**) = yield(**)", "Base.new.run_it(h: options)", "h:"],
+      "... to public_send" => ["def run_it(...) = public_send(...)\n  def poke(h) = h[:format] = \"json\"",
+                               "Base.new.run_it(:poke, options)", nil, true]
+    }.each do |label, (defn, call, keyword, bare)|
+      it "floors through #{label}" do
+        block = keyword ? '{ |h:| h[:format] = "json" }' : '{ |x| x[:format] = "json" }'
+        source = program("class Base\n  #{defn}\nend", bare ? call : "#{call} #{block}")
+        expect(rules(source)).to eq([])
+      end
+    end
+
     it "follows a self-call inside a define_method body" do
       defs = "class Base\n  def poke(h) = h[:format] = \"json\"\n  " \
              "def self.setup(h) = define_method(:go) { poke(h) }\nend"
@@ -147,6 +177,15 @@ RSpec.describe "the callee floor follows the remaining hand-off shapes (#2336)",
       expect(rules(program(defs, "Base.run(options)"))).to eq([])
     end
 
+    # A self-call `Object` answers in RBS runs that method, so a project `define_method` of the name elsewhere does not
+    # floor it.
+    it "keeps the literal for a self-call a core method answers" do
+      extra = "def run_it2(h) = itself"
+      source = "#{instance_program('puts(h)', extra: extra)}class Other\n  " \
+               "define_method(:puts) { |h| h[:format] = \"json\" }\nend\n"
+      expect(rules(source)).to eq(always)
+    end
+
     # Guard: a name no project def has (a core method) resolves to nothing, so the literal stays.
     it "keeps the literal when the call's name has no project def" do
       expect(rules(instance_program("[].push(h)"))).to eq(always)
@@ -181,12 +220,32 @@ RSpec.describe "the callee floor follows the remaining hand-off shapes (#2336)",
     {
       "a part of it" => "def get(h) = h.fetch(:format)",
       "a copy made after a rebind" => "def get(h) = (h = h.dup; h)",
-      "a setter's value" => "def get=(h)\n    @h = h\n  end"
+      "a setter's value" => "def get=(h)\n    @h = h\n  end",
+      "the parameter from a lambda's return" => "def get(h)\n    l = -> { return h }\n    l.call\n    {}\n  end"
     }.each do |label, defn|
       it "keeps the literal when the callee returns #{label}" do
         call = defn.include?("get=") ? "Base.new.get = options" : "Base.new.get(options)"
         expect(rules(program("class Base\n  #{defn}\nend", call))).to eq(always)
       end
+    end
+
+    {
+      "an explicit return" => "def get(h)\n    return h if h\n    {}\n  end",
+      "a write's value" => "def get(h) = (@h ||= h)",
+      "the right side of ||" => "def get(h, d = nil) = d || h",
+      "the right side of &&" => "def get(h) = h.size && h",
+      "a rescue clause's tail" => "def get(h)\n    Integer(\"x\")\n  rescue ArgumentError\n    h\n  end"
+    }.each do |label, defn|
+      it "floors the caller's argument returned through #{label}" do
+        source = program("class Base\n  #{defn}\nend", 'r = Base.new.get(options); r[:format] = "json"')
+        expect(rules(source)).to eq([])
+      end
+    end
+
+    # An operator ending in `=` is no setter: its value is the call's result.
+    it "floors the caller's argument a <= operator returns" do
+      source = program("class Base\n  def <=(h) = h\nend", 'r = Base.new <= options; r[:format] = "json"')
+      expect(rules(source)).to eq([])
     end
   end
 
@@ -223,7 +282,8 @@ RSpec.describe "the callee floor follows the remaining hand-off shapes (#2336)",
   describe "a hand-off after the parameter is rebound to a copy" do
     {
       "a self-call" => "h = h.dup\n    poke(h)",
-      "a zsuper" => "h = h.dup\n    super"
+      "a zsuper" => "h = h.dup\n    super",
+      "a super(h)" => "h = h.dup\n    super(h)"
     }.each do |label, body|
       it "keeps the literal for #{label} of the copy" do
         defs = "class P\n  def run_it(h) = h[:format] = \"json\"\nend\nclass Base < P\n  " \

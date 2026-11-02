@@ -103,7 +103,12 @@ module Rigor
       # Calls on an alias that run code the walk cannot see against it.
       OPAQUE = %i[send public_send __send__ instance_eval instance_exec instance_variable_set method
                   public_method].to_set.freeze
-      # Calls on any explicit receiver that run code the walk cannot see against their arguments.
+      # The names {Census#written} reports an anonymous rest (`*`), keyword rest (`**`) or `...` under when one is
+      # handed to an opaque sink; no parameter can be named so.
+      ANONYMOUS_REST = :*
+      ANONYMOUS_KEYWORD_REST = :**
+      ANONYMOUS_FORWARDED = [ANONYMOUS_REST, ANONYMOUS_KEYWORD_REST].freeze
+      # Calls whose arguments the walk cannot follow, on an explicit receiver for `call` and on any for the rest.
       OPAQUE_ARGUMENTS = %i[call instance_exec class_exec module_exec].to_set.freeze
       # Dispatches whose target is their first argument: opaque to the walk when it is no literal name.
       SENDS = %i[send public_send __send__].to_set.freeze
@@ -113,14 +118,17 @@ module Rigor
                          Prism::KeywordRestParameterNode].freeze
       private_constant :STATUSES, :STATUS_INDEX, :ID, :WRAP, :UNWRAP, :ANY, :SELF_RETURNERS, :SELF_YIELDERS,
                        :BLOCK_RETURNERS, :MEMO_FIRST, :MEMO_RETURNERS, :SLICERS, :ARGUMENT_COPIERS, :COMPOSED, :OPAQUE,
-                       :OPAQUE_ARGUMENTS, :SENDS, :IVAR_ANY_KEY, :PARAMETER_NODES
+                       :OPAQUE_ARGUMENTS, :ANONYMOUS_FORWARDED, :SENDS, :IVAR_ANY_KEY, :PARAMETER_NODES
 
       module_function
 
       # The {Census} of `body` for the parameters `seeds` (`{ name => :same | :held }`), reading `tables` ({Tables}).
       # `returns` says whether a returned parameter counts.
-      def scan(body, seeds, tables:, rebinds:, returns: false)
-        return EMPTY if body.nil? || seeds.empty?
+      #
+      # `anonymous` says the def has an anonymous rest, keyword rest or `...`, which the walk reads even with no
+      # seed: handed to an opaque sink, it reports {ANONYMOUS_REST} / {ANONYMOUS_KEYWORD_REST} as written.
+      def scan(body, seeds, tables:, rebinds:, returns: false, anonymous: false)
+        return EMPTY if body.nil? || (seeds.empty? && !anonymous)
 
         walk = Walk.new(tables, returns: returns)
         walk.visit(body, 0)
@@ -519,8 +527,11 @@ module Rigor
           name = node.name
           return true if @foreign.positive?
           return !CalleeWriteCensus.literal_send?(node) if SENDS.include?(name)
+          return false unless OPAQUE_ARGUMENTS.include?(name)
 
-          OPAQUE_ARGUMENTS.include?(name) && !self_receiver?(node)
+          # A receiverless `call` is a self-call to a def of that name, which the hand-off walk resolves; the `*_exec`
+          # calls run their block whatever the receiver.
+          name != :call || !self_receiver?(node)
         end
 
         # Records each argument of `node` (a call or a `yield`) as written, through any container: the code that
@@ -529,12 +540,21 @@ module Rigor
           node.arguments&.arguments&.each do |argument|
             case argument
             when Prism::KeywordHashNode
-              argument.elements.each { |element| opaque_argument(element.value, depth, node) }
-            when Prism::SplatNode, Prism::AssocSplatNode then opaque_argument(argument.expression, depth, node)
+              argument.elements.each do |element|
+                value = element.value
+                value.nil? ? anonymous_argument(ANONYMOUS_KEYWORD_REST) : opaque_argument(value, depth, node)
+              end
+            when Prism::SplatNode
+              expression = argument.expression
+              expression.nil? ? anonymous_argument(ANONYMOUS_REST) : opaque_argument(expression, depth, node)
+            when Prism::ForwardingArgumentsNode then ANONYMOUS_FORWARDED.each { |rest| anonymous_argument(rest) }
             else opaque_argument(argument, depth, node)
             end
           end
         end
+
+        # An anonymous rest (`*`), keyword rest (`**`) or `...` handed on: every argument it carries is written.
+        def anonymous_argument(rest) = (@anonymous ||= Set.new) << rest
 
         def opaque_argument(value, depth, node)
           CalleeWriteCensus.each_record(sources(value, depth, nil, ID), 2) do |key, _step|
@@ -561,6 +581,7 @@ module Rigor
           @edges = nil
           @mutations = nil
           @returned = nil
+          @anonymous = nil
           @foreign = 0
           @lambdas = 0
         end
@@ -585,11 +606,12 @@ module Rigor
 
         # Every parameter in `seeds` some mutation reaches.
         def census(seeds, rebinds)
-          return EMPTY if @edges.nil? && @mutations.nil? && @returned.nil?
+          return EMPTY if @edges.nil? && @mutations.nil? && @returned.nil? && @anonymous.nil?
 
           table = close(seeds, rebinds)
           written = written_parameters(table, seeds, rebinds)
           written = returned_parameters(written, table, seeds, rebinds) if @returned
+          written = (written || Set.new).merge(@anonymous) if @anonymous
           return EMPTY if written.nil? && table.empty?
 
           Census.new(written: written.nil? ? NONE : written.to_a.freeze, alias_table: table.freeze,

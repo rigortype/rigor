@@ -25,11 +25,15 @@ issue left open what such a hand-off should read as.
 
 ## Decision
 
-The floor. Inside a callee, the write census counts a parameter (or an alias of one) passed to `yield`, to `call`
-or `instance_exec` / `class_exec` / `module_exec` on an explicit receiver, to a non-literal `send`, or to any call
+The floor. Inside a callee, the write census counts a parameter (or an alias of one) passed to `yield`, to `call` on
+an explicit receiver, to `instance_exec` / `class_exec` / `module_exec` on any receiver, to a non-literal `send`, or to any call
 inside a `define_method` block, and a parameter that is the receiver of `method`. At a call site, such a call that
 resolves to no def floors every local argument (`OPAQUE_CALLEES`). A call no def answers floors every argument when
-an ownerless definition row (`define_method`, `define_singleton_method`, `alias_method`) gives the name a body. The `instance_eval` / `Class.new` block guards of #2104 stay: a
+an ownerless definition row gives the name a body: a `define_method`, `define_singleton_method` or `alias_method`
+call of the literal name, and also any def in a block or outside every class, so a top-level def counts. The row is
+not tied to the receiver's class: a top-level `def store` floors `Bag.new.store(:k, acc)` on a project `Bag < Hash`,
+whose inherited core method answers the call, and loses that true positive. A name RBS declares on `Object` (`Class`
+on the singleton side) or on the class itself is left out, since that method answers first. The `instance_eval` / `Class.new` block guards of #2104 stay: a
 self-call there is not a call on the method's receiver.
 
 The spec that pinned a non-literal `send` as unfollowed (`callee_singleton_send_floor_spec.rb`) now expects the

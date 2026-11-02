@@ -5236,21 +5236,14 @@ module Rigor
         callees = argument_mutating_callees(node)
         return base_scope if callees.empty?
 
-        acc = base_scope
-        callees.each do |def_node, offset, owner|
-          acc = floor_arguments(node, census_of(owner, :callee_content_mutated_parameters, def_node), acc, offset,
-                                climbing) do |type|
-            callee_content_floor(type, def_node, owner, callees.size > 1)
-          end
+        acc = floor_callee_channel(node, callees, :callee_content_mutated_parameters, base_scope, climbing) do |type|
+          content_floor_for(type)
         end
         acc = floor_splat_arguments(node, callees, acc)
         # Each closure below is only worth computing when an argument holds something its floor could widen.
         if floorable_local_argument?(node, acc) { |type| UnknownStoreWidening.callee_floorable?(type) }
-          callees.each do |def_node, offset, owner|
-            acc = floor_arguments(node, census_of(owner, :callee_block_mutated_parameters, def_node), acc, offset,
-                                  climbing) do |type|
-              UnknownStoreWidening.callee_block_floor(type)
-            end
+          acc = floor_callee_channel(node, callees, :callee_block_mutated_parameters, acc, climbing) do |type|
+            UnknownStoreWidening.callee_block_floor(type)
           end
         end
         return acc unless floorable_local_argument?(node, acc) { |type| SetMutation.carrier_in?(type) }
@@ -5259,6 +5252,20 @@ module Rigor
           acc = floor_arguments(node, census_of(owner, :callee_set_mutated_parameters, def_node), acc, offset,
                                 climbing) do |type|
             UnknownStoreWidening.callee_set_floor(type)
+          end
+        end
+        acc
+      end
+
+      # Every callee's `census` channel floors the arguments it names with the block's floor, made gradual when the
+      # floor is an over-approximation ({#callee_gradual_floor}). Only a String result is split; the Set channel and
+      # the container elements a floor widens (#2647) are not.
+      def floor_callee_channel(node, callees, census, base_scope, climbing)
+        several = callees.size > 1
+        acc = base_scope
+        callees.each do |def_node, offset, owner|
+          acc = floor_arguments(node, census_of(owner, census, def_node), acc, offset, climbing) do |type|
+            callee_gradual_floor(yield(type), def_node, owner, several)
           end
         end
         acc
@@ -5518,10 +5525,10 @@ module Rigor
         string_carrier?(type) ? Type::Combinator.dynamic(type) : type
       end
 
-      # {#content_floor_for} for an argument of a call to `def_node` under `owner`, gradual when the floor is an
-      # over-approximation ({#over_approximating_callee?}).
-      def callee_content_floor(type, def_node, owner, several)
-        floored = content_floor_for(type)
+      # `floored`, a callee floor (content or block channel) of an argument of a call to `def_node` under `owner`,
+      # made gradual when the floor is an over-approximation ({#over_approximating_callee?}) or the call has several
+      # callees. The one place both channels take the rule.
+      def callee_gradual_floor(floored, def_node, owner, several)
         # Only a String carrier turns gradual, so the callee is walked only for one (this runs per floored argument).
         return floored unless string_carrier_in?(floored)
 
@@ -5990,10 +5997,12 @@ module Rigor
         cache[def_node] ||= resolved_census(:edges, def_node) { compute_forwarding_edges(def_node) }
       end
 
-      # True for a hand-off answer that reads the handed parameter as written whatever the callee is: a name with too
-      # many defs ({CAPPED_HAND_OFF}) or a top-level def that may not be the one called ({FLOOR_EVERY}).
+      # True for a hand-off answer with more than one candidate, or resolved by name ({UnionCallees}): its edges are
+      # over-approximations ({CalleeMutationChain::Edge#approx}).
       def approximate_hand_off?(callees) = callees.size > 1 || callees.is_a?(UnionCallees)
 
+      # True for a hand-off answer that reads the handed parameter as written whatever the callee is: a name with too
+      # many defs ({CAPPED_HAND_OFF}) or a top-level def that may not be the one called ({FLOOR_EVERY}).
       def floors_outright?(callees)
         callees.equal?(CAPPED_HAND_OFF) || callees.any? { |_callee, _offset, owner| owner == FLOOR_EVERY }
       end

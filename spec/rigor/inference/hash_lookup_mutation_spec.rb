@@ -94,9 +94,8 @@ RSpec.describe "Hash lookup mutation widening", type: :runner do
       RUBY
     end
 
-    # The closed control keeps its shape since issue #2608: a literal-key `delete` drops just that key.
     it "does not pin a missing key to a known value once a later mutation drops the shape" do
-      expect(dumped_types(<<~RUBY)).to eq(["Hash[Dynamic[top], Dynamic[top]]", "{}"])
+      expect(dumped_types(<<~RUBY)).to eq(["Hash[Dynamic[top], Dynamic[top]]", "Hash[Symbol, 1]"])
         counts = { a: 1 }
         counts.default = 0
         counts.delete(:a)

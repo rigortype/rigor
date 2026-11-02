@@ -41,10 +41,11 @@ module Rigor
         Prism::InstanceVariableOrWriteNode, Prism::InstanceVariableAndWriteNode
       ].freeze
       ALL = :all
+      EMPTY = [].freeze
       # A run-scoped slot ({RunScopedSlots}): emptied when a run ends, so no verdict outlives the body it read.
       UNSAFE_CACHE_KEY = RunScopedSlots.register(:__rigor_remover_narrowing_unsafe)
       private_constant :REFLECTIVE_CALLS, :IMMEDIATE_BLOCK_CALLS, :FRAME_CALLS, :VARIABLE_READS, :VARIABLE_REFERENCES,
-                       :COPYING_WRITES, :NAMED_WRITES, :ALL, :UNSAFE_CACHE_KEY
+                       :COPYING_WRITES, :NAMED_WRITES, :ALL, :EMPTY, :UNSAFE_CACHE_KEY
 
       module_function
 
@@ -68,22 +69,47 @@ module Rigor
         ALL
       end
 
-      def collect_unsafe(node, in_closure, names) # rubocop:disable Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity
-        case node
-        when Prism::CallNode
-          throw ALL if node.receiver.nil? && FRAME_CALLS.include?(node.name)
-
-          record_reflective(node, names)
-        when Prism::LambdaNode then in_closure = true
-        when Prism::MultiWriteNode then copied_names(node.value).each { |n| names << n } if node.value
-        end
-        names << node.name if in_closure && VARIABLE_REFERENCES.any? { |k| node.is_a?(k) }
-        record_copy(node, names) if COPYING_WRITES.any? { |k| node.is_a?(k) }
+      def collect_unsafe(node, in_closure, names)
+        in_closure ||= node.is_a?(Prism::LambdaNode)
+        record_node(node, in_closure, names)
 
         node.compact_child_nodes.each do |child|
           child_in_closure = in_closure || (child.is_a?(Prism::BlockNode) && deferred_block?(node))
           collect_unsafe(child, child_in_closure, names)
         end
+      end
+
+      def record_node(node, in_closure, names) # rubocop:disable Metrics/CyclomaticComplexity
+        case node
+        when Prism::CallNode
+          throw ALL if node.receiver.nil? && FRAME_CALLS.include?(node.name)
+
+          record_reflective(node, names)
+        when Prism::MultiWriteNode then copied_names(node.value).each { |n| names << n } if node.value
+        end
+        names << node.name if in_closure && VARIABLE_REFERENCES.any? { |k| node.is_a?(k) }
+        record_copy(node, names) if COPYING_WRITES.any? { |k| node.is_a?(k) }
+        held_positions(node).each { |held| record_read(held, names) }
+      end
+
+      # Review round 1 of #2621 — the positions that hand a value to another holder: an Array element, a Hash key or
+      # value, a splat, and every argument of a call, `yield` or `super` (positional, keyword, splat or block-pass).
+      # A receiver position, a `return` and a body's last expression hand nothing on. No callee is exempt: the
+      # #2555 `ConstructionEscape::READERS` list is per receiver class, not a list of calls that only read an argument.
+      def held_positions(node)
+        case node
+        when Prism::ArrayNode then node.elements
+        when Prism::AssocNode then [node.key, node.value]
+        when Prism::AssocSplatNode then [node.value]
+        when Prism::SplatNode, Prism::BlockArgumentNode then [node.expression]
+        when Prism::CallNode, Prism::YieldNode, Prism::SuperNode then node.arguments&.arguments || EMPTY
+        else EMPTY
+        end
+      end
+
+      def record_read(node, names)
+        node = unparenthesised(node)
+        names << node.name if VARIABLE_READS.any? { |k| node.is_a?(k) }
       end
 
       def record_reflective(call_node, names)

@@ -26,8 +26,8 @@ RSpec.describe "collection remover narrowing", type: :runner do
   end
 
   describe "the issue's gradual Hash" do
-    # `pp(h)` hands the Hash on, so it carries no #2555 construction fact (whose remover floor would drop the nil on
-    # its own): this is the gradual carrier the issue reports on.
+    # `h.inspect` is a call no #2555 reader list admits, so the Hash carries no construction fact (whose remover floor
+    # would drop the nil on its own): this is the gradual carrier the issue reports on. A receiver is no holder.
     def issue_source(remover)
       <<~RUBY
         def key = gets.to_s
@@ -36,7 +36,7 @@ RSpec.describe "collection remover narrowing", type: :runner do
         h[key] = nil
         #{remover}
         h.each_value { |v| v + 1 }
-        pp(h)
+        h.inspect
       RUBY
     end
 
@@ -61,32 +61,33 @@ RSpec.describe "collection remover narrowing", type: :runner do
     end
 
     it "narrows inside a branch, and the join reads the union of the arms" do
-      expect(dumped_types("#{maybe_one}a = [mk, 2]\na.compact! if gets\ndump_type(a)\n"))
-        .to eq(["Array[1 | 2] | [1?, 2]"])
+      expect(dumped_types("#{maybe_one}a = [mk, 2]\na.compact! if gets\ndump_type(a.dup)\n"))
+        .to eq(["Array[Integer?] | Array[Integer]"])
     end
 
     # Guard: the loop's join already reads the stored arm back.
     it "keeps the arm a loop stores again after the remover (guard)" do
-      expect(dumped_types("#{maybe_one}a = [mk, 2]\nwhile gets\n  a.compact!\n  a << nil\nend\ndump_type(a)\n"))
-        .to eq(["Array[1 | 2 | nil]"])
+      expect(dumped_types("#{maybe_one}a = [mk, 2]\nwhile gets\n  a.compact!\n  a << nil\nend\ndump_type(a.dup)\n"))
+        .to eq(["Array[Integer?]"])
     end
 
     it "narrows an instance variable" do
-      expect(dumped_types("#{maybe_one}@a = [mk, 2]\n@a.compact!\ndump_type(@a)\n")).to eq(["Array[1 | 2]"])
+      expect(dumped_types("#{maybe_one}@a = [mk, 2]\n@a.compact!\ndump_type(@a.dup)\n")).to eq(["Array[Integer]"])
     end
 
     # Review round 1 of #2621 — a write through another holder after the call would outlive the narrowing, so a
     # receiver the body may write that way keeps the ordinary reading. Each pairs with a control that narrows.
     describe "a receiver another holder may write" do
-      # The reading right after the filter. A narrowed one holds neither `nil` nor `Dynamic` (`is_a?` narrows a
-      # gradual element to `Integer` too); the ordinary one keeps whichever the binding carried.
+      # The reading right after the filter, through `.dup`: an argument is a holder too, so `dump_type(l)` itself would
+      # skip the narrowing. A narrowed reading is `Array[Integer]` (`is_a?` narrows a gradual element to `Integer`
+      # too); the ordinary one keeps the `nil` or the gradual arm the binding carried.
       def narrowed(prefix, suffix = "")
         filter = "l.select! { |x| x.is_a?(Integer) }"
-        dumped_types("#{maybe_one}l = [mk, 2]\n#{prefix}\n#{filter}\ndump_type(l)\n#{suffix}\n").first
+        dumped_types("#{maybe_one}l = [mk, 2]\n#{prefix}\n#{filter}\ndump_type(l.dup)\n#{suffix}\n").first
       end
 
       it "narrows with no other holder (control)" do
-        expect(narrowed("nil")).to eq("Array[1 | 2]")
+        expect(narrowed("nil")).to eq("Array[Integer]")
       end
 
       {
@@ -100,26 +101,39 @@ RSpec.describe "collection remover narrowing", type: :runner do
         "send" => ["", "l.send(:<<, nil)"],
         "instance_eval" => ["", "l.instance_eval { push(nil) }"],
         "tap" => ["", "l.tap { |t| t << nil }"],
-        "binding" => ["", "binding"]
+        "binding" => ["", "binding"],
+        "a Hash value" => ["hh = { k: l }", "hh[:k] << 1"],
+        "an Array element" => ["box = [l]", "box[0] << 1"],
+        "a splat" => ["box = [*l]", ""],
+        "a constructor argument that keeps it" =>
+          ["class Keep\n  def initialize(a) = @a = a\n  def add = @a << 1\nend\nkp = Keep.new(l)", "kp.add"],
+        "a keyword argument" => ["def keep(into:) = into", "keep(into: l)"],
+        "a block-pass argument" => ["", "[1].each(&l)"]
       }.each do |holder, (prefix, suffix)|
         it "keeps the ordinary reading under #{holder}" do
-          expect(narrowed(prefix, suffix)).to match(/nil|Dynamic/)
+          expect(narrowed(prefix, suffix)).not_to eq("Array[Integer]")
         end
       end
 
+      it "still narrows a local used only as a receiver, a return value and the last expression (control)" do
+        source = "#{maybe_one}def f\n  l = [mk, 2]\n  puts l.size\n  l.select! { |x| x.is_a?(Integer) }\n  " \
+                 "dump_type(l.dup)\n  return l if gets\n  l\nend\n"
+        expect(dumped_types(source)).to eq(["Array[Integer]"])
+      end
+
       it "still narrows a local only an iterator block reads (control)" do
-        expect(narrowed("[1].each { l.size }")).to eq("Array[1 | 2]")
+        expect(narrowed("[1].each { l.size }")).to eq("Array[Integer]")
       end
 
       it "keeps the ordinary reading of both names of an alias" do
-        expect(dumped_types("#{maybe_one}a = [mk, 2]\nb = a\nb.compact!\ndump_type(a)\ndump_type(b)\n"))
-          .to eq(["[1?, 2]", "Array[1 | 2 | nil]"])
+        expect(dumped_types("#{maybe_one}a = [mk, 2]\nb = a\nb.compact!\ndump_type(a.dup)\ndump_type(b.dup)\n"))
+          .to eq(["[1?, 2]", "Array[Integer?]"])
       end
     end
 
     it "narrows no candidate of a receiver that selects among bindings" do
-      expect(dumped_types("#{maybe_one}a = [mk, 2]\n(gets ? a : [3]).compact!\ndump_type(a)\n"))
-        .to eq(["Array[1 | 2 | nil]"])
+      expect(dumped_types("#{maybe_one}a = [mk, 2]\n(gets ? a : [3]).compact!\ndump_type(a.dup)\n"))
+        .to eq(["Array[Integer?]"])
     end
 
     it "narrows a declared parameter's binding in its body, and not the caller's argument" do
@@ -127,13 +141,13 @@ RSpec.describe "collection remover narrowing", type: :runner do
         class C
           def f(xs)
             xs.compact!
-            dump_type(xs)
+            dump_type(xs.dup)
             xs.first + 1
           end
 
           def g(ys)
             f(ys)
-            dump_type(ys)
+            dump_type(ys.dup)
           end
         end
       RUBY
@@ -155,18 +169,18 @@ RSpec.describe "collection remover narrowing", type: :runner do
 
   describe "a nil-test block" do
     {
-      "reject!(&:nil?)" => ["a.reject!(&:nil?)", "Array[1 | 2]"],
+      "reject!(&:nil?)" => ["a.reject!(&:nil?)", "Array[Integer]"],
       "select!(&:nil?)" => ["a.select!(&:nil?)", "Array[nil]"],
-      "reject! { |x| x.nil? }" => ["a.reject! { |x| x.nil? }", "Array[1 | 2]"],
-      "select! { |x| !x.nil? }" => ["a.select! { |x| !x.nil? }", "Array[1 | 2]"],
-      "filter! { |x| x }" => ["a.filter! { |x| x }", "Array[1 | 2]"],
-      "delete_if { |x| !x }" => ["a.delete_if { |x| !x }", "Array[1 | 2]"],
-      "keep_if { |x| x.is_a?(Integer) }" => ["a.keep_if { |x| x.is_a?(Integer) }", "Array[1 | 2]"],
-      "select! { |x| Integer === x }" => ["a.select! { |x| Integer === x }", "Array[1 | 2]"],
-      "select! { |x| x.instance_of?(Integer) }" => ["a.select! { |x| x.instance_of?(Integer) }", "Array[1 | 2]"]
+      "reject! { |x| x.nil? }" => ["a.reject! { |x| x.nil? }", "Array[Integer]"],
+      "select! { |x| !x.nil? }" => ["a.select! { |x| !x.nil? }", "Array[Integer]"],
+      "filter! { |x| x }" => ["a.filter! { |x| x }", "Array[Integer]"],
+      "delete_if { |x| !x }" => ["a.delete_if { |x| !x }", "Array[Integer]"],
+      "keep_if { |x| x.is_a?(Integer) }" => ["a.keep_if { |x| x.is_a?(Integer) }", "Array[Integer]"],
+      "select! { |x| Integer === x }" => ["a.select! { |x| Integer === x }", "Array[Integer]"],
+      "select! { |x| x.instance_of?(Integer) }" => ["a.select! { |x| x.instance_of?(Integer) }", "Array[Integer]"]
     }.each do |form, (call, expected)|
       it "narrows like the matching guard under #{form}" do
-        expect(dumped_types("#{maybe_one}a = [mk, 2]\n#{call}\ndump_type(a)\n")).to eq([expected])
+        expect(dumped_types("#{maybe_one}a = [mk, 2]\n#{call}\ndump_type(a.dup)\n")).to eq([expected])
       end
     end
 
@@ -178,15 +192,15 @@ RSpec.describe "collection remover narrowing", type: :runner do
       "a rebound parameter" => "a.reject! { |x| (x = 1).nil? }"
     }.each do |form, call|
       it "does not narrow under #{form} (guard)" do
-        source = "#{maybe_one}def foo(_x) = gets ? true : false\na = [mk, 2]\n#{call}\ndump_type(a)\n"
-        expect(dumped_types(source)).to eq(["Array[1 | 2 | nil]"])
+        source = "#{maybe_one}def foo(_x) = gets ? true : false\na = [mk, 2]\n#{call}\ndump_type(a.dup)\n"
+        expect(dumped_types(source)).to eq(["Array[Integer?]"])
       end
     end
 
     # Guard: a filter that keeps nothing says the carrier is empty, which is left to today's reading rather than
     # spelled `Array[bot]`.
     it "keeps today's reading when the kept edge is empty (guard)" do
-      expect(dumped_types("a = [1, 2]\na.select! { |x| x.nil? }\ndump_type(a)\n")).to eq(["Array[1 | 2]"])
+      expect(dumped_types("a = [1, 2]\na.select! { |x| x.nil? }\ndump_type(a.dup)\n")).to eq(["Array[Integer]"])
     end
 
     # Guard: a block with a rest or optional parameter splats an Array element, so its first parameter is not the
@@ -196,78 +210,78 @@ RSpec.describe "collection remover narrowing", type: :runner do
       "an optional parameter" => "a.reject! { |x, y = 1| x.nil? }"
     }.each do |form, call|
       it "does not narrow a block with #{form} (guard)" do
-        expect(dumped_types("#{maybe_one}a = [mk, 2]\n#{call}\ndump_type(a)\n")).to eq(["Array[1 | 2 | nil]"])
+        expect(dumped_types("#{maybe_one}a = [mk, 2]\n#{call}\ndump_type(a.dup)\n")).to eq(["Array[Integer?]"])
       end
     end
 
     it "narrows past a block-local variable, which cannot rebind the parameter" do
-      expect(dumped_types("#{maybe_one}a = [mk, 2]\na.reject! { |x; y| x.nil? }\ndump_type(a)\n"))
-        .to eq(["Array[1 | 2]"])
+      expect(dumped_types("#{maybe_one}a = [mk, 2]\na.reject! { |x; y| x.nil? }\ndump_type(a.dup)\n"))
+        .to eq(["Array[Integer]"])
     end
 
     it "narrows a Hash value under the `|k, v|` form" do
-      expect(dumped_types("#{maybe_one}h = { a: mk, b: 2 }\nh.reject! { |_k, v| v.nil? }\ndump_type(h)\n"))
-        .to eq(["Hash[Symbol, 1 | 2]"])
-      expect(dumped_types("#{maybe_one}h = { a: mk, b: 2 }\nh.select! { |_k, v| v }\ndump_type(h)\n"))
-        .to eq(["Hash[Symbol, 1 | 2]"])
+      expect(dumped_types("#{maybe_one}h = { a: mk, b: 2 }\nh.reject! { |_k, v| v.nil? }\ndump_type(h.dup)\n"))
+        .to eq(["Hash[Symbol, Integer]"])
+      expect(dumped_types("#{maybe_one}h = { a: mk, b: 2 }\nh.select! { |_k, v| v }\ndump_type(h.dup)\n"))
+        .to eq(["Hash[Symbol, Integer]"])
     end
 
     it "does not narrow a Hash under a one-parameter block, which receives the pair (control)" do
-      expect(dumped_types("#{maybe_one}h = { a: mk, b: 2 }\nh.reject! { |pair| pair.nil? }\ndump_type(h)\n"))
-        .to eq(["Hash[Symbol, 1 | 2 | nil]"])
+      expect(dumped_types("#{maybe_one}h = { a: mk, b: 2 }\nh.reject! { |pair| pair.nil? }\ndump_type(h.dup)\n"))
+        .to eq(["Hash[Symbol, Integer?]"])
     end
 
     it "narrows a Set element" do
-      expect(dumped_types("#{maybe_one}s = Set[ms, \"t\"]\ns.reject! { |x| x.nil? }\ndump_type(s)\n"))
+      expect(dumped_types("#{maybe_one}s = Set[ms, \"t\"]\ns.reject! { |x| x.nil? }\ndump_type(s.dup)\n"))
         .to eq(["Set[Dynamic[top] | String]"])
     end
   end
 
   describe "a literal-nil delete" do
     it "drops nil from an Array element, and a non-literal argument keeps it (control)" do
-      expect(dumped_types("#{maybe_one}a = [mk, 2]\na.delete(nil)\ndump_type(a)\n")).to eq(["Array[1 | 2]"])
-      expect(dumped_types("#{maybe_one}a = [mk, 2]\na.delete(mk)\ndump_type(a)\n")).to eq(["Array[1 | 2 | nil]"])
+      expect(dumped_types("#{maybe_one}a = [mk, 2]\na.delete(nil)\ndump_type(a.dup)\n")).to eq(["Array[Integer]"])
+      expect(dumped_types("#{maybe_one}a = [mk, 2]\na.delete(mk)\ndump_type(a.dup)\n")).to eq(["Array[Integer?]"])
     end
 
     it "drops nil from a Set element under `delete` and `delete?`" do
-      expect(dumped_types("#{maybe_one}s = Set[ms, \"t\"]\ns.delete(nil)\ndump_type(s)\n"))
+      expect(dumped_types("#{maybe_one}s = Set[ms, \"t\"]\ns.delete(nil)\ndump_type(s.dup)\n"))
         .to eq(["Set[Dynamic[top] | String]"])
-      expect(dumped_types("#{maybe_one}s = Set[ms, \"t\"]\ns.delete?(nil)\ndump_type(s)\n"))
+      expect(dumped_types("#{maybe_one}s = Set[ms, \"t\"]\ns.delete?(nil)\ndump_type(s.dup)\n"))
         .to eq(["Set[Dynamic[top] | String]"])
     end
 
     it "drops nil from a Hash key, and leaves the value alone" do
-      source = "#{maybe_one}h = { ms => mk }\nh.delete(nil)\ndump_type(h)\n"
-      expect(dumped_types(source)).to eq(["Hash[\"s\", 1?]"])
+      source = "#{maybe_one}h = { ms => mk }\nh.delete(nil)\ndump_type(h.dup)\n"
+      expect(dumped_types(source)).to eq(["Hash[String, Integer?]"])
     end
   end
 
   describe "Hash#compact!" do
     it "drops nil from the value, and a value-preserving `rehash` keeps it (control)" do
-      expect(dumped_types("#{maybe_one}h = { a: mk, b: 2 }\nh.compact!\ndump_type(h)\n"))
-        .to eq(["Hash[Symbol, 1 | 2]"])
-      expect(dumped_types("#{maybe_one}h = { a: mk, b: 2 }\nh.rehash\ndump_type(h)\n"))
+      expect(dumped_types("#{maybe_one}h = { a: mk, b: 2 }\nh.compact!\ndump_type(h.dup)\n"))
+        .to eq(["Hash[Symbol, Integer]"])
+      expect(dumped_types("#{maybe_one}h = { a: mk, b: 2 }\nh.rehash\ndump_type(h.dup)\n"))
         .to eq(["{ a: 1?, b: 2 }"])
     end
   end
 
   describe "a closed HashShape under a literal-key delete" do
     it "drops the key it names" do
-      expect(dumped_types("h = { a: 1, b: 2 }\nh.delete(:a)\ndump_type(h)\n")).to eq(["{ b: 2 }"])
+      expect(dumped_types("h = { a: 1, b: 2 }\nh.delete(:a)\ndump_type(h.dup)\n")).to eq(["{ b: 2 }"])
     end
 
     it "keeps the shape when the key is absent" do
-      expect(dumped_types("h = { a: 1 }\nh.delete(:z)\ndump_type(h)\n")).to eq(["{ a: 1 }"])
+      expect(dumped_types("h = { a: 1 }\nh.delete(:z)\ndump_type(h.dup)\n")).to eq(["{ a: 1 }"])
     end
 
     it "drops the key under the block form, which still deletes it" do
-      expect(dumped_types("h = { a: 1, b: 2 }\nh.delete(:a) { 0 }\ndump_type(h)\n")).to eq(["{ b: 2 }"])
+      expect(dumped_types("h = { a: 1, b: 2 }\nh.delete(:a) { 0 }\ndump_type(h.dup)\n")).to eq(["{ b: 2 }"])
     end
 
     # Under `compare_by_identity` an equal String need not be the stored key, so only a Symbol key narrows.
     it "erases the shape under a String key (guard)" do
-      expect(dumped_types("h = { \"a\" => 1, \"b\" => 2 }\nh.delete(\"a\")\ndump_type(h)\n"))
-        .to eq(["Hash[String, 1 | 2]"])
+      expect(dumped_types("h = { \"a\" => 1, \"b\" => 2 }\nh.delete(\"a\")\ndump_type(h.dup)\n"))
+        .to eq(["Hash[String, Integer]"])
     end
 
     # Guard: a read-only entry cannot be written through the shape; no source spelling builds one, so the seam is
@@ -283,8 +297,8 @@ RSpec.describe "collection remover narrowing", type: :runner do
     end
 
     it "erases the shape under a key nothing types (control)" do
-      expect(dumped_types("h = { a: 1, b: 2 }\nh.delete(gets.to_s.to_sym)\ndump_type(h)\n"))
-        .to eq(["Hash[Symbol, 1 | 2]"])
+      expect(dumped_types("h = { a: 1, b: 2 }\nh.delete(gets.to_s.to_sym)\ndump_type(h.dup)\n"))
+        .to eq(["Hash[Symbol, Integer]"])
     end
   end
 
@@ -295,12 +309,12 @@ RSpec.describe "collection remover narrowing", type: :runner do
       "pop" => "a.pop", "shift" => "a.shift", "slice!" => "a.slice!(0)", "clear" => "a.clear"
     }.each do |remover, call|
       it "keeps the nil arm under Array##{remover} (guard)" do
-        expect(dumped_types("#{maybe_one}a = [mk, 2]\n#{call}\ndump_type(a)\n")).to eq(["Array[1 | 2 | nil]"])
+        expect(dumped_types("#{maybe_one}a = [mk, 2]\n#{call}\ndump_type(a.dup)\n")).to eq(["Array[Integer?]"])
       end
     end
 
     it "keeps the nil arm under Set#subtract (guard)" do
-      expect(dumped_types("#{maybe_one}s = Set[ms, \"t\"]\ns.subtract([\"t\"])\ndump_type(s)\n"))
+      expect(dumped_types("#{maybe_one}s = Set[ms, \"t\"]\ns.subtract([\"t\"])\ndump_type(s.dup)\n"))
         .to eq(["Set[Dynamic[top] | String | nil]"])
     end
   end

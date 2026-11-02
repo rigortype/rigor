@@ -24,10 +24,12 @@ literal-key `delete` (until now every `delete` erased a shape to a nominal).
   referenced inside a lambda or a block passed to anything but a catalogued iterator or `tap` / `then` /
   `yield_self`, for both names of a copy into a variable (`al = l`, `@x = l`, a multiple assignment), for the
   receiver of a reflective call (`send`, `public_send`, `__send__`, `instance_eval`, `instance_exec`, `tap`, `then`,
-  `yield_self`, `itself`, `method`, `define_singleton_method`), and for every binding of a body that calls
-  `binding`, `eval`, `local_variable_set` or `instance_variable_set`. Such a receiver keeps the reading it had
-  before this change. What the scan does not see stays a known false positive: a holder built from a container or an
-  argument (`hh = { k: l }; ...; hh[:k] << 1`, `Keep.new(l)` keeping it in an ivar), until #2335.
+  `yield_self`, `itself`, `method`, `define_singleton_method`), for a name placed in an Array or Hash literal or a
+  splat (`hh = { k: l }`), for a name passed as an argument to any call, `yield` or `super` (`Keep.new(l)`; no
+  callee is exempt, as #2555's `ConstructionEscape::READERS` lists receivers, not argument readers), and for every
+  binding of a body that calls `binding`, `eval`, `local_variable_set` or `instance_variable_set`. Such a receiver
+  keeps the reading it had before this change. What remains unseen is a holder reached through another object's
+  state without any of these positions, which needs alias tracking (#2335).
 - The floor costs precision on correct code that copies or captures a collection and never writes through the copy,
   and narrowing a receiver some unseen holder can write loses the true positive that holder's later store would
   cause (accepted: the narrowed reading is what the code states, and a missed report outranks a false one).
@@ -42,12 +44,10 @@ literal-key `delete` (until now every `delete` erased a shape to a nominal).
 
 ## Decision
 
-Narrow a local or instance-variable receiver only when the body scan finds no closure, copy, reflective call or frame
-access that could write it, and keep a closed shape minus a Symbol key a literal `delete` names. The writes through a
-container or an argument the scan does not see remain a known false positive (PR body, "Known limits"). The corpus
-A/B (`lib/`, haml, mail, kramdown, yard) moved no diagnostic and the `lib/` census is unchanged. Two #2606 controls
-moved with it: the #1289 alias control now closes its literal with a `delete` of an untyped key, and a closed
-`plain.delete(:a)` reads `{}`.
+Narrow a local or instance-variable receiver only when the body scan finds no closure, copy, container, argument,
+reflective call or frame access that could hand it on, and keep a closed shape minus a Symbol key a literal `delete`
+names. The corpus A/B (`lib/`, haml, mail, kramdown, yard) moved no diagnostic and the `lib/` census is unchanged.
+One #2606 control moved with it: the #1289 alias control now closes its literal with a `delete` of an untyped key.
 
 ## To undo
 

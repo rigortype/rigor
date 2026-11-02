@@ -1,4 +1,4 @@
 - **[cli]** `rigor coverage` and `rigor_coverage` word a missing path as `rigor check` does, and skip it beside files they can measure. ([#2662](https://github.com/rigortype/rigor/pull/2662))
   - A missing path is now `PATH:1:1: error: no such file or directory` on stderr, where it was `coverage: not a file or directory: PATH`. A non-`.rb` file is named as not a Ruby file.
-  - A missing path beside files is a warning, `(skipped)`, and the run measures the rest; before, the whole run stopped with the usage code. With nothing left to measure it still exits with the usage code.
+  - A missing path beside files is a warning, `(skipped)`, and the run measures the rest. Exit status changes: a mixed run used to stop with exit 64 and now exits by its measurement (0, or 1 under `--threshold`). With nothing left to measure it still exits 64.
   - The MCP manual now says a missing path given to `rigor_check` is reported in the diagnostics with `isError: false`.

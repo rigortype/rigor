@@ -346,15 +346,18 @@ module Rigor
                   "disagree; make them agree, or pass --overwrite to replace the sig/ member.")
       end
 
-      # A target `--write` refuses is not one it would update: it is counted apart from the out-of-date targets and,
-      # where the fix is the user's, named for a hand fix. An invalid generated file is a Rigor rendering bug (its
-      # REFUSED line says so), not a file to fix by hand, so it is counted but not listed.
+      # A target `--write` refuses is not one it would update: it is counted apart from the out-of-date targets. Where
+      # the existing file is the user's to repair (encoding, parse), it is named for a hand fix. An invalid generated
+      # file is a Rigor rendering bug (its REFUSED line says so), so it is counted but never listed as a hand fix.
       def refused_targets_line(results)
         by_hand = results.reject { |result| result.action == :skipped_invalid_rbs }
                          .map { |result| result.target_path.to_s }
-        line = "rigor sig-gen --check: #{results.size} signature file(s) refused; " \
-               "`--write` does not update a refused file"
-        by_hand.empty? ? "#{line}." : "#{line} (fix by hand: #{by_hand.join(', ')})."
+        head = "rigor sig-gen --check: #{results.size} signature file(s) refused; `--write` does not update them"
+        if by_hand.empty?
+          return "#{head}. The generated RBS did not parse: a Rigor bug, see its REFUSED line on stdout."
+        end
+
+        "#{head}. Repair by hand: #{by_hand.join(', ')}."
       end
 
       # #2461 — only a run that writes or compares files asks whether the writer will accept each target: where a

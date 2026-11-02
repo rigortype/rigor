@@ -64,7 +64,12 @@ RSpec.describe Rigor::CLI::SigGenCommand do
       expect(out).to include("REFUSED").and include("sig/errors.rbs").and include("does not parse as RBS")
       expect(out).to match(%r{sig/errors\.rbs:\d+:\d+})
       expect(out).not_to include("up to date")
-      expect(err).to include("out of date")
+      # A refusal-only run has nothing `--write` would update, so it names the file for a hand fix and says nothing
+      # about running `--write`.
+      expect(err).to include("1 signature file(s) refused")
+      expect(err).to match(%r{fix by hand: \S*sig/errors\.rbs\)})
+      expect(err).not_to include("out of date")
+      expect(err).not_to include("run `rigor sig-gen --write`")
     end
 
     it "--write refuses it and leaves the file byte-for-byte untouched" do
@@ -113,6 +118,20 @@ RSpec.describe Rigor::CLI::SigGenCommand do
       expect(out).to include("REFUSED").and include("sig/errors.rbs")
       expect(File.read(File.join(root, "sig/a.rbs"))).to include("class A")
       expect(File.read(File.join(root, "sig/b.rbs"))).to include("class B")
+      expect(File.read(sig_file)).to eq(unparseable_sig)
+    end
+
+    # The summary counts the two targets `--write` would update apart from the refused one, named for a hand fix.
+    it "--check counts the pending targets as out of date and the refused one apart, and exits 1" do
+      status, _out, err = sig_gen("--check", paths: ["lib"])
+
+      expect(status).to eq(1)
+      expect(err).to include("rigor sig-gen --check: 2 signature file(s) out of date; " \
+                             "run `rigor sig-gen --write` with the same options to update them.")
+      expect(err).to include("rigor sig-gen --check: 1 signature file(s) refused")
+      expect(err).to match(%r{fix by hand: \S*sig/errors\.rbs\)\.})
+      expect(err.lines.grep(/out of date/).join).not_to include("errors.rbs")
+      expect(File.exist?(File.join(root, "sig/a.rbs"))).to be(false)
       expect(File.read(sig_file)).to eq(unparseable_sig)
     end
   end

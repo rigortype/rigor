@@ -39,6 +39,11 @@ module Rigor
       VALID_MODES = %w[print diff write check].freeze
       VALID_PARAM_POLICIES = %w[untyped observed observed-strict].freeze
 
+      # The per-target outcomes `--write` refuses: the file is left untouched and the run exits 1. `--check` counts
+      # them apart from the targets it would update, since `--write` does not fix a refused file.
+      TARGET_REFUSALS = %i[skipped_invalid_rbs skipped_invalid_encoding skipped_unparseable].freeze
+      private_constant :TARGET_REFUSALS
+
       # The skip reasons {#report_skipped} counts. The four left out each have a report of their own
       # ({#report_unrenderable}, {#report_unresolvable_superclasses}, {#report_inline_declared}, and the refusal
       # lines `--write` / `--check` print for `inline_differs`), so a method never shows up in two tallies.
@@ -300,8 +305,7 @@ module Rigor
         # does not parse, or a method whose inline and `sig/` declarations disagree without `--overwrite`) means the
         # user asked for a write and did not get one, so the command must not report success — a green
         # `sig-gen --write` in CI would otherwise mean nothing.
-        refusals = %i[skipped_invalid_rbs skipped_invalid_encoding skipped_unparseable]
-        results.any? { |result| refusals.include?(result.action) } || !refused.empty? ? 1 : 0
+        results.any? { |result| TARGET_REFUSALS.include?(result.action) } || !refused.empty? ? 1 : 0
       end
 
       # ADR-112 WD4 — the methods whose inline and `sig/` declarations disagree, refused because the run did not
@@ -330,14 +334,27 @@ module Rigor
       end
 
       def report_check_failure(stale, refused)
-        unless stale.empty?
-          @err.puts("rigor sig-gen --check: #{stale.size} signature file(s) out of date; " \
+        pending, refusals = stale.partition { |result| !TARGET_REFUSALS.include?(result.action) }
+        unless pending.empty?
+          @err.puts("rigor sig-gen --check: #{pending.size} signature file(s) out of date; " \
                     "run `rigor sig-gen --write` with the same options to update them.")
         end
+        @err.puts(refused_targets_line(refusals)) unless refusals.empty?
         return if refused.empty?
 
         @err.puts("rigor sig-gen --check: #{refused.size} method(s) whose inline declaration and sig/ copy " \
                   "disagree; make them agree, or pass --overwrite to replace the sig/ member.")
+      end
+
+      # A target `--write` refuses is not one it would update: it is counted apart from the out-of-date targets and,
+      # where the fix is the user's, named for a hand fix. An invalid generated file is a Rigor rendering bug (its
+      # REFUSED line says so), not a file to fix by hand, so it is counted but not listed.
+      def refused_targets_line(results)
+        by_hand = results.reject { |result| result.action == :skipped_invalid_rbs }
+                         .map { |result| result.target_path.to_s }
+        line = "rigor sig-gen --check: #{results.size} signature file(s) refused; " \
+               "`--write` does not update a refused file"
+        by_hand.empty? ? "#{line}." : "#{line} (fix by hand: #{by_hand.join(', ')})."
       end
 
       # #2461 — only a run that writes or compares files asks whether the writer will accept each target: where a

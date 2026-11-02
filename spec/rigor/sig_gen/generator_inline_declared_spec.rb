@@ -471,6 +471,13 @@ RSpec.describe Rigor::SigGen::Generator do
 
       expect(find(candidates, :size).classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
     end
+
+    # Without sig/ the inline member is proposed under the top-level `Box`; keyed as `A::Box` it was dropped.
+    it "proposes the inline member under the top-level class when no sig/ declares it" do
+      candidates = run_generator(write_fixture("lib/a.rb", source))
+
+      expect(find(candidates, :size)).to have_attributes(class_name: "Box", rbs: "def size: () -> Integer")
+    end
   end
 
   # Final review of #1422 (probe `at`): an `attr_*` declaration in `sig/` is compared like a `def`.

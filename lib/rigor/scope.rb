@@ -1273,8 +1273,10 @@ module Rigor
     # Issue #2555 — whether the project defines a method named `method_name` anywhere: on any class or module,
     # instance or singleton side (the def-node tables, which hold a plain cross-file `def` on an RBS-declared class
     # that `discovered_methods` withholds, and `discovered_methods`), or in a `refine` block. The name set is built
-    # once per discovery index.
+    # once per discovery index. The answer depends on every file, so an incremental run records the name either way:
+    # a file that starts or stops defining it re-analyses the reader (issue #1459's `defines:` edge).
     def project_method_name?(method_name)
+      Analysis::DependencyRecorder.read_name(:defines, method_name) if Analysis::DependencyRecorder.active?
       table = (Thread.current[PROJECT_METHOD_NAMES_KEY] ||= ObjectSpace::WeakKeyMap.new)
       return true if (table[@discovery] ||= collect_project_method_names).include?(method_name.to_sym)
 

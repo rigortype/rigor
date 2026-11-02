@@ -1666,6 +1666,50 @@ end
     end
   end
 
+  # Issue #2615 — a local's construction fact is withheld when the project defines a method of a call's name anywhere
+  # (`Scope#project_method_name?`), and the fact decides whether a store joins `Hash.new(0)`'s value side. The
+  # reader's file records a `defines:[]` edge whatever the answer, so a file that starts or stops defining `[]`
+  # re-checks it.
+  describe "a project definition of a Hash reader's name anywhere (#2615)" do
+    plain = "class Lookup\n  def other = nil\nend\n"
+    reader_def = "class Lookup\n  def [](key) = key\nend\n"
+
+    def store_source
+      <<~RUBY
+        def m
+          h = Hash.new(0)
+          h[:y] = "s"
+          h[:y].upcase
+        end
+      RUBY
+    end
+
+    {
+      "a def of [] in another class" => [plain, reader_def, ["call.undefined-method"]],
+      "the def of [] removed" => [reader_def, plain, []]
+    }.each do |label, (before, after, expected)|
+      it "re-checks the reader after #{label}" do
+        Dir.mktmpdir do |dir|
+          d = File.join(dir, "d.rb")
+          File.write(d, store_source)
+          File.write(File.join(dir, "b.rb"), before)
+          session = described_class.new(configuration: configuration(dir), environment: shared_environment)
+          baseline = guarded_baseline(session)
+          expect(baseline.select do |diagnostic|
+            diagnostic.path == d
+          end.map(&:rule)).to eq(["call.undefined-method"] - expected)
+
+          File.write(File.join(dir, "b.rb"), after)
+          recheck = guarded_recheck(session)
+
+          expect(recheck.affected).to include(d)
+          expect(recheck.diagnostics.select { |diagnostic| diagnostic.path == d }.map(&:rule)).to eq(expected)
+          expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+        end
+      end
+    end
+  end
+
   describe "singleton-method symbol granularity" do
     def write_util(dir, unused_body:)
       util = File.join(dir, "util.rb")

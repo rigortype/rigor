@@ -76,6 +76,24 @@ RSpec.describe Rigor::CLI::Options do
 
       expect(options).to eq(tmp_file: "/tmp/buf.rb", instead_of: "lib/real.rb")
     end
+
+    # #2233 — a repeated pair used to overwrite the first one with no message, so the first buffer vanished.
+    it "records a repeated --tmp-file and --instead-of rather than overwriting the first pair silently" do
+      options = {}
+      parser = OptionParser.new { |opts| described_class.add_editor_mode(opts, options) }
+      parser.parse!(["--tmp-file=/tmp/a.rb", "--instead-of=lib/a.rb",
+                     "--tmp-file=/tmp/b.rb", "--instead-of=lib/b.rb"])
+
+      expect(options).to include(repeated_editor_flags: ["--tmp-file", "--instead-of"])
+    end
+
+    it "records nothing for a single pair" do
+      options = {}
+      parser = OptionParser.new { |opts| described_class.add_editor_mode(opts, options) }
+      parser.parse!(["--tmp-file=/tmp/a.rb", "--instead-of=lib/a.rb"])
+
+      expect(options).not_to have_key(:repeated_editor_flags)
+    end
   end
 
   describe ".resolve_buffer_binding" do
@@ -84,6 +102,16 @@ RSpec.describe Rigor::CLI::Options do
     it "returns nil when neither editor-mode flag is set" do
       expect(described_class.resolve_buffer_binding({}, err: err)).to be_nil
       expect(err.string).to be_empty
+    end
+
+    it "returns :usage_error and names the repeated flag rather than dropping the earlier pair" do
+      result = described_class.resolve_buffer_binding(
+        { tmp_file: "/tmp/b.rb", instead_of: "lib/b.rb", repeated_editor_flags: ["--tmp-file"] }, err: err
+      )
+
+      expect(result).to eq(:usage_error)
+      expect(err.string).to include("--tmp-file given more than once")
+      expect(err.string).to include("one buffer per run")
     end
 
     it "returns :usage_error and explains when the flags are unpaired" do

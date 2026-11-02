@@ -1,0 +1,3 @@
+- **[rigor check]** `--incremental` editor mode now analyses a `--tmp-file` buffer for a file that is not on disk yet, and a repeated `--tmp-file` or `--instead-of` is a usage error instead of silently dropping the earlier pair. ([#2658](https://github.com/rigortype/rigor/pull/2658))
+  - A warm `rigor check --incremental --tmp-file T --instead-of F` answered "re-analysed 0 file(s)" with no diagnostics for a new file `F`, with or without path arguments; it now reports the buffer's diagnostics.
+  - A second `--tmp-file` or `--instead-of` exits `64` and names the repeated flag, since editor mode binds one buffer per run. `rigor type-of` rejects a repeat the same way.

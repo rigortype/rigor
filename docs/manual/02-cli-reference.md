@@ -62,7 +62,7 @@ check their arity, since another file may redefine them.
 | `--bleeding-edge[=ids]` | Adopt the bleeding-edge overlay for this run, overriding the configured [`bleeding_edge:`](03-configuration.md) selection (ADR-50 § WD2). Bare adopts every queued feature; `--bleeding-edge=a,b` adopts only the named feature ids. Inspect it with [`rigor show-bleedingedge`](#rigor-show-bleedingedge). |
 | `--no-bleeding-edge` | Ignore any configured `bleeding_edge:` selection for this run (adopt none). |
 | `--no-tolerated-effects` | Check effect envelopes as if [`effects.tolerated:`](03-configuration.md) were empty — the audit switch for your discharge policy (ADR-103). Judgment only: the run, what it collects and its cache entry are identical either way, so this never costs a re-analysis. |
-| `--tmp-file=PATH --instead-of=PATH` | Editor mode: analyse `PATH` using the buffer in `--tmp-file`. Both required together. Alone, only the buffer's own file produces diagnostics; add `--incremental` for whole-project scope (see below). |
+| `--tmp-file=PATH --instead-of=PATH` | Editor mode: analyse `PATH` using the buffer in `--tmp-file`. Both required together, once per run (a repeat is a usage error). Alone, only the buffer's own file produces diagnostics; add `--incremental` for whole-project scope (see below). |
 
 Exit `0` when no error-severity diagnostics remain, `1` when
 any are reported, `64` on a usage error. `--fail-on` raises that
@@ -72,14 +72,16 @@ that want the stricter reading.
 ### Editor mode scope
 
 `--tmp-file` / `--instead-of` on their own analyse **only** the
-buffer's file. It still reads the rest of the project's declarations
-(the classes and methods other files define), as `rigor check FILE`
+buffer's file. The `--instead-of` logical path is analysed even when it
+lies outside `paths:`, as it always has been. It still reads the rest of the
+project's declarations (the classes and methods other files define), as `rigor check FILE`
 does, but it reports nothing about what the unsaved edit does to the
 rest of the project.
 
 Adding `--incremental` analyses the **whole project with the buffer
 substituted** — the edited file and the files that depend on it are
 re-analysed, everything else is served from the incremental snapshot.
+A buffer for a claimed template is analysed as its template unit, once.
 An unsaved change to a method's return type therefore surfaces in its
 callers, not just in the file being edited.
 
@@ -93,6 +95,11 @@ Two things to know:
   exist only in your editor, and recording them would make the next
   ordinary run believe it had already analysed a file in a state it
   was never in.
+- The buffer's file need not exist on disk yet: a new file is analysed
+  as an added file, with or without path arguments.
+- Editor mode binds one buffer per run. Repeating `--tmp-file` or
+  `--instead-of` is a usage error (exit `64`), not a silent replacement
+  of the earlier pair.
 
 `--verify-incremental` refuses a buffer: it compares against a full
 analysis of the files on disk, which a buffer contradicts by
@@ -185,7 +192,8 @@ wraps several results in a `results` array. Line queries add a
 `line_enumerations` array whose `shown` and `total` counts make
 truncation explicit. `--trace` records fail-soft fallbacks,
 after the rows of a line table in text output. The editor-mode
-`--tmp-file` / `--instead-of` pair is accepted as on `check`.
+`--tmp-file` / `--instead-of` pair is accepted as on `check`, and a repeated flag is a usage error
+(exit `64`) there too.
 
 A class or constant that another project file declares reads as
 `rigor check` types it (`singleton(User)`) when a bare

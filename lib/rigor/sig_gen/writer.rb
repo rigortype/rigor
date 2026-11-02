@@ -733,11 +733,10 @@ module Rigor
         decls.each do |decl|
           next unless decl.is_a?(RBS::AST::Declarations::Class) || decl.is_a?(RBS::AST::Declarations::Module)
 
-          local = decl.name.to_s.sub(/\A::/, "")
-          full = prefix.empty? ? local : "#{prefix.join('::')}::#{local}"
-          return decl if full == qualified_name
+          path = ::Rigor::Environment::RbsLoader.declared_class_path(decl, prefix)
+          return decl if path.join("::") == qualified_name
 
-          nested = find_class_decl_in(decl.members, prefix + [local], qualified_name)
+          nested = find_class_decl_in(decl.members, path, qualified_name)
           return nested if nested
         end
         nil
@@ -749,10 +748,9 @@ module Rigor
         decls.each do |decl|
           next unless decl.is_a?(RBS::AST::Declarations::Class) || decl.is_a?(RBS::AST::Declarations::Module)
 
-          local = decl.name.to_s.sub(/\A::/, "")
-          full = prefix.empty? ? local : "#{prefix.join('::')}::#{local}"
-          found << decl if full == qualified_name
-          find_class_decls(decl.members, qualified_name, prefix + [local], found)
+          path = ::Rigor::Environment::RbsLoader.declared_class_path(decl, prefix)
+          found << decl if path.join("::") == qualified_name
+          find_class_decls(decl.members, qualified_name, path, found)
         end
         found
       end

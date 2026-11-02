@@ -439,6 +439,40 @@ RSpec.describe Rigor::SigGen::Generator do
     end
   end
 
+  # #2583: `module A; class ::Box` is the top-level `Box`, so an inline member of `::Box` matches the sig/ member
+  # declared there, and a stale copy keyed under `A::Box` would miss it.
+  describe "an inline member of an absolute declaration nested in a module (#2583)" do
+    let(:sig) do
+      <<~RBS
+        module A
+          class ::Box
+            def size: () -> Integer
+          end
+        end
+      RBS
+    end
+
+    let(:source) do
+      <<~RUBY
+        module A
+          class ::Box
+            #: () -> Integer
+            def size
+              1
+            end
+          end
+        end
+      RUBY
+    end
+
+    it "classifies the member as equivalent to the sig/ declaration of the top-level class" do
+      write_fixture("sig/a.rbs", sig)
+      candidates = run_generator(write_fixture("lib/a.rb", source), sig: true)
+
+      expect(find(candidates, :size).classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+    end
+  end
+
   # Final review of #1422 (probe `at`): an `attr_*` declaration in `sig/` is compared like a `def`.
   describe "an inline-typed attribute against an attr_* declaration in sig/" do
     let(:source) do

@@ -56,6 +56,15 @@ RSpec.describe Rigor::SigGen::LayoutIndex do
     expect(idx.file_for("Outer::Sibling")).to eq(Pathname(path))
   end
 
+  # #2583: `module A; class ::Box` declares the top-level `Box`, not `A::Box`.
+  it "indexes a rooted class nested in a module under its top-level name" do
+    path = write_sig("sig/a.rbs", "module A\n  class ::Box\n  end\nend\n")
+    idx = index(File.join(tmpdir, "sig"))
+
+    expect(idx.file_for("Box")).to eq(Pathname(path))
+    expect(idx.file_for("A::Box")).to be_nil
+  end
+
   it "returns nil for class names with no declaration" do
     write_sig("sig/foo.rbs", "class Foo\nend\n")
 

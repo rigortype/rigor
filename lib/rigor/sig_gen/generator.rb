@@ -261,10 +261,10 @@ module Rigor
         decls.each do |decl|
           next unless decl.is_a?(::RBS::AST::Declarations::Class) || decl.is_a?(::RBS::AST::Declarations::Module)
 
-          name = (prefix + [decl.name.to_s.delete_prefix("::")]).join("::")
-          return decl if name == class_name
+          path = ::Rigor::Environment::RbsLoader.declared_class_path(decl, prefix)
+          return decl if path.join("::") == class_name
 
-          found = find_declaration(decl.members, name.split("::"), class_name)
+          found = find_declaration(decl.members, path, class_name)
           return found if found
         end
         nil

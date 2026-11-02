@@ -126,8 +126,8 @@ module Rigor
         return unless decl.is_a?(RBS::AST::Declarations::Class) ||
                       decl.is_a?(RBS::AST::Declarations::Module)
 
-        local_name = decl.name.to_s.sub(/\A::/, "")
-        full = prefix.empty? ? local_name : "#{prefix.join('::')}::#{local_name}"
+        path = ::Rigor::Environment::RbsLoader.declared_class_path(decl, prefix)
+        full = path.join("::")
         accumulator[full] ||= rbs_path
         decl.members.each do |member|
           # An `overloading?` member (`def f: ... | ...`) adds to a declaration elsewhere; routing a candidate to
@@ -137,7 +137,7 @@ module Rigor
           self.class.member_keys(member).each { |name, kind| @members[[full, name, kind]] ||= rbs_path }
         end
 
-        record_decls(decl.members, prefix + [local_name], rbs_path, accumulator)
+        record_decls(decl.members, path, rbs_path, accumulator)
       end
     end
   end

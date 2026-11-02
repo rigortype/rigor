@@ -112,7 +112,7 @@ module Rigor
         decls.each do |decl|
           next unless decl.is_a?(::RBS::AST::Declarations::Class) || decl.is_a?(::RBS::AST::Declarations::Module)
 
-          inner = prefix + [decl.name.to_s.delete_prefix("::")]
+          inner = ::Rigor::Environment::RbsLoader.declared_class_path(decl, prefix)
           @generic_classes[inner.join("::")] ||= decl.type_params.map(&:name) unless decl.type_params.empty?
           decl.members.each { |member| block.call(inner.join("::"), member) }
           each_member(decl.members, inner, &block)

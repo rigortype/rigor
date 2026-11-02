@@ -126,7 +126,7 @@ module Rigor
       def walk(decl, prefix, methods, classes, registry, reporter)
         return unless decl.is_a?(::RBS::AST::Declarations::Class) || decl.is_a?(::RBS::AST::Declarations::Module)
 
-        nested = prefix + [decl.name.to_s.sub(/\A::/, "")]
+        nested = ::Rigor::Environment::RbsLoader.declared_class_path(decl, prefix)
         class_name = nested.join("::")
         envelope = RbsExtended.read_effect_envelope(
           decl.annotations, owner_key: class_name, source: :class_annotation,

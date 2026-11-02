@@ -439,6 +439,47 @@ RSpec.describe Rigor::SigGen::Generator do
     end
   end
 
+  # #2583: `module A; class ::Box` is the top-level `Box`, so an inline member of `::Box` matches the sig/ member
+  # declared there, and a stale copy keyed under `A::Box` would miss it.
+  describe "an inline member of an absolute declaration nested in a module (#2583)" do
+    let(:sig) do
+      <<~RBS
+        module A
+          class ::Box
+            def size: () -> Integer
+          end
+        end
+      RBS
+    end
+
+    let(:source) do
+      <<~RUBY
+        module A
+          class ::Box
+            #: () -> Integer
+            def size
+              1
+            end
+          end
+        end
+      RUBY
+    end
+
+    it "classifies the member as equivalent to the sig/ declaration of the top-level class" do
+      write_fixture("sig/a.rbs", sig)
+      candidates = run_generator(write_fixture("lib/a.rb", source), sig: true)
+
+      expect(find(candidates, :size).classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+    end
+
+    # Without sig/ the inline member is proposed under the top-level `Box`; keyed as `A::Box` it was dropped.
+    it "proposes the inline member under the top-level class when no sig/ declares it" do
+      candidates = run_generator(write_fixture("lib/a.rb", source))
+
+      expect(find(candidates, :size)).to have_attributes(class_name: "Box", rbs: "def size: () -> Integer")
+    end
+  end
+
   # Final review of #1422 (probe `at`): an `attr_*` declaration in `sig/` is compared like a `def`.
   describe "an inline-typed attribute against an attr_* declaration in sig/" do
     let(:source) do
@@ -559,6 +600,25 @@ RSpec.describe Rigor::SigGen::Generator do
     it "writes the members into a declaration sig/ already carries" do
       write_fixture("sig/box.rbs", "class Box[T]\nend\n")
       path = write_fixture("lib/box.rb", box)
+
+      get = Dir.chdir(tmpdir) { find(run_generator(path, sig: true), :get) }
+
+      expect([get.classification, get.rbs]).to eq([Rigor::SigGen::Classification::NEW_METHOD, "def get: () -> T"])
+    end
+
+    # #2583: `module A; class ::Box[T]` in sig/ is the top-level `Box`, so its type parameters are read for the
+    # top-level inline `Box`; keyed as `A::Box` they were unreadable and the members were refused.
+    it "writes the members into an absolute declaration nested in a module that the sig/ carries" do
+      write_fixture("sig/a.rbs", "module A\n  class ::Box[T]\n  end\nend\n")
+      path = write_fixture("lib/a.rb", <<~RUBY)
+        module A
+          # @rbs generic T
+          class ::Box
+            #: () -> T
+            def get = @v
+          end
+        end
+      RUBY
 
       get = Dir.chdir(tmpdir) { find(run_generator(path, sig: true), :get) }
 

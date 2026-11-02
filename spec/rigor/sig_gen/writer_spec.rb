@@ -180,6 +180,74 @@ RSpec.describe Rigor::SigGen::Writer do
       expect(output).to match(/class Foo\n  def n: \(\) -> Integer\nend/)
     end
 
+    # #2583: `module A; class ::Box` declares the top-level `Box`, so a candidate for `Box` merges into it. Keying it
+    # as `A::Box` appended a second `class Box` after `module A`, and the next check failed on the duplicate method.
+    describe "an absolute declaration nested in a module (#2583)" do
+      let(:existing) { "module A\n  class ::Box\n    def extra: () -> untyped\n  end\nend\n" }
+
+      it "merges a candidate for the top-level class into the `::Box` declaration without a duplicate" do
+        write_target(existing)
+
+        writer.write("lib/foo.rb", [candidate(method_name: :more, rbs: "def more: () -> String", class_name: "Box")])
+
+        expect(File.read(File.join(tmpdir, "sig/foo.rbs")))
+          .to eq("module A\n  class ::Box\n    def extra: () -> untyped\n    def more: () -> String\n  end\nend\n")
+      end
+
+      it "is a no-op on a second identical run" do
+        write_target(existing)
+        candidates = [candidate(method_name: :more, rbs: "def more: () -> String", class_name: "Box")]
+
+        writer.write("lib/foo.rb", candidates)
+        once = File.read(File.join(tmpdir, "sig/foo.rbs"))
+        writer.write("lib/foo.rb", candidates)
+
+        expect(File.read(File.join(tmpdir, "sig/foo.rbs"))).to eq(once)
+      end
+
+      # Control: the nested name `A::Box` is a different class from the top-level `::Box`, so it must not merge
+      # into the absolute declaration.
+      it "does not merge a candidate for the nested `A::Box` into the top-level `::Box` declaration" do
+        write_target(existing)
+
+        writer.write("lib/foo.rb", [candidate(method_name: :more, rbs: "def more: () -> String", class_name: "A::Box")])
+
+        expect(File.read(File.join(tmpdir,
+                                   "sig/foo.rbs"))).to include("class ::Box\n    def extra: () -> untyped\n  end\n")
+      end
+
+      # The flat-pair collapse must not cut a rooted declaration out of its enclosing module: that would leave the
+      # module empty and rewrite the user's `::B::C` as a nested `C`. The member merges in place instead.
+      it "keeps a rooted `module A; class ::B::C` in place when a `B::C` candidate arrives beside `class B`" do
+        write_target("class B\nend\nmodule A\n  class ::B::C\n    def x: () -> Integer\n  end\nend\n")
+
+        writer.write("lib/foo.rb", [candidate(method_name: :y, rbs: "def y: () -> String", class_name: "B::C")])
+
+        expect(File.read(File.join(tmpdir, "sig/foo.rbs")))
+          .to eq("class B\nend\nmodule A\n  class ::B::C\n    " \
+                 "def x: () -> Integer\n    def y: () -> String\n  end\nend\n")
+      end
+
+      it "nests a `Box::Inner` candidate under a rooted `::Box` declaration inside a module" do
+        write_target(existing)
+
+        writer.write("lib/foo.rb", [candidate(method_name: :deep, rbs: "def deep: () -> Integer", class_name: "Box::Inner")])
+        output = File.read(File.join(tmpdir, "sig/foo.rbs"))
+
+        expect(output.scan(/class Box\b|class ::Box\b/).size).to eq(1)
+        expect(output).to include("class Inner\n      def deep: () -> Integer\n    end")
+      end
+
+      it "merges a candidate for a multi-segment root `::A::B` into the declaration without a duplicate" do
+        write_target("module X\n  class ::A::B\n    def a: () -> Integer\n  end\nend\n")
+
+        writer.write("lib/foo.rb", [candidate(method_name: :b, rbs: "def b: () -> String", class_name: "A::B")])
+
+        expect(File.read(File.join(tmpdir, "sig/foo.rbs")))
+          .to eq("module X\n  class ::A::B\n    def a: () -> Integer\n    def b: () -> String\n  end\nend\n")
+      end
+    end
+
     it "skips tighter-return candidates that conflict with user-authored RBS by default" do
       write_target("class Foo\n  def n: () -> Numeric\nend\n")
       tighter = candidate(

@@ -79,6 +79,20 @@ RSpec.describe Rigor::RbsExtended::EnvelopeScanner do
       expect(result.method_envelopes["Repo#b"].bound.to_a).to eq(["io.db"])
     end
 
+    # #2583: `module Outer; class ::Abs` declares the top-level `Abs`, so its envelopes key as `Abs#...`, not `Outer::Abs#...`.
+    it "keys an absolute class nested in a module under its top-level name" do
+      result = scan(<<~RBS)
+        module Outer
+          class ::Abs
+            %a{rigor:v1:effect io.db}
+            def find: (Integer) -> String
+          end
+        end
+      RBS
+
+      expect(result.method_envelopes.keys).to eq(["Abs#find"])
+    end
+
     it "keys a singleton member on the `.` side and `def self?.` on both" do
       result = scan(<<~RBS)
         class Repo

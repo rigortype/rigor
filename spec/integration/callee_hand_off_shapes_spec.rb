@@ -299,7 +299,8 @@ RSpec.describe "the callee floor follows the remaining hand-off shapes (#2336)",
          "Svc.new.run(options)"]
     }.each do |label, (defs, call)|
       it "floors through #{label} ahead of the core method" do
-        expect(rules(program(defs, call))).to eq([])
+        source = program(defs, call)
+        expect(rules(source)).to eq([])
       end
     end
 

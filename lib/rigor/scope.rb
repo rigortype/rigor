@@ -14,6 +14,9 @@ require_relative "inference/flow_tracer"
 require_relative "inference/optimistic_origin"
 require_relative "inference/statement_evaluator"
 require_relative "inference/def_node_resolver"
+# Issue #2608 — read by `MutationWidening` at a remover call, which only an analysis makes; loaded with the engine so the
+# engine-free value layer that requires `MutationWidening` stays as small as it was.
+require_relative "inference/remover_narrowing"
 
 module Rigor
   # Immutable analyzer scope: holds local-variable bindings and a reference to the surrounding Environment. State

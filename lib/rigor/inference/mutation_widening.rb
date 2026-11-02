@@ -10,7 +10,8 @@ require_relative "mutation_rejoin"
 require_relative "deep_erasure"
 require_relative "receiver_alias"
 require_relative "refinement_mutation"
-require_relative "remover_narrowing"
+# `RemoverNarrowing` is loaded with the engine (`scope.rb`), not here: the engine-free value layer requires this file
+# and must not pull in the remover narrowing and its holder scan (`spec/rigor/cli/effects_cache_probe_spec.rb`).
 require_relative "rewrite_mutation"
 require_relative "set_mutation"
 require_relative "string_mutation"

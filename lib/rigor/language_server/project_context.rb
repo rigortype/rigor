@@ -83,8 +83,8 @@ module Rigor
       # warnings does not show the other again. A warning that was fixed and then comes back is new and is shown.
       # Called from the dispatch thread and the save round's thread alike, hence the lock.
       def unannounced_config_warnings
-        warnings = ConfigAudit.warnings(@configuration)
         @announce_lock.synchronize do
+          warnings = ConfigAudit.warnings(@configuration)
           fresh = warnings.reject { |warning| @announced_config_warnings.include?(warning.message) }
           @announced_config_warnings = warnings.to_set(&:message)
           fresh
@@ -288,7 +288,8 @@ module Rigor
       def reload_configuration
         return unless @configuration_loader
 
-        @configuration = @configuration_loader.call
+        loaded = @configuration_loader.call
+        @announce_lock.synchronize { @configuration = loaded }
       rescue StandardError
         nil
       end

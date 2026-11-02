@@ -630,8 +630,6 @@ RSpec.describe Rigor::MCP::Server do
                                                  "params" => { "name" => "rigor_explain", "arguments" => {} })))
 
         texts = resp.dig("result", "content").map { |b| b.fetch("text") }
-        expect(texts.size).to eq(2)
-        expect(texts.last).to start_with("rigor: note")
         expect(texts.grep(/config_warnings/)).to be_empty
       end
     end

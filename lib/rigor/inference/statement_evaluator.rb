@@ -5196,6 +5196,7 @@ module Rigor
             content_floor_for(type)
           end
         end
+        acc = floor_splat_arguments(node, callees, acc)
         # Each closure below is only worth computing when an argument holds something its floor could widen.
         if floorable_local_argument?(node, acc) { |type| UnknownStoreWidening.callee_floorable?(type) }
           callees.each do |def_node, offset, owner|
@@ -5282,6 +5283,267 @@ module Rigor
         return true unless AnonymousMetaClass.block_form_receiver(call_node).nil?
 
         foreign_self_block?(call_node)
+      end
+
+      # Issue #2515 — the floor for a `*x` argument whose `x` is a local holding an array (`args = [parser, options];
+      # Opts.add_format(*args)`). The hash travels inside the array, so the caller's `options` is the array's element,
+      # not an argument, and the per-parameter floor never sees it. An element the callee writes is floored at its place
+      # in the array's type and in every local bound to an equal type (the element's source: only the type is known, so
+      # an equal literal in another local is floored too).
+      #
+      # A known tuple whose splat sits at a fixed position (only plain positional arguments before it) binds element
+      # `j` to the callee's slot `index - offset + j` and floors it when that slot is in the channel's census. Any other
+      # case floors every element when the callee writes any positional parameter: an array that is no longer a tuple
+      # (it was mutated), a splat after another splat, an `offset` that swallows the splat. An element that reaches the
+      # callee's rest or post parameter floors when the callee may write it ({#rest_parameter_written?}). A splat of
+      # anything but a local (a call result, an ivar) is not followed.
+      def floor_splat_arguments(node, callees, base_scope)
+        arguments = node.arguments.arguments
+        return base_scope unless arguments.any?(Prism::SplatNode)
+
+        fixed = true
+        arguments.each_with_index.reduce(base_scope) do |acc, (argument, index)|
+          next acc unless argument.is_a?(Prism::SplatNode)
+
+          read = argument.expression
+          at = fixed ? index : nil
+          fixed = false
+          next acc unless read.is_a?(Prism::LocalVariableReadNode) && acc.locals.key?(read.name)
+
+          floor_splat_local(read.name, at, callees, acc)
+        end
+      end
+
+      # Every callee's channels in turn. The callees are a call's own ({#argument_mutating_callees}), never the nil
+      # sentinel {CAPPED_HAND_OFF}, which only a hand-off inside a def answers ({#rest_hand_off_writes?} reads it).
+      def floor_splat_local(name, at, callees, base_scope)
+        channels = splat_channels
+        origin = base_scope.local(name)
+        callees.reduce(base_scope) do |acc, (def_node, offset, owner)|
+          rest = rest_parameter_written?(def_node, owner)
+          channels.reduce(acc) do |inner, (census, floor)|
+            mutated = census_of(owner, census, def_node)
+            writer = ->(count, position) { splat_written_elements(count, position, offset, def_node, mutated, rest) }
+            floor_splat_arrays(name, at, writer, floor, inner, origin)
+          end
+        end
+      end
+
+      # `base_scope` with the elements of the array local `name` the callee writes floored. The local may be a union
+      # (`cond ? [p, o] : [p, q]`, or an array rebound in a block) and may include nil (`args = [...] if cond`): each
+      # array member floors on its own, and a union of arrays, whose position is unknown, takes the any-slot rule. A
+      # local bound to an equal array type (`args2 = args`) is rebuilt too.
+      def floor_splat_arrays(name, at, writer, floor, base_scope, origin)
+        current = base_scope.local(name)
+        members = current.is_a?(Type::Union) ? current.members : [current]
+        arrays = members.count { |member| splat_elements(member) }
+        return base_scope if arrays.zero?
+
+        origins = splat_origin_members(origin, members)
+        acc = base_scope
+        floored = members.each_with_index.map do |member, index|
+          elements = splat_elements(member)
+          next member if elements.nil?
+
+          position = member.is_a?(Type::Tuple) && arrays == 1 ? at : nil
+          written = writer.call(elements.size, position)
+          next member if written.empty?
+
+          source = splat_elements(origins[index]) || elements
+          rebuilt, acc = floor_array_elements(member, elements, [written, source], floor, acc, name)
+          rebuilt
+        end
+        return acc if floored == members
+
+        rebind_array_aliases(name, current, Type::Combinator.union(*floored), acc)
+      end
+
+      # The members of the array local as it was before the channels ran, aligned with `members`, or `members` itself
+      # when a channel merged or dropped some.
+      def splat_origin_members(origin, members)
+        origin_members = splat_parts(origin)
+        origin_members.size == members.size ? origin_members : members
+      end
+
+      # `scope_in` with `name`, and every local bound to the same array type `before`, rebound to `after`.
+      def rebind_array_aliases(name, before, after, scope_in)
+        aliased = scope_in.locals.reduce(scope_in) do |acc, (other, bound)|
+          other != name && bound == before ? acc.with_mutated_local(other, after) : acc
+        end
+        aliased.with_mutated_local(name, after)
+      end
+
+      def splat_channels
+        [[:callee_content_mutated_parameters, method(:content_floor_for)],
+         [:callee_block_mutated_parameters, UnknownStoreWidening.method(:callee_block_floor)],
+         [:callee_set_mutated_parameters, UnknownStoreWidening.method(:callee_set_floor)]]
+      end
+
+      # The element types of `type` when it is an array a splat spreads, or nil: a tuple's, or a nominal `Array[T]`'s.
+      def splat_elements(type)
+        if type.is_a?(Type::Tuple) then type.elements
+        elsif type.is_a?(Type::Nominal) && type.class_name == "Array" && type.type_args.size == 1 then type.type_args
+        end
+      end
+
+      # The indexes of the `count` array elements the callee writes, for a splat at the call's argument `at` (nil: a
+      # position the call does not show, or an array of unknown length). `rest` is true when the callee may write its
+      # rest parameter ({#rest_parameter_written?}).
+      def splat_written_elements(count, at, offset, def_node, mutated, rest)
+        slots = mutated.values
+        return NO_ELEMENTS unless rest || slots.any? { |slot| slot.is_a?(Integer) || slot == ANY_SLOT }
+        return (0...count).to_a if at.nil? || at < offset || slots.include?(ANY_SLOT)
+
+        named = content_parameter_slots(def_node).each_value.grep(Integer).size
+        (0...count).select do |j|
+          slot = at - offset + j
+          slot >= named ? rest : slots.include?(slot)
+        end
+      end
+
+      NO_ELEMENTS = [].freeze
+      private_constant :NO_ELEMENTS
+
+      # `[array, scope]`: the array type `member` with its `written` elements floored by `floor`, and `scope_in` with
+      # every caller local (other than `name`) the floored elements could be floored too. A union element floors member
+      # by member; every element of the array holding a floored type is rebuilt (`[options, options]`, one slot
+      # written); a local is floored (gradually, {#floor_locals_accepted_by}) when a floored part accepts its type.
+      # Locals are matched against the `source` elements, the array as it was before an earlier channel floored it,
+      # so a floored `Hash[untyped, untyped]` element does not match every hash.
+      def floor_array_elements(member, elements, written_and_source, floor, scope_in, name)
+        written, source = written_and_source
+        acc = scope_in
+        pairs = []
+        written.each do |j|
+          splat_parts(source[j]).each { |part| acc = floor_locals_accepted_by(part, name, floor, acc) }
+          splat_parts(elements[j]).each do |part|
+            replacement = floor.call(part)
+            pairs << [part, replacement] unless replacement.nil? || replacement == part
+          end
+        end
+        return [member, acc] if pairs.empty?
+
+        floored = elements.map { |element| replace_splat_parts(element, pairs) }
+        rebuilt = if member.is_a?(Type::Tuple)
+                    Type::Combinator.tuple_of(*floored)
+                  else
+                    Type::Combinator.nominal_of("Array", type_args: floored)
+                  end
+        [rebuilt, acc]
+      end
+
+      def splat_parts(type) = type.is_a?(Type::Union) ? type.members : [type]
+
+      # `element` with the floored parts replaced, gradually ({#gradual_floor}): an element is floored by
+      # over-approximation as often as by a precise slot (a repeated type, an unknown position, a rest read as written),
+      # and one the callee never writes must not start failing against a literal parameter type.
+      def replace_splat_parts(element, pairs)
+        parts = splat_parts(element)
+        replaced = parts.map do |part|
+          replacement = pairs.find { |from, _| from == part }&.last
+          replacement ? gradual_floor(replacement) : part
+        end
+        replaced == parts ? element : Type::Combinator.union(*replaced)
+      end
+
+      # `scope_in` with each carrier local other than `except` whose type `part` accepts (it is a subtype of, or equal
+      # to, the element: `args << options` widens the pushed `{ format: "text" }` to `Hash[Symbol, String]`) floored
+      # with `floor`. Such a local is only a guess at the element's source (the type is all the array records), so its
+      # floor is gradual ({#gradual_floor}): it may forget a fact, never add a finding. A `Dynamic` part matches no
+      # local: it stands for any value and would floor every carrier in scope.
+      def floor_locals_accepted_by(part, except, floor, scope_in)
+        return scope_in if part.is_a?(Type::Dynamic)
+
+        scope_in.locals.reduce(scope_in) do |acc, (other, bound)|
+          next acc if other == except || !UnknownStoreWidening.callee_floorable?(bound)
+          next acc unless Acceptance.accepts(part, bound).yes?
+
+          floored = floor.call(bound)
+          floored.nil? || floored == bound ? acc : acc.with_mutated_local(other, gradual_floor(floored))
+        end
+      end
+
+      # `type` with a bare `String` carrier made gradual (`Dynamic[String]`): a floor to the nominal `String` fails
+      # against a literal parameter type (`("text") -> String`) that the unmutated local satisfied.
+      def gradual_floor(type)
+        return Type::Combinator.union(*type.members.map { |member| gradual_floor(member) }) if type.is_a?(Type::Union)
+
+        string_carrier?(type) ? Type::Combinator.dynamic(type) : type
+      end
+
+      def string_carrier?(type) = type.is_a?(Type::Nominal) && type.class_name == "String"
+
+      # True when `def_node` has a rest, post or `...` parameter, so a slot no longer names the parameter an element
+      # binds.
+      def variable_arity?(def_node)
+        params = def_node.parameters
+        return false if params.nil?
+
+        !params.rest.nil? || !params.posts.empty? || params.keyword_rest.is_a?(Prism::ForwardingParameterNode)
+      end
+
+      # Issue #2515 — true when a callee's rest parameter (`*args`, `*`, `...`) may be written, so an element a splat
+      # binds to it floors: the body reads it anywhere but as a splat argument of a call (`args.first[:k] = 1`), or
+      # hands it on (`b(*args)`) to a call that resolves to a def which writes a positional parameter or has a rest
+      # parameter of its own that it hands on. A rest handed to a call that resolves to no user def hands off nothing,
+      # as for any hand-off. A callee reached through an inherited lookup ({FLOOR_ALL}) reads as written, as its
+      # parameters do.
+      def rest_parameter_written?(def_node, owner)
+        return false unless variable_arity?(def_node)
+        return true if owner == FLOOR_ALL
+
+        other, calls = def_census(:rest_uses, def_node) { rest_uses(def_node) }
+        return true if other
+
+        evaluator = owner.nil? ? self : owner_evaluator(owner)
+        calls.any? { |call_node, depth| evaluator.__send__(:rest_hand_off_writes?, call_node, def_node, depth) }
+      end
+
+      # True when a call that splats a rest parameter hands it to a def that writes a positional parameter or has a
+      # rest or post parameter of its own, read in this evaluator, the one the call's def runs in. A nil callee is
+      # {CAPPED_HAND_OFF}'s sentinel (a name with too many defs) and reads as written.
+      def rest_hand_off_writes?(call_node, def_node, depth)
+        hand_off_callees(call_node, def_node, depth).any? do |callee, _offset, callee_owner|
+          next true if callee.nil? || variable_arity?(callee)
+
+          census = census_of(callee_owner, :callee_content_mutated_parameters, callee)
+          census.value?(ANY_SLOT) || census.each_value.any?(Integer)
+        end
+      end
+
+      # `[other, calls]` for `def_node`'s rest parameter: `other` is true when it is read except as a splat argument
+      # (`*args`, `*`) of a call, `calls` the calls that splat it ({#rest_parameter_written?}). An AST property.
+      def rest_uses(def_node)
+        params = def_node.parameters
+        name = params.rest.is_a?(Prism::RestParameterNode) ? params.rest.name : nil
+        forwarding = params.keyword_rest.is_a?(Prism::ForwardingParameterNode)
+        reads = 0
+        splatted = 0
+        calls = []
+        each_node_in_method_scope(def_node.body, 0) do |node, depth|
+          reads += 1 if name && splat_reads?(node, name, depth)
+          next unless node.is_a?(Prism::CallNode) && node.arguments
+
+          spread = node.arguments.arguments.select { |a| rest_splat?(a, name, forwarding, depth) }
+          next if spread.empty?
+
+          splatted += spread.count { |a| a.is_a?(Prism::SplatNode) && a.expression }
+          calls << [node, depth]
+        end
+        [reads > splatted, calls.freeze].freeze
+      end
+
+      def rest_splat?(argument, name, forwarding, depth)
+        case argument
+        when Prism::ForwardingArgumentsNode then forwarding
+        when Prism::SplatNode
+          argument.expression.nil? ? name.nil? : !name.nil? && splat_reads?(argument.expression, name, depth)
+        else false
+        end
+      end
+
+      def splat_reads?(node, name, depth)
+        node.is_a?(Prism::LocalVariableReadNode) && node.name == name && node.depth == depth
       end
 
       # True when a local `node` passes (positionally or as a keyword's value) is bound in `scope` to a type the
@@ -6035,6 +6297,8 @@ module Rigor
           case arg
           when Prism::LocalVariableReadNode
             scope.locals.key?(arg.name)
+          when Prism::SplatNode
+            arg.expression.is_a?(Prism::LocalVariableReadNode) && scope.locals.key?(arg.expression.name)
           when Prism::KeywordHashNode
             arg.elements.any? do |pair|
               next false unless pair.is_a?(Prism::AssocNode)

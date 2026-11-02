@@ -76,12 +76,13 @@ module Rigor
           (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode))
       end
 
-      # The `def` nodes a receiverless visibility call takes as arguments (`private def x`, #2254). Ruby evaluates
-      # each one before the call, so it runs whenever the call's statement does. A named call with a symbol takes
-      # no def, and a call with a receiver is not read.
+      # The `def` nodes a receiverless `public`, `private` or `protected` call takes as arguments (`private def x`,
+      # #2254). Ruby evaluates each one before the call, so it runs whenever the call's statement does. A named call
+      # with a symbol takes no def, and a call with a receiver is not read. A `module_function def` is not read here:
+      # its singleton copy is not modelled, so that gap stays as it was.
       def visibility_call_defs(node)
         return [] unless node.is_a?(Prism::CallNode) && node.receiver.nil?
-        return [] unless %i[public private protected module_function].include?(node.name)
+        return [] unless %i[public private protected].include?(node.name)
 
         node.arguments&.arguments&.grep(Prism::DefNode) || []
       end

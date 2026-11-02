@@ -729,8 +729,9 @@ module Rigor
       #
       # Only a definer whose statement certainly runs can be last: a direct statement of a `class`, `module` or
       # `class << self` body, of a `Data.define` / `Struct.new` block or of the file ({#walk_statements} records
-      # them). One under a condition, in a block or a lambda, passed to a call (`private def x`), or after an
-      # uncertain `module_function` reset may not run, as far as this reading tells. A slot such a definer could
+      # them), or a `def` passed to `private`, `public` or `protected` in such a statement ({#walk_statements}, #2254).
+      # One under a condition, in a block or a lambda, or after an uncertain `module_function` reset may not run, as
+      # far as this reading tells. A slot such a definer could
       # still take over from the last certain one is contested, and nothing is written for it.
       #
       # @return the definers of each slot as `[offset, certain]` pairs, keyed by `[class_name, kind, method_name]`.

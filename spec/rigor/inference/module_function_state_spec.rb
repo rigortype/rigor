@@ -936,8 +936,9 @@ RSpec.describe Rigor::Inference::ModuleFunctionState do
     end
   end
 
-  # #2254 — a `def` a receiverless visibility call takes runs with its statement; a named call with a symbol, a call
-  # with a receiver and an unrelated call take none.
+  # #2254 — a `def` a receiverless public, private or protected call takes runs with its statement; a named call with a
+  # symbol, a call with a receiver, a `module_function def` (its singleton copy is not modelled) and an unrelated call
+  # take none.
   describe ".visibility_call_defs" do
     it "returns the def arguments of a receiverless visibility call, and no others" do
       body = Prism.parse(<<~RUBY).value.statements.body
@@ -949,7 +950,7 @@ RSpec.describe Rigor::Inference::ModuleFunctionState do
       RUBY
 
       expect(body.map { |stmt| described_class.visibility_call_defs(stmt).map(&:name) })
-        .to eq([[:a], [:b], [], [], []])
+        .to eq([[:a], [], [], [], []])
     end
   end
 end

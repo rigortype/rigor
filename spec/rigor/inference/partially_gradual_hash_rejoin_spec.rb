@@ -39,6 +39,7 @@ RSpec.describe "a partially gradual synthesised Hash re-grows its precise side (
     RUBY
   end
 
+  # Guard: the counter idiom reads `Integer` with or without the re-join.
   it "keeps the counter idiom's Integer" do
     expect(dumped_types(<<~RUBY)).to eq(["Integer"])
       def m
@@ -49,6 +50,7 @@ RSpec.describe "a partially gradual synthesised Hash re-grows its precise side (
     RUBY
   end
 
+  # Guard and control: the escaped local takes the path without the fact, as before.
   it "keeps the earlier reading on a local that escapes" do
     expect(dumped_types(<<~RUBY)).to eq(["Integer"])
       def keep(_) = nil

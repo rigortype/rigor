@@ -718,10 +718,11 @@ rigor baseline <generate|regenerate|dump|drift|prune> [options]
 `--baseline=PATH` to read a non-default baseline file. `dump`
 also accepts `--format=text|json` for machine-readable output.
 
-`generate` and `regenerate` take no positional paths: they analyse the
-configured `paths:`, and a path argument is a usage error (exit `64`).
-Narrow the scope with `paths:` in the configuration, not on the command
-line.
+No subcommand takes a positional path: `generate` and `regenerate`
+analyse the configured `paths:`, `drift` and `prune` audit them, and
+`dump` prints the whole baseline file. A path argument is a usage error
+(exit `64`). Narrow the scope with `paths:` in the configuration, not on
+the command line.
 
 ## `rigor triage`
 

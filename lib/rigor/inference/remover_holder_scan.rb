@@ -17,7 +17,7 @@ module Rigor
       # the body. A container, an argument and a method of another object stay unseen (issue #2335 tracks aliases).
       REFLECTIVE_CALLS = %i[
         send public_send __send__ instance_eval instance_exec tap then yield_self itself method
-        define_singleton_method extend
+        define_singleton_method
       ].to_set.freeze
       IMMEDIATE_BLOCK_CALLS = %i[tap then yield_self].to_set.freeze
       FRAME_CALLS = %i[binding eval local_variable_set instance_variable_set].to_set.freeze

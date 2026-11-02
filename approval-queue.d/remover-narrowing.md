@@ -24,7 +24,7 @@ literal-key `delete` (until now every `delete` erased a shape to a nominal).
   referenced inside a lambda or a block passed to anything but a catalogued iterator or `tap` / `then` /
   `yield_self`, for both names of a copy into a variable (`al = l`, `@x = l`, a multiple assignment), for the
   receiver of a reflective call (`send`, `public_send`, `__send__`, `instance_eval`, `instance_exec`, `tap`, `then`,
-  `yield_self`, `itself`, `method`, `define_singleton_method`, `extend`), and for every binding of a body that calls
+  `yield_self`, `itself`, `method`, `define_singleton_method`), and for every binding of a body that calls
   `binding`, `eval`, `local_variable_set` or `instance_variable_set`. Such a receiver keeps the reading it had
   before this change. What the scan does not see stays a known false positive: a holder built from a container or an
   argument (`hh = { k: l }; ...; hh[:k] << 1`, `Keep.new(l)` keeping it in an ivar), until #2335.

@@ -8,6 +8,7 @@ require_relative "../rbs_type_translator"
 require_relative "../external_ancestor_resolution"
 require_relative "../void_origin"
 require_relative "../optimistic_origin"
+require_relative "../plain_hash_miss"
 require_relative "argument_distribution"
 require_relative "overload_selector"
 require_relative "self_substitute"
@@ -1479,6 +1480,8 @@ module Rigor
           def record_optimistic_nil_free(method_definition, method_type, scope, call_node)
             return unless scope && call_node
             return unless OptimisticOrigin.optimistic_overload?(method_definition, method_type)
+            # Issue #2555 L3, slice 2 — a plain Hash this body built reads its miss as `nil`, not as a bet.
+            return if PlainHashMiss.applies?(call_node, scope)
 
             scope.record_optimistic_origin(call_node, OptimisticOrigin::IMPLICITLY_RETURNS_NIL)
           end

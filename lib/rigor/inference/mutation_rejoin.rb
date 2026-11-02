@@ -33,7 +33,7 @@ module Rigor
       # keys to the old value, and paying that for an identical type is a straight loss.
       def widen_nominal(nominal, method_name, values: :widen, arg_types: MutationWidening::NO_ARG_TYPES,
                         synthesised: false)
-        if synthesised && synthesised_carrier?(nominal)
+        if synthesised && (synthesised_carrier?(nominal) || partially_gradual_hash?(nominal))
           return widen_synthesised(nominal, method_name, values:, arg_types:)
         end
         return widen_precise_array(nominal, method_name, values:, arg_types:) if precise_array?(nominal)
@@ -138,6 +138,18 @@ module Rigor
       def synthesised_carrier?(nominal)
         %w[Array Hash].include?(nominal.class_name) && !nominal.type_args.empty? &&
           nominal.type_args.none? { |arg| gradual_parameter?(arg) }
+      end
+
+      # Issue #2555 L3, slice 2 — a `Hash` with one gradual parameter and one precise one: `Hash.new(0)` is
+      # `Hash[Dynamic[top], Integer]`. On a synthesised binding the precise side is this engine's own fold of the
+      # default, not a declaration, so {#keep_precise_parameters} must not restore it over a store:
+      # `h = Hash.new(0); h[:y] = "s"` reads `Hash[Dynamic[top] | Symbol, Integer | String]`, not
+      # `Hash[Dynamic[top] | Symbol, Integer]` (which made `h[:y].upcase` an `undefined method` on Integer). The
+      # counter idiom keeps its `Integer`: `h[:x] += 1` stores an `Integer`.
+      def partially_gradual_hash?(nominal)
+        nominal.class_name == "Hash" && nominal.type_args.size == 2 &&
+          nominal.type_args.any? { |arg| gradual_parameter?(arg) } &&
+          nominal.type_args.any? { |arg| !gradual_parameter?(arg) }
       end
 
       # Issue #2555 L3 — the re-join for a precise carrier the engine built itself: a collection literal closed by a

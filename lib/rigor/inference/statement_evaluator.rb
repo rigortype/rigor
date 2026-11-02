@@ -1171,7 +1171,7 @@ module Rigor
       def eval_local_write(node)
         rhs_type, post_rhs = sub_eval(node.value, scope)
         bound = bind_local_write(node, rhs_type, post_rhs)
-        bound = bound.with_construction_fact(node.name, :synthesised) if synthesised_write?(node, rhs_type)
+        bound = stamp_construction_facts(bound, node, rhs_type)
         # Issue #667 — `m = AppConfig::MODE` makes `m` a copy of a constant the reader's file does not
         # declare, so `m == :production` folding to `true` is the project's configuration and not a logic
         # error the author can see. Stamped LAST, across every binding path above: an RHS can be both an
@@ -1193,6 +1193,25 @@ module Rigor
       def synthesised_write?(node, rhs_type)
         synthesised_construction?(node.value, rhs_type) &&
           !ConstructionEscape.escaped?(scope.match_frame&.body, node.name, constructed_carrier_class(rhs_type), scope)
+      end
+
+      def stamp_construction_facts(bound, node, rhs_type)
+        return bound unless synthesised_write?(node, rhs_type)
+
+        bound = bound.with_construction_fact(node.name, :synthesised)
+        defaulted_construction?(node.value) ? bound.with_construction_fact(node.name, :defaulted) : bound
+      end
+
+      # Issue #2555 L3, slice 2 — whether a synthesised Hash may answer a miss with a default, so its binding also
+      # carries `:defaulted` and `h[k]` keeps the optimistic `V` ({PlainHashMiss}). Only a literal, an argument-less
+      # and block-less `Hash.new`, and `Hash[...]` (which copies no default) are plain; any other constructor call is
+      # `:defaulted`, including `Hash.new(capacity: n)`, since telling a capacity keyword from a default value buys
+      # nothing worth the risk. The fact is harmless on an Array or Set: only a `Hash#[]` read consults it.
+      def defaulted_construction?(value_node)
+        return false unless value_node.is_a?(Prism::CallNode)
+        return false if value_node.name == :[]
+
+        !value_node.arguments.nil? || !value_node.block.nil?
       end
 
       def synthesised_construction?(value_node, rhs_type)

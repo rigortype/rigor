@@ -191,17 +191,19 @@ module Rigor
       end
 
       # A closed, non-empty hash shape (or a union of them): the carrier whose computed-key read carries the miss
-      # `nil`. An RBS `Hash[K, V]` read is already nil-free; an open shape or a user class answering `key?` is left
-      # alone.
+      # `nil`. So does a `Hash[K, V]` nominal: an RBS read of one is nil-free and the guard changes nothing, but on a
+      # local issue #2555's {PlainHashMiss} answers `V | nil`, and the guard drops that `nil` as it drops a shape's. An
+      # open shape or a user class answering `key?` is left alone.
       def receiver_type?(type)
         if type.is_a?(Type::Union)
           type.members.all? { |member| closed_shape?(member) }
         else
-          closed_shape?(type)
+          closed_shape?(type) || hash_nominal?(type)
         end
       end
 
       def closed_shape?(type) = type.is_a?(Type::HashShape) && type.closed? && !type.pairs.empty?
+      def hash_nominal?(type) = type.is_a?(Type::Nominal) && type.class_name == "Hash" && type.type_args.size == 2
 
       # The truthy edge of `receiver.key?(key)` with a non-literal key, inside the re-walk: `scope` with the guard
       # recorded, or nil when the guard does not apply.
@@ -247,6 +249,8 @@ module Rigor
       end
 
       def nil_free_values?(receiver_type)
+        return !value_may_be_nil?(receiver_type.type_args.last) if hash_nominal?(receiver_type)
+
         shapes = receiver_type.is_a?(Type::Union) ? receiver_type.members : [receiver_type]
         shapes.none? { |shape| shape.pairs.each_value.any? { |value| value_may_be_nil?(value) } }
       end

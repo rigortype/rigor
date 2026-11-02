@@ -265,12 +265,79 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(validation_errors).to be_empty
     end
 
-    # A guard (control): with no outer class of that name, the token stays what it was before this change.
-    it "never writes a superclass that names the class itself when no other class answers" do
+    # The token is the class's own name at the top level, so no candidate answers and the superclass is dropped
+    # rather than written as a self-reference.
+    it "drops a top-level superclass that is the class's own name" do
       run_generator("lib/lone.rb" => "class Lone < Lone\n  def x = 1\nend\n")
 
       expect(sig("lone")).to include("class Lone\n")
       expect(sig("lone")).not_to include("< ")
+      expect(validation_errors).to be_empty
+    end
+
+    # A different innermost class still wins: `B` inside `Lib::C::D` names `Lib::C::B`, not the class being opened.
+    it "resolves a superclass to a nearer class of another name than the one being opened" do
+      run_generator(
+        "lib/deep.rb" => <<~RUBY
+          module Lib
+            class B
+              def hi = 1
+            end
+            module C
+              class B
+                def mid = 2
+              end
+              module D
+                class B < B
+                  def ho = 3
+                end
+              end
+            end
+          end
+        RUBY
+      )
+
+      expect(sig("deep")).to include("class B < ::Lib::C::B\n")
+      expect(sig("deep")).not_to include("< ::Lib::C::D::B")
+      expect(validation_errors).to be_empty
+    end
+
+    # A top-level outer class: `B` inside `module Lib` names the top-level `::B` when `Lib::B` is the class opened.
+    it "resolves a nested superclass of the same name to a top-level class" do
+      run_generator(
+        "lib/top.rb" => <<~RUBY
+          class B
+            def t = 1
+          end
+          module Lib
+            class B < B
+              def u = 2
+            end
+          end
+        RUBY
+      )
+
+      expect(sig("top")).to include("class B < ::B\n")
+      expect(validation_errors).to be_empty
+    end
+
+    # No outer class of that name exists, so the superclass is unresolvable and the class is demoted (#735).
+    it "demotes a nested superclass of its own name when no outer class answers" do
+      candidates, generator = run_generator(
+        "lib/nested_only.rb" => <<~RUBY
+          module Lib
+            module C
+              class B < B
+                def x = 1
+              end
+            end
+          end
+        RUBY
+      )
+
+      expect(sig("nested_only")).to be_nil
+      expect_demoted(candidates, :x)
+      expect(generator.unresolvable_superclasses).to eq("Lib::C::B" => "B")
       expect(validation_errors).to be_empty
     end
   end

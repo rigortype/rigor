@@ -185,20 +185,17 @@ module Rigor
       # A held position: every local read inside it but the receiver of a {PURE_READERS} call.
       def record_held(node, names)
         return if node.nil?
-        return if pure_read?(node, names)
+        return if pure_read?(node)
 
         names << node.name if node.is_a?(Prism::LocalVariableReadNode)
         node.compact_child_nodes.each { |child| record_held(child, names) }
       end
 
-      # A {PURE_READERS} call on a local hands the local on to nothing; its own arguments and block are still held.
-      def pure_read?(node, names)
-        return false unless node.is_a?(Prism::CallNode) && PURE_READERS.include?(node.name) &&
-                            node.receiver.is_a?(Prism::LocalVariableReadNode)
-
-        node.arguments&.arguments&.each { |argument| record_held(argument, names) }
-        record_held(node.block, names)
-        true
+      # A {PURE_READERS} call on a local hands the local on to nothing. Its own arguments are held positions of the
+      # call itself, which the body walk records when it reaches that call.
+      def pure_read?(node)
+        node.is_a?(Prism::CallNode) && PURE_READERS.include?(node.name) &&
+          node.receiver.is_a?(Prism::LocalVariableReadNode)
       end
 
       # A block that may run after its call returns: any but a catalogued iterator's, or `tap` / `then` /

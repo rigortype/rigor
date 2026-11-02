@@ -411,6 +411,17 @@ The rule is shaped by the idiom, not by a uniform escape analysis. A non-empty l
 
 Some stdlib calls fill a String argument in place. After `io.read(n, buf)`, `io.readpartial(n, buf)`, `io.sysread(n, buf)` and `io.read_nonblock(n, buf)`, the buffer argument is widened as an in-place `replace` would widen it. After `StringIO.new(s)` or `::StringIO.new(s)`, `s` is widened, because later writes through the StringIO land in it. Both apply when the argument is a local, instance, class or global variable read whose current type is a String literal, the `String` nominal or a union of those; any other argument, such as the options Hash of `Rails.cache.read(key, opts)`, keeps its type. The catalogue is keyed by method name and argument position, not by the receiver's type, so a same-named method of another class only loses precision on that argument.
 
+### Collection removers
+
+A remover or filter called on a local or instance variable narrows that binding's element type by what Ruby guarantees it removed ([#2608](https://github.com/rigortype/rigor/issues/2608)):
+
+- `Array#compact!` and `Hash#compact!` drop `nil` from the element or value type;
+- `Array#delete(nil)`, `Set#delete(nil)` and `Set#delete?(nil)`, given a literal `nil`, drop `nil` from the element type, and `Hash#delete(nil)` drops it from the key type;
+- `reject!` and `delete_if` keep the elements their block answers falsey for, and `select!`, `filter!` and `keep_if` the ones it answers truthy for. The block's one expression is read as a guard on its parameter, bound to the element (the Hash `|k, v|` form binds the key and the value), so `reject! { |x| x.nil? }`, `select! { |x| x.is_a?(String) }` and `filter! { |x| x }` narrow as `if` does on the matching edge. `&:nil?` reads as `{ |x| x.nil? }`;
+- a closed hash shape loses the key a literal `delete(:k)` names, and keeps its shape when that key is absent.
+
+Nothing else narrows: `pop`, `shift`, `slice!`, `subtract`, `clear` and `delete` of a non-literal cannot say which members remain, and a block with more than one expression, a jump or a local write, numbered or `it` parameters, or a predicate that says nothing about its parameter gives no narrowing. A receiver that selects among bindings (`(f ? a : b).compact!`) narrows none of them. The narrowing applies to the receiver's binding only: an alias copy (`b = a; b.compact!`) keeps its own, wider, reading, which is still true of the object. A declared parameter's binding narrows in its body, and the caller's argument does not.
+
 ### Closure captures
 
 Closure-captured locals need explicit handling. When a block, proc, or lambda writes an outer local, Rigor MUST record a captured-local write effect. If the closure is invoked immediately and its body is available, Rigor applies the write at the call edge. If the closure escapes or may be invoked later, facts about locals it can write become unstable after the escape point and before any unknown invocation of that closure.

@@ -10,6 +10,7 @@ require_relative "mutation_rejoin"
 require_relative "deep_erasure"
 require_relative "receiver_alias"
 require_relative "refinement_mutation"
+require_relative "remover_narrowing"
 require_relative "rewrite_mutation"
 require_relative "set_mutation"
 require_relative "string_mutation"
@@ -140,8 +141,37 @@ module Rigor
       def widen_after_call(call_node:, current_scope:, arg_types: NO_ARG_TYPES, rewritten_element: nil)
         return current_scope if pure_self_returner?(call_node.name)
 
+        if RemoverNarrowing.candidate?(call_node)
+          narrowed = narrow_remover_receiver(call_node, current_scope, arg_types)
+          return narrowed if narrowed
+        end
+
         widen_receiver_aliases(call_node.receiver, call_node.name, current_scope, arg_types:, rewritten_element:,
                                                                                   removes_nil: removes_nil?(call_node))
+      end
+
+      # Issue #2608 — a remover that narrows its receiver by what it removes ({RemoverNarrowing}): the receiver's
+      # binding widens as any mutator's does, then loses what the call provably took out. This answers before the
+      # #2555 remover floor, so a synthesised carrier a store grew keeps its precise reading (`parts << maybe_nil;
+      # parts.compact!` reads `Array[String]`). `nil` when the call narrows nothing; the caller then takes the
+      # ordinary path, the floor included.
+      def narrow_remover_receiver(call_node, scope, arg_types)
+        read = call_node.receiver
+        getter, builder = ALIAS_ACCESSORS[read.class]
+        name = ReceiverAlias.read_name(read)
+        current = scope.public_send(getter, name)
+        return nil if current.nil?
+
+        narrowed = RemoverNarrowing.narrow_shape(current, call_node)
+        if narrowed.nil?
+          synthesised = synthesised_binding?(scope, getter, name)
+          base = widen_for_mutator(current, call_node.name, arg_types:, synthesised:)
+          narrowed = RemoverNarrowing.narrow(base || current, call_node, scope)
+        end
+        return nil if narrowed.nil?
+        return scope if narrowed == current
+
+        MutationRejoin.rebind(scope, builder, name, narrowed, pre_state: current, kind: getter)
       end
 
       # Issue #2555 — the removers that may take a `nil` out, which is every one but a `delete` / `delete?` given a

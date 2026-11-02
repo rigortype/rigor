@@ -90,6 +90,20 @@ module Rigor
         File.directory?(path) ? path : nil
       end
 
+      # Puts every bundled plugin's `lib` on `$LOAD_PATH`, so a bundled plugin that requires another by gem
+      # name (`require "rigor-ffi"` from `rigor-ethon`, `rigor-sassc`, `rigor-ffi-rzmq` and `rigor-rbnacl`)
+      # resolves without a bundle. The engine's own copies go first, which matches ADR-93 WD5's anti-skew
+      # rule: the bundled copy always wins. Idempotent; a trimmed packaging with no `plugins/` tree adds none.
+      def self.add_bundled_lib_dirs
+        root = File.join(ENGINE_ROOT, "plugins")
+        return unless File.directory?(root)
+
+        Dir.children(root).sort.each do |gem_name|
+          dir = File.join(root, gem_name, "lib")
+          $LOAD_PATH.unshift(dir) if File.directory?(dir) && !$LOAD_PATH.include?(dir)
+        end
+      end
+
       # @param entries — the raw `plugins:` list from the configuration.
       def load(entries)
         plugins = []
@@ -233,7 +247,13 @@ module Rigor
       # `feature_resolver` is unaffected: an absolute-path require's `$LOADED_FEATURES` entry still ends in
       # `/<gem>.rb`, the suffix {FEATURE_RESOLVER} matches.
       def require_gem!(entry)
-        @requirer.call(self.class.bundled_plugin_path(entry[:gem]) || entry[:gem])
+        path = self.class.bundled_plugin_path(entry[:gem])
+        if path
+          self.class.add_bundled_lib_dirs
+          @requirer.call(path)
+        else
+          @requirer.call(entry[:gem])
+        end
       rescue ::LoadError => e
         raise LoadError.new(
           "could not load plugin gem #{entry[:gem].inspect}: #{e.message}",

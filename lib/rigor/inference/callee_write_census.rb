@@ -42,10 +42,10 @@ module Rigor
       # `[cvar_or_global, :global]`) to `{ status => Set[parameter] }`: the value under the key may be the parameter
       # (status `:same`), a part of it (`:part`: `v = h[:list]`, `h.each { |k, v| }`), or hold it as an element
       # (`:held`: `arr = [h]`, which a write to `arr` does not reach).
-      Census = Data.define(:written, :removed, :alias_table, :names)
+      Census = Data.define(:written, :alias_table, :names)
 
       NONE = [].freeze
-      EMPTY = Census.new(written: NONE, removed: NONE, alias_table: {}.freeze, names: Set.new.freeze)
+      EMPTY = Census.new(written: NONE, alias_table: {}.freeze, names: Set.new.freeze)
       STATUSES = %i[same part held].freeze
       STATUS_INDEX = { same: 0, part: 1, held: 2 }.freeze
       # A step is how a value relates to the one it is built from, as the status it gives each of {STATUSES}.
@@ -98,12 +98,11 @@ module Rigor
 
       module_function
 
-      # The {Census} of `body` for the parameters `seeds` (`{ name => :same | :held }`). `vocabulary` is the name
-      # tables {Walk} reads (`mutators:`, `handled:`, `removers:`, `fresh:`, `copiers:`).
-      def scan(body, seeds, rebinds:, **vocabulary)
+      # The {Census} of `body` for the parameters `seeds` (`{ name => :same | :held }`).
+      def scan(body, seeds, mutators:, handled:, fresh:, copiers:, rebinds:)
         return EMPTY if body.nil? || seeds.empty?
 
-        walk = Walk.new(**vocabulary)
+        walk = Walk.new(mutators, handled, fresh, copiers)
         walk.visit(body, 0)
         walk.census(seeds, rebinds)
       end
@@ -119,7 +118,7 @@ module Rigor
         end
         return NONE unless node.is_a?(Prism::CallNode) || node.is_a?(Prism::ParenthesesNode)
 
-        found = Walk.new(mutators: NONE, handled: NONE, fresh:, copiers:).value_sources(node, depth)
+        found = Walk.new(NONE, NONE, fresh, copiers).value_sources(node, depth)
         found.nil? ? NONE : same_parameters(census, seeds, found)
       end
 
@@ -178,14 +177,14 @@ module Rigor
       # method scope.
       def seed(key, seeds) = key.last.equal?(0) ? seeds[key.first] : nil
 
-      # Yields each `width`-long record (at most five) of the flat `list` (nil: none) as separate arguments, allocating
+      # Yields each `width`-long record (at most four) of the flat `list` (nil: none) as separate arguments, allocating
       # nothing; a block taking fewer arguments ignores the rest.
       def each_record(list, width)
         return if list.nil?
 
         i = 0
         while i < list.size
-          yield list[i], list[i + 1], list[i + 2], list[i + 3], list[i + 4]
+          yield list[i], list[i + 1], list[i + 2], list[i + 3]
           i += width
         end
       end
@@ -403,8 +402,7 @@ module Rigor
         include ValueSources
         include BlockBindings
 
-        def initialize(mutators:, handled:, fresh:, copiers:, removers: NONE)
-          @removers = removers
+        def initialize(mutators, handled, fresh, copiers)
           @mutators = mutators
           @handled = handled
           @fresh = fresh
@@ -432,12 +430,11 @@ module Rigor
           return EMPTY if @edges.nil? && @mutations.nil?
 
           table = close(seeds, rebinds)
-          written, removed = written_parameters(table, seeds, rebinds)
-          return EMPTY if written.nil? && removed.nil? && table.empty?
+          written = written_parameters(table, seeds, rebinds)
+          return EMPTY if written.nil? && table.empty?
 
-          removed = removed.to_a - written.to_a if removed
-          Census.new(written: written.nil? ? NONE : written.to_a.freeze, removed: removed.nil? ? NONE : removed.freeze,
-                     alias_table: table.freeze, names: alias_names(table))
+          Census.new(written: written.nil? ? NONE : written.to_a.freeze, alias_table: table.freeze,
+                     names: alias_names(table))
         end
 
         private
@@ -449,39 +446,25 @@ module Rigor
           names.freeze
         end
 
-        # `[written, removed]`, the parameters the recorded mutations reach (each nil for none). A record is `key, node,
-        # counts_self, mode, remover`. A remover (`delete`, `clear`, `pop`, ...) on the parameter read itself (through
-        # no alias and no call) only takes things out, so it is `removed`, which floors through the remover channel;
-        # every other write, a remover through an alias and a remover on a part of the parameter is `written`.
+        # The parameters the recorded mutations reach, or nil for none. A record is `key, node, counts_self, mode`.
         def written_parameters(table, seeds, rebinds)
-          sink = [nil, nil]
-          CalleeWriteCensus.each_record(@mutations, 5) do |key, node, counts_self, mode, remover|
-            collect(sink, table[key], mode)
-            collect(sink, table[IVAR_ANY_KEY], mode) if key.last == :ivar
+          written = nil
+          CalleeWriteCensus.each_record(@mutations, 4) do |key, node, counts_self, mode|
+            written = merge_written(written, table[key], mode)
+            written = merge_written(written, table[IVAR_ANY_KEY], mode) if key.last == :ivar
             status = CalleeWriteCensus.seed(key, seeds)
             next if status.nil? || !counts_self || !CalleeWriteCensus.reaches?(mode, status)
-            next if CalleeWriteCensus.rebound?(rebinds, key.first, node)
 
-            add_reached(sink, mode, status, remover, key.first)
+            (written ||= Set.new) << key.first unless CalleeWriteCensus.rebound?(rebinds, key.first, node)
           end
-          sink
+          written
         end
 
-        # What an alias reaches is `written` even under a remover: the alias may be an element the status collapse
-        # reads as the parameter itself (`h.values.each { |v| v.clear }`).
-        def collect(sink, by_status, mode)
+        def merge_written(written, by_status, mode)
           by_status&.each do |status, parameters|
-            add_reached(sink, mode, status, false, parameters) if CalleeWriteCensus.reaches?(mode, status)
+            written = (written || Set.new).merge(parameters) if CalleeWriteCensus.reaches?(mode, status)
           end
-        end
-
-        # Adds `parameters` (a set, or one name), reached at `status` under `mode`, to the sink's removed or written
-        # set.
-        def add_reached(sink, mode, status, remover, parameters)
-          removal = remover && mode.equal?(ID) && status == :same
-          index = removal ? 1 : 0
-          set = (sink[index] ||= Set.new)
-          parameters.is_a?(Symbol) ? set << parameters : set.merge(parameters)
+          written
         end
 
         # `found` holds the sources flat, `key, step, key, step, ...` ({#sources}); a node that reads none records
@@ -545,7 +528,7 @@ module Rigor
           return unless symbol.is_a?(Prism::SymbolNode) && @mutators.include?(symbol.unescaped.to_sym)
 
           CalleeWriteCensus.each_record(sources(node.receiver, depth, nil, ID), 2) do |key, _step|
-            (@mutations ||= []).push(key, node, true, ANY, false)
+            (@mutations ||= []).push(key, node, true, ANY)
           end
         end
 
@@ -558,9 +541,8 @@ module Rigor
           return if found.nil?
 
           counts_self = !receiver.is_a?(Prism::LocalVariableReadNode) || !(name.nil? || @handled.include?(name))
-          remover = @removers.include?(name)
           CalleeWriteCensus.each_record(found, 2) do |key, step|
-            (@mutations ||= []).push(key, node, counts_self, step, remover)
+            (@mutations ||= []).push(key, node, counts_self, step)
           end
         end
 

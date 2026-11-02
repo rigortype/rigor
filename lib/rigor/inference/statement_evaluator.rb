@@ -530,7 +530,7 @@ module Rigor
       # floor the caller's argument through {#floor_callee_escaped_args_for_call}'s element-keeping channels.
       def content_mutated_parameter_positions(def_node)
         slots = forwarding_slots(def_node)
-        census = callee_content_mutated_parameters(def_node).values + callee_removed_parameters(def_node).values +
+        census = callee_content_mutated_parameters(def_node).values +
                  own_block_content_parameters(def_node).values + own_set_content_parameters(def_node).values
         each_forwarding_call(def_node, slots) { |_, forwarded| census += forwarded.map { |name, _| slots[name] } }
         positions, keywords = census.uniq.partition { |slot| slot.is_a?(Integer) }
@@ -4050,35 +4050,7 @@ module Rigor
       def and_or_right_effects?(node)
         return false unless node.is_a?(Prism::AndNode) || node.is_a?(Prism::OrNode)
 
-        OperandEffects.any?(node.right) || hands_off_guarded_local?(node) || and_or_right_effects?(node.left)
-      end
-
-      # Issue #2595 — true when the right operand passes, as a call's argument, a local the left operand tests with a
-      # key-presence predicate (`h.key?(k) && purge(h, k)`): the callee may take the key out, so the edge must be the
-      # one the right operand left, whose call dropped the guard ({KeyPresenceGuard.invalidate_after_call}), not the
-      # left operand's guard narrowed afresh over it.
-      def hands_off_guarded_local?(node)
-        guarded = guarded_locals(node.left)
-        return false if guarded.nil?
-
-        Source::NodeWalker.each(node.right) do |call|
-          next unless call.is_a?(Prism::CallNode) && call.arguments
-          if call.arguments.arguments.any? { |arg| arg.is_a?(Prism::LocalVariableReadNode) && guarded.include?(arg.name) }
-            return true
-          end
-        end
-        false
-      end
-
-      # The locals `node` tests with a key-presence predicate, or nil for none.
-      def guarded_locals(node)
-        guarded = nil
-        Source::NodeWalker.each(node) do |call|
-          next unless call.is_a?(Prism::CallNode) && KeyPresenceGuard::PREDICATES.include?(call.name)
-
-          (guarded ||= []) << call.receiver.name if call.receiver.is_a?(Prism::LocalVariableReadNode)
-        end
-        guarded
+        OperandEffects.any?(node.right) || and_or_right_effects?(node.left)
       end
 
       # Whether a genuine `Constant` left operand proves the RHS never supplies the value: `false && b` and
@@ -5274,8 +5246,12 @@ module Rigor
         acc = floor_splat_arguments(node, callees, acc)
         # Each closure below is only worth computing when an argument holds something its floor could widen.
         if floorable_local_argument?(node, acc) { |type| UnknownStoreWidening.callee_floorable?(type) }
-          acc = floor_removed_arguments(node, callees, acc, climbing)
-          acc = floor_block_arguments(node, callees, acc, climbing)
+          callees.each do |def_node, offset, owner|
+            acc = floor_arguments(node, census_of(owner, :callee_block_mutated_parameters, def_node), acc, offset,
+                                  climbing) do |type|
+              UnknownStoreWidening.callee_block_floor(type)
+            end
+          end
         end
         return acc unless floorable_local_argument?(node, acc) { |type| SetMutation.carrier_in?(type) }
 
@@ -5283,29 +5259,6 @@ module Rigor
           acc = floor_arguments(node, census_of(owner, :callee_set_mutated_parameters, def_node), acc, offset,
                                 climbing) do |type|
             UnknownStoreWidening.callee_set_floor(type)
-          end
-        end
-        acc
-      end
-
-      # Issue #2595 — the channel for a parameter the callee only takes from ({#callee_removed_parameters}), through
-      # every callee before the block channel runs.
-      def floor_removed_arguments(node, callees, acc, climbing)
-        callees.each do |def_node, offset, owner|
-          acc = floor_arguments(node, census_of(owner, :callee_removed_parameters, def_node), acc, offset,
-                                climbing) do |type|
-            remover_floor(type)
-          end
-        end
-        acc
-      end
-
-      # Issue #2296 — the block channel, through every callee.
-      def floor_block_arguments(node, callees, acc, climbing)
-        callees.each do |def_node, offset, owner|
-          acc = floor_arguments(node, census_of(owner, :callee_block_mutated_parameters, def_node), acc, offset,
-                                climbing) do |type|
-            UnknownStoreWidening.callee_block_floor(type)
           end
         end
         acc
@@ -5826,7 +5779,7 @@ module Rigor
         def_census(:writes, def_node) do
           CalleeWriteCensus.scan(def_node.body, census_seeds(def_node),
                                  mutators: CALLEE_WRITE_MUTATORS, handled: CONTENT_MUTATORS, fresh: FRESH_RESULTS,
-                                 copiers: CENSUS_COPIERS, removers: CALLEE_REMOVERS,
+                                 copiers: CENSUS_COPIERS,
                                  rebinds: parameter_rebinds(def_node))
         end
       end
@@ -5994,46 +5947,6 @@ module Rigor
             (set ||= Set.new) << name if counted_mutation?(def_node, slots, name, node)
           end
           [block.nil? ? NO_PARAMETER_SLOTS : slots.slice(*block), set.nil? ? NO_PARAMETER_SLOTS : slots.slice(*set)]
-        end
-      end
-
-      # Issue #2595 — the parameters {#callee_write_census} saw only taken from (`h.delete(k)`, `a.clear`, `a.pop`):
-      # a remover adds nothing, so their floor is the one a remover call on the argument itself applies
-      # ({#remover_floor}), not the bare one, which would drop a precise nominal's types and the reports they carry.
-      def own_removed_parameters(def_node)
-        def_census(:removed, def_node) do
-          removed = callee_write_census(def_node).removed
-          removed.empty? ? NO_PARAMETER_SLOTS : written_slots(def_node, removed)
-        end
-      end
-
-      # {#own_removed_parameters} closed over hand-offs as {#callee_content_mutated_parameters} is.
-      def callee_removed_parameters(def_node)
-        cache = (@callee_removed_param_cache ||= {}.compare_by_identity)
-        cache[def_node] ||= resolved_census(:close_removed, def_node) do
-          CalleeMutationChain.close(def_node, own: hop_census(:own_removed_parameters),
-                                              edges: hop_census(:forwarding_edges), **callee_chain_store)
-        end
-      end
-
-      # The binding a remover may leave, member by member: a Hash shape keeps its pairs with every key optional (a
-      # remover adds no key, and any may be gone, so a read of one may miss); a tuple or other carrier takes what
-      # `delete_if`, which may take any element out, leaves (`MutationWidening.widen_for_mutator`); a String carrier
-      # reads `String`; a precise nominal stays. nil when nothing changes.
-      def remover_floor(type)
-        floored = removed_member(type)
-        floored == type ? nil : floored
-      end
-
-      def removed_member(type)
-        case type
-        when Type::Union then Type::Combinator.union(*type.members.map { |member| removed_member(member) })
-        when Type::HashShape
-          Type::HashShape.new(type.pairs, required_keys: [], optional_keys: type.pairs.keys,
-                                          read_only_keys: type.read_only_keys, extra_keys: type.extra_keys)
-        else
-          widened = MutationWidening.widen_for_mutator(type, :delete_if) || type
-          UnknownStoreWidening.carrier_class(widened) == "String" ? Type::Combinator.nominal_of("String") : widened
         end
       end
 
@@ -7963,10 +7876,7 @@ module Rigor
       # the widening reads ({MutationWidening::SHAPE_MUTATORS}) and the content scans' own names. A Set-only adder
       # stays out: `merge` on a Hash returns a new Hash.
       CALLEE_WRITE_MUTATORS = (MutationWidening::SHAPE_MUTATORS | CONTENT_MUTATORS).freeze
-      # The removers among them ({MutationWidening::NIL_REMOVERS}, `delete`, `delete_at`): a call that only takes
-      # things out, which the census floors through the element-keeping channel ({#block_and_set_parameters}).
-      CALLEE_REMOVERS = (MutationWidening::NIL_REMOVERS | %i[delete delete_at]).freeze
-      private_constant :CALLEE_WRITE_MUTATORS, :CALLEE_REMOVERS
+      private_constant :CALLEE_WRITE_MUTATORS
 
       # The shared "not a content mutation" answer. This predicate runs on every node of every block, loop and
       # method body it censuses (~950k calls on the lib self-check) and almost always declines, so a fresh

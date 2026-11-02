@@ -47,40 +47,15 @@ RSpec.describe "the callee write census counts mutators, aliases and ivar hand-o
   end
 
   describe "a shape mutator the content scans do not count" do
-    ['merge!(format: "json")', 'update(format: "json")', "transform_values!(&:upcase)"].each do |call|
+    ['merge!(format: "json")', 'update(format: "json")', "transform_values!(&:upcase)", "compact!", "delete(:format)",
+     "clear", "shift", "keep_if { false }", "select! { false }", "reject! { true }"].each do |call|
       it "counts h.#{call}" do
         expect(rules(program("h.#{call}"))).to eq([])
       end
     end
 
-    # A remover only takes things out: the literal opens with every key optional, so a presence test no longer
-    # folds, while `options[:format] == "json"` still reports (a remover cannot make the value "json").
-    ["compact!", "delete(:format)", "clear", "shift", "keep_if { false }", "select! { false }",
-     "reject! { true }"].each do |call|
-      it "counts h.#{call} as a remover" do
-        expect(rules(program("h.#{call}", read: "options.key?(:format)"))).to eq([])
-      end
-
-      it "keeps the report a remover cannot falsify after h.#{call}" do
-        expect(rules(program("h.#{call}"))).to eq(always)
-      end
-    end
-
-    # A remover through an alias may be one on an element the status collapse reads as the parameter, so it floors
-    # bare.
-    it "floors a remover through an alias bare" do
-      expect(rules(program("x = h; x.delete(:format)"))).to eq([])
-    end
-
     # The content adders (`concat`, `push`, `fill`, `replace`, `insert`, `unshift`) were counted before #2595: guards.
-    ["pop", "slice!(0)", "delete_at(0)"].each do |call|
-      it "counts a.#{call} on an array as a remover" do
-        source = program("h.#{call}", literal: '["text"]', read: "options.empty?")
-        expect(rules(source)).to eq([])
-      end
-    end
-
-    ["map!(&:upcase)", "sort!", "reverse!", "rotate!", "shuffle!", "uniq!",
+    ["pop", "map!(&:upcase)", "sort!", "reverse!", "rotate!", "shuffle!", "uniq!", "slice!(0)", "delete_at(0)",
      'concat(["json"])', 'push("json")', 'fill("json")', 'replace(["json"])', 'insert(0, "json")',
      'unshift("json")'].each do |call|
       it "counts a.#{call} on an array" do

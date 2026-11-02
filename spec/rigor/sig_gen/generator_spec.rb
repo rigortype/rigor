@@ -491,8 +491,11 @@ RSpec.describe Rigor::SigGen::Generator do
     {
       "a delete" => ["", "if h[k]\n      h.delete(k)\n      h[k]\n    else\n      \"d\"\n    end", nil],
       "a reassigned key" => ["", "if h[k]\n      k = :other\n      h[k]\n    else\n      \"d\"\n    end", nil],
+      # Since #2595 `x.clear` is a counted write, so the callee floor reads `h` bare and the re-read is untyped:
+      # sig-gen proposes nothing over `untyped` (the expectation below), the conservative direction. A remover-only
+      # floor that keeps `String | nil` here is #2634.
       "a callee that mutates" => ["  def clear_it(x) = x.clear\n",
-                                  "if h[k]\n      clear_it(h)\n      h[k]\n    else\n      \"d\"\n    end", nil],
+                                  "if h[k]\n      clear_it(h)\n      h[k]\n    else\n      \"d\"\n    end", nil, nil],
       "a block that mutates" => ["", "if h[k]\n      [1].each { h.clear }\n      h[k]\n    else\n      \"d\"\n    end",
                                  nil],
       "a yield" => ["", "if h[k]\n      yield h\n      h[k]\n    else\n      \"d\"\n    end", :clear],
@@ -501,7 +504,7 @@ RSpec.describe Rigor::SigGen::Generator do
       "an Array#shift" => ["", "if a.first\n      a.shift\n      a.first\n    else\n      \"d\"\n    end", nil],
       "a computed key" => ["  def next_key = (@n = (@n || 0) + 1) == 1 ? :k : :z\n",
                            "h[next_key] ? h[next_key] : \"d\"", nil]
-    }.each do |label, (extra, body, block)|
+    }.each do |label, (extra, body, block, *proposal)|
       it "keeps the nil for a re-read after #{label}" do
         params = "(Hash[Symbol, String] h, Symbol k, Array[String] a, bool c)"
         write_fixture("sig/box.rbs", "class Box\n  def g: #{params} -> untyped\nend\n")
@@ -512,7 +515,8 @@ RSpec.describe Rigor::SigGen::Generator do
         method = gen.run.find { |c| c.method_name == :g }
 
         expect(box.new.g({ k: "v" }, :k, ["x"], true, &block)).to be_nil
-        expect(method.rbs).to eq("def g: #{params} -> (String | nil)")
+        expected = proposal.empty? ? "def g: #{params} -> (String | nil)" : proposal.first
+        expect(method&.rbs).to eq(expected)
       end
     end
 

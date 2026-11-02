@@ -5274,7 +5274,8 @@ module Rigor
         acc = floor_splat_arguments(node, callees, acc)
         # Each closure below is only worth computing when an argument holds something its floor could widen.
         if floorable_local_argument?(node, acc) { |type| UnknownStoreWidening.callee_floorable?(type) }
-          acc = floor_element_keeping_arguments(node, callees, acc, climbing)
+          acc = floor_removed_arguments(node, callees, acc, climbing)
+          acc = floor_block_arguments(node, callees, acc, climbing)
         end
         return acc unless floorable_local_argument?(node, acc) { |type| SetMutation.carrier_in?(type) }
 
@@ -5287,15 +5288,20 @@ module Rigor
         acc
       end
 
-      # The element-keeping channels, each through every callee before the next: issue #2595's for a parameter the
-      # callee only takes from ({#callee_removed_parameters}), then #2296's block channel.
-      def floor_element_keeping_arguments(node, callees, acc, climbing)
+      # Issue #2595 — the channel for a parameter the callee only takes from ({#callee_removed_parameters}), through
+      # every callee before the block channel runs.
+      def floor_removed_arguments(node, callees, acc, climbing)
         callees.each do |def_node, offset, owner|
           acc = floor_arguments(node, census_of(owner, :callee_removed_parameters, def_node), acc, offset,
                                 climbing) do |type|
             remover_floor(type)
           end
         end
+        acc
+      end
+
+      # Issue #2296 — the block channel, through every callee.
+      def floor_block_arguments(node, callees, acc, climbing)
         callees.each do |def_node, offset, owner|
           acc = floor_arguments(node, census_of(owner, :callee_block_mutated_parameters, def_node), acc, offset,
                                 climbing) do |type|

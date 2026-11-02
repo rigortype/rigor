@@ -49,13 +49,14 @@ jobs:
       # Full history, for its tags: tool/bench.rb `git archive`s the corpus
       # revision bench/baseline.json names, and a shallow clone has none.
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           submodules: false
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
+        uses: ruby/setup-ruby@v1.336.0
         with:
           ruby-version: "4.0"
           bundler-cache: true
@@ -74,7 +75,7 @@ jobs:
 
       - name: Upload suggested baseline (for calibration)
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: bench-baseline-${{ github.run_id }}
           path: bench/baseline.updated.json
@@ -87,12 +88,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           submodules: false
+          persist-credentials: false
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
+        uses: ruby/setup-ruby@v1.336.0
         with:
           ruby-version: "4.0"
           bundler-cache: true

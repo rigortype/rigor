@@ -61,13 +61,14 @@ jobs:
     timeout-minutes: 150
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           submodules: false
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
+        uses: ruby/setup-ruby@v1.336.0
         with:
           ruby-version: "4.0"
           bundler-cache: true
@@ -109,7 +110,7 @@ jobs:
 
       - name: Upload the samples
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: engine-warm-journeys-${{ github.run_id }}
           path: |

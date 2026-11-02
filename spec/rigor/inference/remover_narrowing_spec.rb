@@ -134,6 +134,12 @@ RSpec.describe "collection remover narrowing", type: :runner do
       end
     end
 
+    # Guard: a filter that keeps nothing says the carrier is empty, which is left to today's reading rather than
+    # spelled `Array[bot]`.
+    it "keeps today's reading when the kept edge is empty (guard)" do
+      expect(dumped_types("a = [1, 2]\na.select! { |x| x.nil? }\ndump_type(a)\n")).to eq(["Array[1 | 2]"])
+    end
+
     it "narrows a Hash value under the `|k, v|` form" do
       expect(dumped_types("#{maybe_one}h = { a: mk, b: 2 }\nh.reject! { |_k, v| v.nil? }\ndump_type(h)\n"))
         .to eq(["Hash[Symbol, 1 | 2]"])
@@ -226,6 +232,12 @@ RSpec.describe "collection remover narrowing", type: :runner do
       it "reads the precise narrowed carrier under #{remover}" do
         expect(dumped_types("#{maybe_one}n = gets.to_i\n#{body}\ndump_type(a.dup)\n")).to eq([expected])
       end
+    end
+
+    it "keeps the floored reading under a block whose predicate it cannot read (control)" do
+      source = "#{maybe_one}def foo(_x) = gets ? true : false\nn = gets.to_i\na = Array.new(n, \"a\")\na << ms\n" \
+               "a.reject! { |x| foo(x) }\ndump_type(a.dup)\n"
+      expect(dumped_types(source)).to eq(["Array[Dynamic[top] | String]"])
     end
 
     it "keeps the floored reading under a positional remover (control)" do

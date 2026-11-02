@@ -1523,6 +1523,32 @@ module Rigor
     end
     private :record_toplevel_ambiguity_reads
 
+    # Issue #2336 — whether the project gives `method_name` a body through an ownerless definition row
+    # ({#toplevel_definition_rows}): a `define_method` / `define_singleton_method` / `alias_method` call with that
+    # literal name on any receiver, or a def outside every class body. The callee mutation floor reads a call no def
+    # table answers as one such body may run. The answer depends on every file, so an incremental run records the
+    # `defines:<name>` edge either way.
+    def ownerless_definition?(method_name)
+      Analysis::DependencyRecorder.read_name(:defines, method_name) if Analysis::DependencyRecorder.active?
+      return true if toplevel_definition_rows.key?(method_name.to_sym)
+
+      false
+    end
+
+    # Issue #2336 — {#module_function_def?}'s `:both` reading for a def in any file: whether `def_node`, an instance
+    # def of `owner`, is a module function by a deferred-range row over it (`module_function def x`, or a bare
+    # `module_function` before it), which the singleton def table does not mirror for the argument form.
+    def module_function_row_def?(def_node, owner)
+      start = def_node.location.start_offset
+      name = def_node.name
+      owner = owner.to_s
+      discovered_deferred_ranges.each_value.any? do |entries|
+        entries.any? do |(row_start, _finish, row_name, kind, row_owner)|
+          row_start == start && kind == :both && row_name == name && row_owner == owner
+        end
+      end
+    end
+
     # `{ name => ownerless definition rows }` over `discovered_deferred_ranges`, {MAIN_SINGLETON_ROWS} for a name with
     # a singleton row. Held by the table's identity (a file's merged copy and the seed), released with the run.
     def toplevel_definition_rows

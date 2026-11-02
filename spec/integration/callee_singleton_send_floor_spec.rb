@@ -337,9 +337,10 @@ RSpec.describe "the callee mutation floor resolves singleton self-calls and lite
       RUBY
     end
 
-    # Guard: a non-literal target is unchanged from the base engine (Ruby answers "X"; the report stays).
-    it "leaves a non-literal `send` target as it was" do
-      expect(diagnostics(instance_run("send(name, acc)", <<~RUBY))).to eq(undefined_upcase)
+    # Issue #2336 — a non-literal target names no def the floor can read, so every argument it passes floors (Ruby
+    # answers "X"; the report was a false positive).
+    it "floors every argument a non-literal `send` target passes" do
+      expect(diagnostics(instance_run("send(name, acc)", <<~RUBY))).to eq([])
         def name = :poke
         def poke(acc) = (acc[0] = "x")
       RUBY

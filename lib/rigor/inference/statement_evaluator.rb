@@ -554,14 +554,37 @@ module Rigor
 
       # The `[def, offset]` pairs a self-dispatch `call_node` that passes a local resolves to
       # ({#resolve_self_callees}) — the defs whose census the callee floor reads; empty for any other call.
+      #
+      # Issue #2336 — a call no def answers that runs code the floor cannot see against its arguments (`pr.call(acc)`,
+      # `obj.method(:poke).call(acc)`, `send(name, acc)`; {#opaque_sink_call?}) answers {OPAQUE_CALLEES}: every
+      # argument it passes reads as written.
       def argument_mutating_callees(call_node)
-        return receiver_callees(call_node) unless self_dispatch_call?(call_node)
+        unless self_dispatch_call?(call_node)
+          found = receiver_callees(call_node)
+          return found unless found.empty? && opaque_sink_call?(call_node)
+
+          return call_passes_local_argument?(call_node) ? OPAQUE_CALLEES : NO_CALLEES
+        end
         # Fast path — only a local passed as an argument can be reported, so a call with none skips the def
         # resolution and the body scan entirely (the overwhelming common case).
         return NO_CALLEES unless call_passes_local_argument?(call_node)
 
-        resolve_self_callees(call_node)
+        found = resolve_self_callees(call_node)
+        found.empty? && opaque_sink_call?(call_node) ? OPAQUE_CALLEES : found
       end
+
+      # True for a call whose arguments go to code no def shows: `call` / `instance_exec` / `class_exec` /
+      # `module_exec` on an explicit receiver (a Proc, a Method, a lambda), or a `send` whose target is no literal
+      # ({CalleeWriteCensus}, which reads the same calls inside a callee).
+      def opaque_sink_call?(call_node)
+        name = call_node.name
+        return !CalleeWriteCensus.literal_send?(call_node) if SEND_HAND_OFFS.include?(name)
+
+        OPAQUE_SINKS.include?(name) && !self_dispatch_call?(call_node)
+      end
+
+      OPAQUE_SINKS = %i[call instance_exec class_exec module_exec].to_set.freeze
+      private_constant :OPAQUE_SINKS
 
       # Issue #2510, #2515 — the `[def, 0, owner]` triple an explicit-receiver `recv.name(local)` call resolves to when
       # `recv` types as a project class object (`Const`, a bare constant or any constant path, or a local holding
@@ -588,7 +611,23 @@ module Rigor
       def receiver_callees_in(typing_scope, call_node, receiver = call_node.receiver)
         return NO_CALLEES if overridden_constructor?(receiver, typing_scope)
 
-        callees_for_receiver_type(typing_scope.type_of(receiver), call_node.name)
+        receiver_type = typing_scope.type_of(receiver)
+        own = callees_for_receiver_type(receiver_type, call_node.name)
+        return own unless own.empty? && send_hand_off?(call_node)
+
+        shifted_callees(callees_for_receiver_type(receiver_type, send_target(call_node)))
+      end
+
+      # Issue #2336 — the method a `send` hand-off names (`recv.send(:poke, h)`, `send("poke", h)`).
+      def send_target(call_node) = call_node.arguments.arguments.first.unescaped.to_sym
+
+      # `callees` with each offset one further: the callees of a `send` hand-off's target, whose first argument is the
+      # name. A capped answer stays as it is.
+      def shifted_callees(callees)
+        return callees if callees.empty? || callees.equal?(CAPPED_HAND_OFF)
+
+        shifted = callees.map { |def_node, offset, owner| [def_node, offset + 1, owner] }
+        callees.is_a?(UnionCallees) ? UnionCallees.new(shifted) : shifted
       end
 
       # `[def, 0, owner]` for `name` called on a receiver of `receiver_type`, or none.
@@ -607,7 +646,7 @@ module Rigor
           else scope.user_def_through_ancestors(class_name, name)
           end
         side = singleton ? :singleton : :instance
-        return method_missing_callees(class_name, side, name, 0) if found.nil?
+        return unresolved_receiver_callees(receiver_type, side, name) if found.nil?
 
         [[found, 0, walked_owner(defining, class_name, CalleeOwner.new(receiver_type))]]
       end
@@ -619,6 +658,29 @@ module Rigor
       def walked_owner(defining, class_name, owner)
         defining == class_name ? owner : FLOOR_ALL
       end
+
+      # Issue #2336 — what a call of `name` on a receiver of `receiver_type` reaches when its `side` chain has no def of
+      # the name: a body a `define_method` / `define_singleton_method` / `alias_method` call gives it
+      # ({#ownerless_body?}), floored outright; on the singleton side, a same-named instance def
+      # written as a `module_function def x` argument ({Scope#module_function_row_def?}), which the singleton def table
+      # does not hold, walked as a class method; else the chain's `method_missing`.
+      def unresolved_receiver_callees(receiver_type, side, name)
+        class_name = receiver_type.class_name
+        return OPAQUE_CALLEES if ownerless_body?(name)
+
+        if side == :singleton
+          found, defining = scope.user_def_through_ancestors(class_name, name)
+          if found && scope.module_function_row_def?(found, defining)
+            return [[found, 0, walked_owner(defining, class_name, CalleeOwner.new(receiver_type))]]
+          end
+        end
+        method_missing_callees(class_name, side, name, 0)
+      end
+
+      # Issue #2336 — true when the project gives `name` a body no def table holds, through an ownerless definition row
+      # ({Scope#ownerless_definition?}: a `define_method`, `define_singleton_method` or `alias_method` call of that
+      # literal name on any receiver, or a def outside every class).
+      def ownerless_body?(name) = scope.ownerless_definition?(name)
 
       # Issue #2521 (#2570 review) — the `[def, offset, FLOOR_ALL]` a call of `name` that resolves to no def on
       # `class_name`'s `side` chain reaches when the chain defines `method_missing` and `name` is not a method every
@@ -653,11 +715,16 @@ module Rigor
       # def of the name may take more of them. A hand-off to it floors the handed parameter outright.
       FLOOR_EVERY = :floor_every
 
+      # Issue #2336 — the answer for a call no def resolves whose arguments the floor reads as written: an opaque sink
+      # ({#opaque_sink_call?}), or a name a definer other than a `def` gives a body ({#ownerless_body?}). No def is
+      # read; every argument floors as under {FLOOR_EVERY}.
+      OPAQUE_CALLEES = [[nil, 0, FLOOR_EVERY].freeze].freeze
+
       # The owner of a top-level def reached from inside a class: its hand-offs resolve at the top level, where `self`
       # is no instance of the caller's class.
       TOPLEVEL_OWNER = CalleeOwner.new(nil)
       OVER_APPROXIMATING = [FLOOR_ALL, FLOOR_EVERY].freeze
-      private_constant :CalleeOwner, :FLOOR_ALL, :FLOOR_EVERY, :TOPLEVEL_OWNER, :OVER_APPROXIMATING
+      private_constant :CalleeOwner, :FLOOR_ALL, :FLOOR_EVERY, :OPAQUE_CALLEES, :TOPLEVEL_OWNER, :OVER_APPROXIMATING
 
       # True for `Const.new` where the class defines its own `self.new`, whose result is not an instance of `Const`.
       def overridden_constructor?(receiver, typing_scope)
@@ -812,16 +879,41 @@ module Rigor
       # The `[def, offset, owner]` triples a call inside `def_node`'s body hands its parameter to: a self-call
       # ({#resolve_self_callees}, owner nil) or a call on a constant / `Const.new` receiver ({#hand_off_receiver?},
       # {#hand_off_receiver_callees}).
+      #
+      # Issue #2336 — a call on `itself` is a self-call, and one on `self.class` resolves on the class object `self`
+      # types as. A call on any other receiver the callee's body cannot type (a call's result: `new.store(h)`,
+      # `instance.helper(h)`; a class variable or a global) resolves by name, as an ivar receiver does. A literal
+      # `send` hand-off on any receiver resolves as its target.
       def hand_off_callees(call_node, def_node, depth = 0)
-        return self_hand_off_callees(call_node) if self_dispatch_call?(call_node)
-
         receiver = call_node.receiver
+        return self_hand_off_callees(call_node) if self_dispatch_call?(call_node) || itself_receiver?(receiver)
+
         if receiver.is_a?(Prism::LocalVariableReadNode) || receiver.is_a?(Prism::ItLocalVariableReadNode)
           return local_receiver_callees(call_node, def_node, depth)
         end
-        return named_instance_callees(call_node.name) if receiver.is_a?(Prism::InstanceVariableReadNode)
+        return receiver_callees_in(scope, call_node) if class_of_self?(receiver)
+        return hand_off_receiver_callees(call_node, def_node) if constant_receiver_form?(receiver)
 
-        hand_off_receiver_callees(call_node, def_node)
+        named_hand_off_callees(call_node)
+      end
+
+      # {#named_instance_callees} for `call_node`'s name, or a literal `send` hand-off's target.
+      def named_hand_off_callees(call_node)
+        return named_instance_callees(call_node.name) unless send_hand_off?(call_node)
+
+        shifted_callees(named_instance_callees(send_target(call_node)))
+      end
+
+      # `itself` / `self.itself`, which is `self`.
+      def itself_receiver?(receiver)
+        receiver.is_a?(Prism::CallNode) && receiver.name == :itself && receiver.arguments.nil? &&
+          receiver.block.nil? && self_dispatch_call?(receiver)
+      end
+
+      # `self.class`, the class object of `self`.
+      def class_of_self?(receiver)
+        receiver.is_a?(Prism::CallNode) && receiver.name == :class && receiver.receiver.is_a?(Prism::SelfNode) &&
+          receiver.arguments.nil? && receiver.block.nil?
       end
 
       # {#resolve_self_callees} for a self-call that is a hand-off inside a def. In a def the evaluator is the top
@@ -843,16 +935,10 @@ module Rigor
         UnionCallees.new(found + named)
       end
 
-      # True for a call on a receiver the callee's body can type without its locals (a constant or `Const.new`), on a
-      # local of the callee (#2515: {#local_receiver_callees}), or, issue #2595, on an ivar, whose type the def's AST
-      # does not show, so it resolves by name ({#named_instance_callees}) as an untyped local does.
-      def hand_off_receiver?(node)
-        return false unless node.is_a?(Prism::CallNode)
-
-        receiver = node.receiver
-        receiver.is_a?(Prism::LocalVariableReadNode) || receiver.is_a?(Prism::ItLocalVariableReadNode) ||
-          receiver.is_a?(Prism::InstanceVariableReadNode) || constant_receiver_form?(receiver)
-      end
+      # True for a call on an explicit receiver: one the callee's body can type without its locals (a constant or
+      # `Const.new`), a local of the callee (#2515: {#local_receiver_callees}), or (issue #2595 for an ivar, #2336 for
+      # any other) one whose type the def's AST does not show, so it resolves by name ({#named_hand_off_callees}).
+      def hand_off_receiver?(node) = node.is_a?(Prism::CallNode) && !node.receiver.nil?
 
       def constant_receiver_form?(receiver)
         case receiver
@@ -872,7 +958,7 @@ module Rigor
         typed = receiver.is_a?(Prism::LocalVariableReadNode) && receiver.depth == depth
         forms = typed_local_forms(def_node, receiver.name) if typed
         forms = nil if forms && local_object_opened?(def_node, call_node)
-        return named_instance_callees(call_node.name) if forms.nil?
+        return named_hand_off_callees(call_node) if forms.nil?
 
         found = forms.flat_map { |form| hand_off_receiver_callees(call_node, def_node, form) }
         found.size > 1 ? found.uniq { |callee, _, owner| [callee.object_id, owner] } : found
@@ -5585,6 +5671,7 @@ module Rigor
       # as for any hand-off. A callee reached through an inherited lookup ({FLOOR_ALL}) reads as written, as its
       # parameters do.
       def rest_parameter_written?(def_node, owner)
+        return true if def_node.nil?
         return false unless variable_arity?(def_node)
         return true if owner == FLOOR_ALL
 
@@ -5785,10 +5872,23 @@ module Rigor
       def callee_write_census(def_node)
         def_census(:writes, def_node) do
           CalleeWriteCensus.scan(def_node.body, census_seeds(def_node),
-                                 mutators: CALLEE_WRITE_MUTATORS, handled: CONTENT_MUTATORS, fresh: FRESH_RESULTS,
-                                 copiers: CENSUS_COPIERS,
-                                 rebinds: parameter_rebinds(def_node))
+                                 tables: CENSUS_TABLES, rebinds: parameter_rebinds(def_node),
+                                 returns: returns_counted?(def_node))
         end
+      end
+
+      # Issue #2336 — the calls whose block is a method body of the class (`define_method(:go) { poke(h) }`): the
+      # hand-off walk leaves it out ({#each_node_in_method_scope}), so the write census reads a call in it that passes
+      # a parameter as written ({CalleeWriteCensus}). A block run on another `self` (`instance_exec`, `Class.new`)
+      # stays out: a self-call there is not a call on the method's receiver.
+      METHOD_BODY_BLOCK_CALLS = %i[define_method define_singleton_method].to_set.freeze
+      private_constant :METHOD_BODY_BLOCK_CALLS
+
+      # Issue #2336 — whether the value a def returns counts as a write of the parameter it is ({CalleeWriteCensus}):
+      # not for `initialize`, whose value `new` drops, nor for a setter (`x=`, `[]=`), whose value an assignment drops.
+      def returns_counted?(def_node)
+        name = def_node.name
+        name != :initialize && !name.end_with?("=")
       end
 
       # The parameters {#callee_write_census} follows: each content parameter holds the caller's argument itself
@@ -5857,9 +5957,10 @@ module Rigor
         each_node_in_method_scope(def_node.body, 0) do |node, depth|
           case node
           when Prism::ForwardingSuperNode
-            (names ||= Set.new).merge(slots.keys).merge(rests)
+            (names ||= Set.new).merge(slots.keys.reject { |name| after_rebind?(def_node, name, node) }).merge(rests)
           when Prism::SuperNode
-            (names ||= Set.new).merge(super_argument_parameters(node, slots, depth))
+            handed = super_argument_parameters(node, slots, depth).reject { |name| after_rebind?(def_node, name, node) }
+            (names ||= Set.new).merge(handed)
             names.merge(rests & splatted_rests(node))
           end
         end
@@ -6046,7 +6147,7 @@ module Rigor
       def forwarding_calls(def_node, slots)
         calls = []
         context = HandOffContext.new(census: callee_write_census(def_node), seeds: census_seeds(def_node),
-                                     rests: rest_parameter_names(def_node))
+                                     rests: rest_parameter_names(def_node), rebinds: parameter_rebinds(def_node))
         each_node_in_method_scope(def_node.body, 0) do |descendant, depth|
           next unless self_dispatch_call?(descendant) || hand_off_receiver?(descendant)
 
@@ -6100,14 +6201,21 @@ module Rigor
       def bound_parameter_names(callee_slots, slot)
         if slot == ANY_SLOT
           callee_slots.filter_map { |name, at| name if at.is_a?(Integer) }
+        elsif slot == ANY_KEYWORD
+          callee_slots.filter_map { |name, at| name if at.is_a?(Symbol) }
         else
           callee_slots.filter_map { |name, at| name if at == slot }
         end
       end
 
+      # Issue #2336 — a double splat of the def's own keyword rest (`poke(**kw)`) hands it on whole, at {ANY_KEYWORD}.
       def forwarded_keywords(hash_node, slots, depth, context)
         found = []
         hash_node.elements.each do |pair|
+          if pair.is_a?(Prism::AssocSplatNode)
+            rest = splatted_keyword_rest(pair, depth, context)
+            found << [rest, ANY_KEYWORD] if rest
+          end
           next unless pair.is_a?(Prism::AssocNode) && pair.key.is_a?(Prism::SymbolNode)
 
           keyword = pair.key.unescaped.to_sym
@@ -6120,9 +6228,12 @@ module Rigor
       # an alias or an expression ({CalleeWriteCensus.handed_aliases}). An element of a named rest or keyword rest
       # (`x = args[0]; poke(x)`, `poke(kw[:h])`) hands on that rest, under {REST_PARAMETER} / {KEYWORD_REST_PARAMETER}
       # ({#forwarding_slots}).
+      #
+      # Issue #2336 — a read of the parameter after the def rebound it to a new object (`acc = acc.dup; poke(acc)`)
+      # hands on the copy, not the caller's argument ({#after_rebind?}).
       def handed_names(node, slots, depth, context)
         name = parameter_read_name(node, slots, depth)
-        yield name if name
+        yield name if name && !CalleeWriteCensus.rebound?(context.rebinds, name, node)
         node = node.value if node.is_a?(Prism::ImplicitNode)
         aliases = CalleeWriteCensus.handed_aliases(context.census, context.seeds, node, depth,
                                                    fresh: FRESH_RESULTS, copiers: CENSUS_COPIERS)
@@ -6135,6 +6246,15 @@ module Rigor
         end
       end
 
+      # The keyword-rest key a `**kw` double splat of the def's own named keyword rest hands on whole, or nil.
+      def splatted_keyword_rest(pair, depth, context)
+        read = pair.value
+        return unless read.is_a?(Prism::LocalVariableReadNode) && read.depth == depth
+
+        rest = context.rests[read.name]
+        rest if rest == KEYWORD_REST_PARAMETER
+      end
+
       # The rest key a `*args` splat of the def's own named rest hands on whole (`poke(*args)`), or nil.
       def splatted_rest(argument, depth, context)
         read = argument.is_a?(Prism::SplatNode) ? argument.expression : nil
@@ -6144,10 +6264,11 @@ module Rigor
         rest if rest == REST_PARAMETER
       end
 
-      # What {#forwarded_parameters} reads a def's hand-offs with: its write census, its census seeds and its named
-      # rests.
-      HandOffContext = Data.define(:census, :seeds, :rests)
-      NO_HAND_OFF_CONTEXT = HandOffContext.new(census: CalleeWriteCensus::EMPTY, seeds: {}.freeze, rests: {}.freeze)
+      # What {#forwarded_parameters} reads a def's hand-offs with: its write census, its census seeds, its named
+      # rests and its parameter rebinds ({#parameter_rebinds}).
+      HandOffContext = Data.define(:census, :seeds, :rests, :rebinds)
+      NO_HAND_OFF_CONTEXT = HandOffContext.new(census: CalleeWriteCensus::EMPTY, seeds: {}.freeze, rests: {}.freeze,
+                                               rebinds: {}.freeze)
       private_constant :HandOffContext, :NO_HAND_OFF_CONTEXT
 
       # The slots a hand-off's forwarded name maps to: each content parameter's, and {ANY_SLOT} / {ANY_KEYWORD} for the
@@ -6232,9 +6353,16 @@ module Rigor
       # top-level def of that name (Ruby searches `Object` before `method_missing`, so with both the top-level def runs
       # and the `method_missing` reading is the over-approximation; both are returned and the top-level one floors
       # every argument).
+      #
+      # Issue #2336 — a name nothing above answers floors every argument when a `define_method` /
+      # `define_singleton_method` / `alias_method` call gives it a body ({#ownerless_body?}).
       def unanswered_self_callees(node, class_name, side)
         missing = self_method_missing_callees(node, class_name, side)
         top = top_level_callees(node, class_name, side)
+        if missing.empty? && top.empty?
+          name = send_hand_off?(node) ? send_target(node) : node.name
+          return ownerless_body?(name) ? OPAQUE_CALLEES : NO_CALLEES
+        end
         return top if missing.empty?
         return missing if top.empty?
 
@@ -6312,15 +6440,13 @@ module Rigor
         found && [found, 0]
       end
 
-      # True for a `send` / `public_send` whose first argument is a symbol literal (the target name).
+      # True for a `send` / `public_send` / `__send__` whose first argument is a literal target name: a symbol, or
+      # (issue #2336) a string (`send("poke", h)`).
       def send_hand_off?(node)
-        return false unless SEND_HAND_OFFS.include?(node.name)
-
-        args = node.arguments
-        args.is_a?(Prism::ArgumentsNode) && args.arguments.first.is_a?(Prism::SymbolNode)
+        SEND_HAND_OFFS.include?(node.name) && CalleeWriteCensus.literal_send?(node)
       end
 
-      SEND_HAND_OFFS = %i[send public_send].freeze
+      SEND_HAND_OFFS = %i[send public_send __send__].freeze
       NO_CALLEES = [].freeze
       private_constant :SEND_HAND_OFFS, :NO_CALLEES
 
@@ -7885,7 +8011,11 @@ module Rigor
       # the widening reads ({MutationWidening::SHAPE_MUTATORS}) and the content scans' own names. A Set-only adder
       # stays out: `merge` on a Hash returns a new Hash.
       CALLEE_WRITE_MUTATORS = (MutationWidening::SHAPE_MUTATORS | CONTENT_MUTATORS).freeze
-      private_constant :CALLEE_WRITE_MUTATORS
+      # The tables {#callee_write_census} scans with.
+      CENSUS_TABLES = CalleeWriteCensus::Tables.new(mutators: CALLEE_WRITE_MUTATORS, handled: CONTENT_MUTATORS,
+                                                    fresh: FRESH_RESULTS, copiers: CENSUS_COPIERS,
+                                                    foreign_calls: METHOD_BODY_BLOCK_CALLS)
+      private_constant :CALLEE_WRITE_MUTATORS, :CENSUS_TABLES
 
       # The shared "not a content mutation" answer. This predicate runs on every node of every block, loop and
       # method body it censuses (~950k calls on the lib self-check) and almost always declines, so a fresh

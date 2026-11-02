@@ -12,6 +12,11 @@ RSpec.describe "the callee floor follows the remaining hand-off shapes (#2336)",
     analyze(files: { "code.rb" => source }).diagnostics.reject { |d| d.severity == :info }.map(&:qualified_rule)
   end
 
+  def rules_with_sig(source, sig)
+    analyze(files: { "code.rb" => source }, sig: { "code.rbs" => sig })
+      .diagnostics.reject { |d| d.severity == :info }.map(&:qualified_rule)
+  end
+
   let(:always) { ["flow.always-truthy-condition"] }
 
   # `defs` is more top-level code, `call` the statement of `Caller#own` between the literal and the read, `own` more
@@ -221,10 +226,12 @@ RSpec.describe "the callee floor follows the remaining hand-off shapes (#2336)",
       "a part of it" => "def get(h) = h.fetch(:format)",
       "a copy made after a rebind" => "def get(h) = (h = h.dup; h)",
       "a setter's value" => "def get=(h)\n    @h = h\n  end",
+      "an index writer's value" => "def []=(k, h)\n    @h = h\n  end",
       "the parameter from a lambda's return" => "def get(h)\n    l = -> { return h }\n    l.call\n    {}\n  end"
     }.each do |label, defn|
       it "keeps the literal when the callee returns #{label}" do
-        call = defn.include?("get=") ? "Base.new.get = options" : "Base.new.get(options)"
+        call = { "get=" => "Base.new.get = options", "[]=" => "Base.new[:k] = options" }
+               .find { |key, _| defn.include?(key) }&.last || "Base.new.get(options)"
         expect(rules(program("class Base\n  #{defn}\nend", call))).to eq(always)
       end
     end
@@ -270,6 +277,37 @@ RSpec.describe "the callee floor follows the remaining hand-off shapes (#2336)",
       it "floors through #{label}" do
         expect(rules(program(defs, call))).to eq([])
       end
+    end
+
+    # Issue #2336 review — a body the receiver's own class or singleton gets from a definer answers ahead of a
+    # same-named core method (`Kernel#select`, `Object#tap`, `Kernel#format`), so the core name does not exempt it.
+    {
+      "define_singleton_method of a Kernel name" =>
+        ["class Svc3\nend\nSvc3.define_singleton_method(:select) { |h| h[:format] = \"json\" }",
+         "Svc3.select(options)"],
+      "alias_method of a Kernel name in class << self" =>
+        ["class Svc2\n  class << self\n    def real_open(h) = h[:format] = \"json\"\n    " \
+         "alias_method :open, :real_open\n  end\nend", "Svc2.open(options)"],
+      "define_method of an Object name" =>
+        ["class Item\nend\nItem.define_method(:tap) { |h| h[:format] = \"json\" }", "Item.new.tap(options)"],
+      "define_method of a Kernel name on a constant" =>
+        ["class Conn\nend\nConn.define_method(:open) { |h| h[:format] = \"json\" }", "Conn.new.open(options)"],
+      "a class-body define_method of a Kernel name" =>
+        ["class Svc\n  define_method(:format) { |h| h[:format] = \"json\" }\nend", "Svc.new.format(options)"],
+      "a class-body define_method of a Kernel name behind a self-call" =>
+        ["class Svc\n  define_method(:format) { |h| h[:format] = \"json\" }\n  def run(h) = format(h)\nend",
+         "Svc.new.run(options)"]
+    }.each do |label, (defs, call)|
+      it "floors through #{label} ahead of the core method" do
+        expect(rules(program(defs, call))).to eq([])
+      end
+    end
+
+    # A top-level def lives on `Object`, so the receiver's own core method (`Hash#store`) answers ahead of it.
+    it "keeps the literal when the receiver's class declares the name a top-level def has" do
+      defs = "def store(k, v) = v[:format] = \"json\"\nclass Bag < Hash\nend"
+      source = program(defs, "Bag.new.store(:k, options)")
+      expect(rules_with_sig(source, "class Bag < ::Hash[untyped, untyped]\nend\n")).to eq(always)
     end
 
     # Guard: a module's plain instance def is not callable on the module; the literal stays.

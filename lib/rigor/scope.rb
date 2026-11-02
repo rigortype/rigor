@@ -1525,15 +1525,33 @@ module Rigor
 
     # Issue #2336 — whether the project gives `method_name` a body through an ownerless definition row
     # ({#toplevel_definition_rows}): a `define_method` / `define_singleton_method` / `alias_method` call with that
-    # literal name on any receiver, or a def outside every class body. The callee mutation floor reads a call no def
-    # table answers as one such body may run. The answer depends on every file, so an incremental run records the
-    # `defines:<name>` edge either way.
-    def ownerless_definition?(method_name)
+    # literal name on any receiver, a def in a block, or (with `top_level:`) a def outside every class body. The
+    # callee mutation floor reads a call no def table answers as one such body may run. The answer depends on every
+    # file, so an incremental run records the `defines:<name>` edge either way.
+    def ownerless_definition?(method_name, top_level: true)
       Analysis::DependencyRecorder.read_name(:defines, method_name) if Analysis::DependencyRecorder.active?
-      return true if toplevel_definition_rows.key?(method_name.to_sym)
+      name = method_name.to_sym
+      return true if top_level ? toplevel_definition_rows.key?(name) : deferred_definition_names.include?(name)
 
       false
     end
+
+    # The names of the ownerless rows that claim no side ({#ownerless_definition?} without `top_level:`): a definer
+    # call's literal name and a def in a block. Held by the table's identity, as {#toplevel_definition_rows} is.
+    def deferred_definition_names
+      ranges = @discovery.discovered_deferred_ranges
+      slots = (Thread.current[DEFERRED_NAMES_KEY] ||= [])
+      slot = slots.find { |entry| entry[0].equal?(ranges) }
+      return slot[1] if slot
+
+      names = Set.new
+      ranges.each_value do |entries|
+        entries.each { |(_start, _finish, name, kind, owner)| names << name if name && kind.nil? && owner.nil? }
+      end
+      slots.unshift([ranges, names.freeze]).slice!(2..)
+      names
+    end
+    private :deferred_definition_names
 
     # Issue #2336 — {#module_function_def?}'s `:both` reading for a def in any file: whether `def_node`, an instance
     # def of `owner`, is a module function by a deferred-range row over it (`module_function def x`, or a bare
@@ -1587,7 +1605,8 @@ module Rigor
     MAIN_SINGLETON_ROWS = -1
     TOPLEVEL_ROWS_KEY = RunScopedSlots.register(:__rigor_toplevel_definition_rows)
     METHOD_ALIASES_KEY = RunScopedSlots.register(:__rigor_method_alias_names)
-    private_constant :MAIN_SINGLETON_ROWS, :TOPLEVEL_ROWS_KEY, :METHOD_ALIASES_KEY
+    DEFERRED_NAMES_KEY = RunScopedSlots.register(:__rigor_deferred_definition_names)
+    private_constant :MAIN_SINGLETON_ROWS, :TOPLEVEL_ROWS_KEY, :METHOD_ALIASES_KEY, :DEFERRED_NAMES_KEY
 
     # Issue #316 — the CONFIDENCE-GATED companion of {#top_level_def_for}, and the only accessor the type
     # inference may bind through. {#top_level_def_for} stays unrestricted because it also serves the

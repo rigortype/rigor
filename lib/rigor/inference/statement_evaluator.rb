@@ -663,13 +663,13 @@ module Rigor
       end
 
       # Issue #2336 — what a call of `name` on a receiver of `receiver_type` reaches when its `side` chain has no def of
-      # the name: a body a `define_method` / `define_singleton_method` / `alias_method` call gives it
-      # ({#ownerless_body?}), floored outright; on the singleton side, a same-named instance def
+      # the name: a body an ownerless definition row may give it ({#receiver_ownerless_body?}), floored outright; on
+      # the singleton side, a same-named instance def
       # written as a `module_function def x` argument ({Scope#module_function_row_def?}), which the singleton def table
       # does not hold, walked as a class method; else the chain's `method_missing`.
       def unresolved_receiver_callees(receiver_type, side, name)
         class_name = receiver_type.class_name
-        return OPAQUE_CALLEES if ownerless_body?(name, class_name, side)
+        return OPAQUE_CALLEES if receiver_ownerless_body?(name, class_name)
 
         if side == :singleton
           found, defining = scope.user_def_through_ancestors(class_name, name)
@@ -680,15 +680,28 @@ module Rigor
         method_missing_callees(class_name, side, name, 0)
       end
 
-      # Issue #2336 — true when the project gives `name` a body no def table holds, through an ownerless definition row
-      # ({Scope#ownerless_definition?}: a `define_method`, `define_singleton_method` or `alias_method` call of that
-      # literal name on any receiver, or a def in a block or outside every class). A name RBS declares on `Object`
-      # (`Class` on the singleton side) or on `class_name` is answered by that method first, so it is never such a
-      # body (`warn(msg)`, `Kernel#warn`); a refinement of it is `InEffectRefinements`' to read.
-      def ownerless_body?(name, class_name, side)
-        base = side == :singleton ? "Class" : "Object"
-        return false if Reflection.instance_method_definition(base, name, scope: scope)
-        return false if project_class?(class_name) && rbs_declares?(class_name, name)
+      # Issue #2336 — true when an ownerless definition row may give `name` a body on `class_name`, the receiver of an
+      # explicit-receiver call ({Scope#ownerless_definition?}). A `define_method` / `define_singleton_method` /
+      # `alias_method` call or a def in a block claims no owner, so it may be the receiver's own and always counts. A
+      # top-level def lives on `Object`, so a method RBS declares on the receiver's class answers ahead of it
+      # (`Bag < Hash` and a top-level `def store`): the top-level rows count only when RBS declares none.
+      def receiver_ownerless_body?(name, class_name)
+        return true if scope.ownerless_definition?(name, top_level: false)
+        return false if rbs_declares?(class_name, name)
+
+        scope.ownerless_definition?(name)
+      end
+
+      # Issue #2336 — true when a body no def table holds may answer the receiverless call of `name` in `class_name`'s
+      # `side` chain, which no def, `method_missing` or top-level def answers: a definer the chain records
+      # (`define_method(:format)` in the class body; {Scope#discovered_method_through_ancestors?}), or, for a name RBS
+      # does not declare on `Object` (`Class` on the singleton side), any ownerless definition row. A name `Object`
+      # declares (`warn`, `format`) is answered by that method once the chain has no definer of it, so a `def warn` in a
+      # `refine Kernel` block or a `define_method` on another class does not count.
+      def self_ownerless_body?(name, class_name, side)
+        return true if scope.discovered_method_through_ancestors?(class_name, name, side)
+        return false if Reflection.instance_method_definition(side == :singleton ? "Class" : "Object", name,
+                                                              scope: scope)
 
         scope.ownerless_definition?(name)
       end
@@ -727,7 +740,8 @@ module Rigor
       FLOOR_EVERY = :floor_every
 
       # Issue #2336 — the answer for a call no def resolves whose arguments the floor reads as written: an opaque sink
-      # ({#opaque_sink_call?}), or a name a definer other than a `def` gives a body ({#ownerless_body?}). No def is
+      # ({#opaque_sink_call?}), or a name a definer other than a `def` may give a body ({#receiver_ownerless_body?},
+      # {#self_ownerless_body?}). No def is
       # read; every argument floors as under {FLOOR_EVERY}.
       OPAQUE_CALLEES = [[nil, 0, FLOOR_EVERY].freeze].freeze
 
@@ -6391,13 +6405,13 @@ module Rigor
       # every argument).
       #
       # Issue #2336 — a name nothing above answers floors every argument when a `define_method` /
-      # `define_singleton_method` / `alias_method` call gives it a body ({#ownerless_body?}).
+      # `define_singleton_method` / `alias_method` call gives it a body ({#self_ownerless_body?}).
       def unanswered_self_callees(node, class_name, side)
         missing = self_method_missing_callees(node, class_name, side)
         top = top_level_callees(node, class_name, side)
         if missing.empty? && top.empty?
           name = send_hand_off?(node) ? send_target(node) : node.name
-          return ownerless_body?(name, class_name, side) ? OPAQUE_CALLEES : NO_CALLEES
+          return self_ownerless_body?(name, class_name, side) ? OPAQUE_CALLEES : NO_CALLEES
         end
         return top if missing.empty?
         return missing if top.empty?

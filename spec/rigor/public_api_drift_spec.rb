@@ -135,7 +135,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     optimistic_local_miss(req:name)
     optimistic_locals()
     optimistic_origins()
-    ownerless_definition?(req:method_name)
+    ownerless_definition?(req:method_name,key:top_level)
     param_inferred_types()
     parameter_envelopes_of(req:class_name)
     plugin_typed_call?(req:node)

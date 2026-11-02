@@ -394,6 +394,32 @@ RSpec.describe Rigor::CLI::CoverageCommand do
       expect(err).to eq("missing.rb:1:1: error: no such file or directory\n")
     end
 
+    # #2206 — paths that name no Ruby file are said to hold none, not to be missing a path argument.
+    it "says no Ruby files are under the given paths, and exits with the usage code" do
+      FileUtils.mkdir_p("emptydir")
+
+      status, _out, err = run(["emptydir"])
+
+      expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+      expect(err).to include("coverage: no Ruby files under the given paths")
+      expect(err).not_to include("at least one path is required")
+    end
+
+    # #2206 — an existing file that is not `.rb` is no longer measured, as `check` treats it.
+    it "refuses a named non-Ruby file on its own, and skips it beside a Ruby file" do
+      File.write("Rakefile", "task :x\n")
+      File.write("ok.rb", "x = 1\n")
+
+      alone_status, _out, alone_err = run(["Rakefile"])
+      mixed_status, mixed_out, mixed_err = run(["--format", "json", "Rakefile", "ok.rb"])
+
+      expect(alone_status).to eq(Rigor::CLI::EXIT_USAGE)
+      expect(alone_err).to eq("Rakefile:1:1: error: not a Ruby file (expected `.rb` or a directory)\n")
+      expect(mixed_status).to eq(0)
+      expect(mixed_err).to eq("Rakefile:1:1: warning: not a Ruby file (expected `.rb` or a directory) (skipped)\n")
+      expect(JSON.parse(mixed_out).fetch("by_file").map { |f| f.fetch("file") }).to eq(["ok.rb"])
+    end
+
     it "warns that a missing path is skipped beside a file it will read, and still analyses that file" do
       File.write("ok.rb", "x = 1\n")
 

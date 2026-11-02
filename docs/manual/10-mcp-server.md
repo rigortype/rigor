@@ -513,6 +513,12 @@ as `Constant` / `Nominal` / shaped / refined (precise) versus
 
 **Returns:** JSON — the same as `rigor coverage --format json`.
 
+A `paths` entry that is missing, or is not a Ruby file, is reported as
+`rigor coverage` reports it. Beside files that are measured it is skipped, and
+a second text block names it, for example
+`missing.rb:1:1: warning: no such file or directory (skipped)`. When no entry
+holds a Ruby file, the call is `isError: true` and the block says so.
+
 ```json
 {
   "summary": {

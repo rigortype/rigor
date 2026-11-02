@@ -195,7 +195,16 @@ module Rigor
 
       def finish_tool_result(name, args, out, err, exit_code)
         result = with_config_warnings(tool_result(out, err, exit_code), name, args, out)
-        with_shape_notice(result, name, out, err)
+        result = with_shape_notice(result, name, out, err)
+        with_path_warnings(result, name, out, err)
+      end
+
+      # #2206 — `rigor coverage` writes its path warnings (a missing path skipped beside files it measures) to stderr,
+      # which a successful run drops. The tool carries them as a second text block, so an agent sees what was skipped.
+      def with_path_warnings(result, name, out, err)
+        return result unless name == "rigor_coverage" && !out.empty? && !err.strip.empty?
+
+        result.merge(content: result.fetch(:content) + [{ type: "text", text: err }])
       end
 
       def with_shape_notice(result, name, out, err)

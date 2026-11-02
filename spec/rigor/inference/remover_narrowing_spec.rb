@@ -26,6 +26,8 @@ RSpec.describe "collection remover narrowing", type: :runner do
   end
 
   describe "the issue's gradual Hash" do
+    # `pp(h)` hands the Hash on, so it carries no #2555 construction fact (whose remover floor would drop the nil on
+    # its own): this is the gradual carrier the issue reports on.
     def issue_source(remover)
       <<~RUBY
         def key = gets.to_s
@@ -34,6 +36,7 @@ RSpec.describe "collection remover narrowing", type: :runner do
         h[key] = nil
         #{remover}
         h.each_value { |v| v + 1 }
+        pp(h)
       RUBY
     end
 
@@ -62,7 +65,8 @@ RSpec.describe "collection remover narrowing", type: :runner do
         .to eq(["Array[1 | 2] | [1?, 2]"])
     end
 
-    it "keeps the arm a loop stores again after the remover" do
+    # Guard: the loop's join already reads the stored arm back.
+    it "keeps the arm a loop stores again after the remover (guard)" do
       expect(dumped_types("#{maybe_one}a = [mk, 2]\nwhile gets\n  a.compact!\n  a << nil\nend\ndump_type(a)\n"))
         .to eq(["Array[1 | 2 | nil]"])
     end
@@ -128,7 +132,7 @@ RSpec.describe "collection remover narrowing", type: :runner do
       "a numbered parameter" => "a.reject! { _1.nil? }",
       "a rebound parameter" => "a.reject! { |x| (x = 1).nil? }"
     }.each do |form, call|
-      it "does not narrow under #{form}" do
+      it "does not narrow under #{form} (guard)" do
         source = "#{maybe_one}def foo(_x) = gets ? true : false\na = [mk, 2]\n#{call}\ndump_type(a)\n"
         expect(dumped_types(source)).to eq(["Array[1 | 2 | nil]"])
       end

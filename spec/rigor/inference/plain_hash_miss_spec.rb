@@ -114,9 +114,8 @@ RSpec.describe "plain Hash miss on an engine-built local (issue #2555)", type: :
 
     it "leaves a gradual value side without the nil" do
       expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]"])
-        def m(k, s)
-          h = Hash.new
-          h[s] = "x"
+        def m(k, s, t)
+          h = { s => t }
           dump_type(h[k])
         end
       RUBY

@@ -411,6 +411,56 @@ RSpec.describe Rigor::CLI::CheckCommand do
       expect(status).to eq(1)
     end
 
+    # #2233 — a buffer for a file that is not on disk is in no expansion. It used to be skipped silently by a warm
+    # `--incremental`, with "re-analysed 0 file(s)" and no diagnostics, while option A reported it.
+    context "when the buffer is a new file that is not on disk" do
+      def write_new_buffer
+        File.write("buffer_new.rb", "class Fresh\n  def go\n    \"s\".nope_meth\n  end\nend\n")
+      end
+
+      def new_file_argv(*paths)
+        ["--no-ci-detect", "--no-stats", "--incremental",
+         "--tmp-file=buffer_new.rb", "--instead-of=#{File.join(Dir.pwd, 'lib', 'fresh.rb')}", *paths]
+      end
+
+      it "reports the buffer's diagnostics with a path argument" do
+        write_editor_project
+        write_new_buffer
+        run(["--no-ci-detect", "--no-stats", "--incremental", "lib"]) # warm the snapshot from disk
+
+        status, out, err = run(new_file_argv("lib"))
+
+        expect(err).to include("--incremental editor mode — re-analysed 1 file(s)")
+        expect(out).to include("lib/fresh.rb")
+        expect(out).to include("undefined method `nope_meth'")
+        expect(status).to eq(1)
+      end
+
+      it "reports the buffer's diagnostics with no path argument" do
+        write_editor_project
+        write_new_buffer
+        run(["--no-ci-detect", "--no-stats", "--incremental"]) # warm the snapshot over the configured paths
+
+        status, out, = run(new_file_argv)
+
+        expect(out).to include("undefined method `nope_meth'")
+        expect(status).to eq(1)
+      end
+    end
+
+    # #2233 — a second --tmp-file / --instead-of used to overwrite the first pair, so the first buffer was reported
+    # as a missing file and its pair vanished with no message. One buffer per run, so the repeat is a usage error.
+    it "rejects a repeated --tmp-file pair with a usage error under --incremental" do
+      write_editor_project
+      File.write("buffer_other.rb", "class Other2\nend\n")
+      run(["--no-ci-detect", "--no-stats", "--incremental", "lib"])
+
+      status, _out, err = run(editor_argv + ["--tmp-file=buffer_other.rb", "--instead-of=lib/other.rb"])
+
+      expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+      expect(err).to include("--tmp-file and --instead-of given more than once")
+    end
+
     it "leaves the snapshot untouched, so the next on-disk run is unaffected" do
       write_editor_project
       run(["--no-ci-detect", "--no-stats", "--incremental", "lib"])

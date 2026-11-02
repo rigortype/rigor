@@ -631,8 +631,20 @@ module Rigor
         runner = build_runner
         files = @paths ? runner.analysis_file_set(@paths) : runner.analysis_file_set
         rebind_buffer(files)
-        files
+        admit_new_buffer(files)
       end
+
+      # Issue #2233 — a buffer for a file that is not on disk (a new file) is in no expansion, so the set above never
+      # names it: the recheck neither analyses it nor sees its declarations, and the run answers "re-analysed 0 file(s)"
+      # with no diagnostics for the buffer. Option A (single-file scope) analyses the logical path whether or not it
+      # exists; option B joins it to the set the same way, as an added file, so the closure analyses it like any new
+      # file. A buffer already matched by {#rebind_buffer} is in `files` and is returned as it is.
+      def admit_new_buffer(files)
+        return files if @buffer.nil? || files.include?(@buffer.logical_path)
+
+        files + [@buffer.logical_path]
+      end
+      private :admit_new_buffer
 
       # Verification engine (the `--verify-incremental` gate): with NO source edit, re-analyze `subset` fresh
       # and serve every other analyzed file from the baseline cache. Because nothing on disk changed, the

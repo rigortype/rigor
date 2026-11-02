@@ -63,21 +63,39 @@ module Rigor
       def add_editor_mode(parser, options)
         parser.on("--tmp-file=PATH",
                   "Editor mode: read source bytes from PATH instead of --instead-of (paired)") do |value|
+          note_repeated_editor_flag(options, :tmp_file, "--tmp-file")
           options[:tmp_file] = value
         end
         parser.on("--instead-of=PATH",
                   "Editor mode: the logical project path the buffer represents (paired with --tmp-file)") do |value|
+          note_repeated_editor_flag(options, :instead_of, "--instead-of")
           options[:instead_of] = value
         end
       end
 
+      # Issue #2233 — editor mode binds one buffer per run, so a second `--tmp-file` or `--instead-of` cannot be
+      # honoured beside the first. Overwriting it dropped the first pair with no message; the repeat is recorded here
+      # and rejected by {resolve_buffer_binding} as a usage error instead.
+      def note_repeated_editor_flag(options, key, flag)
+        return if options[key].nil?
+
+        (options[:repeated_editor_flags] ||= []) << flag
+      end
+
       # Resolves the editor-mode buffer binding from parsed `options`: returns nil when neither editor-mode flag is set,
       # a `Analysis::BufferBinding` when the pair is valid, or `:usage_error` (after writing the reason to `err`) when
-      # the flags are unpaired or the temp file is unreadable.
+      # a flag is repeated, the flags are unpaired, or the temp file is unreadable.
       def resolve_buffer_binding(options, err:)
         tmp = options[:tmp_file]
         instead = options[:instead_of]
         return nil if tmp.nil? && instead.nil?
+
+        repeated = Array(options[:repeated_editor_flags])
+        unless repeated.empty?
+          err.puts("#{repeated.join(' and ')} given more than once; editor mode takes one buffer per run " \
+                   "(a single --tmp-file / --instead-of pair)")
+          return :usage_error
+        end
 
         if tmp.nil? || instead.nil?
           err.puts("--tmp-file and --instead-of must appear together")

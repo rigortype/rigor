@@ -76,6 +76,16 @@ module Rigor
           (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode))
       end
 
+      # The `def` nodes a receiverless visibility call takes as arguments (`private def x`, #2254). Ruby evaluates
+      # each one before the call, so it runs whenever the call's statement does. A named call with a symbol takes
+      # no def, and a call with a receiver is not read.
+      def visibility_call_defs(node)
+        return [] unless node.is_a?(Prism::CallNode) && node.receiver.nil?
+        return [] unless %i[public private protected module_function].include?(node.name)
+
+        node.arguments&.arguments&.grep(Prism::DefNode) || []
+      end
+
       # The mode after `stmt`, a direct statement of a body, for the readers that walk the statements: `mode`
       # is `true`, `false` or `:uncertain` before it. A {.visibility_reset?} the statement runs ends the mode,
       # and one it may not run (`:maybe_off`, below {.prescan_deferred}) makes an on mode uncertain. A

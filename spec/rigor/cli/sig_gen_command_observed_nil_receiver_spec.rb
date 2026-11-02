@@ -138,7 +138,7 @@ RSpec.describe Rigor::CLI::SigGenCommand do
 
     out = run_observed
     expect(section(out, "Account")).to include("def deposit: (Integer) -> 10")
-    expect(section(out, "Label")).to include('def deposit: ("a") -> 20')
+    expect(section(out, "Label")).to include("def deposit: (String) -> 20")
   end
 
   it "does not bind a before ivar across sibling describes" do
@@ -323,7 +323,7 @@ RSpec.describe Rigor::CLI::SigGenCommand do
 
     out = run_observed
     expect(out).to include("def bar: (Integer) -> 2")
-    expect(out).to include("def bar: (5) -> 3")
+    expect(out).to include("def bar: (Integer) -> 3")
     expect(out).to include("def bar: (untyped) -> 1")
   end
 

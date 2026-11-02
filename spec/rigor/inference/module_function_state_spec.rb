@@ -935,4 +935,21 @@ RSpec.describe Rigor::Inference::ModuleFunctionState do
       expect(indexer.build_discovered_extends(root)).to eq("Nested" => ["Nested"])
     end
   end
+
+  # #2254 — a `def` a receiverless visibility call takes runs with its statement; a named call with a symbol, a call
+  # with a receiver and an unrelated call take none.
+  describe ".visibility_call_defs" do
+    it "returns the def arguments of a receiverless visibility call, and no others" do
+      body = Prism.parse(<<~RUBY).value.statements.body
+        private def a = 1
+        module_function def b = 2
+        public :c
+        self.private def d = 3
+        foo def e = 4
+      RUBY
+
+      expect(body.map { |stmt| described_class.visibility_call_defs(stmt).map(&:name) })
+        .to eq([[:a], [:b], [], [], []])
+    end
+  end
 end

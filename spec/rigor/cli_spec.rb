@@ -2188,7 +2188,7 @@ RSpec.describe Rigor::CLI do
         Dir.chdir(tmpdir) do
           status, out, _err = run_cli("sig-gen", "--params=observed", "--config=#{config}")
           expect(status).to eq(0)
-          expect(out).to include(%(def greet: ("Alice" | "Bob") -> "hi"))
+          expect(out).to include(%(def greet: (String) -> "hi"))
         end
       end
 
@@ -2197,7 +2197,7 @@ RSpec.describe Rigor::CLI do
 
         Dir.chdir(tmpdir) do
           _, out, = run_cli("sig-gen", "--params=observed", "--observe=spec", "--config=#{config}")
-          expect(out).to include(%(def greet: ("Alice" | "Bob") -> "hi"))
+          expect(out).to include(%(def greet: (String) -> "hi"))
         end
       end
 

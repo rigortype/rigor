@@ -690,7 +690,7 @@ two are wired today, one is reserved.
 | Policy | Behaviour |
 | --- | --- |
 | `untyped` (default) | Every parameter is spelled `untyped`. No inference-derived parameter contract is imposed on future callers. The user retains complete authorship over parameter typing. |
-| `observed` | Collect argument types from every call site under `--observe=PATH...` (defaults to the configured `test_paths:`, or whichever of `spec/` and `test/` exist), union per parameter position, erase to RBS, emit the union. With no test root to observe, or a declared root that does not exist or is not read, sig-gen says so on stderr, and `--format=json` carries the same fact in a top-level `observation` key (below). |
+| `observed` | Collect argument types from every call site under `--observe=PATH...` (defaults to the configured `test_paths:`, or whichever of `spec/` and `test/` exist), union per parameter position, erase to RBS, emit the union. A literal argument is widened to its class first, so `"hello"` proposes `String` (#2254). With no test root to observe, or a declared root that does not exist or is not read, sig-gen says so on stderr, and `--format=json` carries the same fact in a top-level `observation` key (below). |
 | `observed-strict` | Reserved. Will additionally widen to capability roles (`_ToStr`, `_ToS`, …) once the role catalog ships. Currently rejected with a usage error. |
 
 Under `--params=observed`, the `--print` / `--diff` JSON payload gains

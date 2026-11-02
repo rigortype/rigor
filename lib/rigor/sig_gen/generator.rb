@@ -934,6 +934,12 @@ module Rigor
         !@in_effect_refinements.class_body_refine?(node)
       end
 
+      # A block call whose members are not this class body's: a `refine` block (#1763), and a `class_methods` block
+      # (#2259), whose members belong to the including class's singleton.
+      def skipped_block_call?(node)
+        refine_block_call?(node) || class_methods_block?(node)
+      end
+
       def class_methods_block?(node)
         node.is_a?(Prism::CallNode) && node.receiver.nil? && node.name == :class_methods &&
           node.block.is_a?(Prism::BlockNode)
@@ -2318,9 +2324,7 @@ module Rigor
             return
           end
         when Prism::CallNode
-          return if refine_block_call?(node)
-          # #2259 — an `attr_*` in `class_methods do … end` declares a method of the including class's singleton.
-          return if class_methods_block?(node)
+          return if skipped_block_call?(node)
 
           collect_attr_call(node, prefix, in_singleton_class, ctx)
         end

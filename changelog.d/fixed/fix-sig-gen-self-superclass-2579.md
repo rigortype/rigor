@@ -1,0 +1,3 @@
+- **[sig-gen]** `sig-gen --write` resolves a nested superclass that shares its outer namespace's class name to the outer class, so a written header is no longer its own superclass and passes `rbs validate`. ([#2661](https://github.com/rigortype/rigor/pull/2661))
+  - Ruby evaluates the superclass before the new constant exists, so `class B < B` inside `module C` inside `module A` names `A::B`. sig-gen used to name the class being opened, and RBS rejected the header with `RBS::RecursiveAncestorError`.
+  - A superclass is dropped only when the token itself names the class being declared, as in a top-level `class B < B` or `class A::B < A::B`. A nested self-name with no outer class is skipped as unresolvable, as before.

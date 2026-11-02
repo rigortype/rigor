@@ -145,7 +145,7 @@ module Rigor
           nesting, superclass = @superclass_nestings[name]
           return [:project, token] if superclass.nil?
 
-          root = resolve_superclass_token(superclass, nesting, @source_classes)
+          root = resolve_superclass_token(superclass, nesting, @source_classes, name)
           name = bare_superclass_name(root)
           return [:project, token] if Reflection.rbs_class_known?(name, environment: @environment)
         end
@@ -450,20 +450,26 @@ module Rigor
         @superclass_nestings.each_with_object({}) do |(full, (nesting, token)), acc|
           next if token.nil? || nesting.empty?
 
-          resolved = resolve_superclass_token(token, nesting, known)
+          resolved = resolve_superclass_token(token, nesting, known, full)
           acc[full] = resolved if resolved && resolved != token
         end
       end
 
       # The first candidate spelling that names a class this run declares or the RBS environment knows, or
-      # nil when none does — an unresolvable superclass is #735's business, not this pass's.
-      def resolve_superclass_token(token, nesting, known)
+      # the token itself when none does — an unresolvable superclass is #735's business, not this pass's.
+      #
+      # `full` is the class whose header carries the token. Ruby evaluates the superclass expression before the
+      # new constant exists, so the innermost candidate `full` itself (`module A; module C; class B < B`, where
+      # `A::C::B` is the class being opened) is not yet a candidate: the lookup falls through to `A::B` (#2579).
+      def resolve_superclass_token(token, nesting, known, full)
         # A rooted token (`::Hash`) already names one class; the nesting must not capture it (#2459).
         return token if token.start_with?("::")
 
         base = token.sub(/\[.*\]\z/, "")
         nesting.length.downto(1) do |i|
           candidate = "#{nesting[0, i].join('::')}::#{base}"
+          next if candidate == full
+
           # The arguments {#record_superclass} computed belong to the top-level class of the bare name, so they are
           # computed again for the class the token resolves to: `Hash` inside a `module Foo` declaring a plain
           # `Foo::Hash` takes none (#2459).
@@ -956,6 +962,11 @@ module Rigor
         # the name it resolves to may be a class another file declares. Resolved once every file has been
         # walked, in {#resolve_superclass_spellings}.
         spelling = generic_superclass_spelling(superclass)
+        # Issue #2579 — a token that names the class being opened (`class A::B < A::B`, or a top-level `class B < B`
+        # with nothing else of that name) would write a self-superclass, which RBS rejects as a recursive ancestor.
+        # No superclass is safer than that, so the declaration is written without one.
+        return if bare_superclass_name(spelling) == full
+
         # The token rides along because `@class_superclasses` is per-FILE scratch, reset before the next
         # file, while this table is whole-run.
         @superclass_nestings[full] = [prefix.dup, spelling]

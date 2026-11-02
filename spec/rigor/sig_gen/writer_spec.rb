@@ -1434,6 +1434,23 @@ end
 
     # #2605 review — rbs loads every `signature_paths:` entry, but the writer rewrites only the sig root, so a bare
     # opening in another signature path holds its class back everywhere.
+    # #2605 review — RBS resolves `module Foo; class ::Set` to the top-level `Set`, so the scan and the writer key it
+    # `Set` alike (#2654) and the class is repaired in both files, not in one.
+    it "repairs a rooted opening nested in a module together with the top-level one" do
+      top = File.join(tmpdir, "sig/a.rbs")
+      rooted = File.join(tmpdir, "sig/d.rbs")
+      FileUtils.mkdir_p(File.dirname(top))
+      File.write(top, "class Set\n  def a: () -> 1\nend\n")
+      File.write(rooted, "module Foo\n  class ::Set\n    def d: () -> 1\n  end\nend\n")
+      w = writer
+
+      w.write_all([], header_spelling: ->(name) { { "Set" => "[unchecked out A]" }[name] })
+
+      expect(File.read(top)).to eq("class Set[unchecked out A]\n  def a: () -> 1\nend\n")
+      expect(File.read(rooted)).to eq("module Foo\n  class ::Set[unchecked out A]\n    def d: () -> 1\n  end\nend\n")
+      expect(w.left_bare).to eq([])
+    end
+
     describe "a bare opening in a signature path outside the sig root" do
       def file(rel, content)
         path = File.join(tmpdir, rel)

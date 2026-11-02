@@ -36,7 +36,9 @@ candidate routes to gets the repair alone, as a skipped candidate's file already
 includes vendored or generated `.rbs` kept there (`sig/vendor/`, `sig/rbs_rails/`): those files are rewritten
 too. The rule per class (#2605): every `signature_paths:` entry is read, and the class is repaired only when
 every bare opening of it is under the sig root and none of their bodies names a parameter as a relative
-constant; then every such opening is repaired, otherwise none is and the class is reported under `left_bare`. A held-back class is reported (`generic header left bare`, JSON `left_bare`) but does not
+constant; then every such opening is repaired, otherwise none is and the class is reported under `left_bare`. Gem, library and plugin RBS
+(the bundled core, stdlib, `rbs collection` and plugin-contributed signatures) are not scanned: only the
+project's `signature_paths:` entries are. A held-back class is reported (`generic header left bare`, JSON `left_bare`) but does not
 fail `--check`: the gate stays defined by what `--write` would change, as it is for a tighter return
 `--write` declines.
 

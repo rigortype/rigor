@@ -612,8 +612,9 @@ refuse a file, so a tighter return `--write` declines without
 `--overwrite` does not fail it; `--check --overwrite` counts one.
 See [handbook chapter 11](../handbook/11-sig-gen.md#keeping-sig-current-in-ci).
 
-`--write` also repairs a header in any file under the signature directory it writes to (the first
-`signature_paths:` entry, vendored or generated `.rbs` under it included) that opens a generic class such as
+`--write` also repairs a header in any file under the signature directory it writes to (the directory
+under the project root named like the last path component of the first `signature_paths:` entry, `sig/` by
+default, vendored or generated `.rbs` under it included) that opens a generic class such as
 `class Array` or `class Hash` without its type parameters (an earlier release wrote them), reporting
 `repaired N generic header(s)`, and `--check` fails until it is written. In `--format=json` the row of a file
 no method of the run maps to has `"source": null`. A class is repaired in all of its bare headers or in none:

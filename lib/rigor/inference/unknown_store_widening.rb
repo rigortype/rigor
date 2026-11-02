@@ -65,10 +65,11 @@ module Rigor
       CalleeStore = Data.define(:call, :arguments)
 
       COLLECTION_CLASSES = %w[Array Hash].freeze
+      CONTAINER_CLASSES = %w[Array Hash Set].freeze
       FLOORED_CLASSES = %w[Array Hash String].freeze
 
       NO_ARG_NODES = [].freeze
-      private_constant :COLLECTION_CLASSES, :FLOORED_CLASSES, :NO_ARG_NODES
+      private_constant :COLLECTION_CLASSES, :CONTAINER_CLASSES, :FLOORED_CLASSES, :NO_ARG_NODES
 
       module_function
 
@@ -113,14 +114,70 @@ module Rigor
       def callee_block_floor(type)
         widened = widen_store(type, :[]=, unknown_arguments(2)) || type
         widened = callee_set_floor(widened) || widened
-        value_pinned_collection?(widened) ? gradual_content(widened) : widened
+        dynamic_elements(value_pinned_collection?(widened) ? gradual_content(widened) : widened)
       end
 
       # Issue #2296 — `type` after a callee that grows the parameter through a Set-only adder (`s.add(x)`,
       # `s.merge(xs)`): a Set carrier takes one unknown store, and anything else, a Hash under `merge` included, is
       # returned as nil (unchanged).
       def callee_set_floor(type)
-        widen_store(type, :add, unknown_arguments(1))
+        widened = widen_store(type, :add, unknown_arguments(1))
+        widened && dynamic_elements(widened)
+      end
+
+      # Issue #2647 — `type` with each container element the unknown store widened (`Dynamic[top] | String`, which an
+      # element read back out fails a literal-typed parameter with, although the callee stored a value the call never
+      # shows) made a gradual `Dynamic[String]`: the floor may forget a fact, never claim the nominal class. An element
+      # that carries no `Dynamic[top]` arm (a class-level `Array[Integer]`, which the floor leaves alone) is returned as
+      # it is. Scoped to the callee floor's two entry points, so a local mutation's unknown-store widening keeps its
+      # answer.
+      def dynamic_elements(type)
+        return type unless needs_dynamic?(type)
+
+        case type
+        when Type::Union then Type::Combinator.union(*type.members.map { |member| dynamic_elements(member) })
+        when Type::Difference then Type::Combinator.difference(dynamic_elements(type.base), type.removed)
+        when Type::Nominal
+          return type unless CONTAINER_CLASSES.include?(type.class_name) && !type.type_args.empty?
+
+          Type::Combinator.nominal_of(type.class_name, type_args: type.type_args.map { |arg| dynamic_element(arg) })
+        else type
+        end
+      end
+
+      # True when {.dynamic_elements} would change `type`: a container element with a `Dynamic[top]` member and a class
+      # member (neither a literal nor `Dynamic[top]`). Reads with `any?` only, so the common unchanged type is not
+      # rebuilt.
+      def needs_dynamic?(type)
+        case type
+        when Type::Union then type.members.any? { |member| needs_dynamic?(member) }
+        when Type::Difference then needs_dynamic?(type.base)
+        when Type::Nominal
+          CONTAINER_CLASSES.include?(type.class_name) && type.type_args.any? { |arg| needs_dynamic_element?(arg) }
+        else false
+        end
+      end
+
+      def needs_dynamic_element?(arg)
+        return false unless arg.is_a?(Type::Union)
+
+        arg.members.any? { |member| gradual_top?(member) } &&
+          arg.members.any? { |member| !member.is_a?(Type::Constant) && !gradual_top?(member) }
+      end
+
+      def gradual_top?(member) = member.is_a?(Type::Dynamic) && member.static_facet.is_a?(Type::Top)
+
+      # `Dynamic[top] | A | B` as `Dynamic[A | B]` for the class members; a literal member (a value-pinned key) and any
+      # other element stay as they are.
+      def dynamic_element(arg)
+        members = arg.is_a?(Type::Union) ? arg.members : [arg]
+        gradual, known = members.partition { |member| gradual_top?(member) }
+        return arg if gradual.empty?
+
+        literals, classes = known.partition { |member| member.is_a?(Type::Constant) }
+        return arg if classes.empty?
+
+        Type::Combinator.union(*literals, Type::Combinator.dynamic(Type::Combinator.union(*classes)))
       end
 
       def unknown_arguments(count) = Array.new(count) { Type::Combinator.untyped }

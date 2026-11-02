@@ -579,14 +579,15 @@ RSpec.describe Rigor::RunScopedSlots do
     scan_thread_keys(<<~RUBY, "fixture.rb", keys, unresolved)
       x = 1
       =begin
-      Thread.current[INSIDE_BLOCK_KEY]
+      日本語 Thread.current[INSIDE_BLOCK_KEY]
       =end
       y = 2
+      # 日本語 Thread.current[COMMENTED_KEY]
       Thread.current[UNDEFINED_KEY]
     RUBY
 
     expect(keys).to be_empty
-    expect(unresolved).to eq(["fixture.rb:6 UNDEFINED_KEY"])
+    expect(unresolved).to eq(["fixture.rb:7 UNDEFINED_KEY"])
   end
 
   # A `#` inside a string or a regexp is not a comment, so it hides no access on its line.

@@ -160,7 +160,7 @@ module Rigor
         getter, builder = ALIAS_ACCESSORS[read.class]
         name = ReceiverAlias.read_name(read)
         current = scope.public_send(getter, name)
-        return nil if current.nil?
+        return nil if current.nil? || RemoverHolderScan.unsafe_receiver?(scope, name)
 
         narrowed = RemoverNarrowing.narrow_shape(current, call_node)
         if narrowed.nil?

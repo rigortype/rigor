@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "../type"
+require_relative "remover_holder_scan"
 # `Narrowing` is resolved at call time: requiring it here closes a load cycle through `KeyPresenceGuard`.
 
 module Rigor
@@ -53,7 +54,6 @@ module Rigor
       # delete or the shape is open (an unseen key may be the one deleted, and the opened default reads it back).
       def narrow_shape(shape, call_node)
         return nil unless shape.is_a?(Type::HashShape) && shape.closed? && call_node.name == :delete
-        return nil unless call_node.block.nil?
 
         key = literal_key(single_argument(call_node))
         return nil if key.equal?(NO_KEY)
@@ -101,8 +101,8 @@ module Rigor
         element = member.type_args.first
         narrowed =
           case call_node.name
-          when :compact! then member.class_name == "Array" ? Narrowing.narrow_non_nil(element) : nil
-          when :delete, :delete? then nil_deleted?(call_node, member) ? Narrowing.narrow_non_nil(element) : nil
+          when :compact! then Narrowing.narrow_non_nil(element)
+          when :delete, :delete? then nil_argument?(call_node) ? Narrowing.narrow_non_nil(element) : nil
           else block_narrowed(call_node, scope, [element])&.first
           end
         usable?(narrowed) ? Type::Combinator.nominal_of(member.class_name, type_args: [narrowed]) : nil
@@ -126,13 +126,6 @@ module Rigor
         !type.nil? && !type.is_a?(Type::Bot)
       end
 
-      # `Array#delete(nil)` and `Set#delete(nil)` / `Set#delete?(nil)`; `Array#delete?` does not exist.
-      def nil_deleted?(call_node, member)
-        return false if call_node.name == :delete? && member.class_name != "Set"
-
-        nil_argument?(call_node)
-      end
-
       def nil_argument?(call_node)
         single_argument(call_node).is_a?(Prism::NilNode)
       end
@@ -148,8 +141,6 @@ module Rigor
       def literal_key(node)
         case node
         when Prism::SymbolNode then node.unescaped.to_sym
-        when Prism::StringNode then node.unescaped.freeze
-        when Prism::IntegerNode then node.value
         else NO_KEY
         end
       end
@@ -188,7 +179,7 @@ module Rigor
         return nil unless block.is_a?(Prism::BlockNode)
 
         parameters = block.parameters
-        return nil unless parameters.is_a?(Prism::BlockParametersNode) && parameters.locals.empty?
+        return nil unless parameters.is_a?(Prism::BlockParametersNode)
 
         list = parameters.parameters
         return nil if list.nil? || !simple_parameters?(list) || list.requireds.size != arity

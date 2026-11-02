@@ -75,11 +75,46 @@ RSpec.describe "collection remover narrowing", type: :runner do
       expect(dumped_types("#{maybe_one}@a = [mk, 2]\n@a.compact!\ndump_type(@a)\n")).to eq(["Array[1 | 2]"])
     end
 
-    # `b = a` copies the binding: `b`'s narrowing is true of the object, and `a` keeps a wider reading that is too
-    # (issue #2335 tracks no alias), so a read of `a` neither narrows nor reports anything new.
-    it "narrows the receiver and leaves an alias copy at its wider reading" do
-      expect(dumped_types("#{maybe_one}a = [mk, 2]\nb = a\nb.compact!\ndump_type(a)\ndump_type(b)\n"))
-        .to eq(["[1?, 2]", "Array[1 | 2]"])
+    # Review round 1 of #2621 — a write through another holder after the call would outlive the narrowing, so a
+    # receiver the body may write that way keeps the ordinary reading. Each pairs with a control that narrows.
+    describe "a receiver another holder may write" do
+      # The reading right after the filter. A narrowed one holds neither `nil` nor `Dynamic` (`is_a?` narrows a
+      # gradual element to `Integer` too); the ordinary one keeps whichever the binding carried.
+      def narrowed(prefix, suffix = "")
+        filter = "l.select! { |x| x.is_a?(Integer) }"
+        dumped_types("#{maybe_one}l = [mk, 2]\n#{prefix}\n#{filter}\ndump_type(l)\n#{suffix}\n").first
+      end
+
+      it "narrows with no other holder (control)" do
+        expect(narrowed("nil")).to eq("Array[1 | 2]")
+      end
+
+      {
+        "a copy into another local" => ["al = l", ""],
+        "a copy made from the receiver's alias" => ["al = l\nl = al", ""],
+        "a multiple assignment" => ["al, x = l, 1", ""],
+        "an instance-variable copy" => ["@k = l", ""],
+        "a proc created earlier" => ["pr = proc { l << nil }", "pr.call"],
+        "a lambda created later" => ["", "pr = -> { l << nil }\npr.call"],
+        "a block a non-iterator keeps" => ["define_singleton_method(:f) { l << nil }", ""],
+        "send" => ["", "l.send(:<<, nil)"],
+        "instance_eval" => ["", "l.instance_eval { push(nil) }"],
+        "tap" => ["", "l.tap { |t| t << nil }"],
+        "binding" => ["", "binding"]
+      }.each do |holder, (prefix, suffix)|
+        it "keeps the ordinary reading under #{holder}" do
+          expect(narrowed(prefix, suffix)).to match(/nil|Dynamic/)
+        end
+      end
+
+      it "still narrows a local only an iterator block reads (control)" do
+        expect(narrowed("[1].each { l.size }")).to eq("Array[1 | 2]")
+      end
+
+      it "keeps the ordinary reading of both names of an alias" do
+        expect(dumped_types("#{maybe_one}a = [mk, 2]\nb = a\nb.compact!\ndump_type(a)\ndump_type(b)\n"))
+          .to eq(["[1?, 2]", "Array[1 | 2 | nil]"])
+      end
     end
 
     it "narrows no candidate of a receiver that selects among bindings" do
@@ -106,6 +141,16 @@ RSpec.describe "collection remover narrowing", type: :runner do
       expect(dumped_types(source, sig: sig)).to eq(["Array[Integer]", "Array[Integer?]"])
       expect(rules(source, sig: sig)).to be_empty
     end
+  end
+
+  # Guard: a call that narrows nothing answers the scope it was given, so a rebind does not drop the binding's
+  # origins and facts the way a write would.
+  it "answers the same scope when the narrowing changes nothing (guard)" do
+    program = Prism.parse("a = []\na.compact!").value
+    call = program.statements.body.last
+    integers = Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.nominal_of("Integer")])
+    scope = Rigor::Scope.empty.with_match_frame(program.statements).with_local(:a, integers)
+    expect(Rigor::Inference::MutationWidening.narrow_remover_receiver(call, scope, [])).to equal(scope)
   end
 
   describe "a nil-test block" do
@@ -142,6 +187,22 @@ RSpec.describe "collection remover narrowing", type: :runner do
     # spelled `Array[bot]`.
     it "keeps today's reading when the kept edge is empty (guard)" do
       expect(dumped_types("a = [1, 2]\na.select! { |x| x.nil? }\ndump_type(a)\n")).to eq(["Array[1 | 2]"])
+    end
+
+    # Guard: a block with a rest or optional parameter splats an Array element, so its first parameter is not the
+    # element.
+    {
+      "a rest parameter" => "a.reject! { |x, *r| x.nil? }",
+      "an optional parameter" => "a.reject! { |x, y = 1| x.nil? }"
+    }.each do |form, call|
+      it "does not narrow a block with #{form} (guard)" do
+        expect(dumped_types("#{maybe_one}a = [mk, 2]\n#{call}\ndump_type(a)\n")).to eq(["Array[1 | 2 | nil]"])
+      end
+    end
+
+    it "narrows past a block-local variable, which cannot rebind the parameter" do
+      expect(dumped_types("#{maybe_one}a = [mk, 2]\na.reject! { |x; y| x.nil? }\ndump_type(a)\n"))
+        .to eq(["Array[1 | 2]"])
     end
 
     it "narrows a Hash value under the `|k, v|` form" do
@@ -197,6 +258,28 @@ RSpec.describe "collection remover narrowing", type: :runner do
 
     it "keeps the shape when the key is absent" do
       expect(dumped_types("h = { a: 1 }\nh.delete(:z)\ndump_type(h)\n")).to eq(["{ a: 1 }"])
+    end
+
+    it "drops the key under the block form, which still deletes it" do
+      expect(dumped_types("h = { a: 1, b: 2 }\nh.delete(:a) { 0 }\ndump_type(h)\n")).to eq(["{ b: 2 }"])
+    end
+
+    # Under `compare_by_identity` an equal String need not be the stored key, so only a Symbol key narrows.
+    it "erases the shape under a String key (guard)" do
+      expect(dumped_types("h = { \"a\" => 1, \"b\" => 2 }\nh.delete(\"a\")\ndump_type(h)\n"))
+        .to eq(["Hash[String, 1 | 2]"])
+    end
+
+    # Guard: a read-only entry cannot be written through the shape; no source spelling builds one, so the seam is
+    # asked directly.
+    it "answers nothing for a read-only key (guard)" do
+      shape = Rigor::Type::Combinator.hash_shape_of(
+        { a: Rigor::Type::Combinator.constant_of(1) }, read_only_keys: [:a]
+      )
+      call = Prism.parse("h.delete(:a)").value.statements.body.first
+      expect(Rigor::Inference::RemoverNarrowing.narrow_shape(shape, call)).to be_nil
+      writable = Rigor::Type::Combinator.hash_shape_of({ a: Rigor::Type::Combinator.constant_of(1) })
+      expect(Rigor::Inference::RemoverNarrowing.narrow_shape(writable, call)).not_to be_nil
     end
 
     it "erases the shape under a key nothing types (control)" do

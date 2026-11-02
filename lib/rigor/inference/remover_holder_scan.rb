@@ -18,7 +18,9 @@ module Rigor
     #   index or attribute write, an operator or `||=` / `&&=` write, a multiple assignment) or inside the subject of a
     #   `case`/`in`, `=>` or `in` pattern: `al = c ? l : []`, `al = l.push(1)`, `@k = l`, `case l; in al`. The local
     #   such a write or pattern binds is a holder too (both names of a copy), unless the write's value is a fresh
-    #   object: an Array or Hash literal, or `new` / `[]` on a constant (`a = Array.new(n, "a")`);
+    #   object: an Array or Hash literal, or `new` / `[]` on a bare or top-level `Array`, `Hash` or `Set`
+    #   (`a = Array.new(n, "a")`);
+    # - a method's parameter, when its body has a zero-argument `super`, which passes every parameter on;
     # - it is read inside an Array element, a Hash key or value, a splat, or an argument of any call, `yield` or
     #   `super` (positional, keyword, splat or block-pass), unless the read is the receiver of a call that answers
     #   a value other than the receiver and keeps no reference to it ({PURE_READERS}: #2555's per-class
@@ -43,6 +45,7 @@ module Rigor
       # Frame calls that reach the locals whatever their receiver (`pr.binding`, `Kernel.eval`).
       ANY_RECEIVER_FRAME_CALLS = %i[binding eval local_variable_get local_variable_set].to_set.freeze
       NON_WRITER_OPERATORS = %i[== != <= >= ===].to_set.freeze
+      CORE_COLLECTIONS = %i[Array Hash Set].to_set.freeze
       LOCAL_REFERENCES = [
         Prism::LocalVariableReadNode, Prism::LocalVariableWriteNode, Prism::LocalVariableOperatorWriteNode,
         Prism::LocalVariableOrWriteNode, Prism::LocalVariableAndWriteNode, Prism::LocalVariableTargetNode
@@ -55,7 +58,7 @@ module Rigor
       # A run-scoped slot ({RunScopedSlots}): emptied when a run ends, so no verdict outlives the body it read.
       UNSAFE_CACHE_KEY = RunScopedSlots.register(:__rigor_remover_narrowing_unsafe)
       private_constant :REFLECTIVE_CALLS, :SELF_CONVERSIONS, :PURE_READERS, :IMMEDIATE_BLOCK_CALLS, :FRAME_CALLS,
-                       :ANY_RECEIVER_FRAME_CALLS, :NON_WRITER_OPERATORS,
+                       :ANY_RECEIVER_FRAME_CALLS, :NON_WRITER_OPERATORS, :CORE_COLLECTIONS,
                        :LOCAL_REFERENCES, :LOCAL_WRITES, :ALL, :UNSAFE_CACHE_KEY
 
       module_function
@@ -63,18 +66,20 @@ module Rigor
       # Whether the local `name` may be written through another holder somewhere in the body `scope` runs. A scope
       # with no known body answers true.
       def unsafe_receiver?(scope, name)
-        body = scope.match_frame&.body
+        frame = scope.match_frame
+        body = frame&.body
         return true if body.nil?
 
         table = (Thread.current[UNSAFE_CACHE_KEY] ||= ObjectSpace::WeakKeyMap.new)
-        names = table[body] ||= unsafe_names(body)
+        names = table[body] ||= unsafe_names(body, frame.parameters)
         names.equal?(ALL) || names.include?(name.to_sym)
       end
 
-      def unsafe_names(body)
+      def unsafe_names(body, parameters = nil)
         names = Set.new
         catch(ALL) do
           collect_unsafe(body, false, names)
+          parameter_names(parameters, names) if forwards_parameters?(body)
           return names.freeze
         end
         ALL
@@ -120,6 +125,19 @@ module Rigor
         end
       end
 
+      # A zero-argument `super` passes every parameter of the method on, implicitly. (A `...` forward passes only the
+      # anonymous parameters, which name no local.)
+      def forwards_parameters?(node)
+        node.is_a?(Prism::ForwardingSuperNode) || node.compact_child_nodes.any? { |child| forwards_parameters?(child) }
+      end
+
+      def parameter_names(node, names)
+        return if node.nil?
+
+        names << node.name if node.class.name.end_with?("ParameterNode") && node.respond_to?(:name) && node.name
+        node.compact_child_nodes.each { |child| parameter_names(child, names) }
+      end
+
       def frame_call?(node)
         ANY_RECEIVER_FRAME_CALLS.include?(node.name) || (node.receiver.nil? && FRAME_CALLS.include?(node.name))
       end
@@ -143,13 +161,18 @@ module Rigor
         names << node.name if LOCAL_WRITES.any? { |k| node.is_a?(k) } && !fresh_value?(node.value)
       end
 
+      # `Array`, `Hash` or `Set`, bare or as a top-level path (`::Set`): a project class may define its own `self.[]` or
+      # `self.new` that returns its argument.
+      def core_collection_constant?(node)
+        top_level = node.is_a?(Prism::ConstantReadNode) || (node.is_a?(Prism::ConstantPathNode) && node.parent.nil?)
+        top_level && CORE_COLLECTIONS.include?(node.name)
+      end
+
       # A value that is a new object whatever it reads, so the local it binds aliases nothing.
       def fresh_value?(value)
         case value
         when Prism::ArrayNode, Prism::HashNode then true
-        when Prism::CallNode
-          %i[new []].include?(value.name) &&
-            (value.receiver.is_a?(Prism::ConstantReadNode) || value.receiver.is_a?(Prism::ConstantPathNode))
+        when Prism::CallNode then %i[new []].include?(value.name) && core_collection_constant?(value.receiver)
         else false
         end
       end

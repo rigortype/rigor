@@ -17,6 +17,9 @@ module Rigor
       class Frame
         # The body the frame runs, which issue #2555's escape scan reads ({ConstructionEscape.escaped?}).
         attr_reader :body
+        # The method's parameters (nil for a class, module or file body), which issue #2608's holder scan reads for a
+        # zero-argument `super` ({RemoverHolderScan}).
+        attr_reader :parameters
 
         # The nodes that bind a local in a body: the writes, and a block's, lambda's, `rescue`'s or pattern's own
         # parameters and targets.

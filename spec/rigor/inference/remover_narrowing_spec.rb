@@ -203,6 +203,19 @@ RSpec.describe "collection remover narrowing", type: :runner do
     end
   end
 
+  it "keeps the ordinary reading of a parameter a zero-argument super passes on" do
+    source = "#{maybe_one}class P\n  def f(x) = x\nend\nclass Q < P\n  def f(l)\n    super\n    " \
+             "l.select! { |x| x.is_a?(Integer) }\n    dump_type(l.dup)\n  end\nend\n"
+    sig = { "q.rbs" => "class P\n  def f: (Array[Integer?]) -> untyped\nend\nclass Q < P\n  def f: (Array[Integer?]) -> untyped\nend\n" }
+    expect(dumped_types(source, sig: sig)).to eq(["Array[Integer?]"])
+  end
+
+  it "keeps the ordinary reading of a copy a project `self.[]` returns" do
+    source = "#{maybe_one}class Box\n  def self.[](x) = x\nend\nl = [mk, 2]\na = Box[l]\n" \
+             "a.select! { |x| x.is_a?(Integer) }\ndump_type(a.dup)\n"
+    expect(dumped_types(source)).not_to eq(["Array[Integer]"])
+  end
+
   it "still narrows inside a method body with no holder (control)" do
     source = "#{maybe_one}def f\n  l = [mk, 2]\n  l.select! { |x| x.is_a?(Integer) }\n  dump_type(l.dup)\nend\n"
     expect(dumped_types(source)).to eq(["Array[Integer]"])

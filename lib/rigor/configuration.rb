@@ -339,13 +339,38 @@ module Rigor
     def resolved_test_paths(root: nil)
       return test_paths unless test_paths.nil?
 
-      roots = root ? [root] : [exclude_base, Dir.pwd].uniq
+      roots = root ? [root] : [exclude_base, *config_ancestors_to_project_root, Dir.pwd].uniq
       roots.each do |dir|
         found = CONVENTIONAL_TEST_PATHS.map { |test_dir| File.absolute_path(test_dir, dir) }
                                        .select { File.directory?(it) }
         return found unless found.empty?
       end
       []
+    end
+
+    # #2259 — a config file kept below the project root (`proj/config/rigor.yml`, named by an absolute `--config`
+    # from a server started elsewhere) finds the project's test roots at the root. The directories from the config
+    # file's directory up to, and including, the nearest project root (a holder of `.git` or `Gemfile`). Empty when
+    # no config file is in use, or when no ancestor holds such a marker, so a `spec/` far above is never read.
+    PROJECT_ROOT_MARKERS = %w[.git Gemfile].freeze
+    private_constant :PROJECT_ROOT_MARKERS
+
+    def config_ancestors_to_project_root
+      return [] if @base_dir.nil? || project_root_marker?(@base_dir)
+
+      ancestors = []
+      current = File.expand_path(@base_dir)
+      until (parent = File.dirname(current)) == current
+        ancestors << parent
+        return ancestors if project_root_marker?(parent)
+
+        current = parent
+      end
+      []
+    end
+
+    def project_root_marker?(dir)
+      PROJECT_ROOT_MARKERS.any? { |marker| File.exist?(File.join(dir, marker)) }
     end
 
     # Loads a configuration file.

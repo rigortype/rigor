@@ -882,6 +882,9 @@ module Rigor
       # the `self` one returns above): it defines a singleton method on `obj`, not a private `Object` method.
       def walk_def_children(node, prefix, in_singleton_class, module_function_active, out)
         return if refine_block_call?(node)
+        # #2259 — a `def` in `class_methods do … end` (ActiveSupport::Concern) defines a method of the including class's
+        # singleton, not of this module. Omitted, not written class-side: no precedent places it on the singleton.
+        return if class_methods_block?(node)
 
         in_block = node.is_a?(Prism::BlockNode) || node.is_a?(Prism::LambdaNode) ||
                    node.is_a?(Prism::SingletonClassNode)
@@ -929,6 +932,11 @@ module Rigor
 
         @in_effect_refinements ||= Inference::InEffectRefinements.new(@walk_root)
         !@in_effect_refinements.class_body_refine?(node)
+      end
+
+      def class_methods_block?(node)
+        node.is_a?(Prism::CallNode) && node.receiver.nil? && node.name == :class_methods &&
+          node.block.is_a?(Prism::BlockNode)
       end
 
       def declined_self_header?(node)

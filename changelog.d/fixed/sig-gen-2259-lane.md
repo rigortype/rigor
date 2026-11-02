@@ -1,3 +1,2 @@
-- **[sig-gen]** A `def` inside a `class_methods do … end` block is no longer written as an instance method of the module, and `--params=observed` finds the test roots above a config file kept in a subdirectory. ([#2666](https://github.com/rigortype/rigor/pull/2666))
-  - A concern module's `class_methods` defs belong to the including class's singleton, so sig-gen omits them rather than writing them on the module.
-  - With a config file in use, the test roots are also searched in the config file's ancestors up to the nearest `.git` or `Gemfile` holder, so an absolute `--config` from an MCP server started elsewhere finds the project's `spec/`.
+- **[sig-gen]** A `def` or `attr_*` inside a `class_methods do … end` block is no longer written as an instance method of the module. ([#2666](https://github.com/rigortype/rigor/pull/2666))
+  - A concern module's `class_methods` members belong to the including class's singleton, so sig-gen omits them rather than writing them on the module.

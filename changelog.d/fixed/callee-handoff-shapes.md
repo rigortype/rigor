@@ -1,0 +1,4 @@
+- **[inference]** The callee mutation floor now widens a caller's literal after the remaining hand-offs it could not follow, so correct code no longer reports a narrowed shape the callee changed. ([#2649](https://github.com/rigortype/rigor/pull/2649))
+  - A `yield`, a Proc, lambda or Method `call`, an `instance_exec`, `class_exec` or `module_exec`, a `send` with a computed name, or a call inside a `define_method` body reads the arguments it passes as written, an anonymous `*`, `**` or `...` included; so does a method that `define_method`, `define_singleton_method` or `alias_method` defines, and a callee that returns its parameter.
+  - Hand-offs on `itself`, `self.class` and other receivers the callee cannot type, `__send__`, string-literal and explicit-receiver `send`, `poke(**kw)` and `module_function def` arguments are followed.
+  - A hand-off of a parameter the callee first rebinds to a copy (`acc = acc.dup; poke(acc)`) no longer widens the caller's literal.

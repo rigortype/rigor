@@ -20,8 +20,16 @@ module Rigor
     #   (`v = h[:list]`) unless the call returns a new object (`fresh:`, `h.dup`, `h.merge(x)`). A literal, and a
     #   copier's result (`copiers:`, `h.values`, `h.slice(:a)`), only holds what it is built from (`t = [h]`): a
     #   write to it does not count, an element taken out does;
-    # - an opaque dispatch on such a value (`send`, `instance_eval`, ...) and a mutator symbol block
+    # - an opaque dispatch on such a value (`send`, `instance_eval`, `method`, ...) and a mutator symbol block
     #   (`[h].each(&:clear)`).
+    #
+    # Issue #2336 — and a hand-off the callee floor cannot resolve, which reads the handed value as written: an
+    # argument of `yield`, of `call` on any explicit receiver (a Method, a Proc, a lambda: `method(:poke).call(h)`,
+    # `->(x) { }.call(h)`, `blk.(h)`), of `instance_exec` / `class_exec` / `module_exec`, or of a `send` /
+    # `public_send` / `__send__` whose method name is no literal; an argument of any call inside a block that runs
+    # later as a method body (`define_method(:go) { poke(h) }`, {Tables#foreign_calls}), which the hand-off walk
+    # leaves out; and, when `returns:` is true, a value the def returns (its body's last expression, a `return`
+    # outside a lambda) that is the parameter itself, whose caller may write it (`r = ident(h); r[:k] = 1`).
     #
     # `seeds` names the parameters and how each holds the caller's argument: a positional or keyword parameter is it
     # (`:same`); a rest or keyword-rest parameter holds the caller's arguments as elements (`:held`), so a write to the
@@ -43,6 +51,12 @@ module Rigor
       # (status `:same`), a part of it (`:part`: `v = h[:list]`, `h.each { |k, v| }`), or hold it as an element
       # (`:held`: `arr = [h]`, which a write to `arr` does not reach).
       Census = Data.define(:written, :alias_table, :names)
+
+      # The name tables a scan reads, which the caller owns: `mutators` (the shape and content mutators), `handled`
+      # (the names the content scans count on the parameter read directly), `fresh` (calls whose result is a new
+      # object), `copiers` (calls whose result is a new container of the receiver's elements) and `foreign_calls`
+      # (calls whose block is a method body).
+      Tables = Data.define(:mutators, :handled, :fresh, :copiers, :foreign_calls)
 
       NONE = [].freeze
       EMPTY = Census.new(written: NONE, alias_table: {}.freeze, names: Set.new.freeze)
@@ -87,24 +101,46 @@ module Rigor
       end
 
       # Calls on an alias that run code the walk cannot see against it.
-      OPAQUE = %i[send public_send __send__ instance_eval instance_exec instance_variable_set].to_set.freeze
+      OPAQUE = %i[send public_send __send__ instance_eval instance_exec instance_variable_set method
+                  public_method].to_set.freeze
+      # The names {Census#written} reports an anonymous rest (`*`), keyword rest (`**`) or `...` under when one is
+      # handed to an opaque sink; no parameter can be named so.
+      ANONYMOUS_REST = :*
+      ANONYMOUS_KEYWORD_REST = :**
+      ANONYMOUS_FORWARDED = [ANONYMOUS_REST, ANONYMOUS_KEYWORD_REST].freeze
+      # Calls whose arguments the walk cannot follow, on an explicit receiver for `call` and on any for the rest.
+      OPAQUE_ARGUMENTS = %i[call instance_exec class_exec module_exec].to_set.freeze
+      # Dispatches whose target is their first argument: opaque to the walk when it is no literal name.
+      SENDS = %i[send public_send __send__].to_set.freeze
       IVAR_ANY_KEY = %i[* ivar].freeze
       PARAMETER_NODES = [Prism::RequiredParameterNode, Prism::OptionalParameterNode, Prism::RestParameterNode,
                          Prism::RequiredKeywordParameterNode, Prism::OptionalKeywordParameterNode,
                          Prism::KeywordRestParameterNode].freeze
       private_constant :STATUSES, :STATUS_INDEX, :ID, :WRAP, :UNWRAP, :ANY, :SELF_RETURNERS, :SELF_YIELDERS,
                        :BLOCK_RETURNERS, :MEMO_FIRST, :MEMO_RETURNERS, :SLICERS, :ARGUMENT_COPIERS, :COMPOSED, :OPAQUE,
-                       :IVAR_ANY_KEY, :PARAMETER_NODES
+                       :OPAQUE_ARGUMENTS, :ANONYMOUS_FORWARDED, :SENDS, :IVAR_ANY_KEY, :PARAMETER_NODES
 
       module_function
 
-      # The {Census} of `body` for the parameters `seeds` (`{ name => :same | :held }`).
-      def scan(body, seeds, mutators:, handled:, fresh:, copiers:, rebinds:)
-        return EMPTY if body.nil? || seeds.empty?
+      # The {Census} of `body` for the parameters `seeds` (`{ name => :same | :held }`), reading `tables` ({Tables}).
+      # `returns` says whether a returned parameter counts.
+      #
+      # `anonymous` says the def has an anonymous rest, keyword rest or `...`, which the walk reads even with no
+      # seed: handed to an opaque sink, it reports {ANONYMOUS_REST} / {ANONYMOUS_KEYWORD_REST} as written.
+      def scan(body, seeds, tables:, rebinds:, returns: false, anonymous: false)
+        return EMPTY if body.nil? || (seeds.empty? && !anonymous)
 
-        walk = Walk.new(mutators, handled, fresh, copiers)
+        walk = Walk.new(tables, returns: returns)
         walk.visit(body, 0)
+        walk.note_tail(body, 0) if returns
         walk.census(seeds, rebinds)
+      end
+
+      # True when a `send` / `public_send` / `__send__` call names its target with a literal (`send(:poke, h)`,
+      # `send("poke", h)`), which the callee floor resolves as a call of that name.
+      def literal_send?(node)
+        target = node.arguments&.arguments&.first
+        target.is_a?(Prism::SymbolNode) || target.is_a?(Prism::StringNode)
       end
 
       # The parameter names an argument `node` at walk depth `depth` may BE (not a part of, nor a container holding):
@@ -118,7 +154,8 @@ module Rigor
         end
         return NONE unless node.is_a?(Prism::CallNode) || node.is_a?(Prism::ParenthesesNode)
 
-        found = Walk.new(NONE, NONE, fresh, copiers).value_sources(node, depth)
+        tables = Tables.new(mutators: NONE, handled: NONE, fresh: fresh, copiers: copiers, foreign_calls: NONE)
+        found = Walk.new(tables).value_sources(node, depth)
         found.nil? ? NONE : same_parameters(census, seeds, found)
       end
 
@@ -397,40 +434,184 @@ module Rigor
       end
       private_constant :BlockBindings
 
+      # Issue #2336 — how {Walk} reads the values a def returns ({CalleeWriteCensus.scan}'s `returns:`).
+      module Returns
+        # Records what the def's value may be: the last expression of each branch of `node` (a body, a branch, a
+        # `begin` clause), read as {ValueSources#sources} reads a value.
+        def note_tail(node, depth)
+          case node
+          when nil, Prism::ReturnNode then nil
+          when Prism::StatementsNode then note_tail(node.body.last, depth)
+          when Prism::ParenthesesNode then note_tail(node.body, depth)
+          when Prism::ElseNode then note_tail(node.statements, depth)
+          when Prism::IfNode, Prism::UnlessNode
+            note_tail(node.statements, depth)
+            note_tail(node.is_a?(Prism::IfNode) ? node.subsequent : node.else_clause, depth)
+          when Prism::CaseNode, Prism::CaseMatchNode
+            node.conditions.each { |condition| note_tail(condition.statements, depth) }
+            note_tail(node.else_clause, depth)
+          when Prism::BeginNode then note_begin_tail(node, depth)
+          else note_returned(node, depth)
+          end
+        end
+
+        # A `return` outside a lambda returns from the def, when the scan counts returns ({#note_tail} ran first).
+        def note_return(node, depth)
+          values = node.arguments&.arguments
+          note_returned(values.first, depth) if values&.size == 1 && @lambdas.zero? && @returns
+        end
+
+        def note_begin_tail(node, depth)
+          note_tail(node.statements, depth)
+          rescue_clause = node.rescue_clause
+          while rescue_clause
+            note_tail(rescue_clause.statements, depth)
+            rescue_clause = rescue_clause.subsequent
+          end
+          note_tail(node.else_clause, depth)
+        end
+
+        # Records the variable a value the def may return reads, `key, node` flat: a read itself, through a write's
+        # value (`@x = h`), either side of `||` / `&&` and a parenthesised body. A call's result is not read as the
+        # parameter, even one that returns its receiver (`h.tap { }`), so the census stays exact on the spellings it
+        # reads; an element taken out (`[h].first`) or a conversion (`h.to_s`) is left out too.
+        def note_returned(value, depth)
+          case value
+          when Prism::LocalVariableReadNode, Prism::ItLocalVariableReadNode, Prism::InstanceVariableReadNode,
+               Prism::ClassVariableReadNode, Prism::GlobalVariableReadNode
+            (@returned ||= []).push(CalleeWriteCensus.read_key(value, depth), value)
+          when Prism::LocalVariableWriteNode, Prism::InstanceVariableWriteNode, Prism::ClassVariableWriteNode,
+               Prism::GlobalVariableWriteNode, Prism::LocalVariableOrWriteNode, Prism::InstanceVariableOrWriteNode
+            note_returned(value.value, depth)
+          when Prism::OrNode, Prism::AndNode
+            note_returned(value.left, depth)
+            note_returned(value.right, depth)
+          when Prism::ParenthesesNode then note_tail(value.body, depth)
+          end
+        end
+
+        # `written` with each parameter a returned value is itself ({#note_returned}), unless the def rebound it first.
+        def returned_parameters(written, table, seeds, rebinds)
+          CalleeWriteCensus.each_record(@returned, 2) do |key, node|
+            parameters = table.dig(key, :same)
+            written = (written || Set.new).merge(parameters) if parameters
+            next unless CalleeWriteCensus.seed(key, seeds) == :same
+            next if CalleeWriteCensus.rebound?(rebinds, key.first, node)
+
+            (written ||= Set.new) << key.first
+          end
+          written
+        end
+      end
+      private_constant :Returns
+
+      # Issue #2336 — how {Walk} reads a hand-off to code it cannot see: an opaque sink's arguments, and a call inside
+      # a block that is a method body.
+      module OpaqueSinks
+        private
+
+        def visit_counted(child, depth, counter)
+          instance_variable_set(counter, instance_variable_get(counter) + 1)
+          visit(child, depth)
+        ensure
+          instance_variable_set(counter, instance_variable_get(counter) - 1)
+        end
+
+        # True for a call whose block runs later as a method body (`foreign_calls`: `define_method`, ...).
+        def foreign_block?(node)
+          node.is_a?(Prism::CallNode) && node.block.is_a?(Prism::BlockNode) && @foreign_calls.include?(node.name)
+        end
+
+        # True for a call whose arguments the walk reads as written ({CalleeWriteCensus}, issue #2336).
+        def opaque_argument_call?(node)
+          name = node.name
+          return true if @foreign.positive?
+          return !CalleeWriteCensus.literal_send?(node) if SENDS.include?(name)
+          return false unless OPAQUE_ARGUMENTS.include?(name)
+
+          # A receiverless `call` is a self-call to a def of that name, which the hand-off walk resolves; the `*_exec`
+          # calls run their block whatever the receiver.
+          name != :call || !self_receiver?(node)
+        end
+
+        # Records each argument of `node` (a call or a `yield`) as written, through any container: the code that
+        # receives it is not seen.
+        def opaque_arguments(node, depth)
+          node.arguments&.arguments&.each do |argument|
+            case argument
+            when Prism::KeywordHashNode
+              argument.elements.each do |element|
+                value = element.value
+                value.nil? ? anonymous_argument(ANONYMOUS_KEYWORD_REST) : opaque_argument(value, depth, node)
+              end
+            when Prism::SplatNode
+              expression = argument.expression
+              expression.nil? ? anonymous_argument(ANONYMOUS_REST) : opaque_argument(expression, depth, node)
+            when Prism::ForwardingArgumentsNode then ANONYMOUS_FORWARDED.each { |rest| anonymous_argument(rest) }
+            else opaque_argument(argument, depth, node)
+            end
+          end
+        end
+
+        # An anonymous rest (`*`), keyword rest (`**`) or `...` handed on: every argument it carries is written.
+        def anonymous_argument(rest) = (@anonymous ||= Set.new) << rest
+
+        def opaque_argument(value, depth, node)
+          CalleeWriteCensus.each_record(sources(value, depth, nil, ID), 2) do |key, _step|
+            (@mutations ||= []).push(key, node, true, ANY)
+          end
+        end
+      end
+      private_constant :OpaqueSinks
+
       # One pass over a body, collecting alias edges and mutation sites; {#census} closes them.
       class Walk
         include ValueSources
         include BlockBindings
+        include Returns
+        include OpaqueSinks
 
-        def initialize(mutators, handled, fresh, copiers)
-          @mutators = mutators
-          @handled = handled
-          @fresh = fresh
-          @copiers = copiers
+        def initialize(tables, returns: false)
+          @mutators = tables.mutators
+          @handled = tables.handled
+          @fresh = tables.fresh
+          @copiers = tables.copiers
+          @foreign_calls = tables.foreign_calls
+          @returns = returns
           @edges = nil
           @mutations = nil
+          @returned = nil
+          @anonymous = nil
+          @foreign = 0
+          @lambdas = 0
         end
 
         # {ValueSources#sources} of `node` at `depth`, as `node` itself: the flat `key, step` list, or nil.
         def value_sources(node, depth) = sources(node, depth, nil, ID)
 
-        # A nested def is a scope of its own; a block and a lambda are entered one level deeper.
+        # A nested def is a scope of its own; a block and a lambda are entered one level deeper. The block of a
+        # foreign-self call ({#foreign_block?}) and a lambda are counted as they are entered.
         def visit(node, depth)
           return if node.nil? || node.is_a?(Prism::DefNode)
 
           note(node, depth)
+          foreign = foreign_block?(node)
           node.rigor_each_child do |child|
-            nested = child.is_a?(Prism::BlockNode) || child.is_a?(Prism::LambdaNode)
-            visit(child, nested ? depth + 1 : depth)
+            if child.is_a?(Prism::LambdaNode) then visit_counted(child, depth + 1, :@lambdas)
+            elsif foreign && child.is_a?(Prism::BlockNode) then visit_counted(child, depth + 1, :@foreign)
+            else visit(child, child.is_a?(Prism::BlockNode) ? depth + 1 : depth)
+            end
           end
         end
 
         # Every parameter in `seeds` some mutation reaches.
         def census(seeds, rebinds)
-          return EMPTY if @edges.nil? && @mutations.nil?
+          return EMPTY if @edges.nil? && @mutations.nil? && @returned.nil? && @anonymous.nil?
 
           table = close(seeds, rebinds)
           written = written_parameters(table, seeds, rebinds)
+          written = returned_parameters(written, table, seeds, rebinds) if @returned
+          written = (written || Set.new).merge(@anonymous) if @anonymous
           return EMPTY if written.nil? && table.empty?
 
           Census.new(written: written.nil? ? NONE : written.to_a.freeze, alias_table: table.freeze,
@@ -497,12 +678,15 @@ module Rigor
           when Prism::CallNode then note_call(node, depth)
           when Prism::IndexOrWriteNode, Prism::IndexAndWriteNode, Prism::IndexOperatorWriteNode, Prism::IndexTargetNode
             mutation(node.receiver, depth, node, nil)
+          when Prism::YieldNode then opaque_arguments(node, depth)
+          when Prism::ReturnNode then note_return(node, depth)
           end
         end
 
         def note_call(node, depth)
           name = node.name
           mutation(node.receiver, depth, node, name) if @mutators.include?(name) || OPAQUE.include?(name)
+          opaque_arguments(node, depth) if opaque_argument_call?(node)
           note_ivar_set(node, depth) if name == :instance_variable_set && self_receiver?(node)
           case node.block
           when Prism::BlockNode then note_block(node, depth)

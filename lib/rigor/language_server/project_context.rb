@@ -86,7 +86,7 @@ module Rigor
         warnings = ConfigAudit.warnings(@configuration)
         @announce_lock.synchronize do
           fresh = warnings.reject { |warning| @announced_config_warnings.include?(warning.message) }
-          @announced_config_warnings = warnings.map(&:message).to_set
+          @announced_config_warnings = warnings.to_set(&:message)
           fresh
         end
       end

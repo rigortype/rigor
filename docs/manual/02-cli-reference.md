@@ -612,6 +612,13 @@ refuse a file, so a tighter return `--write` declines without
 `--overwrite` does not fail it; `--check --overwrite` counts one.
 See [handbook chapter 11](../handbook/11-sig-gen.md#keeping-sig-current-in-ci).
 
+`--write` also repairs a header in any file under the signature directory that opens a generic class such
+as `class Array` or `class Hash` without its type parameters (an earlier release wrote them), reporting
+`repaired N generic header(s)`, and `--check` fails until it is written. When the body of any such header
+names a type spelt like one of the parameters (`def old: () -> E`), no header of that class is repaired, since
+the parameter would capture the name; a `generic header left bare` line (`left_bare` in `--format=json`) names
+the files, and `--check` does not fail on it. Write the name as `::E` to let the repair through.
+
 `--write` names each proposal it skipped (a member `sig/` already declares, an `alias` included, or one that
 routes to a signature path it does not write to, because it is declared there or its class lives there) on its own `skipped Class#method (reason)` line; the exit status is
 unchanged. See [handbook chapter 11](../handbook/11-sig-gen.md#safety-what---write-will-and-will-not-do).

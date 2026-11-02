@@ -117,12 +117,13 @@ RSpec.describe Rigor::SigGen::Generator do
   # #2259 — `class_methods do … end` (ActiveSupport::Concern) defines the including class's singleton methods, not
   # the module's instance methods, so none of its defs is written on the module's instance side.
   describe "#run on a `class_methods do` block (#2259)" do
-    it "omits the block's defs and keeps the module's own" do
+    it "omits the block's defs and attrs and keeps the module's own" do
       path = write_fixture("lib/greeter.rb", <<~RUBY)
         module Greeter
           extend ActiveSupport::Concern
 
           class_methods do
+            attr_accessor :registry
             def build(name) = name
             def self.make = new
           end

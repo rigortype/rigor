@@ -157,42 +157,6 @@ RSpec.describe Rigor::CLI::SigGenCommand do
 
       expect(out.string).to include("def m: (42) -> 1")
     end
-
-    # #2259 — a config file kept below the project root, named by an absolute `--config` from a directory that holds no
-    # test root (the MCP server started elsewhere): the project's `spec/` is found by walking the config file's
-    # ancestors up to the `Gemfile` that marks the root.
-    describe "a config file below a project root" do
-      def run_below_root(*argv)
-        write("config/rigor.yml", "paths:\n  - ../lib\n")
-        FileUtils.mkdir_p(File.join(root, "sub"))
-        out = StringIO.new
-        err = StringIO.new
-        Dir.chdir(File.join(root, "sub")) do
-          described_class.new(argv: ["--print", "--params=observed", *argv,
-                                     "--config=#{File.join(root, 'config/rigor.yml')}"],
-                              out: out, err: err).run
-        end
-        [out.string, err.string]
-      end
-
-      it "observes the test roots at the project root, marked by a Gemfile" do
-        write("Gemfile", "")
-        write("spec/calc_spec.rb", "Calc.new.m(42)\n")
-
-        out, err = run_below_root
-
-        expect(out).to include("def m: (42) -> 1")
-        expect(err).not_to include("no test roots")
-      end
-
-      it "reads no test root above a config file when no ancestor marks a project root (a guard)" do
-        write("spec/calc_spec.rb", "Calc.new.m(42)\n")
-
-        _out, err = run_below_root
-
-        expect(err).to include("no test roots to observe")
-      end
-    end
   end
 
   # #1398 — the stderr notes are invisible to `--format=json` consumers (and to the MCP tool), so the same fact

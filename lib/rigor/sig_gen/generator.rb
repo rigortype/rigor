@@ -2319,6 +2319,8 @@ module Rigor
           end
         when Prism::CallNode
           return if refine_block_call?(node)
+          # #2259 — an `attr_*` in `class_methods do … end` declares a method of the including class's singleton.
+          return if class_methods_block?(node)
 
           collect_attr_call(node, prefix, in_singleton_class, ctx)
         end

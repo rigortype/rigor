@@ -6,7 +6,7 @@ one subagent in its own worktree, landed through [`contribution-flow.md`](contri
 plan the batch, what the coordinator does itself, what every lane and reviewer brief carries, and the
 order things land in. A subagent cannot be relied on to follow `AGENTS.md`, so a lane brief tells it to
 load the [`rigor-lane`](../../.claude/skills/rigor-lane/SKILL.md) skill first, and a reviewer brief
-points at the [reviewer contract](#reviewer-contract) below.
+tells it to load the [`rigor-reviewer`](../../.claude/skills/rigor-reviewer/SKILL.md) skill.
 
 The rules below come from the 27-PR batch of the v0.4.3 milestone (October 2026). Its rework
 clustered in five places: specs that passed with the fix removed, Ruby-semantics edge cases found
@@ -38,9 +38,8 @@ coordinator keeps these in its own loop and spawns an agent only for implementat
   § "Known limitations" (file it, or label the issue already tracking it): one issue per limit,
   whichever report line or ruling of yours names it.
 
-Keep what comes back short. Lanes report in the shape the `rigor-lane` skill gives and reviewers in
-the shape below; the detail lives in the PR body and the issues, which the coordinator reads only when
-a decision needs it.
+Keep what comes back short. Lanes and reviewers report in the shapes their skills give; the detail
+lives in the PR body and the issues, which the coordinator reads only when a decision needs it.
 
 ## Coordinator steps
 
@@ -122,9 +121,11 @@ a decision needs it.
    `bench/baseline.json`) would then exceed its band is on contribution-flow.md's serious list.
    #2295's +31% passed as an advisory warning and surfaced only at the v0.4.6 release gate, where
    #2329 had to win it back. Send each fix back to the lane that wrote the change with SendMessage,
-   so it keeps its context; do not start a fresh fixer, which re-derives what the lane knew. Route a
-   severe fix in intricate logic to the strongest model by resuming the lane on it only when the
-   lane already runs that model. Delta rounds go to the same reviewer with SendMessage and follow
+   so it keeps its context; do not start a fresh fixer, which re-derives what the lane knew. A lane
+   that can no longer be resumed is taken over per
+   [When a lane has ended or died](#when-a-lane-has-ended-or-died). Route a severe fix in intricate
+   logic to the strongest model by resuming the lane on it only when the lane already runs that model.
+   Delta rounds go to the same reviewer with SendMessage and follow
    contribution-flow.md steps 4–5: three rounds at most; after round 3, a narrow severe finding with
    a conservative fix lands only through one fix-only delta check that finds nothing severe, and a
    non-converging design goes to the user. When a lane stops at a gate or an open choice, decide it
@@ -162,34 +163,46 @@ keywords and the hand-back report. Change it there; a second copy here drifts.
 
 ## Reviewer contract
 
-The reviewer is a fresh agent on the strongest model that did not write the change. Its brief
-carries the base commit, the PR and its issue, the Environment bullet of the `rigor-lane` skill, no
-`make verify`, `make check` or whole-suite run, and:
+The reviewer contract is the [`rigor-reviewer`](../../.claude/skills/rigor-reviewer/SKILL.md) skill:
+the read-only review worktree, probes against Ruby, the precision half, proving the specs, naming the
+class, severity, delta rounds and the fixed report. Change it there; a second copy here drifts.
 
-- A detached review worktree at the PR's head SHA with its bundle cloned (`git worktree add --detach
-  <path> <sha>`, then from the main clone `mkdir -p <path>/vendor <path>/.bundle && cp -Rc
-  vendor/bundle <path>/vendor/bundle && cp .bundle/config <path>/.bundle/`; `cp -Rc` is the macOS
-  clone, elsewhere `cp -R --reflink=auto`), removed at the end; no edits, pushes or comments on the
-  PR.
-- **Probe, not re-run.** For a change that makes Rigor answer something, build the wrong-answer
-  shapes as fixtures, run that tree's `bundle exec exe/rigor check --no-cache` with a same-file
-  positive control, and compare against Ruby; read [`measurement.md`](measurement.md) first.
-  Re-run the edge-case table from coordinator step 2 when the brief has one.
-- **Run the precision half too.** For a change to how the engine records ADR-46 dependencies, run
-  every `spec/rigor/analysis/*incremental*_spec.rb` that asserts a reader is NOT re-checked
-  (`not_to include` on `affected`), not only the new fixture's file: #2136 passed two reviews and
-  failed CI twice on those. `verify-changed` runs them for such an edit.
-- **Prove the specs.** Remove each part of the fix and report which examples fail; an example that
-  survives every removal is a finding.
-- **Name the class, not one instance.** When a finding is one spelling of a wider shape (every
-  `self`-changing block, every reader of one table), say so and list each instance found, so the
-  lane fixes the class in one round instead of one spelling per round.
-- **Report** opening with one line, `Severe N | Moderate N | Minor N | Nit N`, and a one-line
-  verdict, then the findings ranked severe / moderate / minor / nit, each with a concrete failure
-  scenario (for an engine change, the input and the wrong output) and marked *introduced* or
-  *pre-existing* (reproduced on the base commit), scope expansion listed separately, and a plain
-  statement of whether anything severe remains. Severity is defined in contribution-flow.md §
-  "Landing a pull request"; a pre-existing finding is filed, not fixed in the PR, unless the PR's
-  change makes it reachable more often.
-- A delta round re-checks every earlier finding with its original repro, then hunts for regressions
-  the fix introduced.
+The reviewer is a fresh agent on the strongest model that did not write the change. Its brief gives
+the base commit, the PR and its issue, any edge-case table from coordinator step 2, and a first line
+telling it to load the skill. It also carries this floor inline, for a reviewer that cannot load the
+skill: every command through `nix develop --command`; no edits, pushes or comments on the PR; never
+`make verify`, `make check` or the whole suite; `references/` read-only; and "if the skill does not
+load, read it with `git show origin/master:.claude/skills/rigor-reviewer/SKILL.md`; if that fails,
+stop and report". The v0.4.7 window (2026-10-24 to 11-03) is why the contract moved: while it lived
+only in this file, reviewers stopped opening with the fixed `Severe N | …` line after about 11-01
+and returned prose (#2333).
+
+## When a lane has ended or died
+
+A fix round or a ruling goes to the lane that wrote the PR, even after it has handed back: resume it
+with SendMessage. A bare rebase of an ended lane stays step 7's: run `bin/lane-push` in its worktree
+yourself. Only when a resume fails (its session ended, an API error killed it, or it died before any
+handback) does a new agent take the lane over, and it takes it over rather than starting fresh.
+First confirm the old lane is gone (`ListAgents`, or the session list): a failed SendMessage can be
+the coordinator's own API error while the lane still runs, and two writers in one worktree race.
+
+The takeover brief is a lane brief (step 5) with these overrides and additions:
+
+- It skips the `rigor-lane` skill's "Before you write code": the PR and the worktree exist, and the
+  premise was checked when the lane started. It works in the old lane's worktree; when that is gone,
+  `nix develop --command bin/rigor-worktree <branch> origin/<branch>` checks the pushed branch out
+  again (the start point is ignored when the local branch still exists).
+- It runs `git fetch`, then reads `git status` and `git log --oneline origin/<branch>...HEAD` before
+  changing anything. With the old lane's leftovers still uncommitted, `git merge --ff-only
+  origin/<branch>` picks up a coordinator fix-up that step 7's procedure pushed to the remote only.
+  When the fast-forward fails (local and remote diverge, or a leftover overlaps the fix-up), it stops
+  and reports; it never resets. Then the leftovers are deliberately committed or discarded (never
+  `git stash`), and the report's `Open` line says which.
+- It carries what has landed so far (the PR body, the last report, `git log origin/master..`), every
+  open review finding and ruling, quoted, and the approaches already withdrawn.
+
+It pushes with `bin/lane-push` and reports in the `rigor-lane` shape like any lane; its `PR:` line is
+the existing PR. The v0.4.7 window
+measured why: four fresh fixers started on PRs whose lane had finished (#2454, #2584, #2594, #2587),
+against one in v0.4.6, and lanes #2503 and #2505, killed in an API outage, were redone by agents that
+re-derived the work (#2333).

@@ -101,7 +101,9 @@ test-ractor-pool:
 # (tool/plugin_integration_shard.rb); unset, it runs them all.
 PLUGIN_SHARD ?=
 test-integration-plugins:
-	RIGOR_PLUGIN_BOUNDARY=1 RIGOR_INCLUDE_INTEGRATION_PLUGINS=1 bundle exec rspec $$(bundle exec ruby tool/plugin_integration_shard.rb $(PLUGIN_SHARD))
+	@files="$$(bundle exec ruby tool/plugin_integration_shard.rb $(PLUGIN_SHARD))" || exit 1; \
+	[ -n "$$files" ] || { echo "tool/plugin_integration_shard.rb listed no spec files for PLUGIN_SHARD='$(PLUGIN_SHARD)'" >&2; exit 1; }; \
+	RIGOR_PLUGIN_BOUNDARY=1 RIGOR_INCLUDE_INTEGRATION_PLUGINS=1 bundle exec rspec $$files
 
 # Spec suite via `binpacker`, distributing files across worker
 # processes using LPT scheduling driven by measured per-file

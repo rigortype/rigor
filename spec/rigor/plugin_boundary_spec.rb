@@ -82,6 +82,21 @@ RSpec.describe PluginBoundary do
         .not_to include(:instance_variable_get, :instance_variable_set, :instance_variables)
     end
 
+    it "fails a gate that recorded nothing when it is asked to require calls, and not otherwise" do
+      recorder.record { scope.locals }
+
+      expect { described_class.check!(recorder, require_calls: true) }
+        .to raise_error(PluginBoundary::Violation, /recorded no call from a frame under .*it checked nothing/)
+      expect { described_class.check!(recorder) }.not_to raise_error
+    end
+
+    it "fails a gate whose roots match no plugin file, though a plugin made calls" do
+      wrong = PluginBoundary::Recorder.new(roots: ["#{PLUGIN_BOUNDARY_FIXTURE_ROOT}X"])
+      wrong.record { PluginBoundaryFixture::Clean.read(scope, node) }
+
+      expect { described_class.check!(wrong, require_calls: true) }.to raise_error(PluginBoundary::Violation)
+    end
+
     it "attributes a call by its caller's path, so a call from the spec file itself is not a plugin's" do
       recorder.record { scope.locals }
 

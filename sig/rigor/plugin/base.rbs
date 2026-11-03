@@ -25,9 +25,14 @@ class Rigor::Plugin::Base
   def self.producer: (untyped id, ?watch: untyped, ?serialize: untyped, ?deserialize: untyped, ?generation_cap: untyped) { (untyped params) -> untyped } -> Symbol
   def self.producers: () -> Hash[Symbol, untyped]
 
-  # The block runs `instance_exec`'d on the plugin: `file_context` is whatever the `node_file_context` block
-  # returned (plugin-defined), and a rule may answer one diagnostic, an array of them, or nil.
-  def self.node_rule: (singleton(::Prism::Node) node_type) { (::Prism::Node node, Rigor::Plugin::_Scope scope, String path, untyped file_context, Rigor::Plugin::NodeContext context) -> (Rigor::Analysis::Diagnostic | Array[Rigor::Analysis::Diagnostic] | nil) } -> singleton(::Prism::Node)
+  # One overload per node class the bundled plugins name, so the block's `node` is that class; `Prism::Node` is the
+  # fallback for any other (RBS cannot write `singleton(N)` over a type variable). The block runs `instance_exec`'d
+  # on the plugin: `file_context` is whatever the `node_file_context` block returned (plugin-defined), and a rule
+  # may answer one diagnostic, an array of them, or nil.
+  def self.node_rule: (singleton(::Prism::CallNode) node_type) { (::Prism::CallNode node, Rigor::Plugin::_Scope scope, String path, untyped file_context, Rigor::Plugin::NodeContext context) -> (Rigor::Analysis::Diagnostic | Array[Rigor::Analysis::Diagnostic] | nil) } -> singleton(::Prism::CallNode)
+                    | (singleton(::Prism::ClassNode) node_type) { (::Prism::ClassNode node, Rigor::Plugin::_Scope scope, String path, untyped file_context, Rigor::Plugin::NodeContext context) -> (Rigor::Analysis::Diagnostic | Array[Rigor::Analysis::Diagnostic] | nil) } -> singleton(::Prism::ClassNode)
+                    | (singleton(::Prism::ProgramNode) node_type) { (::Prism::ProgramNode node, Rigor::Plugin::_Scope scope, String path, untyped file_context, Rigor::Plugin::NodeContext context) -> (Rigor::Analysis::Diagnostic | Array[Rigor::Analysis::Diagnostic] | nil) } -> singleton(::Prism::ProgramNode)
+                    | (singleton(::Prism::Node) node_type) { (::Prism::Node node, Rigor::Plugin::_Scope scope, String path, untyped file_context, Rigor::Plugin::NodeContext context) -> (Rigor::Analysis::Diagnostic | Array[Rigor::Analysis::Diagnostic] | nil) } -> singleton(::Prism::Node)
   def self.node_rules: () -> Array[untyped]
 
   def self.node_file_context: () { (::Prism::ProgramNode root, Rigor::Plugin::_Scope scope) -> untyped } -> void

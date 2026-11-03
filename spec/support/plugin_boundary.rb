@@ -71,7 +71,15 @@ module PluginBoundary
 
   # Raises {Violation} unless the recorder saw only calls the interfaces, the `Object` protocol or the allow-list
   # account for.
-  def check!(recorder, **)
+  #
+  # `require_calls:` also fails a recorder that saw no call from a plugin frame at all: a gate whose roots match no
+  # file, or whose plugin specs never ran, would otherwise pass for want of anything to judge.
+  def check!(recorder, require_calls: false, **)
+    if require_calls && recorder.calls.empty?
+      raise Violation, "the plugin-boundary gate recorded no call from a frame under #{recorder.roots.join(', ')}: " \
+                       "it checked nothing (wrong roots, or no plugin spec ran)"
+    end
+
     found = recorder.violations(**)
     return if found.empty?
 
@@ -108,11 +116,11 @@ module PluginBoundary
 
   # Records the calls a plugin frame makes into the engine while the block runs.
   class Recorder
-    attr_reader :calls
+    attr_reader :calls, :roots
 
     # roots: absolute directories whose files count as plugin code (`<repo>/plugins`, `<repo>/examples`).
     def initialize(roots: [File.join(REPO_ROOT, "plugins"), File.join(REPO_ROOT, "examples")])
-      @roots = roots.map { |r| File.join(File.expand_path(r), "") }
+      @roots = roots.map { |root| File.join(File.expand_path(root), "") }
       @backing = BACKING.values.to_h { |name| [name, Object.const_get(name)] }
       @calls = {}
       @by_class = {}.compare_by_identity

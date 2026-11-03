@@ -6,7 +6,7 @@
 // configuration, lifecycle commands, the status bar, and — because the
 // v1 LSP is single-root — one client per Rigor-configured folder.
 
-import { ChildProcess, spawn } from "child_process";
+import { ChildProcess, execFileSync, spawn } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import {
@@ -53,14 +53,25 @@ const SERVER_AFFECTING_SETTINGS = [
 /** How long `stop()` may take before the process is killed. */
 const STOP_TIMEOUT_MS = 2000;
 /**
- * How long to wait for the process to exit after `stop()` returned. The
- * client itself sends a terminate 2 s after stopping, so wait past that
- * before killing.
+ * How long to wait for the process to exit after `stop()` returned before
+ * killing its process tree. The client does not kill a process it did not
+ * spawn itself, and this extension spawns it (to hold the handle).
  */
 const EXIT_GRACE_MS = 3000;
+/**
+ * How long `client.start()` (spawn + `initialize`) may take. Without a
+ * limit a server that never answers would hold the lifecycle chain, and
+ * every later restart, folder change and shutdown would wait behind it.
+ */
+const START_TIMEOUT_MS = 60000;
+/** `stop()` budget per server while the window closes. */
+const SHUTDOWN_STOP_MS = 1000;
+/** Config files created or deleted together (a checkout) re-sync once. */
+const SYNC_DEBOUNCE_MS = 500;
 
-/** Directories never searched for a nested Rigor config. */
-const NESTED_CONFIG_EXCLUDE = "**/{node_modules,vendor,.git}/**";
+/** Directory names a nested Rigor config is never offered from. */
+const SKIPPED_DIRS = new Set(["node_modules", "vendor", ".git"]);
+const NESTED_DISMISSED_KEY = "rigor.nestedConfigDismissed";
 
 interface ManagedClient {
   client: LanguageClient;
@@ -72,10 +83,16 @@ interface ManagedClient {
 let outputChannel: OutputChannel;
 let statusBar: StatusBar;
 let extensionVersion = "unknown";
+let extensionContext: ExtensionContext;
 const clients = new Map<string, ManagedClient>();
 
-/** Folders already told about a nested config this session. */
-const nestedConfigOffered = new Set<string>();
+/**
+ * Why each unmanaged folder was last explained, so the same message is
+ * not repeated on every sync but a changed setting is explained again.
+ */
+const explained = new Map<string, string>();
+/** Folders whose probe failure was already reported since the last restart. */
+const probeFailureReported = new Set<string>();
 
 // Every start, stop, restart and sync runs through this chain, one at a
 // time. Without it, a sync that is still probing `rigor version` (up to
@@ -93,6 +110,7 @@ function enqueue(task: () => Promise<void>): Promise<void> {
 }
 
 export function activate(context: ExtensionContext): void {
+  extensionContext = context;
   extensionVersion =
     (context.extension.packageJSON as { version?: string }).version ??
     "unknown";
@@ -119,10 +137,21 @@ export function activate(context: ExtensionContext): void {
     true,
     false,
   );
+  let syncTimer: NodeJS.Timeout | undefined;
+  const scheduleSync = (): void => {
+    if (syncTimer) {
+      clearTimeout(syncTimer);
+    }
+    syncTimer = setTimeout(() => {
+      syncTimer = undefined;
+      void syncClients();
+    }, SYNC_DEBOUNCE_MS);
+  };
   context.subscriptions.push(
     configWatcher,
-    configWatcher.onDidCreate(() => void syncClients()),
-    configWatcher.onDidDelete(() => void syncClients()),
+    configWatcher.onDidCreate(scheduleSync),
+    configWatcher.onDidDelete(scheduleSync),
+    { dispose: () => syncTimer && clearTimeout(syncTimer) },
     workspace.onDidChangeWorkspaceFolders(() => void syncClients()),
     workspace.onDidChangeConfiguration((e) => onConfigChange(e)),
     workspace.onDidGrantWorkspaceTrust(() => void syncClients()),
@@ -132,7 +161,12 @@ export function activate(context: ExtensionContext): void {
 }
 
 export async function deactivate(): Promise<void> {
-  await enqueue(stopAllNow);
+  // Not queued: closing the window must not wait behind a startup probe.
+  // No exit grace either: the extension host is torn down within seconds,
+  // so a server still alive after `stop()` is killed at once.
+  await Promise.all(
+    [...clients.keys()].map((key) => stopClient(key, SHUTDOWN_STOP_MS, 0)),
+  );
 }
 
 /** Bring the running clients in line with the current workspace state. */
@@ -142,6 +176,7 @@ function syncClients(): Promise<void> {
 
 function restartAll(): Promise<void> {
   return enqueue(async () => {
+    probeFailureReported.clear();
     await stopAllNow();
     await syncClientsNow();
   });
@@ -202,18 +237,33 @@ async function startClient(folder: WorkspaceFolder): Promise<void> {
       version: probe.version,
     });
     logStartup(label, root, server, commandLine, probe.version, "failed");
-    reportProbeFailure(server, probe, label);
+    // A config-file watcher or folder change re-syncs often; say it once
+    // until the user restarts or the probe passes.
+    if (!probeFailureReported.has(key)) {
+      probeFailureReported.add(key);
+      reportProbeFailure(server, probe, label);
+    }
     return;
   }
+  probeFailureReported.delete(key);
 
   let child: ChildProcess | undefined;
   const serverOptions: ServerOptions = async () => {
-    child = spawn(server.command, args, {
+    const spawned = spawn(server.command, args, {
       cwd: root,
       shell: process.platform === "win32",
+      // Its own process group on POSIX, so `killTree` reaches the forked
+      // workers too.
+      detached: process.platform !== "win32",
       windowsHide: true,
     });
-    return child;
+    spawned.on("error", (err) => {
+      outputChannel.appendLine(
+        `[rigor] ${label}: could not spawn the server: ${String(err)}`,
+      );
+    });
+    child = spawned;
+    return spawned;
   };
 
   const watchers = [
@@ -240,7 +290,11 @@ async function startClient(folder: WorkspaceFolder): Promise<void> {
   clients.set(key, { client, disposables: watchers, process: () => child });
 
   try {
-    await client.start();
+    await withTimeout(
+      client.start(),
+      START_TIMEOUT_MS,
+      `the server did not answer \`initialize\` within ${START_TIMEOUT_MS / 1000} s`,
+    );
     statusBar.update(key, {
       label,
       state: "running",
@@ -270,7 +324,11 @@ async function startClient(folder: WorkspaceFolder): Promise<void> {
   }
 }
 
-async function stopClient(key: string): Promise<void> {
+async function stopClient(
+  key: string,
+  stopTimeoutMs = STOP_TIMEOUT_MS,
+  exitGraceMs = EXIT_GRACE_MS,
+): Promise<void> {
   statusBar.remove(key);
   const managed = clients.get(key);
   if (!managed) {
@@ -281,11 +339,11 @@ async function stopClient(key: string): Promise<void> {
     disposable.dispose();
   }
   try {
-    await managed.client.stop(STOP_TIMEOUT_MS);
+    await managed.client.stop(stopTimeoutMs);
   } catch {
     // The server may already be gone, or ignored `shutdown`; reaped below.
   }
-  await reap(managed.process());
+  await reap(managed.process(), exitGraceMs);
 }
 
 async function stopAllNow(): Promise<void> {
@@ -295,13 +353,21 @@ async function stopAllNow(): Promise<void> {
   statusBar.clear();
 }
 
-/** Wait for the process to exit, and kill it if it does not. */
-async function reap(child: ChildProcess | undefined): Promise<void> {
-  if (!child || child.exitCode !== null || child.signalCode !== null) {
+/** Wait for the process to exit, and kill its process tree if it does not. */
+async function reap(
+  child: ChildProcess | undefined,
+  graceMs = EXIT_GRACE_MS,
+): Promise<void> {
+  if (
+    !child ||
+    child.pid === undefined ||
+    child.exitCode !== null ||
+    child.signalCode !== null
+  ) {
     return;
   }
   const exited = await new Promise<boolean>((resolve) => {
-    const timer = setTimeout(() => resolve(false), EXIT_GRACE_MS);
+    const timer = setTimeout(() => resolve(false), graceMs);
     child.once("exit", () => {
       clearTimeout(timer);
       resolve(true);
@@ -311,8 +377,40 @@ async function reap(child: ChildProcess | undefined): Promise<void> {
     outputChannel.appendLine(
       `[rigor] server process ${child.pid ?? "?"} did not exit; killing it`,
     );
+    killTree(child);
+  }
+}
+
+/**
+ * Kill the server and everything it started: the fork-based worker pool
+ * on POSIX (one process group, see the `detached` spawn), and on Windows
+ * the `ruby.exe` behind the `cmd.exe` that `shell: true` interposes.
+ */
+function killTree(child: ChildProcess): void {
+  const pid = child.pid;
+  if (pid === undefined) {
+    return;
+  }
+  try {
+    if (process.platform === "win32") {
+      execFileSync("taskkill", ["/T", "/F", "/PID", String(pid)], {
+        stdio: "ignore",
+        windowsHide: true,
+      });
+    } else {
+      process.kill(-pid, "SIGKILL");
+    }
+  } catch {
     child.kill("SIGKILL");
   }
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 function onConfigChange(e: ConfigurationChangeEvent): void {
@@ -333,57 +431,88 @@ function onConfigChange(e: ConfigurationChangeEvent): void {
 async function explainUnmanaged(folder: WorkspaceFolder): Promise<void> {
   const key = folder.uri.toString();
   const cfg = workspace.getConfiguration("rigor", folder.uri);
-  if (nestedConfigOffered.has(key) || !cfg.get<boolean>("enable", true)) {
+  if (!cfg.get<boolean>("enable", true)) {
     return;
   }
 
   const rootDir = (cfg.get<string>("rootDir") ?? "").trim();
   if (rootDir) {
     const root = projectRoot(folder);
-    if (!root || !fs.existsSync(root)) {
-      nestedConfigOffered.add(key);
+    let problem: string | undefined;
+    if (!root) {
+      problem = "is outside the workspace folder. It must be a subdirectory.";
+    } else if (!fs.existsSync(root)) {
+      problem = "does not exist.";
+    } else {
+      problem = "has no .rigor.yml or .rigor.dist.yml (and Gemfile.lock does not pin rigortype).";
+    }
+    if (explained.get(key) !== `rootDir:${rootDir}`) {
+      explained.set(key, `rootDir:${rootDir}`);
       void window.showWarningMessage(
-        `Rigor: "rigor.rootDir" for ${folder.name} is "${rootDir}", which ` +
-          (root
-            ? "does not exist."
-            : "is outside the workspace folder. It must be a subdirectory."),
+        `Rigor: "rigor.rootDir" for ${folder.name} is "${rootDir}", which ${problem}`,
       );
     }
     return;
   }
 
+  const dismissed =
+    extensionContext.workspaceState.get<string[]>(NESTED_DISMISSED_KEY) ?? [];
+  if (explained.get(key) === "nested" || dismissed.includes(key)) {
+    return;
+  }
+  // `undefined` keeps the user's `files.exclude` (and search excludes).
   const found = await workspace.findFiles(
     new RelativePattern(folder, "**/.rigor{,.dist}.yml"),
-    NESTED_CONFIG_EXCLUDE,
-    20,
+    undefined,
+    50,
   );
   const dirs = [
     ...new Set(
       found
         .map((uri) => path.relative(folder.uri.fsPath, path.dirname(uri.fsPath)))
         .filter((dir) => dir !== "")
-        .map((dir) => dir.split(path.sep).join("/")),
+        .map((dir) => dir.split(path.sep))
+        .filter((parts) => !parts.some((part) => SKIPPED_DIRS.has(part)))
+        .map((parts) => parts.join("/")),
     ),
-  ].sort();
-  if (dirs.length === 0 || nestedConfigOffered.has(key)) {
+  ].sort(
+    (a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b),
+  );
+  if (dirs.length === 0 || explained.get(key) === "nested") {
     return;
   }
-  nestedConfigOffered.add(key);
+  explained.set(key, "nested");
 
   const choices = dirs.slice(0, 3).map((dir) => `Use ${dir}`);
   const openSettings = "Open Settings";
+  const dontAsk = "Don't Ask Again";
   const choice = await window.showInformationMessage(
     `Rigor: ${folder.name} has no Rigor config at its root, so no server ` +
       `started. Found one in ${dirs.join(", ")}. Set "rigor.rootDir" to ` +
       "start the server there.",
     ...choices,
     openSettings,
+    dontAsk,
   );
-  if (choice === openSettings) {
-    void commands.executeCommand("workbench.action.openSettings", "rigor.rootDir");
-  } else if (choice) {
-    const dir = dirs[choices.indexOf(choice)];
-    await cfg.update("rootDir", dir, ConfigurationTarget.WorkspaceFolder);
+  try {
+    if (choice === openSettings) {
+      await commands.executeCommand(
+        "workbench.action.openSettings",
+        "rigor.rootDir",
+      );
+    } else if (choice === dontAsk) {
+      await extensionContext.workspaceState.update(NESTED_DISMISSED_KEY, [
+        ...dismissed,
+        key,
+      ]);
+    } else if (choice) {
+      const dir = dirs[choices.indexOf(choice)];
+      await cfg.update("rootDir", dir, ConfigurationTarget.WorkspaceFolder);
+    }
+  } catch (err) {
+    void window.showErrorMessage(
+      `Rigor: could not set "rigor.rootDir": ${String(err)}`,
+    );
   }
 }
 
@@ -512,9 +641,10 @@ function folderLabel(folder: WorkspaceFolder, root: string): string {
 /**
  * A glob matching every file under `root`. Forward slashes so it matches
  * on Windows too; glob metacharacters in the path are wrapped in a
- * character class so a directory named `app{1}` matches literally.
+ * character class (`[[]`, `[]]`, `[{]`, ...) so a directory named `a[1]`
+ * or `app{1}` matches literally.
  */
 function rootGlob(root: string): string {
-  const base = root.replace(/\\/g, "/").replace(/[*?{}]/g, "[$&]");
+  const base = root.replace(/\\/g, "/").replace(/[*?{}[\]]/g, "[$&]");
   return `${base}/**/*`;
 }

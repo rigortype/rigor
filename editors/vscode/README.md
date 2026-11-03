@@ -113,7 +113,8 @@ line) for each server.
 The v1 language server is single-root, so the extension runs one
 server per Rigor-configured folder, and each server is sent only the
 Ruby files under its own project root. A file outside every such root
-gets no diagnostics.
+— including a gem's or the standard library's source opened from
+another file — gets no Rigor features.
 
 ## Coexistence with other Ruby tooling
 

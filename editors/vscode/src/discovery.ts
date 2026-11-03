@@ -59,7 +59,11 @@ export function projectRoot(folder: WorkspaceFolder): string | undefined {
   }
   const resolved = path.resolve(folderPath, rootDir);
   const relative = path.relative(folderPath, resolved);
-  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+  if (
+    relative === ".." ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative)
+  ) {
     return undefined;
   }
   return resolved;

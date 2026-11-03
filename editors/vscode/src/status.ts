@@ -142,5 +142,7 @@ export function describeFolder(folder: FolderStatus): string {
 }
 
 function escapeMarkdown(text: string): string {
-  return text.replace(/[\\`*_{}[\]()#+\-.!|<>]/g, "\\$&");
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/[\\`*_{}[\]()#+\-.!|<>]/g, "\\$&");
 }

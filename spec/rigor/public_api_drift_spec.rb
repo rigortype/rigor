@@ -298,6 +298,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     class_ordering(req:lhs,req:rhs,key:scope)
     class_type_param_names(req:class_name,key:scope,key:environment)
     constant_type_for(req:constant_name,key:scope)
+    declarations_in(req:root,block:on_call)
     discovered_class?(req:class_name,key:scope)
     discovered_method?(req:class_name,req:method_name,key:kind,key:scope)
     instance_definition(req:class_name,key:scope,key:environment)
@@ -312,6 +313,21 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     singleton_definition(req:class_name,key:scope,key:environment)
     singleton_for_name(req:class_name,key:scope)
     singleton_method_definition(req:class_name,req:method_name,key:scope,key:environment)
+  ].freeze
+
+  # `Rigor::Reflection::ClassDeclaration` — the value `Reflection.declarations_in` returns (#2708), so a plugin reads a
+  # class header's qualified name, `Module.nesting` and `Prism::ClassNode` without the engine's walk context.
+  CLASS_DECLARATION_INSTANCE = %w[
+    name()
+    nesting()
+    node()
+  ].freeze
+
+  CLASS_DECLARATION_SINGLETON = %w[
+    [](rest:)
+    inspect()
+    members()
+    new(rest:)
   ].freeze
 
   # `Rigor::Trinary` — the value `Reflection.project_method_defined` returns (ADR-128 WD1), so a plugin reads it
@@ -888,6 +904,15 @@ RSpec.describe "Public API drift", :public_api_drift do
     end
   end
 
+  describe "Rigor::Reflection::ClassDeclaration" do
+    it "exposes the expected value-object surface" do
+      expect(instance_signatures(Rigor::Reflection::ClassDeclaration))
+        .to eq(PublicApiDriftSnapshots::CLASS_DECLARATION_INSTANCE)
+      expect(singleton_signatures(Rigor::Reflection::ClassDeclaration))
+        .to eq(PublicApiDriftSnapshots::CLASS_DECLARATION_SINGLETON)
+    end
+  end
+
   describe "Rigor::Trinary" do
     it "exposes the expected value-object surface" do
       expect(instance_signatures(Rigor::Trinary)).to eq(PublicApiDriftSnapshots::TRINARY_INSTANCE)
@@ -1257,6 +1282,11 @@ RSpec.describe "Public API drift", :public_api_drift do
     it "covers Rigor::Reflection singleton methods" do
       expect_sig_covers(class_name: "Rigor::Reflection", kind: :singleton,
                         snapshot: PublicApiDriftSnapshots::REFLECTION_SINGLETON)
+    end
+
+    it "covers Rigor::Reflection::ClassDeclaration members" do
+      expect_sig_covers(class_name: "Rigor::Reflection::ClassDeclaration", kind: :instance,
+                        snapshot: PublicApiDriftSnapshots::CLASS_DECLARATION_INSTANCE)
     end
 
     it "covers Rigor::Trinary methods" do

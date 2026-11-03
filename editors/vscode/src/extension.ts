@@ -43,7 +43,9 @@ import {
   shouldManageFolder,
   useShell,
 } from "./discovery";
+import { clearRuleCache, registerCommands } from "./commands";
 import { killTree } from "./kill";
+import { killAllCli } from "./proc";
 import { MIN_VERSION, ProbeResult, probeServer } from "./probe";
 import {
   INSTALL_GUIDE_URL,
@@ -173,6 +175,7 @@ export function activate(context: ExtensionContext): void {
       showServerVersion(),
     ),
   );
+  registerCommands(context, outputChannel);
 
   // A config file created or deleted anywhere can change which folders
   // are managed (or which nested configs to offer), so re-sync.
@@ -212,6 +215,7 @@ export async function deactivate(): Promise<void> {
   // No exit grace either: the extension host is torn down within seconds,
   // so a server still alive after `stop()` is killed at once.
   shuttingDown = true;
+  killAllCli();
   if (syncTimer) {
     clearTimeout(syncTimer);
   }
@@ -229,6 +233,7 @@ function syncClients(): Promise<void> {
 function restartAll(): Promise<void> {
   return enqueue(async () => {
     probeFailureReported.clear();
+    clearRuleCache();
     await stopAllNow();
     await syncClientsNow();
   });
@@ -238,11 +243,15 @@ async function syncClientsNow(): Promise<void> {
   if (!workspace.isTrusted) {
     // Spawning `bundle exec rigor` is withheld in untrusted workspaces.
     await stopAllNow();
+    void setManagedContext(false);
     return;
   }
 
   const folders = workspace.workspaceFolders ?? [];
   const wanted = new Set<string>();
+  // Before any client start (each may probe for seconds), so the palette
+  // entries do not lag the folder state.
+  void setManagedContext(folders.some((f) => shouldManageFolder(f)));
 
   for (const folder of folders) {
     // A sync that was already running when the window closed must not
@@ -269,6 +278,11 @@ async function syncClientsNow(): Promise<void> {
       statusBar.remove(key);
     }
   }
+}
+
+/** Drives the `when` clause of the CLI-backed commands. */
+async function setManagedContext(value: boolean): Promise<void> {
+  await commands.executeCommand("setContext", "rigor.managedFolder", value);
 }
 
 async function startClient(folder: WorkspaceFolder): Promise<void> {

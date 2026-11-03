@@ -164,6 +164,49 @@ relative `configPath` or `logPath` resolves against it.
 - **Rigor: Install Managed Rigor**, **Rigor: Check for Rigor Update**,
   **Rigor: Clear Managed Rigor** — see *The managed Rigor* above.
 
+### Commands that run the CLI for the open file
+
+These appear in the Command Palette only while at least one workspace
+folder is managed by Rigor. Each runs the same `rigor` executable the
+language server uses (same discovery, project root and
+`rigor.server.configPath`), refuses to run in an untrusted workspace, logs
+the command line and its output to the Rigor output channel, and shows a
+cancellable progress notification while it runs.
+
+- **Rigor: Show Type at Cursor** — `rigor type-of` at the cursor (1-based
+  line and byte column). The result opens in a read-only document beside
+  the editor. An unsaved buffer is probed as it stands.
+- **Rigor: Explain Rule** — pick a rule from `rigor explain`, and its
+  catalogue entry opens beside the editor. A Rigor diagnostic with a rule
+  code also offers an **Explain `<rule>`** quick fix that opens the same
+  entry.
+- **Rigor: Open Config** — opens `.rigor.yml` or `.rigor.dist.yml` of the
+  project root (or the file named by `rigor.server.configPath`). When none
+  exists it offers to run `rigor init`, after a confirmation, and opens the
+  result.
+- **Rigor: Generate Signatures for File** — shows `rigor sig-gen --diff`
+  for the open file in a read-only diff document, then asks before running
+  `rigor sig-gen --write`. `rigor sig-gen --check` runs first: when
+  `--write` would change nothing, the command says so and shows no diff or
+  prompt. Nothing is written without the confirmation. Save the file first;
+  `sig-gen` reads it from disk.
+- **Rigor: Update Baseline** — only when the project already has a baseline
+  (the top-level `baseline:` file of the config, `.rigor-baseline.yml` by
+  default; `baseline: false` means none). When the config has `includes:`
+  the command asks you to pick the baseline file rather than guess. A
+  confirmation names the file, which the whole team shares, then runs
+  `rigor baseline regenerate` and shows its output.
+
+Boundary: these run only when you ask, and nothing they learn feeds the
+language server's analysis.
+
+Show Type at Cursor and Generate Signatures work on Ruby files only. The
+"Explain" quick fix is offered only for rules `rigor explain` lists. The
+column sent to `rigor type-of` is a byte offset computed as UTF-8, so a file
+in another encoding can be off. Outside Production mode (the Extension
+Development Host) the write commands accept an internal `{ confirmed: true }`
+argument for automated tests; an installed extension ignores it.
+
 The status bar item's tooltip lists the same per-folder detail, and
 the output channel logs a startup summary (versions, root, command
 line) for each server.

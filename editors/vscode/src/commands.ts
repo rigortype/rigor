@@ -842,7 +842,7 @@ function baselineLookup(folder: WorkspaceFolder, root: string): BaselineLookup {
   }
   // A bare `baseline:` whose next non-blank, non-comment line is indented is a
   // block scalar (Psych: `baseline:\n  custom.yml` is "custom.yml").
-  if (/^baseline[ \t]*:[ \t]*(?:#.*)?$(?:\n[ \t]*(?:#.*)?$)*\n[ \t]+\S/m.test(text)) {
+  if (/^baseline[ \t]*:[ \t]*(?:#.*)?$(?:\r?\n[ \t]*(?:#.*)?$)*\r?\n[ \t]+[^\s#]/m.test(text)) {
     return { kind: "ambiguous" };
   }
   // The value is optional: a bare `baseline:` (YAML null) is off.

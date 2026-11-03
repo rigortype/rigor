@@ -109,7 +109,10 @@ RSpec.configure do |config|
   # same-process run.
   exclusions = []
   exclusions << "spec/rigor/analysis/runner_pool_spec.rb" unless ENV["RIGOR_INCLUDE_RACTOR_POOL"]
-  exclusions << "spec/integration/plugins/*_spec.rb" << "spec/integration/examples/*_spec.rb" unless ENV["RIGOR_INCLUDE_INTEGRATION_PLUGINS"]
+  unless ENV["RIGOR_INCLUDE_INTEGRATION_PLUGINS"]
+    exclusions << "spec/integration/plugins/*_spec.rb"
+    exclusions << "spec/integration/examples/*_spec.rb"
+  end
   config.exclude_pattern = exclusions.join(",") unless exclusions.empty?
 
   # ADR-93 WD2 — `Configuration.load` default-wires the bundled `rigor-rbs-inline` plugin whenever the upstream

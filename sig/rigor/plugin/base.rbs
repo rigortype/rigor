@@ -27,7 +27,7 @@ class Rigor::Plugin::Base
 
   # The block runs `instance_exec`'d on the plugin: `file_context` is whatever the `node_file_context` block
   # returned (plugin-defined), and a rule may answer one diagnostic, an array of them, or nil.
-  def self.node_rule: (singleton(::Prism::Node) node_type) { (::Prism::Node node, Rigor::Plugin::_Scope scope, String path, untyped file_context, Rigor::Plugin::NodeContext context) -> (Rigor::Analysis::Diagnostic | Array[Rigor::Analysis::Diagnostic] | nil) } -> Class
+  def self.node_rule: (singleton(::Prism::Node) node_type) { (::Prism::Node node, Rigor::Plugin::_Scope scope, String path, untyped file_context, Rigor::Plugin::NodeContext context) -> (Rigor::Analysis::Diagnostic | Array[Rigor::Analysis::Diagnostic] | nil) } -> singleton(::Prism::Node)
   def self.node_rules: () -> Array[untyped]
 
   def self.node_file_context: () { (::Prism::ProgramNode root, Rigor::Plugin::_Scope scope) -> untyped } -> void
@@ -67,7 +67,7 @@ class Rigor::Plugin::Base
   def declared_members: (untyped class_name) -> Array[untyped]
 
   # Engine-executed dispatch over the declared DSLs.
-  def node_rule_diagnostics: (path: String, scope: Rigor::Plugin::_Scope, root: ::Prism::ProgramNode) -> Array[Rigor::Analysis::Diagnostic]
+  def node_rule_diagnostics: (path: String, scope: Rigor::Plugin::_Scope, root: ::Prism::ProgramNode) -> Array[untyped]
   # sig-gen gap: #1007 — the true `return result if result` branch (base.rb:594) flows through an
   # `instance_exec`'d, plugin-supplied Proc that sig-gen's inference does not fold into the return
   # join, so it proposes the literal fallback `nil` instead of the honest contract.

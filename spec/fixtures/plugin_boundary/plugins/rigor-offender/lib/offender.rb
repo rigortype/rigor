@@ -26,6 +26,7 @@ module PluginBoundaryFixture
       scope.environment.nominal_for_name("String")
       scope.nil?
       scope.respond_to?(:locals)
+      nil
     end
   end
 end

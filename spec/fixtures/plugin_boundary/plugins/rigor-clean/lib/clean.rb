@@ -8,6 +8,7 @@ module PluginBoundaryFixture
     def read(scope, node)
       scope.type_of(node)
       scope.environment.rbs_module?("Kernel")
+      nil
     end
   end
 end

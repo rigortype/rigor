@@ -6,17 +6,12 @@ require "prism"
 # ADR-128 WD4 — the plugin-boundary gate's own contract. The gate itself (`spec/support/plugin_boundary_gate.rb`)
 # runs over the bundled plugins' integration specs; these examples prove it can fail, and fail for the right
 # reason, using fixture plugins under `spec/fixtures/plugin_boundary/plugins/`.
+PLUGIN_BOUNDARY_FIXTURE_ROOT = File.expand_path("../fixtures/plugin_boundary/plugins", __dir__)
+load File.join(PLUGIN_BOUNDARY_FIXTURE_ROOT, "rigor-offender/lib/offender.rb")
+load File.join(PLUGIN_BOUNDARY_FIXTURE_ROOT, "rigor-clean/lib/clean.rb")
+
 RSpec.describe PluginBoundary do
-  fixture_root = File.expand_path("../fixtures/plugin_boundary/plugins", __dir__)
-  offender = File.join(fixture_root, "rigor-offender/lib/offender.rb")
-  clean = File.join(fixture_root, "rigor-clean/lib/clean.rb")
-
-  before(:context) do
-    load offender
-    load clean
-  end
-
-  let(:recorder) { PluginBoundary::Recorder.new(roots: [fixture_root]) }
+  let(:recorder) { PluginBoundary::Recorder.new(roots: [PLUGIN_BOUNDARY_FIXTURE_ROOT]) }
   let(:scope) { Rigor::Scope.empty(environment: Rigor::Environment.default) }
   let(:node) { Prism.parse("1").value }
 
@@ -44,7 +39,7 @@ RSpec.describe PluginBoundary do
       recorder.record { PluginBoundaryFixture::Offender.reach_scope(scope) }
 
       expect { described_class.check!(recorder) }
-        .to raise_error(PluginBoundary::Violation, %r{rigor-offender: Rigor::Scope#locals at .*offender\.rb:\d+})
+        .to raise_error(PluginBoundary::Violation, /rigor-offender: Rigor::Scope#locals at .*offender\.rb:\d+/)
     end
   end
 

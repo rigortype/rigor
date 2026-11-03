@@ -109,7 +109,7 @@ module PluginBoundary
       @calls = {}
       @by_class = {}.compare_by_identity
       @module_targets = {}.compare_by_identity
-      @trace = TracePoint.new(:call, :c_call) { |tp| observe(tp) }
+      @trace = TracePoint.new(:call, :c_call) { |event| observe(event) }
     end
 
     def record(&)
@@ -134,19 +134,19 @@ module PluginBoundary
 
     # The hot path: it runs for every Ruby and C call in the process, so a receiver nothing watches is turned away
     # on one identity-hash lookup, before any caller frame is read.
-    def observe(tp)
-      recv = tp.self
+    def observe(event)
+      recv = event.self
       kind = @by_class.fetch(recv.class) { @by_class[recv.class] = classify(recv.class) }
       return unless kind
 
       target = kind == :module ? module_target(recv) : kind
-      target = internal_owner(tp) if target == :internal
+      target = internal_owner(event) if target == :internal
       return unless target
 
-      location, plugin = plugin_caller(tp)
+      location, plugin = plugin_caller(event)
       return unless plugin
 
-      name = tp.callee_id || tp.method_id
+      name = event.callee_id || event.method_id
       @calls[[target, name, plugin]] ||= Call.new(target: target, name: name, plugin: plugin, location: location)
     end
 
@@ -154,7 +154,7 @@ module PluginBoundary
     # `:module` (a Module or Class, whose own name decides per receiver), `:internal` (a class with an
     # `Rigor::Inference` ancestor, whose method's owner decides), or nil (nothing to record).
     def classify(klass)
-      return :module if klass == Module || klass == Class
+      return :module if [Module, Class].include?(klass)
 
       @backing.each { |name, backing| return name if klass <= backing }
       :internal if klass.ancestors.any? { |mod| internal_name(mod.name) }
@@ -168,9 +168,9 @@ module PluginBoundary
     end
 
     # The module that owns the called method, when it is under {INTERNAL_NAMESPACES}.
-    def internal_owner(tp)
-      owner = tp.defined_class
-      internal_name(owner.singleton_class? ? tp.self.name : owner.name)
+    def internal_owner(event)
+      owner = event.defined_class
+      internal_name(owner.singleton_class? ? event.self.name : owner.name)
     end
 
     def backing_name(mod)
@@ -185,10 +185,10 @@ module PluginBoundary
     end
 
     # [location string, plugin directory name] for the frame that made the call, or nil when it is not a plugin's.
-    def plugin_caller(tp)
+    def plugin_caller(event)
       # `:c_call` reports the caller's own file and line; `:call` reports the callee's, so its caller is one up.
-      path, lineno = if tp.event == :c_call
-                       [tp.path, tp.lineno]
+      path, lineno = if event.event == :c_call
+                       [event.path, event.lineno]
                      else
                        frame = caller_locations(4, 1)&.first
                        [frame&.absolute_path || frame&.path, frame&.lineno]
@@ -198,7 +198,7 @@ module PluginBoundary
       root = @roots.find { |r| path.start_with?(r) }
       return unless root
 
-      ["#{path.delete_prefix(REPO_ROOT + '/')}:#{lineno}", path.delete_prefix(root).split("/", 2).first]
+      ["#{path.delete_prefix("#{REPO_ROOT}/")}:#{lineno}", path.delete_prefix(root).split("/", 2).first]
     end
   end
 end

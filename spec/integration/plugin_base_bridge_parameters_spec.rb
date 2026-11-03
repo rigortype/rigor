@@ -131,14 +131,21 @@ RSpec.describe "ADR-43 bridge: block, override and reader types for a source-onl
 
   # The override bridge reads the declaration the `def` overrides. A nearer source class that defines the name sits
   # between the two, so the leaf's parameters stay `Dynamic[top]`, as a call's bridge withholds past a nearer `def`.
+  # `Mid` lives in another file: `discovered_methods` withholds a cross-file `def`, so only the resolution chain's
+  # project-wide def tables see it.
   it "does not bind an override's parameters past a nearer source definer of the same hook" do
-    source = <<~RUBY
+    mid = <<~RUBY
       module Rigor
         module Plugin
           class Mid < Base
             def diagnostics_for_file(path:, scope:, root:) = []
           end
-
+        end
+      end
+    RUBY
+    source = <<~RUBY
+      module Rigor
+        module Plugin
           class ZzProbe < Mid
             def diagnostics_for_file(path:, scope:, root:)
               Rigor.dump_type(path)
@@ -148,7 +155,7 @@ RSpec.describe "ADR-43 bridge: block, override and reader types for a source-onl
         end
       end
     RUBY
-    expect(dump_lines(source)).to eq([[9, "dump_type: Dynamic[top]"]])
+    expect(dump_lines(source, "mid.rb" => mid)).to eq([[5, "dump_type: Dynamic[top]"]])
   end
 
   # A constructor does not override its superclass's contract: a subclass routinely takes other arguments, so binding
@@ -168,8 +175,8 @@ RSpec.describe "ADR-43 bridge: block, override and reader types for a source-onl
     expect(dump_lines(source)).to eq([[5, "dump_type: Dynamic[top]"]])
   end
 
-  def dump_lines(source)
-    result = analyze(files: { "probe.rb" => source }, sig: sig, cache_store: nil)
+  def dump_lines(source, extra = {})
+    result = analyze(files: { "probe.rb" => source, **extra }, sig: sig, cache_store: nil)
     result.diagnostics.select { |d| d.rule == "dump.type" }.map { |d| [d.line, d.message] }
   end
 end

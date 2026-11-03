@@ -129,8 +129,20 @@ module Rigor
         per_call = (table[call_node] ||= {})
         per_call.fetch(type) do
           method_name, arg_types = UnknownStoreWidening.unknown_store(call_node)
-          per_call[type] = UnknownStoreWidening.widen_store(type, method_name, arg_types)
+          per_call[type] = removed_keys_shape(type, method_name) ||
+                           UnknownStoreWidening.widen_store(type, method_name, arg_types)
         end
+      end
+
+      # A `HashShape` under a remover (`delete`, `clear`, `reject!`, ...) through another holder: the same shape with
+      # every key optional. Nothing is stored, so every value stands, and a read of a key the remover may have taken
+      # still answers its `nil` (`g = h; g.delete(k); h[k].upcase` raises in Ruby), which the nominal `Hash` the unknown
+      # store widens to would not. Nil for anything else.
+      def removed_keys_shape(type, method_name)
+        return nil unless type.is_a?(Type::HashShape) && UnknownStoreWidening::VALUE_PRESERVING.include?(method_name)
+
+        Type::HashShape.new(type.pairs, required_keys: [], optional_keys: type.pairs.keys,
+                                        read_only_keys: type.read_only_keys, extra_keys: type.extra_keys)
       end
 
       # {UnknownStoreWidening.callee_block_floor} of a literal shape, nil for anything else, memoised for the run: the

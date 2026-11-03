@@ -49,7 +49,10 @@ may rely on, and how Rigor checks that they rely on nothing else. Today neither 
      parameters or readers (#2681).
   3. With (1) and (2) worked around, typing `call_node` and `scope` adds 9 `call.argument-type-mismatch`
      diagnostics, all on `scope.type_of(call_node.receiver)` right after a nil guard. They are false
-     positives: Prism node readers are not declared `%a{pure}`.
+     positives: a truthiness or `nil?` guard on a reader chain (`call_node.receiver`) did not carry to
+     the re-read, because chain narrowing covered only class guards. Declaring Prism's readers
+     `%a{pure}` would not have helped: no engine path reads it to remember a call result (#2687), and an
+     overlay cannot re-declare a reader Prism's own RBS declares.
 
   That run found no call outside the draft surface on a scope a hook received directly. Every
   out-of-surface call sits in a helper that takes the scope as a plain parameter, or reads it from
@@ -226,10 +229,11 @@ the bleeding-edge overlay until the next hard break (ADR-50 Decision 3, WD2, WD7
    - The migrated plugins' integration specs pass unchanged.
    - A survey diff on the projects those plugins serve (Mastodon for `rigor-active-model-serializers`
      and `rigor-activerecord`, an RSpec-heavy target for `rigor-rspec`) shows no delta.
-2. **Slice 2:** declare Prism node readers `%a{pure}` through a Rigor-shipped overlay; Prism nodes
-   are effectively immutable after parsing. The overlay applies to every analysed project that uses
-   Prism, so its acceptance includes a corpus before/after run as well as removing the 9 false
-   positives.
+2. **Slice 2 (#2685):** narrow a reader chain on truthiness and `nil?` guards when the RBS declares
+   the reader as an attribute (`control-flow-analysis.md` § "Guards on attribute readers"). Prism
+   declares every node field with `attr_reader`, so no Prism-specific code is needed. The rule applies
+   to every analysed project, so its acceptance includes a corpus before/after run as well as removing
+   the 9 false positives.
 3. **Slice 3:** #2681, then #929, make the types live, with WD6's `plugin.api-surface` rule in the
    bleeding-edge overlay, and WD5's interface-to-backing-class seam settled. Acceptance:
    - `make check-plugins` and `make check` report no new default-on diagnostic;

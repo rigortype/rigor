@@ -1,0 +1,3 @@
+- **[sig-gen]** `rigor sig-gen` now writes a redefinition through `public def x` or `private def x`, and proposes the class of a literal argument under `--params=observed`. ([#2665](https://github.com/rigortype/rigor/pull/2665))
+  - A `def` passed directly to `private`, `public` or `protected` runs with its statement, so it ranks as the definition Ruby keeps: `def x = 1` followed by `public def x = "s"` now writes `def x: () -> "s"`, where it wrote nothing.
+  - Under `--params=observed` a literal argument is widened to its class before it is proposed, so `def initialize: ("hello") -> void` becomes `def initialize: (String) -> void`. A parameter the body only compares against a literal is widened too.

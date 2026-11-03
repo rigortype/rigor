@@ -741,8 +741,9 @@ module Rigor
       #
       # Only a definer whose statement certainly runs can be last: a direct statement of a `class`, `module` or
       # `class << self` body, of a `Data.define` / `Struct.new` block or of the file ({#walk_statements} records
-      # them). One under a condition, in a block or a lambda, passed to a call (`private def x`), or after an
-      # uncertain `module_function` reset may not run, as far as this reading tells. A slot such a definer could
+      # them), or a `def` passed to `private`, `public` or `protected` in such a statement ({#walk_statements}, #2254).
+      # One under a condition, in a block or a lambda, or after an uncertain `module_function` reset may not run, as
+      # far as this reading tells. A slot such a definer could
       # still take over from the last certain one is contested, and nothing is written for it.
       #
       # @return the definers of each slot as `[offset, certain]` pairs, keyed by `[class_name, kind, method_name]`.
@@ -1134,6 +1135,8 @@ module Rigor
             @certain_definers << stmt
             # A `begin … end` statement's body (and `ensure`) runs whenever the statement does.
             mark_certain_body(stmt) if stmt.is_a?(Prism::BeginNode)
+            # A `def` passed to a visibility call (`private def x`, #2254) runs with its statement.
+            @certain_definers.merge(Inference::ModuleFunctionState.visibility_call_defs(stmt))
           end
           walk_defs(stmt, prefix, in_singleton_class, active, out)
         end
@@ -1360,14 +1363,21 @@ module Rigor
       # return position it is not parenthesised.
       def positional_type(observations, index, prefix, owner = nil)
         types = observations.filter_map { |obs| obs.positional[index] }
-        "#{prefix}#{union_erase(types, owner: owner)}"
+        "#{prefix}#{union_erase(widen_observed_params(types), owner: owner)}"
       end
 
       def render_keyword_param(keyword, observations, owner = nil)
         optional_marker = keyword.is_a?(Prism::OptionalKeywordParameterNode) ? "?" : ""
         types = observations.filter_map { |obs| obs.keyword[keyword.name] }
-        rendered = types.empty? ? "untyped" : paren_wrap_union(union_erase(types, owner: owner))
+        rendered = types.empty? ? "untyped" : paren_wrap_union(union_erase(widen_observed_params(types), owner: owner))
         "#{optional_marker}#{keyword.name}: #{rendered}"
+      end
+
+      # #2254 — an observed argument is one call's value, so a literal (`"hello"`) proposes its class (`String`), as
+      # {#widen_value_literals} does for a return. Widening always: a parameter the body only compares against a
+      # literal (a discriminant) is widened too, which loses precision and never adds a false positive.
+      def widen_observed_params(types)
+        types.map { |type| widen_value_literals(type) }
       end
 
       # Issue #2459 — a ROOTED path (`::Hash`, `::A::B`) keeps its leading `::`: it names exactly one class, and the

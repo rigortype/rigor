@@ -304,7 +304,7 @@ RSpec.describe Rigor::SigGen::Generator do
       candidate = described_class.new(configuration: config, paths: [path], observations: observations)
                                  .run.find { |c| c.method_name == :greet }
 
-      expect(candidate.rbs).to eq(%(def greet: (?"Alice", ?punct: "?") -> "hi"))
+      expect(candidate.rbs).to eq(%(def greet: (?String, ?punct: String) -> "hi"))
     end
 
     it "skips defs whose inferred return collapses to untyped via sig.skipped.untyped-return" do
@@ -733,8 +733,8 @@ RSpec.describe Rigor::SigGen::Generator do
         "class K\n  def x = 1\n  begin\n    nil\n  ensure\n    def x = \"s\"\n  end\nend\n",
         "K", ['def x: () -> "s"'], -> { it.new.x }, "s"
       ],
-      "a def passed to public after a def (one this reading cannot rank, so nothing is written)" => [
-        "class K\n  def x = 1\n  public def x = \"s\"\nend\n", "K", [], -> { it.new.x }, "s"
+      "a def passed to public after a def" => [
+        "class K\n  def x = 1\n  public def x = \"s\"\nend\n", "K", ['def x: () -> "s"'], -> { it.new.x }, "s"
       ],
       "an attr_reader of two names, one redefined" => [
         "class K\n  attr_reader :x, :y\n  def x = 1\n  def initialize = (@x = \"s\"; @y = :t)\nend\n",
@@ -783,6 +783,7 @@ RSpec.describe Rigor::SigGen::Generator do
         "class K\n  def x = 1\n  raise LoadError if COND\n  def x = \"s\"\nrescue LoadError\nend\n", :x
       ],
       "a case-arm redefinition" => ["class K\n  def x = 1\n  case COND when true then def x = \"s\" end\nend\n", :x],
+      "a public def under a condition" => ["class K\n  def x = 1\n  public(def x = \"s\") if COND\nend\n", :x],
       "a redefinition in a lambda" => ["class K\n  def x = 1\n  L = -> { def x = \"s\" }\n  L.call if COND\nend\n", :x],
       "a guarded polyfill" => [
         "class K\n  def x = 1\n  remove_method(:x) if COND\n  def x = \"s\" unless method_defined?(:x)\nend\n", :x
@@ -1409,15 +1410,15 @@ RSpec.describe Rigor::SigGen::Generator do
       init = described_class.new(configuration: config, paths: [path], observations: observations)
                             .run.find { |c| c.method_name == :initialize }
 
-      expect(init.rbs).to eq(%(def initialize: (name: "Alice", ?count: 42) -> void))
+      expect(init.rbs).to eq(%(def initialize: (name: String, ?count: Integer) -> void))
     end
 
-    it "fills in observed positional arg types in the stub" do
+    it "fills in observed positional arg types in the stub, widening a literal to its class (#2254)" do
       src = "class Box\n  def initialize(name)\n    @name = name\n  end\nend\n"
       path = write_fixture("lib/box.rb", src)
       observations = {
         ["Box", :initialize] => [
-          Rigor::SigGen::ObservedCall.new(positional: [Rigor::Type::Combinator.constant_of("Alice")])
+          Rigor::SigGen::ObservedCall.new(positional: [Rigor::Type::Combinator.constant_of("hello")])
         ]
       }
 
@@ -1425,7 +1426,7 @@ RSpec.describe Rigor::SigGen::Generator do
       init = described_class.new(configuration: config, paths: [path], observations: observations)
                             .run.find { |c| c.method_name == :initialize }
 
-      expect(init.rbs).to eq(%(def initialize: ("Alice") -> void))
+      expect(init.rbs).to eq(%(def initialize: (String) -> void))
     end
 
     it "renders a `&block` constructor param as a valid RBS block AFTER the parens" do
@@ -2640,7 +2641,7 @@ RSpec.describe Rigor::SigGen::Generator do
       candidate = described_class.new(configuration: config, paths: [path], observations: observations)
                                  .run.find { |c| c.method_name == :greet }
 
-      expect(candidate.rbs).to eq(%(def greet: ("Alice" | "Bob") -> "hi"))
+      expect(candidate.rbs).to eq(%(def greet: (String) -> "hi"))
     end
 
     it "falls back to untyped when no observation matches the method's required arity" do
@@ -2655,12 +2656,12 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(candidate.rbs).to eq(%(def add: (untyped, untyped) -> "x"))
     end
 
-    it "preserves distinct literal observations as a union" do
+    it "unions the classes of distinct literal observations (#2254)" do
       path = write_fixture("lib/box.rb", "class Box\n  def m(x)\n    \"r\"\n  end\nend\n")
       observations = {
         ["Box", :m] => [
           [Rigor::Type::Combinator.constant_of("a")],
-          [Rigor::Type::Combinator.constant_of("b")]
+          [Rigor::Type::Combinator.constant_of(1)]
         ]
       }
 
@@ -2668,7 +2669,7 @@ RSpec.describe Rigor::SigGen::Generator do
       candidate = described_class.new(configuration: config, paths: [path], observations: observations)
                                  .run.find { |c| c.method_name == :m }
 
-      expect(candidate.rbs).to eq(%(def m: ("a" | "b") -> "r"))
+      expect(candidate.rbs).to eq(%(def m: (Integer | String) -> "r"))
     end
 
     it "renders multiple observed positional params comma-joined, each unioned independently" do
@@ -2684,7 +2685,7 @@ RSpec.describe Rigor::SigGen::Generator do
       candidate = described_class.new(configuration: config, paths: [path], observations: observations)
                                  .run.find { |c| c.method_name == :add }
 
-      expect(candidate.rbs).to eq(%(def add: (1 | 2, "y" | "z") -> "x"))
+      expect(candidate.rbs).to eq(%(def add: (Integer, String) -> "x"))
     end
 
     # attr_reader + initialize-param observations

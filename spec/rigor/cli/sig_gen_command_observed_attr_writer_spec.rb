@@ -207,7 +207,7 @@ RSpec.describe Rigor::CLI::SigGenCommand do
   it "skips the reader and writer of an attr_accessor instead of rendering the observed literal" do
     box = section(observed_print, "Box")
 
-    expect(box).to include("def initialize: (0) -> void")
+    expect(box).to include("def initialize: (Integer) -> void")
     expect(box).not_to include("def count")
   end
 

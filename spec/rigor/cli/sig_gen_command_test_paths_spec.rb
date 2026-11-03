@@ -41,7 +41,7 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     status, out, err = run
 
     expect(status).to eq(0)
-    expect(out).to include("def m: (42) -> 1")
+    expect(out).to include("def m: (Integer) -> 1")
     expect(err).not_to include("no test roots")
   end
 
@@ -51,7 +51,7 @@ RSpec.describe Rigor::CLI::SigGenCommand do
 
     _status, out, = run(config: "paths:\n  - lib\ntest_paths:\n  - checks\n")
 
-    expect(out).to include("def m: (42) -> 1")
+    expect(out).to include("def m: (Integer) -> 1")
   end
 
   it "lets --observe=PATH override the configured test roots for one run" do
@@ -60,7 +60,7 @@ RSpec.describe Rigor::CLI::SigGenCommand do
 
     _status, out, = run("--observe=spec", config: "paths:\n  - lib\ntest_paths:\n  - checks\n")
 
-    expect(out).to include(%(def m: ("s") -> 1))
+    expect(out).to include(%(def m: (String) -> 1))
   end
 
   it "says why every parameter stays untyped when there is no test root to observe" do
@@ -85,7 +85,7 @@ RSpec.describe Rigor::CLI::SigGenCommand do
 
     _status, out, err = run(config: "paths:\n  - lib\ntest_paths:\n  - spec\n  - tests\n")
 
-    expect(out).to include("def m: (42) -> 1")
+    expect(out).to include("def m: (Integer) -> 1")
     expect(err).to include("tests").and include("does not exist")
     expect(err).not_to include("every parameter stays untyped")
   end
@@ -121,7 +121,7 @@ RSpec.describe Rigor::CLI::SigGenCommand do
 
       _status, out, err = run_in_sub
 
-      expect(out).to include("def m: (42) -> 1")
+      expect(out).to include("def m: (Integer) -> 1")
       expect(err).not_to include("no test roots")
     end
 
@@ -130,7 +130,7 @@ RSpec.describe Rigor::CLI::SigGenCommand do
 
       _status, out, = run_in_sub("--observe=../spec")
 
-      expect(out).to include("def m: (42) -> 1")
+      expect(out).to include("def m: (Integer) -> 1")
     end
 
     # No config file is discovered from `sub/`, so the default `paths:` name `sub/lib`; the class to observe is
@@ -144,7 +144,7 @@ RSpec.describe Rigor::CLI::SigGenCommand do
                             err: StringIO.new).run
       end
 
-      expect(out.string).to include("def m: (42) -> 1")
+      expect(out.string).to include("def m: (Integer) -> 1")
     end
 
     # A config file kept below the project root still finds the project's test roots from the root.
@@ -155,7 +155,7 @@ RSpec.describe Rigor::CLI::SigGenCommand do
       described_class.new(argv: ["--print", "--params=observed", "--config=#{File.join(root, 'config/rigor.yml')}"],
                           out: out, err: StringIO.new).run
 
-      expect(out.string).to include("def m: (42) -> 1")
+      expect(out.string).to include("def m: (Integer) -> 1")
     end
   end
 

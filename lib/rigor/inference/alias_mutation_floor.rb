@@ -166,7 +166,7 @@ module Rigor
 
         arguments = call_node.arguments&.arguments
         target = arguments&.first
-        return nil unless target.is_a?(Prism::SymbolNode) && target.unescaped&.valid_encoding?
+        return nil unless target.is_a?(Prism::SymbolNode)
 
         rest = arguments.drop(1)
         call_node.copy(name: target.unescaped.to_sym,

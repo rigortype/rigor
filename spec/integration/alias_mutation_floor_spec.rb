@@ -43,9 +43,9 @@ RSpec.describe "a mutation through another holder floors the locals it may reach
     "an Array.new fill" => 'a = [1]; Array.new(1, a)[0] << "s"; a.last.bytesize',
     "a Struct member" => 'a = [1]; Struct.new(:v).new(a).v << "s"; a.last.bytesize',
     "an index write through a copy" => 'acc = [7]; r = acc; r[0] = "x"; acc[0].upcase',
-    "a copy made on an earlier pass of a loop" => 'a = [1]; x = nil; i = 0; while i < 2; x << "s" if x; x = a; ' \
-                                                  "i += 1; end; a.last.bytesize",
-    "a proc that runs after the local is handed on" => 'a = [1]; pr = proc { |y| y << "s" }; @k = a; pr.call(a); ' \
+    "an ivar set on an earlier pass of a block" => 'a = [1]; [1, 2].each { |i| @h << "s" if i == 2; @h = a }; ' \
+                                                   "a.last.bytesize",
+    "a proc that runs after the local is handed on" => 'a = [1]; pr = proc { @k << "s" }; @k = a; pr.call; ' \
                                                        "a.last.bytesize"
   }.each do |path, body|
     it "stays silent after a mutation through #{path}" do
@@ -100,12 +100,11 @@ RSpec.describe "a mutation through another holder floors the locals it may reach
     end
 
     it "keeps an escaped literal when the receiver is another escaped new-object local" do
-      source = 'def foo(_) = nil; def m; a = [1]; b = [2]; foo(a); foo(b); b << "s"; dump_type(a.size); end'
-      expect(dumped(source)).to eq(["1"])
+      expect(dumped('def m; a = [1]; b = [2]; @k = a; @j = b; b << "s"; dump_type(a.size); end')).to eq(["1"])
     end
 
     it "keeps an escaped literal when the receiver is a method parameter the body never rebinds" do
-      expect(dumped('def foo(_) = nil; def m(p); a = [1]; foo(a); p << "s"; dump_type(a.size); end')).to eq(["1"])
+      expect(dumped('def m(p); a = [1]; @k = a; p << "s"; dump_type(a.size); end')).to eq(["1"])
     end
 
     it "keeps a literal handed on only after the mutation" do
@@ -133,6 +132,8 @@ RSpec.describe "a mutation through another holder floors the locals it may reach
 
     it "keeps the element widening of an element read's aliased root" do
       expect(dumped("def m; c = [{ a: 1 }]; @k = c; c[0].shift; dump_type(c); end")).to eq(["[Hash[Symbol, 1]]"])
+      expect(dumped("def m; c = [{ a: 1 }]; @k = c; [1].each { c[0].shift }; dump_type(c); end"))
+        .to eq(["[Hash[Symbol, 1]]"])
     end
 
     it "floors nothing for a method parameter a callee writes" do
@@ -141,7 +142,7 @@ RSpec.describe "a mutation through another holder floors the locals it may reach
     end
 
     it "keeps an escaped literal String when the receiver is another new String" do
-      source = 'def foo(_) = nil; def m; s = +"a"; t = +"b"; foo(s); foo(t); t << "x"; dump_type(s); end'
+      source = 'def m; s = +"a"; t = +"b"; @k = s; @j = t; t << "x"; dump_type(s); end'
       expect(dumped(source)).to eq(['"a"'])
     end
   end

@@ -4,6 +4,7 @@
 
 import { execFile } from "child_process";
 import { ResolvedServer, useShell, versionArgs } from "./discovery";
+import { shellInvocation } from "./proc";
 
 /** First `rigor lsp` release. Older gems cannot serve the LSP. */
 export const MIN_VERSION = "0.1.6";
@@ -36,16 +37,18 @@ export function probeServer(
   server: ResolvedServer,
   cwd: string,
 ): Promise<ProbeResult> {
+  const shell = useShell(server);
+  const invocation = shellInvocation(server.command, versionArgs(server), shell);
   return new Promise((resolve) => {
     execFile(
-      server.command,
-      versionArgs(server),
+      invocation.command,
+      invocation.args,
       {
         cwd,
         env: server.env,
         timeout: 20000,
         windowsHide: true,
-        shell: useShell(server),
+        shell,
       },
       (error, stdout) => {
         if (error) {

@@ -110,6 +110,30 @@ RSpec.describe "a mutation through another holder floors the locals it may reach
     analyze(source).diagnostics.map(&:qualified_rule).grep(/\Aflow\./)
   end
 
+  # The fix-only check after review round 3: a remover on an element keeps the element's removed key optional, and
+  # leaves the outer Hash's own keys alone. Each body runs clean in Ruby.
+  {
+    "a delete on an element read" => "h = { k: { a: 1 } }; x = h[:k]; x.delete(:a); " \
+                                     "raise 'bad' if h.fetch(:k).key?(:a)",
+    "a clear on an element read" => "h = { k: { a: 1 } }; x = h[:k]; x.clear; raise 'bad' if h.fetch(:k).key?(:a)",
+    "a reject! on an element read" => "h = { k: { a: 1 } }; x = h[:k]; x.reject! { true }; " \
+                                      "raise 'bad' if h.fetch(:k).include?(:a)",
+    "a delete through an element read of a copied Hash" => "h = { k: { a: 1 } }; y = h; h[:k].delete(:a); " \
+                                                           "raise 'bad' if y.fetch(:k).key?(:a)",
+    "a delete on a Hash held in a literal" => "x = { a: 1 }; h = { k: x }; x.delete(:a); " \
+                                              "raise 'bad' if h.fetch(:k).key?(:a)",
+    "a delete on an element held by an ivar" => "h = { k: { a: 1 } }; @z = h[:k]; @z.delete(:a); " \
+                                                "raise 'bad' if h.fetch(:k).key?(:a)",
+    "a delete read in a ternary" => "h = { k: { a: 1 } }; x = h[:k]; x.delete(:a); h.fetch(:k).key?(:a) ? :y : :n",
+    "a delete under binding" => "b = binding; h = { k: { a: 1 } }; x = h[:k]; x.delete(:a); " \
+                                "raise 'bad' if h.fetch(:k).key?(:a); b"
+  }.each do |shape, body|
+    it "folds no condition after #{shape}" do
+      rules = analyze("def m; #{body}; end\n").diagnostics.map(&:qualified_rule)
+      expect(rules.grep(/always-(truthy|falsey)/)).to eq([])
+    end
+  end
+
   it "floors a literal String a callee writes through its copy" do
     source = "def app(x) = x << \"b\"\ndef m; s = +\"a\"; t = s; app(t); s == \"ab\" ? 1 : 2; end\n"
     expect(flow_rules(source)).to eq([])

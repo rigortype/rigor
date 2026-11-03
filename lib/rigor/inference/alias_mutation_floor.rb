@@ -94,7 +94,10 @@ module Rigor
         targets = call_targets(facts, call_node) { receiver_targets(call_node.receiver, facts, call_node) }
         return scope if targets.empty?
 
-        floor_targets(scope, targets, yield) { |type| unknown_store(call_node, type) }
+        whole = !targets.equal?(ALL)
+        floor_targets(scope, targets, yield) do |type, kind|
+          unknown_store(call_node, type, removed_keys: whole && kind == FULL)
+        end
       end
 
       # Whether `call_node` is a shape mutator on an explicit receiver, the only call {.floor_after_call} floors after.
@@ -124,12 +127,12 @@ module Rigor
 
       # `type` after `call_node`'s unknown store ({UnknownStoreWidening.widen_store}), memoised per call site for the
       # run as {.callee_floor} is.
-      def unknown_store(call_node, type)
+      def unknown_store(call_node, type, removed_keys:)
         table = (Thread.current[STORE_CACHE_KEY] ||= {}.compare_by_identity)
-        per_call = (table[call_node] ||= {})
-        per_call.fetch(type) do
+        per_mode = ((table[call_node] ||= {})[removed_keys] ||= {})
+        per_mode.fetch(type) do
           method_name, arg_types = UnknownStoreWidening.unknown_store(call_node)
-          per_call[type] = removed_keys_shape(type, method_name) ||
+          per_mode[type] = (removed_keys && removed_keys_shape(type, method_name)) ||
                            UnknownStoreWidening.widen_store(type, method_name, arg_types)
         end
       end
@@ -137,7 +140,9 @@ module Rigor
       # A `HashShape` under a remover (`delete`, `clear`, `reject!`, ...) through another holder: the same shape with
       # every key optional. Nothing is stored, so every value stands, and a read of a key the remover may have taken
       # still answers its `nil` (`g = h; g.delete(k); h[k].upcase` raises in Ruby), which the nominal `Hash` the unknown
-      # store widens to would not. Nil for anything else.
+      # store widens to would not. Only for a target that may be the mutated object itself, and not under `binding` /
+      # `eval`: a remover on an element (`x = h[:k]; x.delete(:a)`) must not mark `h`'s own keys optional and leave the
+      # element's removed key required. Nil for anything else.
       def removed_keys_shape(type, method_name)
         return nil unless type.is_a?(Type::HashShape) && UnknownStoreWidening::VALUE_PRESERVING.include?(method_name)
 
@@ -324,8 +329,9 @@ module Rigor
         targets.each(&)
       end
 
-      # Each target but `except` takes what the block answers for its binding. A target reached only below its own
-      # object (a depth past {FULL}) is floored only when its binding can hold a mutable element.
+      # Each target but `except` takes what the block answers for its binding and the depth it was reached at. A target
+      # reached only below its own object (a depth past {FULL}) is floored only when its binding can hold a mutable
+      # element.
       def floor_targets(scope, targets, except)
         acc = scope
         each_target(scope, targets) do |name, kind|
@@ -334,7 +340,7 @@ module Rigor
           current = acc.local(name)
           next if current.nil? || (kind > FULL && !mutable_parts?(current))
 
-          floored = yield(current)
+          floored = yield(current, kind)
           acc = acc.with_mutated_local(name, floored) unless floored.nil? || floored == current
         end
         acc

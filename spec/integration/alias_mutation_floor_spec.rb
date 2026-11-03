@@ -50,6 +50,7 @@ RSpec.describe "a mutation through another holder floors the locals it may reach
     "the fetched Hash value it was bound to" => 'h = { k: [1] }; a = h[:k]; h.fetch(:k) << "s"; a.last.bytesize',
     "an element read through a copy of its container" => 'c = [[1]]; a = c[0]; d = c; d[0] << "s"; a.last.bytesize',
     "a nested element read" => 'h = { k: [[1]] }; a = h[:k][0]; h[:k][0] << "s"; a.last.bytesize',
+    "a dig two levels in" => 'h = { k: [[1]] }; a = h.dig(:k, 0); h[:k][0] << "s"; a.last.bytesize',
     "a chain of element reads" => 'c = [[[1]]]; x = c[0]; y = x[0]; c[0][0] << "s"; y.last.bytesize',
     "an element read of an ivar" => '@rows = [[1]]; a = @rows[0]; @rows[0] << "s"; a.last.bytesize',
     "the local held in its container" => 'inner = [1]; c = [inner]; a = c[0]; inner << "s"; a.last.bytesize',
@@ -149,7 +150,8 @@ RSpec.describe "a mutation through another holder floors the locals it may reach
     "a size read as a Hash key" => "{ a.size => 1 }; @z = []; @z << 1",
     "a scalar element in a literal" => "[a.first]; @z = []; @z << 1",
     "a size read in a literal" => "x = [a.size]; @z = []; @z << 1",
-    "a shift of a scalar element read out" => "x = a.first; x << 2"
+    "a shift of a scalar element read out" => "x = a.first; x << 2",
+    "the container holding it growing" => "c = [a]; c << [2]"
   }.each do |read, body|
     it "still reports a literal after #{read}" do
       expect(undefined_methods("def m; a = [1]; #{body}; a.last.bytesize; end\n")).to eq(["call.undefined-method"])

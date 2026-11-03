@@ -18,6 +18,10 @@ the extension is versioned independently of the `rigortype` gem.
   `rigor.server.useBundler`, `rigor.server.configPath`,
   `rigor.server.logPath`, `rigor.trace.server`.
 - Commands: Restart Server, Show Output Channel, Show Server Log.
+- CLI-backed commands for the open file, shown in the Command Palette
+  only while a folder is managed: Show Type at Cursor, Explain Rule (also
+  a quick fix on Rigor diagnostics), Open Config, Generate Signatures for
+  File and Update Baseline. The commands that write ask first.
 - Status bar item reflecting the server lifecycle.
 - One server per Rigor-configured folder in multi-root workspaces.
 - Workspace-trust gating — the server is not started in restricted

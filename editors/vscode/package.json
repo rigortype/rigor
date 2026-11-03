@@ -156,6 +156,31 @@
         "command": "rigor.clearManagedRuntime",
         "title": "Clear Managed Rigor",
         "category": "Rigor"
+      },
+      {
+        "command": "rigor.showTypeAtCursor",
+        "title": "Show Type at Cursor",
+        "category": "Rigor"
+      },
+      {
+        "command": "rigor.explainRule",
+        "title": "Explain Rule",
+        "category": "Rigor"
+      },
+      {
+        "command": "rigor.openConfig",
+        "title": "Open Config",
+        "category": "Rigor"
+      },
+      {
+        "command": "rigor.generateSignatures",
+        "title": "Generate Signatures for File",
+        "category": "Rigor"
+      },
+      {
+        "command": "rigor.updateBaseline",
+        "title": "Update Baseline",
+        "category": "Rigor"
       }
     ],
     "taskDefinitions": [
@@ -187,7 +212,31 @@
           "code": 6
         }
       }
-    ]
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "rigor.showTypeAtCursor",
+          "when": "rigor.managedFolder"
+        },
+        {
+          "command": "rigor.explainRule",
+          "when": "rigor.managedFolder"
+        },
+        {
+          "command": "rigor.openConfig",
+          "when": "rigor.managedFolder"
+        },
+        {
+          "command": "rigor.generateSignatures",
+          "when": "rigor.managedFolder"
+        },
+        {
+          "command": "rigor.updateBaseline",
+          "when": "rigor.managedFolder"
+        }
+      ]
+    }
   },
   "scripts": {
     "compile": "node esbuild.js --production",

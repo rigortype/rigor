@@ -215,12 +215,10 @@ module Rigor
 
         def bind(name, value)
           AliasMutationFloor.each_may_be(value) do |read|
-            if local?(read)
-              other = AliasMutationFloor.local_name(read)
-              @links << [name, other, key, 0] unless other == name
-            else
-              note(@held, name)
-            end
+            next unless local?(read)
+
+            other = AliasMutationFloor.local_name(read)
+            @links << [name, other, key, 0] unless other == name
           end
           note(@held, name) if NON_LOCAL_READS.include?(AliasMutationFloor.element_path(value).first.class)
           root, depth = AliasMutationFloor.element_root(value)

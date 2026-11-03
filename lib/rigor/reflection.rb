@@ -528,7 +528,6 @@ module Rigor
     def project_method_defined(class_name, method_name, kind:, source:, scope:)
       raise ArgumentError, "unknown kind #{kind.inspect}" unless PROJECT_METHOD_KINDS.include?(kind)
       raise ArgumentError, "unknown source #{source.inspect}" unless PROJECT_METHOD_SOURCES.include?(source)
-      return Trinary.no if class_name.nil?
 
       case source
       when :def then project_def_defined(class_name, method_name, kind, scope)

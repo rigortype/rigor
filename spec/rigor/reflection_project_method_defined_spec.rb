@@ -125,7 +125,8 @@ RSpec.describe Rigor::Reflection, ".project_method_defined" do
       end
       includes = (1..count).map { |i| "  include M#{i}" }.join("\n")
       host = if extend
-               "module Ext\n#{includes}\nend\nclass Cut < Base\n  extend Ext\nend"
+               "module Ext\n#{includes}\nend\n" \
+                 "class Cut < Base\n  extend Ext\n  class << self\n    attr_reader :own_config\n  end\nend"
              else
                "class Cut < Base\n#{includes}\nend"
              end
@@ -133,7 +134,9 @@ RSpec.describe Rigor::Reflection, ".project_method_defined" do
     end
 
     let(:cut_scope) do
-      scope_for(modules_source({ 1 => "def deep = 1\nattr_reader :deep_reader", count => "def near = 1" }))
+      scope_for(
+        modules_source({ 1 => "def deep = 1\nattr_reader :deep_reader", count => "def near = 1\ninclude Comparable" })
+      )
     end
 
     it "builds a truncated chain (the premise)" do
@@ -173,6 +176,14 @@ RSpec.describe Rigor::Reflection, ".project_method_defined" do
       expect(answer(extended, "Cut", :deep, kind: :singleton, source: :discovered)).to eq(Rigor::Trinary.maybe)
       expect(answer(extended, "Cut", :near, kind: :singleton, source: :def)).to eq(Rigor::Trinary.yes)
       expect(answer(extended, "Cut", :near, kind: :singleton, source: :discovered)).to eq(Rigor::Trinary.yes)
+    end
+
+    it "reads the class object's own singleton table inside a cut singleton chain" do
+      extended = scope_for(modules_source({ 1 => "def deep = 1" }, extend: true))
+
+      expect(answer(extended, "Cut", :own_config, kind: :singleton, source: :def)).to eq(Rigor::Trinary.maybe)
+      expect(answer(extended, "Cut", :own_config, kind: :singleton, source: :discovered)).to eq(Rigor::Trinary.yes)
+      expect(answer(extended, "Cut", :own_config, kind: :singleton, source: :either)).to eq(Rigor::Trinary.yes)
     end
 
     it "leaves both Scope walks answering what they answered before the facade" do

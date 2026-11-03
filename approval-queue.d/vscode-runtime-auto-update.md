@@ -1,6 +1,6 @@
 # The VS Code extension checks for managed-Rigor updates in the background by default, and installs one only on a click
 
-- **PR:** [#0000](https://github.com/rigortype/rigor/pull/0000)
+- **PR:** [#2772](https://github.com/rigortype/rigor/pull/2772)
 - **Issue:** [#2746](https://github.com/rigortype/rigor/issues/2746)
 - **Class:** open-choice
 - **Precedent:** none — sets one

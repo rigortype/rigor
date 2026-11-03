@@ -29,7 +29,12 @@ import {
   window,
   workspace,
 } from "vscode";
-import { projectRoot, resolveServer, shouldManageFolder } from "./discovery";
+import {
+  projectRoot,
+  resolveServer,
+  shouldManageFolder,
+  useShell,
+} from "./discovery";
 import { killTree, spawnCli } from "./proc";
 
 export const OUTPUT_SCHEME = "rigor-output";
@@ -248,7 +253,10 @@ function runRigor(
       }
       resolve({ code, stdout, stderr, cancelled });
     };
-    const child = spawnCli(server.command, args, root);
+    const child = spawnCli(server.command, args, root, {
+      shell: useShell(server),
+      env: server.env,
+    });
     const sub: Disposable | undefined = token?.onCancellationRequested(() => {
       cancelled = true;
       killTree(child);

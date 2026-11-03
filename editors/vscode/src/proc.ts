@@ -32,11 +32,16 @@ export function spawnCli(
   command: string,
   args: string[],
   cwd: string,
+  options: { shell?: boolean; env?: NodeJS.ProcessEnv } = {},
 ): ChildProcess {
   const win = process.platform === "win32";
-  const child = spawn(win ? shellArg(command) : command, win ? args.map(shellArg) : args, {
+  // The managed kind (ADR-27 WD10) spawns its Ruby directly, without a
+  // shell, under its own Bundler environment.
+  const shell = options.shell ?? win;
+  const child = spawn(shell ? shellArg(command) : command, shell ? args.map(shellArg) : args, {
     cwd,
-    shell: win,
+    env: options.env,
+    shell,
     detached: !win,
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],

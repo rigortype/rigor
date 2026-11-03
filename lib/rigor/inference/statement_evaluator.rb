@@ -1963,8 +1963,10 @@ module Rigor
                                                     rewritten_element: rewritten_element(call_node, current_scope))
         widened = ElementReadWidening.widen_element_read(call_node: call_node, current_scope: widened,
                                                          arg_types: arg_types)
-        widened = AliasMutationFloor.floor_after_call(call_node, widened,
-                                                      except: named_receiver_locals(call_node.receiver))
+        if AliasMutationFloor.candidate?(call_node)
+          widened = AliasMutationFloor.floor_after_call(call_node, widened,
+                                                        except: named_receiver_locals(call_node.receiver))
+        end
         # Issue #2499 — a stdlib call that fills a String argument (`io.read(n, buf)`, `StringIO.new(s)`).
         floor_ivar_mutating_callee(node, OutBufferMutation.floor(call_node, widened))
       end

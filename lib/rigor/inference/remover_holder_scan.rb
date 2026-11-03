@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "../run_scoped_slots"
+require_relative "../source/node_children"
 require_relative "closure_escape_analyzer"
 require_relative "construction_escape"
 
@@ -96,7 +97,7 @@ module Rigor
         names << node.name if in_closure && LOCAL_REFERENCES.any? { |k| node.is_a?(k) }
         record_node(node, names)
 
-        node.compact_child_nodes.each do |child|
+        node.rigor_each_child do |child|
           child_in_closure = in_closure || (child.is_a?(Prism::BlockNode) && deferred_block?(node))
           collect_unsafe(child, child_in_closure, names, sited:)
         end
@@ -136,14 +137,17 @@ module Rigor
       # A zero-argument `super` passes every parameter of the method on, implicitly. (A `...` forward passes only the
       # anonymous parameters, which name no local.)
       def forwards_parameters?(node)
-        node.is_a?(Prism::ForwardingSuperNode) || node.compact_child_nodes.any? { |child| forwards_parameters?(child) }
+        return true if node.is_a?(Prism::ForwardingSuperNode)
+
+        node.rigor_each_child { |child| return true if forwards_parameters?(child) }
+        false
       end
 
       def parameter_names(node, names)
         return if node.nil?
 
         names << node.name if node.class.name.end_with?("ParameterNode") && node.respond_to?(:name) && node.name
-        node.compact_child_nodes.each { |child| parameter_names(child, names) }
+        node.rigor_each_child { |child| parameter_names(child, names) }
       end
 
       def frame_call?(node)
@@ -203,7 +207,8 @@ module Rigor
 
         found = node.is_a?(Prism::LocalVariableReadNode)
         names << node.name if found
-        node.compact_child_nodes.reduce(found) { |acc, child| every_read(child, names) || acc }
+        node.rigor_each_child { |child| found = true if every_read(child, names) }
+        found
       end
 
       def local_targets(nodes, names)
@@ -219,7 +224,7 @@ module Rigor
         return if pure_read?(node)
 
         names << node.name if node.is_a?(Prism::LocalVariableReadNode)
-        node.compact_child_nodes.each { |child| record_held(child, names) }
+        node.rigor_each_child { |child| record_held(child, names) }
       end
 
       # A {PURE_READERS} call on a local hands the local on to nothing. Its own arguments are held positions of the

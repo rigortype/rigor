@@ -305,7 +305,9 @@ module Rigor
         return scope if receiver.nil?
 
         # Issue #2335 — a block parameter, an element read or any other receiver that may be an outer local's object.
-        scope = AliasMutationFloor.floor_after_call(call_node, scope, except: captured_element_root(receiver))
+        if AliasMutationFloor.candidate?(call_node)
+          scope = AliasMutationFloor.floor_after_call(call_node, scope, except: captured_element_root(receiver))
+        end
         widened = widen_outer_element_read(call_node, scope)
         return widened if widened
 

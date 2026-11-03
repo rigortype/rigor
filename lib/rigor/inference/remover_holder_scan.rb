@@ -25,7 +25,8 @@ module Rigor
     #   `super` (positional, keyword, splat or block-pass), unless the read is the receiver of a call that answers
     #   a value other than the receiver and keeps no reference to it ({PURE_READERS}: #2555's per-class
     #   `ConstructionEscape::READERS`, less the conversions that return self on another class): `puts(l.size)`,
-    #   `dump_type(l.dup)` and `dump_type(l.first)` hold nothing, `Keep.new(l)` and `foo(l.push(1))` do;
+    #   `dump_type(l.dup)` and `dump_type(l.first)` hold nothing, `Keep.new(l)` and `foo(l.push(1))` do. A
+    #   `dump_type` / `assert_type` probe ({Rigor::Testing}) holds nothing it is passed (#2335);
     # - it receives a reflective call (`l.send(...)`, `l.instance_eval { }`, `l.tap { }`);
     # - and every local, when the body calls `binding`, `eval`, `local_variable_get` or `local_variable_set` on any
     #   receiver (`-> {}.binding`), or a receiverless `instance_variable_set`.
@@ -54,12 +55,15 @@ module Rigor
         Prism::LocalVariableWriteNode, Prism::LocalVariableOperatorWriteNode, Prism::LocalVariableOrWriteNode,
         Prism::LocalVariableAndWriteNode
       ].freeze
+      TESTING_PROBES = %i[dump_type assert_type].to_set.freeze
+      TESTING_RECEIVERS = %w[Rigor Rigor::Testing ::Rigor ::Rigor::Testing].to_set.freeze
       ALL = :all
       # A run-scoped slot ({RunScopedSlots}): emptied when a run ends, so no verdict outlives the body it read.
       UNSAFE_CACHE_KEY = RunScopedSlots.register(:__rigor_remover_narrowing_unsafe)
       private_constant :REFLECTIVE_CALLS, :SELF_CONVERSIONS, :PURE_READERS, :IMMEDIATE_BLOCK_CALLS, :FRAME_CALLS,
                        :ANY_RECEIVER_FRAME_CALLS, :NON_WRITER_OPERATORS, :CORE_COLLECTIONS,
-                       :LOCAL_REFERENCES, :LOCAL_WRITES, :ALL, :UNSAFE_CACHE_KEY
+                       :LOCAL_REFERENCES, :LOCAL_WRITES, :TESTING_PROBES, :TESTING_RECEIVERS, :ALL,
+                       :UNSAFE_CACHE_KEY
 
       module_function
 
@@ -75,30 +79,36 @@ module Rigor
         names.equal?(ALL) || names.include?(name.to_sym)
       end
 
-      def unsafe_names(body, parameters = nil)
-        names = Set.new
+      # `names` collects the locals; a collector that answers `site=` ({AliasMutationFloor}) is told, before each name
+      # it is given, the node that hands the local on, or nil when no single node does (a capture by a closure that may
+      # run later, a zero-argument `super`). One that answers `keeps_arguments?` says which calls' plain arguments it
+      # counts as held.
+      def unsafe_names(body, parameters = nil, names = Set.new)
+        sited = names.respond_to?(:site=)
         catch(ALL) do
-          collect_unsafe(body, false, names)
+          collect_unsafe(body, false, names, sited:)
+          names.site = nil if sited
           parameter_names(parameters, names) if forwards_parameters?(body)
           return names.freeze
         end
         ALL
       end
 
-      def collect_unsafe(node, in_closure, names)
+      def collect_unsafe(node, in_closure, names, sited: false)
         in_closure ||= node.is_a?(Prism::LambdaNode)
+        names.site = in_closure ? nil : node if sited
         names << node.name if in_closure && LOCAL_REFERENCES.any? { |k| node.is_a?(k) }
         record_node(node, names)
 
         node.compact_child_nodes.each do |child|
           child_in_closure = in_closure || (child.is_a?(Prism::BlockNode) && deferred_block?(node))
-          collect_unsafe(child, child_in_closure, names)
+          collect_unsafe(child, child_in_closure, names, sited:)
         end
       end
 
       def record_node(node, names) # rubocop:disable Metrics/CyclomaticComplexity
         case node
-        when Prism::CallNode then record_call(node, names)
+        when Prism::CallNode then record_call(node, names) unless testing_probe?(node)
         when Prism::YieldNode, Prism::SuperNode then node.arguments&.arguments&.each { |a| record_held(a, names) }
         when Prism::ArrayNode then node.elements.each { |element| record_held(element, names) }
         when Prism::AssocNode then [node.key, node.value].each { |part| record_held(part, names) }
@@ -120,9 +130,20 @@ module Rigor
           *keys, value = arguments
           keys.each { |key| record_held(key, names) }
           every_read(value, names)
-        else
+        elsif keeps_arguments?(node, names)
           arguments.each { |argument| record_held(argument, names) }
         end
+      end
+
+      def keeps_arguments?(node, names) = !names.respond_to?(:keeps_arguments?) || names.keeps_arguments?(node)
+
+      # Issue #2335 — `dump_type(l)` / `assert_type(t, l)`, receiverless or on `Rigor` / `Rigor::Testing`: the runtime
+      # no-op probes ({Rigor::Testing}) keep nothing they are passed.
+      def testing_probe?(node)
+        return false unless TESTING_PROBES.include?(node.name)
+
+        receiver = node.receiver
+        receiver.nil? || TESTING_RECEIVERS.include?(receiver.location.slice)
       end
 
       # A zero-argument `super` passes every parameter of the method on, implicitly. (A `...` forward passes only the

@@ -78,4 +78,10 @@ shape = SchemaWalk.collect([[:required, :email, nil], [:optional, :tags, [[:requ
 # returned. Since issue #2287 the block's outer-mutation walk widens the element
 # that read reaches in `declared`'s `HashShape`; `kind` is no literal key, so
 # both values widen while the keys survive.
-assert_type("{ required: Hash, optional: Hash, declared: { required: Array[Dynamic[top]], optional: Array[Dynamic[top]] } }", shape)
+#
+# Since issue #2335 `declared` takes one unknown store as well: `element_info(nested)`
+# hands the block parameter `nested` to a callee the callee floor reads as writing
+# it (its rows reach `block.call`), and `nested`, a parameter of a block that may
+# run later, may be any captured local's object. The store makes its keys and
+# values gradual.
+assert_type("{ required: Hash, optional: Hash, declared: Hash[Dynamic[Symbol], Dynamic[[]]] }", shape)

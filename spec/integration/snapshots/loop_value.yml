@@ -11,7 +11,7 @@ assertions:
   '8': Array[1 | 2 | Dynamic[top]] | Array[Integer]
   '9': Array[1 | 2 | Dynamic[top]] | Array[Integer]
   '10': Array[1 | 2 | Dynamic[top]] | Array[Integer]
-  '11': Array[Integer]
+  '11': Array[1 | 2 | Dynamic[top]] | Array[Integer]
   '12': Hash[Dynamic[top] | Symbol, 1 | Dynamic[top]] | Hash[Symbol, Integer]
   '13': Dynamic[top]
   '14': Array[String]

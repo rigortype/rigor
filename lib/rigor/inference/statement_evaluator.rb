@@ -1955,8 +1955,8 @@ module Rigor
       # Issue #2335 — a literal-symbol `send` (`a.send(:push, x)`) widens as the call it makes, and a mutation through a
       # receiver that may be another local's object floors every local whose object another holder may reach
       # ({AliasMutationFloor}).
-      def widen_mutated_receivers(call_node, current_scope)
-        call_node = AliasMutationFloor.literal_send_target(call_node) || call_node
+      def widen_mutated_receivers(node, current_scope)
+        call_node = AliasMutationFloor.literal_send_target(node) || node
         arg_types = mutator_arg_types(call_node, current_scope)
         widened = MutationWidening.widen_after_call(call_node: call_node, current_scope: current_scope,
                                                     arg_types: arg_types,
@@ -1966,24 +1966,22 @@ module Rigor
         widened = AliasMutationFloor.floor_after_call(call_node, widened,
                                                       except: named_receiver_locals(call_node.receiver))
         # Issue #2499 — a stdlib call that fills a String argument (`io.read(n, buf)`, `StringIO.new(s)`).
-        OutBufferMutation.floor(call_node, widened)
+        floor_ivar_mutating_callee(node, OutBufferMutation.floor(call_node, widened))
       end
 
       # Issue #2335 — a call on a local that may hold another local's object (`box = Box.new(a)`) to a project method
       # that mutates one of its instance variables (`def add(v) = @items << v`) may mutate that object: every local
-      # whose object another holder may reach takes one unknown store ({UnknownStoreWidening.callee_block_floor}).
+      # whose object another holder may reach takes one unknown store ({AliasMutationFloor.floor_after_written_local}).
       def floor_ivar_mutating_callee(call_node, current_scope)
         receiver = call_node.receiver
         return current_scope unless receiver.is_a?(Prism::LocalVariableReadNode)
-        return current_scope if MutationWidening::SHAPE_MUTATORS.include?(call_node.name)
-        return current_scope unless AliasMutationFloor.reaches_other_locals?(current_scope, receiver.name)
+        return current_scope if MutationWidening::SHAPE_MUTATORS.include?(call_node.name) || send_hand_off?(call_node)
+        return current_scope unless AliasMutationFloor.reaches_other_locals?(current_scope, receiver.name, call_node)
 
         callees = receiver_callees_in(scope, call_node)
         return current_scope unless callees.any? { |def_node, _, _| AliasMutationFloor.mutates_ivar?(def_node) }
 
-        AliasMutationFloor.floor_after_written_local(current_scope, receiver.name) do |type|
-          UnknownStoreWidening.callee_block_floor(type)
-        end
+        AliasMutationFloor.floor_after_written_local(current_scope, receiver.name, call_node)
       end
 
       # The locals a mutator's receiver names ({ReceiverAlias.mutated_reads}), which the named path widens, and the
@@ -4579,7 +4577,6 @@ module Rigor
         # (e.g. `arms << x`, `@tags << hashtag`). Stops a literal-shape carrier (`Tuple` / `HashShape`) from outliving
         # its justification when the value is mutated. Always-safe (loses precision, never invents facts).
         post_scope = widen_mutated_receivers(node, post_scope)
-        post_scope = floor_ivar_mutating_callee(node, post_scope)
         # ADR-48 slice 4 — Struct member-setter re-typing. After `s.x = v` on a fold-safe StructInstance local, rebind
         # `s` to a StructInstance with member `:x` replaced by the assigned type, so a later `s.x` folds to `v` and a
         # sibling `s.y` stays precise. `call_type` is the setter's own result (the assigned value type). Sound only for
@@ -5812,14 +5809,14 @@ module Rigor
 
       # `base_scope` with each local `node` passes to a parameter of `mutated` rebound to what the block answers for
       # its binding; a nil answer, or an answer equal to the binding, leaves it. Issue #2335 — an argument that may be
-      # another local's object (a block parameter, a copy) floors every local another holder may reach the same way
-      # ({AliasMutationFloor}), a block-local one included.
+      # another local's object (a block parameter, a copy) floors every local another holder may reach
+      # ({AliasMutationFloor.floor_after_written_local}), a block-local one included.
       def floor_arguments(node, mutated, base_scope, offset, climbing = nil)
         arguments = arguments_for_slots(node, mutated, offset)
         return base_scope if arguments.empty?
 
         arguments.reduce(base_scope) do |acc, argument|
-          acc = AliasMutationFloor.floor_after_written_local(acc, argument.name) { |type| yield(type) }
+          acc = AliasMutationFloor.floor_after_written_local(acc, argument.name, node)
           next acc unless acc.locals.key?(argument.name)
           next acc if climbing && argument.depth <= climbing
 
@@ -6788,14 +6785,19 @@ module Rigor
       # True when at least one argument of `node` is a bare local-variable read (positional or keyword value) bound in
       # the current scope — a cheap pre-filter so the def resolution / body scan only runs for calls that could actually
       # floor something.
+      # A local bound in the current scope, or (issue #2335) one whose object another local may share, which the
+      # alias floor reads a callee's write through ({AliasMutationFloor.reaches_other_locals?}).
+      def passed_local?(name, node)
+        scope.locals.key?(name) || AliasMutationFloor.reaches_other_locals?(scope, name, node)
+      end
+
       def call_passes_local_argument?(node)
         args = node.arguments
         return false unless args.respond_to?(:arguments)
 
         args.arguments.any? do |arg|
           case arg
-          when Prism::LocalVariableReadNode
-            scope.locals.key?(arg.name) || AliasMutationFloor.reaches_other_locals?(scope, arg.name)
+          when Prism::LocalVariableReadNode then passed_local?(arg.name, node)
           when Prism::SplatNode
             arg.expression.is_a?(Prism::LocalVariableReadNode) && scope.locals.key?(arg.expression.name)
           when Prism::KeywordHashNode

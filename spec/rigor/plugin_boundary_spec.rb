@@ -10,6 +10,10 @@ PLUGIN_BOUNDARY_FIXTURE_ROOT = File.expand_path("../fixtures/plugin_boundary/plu
 load File.join(PLUGIN_BOUNDARY_FIXTURE_ROOT, "rigor-offender/lib/offender.rb")
 load File.join(PLUGIN_BOUNDARY_FIXTURE_ROOT, "rigor-clean/lib/clean.rb")
 
+# A spec tree root: `spec_helper.rb` is a loaded file under it, and the fixtures above are methods under it.
+SPEC_ROOT = File.join(PluginBoundary::REPO_ROOT, "spec")
+INTEGRATION_EXAMPLE = "./spec/integration/examples/deprecations_plugin_spec.rb"
+
 RSpec.describe PluginBoundary do
   let(:recorder) { PluginBoundary::Recorder.new(roots: [PLUGIN_BOUNDARY_FIXTURE_ROOT]) }
   let(:scope) { Rigor::Scope.empty(environment: Rigor::Environment.default) }
@@ -82,34 +86,54 @@ RSpec.describe PluginBoundary do
         .not_to include(:instance_variable_get, :instance_variable_set, :instance_variables)
     end
 
-    it "fails a run that ran an integration example when no root holds a loaded file, and not otherwise" do
-      wrong = PluginBoundary::Recorder.new(roots: ["#{PLUGIN_BOUNDARY_FIXTURE_ROOT}X"])
+    it "fails a gate that recorded nothing when it is asked to require calls, and not otherwise" do
+      recorder.record { scope.locals }
 
-      expect { described_class.check!(wrong, require_root_file: true, integration_ran: true) }
+      expect { described_class.check!(recorder, require_calls: true) }
+        .to raise_error(PluginBoundary::Violation, /recorded no call from a frame under .*it checked nothing/)
+      expect { described_class.check!(recorder) }.not_to raise_error
+    end
+
+    it "fails a run that ran an integration example when no root holds a loaded file" do
+      wrong = PluginBoundary::Recorder.new(roots: ["#{PLUGIN_BOUNDARY_FIXTURE_ROOT}X"])
+      wrong.note_example(INTEGRATION_EXAMPLE)
+
+      expect { described_class.check!(wrong) }
         .to raise_error(PluginBoundary::Violation, /loaded no file under .*it checked nothing/)
-      expect { described_class.check!(wrong) }.not_to raise_error
-      expect { described_class.check!(wrong, require_root_file: true) }.not_to raise_error
     end
 
     it "passes a run with no integration example, though no root holds a loaded file" do
       wrong = PluginBoundary::Recorder.new(roots: ["#{PLUGIN_BOUNDARY_FIXTURE_ROOT}X"])
+      wrong.note_example("./spec/rigor/plugin_boundary_spec.rb")
 
-      expect { described_class.check!(wrong, require_root_file: true, integration_ran: false) }.not_to raise_error
+      expect { described_class.check!(wrong) }.not_to raise_error
     end
 
-    it "passes a gate whose root holds a loaded file, though it recorded no call" do
-      spec_root = PluginBoundary::Recorder.new(roots: [File.join(PluginBoundary::REPO_ROOT, "spec")])
-      expect(spec_root.calls).to be_empty
+    it "fails a run that ran an integration example on a recorder that never went live" do
+      never = PluginBoundary::Recorder.new(roots: [SPEC_ROOT])
+      never.note_example(INTEGRATION_EXAMPLE)
+      expect(never.root_file_loaded?).to be(true)
 
-      expect { described_class.check!(spec_root, require_root_file: true, integration_ran: true) }.not_to raise_error
+      expect { described_class.check!(never) }
+        .to raise_error(PluginBoundary::Violation, /no method under .* run under the trace/)
+    end
+
+    it "passes a gate whose root holds a loaded file and went live, though it recorded no call" do
+      live = PluginBoundary::Recorder.new(roots: [SPEC_ROOT])
+      live.note_example(INTEGRATION_EXAMPLE)
+      live.record { PluginBoundaryFixture::Clean.idle }
+
+      expect(live.calls).to be_empty
+      expect(live.live?).to be(true)
+      expect { described_class.check!(live) }.not_to raise_error
     end
 
     it "fails a gate whose roots match no plugin file, though a plugin made calls" do
       wrong = PluginBoundary::Recorder.new(roots: ["#{PLUGIN_BOUNDARY_FIXTURE_ROOT}X"])
+      wrong.note_example(INTEGRATION_EXAMPLE)
       wrong.record { PluginBoundaryFixture::Clean.read(scope, node) }
 
-      expect { described_class.check!(wrong, require_root_file: true, integration_ran: true) }
-        .to raise_error(PluginBoundary::Violation)
+      expect { described_class.check!(wrong) }.to raise_error(PluginBoundary::Violation)
     end
 
     it "attributes a call by its caller's path, so a call from the spec file itself is not a plugin's" do
@@ -147,6 +171,29 @@ RSpec.describe PluginBoundary do
       expect(described_class.integration_spec?("./spec/rigor/plugin_boundary_spec.rb")).to be(false)
       expect(described_class.integration_spec?("./spec/integration/lens_spec.rb")).to be(false)
       expect(described_class.integration_spec?("./spec/integration/examples_helper.rb")).to be(false)
+    end
+
+    it "anchors the directory at a path component, with or without a leading directory or ./" do
+      expect(described_class.integration_spec?("spec/integration/examples/x_spec.rb")).to be(true)
+      expect(described_class.integration_spec?("./myspec/integration/examples/x_spec.rb")).to be(false)
+      expect(described_class.integration_spec?("./xspec/integration/plugins/x_spec.rb")).to be(false)
+    end
+  end
+
+  describe "the recorder's integration state" do
+    it "is set only by a plugin integration spec path" do
+      recorder.note_example("./spec/rigor/plugin_boundary_spec.rb")
+      expect(recorder.integration_ran?).to be(false)
+
+      recorder.note_example("./spec/integration/plugins/alba_plugin_spec.rb")
+      expect(recorder.integration_ran?).to be(true)
+    end
+
+    it "is not live until a method under a root has run under the trace" do
+      expect(recorder.live?).to be(false)
+      recorder.record { PluginBoundaryFixture::Clean.idle }
+
+      expect(recorder.live?).to be(true)
     end
   end
 

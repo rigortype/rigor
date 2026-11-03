@@ -10,5 +10,8 @@ module PluginBoundaryFixture
       scope.environment.rbs_module?("Kernel")
       nil
     end
+
+    # Runs under the trace and makes no engine call: the recorder goes live without recording a call.
+    def idle = nil
   end
 end

@@ -81,15 +81,25 @@ module PluginBoundary
   # Raises {Violation} unless the recorder saw only calls the interfaces, the `Object` protocol or the allow-list
   # account for.
   #
-  # `require_root_file:` also fails a recorder none of whose roots holds a file in `$LOADED_FEATURES`, but only when
-  # `integration_ran:` says the run executed a plugin integration example (see {integration_spec?}). A gate whose
-  # roots match no file checks nothing, and would otherwise pass for want of anything to judge; a run with no
-  # integration example has no plugin code to judge at all. It reads what was loaded, never what a plugin called,
-  # so a run whose plugins make no engine call still passes.
-  def check!(recorder, require_root_file: false, integration_ran: false, **)
-    if require_root_file && integration_ran && !recorder.root_file_loaded?
+  # Two liveness checks fail a recorder that could not have judged anything, and neither reads what a plugin called.
+  # `require_calls:` (the CI jobs set it, see the Makefile) also fails a recorder that saw no call from a plugin
+  # frame. Every run that executed a plugin integration example (see {Recorder#note_example}) fails unless a file
+  # under the roots is in `$LOADED_FEATURES` and a method under the roots ran while the trace was on
+  # ({Recorder#live?}). A run with no integration example has nothing to judge, so it passes both.
+  def check!(recorder, require_calls: false, **)
+    if require_calls && recorder.calls.empty?
+      raise Violation, "the plugin-boundary gate recorded no call from a frame under #{recorder.roots.join(', ')}: " \
+                       "it checked nothing (wrong roots, or no plugin spec ran)"
+    end
+
+    if recorder.integration_ran? && !recorder.root_file_loaded?
       raise Violation, "the plugin-boundary gate loaded no file under #{recorder.roots.join(', ')}: " \
                        "it checked nothing (wrong roots, or no plugin file was required)"
+    end
+
+    if recorder.integration_ran? && !recorder.live?
+      raise Violation, "the plugin-boundary gate saw no method under #{recorder.roots.join(', ')} run under the trace: " \
+                       "it checked nothing (the recorder never started, or the roots are wrong)"
     end
 
     found = recorder.violations(**)
@@ -137,8 +147,20 @@ module PluginBoundary
       @calls = {}
       @by_class = {}.compare_by_identity
       @module_targets = {}.compare_by_identity
+      @live = false
+      @integration_ran = false
       @trace = TracePoint.new(:call, :c_call) { |event| observe(event) }
     end
+
+    # Records that an example from the spec file at `path` ran; only a plugin integration spec counts.
+    def note_example(path)
+      @integration_ran ||= PluginBoundary.integration_spec?(path)
+    end
+
+    def integration_ran? = @integration_ran
+
+    # Whether a method under a root ran while the trace was on: the recorder saw plugin code at all.
+    def live? = @live
 
     def record(&)
       @trace.enable(&)
@@ -158,16 +180,22 @@ module PluginBoundary
       end
     end
 
-    # Whether a file under one of the roots has been required: the one fact the liveness check reads.
+    # Whether a file under one of the roots has been required: one of the facts the liveness check reads.
     def root_file_loaded?
-      $LOADED_FEATURES.any? { |feature| @roots.any? { |root| feature.start_with?(root) } }
+      $LOADED_FEATURES.any? { |feature| under_root?(feature) }
     end
 
     private
 
+    def under_root?(path)
+      @roots.any? { |root| path.start_with?(root) }
+    end
+
     # The hot path: it runs for every Ruby and C call in the process, so a receiver nothing watches is turned away
-    # on one identity-hash lookup, before any caller frame is read.
+    # on one identity-hash lookup, before any caller frame is read. The liveness latch is the first test: once a
+    # plugin method has run under the trace, each later event costs one ivar test.
     def observe(event)
+      @live ||= event.event == :call && under_root?(event.path)
       recv = event.self
       klass = CLASS_OF.bind_call(recv)
       kind = @by_class.fetch(klass) { @by_class[klass] = classify(klass) }

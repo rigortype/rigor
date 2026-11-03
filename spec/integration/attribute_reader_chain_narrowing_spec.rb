@@ -38,6 +38,15 @@ RSpec.describe "attribute-reader chain narrowing on truthiness and nil? guards (
       class Sub2 < Base2
       end
 
+      class Account
+        %a{rigor:v1:predicate-if-true self is Admin}
+        attr_reader admin: bool?
+      end
+
+      class Admin < Account
+        def grant: () -> void
+      end
+
       class Sink
         def int: (Integer n) -> void
         def node: (::Prism::Node n) -> void
@@ -56,6 +65,7 @@ RSpec.describe "attribute-reader chain narrowing on truthiness and nil? guards (
         def pr3: (::Prism::CallNode x, Sink s) -> void
         def prs: (Array[::Prism::CallNode] xs, Sink s) -> void
         def mutate: (Holder x) -> void
+        def ac: (Account x) -> void
       end
     RBS
   end
@@ -143,6 +153,21 @@ RSpec.describe "attribute-reader chain narrowing on truthiness and nil? guards (
           end
         end
       RUBY
+    end
+  end
+
+  describe "edges the guard already had" do
+    # The attribute's `RBS::Extended` predicate fact narrows `x` to `Admin`; the chain fact is added beside it.
+    it "keeps an RBS::Extended predicate fact the attribute carries" do
+      result = diagnostics(<<~RUBY)
+        def ac(x)
+          if x.admin
+            Rigor.dump_type(x.admin)
+            x.grant
+          end
+        end
+      RUBY
+      expect(result.map { |d| [d.rule.to_s, d.message] }).to eq([["dump.type", "dump_type: true"]])
     end
   end
 

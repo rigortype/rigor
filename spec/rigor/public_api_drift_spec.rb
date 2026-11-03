@@ -25,6 +25,23 @@ require File.expand_path("../../plugins/rigor-ffi/lib/rigor-ffi", __dir__)
 # When you change a public method on purpose, update the matching
 # snapshot below in the same commit.
 module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
+  # ADR-128 — the plugin-facing interfaces (`sig/rigor/plugin/interfaces.rbs`) are the promise: a method is public
+  # plugin API only if `Plugin::Base`, one of these interfaces or a listed public namespace declares it. Adding a
+  # member is an API promise and needs ADR-128's admission rule (a plugin needs it, and its contract can be stated
+  # without an engine-internal type or a hidden uncertainty direction). The bundled plugins are gated against these
+  # lists by `spec/support/plugin_boundary.rb`.
+  PLUGIN_INTERFACE_MEMBERS = {
+    "Rigor::Plugin::_Scope" => %w[environment local self_type source_path type_of],
+    "Rigor::Plugin::_Environment" => %w[nominal_for_name rbs_module?],
+    "Rigor::Plugin::_Services" => %w[configuration fact_store reflection type],
+    "Rigor::Plugin::_FactStore" => %w[publish read],
+    "Rigor::Plugin::_Configuration" => %w[paths]
+  }.freeze
+
+  # An internal change detector, NOT a promise. `Rigor::Scope` is an engine class (ADR-50 WD1): these ~200 methods
+  # are pinned so a signature change is deliberate and reviewable, but a plugin may rely only on the
+  # `Rigor::Plugin::_Scope` members above. A change here needs no plugin-API release note; a change to the
+  # interface snapshot does (ADR-128 WD6).
   SCOPE_INSTANCE = %w[
     ==(req:other)
     ambiguous_ancestor_resolutions(req:subclass_qualified,req:raw_ancestor)
@@ -831,8 +848,16 @@ RSpec.describe "Public API drift", :public_api_drift do
     klass.singleton_methods(false).sort.map { |name| signature(klass.method(name)) }
   end
 
+  describe "the plugin-facing interfaces (ADR-128)" do
+    it "declares the expected member set for each interface" do
+      declared = PluginBoundary.interface_members.transform_values { |members| members.to_a.sort }
+
+      expect(declared).to eq(PublicApiDriftSnapshots::PLUGIN_INTERFACE_MEMBERS)
+    end
+  end
+
   describe "Rigor::Scope" do
-    it "exposes the expected instance method surface" do
+    it "exposes the expected instance method surface (an internal change detector, not a promise)" do
       expect(instance_signatures(Rigor::Scope)).to eq(PublicApiDriftSnapshots::SCOPE_INSTANCE)
     end
 

@@ -1,0 +1,15 @@
+module Rigor
+  module Plugin
+    # ADR-37 slice 1d — the lexical context of a node, the fifth argument of a `node_rule` block.
+    class NodeContext
+      EMPTY: nil
+
+      attr_reader ancestors: Array[::Prism::Node]
+
+      def initialize: (Array[::Prism::Node] ancestors) -> void
+      def enclosing_def: () -> ::Prism::DefNode?
+      def enclosing_module: () -> (::Prism::ClassNode | ::Prism::ModuleNode)?
+      def enclosing_block: (Symbol method_name) -> ::Prism::CallNode?
+    end
+  end
+end

@@ -93,8 +93,12 @@ test-ractor-pool:
 # Plugin integration tests are excluded from the default suite because they modify global state (Test Pollution).
 # Specifically, rigor-ffi re-opens Rigor::Plugin::Base to define DSL macros.
 # Running them in a separate RSpec process avoids flaky failures in public_api_drift_spec.rb.
+#
+# The run also carries the ADR-128 WD4 plugin-boundary gate (RIGOR_PLUGIN_BOUNDARY, spec/support/plugin_boundary.rb): a
+# TracePoint that fails the run when a bundled plugin calls past the plugin-facing interfaces. It roughly doubles the
+# run, and spec/integration/examples/ joins it because the gate covers examples/ as well as plugins/.
 test-integration-plugins:
-	RIGOR_INCLUDE_INTEGRATION_PLUGINS=1 bundle exec rspec spec/integration/plugins/
+	RIGOR_PLUGIN_BOUNDARY=1 RIGOR_INCLUDE_INTEGRATION_PLUGINS=1 bundle exec rspec spec/integration/plugins/ spec/integration/examples/
 
 # Spec suite via `binpacker`, distributing files across worker
 # processes using LPT scheduling driven by measured per-file

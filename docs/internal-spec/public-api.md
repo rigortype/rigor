@@ -31,12 +31,15 @@ contribute capability roles, dynamic-return facts, type-specifying
 plugins, and `RBS::Extended` directives. Plugin authors will write
 against a small set of read-side surfaces:
 
-- **`Rigor::Scope`** — the per-node analysis state (locals, ivars,
-  facts, environment).
+- **`Rigor::Plugin::_Scope`** — what a hook may call on the per-node
+  analysis state it receives. A structural interface, not the engine's
+  `Rigor::Scope` class.
 - **`Rigor::Type`** + **`Rigor::Type::Combinator`** — the type-object
   layout and factory entry points.
-- **`Rigor::Environment`** — the project-level RBS / class-registry
-  / cache-store handle.
+- **`Rigor::Plugin::_Environment`**, **`_Services`**, **`_FactStore`**
+  and **`_Configuration`** — the interfaces for the project-level RBS
+  handle a scope exposes and for the services container `init` /
+  `prepare` receive.
 - **`Rigor::Reflection`** — the unified read-side facade over the
   three reflection sources (ClassRegistry + RbsLoader + Scope's
   discovered facts).
@@ -50,7 +53,38 @@ against a small set of read-side surfaces:
 
 This document declares which methods on those namespaces are
 **public** (plugin authors may rely on them) versus **internal**
-(may change without notice). The v0.0.9 cluster grew per-namespace
+(may change without notice).
+
+**The criterion** ([ADR-128](../adr/128-plugin-hook-surface-interfaces.md)):
+a method is public plugin API **if and only if** it is declared on
+`Rigor::Plugin::Base`, on a plugin-facing interface
+(`sig/rigor/plugin/interfaces.rbs`), or in a namespace this document lists
+as public. Being reachable at runtime does not make a method public, and
+neither does a drift pin. The concrete engine classes behind the interfaces
+(`Rigor::Scope`, `Rigor::Environment`, `Rigor::Plugin::Services`,
+`Rigor::Plugin::FactStore`, `Rigor::Configuration`) are internal
+([ADR-50](../adr/50-release-engineering-and-stability-strategy.md) WD1): a
+plugin that calls past the interface works today and may break in any
+release. A method enters an interface only when a plugin needs it and its
+contract can be stated without naming an engine-internal type or hiding an
+uncertainty direction; otherwise Rigor adds a facade on a public namespace
+(`Reflection.project_method_defined` is the first).
+
+The interface member lists:
+
+- `_Scope` — `type_of`, `self_type`, `local`, `source_path`, and a non-nil
+  `environment`.
+- `_Environment` — `nominal_for_name`, `rbs_module?`.
+- `_Services` — `fact_store`, `configuration`, `reflection` and `type`.
+  The last two are the public `Rigor::Reflection` and
+  `Rigor::Type::Combinator` modules themselves, not narrower interfaces,
+  because a plugin reaches both by constant as well.
+- `_FactStore` — `publish`, `read`.
+- `_Configuration` — `paths`.
+
+Every hook position in `Plugin::Base` is typed against these, concrete
+`Prism` node classes, `Rigor::Type::t` and core types. A hook's `scope` is
+non-nil: the engine calls every scope-taking hook with a `Scope`. The v0.0.9 cluster grew per-namespace
 drift snapshots so future signature changes show up as test
 failures, not silent breakage.
 
@@ -60,10 +94,14 @@ The drift spec at
 [`spec/rigor/public_api_drift_spec.rb`](../../spec/rigor/public_api_drift_spec.rb)
 pins instance and singleton method sets for:
 
-- `Rigor::Scope` — instance methods + the `Scope.empty(environment:)`
-  factory.
-- `Rigor::Environment` — instance methods + `Environment.default` /
+- The member lists of the plugin-facing interfaces above (the
+  `PLUGIN_INTERFACE_MEMBERS` snapshot, read from the RBS).
+- `Rigor::Scope` and `Rigor::Environment` — instance methods + the
+  `Scope.empty(environment:)` factory and `Environment.default` /
   `Environment.for_project(root:, libraries:, signature_paths:, cache_store:)`.
+  **These two snapshots are internal change detectors, not promises**: they
+  make a signature change on an engine class deliberate and reviewable, and
+  no plugin may rely on a member only they pin.
 - `Rigor::Type::Combinator` — every factory the inference engine
   reaches for (`top`, `bot`, `untyped`, `nominal_of`, `singleton_of`,
   `constant_of`, `integer_range`, `positive_int`, `non_empty_string`,
@@ -107,7 +145,10 @@ pins instance and singleton method sets for:
   / `hash` / `to_h`). Spec'd in
   [`macro-substrate.md`](macro-substrate.md) § Template units.
 - `Rigor::Plugin::Services` — `reflection`, `type`, `configuration`,
-  `cache_store`, `trust_policy`, `io_boundary_for(plugin_id)`.
+  `cache_store`, `trust_policy`, `io_boundary_for(plugin_id)`. Of these only
+  the `_Services` members (`fact_store`, `configuration`, `reflection`,
+  `type`) are plugin API; the rest are pinned as an internal change detector
+  because no bundled plugin calls them through `services`.
 - `Rigor::Plugin::Registry` — `plugins`, `ids`, `find(id)`,
   `load_errors`, `empty?`, `any_load_errors?`.
 - `Rigor::Plugin::TrustPolicy` — `trusted_gems`,
@@ -125,6 +166,17 @@ pins instance and singleton method sets for:
 
 Any signature change on these methods has to update the matching
 `PublicApiDriftSnapshots::*` constant in the same commit.
+
+**The boundary gate.** The drift spec pins what Rigor promises; it cannot see
+what plugins actually call. A spec-only `TracePoint` recorder
+(`spec/support/plugin_boundary.rb`, ADR-128 WD4) runs over the bundled
+plugins' integration specs (`make test-integration-plugins`), records every
+method a frame under `plugins/` or `examples/` calls on an interface's
+backing class or on a module under `Rigor::Inference`, and fails the run on
+any that is neither declared by the interface, nor part of the
+`Object` / `Kernel` / `BasicObject` protocol, nor a row of its allow-list.
+Its coverage is whatever those specs exercise, and it covers bundled plugins
+only.
 
 ## What is intentionally NOT yet locked
 
@@ -173,7 +225,14 @@ Plugin authors must NOT rely on:
   StatementEvaluator, MethodDispatcher, MethodParameterBinder,
   ClosureEscapeAnalyzer, CoverageScanner). These are the engine's
   internal mechanism; their shapes change as the inference surface
-  evolves.
+  evolves. `rigor-alba` and `rigor-typelizer` still reach
+  `Rigor::Inference::DeclarationWalk`; that is a tracked reach awaiting a
+  facade ([#2708](https://github.com/rigortype/rigor/issues/2708)), listed
+  on the plugin-boundary gate's allow-list, not a promise.
+- Any method of `Rigor::Scope`, `Rigor::Environment`, `Rigor::Plugin::Services`,
+  `Rigor::Plugin::FactStore` or `Rigor::Configuration` that its interface
+  above does not declare, and `Rigor::Plugin::TypeNodeResolver`'s
+  `NameScope` (a later ADR-128 slice decides its interface).
 - `Rigor::Analysis::FactStore`, `Analysis::Result`,
   `Analysis::CheckRules`, `Analysis::Runner`. The diagnostic
   catalogue and the rule definitions are not a plugin extension

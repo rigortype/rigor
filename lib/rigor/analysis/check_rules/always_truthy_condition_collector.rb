@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../../source/node_children"
 require_relative "../../inference/optimistic_origin"
+require_relative "attribute_chain_guard"
 require_relative "inferred_param_guard"
 require_relative "published_constant_guard"
 
@@ -118,6 +119,10 @@ module Rigor
 
           predicate_type = scope.type_of(predicate)
           return unless predicate_type.is_a?(Type::Constant)
+
+          # Issue #2685 — a constancy that rests on an attribute-chain fact may rest on a write the fact did not see
+          # (an alias, a callee handed the root); such a fact refines types but never proves a check redundant.
+          return if AttributeChainGuard.rooted?(predicate, scope)
 
           # Issue #644 — a predicate whose constancy rests on a value constant declared in ANOTHER file is
           # not a logic error the reader's author can see: `if MODE == :production` folds only because the

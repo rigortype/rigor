@@ -2068,14 +2068,17 @@ module Rigor
         [scope.type_of(node, tracer: tracer), forget_rebound_specials(widened, node)]
       end
 
-      # The scope effect of calling the writer `writer` on `receiver` outside a `CallNode`: the receiver widening, and
-      # the receiver-wide drop of recorded `receiver[key]` narrowings `IndexedNarrowing` makes after a mutator call.
+      # The scope effect of calling the writer `writer` on `receiver` outside a `CallNode`: the receiver widening, the
+      # drop of every method-chain narrowing rooted at the receiver that `eval_call` makes after any call on it (issue
+      # #2685: `x.r ||= v`, `x.r, y = …` and `for x.r in …` call `r=`), and the receiver-wide drop of recorded
+      # `receiver[key]` narrowings `IndexedNarrowing` makes after a mutator call.
       def widen_attribute_write(receiver, writer, current_scope)
         widened = MutationWidening.widen_receiver_aliases(receiver, writer, current_scope)
         stable = IndexedNarrowing.stable_receiver(receiver)
-        return widened unless stable && IndexedNarrowing.mutator?(writer)
+        return widened unless stable
 
-        widened.without_indexed_narrowings_for(*stable)
+        widened = widened.without_method_chain_narrowings_for(*stable)
+        IndexedNarrowing.mutator?(writer) ? widened.without_indexed_narrowings_for(*stable) : widened
       end
 
       # The attribute targets of a multi-write (`h.default, x = 0, 1`), nested ones included, each widening its
@@ -4001,9 +4004,11 @@ module Rigor
           scope.with_global(index_node.name, element_type)
         when Prism::IndexTargetNode
           widen_index_target(index_node, element_type, scope, type_scope: scope)
+        when Prism::CallTargetNode
+          widen_attribute_write(index_node.receiver, index_node.name, scope)
         when Prism::MultiTargetNode
           bound = MultiTargetBinder.bind_marked(index_node, element_type, scope: scope)
-          widen_index_targets(bound, bound.apply_to(scope), type_scope: scope)
+          widen_attribute_targets(index_node, widen_index_targets(bound, bound.apply_to(scope), type_scope: scope))
         when Prism::SplatNode
           bind_for_splat_index(index_node, scope)
         else

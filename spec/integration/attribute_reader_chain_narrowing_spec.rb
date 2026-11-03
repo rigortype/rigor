@@ -3,15 +3,21 @@
 require "spec_helper"
 
 # Issue #2685 — a truthiness or `nil?` guard on `x.r` carries to the next `x.r` read when `r` is declared with
-# `attr_reader` / `attr_accessor` in the RBS of the receiver's class or an RBS ancestor, and no project `def` can
-# answer `r` instead. The fact is the single-hop method-chain narrowing `is_a?` guards already record, and is dropped
-# by the same rules: a rebind of the root, or any later call on it.
+# `attr_reader` / `attr_accessor` in the RBS of the receiver's class or an RBS ancestor, and the project cannot answer
+# `r` another way. The fact is the single-hop method-chain narrowing `is_a?` guards already record, dropped by the same
+# rules (a rebind of the root, any later call on it) and by three more for this kind of fact: a call whose block or
+# lambda mentions the root, a call that runs a closure, and, for an instance-variable root, an implicit-self call. Such
+# a fact never makes `flow.always-truthy-condition` fire.
 #
 # Each example passes the re-read to `Sink#int(Integer)`: a narrowed read is quiet, an un-narrowed one reports
-# `call.argument-type-mismatch`. Ruby 4.0.5 behaviour the rule relies on, witnessed with `ruby -e`: two reads of an
-# `attr_reader` with no write between return the same object; the writer `x.w = nil` and a method that sets the
-# ivar through `x` passed as an argument both change the next read; `nil&.r` returns `nil` without calling `r`; and a
-# subclass `def r` returns different values on two reads.
+# `call.argument-type-mismatch`. Ruby 4.0.5 behaviour the rule relies on, witnessed with `ruby -e`:
+# - two reads of an `attr_reader` with no write between return the same object, and `nil&.r` returns `nil` without
+#   calling `r`;
+# - each of these makes the next read `nil` (or differ from the last): the writer `x.w = nil`, `x.w &&= nil`,
+#   `x.w, _ = nil, 1`, `for x.w in [nil]`, a block or lambda writing `x.w` (`[1].each { … }`, `clear.call`,
+#   `clear.()`), a `reset!` writing `@x.w`, an alias `y = x; y.w = nil`, and a method handed `x` that writes it;
+# - a subclass `def r`, a `define_method(:r)`, a `refine … def r` under `using`, and a `define_singleton_method(:r)` in
+#   `initialize` each answer `r` in place of the attribute.
 #
 # An example marked "guard" passes without the fix too; the comment says what it pins.
 RSpec.describe "attribute-reader chain narrowing on truthiness and nil? guards (#2685)", type: :runner do
@@ -47,13 +53,46 @@ RSpec.describe "attribute-reader chain narrowing on truthiness and nil? guards (
         def grant: () -> void
       end
 
+      class Job
+        attr_accessor done: true?
+      end
+
+      class HDm
+        attr_reader r: Integer?
+      end
+
+      class HRef
+        attr_reader r: Integer?
+      end
+
+      class HSing
+        attr_reader r: Integer?
+      end
+
       class Sink
         def int: (Integer n) -> void
         def node: (::Prism::Node n) -> void
       end
 
       class Probe
+        @x: Holder
+        @task: Job
+        def initialize: (Holder x, Job t) -> void
         def f: (Holder x, Sink s, ?Holder y) -> void
+        def f3: (Holder x, Sink s, Array[Integer] items) -> void
+        def f4: (Holder x, Sink s, ?Holder y) -> void
+        def f5: (Holder x, Sink s, ?Holder y) -> void
+        def iv: (Sink s) -> void
+        def iv2: (Sink s) -> void
+        def reset!: () -> void
+        def dm: (HDm x, Holder h, Sink s) -> void
+        def rf: (HRef x, Holder h, Sink s) -> void
+        def sg: (HSing x, Holder h, Sink s) -> void
+        def jb: (Job j, Job k) -> Integer
+        def jb2: (Job j) -> Integer
+        def jb3: () -> Integer
+        def jctl: () -> Integer
+        def reset_all: (Array[Job] js) -> void
         def f2: (Holder x, Sink s, ?Holder y) -> void
         def g: (Holder? x, Sink s) -> void
         def g2: (Holder? x, Sink s) -> void
@@ -81,6 +120,13 @@ RSpec.describe "attribute-reader chain narrowing on truthiness and nil? guards (
     diagnostics(body, extra: extra)
       .select { |d| %w[call.argument-type-mismatch call.possible-nil-receiver].include?(d.rule.to_s) }
       .map { |d| [d.line - offset, d.rule.to_s] }
+  end
+
+  def fired(body, rule, extra: "")
+    offset = extra.count("\n")
+    source = "#{extra}class Probe\n#{body.gsub(/^/, '  ')}end\n"
+    result = analyze(source, sig: { "probe.rbs" => sig }, config: { "severity_profile" => "strict" })
+    result.diagnostics.select { |d| d.rule.to_s == rule }.map { |d| d.line - offset }
   end
 
   def dumps(body)
@@ -143,11 +189,25 @@ RSpec.describe "attribute-reader chain narrowing on truthiness and nil? guards (
       RUBY
     end
 
-    it "carries into a block body and a loop body entered after the guard" do
+    it "carries into a block body entered after the guard, and past a block that does not mention the root" do
       expect(findings(<<~RUBY)).to eq([])
         def f(x, s, y = nil)
           return unless x.r
           [1].each { s.int(x.r) }
+        end
+
+        def f2(x, s, y = nil)
+          return unless x.r
+          [1].each { |i| i }
+          s.int(x.r)
+        end
+      RUBY
+    end
+
+    it "carries into a loop body entered after the guard" do
+      expect(findings(<<~RUBY)).to eq([])
+        def f(x, s, y = nil)
+          return unless x.r
           while rand > 0.5
             s.int(x.r)
           end
@@ -220,6 +280,103 @@ RSpec.describe "attribute-reader chain narrowing on truthiness and nil? guards (
       RUBY
     end
 
+    it "does not narrow after a compound write of the attribute" do
+      expect(findings(<<~RUBY)).to eq([[5, "call.argument-type-mismatch"], [11, "call.argument-type-mismatch"]])
+        def f(x, s, y = nil)
+          return unless x.w
+          x.w &&= nil
+          s.int(x.w)
+        end
+
+        def f2(x, s, y = nil)
+          return unless x.w
+          x.w += 1
+          s.int(x.w)
+        end
+      RUBY
+    end
+
+    # `f5` is a class guard, whose narrowing the same writes end.
+    it "does not narrow after a multiple assignment or a for loop writes the attribute" do
+      expect(findings(<<~RUBY)).to eq((0..2).map { |i| [5 + (i * 6), "call.argument-type-mismatch"] })
+        def f3(x, s, items)
+          return unless x.w
+          x.w, _y = nil, 1
+          s.int(x.w)
+        end
+
+        def f4(x, s, y = nil)
+          return unless x.w
+          for x.w in [nil] do end
+          s.int(x.w)
+        end
+
+        def f5(x, s, y = nil)
+          return unless x.w.is_a?(Integer)
+          x.w, _y = nil, 1
+          s.int(x.w)
+        end
+      RUBY
+    end
+
+    it "does not narrow after a call whose block mentions the root" do
+      expect(findings(<<~RUBY)).to eq([[5, "call.argument-type-mismatch"], [11, "call.argument-type-mismatch"]])
+        def f3(x, s, items)
+          return unless x.w
+          items.each { x.w = nil }
+          s.int(x.w)
+        end
+
+        def f(x, s, y = nil)
+          return unless x.w
+          1.tap { x.w = nil }
+          s.int(x.w)
+        end
+      RUBY
+    end
+
+    it "does not narrow after a call that runs a lambda" do
+      expect(findings(<<~RUBY)).to eq([[6, "call.argument-type-mismatch"], [13, "call.argument-type-mismatch"]])
+        def f(x, s, y = nil)
+          clear = -> { x.w = nil }
+          return unless x.w
+          clear.call
+          s.int(x.w)
+        end
+
+        def f2(x, s, y = nil)
+          clear = -> { x.w = nil }
+          return unless x.w
+          clear.()
+          s.int(x.w)
+        end
+      RUBY
+    end
+
+    it "does not narrow an instance-variable root after an implicit-self call, and narrows it with none" do
+      expect(findings(<<~RUBY)).to eq([[10, "call.argument-type-mismatch"]])
+        def initialize(x, t)
+          @x = x
+          @task = t
+        end
+
+        def iv(s)
+          return unless @x.r
+          reset!
+          s.int(@x.r)
+        end
+
+        def iv2(s)
+          return unless @x.r
+          s.int(@x.r)
+        end
+
+        def reset!
+          @x.set_r(nil)
+        end
+      RUBY
+    end
+
     # Known limit, inherited from the `is_a?` chain rule: passing `x` to another method is not a call on `x`, so the
     # fact survives although the callee may write the attribute (Ruby: `mutate(h)` that calls `h.set_r(nil)` makes
     # `h.r` nil). The second method shows the `is_a?` guard behaving the same way.
@@ -235,6 +392,72 @@ RSpec.describe "attribute-reader chain narrowing on truthiness and nil? guards (
           return unless x.r.is_a?(Integer)
           mutate(x)
           s.int(x.r)
+        end
+      RUBY
+    end
+
+    # Known limit, inherited from the `is_a?` chain rule: a write through another variable holding the same object
+    # (Ruby: `y = x; y.w = nil` makes `x.w` nil) is a call on `y`, not on `x`.
+    it "keeps the narrowing across a write through an alias of the root" do
+      expect(findings(<<~RUBY)).to eq([])
+        def f(x, s, y = nil)
+          y = x
+          return unless x.w
+          y.w = nil
+          s.int(x.w)
+        end
+      RUBY
+    end
+  end
+
+  # The fact never proves a check redundant, so a wrong narrowing costs a missed report at most. `jctl` is the
+  # positive control: an ordinary always-true condition in the same file still fires.
+  describe "flow.always-truthy-condition" do
+    it "does not fire on a re-test whose constancy rests on an attribute-chain fact" do
+      expect(fired(<<~RUBY, "flow.always-truthy-condition")).to eq([16])
+        def jb(j, k)
+          return 0 unless j.done
+          k.done = nil
+          if j.done then 1 else 2 end
+        end
+
+        def jb2(j)
+          return 0 unless j.done
+          reset_all([j])
+          if j.done then 1 else 2 end
+        end
+
+        def jctl
+          t = 1 == 1
+          if t then 1 else 2 end
+        end
+
+        def reset_all(js)
+          js.each { |job| job.done = nil }
+        end
+      RUBY
+    end
+
+    it "does not fire on a re-test of an instance-variable attribute after an implicit-self call" do
+      expect(fired(<<~RUBY, "flow.always-truthy-condition")).to eq([19])
+        def initialize(x, t)
+          @x = x
+          @task = t
+        end
+
+        def jb3
+          return 0 unless @task.done
+          reset!
+          if @task.done then 1 else 2 end
+        end
+
+        def reset!
+          @task.done = nil
+        end
+
+        def jctl
+          t = 1 == 1
+          if t then 1 else 2 end
         end
       RUBY
     end
@@ -271,6 +494,58 @@ RSpec.describe "attribute-reader chain narrowing on truthiness and nil? guards (
         def b(x, s)
           return unless x.r
           s.int(x.r)
+        end
+      RUBY
+    end
+  end
+
+  # Each example carries a same-file control: `h.w` on `Holder`, whose `w` nothing redefines, still narrows.
+  describe "attributes the project may answer another way" do
+    it "does not narrow an attribute a define_method on the receiver's class answers" do
+      extra = "class HDm\n  define_method(:r) { rand > 0.5 ? 1 : nil }\nend\n"
+      expect(findings(<<~RUBY, extra: extra)).to eq([[4, "call.argument-type-mismatch"]])
+        def dm(x, h, s)
+          return unless x.r
+          s.int(x.r)
+          return unless h.w
+          s.int(h.w)
+        end
+      RUBY
+    end
+
+    # Conservative by name: any `define_method(:r)` in the project withholds the rule for every `r`.
+    it "does not narrow an attribute whose name a define_method on another class defines" do
+      extra = "class Unrelated\n  define_method(:r) { 1 }\nend\n"
+      expect(findings(<<~RUBY, extra: extra)).to eq([[4, "call.argument-type-mismatch"]])
+        def f(x, s, h = nil)
+          return unless x.r
+          s.int(x.r)
+          return unless x.w
+          s.int(x.w)
+        end
+      RUBY
+    end
+
+    it "does not narrow an attribute a refinement redefines" do
+      extra = "module FlakyRef\n  refine HRef do\n    def r = nil\n  end\nend\nusing FlakyRef\n"
+      expect(findings(<<~RUBY, extra: extra)).to eq([[4, "call.argument-type-mismatch"]])
+        def rf(x, h, s)
+          return unless x.r
+          s.int(x.r)
+          return unless h.w
+          s.int(h.w)
+        end
+      RUBY
+    end
+
+    it "does not narrow an attribute of a class whose body defines singleton methods" do
+      extra = "class HSing\n  def initialize = define_singleton_method(:r) { nil }\nend\n"
+      expect(findings(<<~RUBY, extra: extra)).to eq([[4, "call.argument-type-mismatch"]])
+        def sg(x, h, s)
+          return unless x.r
+          s.int(x.r)
+          return unless h.w
+          s.int(h.w)
         end
       RUBY
     end

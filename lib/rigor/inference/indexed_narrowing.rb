@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "../type"
+require_relative "attribute_reader_chain"
 require_relative "mutation_widening"
 require_relative "unknown_store_widening"
 
@@ -211,9 +212,13 @@ module Rigor
       # stable root) does NOT drop narrowings keyed on `x`, so the worked-site `x.last << y`
       # pattern correctly preserves the chain narrowing for any further `x.last` read in the same
       # body. Always-safe (only forgets; never invents).
+      #
+      # Issue #2685 — an attribute-chain fact (a truthiness or `nil?` guard's) is also dropped where the call may run
+      # code that writes through the root without a call on it ({AttributeReaderChain.after_call}).
       def invalidate_chain_after_call(call_node:, current_scope:)
         return current_scope unless call_node.is_a?(Prism::CallNode)
 
+        current_scope = AttributeReaderChain.after_call(call_node, current_scope)
         receiver = stable_receiver(call_node.receiver)
         return current_scope if receiver.nil?
 

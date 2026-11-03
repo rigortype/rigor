@@ -384,14 +384,32 @@ An implicit-self or `self.` call whose callee is proven to write no narrowed ins
 
 ### Guards on attribute readers
 
-A class guard on a no-argument, block-free reader rooted at a local or instance variable (`x.r.is_a?(C)`, `C === x.r`) narrows the next `x.r` read, whatever `r` is. A truthiness guard (`if x.r`, `unless x.r`, a ternary, `x.r && …`) and a `nil?` guard (`x.r.nil?`) narrow it only when `r` is an attribute ([#2685](https://github.com/rigortype/rigor/issues/2685)):
+A class guard on a no-argument, block-free reader rooted at a local or instance variable (`x.r.is_a?(C)`, `C === x.r`) narrows the next `x.r` read, whatever `r` is. A truthiness guard (`if x.r`, `unless x.r`, a ternary, `x.r && …`) and a `nil?` guard (`x.r.nil?`) narrow it only when `r` is an attribute ([#2685](https://github.com/rigortype/rigor/issues/2685)). What the rule relies on is that the reader's nil-ness does not change between two reads with no call on `x` between them. Not every RBS attribute returns a plain instance variable (some memoise or compute), but this one condition holds for all of them. The reader is an attribute when:
 
 - For every member of the receiver's type other than `nil`, the RBS of that class or of an RBS ancestor declares `r` with `attr_reader` or `attr_accessor`. A method declared with `def` (`queue.pop`, `io.gets`) is not an attribute, and neither is a receiver typed `Dynamic`, an interface, or a project class with no RBS.
-- No project `def r` can answer the call: none on the receiver's class or its ancestors, and none on a project class or module that descends from it. An `attr_reader` written only in project Ruby does not qualify.
+- The project cannot answer `r` another way:
+  - no project `def r` on the receiver's class, its ancestors, or a project class or module that descends from it;
+  - no definition of a method named `r` anywhere in the project by a route other than `def`: `define_method`, `attr_*`, an alias, a top-level `def`, or a `refine` (including one whose methods the walk cannot read);
+  - no project class or module that rewrites its method table beyond the names it spells (a computed `define_method`, `send(:define_method, …)`, `define_singleton_method` in its body, a refined class), and that is the receiver's class, an ancestor, or a descendant.
+
+  An `attr_reader` written only in project Ruby does not qualify.
 
 Only the edge that excludes `nil` is narrowed: the truthy edge of a truthiness guard drops `nil` and `false`, and the falsey edge of `x.r.nil?` drops `nil`. The other edge keeps the declared type. `x&.r` still narrows `x` to its non-`nil` part on the edge where the call is known to have run, and an `RBS::Extended` predicate fact the attribute carries still applies.
 
-The narrowing ends as a class guard's does: at a rebinding of `x`, and at any later call whose receiver is `x`, the attribute's writer (`x.r = nil`) included. Passing `x` as an argument (`mutate(x)`) does not end it, although the callee may write the attribute. It carries into a block body and a loop body entered after the guard. A provably-live branch is evaluated from the scope its condition left, so a guard that repeats one already in force (`return unless x.r; x.r ? use(x.r) : nil`) does not narrow its branch: evaluating the condition is itself a call on `x`.
+The narrowing ends as a class guard's does:
+
+- at a rebinding of `x`;
+- at any later call whose receiver is `x`, including the attribute's writer (`x.r = nil`), a compound write (`x.r ||= v`, `x.r &&= v`, `x.r += 1`), and `x.r` as a multiple-assignment or `for` target. These last ones end a class guard's narrowing too.
+
+A truthiness or `nil?` guard's narrowing also ends:
+
+- after a call whose block, or a lambda among its receiver and arguments, mentions `x` (`items.each { x.r = nil }`);
+- after a call that runs a closure: `.call` or `.()` on anything, and `[]`, `yield` or `===` on a `Proc` or `Method`;
+- for an instance-variable root, after any implicit-self or `self.` call, or a call whose closure makes one.
+
+It carries into a block body and a loop body entered after the guard. Two writes stay unseen: passing `x` as an argument (`mutate(x)`), and a write through another variable holding the same object (`y = x; y.r = nil`). A class guard on a reader has the same gaps. A provably-live branch is evaluated from the scope its condition left. So a guard that repeats one already in force (`return unless x.r; x.r ? use(x.r) : nil`) does not narrow its branch, and `use(x.r)` there reads the declared type: evaluating the condition is itself a call on `x`.
+
+Such a narrowing never makes `flow.always-truthy-condition` fire. A condition that reads `x.r` while a chain narrowing of an attribute `r` is in force is not reported always truthy or always falsey. A wrong narrowing, from one of the unseen writes above, can therefore hide a `nil` report but never report correct code. A copy of the read into a local before the condition (`v = x.r; if v`) is not followed.
 
 ## Fact stability and mutation
 

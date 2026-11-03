@@ -141,6 +141,21 @@ RSpec.describe "plugins/rigor-mangrove" do
     end
   end
 
+  # #2717 — the receivers-only unwrap rule has no `methods:` gate, so the engine offers it the `&:symbol` block's
+  # `Prism::BlockArgumentNode` (which has no `receiver`) as `call_node`. The rule must decline with nil. The
+  # engine's rescue would also nil a raise, so this drives the rule block directly: a raise would fail here,
+  # and a nil answer would stay invisible to a typed-result assertion.
+  describe "receivers-only unwrap rule on a &:symbol block (#2717)" do
+    it "declines a Prism::BlockArgumentNode with nil instead of raising" do
+      plugin = plugin_class.new(services: nil)
+      rule = plugin_class.dynamic_returns.first
+      block_arg = Prism.parse("xs.map(&:unwrap!)").value.statements.body.first.block
+      expect(block_arg).to be_a(Prism::BlockArgumentNode)
+
+      expect(plugin.instance_exec(block_arg, nil, &rule[:block])).to be_nil
+    end
+  end
+
   # ADR-36 nested-class emission — the `variants do … end` Enum DSL mints a nested subclass per variant with a
   # typed `#inner` reader.
   describe "Enum variant synthesis (ADR-36)" do

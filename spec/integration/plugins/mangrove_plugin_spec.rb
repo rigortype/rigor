@@ -158,8 +158,12 @@ RSpec.describe "plugins/rigor-mangrove" do
         node = Prism.parse(form).value.statements.body.first
         node = node.block if node.is_a?(Prism::CallNode) && node.block.is_a?(Prism::BlockArgumentNode)
         expect(node).not_to be_a(Prism::CallNode)
+        # A typed Result receiver, so a write node reaches the rule's `name` read instead of declining at the
+        # receiver: without the guard, that read raises here.
+        scope = Struct.new(:receiver_type) { def type_of(_node) = receiver_type }
+                      .new(Rigor::Type::Combinator.nominal_of("Mangrove::Result::Ok"))
 
-        expect(plugin.instance_exec(node, nil, &rule[:block])).to be_nil
+        expect(plugin.instance_exec(node, scope, &rule[:block])).to be_nil
       end
     end
   end

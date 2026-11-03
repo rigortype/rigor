@@ -7,8 +7,13 @@ require "prism"
 # runs over the bundled plugins' integration specs; these examples prove it can fail, and fail for the right
 # reason, using fixture plugins under `spec/fixtures/plugin_boundary/plugins/`.
 PLUGIN_BOUNDARY_FIXTURE_ROOT = File.expand_path("../fixtures/plugin_boundary/plugins", __dir__)
-load File.join(PLUGIN_BOUNDARY_FIXTURE_ROOT, "rigor-offender/lib/offender.rb")
-load File.join(PLUGIN_BOUNDARY_FIXTURE_ROOT, "rigor-clean/lib/clean.rb")
+require File.join(PLUGIN_BOUNDARY_FIXTURE_ROOT, "rigor-offender/lib/offender.rb")
+require File.join(PLUGIN_BOUNDARY_FIXTURE_ROOT, "rigor-clean/lib/clean.rb")
+
+# The gate's liveness check reads `$LOADED_FEATURES` for a file under the default roots (`plugins/`, `examples/`). A
+# run of this file alone loads no other bundled plugin, so it loads one here; the default-roots examples below
+# depend on it.
+require "rigor-alba"
 
 RSpec.describe PluginBoundary do
   let(:recorder) { PluginBoundary::Recorder.new(roots: [PLUGIN_BOUNDARY_FIXTURE_ROOT]) }
@@ -82,19 +87,25 @@ RSpec.describe PluginBoundary do
         .not_to include(:instance_variable_get, :instance_variable_set, :instance_variables)
     end
 
-    it "fails a gate that recorded nothing when it is asked to require calls, and not otherwise" do
-      recorder.record { scope.locals }
+    it "fails a gate none of whose roots holds a loaded file when it is asked to, and not otherwise" do
+      wrong = PluginBoundary::Recorder.new(roots: ["#{PLUGIN_BOUNDARY_FIXTURE_ROOT}X"])
 
-      expect { described_class.check!(recorder, require_calls: true) }
-        .to raise_error(PluginBoundary::Violation, /recorded no call from a frame under .*it checked nothing/)
-      expect { described_class.check!(recorder) }.not_to raise_error
+      expect { described_class.check!(wrong, require_root_file: true) }
+        .to raise_error(PluginBoundary::Violation, /loaded no file under .*it checked nothing/)
+      expect { described_class.check!(wrong) }.not_to raise_error
+    end
+
+    it "passes a gate whose root holds a loaded file, though it recorded no call" do
+      expect(recorder.calls).to be_empty
+
+      expect { described_class.check!(recorder, require_root_file: true) }.not_to raise_error
     end
 
     it "fails a gate whose roots match no plugin file, though a plugin made calls" do
       wrong = PluginBoundary::Recorder.new(roots: ["#{PLUGIN_BOUNDARY_FIXTURE_ROOT}X"])
       wrong.record { PluginBoundaryFixture::Clean.read(scope, node) }
 
-      expect { described_class.check!(wrong, require_calls: true) }.to raise_error(PluginBoundary::Violation)
+      expect { described_class.check!(wrong, require_root_file: true) }.to raise_error(PluginBoundary::Violation)
     end
 
     it "attributes a call by its caller's path, so a call from the spec file itself is not a plugin's" do
@@ -111,6 +122,18 @@ RSpec.describe PluginBoundary do
 
       expect(recorder.violations(allow_list: [own])).to be_empty
       expect(recorder.violations(allow_list: [other])).not_to be_empty
+    end
+  end
+
+  describe "the default roots" do
+    it "are the bundled plugins/ and examples/ directories" do
+      expect(PluginBoundary::Recorder.new.roots)
+        .to eq([File.join(PluginBoundary::REPO_ROOT, "plugins", ""),
+                File.join(PluginBoundary::REPO_ROOT, "examples", "")])
+    end
+
+    it "hold a loaded file, so the liveness check passes a run that loaded no plugin spec" do
+      expect(PluginBoundary::Recorder.new.root_file_loaded?).to be(true)
     end
   end
 

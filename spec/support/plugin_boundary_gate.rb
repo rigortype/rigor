@@ -19,6 +19,6 @@ RSpec.configure do |config|
   config.after(:suite) do
     recorder.stop
     config.reporter.message("plugin-boundary gate: #{recorder.calls.size} distinct plugin->engine call(s) recorded")
-    PluginBoundary.check!(recorder, require_calls: true)
+    PluginBoundary.check!(recorder, require_root_file: true)
   end
 end

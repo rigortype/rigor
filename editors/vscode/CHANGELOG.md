@@ -30,6 +30,11 @@ the extension is versioned independently of the `rigortype` gem.
 - **Rigor: Show Server Version**, a per-folder status bar tooltip
   (state, `rigortype` version, discovery kind, command line), and a
   startup summary in the output channel.
+- A `rigor: check` task (`type: "rigor"`) per managed folder, which runs
+  `rigor check` from the project root and fills the Problems panel
+  through the `$rigor` problem matcher. Trusted workspaces only.
+- **Rigor: Check Workspace**, which runs that task for the active
+  editor's folder.
 
 ### Fixed
 

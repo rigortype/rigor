@@ -189,19 +189,18 @@ function versionManagerShim(): string | undefined {
   return undefined;
 }
 
+/** The `--config=` flag, shared by `rigor lsp` and `rigor check`. */
+export function configArgs(folder: WorkspaceFolder): string[] {
+  const cfg = workspace.getConfiguration("rigor", folder.uri);
+  const configPath = (cfg.get<string>("server.configPath") ?? "").trim();
+  return configPath ? [`--config=${configPath}`] : [];
+}
+
 /** Extra `rigor lsp` flags derived from settings. */
 export function serverOptionArgs(folder: WorkspaceFolder): string[] {
   const cfg = workspace.getConfiguration("rigor", folder.uri);
-  const args: string[] = [];
-  const configPath = (cfg.get<string>("server.configPath") ?? "").trim();
   const logPath = (cfg.get<string>("server.logPath") ?? "").trim();
-  if (configPath) {
-    args.push(`--config=${configPath}`);
-  }
-  if (logPath) {
-    args.push(`--log=${logPath}`);
-  }
-  return args;
+  return [...configArgs(folder), ...(logPath ? [`--log=${logPath}`] : [])];
 }
 
 /** Full argument vector for `rigor lsp`. */

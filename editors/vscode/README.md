@@ -103,10 +103,33 @@ relative `configPath` or `logPath` resolves against it.
   folder the `rigortype` version, how `rigor` was found, and its state.
   Include it in a bug report.
 - **Rigor: Show Server Log** (when `rigor.server.logPath` is set)
+- **Rigor: Check Workspace** — runs `rigor check` for the folder of the
+  active editor (or asks which folder, when the editor has none of
+  them). Its results go to the Problems panel, as described below.
 
 The status bar item's tooltip lists the same per-folder detail, and
 the output channel logs a startup summary (versions, root, command
 line) for each server.
+
+## Whole-project check task
+
+The language server only reports diagnostics for open files. To see
+every finding in the project, run the `rigor: check` task
+(**Terminal → Run Task…**, or **Rigor: Check Workspace**). The task runs
+the same `rigor` the server uses, from the project root, with the same
+`rigor.server.configPath`, and its text output fills the Problems panel
+through the `$rigor` problem matcher. The matcher reads one
+`PATH:LINE:COL: SEVERITY: MESSAGE [RULE]` line per finding, and the
+problems carry `source: "rigor"`, like the server's.
+
+- The task is provided once per managed folder, and only in trusted
+  workspaces. In a multi-root workspace the task is named
+  `check (<folder>)`.
+- To clear the task's problems, rerun the task or close its terminal.
+- A file open in the editor can show the same finding twice: once from
+  the language server and once from the task. Both entries have
+  `source: "rigor"` and the same position. VS Code does not merge them,
+  so clearing the task's problems does not clear the server's entry.
 
 ## Multi-root workspaces
 

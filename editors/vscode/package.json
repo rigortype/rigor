@@ -124,6 +124,41 @@
         "command": "rigor.showServerLog",
         "title": "Show Server Log",
         "category": "Rigor"
+      },
+      {
+        "command": "rigor.checkWorkspace",
+        "title": "Check Workspace",
+        "category": "Rigor"
+      }
+    ],
+    "taskDefinitions": [
+      {
+        "type": "rigor",
+        "required": ["command"],
+        "properties": {
+          "command": {
+            "type": "string",
+            "enum": ["check"],
+            "description": "The Rigor subcommand the task runs."
+          }
+        }
+      }
+    ],
+    "problemMatchers": [
+      {
+        "name": "rigor",
+        "owner": "rigor",
+        "source": "rigor",
+        "fileLocation": ["autoDetect", "${workspaceFolder}"],
+        "pattern": {
+          "regexp": "^(.+?):(\\d+):(\\d+): (error|warning|info): (.*) \\[([^\\[\\]\\s]+)\\]$",
+          "file": 1,
+          "line": 2,
+          "column": 3,
+          "severity": 4,
+          "message": 5,
+          "code": 6
+        }
       }
     ]
   },

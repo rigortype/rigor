@@ -43,6 +43,7 @@ import {
 } from "./discovery";
 import { MIN_VERSION, ProbeResult, probeServer } from "./probe";
 import { FolderStatus, StatusBar, describeFolder } from "./status";
+import { registerTasks } from "./tasks";
 
 const DOCS_URL = "https://github.com/rigortype/rigor";
 
@@ -135,6 +136,7 @@ export function activate(context: ExtensionContext): void {
   outputChannel = window.createOutputChannel("Rigor");
   statusBar = new StatusBar();
   context.subscriptions.push(outputChannel, statusBar);
+  registerTasks(context);
 
   context.subscriptions.push(
     commands.registerCommand("rigor.restartServer", () => restartAll()),

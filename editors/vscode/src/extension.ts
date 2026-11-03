@@ -23,6 +23,9 @@ import {
   workspace,
 } from "vscode";
 import {
+  CloseAction,
+  ErrorAction,
+  ErrorHandler,
   LanguageClient,
   LanguageClientOptions,
   RevealOutputChannelOn,
@@ -78,6 +81,12 @@ interface ManagedClient {
   disposables: Disposable[];
   /** The spawned `rigor lsp` process, once the client has started it. */
   process(): ChildProcess | undefined;
+  /**
+   * Mark the client as torn down by the extension: from now on a closed
+   * connection is not restarted, no error is shown, and no new server is
+   * spawned for it.
+   */
+  abandon(): void;
 }
 
 let outputChannel: OutputChannel;
@@ -100,9 +109,12 @@ const probeFailureReported = new Set<string>();
 // grant, a restart — both see the folder as unmanaged and both start a
 // server.
 let lifecycle: Promise<void> = Promise.resolve();
+/** Set by `deactivate`: no sync, start or spawn runs after it. */
+let shuttingDown = false;
+let syncTimer: NodeJS.Timeout | undefined;
 
 function enqueue(task: () => Promise<void>): Promise<void> {
-  const run = lifecycle.then(task);
+  const run = lifecycle.then(() => (shuttingDown ? undefined : task()));
   lifecycle = run.catch((err) => {
     outputChannel.appendLine(`[rigor] lifecycle error: ${String(err)}`);
   });
@@ -137,8 +149,10 @@ export function activate(context: ExtensionContext): void {
     true,
     false,
   );
-  let syncTimer: NodeJS.Timeout | undefined;
   const scheduleSync = (): void => {
+    if (shuttingDown) {
+      return;
+    }
     if (syncTimer) {
       clearTimeout(syncTimer);
     }
@@ -164,6 +178,10 @@ export async function deactivate(): Promise<void> {
   // Not queued: closing the window must not wait behind a startup probe.
   // No exit grace either: the extension host is torn down within seconds,
   // so a server still alive after `stop()` is killed at once.
+  shuttingDown = true;
+  if (syncTimer) {
+    clearTimeout(syncTimer);
+  }
   await Promise.all(
     [...clients.keys()].map((key) => stopClient(key, SHUTDOWN_STOP_MS, 0)),
   );
@@ -246,9 +264,16 @@ async function startClient(folder: WorkspaceFolder): Promise<void> {
     return;
   }
   probeFailureReported.delete(key);
+  if (shuttingDown) {
+    return;
+  }
 
   let child: ChildProcess | undefined;
+  let abandoned = false;
   const serverOptions: ServerOptions = async () => {
+    if (abandoned || shuttingDown) {
+      throw new Error("the Rigor client was stopped");
+    }
     const spawned = spawn(server.command, args, {
       cwd: root,
       shell: process.platform === "win32",
@@ -284,10 +309,34 @@ async function startClient(folder: WorkspaceFolder): Promise<void> {
     outputChannel,
     revealOutputChannelOn: RevealOutputChannelOn.Never,
     synchronize: { fileEvents: watchers },
+    // The client's own handler restarts a closed connection and shows an
+    // error. Once the extension has stopped or abandoned the client (a
+    // start timeout, a restart, shutdown), both are wrong: the close is
+    // the extension's own kill.
+    errorHandler: {
+      error: (error, message, count) =>
+        abandoned
+          ? { action: ErrorAction.Shutdown, handled: true }
+          : defaultErrorHandler().error(error, message, count),
+      closed: () =>
+        abandoned
+          ? { action: CloseAction.DoNotRestart, handled: true }
+          : defaultErrorHandler().closed(),
+    },
   };
 
   const client = new LanguageClient("rigor", "Rigor", serverOptions, clientOptions);
-  clients.set(key, { client, disposables: watchers, process: () => child });
+  let fallback: ErrorHandler | undefined;
+  const defaultErrorHandler = (): ErrorHandler =>
+    (fallback ??= client.createDefaultErrorHandler());
+  clients.set(key, {
+    client,
+    disposables: watchers,
+    process: () => child,
+    abandon: () => {
+      abandoned = true;
+    },
+  });
 
   try {
     await withTimeout(
@@ -318,9 +367,12 @@ async function startClient(folder: WorkspaceFolder): Promise<void> {
     for (const disposable of watchers) {
       disposable.dispose();
     }
-    // A start that failed part way leaves the spawned process running.
+    // A start that failed part way (or timed out) leaves the spawned
+    // process running. Kill it before disposing, so a late `initialize`
+    // answer cannot register providers on an abandoned client.
+    abandoned = true;
+    await reap(child, 0);
     await client.dispose(STOP_TIMEOUT_MS).catch(() => undefined);
-    await reap(child);
   }
 }
 
@@ -335,6 +387,7 @@ async function stopClient(
     return;
   }
   clients.delete(key);
+  managed.abandon();
   for (const disposable of managed.disposables) {
     disposable.dispose();
   }
@@ -414,6 +467,14 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
 }
 
 function onConfigChange(e: ConfigurationChangeEvent): void {
+  if (
+    e.affectsConfiguration("rigor.rootDir") ||
+    e.affectsConfiguration("rigor.enable")
+  ) {
+    // Explain a folder again after its setting changed, even back to a
+    // value that was explained before.
+    explained.clear();
+  }
   if (SERVER_AFFECTING_SETTINGS.some((s) => e.affectsConfiguration(s))) {
     void restartAll();
   }
@@ -640,11 +701,16 @@ function folderLabel(folder: WorkspaceFolder, root: string): string {
 
 /**
  * A glob matching every file under `root`. Forward slashes so it matches
- * on Windows too; glob metacharacters in the path are wrapped in a
- * character class (`[[]`, `[]]`, `[{]`, ...) so a directory named `a[1]`
- * or `app{1}` matches literally.
+ * on Windows too. `*`, `?`, `[` and `]` are wrapped in a character class
+ * (`[[]`, `[]]`, ...) so `a[1]` matches literally. A brace cannot be: VS
+ * Code splits glob segments on `{`/`}` before it reads brackets, so `[{]`
+ * opens a group that never closes. A brace becomes `?` instead, which also
+ * matches a sibling directory differing in just that character.
  */
 function rootGlob(root: string): string {
-  const base = root.replace(/\\/g, "/").replace(/[*?{}[\]]/g, "[$&]");
+  const base = root
+    .replace(/\\/g, "/")
+    .replace(/[*?[\]]/g, "[$&]")
+    .replace(/[{}]/g, "?");
   return `${base}/**/*`;
 }

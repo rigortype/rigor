@@ -161,9 +161,8 @@ module Rigor
       end
 
       def project_defines_object?(serializer_name, scope)
-        return false unless scope.respond_to?(:user_def_through_ancestors)
-
-        !scope.user_def_through_ancestors(serializer_name, :object).first.nil?
+        Rigor::Reflection.project_method_defined(serializer_name, :object, kind: :instance, source: :def,
+                                                                           scope: scope).yes?
       end
 
       # The model a serializer serializes, or nil where nothing corroborates it. Memoised per serializer
@@ -237,13 +236,11 @@ module Rigor
       # the check would decline nearly every real serializer. On the serializer side it is a base
       # serializer's own rendering method, which is not a read of the resource at all.
       def project_defines?(class_name, method_name, scope)
-        return false unless scope.respond_to?(:user_def_through_ancestors)
-
         # A name no Symbol can hold cannot be a method the project defines (#1831): decline, do not raise.
         method = Rigor::Source::SymbolName.of(method_name.to_s)
         return false if method.nil?
 
-        !scope.user_def_through_ancestors(class_name, method).first.nil?
+        Rigor::Reflection.project_method_defined(class_name, method, kind: :instance, source: :def, scope: scope).yes?
       end
 
       # `REST::AccountSerializer` offers two readings — the namespaced `REST::Account` and the

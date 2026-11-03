@@ -660,6 +660,34 @@ RSpec.describe "plugins/rigor-rspec" do
           end
         end
 
+        # ADR-128 WD1 — a core class whose project reopening pulls in more modules than `ResolutionChain::LIMIT`
+        # has a chain the walk cannot finish, so the facade answers `maybe`, and the analyzer reads `maybe` as "the
+        # project may define it" (`!no?`), as the discovery walk always has: no fact, the local's type stands.
+        # Each example pairs the cut project with an uncut control.
+        describe "a core class whose ancestor chain runs past the budget" do
+          def cut_count = Rigor::Scope::ResolutionChain::LIMIT + 5
+
+          def cut_modules_patch(core_class)
+            modules = (1..cut_count).map { |i| "module CutM#{i}\n  def cut_m#{i}; end\nend" }.join("\n")
+            includes = (1..cut_count).map { |i| "  include CutM#{i}" }.join("\n")
+            "#{modules}\nclass #{core_class}\n#{includes}\nend\n"
+          end
+
+          it "gives no equality fact when the literal's own class is cut" do
+            body = "expect(x).to eq(\"a\")\ndump_type(x)\n"
+
+            expect(dumped_types(run_case_eq("String?", body))).to eq(['"a"'])
+            expect(dumped_types(run_case_eq("String?", body, patch: cut_modules_patch("String")))).to eq(["String?"])
+          end
+
+          it "keeps a member whose cut core ancestor may define `match` or `to_str`" do
+            body = "expect(x).to match(/a/)\ndump_type(x)\n"
+
+            expect(dumped_types(run_case_eq("Float?", body))).to eq(["Float?"])
+            expect(dumped_types(run_case_eq("Float?", body, patch: cut_modules_patch("Numeric")))).to eq(["Float"])
+          end
+        end
+
         # An Object, BasicObject or module subject reads `String | Symbol` after the matcher, as before #2033, so a
         # String method called there reports nothing (approval-queue.d/regexp-match-open-surface-subject.md).
         it "reads an Object, BasicObject, Kernel or Comparable subject as String | Symbol" do

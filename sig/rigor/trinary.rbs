@@ -22,6 +22,7 @@ module Rigor
     def and: (Trinary other) -> Trinary
     def or: (Trinary other) -> Trinary
     def ==: (untyped other) -> bool
+    alias eql? ==
     def hash: () -> Integer
     def to_s: () -> String
     def inspect: () -> String

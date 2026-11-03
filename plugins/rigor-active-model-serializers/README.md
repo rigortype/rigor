@@ -86,7 +86,7 @@ is both what resolves the name and what the serializer is checked against.
 | `IoBoundary#read_file` / `#directory?` | the discoverer's project reads |
 | `dynamic_return(methods:)` | the receiver-independent `object` rule (ADR-52 WD2) |
 | `Scope#self_type` | the lexical gate — which serializer is `self` here? |
-| `Scope#user_def_through_ancestors` | an explicit `def object`, and the model's own Ruby methods |
+| `Reflection.project_method_defined` | an explicit `def object`, and the model's own Ruby methods |
 | `read_fact` | the cross-plugin model set |
 
 ## Why the model has to answer, not merely exist

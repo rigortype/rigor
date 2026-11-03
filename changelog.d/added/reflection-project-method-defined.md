@@ -1,0 +1,4 @@
+- **[plugin API]** `Rigor::Reflection.project_method_defined` answers whether the project defines a method on a class or an ancestor as a `Rigor::Trinary`, with `maybe` where the ancestor walk ran out of budget ([#2688](https://github.com/rigortype/rigor/pull/2688)).
+  - `kind:` is `:instance` or `:singleton`, and `source:` is `:def`, `:discovered` (which also counts `attr_*` and `define_method`) or `:either`.
+  - `rigor-active-model-serializers`, `rigor-activerecord` and `rigor-rspec` now call it instead of the `Scope` ancestor walks; their behaviour is unchanged.
+  - `Rigor::Trinary` is listed as public.

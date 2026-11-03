@@ -511,3 +511,4 @@ end
 # private candidate lookups, so the facade has to exist first.
 require_relative "reflection/constant_ancestors"
 require_relative "reflection/constant_path"
+require_relative "reflection/project_method"

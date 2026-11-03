@@ -286,8 +286,8 @@ module Rigor
         # project class, which says nothing about who wrote `==`.
         def project_defines?(class_name, operator, scope)
           OPERATOR_OWNER_CHAINS.fetch([class_name, operator]).any? do |name|
-            !scope.user_def_through_ancestors(name, operator).first.nil? ||
-              scope.discovered_method_through_ancestors?(name, operator, :instance)
+            !Rigor::Reflection.project_method_defined(name, operator, kind: :instance, source: :either,
+                                                                      scope: scope).no?
           end
         end
 
@@ -390,8 +390,8 @@ module Rigor
         # `def`, an included module, or a `define_method`.
         def project_defines_on_chain?(class_name, method_name, scope)
           CORE_ANCESTOR_CHAINS.fetch(class_name, [class_name]).any? do |name|
-            !scope.user_def_through_ancestors(name, method_name).first.nil? ||
-              scope.discovered_method_through_ancestors?(name, method_name, :instance)
+            !Rigor::Reflection.project_method_defined(name, method_name, kind: :instance, source: :either,
+                                                                         scope: scope).no?
           end
         end
 

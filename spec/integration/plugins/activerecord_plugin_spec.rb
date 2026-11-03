@@ -4646,4 +4646,72 @@ RSpec.describe "plugins/rigor-activerecord" do
       expect(index.find("Blog::Post")).not_to be_nil
     end
   end
+
+  # ADR-128 WD1 — the facade answers `maybe` where the ancestor chain was cut at `ResolutionChain::LIMIT`, and the
+  # plugin reads `maybe` as "a project definition may exist": it declines, as the discovery walk always has. Each
+  # example pairs the cut project with an uncut control, so the decline is the chain's and not the fixture's.
+  describe "a model whose ancestor chain runs past the budget" do
+    def cut_count = Rigor::Scope::ResolutionChain::LIMIT + 5
+
+    def cut_modules
+      "#{(1..cut_count).map { |i| "module CutM#{i}\n  def cut_m#{i}; end\nend" }.join("\n")}\n"
+    end
+
+    def cut_includes = (1..cut_count).map { |i| "  include CutM#{i}" }.join("\n")
+
+    # `extend` folds a module's own `def`s into the extender, so the singleton chain is cut through a module that
+    # includes the others.
+    def cut_singleton_source = "#{cut_modules}module CutExt\n#{cut_includes}\nend\nclass Post\n  extend CutExt\nend\n"
+
+    def hits(source, rule)
+      find_diagnostics(source).select { |d| d.rule == rule }.map { |d| [d.line, d.message] }
+    end
+
+    def dumped_after(prefix, body)
+      lines = find_diagnostics("#{prefix}#{body}").select { |d| d.qualified_rule == "dump.type" }
+      lines.map(&:message)
+    end
+
+    it "declines the class-side `find(1, 2)` Array reading, which an uncut model keeps" do
+      body = "Rigor.dump_type(Post.find(1, 2))\n"
+
+      expect(dumped_after("", body)).to eq(["dump_type: Array[Post]"])
+      expect(dumped_after(cut_singleton_source, body)).to eq(["dump_type: Dynamic[top]"])
+    end
+
+    it "declines the block form's `Post?` reading, which an uncut model keeps" do
+      body = "Rigor.dump_type(Post.find { |post| post.title == \"x\" })\n"
+
+      expect(dumped_after("", body)).to eq(["dump_type: Post?"])
+      expect(dumped_after(cut_singleton_source, body)).to eq(["dump_type: Dynamic[top]"])
+    end
+
+    it "makes no `find` model-call note for the many-id and block forms, keeping the one-id note" do
+      body = "Post.find(1, 2)\nPost.find { |post| post.title == \"x\" }\nPost.find(1)\n"
+      uncut = hits(body, "model-call").map(&:first)
+      cut = hits("#{cut_singleton_source}#{body}", "model-call")
+
+      expect(uncut).to eq([1, 2, 3])
+      expect(cut.map(&:last)).to eq(["`Post.find` returns Post (table: `posts`)"])
+    end
+
+    it "declines the implicit-self column reader, which an uncut model answers `untyped`" do
+      _result, index = run_ar_with_index("x = 1\n", models: ASSOCIATION_MODELS, schema: DEFAULT_SCHEMA)
+      plugin = Rigor::Plugin::Activerecord.allocate
+      plugin.instance_variable_set(:@model_index, index)
+      call_node = Prism.parse("title").value.statements.body.first
+      contribution = lambda do |source|
+        root = Prism.parse(source).value
+        scope = Rigor::Inference::ScopeIndexer.index(root, default_scope: Rigor::Scope.empty)[root]
+        plugin.dynamic_return_type(
+          call_node: call_node, scope: scope.with_self_type(Rigor::Type::Combinator.nominal_of("Post")),
+          receiver_type: Rigor::Type::Combinator.untyped
+        )
+      end
+
+      expect(contribution.call("class Post\nend\n")).to eq(Rigor::Type::Combinator.untyped)
+      expect(contribution.call("#{cut_modules}class ApplicationRecord\nend\nclass Post < ApplicationRecord\n" \
+                               "#{cut_includes}\nend\n")).to be_nil
+    end
+  end
 end

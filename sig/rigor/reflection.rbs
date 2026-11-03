@@ -19,5 +19,6 @@ module Rigor
     def self?.class_type_param_names: (String | Symbol class_name, ?scope: Scope) -> Array[Symbol]
     def self?.discovered_class?: (String | Symbol class_name, ?scope: Scope) -> bool
     def self?.discovered_method?: (String | Symbol class_name, String | Symbol method_name, ?kind: Symbol, ?scope: Scope) -> bool
+    def self?.project_method_defined: (String | Symbol? class_name, String | Symbol method_name, kind: :instance | :singleton, source: :def | :discovered | :either, scope: Scope) -> Trinary
   end
 end

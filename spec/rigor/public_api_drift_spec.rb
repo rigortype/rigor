@@ -288,12 +288,37 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     lexical_nesting_chain(req:scope)
     nominal_for_name(req:class_name,key:scope)
     project_declared_class?(req:class_name,key:scope,key:environment)
+    project_method_defined(req:class_name,req:method_name,keyreq:kind,keyreq:source,keyreq:scope)
     rbs_class_known?(req:class_name,key:scope,key:environment)
     resolve_constant_path_name(req:name,req:scope,block:known)
     resolve_constant_type(req:name,key:scope,key:rooted,key:caller_derived)
     singleton_definition(req:class_name,key:scope,key:environment)
     singleton_for_name(req:class_name,key:scope)
     singleton_method_definition(req:class_name,req:method_name,key:scope,key:environment)
+  ].freeze
+
+  # `Rigor::Trinary` — the value `Reflection.project_method_defined` returns (ADR-128 WD1), so a plugin reads it
+  # with `yes?` / `no?` / `maybe?` and combines it with `and` / `or` / `negate`.
+  TRINARY_INSTANCE = %w[
+    ==(req:other)
+    and(req:other)
+    eql?(req:other)
+    hash()
+    inspect()
+    maybe?()
+    negate()
+    no?()
+    or(req:other)
+    to_s()
+    value()
+    yes?()
+  ].freeze
+
+  TRINARY_SINGLETON = %w[
+    from_symbol(req:symbol)
+    maybe()
+    no()
+    yes()
   ].freeze
 
   PLUGIN_SINGLETON = %w[
@@ -838,6 +863,13 @@ RSpec.describe "Public API drift", :public_api_drift do
     end
   end
 
+  describe "Rigor::Trinary" do
+    it "exposes the expected value-object surface" do
+      expect(instance_signatures(Rigor::Trinary)).to eq(PublicApiDriftSnapshots::TRINARY_INSTANCE)
+      expect(singleton_signatures(Rigor::Trinary)).to eq(PublicApiDriftSnapshots::TRINARY_SINGLETON)
+    end
+  end
+
   describe "Rigor::Source::Literals" do
     it "exposes the expected literal-extraction surface" do
       expect(singleton_signatures(Rigor::Source::Literals)).to eq(PublicApiDriftSnapshots::SOURCE_LITERALS_SINGLETON)
@@ -1200,6 +1232,13 @@ RSpec.describe "Public API drift", :public_api_drift do
     it "covers Rigor::Reflection singleton methods" do
       expect_sig_covers(class_name: "Rigor::Reflection", kind: :singleton,
                         snapshot: PublicApiDriftSnapshots::REFLECTION_SINGLETON)
+    end
+
+    it "covers Rigor::Trinary methods" do
+      expect_sig_covers(class_name: "Rigor::Trinary", kind: :instance,
+                        snapshot: PublicApiDriftSnapshots::TRINARY_INSTANCE)
+      expect_sig_covers(class_name: "Rigor::Trinary", kind: :singleton,
+                        snapshot: PublicApiDriftSnapshots::TRINARY_SINGLETON)
     end
 
     it "covers Rigor::Source::Literals singleton methods" do

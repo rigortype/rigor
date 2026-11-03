@@ -110,7 +110,8 @@ module Rigor
         # The predicate `Activerecord#finder_return_type` declines on, so the note and the type agree in a
         # CLI run. In an editor run this scope lacks the file's own methods (#1329).
         def own_find?(entry)
-          @scope.discovered_method_through_ancestors?(entry.class_name, :find, :singleton)
+          !Rigor::Reflection.project_method_defined(entry.class_name, :find, kind: :singleton, source: :discovered,
+                                                                             scope: @scope).no?
         end
 
         def validate_column_hash_call(node, entry)

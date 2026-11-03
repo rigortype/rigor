@@ -91,10 +91,13 @@ interface Rigor::Plugin::_Scope
   def self_type: () -> Rigor::Type::t?
   def local: (String | Symbol name) -> Rigor::Type::t?
   def source_path: () -> String?
+  def with_local: (String | Symbol name, Rigor::Type::t type) -> Rigor::Plugin::_Scope
   def environment: () -> Rigor::Plugin::_Environment
 end
 ```
 
+`with_local` is a pure functional update that returns a new scope. Slice 1's boundary gate found
+`rigor-web`'s protocol checker rebinding parameter types through it before `type_of`, so it joined the list.
 `environment` is non-nil, matching `Scope#environment`. A nilable promise would make
 `call.possible-nil-receiver` fire on plugins that call it unguarded.
 

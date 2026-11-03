@@ -31,7 +31,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
   # without an engine-internal type or a hidden uncertainty direction). The bundled plugins are gated against these
   # lists by `spec/support/plugin_boundary.rb`.
   PLUGIN_INTERFACE_MEMBERS = {
-    "Rigor::Plugin::_Scope" => %w[environment local self_type source_path type_of],
+    "Rigor::Plugin::_Scope" => %w[environment local self_type source_path type_of with_local],
     "Rigor::Plugin::_Environment" => %w[nominal_for_name rbs_module?],
     "Rigor::Plugin::_Services" => %w[configuration fact_store reflection type],
     "Rigor::Plugin::_FactStore" => %w[publish read],

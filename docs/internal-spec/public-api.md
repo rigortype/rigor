@@ -72,7 +72,7 @@ uncertainty direction; otherwise Rigor adds a facade on a public namespace
 
 The interface member lists:
 
-- `_Scope` — `type_of`, `self_type`, `local`, `source_path`, and a non-nil
+- `_Scope` — `type_of`, `self_type`, `local`, `source_path`, `with_local`, and a non-nil
   `environment`.
 - `_Environment` — `nominal_for_name`, `rbs_module?`.
 - `_Services` — `fact_store`, `configuration`, `reflection` and `type`.

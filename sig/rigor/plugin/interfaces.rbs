@@ -17,6 +17,7 @@ module Rigor
       def self_type: () -> Rigor::Type::t?
       def local: (String | Symbol name) -> Rigor::Type::t?
       def source_path: () -> String?
+      def with_local: (String | Symbol name, Rigor::Type::t type) -> Rigor::Plugin::_Scope
       def environment: () -> Rigor::Plugin::_Environment
     end
 

@@ -89,13 +89,15 @@ module Rigor
       # decline — they take side-effecting argument types that the RBS surface already covers.
       dynamic_return receivers: -> { attachment_index&.class_names || [] } do |call_node, scope|
         next nil unless call_node.is_a?(Prism::CallNode)
-        next nil if call_node.receiver.nil?
+
+        receiver = call_node.receiver
+        next nil if receiver.nil?
         next nil unless call_node.arguments.nil?
 
         index = attachment_index
         next nil if index.nil? || index.empty?
 
-        receiver_type = scope.type_of(call_node.receiver)
+        receiver_type = scope.type_of(receiver)
         next nil unless receiver_type.is_a?(Rigor::Type::Nominal)
 
         # `AttachmentIndex#attachments_for` de-roots the query itself (#621) — no retry arm here.

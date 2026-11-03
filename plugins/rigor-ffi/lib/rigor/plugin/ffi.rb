@@ -47,7 +47,8 @@ module Rigor
         catalog = producer_value(:ffi_catalog)
         next nil if catalog.nil?
 
-        receiver_type = call_node.receiver ? scope&.type_of(call_node.receiver) : scope&.self_type
+        receiver = call_node.receiver
+        receiver_type = receiver ? scope&.type_of(receiver) : scope&.self_type
         receiver_class = case receiver_type
                          when Rigor::Type::Nominal, Rigor::Type::Singleton then receiver_type.class_name
                          end
@@ -77,7 +78,8 @@ module Rigor
         catalog = producer_value(:ffi_catalog)
         next nil if catalog.nil?
 
-        receiver_type = call_node.receiver ? scope&.type_of(call_node.receiver) : scope&.self_type
+        receiver = call_node.receiver
+        receiver_type = receiver ? scope&.type_of(receiver) : scope&.self_type
         receiver_class = case receiver_type
                          when Rigor::Type::Nominal, Rigor::Type::Singleton then receiver_type.class_name
                          end

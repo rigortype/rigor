@@ -108,9 +108,11 @@ module Rigor
       # a `FlowContribution`; the block returns a bare `Rigor::Type`.
       dynamic_return methods: RECOGNISED_METHODS do |call_node, scope|
         next nil unless call_node.is_a?(Prism::CallNode)
-        next nil if call_node.receiver.nil?
 
-        receiver_dim = dimension_for_type(scope.type_of(call_node.receiver))
+        receiver = call_node.receiver
+        next nil if receiver.nil?
+
+        receiver_dim = dimension_for_type(scope.type_of(receiver))
         next nil if receiver_dim.nil?
 
         arg_dims = call_node.arguments&.arguments&.map { |arg| dimension_for_type(scope.type_of(arg)) } || []

@@ -79,7 +79,8 @@ module Rigor
 
       # `names` collects the locals; a collector that answers `site=` ({AliasMutationFloor}) is told, before each name
       # it is given, the node that hands the local on, or nil when no single node does (a capture by a closure that may
-      # run later, a zero-argument `super`), and is told when the walk enters (`enter(node, parent)`) and leaves
+      # run later, a zero-argument `super`), reads value positions itself when it answers `value_held` ({.precise?}),
+      # and is told when the walk enters (`enter(node, parent)`) and leaves
       # (`leave(node)`) each node. One that answers `keeps_arguments?` says which calls' plain arguments it counts as
       # held.
       def unsafe_names(body, parameters = nil, names = Set.new)
@@ -132,15 +133,25 @@ module Rigor
         names << receiver.name if receiver.is_a?(Prism::LocalVariableReadNode) && REFLECTIVE_CALLS.include?(node.name)
         arguments = node.arguments&.arguments || NO_ARGUMENTS
         if writer_call?(node) && !arguments.empty?
-          *keys, value = arguments
-          keys.each { |key| record_held(key, names) }
-          every_read(value, names)
+          record_writer_call(arguments, names)
         elsif keeps_arguments?(node, names)
           arguments.each { |argument| record_held(argument, names) }
         end
       end
 
+      def record_writer_call(arguments, names)
+        *keys, value = arguments
+        keys.each { |key| record_held(key, names) }
+        precise?(names) ? names.value_held(value) : every_read(value, names)
+      end
+
       def keeps_arguments?(node, names) = !names.respond_to?(:keeps_arguments?) || names.keeps_arguments?(node)
+
+      # A collector that reads a value position itself ({AliasMutationFloor}): `value_held(node)` for a value handed
+      # to another holder (an element, an argument, an index or attribute write's value), `value_written(node)` for a
+      # write node, and `value_bound(value, targets)` for a multiple assignment or a pattern. The default collector
+      # reads every local inside the value instead.
+      def precise?(names) = names.respond_to?(:value_held)
 
       # A zero-argument `super` passes every parameter of the method on, implicitly. (A `...` forward passes only the
       # anonymous parameters, which name no local.)
@@ -176,6 +187,7 @@ module Rigor
       # A write's value hands on every local read anywhere inside it, and the local it binds holds what it read.
       def record_write(node, names)
         return unless node.class.name.end_with?("WriteNode") && node.respond_to?(:value)
+        return names.value_written(node) if precise?(names)
         return unless every_read(node.value, names)
 
         names << node.name if LOCAL_WRITES.any? { |k| node.is_a?(k) } && !fresh_value?(node.value)
@@ -198,12 +210,14 @@ module Rigor
       end
 
       def record_multi_write(node, names)
+        return names.value_bound(node.value, [*node.lefts, node.rest, *node.rights]) if precise?(names)
         return unless every_read(node.value, names)
 
         local_targets([*node.lefts, node.rest, *node.rights], names)
       end
 
       def record_pattern(subject, patterns, names)
+        return names.value_bound(subject, patterns) if precise?(names)
         return unless every_read(subject, names)
 
         local_targets(patterns, names)
@@ -229,6 +243,7 @@ module Rigor
       # A held position: every local read inside it but the receiver of a {PURE_READERS} call.
       def record_held(node, names)
         return if node.nil?
+        return names.value_held(node) if precise?(names)
         return if pure_read?(node)
 
         names << node.name if node.is_a?(Prism::LocalVariableReadNode)

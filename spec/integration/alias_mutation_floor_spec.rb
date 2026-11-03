@@ -43,6 +43,10 @@ RSpec.describe "a mutation through another holder floors the locals it may reach
     "an Array.new fill" => 'a = [1]; Array.new(1, a)[0] << "s"; a.last.bytesize',
     "a Struct member" => 'a = [1]; Struct.new(:v).new(a).v << "s"; a.last.bytesize',
     "an index write through a copy" => 'acc = [7]; r = acc; r[0] = "x"; acc[0].upcase',
+    "a String method name for send" => 'a = [1]; a.send("push", "s"); a.last.bytesize',
+    "the ivar a local was copied from" => '@q = [1]; a = @q; @q << "s"; a.last.bytesize',
+    "another copy of the same ivar" => '@q = [1]; a = @q; b = @q; b << "s"; a.last.bytesize',
+    "the global a local was copied from" => '$amf_g = [1]; a = $amf_g; $amf_g << "s"; a.last.bytesize',
     "an ivar set on an earlier pass of a block" => 'a = [1]; [1, 2].each { |i| @h << "s" if i == 2; @h = a }; ' \
                                                    "a.last.bytesize",
     "a proc that runs after the local is handed on" => 'a = [1]; pr = proc { @k << "s" }; @k = a; pr.call; ' \
@@ -72,6 +76,20 @@ RSpec.describe "a mutation through another holder floors the locals it may reach
     expect(undefined_methods(source)).to eq([])
   end
 
+  def flow_rules(source)
+    analyze(source).diagnostics.map(&:qualified_rule).grep(/\Aflow\./)
+  end
+
+  it "floors a literal String a callee writes through its copy" do
+    source = "def app(x) = x << \"b\"\ndef m; s = +\"a\"; t = s; app(t); s == \"ab\" ? 1 : 2; end\n"
+    expect(flow_rules(source)).to eq([])
+  end
+
+  it "floors a literal Hash a callee writes through its copy" do
+    source = "def put(h) = h[:b] = 2\ndef m; h = { a: 1 }; g = h; put(g); h.size == 2 ? 1 : 2; end\n"
+    expect(flow_rules(source)).to eq([])
+  end
+
   it "stays silent after a callee writes a block parameter that holds it" do
     source = <<~RUBY
       def poke(a) = a[0] = "x"
@@ -84,6 +102,28 @@ RSpec.describe "a mutation through another holder floors the locals it may reach
   it "stays silent after a returns-self chain on the local (guard)" do
     expect(undefined_methods("def m; a = [1]; a << :x << \"s\"; a.last.bytesize; end\n")).to eq([])
     expect(undefined_methods("def m; a = [1]; a.push(:x).push(\"s\"); a.last.bytesize; end\n")).to eq([])
+  end
+
+  # Review round 1 of #2335 — each body raises in Ruby, and nothing hands the local on: a scalar read, a fresh copy, a
+  # read-only alias or an element read of scalars leaves it reachable by no other holder, so its literal stays.
+  {
+    "a size read" => "n = a.size; @z = []; @z << n",
+    "a scalar element read" => "n = a.first; @z = []; @z << n",
+    "a predicate" => "e = a.empty?; @z = []; @z << e",
+    "a join" => "s = a.join; @z = []; @z << s",
+    "a comparison" => "f = (a == [1]); @z = []; @z << f",
+    "a dup" => 'b = a.dup; b << "s"',
+    "a map" => 'b = a.map(&:to_s); b << "s"',
+    "an Array sum" => 'b = a + [2]; b << "s"',
+    "a read-only alias" => "b = a; b.size; @z = []; @z << 1",
+    "a size read into an unrelated block" => "n = a.size; [[2]].map(&:dup).each { |x| x << n }",
+    "a size read as a Hash key" => "{ a.size => 1 }; @z = []; @z << 1",
+    "a scalar element in a literal" => "[a.first]; @z = []; @z << 1",
+    "a size read in a literal" => "x = [a.size]; @z = []; @z << 1"
+  }.each do |read, body|
+    it "still reports a literal after #{read}" do
+      expect(undefined_methods("def m; a = [1]; #{body}; a.last.bytesize; end\n")).to eq(["call.undefined-method"])
+    end
   end
 
   describe "precision" do

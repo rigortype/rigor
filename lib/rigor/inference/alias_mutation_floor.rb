@@ -5,6 +5,7 @@ require "prism"
 require_relative "../run_scoped_slots"
 require_relative "../source/node_children"
 require_relative "closure_escape_analyzer"
+require_relative "element_read_widening"
 require_relative "mutation_widening"
 require_relative "receiver_alias"
 require_relative "remover_holder_scan"
@@ -12,6 +13,8 @@ require_relative "set_mutation"
 require_relative "string_mutation"
 require_relative "unknown_store_widening"
 require_relative "alias_mutation_floor/foreign_locals"
+require_relative "alias_mutation_floor/site_collector"
+require_relative "alias_mutation_floor/reach"
 
 module Rigor
   module Inference
@@ -21,20 +24,26 @@ module Rigor
     # ({MutationWidening.widen_after_call}) and the callee floor only rebind the binding a receiver or argument names,
     # so every other local holding the object kept its literal and a later read reported on correct code.
     #
-    # One scan per frame body answers:
+    # One scan per frame body, in {RemoverHolderScan}'s walk ({SiteCollector}), answers:
     #
-    # - where each local is handed to another holder, from {RemoverHolderScan}'s walk (a copy, a container element, a
-    #   call argument, an ivar or index write's value, a capture by a closure that may run later, a reflective
-    #   receiver; every local under `binding` / `eval`). A local is *aliased* at a call once such a site may have run
-    #   before it: a site earlier in the body, or one inside a loop or block that also holds the call or ends before
-    #   it; a capture by a closure that may run later counts everywhere, and a call inside such a closure sees every
-    #   site;
-    # - the *foreign* locals: those whose object may have come from elsewhere, so they may be one of the aliased
-    #   locals' objects: a method parameter, a block or lambda parameter (but one of a catalogued iterator over
-    #   literals that read nothing), a local any target node binds (a multiple assignment, a `rescue => e`, a pattern,
-    #   a `for` index), and a local written from anything but a new object.
+    # - the locals handed whole to another holder: an element of a container literal, an argument of a call that may
+    #   keep it, an ivar, global, index or attribute write's value, a capture by a closure that may run later, a
+    #   reflective receiver, a local bound to an ivar, global or class variable (`a = @q`); every local under
+    #   `binding` / `eval`. A value counts only where it may evaluate to the local itself ({.each_may_be}: the local,
+    #   a selection of it, a call that answers its receiver), so `n = a.size`, `b = a.dup` and `[a.first]` hand
+    #   nothing on whole;
+    # - the locals one of whose elements is handed on (`[a.first]`), and the links between locals: a copy (`b = a`)
+    #   and an element read (`x = a[i]`);
+    # - the *foreign* locals, whose object may have come from elsewhere ({ForeignLocals}).
     #
-    # A mutating call whose receiver may be another local's object ({.targets}) gives each local it may reach the
+    # A local is *aliased* at a call once a site that hands it on may have run before the call's message (a site
+    # earlier in the body, or one inside a loop or block that also holds the call; a capture by a closure that may run
+    # later counts everywhere, and a call inside such a closure sees every site), or it is linked to such a local. A
+    # local reached only through an element link is a *part*, floored only when its binding can hold a mutable
+    # element ({.mutable_parts?}).
+    #
+    # A mutating call whose receiver may be another local's object ({.targets}: the locals linked to the receiver, and
+    # the aliased ones when the receiver may hold any object) gives each local it may reach the
     # unknown store {UnknownStoreWidening.widen_store} gives a site whose stored values nothing typed: the same
     # widening the named path applies, fed `Dynamic[top]` arguments, with its gradual arm. A callee that writes such
     # an argument, and a call on one to a method that mutates its instance variables, floor them the same way. The
@@ -43,89 +52,32 @@ module Rigor
     # A body where no local is handed on, and a receiver only ever written a new object that is not aliased, change
     # nothing.
     module AliasMutationFloor
-      # `escapes` maps each aliased local to the earliest offset its handing-on may run from ({.handed_by}), or is
-      # {ALL}; `deferred` lists the `[start, end)` ranges of the closures that may run later.
-      # `memo` keeps each call's answer ({.call_targets}) for the run: a loop or block body is evaluated more than once.
-      Facts = Data.define(:escapes, :foreign, :entry, :deferred, :memo, :named_memo)
-      EMPTY = Set.new.freeze
-      ALWAYS = -1
-      LOOPS = [Prism::WhileNode, Prism::UntilNode, Prism::ForNode, Prism::BlockNode, Prism::LambdaNode].freeze
-
-      # The {RemoverHolderScan} collector, which reads every fact {.scan} needs in that one walk: for each local the
-      # least key of the sites that hand it on ({.handed_by}), the ranges of the closures that may run later, and the
-      # body's foreign and written locals ({ForeignLocals.visit}).
-      class SiteCollector
-        attr_writer :site
-        attr_reader :escapes, :deferred, :foreign, :written
-
-        def initialize
-          @escapes = {}
-          @site = nil
-          @outer = nil
-          @outer_owner = nil
-          @deferred = []
-          @foreign = Set.new
-          @written = Set.new
-          @literal_blocks = Set.new.compare_by_identity
-          @def_depth = 0
-        end
-
-        def <<(name)
-          key = @site ? @outer || AliasMutationFloor.handed_by(@site) : ALWAYS
-          current = @escapes[name]
-          @escapes[name] = key if current.nil? || key < current
-          self
-        end
-
-        def enter(node, parent)
-          if @outer.nil? && LOOPS.any? { |klass| node.is_a?(klass) }
-            @outer = node.location.start_offset
-            @outer_owner = node
-          end
-          note_deferred(node, parent)
-          if node.is_a?(Prism::DefNode)
-            @def_depth += 1
-          elsif @def_depth.zero?
-            ForeignLocals.visit(node, @foreign, @written, @literal_blocks)
-          end
-        end
-
-        def leave(node)
-          if node.equal?(@outer_owner)
-            @outer = nil
-            @outer_owner = nil
-          end
-          @def_depth -= 1 if node.is_a?(Prism::DefNode)
-        end
-
-        # Only a call that may keep its argument hands it to another holder: a constructor, an in-place mutator (a
-        # container adder), and a reflective or `define_method` call. Any other call's arguments are passed, not kept.
-        def keeps_arguments?(call_node) = KEEPING_CALLS.include?(call_node.name)
-
-        private
-
-        def note_deferred(node, parent)
-          return unless node.is_a?(Prism::LambdaNode) ||
-                        (node.is_a?(Prism::BlockNode) && RemoverHolderScan.deferred_block?(parent))
-
-          start = node.location.start_offset
-          @deferred << [start, start + node.location.length]
-        end
-      end
+      # `held` maps each local handed to another holder to the least key of those sites ({.handed_by}), or is {ALL};
+      # `held_part` does the same for a local an element of which was handed on (`[a.first]`); `links` lists
+      # `[local, local, key, part]` for each write that binds a local to another local's object (`b = a`) or to an
+      # element of it (`x = a[i]`, `part` true). `deferred` lists the `[start, end)` ranges of the closures that may run
+      # later. `memo` and `named_memo` keep each call's and each read's targets for the run: a loop or block body is
+      # evaluated more than once.
+      Facts = Data.define(:held, :held_part, :links, :foreign, :entry, :deferred, :memo, :named_memo)
+      FULL = :full
+      PART = :part
+      NO_KEYS = {}.freeze
+      NO_LINKS = [].freeze
+      # Calls whose result is their receiver (or, for `to_a` / `to_h` / `to_s`, may be on one core class), as
+      # {CalleeWriteCensus} reads them.
+      SELF_RETURNERS = %i[tap itself freeze to_a to_h to_s].to_set.freeze
 
       ALL = :all
       NUMBERED_PARAMETER = /\A_[1-9]\z/
       SEND_NAMES = %i[send public_send __send__].to_set.freeze
-      KEEPING_CALLS = (MutationWidening::SHAPE_MUTATORS | SetMutation::MUTATORS |
-                       %i[new add add? send public_send __send__ instance_variable_set instance_exec instance_eval
-                          class_exec module_exec define_method define_singleton_method]).freeze
       ELEMENT_READS = %i[[] first last fetch dig].to_set.freeze
       FACTS_CACHE_KEY = RunScopedSlots.register(:__rigor_alias_mutation_floor_facts)
       IVAR_CACHE_KEY = RunScopedSlots.register(:__rigor_alias_mutation_floor_ivar_mutators)
       FLOOR_CACHE_KEY = RunScopedSlots.register(:__rigor_alias_mutation_floor_callee_floors)
       STORE_CACHE_KEY = RunScopedSlots.register(:__rigor_alias_mutation_floor_unknown_stores)
-      private_constant :ALWAYS, :LOOPS, :ALL, :NUMBERED_PARAMETER, :SEND_NAMES, :ELEMENT_READS, :FACTS_CACHE_KEY,
-                       :IVAR_CACHE_KEY, :FLOOR_CACHE_KEY, :STORE_CACHE_KEY
+      private_constant :FULL, :PART, :NO_KEYS, :NO_LINKS, :SELF_RETURNERS, :ALL, :NUMBERED_PARAMETER,
+                       :SEND_NAMES, :ELEMENT_READS, :FACTS_CACHE_KEY, :IVAR_CACHE_KEY, :FLOOR_CACHE_KEY,
+                       :STORE_CACHE_KEY
 
       module_function
 
@@ -138,9 +90,7 @@ module Rigor
         facts = facts_for(scope)
         return scope if facts.nil?
 
-        targets = call_targets(facts, call_node) do
-          receiver_targets(call_node.receiver, facts, aliased_at(facts, call_node))
-        end
+        targets = call_targets(facts, call_node) { receiver_targets(call_node.receiver, facts, call_node) }
         return scope if targets.empty?
 
         floor_targets(scope, targets, yield) { |type| unknown_store(call_node, type) }
@@ -165,7 +115,7 @@ module Rigor
         return scope if facts.nil?
         return scope if facts.entry.include?(name)
 
-        targets = read_targets(facts, read) { targets(name, facts, aliased_at(facts, call_node)) }
+        targets = read_targets(facts, read) { targets(name, facts, aliased_at(facts, call_node), call_node) }
         return scope if targets.empty?
 
         floor_targets(scope, targets, name) { |type| callee_floor(type) }
@@ -200,10 +150,13 @@ module Rigor
         facts = facts_for(scope)
         return false if facts.nil? || facts.entry.include?(name)
 
-        targets = read_targets(facts, read) { targets(name, facts, aliased_at(facts, call_node)) }
+        targets = read_targets(facts, read) { targets(name, facts, aliased_at(facts, call_node), call_node) }
         return local_besides?(scope, name) { |type| literal_shape?(type) } if targets.equal?(ALL)
 
-        targets.any? { |target| target != name && literal_shape?(scope.local(target)) }
+        targets.any? do |target, kind|
+          type = scope.local(target)
+          target != name && literal_shape?(type) && (kind == FULL || mutable_parts?(type))
+        end
       end
 
       # A literal shape a store can make stale: a `Tuple`, a `HashShape`, a literal String or Set, or an empty-witness
@@ -247,14 +200,15 @@ module Rigor
         receiver.is_a?(Prism::InstanceVariableReadNode)
       end
 
-      # A literal-symbol `send` / `public_send` / `__send__` as the call it makes (`a.send(:push, x)` is `a.push(x)`),
-      # or nil.
+      # A `send` / `public_send` / `__send__` with a literal Symbol or String name as the call it makes (`a.send(:push,
+      # x)` and `a.send("push", x)` are `a.push(x)`), or nil. A name that is no valid string names no method.
       def literal_send_target(call_node)
         return nil unless SEND_NAMES.include?(call_node.name) && call_node.block.nil?
 
         arguments = call_node.arguments&.arguments
         target = arguments&.first
-        return nil unless target.is_a?(Prism::SymbolNode)
+        return nil unless target.is_a?(Prism::SymbolNode) || target.is_a?(Prism::StringNode)
+        return nil unless target.unescaped.valid_encoding?
 
         rest = arguments.drop(1)
         call_node.copy(name: target.unescaped.to_sym,
@@ -268,7 +222,7 @@ module Rigor
 
         table = (Thread.current[FACTS_CACHE_KEY] ||= ObjectSpace::WeakKeyMap.new)
         facts = (table[body] ||= scan(body, frame.parameters))
-        facts.escapes.empty? ? nil : facts
+        facts.held.empty? && facts.held_part.empty? && facts.links.empty? ? nil : facts
       end
 
       # One walk ({SiteCollector}) answers the facts. A body that calls `binding` or `eval` stops it early: every local
@@ -278,12 +232,13 @@ module Rigor
         result = RemoverHolderScan.unsafe_names(body, parameters, collector)
         if result.equal?(ALL)
           foreign, entry = ForeignLocals.collect(body, parameters)
-          return Facts.new(escapes: ALL, foreign:, entry:, deferred: [].freeze, memo: {}.compare_by_identity,
-                           named_memo: {}.compare_by_identity)
+          return Facts.new(held: ALL, held_part: NO_KEYS, links: NO_LINKS, foreign:, entry:, deferred: NO_LINKS,
+                           memo: {}.compare_by_identity, named_memo: {}.compare_by_identity)
         end
 
         foreign, entry = ForeignLocals.finish(parameters, collector.foreign, collector.written)
-        Facts.new(escapes: collector.escapes.freeze, foreign:, entry:, deferred: collector.deferred.freeze,
+        Facts.new(held: collector.held.freeze, held_part: collector.held_part.freeze, links: collector.links.freeze,
+                  foreign:, entry:, deferred: collector.deferred.freeze,
                   memo: {}.compare_by_identity, named_memo: {}.compare_by_identity)
       end
 
@@ -309,46 +264,6 @@ module Rigor
         facts.named_memo.fetch(read) { facts.named_memo[read] = yield }
       end
 
-      # The locals aliased by the time `call_node`'s message runs: every one, inside a closure that may run later.
-      def aliased_at(facts, call_node)
-        escapes = facts.escapes
-        return ALL if escapes.equal?(ALL)
-
-        offset = (call_node.message_loc || call_node.location).start_offset
-        return escapes.keys.to_set if facts.deferred.any? { |from, to| offset >= from && offset < to }
-
-        escapes.each_with_object(Set.new) { |(name, key), set| set << name if key <= offset }
-      end
-
-      # The locals a write through `receiver` may reach: through each local it may evaluate to
-      # ({ReceiverAlias.candidates}: `(c ? a : b)`), or as through any other receiver.
-      def receiver_targets(receiver, facts, aliased)
-        reads = ReceiverAlias.candidates(receiver)
-        return targets(nil, facts, aliased) if reads.empty? || !reads.all?(Prism::LocalVariableReadNode)
-
-        reads.map { |read| targets(read.name, facts, aliased) }.reduce { |acc, set| union(acc, set) }
-      end
-
-      def union(left, right)
-        left.equal?(ALL) || right.equal?(ALL) ? ALL : left | right
-      end
-
-      # The locals of `aliased` a write through the local `name` (nil for any other receiver) may reach:
-      #
-      # - every one, through a receiver that may hold any object: an ivar, an index read, a call result, a block
-      #   parameter, or a local some write binds to an object from elsewhere;
-      # - only the foreign ones, through a local only ever written a new object or a method parameter the body never
-      #   rebinds, once the body has handed it on: either is an object no new-object local can be, and only a holder it
-      #   reached can hand it to another local;
-      # - none, through such a local the body has not handed on.
-      def targets(name, facts, aliased)
-        return ALL if aliased.equal?(ALL)
-        return aliased if name.nil? || NUMBERED_PARAMETER.match?(name)
-        return aliased if facts.foreign.include?(name) && !facts.entry.include?(name)
-
-        aliased.include?(name) ? aliased & facts.foreign : EMPTY
-      end
-
       # Whether `scope` binds a local other than `except` (a name, a list of names, or nil) whose type the block
       # accepts: the cheap gate every trigger asks before the body scan, since a floor changes only such a binding.
       def local_besides?(scope, except)
@@ -360,19 +275,26 @@ module Rigor
         except.is_a?(Symbol) ? except == name : except&.include?(name)
       end
 
-      def each_target(scope, targets) = targets.equal?(ALL) ? scope.locals.keys : targets
+      def each_target(scope, targets, &)
+        return scope.locals.each_key { |name| yield name, FULL } if targets.equal?(ALL)
 
-      # Each target but `except` takes what the block answers for its binding.
+        targets.each(&)
+      end
+
+      # Each target but `except` takes what the block answers for its binding. A target reached only as a part
+      # ({PART}) is floored only when its binding can hold a mutable element.
       def floor_targets(scope, targets, except)
-        each_target(scope, targets).reduce(scope) do |acc, name|
-          next acc if excepted?(except, name)
+        acc = scope
+        each_target(scope, targets) do |name, kind|
+          next if excepted?(except, name)
 
           current = acc.local(name)
-          next acc if current.nil?
+          next if current.nil? || (kind == PART && !mutable_parts?(current))
 
           floored = yield(current)
-          floored.nil? || floored == current ? acc : acc.with_mutated_local(name, floored)
+          acc = acc.with_mutated_local(name, floored) unless floored.nil? || floored == current
         end
+        acc
       end
     end
   end

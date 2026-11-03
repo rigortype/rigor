@@ -6,8 +6,8 @@ require_relative "../inference/declaration_walk"
 
 module Rigor
   # {Reflection}'s per-file declaration walk for plugins (ADR-128, #2708): {.class_declarations_in} answers which
-  # classes a parsed file declares under their `Module.nesting`-correct names, and hands each call inside a
-  # declaration body to a plugin together with the class or module its position reaches. It replaces a plugin's own
+  # classes a parsed file declares under their `Module.nesting`-correct names, and hands each call the walk visits
+  # to a plugin together with the class or module its position reaches. It replaces a plugin's own
   # `DeclarationWalk::Collector`, so the walk's context, its control constants and its collector protocol stay
   # internal.
   module Reflection

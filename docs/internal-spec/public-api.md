@@ -122,7 +122,7 @@ pins instance and singleton method sets for:
   `class_declarations_in(root) { |declared_call| … }` (#2708) is the per-file
   declaration walk: the classes a parsed file declares as
   `Rigor::Reflection::ClassDeclaration` values (`name`, `nesting`, `node`),
-  and, when given a block, the calls inside declaration bodies as
+  and, when given a block, each call the walk visits as
   `Rigor::Reflection::DeclaredCall` values (`node`, `owner`: the class or
   module the call sits in). It is the entry point `rigor-alba` and `rigor-typelizer` use
   in place of `Rigor::Inference::DeclarationWalk`, which stays internal.

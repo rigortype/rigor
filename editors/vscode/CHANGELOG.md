@@ -46,6 +46,16 @@ the extension is versioned independently of the `rigortype` gem.
   restart rather than on every sync.
 - In a multi-root workspace each server is sent only the Ruby files
   under its own folder, not every Ruby file in the window.
+- A server that crashes more often than the client's restart limit
+  allows now shows the folder as `error` in the status bar, tooltip and
+  **Show Server Version**, instead of staying `running`.
+  **Rigor: Restart Server** brings it back.
+- A start that does not answer `initialize` within 60 s now shows one
+  error ("Show Output" opens the log) instead of two unrelated ones.
+- Changing `rigor.rootDir` or `rigor.enable` in one folder re-explains
+  only that folder, not the other folders' dismissed messages.
+- Closing the window during a multi-folder sync no longer runs
+  `rigor version` for the folders not yet reached.
 - **Rigor: Show Server Log** reads the setting of the active editor's
   folder (or asks) instead of always the first folder.
 

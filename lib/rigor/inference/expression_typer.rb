@@ -260,17 +260,39 @@ module Rigor
         @typing_node = typing_node
       end
 
+      # MEASUREMENT PROTOTYPE (branch type-of-memo-prototype, not for merge; #2709): a per-file memo of `type_of`
+      # results keyed by the scope's and the node's identity. It has no store gate, so it is unsound inside an
+      # ADR-55 fixpoint, which evaluates one body scope several times; it exists to size the lever on CI.
+      TYPE_MEMO_KEY = RunScopedSlots.register(:__rigor_type_of_memo_prototype__)
+      private_constant :TYPE_MEMO_KEY
+
+      def self.clear_type_memo = (Thread.current[TYPE_MEMO_KEY] = nil)
+
       def type_of(node)
+        per_scope = type_memo_for(node)
+        return typing_node_frame(node) unless per_scope
+
+        per_scope[node] ||= typing_node_frame(node)
+      end
+
+      def typing_node_frame(node)
         previous = @typing_node
         @typing_node = node
-        result = if FlowTracer.active?
-                   FlowTracer.trace_node(node) { untraced_type_of(node) }
-                 else
-                   untraced_type_of(node)
-                 end
-        result
+        if FlowTracer.active?
+          FlowTracer.trace_node(node) { untraced_type_of(node) }
+        else
+          untraced_type_of(node)
+        end
       ensure
         @typing_node = previous
+      end
+
+      def type_memo_for(node)
+        return nil if @operand_types || @tracer || FlowTracer.active? || !node.is_a?(Prism::Node)
+        return nil if KeyPresenceGuard.active? || Analysis::DependencyRecorder.active?
+
+        table = (Thread.current[TYPE_MEMO_KEY] ||= {}.compare_by_identity)
+        table[scope] ||= {}.compare_by_identity
       end
 
       def untraced_type_of(node)

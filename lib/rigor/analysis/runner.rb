@@ -2768,6 +2768,9 @@ module Rigor
             severity: :error
           )
         ]
+      ensure
+        # MEASUREMENT PROTOTYPE (#2709): the type_of memo holds this file's scopes only.
+        Inference::ExpressionTyper.clear_type_memo
       end
 
       # ADR-113 WD2 — the `on_file_indexed` observer. It reads; an error inside it never changes this file's

@@ -58,17 +58,19 @@ the extension is versioned independently of the `rigortype` gem.
   mise, the message points to the installation guide and #926. New settings
   `rigor.runtime.version` and `rigor.runtime.rubyPath`; new commands
   **Rigor: Check for Rigor Update** and **Rigor: Clear Managed Rigor**.
-  The Ruby search takes the newest Ruby 4.0 release and skips a preview
-  or dev build unless `rigor.runtime.rubyPath` names it; a
-  `mise install ruby@4.0` in progress finishes when the window closes.
+  The Ruby search takes the first Ruby 4.0 with Bundler and OpenSSL,
+  skips a preview or dev build unless `rigor.runtime.rubyPath` names it,
+  and tries the next one once when the build fails the way a broken Ruby
+  does; a `mise install ruby@4.0` in progress finishes when the window
+  closes.
 - Background update checks for the managed Rigor (#2746):
   `rigor.runtime.autoUpdate` (on by default) and
   `rigor.runtime.updateCheckIntervalHours` (24). While a folder runs it
   and `rigor.runtime.version` is `latest`, a newer `rigortype` is offered
-  shortly after startup and then on the interval; it installs beside
-  the current version on **Install update** and is used after a
-  restart. Never in an untrusted workspace; a failed check logs one
-  line.
+  shortly after startup, at most once per interval across the machine's
+  windows; it installs beside the current version on **Install update**
+  and is used after a restart, and **Later** is remembered. Never in an
+  untrusted workspace; a failed check logs one line.
 
 ### Fixed
 

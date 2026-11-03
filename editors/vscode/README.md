@@ -67,10 +67,13 @@ for this editor** (also **Rigor: Install Managed Rigor**). The
 extension then installs `rigortype` into its own storage, outside
 every project:
 
-- **A Ruby 4.0 is on the machine** — from `rigor.runtime.rubyPath`,
-  or else the newest Ruby 4.0 release among `ruby` on `PATH` and the
-  mise, rbenv, chruby and asdf install directories (a preview or dev
-  build is skipped unless `rigor.runtime.rubyPath` names it). The extension runs `bundle install` for a one-line
+- **A Ruby 4.0 is on the machine** — the first that qualifies of
+  `rigor.runtime.rubyPath`, `ruby` on `PATH`, and the mise, rbenv,
+  chruby and asdf install directories. It must carry Bundler and load
+  OpenSSL; a preview or dev build is used only when
+  `rigor.runtime.rubyPath` names it. When the build fails the way a
+  broken Ruby does, the next Ruby that qualifies is tried once. The
+  extension runs `bundle install` for a one-line
   `Gemfile` (`gem 'rigortype', '= X'`), then starts the server as
   `ruby <bundle> exec rigor lsp` in the project. Bundler's config
   files are ignored, and the inherited `BUNDLE_*`, `GEM_HOME`,
@@ -86,7 +89,9 @@ every project:
   own mise settings while it runs (an auto-prune, for example). It is
   the only `mise` command the extension runs: it reads mise's files to
   find pins and Rubies. Closing the window does not stop it: it
-  finishes on its own, and the output channel says so.
+  finishes on its own, writing its output to a
+  `.mise-install-<pid>.log` file in the extension's storage, and until
+  that log has been quiet for two hours no window starts another.
 - **Neither** — the extension points you to the
   [installation guide](https://github.com/rigortype/rigor/blob/master/docs/install.md).
   A self-contained Rigor that needs no Ruby is tracked in
@@ -108,11 +113,13 @@ untrusted workspace, or without your click. When no folder has a
 **Rigor: Check for Rigor Update** installs a newer release, which
 takes effect when the server restarts. While a folder runs the managed
 Rigor and the version is `latest`, the extension also checks by itself
-(`rigor.runtime.autoUpdate`, on by default): once shortly after the
-server starts, then every `rigor.runtime.updateCheckIntervalHours`
-(24). A newer release is offered with **Install update** / **Later**;
-it installs beside the current one and is used after a restart, which
-the extension offers. A pinned version never updates, an untrusted
+(`rigor.runtime.autoUpdate`, on by default): shortly after the
+server starts, and at most once every
+`rigor.runtime.updateCheckIntervalHours` (24) across all windows on
+the machine. A newer release is offered with **Install update** /
+**Later**; it installs beside the current one and is used after a
+restart, which the extension offers. **Later** is remembered, so no
+window asks about that version again. A pinned version never updates, an untrusted
 workspace is never checked, and an unreachable rubygems.org leaves
 the install alone and logs one line. Every VS Code window shares
 the install: the extension keeps the newest two versions plus any
@@ -155,7 +162,7 @@ Use an absolute path — the setting is not `~`-expanded.
 | `rigor.runtime.version` | `latest` | `rigortype` version of the managed Rigor; `latest` resolves the newest release on rubygems.org. |
 | `rigor.runtime.autoUpdate` | `true` | Background update checks for the managed Rigor while `rigor.runtime.version` is `latest`. |
 | `rigor.runtime.updateCheckIntervalHours` | `24` | Hours between those checks (1–168). |
-| `rigor.runtime.rubyPath` | `""` | Ruby 4.0 the managed Rigor is installed with. Empty searches `PATH` and the version managers' install directories and takes the newest release found; a prerelease Ruby is used only when named here. |
+| `rigor.runtime.rubyPath` | `""` | Ruby 4.0 the managed Rigor is installed with. Empty searches `PATH` and the version managers' install directories, in that order; a prerelease Ruby is used only when named here. |
 | `rigor.trace.server` | `off` | JSON-RPC trace into the output channel. |
 
 `rootDir` and the `server.*` settings are per-folder; changing one

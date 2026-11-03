@@ -122,11 +122,19 @@ interface RubyCandidate {
 export interface RubyProbe extends RubyCandidate {
   /** `Gem.ruby_version.prerelease?`: a preview, rc or dev build. */
   prerelease: boolean;
+  /** Whether `require "openssl"` worked. */
+  openssl: boolean;
 }
 
 let runtimeRoot: string | undefined;
 let devGemPath: string | undefined;
-let installing: Promise<boolean> | undefined;
+/**
+ * The install in progress, keyed by what it was asked for: a second
+ * request for the same thing shares it, one for something else waits for
+ * it and then runs its own.
+ */
+let installing: { key: string; promise: Promise<InstallResult> } | undefined;
+let installQueue: Promise<unknown> = Promise.resolve();
 /**
  * The running `bundle install` / `mise install`. On deactivate a
  * `bundle install` is killed; a `mise install` is left to finish.
@@ -141,10 +149,18 @@ let stopMarkerTimer: (() => void) | undefined;
 let runtimeOutput: OutputChannel | undefined;
 let updateTimer: NodeJS.Timeout | undefined;
 let updateChecking = false;
-/** Wall-clock time of the last background update check. */
-let lastUpdateCheck = 0;
-/** Versions already announced this session: each is offered once. */
+/**
+ * Versions the user already answered this session ("Install update" or
+ * a restart prompt): each is offered once. A "Later" is also persisted
+ * in `globalState` (DECLINED_KEY), so no window asks again.
+ */
 const updateOffered = new Set<string>();
+/** The user's global extension state, shared by every window. */
+let globalState: ExtensionContext["globalState"] | undefined;
+/** Wall-clock time of the last background check by any window. */
+const LAST_CHECK_KEY = "rigor.runtime.lastUpdateCheck";
+/** Versions the user answered "Later" to. */
+const DECLINED_KEY = "rigor.runtime.declinedUpdates";
 
 function log(line: string): void {
   try {
@@ -157,6 +173,7 @@ function log(line: string): void {
 /** Where managed versions live. Called once from `activate`. */
 export function initRuntime(context: ExtensionContext): void {
   runtimeRoot = path.join(context.globalStorageUri.fsPath, "runtime");
+  globalState = context.globalState;
   devGemPath =
     context.extensionMode === ExtensionMode.Production
       ? undefined
@@ -191,8 +208,12 @@ export function managedServer(): ResolvedServer | undefined {
   };
 }
 
-/** Valid installs, newest first. */
-function installedVersions(): Manifest[] {
+/**
+ * Valid installs, newest first. A `dev` install is left out unless the
+ * development override is active (or `all`), so a production window
+ * never selects what a development host left behind.
+ */
+function installedVersions(all = false): Manifest[] {
   if (!runtimeRoot || !fs.existsSync(runtimeRoot)) {
     return [];
   }
@@ -211,7 +232,14 @@ function installedVersions(): Manifest[] {
       manifests.push(manifest);
     }
   }
-  return manifests.sort((a, b) => compareVersions(b.version, a.version));
+  return manifests
+    .filter((m) => all || devGemPath !== undefined || m.version !== DEV_VERSION)
+    .sort((a, b) => compareVersions(b.version, a.version));
+}
+
+/** Whether `version` is installed: its directory, with a valid manifest. */
+function isInstalled(version: string): boolean {
+  return installedVersions(true).some((m) => m.version === version);
 }
 
 function readManifest(dir: string): Manifest | undefined {
@@ -305,71 +333,119 @@ function bundleEnv(dir: string, frozen: boolean): NodeJS.ProcessEnv {
 
 const RUBY_PROBE = [
   `req = Gem::Requirement.new(${REQUIRED_RUBY.map((r) => JSON.stringify(r)).join(", ")})`,
-  'print RUBY_VERSION, "\\n", req.satisfied_by?(Gem.ruby_version), "\\n", RbConfig.ruby, "\\n", (Gem.bin_path("bundler", "bundle") rescue ""), "\\n", Gem.ruby_version.prerelease?',
+  // `bundle install` fetches over HTTPS: a Ruby whose OpenSSL does not
+  // load cannot install anything.
+  'ssl = begin; require "openssl"; true; rescue LoadError, StandardError; false; end',
+  'print RUBY_VERSION, "\\n", req.satisfied_by?(Gem.ruby_version), "\\n", RbConfig.ruby, "\\n", (Gem.bin_path("bundler", "bundle") rescue ""), "\\n", Gem.ruby_version.prerelease?, "\\n", ssl',
 ].join("; ");
 
 /**
- * The Ruby to install with, or undefined. `rigor.runtime.rubyPath` wins
- * when it qualifies, prerelease or not: naming one is a choice.
- * Otherwise every candidate is asked and the newest release that
- * qualifies is taken. A prerelease (`4.1.0.preview1`, `4.1.0.dev`)
- * satisfies the gemspec's `< 4.1` by RubyGems' rules, so it is skipped.
+ * The first Ruby that qualifies, in order: `rigor.runtime.rubyPath`,
+ * then `ruby` on PATH, then the version managers' install directories.
+ * A prerelease (`4.1.0.preview1`, `4.1.0.dev`) satisfies the gemspec's
+ * `< 4.1` by RubyGems' rules, so it qualifies only as the named
+ * `rubyPath`. `skip` holds the real paths of Rubies already tried.
  */
 async function findRuby(
   output: OutputChannel,
+  skip: ReadonlySet<string> = new Set(),
 ): Promise<RubyCandidate | undefined> {
   const configured = (
     workspace.getConfiguration("rigor").get<string>("runtime.rubyPath") ?? ""
   ).trim();
-  if (configured) {
+  if (configured && !skip.has(realPath(resolveExecutable(configured)))) {
     const found = await probeRuby(configured, output);
-    if (found) {
+    if (found && rubyQualifies(found, true)) {
       return found;
     }
-    void window.showWarningMessage(
-      `Rigor: "rigor.runtime.rubyPath" is "${configured}", which is not a ` +
-        `Ruby satisfying ${REQUIRED_RUBY.join(", ")} with Bundler. Looking for another.`,
-    );
-  }
-  const candidates = rubyCandidates();
-  const probes: RubyProbe[] = [];
-  for (const candidate of candidates) {
-    const found = await probeRuby(candidate, output);
-    if (found) {
-      probes.push(found);
+    if (skip.size === 0) {
+      void window.showWarningMessage(
+        `Rigor: "rigor.runtime.rubyPath" is "${configured}", which is not a ` +
+          `Ruby satisfying ${REQUIRED_RUBY.join(", ")} with Bundler and OpenSSL. Looking for another.`,
+      );
     }
   }
-  for (const skipped of probes.filter((p) => p.prerelease)) {
-    output.appendLine(
-      `[rigor] ${skipped.ruby}: Ruby ${skipped.version} is a prerelease; ` +
-        'name it in "rigor.runtime.rubyPath" to use it',
-    );
-  }
-  const picked = pickRuby(probes);
-  if (picked) {
-    return picked;
+  const candidates = dedupeCandidates(rubyCandidates(), (c) =>
+    realPath(resolveExecutable(c)),
+  );
+  for (const candidate of candidates) {
+    if (skip.has(realPath(resolveExecutable(candidate)))) {
+      continue;
+    }
+    const found = await probeRuby(candidate, output);
+    if (!found || skip.has(realPath(found.ruby))) {
+      continue;
+    }
+    if (rubyQualifies(found, false)) {
+      return found;
+    }
+    if (found.prerelease) {
+      output.appendLine(
+        `[rigor] ${candidate}: Ruby ${found.version} is a prerelease; ` +
+          'name it in "rigor.runtime.rubyPath" to use it',
+      );
+    }
   }
   output.appendLine(
-    `[rigor] no Ruby ${REQUIRED_RUBY.join(", ")} with Bundler among: ${candidates.join(", ")}`,
+    `[rigor] no Ruby ${REQUIRED_RUBY.join(", ")} with Bundler and OpenSSL among: ${candidates.join(", ")}`,
   );
   return undefined;
 }
 
 /**
- * The newest release among the qualifying probes; on a tie the one asked
- * first (`ruby` on PATH comes first). A prerelease never qualifies here.
+ * Whether a probed Ruby is one to install with: it carries Bundler and
+ * OpenSSL (`probeRuby` checked the version range), and it is a release
+ * unless the user named it (`explicit`).
  */
-export function pickRuby(probes: readonly RubyProbe[]): RubyProbe | undefined {
-  let best: RubyProbe | undefined;
-  for (const probe of probes) {
-    if (probe.prerelease) {
-      continue;
-    }
-    if (!best || compareVersions(probe.version, best.version) > 0) {
-      best = probe;
+export function rubyQualifies(probe: RubyProbe, explicit: boolean): boolean {
+  return probe.openssl && (explicit || !probe.prerelease);
+}
+
+/**
+ * `candidates` without the ones that resolve to an executable already
+ * listed (`ruby` on PATH is often a manager's install), first one kept.
+ */
+export function dedupeCandidates(
+  candidates: readonly string[],
+  resolve: (candidate: string) => string,
+): string[] {
+  const seen = new Set<string>();
+  const kept: string[] = [];
+  for (const candidate of candidates) {
+    const key = resolve(candidate);
+    if (!seen.has(key)) {
+      seen.add(key);
+      kept.push(candidate);
     }
   }
-  return best;
+  return kept;
+}
+
+/** A bare command name looked up on PATH; a path as given. */
+function resolveExecutable(command: string): string {
+  if (command.includes("/") || command.includes("\\")) {
+    return command;
+  }
+  const sep = process.platform === "win32" ? ";" : ":";
+  const names =
+    process.platform === "win32" ? [`${command}.exe`, command] : [command];
+  for (const dir of (process.env.PATH ?? "").split(sep)) {
+    for (const name of names) {
+      const candidate = dir && path.join(dir, name);
+      if (candidate && fs.existsSync(candidate)) {
+        return candidate;
+      }
+    }
+  }
+  return command;
+}
+
+function realPath(file: string): string {
+  try {
+    return fs.realpathSync(file);
+  } catch {
+    return file;
+  }
 }
 
 /**
@@ -420,14 +496,25 @@ async function probeRuby(
   if (out === undefined) {
     return undefined;
   }
-  const [version, satisfied, ruby, bundler, prerelease] = out.split("\n");
+  const [version, satisfied, ruby, bundler, prerelease, openssl] = out.split("\n");
   if (satisfied !== "true" || !ruby || !bundler) {
     output.appendLine(
       `[rigor] ${candidate}: Ruby ${version ?? "?"}${satisfied === "true" ? " without Bundler" : ""} does not qualify`,
     );
     return undefined;
   }
-  return { version, ruby, bundler, prerelease: prerelease === "true" };
+  if (openssl !== "true") {
+    output.appendLine(
+      `[rigor] ${candidate}: Ruby ${version} cannot load OpenSSL, which \`bundle install\` needs`,
+    );
+  }
+  return {
+    version,
+    ruby,
+    bundler,
+    prerelease: prerelease === "true",
+    openssl: openssl === "true",
+  };
 }
 
 function miseDataDir(): string {
@@ -769,13 +856,12 @@ function prune(keep: string): void {
       fs.rmSync(path.join(root, name), { recursive: true, force: true });
     }
     // The log of a `mise install` a closed window left running, once that
-    // window is gone (the install may outlive it; unlinking is harmless).
-    const miseLog = /^\.mise-install-(\d+)\.log$/.exec(name);
-    if (miseLog && !pidAlive(parseInt(miseLog[1], 10))) {
+    // has been quiet for MISE_LOG_RECENT_MS (one being written stays).
+    if (MISE_LOG.test(name) && !miseLogRecent(path.join(root, name))) {
       fs.rmSync(path.join(root, name), { force: true });
     }
   }
-  const others = installedVersions()
+  const others = installedVersions(true)
     .map((m) => m.version)
     .filter((v) => v !== keep);
   for (const version of others.slice(KEEP_VERSIONS - 1)) {
@@ -797,49 +883,71 @@ export interface InstallOptions {
 }
 
 /**
- * Install the managed Rigor (tiers A–C). Resolves true when a usable
- * version is installed afterwards. Concurrent calls share one install.
+ * How an install ended: `installed` (the version is there, with its
+ * manifest), `busy` (another window holds the lock or runs the version,
+ * so nothing was tried), or `failed`.
  */
-export function installManaged(
+export type InstallResult = "installed" | "busy" | "failed";
+
+/**
+ * Install the managed Rigor (tiers A–C). Resolves true when a usable
+ * version is installed afterwards.
+ */
+export async function installManaged(
   output: OutputChannel,
   options: InstallOptions = {},
 ): Promise<boolean> {
+  return (await installManagedResult(output, options)) === "installed";
+}
+
+/**
+ * `installManaged`, with the reason it did not install. A second call
+ * while one runs shares it when it asks for the same thing, and
+ * otherwise waits for it and then runs its own.
+ */
+export function installManagedResult(
+  output: OutputChannel,
+  options: InstallOptions = {},
+): Promise<InstallResult> {
   if (!workspace.isTrusted) {
     void window.showWarningMessage(
       "Rigor: the managed Rigor is not installed in an untrusted workspace. " +
         "Trust the workspace first.",
     );
-    return Promise.resolve(false);
+    return Promise.resolve("failed");
   }
-  installing ??= installNow(output, options)
-    .catch((err) => {
+  const key = `${options.version ?? ""}|${options.repair === true}`;
+  if (installing?.key === key) {
+    return installing.promise;
+  }
+  const promise: Promise<InstallResult> = installQueue
+    .then(() => installNow(output, options))
+    .catch((err): InstallResult => {
       output.appendLine(`[rigor] the managed install failed: ${String(err)}`);
       void window.showErrorMessage(
         `Rigor: installing the managed Rigor failed: ${String(err)}`,
       );
-      return false;
+      return "failed";
     })
     .finally(() => {
-      installing = undefined;
+      if (installing?.promise === promise) {
+        installing = undefined;
+      }
     });
-  return installing;
+  installing = { key, promise };
+  installQueue = promise;
+  return promise;
 }
 
 async function installNow(
   output: OutputChannel,
   options: InstallOptions,
-): Promise<boolean> {
+): Promise<InstallResult> {
   if (!runtimeRoot) {
-    return false;
+    return "failed";
   }
-  let ruby = await findRuby(output);
-  if (!ruby) {
-    ruby = await offerMiseRuby(output);
-    if (!ruby) {
-      return false;
-    }
-  }
-
+  // The version first: no Ruby search, and no mise offer, for a version
+  // that is already there.
   let version: string;
   try {
     version = options.version ?? (await targetVersion());
@@ -847,21 +955,70 @@ async function installNow(
     void window.showErrorMessage(
       `Rigor: could not find the rigortype version to install: ${String(err)}`,
     );
-    return false;
+    return "failed";
   }
-  const present = installedVersions().some((m) => m.version === version);
-  if (present && !options.repair && version !== DEV_VERSION) {
+  if (isInstalled(version) && !options.repair && version !== DEV_VERSION) {
     void window.showInformationMessage(
       `Rigor: rigortype ${version} is already installed for this editor.`,
     );
-    return true;
+    return "installed";
   }
-  const found = ruby;
+  let ruby = await findRuby(output);
+  if (!ruby) {
+    ruby = await offerMiseRuby(output);
+    if (!ruby) {
+      return "failed";
+    }
+  }
   const repair = options.repair === true;
-  const result = await withLock(() =>
-    installVersion(output, found, version, repair),
-  );
-  return result === true;
+  const tried = new Set<string>();
+  // A build that fails the way a broken Ruby does (no OpenSSL, a native
+  // extension that will not compile) is tried once more with the next
+  // Ruby that qualifies.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const found: RubyCandidate = ruby;
+    tried.add(realPath(found.ruby));
+    const result = await withLock(() =>
+      installVersion(output, found, version, repair),
+    );
+    if (result === undefined) {
+      return "busy";
+    }
+    if (result === "installed" || result === "busy") {
+      return result;
+    }
+    if (result === "failed") {
+      break;
+    }
+    const next = attempt === 0 ? await findRuby(output, tried) : undefined;
+    if (!next) {
+      break;
+    }
+    output.appendLine(
+      `[rigor] the build failed the way a broken Ruby does; trying Ruby ${next.version} (${next.ruby})`,
+    );
+    ruby = next;
+  }
+  showInstallFailed(output, version);
+  return "failed";
+}
+
+function showInstallFailed(output: OutputChannel, version: string): void {
+  const show = "Show Output";
+  const guide = "Installation guide";
+  void window
+    .showErrorMessage(
+      `Rigor: installing rigortype ${version} failed. The Bundler output is in the Rigor output channel.`,
+      show,
+      guide,
+    )
+    .then((choice) => {
+      if (choice === show) {
+        output.show();
+      } else if (choice === guide) {
+        void commands.executeCommand("vscode.open", Uri.parse(INSTALL_GUIDE_URL));
+      }
+    });
 }
 
 /**
@@ -880,20 +1037,23 @@ function replaceBlocked(dir: string, repair: boolean): boolean {
   return repair && [...inUse.values()].includes(dir);
 }
 
+/** `ruby-failed`: failed the way a broken Ruby does, so another may work. */
+type BuildResult = "installed" | "busy" | "failed" | "ruby-failed";
+
 async function installVersion(
   output: OutputChannel,
   ruby: RubyCandidate,
   version: string,
   repair: boolean,
-): Promise<boolean> {
+): Promise<BuildResult> {
   const root = runtimeRoot;
   if (!root) {
-    return false;
+    return "failed";
   }
   const dir = path.join(root, version);
   if (replaceBlocked(dir, repair)) {
     showReplaceBlocked(version);
-    return false;
+    return "busy";
   }
   const staging = path.join(
     root,
@@ -902,10 +1062,9 @@ async function installVersion(
   output.appendLine(
     `[rigor] installing rigortype ${version} with Ruby ${ruby.version} (${ruby.ruby}) into ${dir}`,
   );
-  let ok = false;
-  let busy = false;
+  let result: BuildResult = "failed";
   try {
-    ok = await window.withProgress(
+    result = await window.withProgress(
       {
         location: ProgressLocation.Notification,
         title: `Rigor: installing rigortype ${version}`,
@@ -915,43 +1074,39 @@ async function installVersion(
         buildInto(staging, output, ruby, version, progress, token),
     );
     // Again: a window may have started on the version during the build.
-    if (ok && replaceBlocked(dir, repair)) {
-      ok = false;
-      busy = true;
-    } else if (ok) {
+    if (result === "installed" && replaceBlocked(dir, repair)) {
+      result = "busy";
+    } else if (result === "installed") {
       replaceDir(staging, dir);
     }
   } catch (err) {
-    ok = false;
+    result = "failed";
     output.appendLine(`[rigor] the install failed: ${String(err)}`);
   } finally {
     fs.rmSync(staging, { recursive: true, force: true });
   }
-  if (busy) {
+  if (result === "busy") {
     showReplaceBlocked(version);
-    return false;
+    return result;
   }
-  if (!ok) {
-    const show = "Show Output";
-    const guide = "Installation guide";
-    void window
-      .showErrorMessage(
-        `Rigor: installing rigortype ${version} failed. The Bundler output is in the Rigor output channel.`,
-        show,
-        guide,
-      )
-      .then((choice) => {
-        if (choice === show) {
-          output.show();
-        } else if (choice === guide) {
-          void commands.executeCommand("vscode.open", Uri.parse(INSTALL_GUIDE_URL));
-        }
-      });
-    return false;
+  if (result !== "installed") {
+    return result;
   }
   output.appendLine(`[rigor] installed rigortype ${version} into ${dir}`);
   prune(version);
-  return true;
+  return "installed";
+}
+
+/**
+ * Whether `bundle install` output reads as the Ruby's fault rather than
+ * the network's or the gem's: OpenSSL or another stdlib library missing
+ * or built against something else, or a native extension that does not
+ * build.
+ */
+export function looksLikeRubyProblem(text: string): boolean {
+  return /\bopenssl\b|LoadError|cannot load such file|incompatible library version|Gem::Ext::BuildError|Failed to build gem native extension/i.test(
+    text,
+  );
 }
 
 function showReplaceBlocked(version: string): void {
@@ -971,7 +1126,7 @@ async function buildInto(
   version: string,
   progress: { report(value: { message?: string }): void },
   token: CancellationToken,
-): Promise<boolean> {
+): Promise<BuildResult> {
   fs.mkdirSync(staging, { recursive: true });
   const gem = devGemPath
     ? `gem 'rigortype', path: ${rubyString(devGemPath)}`
@@ -981,6 +1136,7 @@ async function buildInto(
     `source 'https://rubygems.org'\n${gem}\n`,
   );
   progress.report({ message: "bundle install" });
+  let captured = "";
   const installed = await stream(
     output,
     ruby.ruby,
@@ -988,9 +1144,15 @@ async function buildInto(
     staging,
     bundleEnv(staging, false),
     token,
+    undefined,
+    (text) => {
+      captured += text;
+    },
   );
   if (!installed) {
-    return false;
+    return !token.isCancellationRequested && looksLikeRubyProblem(captured)
+      ? "ruby-failed"
+      : "failed";
   }
   progress.report({ message: "checking `rigor version`" });
   const printed = await new Promise<string | undefined>((resolve) => {
@@ -1004,7 +1166,7 @@ async function buildInto(
   const rigortype = printed && /\b(\d+\.\d+\.\d+)\b/.exec(printed)?.[1];
   if (!rigortype) {
     output.appendLine("[rigor] the installed `rigor version` did not run");
-    return false;
+    return "failed";
   }
   const manifest: Manifest = {
     version,
@@ -1016,7 +1178,7 @@ async function buildInto(
     path.join(staging, MANIFEST),
     `${JSON.stringify(manifest, null, 2)}\n`,
   );
-  return true;
+  return "installed";
 }
 
 /**
@@ -1104,9 +1266,14 @@ function stream(
   env: NodeJS.ProcessEnv,
   token: CancellationToken,
   logFile?: string,
+  onOutput?: (text: string) => void,
 ): Promise<boolean> {
   const commandLine = [command, ...args].join(" ");
   output.appendLine(`[rigor] $ ${commandLine}`);
+  const emit = (text: string): void => {
+    output.append(text);
+    onOutput?.(text);
+  };
   return new Promise((resolve) => {
     let child: ChildProcess;
     let follow: { stop(): void } | undefined;
@@ -1124,7 +1291,7 @@ function stream(
         } finally {
           fs.closeSync(fd);
         }
-        follow = followFile(logFile, (text) => output.append(text));
+        follow = followFile(logFile, emit);
       } else {
         child = spawn(command, args, {
           cwd,
@@ -1144,8 +1311,8 @@ function stream(
       output.appendLine("[rigor] cancelled");
       killTree(child);
     });
-    child.stdout?.on("data", (data: Buffer) => output.append(data.toString()));
-    child.stderr?.on("data", (data: Buffer) => output.append(data.toString()));
+    child.stdout?.on("data", (data: Buffer) => emit(data.toString()));
+    child.stderr?.on("data", (data: Buffer) => emit(data.toString()));
     child.on("error", (err) => {
       output.appendLine(`[rigor] could not run ${command}: ${String(err)}`);
     });
@@ -1207,6 +1374,15 @@ async function offerMiseRuby(
     showNoRuby();
     return undefined;
   }
+  const running = recentMiseLog();
+  if (running) {
+    void window.showWarningMessage(
+      "Rigor: a `mise install ruby@4.0` that a VS Code window started may " +
+        `still be running (its output is in ${running}). Wait for it to ` +
+        "finish, then try again.",
+    );
+    return undefined;
+  }
   const install = "Install Ruby 4.0 with mise";
   const guide = "Installation guide";
   const choice = await window.showInformationMessage(
@@ -1249,6 +1425,47 @@ async function offerMiseRuby(
     );
   }
   return ruby;
+}
+
+const MISE_LOG = /^\.mise-install-\d+\.log$/;
+/**
+ * A mise log written to this recently may belong to an install still
+ * running: one a closed window left behind, or one in another window.
+ * mise keeps writing while it builds, so the age is of the last write.
+ */
+const MISE_LOG_RECENT_MS = 2 * 60 * 60 * 1000;
+
+/**
+ * Whether `file` is a mise log written within MISE_LOG_RECENT_MS. The
+ * window's pid in the name is not consulted: the install outlives it,
+ * and a reused pid would keep a finished log alive.
+ */
+function miseLogRecent(file: string): boolean {
+  if (!MISE_LOG.test(path.basename(file))) {
+    return false;
+  }
+  try {
+    return Date.now() - fs.statSync(file).mtimeMs < MISE_LOG_RECENT_MS;
+  } catch {
+    return false;
+  }
+}
+
+/** A mise log another install may still be writing, if any. */
+function recentMiseLog(): string | undefined {
+  const root = runtimeRoot;
+  if (!root) {
+    return undefined;
+  }
+  let names: string[];
+  try {
+    names = fs.readdirSync(root);
+  } catch {
+    return undefined;
+  }
+  return names
+    .map((name) => path.join(root, name))
+    .find((file) => miseLogRecent(file));
 }
 
 /**
@@ -1418,21 +1635,50 @@ async function checkForUpdate(output: OutputChannel): Promise<void> {
       ` ${scope}`,
     install,
   );
-  if (choice !== install || !(await installManaged(output, { version: latest }))) {
+  if (choice !== install) {
     return;
   }
-  await offerRestart(latest);
+  const target = await freshLatest(output, latest);
+  if (target && (await installManaged(output, { version: target }))) {
+    await offerRestart();
+  }
 }
 
-async function offerRestart(version: string): Promise<void> {
+/**
+ * The latest release again, for a prompt the user may have left open
+ * for a while; the earlier answer when rubygems.org is unreachable now.
+ */
+async function freshLatest(
+  output: OutputChannel,
+  earlier: string,
+): Promise<string | undefined> {
+  try {
+    const now = await latestVersion();
+    return compareVersions(now, earlier) >= 0 ? now : earlier;
+  } catch (err) {
+    output.appendLine(`[rigor] could not re-check rubygems.org: ${String(err)}`);
+    return earlier;
+  }
+}
+
+/**
+ * Offer a restart onto the version `latest` now selects (the newest
+ * installed). Resolves whether the user answered.
+ */
+async function offerRestart(): Promise<boolean> {
+  const next = installedVersions()[0]?.version;
+  if (!next) {
+    return false;
+  }
   const restartNow = "Restart Server";
   const after = await window.showInformationMessage(
-    `Rigor: rigortype ${version} is installed and takes effect when the server restarts.`,
+    `Rigor: rigortype ${next} is installed and takes effect when the server restarts.`,
     restartNow,
   );
   if (after === restartNow) {
     await commands.executeCommand("rigor.restartServer");
   }
+  return after !== undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -1441,6 +1687,8 @@ async function offerRestart(version: string): Promise<void> {
 /** The first check after a managed server starts. */
 const UPDATE_FIRST_CHECK_MS = 30 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
+/** How many declined versions `globalState` remembers. */
+const DECLINED_KEEP = 20;
 
 /**
  * `rigor.runtime.updateCheckIntervalHours`, clamped to 1–168: VS Code
@@ -1470,15 +1718,31 @@ function autoUpdateApplies(): boolean {
 }
 
 /**
+ * When any window last checked, from `globalState`: the interval is a
+ * rate for the machine, not per window. A time in the future (a clock
+ * set back) counts as never.
+ */
+function lastUpdateCheck(): number {
+  const at = globalState?.get<number>(LAST_CHECK_KEY);
+  return typeof at === "number" && at <= Date.now() ? at : 0;
+}
+
+function declinedUpdates(): string[] {
+  const list = globalState?.get<unknown>(DECLINED_KEY);
+  return Array.isArray(list) ? list.filter((v): v is string => typeof v === "string") : [];
+}
+
+/**
  * Arm the next check: `delayMs` from now, but never sooner than the
- * interval after the last check. A no-op while one is armed or running.
- * Called whenever a folder starts on the managed Rigor.
+ * interval after the last check by any window. A no-op while one is
+ * armed or running. Called whenever a folder starts on the managed Rigor.
  */
 function scheduleUpdateCheck(delayMs: number): void {
   if (updateTimer || updateChecking || !runtimeOutput) {
     return;
   }
-  const notBefore = lastUpdateCheck === 0 ? 0 : lastUpdateCheck + updateIntervalMs();
+  const last = lastUpdateCheck();
+  const notBefore = last === 0 ? 0 : last + updateIntervalMs();
   const delay = Math.max(delayMs, notBefore - Date.now());
   updateTimer = setTimeout(() => {
     updateTimer = undefined;
@@ -1493,23 +1757,31 @@ async function backgroundUpdateCheck(): Promise<void> {
     // Re-armed by the next managed start (setInUse).
     return;
   }
+  if (Date.now() - lastUpdateCheck() < updateIntervalMs()) {
+    // Another window checked meanwhile.
+    scheduleUpdateCheck(UPDATE_FIRST_CHECK_MS);
+    return;
+  }
   updateChecking = true;
-  lastUpdateCheck = Date.now();
   try {
+    await globalState?.update(LAST_CHECK_KEY, Date.now());
     await checkInBackground(output);
   } finally {
     updateChecking = false;
     if (inUse.size > 0) {
-      scheduleUpdateCheck(updateIntervalMs());
+      scheduleUpdateCheck(UPDATE_FIRST_CHECK_MS);
     }
   }
 }
 
 /**
- * One background check. A newer release is announced once per session
- * and installed only on "Install update"; it is used from the next
- * restart. A newer version another window already installed is offered
- * as a restart. A network failure logs one line and changes nothing.
+ * One background check. A newer release is announced until the user
+ * answers: "Install update" installs it beside the current version (used
+ * from the next restart), "Later" is remembered for every window. A
+ * newer version another window already installed is offered as a
+ * restart. An install refused because another window holds the lock is
+ * not an answer, so the next check offers the restart instead. A network
+ * failure logs one line and changes nothing.
  */
 async function checkInBackground(output: OutputChannel): Promise<void> {
   let latest: string;
@@ -1523,29 +1795,51 @@ async function checkInBackground(output: OutputChannel): Promise<void> {
     latest,
     installedVersions().map((m) => m.version),
     [...new Set(inUse.values())].map((dir) => path.basename(dir)),
-    updateOffered,
+    new Set([...updateOffered, ...declinedUpdates()]),
   );
   if (decision.kind === "none") {
     return;
   }
-  updateOffered.add(decision.version);
   if (decision.kind === "restart") {
-    await offerRestart(decision.version);
+    if (await offerRestart()) {
+      updateOffered.add(decision.version);
+    }
     return;
   }
   const install = "Install update";
+  const later = "Later";
   const choice = await window.showInformationMessage(
     `Rigor: rigortype ${decision.version} is available (the managed Rigor ` +
       `runs ${decision.current}). It installs beside the current version and ` +
       "is used from the next server restart.",
     install,
-    "Later",
+    later,
   );
+  if (choice === later) {
+    updateOffered.add(decision.version);
+    await globalState?.update(
+      DECLINED_KEY,
+      [...declinedUpdates().filter((v) => v !== decision.version), decision.version].slice(
+        -DECLINED_KEEP,
+      ),
+    );
+    return;
+  }
   if (choice !== install || !autoUpdateApplies()) {
     return;
   }
-  if (await installManaged(output, { version: decision.version })) {
-    await offerRestart(decision.version);
+  const target = await freshLatest(output, decision.version);
+  if (!target) {
+    return;
+  }
+  const result = await installManagedResult(output, { version: target });
+  if (result === "busy") {
+    return;
+  }
+  updateOffered.add(decision.version);
+  updateOffered.add(target);
+  if (result === "installed") {
+    await offerRestart();
   }
 }
 
@@ -1557,25 +1851,35 @@ export type UpdateDecision =
 /**
  * What a background check does with the `latest` release, given the
  * installed versions and those this window's servers run (both version
- * directory names): install it when nothing installed is that new,
- * offer a restart when it is installed (another window updated) but not
- * running, and nothing for a version already offered this session.
+ * directory names): install it when nothing installed is that new;
+ * offer a restart onto the newest installed version when that is at
+ * least `latest` (another window updated) but not running; nothing for
+ * a version already answered (`answered`).
  */
 export function updateDecision(
   latest: string,
   installed: readonly string[],
   running: readonly string[],
-  offered: ReadonlySet<string>,
+  answered: ReadonlySet<string>,
 ): UpdateDecision {
-  if (offered.has(latest) || running.length === 0) {
+  if (running.length === 0) {
     return { kind: "none" };
   }
-  const newestRunning = [...running].sort((a, b) => compareVersions(b, a))[0];
+  const newest = (list: readonly string[]): string | undefined =>
+    [...list].sort((a, b) => compareVersions(b, a))[0];
+  const newestRunning = newest(running) as string;
   if (compareVersions(newestRunning, latest) >= 0) {
     return { kind: "none" };
   }
-  if (installed.some((v) => compareVersions(v, latest) >= 0)) {
-    return { kind: "restart", version: latest };
+  const newestInstalled = newest(installed);
+  if (newestInstalled && compareVersions(newestInstalled, latest) >= 0) {
+    if (compareVersions(newestInstalled, newestRunning) <= 0 || answered.has(newestInstalled)) {
+      return { kind: "none" };
+    }
+    return { kind: "restart", version: newestInstalled };
+  }
+  if (answered.has(latest)) {
+    return { kind: "none" };
   }
   return { kind: "install", version: latest, current: newestRunning };
 }
@@ -1585,7 +1889,7 @@ async function clearManaged(
   whileStopped: (task: () => Promise<void>) => Promise<void>,
 ): Promise<void> {
   const root = runtimeRoot;
-  const versions = installedVersions().map((m) => m.version);
+  const versions = installedVersions(true).map((m) => m.version);
   if (!root || !fs.existsSync(root)) {
     void window.showInformationMessage("Rigor: no managed Rigor is installed.");
     return;

@@ -335,22 +335,58 @@ export function tomlToolsNameRigortype(text: string): boolean {
 /**
  * The multi-line string delimiter (`"""` or `'''`) still open at the end
  * of `line`, given the one open at its start. The two are tracked apart:
- * a `"""` inside a `'''` string, or the other way round, is text.
- * Single-line strings and comments are not parsed; a line-level reading
- * allows that.
+ * a `"""` inside a `'''` string, or the other way round, is text, and so
+ * is either inside a single-line string (`x = '"""'`) or after a `#`
+ * comment. A backslash escapes in `"..."` and `"""..."""`, as in TOML.
  */
 export function multilineStringAfter(
   line: string,
   open: string | undefined,
 ): string | undefined {
   let current = open;
-  const delimiter = /"""|'''/g;
-  let match: RegExpExecArray | null;
-  while ((match = delimiter.exec(line)) !== null) {
-    if (current === undefined) {
-      current = match[0];
-    } else if (current === match[0]) {
-      current = undefined;
+  let i = 0;
+  while (i < line.length) {
+    if (current === '"""') {
+      if (line[i] === "\\") {
+        i += 2;
+      } else if (line.startsWith('"""', i)) {
+        current = undefined;
+        i += 3;
+      } else {
+        i++;
+      }
+      continue;
+    }
+    if (current === "'''") {
+      if (line.startsWith("'''", i)) {
+        current = undefined;
+        i += 3;
+      } else {
+        i++;
+      }
+      continue;
+    }
+    const c = line[i];
+    if (c === "#") {
+      break;
+    }
+    if (line.startsWith('"""', i) || line.startsWith("'''", i)) {
+      current = line.slice(i, i + 3);
+      i += 3;
+    } else if (c === '"') {
+      i++;
+      while (i < line.length && line[i] !== '"') {
+        i += line[i] === "\\" ? 2 : 1;
+      }
+      i++;
+    } else if (c === "'") {
+      i++;
+      while (i < line.length && line[i] !== "'") {
+        i++;
+      }
+      i++;
+    } else {
+      i++;
     }
   }
   return current;

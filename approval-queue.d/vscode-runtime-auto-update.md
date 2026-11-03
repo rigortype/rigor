@@ -32,9 +32,11 @@ one, so it was decided here.
 `rigor.runtime.autoUpdate` (boolean, default `true`, application scope) and
 `rigor.runtime.updateCheckIntervalHours` (number, default 24, clamped to 1–168). A check runs only
 while some folder of the window runs the managed Rigor, `rigor.runtime.version` is `latest` (a pin
-or a development install never checks), and the workspace is trusted: once 30 s after the first
-managed server starts, then on the interval. Each newer version is offered once per session
-(**Install update** / **Later**); one another window already installed is offered as a restart. A
+or a development install never checks), and the workspace is trusted: 30 s after the first managed
+server starts, and at most once per interval across the machine's windows (the last check time is
+kept in the extension's global state). A newer version is offered until the user answers
+(**Install update** / **Later**); a **Later** is remembered in global state, so no window asks
+again; one another window already installed is offered as a restart. A
 network failure logs one line and leaves the install alone. The default follows PHPantom; the click
 keeps WD10's no-install-without-a-click rule.
 

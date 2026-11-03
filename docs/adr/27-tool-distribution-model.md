@@ -388,8 +388,10 @@ Tiers, by what the machine has (`editors/vscode/src/runtime.ts`):
   `PATH`, the mise / rbenv / chruby / asdf install directories; each
   candidate checks `Gem.ruby_version` against the gemspec's
   `required_ruby_version`, which a gate keeps the extension's copy
-  equal to; the newest qualifying release wins, and a prerelease, which
-  `< 4.1` admits, is used only when `rigor.runtime.rubyPath` names it).
+  equal to; the first in that order with Bundler and OpenSSL wins, a
+  prerelease, which `< 4.1` admits, only when `rigor.runtime.rubyPath`
+  names it, and a build that fails the way a broken Ruby does is tried
+  once more with the next).
   The extension writes a one-line `Gemfile`
   into its storage and runs `bundle install` with `BUNDLE_GEMFILE`,
   `BUNDLE_PATH` and `BUNDLE_IGNORE_CONFIG=1` set, dropping every
@@ -401,8 +403,9 @@ Tiers, by what the machine has (`editors/vscode/src/runtime.ts`):
   install ruby@4.0` — its one deliberate `mise` invocation, after a
   click, with a prompt that says mise applies the user's own settings
   (auto-prune among them) — then continues as A. Closing the window
-  leaves that install running to completion rather than killing it
-  half-built.
+  leaves that install running to completion, writing to a log file in
+  the storage, rather than killing it half-built; while that log is
+  recent no window starts another.
 - **C — neither.** The extension shows the installation guide and
   points at WD5's single binary
   ([#926](https://github.com/rigortype/rigor/issues/926)); when that
@@ -421,11 +424,13 @@ residue.
 
 Updates follow PHPantom's model: while a folder runs the managed Rigor
 and `rigor.runtime.version` is `latest`, the extension checks
-rubygems.org shortly after startup and then every
-`rigor.runtime.updateCheckIntervalHours` (`rigor.runtime.autoUpdate`,
-on by default). A newer release installs beside the current one only
-on the user's click and is used from the next restart; a pin, an
-untrusted workspace or an unreachable rubygems.org changes nothing.
+rubygems.org shortly after startup and at most once every
+`rigor.runtime.updateCheckIntervalHours` across the machine's windows
+(`rigor.runtime.autoUpdate`, on by default; the last check and the
+declined versions live in the extension's global state). A newer
+release installs beside the current one only on the user's click and
+is used from the next restart; a pin, an untrusted workspace or an
+unreachable rubygems.org changes nothing.
 
 Rigor reads the analysed project as data from this foreign bundle as
 from a global install: measured for #2725,

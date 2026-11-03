@@ -92,15 +92,8 @@ module PluginBoundary
                        "it checked nothing (wrong roots, or no plugin spec ran)"
     end
 
-    if recorder.integration_ran? && !recorder.root_file_loaded?
-      raise Violation, "the plugin-boundary gate loaded no file under #{recorder.roots.join(', ')}: " \
-                       "it checked nothing (wrong roots, or no plugin file was required)"
-    end
-
-    if recorder.integration_ran? && !recorder.live?
-      raise Violation, "the plugin-boundary gate saw no method under #{recorder.roots.join(', ')} run under the trace: " \
-                       "it checked nothing (the recorder never started, or the roots are wrong)"
-    end
+    problem = liveness_problem(recorder)
+    raise Violation, problem if problem
 
     found = recorder.violations(**)
     return if found.empty?
@@ -115,6 +108,21 @@ module PluginBoundary
       for the question it asks. Admit a member to an interface only per ADR-128's admission rule; an engine
       internal that already has a tracking issue goes on PluginBoundary::ALLOW_LIST with that issue.
     MSG
+  end
+
+  # Why a run that executed a plugin integration example could not have judged anything, or nil when it could.
+  def liveness_problem(recorder)
+    return nil unless recorder.integration_ran?
+
+    roots = recorder.roots.join(", ")
+    unless recorder.root_file_loaded?
+      return "the plugin-boundary gate loaded no file under #{roots}: it checked nothing " \
+             "(wrong roots, or no plugin file was required)"
+    end
+    return nil if recorder.live?
+
+    "the plugin-boundary gate saw no method under #{roots} run under the trace: it checked nothing " \
+      "(the recorder never started, or the roots are wrong)"
   end
 
   # interface name => Set of the method names its RBS declares, read from `sig/rigor/plugin/interfaces.rbs`.
@@ -154,7 +162,7 @@ module PluginBoundary
 
     # Records that an example from the spec file at `path` ran; only a plugin integration spec counts.
     def note_example(path)
-      @integration_ran ||= PluginBoundary.integration_spec?(path)
+      @integration_ran = true if PluginBoundary.integration_spec?(path)
     end
 
     def integration_ran? = @integration_ran

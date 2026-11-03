@@ -54,13 +54,14 @@ module Rigor
     module AliasMutationFloor
       # `held` maps each local handed to another holder to the least key of those sites ({.handed_by}), or is {ALL};
       # `held_part` does the same for a local an element of which was handed on (`[a.first]`); `links` lists
-      # `[local, local, key, part]` for each write that binds a local to another local's object (`b = a`) or to an
-      # element of it (`x = a[i]`, `part` true). `deferred` lists the `[start, end)` ranges of the closures that may run
-      # later. `memo` and `named_memo` keep each call's and each read's targets for the run: a loop or block body is
-      # evaluated more than once.
+      # `[child, parent, key, levels]` for each write that binds a local to another local's object (`b = a`, 0 levels)
+      # or to an element of it (`x = a[i]`, 1; `x = a[i][j]`, 2; `c = [x]` links `x` as `c`'s element). `deferred`
+      # lists the `[start, end)` ranges of the closures that may run later. `memo` and `named_memo` keep each call's and
+      # each read's targets for the run: a loop or block body is evaluated more than once.
       Facts = Data.define(:held, :held_part, :links, :foreign, :entry, :deferred, :memo, :named_memo)
-      FULL = :full
-      PART = :part
+      # Depths ({.reach}): the mutated object is the local's object itself, or one of its elements.
+      FULL = 0
+      PART = 1
       NO_KEYS = {}.freeze
       NO_LINKS = [].freeze
       # Calls whose result is their receiver (or, for `to_a` / `to_h` / `to_s`, may be on one core class), as
@@ -157,6 +158,36 @@ module Rigor
           type = scope.local(target)
           target != name && literal_shape?(type) && (kind == FULL || mutable_parts?(type))
         end
+      end
+
+      # Whether a call that may mutate a holder's object through `self` ({.floor_after_holder_call}) reaches an aliased
+      # local holding a literal shape.
+      def holder_call_reaches?(scope, call_node)
+        return false unless local_besides?(scope, nil) { |type| literal_shape?(type) }
+
+        facts = facts_for(scope)
+        return false if facts.nil?
+
+        targets = holder_targets(facts, call_node)
+        return true if targets.equal?(ALL)
+
+        targets.any? do |target, kind|
+          type = scope.local(target)
+          literal_shape?(type) && (kind == FULL || mutable_parts?(type))
+        end
+      end
+
+      # `scope` after a call on `self` whose method mutates one of its ivars: every aliased local holding a literal
+      # shape takes one unknown store, as {.floor_after_written_local} gives it.
+      def floor_after_holder_call(scope, call_node)
+        facts = facts_for(scope)
+        return scope if facts.nil?
+
+        floor_targets(scope, holder_targets(facts, call_node), nil) { |type| callee_floor(type) }
+      end
+
+      def holder_targets(facts, call_node)
+        call_targets(facts, call_node) { targets(nil, facts, aliased_at(facts, call_node), call_node) }
       end
 
       # A literal shape a store can make stale: a `Tuple`, a `HashShape`, a literal String or Set, or an empty-witness
@@ -281,15 +312,15 @@ module Rigor
         targets.each(&)
       end
 
-      # Each target but `except` takes what the block answers for its binding. A target reached only as a part
-      # ({PART}) is floored only when its binding can hold a mutable element.
+      # Each target but `except` takes what the block answers for its binding. A target reached only below its own
+      # object (a depth past {FULL}) is floored only when its binding can hold a mutable element.
       def floor_targets(scope, targets, except)
         acc = scope
         each_target(scope, targets) do |name, kind|
           next if excepted?(except, name)
 
           current = acc.local(name)
-          next if current.nil? || (kind == PART && !mutable_parts?(current))
+          next if current.nil? || (kind > FULL && !mutable_parts?(current))
 
           floored = yield(current)
           acc = acc.with_mutated_local(name, floored) unless floored.nil? || floored == current

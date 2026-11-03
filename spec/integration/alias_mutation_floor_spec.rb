@@ -44,6 +44,18 @@ RSpec.describe "a mutation through another holder floors the locals it may reach
     "a Struct member" => 'a = [1]; Struct.new(:v).new(a).v << "s"; a.last.bytesize',
     "an index write through a copy" => 'acc = [7]; r = acc; r[0] = "x"; acc[0].upcase',
     "a String method name for send" => 'a = [1]; a.send("push", "s"); a.last.bytesize',
+    "the element read it was bound to" => 'c = [[1]]; a = c[0]; c[0] << "s"; a.last.bytesize',
+    "the first element it was bound to" => 'c = [[1]]; a = c.first; c.first << "s"; a.last.bytesize',
+    "the Hash value it was bound to" => 'h = { k: [1] }; a = h[:k]; h[:k] << "s"; a.last.bytesize',
+    "the fetched Hash value it was bound to" => 'h = { k: [1] }; a = h[:k]; h.fetch(:k) << "s"; a.last.bytesize',
+    "an element read through a copy of its container" => 'c = [[1]]; a = c[0]; d = c; d[0] << "s"; a.last.bytesize',
+    "a nested element read" => 'h = { k: [[1]] }; a = h[:k][0]; h[:k][0] << "s"; a.last.bytesize',
+    "a chain of element reads" => 'c = [[[1]]]; x = c[0]; y = x[0]; c[0][0] << "s"; y.last.bytesize',
+    "an element read of an ivar" => '@rows = [[1]]; a = @rows[0]; @rows[0] << "s"; a.last.bytesize',
+    "the local held in its container" => 'inner = [1]; c = [inner]; a = c[0]; inner << "s"; a.last.bytesize',
+    "a case branch" => 'a = [1]; b = case gets when nil then a else a end; b << "s"; a.last.bytesize',
+    "a begin block" => 'a = [1]; b = begin; a; end; b << "s"; a.last.bytesize',
+    "a rescue modifier" => 'a = [1]; b = (a rescue []); b << "s"; a.last.bytesize',
     "a held element of an Array of Arrays" => 'a = [[1]]; @k = [a.first]; @k[0] << "s"; a[0].last.bytesize',
     "a copy made by a conversion that answers the receiver" => 'a = [1]; b = a.to_a; b << "s"; a.last.bytesize',
     "the ivar a local was copied from" => '@q = [1]; a = @q; @q << "s"; a.last.bytesize',
@@ -76,6 +88,21 @@ RSpec.describe "a mutation through another holder floors the locals it may reach
       def m; a = [1]; box = Box.new(a); box.add("s"); a.last.bytesize; end
     RUBY
     expect(undefined_methods(source)).to eq([])
+  end
+
+  {
+    "an implicit self call" => 'a = [1]; @items = a; push_it("s"); a.last.bytesize',
+    "an explicit self call" => 'a = [1]; @items = a; self.push_it("s"); a.last.bytesize',
+    "a self call on the ivar a local was copied from" => '@items = [1]; a = @items; push_it("s"); a.last.bytesize'
+  }.each do |call, body|
+    it "stays silent after #{call} mutates the ivar holding it" do
+      source = "class Holder\n  def push_it(v) = @items.push(v)\n  def m; #{body}; end\nend\n"
+      expect(undefined_methods(source)).to eq([])
+    end
+  end
+
+  it "analyses a send whose String method name is not valid UTF-8" do
+    expect(undefined_methods("def m(a) = a.send(\"\\xff\", :write)\n")).to eq([])
   end
 
   def flow_rules(source)

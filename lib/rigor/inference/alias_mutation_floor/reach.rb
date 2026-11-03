@@ -11,8 +11,8 @@ module Rigor
     module AliasMutationFloor
       module_function
 
-      # The locals aliased by the time `call_node`'s message runs, as `{ name => FULL | PART }`: those a site has handed
-      # on, and those linked to one ({.reach}). A call inside a closure that may run later sees every site.
+      # The locals aliased by the time `call_node`'s message runs, as `{ name => depth }`: those a site has handed on,
+      # and those linked to one ({.reach}). A call inside a closure that may run later sees every site.
       def aliased_at(facts, call_node)
         return ALL if facts.held.equal?(ALL)
 
@@ -28,53 +28,73 @@ module Rigor
         facts.deferred.any? { |from, to| offset >= from && offset < to } ? Float::INFINITY : offset
       end
 
-      # `seeds` closed over every link whose site may have run by `offset`: a copy keeps the kind it reached, an element
-      # link makes it a part. A full reach outranks a part one.
+      # `seeds` closed over every link whose site may have run by `offset`. A depth says how far inside a local's object
+      # the mutated object may sit: 0 ({FULL}) is the object itself, 1 ({PART}) one of its elements, and so on. A copy
+      # keeps the depth; across an element link (`x = a[i]`, `x = a[i][j]`) the parent sits as many levels further out
+      # than the child as the read goes, and the child as many further in, so a mutation of the parent object itself
+      # (depth 0) does not reach the child.
+      # The least depth wins.
       def reach(seeds, links, offset)
         changed = !seeds.empty?
         while changed
           changed = false
-          links.each do |left, right, key, part|
+          links.each do |child, parent, key, levels|
             next if key > offset
 
-            changed = true if spread(seeds, left, right, part) | spread(seeds, right, left, part)
+            changed = true if spread(seeds, child, parent, levels) | spread(seeds, parent, child, -levels)
           end
         end
         seeds
       end
 
-      # Spreads the kind `from` reached across one link to `to`; answers whether `to` changed.
-      def spread(seeds, from, to, part) # rubocop:disable Naming/PredicateMethod
-        kind = seeds[from]
-        return false if kind.nil?
+      DEPTH_CAP = 8
+      private_constant :DEPTH_CAP
 
-        kind = PART if part
-        return false if [FULL, kind].include?(seeds[to])
+      # Spreads the depth `from` reached across one link to `to`, `step` levels further out; answers whether `to`
+      # changed.
+      def spread(seeds, from, to, step) # rubocop:disable Naming/PredicateMethod
+        depth = seeds[from]
+        return false if depth.nil?
 
-        seeds[to] = kind
+        depth += step
+        return false if depth.negative? || depth > DEPTH_CAP
+        return false if seeds[to] && seeds[to] <= depth
+
+        seeds[to] = depth
         true
       end
 
       # The locals a write through `receiver` may reach, as {.aliased_at} answers them: through each local it may
-      # evaluate to ({ReceiverAlias.candidates}: `(c ? a : b)`), or as through any other receiver.
+      # evaluate to ({ReceiverAlias.candidates}: `(c ? a : b)`), through an element read's root ({.element_targets}), or
+      # as through any other receiver.
       def receiver_targets(receiver, facts, call_node)
         reads = ReceiverAlias.candidates(receiver)
         aliased = aliased_at(facts, call_node)
-        return targets(nil, facts, aliased, call_node) if reads.empty? || !reads.all?(Prism::LocalVariableReadNode)
+        return element_targets(receiver, facts, aliased, call_node) if reads.empty?
+        return targets(nil, facts, aliased, call_node) unless reads.all?(Prism::LocalVariableReadNode)
 
         reads.map { |read| targets(read.name, facts, aliased, call_node) }.reduce { |acc, set| union(acc, set) }
+      end
+
+      # Through an element read rooted at a local (`c[0] << x`, `h[:k].fetch(0) << x`), the root's own links as far
+      # inside it as the read goes (`a = c[0]` is the mutated object itself), beside what any other receiver reaches.
+      def element_targets(receiver, facts, aliased, call_node)
+        others = targets(nil, facts, aliased, call_node)
+        root, depth = element_root(receiver)
+        return others if root.nil? || others.equal?(ALL)
+
+        union(others, reach({ root.name => depth }, facts.links, offset_of(facts, call_node)))
       end
 
       def union(left, right)
         return ALL if left.equal?(ALL) || right.equal?(ALL)
 
         merged = left.dup
-        right.each { |name, kind| merged[name] = kind == FULL ? FULL : merged[name] || kind }
+        right.each { |name, depth| merged[name] = [merged[name], depth].compact.min }
         merged
       end
 
-      # The locals a write through the local `name` (nil for any other receiver) may reach, as
-      # `{ name => FULL | PART }`:
+      # The locals a write through the local `name` (nil for any other receiver) may reach, as `{ name => depth }`:
       #
       # - the locals linked to it ({.reach}): a copy of it, or what it copied (`b = a; b << x`), or the local it is an
       #   element of (`x = a[i]`);

@@ -46,30 +46,78 @@ module Rigor
         end
       end
 
-      # Each local or ivar read `node` may evaluate to ({ReceiverAlias.candidates}), seeing through a call that
-      # answers its receiver (`a.tap { }`, `a.itself`, `a.freeze`, `a.to_a`).
-      def each_may_be(node, &)
+      # Each local or ivar read `node` may evaluate to: through the branches of an `if` / `unless` / ternary, `case`,
+      # `case`/`in`, `begin` (its body, rescue and else clauses), `rescue` modifier and `||` / `&&`, the last statement
+      # of a body, and a call that answers its receiver (`a.tap { }`, `a.itself`, `a.freeze`, `a.to_a`); anything else
+      # as {ReceiverAlias.candidates} reads it. A nest deeper than {SELECTION_DEPTH} reads as no local.
+      def each_may_be(node, depth = 0, &)
         node = RemoverHolderScan.unparenthesised(node)
-        return if node.nil?
-        return each_may_be(node.receiver, &) if node.is_a?(Prism::CallNode) && SELF_RETURNERS.include?(node.name)
+        return if node.nil? || depth > SELECTION_DEPTH
+        return each_may_be(node.receiver, depth + 1, &) if self_returning_call?(node)
 
-        ReceiverAlias.candidates(node).each(&)
+        branches = selection_branches(node)
+        return ReceiverAlias.candidates(node).each(&) if branches.nil?
+
+        branches.each { |branch| each_may_be(branch, depth + 1, &) }
+      end
+
+      SELECTION_DEPTH = 6
+
+      def self_returning_call?(node) = node.is_a?(Prism::CallNode) && SELF_RETURNERS.include?(node.name)
+
+      # The sub-expressions a selection's value is one of, or nil for a node that selects nothing.
+      def selection_branches(node)
+        case node
+        when Prism::StatementsNode then [node.body.last]
+        when Prism::ParenthesesNode, Prism::ElseNode then [node.respond_to?(:statements) ? node.statements : node.body]
+        when Prism::IfNode then [node.statements, node.subsequent]
+        when Prism::UnlessNode then [node.statements, node.else_clause]
+        when Prism::OrNode, Prism::AndNode then [node.left, node.right]
+        when Prism::CaseNode, Prism::CaseMatchNode
+          node.conditions.map(&:statements) << node.else_clause
+        when Prism::BeginNode then begin_branches(node)
+        when Prism::RescueModifierNode then [node.expression, node.rescue_expression]
+        end
+      end
+
+      def begin_branches(node)
+        branches = [node.statements, node.else_clause]
+        clause = node.rescue_clause
+        while clause
+          branches << clause.statements
+          clause = clause.subsequent
+        end
+        branches
       end
 
       def local_name(read) = ReceiverAlias.read_name(read)
 
-      # The local an element read is rooted at (`a[i]`, `a.first`, `a.dig(:k, 0)`), or nil.
+      # `[base, depth]` for an element read (`a[i]`, `a.first`, `h.fetch(:k)`, `a.dig(:k, 0)`, a chain of them): what
+      # it reads from and how many levels inside it, `[node, 0]` for anything else.
+      def element_path(node)
+        node = RemoverHolderScan.unparenthesised(node)
+        depth = 0
+        while node.is_a?(Prism::CallNode) && node.receiver && node.block.nil? && ELEMENT_READS.include?(node.name)
+          depth += node.name == :dig ? [node.arguments&.arguments&.size.to_i, 1].max : 1
+          node = RemoverHolderScan.unparenthesised(node.receiver)
+        end
+        [node, depth]
+      end
+
+      # `[root, depth]` for an element read rooted at a local, or nil.
       def element_root(node)
-        root = ElementReadWidening.element_read_path(RemoverHolderScan.unparenthesised(node))&.first
-        root if root.is_a?(Prism::LocalVariableReadNode)
+        root, depth = element_path(node)
+        [root, depth] if depth.positive? && root.is_a?(Prism::LocalVariableReadNode)
       end
 
       # The {RemoverHolderScan} collector, which reads every fact {.scan} needs in that one walk: for each local the
       # least key of the sites that hand it on ({.handed_by}), the ranges of the closures that may run later, and the
       # body's foreign and written locals ({ForeignLocals.visit}).
       class SiteCollector
-        # Reads {ReceiverAlias.candidates} leaves out: a local bound to one is held by that variable all the same.
-        NON_LOCAL_READS = [Prism::GlobalVariableReadNode, Prism::ClassVariableReadNode].to_set.freeze
+        # Non-local reads: a local bound to one, or to an element read rooted at one (`a = @rows[0]`), is held by that
+        # variable. ({ReceiverAlias.candidates} answers a bare ivar read itself.)
+        NON_LOCAL_READS = [Prism::InstanceVariableReadNode, Prism::GlobalVariableReadNode,
+                           Prism::ClassVariableReadNode].to_set.freeze
         LOCAL_BINDS = [Prism::LocalVariableWriteNode, Prism::LocalVariableOrWriteNode,
                        Prism::LocalVariableAndWriteNode].to_set.freeze
 
@@ -103,7 +151,7 @@ module Rigor
           AliasMutationFloor.each_may_be(node) do |read|
             note(@held, AliasMutationFloor.local_name(read)) if local?(read)
           end
-          root = AliasMutationFloor.element_root(node)
+          root, = AliasMutationFloor.element_root(node)
           note(@held_part, root.name) if root
         end
 
@@ -169,14 +217,28 @@ module Rigor
           AliasMutationFloor.each_may_be(value) do |read|
             if local?(read)
               other = AliasMutationFloor.local_name(read)
-              @links << [name, other, key, false] unless other == name
+              @links << [name, other, key, 0] unless other == name
             else
               note(@held, name)
             end
           end
-          note(@held, name) if NON_LOCAL_READS.include?(RemoverHolderScan.unparenthesised(value).class)
-          root = AliasMutationFloor.element_root(value)
-          @links << [name, root.name, key, true] if root && root.name != name
+          note(@held, name) if NON_LOCAL_READS.include?(AliasMutationFloor.element_path(value).first.class)
+          root, depth = AliasMutationFloor.element_root(value)
+          @links << [name, root.name, key, depth] if root && root.name != name
+          link_elements(name, value)
+        end
+
+        # A container literal's elements are the local's elements (`c = [inner]`): each local an element may be is
+        # linked to it as a part.
+        def link_elements(name, value)
+          value = RemoverHolderScan.unparenthesised(value)
+          elements = value.elements if value.is_a?(Prism::ArrayNode)
+          elements = value.elements.grep(Prism::AssocNode).map(&:value) if value.is_a?(Prism::HashNode)
+          elements&.each do |element|
+            AliasMutationFloor.each_may_be(element) do |read|
+              @links << [AliasMutationFloor.local_name(read), name, key, 1] if local?(read)
+            end
+          end
         end
 
         def note_deferred(node, parent)

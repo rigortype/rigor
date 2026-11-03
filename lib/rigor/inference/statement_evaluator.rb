@@ -1977,8 +1977,9 @@ module Rigor
       # whose object another holder may reach takes one unknown store ({AliasMutationFloor.floor_after_written_local}).
       def floor_ivar_mutating_callee(call_node, current_scope)
         receiver = call_node.receiver
-        return current_scope unless receiver.is_a?(Prism::LocalVariableReadNode)
         return current_scope if MutationWidening::SHAPE_MUTATORS.include?(call_node.name) || send_hand_off?(call_node)
+        return floor_self_ivar_callee(call_node, current_scope) if self_dispatch_call?(call_node)
+        return current_scope unless receiver.is_a?(Prism::LocalVariableReadNode)
         return current_scope unless callee_bearing?(current_scope.local(receiver.name))
         return current_scope unless AliasMutationFloor.reaches_other_locals?(current_scope, receiver, call_node)
 
@@ -1986,6 +1987,17 @@ module Rigor
         return current_scope unless callees.any? { |def_node, _, _| AliasMutationFloor.mutates_ivar?(def_node) }
 
         AliasMutationFloor.floor_after_written_local(current_scope, receiver, call_node)
+      end
+
+      # The same for a call on `self` (`push_it(v)`, `self.push_it(v)`): its ivars hold whatever locals were handed to
+      # them (`@items = a`, `a = @q`), so every aliased local holding a literal shape takes one unknown store.
+      def floor_self_ivar_callee(call_node, current_scope)
+        return current_scope unless AliasMutationFloor.holder_call_reaches?(current_scope, call_node)
+        return current_scope unless resolve_self_callees(call_node).any? do |def_node, _, _|
+          AliasMutationFloor.mutates_ivar?(def_node)
+        end
+
+        AliasMutationFloor.floor_after_holder_call(current_scope, call_node)
       end
 
       # A binding `receiver_callees_in` can resolve a project def on: a class or instance type, or a union of them. Any

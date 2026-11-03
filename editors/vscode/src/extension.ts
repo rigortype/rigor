@@ -43,6 +43,7 @@ import {
 } from "./discovery";
 import { MIN_VERSION, ProbeResult, probeServer } from "./probe";
 import { FolderStatus, StatusBar, describeFolder } from "./status";
+import { registerTasks } from "./tasks";
 
 const DOCS_URL = "https://github.com/rigortype/rigor";
 
@@ -135,6 +136,7 @@ export function activate(context: ExtensionContext): void {
   outputChannel = window.createOutputChannel("Rigor");
   statusBar = new StatusBar();
   context.subscriptions.push(outputChannel, statusBar);
+  registerTasks(context);
 
   context.subscriptions.push(
     commands.registerCommand("rigor.restartServer", () => restartAll()),
@@ -569,7 +571,9 @@ async function explainUnmanaged(folder: WorkspaceFolder): Promise<void> {
     const root = projectRoot(folder);
     let problem: string | undefined;
     if (!root) {
-      problem = "is outside the workspace folder. It must be a subdirectory.";
+      problem = path.isAbsolute(rootDir)
+        ? 'is an absolute path. Use a path relative to the folder, such as "sub".'
+        : "is outside the workspace folder. It must be a subdirectory.";
     } else if (!fs.existsSync(root)) {
       problem = "does not exist.";
     } else {

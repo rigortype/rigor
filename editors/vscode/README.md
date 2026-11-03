@@ -84,7 +84,7 @@ Use an absolute path — the setting is not `~`-expanded.
 | Setting | Default | Description |
 |---|---|---|
 | `rigor.enable` | `true` | Enable the server for the folder. |
-| `rigor.rootDir` | `""` | Subdirectory holding the Rigor project (such as `api`). Empty uses the folder itself. |
+| `rigor.rootDir` | `""` | Relative subdirectory holding the Rigor project (such as `api`). Empty uses the folder itself; an absolute path is rejected. |
 | `rigor.server.path` | `""` | Explicit `rigor` executable path. |
 | `rigor.server.useBundler` | `auto` | `auto` / `always` / `never`. |
 | `rigor.server.configPath` | `""` | Passed as `--config=PATH`. |
@@ -103,10 +103,50 @@ relative `configPath` or `logPath` resolves against it.
   folder the `rigortype` version, how `rigor` was found, and its state.
   Include it in a bug report.
 - **Rigor: Show Server Log** (when `rigor.server.logPath` is set)
+- **Rigor: Check Workspace** — runs `rigor check` for the folder of the
+  active editor (or asks which folder, when the editor has none of
+  them). Its results go to the Problems panel, as described below.
 
 The status bar item's tooltip lists the same per-folder detail, and
 the output channel logs a startup summary (versions, root, command
 line) for each server.
+
+## Whole-project check task
+
+The language server only reports diagnostics for open files. To see
+every finding in the project, run the `rigor: check` task
+(**Terminal → Run Task…**, or **Rigor: Check Workspace**). The task runs
+the same `rigor` the server uses, from the project root, with the same
+`rigor.server.configPath`, and its text output fills the Problems panel
+through the `$rigor` problem matcher. The problems carry
+`source: "rigor"`, like the server's.
+
+The matcher reads each `PATH:LINE:COL: SEVERITY: MESSAGE` line, where
+`SEVERITY` is `error`, `warning` or `info`. A trailing `[RULE]` is
+optional: when the line ends with one, it is the rule (the last
+bracketed token), so a message that itself ends in brackets without a
+rule is read as having that rule. Summary lines such as
+`1 error(s) in 1 file(s)` and the `Check targets` and timing output
+are not problems.
+
+Relative paths resolve against the project root (`rigor.rootDir`, or
+the folder itself), through `${config:rigor.rootDir}`. Absolute paths
+are used as given. The base was checked per folder in a multi-root
+workspace where each folder has its own `rootDir`. An absolute
+`rigor.rootDir` is rejected, as it is for the server.
+
+- The task is provided once per managed folder, and only in trusted
+  workspaces. In a multi-root workspace the task is named
+  `check (<folder>)`.
+- Each run replaces the task's previous problems, including those of a
+  task for another folder. To clear them, rerun the task or close its
+  terminal.
+- VS Code keeps one problem per file, line and column. Two findings at
+  the same position show only the first one.
+- A file open in the editor can show the same finding twice: once from
+  the language server and once from the task. Both entries have
+  `source: "rigor"` and the same position. VS Code does not merge them,
+  so clearing the task's problems does not clear the server's entry.
 
 ## Multi-root workspaces
 

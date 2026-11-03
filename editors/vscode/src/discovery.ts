@@ -47,8 +47,9 @@ export function hasRigorConfig(folderPath: string): boolean {
 /**
  * The directory that holds the folder's Rigor project: the folder itself,
  * or `rigor.rootDir` resolved against it. Returns undefined when the
- * setting points outside the folder, so a typo cannot root a server in an
- * unrelated directory.
+ * setting is absolute or points outside the folder, so a typo cannot root
+ * a server in an unrelated directory. The problem matcher's file base
+ * (`${config:rigor.rootDir}`) assumes the relative form.
  */
 export function projectRoot(folder: WorkspaceFolder): string | undefined {
   const cfg = workspace.getConfiguration("rigor", folder.uri);
@@ -56,6 +57,9 @@ export function projectRoot(folder: WorkspaceFolder): string | undefined {
   const folderPath = folder.uri.fsPath;
   if (!rootDir) {
     return folderPath;
+  }
+  if (path.isAbsolute(rootDir)) {
+    return undefined;
   }
   const resolved = path.resolve(folderPath, rootDir);
   const relative = path.relative(folderPath, resolved);
@@ -189,19 +193,18 @@ function versionManagerShim(): string | undefined {
   return undefined;
 }
 
+/** The `--config=` flag, shared by `rigor lsp` and `rigor check`. */
+export function configArgs(folder: WorkspaceFolder): string[] {
+  const cfg = workspace.getConfiguration("rigor", folder.uri);
+  const configPath = (cfg.get<string>("server.configPath") ?? "").trim();
+  return configPath ? [`--config=${configPath}`] : [];
+}
+
 /** Extra `rigor lsp` flags derived from settings. */
 export function serverOptionArgs(folder: WorkspaceFolder): string[] {
   const cfg = workspace.getConfiguration("rigor", folder.uri);
-  const args: string[] = [];
-  const configPath = (cfg.get<string>("server.configPath") ?? "").trim();
   const logPath = (cfg.get<string>("server.logPath") ?? "").trim();
-  if (configPath) {
-    args.push(`--config=${configPath}`);
-  }
-  if (logPath) {
-    args.push(`--log=${logPath}`);
-  }
-  return args;
+  return [...configArgs(folder), ...(logPath ? [`--log=${logPath}`] : [])];
 }
 
 /** Full argument vector for `rigor lsp`. */

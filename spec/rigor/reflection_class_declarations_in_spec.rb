@@ -3,8 +3,8 @@
 require "spec_helper"
 require "prism"
 
-# #2708 — `Reflection.class_declarations_in`: the public facade over the engine's declaration walk, which `rigor-alba` and
-# `rigor-typelizer` read instead of `Rigor::Inference::DeclarationWalk`.
+# #2708 — `Reflection.class_declarations_in`: the public facade over the engine's declaration walk, which
+# `rigor-alba` and `rigor-typelizer` read instead of `Rigor::Inference::DeclarationWalk`.
 RSpec.describe Rigor::Reflection, ".class_declarations_in" do
   def parse(source)
     Prism.parse(source).value
@@ -72,9 +72,9 @@ RSpec.describe Rigor::Reflection, ".class_declarations_in" do
 
     it "dispatches no call event without a block, so a classes-only walk pays for none" do
       collectors = nil
-      allow(Rigor::Inference::DeclarationWalk).to receive(:run).and_wrap_original do |original, root, run_collectors, context|
-        collectors = run_collectors
-        original.call(root, run_collectors, context)
+      allow(Rigor::Inference::DeclarationWalk).to receive(:run).and_wrap_original do |original, root, list, context|
+        collectors = list
+        original.call(root, list, context)
       end
 
       described_class.class_declarations_in(parse("foo\nclass A; bar; end\n"))

@@ -315,8 +315,8 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     singleton_method_definition(req:class_name,req:method_name,key:scope,key:environment)
   ].freeze
 
-  # `Rigor::Reflection::ClassDeclaration` — the value `Reflection.class_declarations_in` returns (#2708), so a plugin reads a
-  # class header's qualified name, `Module.nesting` and `Prism::ClassNode` without the engine's walk context.
+  # `Rigor::Reflection::ClassDeclaration` — the value `Reflection.class_declarations_in` returns (#2708), so a plugin
+  # reads a class header's qualified name, `Module.nesting` and `Prism::ClassNode` without the engine's walk context.
   CLASS_DECLARATION_INSTANCE = %w[
     name()
     nesting()

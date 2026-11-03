@@ -392,7 +392,7 @@ A class guard on a no-argument, block-free reader rooted at a local or instance 
   - no definition of a method named `r` anywhere in the project by a route other than `def`: `define_method`, `attr_*`, an alias, or a top-level `def`;
   - no project class or module that rewrites its method table beyond the names it spells (a computed `define_method`, `send(:define_method, …)`, `define_singleton_method` in its body), and no class a `refine` block refines, that is the receiver's class, an ancestor, or a descendant. A refinement takes effect only in a file with `using`, and a refinement of a class the analysis cannot name already makes such a file's calls `Dynamic`.
 
-  An `attr_reader` written only in project Ruby does not qualify.
+  An `attr_reader` written only in project Ruby does not qualify. A singleton method one object gains from outside its class's body (`obj.define_singleton_method(:r)`, `obj.extend(M)`) is not seen.
 
 Only the edge that excludes `nil` is narrowed: the truthy edge of a truthiness guard drops `nil` and `false`, and the falsey edge of `x.r.nil?` drops `nil`. The other edge keeps the declared type. `x&.r` still narrows `x` to its non-`nil` part on the edge where the call is known to have run, and an `RBS::Extended` predicate fact the attribute carries still applies.
 

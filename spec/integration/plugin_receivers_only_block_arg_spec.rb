@@ -1,11 +1,17 @@
 # frozen_string_literal: true
 
-# #2717 — a `dynamic_return` rule declared with `receivers:` and NO `methods:` gate is consulted for every call on
-# its receiver kind, including the `&:symbol` block path. There the engine dispatches with the
-# `Prism::BlockArgumentNode` itself as `call_node` (`ExpressionTyper#symbol_block_return_type`), not a
-# `Prism::CallNode`. This spec pins that the rule receives that node, so a rule author knows the plugin-facing
-# `call_node` is a `CallNode | BlockArgumentNode` union (sig/rigor/plugin/base.rbs). The engine is deliberately
-# unchanged: the contract is pinned here, and the rule's guard lives in the plugin.
+# #2717 — a `dynamic_return` rule declared with `receivers:` and no `methods:` gate is not screened by the name
+# gate, so the engine offers it every call on its receiver kind, and some of those calls do not dispatch with a
+# `Prism::CallNode`. The engine passes four families of node as `call_node`:
+#
+# - the compound writes (`x.attr op= v`, `x.attr ||= v`, `x.attr &&= v`, and the `x[i]` forms), through
+#   `ExpressionTyper#attribute_compound_read_type` and `#index_read_dispatch`;
+# - the `&:symbol` block argument, through `ExpressionTyper#symbol_block_return_type` (an Array element) and
+#   `#apply_hash_block` (a Hash pair).
+#
+# Each example below drives one form and pins the exact set of node classes the rule is offered, so a rule author
+# knows the plugin-facing `call_node` is the union in sig/rigor/plugin/base.rbs. The engine is deliberately
+# unchanged: the contract is pinned here, and a rule that reads a `CallNode`-only member guards in the plugin.
 #
 # The fixture is an inline plugin plus a hand-written RBS, so the spec pins the ENGINE contract rather than a
 # bundled plugin's rules.
@@ -17,14 +23,19 @@ require "tmpdir"
 require "rigor/analysis/runner"
 require "rigor/configuration"
 
-RSpec.describe "a receivers-only dynamic_return rule and the &:symbol block path (#2717)" do
+RSpec.describe "the nodes a receivers-only dynamic_return rule is offered (#2717)" do
   let(:widget_rbs) do
     <<~RBS
       class Widget
-        def price: () -> Integer
+        attr_accessor price: Integer
+        def []: (Integer) -> Integer
+        def []=: (Integer, Integer) -> Integer
       end
     RBS
   end
+
+  # Typed receivers for every form, so each dispatch reaches the rule's receiver gate.
+  let(:prelude) { "w = Widget.new\nxs = [Widget.new]\nh = { a: Widget.new }\n" }
 
   # Records the class of every `call_node` the rule is offered. The rule answers nil, so the RBS still types the
   # call and the spec observes only what the engine hands the rule.
@@ -69,17 +80,54 @@ RSpec.describe "a receivers-only dynamic_return rule and the &:symbol block path
     end
   end
 
-  it "offers the rule a Prism::BlockArgumentNode for `xs.map(&:price)`, not a CallNode" do
+  # The distinct node classes the rule was offered for one form, in first-seen order.
+  def offered(form)
     seen = []
-    run_analysis("xs = [Widget.new]\nxs.map(&:price)\n", seen)
-    expect(seen).to include(Prism::BlockArgumentNode)
-    expect(seen).not_to include(Prism::SymbolNode)
+    run_analysis(prelude + form + "\n", seen)
+    seen.uniq
   end
 
-  it "still offers the rule a Prism::CallNode for a direct `Widget#price` call" do
-    seen = []
-    run_analysis("Widget.new.price\n", seen)
-    expect(seen).to include(Prism::CallNode)
-    expect(seen).not_to include(Prism::BlockArgumentNode)
+  describe "the &:symbol block argument" do
+    it "is offered a Prism::BlockArgumentNode for an Array element: `xs.map(&:price)`" do
+      expect(offered("xs.map(&:price)")).to contain_exactly(Prism::BlockArgumentNode)
+    end
+
+    it "is offered a Prism::BlockArgumentNode for a Hash pair: `h.transform_values(&:price)`" do
+      expect(offered("h.transform_values(&:price)")).to contain_exactly(Prism::BlockArgumentNode)
+    end
+  end
+
+  describe "a compound attribute write" do
+    it "is offered a Prism::CallOperatorWriteNode for `w.price += 1`" do
+      expect(offered("w.price += 1")).to contain_exactly(Prism::CallOperatorWriteNode)
+    end
+
+    it "is offered a Prism::CallOrWriteNode for `w.price ||= 1`" do
+      expect(offered("w.price ||= 1")).to contain_exactly(Prism::CallOrWriteNode)
+    end
+
+    it "is offered a Prism::CallAndWriteNode for `w.price &&= 1`" do
+      expect(offered("w.price &&= 1")).to contain_exactly(Prism::CallAndWriteNode)
+    end
+  end
+
+  describe "a compound index write" do
+    it "is offered a Prism::IndexOperatorWriteNode for `w[0] += 1`" do
+      expect(offered("w[0] += 1")).to contain_exactly(Prism::IndexOperatorWriteNode)
+    end
+
+    it "is offered a Prism::IndexOrWriteNode for `w[0] ||= 1`" do
+      expect(offered("w[0] ||= 1")).to contain_exactly(Prism::IndexOrWriteNode)
+    end
+
+    it "is offered a Prism::IndexAndWriteNode for `w[0] &&= 1`" do
+      expect(offered("w[0] &&= 1")).to contain_exactly(Prism::IndexAndWriteNode)
+    end
+  end
+
+  describe "an ordinary call" do
+    it "is offered a Prism::CallNode for a direct `w.price` read" do
+      expect(offered("w.price")).to contain_exactly(Prism::CallNode)
+    end
   end
 end

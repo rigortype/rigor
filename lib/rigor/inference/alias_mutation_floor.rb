@@ -140,7 +140,7 @@ module Rigor
         facts = facts_for(scope)
         return scope if facts.nil?
 
-        targets = call_targets(facts, call_node, nil) do
+        targets = call_targets(facts, call_node) do
           receiver_targets(call_node.receiver, facts, aliased_at(facts, call_node))
         end
         return scope if targets.empty?
@@ -153,20 +153,21 @@ module Rigor
         !call_node.receiver.nil? && MutationWidening::SHAPE_MUTATORS.include?(call_node.name)
       end
 
-      # `scope` after `call_node` wrote the object the local `name` holds (a callee that writes its argument or mutates
+      # `scope` after `call_node` wrote the object the local `read` reads (a callee that writes its argument or mutates
       # the ivars of an object holding it): every local that may be that object and holds a literal shape
       # ({.literal_shape?}) takes one unknown store ({UnknownStoreWidening.callee_block_floor}). A method parameter the
       # body never rebinds floors nothing here: the callee census reads every opaque hand-off as a write, and flooring
       # each local a parameter was copied into at every such call cost precision across the corpus for no finding (a
       # known limit of #2335).
-      def floor_after_written_local(scope, name, call_node)
+      def floor_after_written_local(scope, read, call_node)
+        name = read.name
         return scope unless local_besides?(scope, name) { |type| literal_shape?(type) }
 
         facts = facts_for(scope)
         return scope if facts.nil?
         return scope if facts.entry.include?(name)
 
-        targets = call_targets(facts, call_node, name) { targets(name, facts, aliased_at(facts, call_node)) }
+        targets = read_targets(facts, read) { targets(name, facts, aliased_at(facts, call_node)) }
         return scope if targets.empty?
 
         floor_targets(scope, targets, name) { |type| callee_floor(type) }
@@ -192,15 +193,16 @@ module Rigor
         table.fetch(type) { table[type] = UnknownStoreWidening.callee_block_floor(type) }
       end
 
-      # Whether {.floor_after_written_local} may floor anything for the local `name` at `call_node`: a target bound to a
-      # literal shape.
-      def reaches_other_locals?(scope, name, call_node)
+      # Whether {.floor_after_written_local} may floor anything for the local `read` reads at `call_node`: a target
+      # bound to a literal shape.
+      def reaches_other_locals?(scope, read, call_node)
+        name = read.name
         return false unless local_besides?(scope, name) { |type| literal_shape?(type) }
 
         facts = facts_for(scope)
         return false if facts.nil? || facts.entry.include?(name)
 
-        targets = call_targets(facts, call_node, name) { targets(name, facts, aliased_at(facts, call_node)) }
+        targets = read_targets(facts, read) { targets(name, facts, aliased_at(facts, call_node)) }
         return local_besides?(scope, name) { |type| literal_shape?(type) } if targets.equal?(ALL)
 
         targets.any? { |target| target != name && literal_shape?(scope.local(target)) }
@@ -311,13 +313,15 @@ module Rigor
         block.is_a?(Prism::BlockNode) ? block.location.start_offset : node.location.end_offset
       end
 
-      # The targets of `call_node` (through its receiver when `name` is nil, else through the local `name` it writes),
-      # computed once per call site.
-      def call_targets(facts, call_node, name)
-        return facts.memo.fetch(call_node) { facts.memo[call_node] = yield } if name.nil?
+      # The targets of `call_node` through its receiver, computed once per call site.
+      def call_targets(facts, call_node)
+        facts.memo.fetch(call_node) { facts.memo[call_node] = yield }
+      end
 
-        per_call = (facts.named_memo[call_node] ||= {})
-        per_call.fetch(name) { per_call[name] = yield }
+      # The targets of a write through the local `read` reads (a written argument, a receiver), computed once per read.
+      # The read is the call's own operand, so its call's offset is fixed with it.
+      def read_targets(facts, read)
+        facts.named_memo.fetch(read) { facts.named_memo[read] = yield }
       end
 
       # The locals aliased by the time `call_node`'s message runs: every one, inside a closure that may run later.

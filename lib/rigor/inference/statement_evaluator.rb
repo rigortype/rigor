@@ -1981,12 +1981,12 @@ module Rigor
         return current_scope if MutationWidening::SHAPE_MUTATORS.include?(call_node.name) || send_hand_off?(call_node)
         return current_scope unless callee_bearing?(current_scope.local(receiver.name))
         return current_scope unless AliasMutationFloor.project_method_name?(scope, call_node.name)
-        return current_scope unless AliasMutationFloor.reaches_other_locals?(current_scope, receiver.name, call_node)
+        return current_scope unless AliasMutationFloor.reaches_other_locals?(current_scope, receiver, call_node)
 
         callees = receiver_callees_in(scope, call_node)
         return current_scope unless callees.any? { |def_node, _, _| AliasMutationFloor.mutates_ivar?(def_node) }
 
-        AliasMutationFloor.floor_after_written_local(current_scope, receiver.name, call_node)
+        AliasMutationFloor.floor_after_written_local(current_scope, receiver, call_node)
       end
 
       # A binding `receiver_callees_in` can resolve a project def on: a class or instance type, or a union of them. Any
@@ -5826,7 +5826,7 @@ module Rigor
         return base_scope if arguments.empty?
 
         arguments.reduce(base_scope) do |acc, argument|
-          acc = AliasMutationFloor.floor_after_written_local(acc, argument.name, node)
+          acc = AliasMutationFloor.floor_after_written_local(acc, argument, node)
           next acc unless acc.locals.key?(argument.name)
           next acc if climbing && argument.depth <= climbing
 
@@ -6797,8 +6797,8 @@ module Rigor
       # floor something.
       # A local bound in the current scope, or (issue #2335) one whose object another local may share, which the
       # alias floor reads a callee's write through ({AliasMutationFloor.reaches_other_locals?}).
-      def passed_local?(name, node)
-        scope.locals.key?(name) || AliasMutationFloor.reaches_other_locals?(scope, name, node)
+      def passed_local?(read, node)
+        scope.locals.key?(read.name) || AliasMutationFloor.reaches_other_locals?(scope, read, node)
       end
 
       def call_passes_local_argument?(node)
@@ -6807,7 +6807,7 @@ module Rigor
 
         args.arguments.any? do |arg|
           case arg
-          when Prism::LocalVariableReadNode then passed_local?(arg.name, node)
+          when Prism::LocalVariableReadNode then passed_local?(arg, node)
           when Prism::SplatNode
             arg.expression.is_a?(Prism::LocalVariableReadNode) && scope.locals.key?(arg.expression.name)
           when Prism::KeywordHashNode

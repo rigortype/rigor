@@ -2,8 +2,6 @@
 
 require "prism"
 
-require "rigor/inference/declaration_walk"
-
 require_relative "resource_collector"
 require_relative "resource_index"
 
@@ -28,10 +26,7 @@ module Rigor
             parsed = Prism.parse(contents)
             next unless parsed.success?
 
-            collector = ResourceCollector.new
-            Rigor::Inference::DeclarationWalk.run(
-              parsed.value, [collector], Rigor::Inference::DeclarationWalk::Context.root(nesting: [])
-            )
+            collector = ResourceCollector.new.collect(parsed.value)
             entries.concat(collector.class_entries)
             associations.concat(collector.associations)
           end

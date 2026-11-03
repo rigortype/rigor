@@ -115,9 +115,8 @@ RSpec.describe PluginBoundary do
   end
 
   describe "the allow-list" do
-    it "holds only the DeclarationWalk reach of rigor-alba and rigor-typelizer, citing #2708" do
-      expect(PluginBoundary::ALLOW_LIST.map { |r| [r.plugin, r.issue] })
-        .to eq([%w[rigor-alba rigortype/rigor#2708], %w[rigor-typelizer rigortype/rigor#2708]])
+    it "is empty: #2708's facade retired the last tracked reach" do
+      expect(PluginBoundary::ALLOW_LIST).to be_empty
     end
   end
 

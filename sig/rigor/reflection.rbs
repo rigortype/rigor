@@ -20,5 +20,39 @@ module Rigor
     def self?.discovered_class?: (String | Symbol class_name, ?scope: Scope) -> bool
     def self?.discovered_method?: (String | Symbol class_name, String | Symbol method_name, ?kind: Symbol, ?scope: Scope) -> bool
     def self?.project_method_defined: (String | Symbol? class_name, String | Symbol method_name, kind: :instance | :singleton, source: :def | :discovered | :either, scope: Scope) -> Trinary
+    # sig-gen gap: #2302 — the collector's `@classes = []` is grown by `<<`, so sig-gen reads the array as `Array[untyped]`.
+    def self?.class_declarations_in: (Prism::Node root) ?{ (DeclaredCall call) -> void } -> Array[ClassDeclaration]
+
+    # One `class` header of a parsed file, as `class_declarations_in` reports it.
+    class ClassDeclaration < Data
+      # sig-gen gap: #1150 — `Data.define` members carry no type, so sig-gen proposes `untyped`; the shape is hand-written.
+      attr_reader name: String
+      # sig-gen gap: #1150 — `Data.define` members carry no type, so sig-gen proposes `untyped`; the shape is hand-written.
+      attr_reader nesting: Array[String]
+      # sig-gen gap: #1150 — `Data.define` members carry no type, so sig-gen proposes `untyped`; the shape is hand-written.
+      attr_reader node: Prism::ClassNode
+
+      # sig-gen gap: #1150 — `Data.define` members carry no type, so the constructor's keywords are `untyped` in sig-gen.
+      def self.new: (name: String, nesting: Array[String], node: Prism::ClassNode) -> instance
+                  | (String name, Array[String] nesting, Prism::ClassNode node) -> instance
+      # sig-gen gap: #1150 — `Data.define` members carry no type, so the constructor's keywords are `untyped` in sig-gen.
+      def self.[]: (name: String, nesting: Array[String], node: Prism::ClassNode) -> instance
+                 | (String name, Array[String] nesting, Prism::ClassNode node) -> instance
+    end
+
+    # One call `class_declarations_in` yields: the `Prism::CallNode` and the class or module it lexically sits in.
+    class DeclaredCall < Data
+      # sig-gen gap: #1150 — `Data.define` members carry no type, so sig-gen proposes `untyped`; the shape is hand-written.
+      attr_reader node: Prism::CallNode
+      # sig-gen gap: #1150 — `Data.define` members carry no type, so sig-gen proposes `untyped`; the shape is hand-written.
+      attr_reader owner: String?
+
+      # sig-gen gap: #1150 — `Data.define` members carry no type, so the constructor's keywords are `untyped` in sig-gen.
+      def self.new: (node: Prism::CallNode, owner: String?) -> instance
+                  | (Prism::CallNode node, String? owner) -> instance
+      # sig-gen gap: #1150 — `Data.define` members carry no type, so the constructor's keywords are `untyped` in sig-gen.
+      def self.[]: (node: Prism::CallNode, owner: String?) -> instance
+                 | (Prism::CallNode node, String? owner) -> instance
+    end
   end
 end

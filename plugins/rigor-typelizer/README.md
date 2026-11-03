@@ -56,7 +56,7 @@ plugins/rigor-typelizer/
 │   └── rigor/plugin/
 │       ├── typelizer.rb                    ← manifest, root publication
 │       └── typelizer/
-│           ├── serializer_collector.rb     ← DeclarationWalk collector (classes, DSL include/extend)
+│           ├── serializer_collector.rb     ← collector over Reflection.class_declarations_in (classes, DSL include/extend)
 │           ├── serializer_discoverer.rb    ← walks dirs and paths through IoBoundary
 │           └── serializer_index.rb         ← frozen index; the superclass-chain walk
 └── demo/
@@ -94,7 +94,7 @@ nix develop --command \
 | Surface | Used for |
 | --- | --- |
 | `Plugin::Base.producer :serializer_index` | cached project scan, `watch:` on `dirs` and the project `paths:` |
-| `Inference::DeclarationWalk::Collector` | `Module.nesting`-correct class names without a bespoke walker |
+| `Reflection.class_declarations_in` | `Module.nesting`-correct class names without a bespoke walker |
 | `#prepare` + `fact_store.publish` (ADR-9) | the `:reachability_roots` fact |
 
 ## License

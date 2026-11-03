@@ -2,15 +2,15 @@
 
 require "prism"
 
-require "rigor/inference/declaration_walk"
+require "rigor/reflection"
 
 require_relative "serializer_index"
 
 module Rigor
   module Plugin
     class Typelizer < Rigor::Plugin::Base
-      # A {Rigor::Inference::DeclarationWalk} collector over one file: the classes it declares, and whether each
-      # one's own body says `include Typelizer::DSL` / `extend Typelizer::DSL`.
+      # A collector over one file, built on {Rigor::Reflection.class_declarations_in}: the classes it declares, and
+      # whether each one's own body says `include Typelizer::DSL` / `extend Typelizer::DSL`.
       #
       # A `module` that includes the DSL is deliberately not recorded: typelizer registers the module's own
       # name and `target_serializers` then calls `.descendants` on it, which a plain Module lacks. A class that
@@ -22,8 +22,6 @@ module Rigor
       # `included do include Typelizer::DSL end` and a `def` that includes it credit nothing to the lexical
       # class. A `class << self` body is a different node and is not entered either.
       class SerializerCollector
-        include Rigor::Inference::DeclarationWalk::Collector
-
         DSL_MODULE = "Typelizer::DSL"
         DSL_CALLS = %i[include extend].freeze
 
@@ -33,17 +31,10 @@ module Rigor
           @dsl = {}
         end
 
-        def on_declaration(node, context, body_context)
-          return Rigor::Inference::DeclarationWalk::DESCEND unless node.is_a?(Prism::ClassNode)
-
-          name = body_context.prefix.join("::")
-          unless name.empty?
-            superclass = superclass_name(node.superclass)
-            @entries[name] = superclass if superclass || !@entries.key?(name)
-            @nestings[name] = context.nesting || []
-            @dsl[name] = true if dsl_in?(node.body) && !body_context.singleton_cref
-          end
-          Rigor::Inference::DeclarationWalk::DESCEND
+        # Walks `root` (a parsed file's `Prism::Node`) and records what it finds; answers the collector itself.
+        def collect(root)
+          Rigor::Reflection.class_declarations_in(root).each { |declaration| record(declaration) }
+          self
         end
 
         # The classes this file declares, as {SerializerIndex::ClassEntry} values.
@@ -57,6 +48,15 @@ module Rigor
         end
 
         private
+
+        def record(declaration)
+          name = declaration.name
+          node = declaration.node
+          superclass = superclass_name(node.superclass)
+          @entries[name] = superclass if superclass || !@entries.key?(name)
+          @nestings[name] = declaration.nesting
+          @dsl[name] = true if dsl_in?(node.body)
+        end
 
         # Whether a statement reachable without entering a def, block, lambda or nested declaration is a
         # receiverless `include` / `extend` of the DSL module.

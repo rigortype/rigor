@@ -42,12 +42,7 @@ module PluginBoundary
   # the module that owns the called method. A row allows nothing outside its plugins and its owner.
   AllowRow = Data.define(:plugin, :owner, :issue)
 
-  ALLOW_LIST = [
-    AllowRow.new(plugin: "rigor-alba", owner: /\ARigor::Inference::DeclarationWalk(::|\z)/,
-                 issue: "rigortype/rigor#2708"),
-    AllowRow.new(plugin: "rigor-typelizer", owner: /\ARigor::Inference::DeclarationWalk(::|\z)/,
-                 issue: "rigortype/rigor#2708")
-  ].freeze
+  ALLOW_LIST = [].freeze
 
   # The protocol every object answers. Reading or writing another object's instance variables is not part of it:
   # that is a reach into its internals, and the gate reports it.

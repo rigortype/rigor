@@ -70,7 +70,7 @@ plugins/rigor-alba/
 │   └── rigor/plugin/
 │       ├── alba.rb                       ← manifest, block-self entry, root publication
 │       └── alba/
-│           ├── resource_collector.rb     ← DeclarationWalk collector (classes, includes, associations)
+│           ├── resource_collector.rb     ← collector over Reflection.class_declarations_in (classes, includes, associations)
 │           ├── resource_discoverer.rb    ← walks resource_search_paths through IoBoundary
 │           └── resource_index.rb         ← frozen index; the nesting-aware inference
 └── demo/
@@ -115,7 +115,7 @@ signatures alba's runtime may not honour, which is the false-positive direction 
 | `manifest(... block_as_methods:)` | `Alba.serialize` / `Alba.hashify` block `self` (`singleton(Alba::Resource)`) |
 | `manifest(... signature_paths:, open_receivers:)` | the two-namespace sig and its open surface |
 | `Plugin::Base.producer :resource_index` | cached project scan, `watch:` on the search paths |
-| `Inference::DeclarationWalk::Collector` | declaration context (`Module.nesting`-correct class names) without a bespoke walker |
+| `Reflection.class_declarations_in` | declaration context (`Module.nesting`-correct class names) without a bespoke walker |
 | `#prepare` + `fact_store.publish` (ADR-9) | the `:reachability_roots` fact |
 | `Plugin::Inflector` (ADR-39) | `classify` through the real ActiveSupport inflector |
 

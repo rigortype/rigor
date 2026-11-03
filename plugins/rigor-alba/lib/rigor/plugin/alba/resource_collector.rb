@@ -2,24 +2,22 @@
 
 require "prism"
 
-require "rigor/inference/declaration_walk"
+require "rigor/reflection"
 
 require_relative "resource_index"
 
 module Rigor
   module Plugin
     class Alba < Rigor::Plugin::Base
-      # A {Rigor::Inference::DeclarationWalk} collector over one file: the classes it declares, whether each
-      # `include Alba::Resource`s, and the association declarations whose resource
-      # class alba infers from the name.
+      # A collector over one file, built on {Rigor::Reflection.class_declarations_in}: the classes it declares, whether
+      # each `include Alba::Resource`s, and the association declarations whose resource class alba infers from
+      # the name.
       #
       # An association is recorded only when alba would take the inference path (`Alba::Association#
       # resource_from`): a literal Symbol/String name, exactly one positional argument, no block, and no
       # `resource:` / `serializer:` keyword. A keyword splat (`**opts`) might carry either, so it is not
       # recorded either — a skipped association costs a root, never invents one.
       class ResourceCollector
-        include Rigor::Inference::DeclarationWalk::Collector
-
         ASSOCIATION_METHODS = %i[association one many has_one has_many].freeze
         RESOURCE_MODULE = "Alba::Resource"
         RESOURCE_KEYWORDS = %i[resource serializer].freeze
@@ -40,22 +38,13 @@ module Rigor
           @associations = []
         end
 
-        def on_declaration(node, context, body_context)
-          return Rigor::Inference::DeclarationWalk::DESCEND unless node.is_a?(Prism::ClassNode)
-
-          name = body_context.prefix.join("::")
-          unless name.empty?
-            @entries[name] = superclass_name(node.superclass)
-            @nestings[name] = context.nesting || []
+        # Walks `root` (a parsed file's `Prism::Node`) and records what it finds; answers the collector itself.
+        def collect(root)
+          Rigor::Reflection.class_declarations_in(root) { |call| on_call(call.node, call.owner) }.each do |declaration|
+            @entries[declaration.name] = superclass_name(declaration.node.superclass)
+            @nestings[declaration.name] = declaration.nesting
           end
-          Rigor::Inference::DeclarationWalk::DESCEND
-        end
-
-        def on_call(node, context)
-          owner = context.prefix.join("::")
-          record_call(node, owner) unless owner.empty? || !node.receiver.nil?
-          remember_block(node)
-          Rigor::Inference::DeclarationWalk::DESCEND
+          self
         end
 
         # The classes this file declares, as {ResourceIndex::ClassEntry} values.
@@ -69,6 +58,11 @@ module Rigor
         end
 
         private
+
+        def on_call(node, owner)
+          record_call(node, owner) unless owner.nil? || !node.receiver.nil?
+          remember_block(node)
+        end
 
         def record_call(node, owner)
           if node.name == :include

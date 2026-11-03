@@ -2,8 +2,6 @@
 
 require "prism"
 
-require "rigor/inference/declaration_walk"
-
 require_relative "serializer_collector"
 require_relative "serializer_index"
 
@@ -30,10 +28,7 @@ module Rigor
             parsed = Prism.parse(contents)
             next unless parsed.success?
 
-            collector = SerializerCollector.new
-            Rigor::Inference::DeclarationWalk.run(
-              parsed.value, [collector], Rigor::Inference::DeclarationWalk::Context.root(nesting: [])
-            )
+            collector = SerializerCollector.new.collect(parsed.value)
             in_dirs = dir_files.include?(path)
             entries.concat(collector.class_entries.map { |entry| entry.with(in_dirs: in_dirs) })
           end

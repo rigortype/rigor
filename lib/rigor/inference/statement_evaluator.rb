@@ -1978,6 +1978,7 @@ module Rigor
         receiver = call_node.receiver
         return current_scope unless receiver.is_a?(Prism::LocalVariableReadNode)
         return current_scope if MutationWidening::SHAPE_MUTATORS.include?(call_node.name) || send_hand_off?(call_node)
+        return current_scope unless callee_bearing?(current_scope.local(receiver.name))
         return current_scope unless AliasMutationFloor.reaches_other_locals?(current_scope, receiver.name, call_node)
 
         callees = receiver_callees_in(scope, call_node)
@@ -1985,6 +1986,10 @@ module Rigor
 
         AliasMutationFloor.floor_after_written_local(current_scope, receiver.name, call_node)
       end
+
+      # A binding `receiver_callees_in` can resolve a project def on: a class or instance type, or a union of them. Any
+      # other binding resolves none, so the floor skips the resolution for it.
+      def callee_bearing?(type) = type.is_a?(Type::Nominal) || type.is_a?(Type::Singleton) || type.is_a?(Type::Union)
 
       # The locals a mutator's receiver names ({ReceiverAlias.mutated_reads}), which the named path widens, and the
       # root of an element read (`c[0].shift`), whose element {ElementReadWidening} widens.

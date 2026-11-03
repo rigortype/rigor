@@ -81,8 +81,10 @@ module Rigor
       ELEMENT_READS = %i[[] first last fetch dig].to_set.freeze
       FACTS_CACHE_KEY = RunScopedSlots.register(:__rigor_alias_mutation_floor_facts)
       IVAR_CACHE_KEY = RunScopedSlots.register(:__rigor_alias_mutation_floor_ivar_mutators)
+      FLOOR_CACHE_KEY = RunScopedSlots.register(:__rigor_alias_mutation_floor_callee_floors)
+      STORE_CACHE_KEY = RunScopedSlots.register(:__rigor_alias_mutation_floor_unknown_stores)
       private_constant :ALWAYS, :LOOPS, :ALL, :NUMBERED_PARAMETER, :SEND_NAMES, :ELEMENT_READS, :FACTS_CACHE_KEY,
-                       :IVAR_CACHE_KEY
+                       :IVAR_CACHE_KEY, :FLOOR_CACHE_KEY, :STORE_CACHE_KEY
 
       module_function
 
@@ -90,6 +92,8 @@ module Rigor
       # the locals the receiver itself names, whose own widening (the named path's) stands.
       # The caller asks {.candidate?} first, so it computes `except` only for a call this may floor after.
       def floor_after_call(call_node, scope, except: nil)
+        return scope unless local_besides?(scope, except) { |type| UnknownStoreWidening.callee_floorable?(type) }
+
         facts = facts_for(scope)
         return scope if facts.nil?
 
@@ -98,8 +102,7 @@ module Rigor
         end
         return scope if targets.empty?
 
-        method_name, arg_types = UnknownStoreWidening.unknown_store(call_node)
-        floor_targets(scope, targets, except) { |type| UnknownStoreWidening.widen_store(type, method_name, arg_types) }
+        floor_targets(scope, targets, except) { |type| unknown_store(call_node, type) }
       end
 
       # Whether `call_node` is a shape mutator on an explicit receiver, the only call {.floor_after_call} floors after.
@@ -114,6 +117,8 @@ module Rigor
       # each local a parameter was copied into at every such call cost precision across the corpus for no finding (a
       # known limit of #2335).
       def floor_after_written_local(scope, name, call_node)
+        return scope unless local_besides?(scope, name) { |type| literal_shape?(type) }
+
         facts = facts_for(scope)
         return scope if facts.nil?
         return scope if facts.entry.include?(name)
@@ -121,14 +126,34 @@ module Rigor
         targets = call_targets(facts, call_node, name) { targets(name, facts, aliased_at(facts, call_node)) }
         return scope if targets.empty?
 
-        floor_targets(scope, targets, [name]) do |type|
-          UnknownStoreWidening.callee_block_floor(type) if literal_shape?(type)
+        floor_targets(scope, targets, name) { |type| callee_floor(type) }
+      end
+
+      # `type` after `call_node`'s unknown store ({UnknownStoreWidening.widen_store}), memoised per call site for the
+      # run as {.callee_floor} is.
+      def unknown_store(call_node, type)
+        table = (Thread.current[STORE_CACHE_KEY] ||= {}.compare_by_identity)
+        per_call = (table[call_node] ||= {})
+        per_call.fetch(type) do
+          method_name, arg_types = UnknownStoreWidening.unknown_store(call_node)
+          per_call[type] = UnknownStoreWidening.widen_store(type, method_name, arg_types)
         end
+      end
+
+      # {UnknownStoreWidening.callee_block_floor} of a literal shape, nil for anything else, memoised for the run: the
+      # same shape is floored again on each pass over a loop or block body and by each callee channel.
+      def callee_floor(type)
+        return nil unless literal_shape?(type)
+
+        table = (Thread.current[FLOOR_CACHE_KEY] ||= {})
+        table.fetch(type) { table[type] = UnknownStoreWidening.callee_block_floor(type) }
       end
 
       # Whether {.floor_after_written_local} may floor anything for the local `name` at `call_node`: a target bound to a
       # literal shape.
       def reaches_other_locals?(scope, name, call_node)
+        return false unless local_besides?(scope, name) { |type| literal_shape?(type) }
+
         facts = facts_for(scope)
         return false if facts.nil? || facts.entry.include?(name)
 
@@ -289,11 +314,22 @@ module Rigor
         aliased.include?(name) ? aliased & facts.foreign : EMPTY
       end
 
+      # Whether `scope` binds a local other than `except` (a name, a list of names, or nil) whose type the block
+      # accepts: the cheap gate every trigger asks before the body scan, since a floor changes only such a binding.
+      def local_besides?(scope, except)
+        scope.locals.each { |name, type| return true if !excepted?(except, name) && yield(type) }
+        false
+      end
+
+      def excepted?(except, name)
+        except.is_a?(Symbol) ? except == name : except&.include?(name)
+      end
+
       # Each target but `except` takes what the block answers for its binding.
       def floor_targets(scope, targets, except)
         names = targets.equal?(ALL) ? scope.locals.keys : targets
         names.reduce(scope) do |acc, name|
-          next acc if except&.include?(name)
+          next acc if excepted?(except, name)
 
           current = acc.local(name)
           next acc if current.nil?

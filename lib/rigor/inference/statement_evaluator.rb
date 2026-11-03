@@ -5748,12 +5748,13 @@ module Rigor
       # binds to it floors: the body reads it anywhere but as a splat argument of a call (`args.first[:k] = 1`), or
       # hands it on (`b(*args)`) to a call that resolves to a def which writes a positional parameter or has a rest
       # parameter of its own that it hands on. A rest handed to a call that resolves to no user def hands off nothing,
-      # as for any hand-off. A callee reached through an inherited lookup ({FLOOR_ALL}) reads as written, as its
-      # parameters do.
+      # as for any hand-off. A callee reached through an inherited lookup ({FLOOR_ALL}) or one that may not be the def
+      # the call runs ({FLOOR_EVERY}) reads as written, as its parameters do: neither owner is a {CalleeOwner}, so its
+      # body's hand-offs cannot be read under it.
       def rest_parameter_written?(def_node, owner)
         return true if def_node.nil?
         return false unless variable_arity?(def_node)
-        return true if owner == FLOOR_ALL
+        return true if [FLOOR_ALL, FLOOR_EVERY].include?(owner)
 
         other, calls = def_census(:rest_uses, def_node) { rest_uses(def_node) }
         return true if other

@@ -124,10 +124,8 @@ module Rigor
       IVAR_CACHE_KEY = RunScopedSlots.register(:__rigor_alias_mutation_floor_ivar_mutators)
       FLOOR_CACHE_KEY = RunScopedSlots.register(:__rigor_alias_mutation_floor_callee_floors)
       STORE_CACHE_KEY = RunScopedSlots.register(:__rigor_alias_mutation_floor_unknown_stores)
-      PROJECT_NAMES_KEY = RunScopedSlots.register(:__rigor_alias_mutation_floor_project_names)
       private_constant :ALWAYS, :LOOPS, :ALL, :NUMBERED_PARAMETER, :SEND_NAMES, :ELEMENT_READS, :FACTS_CACHE_KEY,
-                       :IVAR_CACHE_KEY, :FLOOR_CACHE_KEY, :STORE_CACHE_KEY,
-                       :PROJECT_NAMES_KEY
+                       :IVAR_CACHE_KEY, :FLOOR_CACHE_KEY, :STORE_CACHE_KEY
 
       module_function
 
@@ -224,19 +222,6 @@ module Rigor
       # Whether the body of `def_node` runs a shape mutator on one of its own instance variables or an element of one
       # (`@items << v`, `@h[k] = v`, `@rows[0] << v`): a call to it on an object that holds another local's object
       # (`box = Box.new(a)`, whose `initialize` keeps `@items = a`) may mutate that object. A nested def is not entered.
-      # Whether any project class or module defines a method `name`, instance or singleton side: a call by any other
-      # name resolves no project def, so {StatementEvaluator#floor_ivar_mutating_callee} skips the resolution. Memoised
-      # per discovery and name for the run.
-      def project_method_name?(scope, name)
-        table = (Thread.current[PROJECT_NAMES_KEY] ||= {}.compare_by_identity)
-        per_discovery = (table[scope.discovery] ||= {})
-        per_discovery.fetch(name) do
-          per_discovery[name] = [scope.discovered_def_nodes, scope.discovered_singleton_def_nodes].any? do |defs|
-            defs.each_value.any? { |per_class| per_class.key?(name) }
-          end
-        end
-      end
-
       def mutates_ivar?(def_node)
         return false if def_node.nil?
 

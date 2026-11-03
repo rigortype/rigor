@@ -1980,7 +1980,6 @@ module Rigor
         return current_scope unless receiver.is_a?(Prism::LocalVariableReadNode)
         return current_scope if MutationWidening::SHAPE_MUTATORS.include?(call_node.name) || send_hand_off?(call_node)
         return current_scope unless callee_bearing?(current_scope.local(receiver.name))
-        return current_scope unless AliasMutationFloor.project_method_name?(scope, call_node.name)
         return current_scope unless AliasMutationFloor.reaches_other_locals?(current_scope, receiver, call_node)
 
         callees = receiver_callees_in(scope, call_node)

@@ -15,9 +15,11 @@ constructions, `Combinator.union` calls, and every return-memo compute classed b
 
 Corpora: Rigor's own `lib` (654 files, 536K AST nodes, no plugins); Mastodon `app lib` (1,416 files,
 235K nodes, 10 Rails plugins); Redmine `app lib` (876 files, 6 plugins). The survey checkouts were
-copied to a private directory first. Both carry an untracked `sig/` written by an earlier sig-gen
-experiment, which made 70 (Mastodon) and 68 (Redmine) RBS definition builds fail and would have skewed
-the inference mass, so the copies drop it. They keep the checkouts' gem RBS collection.
+copied to a private directory first. Both carry an untracked `sig/` that the 2026-10-27
+`rigor-project-init` re-init wrote (Phase 5, `rigor sig-gen`) before #2437 was fixed: it declares
+subclasses against superclasses it wrote no declaration for. That made 70 (Mastodon) and 68 (Redmine)
+RBS definition builds fail and would have skewed the inference mass, so the copies drop it. They keep
+the checkouts' gem RBS collection.
 
 CPU seconds come from one shared host under load. The phase table is one run per corpus. The
 prototype A/B is three alternated pairs on Mastodon and `lib`, and one pair on Redmine. Allocations and
@@ -228,6 +230,7 @@ first compute has already written the entry.
   carries little weight. The Rails corpora's 4,627 rows carry the claim.
 - The harness classifies callee computes at entry. A class's CPU is the body's exclusive time, and
   nested computes are charged to their own class.
-- The survey checkouts under `~/repo/ruby/rigor-survey/` still carry the untracked sig-gen `sig/`
-  (§ Method). Any measurement taken from them in place inherits the same RBS build failures.
+- The survey checkouts under `~/repo/ruby/rigor-survey/` still carry that pre-#2437 `sig/`
+  (§ Method). Any measurement taken from them in place inherits the same RBS build failures until the
+  targets are re-initialized with a current `rigor sig-gen`.
 - The prototype memo is not a candidate implementation (§ The prototype memo).

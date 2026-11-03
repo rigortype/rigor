@@ -36,6 +36,7 @@ RSpec.describe "ADR-43 bridge: block, override and reader types for a source-onl
               def self.manifest: (**untyped fields) -> Rigor::Plugin::Manifest
               def self.dynamic_return: (?receivers: untyped, ?methods: untyped) { (Rigor::Plugin::CallNode call_node, Rigor::Scope scope) -> untyped } -> nil
               attr_reader services: Rigor::Plugin::Services
+              def initialize: (Integer count) -> void
               def diagnostics_for_file: (path: String, scope: Rigor::Scope, root: Rigor::Plugin::ProgramNode) -> Array[untyped]
             end
           end
@@ -147,8 +148,28 @@ RSpec.describe "ADR-43 bridge: block, override and reader types for a source-onl
         end
       end
     RUBY
+    expect(dump_lines(source)).to eq([[9, "dump_type: Dynamic[top]"]])
+  end
+
+  # A constructor does not override its superclass's contract: a subclass routinely takes other arguments, so binding
+  # `name` to Base's `Integer count` would read correct code as a contradiction.
+  it "does not bind a source subclass's `initialize` parameters from the ancestor's" do
+    source = <<~RUBY
+      module Rigor
+        module Plugin
+          class ZzProbe < Base
+            def initialize(name)
+              Rigor.dump_type(name)
+            end
+          end
+        end
+      end
+    RUBY
+    expect(dump_lines(source)).to eq([[5, "dump_type: Dynamic[top]"]])
+  end
+
+  def dump_lines(source)
     result = analyze(files: { "probe.rb" => source }, sig: sig, cache_store: nil)
-    dumps = result.diagnostics.select { |d| d.rule == "dump.type" }.map { |d| [d.line, d.message] }
-    expect(dumps).to eq([[9, "dump_type: Dynamic[top]"]])
+    result.diagnostics.select { |d| d.rule == "dump.type" }.map { |d| [d.line, d.message] }
   end
 end

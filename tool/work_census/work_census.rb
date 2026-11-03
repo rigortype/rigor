@@ -283,6 +283,8 @@ if ENV['MEMO'] == '1'
   at_exit { warn "memo stats: #{WCMemo.stats}" }
 end
 
+require_relative 'memo3' if ENV['MEMO'] == '3' || ENV['COUNT3'] == '1'
+
 if WC::CENSUS
   Rigor::Inference::ExpressionTyper.prepend(Module.new do
     def type_of(node)
@@ -519,6 +521,7 @@ if WC::CENSUS
 end
 out[:files] = WC::FILE_ROWS
 out[:read_collapse] = WCRead::STATS if defined?(WCRead)
+out[:memo3] = WC3.report if defined?(WC3)
 path = ENV.fetch('OUT', 'census.json')
 File.write(path, JSON.pretty_generate(out))
 warn "wrote #{path}"

@@ -54,6 +54,92 @@ module Rigor
       end
     end
 
+    # Issue #2681 — which declared type, if any, one RBS overload hands a `def`'s parameter slot when the def's shape
+    # need not match the declaration's (an override bound from its ancestor, or a source `def` whose RBS was written
+    # for another shape). A slot takes a type only where the two shapes line up:
+    #
+    # - a leading positional (required or optional) takes the declared leading positional at the same ABSOLUTE
+    #   position, and a post positional the declared trailing one, provided both sides have as many post as
+    #   trailing positionals: Ruby fills the leading parameters left to right on both sides, so the argument a call
+    #   puts at a leading position reaches the slot at the same one;
+    # - `*rest` takes the declared rest only when the def has exactly the declared leading positionals;
+    # - a keyword takes the declared keyword of its name, and `**kw` the declared keyword rest only when the def
+    #   names every declared keyword.
+    #
+    # Any other overlap is {MISALIGNED}, and leaves the slot `Dynamic[Top]`. {NOT_PASSED} is an overload that passes
+    # the slot nothing (`def first(n)` under `Array#first`'s `()`), which the binder skips.
+    module SlotAlignment
+      module_function
+
+      MISALIGNED = :misaligned
+      NOT_PASSED = :not_passed
+
+      Shape = Data.define(:requireds, :leading, :posts, :keywords)
+
+      def shape_of(params_node)
+        return Shape.new(0, 0, 0, [].freeze) if params_node.nil?
+
+        requireds = params_node.requireds.size
+        keywords = params_node.keywords.map(&:name).freeze
+        Shape.new(requireds, requireds + params_node.optionals.size, params_node.posts.size, keywords)
+      end
+
+      # The RBS type the overload `function` declares for `slot`, {MISALIGNED} or {NOT_PASSED}.
+      def declared(function, slot, shape)
+        case slot.kind
+        when :required_positional then leading(function, shape, slot.index)
+        when :optional_positional then leading(function, shape, shape.requireds + slot.index)
+        when :trailing_positional then trailing(function, shape, slot.index)
+        when :rest_positional then rest(function, shape)
+        when :required_keyword, :optional_keyword then keyword(function, slot.name)
+        when :rest_keyword then rest_keyword(function, shape)
+        else NOT_PASSED
+        end
+      end
+
+      def leading(function, shape, position)
+        return MISALIGNED unless function.trailing_positionals.size == shape.posts
+
+        required = function.required_positionals
+        return required[position].type if position < required.size
+
+        optional = function.optional_positionals[position - required.size]
+        return optional.type if optional
+
+        function.rest_positionals ? MISALIGNED : NOT_PASSED
+      end
+
+      def trailing(function, shape, index)
+        return MISALIGNED unless function.trailing_positionals.size == shape.posts
+
+        function.trailing_positionals[index].type
+      end
+
+      def rest(function, shape)
+        return MISALIGNED unless function.trailing_positionals.size == shape.posts
+
+        declared_leading = function.required_positionals.size + function.optional_positionals.size
+        return MISALIGNED if shape.leading < declared_leading
+        return NOT_PASSED if function.rest_positionals.nil?
+
+        shape.leading == declared_leading ? function.rest_positionals.type : MISALIGNED
+      end
+
+      def keyword(function, name)
+        declared = function.required_keywords[name] || function.optional_keywords[name]
+        return declared.type if declared
+
+        function.rest_keywords ? MISALIGNED : NOT_PASSED
+      end
+
+      def rest_keyword(function, shape)
+        declared = function.required_keywords.keys + function.optional_keywords.keys
+        return MISALIGNED unless declared.all? { |name| shape.keywords.include?(name) }
+
+        function.rest_keywords ? function.rest_keywords.type : NOT_PASSED
+      end
+    end
+
     class MethodParameterBinder
       # @param class_path — the qualified name of the class the method is defined in
       #   (e.g., `"Foo::Bar"`), or `nil` for a top-level `def` outside any class. When `nil` (or
@@ -83,7 +169,9 @@ module Rigor
 
         rbs_method = lookup_rbs_method(def_node)
         if rbs_method
-          apply_rbs_overloads(types, slots, rbs_method.method_types) unless rbs_method.method_types.empty?
+          unless rbs_method.method_types.empty?
+            apply_rbs_overloads(types, slots, rbs_method.method_types, SlotAlignment.shape_of(def_node.parameters))
+          end
           # `rigor:v1:param: <name> <refinement>` annotations tighten the bound type for matching
           # slots. Applied after the RBS-overload pass so the override is the authoritative
           # answer regardless of what the RBS signature declared.
@@ -198,7 +286,9 @@ module Rigor
       end
 
       # Bind each parameter slot to the union of the matching parameter types across every
-      # overload that *has* that slot. Overloads that omit the slot (e.g., `Array#first` has
+      # overload that *has* that slot, where the def's parameter shape lines up with the overload's
+      # ({SlotAlignment}); one overload that does not line up leaves the slot `Dynamic[Top]`.
+      # Overloads that pass the slot no argument (e.g., `Array#first` has
       # both `()` and `(int)` overloads — only the second matches a `def first(n)` redefinition)
       # are silently skipped, so the binder defaults to the most informative type the RBS
       # signature provides without having to know which overload the runtime will pick.
@@ -207,14 +297,14 @@ module Rigor
       # accepts any argument in every slot, so no slot can be narrowed below `Dynamic[Top]`: binding a typed
       # sibling overload's parameter type would read a value that overload legitimately passes as a
       # contradiction inside the body. Every slot keeps its default; the declared return type still applies.
-      def apply_rbs_overloads(types, slots, method_types)
+      def apply_rbs_overloads(types, slots, method_types, shape)
         return unless method_types.all? { |mt| mt.type.respond_to?(:required_positionals) }
 
         slots.each do |slot|
           next if slot.name.nil?
 
-          translated = collect_translated_types(method_types, slot)
-          next if translated.empty?
+          translated = collect_translated_types(method_types, slot, shape)
+          next if translated.nil? || translated.empty?
 
           types[slot.name] = build_slot_type(translated, slot.kind)
         end
@@ -276,10 +366,15 @@ module Rigor
         slots.find { |slot| POSITIONAL_KINDS.include?(slot.kind) && slot.index == index }
       end
 
-      def collect_translated_types(method_types, slot)
-        rbs_types = method_types.flat_map do |mt|
-          t = rbs_type_for_slot(mt.type, slot)
-          t ? [t] : []
+      # The translated types the overloads declare for `slot`, or nil when one of them does not line up with the
+      # def's parameter shape ({SlotAlignment}): that overload may hand the slot an argument of another type.
+      def collect_translated_types(method_types, slot, shape)
+        rbs_types = []
+        method_types.each do |mt|
+          declared = SlotAlignment.declared(mt.type, slot, shape)
+          return nil if declared.equal?(SlotAlignment::MISALIGNED)
+
+          rbs_types << declared unless declared.equal?(SlotAlignment::NOT_PASSED)
         end
         rbs_types.map { |t| translate_with_self(t) }.uniq
       end
@@ -287,47 +382,6 @@ module Rigor
       def build_slot_type(translated, kind)
         bound = translated.size == 1 ? translated.first : Type::Combinator.union(*translated)
         wrap_for_kind(bound, kind)
-      end
-
-      # Dispatch table from slot kind to a small lambda that pulls the matching RBS parameter
-      # type out of an `RBS::Types::Function`. The hash keeps `rbs_type_for_slot` linear (one
-      # lookup, one call) so the cyclomatic-complexity budget does not balloon as future slices
-      # add more parameter kinds (e.g., `**Symbol kw` is a candidate for a stricter route in
-      # Slice 5+).
-      # Match keyword parameters by name across both required and optional keyword maps. RBS may
-      # declare a keyword as optional (`?by:`) while the Ruby `def` lists it as required (or
-      # vice versa); the binding is by-name regardless of which side defines it.
-      KEYWORD_PROVIDER = Ractor.make_shareable(lambda do |fn, slot|
-        fn.required_keywords[slot.name]&.type || fn.optional_keywords[slot.name]&.type
-      end)
-      private_constant :KEYWORD_PROVIDER
-
-      RBS_TYPE_PROVIDERS = Ractor.make_shareable({
-                                                   required_positional: Ractor.make_shareable(lambda { |fn, slot|
-                                                     fn.required_positionals[slot.index]&.type
-                                                   }),
-                                                   optional_positional: Ractor.make_shareable(lambda { |fn, slot|
-                                                     fn.optional_positionals[slot.index]&.type
-                                                   }),
-                                                   rest_positional: Ractor.make_shareable(lambda { |fn, _slot|
-                                                     fn.rest_positionals&.type
-                                                   }),
-                                                   trailing_positional: Ractor.make_shareable(lambda { |fn, slot|
-                                                     fn.trailing_positionals[slot.index]&.type
-                                                   }),
-                                                   required_keyword: KEYWORD_PROVIDER,
-                                                   optional_keyword: KEYWORD_PROVIDER,
-                                                   rest_keyword: Ractor.make_shareable(lambda { |fn, _slot|
-                                                     fn.rest_keywords&.type
-                                                   })
-                                                 })
-      private_constant :RBS_TYPE_PROVIDERS
-
-      def rbs_type_for_slot(function, slot)
-        provider = RBS_TYPE_PROVIDERS[slot.kind]
-        return nil unless provider
-
-        provider.call(function, slot)
       end
 
       # The variable bound to a `*rest` parameter is the *Array* of rest-positional arguments,

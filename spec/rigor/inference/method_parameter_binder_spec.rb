@@ -187,6 +187,77 @@ RSpec.describe Rigor::Inference::MethodParameterBinder do
       end
     end
 
+    # #2681 — a `def` whose parameter shape differs from its RBS overload's binds a slot only where the two line up:
+    # leading positionals by absolute position, `*rest` only when the def has every declared leading positional,
+    # `**kw` only when the def names every declared keyword. Before, a slot was indexed within its own kind, so
+    # `def opt(x = 0, y = "")` under `(Integer x, ?String y)` bound `x` to `String`, and `x.even?` reported.
+    context "with a def whose parameter shape differs from its RBS overload" do
+      def with_shape_demo
+        Dir.mktmpdir do |dir|
+          FileUtils.mkdir_p(File.join(dir, "sig"))
+          File.write(File.join(dir, "sig/shape_demo.rbs"), <<~RBS)
+            class ShapeDemo
+              def opt: (Integer x, ?String y) -> void
+              def go: (Integer x, ?String y, *Symbol rest, **Float kw) -> void
+              def kws: (Integer x, path: String, **Float kw) -> void
+              def posts: (Integer a, Symbol z) -> void
+            end
+          RBS
+          project_env = Rigor::Environment.for_project(root: dir)
+          yield described_class.new(environment: project_env, class_path: "ShapeDemo", singleton: false)
+        end
+      end
+
+      let(:untyped) { Rigor::Type::Combinator.untyped }
+
+      def nominal(name, args = []) = Rigor::Type::Combinator.nominal_of(name, type_args: args)
+
+      it "binds optional positionals by their absolute position" do
+        with_shape_demo do |binder|
+          result = binder.bind(def_node("def opt(x = 0, y = ''); x; end"))
+
+          expect(result).to eq(x: nominal("Integer"), y: nominal("String"))
+        end
+      end
+
+      it "leaves a *rest that absorbs declared leading positionals Dynamic[Top]" do
+        with_shape_demo do |binder|
+          expect(binder.bind(def_node("def go(*args); args; end"))).to eq(args: untyped)
+        end
+      end
+
+      it "binds *rest to the declared rest when the def has every declared leading positional" do
+        with_shape_demo do |binder|
+          result = binder.bind(def_node("def go(x, y = '', *rest); x; end"))
+
+          expect(result[:rest]).to eq(nominal("Array", [nominal("Symbol")]))
+        end
+      end
+
+      it "leaves a **kw that absorbs a declared keyword Dynamic[Top]" do
+        with_shape_demo do |binder|
+          result = binder.bind(def_node("def kws(x, **opts); x; end"))
+
+          expect(result).to eq(x: nominal("Integer"), opts: untyped)
+        end
+      end
+
+      it "binds **kw to the declared keyword rest when the def names every declared keyword" do
+        with_shape_demo do |binder|
+          result = binder.bind(def_node("def kws(x, path:, **opts); x; end"))
+
+          expect(result).to eq(x: nominal("Integer"), path: nominal("String"),
+                               opts: nominal("Hash", [nominal("Symbol"), nominal("Float")]))
+        end
+      end
+
+      it "leaves every positional Dynamic[Top] when the post positionals do not line up" do
+        with_shape_demo do |binder|
+          expect(binder.bind(def_node("def posts(a, *rest, z); a; end"))).to eq(a: untyped, rest: untyped, z: untyped)
+        end
+      end
+    end
+
     # Issue #1430 — `(?)` is `RBS::Types::UntypedFunction`, which carries no parameter lists. Before the guard the
     # binder's slot providers called `required_positionals` on it and the whole file failed with an internal error.
     context "with an untyped-parameter `(?)` signature" do

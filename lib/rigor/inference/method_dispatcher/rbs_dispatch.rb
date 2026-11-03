@@ -266,9 +266,10 @@ module Rigor
         #
         # #2681 — when `class_name` is a Ruby-source class with no RBS, the declaration the `def` overrides on an
         # ADR-43 allow-listed ancestor, as an empty RBS declaration of the class would inherit it. Nil whenever the
-        # call bridge would decline for a reason other than `class_name`'s own definition: no scope, no allow-listed
-        # ancestor, or a nearer definer between them. `initialize` is never bridged: a constructor does not
-        # override its superclass's contract, and a subclass routinely takes different arguments.
+        # call bridge would decline for a reason other than `class_name`'s own definition (no scope, no allow-listed
+        # ancestor, a nearer definer between them), and for a declaration one of {OBJECT_SURFACE_OWNERS} makes:
+        # `Kernel#load` is every class's, not that ancestor's contract. `initialize` is never bridged: a constructor
+        # does not override its superclass's contract, and a subclass routinely takes different arguments.
         def def_declaration(environment, class_name, kind, method_name, scope)
           direct = lookup_method_on(environment, class_name, kind, method_name)
           return direct if direct
@@ -277,7 +278,12 @@ module Rigor
 
           ancestor = allowed_rbs_complete_ancestor(environment, class_name, kind, method_name, scope,
                                                    overriding: true)
-          ancestor && lookup_method_on(environment, ancestor, kind, method_name)
+          overridden = ancestor && lookup_method_on(environment, ancestor, kind, method_name)
+          overridden unless overridden.nil? || object_surface?(overridden)
+        end
+
+        def object_surface?(method_definition)
+          OBJECT_SURFACE_OWNERS.include?(method_definition.defined_in.to_s.delete_prefix("::"))
         end
 
         # rubocop:disable-next Metrics/ClassLength
@@ -578,16 +584,18 @@ module Rigor
 
             registry = environment&.plugin_registry
             each_source_ancestor_candidate(scope, class_name) do |candidate|
-              # #2681 — the allow-listed ancestor's own source (`lib/rigor/plugin/base.rb`, which this
-              # repository's plugin check discovers) is not a nearer definer: its RBS is the authority the
-              # allow-list names, so only the classes below it shadow.
-              if ALLOWED_RBS_COMPLETE_ANCESTORS.include?(candidate) || registry&.rbs_complete_ancestor?(candidate)
-                return nil if shadowed_in_ruby_order?(scope, class_name, kind, method_name, candidate,
-                                                      overriding: overriding)
+              # #2681 — the engine seed's own source (`lib/rigor/plugin/base.rb`, which this repository's plugin
+              # check discovers) is the implementation its RBS describes, not a nearer definer. A project `def` on
+              # a manifest-declared ancestor is a reopen (`class Grape::API; def self.desc`), which Ruby calls
+              # instead of the declaration, so it still shadows.
+              seed = ALLOWED_RBS_COMPLETE_ANCESTORS.include?(candidate)
+              return nil if !seed && scope.discovered_method?(candidate, method_name, kind)
+              next unless seed || registry&.rbs_complete_ancestor?(candidate)
 
-                return candidate
-              end
-              return nil if scope.discovered_method?(candidate, method_name, kind)
+              return nil if shadowed_in_ruby_order?(scope, class_name, kind, method_name, candidate,
+                                                    overriding: overriding)
+
+              return candidate
             end
             nil
           end

@@ -2,6 +2,12 @@
 
 require "spec_helper"
 
+%w[rigor-graphql rigor-sorbet rigor-grape].each do |plugin|
+  lib = File.expand_path("../../plugins/#{plugin}/lib", __dir__)
+  $LOAD_PATH.unshift(lib) unless $LOAD_PATH.include?(lib)
+  require plugin
+end
+
 # #2681 — ADR-43's bridge reaches parameter positions, not only call returns. A plugin class known only from Ruby
 # source (`class ZzProbe < Base` with no RBS declaration of `ZzProbe`) takes the allow-listed ancestor's RBS for
 # the parameters of a block passed to a class-body DSL call, the parameters of an overriding hook `def`, and the
@@ -37,6 +43,8 @@ RSpec.describe "ADR-43 bridge: block, override and reader types for a source-onl
               def self.dynamic_return: (?receivers: untyped, ?methods: untyped) { (Rigor::Plugin::CallNode call_node, Rigor::Scope scope) -> untyped } -> nil
               attr_reader services: Rigor::Plugin::Services
               def initialize: (Integer count) -> void
+              def self.load: (Symbol name) -> void
+              def self.respond_to_missing?: (Symbol name, bool include_all) -> bool
               def diagnostics_for_file: (path: String, scope: Rigor::Scope, root: Rigor::Plugin::ProgramNode) -> Array[untyped]
             end
           end
@@ -173,6 +181,73 @@ RSpec.describe "ADR-43 bridge: block, override and reader types for a source-onl
       end
     RUBY
     expect(dump_lines(source)).to eq([[5, "dump_type: Dynamic[top]"]])
+  end
+
+  # The name gate admits `load` and `respond_to_missing?` (Base's RBS declares them on the singleton side), and the
+  # instance lookup on Base answers `Kernel#load` and `Kernel#respond_to_missing?`. Those are every class's surface,
+  # not Base's contract, so the overrides keep `Dynamic[top]` rather than `String` and `Symbol | String`.
+  it "does not bind an override from a declaration Object, Kernel, Module or Class makes" do
+    source = <<~RUBY
+      module Rigor
+        module Plugin
+          class ZzProbe < Base
+            def load(x)
+              Rigor.dump_type(x)
+            end
+
+            def respond_to_missing?(name, include_private = false)
+              Rigor.dump_type(name)
+            end
+          end
+        end
+      end
+    RUBY
+    expect(dump_lines(source)).to eq([[5, "dump_type: Dynamic[top]"], [9, "dump_type: Dynamic[top]"]])
+  end
+
+  # The bridge serves the manifest-declared ancestors too (`rbs_complete_ancestors:`). With rigor-graphql,
+  # rigor-sorbet and rigor-grape loaded, some ancestor's RBS declares a `load`, so the name gate admits it; the
+  # `GraphQL::Schema::Object` lookup then answers `Kernel#load`, which binds nothing. `T::Struct.from_hash`'s
+  # `(untyped hash, ?bool strict)` binds by absolute position: `hash` is not the optional `bool`.
+  it "binds a manifest-declared ancestor's overrides per ancestor and by position" do
+    source = <<~RUBY
+      class Thing < GraphQL::Schema::Object
+        def load(record_id)
+          Rigor.dump_type(record_id)
+        end
+      end
+
+      class Doc < T::Struct
+        def self.from_hash(hash = {}, strict = false)
+          Rigor.dump_type(hash)
+          Rigor.dump_type(strict)
+        end
+      end
+    RUBY
+    expect(dump_with_plugins(source)).to eq(
+      [[3, "dump_type: Dynamic[top]"], [9, "dump_type: Dynamic[top]"], [10, "dump_type: bool"]]
+    )
+  end
+
+  def dump_with_plugins(source)
+    Rigor::Plugin.unregister!
+    plugins = [Rigor::Plugin::Graphql, Rigor::Plugin::Sorbet, Rigor::Plugin::Grape]
+    configuration = Rigor::Configuration.new(
+      Rigor::Configuration::DEFAULTS.merge(
+        "plugins" => %w[rigor-graphql rigor-sorbet rigor-grape],
+        "bundler" => { "auto_detect" => false }, "rbs_collection" => { "auto_detect" => false }
+      )
+    )
+    # A bundled plugin is required by its absolute path, so match on the file name.
+    requirer = lambda do |name|
+      Rigor::Plugin.register(plugins.find { |plugin| File.basename(name.to_s, ".rb") == "rigor-#{plugin.manifest.id}" })
+      true
+    end
+    runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil, plugin_requirer: requirer)
+    result = guarded_run_source(runner, source: source)
+    result.diagnostics.select { |d| d.rule == "dump.type" }.map { |d| [d.line, d.message] }
+  ensure
+    Rigor::Plugin.unregister!
   end
 
   def dump_lines(source, extra = {})

@@ -2455,6 +2455,51 @@ module Rigor
       end
       private :mixin_parent
 
+      # Issue #2681 — every method name declared, on either side, by `name`'s RBS declarations and by the classes and
+      # modules they inherit, include, prepend or extend, `::`-stripped names in `skip` excepted. Read from the
+      # declarations as {#declared_ancestry} reads them, not through the definition builder: a definition that fails to
+      # build reports a coverage diagnostic each time it is asked for. A superset of what the built definitions hold
+      # is harmless to the one reader, a gate in front of ADR-43's override walk. Empty when the environment is
+      # unavailable; the walk stops at 64 owners.
+      def declared_method_names(name, skip: [])
+        return Set.new if env.nil?
+
+        names = Set.new
+        pending = [name.to_s.delete_prefix("::")]
+        seen = Set.new
+        until pending.empty? || seen.size > 64
+          owner = pending.shift
+          next if seen.include?(owner) || skip.include?(owner)
+
+          seen << owner
+          entry = env.class_decls[parse_type_name(owner)]
+          self.class.entry_declarations(entry).each { |decl| read_declared_methods(decl, names, pending) } if entry
+        end
+        names
+      rescue ::RBS::BaseError
+        Set.new
+      end
+
+      def read_declared_methods(decl, names, pending)
+        superclass = decl.respond_to?(:super_class) ? decl.super_class : nil
+        pending << superclass.name.to_s.delete_prefix("::") if superclass
+        return unless decl.respond_to?(:members)
+
+        decl.members.each do |member|
+          case member
+          when ::RBS::AST::Members::MethodDefinition, ::RBS::AST::Members::AttrReader
+            names << member.name
+          when ::RBS::AST::Members::AttrAccessor, ::RBS::AST::Members::AttrWriter
+            names << member.name << :"#{member.name}="
+          when ::RBS::AST::Members::Alias
+            names << member.new_name
+          when ::RBS::AST::Members::Include, ::RBS::AST::Members::Prepend, ::RBS::AST::Members::Extend
+            pending << member.name.to_s.delete_prefix("::") unless member.name.interface?
+          end
+        end
+      end
+      private :read_declared_methods
+
       # Issue #2321 — every class name an RBS class declaration names as its superclass, `::`-stripped: a class
       # absent from the set has no RBS-declared subclass. `nil` when the environment is unavailable or fails to read,
       # so a caller cannot mistake an unread environment for one without subclasses. Memoised per loader.

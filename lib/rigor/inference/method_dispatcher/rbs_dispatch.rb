@@ -74,10 +74,11 @@ module Rigor
 
         # #2681 — the owners whose members every class answers to. A name only they declare is not part of an
         # allow-listed ancestor's contract, so a `def` of it never walks for the declaration it overrides.
-        OBJECT_SURFACE_OWNERS = %w[::BasicObject ::Object ::Kernel ::Module ::Class].freeze
+        OBJECT_SURFACE_OWNERS = %w[BasicObject Object Kernel Module Class].freeze
 
-        # Per-thread memo, keyed by environment: `kind => Set` of the names an allow-listed ancestor's RBS declares
-        # outside {OBJECT_SURFACE_OWNERS}. It keeps {.def_declaration} off the ancestor walk for every other `def`.
+        # Per-thread memo, keyed by environment: the Set of the names an allow-listed ancestor's RBS declarations
+        # declare outside {OBJECT_SURFACE_OWNERS}. It keeps {.def_declaration} off the ancestor walk for any other
+        # `def`.
         RBS_COMPLETE_MEMBER_NAMES_KEY = RunScopedSlots.register(:__rigor_rbs_complete_member_names)
         private_constant :RBS_COMPLETE_MEMBER_NAMES_KEY
 
@@ -272,7 +273,7 @@ module Rigor
           direct = lookup_method_on(environment, class_name, kind, method_name)
           return direct if direct
           return nil if environment.nil? || scope.nil? || method_name == :initialize
-          return nil unless rbs_complete_member_name?(environment, kind, method_name)
+          return nil unless rbs_complete_member_name?(environment, method_name)
 
           ancestor = allowed_rbs_complete_ancestor(environment, class_name, kind, method_name, scope,
                                                    overriding: true)
@@ -283,30 +284,22 @@ module Rigor
         class << self
           private
 
-          # Whether some allow-listed ancestor's RBS declares `method_name` on `kind`'s side outside
+          # Whether some allow-listed ancestor's RBS declarations declare `method_name` outside
           # {OBJECT_SURFACE_OWNERS}: the one-probe gate that leaves a `def` no ancestor declares, the common case
-          # in a project with no plugin class, on the cost it had before #2681.
-          def rbs_complete_member_name?(environment, kind, method_name)
+          # in a project with no plugin class, on the cost it had before #2681. Read from the declarations, so a
+          # gem signature that fails to build reports nothing more than it did.
+          def rbs_complete_member_name?(environment, method_name)
             table = (Thread.current[RBS_COMPLETE_MEMBER_NAMES_KEY] ||= ObjectSpace::WeakKeyMap.new)
             names = (table[environment] ||= collect_rbs_complete_member_names(environment))
-            names.fetch(kind).include?(method_name)
+            names.include?(method_name)
           end
 
           def collect_rbs_complete_member_names(environment)
-            instance = Set.new
-            singleton = Set.new
+            loader = environment.rbs_loader
             ancestors = ALLOWED_RBS_COMPLETE_ANCESTORS + (environment.plugin_registry&.rbs_complete_ancestors || [])
-            ancestors.each do |ancestor|
-              add_contract_names(instance, Rigor::Reflection.instance_definition(ancestor, environment: environment))
-              add_contract_names(singleton, Rigor::Reflection.singleton_definition(ancestor, environment: environment))
-            end
-            { instance: instance.freeze, singleton: singleton.freeze }.freeze
-          end
-
-          def add_contract_names(names, definition)
-            definition&.methods&.each do |name, member|
-              names << name unless OBJECT_SURFACE_OWNERS.include?(member.defined_in.to_s)
-            end
+            ancestors.each_with_object(Set.new) do |ancestor, names|
+              names.merge(loader.declared_method_names(ancestor, skip: OBJECT_SURFACE_OWNERS))
+            end.freeze
           end
 
           def dispatch_for(receiver:, method_name:, args:, environment:, block_type:, self_type_override: nil, # rubocop:disable Metrics/ParameterLists

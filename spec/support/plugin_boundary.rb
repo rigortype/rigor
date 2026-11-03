@@ -67,16 +67,27 @@ module PluginBoundary
   # Raised by {check!}; its message names every reach and the way out.
   class Violation < StandardError; end
 
+  # The plugin integration specs: `spec/integration/plugins/` and `spec/integration/examples/`. Matched on the path
+  # RSpec reports for an example (`example.metadata[:file_path]`), which may be relative to the working directory.
+  INTEGRATION_SPEC = %r{(?:\A|/)spec/integration/(?:plugins|examples)/}
+
   module_function
+
+  # Whether an example's spec file is one of the plugin integration specs.
+  def integration_spec?(path)
+    INTEGRATION_SPEC.match?(path.to_s)
+  end
 
   # Raises {Violation} unless the recorder saw only calls the interfaces, the `Object` protocol or the allow-list
   # account for.
   #
-  # `require_root_file:` also fails a recorder none of whose roots holds a file in `$LOADED_FEATURES`: a gate whose
-  # roots match no file checks nothing, and would otherwise pass for want of anything to judge. It reads what was
-  # loaded, never what a plugin called, so a run whose plugins make no engine call still passes.
-  def check!(recorder, require_root_file: false, **)
-    if require_root_file && !recorder.root_file_loaded?
+  # `require_root_file:` also fails a recorder none of whose roots holds a file in `$LOADED_FEATURES`, but only when
+  # `integration_ran:` says the run executed a plugin integration example (see {integration_spec?}). A gate whose
+  # roots match no file checks nothing, and would otherwise pass for want of anything to judge; a run with no
+  # integration example has no plugin code to judge at all. It reads what was loaded, never what a plugin called,
+  # so a run whose plugins make no engine call still passes.
+  def check!(recorder, require_root_file: false, integration_ran: false, **)
+    if require_root_file && integration_ran && !recorder.root_file_loaded?
       raise Violation, "the plugin-boundary gate loaded no file under #{recorder.roots.join(', ')}: " \
                        "it checked nothing (wrong roots, or no plugin file was required)"
     end

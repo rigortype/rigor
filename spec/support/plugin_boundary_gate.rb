@@ -14,11 +14,15 @@ return unless ENV["RIGOR_PLUGIN_BOUNDARY"]
 
 RSpec.configure do |config|
   recorder = PluginBoundary::Recorder.new
+  integration_ran = false
 
   config.before(:suite) { recorder.start }
+  config.after do |example|
+    integration_ran ||= PluginBoundary.integration_spec?(example.metadata[:file_path])
+  end
   config.after(:suite) do
     recorder.stop
     config.reporter.message("plugin-boundary gate: #{recorder.calls.size} distinct plugin->engine call(s) recorded")
-    PluginBoundary.check!(recorder, require_root_file: true)
+    PluginBoundary.check!(recorder, require_root_file: true, integration_ran: integration_ran)
   end
 end

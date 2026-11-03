@@ -3,7 +3,7 @@
 // instead of an opaque spawn failure.
 
 import { execFile } from "child_process";
-import { ResolvedServer, versionArgs } from "./discovery";
+import { ResolvedServer, useShell, versionArgs } from "./discovery";
 
 /** First `rigor lsp` release. Older gems cannot serve the LSP. */
 export const MIN_VERSION = "0.1.6";
@@ -42,9 +42,10 @@ export function probeServer(
       versionArgs(server),
       {
         cwd,
+        env: server.env,
         timeout: 20000,
         windowsHide: true,
-        shell: process.platform === "win32",
+        shell: useShell(server),
       },
       (error, stdout) => {
         if (error) {

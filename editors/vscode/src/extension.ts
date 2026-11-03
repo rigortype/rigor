@@ -6,7 +6,7 @@
 // configuration, lifecycle commands, the status bar, and — because the
 // v1 LSP is single-root — one client per Rigor-configured folder.
 
-import { ChildProcess, execFileSync, spawn } from "child_process";
+import { ChildProcess, spawn } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import {
@@ -37,15 +37,26 @@ import {
 import {
   ResolvedServer,
   lspArgs,
+  managedReachable,
   projectRoot,
   resolveServer,
   shouldManageFolder,
+  useShell,
 } from "./discovery";
+import { killTree } from "./kill";
 import { MIN_VERSION, ProbeResult, probeServer } from "./probe";
+import {
+  INSTALL_GUIDE_URL,
+  initRuntime,
+  installManaged,
+  disposeRuntime,
+  managedServer,
+  offerInit,
+  registerRuntimeCommands,
+  setInUse,
+} from "./runtime";
 import { FolderStatus, StatusBar, describeFolder } from "./status";
 import { registerTasks } from "./tasks";
-
-const DOCS_URL = "https://github.com/rigortype/rigor";
 
 /** Settings that change the server invocation and require a restart. */
 const SERVER_AFFECTING_SETTINGS = [
@@ -55,6 +66,7 @@ const SERVER_AFFECTING_SETTINGS = [
   "rigor.server.useBundler",
   "rigor.server.configPath",
   "rigor.server.logPath",
+  "rigor.runtime.version",
 ];
 
 /** How long `stop()` may take before the process is killed. */
@@ -107,6 +119,8 @@ const clients = new Map<string, ManagedClient>();
  * not repeated on every sync but a changed setting is explained again.
  */
 const explained = new Map<string, string>();
+/** Whether the fall-through-to-managed notice was shown this session. */
+let fallThroughShown = false;
 /** Folders whose probe failure was already reported since the last restart. */
 const probeFailureReported = new Set<string>();
 
@@ -137,6 +151,17 @@ export function activate(context: ExtensionContext): void {
   statusBar = new StatusBar();
   context.subscriptions.push(outputChannel, statusBar);
   registerTasks(context);
+  initRuntime(context);
+  registerRuntimeCommands(context, outputChannel, afterManagedInstall, (task) =>
+    enqueue(async () => {
+      await stopAllNow();
+      try {
+        await task();
+      } finally {
+        await syncClientsNow();
+      }
+    }),
+  );
 
   context.subscriptions.push(
     commands.registerCommand("rigor.restartServer", () => restartAll()),
@@ -193,6 +218,7 @@ export async function deactivate(): Promise<void> {
   await Promise.all(
     [...clients.keys()].map((key) => stopClient(key, SHUTDOWN_STOP_MS, 0)),
   );
+  disposeRuntime();
 }
 
 /** Bring the running clients in line with the current workspace state. */
@@ -254,12 +280,37 @@ async function startClient(folder: WorkspaceFolder): Promise<void> {
   const root = projectRoot(folder) ?? folder.uri.fsPath;
   const label = folderLabel(folder, root);
 
-  const server = resolveServer(folder);
-  const args = lspArgs(server, folder);
-  const commandLine = [server.command, ...args].join(" ");
+  let server = resolveServer(folder);
   statusBar.update(key, { label, state: "starting", kind: server.kind });
 
-  const probe = await probeServer(server, root);
+  let probe = await probeServer(server, root);
+  // A `rigor` on PATH or a shim that exists but does not run would hide
+  // an installed managed Rigor behind it for good: fall through to it.
+  // Not for a `rigor` that runs but is too old: that one gets the
+  // upgrade warning, since it is the user's own install.
+  if (
+    !probe.ok &&
+    !probe.tooOld &&
+    server.kind !== "managed" &&
+    managedReachable(server.kind, root)
+  ) {
+    const fallback = managedServer();
+    if (fallback && !shuttingDown) {
+      const fallbackProbe = await probeServer(fallback, root);
+      if (fallbackProbe.ok) {
+        const note = `\`${server.command}\` (${server.kind}) did not run in ${label}, so the managed Rigor serves it.`;
+        outputChannel.appendLine(`[rigor] ${note}`);
+        if (!fallThroughShown) {
+          fallThroughShown = true;
+          void window.showInformationMessage(`Rigor: ${note}`);
+        }
+        server = fallback;
+        probe = fallbackProbe;
+      }
+    }
+  }
+  const args = lspArgs(server, folder);
+  const commandLine = [server.command, ...args].join(" ");
   if (!probe.ok) {
     statusBar.update(key, {
       label,
@@ -272,7 +323,7 @@ async function startClient(folder: WorkspaceFolder): Promise<void> {
     // until the user restarts or the probe passes.
     if (!probeFailureReported.has(key)) {
       probeFailureReported.add(key);
-      reportProbeFailure(server, probe, label);
+      reportProbeFailure(server, probe, label, root);
     }
     return;
   }
@@ -292,7 +343,8 @@ async function startClient(folder: WorkspaceFolder): Promise<void> {
     }
     const spawned = spawn(server.command, args, {
       cwd: root,
-      shell: process.platform === "win32",
+      env: server.env,
+      shell: useShell(server),
       // Its own process group on POSIX, so `killTree` reaches the forked
       // workers too.
       detached: process.platform !== "win32",
@@ -379,6 +431,8 @@ async function startClient(folder: WorkspaceFolder): Promise<void> {
     }
   });
   const disposables = [...watchers, stateListener];
+  // Before the spawn, so a prune in another window keeps this version.
+  setInUse(key, server);
   clients.set(key, {
     client,
     disposables,
@@ -415,6 +469,7 @@ async function startClient(folder: WorkspaceFolder): Promise<void> {
       `[rigor] failed to start the server for ${label}: ${String(err)}`,
     );
     clients.delete(key);
+    setInUse(key, undefined);
     for (const disposable of disposables) {
       disposable.dispose();
     }
@@ -444,6 +499,7 @@ async function stopClient(
   exitGraceMs = EXIT_GRACE_MS,
 ): Promise<void> {
   statusBar.remove(key);
+  setInUse(key, undefined);
   const managed = clients.get(key);
   if (!managed) {
     return;
@@ -493,30 +549,6 @@ async function reap(
       `[rigor] server process ${child.pid ?? "?"} did not exit; killing it`,
     );
     killTree(child);
-  }
-}
-
-/**
- * Kill the server and everything it started: the fork-based worker pool
- * on POSIX (one process group, see the `detached` spawn), and on Windows
- * the `ruby.exe` behind the `cmd.exe` that `shell: true` interposes.
- */
-function killTree(child: ChildProcess): void {
-  const pid = child.pid;
-  if (pid === undefined) {
-    return;
-  }
-  try {
-    if (process.platform === "win32") {
-      execFileSync("taskkill", ["/T", "/F", "/PID", String(pid)], {
-        stdio: "ignore",
-        windowsHide: true,
-      });
-    } else {
-      process.kill(-pid, "SIGKILL");
-    }
-  } catch {
-    child.kill("SIGKILL");
   }
 }
 
@@ -653,6 +685,7 @@ function reportProbeFailure(
   server: ResolvedServer,
   probe: ProbeResult,
   label: string,
+  root: string,
 ): void {
   if (probe.tooOld) {
     void window.showWarningMessage(
@@ -663,20 +696,49 @@ function reportProbeFailure(
     return;
   }
 
-  const install = "Installation help";
+  const guide = "Installation guide";
+  // The managed install is offered only where discovery would fall
+  // through to it: no explicit path, no Bundler, no project pin (ADR-27
+  // WD9). When one is installed and still failed, offer to repair it.
+  const offerManaged = managedReachable(server.kind, root);
+  const repair = offerManaged && managedServer() !== undefined;
+  const managed = repair ? "Repair Managed Rigor" : "Install Rigor for this editor";
+  const choices = offerManaged ? [managed, guide] : [guide];
   void window
     .showErrorMessage(
       `Rigor: could not run \`${server.command}\` in ${label}. ` +
         "Install Rigor so `rigor` is on `PATH` (`mise use gem:rigortype` " +
         "is the recommended setup), or set `rigor.server.path` to the " +
-        'executable, then run "Rigor: Restart Server".',
-      install,
+        'executable, then run "Rigor: Restart Server".' +
+        (repair
+          ? " The managed Rigor did not run either; repairing reinstalls it."
+          : offerManaged
+            ? " Or let the extension install a Rigor of its own (needs Ruby 4.0)."
+            : ""),
+      ...choices,
     )
-    .then((choice) => {
-      if (choice === install) {
-        void commands.executeCommand("vscode.open", Uri.parse(DOCS_URL));
+    .then(async (choice) => {
+      if (choice === guide) {
+        void commands.executeCommand("vscode.open", Uri.parse(INSTALL_GUIDE_URL));
+      } else if (
+        choice === managed &&
+        (await installManaged(outputChannel, { repair }))
+      ) {
+        await afterManagedInstall();
       }
     });
+}
+
+/**
+ * Restart after a managed install; when no folder has a Rigor config, so
+ * nothing started, say so and offer `rigor init`.
+ */
+async function afterManagedInstall(): Promise<void> {
+  await restartAll();
+  const folders = workspace.workspaceFolders ?? [];
+  if (!folders.some((folder) => shouldManageFolder(folder))) {
+    await offerInit(folders, outputChannel, restartAll);
+  }
 }
 
 function logStartup(

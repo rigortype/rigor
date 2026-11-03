@@ -24,11 +24,22 @@ import {
   projectRoot,
   resolveServer,
   shouldManageFolder,
+  useShell,
 } from "./discovery";
 
 const TASK_TYPE = "rigor";
 const TASK_SOURCE = "rigor";
 const PROBLEM_MATCHER = "$rigor";
+
+function definedEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (value !== undefined) {
+      out[key] = value;
+    }
+  }
+  return out;
+}
 
 /** The `rigor check` task for one managed folder. */
 function checkTask(folder: WorkspaceFolder, label: string): Task {
@@ -39,10 +50,13 @@ function checkTask(folder: WorkspaceFolder, label: string): Task {
   // On Windows `bundle` and the version-manager shim are .cmd or .bat files,
   // which only a shell can start. ShellExecution takes the command and its
   // arguments separately, so VS Code quotes them for the user's shell.
-  const execution =
-    process.platform === "win32"
-      ? new ShellExecution(server.command, args, { cwd: root })
-      : new ProcessExecution(server.command, args, { cwd: root });
+  // The managed kind (ADR-27 WD10) runs under its own Bundler environment.
+  // VS Code adds a task's `env` to the window's environment rather than
+  // replacing it, so variables the managed spawn strips can still reach it.
+  const env = server.env ? definedEnv(server.env) : undefined;
+  const execution = useShell(server)
+    ? new ShellExecution(server.command, args, { cwd: root, env })
+    : new ProcessExecution(server.command, args, { cwd: root, env });
   const task = new Task(
     definition,
     folder,

@@ -38,7 +38,7 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
-      "description": "Rigor spawns the `rigor` executable (often via `bundle exec`) from the workspace. The language server is only started in trusted workspaces."
+      "description": "Rigor spawns the `rigor` executable (often via `bundle exec`) from the workspace. The language server is only started, and the managed Rigor only installed, in trusted workspaces."
     }
   },
   "contributes": {
@@ -91,6 +91,18 @@
           "scope": "resource",
           "markdownDescription": "Path to write the server log, passed as `--log=PATH`. Leave empty to send server logs to the output channel."
         },
+        "rigor.runtime.version": {
+          "type": "string",
+          "default": "latest",
+          "scope": "application",
+          "markdownDescription": "The `rigortype` version of the Rigor the extension installs for itself (**Rigor: Install Managed Rigor**), used only when no other `rigor` is found. `latest` resolves the newest release on rubygems.org; a version such as `0.4.7` pins it."
+        },
+        "rigor.runtime.rubyPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Path to the Ruby 4.0 executable the managed Rigor is installed with. Leave empty to look for one on `PATH` and in mise, rbenv, chruby and asdf install directories."
+        },
         "rigor.trace.server": {
           "type": "string",
           "enum": [
@@ -128,6 +140,21 @@
       {
         "command": "rigor.checkWorkspace",
         "title": "Check Workspace",
+        "category": "Rigor"
+      },
+      {
+        "command": "rigor.installManagedRuntime",
+        "title": "Install Managed Rigor",
+        "category": "Rigor"
+      },
+      {
+        "command": "rigor.checkForUpdate",
+        "title": "Check for Rigor Update",
+        "category": "Rigor"
+      },
+      {
+        "command": "rigor.clearManagedRuntime",
+        "title": "Clear Managed Rigor",
         "category": "Rigor"
       }
     ],

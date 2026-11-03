@@ -28,6 +28,14 @@ so nothing is lost by installing it separately.
 > [Rails quickstart](14-rails-quickstart.md)). The channels below
 > are the manual route.
 
+> **Only trying Rigor in VS Code?** When the
+> [Rigor extension](../../editors/vscode/README.md) finds no `rigor`,
+> it offers to install one into its own storage, using a Ruby 4.0
+> already on the machine (or one `mise install ruby@4.0` provides).
+> That install serves the editor only and is never used for a project
+> that pins `rigortype`; for the command line and CI, use a channel
+> below.
+
 ### Set up in your language
 
 The prompt above is plain natural language — your agent follows the
@@ -356,8 +364,60 @@ gem install rigortype
 `asdf` has no general-purpose gem backend, so the gem itself is
 installed with `gem install` rather than an `asdf` command. `mise`
 (above) is the more integrated option because its `gem:` backend
-records the gem in the same config that records Ruby, and — as the
-next section explains — keeps the two from interfering.
+records the gem in the same config that records Ruby, and — as
+[Simple alternative](#simple-alternative--gem-install) explains —
+keeps the two from interfering.
+
+## Secondary — a pinned bundle
+
+The rule at the top of this chapter is about your *application's*
+`Gemfile` — the one Bundler resolves against your app's gems, and whose
+entries `Bundler.require` loads at boot. It is not a rule against
+Bundler. A `Gemfile` holding nothing but Rigor, resolved separately and
+selected with `BUNDLE_GEMFILE`, keeps every property the prohibition
+exists to protect: your application's dependency graph never meets
+Rigor's, and your application's Ruby is never constrained by Rigor's.
+
+Commit it, with its `Gemfile.lock`, at `.github/rigor/`, the path Rigor's
+CI template uses. The VS Code extension and `rigor doctor` do not run
+or recognise it yet
+([#2750](https://github.com/rigortype/rigor/issues/2750),
+[#2751](https://github.com/rigortype/rigor/issues/2751)):
+
+```ruby
+# .github/rigor/Gemfile
+source "https://rubygems.org"
+ruby ">= 4.0.0", "< 4.1"
+gem "rigortype", "~> 0.4"
+```
+
+Each command has to run under a Ruby 4.0, which is usually not your
+project's Ruby, so select it on the command line:
+
+```sh
+# with mise
+BUNDLE_GEMFILE=.github/rigor/Gemfile mise exec ruby@4.0 -- bundle install
+BUNDLE_GEMFILE=.github/rigor/Gemfile mise exec ruby@4.0 -- bundle exec rigor check
+# with rbenv
+BUNDLE_GEMFILE=.github/rigor/Gemfile RBENV_VERSION=4.0.5 bundle exec rigor check
+```
+
+A `.ruby-version` inside `.github/rigor/` does not select it, because
+Rigor runs from the project root, and neither does a Bundler binstub,
+whose `#!/usr/bin/env ruby` runs the project's Ruby.
+
+The same pin then serves local runs and CI, Dependabot can keep it
+current (see [Pinning Rigor's version](11-ci.md#pinning-rigors-version)
+in the CI chapter), and it is where a third-party Rigor plugin gem
+goes. What it does **not** do is provide Ruby: every `bundle exec`
+must already run under a Ruby 4.0, which the `ruby` line checks. Only
+`rigortype` is pinned exactly; the lockfile records the dependency
+versions Bundler resolved when you installed.
+
+It is more moving parts than `mise use --pin gem:rigortype`, which
+records the version and the Ruby in one place and needs no `bundle
+exec`. Reach for it when your team already runs everything through
+Bundler, or needs a plugin gem — not as a first choice.
 
 ## Simple alternative — gem install
 
@@ -385,30 +445,6 @@ the Ruby the tool was installed with, so a project's Ruby pin cannot
 reach it. A `gem install` under a Ruby 4.0 you never switch away from
 is perfectly fine; one that shares a Ruby with projects you switch
 between is a footgun.
-
-## If you want Bundler to manage the version
-
-The rule at the top of this chapter is about your *application's*
-`Gemfile` — the one Bundler resolves against your app's gems, and whose
-entries `Bundler.require` loads at boot. It is not a rule against
-Bundler. A `Gemfile` holding nothing but Rigor, resolved separately and
-selected with `BUNDLE_GEMFILE`, keeps every property the prohibition
-exists to protect: your application's dependency graph never meets
-Rigor's, and your application's Ruby is never constrained by Rigor's.
-
-That arrangement — a `Gemfile` under `.github/rigor/`, plus the
-Dependabot config that keeps it current — is written up under
-[Pinning Rigor's version](11-ci.md#pinning-rigors-version) in the CI
-chapter. Nothing about it is CI-specific:
-
-```sh
-BUNDLE_GEMFILE=.github/rigor/Gemfile bundle exec rigor check
-```
-
-It is more moving parts than `mise use --pin gem:rigortype`, which
-records the same version in one line and needs no `bundle exec`. Reach
-for it when your team already runs everything through Bundler and wants
-Rigor on the same footing — not as a first choice.
 
 ## Nix
 

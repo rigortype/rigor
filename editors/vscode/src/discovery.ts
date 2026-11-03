@@ -5,6 +5,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { WorkspaceFolder, workspace } from "vscode";
+import { managedServer } from "./runtime";
 
 export type BundlerMode = "auto" | "always" | "never";
 
@@ -12,7 +13,8 @@ export type DiscoveryKind =
   | "explicit"
   | "bundler"
   | "global"
-  | "version-manager";
+  | "version-manager"
+  | "managed";
 
 export interface ResolvedServer {
   kind: DiscoveryKind;
@@ -20,6 +22,17 @@ export interface ResolvedServer {
   command: string;
   /** Argument prefix that precedes the rigor subcommand. */
   prefixArgs: string[];
+  /** Environment for the process, when it differs from the extension's. */
+  env?: NodeJS.ProcessEnv;
+  /** Spawn through a shell. Defaults to true on Windows only. */
+  shell?: boolean;
+  /** For the managed kind: the version directory it runs from. */
+  runtimeDir?: string;
+}
+
+/** Whether to spawn the server through a shell. */
+export function useShell(server: ResolvedServer): boolean {
+  return server.shell ?? process.platform === "win32";
 }
 
 /** Whether the folder pins the `rigortype` gem in its lockfile. */
@@ -125,7 +138,220 @@ export function resolveServer(folder: WorkspaceFolder): ResolvedServer {
   if (shim) {
     return { kind: "version-manager", command: shim, prefixArgs: [] };
   }
+  // Last: the Rigor the extension installed for itself (ADR-27 WD9). A
+  // project that pins rigortype is never served by it, even when its pin
+  // is not installed yet: the not-found message says to install the pin.
+  const managed = rigortypePin(projectRoot(folder) ?? folder.uri.fsPath)
+    ? undefined
+    : managedServer();
+  if (managed) {
+    return managed;
+  }
   return { kind: "global", command: "rigor", prefixArgs: [] };
+}
+
+/**
+ * Whether discovery falls through to the managed install after `kind`
+ * fails: only from the kinds that come before it in the fall-through
+ * (`PATH`, the shim) or from itself, and only for a project with no pin.
+ * An explicit path or Bundler is the user's choice and is never replaced.
+ */
+export function managedReachable(kind: DiscoveryKind, root: string): boolean {
+  return (
+    (kind === "global" || kind === "version-manager" || kind === "managed") &&
+    rigortypePin(root) === undefined
+  );
+}
+
+/**
+ * The file through which the project pins `rigortype`, or undefined. Such
+ * a project is served by its own pin or not at all, never by the managed
+ * install. Read from the files rather than by running `mise`: a `mise`
+ * command can run the user's configured auto-prune, which uninstalls
+ * tools.
+ *
+ * - `Gemfile.lock` at the project root, or the CI-only
+ *   `.github/rigor/Gemfile.lock` (manual chapter 11).
+ * - A mise or asdf file in the project root or a directory above it,
+ *   other than the home directory and its ancestors: the `[tools]` table
+ *   must name `rigortype` or `gem:rigortype`.
+ * - The user's global mise or asdf config (the home directory, its
+ *   ancestors, and mise's global config files) only while a rigortype is
+ *   installed through mise or asdf. A global pin that was
+ *   never installed would otherwise block the managed Rigor everywhere.
+ */
+export function rigortypePin(root: string): string | undefined {
+  for (const lock of [
+    path.join(root, "Gemfile.lock"),
+    path.join(root, ".github", "rigor", "Gemfile.lock"),
+  ]) {
+    if (lockfileHasRigortype(path.dirname(lock))) {
+      return lock;
+    }
+  }
+  const home = path.resolve(os.homedir());
+  const globalFiles = globalPinFiles(home);
+  let dir = path.resolve(root);
+  for (;;) {
+    // The home directory and the directories above it hold the user's
+    // own configuration, not the project's.
+    const projectLevel = dir !== home && !isBelow(home, dir);
+    for (const file of pinFilesIn(dir)) {
+      if (!projectLevel) {
+        globalFiles.push(file);
+      } else if (fileNamesRigortype(file)) {
+        return file;
+      }
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) {
+      break;
+    }
+    dir = parent;
+  }
+  if (globalPinInstalled()) {
+    return globalFiles.find(fileNamesRigortype);
+  }
+  return undefined;
+}
+
+/** Whether `dir` is strictly inside `base`. */
+function isBelow(dir: string, base: string): boolean {
+  const relative = path.relative(base, dir);
+  return (
+    relative !== "" &&
+    relative !== ".." &&
+    !relative.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(relative)
+  );
+}
+
+/** The mise and asdf config files a directory can hold. */
+function pinFilesIn(dir: string): string[] {
+  const envs = (process.env.MISE_ENV ?? "")
+    .split(",")
+    .map((e) => e.trim())
+    .filter((e) => e !== "");
+  const names = [
+    "mise.toml",
+    ".mise.toml",
+    "mise.local.toml",
+    ".mise.local.toml",
+    ...envs.flatMap((e) => [`mise.${e}.toml`, `.mise.${e}.toml`]),
+    path.join(".mise", "config.toml"),
+    path.join("mise", "config.toml"),
+    path.join(".config", "mise.toml"),
+    path.join(".config", "mise", "config.toml"),
+    ".tool-versions",
+  ];
+  return [
+    ...names.map((name) => path.join(dir, name)),
+    ...confD(path.join(dir, ".config", "mise", "conf.d")),
+  ];
+}
+
+/** mise's global config, wherever the environment relocates it. */
+function globalPinFiles(home: string): string[] {
+  const configDir =
+    process.env.MISE_CONFIG_DIR ??
+    path.join(process.env.XDG_CONFIG_HOME ?? path.join(home, ".config"), "mise");
+  return [
+    ...(process.env.MISE_GLOBAL_CONFIG_FILE
+      ? [process.env.MISE_GLOBAL_CONFIG_FILE]
+      : []),
+    path.join(configDir, "config.toml"),
+    ...confD(path.join(configDir, "conf.d")),
+  ];
+}
+
+function confD(dir: string): string[] {
+  try {
+    return fs
+      .readdirSync(dir)
+      .filter((name) => name.endsWith(".toml"))
+      .map((name) => path.join(dir, name));
+  } catch {
+    return [];
+  }
+}
+
+/** Whether a mise TOML file or an asdf `.tool-versions` names rigortype. */
+function fileNamesRigortype(file: string): boolean {
+  let text: string;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch {
+    return false;
+  }
+  if (path.basename(file) === ".tool-versions") {
+    return /^\s*(gem:)?rigortype\s+\S/m.test(text);
+  }
+  return tomlToolsNameRigortype(text);
+}
+
+/**
+ * Whether a mise TOML file pins rigortype: a `rigortype` / `gem:rigortype`
+ * key in the `[tools]` table, a `[tools."gem:rigortype"]` table, a root
+ * dotted key (`tools."gem:rigortype" = ...`), or a root inline table
+ * (`tools = { "gem:rigortype" = ... }`, on one line). A line-level
+ * reading: enough for the forms mise documents. Lines inside a multi-line
+ * string are skipped, and a comment or another table that merely
+ * mentions rigortype is no pin.
+ */
+export function tomlToolsNameRigortype(text: string): boolean {
+  const key = `(["']?)(gem:)?rigortype\\1`;
+  const header = /^\s*\[\s*([^\]]*?)\s*\]\s*(#.*)?$/;
+  const toolKey = new RegExp(`^\\s*${key}\\s*=`);
+  const toolTable = new RegExp(`^tools\\s*\\.\\s*${key}$`);
+  const dottedKey = new RegExp(`^\\s*tools\\s*\\.\\s*${key}\\s*=`);
+  const inlineTable = new RegExp(`^\\s*tools\\s*=\\s*\\{(?:.*?,)?\\s*${key}\\s*=`);
+  let section = "";
+  let inString = false;
+  for (const line of text.split(/\r?\n/)) {
+    const delimiters = (line.match(/"""|'''/g) ?? []).length;
+    if (inString) {
+      inString = delimiters % 2 === 0;
+      continue;
+    }
+    if (delimiters % 2 === 1) {
+      inString = true;
+    }
+    const match = header.exec(line);
+    if (match) {
+      section = match[1];
+      if (toolTable.test(section)) {
+        return true;
+      }
+      continue;
+    }
+    if (section === "tools" && toolKey.test(line)) {
+      return true;
+    }
+    if (section === "" && (dottedKey.test(line) || inlineTable.test(line))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Whether mise or asdf has a rigortype installed at all. */
+function globalPinInstalled(): boolean {
+  const home = os.homedir();
+  const miseData =
+    process.env.MISE_DATA_DIR ??
+    path.join(process.env.XDG_DATA_HOME ?? path.join(home, ".local", "share"), "mise");
+  const asdfData = process.env.ASDF_DATA_DIR ?? path.join(home, ".asdf");
+  return [
+    path.join(miseData, "installs", "gem-rigortype"),
+    path.join(miseData, "installs", "rigortype"),
+    path.join(asdfData, "installs", "rigortype"),
+  ].some((dir) => {
+    try {
+      return fs.readdirSync(dir).length > 0;
+    } catch {
+      return false;
+    }
+  });
 }
 
 /** Whether `name` resolves to an executable on the current `PATH`. */

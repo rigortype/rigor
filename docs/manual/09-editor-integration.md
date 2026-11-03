@@ -35,6 +35,14 @@ install channels in [Installing Rigor](01-installation.md) provide it;
 `mise` is the recommended one because its shims make `rigor` available
 to GUI-launched editors that do not inherit your shell environment.
 
+The [VS Code extension](../../editors/vscode/README.md) also finds a
+mise or asdf shim when `rigor` is not on `PATH`. When it finds no
+`rigor` at all, it offers to install a **managed Rigor** into its own
+storage with a Ruby 4.0 already on the machine, and uses it as its
+last resort; a project that pins `rigortype` in `Gemfile.lock`,
+`mise.toml` or `.tool-versions` is never served by it. See the
+extension README's *Server discovery*.
+
 Do **not** add `rigortype` to your project's `Gemfile`. Rigor is a
 tool, not a library — installing it standalone keeps its Ruby version
 and its dependencies out of your application's resolution. See

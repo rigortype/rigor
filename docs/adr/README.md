@@ -41,7 +41,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-24 | [Self Method Call Resolution](24-self-method-call-resolution.md) | Accepted (slice 4 gated `:off` with subclass-aware gating; WD3 in-body adoption gate opened by ADR-57, 2026-06-12) |
 | ADR-25 | [Plugin Contributed RBS](25-plugin-contributed-rbs.md) | Accepted |
 | ADR-26 | [ActiveRecord Relation Typing](26-activerecord-relation-typing.md) | Accepted |
-| ADR-27 | [Tool Distribution and Installation Model](27-tool-distribution-model.md) | Accepted (partially implemented; Nix flake, container image, and CI templates shipped; single binary deferred) |
+| ADR-27 | [Tool Distribution and Installation Model](27-tool-distribution-model.md) | Accepted (partially implemented; Nix flake, container image, and CI templates shipped; single binary deferred; WD9 pinned bundle and WD10 editor-managed bundle added 2026-11-04) |
 | ADR-28 | [Path-scoped Method-Protocol Contracts](28-path-scoped-protocol-contracts.md) | Accepted |
 | ADR-29 | [Browser Playground](29-browser-playground.md) | Accepted (server-side playground v0.1.10–0.1.11; in-browser ruby.wasm build shipped 2026-06-14/15) |
 | ADR-30 | [`rigor-ffi` Plugin Shape](30-rigor-ffi-plugin-shape.md) | Accepted |

@@ -17,7 +17,12 @@ guide (`docs/install.md`, v0.1.14) de-recommending the `Gemfile`
 entry, and the copy-pasteable standalone CI workflow templates — which
 landed via [ADR-51](51-ci-diagnostic-output-formats.md) WD6
 (`docs/manual/ci-templates/` + the bundled `rigor-ci-setup` skill).
-**Still queued:** the self-contained single binary.
+**Still queued:** the self-contained single binary. **Amended
+2026-11-04 (#2725, decided by the maintainer):** WD9 makes a
+committed, Rigor-only pinned bundle at `.github/rigor/` a documented
+channel below the version manager, and WD10 lets the VS Code extension
+install that bundle's per-user form for first-time users (landing
+with WD10); WD1 no longer rules the isolated bundle out.
 
 ## Context
 
@@ -103,7 +108,13 @@ The recommended channels, in priority order:
    file." `tebako` is the obvious tool; a lighter homegrown packaging
    is worth a spike. Uncommitted (WD5).
 
-5. **Retained — global `gem install rigortype`.** Kept as a
+5. **Secondary — a pinned bundle.** A committed Rigor-only `Gemfile`
+   and lockfile at `.github/rigor/`, selected with `BUNDLE_GEMFILE`,
+   for teams that run everything through Bundler; it does not
+   provision Ruby (WD9). The VS Code extension installs a per-user
+   form of it for a first-time user (WD10).
+
+6. **Retained — global `gem install rigortype`.** Kept as a
    documented simple path for users who already have a Ruby 4.0 on
    `PATH`, but no longer the headline (WD6).
 
@@ -121,16 +132,20 @@ from the README and from every onboarding SKILL. The reasons are in
 and the three runtime dependencies contaminate its resolution. This
 is the decision the rest of the ADR is built on.
 
-The standalone-but-still-`Gemfile`-based alternative — Rigor
-bootstrapping its own isolated bundle (`.rigor/Gemfile`, the
-`ruby-lsp` "composed bundle" pattern) — was considered. It solves the
-*resolution* contamination cleanly but **does not solve interpreter
-provisioning**: the user still needs a Ruby 4.0 available. A version
-manager (WD2) solves both at once, so the isolated-bundle bootstrap is
-not pursued as a separate mechanism. The pattern remains a valid
-fallback for a user who insists on a `bundle exec rigor` invocation
-shape, and may be documented as such, but it is not a recommended
-channel.
+No onboarding material recommends the project `Gemfile` entry. An
+entry that already exists, on a project that itself runs Ruby 4.0, is
+not a supported channel either: it is a state `rigor doctor` diagnoses
+by its concrete harms (the Ruby ceiling, a divergent `rbs` lock, a
+missing `require: false`;
+[#2751](https://github.com/rigortype/rigor/issues/2751)).
+
+A `Gemfile` holding nothing but Rigor, resolved separately — the
+`ruby-lsp` "composed bundle" pattern — solves the *resolution*
+contamination cleanly but **does not solve interpreter provisioning**:
+the user still needs a Ruby 4.0. That is why the version manager (WD2)
+stays front-line. The isolated bundle is a channel in its own right,
+though, below it: WD9 records it, and WD10 its per-user form in the
+editor.
 
 ### WD2 — A runtime-version manager is the front-line channel
 
@@ -301,6 +316,127 @@ This is independent of WD4: WD4 is Rigor's *own* published image as a
 CI channel; WD8 is about where a developer places Rigor when they
 themselves develop inside a container.
 
+### WD9 — A pinned bundle is the documented secondary channel
+
+*Decided by the maintainer 2026-11-04
+([#2725](https://github.com/rigortype/rigor/issues/2725)).* A committed
+Rigor-only `Gemfile` and its lockfile at **one canonical path,
+`.github/rigor/`**, selected with `BUNDLE_GEMFILE`
+(`BUNDLE_GEMFILE=.github/rigor/Gemfile bundle exec rigor check`). The
+path is the one the CI template (WD3, manual chapter 11) and the
+`rigor-ci-setup` skill already use. WD3's CI-only `Gemfile` is meant to
+be this WD applied to CI; its template does not yet carry the `ruby`
+line or the current version constraint
+([#2759](https://github.com/rigortype/rigor/issues/2759)).
+
+It ranks below the version manager and above a bare `gem install`
+(WD6). What it buys: isolation from the project's bundle (Rigor's
+gems never meet the application's resolution), Dependabot updates, one
+pin read by local runs and CI alike, and a home for third-party plugin
+gems that a version manager's `gem:` backend may not load
+([#2752](https://github.com/rigortype/rigor/issues/2752)).
+
+**It does not provision Ruby.** Every invocation must already run a
+Ruby 4.0, so the `Gemfile` carries `ruby ">= 4.0.0", "< 4.1"` and a
+wrong Ruby fails at `bundle exec` rather than inside the analyzer.
+Nor does it make the transitive gems reproducible in any verifying
+sense: the lockfile is written by the same resolution that downloads
+them. A lockfile produced at release time would change that
+([#2754](https://github.com/rigortype/rigor/issues/2754)); until then
+it is not claimed.
+
+Follow-ups: the VS Code extension discovers `.github/rigor/`
+([#2750](https://github.com/rigortype/rigor/issues/2750)), `rigor
+doctor` recognises it (#2751), and the CI template's `bundler-cache`
+must not install Rigor's gems where Rigor reads them as the project's
+bundle ([#2753](https://github.com/rigortype/rigor/issues/2753)).
+
+**Acceptance:** the installation guide and manual chapter 01 present
+it under the version manager with the `ruby` range; doctor and the
+extension recognise the path (#2750, #2751). **Revisit when:** the
+single binary (WD5) ships, or #2754 lands a release lockfile (then
+reproducibility can be claimed).
+
+### WD10 — The editor installs a per-user pinned bundle for a first-time user
+
+*Decided by the maintainer 2026-11-04 ([#2725](https://github.com/rigortype/rigor/issues/2725)).*
+WD9's bundle, kept per user in the editor's storage rather than
+committed to a project: a first-time user who installs the VS Code
+extension gets diagnostics without first installing Rigor by hand.
+It shares WD9's limit and does not pretend otherwise — it needs a
+Ruby 4.0, or one the user lets mise install.
+
+**Criterion: it serves a user who has no Rigor yet, and nobody who has
+one.** It is the *last* discovery kind (`managed`, after explicit
+path, Bundler, `PATH` and the mise / asdf shim in
+`editors/vscode/src/discovery.ts`; an earlier kind that is found but
+does not run falls through to it, one that runs but is too old does
+not). A project that pins `rigortype` — in `Gemfile.lock` or
+`.github/rigor/Gemfile.lock`, or in the `[tools]` of a mise / asdf
+file at the project root or above it, short of the home directory —
+is never served by it, even when that pin is not installed. The
+user's global mise / asdf config counts only while a rigortype is
+installed through it. Pins are read from the files: the extension
+never runs `mise` to resolve one (a `mise` command can run the user's
+configured auto-prune, which uninstalls tools — observed while
+building this). Nothing is installed in an untrusted workspace or
+without the user's click.
+
+Tiers, by what the machine has (`editors/vscode/src/runtime.ts`):
+
+- **A — a Ruby 4.0 exists** (`rigor.runtime.rubyPath`, `ruby` on
+  `PATH`, the mise / rbenv / chruby / asdf install directories; each
+  candidate checks `Gem.ruby_version` against the gemspec's
+  `required_ruby_version`). The extension writes a one-line `Gemfile`
+  into its storage and runs `bundle install` with `BUNDLE_GEMFILE`,
+  `BUNDLE_PATH` and `BUNDLE_IGNORE_CONFIG=1` set, dropping every
+  inherited `BUNDLE_*` / `BUNDLER_*` variable (but
+  `BUNDLE_MIRROR__*`), `GEM_HOME`, `GEM_PATH`, `RUBYOPT` and
+  `RUBYLIB`. The server is `ruby <bundler> exec rigor lsp` with the
+  project as its working directory.
+- **B — no Ruby 4.0, but mise.** The extension offers to run `mise
+  install ruby@4.0` — its one deliberate `mise` invocation, after a
+  click, with a prompt that says mise applies the user's own settings
+  (auto-prune among them) — then continues as A.
+- **C — neither.** The extension shows the installation guide and
+  points at WD5's single binary
+  ([#926](https://github.com/rigortype/rigor/issues/926)); when that
+  ships, C downloads it instead.
+
+The storage is per user and every VS Code window shares it: an install
+builds in a temporary directory under a heartbeat lock file and is
+renamed into `runtime/<version>/`; each window marks the version its
+servers run, and pruning (newest two kept) and repair skip a version
+another live window marks.
+
+Rigor reads the analysed project as data from this foreign bundle as
+from a global install: measured for #2725,
+`Plugin::Isolation.require_with_target_bundle` under
+`BUNDLE_GEMFILE=<managed>` with the project as the working directory
+resolved Erubi from the project's `vendor/bundle`, and `rigor check`
+read the project's `Gemfile.lock`. One difference: a Bundler-locked
+process cannot `require` a gem that sits only in the user's default
+`GEM_HOME`, so ADR-90's fallback then has only the project-local
+bundle paths `BundleSigDiscovery` auto-detects.
+
+**Intended direction:** the install logic moves into a non-interactive
+`rigor runtime …` helper that other editors (Neovim, Helix) call too,
+with the extension as one client. Not built yet: VS Code is the only
+client so far.
+
+Rejected: the container image as tier C (WD4 — its paths do not match
+the editor's file URIs); `gem install --install-dir` with `GEM_HOME`
+(the fallback had the isolation measurement failed; Bundler keeps the
+user's and the project's Bundler config out by construction);
+installing on activation without a click.
+
+**Acceptance:** on a machine with Ruby 4.0 and no `rigor`, the install
+yields a running server whose kind is `managed`; a pinned project is
+never served by it; nothing installs untrusted or unclicked; tier C
+never shows a bare spawn error. **Revisit when:** the `rigor runtime`
+helper is built, #926 ships (tier C), or #2754 lands (the managed
+install can then use the release lockfile).
+
 ## Consequences
 
 ### Positive
@@ -336,6 +472,18 @@ themselves develop inside a container.
 - **No single recommended channel.** Local development, CI, and
   zero-Ruby environments are pointed at different channels. Mitigated
   by a clear priority order and a decision table in the docs.
+- **A second code path in the editor (WD10).** The extension now
+  installs and versions a Rigor of its own, beside discovery, until the
+  shared `rigor runtime` helper takes that over.
+- **Per-user state shared across windows (WD10).** Every VS Code
+  window reads and writes the same storage, which is why it needs the
+  lock, the atomic rename and the in-use markers.
+- **The Ruby range is hard-coded in two places.** The pinned bundle's
+  `ruby` line (WD9) and the extension's Ruby check (WD10) copy the
+  gemspec's `required_ruby_version`
+  ([#2755](https://github.com/rigortype/rigor/issues/2755)).
+- **Transitive versions drift between installs (WD9, WD10).** Only
+  `rigortype` is pinned until a release lockfile exists (#2754).
 
 ### Carry-over
 

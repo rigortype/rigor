@@ -141,7 +141,7 @@ Once the change is implemented and `make verify-changed` passes:
    issue, and this repository's rules (the Flake, read-only `references/`, no local full gates, the
    release gate — a subagent does not inherit them). Ask for findings ranked by severity, each with
    a concrete failure scenario, and scope expansion labelled separately; the batch version of this
-   brief is the reviewer contract in [`parallel-lanes.md`](parallel-lanes.md). A PR that changes a skill
+   brief is the [`rigor-reviewer`](../../.claude/skills/rigor-reviewer/SKILL.md) skill. A PR that changes a skill
    also runs the `waza` review in [`skill-authoring.md`](skill-authoring.md) at the same time; its
    findings join this triage.
 3. **Triage.** For a PR that changes the engine, read the "Engine allocations (advisory)" job's

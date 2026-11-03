@@ -3,7 +3,7 @@ name: rigor-lane
 description: >-
   Implement one Rigor issue as a lane subagent: in its own worktree, returned to the coordinator as a
   Draft PR with a short fixed report. Load it first in any lane brief; not for reviewing a PR (the
-  reviewer contract in docs/agents/parallel-lanes.md) or for coordinating a batch.
+  `rigor-reviewer` skill) or for coordinating a batch.
 metadata:
   internal: true
 ---

@@ -76,10 +76,12 @@ module Rigor
       #
       # - **By name, anywhere in the project** ({.redefined_name?}): a non-`def` definition of the name on any
       #   class or module (`define_method`, `attr_*`, an alias with no `def` behind it, which the discovery
-      #   table records), a top-level `def` of it, and a `refine` that defines it or that the walk cannot read.
+      #   table records), and a top-level `def` of it.
       # - **By class**: a project class or module that rewrites its method table beyond the names it spells (a
       #   computed `define_method`, `send(:define_method, …)`, `define_singleton_method` in its body, a refined
-      #   class) and is the receiver's class, an ancestor of it, or a descendant of it.
+      #   class) and is the receiver's class, an ancestor of it, or a descendant of it. A refinement takes effect
+      #   only in a file with `using`, and one of a class the walk cannot name leaves such a file's calls
+      #   `Dynamic` already, so a refinement is read by the class it refines.
       # - **A `def`** on the class, an ancestor, or a descendant
       #   ({ExpressionTyper#instance_method_redefined_in_project?}).
       def project_may_redefine?(class_name, method_name, scope)
@@ -88,12 +90,8 @@ module Rigor
       end
 
       def redefined_name?(method_name, scope)
-        if Analysis::DependencyRecorder.active?
-          Analysis::DependencyRecorder.read_name(:defines, method_name)
-          Analysis::DependencyRecorder.read_name(:refinement, method_name)
-        end
-        names, wildcard = census(scope)[:names]
-        wildcard || names.include?(method_name.to_sym)
+        Analysis::DependencyRecorder.read_name(:defines, method_name) if Analysis::DependencyRecorder.active?
+        census(scope)[:names].include?(method_name.to_sym)
       end
 
       def rewritten_in_reach?(class_name, scope)
@@ -236,13 +234,7 @@ module Rigor
           methods.each { |name, kind| names << name.to_sym unless kind == :singleton || defs&.key?(name) }
         end
         def_nodes[TOP_LEVEL_DEF_KEY]&.each_key { |name| names << name.to_sym }
-        wildcard = false
-        discovery.discovered_refinements.each_value do |methods|
-          methods.each_key do |name|
-            name == Scope::DiscoveryIndex::REFINEMENT_WILDCARD ? wildcard = true : names << name.to_sym
-          end
-        end
-        [names.freeze, wildcard]
+        names.freeze
       end
 
       def rewritten_owners(discovery)

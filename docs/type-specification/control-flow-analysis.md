@@ -389,8 +389,8 @@ A class guard on a no-argument, block-free reader rooted at a local or instance 
 - For every member of the receiver's type other than `nil`, the RBS of that class or of an RBS ancestor declares `r` with `attr_reader` or `attr_accessor`. A method declared with `def` (`queue.pop`, `io.gets`) is not an attribute, and neither is a receiver typed `Dynamic`, an interface, or a project class with no RBS.
 - The project cannot answer `r` another way:
   - no project `def r` on the receiver's class, its ancestors, or a project class or module that descends from it;
-  - no definition of a method named `r` anywhere in the project by a route other than `def`: `define_method`, `attr_*`, an alias, a top-level `def`, or a `refine` (including one whose methods the walk cannot read);
-  - no project class or module that rewrites its method table beyond the names it spells (a computed `define_method`, `send(:define_method, …)`, `define_singleton_method` in its body, a refined class), and that is the receiver's class, an ancestor, or a descendant.
+  - no definition of a method named `r` anywhere in the project by a route other than `def`: `define_method`, `attr_*`, an alias, or a top-level `def`;
+  - no project class or module that rewrites its method table beyond the names it spells (a computed `define_method`, `send(:define_method, …)`, `define_singleton_method` in its body), and no class a `refine` block refines, that is the receiver's class, an ancestor, or a descendant. A refinement takes effect only in a file with `using`, and a refinement of a class the analysis cannot name already makes such a file's calls `Dynamic`.
 
   An `attr_reader` written only in project Ruby does not qualify.
 

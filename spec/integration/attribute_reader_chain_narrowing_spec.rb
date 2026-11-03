@@ -377,6 +377,18 @@ RSpec.describe "attribute-reader chain narrowing on truthiness and nil? guards (
       RUBY
     end
 
+    # The extra invalidation is for attribute-chain facts only: an `is_a?` fact on a reader declared with `def` keeps
+    # its own rules, which a block mentioning the root does not end.
+    it "leaves an is_a? fact on a def reader to the class guard's rules" do
+      expect(findings(<<~RUBY)).to eq([])
+        def f(x, s, y = nil)
+          return unless x.m.is_a?(Integer)
+          [1].each { x }
+          s.int(x.m)
+        end
+      RUBY
+    end
+
     # Known limit, inherited from the `is_a?` chain rule: passing `x` to another method is not a call on `x`, so the
     # fact survives although the callee may write the attribute (Ruby: `mutate(h)` that calls `h.set_r(nil)` makes
     # `h.r` nil). The second method shows the `is_a?` guard behaving the same way.

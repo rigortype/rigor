@@ -58,8 +58,8 @@ root is passed to, is not seen. Three bounds keep that from becoming a finding o
   - a call that runs a closure (`clear.call`);
   - for an instance-variable root, any implicit-self call.
 - **A wider override gate.** The rule declines for a name the project defines by any route other
-  than `def`, anywhere: `define_method`, `attr_*`, an alias, `refine`, or a top-level `def`. It also
-  declines for a class whose method table is rewritten beyond the names it spells (a computed
+  than `def`, anywhere: `define_method`, `attr_*`, an alias, or a top-level `def`. It also
+  declines for a class that is refined, or whose method table is rewritten beyond the names it spells (a computed
   `define_method`, `define_singleton_method` in its body), and for a project `def` on the class, an
   ancestor or a descendant.
 

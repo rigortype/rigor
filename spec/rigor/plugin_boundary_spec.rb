@@ -118,6 +118,17 @@ RSpec.describe PluginBoundary do
         .to raise_error(PluginBoundary::Violation, /no method under .* run under the trace/)
     end
 
+    it "fails a run that ran an integration example when the trace saw only engine code" do
+      engine_only = PluginBoundary::Recorder.new(roots: [SPEC_ROOT])
+      engine_only.note_example(INTEGRATION_EXAMPLE)
+      engine = scope # the `let` method is defined in this spec file, under SPEC_ROOT: evaluate it before tracing
+      engine_only.record { engine.locals }
+
+      expect(engine_only.live?).to be(false)
+      expect { described_class.check!(engine_only) }
+        .to raise_error(PluginBoundary::Violation, /no method under .* run under the trace/)
+    end
+
     it "passes a gate whose root holds a loaded file and went live, though it recorded no call" do
       live = PluginBoundary::Recorder.new(roots: [SPEC_ROOT])
       live.note_example(INTEGRATION_EXAMPLE)

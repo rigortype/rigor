@@ -1,0 +1,4 @@
+- **[engine]** A truthiness or `nil?` guard on a reader such as `node.receiver` now narrows the next read of it when the RBS declares the reader with `attr_reader` or `attr_accessor`. ([#2690](https://github.com/rigortype/rigor/pull/2690))
+  - `return unless call_node.receiver` followed by `scope.type_of(call_node.receiver)` no longer reports `call.argument-type-mismatch`, since Prism declares every node field this way.
+  - The narrowing ends at a rebinding of the receiver variable or any later call on it, the attribute's writer included, as for an `is_a?` guard on a reader.
+  - A reader declared with `def`, an attribute a project `def` overrides, and an `attr_reader` with no RBS are not narrowed.

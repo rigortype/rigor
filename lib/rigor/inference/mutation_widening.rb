@@ -304,6 +304,10 @@ module Rigor
         receiver = call_node.receiver
         return scope if receiver.nil?
 
+        # Issue #2335 — a block parameter, an element read or any other receiver that may be an outer local's object.
+        if AliasMutationFloor.candidate?(call_node)
+          scope = AliasMutationFloor.floor_after_call(call_node, scope) { captured_element_root(receiver) }
+        end
         widened = widen_outer_element_read(call_node, scope)
         return widened if widened
 
@@ -319,6 +323,14 @@ module Rigor
           # straight-line paths have no such join, which is why their default is `:widen` (issue #560).
           widen_alias_read(call_node.name, read, acc, values: :keep, unread_arguments: !call_node.arguments.nil?)
         end
+      end
+
+      # The outer root of an element read in a block body, whose element {#widen_outer_element_read} widens. (A captured
+      # local the receiver names takes the capture path's widening and the block content join after it, which a floor
+      # here would not change.)
+      def captured_element_root(receiver)
+        root = ElementReadWidening.element_read_path(receiver)&.first
+        root && !ReceiverAlias.block_local?(root) ? [root.name] : nil
       end
 
       # Issue #2287 — a mutator on an element read rooted at a captured local (`[0].each { |i| a[i] << 2 }`,

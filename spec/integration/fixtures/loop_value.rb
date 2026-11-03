@@ -86,13 +86,14 @@ def for_append
   assert_type("Array[1 | 2 | Dynamic[top]] | Array[Integer]", r)
 end
 
+# Issue #2335 — a mutation through the copy `b` floors `a` as a mutation of `a` itself does.
 def for_alias_pop
   a = [1, 2]
   b = a
   r = for i in a
     b.pop
   end
-  assert_type("Array[Integer]", r)
+  assert_type("Array[1 | 2 | Dynamic[top]] | Array[Integer]", r)
   r.size == 1 ? :one : :two
 end
 

@@ -1951,15 +1951,70 @@ module Rigor
       # receiver is an element read into a local, that element's pin inside its container
       # ({ElementReadWidening.widen_element_read}, issue #643) — and, issue #2499, the String a stdlib
       # out-buffer call fills ({OutBufferMutation}), which names no receiver of the call at all.
-      def widen_mutated_receivers(call_node, current_scope)
+      #
+      # Issue #2335 — a literal-symbol `send` (`a.send(:push, x)`) widens as the call it makes, and a mutation through a
+      # receiver that may be another local's object floors every local whose object another holder may reach
+      # ({AliasMutationFloor}).
+      def widen_mutated_receivers(node, current_scope)
+        call_node = AliasMutationFloor.literal_send_target(node) || node
         arg_types = mutator_arg_types(call_node, current_scope)
         widened = MutationWidening.widen_after_call(call_node: call_node, current_scope: current_scope,
                                                     arg_types: arg_types,
                                                     rewritten_element: rewritten_element(call_node, current_scope))
         widened = ElementReadWidening.widen_element_read(call_node: call_node, current_scope: widened,
                                                          arg_types: arg_types)
+        if AliasMutationFloor.candidate?(call_node)
+          widened = AliasMutationFloor.floor_after_call(call_node, widened) do
+            named_receiver_locals(call_node.receiver)
+          end
+        end
         # Issue #2499 — a stdlib call that fills a String argument (`io.read(n, buf)`, `StringIO.new(s)`).
-        OutBufferMutation.floor(call_node, widened)
+        floor_ivar_mutating_callee(node, OutBufferMutation.floor(call_node, widened))
+      end
+
+      # Issue #2335 — a call on a local that may hold another local's object (`box = Box.new(a)`) to a project method
+      # that mutates one of its instance variables (`def add(v) = @items << v`) may mutate that object: every local
+      # whose object another holder may reach takes one unknown store ({AliasMutationFloor.floor_after_written_local}).
+      def floor_ivar_mutating_callee(call_node, current_scope)
+        receiver = call_node.receiver
+        return current_scope if MutationWidening::SHAPE_MUTATORS.include?(call_node.name) || send_hand_off?(call_node)
+        return floor_self_ivar_callee(call_node, current_scope) if self_dispatch_call?(call_node)
+        return current_scope unless receiver.is_a?(Prism::LocalVariableReadNode)
+        return current_scope unless callee_bearing?(current_scope.local(receiver.name))
+        return current_scope unless AliasMutationFloor.reaches_other_locals?(current_scope, receiver, call_node)
+
+        callees = receiver_callees_in(scope, call_node)
+        return current_scope unless callees.any? { |def_node, _, _| AliasMutationFloor.mutates_ivar?(def_node) }
+
+        AliasMutationFloor.floor_after_written_local(current_scope, receiver, call_node)
+      end
+
+      # The same for a call on `self` (`push_it(v)`, `self.push_it(v)`): its ivars hold whatever locals were handed to
+      # them (`@items = a`, `a = @q`), so every aliased local holding a literal shape takes one unknown store.
+      def floor_self_ivar_callee(call_node, current_scope)
+        return current_scope unless AliasMutationFloor.holder_call_reaches?(current_scope, call_node)
+        return current_scope unless resolve_self_callees(call_node).any? do |def_node, _, _|
+          AliasMutationFloor.mutates_ivar?(def_node)
+        end
+
+        AliasMutationFloor.floor_after_holder_call(current_scope, call_node)
+      end
+
+      # A binding `receiver_callees_in` can resolve a project def on: a class or instance type, or a union of them. Any
+      # other binding resolves none, so the floor skips the resolution for it.
+      def callee_bearing?(type) = type.is_a?(Type::Nominal) || type.is_a?(Type::Singleton) || type.is_a?(Type::Union)
+
+      # The locals a mutator's receiver names ({ReceiverAlias.mutated_reads}), which the named path widens, and the
+      # root of an element read (`c[0].shift`), whose element {ElementReadWidening} widens.
+      def named_receiver_locals(receiver)
+        return nil if receiver.nil?
+        return receiver.name if receiver.is_a?(Prism::LocalVariableReadNode)
+
+        names = ReceiverAlias.mutated_reads(receiver).filter_map do |read|
+          ReceiverAlias.read_name(read) if read.is_a?(Prism::LocalVariableReadNode)
+        end
+        root = ElementReadWidening.element_read_path(receiver)&.first
+        root ? names << root.name : names
       end
 
       # Issue #2427 — the element an element rewriter (`map!`, `collect!`, `flatten!`) leaves in its receiver, read
@@ -5774,12 +5829,15 @@ module Rigor
       end
 
       # `base_scope` with each local `node` passes to a parameter of `mutated` rebound to what the block answers for
-      # its binding; a nil answer, or an answer equal to the binding, leaves it.
+      # its binding; a nil answer, or an answer equal to the binding, leaves it. Issue #2335 — an argument that may be
+      # another local's object (a block parameter, a copy) floors every local another holder may reach
+      # ({AliasMutationFloor.floor_after_written_local}), a block-local one included.
       def floor_arguments(node, mutated, base_scope, offset, climbing = nil)
         arguments = arguments_for_slots(node, mutated, offset)
         return base_scope if arguments.empty?
 
         arguments.reduce(base_scope) do |acc, argument|
+          acc = AliasMutationFloor.floor_after_written_local(acc, argument, node)
           next acc unless acc.locals.key?(argument.name)
           next acc if climbing && argument.depth <= climbing
 
@@ -6748,14 +6806,19 @@ module Rigor
       # True when at least one argument of `node` is a bare local-variable read (positional or keyword value) bound in
       # the current scope — a cheap pre-filter so the def resolution / body scan only runs for calls that could actually
       # floor something.
+      # A local bound in the current scope, or (issue #2335) one whose object another local may share, which the
+      # alias floor reads a callee's write through ({AliasMutationFloor.reaches_other_locals?}).
+      def passed_local?(read, node)
+        scope.locals.key?(read.name) || AliasMutationFloor.reaches_other_locals?(scope, read, node)
+      end
+
       def call_passes_local_argument?(node)
         args = node.arguments
         return false unless args.respond_to?(:arguments)
 
         args.arguments.any? do |arg|
           case arg
-          when Prism::LocalVariableReadNode
-            scope.locals.key?(arg.name)
+          when Prism::LocalVariableReadNode then passed_local?(arg, node)
           when Prism::SplatNode
             arg.expression.is_a?(Prism::LocalVariableReadNode) && scope.locals.key?(arg.expression.name)
           when Prism::KeywordHashNode

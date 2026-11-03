@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "../run_scoped_slots"
+require_relative "../source/node_children"
 require_relative "closure_escape_analyzer"
 require_relative "construction_escape"
 
@@ -55,11 +56,12 @@ module Rigor
         Prism::LocalVariableAndWriteNode
       ].freeze
       ALL = :all
+      NO_ARGUMENTS = [].freeze
       # A run-scoped slot ({RunScopedSlots}): emptied when a run ends, so no verdict outlives the body it read.
       UNSAFE_CACHE_KEY = RunScopedSlots.register(:__rigor_remover_narrowing_unsafe)
       private_constant :REFLECTIVE_CALLS, :SELF_CONVERSIONS, :PURE_READERS, :IMMEDIATE_BLOCK_CALLS, :FRAME_CALLS,
                        :ANY_RECEIVER_FRAME_CALLS, :NON_WRITER_OPERATORS, :CORE_COLLECTIONS,
-                       :LOCAL_REFERENCES, :LOCAL_WRITES, :ALL, :UNSAFE_CACHE_KEY
+                       :LOCAL_REFERENCES, :LOCAL_WRITES, :ALL, :NO_ARGUMENTS, :UNSAFE_CACHE_KEY
 
       module_function
 
@@ -75,25 +77,37 @@ module Rigor
         names.equal?(ALL) || names.include?(name.to_sym)
       end
 
-      def unsafe_names(body, parameters = nil)
-        names = Set.new
+      # `names` collects the locals; a collector that answers `site=` ({AliasMutationFloor}) is told, before each name
+      # it is given, the node that hands the local on, or nil when no single node does (a capture by a closure that may
+      # run later, a zero-argument `super`), reads value positions itself when it answers `value_held` ({.precise?}),
+      # and is told when the walk enters (`enter(node, parent)`) and leaves
+      # (`leave(node)`) each node. One that answers `keeps_arguments?` says which calls' plain arguments it counts as
+      # held.
+      def unsafe_names(body, parameters = nil, names = Set.new)
+        sited = names.respond_to?(:site=)
         catch(ALL) do
-          collect_unsafe(body, false, names)
+          collect_unsafe(body, false, names, sited:)
+          names.site = nil if sited
           parameter_names(parameters, names) if forwards_parameters?(body)
           return names.freeze
         end
         ALL
       end
 
-      def collect_unsafe(node, in_closure, names)
+      def collect_unsafe(node, in_closure, names, sited: false, parent: nil)
         in_closure ||= node.is_a?(Prism::LambdaNode)
+        if sited
+          names.enter(node, parent)
+          names.site = in_closure ? nil : node
+        end
         names << node.name if in_closure && LOCAL_REFERENCES.any? { |k| node.is_a?(k) }
         record_node(node, names)
 
-        node.compact_child_nodes.each do |child|
+        node.rigor_each_child do |child|
           child_in_closure = in_closure || (child.is_a?(Prism::BlockNode) && deferred_block?(node))
-          collect_unsafe(child, child_in_closure, names)
+          collect_unsafe(child, child_in_closure, names, sited:, parent: node)
         end
+        names.leave(node) if sited
       end
 
       def record_node(node, names) # rubocop:disable Metrics/CyclomaticComplexity
@@ -101,7 +115,9 @@ module Rigor
         when Prism::CallNode then record_call(node, names)
         when Prism::YieldNode, Prism::SuperNode then node.arguments&.arguments&.each { |a| record_held(a, names) }
         when Prism::ArrayNode then node.elements.each { |element| record_held(element, names) }
-        when Prism::AssocNode then [node.key, node.value].each { |part| record_held(part, names) }
+        when Prism::AssocNode
+          record_held(node.key, names)
+          record_held(node.value, names)
         when Prism::SplatNode, Prism::BlockArgumentNode then record_held(node.expression, names)
         when Prism::CaseMatchNode then record_pattern(node.predicate, node.conditions, names)
         when Prism::MatchRequiredNode, Prism::MatchPredicateNode then record_pattern(node.value, [node.pattern], names)
@@ -115,27 +131,42 @@ module Rigor
 
         receiver = unparenthesised(node.receiver)
         names << receiver.name if receiver.is_a?(Prism::LocalVariableReadNode) && REFLECTIVE_CALLS.include?(node.name)
-        arguments = node.arguments&.arguments || []
+        arguments = node.arguments&.arguments || NO_ARGUMENTS
         if writer_call?(node) && !arguments.empty?
-          *keys, value = arguments
-          keys.each { |key| record_held(key, names) }
-          every_read(value, names)
-        else
+          record_writer_call(arguments, names)
+        elsif keeps_arguments?(node, names)
           arguments.each { |argument| record_held(argument, names) }
         end
       end
 
+      def record_writer_call(arguments, names)
+        *keys, value = arguments
+        keys.each { |key| record_held(key, names) }
+        precise?(names) ? names.value_held(value) : every_read(value, names)
+      end
+
+      def keeps_arguments?(node, names) = !names.respond_to?(:keeps_arguments?) || names.keeps_arguments?(node)
+
+      # A collector that reads a value position itself ({AliasMutationFloor}): `value_held(node)` for a value handed
+      # to another holder (an element, an argument, an index or attribute write's value), `value_written(node)` for a
+      # write node, and `value_bound(value, targets)` for a multiple assignment or a pattern. The default collector
+      # reads every local inside the value instead.
+      def precise?(names) = names.respond_to?(:value_held)
+
       # A zero-argument `super` passes every parameter of the method on, implicitly. (A `...` forward passes only the
       # anonymous parameters, which name no local.)
       def forwards_parameters?(node)
-        node.is_a?(Prism::ForwardingSuperNode) || node.compact_child_nodes.any? { |child| forwards_parameters?(child) }
+        return true if node.is_a?(Prism::ForwardingSuperNode)
+
+        node.rigor_each_child { |child| return true if forwards_parameters?(child) }
+        false
       end
 
       def parameter_names(node, names)
         return if node.nil?
 
         names << node.name if node.class.name.end_with?("ParameterNode") && node.respond_to?(:name) && node.name
-        node.compact_child_nodes.each { |child| parameter_names(child, names) }
+        node.rigor_each_child { |child| parameter_names(child, names) }
       end
 
       def frame_call?(node)
@@ -156,6 +187,7 @@ module Rigor
       # A write's value hands on every local read anywhere inside it, and the local it binds holds what it read.
       def record_write(node, names)
         return unless node.class.name.end_with?("WriteNode") && node.respond_to?(:value)
+        return names.value_written(node) if precise?(names)
         return unless every_read(node.value, names)
 
         names << node.name if LOCAL_WRITES.any? { |k| node.is_a?(k) } && !fresh_value?(node.value)
@@ -178,12 +210,14 @@ module Rigor
       end
 
       def record_multi_write(node, names)
+        return names.value_bound(node.value, [*node.lefts, node.rest, *node.rights]) if precise?(names)
         return unless every_read(node.value, names)
 
         local_targets([*node.lefts, node.rest, *node.rights], names)
       end
 
       def record_pattern(subject, patterns, names)
+        return names.value_bound(subject, patterns) if precise?(names)
         return unless every_read(subject, names)
 
         local_targets(patterns, names)
@@ -195,7 +229,8 @@ module Rigor
 
         found = node.is_a?(Prism::LocalVariableReadNode)
         names << node.name if found
-        node.compact_child_nodes.reduce(found) { |acc, child| every_read(child, names) || acc }
+        node.rigor_each_child { |child| found = true if every_read(child, names) }
+        found
       end
 
       def local_targets(nodes, names)
@@ -208,10 +243,11 @@ module Rigor
       # A held position: every local read inside it but the receiver of a {PURE_READERS} call.
       def record_held(node, names)
         return if node.nil?
+        return names.value_held(node) if precise?(names)
         return if pure_read?(node)
 
         names << node.name if node.is_a?(Prism::LocalVariableReadNode)
-        node.compact_child_nodes.each { |child| record_held(child, names) }
+        node.rigor_each_child { |child| record_held(child, names) }
       end
 
       # A {PURE_READERS} call on a local hands the local on to nothing. Its own arguments are held positions of the

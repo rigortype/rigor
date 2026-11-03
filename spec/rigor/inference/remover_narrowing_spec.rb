@@ -157,9 +157,10 @@ RSpec.describe "collection remover narrowing", type: :runner do
         expect(dumped_types(source).first).to eq("Array[Integer?]")
       end
 
+      # Issue #2335 — the copied-from name takes the unknown store of a mutation through its copy, not its literal.
       it "keeps the ordinary reading of both names of an alias" do
         expect(dumped_types("#{maybe_one}a = [mk, 2]\nb = a\nb.compact!\ndump_type(a.dup)\ndump_type(b.dup)\n"))
-          .to eq(["[1?, 2]", "Array[Integer?]"])
+          .to eq(["Array[Dynamic[top] | Integer | nil]", "Array[Integer?]"])
       end
     end
 

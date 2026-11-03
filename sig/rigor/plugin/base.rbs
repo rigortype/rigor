@@ -79,7 +79,8 @@ class Rigor::Plugin::Base
   # `call_node` is a `CallNode` except on the `&:symbol` block path, which dispatches with the
   # `Prism::BlockArgumentNode` itself (`ExpressionTyper#symbol_block_return_type`) and reaches a `receivers:`-only
   # rule. The `dynamic_return` block is typed with the same union for that reason; a rule that reads a
-  # `CallNode`-only member off the `BlockArgumentNode` raises into the rescue below (nil), which #2717 tracks.
+  # `CallNode`-only member off the `BlockArgumentNode` raises into the rescue below (nil), so such a rule guards
+  # with `call_node.is_a?(::Prism::CallNode)` first (#2717).
   def dynamic_return_type: (call_node: ::Prism::CallNode | ::Prism::BlockArgumentNode, scope: Rigor::Plugin::_Scope, receiver_type: Rigor::Type::t) -> Rigor::Type::t?
   def narrowing_facts_for: (call_node: ::Prism::CallNode, scope: Rigor::Plugin::_Scope) -> Array[untyped]
 

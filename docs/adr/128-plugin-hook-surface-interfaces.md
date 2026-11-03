@@ -62,8 +62,8 @@ reserved for ADR-28's path-scoped contracts.
 
 Each engine object a hook receives is exposed to plugins as a named RBS structural interface under
 `Rigor::Plugin` (`_Scope`, `_Environment`, `_Services`, …). `base.rbs` types every hook position
-against those interfaces, concrete Prism node classes, `Rigor::Type::t`, or core types. Public APIs
-that accept a scope back (`Rigor::Reflection`'s `scope:`) accept the interface.
+against those interfaces, concrete Prism node classes, `Rigor::Type::t`, or core types. Engine
+signatures keep their concrete classes (WD5).
 
 **Criterion.** A method is public plugin API **if and only if** it is declared on `Plugin::Base`, on
 a plugin-facing interface, or in a namespace `public-api.md` lists as public (`Type::Combinator`,
@@ -89,26 +89,40 @@ interface Rigor::Plugin::_Scope
   def self_type: () -> Rigor::Type::t?
   def local: (String | Symbol name) -> Rigor::Type::t?
   def source_path: () -> String?
-  def environment: () -> Rigor::Plugin::_Environment?
+  def environment: () -> Rigor::Plugin::_Environment
 end
 ```
+
+`environment` is non-nil, matching `Scope#environment`. A nilable promise would make
+`call.possible-nil-receiver` fire on plugins that call it unguarded.
 
 The ancestor question becomes `Rigor::Reflection.project_method_defined(class_name, method_name, kind:,
 source:, scope:) -> Rigor::Trinary`. It lives on `Reflection`, the public read-side facade. Its
 parameters:
 
 - `kind:` is `:instance` or `:singleton`. Each kind walks its own chain.
-- `source:` is `:def` or `:any`. `:def` asks about `def` nodes only; `:any` also counts `attr_*` and
-  `define_method`, as the discovery table does.
+- `source:` names the walk outright, with that walk's existing order and settling:
+  - `:def` is the def-node walk (`user_def_through_ancestors`, or `singleton_def_through_ancestors`
+    for `kind: :singleton`);
+  - `:discovered` is the discovery-table walk (`discovered_method_through_ancestors?`), which also
+    counts `attr_*` and `define_method`;
+  - `:either` is their union, as `rigor-rspec` asks today.
 
-It answers `maybe` when the ancestor budget runs out. Each migrated site keeps its own direction:
+It answers `maybe` where a walk gives up on budget. Each migrated site maps `maybe` to the answer its
+walk gives today, whatever the site does with a hit:
 
-- a site that admits on a hit tests `yes?`;
-- a site that declines on a hit tests `!no?`.
+- a `:def` site tests `yes?`, because the def walk reads truncation as absent;
+- a `:discovered` or `:either` site tests `!no?`, because the discovery walk reads truncation as
+  present.
 
-That preserves today's behaviour at all 8 expressions. `_Environment` starts with the two members
-plugins call through it, `nominal_for_name` and `rbs_module?`. Slice 1 measures the rest of its set
-the same way.
+That preserves today's behaviour at all 8 expressions. Slice 1 also lists `Rigor::Trinary` in
+`public-api.md`, because the facade returns it. `_Environment` starts with the two members plugins
+call through it, `nominal_for_name` and `rbs_module?`. Slice 1 measures the rest of its set the same
+way.
+
+Whether a hook's `scope` can be `nil` is settled per position in slice 1. A position is non-nil only
+where every engine call site provably passes a `Scope`; otherwise it is `_Scope?`. The 13 existing
+`scope.nil?` guards stay valid either way.
 
 **WD2 — The other hook positions.**
 
@@ -124,8 +138,9 @@ the same way.
   narrowed to the members plugins call.
 - `config` becomes `Hash[String, untyped]`. Its values are schema-driven per plugin, and typing them
   precisely is out of scope.
-- `TypeNodeResolver` hooks receive a `TypeNode::NameScope`, which is already drift-pinned public. It
-  stays a concrete public class here; giving it an interface is a later slice.
+- `TypeNodeResolver` hooks receive a `TypeNode::NameScope`. `plugin.md` documents it, but
+  `public-api.md` does not list it, and its `resolver` returns an internal resolver chain. Under the
+  Criterion it is not public yet, and a later slice decides its interface.
 
 **WD3 — Where generics apply.** Generics apply only where a key links a write to a later read:
 `producer` with `producer_value`, and the fact store's `publish` with `read`. These gain an
@@ -150,10 +165,19 @@ get a facade, or an allow-list entry that cites a filed issue.
 **WD5 — The concrete classes stay internal.** ADR-50 WD1 holds. In slice 1:
 
 - `public-api.md` replaces its `Rigor::Scope` / `Rigor::Environment` entries with the interfaces.
-- `Reflection`'s RBS takes `scope: Rigor::Plugin::_Scope`. Its implementation still receives a real
-  `Scope` at runtime and reads it as one.
+- Interface types appear only at plugin-facing positions: `base.rbs` hooks and the interfaces
+  themselves. Engine signatures, including `Reflection`'s `scope: Scope`, keep their concrete classes.
+  `Reflection`'s implementation reads about 20 internal `Scope` members, so an interface-typed
+  parameter there would fail `lib` self-checking under Steep at once and under `rigor check` after
+  #929.
 - The drift spec gains an interface snapshot. The existing `SCOPE_INSTANCE` snapshot stays as an
   internal change detector, relabelled so that it no longer reads as a promise.
+
+This leaves one seam for slice 3. A plugin passes its `_Scope` to `Reflection`'s `scope: Scope`, and
+an interface is not assignable to a class. #929's assignability must accept an interface-typed value
+where the interface's backing class is expected, or `call.argument-type-mismatch` fires on correct
+plugins. Slice 3 decides how, and measures it: a declared backing class for each plugin-facing
+interface, or an exemption confined to those interfaces.
 
 **WD6 — How a breaking plugin-API change ships.** Classify the change first; the class decides the
 release vehicle. ADR-50 WD5's tiers apply unchanged: a patch carries no behaviour surprise, and a
@@ -182,17 +206,19 @@ in 0.3.0, where it raises at class-definition time.
 
 **The check slice 3 turns on is a new discipline.** A call outside an interface works at runtime, so
 `call.undefined-method` must not fire on it. Slice 3 reports such a call under a dedicated rule
-(`plugin.api-surface`). The rule sits in the bleeding-edge overlay until the next hard break (ADR-50
-Decision 3, WD2, WD7).
+(`plugin.api-surface`), whose receiver is typed by a plugin-facing interface. Since WD5 keeps
+interfaces out of engine signatures, `lib/` never meets the rule. The rule sits in the bleeding-edge
+overlay until the next hard break (ADR-50 Decision 3, WD2, WD7).
 
 **WD7 — Sequencing.**
 
-1. **Slice 1:** declare the interfaces and `NodeContext`; type `base.rbs` and `Reflection`'s `scope:`;
-   add `Reflection.project_method_defined`; migrate the three plugins; amend `public-api.md`; add the
-   WD4 gate and the WD5 snapshot. Acceptance:
+1. **Slice 1:** declare the interfaces and `NodeContext`; type `base.rbs`; add
+   `Reflection.project_method_defined`; migrate the three plugins; amend `public-api.md` (the
+   interfaces, plus `Trinary`); settle each hook position's scope nilability; add the WD4 gate and the
+   WD5 snapshot. Acceptance:
    - `make check-plugins` and `make check` report no new diagnostic. `make check` matters because
      `lib/` calls the typed hooks with explicit receivers, which the ADR-43 bridge and RBS dispatch
-     already check.
+     already check. A local Steep run over `lib` reports nothing new.
    - The migrated plugins' integration specs pass unchanged.
    - A survey diff on the projects those plugins serve (Mastodon for `rigor-active-model-serializers`
      and `rigor-activerecord`, an RSpec-heavy target for `rigor-rspec`) shows no delta.
@@ -201,8 +227,10 @@ Decision 3, WD2, WD7).
    Prism, so its acceptance includes a corpus before/after run as well as removing the 9 false
    positives.
 3. **Slice 3:** #2681, then #929, make the types live, with WD6's `plugin.api-surface` rule in the
-   bleeding-edge overlay. Acceptance: `make check-plugins` reports no new default-on diagnostic, and
-   any firing is adjudicated before it lands.
+   bleeding-edge overlay, and WD5's interface-to-backing-class seam settled. Acceptance:
+   - `make check-plugins` and `make check` report no new default-on diagnostic;
+   - a plugin passing its hook scope to `Reflection` draws no `call.argument-type-mismatch`;
+   - any firing is adjudicated before it lands.
 
 ## Rejected / deferred alternatives
 

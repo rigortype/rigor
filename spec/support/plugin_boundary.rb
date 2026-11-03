@@ -49,10 +49,18 @@ module PluginBoundary
                  issue: "rigortype/rigor#2708")
   ].freeze
 
+  # The protocol every object answers. Reading or writing another object's instance variables is not part of it:
+  # that is a reach into its internals, and the gate reports it.
   OBJECT_PROTOCOL = (
     Object.instance_methods + Object.private_instance_methods +
-    BasicObject.instance_methods + BasicObject.private_instance_methods + Kernel.instance_methods
+    BasicObject.instance_methods + BasicObject.private_instance_methods + Kernel.instance_methods -
+    %i[instance_variable_get instance_variable_set instance_variables]
   ).to_set.freeze
+
+  # Bound by hand: the recorder runs inside traced code, where a `BasicObject` receiver has no `class`, and a class
+  # may define `self.name` with parameters.
+  CLASS_OF = Kernel.instance_method(:class)
+  NAME_OF = Module.instance_method(:name)
 
   Call = Data.define(:target, :name, :plugin, :location)
 
@@ -136,7 +144,8 @@ module PluginBoundary
     # on one identity-hash lookup, before any caller frame is read.
     def observe(event)
       recv = event.self
-      kind = @by_class.fetch(recv.class) { @by_class[recv.class] = classify(recv.class) }
+      klass = CLASS_OF.bind_call(recv)
+      kind = @by_class.fetch(klass) { @by_class[klass] = classify(klass) }
       return unless kind
 
       target = kind == :module ? module_target(recv) : kind
@@ -157,20 +166,21 @@ module PluginBoundary
       return :module if [Module, Class].include?(klass)
 
       @backing.each { |name, backing| return name if klass <= backing }
-      :internal if klass.ancestors.any? { |mod| internal_name(mod.name) }
+      :internal if klass.ancestors.any? { |mod| internal_name(NAME_OF.bind_call(mod)) }
     end
 
     # A call on a module or class: a backing class itself, or a module under {INTERNAL_NAMESPACES}.
     def module_target(recv)
       @module_targets.fetch(recv) do
-        @module_targets[recv] = backing_name(recv) || internal_name(recv.name)
+        @module_targets[recv] = backing_name(recv) || internal_name(NAME_OF.bind_call(recv))
       end
     end
 
     # The module that owns the called method, when it is under {INTERNAL_NAMESPACES}.
     def internal_owner(event)
       owner = event.defined_class
-      internal_name(owner.singleton_class? ? event.self.name : owner.name)
+      named = owner.singleton_class? && Module === event.self ? event.self : owner # rubocop:disable Style/CaseEquality
+      internal_name(NAME_OF.bind_call(named))
     end
 
     def backing_name(mod)

@@ -35,6 +35,12 @@ RSpec.describe PluginBoundary do
       expect(reached(recorder).keys).to include(["Rigor::Inference::DeclarationWalk::Context", :root])
     end
 
+    it "fails on an instance method of an Inference object, whose receiver is no module" do
+      recorder.record { PluginBoundaryFixture::Offender.reach_inference_instance }
+
+      expect(reached(recorder).keys).to include(["Rigor::Inference::DeclarationWalk::Context", :nesting])
+    end
+
     it "makes check! raise, naming the plugin, the method and where it was called" do
       recorder.record { PluginBoundaryFixture::Offender.reach_scope(scope) }
 
@@ -56,6 +62,24 @@ RSpec.describe PluginBoundary do
       recorder.record { PluginBoundaryFixture::Clean.read(scope, node) }
 
       expect { described_class.check!(recorder) }.not_to raise_error
+    end
+
+    it "does not raise inside traced code on a BasicObject receiver" do
+      proxy = Class.new(BasicObject) { def ping = nil }.new
+
+      expect { recorder.record { proxy.ping } }.not_to raise_error
+      expect(recorder.calls).to be_empty
+    end
+
+    it "does not raise inside traced code on a class whose own name takes an argument" do
+      odd = Class.new { def self.name(_arg) = "odd"; def self.ping = nil } # rubocop:disable Style/Semicolon
+
+      expect { recorder.record { odd.ping } }.not_to raise_error
+    end
+
+    it "does not let instance-variable access through as Object protocol" do
+      expect(PluginBoundary::OBJECT_PROTOCOL)
+        .not_to include(:instance_variable_get, :instance_variable_set, :instance_variables)
     end
 
     it "attributes a call by its caller's path, so a call from the spec file itself is not a plugin's" do

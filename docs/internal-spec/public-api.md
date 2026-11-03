@@ -84,7 +84,9 @@ The interface member lists:
 
 Every hook position in `Plugin::Base` is typed against these, concrete
 `Prism` node classes, `Rigor::Type::t` and core types. A hook's `scope` is
-non-nil: the engine calls every scope-taking hook with a `Scope`. The v0.0.9 cluster grew per-namespace
+non-nil: the engine calls every scope-taking hook with a `Scope`.
+
+The v0.0.9 cluster grew per-namespace
 drift snapshots so future signature changes show up as test
 failures, not silent breakage.
 
@@ -145,7 +147,7 @@ pins instance and singleton method sets for:
   / `hash` / `to_h`). Spec'd in
   [`macro-substrate.md`](macro-substrate.md) § Template units.
 - `Rigor::Plugin::Services` — `reflection`, `type`, `configuration`,
-  `cache_store`, `trust_policy`, `io_boundary_for(plugin_id)`. Of these only
+  `fact_store`, `cache_store`, `trust_policy`, `io_boundary_for(plugin_id)`. Of these only
   the `_Services` members (`fact_store`, `configuration`, `reflection`,
   `type`) are plugin API; the rest are pinned as an internal change detector
   because no bundled plugin calls them through `services`.
@@ -176,7 +178,7 @@ backing class or on a module under `Rigor::Inference`, and fails the run on
 any that is neither declared by the interface, nor part of the
 `Object` / `Kernel` / `BasicObject` protocol, nor a row of its allow-list.
 Its coverage is whatever those specs exercise, and it covers bundled plugins
-only.
+only. Calls made in forked pool workers are not recorded.
 
 ## What is intentionally NOT yet locked
 

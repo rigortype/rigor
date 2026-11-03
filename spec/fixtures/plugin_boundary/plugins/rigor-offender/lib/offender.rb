@@ -18,6 +18,12 @@ module PluginBoundaryFixture
       Rigor::Inference::DeclarationWalk::Context.root(nesting: [])
     end
 
+    # An instance method of an Inference object: the receiver is no module, so only the class's ancestry says it
+    # is engine-internal.
+    def reach_inference_instance
+      Rigor::Inference::DeclarationWalk::Context.root(nesting: []).nesting
+    end
+
     def within_interface(scope, node)
       scope.type_of(node)
       scope.self_type

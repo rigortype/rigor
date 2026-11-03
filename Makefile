@@ -96,9 +96,12 @@ test-ractor-pool:
 #
 # The run also carries the ADR-128 WD4 plugin-boundary gate (RIGOR_PLUGIN_BOUNDARY, spec/support/plugin_boundary.rb): a
 # TracePoint that fails the run when a bundled plugin calls past the plugin-facing interfaces. It roughly doubles the
-# run, and spec/integration/examples/ joins it because the gate covers examples/ as well as plugins/.
+# run. spec/integration/examples/ is excluded from the default suite the same way, because the gate covers examples/
+# as well as plugins/. CI splits the run across jobs: PLUGIN_SHARD=I/N runs one deterministic slice of the files
+# (tool/plugin_integration_shard.rb); unset, it runs them all.
+PLUGIN_SHARD ?=
 test-integration-plugins:
-	RIGOR_PLUGIN_BOUNDARY=1 RIGOR_INCLUDE_INTEGRATION_PLUGINS=1 bundle exec rspec spec/integration/plugins/ spec/integration/examples/
+	RIGOR_PLUGIN_BOUNDARY=1 RIGOR_INCLUDE_INTEGRATION_PLUGINS=1 bundle exec rspec $$(bundle exec ruby tool/plugin_integration_shard.rb $(PLUGIN_SHARD))
 
 # Spec suite via `binpacker`, distributing files across worker
 # processes using LPT scheduling driven by measured per-file

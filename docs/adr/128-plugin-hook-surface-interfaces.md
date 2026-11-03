@@ -140,8 +140,11 @@ where every engine call site provably passes a `Scope`; otherwise it is `_Scope?
 - The `narrowing_facts` block returns the fact array `narrowing_facts_for` collects (`base.rb`
   ~L644); slice 1 declares its element type.
 - Diagnostic hooks return `Array[Rigor::Analysis::Diagnostic]`.
-- `services` becomes `_Services`: `fact_store`, `configuration`, `reflection` and `type`, each
-  narrowed to the members plugins call.
+- `services` becomes `_Services`: `fact_store`, `configuration`, `reflection` and `type`.
+  `fact_store` and `configuration` are narrowed to the members plugins call; `reflection` and `type` are
+  `singleton(Rigor::Reflection)` and `singleton(Rigor::Type::Combinator)`, because both are listed public
+  namespaces and a narrower interface would promise less than the constant path (slice 1's approval-queue
+  entry `adr128-plugin-interfaces`, PR #2714).
 - `config` becomes `Hash[String, untyped]`. Its values are schema-driven per plugin, and typing them
   precisely is out of scope.
 - `TypeNodeResolver` hooks receive a `TypeNode::NameScope`. `plugin.md` documents it, but

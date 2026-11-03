@@ -3,20 +3,20 @@
 require "spec_helper"
 require "prism"
 
-# #2708 — `Reflection.declarations_in`: the public facade over the engine's declaration walk, which `rigor-alba` and
+# #2708 — `Reflection.class_declarations_in`: the public facade over the engine's declaration walk, which `rigor-alba` and
 # `rigor-typelizer` read instead of `Rigor::Inference::DeclarationWalk`.
-RSpec.describe Rigor::Reflection, ".declarations_in" do
+RSpec.describe Rigor::Reflection, ".class_declarations_in" do
   def parse(source)
     Prism.parse(source).value
   end
 
   def declared(source)
-    described_class.declarations_in(parse(source)).map { |declaration| [declaration.name, declaration.nesting] }
+    described_class.class_declarations_in(parse(source)).map { |declaration| [declaration.name, declaration.nesting] }
   end
 
   def calls(source)
     seen = []
-    described_class.declarations_in(parse(source)) { |call, owner| seen << [call.name, owner] }
+    described_class.class_declarations_in(parse(source)) { |declared| seen << [declared.node.name, declared.owner] }
     seen
   end
 
@@ -50,14 +50,36 @@ RSpec.describe Rigor::Reflection, ".declarations_in" do
     end
 
     it "hands back the Prism::ClassNode, whose superclass and body the plugin reads" do
-      declaration = described_class.declarations_in(parse("class A < B; include M; end")).first
+      declaration = described_class.class_declarations_in(parse("class A < B; include M; end")).first
 
       expect(declaration.node).to be_a(Prism::ClassNode)
       expect(declaration.node.superclass.name).to eq(:B)
     end
 
-    it "reports no calls without a block" do
-      expect { described_class.declarations_in(parse("foo\nclass A; bar; end\n")) }.not_to raise_error
+    it "freezes the nesting, so a top-level declaration's cannot leak into another's" do
+      first, second = described_class.class_declarations_in(parse("class A; end\nclass B; end\n"))
+
+      expect(first.nesting).to be_frozen
+      expect { first.nesting << "Oops" }.to raise_error(FrozenError)
+      expect(second.nesting).to eq([])
+    end
+
+    it "freezes a nested declaration's nesting too" do
+      inner = described_class.class_declarations_in(parse("module M\n  class A; end\nend\n")).first
+
+      expect(inner.nesting).to be_frozen
+    end
+
+    it "dispatches no call event without a block, so a classes-only walk pays for none" do
+      collectors = nil
+      allow(Rigor::Inference::DeclarationWalk).to receive(:run).and_wrap_original do |original, root, run_collectors, context|
+        collectors = run_collectors
+        original.call(root, run_collectors, context)
+      end
+
+      described_class.class_declarations_in(parse("foo\nclass A; bar; end\n"))
+
+      expect(Rigor::Inference::DeclarationWalk::Collector.events_of(collectors.first.class)).to eq([:on_declaration])
     end
   end
 
@@ -91,10 +113,42 @@ end
       expect(calls("class A\n  class << self\n    class D\n      macro\n    end\n  end\nend\n")).to eq([[:macro, nil]])
     end
 
+    it "yields a DeclaredCall value whose fields are the node and the owner" do
+      declared = nil
+      described_class.class_declarations_in(parse("class A; macro; end")) { |value| declared ||= value }
+
+      expect(declared).to be_a(Rigor::Reflection::DeclaredCall)
+      expect(declared.node).to be_a(Prism::CallNode)
+      expect(declared.owner).to eq("A")
+    end
+
     it "keeps reporting the classes alongside the calls" do
-      declarations = described_class.declarations_in(parse("class A; x; end")) { |_call, _owner| nil }
+      declarations = described_class.class_declarations_in(parse("class A; x; end")) { |_declared| nil }
 
       expect(declarations.map(&:name)).to eq(["A"])
+    end
+  end
+
+  describe "the positions the block does not see" do
+    it "skips the calls in a class header's superclass expression" do
+      expect(calls("class Foo < Struct.new(:a, :b)\n  inside\nend\nclass Bar < Data.define(:a); end\n"))
+        .to eq([[:inside, "Foo"]])
+    end
+
+    it "skips a call in a class header's constant path" do
+      expect(calls("class foo::Bar\n  inside\nend\n").map(&:first)).to eq([:inside])
+    end
+
+    it "skips the tail of a constant write's factory call, but walks the block" do
+      expect(calls("K = Class.new { x }.freeze\n")).to eq([[:x, nil]])
+    end
+
+    it "skips the factory call of a constant write, but walks its arguments" do
+      expect(calls("class A\n  K = Class.new(base) { x }\nend\n")).to eq([[:base, "A"], [:x, "A"]])
+    end
+
+    it "skips the constant-path parent of a write target" do
+      expect(calls("class A\n  parent::K = Class.new { x }\nend\n")).to eq([[:x, "A"]])
     end
   end
 end

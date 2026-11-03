@@ -1,2 +1,0 @@
-- **[plugin API]** `Rigor::Reflection.declarations_in` walks a parsed file and returns the classes it declares as `Rigor::Reflection::ClassDeclaration` values (`name`, `nesting`, `node`), and with a block yields each call with the class or module it sits in ([#2763](https://github.com/rigortype/rigor/pull/2763)).
-  - `rigor-alba` and `rigor-typelizer` now use it instead of `Rigor::Inference::DeclarationWalk`, which stays internal; their behaviour is unchanged.

@@ -9,7 +9,7 @@ require_relative "serializer_index"
 module Rigor
   module Plugin
     class Typelizer < Rigor::Plugin::Base
-      # A collector over one file, built on {Rigor::Reflection.declarations_in}: the classes it declares, and
+      # A collector over one file, built on {Rigor::Reflection.class_declarations_in}: the classes it declares, and
       # whether each one's own body says `include Typelizer::DSL` / `extend Typelizer::DSL`.
       #
       # A `module` that includes the DSL is deliberately not recorded: typelizer registers the module's own
@@ -33,7 +33,7 @@ module Rigor
 
         # Walks `root` (a parsed file's `Prism::Node`) and records what it finds; answers the collector itself.
         def collect(root)
-          Rigor::Reflection.declarations_in(root).each { |declaration| record(declaration) }
+          Rigor::Reflection.class_declarations_in(root).each { |declaration| record(declaration) }
           self
         end
 

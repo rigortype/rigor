@@ -9,7 +9,7 @@ require_relative "resource_index"
 module Rigor
   module Plugin
     class Alba < Rigor::Plugin::Base
-      # A collector over one file, built on {Rigor::Reflection.declarations_in}: the classes it declares, whether
+      # A collector over one file, built on {Rigor::Reflection.class_declarations_in}: the classes it declares, whether
       # each `include Alba::Resource`s, and the association declarations whose resource class alba infers from
       # the name.
       #
@@ -40,7 +40,7 @@ module Rigor
 
         # Walks `root` (a parsed file's `Prism::Node`) and records what it finds; answers the collector itself.
         def collect(root)
-          Rigor::Reflection.declarations_in(root) { |node, owner| on_call(node, owner) }.each do |declaration|
+          Rigor::Reflection.class_declarations_in(root) { |call| on_call(call.node, call.owner) }.each do |declaration|
             @entries[declaration.name] = superclass_name(declaration.node.superclass)
             @nestings[declaration.name] = declaration.nesting
           end

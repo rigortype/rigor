@@ -294,11 +294,11 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
   ].freeze
 
   REFLECTION_SINGLETON = %w[
+    class_declarations_in(req:root,block:on_call)
     class_known?(req:class_name,key:scope)
     class_ordering(req:lhs,req:rhs,key:scope)
     class_type_param_names(req:class_name,key:scope,key:environment)
     constant_type_for(req:constant_name,key:scope)
-    declarations_in(req:root,block:on_call)
     discovered_class?(req:class_name,key:scope)
     discovered_method?(req:class_name,req:method_name,key:kind,key:scope)
     instance_definition(req:class_name,key:scope,key:environment)
@@ -315,7 +315,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     singleton_method_definition(req:class_name,req:method_name,key:scope,key:environment)
   ].freeze
 
-  # `Rigor::Reflection::ClassDeclaration` — the value `Reflection.declarations_in` returns (#2708), so a plugin reads a
+  # `Rigor::Reflection::ClassDeclaration` — the value `Reflection.class_declarations_in` returns (#2708), so a plugin reads a
   # class header's qualified name, `Module.nesting` and `Prism::ClassNode` without the engine's walk context.
   CLASS_DECLARATION_INSTANCE = %w[
     name()
@@ -329,6 +329,14 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     members()
     new(rest:)
   ].freeze
+
+  # `Rigor::Reflection::DeclaredCall` — the value `Reflection.class_declarations_in` yields per call (#2708).
+  DECLARED_CALL_INSTANCE = %w[
+    node()
+    owner()
+  ].freeze
+
+  DECLARED_CALL_SINGLETON = CLASS_DECLARATION_SINGLETON
 
   # `Rigor::Trinary` — the value `Reflection.project_method_defined` returns (ADR-128 WD1), so a plugin reads it
   # with `yes?` / `no?` / `maybe?` and combines it with `and` / `or` / `negate`.
@@ -913,6 +921,15 @@ RSpec.describe "Public API drift", :public_api_drift do
     end
   end
 
+  describe "Rigor::Reflection::DeclaredCall" do
+    it "exposes the expected value-object surface" do
+      expect(instance_signatures(Rigor::Reflection::DeclaredCall))
+        .to eq(PublicApiDriftSnapshots::DECLARED_CALL_INSTANCE)
+      expect(singleton_signatures(Rigor::Reflection::DeclaredCall))
+        .to eq(PublicApiDriftSnapshots::DECLARED_CALL_SINGLETON)
+    end
+  end
+
   describe "Rigor::Trinary" do
     it "exposes the expected value-object surface" do
       expect(instance_signatures(Rigor::Trinary)).to eq(PublicApiDriftSnapshots::TRINARY_INSTANCE)
@@ -1287,6 +1304,11 @@ RSpec.describe "Public API drift", :public_api_drift do
     it "covers Rigor::Reflection::ClassDeclaration members" do
       expect_sig_covers(class_name: "Rigor::Reflection::ClassDeclaration", kind: :instance,
                         snapshot: PublicApiDriftSnapshots::CLASS_DECLARATION_INSTANCE)
+    end
+
+    it "covers Rigor::Reflection::DeclaredCall members" do
+      expect_sig_covers(class_name: "Rigor::Reflection::DeclaredCall", kind: :instance,
+                        snapshot: PublicApiDriftSnapshots::DECLARED_CALL_INSTANCE)
     end
 
     it "covers Rigor::Trinary methods" do

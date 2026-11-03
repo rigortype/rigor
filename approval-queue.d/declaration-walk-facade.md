@@ -1,4 +1,4 @@
-# The plugin declaration-walk facade is `Reflection.declarations_in`, returning class values and yielding calls with a lexical owner
+# The plugin declaration-walk facade is `Reflection.class_declarations_in`, returning class values and yielding calls with a lexical owner
 
 - **PR:** [#2763](https://github.com/rigortype/rigor/pull/2763)
 - **Issue:** [#2708](https://github.com/rigortype/rigor/issues/2708)
@@ -20,7 +20,7 @@
 
 ## Decision
 
-`Rigor::Reflection.declarations_in(root) { |call, owner| ... } -> Array[ClassDeclaration]`, with `ClassDeclaration = Data.define(:name, :nesting, :node)`, classes only (no modules). It follows #2688's criterion: a plugin need met by a facade on a public namespace rather than by promoting an engine module.
+`Rigor::Reflection.class_declarations_in(root) { |call, owner| ... } -> Array[ClassDeclaration]`, with `ClassDeclaration = Data.define(:name, :nesting, :node)`, classes only (no modules). It follows #2688's criterion: a plugin need met by a facade on a public namespace rather than by promoting an engine module.
 
 ## To undo
 

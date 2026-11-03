@@ -109,22 +109,22 @@ pins instance and singleton method sets for:
   `constant_of`, `integer_range`, `positive_int`, `non_empty_string`,
   `lowercase_string`, `literal_string`, `union`, `intersection`,
   `difference`, `refined`, `key_of`, `value_of`, `indexed_access`, …).
-- `Rigor::Reflection` — every `class_known?`, `class_ordering`,
-  `class_type_param_names`, `constant_type_for`, `discovered_class?`,
-  `declarations_in`, `discovered_method?`, `instance_definition`,
+- `Rigor::Reflection` — every `class_declarations_in`, `class_known?`,
+  `class_ordering`, `class_type_param_names`, `constant_type_for`,
+  `discovered_class?`, `discovered_method?`, `instance_definition`,
   `instance_method_definition`, `nominal_for_name`, `project_method_defined`,
-  `rbs_class_known?`,
-  `singleton_definition`, `singleton_for_name`, `singleton_method_definition`.
+  `rbs_class_known?`, `singleton_definition`, `singleton_for_name`, `singleton_method_definition`.
   `project_method_defined(class_name, method_name, kind:, source:, scope:)`
   (ADR-128 WD1) is the ancestor question plugins used to ask through two
   `Scope` walks: it answers a `Rigor::Trinary`, and `maybe` exactly where
   the walk's ancestor budget ran out before it found a definer. See
   [`reflection.md`](reflection.md) § "Source-side discoveries".
-  `declarations_in(root) { |call, owner| … }` (#2708) is the per-file
+  `class_declarations_in(root) { |declared_call| … }` (#2708) is the per-file
   declaration walk: the classes a parsed file declares as
   `Rigor::Reflection::ClassDeclaration` values (`name`, `nesting`, `node`),
-  and, when given a block, every call with the name of the class or module
-  it sits in. It is the entry point `rigor-alba` and `rigor-typelizer` use
+  and, when given a block, the calls inside declaration bodies as
+  `Rigor::Reflection::DeclaredCall` values (`node`, `owner`: the class or
+  module the call sits in). It is the entry point `rigor-alba` and `rigor-typelizer` use
   in place of `Rigor::Inference::DeclarationWalk`, which stays internal.
 - `Rigor::Trinary` — the value `Reflection.project_method_defined` returns:
   `yes?` / `no?` / `maybe?`, `and`, `or`, `negate`, `value`, `==` and the
@@ -235,7 +235,7 @@ Plugin authors must NOT rely on:
   ClosureEscapeAnalyzer, CoverageScanner). These are the engine's
   internal mechanism; their shapes change as the inference surface
   evolves. The declaration walk (`Rigor::Inference::DeclarationWalk`) is
-  among them; a plugin asks `Rigor::Reflection.declarations_in` instead.
+  among them; a plugin asks `Rigor::Reflection.class_declarations_in` instead.
 - Any method of `Rigor::Scope`, `Rigor::Environment`, `Rigor::Plugin::Services`,
   `Rigor::Plugin::FactStore` or `Rigor::Configuration` that its interface
   above does not declare, and `Rigor::Plugin::TypeNodeResolver`'s

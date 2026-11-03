@@ -41,7 +41,7 @@ before a mutation through an unknown receiver loses its literal size and element
 nothing escapes keeps its answers exactly. Two fixture goldens moved (`loop_value`'s alias case now
 reads as the direct mutation does, and `aliased_mutation_receiver`'s `declared` takes one unknown
 store) and one remover-narrowing spec now reads the copied-from name as floored. #2621's holder scan
-is the precedent for reading object facts off a per-body escape scan. The engine cost (+1.13% allocations on the frozen corpus after round 2, inside the `bench-perf` band but over the 1% per-PR band) is reported on the PR for the maintainer's ruling, not decided here.
+is the precedent for reading object facts off a per-body escape scan. The engine cost after review round 1 is +0.77% allocations on the frozen corpus, inside both the 1% per-PR band and the `bench-perf` band.
 
 ## To undo
 

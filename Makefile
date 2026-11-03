@@ -102,8 +102,9 @@ test-ractor-pool:
 #
 # RIGOR_PLUGIN_BOUNDARY_REQUIRE_CALLS=1 makes the gate also fail a run that recorded no plugin->engine call. It is set
 # here, for the whole run and each CI shard, because a run that recorded nothing would otherwise pass for want of
-# anything to judge; the shard counts (25, 42, 58 calls) say a full run always records some. A narrow run of one spec
-# file, run through rspec directly, leaves it unset: an engine-silent plugin spec legitimately records no call.
+# anything to judge; the shard counts (25, 42, 58 calls) say a full run always records some, and that holds for CI's
+# 3-way split. A much finer PLUGIN_SHARD can isolate an engine-silent spec, which then fails. A narrow run of one spec
+# file, run through rspec directly, leaves the variable unset: an engine-silent plugin spec legitimately records no call.
 PLUGIN_SHARD ?=
 test-integration-plugins:
 	@files="$$(bundle exec ruby tool/plugin_integration_shard.rb $(PLUGIN_SHARD))" || exit 1; \

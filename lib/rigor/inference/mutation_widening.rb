@@ -304,6 +304,8 @@ module Rigor
         receiver = call_node.receiver
         return scope if receiver.nil?
 
+        # Issue #2335 — a block parameter, an element read or any other receiver that may be an outer local's object.
+        scope = AliasMutationFloor.floor_after_call(call_node, scope, except: captured_receiver_locals(receiver))
         widened = widen_outer_element_read(call_node, scope)
         return widened if widened
 
@@ -318,6 +320,17 @@ module Rigor
           # pinning is still justified (`out = [0]; arr.each { out << x }` never rewrites slot 0). The
           # straight-line paths have no such join, which is why their default is `:widen` (issue #560).
           widen_alias_read(call_node.name, read, acc, values: :keep, unread_arguments: !call_node.arguments.nil?)
+        end
+      end
+
+      # The outer locals a block-body receiver names, which the capture path below widens itself, and the outer root of
+      # an element read, whose element {#widen_outer_element_read} widens.
+      def captured_receiver_locals(receiver)
+        reads = ReceiverAlias.candidates(receiver)
+        root = ElementReadWidening.element_read_path(receiver)&.first
+        reads += [root] if root
+        reads.filter_map do |read|
+          read.name if read.is_a?(Prism::LocalVariableReadNode) && !ReceiverAlias.block_local?(read)
         end
       end
 

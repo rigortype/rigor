@@ -1951,15 +1951,51 @@ module Rigor
       # receiver is an element read into a local, that element's pin inside its container
       # ({ElementReadWidening.widen_element_read}, issue #643) — and, issue #2499, the String a stdlib
       # out-buffer call fills ({OutBufferMutation}), which names no receiver of the call at all.
+      #
+      # Issue #2335 — a literal-symbol `send` (`a.send(:push, x)`) widens as the call it makes, and a mutation through a
+      # receiver that may be another local's object floors every local whose object another holder may reach
+      # ({AliasMutationFloor}).
       def widen_mutated_receivers(call_node, current_scope)
+        call_node = AliasMutationFloor.literal_send_target(call_node) || call_node
         arg_types = mutator_arg_types(call_node, current_scope)
         widened = MutationWidening.widen_after_call(call_node: call_node, current_scope: current_scope,
                                                     arg_types: arg_types,
                                                     rewritten_element: rewritten_element(call_node, current_scope))
         widened = ElementReadWidening.widen_element_read(call_node: call_node, current_scope: widened,
                                                          arg_types: arg_types)
+        widened = AliasMutationFloor.floor_after_call(call_node, widened,
+                                                      except: named_receiver_locals(call_node.receiver))
         # Issue #2499 — a stdlib call that fills a String argument (`io.read(n, buf)`, `StringIO.new(s)`).
         OutBufferMutation.floor(call_node, widened)
+      end
+
+      # Issue #2335 — a call on a local that may hold another local's object (`box = Box.new(a)`) to a project method
+      # that mutates one of its instance variables (`def add(v) = @items << v`) may mutate that object: every local
+      # whose object another holder may reach takes one unknown store ({UnknownStoreWidening.callee_block_floor}).
+      def floor_ivar_mutating_callee(call_node, current_scope)
+        receiver = call_node.receiver
+        return current_scope unless receiver.is_a?(Prism::LocalVariableReadNode)
+        return current_scope if MutationWidening::SHAPE_MUTATORS.include?(call_node.name)
+        return current_scope unless AliasMutationFloor.reaches_other_locals?(current_scope, receiver.name)
+
+        callees = receiver_callees_in(scope, call_node)
+        return current_scope unless callees.any? { |def_node, _, _| AliasMutationFloor.mutates_ivar?(def_node) }
+
+        AliasMutationFloor.floor_after_written_local(current_scope, receiver.name) do |type|
+          UnknownStoreWidening.callee_block_floor(type)
+        end
+      end
+
+      # The locals a mutator's receiver names ({ReceiverAlias.mutated_reads}), which the named path widens, and the
+      # root of an element read (`c[0].shift`), whose element {ElementReadWidening} widens.
+      def named_receiver_locals(receiver)
+        return nil if receiver.nil?
+
+        names = ReceiverAlias.mutated_reads(receiver).filter_map do |read|
+          ReceiverAlias.read_name(read) if read.is_a?(Prism::LocalVariableReadNode)
+        end
+        root = ElementReadWidening.element_read_path(receiver)&.first
+        root ? names << root.name : names
       end
 
       # Issue #2427 — the element an element rewriter (`map!`, `collect!`, `flatten!`) leaves in its receiver, read
@@ -4543,6 +4579,7 @@ module Rigor
         # (e.g. `arms << x`, `@tags << hashtag`). Stops a literal-shape carrier (`Tuple` / `HashShape`) from outliving
         # its justification when the value is mutated. Always-safe (loses precision, never invents facts).
         post_scope = widen_mutated_receivers(node, post_scope)
+        post_scope = floor_ivar_mutating_callee(node, post_scope)
         # ADR-48 slice 4 — Struct member-setter re-typing. After `s.x = v` on a fold-safe StructInstance local, rebind
         # `s` to a StructInstance with member `:x` replaced by the assigned type, so a later `s.x` folds to `v` and a
         # sibling `s.y` stays precise. `call_type` is the setter's own result (the assigned value type). Sound only for
@@ -5774,12 +5811,15 @@ module Rigor
       end
 
       # `base_scope` with each local `node` passes to a parameter of `mutated` rebound to what the block answers for
-      # its binding; a nil answer, or an answer equal to the binding, leaves it.
+      # its binding; a nil answer, or an answer equal to the binding, leaves it. Issue #2335 — an argument that may be
+      # another local's object (a block parameter, a copy) floors every local another holder may reach the same way
+      # ({AliasMutationFloor}), a block-local one included.
       def floor_arguments(node, mutated, base_scope, offset, climbing = nil)
         arguments = arguments_for_slots(node, mutated, offset)
         return base_scope if arguments.empty?
 
         arguments.reduce(base_scope) do |acc, argument|
+          acc = AliasMutationFloor.floor_after_written_local(acc, argument.name) { |type| yield(type) }
           next acc unless acc.locals.key?(argument.name)
           next acc if climbing && argument.depth <= climbing
 
@@ -6755,7 +6795,7 @@ module Rigor
         args.arguments.any? do |arg|
           case arg
           when Prism::LocalVariableReadNode
-            scope.locals.key?(arg.name)
+            scope.locals.key?(arg.name) || AliasMutationFloor.reaches_other_locals?(scope, arg.name)
           when Prism::SplatNode
             arg.expression.is_a?(Prism::LocalVariableReadNode) && scope.locals.key?(arg.expression.name)
           when Prism::KeywordHashNode

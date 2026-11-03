@@ -60,9 +60,11 @@ RSpec.describe "a receivers-only dynamic_return rule and the &:symbol block path
         true
       end
       Dir.chdir(dir) do
-        Rigor::Analysis::Runner.new(
-          configuration: configuration, cache_store: nil, plugin_requirer: requirer
-        ).run
+        guarded_run(
+          Rigor::Analysis::Runner.new(
+            configuration: configuration, cache_store: nil, plugin_requirer: requirer
+          )
+        )
       end
     end
   end

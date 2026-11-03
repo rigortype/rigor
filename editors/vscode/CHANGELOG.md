@@ -60,8 +60,8 @@ the extension is versioned independently of the `rigortype` gem.
   **Rigor: Check for Rigor Update** and **Rigor: Clear Managed Rigor**.
   The Ruby search takes the first Ruby 4.0 with Bundler and OpenSSL,
   skips a preview or dev build unless `rigor.runtime.rubyPath` names it,
-  and tries the next one once when the build fails the way a broken Ruby
-  does; a `mise install ruby@4.0` in progress finishes when the window
+  and tries the next one once when the build fails because the Ruby
+  cannot load OpenSSL (never for a named `rubyPath`); a `mise install ruby@4.0` in progress finishes when the window
   closes.
 - Background update checks for the managed Rigor (#2746):
   `rigor.runtime.autoUpdate` (on by default) and

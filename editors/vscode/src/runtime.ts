@@ -116,6 +116,8 @@ interface RubyCandidate {
   ruby: string;
   bundler: string;
   version: string;
+  /** Named by `rigor.runtime.rubyPath`: never swapped for another. */
+  explicit?: boolean;
 }
 
 /** What a candidate Ruby answered, before it is accepted. */
@@ -155,6 +157,8 @@ let updateChecking = false;
  * in `globalState` (DECLINED_KEY), so no window asks again.
  */
 const updateOffered = new Set<string>();
+/** Versions whose restart offer the user answered this session. */
+const restartOffered = new Set<string>();
 /** The user's global extension state, shared by every window. */
 let globalState: ExtensionContext["globalState"] | undefined;
 /** Wall-clock time of the last background check by any window. */
@@ -356,7 +360,7 @@ async function findRuby(
   if (configured && !skip.has(realPath(resolveExecutable(configured)))) {
     const found = await probeRuby(configured, output);
     if (found && rubyQualifies(found, true)) {
-      return found;
+      return { ...found, explicit: true };
     }
     if (skip.size === 0) {
       void window.showWarningMessage(
@@ -861,7 +865,9 @@ function prune(keep: string): void {
       fs.rmSync(path.join(root, name), { force: true });
     }
   }
-  const others = installedVersions(true)
+  // A `dev` install is not counted in a production window (and not
+  // removed there either): the two kept are the newest releases.
+  const others = installedVersions()
     .map((m) => m.version)
     .filter((v) => v !== keep);
   for (const version of others.slice(KEEP_VERSIONS - 1)) {
@@ -972,9 +978,9 @@ async function installNow(
   }
   const repair = options.repair === true;
   const tried = new Set<string>();
-  // A build that fails the way a broken Ruby does (no OpenSSL, a native
-  // extension that will not compile) is tried once more with the next
-  // Ruby that qualifies.
+  // A build that fails the way a broken Ruby does (OpenSSL or another
+  // stdlib extension that does not load) is tried once more with the next
+  // Ruby that qualifies, unless the user named this one.
   for (let attempt = 0; attempt < 2; attempt++) {
     const found: RubyCandidate = ruby;
     tried.add(realPath(found.ruby));
@@ -990,7 +996,8 @@ async function installNow(
     if (result === "failed") {
       break;
     }
-    const next = attempt === 0 ? await findRuby(output, tried) : undefined;
+    const next =
+      attempt === 0 && !found.explicit ? await findRuby(output, tried) : undefined;
     if (!next) {
       break;
     }
@@ -999,16 +1006,20 @@ async function installNow(
     );
     ruby = next;
   }
-  showInstallFailed(output, version);
+  showInstallFailed(output, version, failureHint(lastBuildFailure));
   return "failed";
 }
 
-function showInstallFailed(output: OutputChannel, version: string): void {
+function showInstallFailed(
+  output: OutputChannel,
+  version: string,
+  hint: string,
+): void {
   const show = "Show Output";
   const guide = "Installation guide";
   void window
     .showErrorMessage(
-      `Rigor: installing rigortype ${version} failed. The Bundler output is in the Rigor output channel.`,
+      `Rigor: installing rigortype ${version} failed.${hint} The Bundler output is in the Rigor output channel.`,
       show,
       guide,
     )
@@ -1098,15 +1109,50 @@ async function installVersion(
 }
 
 /**
- * Whether `bundle install` output reads as the Ruby's fault rather than
- * the network's or the gem's: OpenSSL or another stdlib library missing
- * or built against something else, or a native extension that does not
- * build.
+ * What a failed `bundle install` says about its cause:
+ * - `ruby`: the Ruby itself is broken: OpenSSL or another stdlib
+ *   extension does not load, or was built against another library
+ *   version. Another Ruby may work.
+ * - `tls`: the HTTPS connection was refused (a certificate that does not
+ *   verify, usually a proxy or a missing CA bundle). Another Ruby would
+ *   fail the same way.
+ * - `compiler`: a native extension did not build (no compiler, no
+ *   headers). Likewise.
+ * Anything else (the network, the gem) is undefined.
  */
-export function looksLikeRubyProblem(text: string): boolean {
-  return /\bopenssl\b|LoadError|cannot load such file|incompatible library version|Gem::Ext::BuildError|Failed to build gem native extension/i.test(
-    text,
-  );
+export type BuildFailure = "ruby" | "tls" | "compiler";
+
+export function classifyBuildFailure(text: string): BuildFailure | undefined {
+  if (
+    /cannot load such file -- (openssl|zlib|psych|digest|etc|fiddle|io\/console)\b|incompatible library version|LoadError[^\n]*\b(openssl|zlib|psych|libssl|libcrypto|libyaml)\b/i.test(
+      text,
+    )
+  ) {
+    return "ruby";
+  }
+  if (/certificate verify failed|SSL_connect returned|OpenSSL::SSL::SSLError|unable to get local issuer certificate/i.test(text)) {
+    return "tls";
+  }
+  if (/Gem::Ext::BuildError|Failed to build gem native extension/i.test(text)) {
+    return "compiler";
+  }
+  return undefined;
+}
+
+/** What `classifyBuildFailure` found in the last build, for the message. */
+let lastBuildFailure: BuildFailure | undefined;
+
+function failureHint(failure: BuildFailure | undefined): string {
+  switch (failure) {
+    case "tls":
+      return " The HTTPS connection to rubygems.org failed certificate verification: check your proxy and CA certificate settings (for example SSL_CERT_FILE).";
+    case "compiler":
+      return " A native extension did not build: install a C compiler and build tools (on macOS, `xcode-select --install`).";
+    case "ruby":
+      return " The Ruby it used cannot load a standard library it needs (such as OpenSSL); set \"rigor.runtime.rubyPath\" to a working Ruby 4.0.";
+    default:
+      return "";
+  }
 }
 
 function showReplaceBlocked(version: string): void {
@@ -1127,6 +1173,7 @@ async function buildInto(
   progress: { report(value: { message?: string }): void },
   token: CancellationToken,
 ): Promise<BuildResult> {
+  lastBuildFailure = undefined;
   fs.mkdirSync(staging, { recursive: true });
   const gem = devGemPath
     ? `gem 'rigortype', path: ${rubyString(devGemPath)}`
@@ -1150,9 +1197,11 @@ async function buildInto(
     },
   );
   if (!installed) {
-    return !token.isCancellationRequested && looksLikeRubyProblem(captured)
-      ? "ruby-failed"
-      : "failed";
+    if (token.isCancellationRequested) {
+      return "failed";
+    }
+    lastBuildFailure = classifyBuildFailure(captured);
+    return lastBuildFailure === "ruby" ? "ruby-failed" : "failed";
   }
   progress.report({ message: "checking `rigor version`" });
   const printed = await new Promise<string | undefined>((resolve) => {
@@ -1208,6 +1257,11 @@ function rubyString(value: string): string {
 /** `rigor.runtime.version`, with `latest` resolved from rubygems.org. */
 async function targetVersion(): Promise<string> {
   const requested = requestedVersion();
+  if (requested === DEV_VERSION && !devGemPath) {
+    throw new Error(
+      `"rigor.runtime.version" is "${DEV_VERSION}", which only a development host with ${DEV_GEM_PATH_ENV} set installs; use latest or a release version`,
+    );
+  }
   if (requested !== "latest") {
     if (
       requested !== DEV_VERSION &&
@@ -1374,12 +1428,12 @@ async function offerMiseRuby(
     showNoRuby();
     return undefined;
   }
-  const running = recentMiseLog();
+  const running = runningMiseLog();
   if (running) {
     void window.showWarningMessage(
       "Rigor: a `mise install ruby@4.0` that a VS Code window started may " +
-        `still be running (its output is in ${running}). Wait for it to ` +
-        "finish, then try again.",
+        `still be running, or may have finished: check its log, ${running}. ` +
+        "When it has finished, try again.",
     );
     return undefined;
   }
@@ -1451,8 +1505,47 @@ function miseLogRecent(file: string): boolean {
   }
 }
 
+/**
+ * A log that has not grown for this long belongs to an install that
+ * ended (or was killed) without saying so. ruby-build compiles quietly
+ * for minutes at a time, so it is longer than one compile step.
+ */
+const MISE_LOG_QUIET_MS = 15 * 60 * 1000;
+
+/**
+ * Whether a mise log (its last few KiB, and how long since it last grew)
+ * reads as an install still running: it grew lately, and its tail does
+ * not show mise or ruby-build finishing, with success or an error.
+ */
+export function miseLogActive(tail: string, quietMs: number): boolean {
+  if (quietMs >= MISE_LOG_QUIET_MS) {
+    return false;
+  }
+  return !/Installed ruby-\S+ to|BUILD FAILED|\bmise\b[^\n]*\b(ERROR|error)\b|^\s*(ERROR|Error)\b|✓|\binstalled\b[^\n]*ruby@/im.test(
+    tail,
+  );
+}
+
+function miseLogTail(file: string): string {
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(file, "r");
+    const size = fs.fstatSync(fd).size;
+    const length = Math.min(size, 4096);
+    const buffer = Buffer.alloc(length);
+    fs.readSync(fd, buffer, 0, length, size - length);
+    return buffer.toString("utf8");
+  } catch {
+    return "";
+  } finally {
+    if (fd !== undefined) {
+      fs.closeSync(fd);
+    }
+  }
+}
+
 /** A mise log another install may still be writing, if any. */
-function recentMiseLog(): string | undefined {
+function runningMiseLog(): string | undefined {
   const root = runtimeRoot;
   if (!root) {
     return undefined;
@@ -1464,8 +1557,16 @@ function recentMiseLog(): string | undefined {
     return undefined;
   }
   return names
+    .filter((name) => MISE_LOG.test(name))
     .map((name) => path.join(root, name))
-    .find((file) => miseLogRecent(file));
+    .find((file) => {
+      try {
+        const quiet = Date.now() - fs.statSync(file).mtimeMs;
+        return miseLogActive(miseLogTail(file), quiet);
+      } catch {
+        return false;
+      }
+    });
 }
 
 /**
@@ -1796,13 +1897,14 @@ async function checkInBackground(output: OutputChannel): Promise<void> {
     installedVersions().map((m) => m.version),
     [...new Set(inUse.values())].map((dir) => path.basename(dir)),
     new Set([...updateOffered, ...declinedUpdates()]),
+    restartOffered,
   );
   if (decision.kind === "none") {
     return;
   }
   if (decision.kind === "restart") {
     if (await offerRestart()) {
-      updateOffered.add(decision.version);
+      restartOffered.add(decision.version);
     }
     return;
   }
@@ -1838,8 +1940,11 @@ async function checkInBackground(output: OutputChannel): Promise<void> {
   }
   updateOffered.add(decision.version);
   updateOffered.add(target);
-  if (result === "installed") {
-    await offerRestart();
+  if (result === "installed" && (await offerRestart())) {
+    const next = installedVersions()[0]?.version;
+    if (next) {
+      restartOffered.add(next);
+    }
   }
 }
 
@@ -1853,14 +1958,17 @@ export type UpdateDecision =
  * installed versions and those this window's servers run (both version
  * directory names): install it when nothing installed is that new;
  * offer a restart onto the newest installed version when that is at
- * least `latest` (another window updated) but not running; nothing for
- * a version already answered (`answered`).
+ * least `latest` (another window updated) but not running. `declined`
+ * (answered install offers, "Later" in any window included) suppresses
+ * only the install offer; once a version is installed its restart is
+ * offered until answered in this window (`restartAnswered`).
  */
 export function updateDecision(
   latest: string,
   installed: readonly string[],
   running: readonly string[],
-  answered: ReadonlySet<string>,
+  declined: ReadonlySet<string>,
+  restartAnswered: ReadonlySet<string>,
 ): UpdateDecision {
   if (running.length === 0) {
     return { kind: "none" };
@@ -1873,12 +1981,15 @@ export function updateDecision(
   }
   const newestInstalled = newest(installed);
   if (newestInstalled && compareVersions(newestInstalled, latest) >= 0) {
-    if (compareVersions(newestInstalled, newestRunning) <= 0 || answered.has(newestInstalled)) {
+    if (
+      compareVersions(newestInstalled, newestRunning) <= 0 ||
+      restartAnswered.has(newestInstalled)
+    ) {
       return { kind: "none" };
     }
     return { kind: "restart", version: newestInstalled };
   }
-  if (answered.has(latest)) {
+  if (declined.has(latest)) {
     return { kind: "none" };
   }
   return { kind: "install", version: latest, current: newestRunning };

@@ -390,8 +390,9 @@ Tiers, by what the machine has (`editors/vscode/src/runtime.ts`):
   `required_ruby_version`, which a gate keeps the extension's copy
   equal to; the first in that order with Bundler and OpenSSL wins, a
   prerelease, which `< 4.1` admits, only when `rigor.runtime.rubyPath`
-  names it, and a build that fails the way a broken Ruby does is tried
-  once more with the next).
+  names it, and a build that fails because the Ruby cannot load
+  OpenSSL or another standard library is tried once more with the next,
+  unless `rigor.runtime.rubyPath` named it).
   The extension writes a one-line `Gemfile`
   into its storage and runs `bundle install` with `BUNDLE_GEMFILE`,
   `BUNDLE_PATH` and `BUNDLE_IGNORE_CONFIG=1` set, dropping every
@@ -404,8 +405,8 @@ Tiers, by what the machine has (`editors/vscode/src/runtime.ts`):
   click, with a prompt that says mise applies the user's own settings
   (auto-prune among them) — then continues as A. Closing the window
   leaves that install running to completion, writing to a log file in
-  the storage, rather than killing it half-built; while that log is
-  recent no window starts another.
+  the storage, rather than killing it half-built; while that log still
+  grows and shows no end, no window starts another.
 - **C — neither.** The extension shows the installation guide and
   points at WD5's single binary
   ([#926](https://github.com/rigortype/rigor/issues/926)); when that

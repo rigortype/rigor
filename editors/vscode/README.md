@@ -71,8 +71,11 @@ every project:
   `rigor.runtime.rubyPath`, `ruby` on `PATH`, and the mise, rbenv,
   chruby and asdf install directories. It must carry Bundler and load
   OpenSSL; a preview or dev build is used only when
-  `rigor.runtime.rubyPath` names it. When the build fails the way a
-  broken Ruby does, the next Ruby that qualifies is tried once. The
+  `rigor.runtime.rubyPath` names it. When the build fails because the
+  Ruby cannot load OpenSSL or another standard library, the next Ruby
+  that qualifies is tried once (not when `rigor.runtime.rubyPath`
+  named it); a certificate error or a missing compiler is reported
+  with a hint instead. The
   extension runs `bundle install` for a one-line
   `Gemfile` (`gem 'rigortype', '= X'`), then starts the server as
   `ruby <bundle> exec rigor lsp` in the project. Bundler's config
@@ -90,8 +93,9 @@ every project:
   the only `mise` command the extension runs: it reads mise's files to
   find pins and Rubies. Closing the window does not stop it: it
   finishes on its own, writing its output to a
-  `.mise-install-<pid>.log` file in the extension's storage, and until
-  that log has been quiet for two hours no window starts another.
+  `.mise-install-<pid>.log` file in the extension's storage. While
+  that log is still growing and does not show mise finishing, no
+  window starts another; the message names the log.
 - **Neither** — the extension points you to the
   [installation guide](https://github.com/rigortype/rigor/blob/master/docs/install.md).
   A self-contained Rigor that needs no Ruby is tracked in

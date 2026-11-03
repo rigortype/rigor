@@ -367,6 +367,7 @@ module WC3
     SAVED = Hash.new { |h, k| h[k] = Hash.new(0.0) } # mode => "phase/class" => inclusive cpu of outermost hits
     XPH = Hash.new(0) # "mode:lookup<-store" => hits
     @depth = MODES.to_h { |m| [m, 0] }
+    @instr = 0.0
     @k1 = {}.compare_by_identity
     @k3 = {}.compare_by_identity
     @kv = {}.compare_by_identity
@@ -415,6 +416,7 @@ module WC3
 
       # rubocop:disable Metrics
       def call(scope, node)
+        t_in = cpu
         ph = PHASE_OF[WC.top]
         cls = node.class.name.delete_prefix("Prism::")
         key = "#{ph}/#{cls}"
@@ -467,15 +469,19 @@ module WC3
           @depth[m] += 1
         end
 
+        i0 = @instr
         t0 = cpu
+        @instr += t0 - t_in
         WC3.open_capture
         begin
           result = yield
         ensure
+          t1 = cpu
           WC3.close_capture
           fe = WC3.lfe
           fa = WC3.lfa
-          dt = cpu - t0
+          # the computation's own CPU, less the count bookkeeping of the calls nested in it
+          dt = (t1 - t0) - (@instr - i0)
           MODES.each { |m| @depth[m] -= 1 if hits[m] }
         end
         outer.each { |m| SAVED[m][key] += dt }
@@ -523,12 +529,14 @@ module WC3
           end
         end
         @ov[node] = [scope, vec] if esc_ok
+        @instr += cpu - t1
         result
       end
       # rubocop:enable Metrics
 
       def report
-        { by_phase_class: C.transform_values(&:dup), saved_cpu: SAVED.transform_values(&:dup), cross_phase: XPH.dup }
+        { by_phase_class: C.transform_values(&:dup), saved_cpu: SAVED.transform_values(&:dup), cross_phase: XPH.dup,
+          bookkeeping_cpu_s: @instr.round(3) }
       end
     end
   end

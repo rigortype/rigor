@@ -55,8 +55,61 @@ executable in this order:
    extension looks for a runtime-version-manager shim (e.g.
    `~/.local/share/mise/shims/rigor`) and uses it directly.
 
+5. The **managed Rigor**, when you installed one — see below.
+
 If none works, the extension shows an actionable message and stays
 loaded — fix the setup and run **Rigor: Restart Server**.
+
+### The managed Rigor (first-time setup)
+
+When no `rigor` is found, the not-found message offers **Install Rigor
+for this editor** (also **Rigor: Install Managed Rigor**). The
+extension then installs `rigortype` into its own storage, outside
+every project:
+
+- **A Ruby 4.0 is on the machine** — from `rigor.runtime.rubyPath`,
+  `ruby` on `PATH`, or the mise, rbenv, chruby and asdf install
+  directories. The extension runs `bundle install` for a one-line
+  `Gemfile` (`gem 'rigortype', '= X'`), then starts the server as
+  `ruby <bundle> exec rigor lsp` in the project. Bundler's config
+  files are ignored, and the inherited `BUNDLE_*`, `GEM_HOME`,
+  `GEM_PATH`, `RUBYOPT` and `RUBYLIB` variables are dropped, except
+  `BUNDLE_MIRROR__*`: a mirror set that way is still used. Only
+  `rigortype` is pinned; its dependencies resolve to their newest
+  matching releases when you install. Progress and
+  Bundler's output appear in the Rigor output channel. **Rigor: Show
+  Server Version** reports the kind as `managed`.
+- **No Ruby 4.0, but `mise`** — the extension offers to run
+  `mise install ruby@4.0` first. That installs Ruby into mise's own
+  store, and no file in the project changes, but mise applies your
+  own mise settings while it runs (an auto-prune, for example). It is
+  the only `mise` command the extension runs: it reads mise's files to
+  find pins and Rubies.
+- **Neither** — the extension points you to the
+  [installation guide](https://github.com/rigortype/rigor/blob/master/docs/install.md).
+  A self-contained Rigor that needs no Ruby is tracked in
+  [#926](https://github.com/rigortype/rigor/issues/926).
+
+The managed Rigor is the last thing discovery tries, so a `rigor` you
+install yourself wins over it; one that is found but does not run
+falls through to it. A project that pins `rigortype` — in
+`Gemfile.lock` or `.github/rigor/Gemfile.lock`, or in the `[tools]` of
+a `mise.toml` (or another mise config file) or `.tool-versions` at the
+project root or above it — is never served by it: install that pin
+instead. Your global mise or asdf config counts only while a
+rigortype is installed through it. Nothing is installed in an
+untrusted workspace, or without your click. When no folder has a
+`.rigor.yml` yet, the extension offers to create one with
+`rigor init`.
+
+`rigor.runtime.version` chooses the version (`latest` by default).
+**Rigor: Check for Rigor Update** installs a newer release, which
+takes effect when the server restarts. Every VS Code window shares
+the install: the extension keeps the newest two versions plus any
+version a window's server still runs, and **Rigor: Clear Managed
+Rigor** deletes them all. Clear stops this window's servers and starts
+them again; servers in other windows keep running from the deleted
+files and fail until those windows restart them.
 
 ### Runtime version managers (mise / asdf)
 
@@ -89,10 +142,12 @@ Use an absolute path — the setting is not `~`-expanded.
 | `rigor.server.useBundler` | `auto` | `auto` / `always` / `never`. |
 | `rigor.server.configPath` | `""` | Passed as `--config=PATH`. |
 | `rigor.server.logPath` | `""` | Passed as `--log=PATH`. |
+| `rigor.runtime.version` | `latest` | `rigortype` version of the managed Rigor; `latest` resolves the newest release on rubygems.org. |
+| `rigor.runtime.rubyPath` | `""` | Ruby 4.0 the managed Rigor is installed with. Empty searches `PATH` and the version managers' install directories. |
 | `rigor.trace.server` | `off` | JSON-RPC trace into the output channel. |
 
 `rootDir` and the `server.*` settings are per-folder; changing one
-restarts the server. The server runs in the project root, so a
+restarts the server. The `runtime.*` settings are user settings only. The server runs in the project root, so a
 relative `configPath` or `logPath` resolves against it.
 
 ## Commands
@@ -106,6 +161,8 @@ relative `configPath` or `logPath` resolves against it.
 - **Rigor: Check Workspace** — runs `rigor check` for the folder of the
   active editor (or asks which folder, when the editor has none of
   them). Its results go to the Problems panel, as described below.
+- **Rigor: Install Managed Rigor**, **Rigor: Check for Rigor Update**,
+  **Rigor: Clear Managed Rigor** — see *The managed Rigor* above.
 
 The status bar item's tooltip lists the same per-folder detail, and
 the output channel logs a startup summary (versions, root, command

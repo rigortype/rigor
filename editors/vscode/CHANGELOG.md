@@ -38,6 +38,22 @@ the extension is versioned independently of the `rigortype` gem.
   appear too.
 - **Rigor: Check Workspace**, which runs that task for the active
   editor's folder.
+- A **managed Rigor** for first-time users (#2725): when no `rigor` is
+  found, **Install Rigor for this editor** (or **Rigor: Install Managed
+  Rigor**) installs `rigortype` with an isolated `bundle install` into
+  the extension's storage, using a Ruby 4.0 found on the machine, or
+  one `mise install ruby@4.0` provides when you agree. It is the last
+  discovery kind (`managed`), is never used for a project that pins
+  `rigortype`, and installs nothing in an untrusted workspace or
+  without a click. A `rigor` on `PATH` or a shim that is found but
+  does not run falls through to an installed managed Rigor, and a
+  managed Rigor that does not run is offered a repair. When no folder
+  has a `.rigor.yml`, the extension offers `rigor init`. VS Code
+  windows share the install safely (a lock, an atomic rename, and no
+  pruning of a version another window runs). Without a Ruby 4.0 or
+  mise, the message points to the installation guide and #926. New settings
+  `rigor.runtime.version` and `rigor.runtime.rubyPath`; new commands
+  **Rigor: Check for Rigor Update** and **Rigor: Clear Managed Rigor**.
 
 ### Fixed
 

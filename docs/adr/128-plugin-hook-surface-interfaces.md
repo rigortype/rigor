@@ -48,8 +48,10 @@ may rely on, and how Rigor checks that they rely on nothing else. Today neither 
   2. A source-only plugin class does not take `Base`'s RBS types for DSL block parameters, override
      parameters or readers (#2681).
   3. With (1) and (2) worked around, typing `call_node` and `scope` adds 9 `call.argument-type-mismatch`
-     diagnostics, all on `scope.type_of(call_node.receiver)` right after a nil guard. They are false
-     positives: Prism node readers are not declared `%a{pure}`.
+     diagnostics, all on `scope.type_of(call_node.receiver)`. Eight follow a truthiness or `nil?` guard
+     and are false positives: such a guard on a method-call chain does not narrow its re-read (#2692;
+     the `%a{pure}` route the spec describes is not implemented, #2687). The ninth reads the receiver
+     unguarded, and the diagnostic is correct.
 
   That run found no call outside the draft surface on a scope a hook received directly. Every
   out-of-surface call sits in a helper that takes the scope as a plain parameter, or reads it from
@@ -226,10 +228,9 @@ the bleeding-edge overlay until the next hard break (ADR-50 Decision 3, WD2, WD7
    - The migrated plugins' integration specs pass unchanged.
    - A survey diff on the projects those plugins serve (Mastodon for `rigor-active-model-serializers`
      and `rigor-activerecord`, an RSpec-heavy target for `rigor-rspec`) shows no delta.
-2. **Slice 2:** declare Prism node readers `%a{pure}` through a Rigor-shipped overlay; Prism nodes
-   are effectively immutable after parsing. The overlay applies to every analysed project that uses
-   Prism, so its acceptance includes a corpus before/after run as well as removing the 9 false
-   positives.
+2. **Slice 2:** bundled plugins bind `call_node.receiver` to a local before guarding it, so the 9
+   false positives cannot appear when the types go live. Engine narrowing of guarded reader chains was
+   tried in #2690 and did not converge; it is #2692.
 3. **Slice 3:** #2681, then #929, make the types live, with WD6's `plugin.api-surface` rule in the
    bleeding-edge overlay, and WD5's interface-to-backing-class seam settled. Acceptance:
    - `make check-plugins` and `make check` report no new default-on diagnostic;
@@ -257,8 +258,8 @@ the bleeding-edge overlay until the next hard break (ADR-50 Decision 3, WD2, WD7
   other.
 - **Positive:** a plugin author gets typed hook arguments and a three-valued answer to the ancestor
   question, in place of a `respond_to?` guard on an internal walk.
-- **Negative:** the useful half, `check` reporting misuse in a plugin, waits on two engine issues and
-  the purity overlay. Even then it is opt-in until a hard break.
+- **Negative:** the useful half, `check` reporting misuse in a plugin, waits on two engine issues.
+  Even then it is opt-in until a hard break.
 - **Negative:** the WD4 gate is only as complete as the plugin specs' coverage, and it covers only
   bundled plugins.
 - **Carry-over:** `Inference::DeclarationWalk`'s plugin users need a facade or a tracked allow-list

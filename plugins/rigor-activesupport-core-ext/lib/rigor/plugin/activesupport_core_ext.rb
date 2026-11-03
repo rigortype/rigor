@@ -132,10 +132,12 @@ module Rigor
 
       dynamic_return methods: DURATION_MULTIPLIERS do |call_node, scope|
         next nil unless call_node.is_a?(Prism::CallNode)
-        next nil unless call_node.receiver # `day` with no receiver is somebody's own method
+
+        receiver = call_node.receiver
+        next nil unless receiver # `day` with no receiver is somebody's own method
         next nil unless call_node.arguments.nil?
         next nil unless call_node.block.nil?
-        next nil unless numeric_receiver?(scope&.type_of(call_node.receiver))
+        next nil unless numeric_receiver?(scope&.type_of(receiver))
 
         Rigor::Type::Combinator.nominal_of(DURATION_NOMINAL)
       end
@@ -200,7 +202,11 @@ module Rigor
         argument_kind = duration_operand_kind(scope&.type_of(argument))
         next nil if argument_kind.nil?
 
-        receiver_kind = duration_operand_kind(scope&.type_of(call_node.receiver))
+        receiver = call_node.receiver
+        # Prism gives every parsed `+` / `-` / `*` call a receiver; the guard is for the RBS `Node?` type.
+        next nil if receiver.nil?
+
+        receiver_kind = duration_operand_kind(scope&.type_of(receiver))
         next nil if receiver_kind.nil?
 
         duration_arithmetic_result(call_node.name, receiver_kind, argument_kind)
@@ -210,11 +216,13 @@ module Rigor
       # member; see {SymbolizeKeys}. The RBS rows answer `Hash[untyped, V]` wherever this declines.
       dynamic_return methods: %i[symbolize_keys to_options] do |call_node, scope|
         next nil unless call_node.is_a?(Prism::CallNode)
-        next nil unless call_node.receiver
+
+        receiver = call_node.receiver
+        next nil unless receiver
         next nil unless call_node.arguments.nil?
 
         # A block is ignored by `symbolize_keys`, so it does not decline.
-        SymbolizeKeys.result(scope&.type_of(call_node.receiver), scope)
+        SymbolizeKeys.result(scope&.type_of(receiver), scope)
       end
 
       # ADR-88 WD1 — both tables are static and the RBS bundle ships with the gem; nothing here reads a

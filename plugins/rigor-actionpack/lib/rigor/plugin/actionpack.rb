@@ -580,9 +580,12 @@ module Rigor
       # Issue #2430 — the chain on a `params[...]` carrier (`params[:user].permit(:name)`). The result stays
       # a `Dynamic` of the same nominal, so it crosses a declared boundary as the carrier does.
       dynamic_return methods: STRONG_PARAMS_CHAIN_METHODS do |call_node, scope|
-        next nil unless call_node.is_a?(Prism::CallNode) && call_node.receiver
+        next nil unless call_node.is_a?(Prism::CallNode)
+
+        receiver = call_node.receiver
+        next nil unless receiver
         next nil unless controller_scope?(scope)
-        next nil unless params_carrier_facet?(scope.type_of(call_node.receiver))
+        next nil unless params_carrier_facet?(scope.type_of(receiver))
 
         Rigor::Type::Combinator.dynamic(Rigor::Type::Combinator.nominal_of(REQUEST_CONTEXT_READER_TYPES[:params]))
       end
@@ -620,9 +623,12 @@ module Rigor
       # receiver. These two rules gate on the carrier's facet instead, and only inside a controller: a
       # carrier is minted by the `params` reader, which is controller-only, so no other scope can hold one.
       dynamic_return methods: %i[[]] do |call_node, scope|
-        next nil unless call_node.is_a?(Prism::CallNode) && call_node.receiver
+        next nil unless call_node.is_a?(Prism::CallNode)
+
+        receiver = call_node.receiver
+        next nil unless receiver
         next nil unless controller_scope?(scope)
-        next nil unless params_carrier_facet?(scope.type_of(call_node.receiver))
+        next nil unless params_carrier_facet?(scope.type_of(receiver))
 
         params_read_type
       end

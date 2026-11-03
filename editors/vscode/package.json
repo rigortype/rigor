@@ -51,6 +51,12 @@
           "scope": "resource",
           "description": "Enable the Rigor language server for this workspace folder."
         },
+        "rigor.rootDir": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "markdownDescription": "Subdirectory of the workspace folder that holds the Rigor project, for example `api` when `.rigor.yml` lives in `api/`. The server runs there, and Ruby files outside it get no Rigor features. Leave empty to use the workspace folder itself."
+        },
         "rigor.server.path": {
           "type": "string",
           "default": "",
@@ -107,6 +113,11 @@
       {
         "command": "rigor.showOutputChannel",
         "title": "Show Output Channel",
+        "category": "Rigor"
+      },
+      {
+        "command": "rigor.showServerVersion",
+        "title": "Show Server Version",
         "category": "Rigor"
       },
       {

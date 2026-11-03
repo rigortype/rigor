@@ -15,7 +15,9 @@ exposes settings, and surfaces lifecycle state.
 | Diagnostics | Type errors in the Problems panel and as inline squiggles, on every keystroke (200 ms debounced). `source: "rigor"`, severity- and rule-coded. |
 | Hover | Type-aware tooltip — receiver type + RBS signature for calls, FQN + singleton type for constants, narrowed type for locals. |
 | Completion | Method completion after `.`, constant-path completion after `::`, driven by the inferred receiver type. |
+| Signature help | Parameter list of the method being called, after `(` and `,`. |
 | Outline | Class / module / method tree in the Outline view, breadcrumbs, and symbol search. |
+| Folding and selection | Folding ranges for classes, methods and blocks; Expand / Shrink Selection by syntax node. |
 
 ## Requirements
 
@@ -32,7 +34,10 @@ exposes settings, and surfaces lifecycle state.
 
 - A **Rigor config** (`.rigor.yml` or `.rigor.dist.yml`) at the
   project root. The extension only starts a server for folders that
-  have a config file or pin `rigortype` in `Gemfile.lock`.
+  have a config file or pin `rigortype` in `Gemfile.lock`. When the
+  project lives in a subdirectory (a monorepo's `api/`), set
+  `rigor.rootDir`; the extension offers to when it finds a nested
+  config.
 
 The extension does **not** bundle the gem and does **not** provide
 Ruby syntax highlighting — keep your existing Ruby grammar extension.
@@ -79,24 +84,35 @@ Use an absolute path — the setting is not `~`-expanded.
 | Setting | Default | Description |
 |---|---|---|
 | `rigor.enable` | `true` | Enable the server for the folder. |
+| `rigor.rootDir` | `""` | Subdirectory holding the Rigor project (such as `api`). Empty uses the folder itself. |
 | `rigor.server.path` | `""` | Explicit `rigor` executable path. |
 | `rigor.server.useBundler` | `auto` | `auto` / `always` / `never`. |
 | `rigor.server.configPath` | `""` | Passed as `--config=PATH`. |
 | `rigor.server.logPath` | `""` | Passed as `--log=PATH`. |
 | `rigor.trace.server` | `off` | JSON-RPC trace into the output channel. |
 
-`server.*` settings are per-folder; changing one restarts the server.
+`rootDir` and the `server.*` settings are per-folder; changing one
+restarts the server. The server runs in the project root, so a
+relative `configPath` or `logPath` resolves against it.
 
 ## Commands
 
 - **Rigor: Restart Server**
 - **Rigor: Show Output Channel**
+- **Rigor: Show Server Version** — the extension version, and for each
+  folder the `rigortype` version, how `rigor` was found, and its state.
+  Include it in a bug report.
 - **Rigor: Show Server Log** (when `rigor.server.logPath` is set)
+
+The status bar item's tooltip lists the same per-folder detail, and
+the output channel logs a startup summary (versions, root, command
+line) for each server.
 
 ## Multi-root workspaces
 
 The v1 language server is single-root, so the extension runs one
-server per Rigor-configured folder. A file outside every such folder
+server per Rigor-configured folder, and each server is sent only the
+Ruby files under its own project root. A file outside every such root
 gets no diagnostics.
 
 ## Coexistence with other Ruby tooling

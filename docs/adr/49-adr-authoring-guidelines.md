@@ -149,7 +149,7 @@ an ADR number. The README row and the `Status:` header both keep their
 existing status word; see `docs/adr/README.md` § "How to Read" and
 [ADR-97](97-adr-index-budgets.md) WD2.
 
-**Reading hazards (a diagnostic aid, not a rule).** Five recurring things
+**Reading hazards (a diagnostic aid, not a rule; added 2026-11-03).** Five recurring things
 make an ADR hard to follow. They are symptoms to look for while scoring;
 each names the axis it docks, and none is a gate, a checklist item, or a
 reason to rewrite an ADR that already reads well. The list is drawn from
@@ -160,14 +160,11 @@ contradict axes 3 and 6.
 
 | Hazard | Looks like | Axis | What stays fine here |
 | --- | --- | --- | --- |
-| **Plan or backlog in the decision** | A task table, a per-ticket owner or status column, or a schedule in the body — stale once the work lands. | 6, 8 | The `Status:` block's "what landed in which version, what remains" is the sanctioned bookmark (axis 6). |
-| **Cannot be read alone** | The problem stated as a hypothetical ("if some caller were to…") instead of the case that happened; a ground that lives only in a chat or meeting. | 1, 5 | Linking a `docs/notes/` note or an issue as grounding is correct; the ADR still states the case in a sentence. |
-| **Decision carries the mechanism** | Ask: *would swapping the realization force a rewrite of this sentence?* If yes, the sentence is an anchor, not the decision. | 2, 3 | Anchors (symbol, file, approx. line) are what axis 3 rewards. Keep them, in a code-anchor line or a WD, not in the sentence that states the criterion. |
+| **Plan or backlog in the decision** | Open to-do, in-progress or owner state, or a schedule, in the body — stale once the work lands. | 6, 8 | A record of what landed (a slice or staging log, a per-slice "landed" column) is history, not backlog; so is the `Status:` block's "what landed in which version, what remains" (axis 6). |
+| **Cannot be read alone** | A hypothetical offered where a real case exists; a ground that lives only in a chat or meeting. | 1, 5 | A soundness or false-positive argument over a program shape not yet observed is the case itself. Linking a `docs/notes/` note or an issue as grounding is correct; the ADR still states the case in a sentence. |
+| **Decision carries the mechanism** | Ask: *would swapping the realization force a rewrite of this sentence?* If yes, the sentence is an anchor, not the decision. | 2, 8 | Anchors (symbol, file, approx. line) are what axis 3 rewards; this hazard never docks it. Keep them in a code-anchor line or a WD, not in the sentence that states the criterion. When the ADR's subject is the representation or mechanism itself, the mechanism is the decision. |
 | **Dangling delegation** | "Out of scope; left to X" or "see the spec" where X does not exist, or a deferral with no re-evaluation trigger. | 4, 7 | A deferral to a named issue or ADR is a guardrail, not a gap. |
-| **Ambiguous cross-reference** | Citing another ADR's decision by paraphrase or by line number alone, so a later edit leaves the pointer unresolved. | 7 | Name the WD or the section heading. A `file:line` beside the symbol is fine, never instead of it. |
-
-Illustrate a hazard with an invented example, never a live ADR: citing a real
-ADR as the bad example pins its flaw in the record.
+| **Ambiguous cross-reference** | Citing another ADR's decision by paraphrase or by line number alone, so a later edit leaves the pointer unresolved. | 7 | A WD, a section heading or a named symbol resolves it; so does a paraphrase that names the ADR and its relation. A `file:line` beside the symbol is fine. |
 
 ### 4. Scoring & the don't-over-penalize rule
 

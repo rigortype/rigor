@@ -137,8 +137,8 @@ RSpec.describe "a mutation through another holder floors the locals it may reach
     end
 
     it "floors nothing for a method parameter a callee writes" do
-      source = 'def poke(a) = a[0] = "x"; def m(p); r = gets.to_s.split; @k = r; @j = p; poke(p); dump_type(r); end'
-      expect(dumped(source)).to eq(["Array[String]"])
+      source = 'def poke(a) = a[0] = "x"; def m(p); r = [1].dup; @k = r; @j = p; poke(p); dump_type(r); end'
+      expect(dumped(source)).to eq(["[1]"])
     end
 
     it "keeps an escaped literal String when the receiver is another new String" do

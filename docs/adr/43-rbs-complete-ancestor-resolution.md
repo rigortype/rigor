@@ -1,6 +1,6 @@
 # ADR-43 — RBS-complete ancestor resolution (allow-list inherited-method dispatch)
 
-Status: **Accepted — fully landed (WD1–WD7), 2026-06-03.** WD7 and the `rbs_complete_extends:` half of WD4 landed with #1097. Rejected alternative A is partially
+Status: **Accepted — fully landed (WD1–WD7), 2026-06-03.** WD7 and the `rbs_complete_extends:` half of WD4 landed with #1097. WD8 (block, override and reader positions) amended 2026-11-04 with #2681. Rejected alternative A is partially
 superseded by [ADR-114](114-core-stdlib-ancestor-dispatch.md) (2026-09-20), which narrows it to the
 gem case and keeps this ADR's allow-list as the bypass of its declines.
 Lets `rigor check` resolve a Ruby-source subclass's *inherited* method calls
@@ -216,6 +216,31 @@ RBS omits.
   diagnostic on a project method. The table is why the extend bridge is
   not a plugin-only recogniser: the same ordering is load-bearing for any
   future `rbs_complete_extends:` consumer.
+
+- **WD8 — The bridge covers parameter positions and readers, not only calls
+  (amended 2026-11-04, #2681).** WD1–WD3 frame the bridge around a call's return,
+  existence and arity. The contract a plugin is written against also has
+  parameter positions: the parameters of a block passed to a class-body DSL
+  call (`dynamic_return`, `narrowing_facts`, `node_rule`, `node_file_context`),
+  the parameters of an overriding hook `def` (`diagnostics_for_file(path:,
+  scope:, root:)`), and the inherited readers (`services`, `config`). With a
+  typed `base.rbs` (ADR-128) these stayed `Dynamic[top]` in every source-only
+  plugin class, so the declared hook types never reached plugin code; an empty
+  RBS declaration of each plugin class was the only workaround. Two changes
+  close it, both bounded by the same allow-list:
+  (1) the allow-listed ancestor's own source `def` no longer counts as a nearer
+  definer. This repository's plugin check discovers `lib/rigor/plugin/base.rb`,
+  so every member Base defines in Ruby withheld the bridge, which is why a
+  class-body `manifest` typed `Dynamic[top] | Rigor::Plugin::Manifest` and the
+  block-parameter probe, which already read the bridge, found nothing.
+  (2) `MethodParameterBinder` binds an overriding `def` from the declaration it
+  overrides: the bridge's resolution with the class's own definition set aside,
+  every other decline kept. `initialize` is excluded, because a constructor does
+  not override its superclass's contract. A source subclass of a class off the
+  allow-list (`< ActionController::Base`) keeps `Dynamic[top]` in every one of
+  these positions. Binding contract:
+  [`inference-engine.md`](../internal-spec/inference-engine.md) § "Inherited
+  resolution into an RBS ancestor" and § "Method Parameter Binding".
 
 ## Rejected / deferred alternatives
 

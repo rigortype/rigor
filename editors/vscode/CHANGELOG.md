@@ -23,6 +23,31 @@ the extension is versioned independently of the `rigortype` gem.
 - Workspace-trust gating — the server is not started in restricted
   mode.
 - Extension icon (`icon.png`, from the Rigor branding asset).
+- `rigor.rootDir`, for a Rigor project in a subdirectory of the
+  workspace folder. When a folder has no root config but a nested
+  one, the extension says so and offers to set it, instead of
+  activating and staying silent.
+- **Rigor: Show Server Version**, a per-folder status bar tooltip
+  (state, `rigortype` version, discovery kind, command line), and a
+  startup summary in the output channel.
+
+### Fixed
+
+- Overlapping starts, restarts and folder or trust changes no longer
+  spawn two servers for one folder: lifecycle operations now run one
+  at a time.
+- On stop or restart, a server that has not exited after `shutdown`
+  is killed together with the worker processes it forked (on Windows,
+  the `ruby.exe` behind the `cmd.exe` wrapper). A start that does not
+  answer `initialize` within 60 s is abandoned the same way instead of
+  blocking every later restart.
+- Creating or deleting a Rigor config re-syncs the managed folders,
+  and a folder whose `rigor version` probe fails is reported once per
+  restart rather than on every sync.
+- In a multi-root workspace each server is sent only the Ruby files
+  under its own folder, not every Ruby file in the window.
+- **Rigor: Show Server Log** reads the setting of the active editor's
+  folder (or asks) instead of always the first folder.
 
 ### Known limitations
 

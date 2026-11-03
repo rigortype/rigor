@@ -45,22 +45,51 @@ export function hasRigorConfig(folderPath: string): boolean {
 }
 
 /**
+ * The directory that holds the folder's Rigor project: the folder itself,
+ * or `rigor.rootDir` resolved against it. Returns undefined when the
+ * setting points outside the folder, so a typo cannot root a server in an
+ * unrelated directory.
+ */
+export function projectRoot(folder: WorkspaceFolder): string | undefined {
+  const cfg = workspace.getConfiguration("rigor", folder.uri);
+  const rootDir = (cfg.get<string>("rootDir") ?? "").trim();
+  const folderPath = folder.uri.fsPath;
+  if (!rootDir) {
+    return folderPath;
+  }
+  const resolved = path.resolve(folderPath, rootDir);
+  const relative = path.relative(folderPath, resolved);
+  if (
+    relative === ".." ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative)
+  ) {
+    return undefined;
+  }
+  return resolved;
+}
+
+/**
  * Decide whether the extension should manage a language client for this
  * workspace folder. We only start a server where there is positive
  * evidence the project uses Rigor — a config file, the gem in the
  * lockfile, or an explicit server path — so non-Rigor folders in a
- * multi-root workspace stay silent.
+ * multi-root workspace stay silent. The evidence is looked for in the
+ * project root (`rigor.rootDir`), not necessarily the folder root.
  */
 export function shouldManageFolder(folder: WorkspaceFolder): boolean {
   const cfg = workspace.getConfiguration("rigor", folder.uri);
   if (!cfg.get<boolean>("enable", true)) {
     return false;
   }
+  const root = projectRoot(folder);
+  if (!root || !fs.existsSync(root)) {
+    return false;
+  }
   if ((cfg.get<string>("server.path") ?? "").trim()) {
     return true;
   }
-  const folderPath = folder.uri.fsPath;
-  return hasRigorConfig(folderPath) || lockfileHasRigortype(folderPath);
+  return hasRigorConfig(root) || lockfileHasRigortype(root);
 }
 
 /** Resolve which executable to spawn for a folder. */
@@ -74,7 +103,8 @@ export function resolveServer(folder: WorkspaceFolder): ResolvedServer {
   const mode = cfg.get<BundlerMode>("server.useBundler", "auto");
   const useBundler =
     mode === "always" ||
-    (mode === "auto" && lockfileHasRigortype(folder.uri.fsPath));
+    (mode === "auto" &&
+      lockfileHasRigortype(projectRoot(folder) ?? folder.uri.fsPath));
 
   if (useBundler) {
     return { kind: "bundler", command: "bundle", prefixArgs: ["exec", "rigor"] };

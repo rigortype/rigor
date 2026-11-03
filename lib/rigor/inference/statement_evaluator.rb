@@ -1980,6 +1980,7 @@ module Rigor
         return current_scope unless receiver.is_a?(Prism::LocalVariableReadNode)
         return current_scope if MutationWidening::SHAPE_MUTATORS.include?(call_node.name) || send_hand_off?(call_node)
         return current_scope unless callee_bearing?(current_scope.local(receiver.name))
+        return current_scope unless AliasMutationFloor.project_method_name?(scope, call_node.name)
         return current_scope unless AliasMutationFloor.reaches_other_locals?(current_scope, receiver.name, call_node)
 
         callees = receiver_callees_in(scope, call_node)
@@ -1996,6 +1997,7 @@ module Rigor
       # root of an element read (`c[0].shift`), whose element {ElementReadWidening} widens.
       def named_receiver_locals(receiver)
         return nil if receiver.nil?
+        return receiver.name if receiver.is_a?(Prism::LocalVariableReadNode)
 
         names = ReceiverAlias.mutated_reads(receiver).filter_map do |read|
           ReceiverAlias.read_name(read) if read.is_a?(Prism::LocalVariableReadNode)

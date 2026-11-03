@@ -56,11 +56,12 @@ module Rigor
         Prism::LocalVariableAndWriteNode
       ].freeze
       ALL = :all
+      NO_ARGUMENTS = [].freeze
       # A run-scoped slot ({RunScopedSlots}): emptied when a run ends, so no verdict outlives the body it read.
       UNSAFE_CACHE_KEY = RunScopedSlots.register(:__rigor_remover_narrowing_unsafe)
       private_constant :REFLECTIVE_CALLS, :SELF_CONVERSIONS, :PURE_READERS, :IMMEDIATE_BLOCK_CALLS, :FRAME_CALLS,
                        :ANY_RECEIVER_FRAME_CALLS, :NON_WRITER_OPERATORS, :CORE_COLLECTIONS,
-                       :LOCAL_REFERENCES, :LOCAL_WRITES, :ALL, :UNSAFE_CACHE_KEY
+                       :LOCAL_REFERENCES, :LOCAL_WRITES, :ALL, :NO_ARGUMENTS, :UNSAFE_CACHE_KEY
 
       module_function
 
@@ -113,7 +114,9 @@ module Rigor
         when Prism::CallNode then record_call(node, names)
         when Prism::YieldNode, Prism::SuperNode then node.arguments&.arguments&.each { |a| record_held(a, names) }
         when Prism::ArrayNode then node.elements.each { |element| record_held(element, names) }
-        when Prism::AssocNode then [node.key, node.value].each { |part| record_held(part, names) }
+        when Prism::AssocNode
+          record_held(node.key, names)
+          record_held(node.value, names)
         when Prism::SplatNode, Prism::BlockArgumentNode then record_held(node.expression, names)
         when Prism::CaseMatchNode then record_pattern(node.predicate, node.conditions, names)
         when Prism::MatchRequiredNode, Prism::MatchPredicateNode then record_pattern(node.value, [node.pattern], names)
@@ -127,7 +130,7 @@ module Rigor
 
         receiver = unparenthesised(node.receiver)
         names << receiver.name if receiver.is_a?(Prism::LocalVariableReadNode) && REFLECTIVE_CALLS.include?(node.name)
-        arguments = node.arguments&.arguments || []
+        arguments = node.arguments&.arguments || NO_ARGUMENTS
         if writer_call?(node) && !arguments.empty?
           *keys, value = arguments
           keys.each { |key| record_held(key, names) }

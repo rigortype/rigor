@@ -46,7 +46,7 @@ module Rigor
       # `escapes` maps each aliased local to the earliest offset its handing-on may run from ({.handed_by}), or is
       # {ALL}; `deferred` lists the `[start, end)` ranges of the closures that may run later.
       # `memo` keeps each call's answer ({.call_targets}) for the run: a loop or block body is evaluated more than once.
-      Facts = Data.define(:escapes, :foreign, :entry, :deferred, :memo)
+      Facts = Data.define(:escapes, :foreign, :entry, :deferred, :memo, :named_memo)
       EMPTY = Set.new.freeze
       ALWAYS = -1
       LOOPS = [Prism::WhileNode, Prism::UntilNode, Prism::ForNode, Prism::BlockNode, Prism::LambdaNode].freeze
@@ -124,8 +124,10 @@ module Rigor
       IVAR_CACHE_KEY = RunScopedSlots.register(:__rigor_alias_mutation_floor_ivar_mutators)
       FLOOR_CACHE_KEY = RunScopedSlots.register(:__rigor_alias_mutation_floor_callee_floors)
       STORE_CACHE_KEY = RunScopedSlots.register(:__rigor_alias_mutation_floor_unknown_stores)
+      PROJECT_NAMES_KEY = RunScopedSlots.register(:__rigor_alias_mutation_floor_project_names)
       private_constant :ALWAYS, :LOOPS, :ALL, :NUMBERED_PARAMETER, :SEND_NAMES, :ELEMENT_READS, :FACTS_CACHE_KEY,
-                       :IVAR_CACHE_KEY, :FLOOR_CACHE_KEY, :STORE_CACHE_KEY
+                       :IVAR_CACHE_KEY, :FLOOR_CACHE_KEY, :STORE_CACHE_KEY,
+                       :PROJECT_NAMES_KEY
 
       module_function
 
@@ -220,6 +222,19 @@ module Rigor
       # Whether the body of `def_node` runs a shape mutator on one of its own instance variables or an element of one
       # (`@items << v`, `@h[k] = v`, `@rows[0] << v`): a call to it on an object that holds another local's object
       # (`box = Box.new(a)`, whose `initialize` keeps `@items = a`) may mutate that object. A nested def is not entered.
+      # Whether any project class or module defines a method `name`, instance or singleton side: a call by any other
+      # name resolves no project def, so {StatementEvaluator#floor_ivar_mutating_callee} skips the resolution. Memoised
+      # per discovery and name for the run.
+      def project_method_name?(scope, name)
+        table = (Thread.current[PROJECT_NAMES_KEY] ||= {}.compare_by_identity)
+        per_discovery = (table[scope.discovery] ||= {})
+        per_discovery.fetch(name) do
+          per_discovery[name] = [scope.discovered_def_nodes, scope.discovered_singleton_def_nodes].any? do |defs|
+            defs.each_value.any? { |per_class| per_class.key?(name) }
+          end
+        end
+      end
+
       def mutates_ivar?(def_node)
         return false if def_node.nil?
 
@@ -276,12 +291,13 @@ module Rigor
         result = RemoverHolderScan.unsafe_names(body, parameters, collector)
         if result.equal?(ALL)
           foreign, entry = ForeignLocals.collect(body, parameters)
-          return Facts.new(escapes: ALL, foreign:, entry:, deferred: [].freeze, memo: {}.compare_by_identity)
+          return Facts.new(escapes: ALL, foreign:, entry:, deferred: [].freeze, memo: {}.compare_by_identity,
+                           named_memo: {}.compare_by_identity)
         end
 
         foreign, entry = ForeignLocals.finish(parameters, collector.foreign, collector.written)
         Facts.new(escapes: collector.escapes.freeze, foreign:, entry:, deferred: collector.deferred.freeze,
-                  memo: {}.compare_by_identity)
+                  memo: {}.compare_by_identity, named_memo: {}.compare_by_identity)
       end
 
       # A site's key ({SiteCollector}) is the start of the outermost loop or block that holds it (it may run again after
@@ -298,7 +314,9 @@ module Rigor
       # The targets of `call_node` (through its receiver when `name` is nil, else through the local `name` it writes),
       # computed once per call site.
       def call_targets(facts, call_node, name)
-        per_call = (facts.memo[call_node] ||= {})
+        return facts.memo.fetch(call_node) { facts.memo[call_node] = yield } if name.nil?
+
+        per_call = (facts.named_memo[call_node] ||= {})
         per_call.fetch(name) { per_call[name] = yield }
       end
 
@@ -353,10 +371,11 @@ module Rigor
         except.is_a?(Symbol) ? except == name : except&.include?(name)
       end
 
+      def each_target(scope, targets) = targets.equal?(ALL) ? scope.locals.keys : targets
+
       # Each target but `except` takes what the block answers for its binding.
       def floor_targets(scope, targets, except)
-        names = targets.equal?(ALL) ? scope.locals.keys : targets
-        names.reduce(scope) do |acc, name|
+        each_target(scope, targets).reduce(scope) do |acc, name|
           next acc if excepted?(except, name)
 
           current = acc.local(name)

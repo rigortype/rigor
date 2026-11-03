@@ -556,5 +556,37 @@ module Rigor
         super
       end
     end
+
+    # Issue #2685 — name-keyed readings of whole discovery tables for `Inference::AttributeReaderChain`, kept in the
+    # index's own file because they read whole tables (the admission census's table owners), and outside the class so
+    # they do not grow its surface.
+    module DiscoveryCensus
+      # The `discovered_def_nodes` owner key of a top-level `def` (`ScopeIndexer::TOP_LEVEL_DEF_KEY`).
+      TOP_LEVEL_DEF_KEY = "<toplevel>"
+
+      module_function
+
+      # The instance-method names the project defines by a route other than a class or module `def`: every name
+      # `discovered_methods` records on an owner whose def table does not hold it (`define_method`, `attr_*`, an
+      # alias without a `def`), and every name in the top-level def table (a top-level `def`, and the singleton
+      # `def obj.m` the walk files there).
+      def non_def_instance_method_names(index)
+        names = Set.new
+        index.discovered_methods.each do |owner, methods|
+          defs = index.discovered_def_nodes[owner]
+          methods.each { |name, kind| names << name.to_sym unless kind == :singleton || defs&.key?(name) }
+        end
+        index.discovered_def_nodes[TOP_LEVEL_DEF_KEY]&.each_key { |name| names << name.to_sym }
+        names.freeze
+      end
+
+      # The classes and modules whose method table the project rewrites beyond the names it spells, or refines
+      # ({DiscoveryIndex.rewritten_surface?}).
+      def rewritten_surface_owners(index)
+        index.discovered_parameter_envelopes.filter_map do |owner, bucket|
+          owner if DiscoveryIndex.rewritten_surface?(bucket)
+        end.freeze
+      end
+    end
   end
 end

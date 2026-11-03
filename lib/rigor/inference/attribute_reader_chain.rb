@@ -30,8 +30,7 @@ module Rigor
     # qualify; that is a follow-up, not part of this rule.
     module AttributeReaderChain
       ATTRIBUTE_MEMBERS = [::RBS::AST::Members::AttrReader, ::RBS::AST::Members::AttrAccessor].freeze
-      TOP_LEVEL_DEF_KEY = "<toplevel>"
-      private_constant :ATTRIBUTE_MEMBERS, :TOP_LEVEL_DEF_KEY
+      private_constant :ATTRIBUTE_MEMBERS
 
       CENSUS_KEY = RunScopedSlots.register(:__rigor_attribute_reader_chain_census__)
       private_constant :CENSUS_KEY
@@ -186,25 +185,29 @@ module Rigor
         node.rigor_each_child { |child| collect_lambdas(child, closures) }
       end
 
-      LOCAL_NODES = [Prism::LocalVariableReadNode, Prism::LocalVariableWriteNode, Prism::LocalVariableTargetNode,
-                     Prism::LocalVariableOperatorWriteNode, Prism::LocalVariableOrWriteNode,
-                     Prism::LocalVariableAndWriteNode].freeze
-      IVAR_NODES = [Prism::InstanceVariableReadNode, Prism::InstanceVariableWriteNode,
-                    Prism::InstanceVariableTargetNode, Prism::InstanceVariableOperatorWriteNode,
-                    Prism::InstanceVariableOrWriteNode, Prism::InstanceVariableAndWriteNode].freeze
-      private_constant :LOCAL_NODES, :IVAR_NODES
-
       def mentioned?(key, closures)
-        kinds = key.receiver_kind == :local ? LOCAL_NODES : IVAR_NODES
-        closures.any? { |closure| mentions?(closure, kinds, key.receiver_name) }
+        closures.any? { |closure| mentions?(closure, key.receiver_kind, key.receiver_name) }
       end
 
-      def mentions?(node, kinds, name)
+      def mentions?(node, kind, name)
         return false unless node.is_a?(Prism::Node)
-        return true if kinds.any? { |klass| node.is_a?(klass) } && node.name == name
+        return true if variable_named?(node, kind, name)
 
-        node.rigor_each_child { |child| return true if mentions?(child, kinds, name) }
+        node.rigor_each_child { |child| return true if mentions?(child, kind, name) }
         false
+      end
+
+      def variable_named?(node, kind, name)
+        case node
+        when Prism::LocalVariableReadNode, Prism::LocalVariableWriteNode, Prism::LocalVariableTargetNode,
+             Prism::LocalVariableOperatorWriteNode, Prism::LocalVariableOrWriteNode, Prism::LocalVariableAndWriteNode
+          kind == :local && node.name == name
+        when Prism::InstanceVariableReadNode, Prism::InstanceVariableWriteNode, Prism::InstanceVariableTargetNode,
+             Prism::InstanceVariableOperatorWriteNode, Prism::InstanceVariableOrWriteNode,
+             Prism::InstanceVariableAndWriteNode
+          kind == :ivar && node.name == name
+        else false
+        end
       end
 
       def self_call_inside?(node)
@@ -226,22 +229,9 @@ module Rigor
         built
       end
 
-      def redefined_names(discovery)
-        names = Set.new
-        def_nodes = discovery.discovered_def_nodes
-        discovery.discovered_methods.each do |owner, methods|
-          defs = def_nodes[owner]
-          methods.each { |name, kind| names << name.to_sym unless kind == :singleton || defs&.key?(name) }
-        end
-        def_nodes[TOP_LEVEL_DEF_KEY]&.each_key { |name| names << name.to_sym }
-        names.freeze
-      end
+      def redefined_names(discovery) = Scope::DiscoveryCensus.non_def_instance_method_names(discovery)
 
-      def rewritten_owners(discovery)
-        discovery.discovered_parameter_envelopes.filter_map do |owner, bucket|
-          owner if Scope::DiscoveryIndex.rewritten_surface?(bucket)
-        end.freeze
-      end
+      def rewritten_owners(discovery) = Scope::DiscoveryCensus.rewritten_surface_owners(discovery)
     end
   end
 end

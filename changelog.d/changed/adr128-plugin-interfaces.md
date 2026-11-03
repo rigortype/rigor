@@ -1,0 +1,4 @@
+- **[plugin API]** The plugin contract now names what a hook may call on the engine objects it receives: `Rigor::Plugin::_Scope`, `_Environment`, `_Services`, `_FactStore` and `_Configuration` replace `Rigor::Scope` and `Rigor::Environment` in `docs/internal-spec/public-api.md`, and `Plugin::Base`'s hook signatures are typed against them ([#2714](https://github.com/rigortype/rigor/pull/2714)).
+  - Nothing changes at runtime: a call past an interface still works, but only the interface members are promised across releases. `_Scope` carries `type_of`, `self_type`, `local`, `source_path` and `environment`.
+  - `Rigor::Scope`'s other pinned methods and `Plugin::Services`' `cache_store`, `trust_policy` and `io_boundary_for` are an internal change detector now, not a promise.
+  - A spec-only gate fails the bundled plugin integration run when a plugin calls past an interface.

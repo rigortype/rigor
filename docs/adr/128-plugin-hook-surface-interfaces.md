@@ -48,9 +48,10 @@ may rely on, and how Rigor checks that they rely on nothing else. Today neither 
   2. A source-only plugin class does not take `Base`'s RBS types for DSL block parameters, override
      parameters or readers (#2681).
   3. With (1) and (2) worked around, typing `call_node` and `scope` adds 9 `call.argument-type-mismatch`
-     diagnostics, all on `scope.type_of(call_node.receiver)` right after a nil guard. They are false
-     positives: a truthiness guard on a method-call chain does not narrow its re-read (#2692; the
-     `%a{pure}` route the spec describes is not implemented, #2687).
+     diagnostics, all on `scope.type_of(call_node.receiver)`. Eight follow a truthiness or `nil?` guard
+     and are false positives: such a guard on a method-call chain does not narrow its re-read (#2692;
+     the `%a{pure}` route the spec describes is not implemented, #2687). The ninth reads the receiver
+     unguarded, and the diagnostic is correct.
 
   That run found no call outside the draft surface on a scope a hook received directly. Every
   out-of-surface call sits in a helper that takes the scope as a plain parameter, or reads it from

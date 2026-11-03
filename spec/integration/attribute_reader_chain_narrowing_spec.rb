@@ -172,8 +172,8 @@ RSpec.describe "attribute-reader chain narrowing on truthiness and nil? guards (
   end
 
   describe "the edge that does not remove nil" do
-    # Guard: the falsey arm keeps the declared `Integer?`, so a later test of the reader is not folded.
-    it "leaves the falsey arm of a truthiness guard at the declared type" do
+    # The falsey arm keeps the declared `Integer?`, so a later test of the reader there is not folded to a constant.
+    it "leaves the falsey arm of a truthiness guard at the declared type and narrows the truthy one" do
       expect(dumps(<<~RUBY)).to eq(["dump_type: Integer?", "dump_type: Integer"])
         def f(x, s, y = nil)
           unless x.r

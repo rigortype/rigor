@@ -33,15 +33,10 @@ module Rigor
       def attribute_read?(call_node, scope)
         receiver_type = scope.type_of(call_node.receiver)
         members = receiver_type.is_a?(Type::Union) ? receiver_type.members : [receiver_type]
-        owners = members.reject { |member| nil_member?(member) }
+        owners = members.reject { |member| member.is_a?(Type::Constant) && member.value.nil? }
         return false if owners.empty?
 
         owners.all? { |member| attribute_owner?(member, call_node.name, scope) }
-      end
-
-      def nil_member?(member)
-        (member.is_a?(Type::Constant) && member.value.nil?) ||
-          (member.is_a?(Type::Nominal) && member.class_name == "NilClass")
       end
 
       def attribute_owner?(member, method_name, scope)

@@ -2638,10 +2638,7 @@ module Rigor
           return nil unless AttributeReaderChain.attribute_read?(chain_call, scope)
 
           current = scope.type_of(chain_call)
-          narrowed = yield(current)
-          return nil if narrowed.is_a?(Type::Bot)
-
-          [*address, narrowed]
+          [*address, yield(current)]
         end
 
         # Returns `[receiver_kind, receiver_name, method_name]` iff `chain_call` is a stable

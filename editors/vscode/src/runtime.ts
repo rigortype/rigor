@@ -17,17 +17,20 @@
 //
 // - An install or a clear holds `runtime/.lock`: created exclusively,
 //   re-read to confirm ownership, its timestamp refreshed every minute
-//   while held, and removed only by its owner. A lock whose process is
-//   gone, or whose heartbeat stopped LOCK_STALE_MS ago, is stale.
+//   of wall-clock time while held (and at once after the machine wakes)
+//   through a descriptor whose contents carry the owner's token, and
+//   removed only by its owner. A lock whose process is gone, or whose
+//   heartbeat stopped LOCK_STALE_MS ago, is stale.
 // - An install builds in `runtime/.tmp-*` and renames the finished
 //   directory, manifest included, into place, so another window never
 //   sees a half-installed version.
 // - A window running a managed server leaves a marker named by its
-//   extension host's pid in `<version>/.in-use/`, touched hourly and
-//   removed when it stops using the version. Pruning skips a version with
-//   a live marker (this window's included); a repair does not replace a
-//   version another window runs. Only Clear deletes a version in use, and
-//   says so.
+//   extension host's pid in `<version>/.in-use/`, touched hourly (and
+//   after a wake) and removed when it stops using the version. Pruning
+//   skips a version with a live marker (this window's included); a repair
+//   does not replace a version another window, or another folder of this
+//   one, runs, and checks that before it builds. Only Clear deletes a
+//   version in use, and says so.
 
 import { ChildProcess, execFile, spawn } from "child_process";
 import * as fs from "fs";
@@ -56,9 +59,12 @@ const CONFIG_GUIDE_URL =
 const SINGLE_BINARY_URL = "https://github.com/rigortype/rigor/issues/926";
 const LATEST_URL = "https://rubygems.org/api/v1/versions/rigortype/latest.json";
 /**
- * `rigortype.gemspec`'s `required_ruby_version`, copied by hand (#2755).
+ * `rigortype.gemspec`'s `required_ruby_version`, copied by hand;
+ * `spec/docs/vscode_required_ruby_sync_spec.rb` fails when they differ,
+ * and reads this line, so keep it one array of string literals.
  * The candidate Ruby checks `Gem.ruby_version` against it, which carries
- * a prerelease marker (`4.0.0.preview2`), so RubyGems' own rules decide.
+ * a prerelease marker (`4.0.0.preview2`), so RubyGems' own rules decide;
+ * `findRuby` then skips a prerelease, which `< 4.1` admits.
  */
 const REQUIRED_RUBY = [">= 4.0.0", "< 4.1"];
 /** Installed versions kept on disk besides any a window still uses. */
@@ -75,6 +81,17 @@ const LOCK_STALE_MS = 5 * 60 * 1000;
 const MARKER_TOUCH_MS = 60 * 60 * 1000;
 /** A marker untouched this long belongs to a window that died uncleanly. */
 const MARKER_STALE_MS = 24 * 60 * 60 * 1000;
+/**
+ * How often the lock and marker timers wake to read the wall clock. A
+ * timer runs on the monotonic clock, which on macOS stops while the
+ * machine sleeps; the wall clock does not, so after a wake the lock or a
+ * marker can look stale to another window until it is refreshed. Each
+ * probe refreshes when the wall clock says the interval is up, or when
+ * it jumped (a wake), so a refresh follows a wake within this time.
+ */
+const WAKE_PROBE_MS = 10 * 1000;
+/** A probe this much later on the wall clock than scheduled was a sleep. */
+const DRIFT_SLACK_MS = 5 * 1000;
 /**
  * Development override: install `rigortype` from a local checkout
  * (`gem 'rigortype', path: ...`) instead of rubygems.org, to test the
@@ -101,14 +118,41 @@ interface RubyCandidate {
   version: string;
 }
 
+/** What a candidate Ruby answered, before it is accepted. */
+export interface RubyProbe extends RubyCandidate {
+  /** `Gem.ruby_version.prerelease?`: a preview, rc or dev build. */
+  prerelease: boolean;
+}
+
 let runtimeRoot: string | undefined;
 let devGemPath: string | undefined;
 let installing: Promise<boolean> | undefined;
-/** The running `bundle install` / `mise install`, killed on deactivate. */
+/**
+ * The running `bundle install` / `mise install`. On deactivate a
+ * `bundle install` is killed; a `mise install` is left to finish.
+ */
 let activeChild: ChildProcess | undefined;
+/** Set while `activeChild` writes to a log file and outlives the window. */
+let activeChildDetaches: { commandLine: string; logFile: string } | undefined;
 /** Folder key → the version directory its managed server runs from. */
 const inUse = new Map<string, string>();
-let markerTimer: NodeJS.Timeout | undefined;
+let stopMarkerTimer: (() => void) | undefined;
+/** The output channel, once the commands are registered. */
+let runtimeOutput: OutputChannel | undefined;
+let updateTimer: NodeJS.Timeout | undefined;
+let updateChecking = false;
+/** Wall-clock time of the last background update check. */
+let lastUpdateCheck = 0;
+/** Versions already announced this session: each is offered once. */
+const updateOffered = new Set<string>();
+
+function log(line: string): void {
+  try {
+    runtimeOutput?.appendLine(line);
+  } catch {
+    // The channel is disposed while the window closes.
+  }
+}
 
 /** Where managed versions live. Called once from `activate`. */
 export function initRuntime(context: ExtensionContext): void {
@@ -261,10 +305,16 @@ function bundleEnv(dir: string, frozen: boolean): NodeJS.ProcessEnv {
 
 const RUBY_PROBE = [
   `req = Gem::Requirement.new(${REQUIRED_RUBY.map((r) => JSON.stringify(r)).join(", ")})`,
-  'print RUBY_VERSION, "\\n", req.satisfied_by?(Gem.ruby_version), "\\n", RbConfig.ruby, "\\n", (Gem.bin_path("bundler", "bundle") rescue "")',
+  'print RUBY_VERSION, "\\n", req.satisfied_by?(Gem.ruby_version), "\\n", RbConfig.ruby, "\\n", (Gem.bin_path("bundler", "bundle") rescue ""), "\\n", Gem.ruby_version.prerelease?',
 ].join("; ");
 
-/** The first Ruby 4.0 that also carries Bundler, or undefined. */
+/**
+ * The Ruby to install with, or undefined. `rigor.runtime.rubyPath` wins
+ * when it qualifies, prerelease or not: naming one is a choice.
+ * Otherwise every candidate is asked and the newest release that
+ * qualifies is taken. A prerelease (`4.1.0.preview1`, `4.1.0.dev`)
+ * satisfies the gemspec's `< 4.1` by RubyGems' rules, so it is skipped.
+ */
 async function findRuby(
   output: OutputChannel,
 ): Promise<RubyCandidate | undefined> {
@@ -282,16 +332,44 @@ async function findRuby(
     );
   }
   const candidates = rubyCandidates();
+  const probes: RubyProbe[] = [];
   for (const candidate of candidates) {
     const found = await probeRuby(candidate, output);
     if (found) {
-      return found;
+      probes.push(found);
     }
+  }
+  for (const skipped of probes.filter((p) => p.prerelease)) {
+    output.appendLine(
+      `[rigor] ${skipped.ruby}: Ruby ${skipped.version} is a prerelease; ` +
+        'name it in "rigor.runtime.rubyPath" to use it',
+    );
+  }
+  const picked = pickRuby(probes);
+  if (picked) {
+    return picked;
   }
   output.appendLine(
     `[rigor] no Ruby ${REQUIRED_RUBY.join(", ")} with Bundler among: ${candidates.join(", ")}`,
   );
   return undefined;
+}
+
+/**
+ * The newest release among the qualifying probes; on a tie the one asked
+ * first (`ruby` on PATH comes first). A prerelease never qualifies here.
+ */
+export function pickRuby(probes: readonly RubyProbe[]): RubyProbe | undefined {
+  let best: RubyProbe | undefined;
+  for (const probe of probes) {
+    if (probe.prerelease) {
+      continue;
+    }
+    if (!best || compareVersions(probe.version, best.version) > 0) {
+      best = probe;
+    }
+  }
+  return best;
 }
 
 /**
@@ -335,21 +413,21 @@ function rubyCandidates(): string[] {
 async function probeRuby(
   candidate: string,
   output: OutputChannel,
-): Promise<RubyCandidate | undefined> {
+): Promise<RubyProbe | undefined> {
   // From the home directory, so a version-manager shim on PATH answers
   // with the user's default Ruby rather than the project's.
   const out = await run(candidate, ["-e", RUBY_PROBE], 15000, os.homedir());
   if (out === undefined) {
     return undefined;
   }
-  const [version, satisfied, ruby, bundler] = out.split("\n");
+  const [version, satisfied, ruby, bundler, prerelease] = out.split("\n");
   if (satisfied !== "true" || !ruby || !bundler) {
     output.appendLine(
       `[rigor] ${candidate}: Ruby ${version ?? "?"}${satisfied === "true" ? " without Bundler" : ""} does not qualify`,
     );
     return undefined;
   }
-  return { version, ruby, bundler };
+  return { version, ruby, bundler, prerelease: prerelease === "true" };
 }
 
 function miseDataDir(): string {
@@ -422,16 +500,10 @@ async function withLock<T>(task: () => Promise<T>): Promise<T | undefined> {
   fs.mkdirSync(root, { recursive: true });
   const lock = path.join(root, LOCK);
   const token = `${process.pid}-${Math.random().toString(36).slice(2)}`;
-  const write = (flag: string): void =>
-    fs.writeFileSync(
-      lock,
-      JSON.stringify({ pid: process.pid, token, at: Date.now() }),
-      { flag },
-    );
   let held = false;
   for (let attempt = 0; attempt < 2 && !held; attempt++) {
     try {
-      write("wx");
+      fs.writeFileSync(lock, lockBody(token), { flag: "wx" });
       // Two windows that both judged the old lock stale may both have
       // removed it; only the one whose token is in the file owns it.
       held = readLock(lock)?.token === token;
@@ -451,19 +523,104 @@ async function withLock<T>(task: () => Promise<T>): Promise<T | undefined> {
     );
     return undefined;
   }
-  const heartbeat = setInterval(() => {
-    if (readLock(lock)?.token === token) {
-      write("w");
-    }
-  }, LOCK_HEARTBEAT_MS);
+  const stopHeartbeat = wallClockTimer(LOCK_HEARTBEAT_MS, () =>
+    withOwnedLock(lock, token, (fd) => {
+      const body = Buffer.from(lockBody(token));
+      fs.writeSync(fd, body, 0, body.length, 0);
+      fs.ftruncateSync(fd, body.length);
+    }),
+  );
   try {
     return await task();
   } finally {
-    clearInterval(heartbeat);
-    if (readLock(lock)?.token === token) {
-      fs.rmSync(lock, { force: true });
-    }
+    stopHeartbeat();
+    withOwnedLock(lock, token, (fd) => {
+      // Unlink only the file the token was read from: a lock another
+      // window created after judging this one stale stays.
+      if (fs.statSync(lock).ino === fs.fstatSync(fd).ino) {
+        fs.rmSync(lock, { force: true });
+      }
+    });
   }
+}
+
+function lockBody(token: string): string {
+  return JSON.stringify({ pid: process.pid, token, at: Date.now() });
+}
+
+/**
+ * Run `action` on an open descriptor of the lock file when the contents
+ * read through it carry `token`. Reading and writing the same descriptor
+ * means a window that judged the lock stale, removed it and created its
+ * own (a new file) is never overwritten: a write after that lands in the
+ * unlinked file. The residue is the steal itself, which can happen only
+ * when the heartbeat is older than LOCK_STALE_MS (see `wallClockTimer`).
+ */
+function withOwnedLock(
+  lock: string,
+  token: string,
+  action: (fd: number) => void,
+): void {
+  let fd: number;
+  try {
+    fd = fs.openSync(lock, "r+");
+  } catch {
+    return;
+  }
+  try {
+    const contents = JSON.parse(fs.readFileSync(fd, "utf8")) as LockContents;
+    if (contents.token === token) {
+      action(fd);
+    }
+  } catch {
+    // Unreadable, or gone meanwhile: not ours to touch.
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/**
+ * Whether a wall-clock timer probing at `now` should refresh: the
+ * interval is up by the wall clock since `lastRefresh`, or the probe
+ * came late (`lastTick` more than WAKE_PROBE_MS + DRIFT_SLACK_MS ago) or
+ * before the previous one, so the machine slept or the clock was set.
+ */
+export function refreshDue(
+  now: number,
+  lastTick: number,
+  lastRefresh: number,
+  intervalMs: number,
+): boolean {
+  const sinceTick = now - lastTick;
+  return (
+    now - lastRefresh >= intervalMs ||
+    sinceTick > WAKE_PROBE_MS + DRIFT_SLACK_MS ||
+    sinceTick < 0
+  );
+}
+
+/**
+ * Call `refresh` every `intervalMs` of wall-clock time, and at once after
+ * a wake. Returns the function that stops it. Unreferenced: it never
+ * keeps the extension host alive.
+ */
+function wallClockTimer(intervalMs: number, refresh: () => void): () => void {
+  let lastTick = Date.now();
+  let lastRefresh = lastTick;
+  const timer = setInterval(() => {
+    const now = Date.now();
+    if (refreshDue(now, lastTick, lastRefresh, intervalMs)) {
+      lastRefresh = now;
+      try {
+        refresh();
+      } catch {
+        // A refresh that fails is retried on the next interval.
+      }
+    }
+    lastTick = now;
+  }, WAKE_PROBE_MS);
+  timer.unref?.();
+  return () => clearInterval(timer);
 }
 
 interface LockContents {
@@ -513,23 +670,45 @@ export function setInUse(key: string, server: ResolvedServer | undefined): void 
     }
   }
   touchMarkers();
-  if (after.size > 0 && !markerTimer) {
-    markerTimer = setInterval(touchMarkers, MARKER_TOUCH_MS);
-    markerTimer.unref?.();
-  } else if (after.size === 0 && markerTimer) {
-    clearInterval(markerTimer);
-    markerTimer = undefined;
+  if (after.size > 0 && !stopMarkerTimer) {
+    stopMarkerTimer = wallClockTimer(MARKER_TOUCH_MS, touchMarkers);
+  } else if (after.size === 0 && stopMarkerTimer) {
+    stopMarkerTimer();
+    stopMarkerTimer = undefined;
+  }
+  if (after.size > 0) {
+    scheduleUpdateCheck(UPDATE_FIRST_CHECK_MS);
   }
 }
 
-/** On deactivate: drop this window's markers and kill a running install. */
+/**
+ * On deactivate: drop this window's markers and stop the update checks.
+ * A running `bundle install` is killed (its staging directory is a
+ * leftover the next install prunes). A running `mise install ruby@4.0`
+ * is left to finish, detached, writing to its log file: killing it
+ * mid-build leaves mise's own partial install for the user to clean up.
+ */
 export function disposeRuntime(): void {
   for (const key of [...inUse.keys()]) {
     setInUse(key, undefined);
   }
-  if (activeChild && activeChild.exitCode === null) {
-    killTree(activeChild);
+  if (updateTimer) {
+    clearTimeout(updateTimer);
+    updateTimer = undefined;
   }
+  if (!activeChild || activeChild.exitCode !== null) {
+    return;
+  }
+  if (activeChildDetaches) {
+    log(
+      `[rigor] left \`${activeChildDetaches.commandLine}\` running (pid ` +
+        `${activeChild.pid ?? "?"}) as the window closed; its output goes to ` +
+        activeChildDetaches.logFile,
+    );
+    activeChild.unref();
+    return;
+  }
+  killTree(activeChild);
 }
 
 function markerPath(dir: string, pid = process.pid): string {
@@ -589,6 +768,12 @@ function prune(keep: string): void {
     if (name.startsWith(".tmp-") || name.startsWith(".old-")) {
       fs.rmSync(path.join(root, name), { recursive: true, force: true });
     }
+    // The log of a `mise install` a closed window left running, once that
+    // window is gone (the install may outlive it; unlinking is harmless).
+    const miseLog = /^\.mise-install-(\d+)\.log$/.exec(name);
+    if (miseLog && !pidAlive(parseInt(miseLog[1], 10))) {
+      fs.rmSync(path.join(root, name), { force: true });
+    }
   }
   const others = installedVersions()
     .map((m) => m.version)
@@ -607,6 +792,8 @@ function prune(keep: string): void {
 export interface InstallOptions {
   /** Reinstall the version even when it is installed: its probe failed. */
   repair?: boolean;
+  /** The version to install, already resolved (an update check). */
+  version?: string;
 }
 
 /**
@@ -655,7 +842,7 @@ async function installNow(
 
   let version: string;
   try {
-    version = await targetVersion();
+    version = options.version ?? (await targetVersion());
   } catch (err) {
     void window.showErrorMessage(
       `Rigor: could not find the rigortype version to install: ${String(err)}`,
@@ -670,20 +857,44 @@ async function installNow(
     return true;
   }
   const found = ruby;
-  const result = await withLock(() => installVersion(output, found, version));
+  const repair = options.repair === true;
+  const result = await withLock(() =>
+    installVersion(output, found, version, repair),
+  );
   return result === true;
+}
+
+/**
+ * Who runs the version directory `dir`, so replacing it would pull the
+ * files from under a live server: other windows' live markers, and for a
+ * repair this window's other folders too (a dev reinstall in a window
+ * that runs it is the developer's own call, and restarts after).
+ */
+function replaceBlocked(dir: string, repair: boolean): boolean {
+  if (!fs.existsSync(dir)) {
+    return false;
+  }
+  if (liveMarkers(dir, false).length > 0) {
+    return true;
+  }
+  return repair && [...inUse.values()].includes(dir);
 }
 
 async function installVersion(
   output: OutputChannel,
   ruby: RubyCandidate,
   version: string,
+  repair: boolean,
 ): Promise<boolean> {
   const root = runtimeRoot;
   if (!root) {
     return false;
   }
   const dir = path.join(root, version);
+  if (replaceBlocked(dir, repair)) {
+    showReplaceBlocked(version);
+    return false;
+  }
   const staging = path.join(
     root,
     `.tmp-${version}-${process.pid}-${Date.now().toString(36)}`,
@@ -703,7 +914,8 @@ async function installVersion(
       (progress, token) =>
         buildInto(staging, output, ruby, version, progress, token),
     );
-    if (ok && liveMarkers(dir, false).length > 0) {
+    // Again: a window may have started on the version during the build.
+    if (ok && replaceBlocked(dir, repair)) {
       ok = false;
       busy = true;
     } else if (ok) {
@@ -716,11 +928,7 @@ async function installVersion(
     fs.rmSync(staging, { recursive: true, force: true });
   }
   if (busy) {
-    void window.showWarningMessage(
-      `Rigor: another VS Code window is running rigortype ${version} from ` +
-        "the managed install, so it was not replaced. Close or reload that " +
-        "window, then try again.",
-    );
+    showReplaceBlocked(version);
     return false;
   }
   if (!ok) {
@@ -744,6 +952,15 @@ async function installVersion(
   output.appendLine(`[rigor] installed rigortype ${version} into ${dir}`);
   prune(version);
   return true;
+}
+
+function showReplaceBlocked(version: string): void {
+  void window.showWarningMessage(
+    `Rigor: rigortype ${version} from the managed install is running in ` +
+      "another VS Code window or another folder of this one, so it was not " +
+      "replaced. Close or reload that window (or stop that folder's " +
+      "server), then try again.",
+  );
 }
 
 /** `bundle install`, checked with `rigor version`, manifest written last. */
@@ -873,6 +1090,11 @@ function latestVersion(): Promise<string> {
 /**
  * Run a command, streaming its output to the channel. True on exit 0.
  * Cancelling kills the whole tree (`bundle install` runs compilers).
+ *
+ * With `logFile`, the command's output goes to that file, which is
+ * followed into the channel, instead of to a pipe: a pipe closes with
+ * the extension host, and the next write would fail the command. Such a
+ * command is not killed when the window closes (`disposeRuntime`).
  */
 function stream(
   output: OutputChannel,
@@ -881,23 +1103,43 @@ function stream(
   cwd: string,
   env: NodeJS.ProcessEnv,
   token: CancellationToken,
+  logFile?: string,
 ): Promise<boolean> {
-  output.appendLine(`[rigor] $ ${[command, ...args].join(" ")}`);
+  const commandLine = [command, ...args].join(" ");
+  output.appendLine(`[rigor] $ ${commandLine}`);
   return new Promise((resolve) => {
     let child: ChildProcess;
+    let follow: { stop(): void } | undefined;
     try {
-      child = spawn(command, args, {
-        cwd,
-        env,
-        windowsHide: true,
-        detached: process.platform !== "win32",
-      });
+      if (logFile) {
+        const fd = fs.openSync(logFile, "w");
+        try {
+          child = spawn(command, args, {
+            cwd,
+            env,
+            windowsHide: true,
+            detached: true,
+            stdio: ["ignore", fd, fd],
+          });
+        } finally {
+          fs.closeSync(fd);
+        }
+        follow = followFile(logFile, (text) => output.append(text));
+      } else {
+        child = spawn(command, args, {
+          cwd,
+          env,
+          windowsHide: true,
+          detached: process.platform !== "win32",
+        });
+      }
     } catch (err) {
       output.appendLine(`[rigor] could not run ${command}: ${String(err)}`);
       resolve(false);
       return;
     }
     activeChild = child;
+    activeChildDetaches = logFile ? { commandLine, logFile } : undefined;
     const cancel = token.onCancellationRequested(() => {
       output.appendLine("[rigor] cancelled");
       killTree(child);
@@ -909,12 +1151,48 @@ function stream(
     });
     child.on("close", (code) => {
       cancel.dispose();
+      follow?.stop();
+      if (logFile) {
+        fs.rmSync(logFile, { force: true });
+      }
       if (activeChild === child) {
         activeChild = undefined;
+        activeChildDetaches = undefined;
       }
       resolve(code === 0 && !token.isCancellationRequested);
     });
   });
+}
+
+/** Append what is written to `file` to `sink` until stopped, then drain. */
+function followFile(file: string, sink: (text: string) => void): { stop(): void } {
+  let position = 0;
+  const drain = (): void => {
+    let fd: number | undefined;
+    try {
+      fd = fs.openSync(file, "r");
+      const buffer = Buffer.alloc(64 * 1024);
+      let read: number;
+      while ((read = fs.readSync(fd, buffer, 0, buffer.length, position)) > 0) {
+        position += read;
+        sink(buffer.toString("utf8", 0, read));
+      }
+    } catch {
+      // The file went away (Clear Managed Rigor): nothing more to show.
+    } finally {
+      if (fd !== undefined) {
+        fs.closeSync(fd);
+      }
+    }
+  };
+  const timer = setInterval(drain, 500);
+  timer.unref?.();
+  return {
+    stop: () => {
+      clearInterval(timer);
+      drain();
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -953,7 +1231,15 @@ async function offerMiseRuby(
       cancellable: true,
     },
     (_progress, token) =>
-      stream(output, mise, ["install", "ruby@4.0"], os.homedir(), cleanEnv(), token),
+      stream(
+        output,
+        mise,
+        ["install", "ruby@4.0"],
+        os.homedir(),
+        cleanEnv(),
+        token,
+        miseLogFile(),
+      ),
   );
   const ruby = ok ? await findRuby(output) : undefined;
   if (!ruby) {
@@ -963,6 +1249,17 @@ async function offerMiseRuby(
     );
   }
   return ruby;
+}
+
+/**
+ * Where `mise install ruby@4.0` writes its output: beside the versions,
+ * but not a version directory (a dot name), and not a leftover prune
+ * removes; Clear deletes it.
+ */
+function miseLogFile(): string {
+  const dir = runtimeRoot ?? os.tmpdir();
+  fs.mkdirSync(dir, { recursive: true });
+  return path.join(dir, `.mise-install-${process.pid}.log`);
 }
 
 /** Tier C: no Ruby 4.0 and no mise to provide one. */
@@ -1060,6 +1357,7 @@ export function registerRuntimeCommands(
   afterInstall: () => Promise<void>,
   whileStopped: (task: () => Promise<void>) => Promise<void>,
 ): void {
+  runtimeOutput = output;
   context.subscriptions.push(
     commands.registerCommand("rigor.installManagedRuntime", async () => {
       if (await installManaged(output)) {
@@ -1120,17 +1418,166 @@ async function checkForUpdate(output: OutputChannel): Promise<void> {
       ` ${scope}`,
     install,
   );
-  if (choice !== install || !(await installManaged(output))) {
+  if (choice !== install || !(await installManaged(output, { version: latest }))) {
     return;
   }
+  await offerRestart(latest);
+}
+
+async function offerRestart(version: string): Promise<void> {
   const restartNow = "Restart Server";
   const after = await window.showInformationMessage(
-    `Rigor: rigortype ${latest} is installed and takes effect when the server restarts.`,
+    `Rigor: rigortype ${version} is installed and takes effect when the server restarts.`,
     restartNow,
   );
   if (after === restartNow) {
     await commands.executeCommand("rigor.restartServer");
   }
+}
+
+// ---------------------------------------------------------------------------
+// Background update checks (#2746)
+
+/** The first check after a managed server starts. */
+const UPDATE_FIRST_CHECK_MS = 30 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
+
+/**
+ * `rigor.runtime.updateCheckIntervalHours`, clamped to 1–168: VS Code
+ * enforces the schema's bounds only in the Settings UI.
+ */
+function updateIntervalMs(): number {
+  const hours = workspace
+    .getConfiguration("rigor")
+    .get<number>("runtime.updateCheckIntervalHours", 24);
+  const valid = typeof hours === "number" && Number.isFinite(hours) ? hours : 24;
+  return Math.min(168, Math.max(1, valid)) * HOUR_MS;
+}
+
+/**
+ * Whether a background check may run now: the workspace is trusted,
+ * `rigor.runtime.autoUpdate` is on, `rigor.runtime.version` is `latest`
+ * (not a pin, not a development install), and a folder of this window
+ * runs the managed Rigor.
+ */
+function autoUpdateApplies(): boolean {
+  return (
+    workspace.isTrusted &&
+    workspace.getConfiguration("rigor").get<boolean>("runtime.autoUpdate", true) &&
+    requestedVersion() === "latest" &&
+    inUse.size > 0
+  );
+}
+
+/**
+ * Arm the next check: `delayMs` from now, but never sooner than the
+ * interval after the last check. A no-op while one is armed or running.
+ * Called whenever a folder starts on the managed Rigor.
+ */
+function scheduleUpdateCheck(delayMs: number): void {
+  if (updateTimer || updateChecking || !runtimeOutput) {
+    return;
+  }
+  const notBefore = lastUpdateCheck === 0 ? 0 : lastUpdateCheck + updateIntervalMs();
+  const delay = Math.max(delayMs, notBefore - Date.now());
+  updateTimer = setTimeout(() => {
+    updateTimer = undefined;
+    void backgroundUpdateCheck();
+  }, delay);
+  updateTimer.unref?.();
+}
+
+async function backgroundUpdateCheck(): Promise<void> {
+  const output = runtimeOutput;
+  if (!output || !autoUpdateApplies()) {
+    // Re-armed by the next managed start (setInUse).
+    return;
+  }
+  updateChecking = true;
+  lastUpdateCheck = Date.now();
+  try {
+    await checkInBackground(output);
+  } finally {
+    updateChecking = false;
+    if (inUse.size > 0) {
+      scheduleUpdateCheck(updateIntervalMs());
+    }
+  }
+}
+
+/**
+ * One background check. A newer release is announced once per session
+ * and installed only on "Install update"; it is used from the next
+ * restart. A newer version another window already installed is offered
+ * as a restart. A network failure logs one line and changes nothing.
+ */
+async function checkInBackground(output: OutputChannel): Promise<void> {
+  let latest: string;
+  try {
+    latest = await latestVersion();
+  } catch (err) {
+    output.appendLine(`[rigor] the update check could not reach rubygems.org: ${String(err)}`);
+    return;
+  }
+  const decision = updateDecision(
+    latest,
+    installedVersions().map((m) => m.version),
+    [...new Set(inUse.values())].map((dir) => path.basename(dir)),
+    updateOffered,
+  );
+  if (decision.kind === "none") {
+    return;
+  }
+  updateOffered.add(decision.version);
+  if (decision.kind === "restart") {
+    await offerRestart(decision.version);
+    return;
+  }
+  const install = "Install update";
+  const choice = await window.showInformationMessage(
+    `Rigor: rigortype ${decision.version} is available (the managed Rigor ` +
+      `runs ${decision.current}). It installs beside the current version and ` +
+      "is used from the next server restart.",
+    install,
+    "Later",
+  );
+  if (choice !== install || !autoUpdateApplies()) {
+    return;
+  }
+  if (await installManaged(output, { version: decision.version })) {
+    await offerRestart(decision.version);
+  }
+}
+
+export type UpdateDecision =
+  | { kind: "none" }
+  | { kind: "install"; version: string; current: string }
+  | { kind: "restart"; version: string };
+
+/**
+ * What a background check does with the `latest` release, given the
+ * installed versions and those this window's servers run (both version
+ * directory names): install it when nothing installed is that new,
+ * offer a restart when it is installed (another window updated) but not
+ * running, and nothing for a version already offered this session.
+ */
+export function updateDecision(
+  latest: string,
+  installed: readonly string[],
+  running: readonly string[],
+  offered: ReadonlySet<string>,
+): UpdateDecision {
+  if (offered.has(latest) || running.length === 0) {
+    return { kind: "none" };
+  }
+  const newestRunning = [...running].sort((a, b) => compareVersions(b, a))[0];
+  if (compareVersions(newestRunning, latest) >= 0) {
+    return { kind: "none" };
+  }
+  if (installed.some((v) => compareVersions(v, latest) >= 0)) {
+    return { kind: "restart", version: latest };
+  }
+  return { kind: "install", version: latest, current: newestRunning };
 }
 
 async function clearManaged(

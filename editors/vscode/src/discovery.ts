@@ -306,15 +306,13 @@ export function tomlToolsNameRigortype(text: string): boolean {
   const dottedKey = new RegExp(`^\\s*tools\\s*\\.\\s*${key}\\s*=`);
   const inlineTable = new RegExp(`^\\s*tools\\s*=\\s*\\{(?:.*?,)?\\s*${key}\\s*=`);
   let section = "";
-  let inString = false;
+  /** The delimiter of the multi-line string the line starts in, if any. */
+  let inString: string | undefined;
   for (const line of text.split(/\r?\n/)) {
-    const delimiters = (line.match(/"""|'''/g) ?? []).length;
-    if (inString) {
-      inString = delimiters % 2 === 0;
+    const before = inString;
+    inString = multilineStringAfter(line, inString);
+    if (before) {
       continue;
-    }
-    if (delimiters % 2 === 1) {
-      inString = true;
     }
     const match = header.exec(line);
     if (match) {
@@ -332,6 +330,30 @@ export function tomlToolsNameRigortype(text: string): boolean {
     }
   }
   return false;
+}
+
+/**
+ * The multi-line string delimiter (`"""` or `'''`) still open at the end
+ * of `line`, given the one open at its start. The two are tracked apart:
+ * a `"""` inside a `'''` string, or the other way round, is text.
+ * Single-line strings and comments are not parsed; a line-level reading
+ * allows that.
+ */
+export function multilineStringAfter(
+  line: string,
+  open: string | undefined,
+): string | undefined {
+  let current = open;
+  const delimiter = /"""|'''/g;
+  let match: RegExpExecArray | null;
+  while ((match = delimiter.exec(line)) !== null) {
+    if (current === undefined) {
+      current = match[0];
+    } else if (current === match[0]) {
+      current = undefined;
+    }
+  }
+  return current;
 }
 
 /** Whether mise or asdf has a rigortype installed at all. */

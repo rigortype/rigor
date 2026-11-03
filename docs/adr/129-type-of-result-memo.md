@@ -60,17 +60,19 @@ end
 That prototype also passed byte-identity on Mastodon, Redmine and `lib`, so a corpus diff cannot detect this class of
 error.
 
-By the time the rule walk runs, the main pass is over. No sink or frame is installed, the recursion guard is empty, and
-no fixpoint is in flight. Every input outside the key is at its default by construction.
+By the time the rule walk runs, the main pass is over. A rule's query starts with no sink or frame installed and an
+empty recursion guard. Typing inside the walk can still install frames: `type_of_and_or` evaluates through the
+statement evaluator, and `BodyFixpoint` runs there. So inside the window too, one scope object can be typed both at the
+default ambient state and off it. The window narrows where the memo runs; WD2 is what makes it correct.
 
 ## Decision
 
 Memoise `ExpressionTyper#type_of` only inside the rule walk. Key it by the identity of the scope and of the node, keep
 it shut whenever any ambient input is off its default, and replay a stored computation's table writes on a hit.
 
-**Criterion:** a typing result may be served again only for the same scope object and node, in the same ambient state,
-with every table write it made replayed. A memo may open only where that state is the default by construction, never
-where frames can differ for one scope object. Within the engine, that place is the rule walk.
+**Criterion:** store a typing result only when it was computed at the default ambient state. Serve it only for the
+same scope object and node, at the default ambient state, while every scope-reachable table that typing reads back is
+as it was at the store, and replay the table writes the computation made.
 
 ## Working decisions
 
@@ -90,39 +92,62 @@ where frames can differ for one scope object. Within the engine, that place is t
   - a tracer or `FlowTracer` is active;
   - the typer threads an operand table;
   - the node is not a Prism node.
-- **WD3 — No store across a transient event.** A computation during which any transient event was logged is not stored
-  (a monotonic count, since the event log is cleared when the guard stack drains). This is stricter than ADR-84 WD3,
-  which refuses only events below the entry depth.
-- **WD4 — Replay the table writes.** While a computation runs, every write to the four tables, through
-  `record_dynamic_origin`, `record_void_origin`, `record_plugin_typed_call` or `record_optimistic_origin`, is
-  appended to each open capture. A hit replays its entry's writes in order on the scopes that received them, which
-  restores last-write-wins exactly. The other output channels need no replay, because they are first-write-wins or
-  deduplicated within the window: `Effects::Collector`, `SelfCallResolutionRecorder`, `LoopValueRecord` and the
-  inject-accumulator record. Known residual: a stored computation that read an `optimistic_origins` mark another
-  query wrote after the store. The coverage parity in WD6 watches it; no case is known.
-- **WD5 — An ambient-input census.** A spec enumerates every `Thread.current` key under `lib/rigor/inference`,
-  `lib/rigor/scope.rb`, `lib/rigor/analysis` and `lib/rigor/effects`, and every node-keyed table reachable from a
-  `Scope`. Each must shut the memo (WD2), be counted (WD3), be replayed (WD4), or be on an allow-list with its reason.
-  The precedent is `spec/rigor/run_scoped_slots_spec.rb`. A new input then fails a test instead of relying on a
-  reviewer to notice it.
+- **WD3 — No store across a transient event, and a stamp for read-back tables.**
+  - A computation during which any transient event was logged is not stored. The memo counts events monotonically,
+    since the event log itself is cleared when the guard stack drains. This is stricter than ADR-84 WD3, which refuses
+    only events below the entry depth.
+  - `optimistic_origins` is read back into typing and is not part of the scope's identity. It only ever gains keys (one
+    cause, `IMPLICITLY_RETURNS_NIL`). So each entry records a monotone count of new-key `record_optimistic_origin`
+    writes at the store, and a hit whose count differs recomputes. In the spec fixtures, 6 of 340 files write a new
+    mark inside the window, so this costs few hits.
+- **WD4 — Replay the table writes.**
+  - While a computation runs, every write to the four tables (`record_dynamic_origin`, `record_void_origin`,
+    `record_plugin_typed_call`, `record_optimistic_origin`) is appended to each open capture.
+  - The append happens in an `ensure`, so a nested computation that raises and is rescued still reaches the enclosing
+    capture.
+  - A hit replays its entry's writes, in order, on the scopes that received them.
+  - This reproduces the stored computation's own writes. It does not prove that a recomputation would write the same
+    list. The list can depend on state outside the key: `inherit_receiver_origin` and `StatementEvaluator#rhs_origin`
+    read `dynamic_origins` back, and `LoopValueRecord` and the inject-accumulator record are one-slot caches whose
+    hit or miss decides which bodies are walked again. WD6's shadow check is what verifies that.
+  - `Effects::Collector` and `SelfCallResolutionRecorder` need no replay. They are first-write-wins, or they
+    deduplicate within the file.
+  - No reader that runs while the memo can be open reads an entry first written inside the window: the in-walk readers
+    `VoidValueUseCollector` and `CheckRules#plugin_typed_call?` read entries the main pass wrote. WD4 is insurance for
+    the readers downstream of the walk and for future rules.
+- **WD5 — An ambient-input census.** A spec enumerates three kinds of state:
+  - every `Thread.current` key under `lib/rigor/inference`, `lib/rigor/scope.rb`, `lib/rigor/scope/`,
+    `lib/rigor/reflection/`, `lib/rigor/analysis` and `lib/rigor/effects`;
+  - the process-level switches `FlowTracer`, `Effects::Collector` and the `DependencyRecorder` fast path;
+  - every node-keyed table reachable from a `Scope`, and `ExpressionTyper`'s instance state.
+  Each must shut the memo (WD2), be counted or stamped (WD3), be replayed (WD4), or be on an allow-list with its
+  reason. The precedent is `spec/rigor/run_scoped_slots_spec.rb`. A new input then fails a test instead of relying on
+  a reviewer to notice it.
 - **WD6 — The landing gate.**
   - `--format json --no-cache` is byte-identical with the memo on and off over `lib`, `plugins/*/lib`,
     `examples/*/lib`, `spec/integration/fixtures`, and Mastodon, Redmine and GitLab `app/models` (strict profile, no
     baseline);
-  - `rigor coverage --protection --format json` is byte-identical on Mastodon and Redmine;
+  - a shadow mode passes over `spec/integration/fixtures` and Mastodon. On every hit it recomputes with the memo shut
+    and compares both the value and the write list with the entry. A probe of this kind during review saw 22,776 hits
+    and no mismatch on the fixtures. It is the only gate here that can see WD3's stamp or WD4: `coverage
+    --protection`, the lens and every `--incremental` run never open the window, and a run with the replay removed
+    still passed the diagnostic check;
+  - the four tables, dumped per file after the rule walk, are identical with the memo on and off;
   - `--workers=2` gives the same output as `--workers=0`;
-  - warm output equals cold, and `--verify-incremental` passes;
+  - warm output equals cold, and `--verify-incremental` passes (its full run opens the window and its recording run
+    does not, so it compares the memo on against the memo off);
   - one fixture per WD2 input passes with the memo on, the example above among them, and fails if that input is
     dropped from WD2;
   - `engine-warm` separates on Mastodon.
 - **WD7 — The contract text.** This PR corrects [`inference-engine.md`](../internal-spec/inference-engine.md) where it
   is wrong today:
-  - the purity rule holds per `(scope, node, ambient inputs)` and lists them;
-  - the ADR-55 fixpoint and the shared `optimistic_origins` table both break it;
+  - the purity rule holds per `(scope, node, ambient inputs)` and lists the inputs, among them the ADR-55 summaries;
+  - `optimistic_origins` is reached through the scope but is not on that list, so an identity cache must stamp it;
   - § "Determinism and Caching" allows identity-keyed caches only on those terms and forbids `==`-keyed ones, because
     `Scope#==` ignores fields typing reads;
   - the advisory-table paragraph names `plugin_typed_calls`, last-write-wins and the body boundary.
-  `LoopValueRecord` (#2031, #2262) and the inject-accumulator record (#1889) are the precedent identity caches.
+  `LoopValueRecord` (#2031, #2262) and the inject-accumulator record (#1889) are the precedent identity caches. They
+  serve a recorded value under any ambient state, so they may not meet the new rule (#2767, not reproduced).
 
 ## Rejected and deferred alternatives
 
@@ -138,17 +163,23 @@ where frames can differ for one scope object. Within the engine, that place is t
 
 ## Consequences
 
-- **Gains,** measured with prototype v2.
-  - Mastodon re-analysis on CI: −5.9% wall (leaf edit, separated) and −4.0% (hub edit, not separated).
+- **Gains,** measured with prototype v2, which lacks WD3's stamp and WD4's `ensure`.
+  - Mastodon on CI: −5.9% wall after a leaf edit (separated) and −4.0% after a hub edit (not separated). Both are
+    full runs after a run-result-cache miss, `engine-warm` mode `default`.
   - A cold Mastodon run: −10.2% from one sample.
   - Rigor's `lib`: −0.3% wall, not separated, and −2.5% allocations.
-  - Output is identical on every WD6 corpus checked (`check`, `coverage --protection`, `--workers=2`, the spec
-    fixtures).
+  - Local runs gave identical `check` output on Mastodon, Redmine (strict, no baseline) and the spec fixtures, with
+    `--workers=0` and `--workers=2`. `lib`, `plugins/`, `examples/` and GitLab were not run.
   - The gain grows with the number of rules and plugins that re-type a receiver.
 - **Costs.**
+  - Memory: peak RSS rose 15% on Mastodon locally (544 → 629 MB), 11% on Redmine and 8% on the fixtures. A stored
+    write list keeps the callee-body scopes it names alive until the window closes.
   - Four table writers gain a capture append.
-  - The rule walk holds a per-file table.
+  - Plugin `dynamic_return` and `narrowing_facts` blocks run fewer times. The plugin contract does not require them to
+    be pure, and no plugin under `plugins/` or `examples/` keeps per-thread state.
   - Every future ambient input is subject to an invariant, which WD5 enforces.
+  - `--incremental`, the lens and the language server record dependencies, so they never open the memo and gain
+    nothing.
 - **Not covered.** The main pass and callee bodies carry most of the repeated work (the first design's −13% against
   this one's −4 to −6%), and so does code shaped like Rigor's `lib`. #1228 (generalised) and #2711 stay open, and so
   does a context-keyed extension.
@@ -158,7 +189,9 @@ where frames can differ for one scope object. Within the engine, that place is t
 - [ADR-52](52-compiled-plugin-contribution-dispatch.md) WD5: answered by the identity key and the window. Its
   conclusion for plugin contribution caches stands.
 - [ADR-55](55-recursive-return-precision.md): its fixpoint runs only inside callee inference, which WD2 keeps shut.
-- [ADR-56](56-block-captured-local-mutation.md): `BodyFixpoint` passes run in the main pass, outside the window.
+- [ADR-56](56-block-captured-local-mutation.md): `BodyFixpoint` can run inside the window (through `type_of_and_or`).
+  Each pass rebuilds its entry scope from the running assumption (`bind_capture` / `with_local`), so no entry stored in
+  one pass is served in the next.
 - [ADR-84](84-cross-file-return-memo-scoping.md): WD3 is a stricter form of its event bracket. Its WD4(b), the
   parameter-read mask, stays rejected; the census measured it at 1–3% of evaluations.
 - [ADR-46](46-incremental-dependency-graph.md): recording runs keep the memo shut (WD2).

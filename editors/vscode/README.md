@@ -191,8 +191,9 @@ cancellable progress notification while it runs.
   prompt. Nothing is written without the confirmation. Save the file first;
   `sig-gen` reads it from disk.
 - **Rigor: Update Baseline** — only when the project already has a baseline
-  (the top-level `baseline:` file of the config, `.rigor-baseline.yml` by
-  default; `baseline: false` means none). When the config has `includes:`
+  (the top-level `baseline:` file of the config; a config without the key
+  has none, and `baseline: false`, `null` or a bare `baseline:` also means
+  none). When the config has `includes:`
   the command asks you to pick the baseline file rather than guess. A
   confirmation names the file, which the whole team shares, then runs
   `rigor baseline regenerate` and shows its output.

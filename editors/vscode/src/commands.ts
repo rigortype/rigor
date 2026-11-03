@@ -38,7 +38,6 @@ import {
 import { killTree, spawnCli } from "./proc";
 
 export const OUTPUT_SCHEME = "rigor-output";
-const DEFAULT_BASELINE = ".rigor-baseline.yml";
 
 /**
  * Internal argument of the commands that ask before writing. The Extension
@@ -489,23 +488,33 @@ async function loadRules(
     : await runWithProgress("Rigor: listing rules", folder, root, args);
   // A load that a restart overtook must not refill the cache from the old gem.
   const current = generation === ruleGeneration;
-  if (quiet && list.code !== 0) {
-    if (current) {
+  // Only the lightbulb's quiet load caches a failure, and only over an empty
+  // slot: a palette failure or a late failure never wipes a good Set.
+  const cacheFailure = (why: string): void => {
+    if (quiet && current && ruleCache.get(root) === undefined) {
       ruleCache.set(root, null);
       out.appendLine(
-        `[rigor] explain rule list unavailable (exit ${list.code}); lightbulb explain actions are off until Restart Server.`,
+        `[rigor] explain rule list unavailable (${why}); lightbulb explain actions are off until Restart Server.`,
       );
     }
+  };
+  if (quiet && list.code !== 0) {
+    cacheFailure(`exit ${list.code}`);
     return undefined;
   }
   if (!quiet && failed("explain", list)) {
-    // A cancelled palette run says nothing about the gem: do not cache it.
-    if (current && !list.cancelled) {
-      ruleCache.set(root, null);
+    return undefined;
+  }
+  const rules = parseRuleList(list.stdout);
+  if (rules === undefined) {
+    // Exit 0 with no rules array is a failure, not an empty rule set.
+    if (quiet) {
+      cacheFailure("output is not a rule list");
+    } else {
+      void window.showErrorMessage("Rigor: `rigor explain --format=json` did not return a rule list.");
     }
     return undefined;
   }
-  const rules = parseRules(list.stdout);
   if (current) {
     ruleCache.set(root, new Set(rules.map((r) => r.id)));
   }
@@ -550,19 +559,28 @@ async function explainRule(rule?: string): Promise<void> {
   await showVirtual(`explain ${chosen}`, r.stdout);
 }
 
-/** Rules from `explain --format=json`: an array now, `{ rules }` later. */
-export function parseRules(stdout: string): { id: string; summary: string }[] {
+/**
+ * Rules from `explain --format=json`: an array now, `{ rules }` later.
+ * `undefined` when the output is not JSON or has no rules array, so a broken
+ * run is not mistaken for an empty rule set.
+ */
+export function parseRuleList(
+  stdout: string,
+): { id: string; summary: string }[] | undefined {
   let parsed: unknown;
   try {
     parsed = JSON.parse(stdout);
   } catch {
-    return [];
+    return undefined;
   }
-  const rows: unknown[] = Array.isArray(parsed)
+  const rows: unknown[] | undefined = Array.isArray(parsed)
     ? parsed
     : isRecord(parsed) && Array.isArray(parsed.rules)
       ? parsed.rules
-      : [];
+      : undefined;
+  if (rows === undefined) {
+    return undefined;
+  }
   const rules: { id: string; summary: string }[] = [];
   for (const row of rows) {
     if (isRecord(row) && typeof row.id === "string") {
@@ -796,15 +814,18 @@ async function generateSignatures(options?: CommandOptions): Promise<void> {
 
 type BaselineLookup =
   | { kind: "file"; rel: string }
-  | { kind: "off" }
+  /** `unset`: no `baseline:` key at all (the CLI default is no baseline). */
+  | { kind: "off"; unset?: boolean }
   /** The config pulls in other files; which one wins is not guessed here. */
   | { kind: "ambiguous" };
 
 /**
- * The baseline file the config names with a top-level `baseline:`, else the
- * default. `baseline: false` means baselines are off. A config with
- * `includes:` may set the key in an included file (later files override), so
- * it is not guessed.
+ * The baseline file the top-level `baseline:` of the config names. A missing
+ * key means no baseline (the CLI default is nil; a `.rigor-baseline.yml` on
+ * disk alone does not activate one). The null and false spellings are the
+ * ones Psych reads as nil or false. A config with `includes:` may set the key
+ * in an included file (later files override), and a bare `baseline:` followed
+ * by an indented line takes that line as its value, so neither is guessed.
  */
 function baselineLookup(folder: WorkspaceFolder, root: string): BaselineLookup {
   const cfg = findConfig(folder, root);
@@ -813,20 +834,25 @@ function baselineLookup(folder: WorkspaceFolder, root: string): BaselineLookup {
     try {
       text = fs.readFileSync(cfg, "utf8");
     } catch {
-      // Unreadable config — use the default.
+      // Unreadable config — treated as no key.
     }
   }
   if (/^includes[ \t]*:(?![ \t]*\[[ \t]*\][ \t]*(?:#.*)?$)/m.test(text)) {
     return { kind: "ambiguous" };
   }
-  // The value is optional: a bare `baseline:` (YAML null) is off, as the CLI
-  // reads it, not the default file.
+  // A bare `baseline:` whose next non-blank, non-comment line is indented is a
+  // block scalar (Psych: `baseline:\n  custom.yml` is "custom.yml").
+  if (/^baseline[ \t]*:[ \t]*(?:#.*)?$(?:\n[ \t]*(?:#.*)?$)*\n[ \t]+\S/m.test(text)) {
+    return { kind: "ambiguous" };
+  }
+  // The value is optional: a bare `baseline:` (YAML null) is off.
   const m = /^baseline[ \t]*:[ \t]*(?:"([^"]*)"|'([^']*)'|([^\s#]+))?[ \t]*(?:#.*)?$/m.exec(text);
   if (!m) {
-    return { kind: "file", rel: DEFAULT_BASELINE };
+    return { kind: "off", unset: true };
   }
   const value = m[1] ?? m[2] ?? m[3] ?? "";
-  if (value === "false" || value === "null" || value === "~" || value === "") {
+  // Psych (YAML 1.1) nil and false spellings, case-insensitive.
+  if (value === "" || /^(?:null|~|false|no|off)$/i.test(value)) {
     return { kind: "off" };
   }
   return { kind: "file", rel: value };
@@ -844,7 +870,9 @@ async function updateBaseline(options?: CommandOptions): Promise<void> {
   const lookup = baselineLookup(folder, root);
   if (lookup.kind === "off") {
     void window.showInformationMessage(
-      "Rigor: baselines are turned off in the configuration (`baseline: false`).",
+      lookup.unset
+        ? "Rigor: no baseline is configured; set `baseline:` in .rigor.yml or run `rigor baseline generate`."
+        : "Rigor: no baseline is in use: `baseline:` is set to false/null in the configuration.",
     );
     return;
   }

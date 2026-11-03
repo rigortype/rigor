@@ -89,14 +89,25 @@ class OutputProvider implements TextDocumentContentProvider {
 let out: OutputChannel;
 let provider: OutputProvider;
 let allowUnconfirmed = false;
-/** Rule ids `rigor explain` knows, per project root. */
-const ruleCache = new Map<string, Set<string>>();
+/**
+ * Rule ids `rigor explain` knows, per project root. `null` is a failed load,
+ * kept until `clearRuleCache()` so a broken environment is not re-run on
+ * every lightbulb request.
+ */
+const ruleCache = new Map<string, Set<string> | null>();
 /** One in-flight quiet load per root. */
 const ruleLoads = new Map<string, Promise<unknown>>();
+/**
+ * Bumped by `clearRuleCache()`. A load started under an older generation
+ * neither writes its result into the cache nor clears a newer load's slot.
+ */
+let ruleGeneration = 0;
 
 /** Forget the cached rule lists (the gem may have changed on restart). */
 export function clearRuleCache(): void {
   ruleCache.clear();
+  ruleLoads.clear();
+  ruleGeneration++;
 }
 
 function confirmedBy(options?: CommandOptions): boolean {
@@ -471,15 +482,33 @@ async function loadRules(
   quiet = false,
 ): Promise<{ id: string; summary: string }[] | undefined> {
   const args = ["explain", "--format=json"];
+  const generation = ruleGeneration;
   // A quiet load backs the lightbulb: no progress toast.
   const list = quiet
     ? await runRigor(folder, root, args)
     : await runWithProgress("Rigor: listing rules", folder, root, args);
-  if (quiet ? list.code !== 0 : failed("explain", list)) {
+  // A load that a restart overtook must not refill the cache from the old gem.
+  const current = generation === ruleGeneration;
+  if (quiet && list.code !== 0) {
+    if (current) {
+      ruleCache.set(root, null);
+      out.appendLine(
+        `[rigor] explain rule list unavailable (exit ${list.code}); lightbulb explain actions are off until Restart Server.`,
+      );
+    }
+    return undefined;
+  }
+  if (!quiet && failed("explain", list)) {
+    // A cancelled palette run says nothing about the gem: do not cache it.
+    if (current && !list.cancelled) {
+      ruleCache.set(root, null);
+    }
     return undefined;
   }
   const rules = parseRules(list.stdout);
-  ruleCache.set(root, new Set(rules.map((r) => r.id)));
+  if (current) {
+    ruleCache.set(root, new Set(rules.map((r) => r.id)));
+  }
   return rules;
 }
 
@@ -560,17 +589,26 @@ class ExplainActions implements CodeActionProvider {
     // Only ids `rigor explain` knows: a plugin rule is not explainable, and
     // its bare id could collide with a core one.
     const known = ruleCache.get(hit.root);
+    if (known === null) {
+      // The load failed; that failure is cached until clearRuleCache().
+      return [];
+    }
     if (!known) {
       // Do not block the lightbulb on a CLI boot: fill the cache in the
-      // background (one load per root; a failure is not cached, so the next
-      // request retries) and offer the action from the next request on.
+      // background (one load per root) and offer the action from the next
+      // request on.
       if (
         !token.isCancellationRequested &&
         !ruleLoads.has(hit.root) &&
         context.diagnostics.some((d) => d.source === "rigor")
       ) {
-        const load = loadRules(hit.folder, hit.root, true).finally(() =>
-          ruleLoads.delete(hit.root),
+        const load: Promise<unknown> = loadRules(hit.folder, hit.root, true).finally(
+          () => {
+            // Only the slot this load owns: a restart may have replaced it.
+            if (ruleLoads.get(hit.root) === load) {
+              ruleLoads.delete(hit.root);
+            }
+          },
         );
         ruleLoads.set(hit.root, load);
       }
@@ -781,11 +819,13 @@ function baselineLookup(folder: WorkspaceFolder, root: string): BaselineLookup {
   if (/^includes[ \t]*:(?![ \t]*\[[ \t]*\][ \t]*(?:#.*)?$)/m.test(text)) {
     return { kind: "ambiguous" };
   }
-  const m = /^baseline[ \t]*:[ \t]*(?:"([^"]*)"|'([^']*)'|([^\s#]+))[ \t]*(?:#.*)?$/m.exec(text);
-  const value = m ? (m[1] ?? m[2] ?? m[3]) : undefined;
-  if (value === undefined) {
+  // The value is optional: a bare `baseline:` (YAML null) is off, as the CLI
+  // reads it, not the default file.
+  const m = /^baseline[ \t]*:[ \t]*(?:"([^"]*)"|'([^']*)'|([^\s#]+))?[ \t]*(?:#.*)?$/m.exec(text);
+  if (!m) {
     return { kind: "file", rel: DEFAULT_BASELINE };
   }
+  const value = m[1] ?? m[2] ?? m[3] ?? "";
   if (value === "false" || value === "null" || value === "~" || value === "") {
     return { kind: "off" };
   }

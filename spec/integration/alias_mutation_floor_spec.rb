@@ -44,6 +44,8 @@ RSpec.describe "a mutation through another holder floors the locals it may reach
     "a Struct member" => 'a = [1]; Struct.new(:v).new(a).v << "s"; a.last.bytesize',
     "an index write through a copy" => 'acc = [7]; r = acc; r[0] = "x"; acc[0].upcase',
     "a String method name for send" => 'a = [1]; a.send("push", "s"); a.last.bytesize',
+    "a held element of an Array of Arrays" => 'a = [[1]]; @k = [a.first]; @k[0] << "s"; a[0].last.bytesize',
+    "a copy made by a conversion that answers the receiver" => 'a = [1]; b = a.to_a; b << "s"; a.last.bytesize',
     "the ivar a local was copied from" => '@q = [1]; a = @q; @q << "s"; a.last.bytesize',
     "another copy of the same ivar" => '@q = [1]; a = @q; b = @q; b << "s"; a.last.bytesize',
     "the global a local was copied from" => '$amf_g = [1]; a = $amf_g; $amf_g << "s"; a.last.bytesize',
@@ -119,7 +121,8 @@ RSpec.describe "a mutation through another holder floors the locals it may reach
     "a size read into an unrelated block" => "n = a.size; [[2]].map(&:dup).each { |x| x << n }",
     "a size read as a Hash key" => "{ a.size => 1 }; @z = []; @z << 1",
     "a scalar element in a literal" => "[a.first]; @z = []; @z << 1",
-    "a size read in a literal" => "x = [a.size]; @z = []; @z << 1"
+    "a size read in a literal" => "x = [a.size]; @z = []; @z << 1",
+    "a shift of a scalar element read out" => "x = a.first; x << 2"
   }.each do |read, body|
     it "still reports a literal after #{read}" do
       expect(undefined_methods("def m; a = [1]; #{body}; a.last.bytesize; end\n")).to eq(["call.undefined-method"])
@@ -179,6 +182,14 @@ RSpec.describe "a mutation through another holder floors the locals it may reach
     it "floors nothing for a method parameter a callee writes" do
       source = 'def poke(a) = a[0] = "x"; def m(p); r = [1].dup; @k = r; @j = p; poke(p); dump_type(r); end'
       expect(dumped(source)).to eq(["[1]"])
+    end
+
+    it "keeps an escaped literal when the receiver is a new-object local nothing hands on" do
+      expect(dumped("def m; r = [2].dup; @k = r; x = [1]; x << 3; dump_type(r); end")).to eq(["[2]"])
+    end
+
+    it "keeps a literal a copy links only after the mutation" do
+      expect(dumped('def m; y = [9]; x = [1]; x << "s"; dump_type(y.size); y = x; end')).to eq(["1"])
     end
 
     it "keeps an escaped literal String when the receiver is another new String" do

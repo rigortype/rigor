@@ -3,7 +3,7 @@
 - **PR:** [#2707](https://github.com/rigortype/rigor/pull/2707)
 - **Issue:** none
 - **Class:** process
-- **Precedent:** [ADR-49](../docs/adr/49-adr-authoring-guidelines.md) itself, whose Status provides for refining the axes when the corpus teaches a new failure mode; commit `ae366d261` (2026-09-10) amended § 3 the same way
+- **Precedent:** [ADR-49](https://github.com/rigortype/rigor/blob/master/docs/adr/49-adr-authoring-guidelines.md)
 - **Decided:** 2026-11-03
 
 ## Background
@@ -18,7 +18,7 @@ The maintainer asked to manage ADR quality qualitatively, using three Japanese w
 
 ## Decision
 
-The third option; the maintainer chose the approach. It amends a living rubric that says "refine the axes when the corpus teaches us a new failure mode", reverses no Accepted decision, and adds no gate. The choices made here without the maintainer, for ratification: which five hazards, their axis mappings, and the carve-outs that keep the corpus's own conventions (landing logs, code anchors, status blocks, soundness arguments, mechanism-as-subject ADRs) from being docked. An earlier draft also said never to cite a live ADR as an example; that rule came from the source and was dropped as a norm. No structural gate on ADR bodies was added; the regomark-style `deny`/`warn` split remains an open idea, not a decision.
+The third option; the maintainer chose the approach. The precedent is ADR-49 itself, whose Status provides for refining the axes when the corpus teaches a new failure mode, and commit `ae366d261` (2026-09-10), which amended § 3 the same way. It amends a living rubric that says "refine the axes when the corpus teaches us a new failure mode", reverses no Accepted decision, and adds no gate. The choices made here without the maintainer, for ratification: which five hazards, their axis mappings, and the carve-outs that keep the corpus's own conventions (landing logs, code anchors, status blocks, soundness arguments, mechanism-as-subject ADRs) from being docked. An earlier draft also said never to cite a live ADR as an example; that rule came from the source and was dropped as a norm. No structural gate on ADR bodies was added; the regomark-style `deny`/`warn` split remains an open idea, not a decision.
 
 ## To undo
 

@@ -30,12 +30,17 @@ module Rigor
 
         # `[foreign, entry]`: the foreign locals, and the method parameters the body never rebinds, each frozen.
         def collect(body, parameters)
-          entry = Set.new
-          collect_parameters(parameters, entry)
-          foreign = Set.new(entry)
+          foreign = Set.new
           written = Set.new
           collect_foreign(body, foreign, written)
-          [foreign.freeze, (entry - written).freeze]
+          finish(parameters, foreign, written)
+        end
+
+        # `[foreign, entry]` from the body's own `foreign` and `written` sets and the method's `parameters`.
+        def finish(parameters, foreign, written)
+          entry = Set.new
+          collect_parameters(parameters, entry)
+          [foreign.merge(entry).freeze, (entry - written).freeze]
         end
 
         def collect_parameters(node, names)
@@ -46,8 +51,18 @@ module Rigor
         end
 
         # `foreign` gains every block or lambda parameter and every local a write binds to an object from elsewhere (an
-        # operator write's value is a call result); `written` every local any write or target binds.
+        # operator write's value is a call result); `written` every local any write or target binds. A nested def is
+        # not entered.
         def collect_foreign(node, foreign, written, literal_blocks = Set.new.compare_by_identity)
+          return if node.is_a?(Prism::DefNode)
+
+          visit(node, foreign, written, literal_blocks)
+          node.rigor_each_child { |child| collect_foreign(child, foreign, written, literal_blocks) }
+        end
+
+        # {.collect_foreign}'s step for one node, which the site collector's walk also takes
+        # ({AliasMutationFloor::SiteCollector}).
+        def visit(node, foreign, written, literal_blocks)
           case node
           when Prism::CallNode then literal_blocks << node.block if literal_iterator_block?(node)
           when Prism::BlockNode, Prism::LambdaNode
@@ -57,9 +72,7 @@ module Rigor
           when Prism::LocalVariableWriteNode, Prism::LocalVariableOrWriteNode, Prism::LocalVariableAndWriteNode
             name = written_name(node, written)
             foreign << name unless fresh_value?(node.value)
-          when Prism::DefNode then return
           end
-          node.rigor_each_child { |child| collect_foreign(child, foreign, written, literal_blocks) }
         end
 
         # A catalogued iterator over literals that read nothing (`[[1], [2]].each { |x| }`,

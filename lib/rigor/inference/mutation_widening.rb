@@ -306,7 +306,7 @@ module Rigor
 
         # Issue #2335 — a block parameter, an element read or any other receiver that may be an outer local's object.
         if AliasMutationFloor.candidate?(call_node)
-          scope = AliasMutationFloor.floor_after_call(call_node, scope, except: captured_element_root(receiver))
+          scope = AliasMutationFloor.floor_after_call(call_node, scope) { captured_element_root(receiver) }
         end
         widened = widen_outer_element_read(call_node, scope)
         return widened if widened

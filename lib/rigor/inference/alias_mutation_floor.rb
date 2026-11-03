@@ -43,7 +43,7 @@ module Rigor
     # A body where no local is handed on, and a receiver only ever written a new object that is not aliased, change
     # nothing.
     module AliasMutationFloor
-      # `escapes` maps each aliased local to the earliest offset its handing-on may run from ({.site_keys}), or is
+      # `escapes` maps each aliased local to the earliest offset its handing-on may run from ({.handed_by}), or is
       # {ALL}; `deferred` lists the `[start, end)` ranges of the closures that may run later.
       # `memo` keeps each call's answer ({.call_targets}) for the run: a loop or block body is evaluated more than once.
       Facts = Data.define(:escapes, :foreign, :entry, :deferred, :memo)
@@ -51,25 +51,66 @@ module Rigor
       ALWAYS = -1
       LOOPS = [Prism::WhileNode, Prism::UntilNode, Prism::ForNode, Prism::BlockNode, Prism::LambdaNode].freeze
 
-      # The {RemoverHolderScan} collector that keeps, for each local, the nodes that hand it on (nil for a capture by a
-      # closure that may run later).
+      # The {RemoverHolderScan} collector, which reads every fact {.scan} needs in that one walk: for each local the
+      # least key of the sites that hand it on ({.handed_by}), the ranges of the closures that may run later, and the
+      # body's foreign and written locals ({ForeignLocals.visit}).
       class SiteCollector
         attr_writer :site
-        attr_reader :sites
+        attr_reader :escapes, :deferred, :foreign, :written
 
         def initialize
-          @sites = {}
+          @escapes = {}
           @site = nil
+          @outer = nil
+          @outer_owner = nil
+          @deferred = []
+          @foreign = Set.new
+          @written = Set.new
+          @literal_blocks = Set.new.compare_by_identity
+          @def_depth = 0
         end
 
         def <<(name)
-          (@sites[name] ||= []) << @site
+          key = @site ? @outer || AliasMutationFloor.handed_by(@site) : ALWAYS
+          current = @escapes[name]
+          @escapes[name] = key if current.nil? || key < current
           self
+        end
+
+        def enter(node, parent)
+          if @outer.nil? && LOOPS.any? { |klass| node.is_a?(klass) }
+            @outer = node.location.start_offset
+            @outer_owner = node
+          end
+          note_deferred(node, parent)
+          if node.is_a?(Prism::DefNode)
+            @def_depth += 1
+          elsif @def_depth.zero?
+            ForeignLocals.visit(node, @foreign, @written, @literal_blocks)
+          end
+        end
+
+        def leave(node)
+          if node.equal?(@outer_owner)
+            @outer = nil
+            @outer_owner = nil
+          end
+          @def_depth -= 1 if node.is_a?(Prism::DefNode)
         end
 
         # Only a call that may keep its argument hands it to another holder: a constructor, an in-place mutator (a
         # container adder), and a reflective or `define_method` call. Any other call's arguments are passed, not kept.
         def keeps_arguments?(call_node) = KEEPING_CALLS.include?(call_node.name)
+
+        private
+
+        def note_deferred(node, parent)
+          return unless node.is_a?(Prism::LambdaNode) ||
+                        (node.is_a?(Prism::BlockNode) && RemoverHolderScan.deferred_block?(parent))
+
+          start = node.location.start_offset
+          @deferred << [start, start + node.location.length]
+        end
       end
 
       ALL = :all
@@ -88,11 +129,11 @@ module Rigor
 
       module_function
 
-      # `scope` after `call_node`, a shape mutator, ran on a receiver that may be another local's object. `except` names
-      # the locals the receiver itself names, whose own widening (the named path's) stands.
-      # The caller asks {.candidate?} first, so it computes `except` only for a call this may floor after.
-      def floor_after_call(call_node, scope, except: nil)
-        return scope unless local_besides?(scope, except) { |type| UnknownStoreWidening.callee_floorable?(type) }
+      # `scope` after `call_node`, a shape mutator ({.candidate?}), ran on a receiver that may be another local's
+      # object. The block answers the locals the receiver itself names, whose own widening (the named path's)
+      # stands; it runs only once the call has targets.
+      def floor_after_call(call_node, scope)
+        return scope unless local_besides?(scope, nil) { |type| UnknownStoreWidening.callee_floorable?(type) }
 
         facts = facts_for(scope)
         return scope if facts.nil?
@@ -102,7 +143,7 @@ module Rigor
         end
         return scope if targets.empty?
 
-        floor_targets(scope, targets, except) { |type| unknown_store(call_node, type) }
+        floor_targets(scope, targets, yield) { |type| unknown_store(call_node, type) }
       end
 
       # Whether `call_node` is a shape mutator on an explicit receiver, the only call {.floor_after_call} floors after.
@@ -158,8 +199,9 @@ module Rigor
         return false if facts.nil? || facts.entry.include?(name)
 
         targets = call_targets(facts, call_node, name) { targets(name, facts, aliased_at(facts, call_node)) }
-        names = targets.equal?(ALL) ? scope.locals.keys : targets
-        names.any? { |target| target != name && literal_shape?(scope.local(target)) }
+        return local_besides?(scope, name) { |type| literal_shape?(type) } if targets.equal?(ALL)
+
+        targets.any? { |target| target != name && literal_shape?(scope.local(target)) }
       end
 
       # A literal shape a store can make stale: a `Tuple`, a `HashShape`, a literal String or Set, or an empty-witness
@@ -227,40 +269,26 @@ module Rigor
         facts.escapes.empty? ? nil : facts
       end
 
+      # One walk ({SiteCollector}) answers the facts. A body that calls `binding` or `eval` stops it early: every local
+      # is aliased, and the foreign locals are read in a walk of their own.
       def scan(body, parameters)
-        collector = RemoverHolderScan.unsafe_names(body, parameters, SiteCollector.new)
-        foreign, entry = ForeignLocals.collect(body, parameters)
-        escapes, deferred = collector.equal?(ALL) ? [ALL, []] : site_keys(body, collector.sites)
-        Facts.new(escapes:, foreign:, entry:, deferred:,
+        collector = SiteCollector.new
+        result = RemoverHolderScan.unsafe_names(body, parameters, collector)
+        if result.equal?(ALL)
+          foreign, entry = ForeignLocals.collect(body, parameters)
+          return Facts.new(escapes: ALL, foreign:, entry:, deferred: [].freeze, memo: {}.compare_by_identity)
+        end
+
+        foreign, entry = ForeignLocals.finish(parameters, collector.foreign, collector.written)
+        Facts.new(escapes: collector.escapes.freeze, foreign:, entry:, deferred: collector.deferred.freeze,
                   memo: {}.compare_by_identity)
       end
 
-      # `[escapes, deferred]` for {Facts}: a site's key is the start of the outermost loop or block that holds it (it
-      # may run again after any later point inside that loop), else where it has handed them on ({.handed_by}): its end
-      # (the receiver of a call has handed its locals on before the call's message runs, while the call's own arguments
-      # are handed on by the call itself), or its block's start; a local's is its least site's.
-      def site_keys(body, sites)
-        site_nodes = Set.new.compare_by_identity
-        sites.each_value { |nodes| nodes.each { |node| site_nodes << node if node } }
-        node_keys = {}.compare_by_identity
-        deferred = []
-        walk_sites(body, nil, nil, site_nodes, node_keys, deferred)
-        escapes = sites.transform_values do |nodes|
-          nodes.map { |node| node ? node_keys.fetch(node, ALWAYS) : ALWAYS }.min
-        end
-        [escapes.freeze, deferred.freeze]
-      end
-
-      def walk_sites(node, parent, outer, site_nodes, node_keys, deferred)
-        start = node.location.start_offset
-        outer ||= start if LOOPS.any? { |klass| node.is_a?(klass) }
-        node_keys[node] = outer || handed_by(node) if site_nodes.include?(node)
-        if node.is_a?(Prism::LambdaNode) || (node.is_a?(Prism::BlockNode) && RemoverHolderScan.deferred_block?(parent))
-          deferred << [start, start + node.location.length]
-        end
-        node.rigor_each_child { |child| walk_sites(child, node, outer, site_nodes, node_keys, deferred) }
-      end
-
+      # A site's key ({SiteCollector}) is the start of the outermost loop or block that holds it (it may run again after
+      # any later point inside that loop), else where it has handed its locals on: its end (the receiver of a call has
+      # handed its locals on before the call's message runs, while the call's own arguments are handed on by the call
+      # itself), or its block's start. A local's key is its least site's; a capture by a closure that may run later is
+      # {ALWAYS}.
       # Where a site has handed its locals on: a call's block may receive them as soon as it starts.
       def handed_by(node)
         block = node.block if node.is_a?(Prism::CallNode)

@@ -78,8 +78,9 @@ module Rigor
 
       # `names` collects the locals; a collector that answers `site=` ({AliasMutationFloor}) is told, before each name
       # it is given, the node that hands the local on, or nil when no single node does (a capture by a closure that may
-      # run later, a zero-argument `super`). One that answers `keeps_arguments?` says which calls' plain arguments it
-      # counts as held.
+      # run later, a zero-argument `super`), and is told when the walk enters (`enter(node, parent)`) and leaves
+      # (`leave(node)`) each node. One that answers `keeps_arguments?` says which calls' plain arguments it counts as
+      # held.
       def unsafe_names(body, parameters = nil, names = Set.new)
         sited = names.respond_to?(:site=)
         catch(ALL) do
@@ -91,16 +92,20 @@ module Rigor
         ALL
       end
 
-      def collect_unsafe(node, in_closure, names, sited: false)
+      def collect_unsafe(node, in_closure, names, sited: false, parent: nil)
         in_closure ||= node.is_a?(Prism::LambdaNode)
-        names.site = in_closure ? nil : node if sited
+        if sited
+          names.enter(node, parent)
+          names.site = in_closure ? nil : node
+        end
         names << node.name if in_closure && LOCAL_REFERENCES.any? { |k| node.is_a?(k) }
         record_node(node, names)
 
         node.rigor_each_child do |child|
           child_in_closure = in_closure || (child.is_a?(Prism::BlockNode) && deferred_block?(node))
-          collect_unsafe(child, child_in_closure, names, sited:)
+          collect_unsafe(child, child_in_closure, names, sited:, parent: node)
         end
+        names.leave(node) if sited
       end
 
       def record_node(node, names) # rubocop:disable Metrics/CyclomaticComplexity

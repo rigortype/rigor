@@ -558,7 +558,7 @@ module Rigor
       # (`maybe`): the veto fails toward declining, as the discovery walk always has.
       def project_find_defined?(entry, scope)
         !Rigor::Reflection.project_method_defined(entry.class_name, :find, kind: :singleton, source: :discovered,
-                                                                            scope: scope).no?
+                                                                           scope: scope).no?
       end
 
       # Class-side finders + the class-side relation entry points. `find` returns the model, or an Array of

@@ -115,6 +115,11 @@ RSpec.describe Rigor::Reflection, ".project_method_defined" do
   describe "a chain cut at its budget" do
     let(:limit) { Rigor::Scope::ResolutionChain::LIMIT }
     let(:count) { limit + 5 }
+    let(:cut_scope) do
+      scope_for(
+        modules_source({ 1 => "def deep = 1\nattr_reader :deep_reader", count => "def near = 1\ninclude Comparable" })
+      )
+    end
 
     # `Cut < Base` mixes in `M1 .. Mn`: by `include`, or (`extend: true`) through one `extend Ext` of a module that
     # includes them, since `extend` folds a module's own `def`s into the extender and only the modules IT includes
@@ -131,12 +136,6 @@ RSpec.describe Rigor::Reflection, ".project_method_defined" do
                "class Cut < Base\n#{includes}\nend"
              end
       "#{modules.join("\n")}\nclass Base; end\n#{host}\n"
-    end
-
-    let(:cut_scope) do
-      scope_for(
-        modules_source({ 1 => "def deep = 1\nattr_reader :deep_reader", count => "def near = 1\ninclude Comparable" })
-      )
     end
 
     it "builds a truncated chain (the premise)" do

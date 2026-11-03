@@ -391,7 +391,7 @@ module Rigor
         def project_defines_on_chain?(class_name, method_name, scope)
           CORE_ANCESTOR_CHAINS.fetch(class_name, [class_name]).any? do |name|
             !Rigor::Reflection.project_method_defined(name, method_name, kind: :instance, source: :either,
-                                                                          scope: scope).no?
+                                                                         scope: scope).no?
           end
         end
 

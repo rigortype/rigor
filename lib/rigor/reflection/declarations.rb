@@ -2,8 +2,6 @@
 
 require "prism"
 
-require_relative "../inference/declaration_walk"
-
 module Rigor
   # {Reflection}'s per-file declaration walk for plugins (ADR-128, #2708): {.class_declarations_in} answers which
   # classes a parsed file declares under their `Module.nesting`-correct names, and hands each call the walk visits
@@ -49,54 +47,12 @@ module Rigor
     #
     # `root` is a `Prism::Node`, typically `Prism.parse(source).value`.
     def class_declarations_in(root, &on_call)
+      # Loaded on first use, not with `Reflection`: the walk heads the analysis engine, which the engine-free
+      # paths (a warm `rigor effects`) load `Reflection` without. The walk's entry point loads the collectors.
+      require_relative "../inference/declaration_walk"
       collector = on_call ? DeclarationCallCollector.new(on_call) : DeclarationCollector.new
       Inference::DeclarationWalk.run(root, [collector], Inference::DeclarationWalk::Context.root(nesting: []))
       collector.classes
     end
-
-    # The walk's collector behind {.class_declarations_in}; the plugin never sees it.
-    class DeclarationCollector
-      include Inference::DeclarationWalk::Collector
-
-      EMPTY_NESTING = [].freeze
-
-      attr_reader :classes
-
-      def initialize
-        @classes = []
-      end
-
-      def on_declaration(node, context, body_context)
-        if node.is_a?(Prism::ClassNode)
-          name = body_context.prefix.join("::")
-          @classes << ClassDeclaration.new(name: name, nesting: frozen_nesting(context), node: node) unless name.empty?
-        end
-        Inference::DeclarationWalk::DESCEND
-      end
-
-      private
-
-      # The walk's chain, frozen: the root's `[]` is one array shared by every top-level declaration.
-      def frozen_nesting(context)
-        nesting = context.nesting || EMPTY_NESTING
-        nesting.frozen? ? nesting : nesting.dup.freeze
-      end
-    end
-
-    # {DeclarationCollector} that also forwards every call. A subclass, because the walk dispatches only the events a
-    # collector's class overrides, so a classes-only run pays for no call event.
-    class DeclarationCallCollector < DeclarationCollector
-      def initialize(on_call)
-        super()
-        @on_call = on_call
-      end
-
-      def on_call(node, context)
-        owner = context.prefix.join("::")
-        @on_call.call(DeclaredCall.new(node: node, owner: owner.empty? ? nil : owner))
-        Inference::DeclarationWalk::DESCEND
-      end
-    end
-    private_constant :DeclarationCollector, :DeclarationCallCollector
   end
 end

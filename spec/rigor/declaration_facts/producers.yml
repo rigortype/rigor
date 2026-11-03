@@ -685,7 +685,7 @@ lib/rigor/plugin/node_context.rb:
   computes: the enclosing class or module a node rule sees (ADR-37)
   producers:
     Rigor::Plugin::NodeContext#enclosing_module: grandfathered
-lib/rigor/reflection/declarations.rb:
+lib/rigor/reflection/declaration_collectors.rb:
   computes: the classes a plugin's parsed file declares, and each call's lexical owner, for Reflection.class_declarations_in (#2708)
   producers:
     Rigor::Reflection::DeclarationCallCollector: a DeclarationWalk collector, so the owner name comes from DeclarationWalk::Context#prefix; it computes no context itself

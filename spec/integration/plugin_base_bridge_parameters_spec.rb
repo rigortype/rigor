@@ -244,6 +244,30 @@ RSpec.describe "ADR-43 bridge: block, override and reader types for a source-onl
     expect(dump_with_plugins(source)).to eq([[6, "dump_type: 1"]])
   end
 
+  # The real `sig/rigor/plugin/base.rbs`: a `dynamic_return` rule with a static `methods:` Array only ever runs on a
+  # `Prism::CallNode`, because the name gate reads `call_node.name`, which no other node the engine offers has. A
+  # callable `methods:`, a `file_methods:` or a `receivers:`-only rule is offered the compound writes and `&:sym`.
+  it "types a static `methods:` rule's call_node as a CallNode and every other rule's as the offered union" do
+    source = <<~RUBY
+      module Rigor
+        module Plugin
+          class ZzProbe < Base
+            dynamic_return(receivers: ["Foo"], methods: %i[bar]) { |call_node, _scope| Rigor.dump_type(call_node) }
+            dynamic_return(methods: -> { %i[bar] }) { |call_node, _scope| Rigor.dump_type(call_node) }
+            dynamic_return(receivers: ["Foo"]) { |call_node, _scope| Rigor.dump_type(call_node) }
+          end
+        end
+      end
+    RUBY
+    union = "Prism::BlockArgumentNode | Prism::CallAndWriteNode | Prism::CallNode | Prism::CallOperatorWriteNode | " \
+            "Prism::CallOrWriteNode | Prism::IndexAndWriteNode | Prism::IndexOperatorWriteNode | Prism::IndexOrWriteNode"
+    result = analyze(files: { "probe.rb" => source }, cache_store: nil,
+                     config: { "signature_paths" => [File.expand_path("../../sig", __dir__)] })
+    dumps = result.diagnostics.select { |d| d.rule == "dump.type" }
+    dumps = dumps.map { |d| [d.line, d.message.delete_prefix("dump_type: ")] }
+    expect(dumps).to eq([[4, "Prism::CallNode"], [5, union], [6, union]])
+  end
+
   def dump_with_plugins(source)
     Rigor::Plugin.unregister!
     plugins = [Rigor::Plugin::Graphql, Rigor::Plugin::Sorbet, Rigor::Plugin::Grape]

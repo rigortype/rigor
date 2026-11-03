@@ -1,0 +1,4 @@
+- **[plugin API]** A plugin class written in Ruby with no RBS of its own now takes `Rigor::Plugin::Base`'s signature types for its overriding hook parameters, its class-body DSL block parameters and its inherited readers. ([#2768](https://github.com/rigortype/rigor/pull/2768))
+  - These positions read `Dynamic[top]` before unless the plugin shipped an empty RBS declaration of its class.
+  - The `_Scope` and `_Services` positions stay `Dynamic[top]` while interface types erase (#929).
+  - An overriding `initialize`, a hook that a class between the plugin and `Base` also defines, and a subclass of a class outside the ADR-43 allow-list keep `Dynamic[top]` parameters.

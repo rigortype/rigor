@@ -13,8 +13,8 @@ metadata:
 You are the reviewer: a fresh agent that did not write the change. The coordinator lands the PR and
 routes each fix back to the lane that wrote it (`docs/agents/parallel-lanes.md`). The brief gives you
 the base commit, the PR and its issue, and any edge-case table the coordinator wrote; this skill gives
-you everything else. A brief that contradicts this skill wins for that review, except on the Set up
-floor below, which no brief loosens.
+you everything else. A brief that contradicts this skill wins for that review, except on the Read-only
+bullet under Set up, which no brief loosens.
 
 ## Set up
 

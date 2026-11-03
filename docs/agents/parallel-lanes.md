@@ -124,7 +124,8 @@ lives in the PR body and the issues, which the coordinator reads only when a dec
    so it keeps its context; do not start a fresh fixer, which re-derives what the lane knew. A lane
    that can no longer be resumed is taken over per
    [When a lane has ended or died](#when-a-lane-has-ended-or-died). Route a severe fix in intricate
-   logic to the strongest model by resuming the lane on it only when the lane already runs that model. Delta rounds go to the same reviewer with SendMessage and follow
+   logic to the strongest model by resuming the lane on it only when the lane already runs that model.
+   Delta rounds go to the same reviewer with SendMessage and follow
    contribution-flow.md steps 4–5: three rounds at most; after round 3, a narrow severe finding with
    a conservative fix lands only through one fix-only delta check that finds nothing severe, and a
    non-converging design goes to the user. When a lane stops at a gate or an open choice, decide it
@@ -189,11 +190,14 @@ The takeover brief is a lane brief (step 5) with these overrides and additions:
 
 - It skips the `rigor-lane` skill's "Before you write code": the PR and the worktree exist, and the
   premise was checked when the lane started. It works in the old lane's worktree; when that is gone,
-  `nix develop --command bin/rigor-worktree <branch>` checks the existing branch out again.
-- It runs `git fetch && git merge --ff-only origin/<branch>` first, since a coordinator fix-up pushed
-  by step 7's procedure is on the remote only, then reads `git status`. Uncommitted leftovers from the
-  old lane are inspected and deliberately committed or discarded (never `git stash`), and the report's
-  `Open` line says which.
+  `nix develop --command bin/rigor-worktree <branch> origin/<branch>` checks the pushed branch out
+  again (the start point is ignored when the local branch still exists).
+- It reads `git fetch`, `git status` and `git log --oneline origin/<branch>...HEAD` before changing
+  anything. Uncommitted leftovers from the old lane are inspected and deliberately committed or
+  discarded (never `git stash`), and the report's `Open` line says which. Then `git merge --ff-only
+  origin/<branch>` picks up a coordinator fix-up that step 7's procedure pushed to the remote only.
+  When the fast-forward fails (the old lane died mid-rebase, so local and remote diverge), it stops
+  and reports; it never resets.
 - It carries what has landed so far (the PR body, the last report, `git log origin/master..`), every
   open review finding and ruling, quoted, and the approaches already withdrawn.
 

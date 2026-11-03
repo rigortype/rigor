@@ -42,7 +42,11 @@ RSpec.describe "a mutation through another holder floors the locals it may reach
     "a Hash default" => 'a = [1]; Hash.new(a)[:k] << "s"; a.last.bytesize',
     "an Array.new fill" => 'a = [1]; Array.new(1, a)[0] << "s"; a.last.bytesize',
     "a Struct member" => 'a = [1]; Struct.new(:v).new(a).v << "s"; a.last.bytesize',
-    "an index write through a copy" => 'acc = [7]; r = acc; r[0] = "x"; acc[0].upcase'
+    "an index write through a copy" => 'acc = [7]; r = acc; r[0] = "x"; acc[0].upcase',
+    "a copy made on an earlier pass of a loop" => 'a = [1]; x = nil; i = 0; while i < 2; x << "s" if x; x = a; ' \
+                                                  "i += 1; end; a.last.bytesize",
+    "a proc that runs after the local is handed on" => 'a = [1]; pr = proc { |y| y << "s" }; @k = a; pr.call(a); ' \
+                                                       "a.last.bytesize"
   }.each do |path, body|
     it "stays silent after a mutation through #{path}" do
       expect(undefined_methods("def m; #{body}; end\n")).to eq([])
@@ -102,6 +106,38 @@ RSpec.describe "a mutation through another holder floors the locals it may reach
 
     it "keeps an escaped literal when the receiver is a method parameter the body never rebinds" do
       expect(dumped('def foo(_) = nil; def m(p); a = [1]; foo(a); p << "s"; dump_type(a.size); end')).to eq(["1"])
+    end
+
+    it "keeps a literal handed on only after the mutation" do
+      expect(dumped('def m; a = [1]; b = gets.to_s.split; b << "s"; @k = a; dump_type(a.size); end')).to eq(["1"])
+    end
+
+    it "keeps a literal passed only to a call that keeps nothing" do
+      source = 'def foo(_) = nil; def m; a = [1]; foo(a); b = gets.to_s.split; b << "s"; dump_type(a.size); end'
+      expect(dumped(source)).to eq(["1"])
+    end
+
+    it "keeps an escaped literal when the receiver is a block parameter of an iterator over literals" do
+      expect(dumped("def m; a = [1]; @k = a; [[2]].each { |y| y << 3 }; dump_type(a.size); end")).to eq(["1"])
+    end
+
+    it "keeps an escaped literal when the receiver selects between new-object locals" do
+      source = "def m; x = [1]; y = [2]; z = [3]; @k = [x, y, z]; (gets ? x : y) << 4; dump_type(z.size); end"
+      expect(dumped(source)).to eq(["1"])
+    end
+
+    it "keeps the precise reading the named path gives a receiver that is itself aliased" do
+      source = 'def m; s = gets.to_s.split(","); t = s; s.map!(&:strip); dump_type(s); end'
+      expect(dumped(source)).to eq(["Array[String]"])
+    end
+
+    it "keeps the element widening of an element read's aliased root" do
+      expect(dumped("def m; c = [{ a: 1 }]; @k = c; c[0].shift; dump_type(c); end")).to eq(["[Hash[Symbol, 1]]"])
+    end
+
+    it "floors nothing for a method parameter a callee writes" do
+      source = 'def poke(a) = a[0] = "x"; def m(p); r = gets.to_s.split; @k = r; @j = p; poke(p); dump_type(r); end'
+      expect(dumped(source)).to eq(["Array[String]"])
     end
 
     it "keeps an escaped literal String when the receiver is another new String" do

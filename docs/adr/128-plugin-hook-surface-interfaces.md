@@ -1,6 +1,6 @@
 # ADR-128 — The plugin hook surface as structural interfaces, and how its breaking changes ship
 
-Status: **Proposed, 2026-11-03.** Nothing is implemented. Slice 1 (WD7) can land today. It adds no
+Status: **Accepted, 2026-11-03.** Nothing is implemented. Slice 1 (WD7) can land today. It adds no
 diagnostic to plugin source, because the interface types stay inert there until two issues land:
 #929 (RBS interface types erase to `untyped`) and #2681 (a source-only plugin class does not take
 `Plugin::Base`'s RBS types). Slice 2 must land before those two. Slice 3 makes the types live, behind

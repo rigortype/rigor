@@ -99,7 +99,7 @@ RSpec.describe "Precise carrier re-grow (issue #2361)", type: :runner do
 
     it "floors a precise Set a self-call grows through a Set-only adder" do
       source = "def put(s) = s.add(1)\ns = ARGV.to_set\nput(s)\ndump_type(s)"
-      expect(dumped(source)).to eq(["Set[Dynamic[top] | String]"])
+      expect(dumped(source)).to eq(["Set[Dynamic[String]]"])
     end
   end
 

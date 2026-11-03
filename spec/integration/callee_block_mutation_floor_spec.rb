@@ -3,7 +3,7 @@
 # Issue #2296 — a callee that mutates its parameter inside a block of its body (`def poke(acc) = 2.times { |i| acc[i]
 # = "x" }`) left the caller's argument at its literal shape, so `acc = [7, 9]; poke(acc); acc[0].upcase` reported
 # `undefined method 'upcase' for 7` on code Ruby runs to `"X"` (`XXH3#hash_long`, the instance behind #2104). The floor
-# now counts that channel and keeps the element type beside the gradual arm (`Array[Dynamic[top] | Integer]`), not the
+# now counts that channel and keeps the element type as a gradual `Dynamic` (`Array[Dynamic[Integer]]`, #2647), not the
 # bare carrier the escaping-block census answers. A Set argument grown through a Set-only adder (`add`, `merge`) is
 # floored the same way, and only a Set: `Hash#merge` returns a new Hash.
 #
@@ -39,21 +39,21 @@ RSpec.describe "a callee's block mutation floors the caller's argument (#2296)",
   describe "the widened argument keeps its element type" do
     {
       "an Integer#times block" => ["def poke(acc) = 2.times { |i| acc[i] = \"x\" }",
-                                   "acc = [7, 9]\npoke(acc)", "Array[Dynamic[top] | Integer]"],
+                                   "acc = [7, 9]\npoke(acc)", "Array[Dynamic[Integer]]"],
       "a nested block" => ["def poke(acc) = [1].each { 2.times { |i| acc[i] = \"x\" } }",
-                           "acc = [7, 9]\npoke(acc)", "Array[Dynamic[top] | Integer]"],
+                           "acc = [7, 9]\npoke(acc)", "Array[Dynamic[Integer]]"],
       "an each_with_index block" => ["def poke(acc) = acc.each_with_index { |_, i| acc[i] = \"x\" }",
-                                     "acc = [7, 9]\npoke(acc)", "Array[Dynamic[top] | Integer]"],
+                                     "acc = [7, 9]\npoke(acc)", "Array[Dynamic[Integer]]"],
       "a Hash index write" => ["def poke(h) = [1].each { |k| h[k] = \"s\" }",
-                               "acc = { a: 1 }\npoke(acc)", "Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]"],
+                               "acc = { a: 1 }\npoke(acc)", "Hash[Dynamic[Symbol], Dynamic[Integer]]"],
       "a value-pinned Hash nominal" => ["def poke(h) = [1].each { |k| h[\"k\"] = k }",
                                         "acc = {}\n%w[a b].each { |n| acc[n] = n.size }\npoke(acc)",
                                         "Hash[\"a\" | \"b\" | Dynamic[top], 1 | Dynamic[top]]"],
       "a nilable Array" => ["def poke(acc) = 2.times { |i| acc[i] = \"x\" if acc }",
-                            "acc = ARGV.empty? ? [7, 9] : nil\npoke(acc)", "Array[Dynamic[top] | Integer]?"],
+                            "acc = ARGV.empty? ? [7, 9] : nil\npoke(acc)", "Array[Dynamic[Integer]]?"],
       "a String append" => ["def poke(s) = [1].each { s << \"c\" }", "acc = +\"ab\"\npoke(acc)", "String"],
       "a Set append" => ["def poke(s) = [1].each { s << \"c\" }", "acc = Set[1]\npoke(acc)",
-                         "Set[Dynamic[top] | Integer]"]
+                         "Set[Dynamic[Integer]]"]
     }.each do |label, (defs, source, expected)|
       it "floors through #{label}" do
         expect(dumped(defs, "#{source}\ndump_type(acc)")).to eq([expected])
@@ -96,7 +96,7 @@ RSpec.describe "a callee's block mutation floors the caller's argument (#2296)",
       "merge in a block" => "def grow(s) = [1].each { s.merge([\"a\"]) }"
     }.each do |label, defs|
       it "floors a Set argument through #{label}" do
-        expect(dumped(defs, "acc = Set[1]\ngrow(acc)\ndump_type(acc)")).to eq(["Set[Dynamic[top] | Integer]"])
+        expect(dumped(defs, "acc = Set[1]\ngrow(acc)\ndump_type(acc)")).to eq(["Set[Dynamic[Integer]]"])
       end
     end
 

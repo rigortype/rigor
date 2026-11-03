@@ -241,20 +241,23 @@ module Rigor
           seed_project_scope(Scope.empty(environment: @environment, source_path: path)), path
         )
         index = Inference::ScopeIndexer.index(root, default_scope: scope, widen_clauses: true)
-        # ADR-53 B4 — built-in collectors + plugin node rules share one walk.
-        node_collectors = CheckRules.build_node_collectors(path, index, root)
-        node_results = node_rule_results_by_plugin(path, root, scope, node_collectors, index)
-        diagnostics = CheckRules.diagnose(
-          path: path,
-          root: root,
-          scope_index: index,
-          comments: parse_result.comments,
-          disabled_rules: @configuration.disabled_rules,
-          node_collectors: node_collectors,
-          stated_runtime_ruby: @configuration.stated_runtime_ruby
-        )
-        plugin_rows = plugin_emitted_diagnostics(path, root, scope, node_results)
-        diagnostics += CheckRules.filter_plugin_suppressed(plugin_rows, path: path, comments: parse_result.comments)
+        # MEASUREMENT PROTOTYPE v2 (#2709): the type_of memo is open for the rule walk only.
+        diagnostics = Inference::ExpressionTyper.with_type_memo_window do
+          # ADR-53 B4 — built-in collectors + plugin node rules share one walk.
+          node_collectors = CheckRules.build_node_collectors(path, index, root)
+          node_results = node_rule_results_by_plugin(path, root, scope, node_collectors, index)
+          rows = CheckRules.diagnose(
+            path: path,
+            root: root,
+            scope_index: index,
+            comments: parse_result.comments,
+            disabled_rules: @configuration.disabled_rules,
+            node_collectors: node_collectors,
+            stated_runtime_ruby: @configuration.stated_runtime_ruby
+          )
+          plugin_rows = plugin_emitted_diagnostics(path, root, scope, node_results)
+          rows + CheckRules.filter_plugin_suppressed(plugin_rows, path: path, comments: parse_result.comments)
+        end
         diagnostics + explain_diagnostics(path, parse_result.value, scope)
       rescue Errno::ENOENT => e
         [analyzer_error(path, e.message)]

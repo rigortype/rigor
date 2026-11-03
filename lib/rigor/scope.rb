@@ -297,6 +297,7 @@ module Rigor
 
     def record_dynamic_origin(node, cause)
       @dynamic_origins[node] = cause
+      Inference::ExpressionTyper.note_advisory_write(self, :record_dynamic_origin, [node, cause])
       self
     end
 
@@ -307,6 +308,7 @@ module Rigor
     # through `#join` / `#rebuild`), excluded from `==` / `hash`, so it never forks a flow-dedup or cache key.
     def record_void_origin(node, origin)
       @void_origins[node] = origin
+      Inference::ExpressionTyper.note_advisory_write(self, :record_void_origin, [node, origin])
       self
     end
 
@@ -319,6 +321,7 @@ module Rigor
     # excluded from `==` / `hash`, so it never forks a flow-dedup or cache key.
     def record_plugin_typed_call(node)
       @plugin_typed_calls[node] = true
+      Inference::ExpressionTyper.note_advisory_write(self, :record_plugin_typed_call, [node])
       self
     end
 
@@ -405,6 +408,7 @@ module Rigor
     # metadata, ignored by `==` / `hash`, and never varying a flow decision on its own.
     def record_optimistic_origin(node, cause)
       @optimistic_origins[node] = cause
+      Inference::ExpressionTyper.note_advisory_write(self, :record_optimistic_origin, [node, cause])
       self
     end
 

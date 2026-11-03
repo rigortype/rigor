@@ -260,19 +260,57 @@ module Rigor
         @typing_node = typing_node
       end
 
-      # MEASUREMENT PROTOTYPE (branch type-of-memo-prototype, not for merge; #2709): a per-file memo of `type_of`
-      # results keyed by the scope's and the node's identity. It has no store gate, so it is unsound inside an
-      # ADR-55 fixpoint, which evaluates one body scope several times; it exists to size the lever on CI.
+      # MEASUREMENT PROTOTYPE v2 (branch type-of-memo-prototype, not for merge; #2709, ADR-129 revision). A memo of
+      # `type_of` results keyed by the scope's and the node's identity, open only inside the rule walk's window
+      # ({.with_type_memo_window}). Inside the window it stays shut while any ambient input is not at its default,
+      # refuses to store a result whose computation logged a transient event, and records the advisory-table writes
+      # a computation makes so a hit replays them in order.
       TYPE_MEMO_KEY = RunScopedSlots.register(:__rigor_type_of_memo_prototype__)
-      private_constant :TYPE_MEMO_KEY
+      TYPE_MEMO_WINDOW_KEY = RunScopedSlots.register(:__rigor_type_of_memo_window__)
+      TYPE_MEMO_CAPTURE_KEY = RunScopedSlots.register(:__rigor_type_of_memo_capture__)
+      TRANSIENT_EVENT_COUNT_KEY = RunScopedSlots.register(:__rigor_transient_event_count__)
+      AMBIENT_SINK_KEYS = %i[rigor_return_sink rigor_provisional_returns rigor_next_sink rigor_break_sink
+                             rigor_break_value_sink rigor_retry_frames].freeze
+      private_constant :TYPE_MEMO_KEY, :TYPE_MEMO_WINDOW_KEY, :TYPE_MEMO_CAPTURE_KEY, :TRANSIENT_EVENT_COUNT_KEY,
+                       :AMBIENT_SINK_KEYS
 
-      def self.clear_type_memo = (Thread.current[TYPE_MEMO_KEY] = nil)
+      def self.with_type_memo_window
+        previous = Thread.current[TYPE_MEMO_WINDOW_KEY]
+        Thread.current[TYPE_MEMO_WINDOW_KEY] = true
+        Thread.current[TYPE_MEMO_KEY] = nil
+        yield
+      ensure
+        Thread.current[TYPE_MEMO_WINDOW_KEY] = previous
+        Thread.current[TYPE_MEMO_KEY] = nil
+      end
+
+      # The advisory-table write `scope.public_send(writer, *args)` just made, appended to every open capture.
+      def self.note_advisory_write(scope, writer, args)
+        captures = Thread.current[TYPE_MEMO_CAPTURE_KEY]
+        captures.last << [scope, writer, args] if captures && !captures.empty?
+      end
 
       def type_of(node)
-        per_scope = type_memo_for(node)
-        return typing_node_frame(node) unless per_scope
+        return typing_node_frame(node) unless type_memo_open?(node)
 
-        per_scope[node] ||= typing_node_frame(node)
+        per_scope = ((Thread.current[TYPE_MEMO_KEY] ||= {}.compare_by_identity)[scope] ||= {}.compare_by_identity)
+        if (entry = per_scope[node])
+          entry[1].each { |target, writer, args| target.public_send(writer, *args) }
+          return entry[0]
+        end
+
+        events = Thread.current[TRANSIENT_EVENT_COUNT_KEY] || 0
+        captures = (Thread.current[TYPE_MEMO_CAPTURE_KEY] ||= [])
+        writes = []
+        captures.push(writes)
+        begin
+          result = typing_node_frame(node)
+        ensure
+          captures.pop
+        end
+        captures.last&.concat(writes)
+        per_scope[node] = [result, writes.freeze] if (Thread.current[TRANSIENT_EVENT_COUNT_KEY] || 0) == events
+        result
       end
 
       def typing_node_frame(node)
@@ -287,13 +325,19 @@ module Rigor
         @typing_node = previous
       end
 
-      def type_memo_for(node)
-        return nil if @operand_types || @tracer || FlowTracer.active? || !node.is_a?(Prism::Node)
-        return nil if KeyPresenceGuard.active? || Analysis::DependencyRecorder.active?
+      def type_memo_open?(node)
+        return false unless Thread.current[TYPE_MEMO_WINDOW_KEY]
+        return false if @operand_types || @tracer || FlowTracer.active? || !node.is_a?(Prism::Node)
+        return false if KeyPresenceGuard.active? || Analysis::DependencyRecorder.active?
+        return false unless (Thread.current[INFERENCE_GUARD_KEY] || EMPTY_GUARD_STACK).empty?
+        return false if Thread.current[YIELD_VALUE_KEY] || Thread.current[FORWARDED_ARGS_KEY]
+        return false if Thread.current[THREADED_BLOCK_BODY_KEY] || ReflectiveIvarWrite.repeating_body?
 
-        table = (Thread.current[TYPE_MEMO_KEY] ||= {}.compare_by_identity)
-        table[scope] ||= {}.compare_by_identity
+        AMBIENT_SINK_KEYS.none? { |key| Thread.current[key] }
       end
+
+      EMPTY_GUARD_STACK = [].freeze
+      private_constant :EMPTY_GUARD_STACK
 
       def untraced_type_of(node)
         # Slice A-declarations. ScopeIndexer pre-fills `scope.declared_types` for declaration-position nodes
@@ -3713,6 +3757,7 @@ module Rigor
       # always a sound conservative choice).
       def note_transient_fallback(category, context_depth)
         (Thread.current[TRANSIENT_EVENT_DEPTHS_KEY] ||= []) << context_depth
+        Thread.current[TRANSIENT_EVENT_COUNT_KEY] = (Thread.current[TRANSIENT_EVENT_COUNT_KEY] || 0) + 1
         BudgetTrace.hit(category)
       end
 

@@ -2768,9 +2768,6 @@ module Rigor
             severity: :error
           )
         ]
-      ensure
-        # MEASUREMENT PROTOTYPE (#2709): the type_of memo holds this file's scopes only.
-        Inference::ExpressionTyper.clear_type_memo
       end
 
       # ADR-113 WD2 — the `on_file_indexed` observer. It reads; an error inside it never changes this file's
@@ -2786,6 +2783,13 @@ module Rigor
       # plugin walk; `node_results` carries the per-plugin node-rule output. Both the built-in `diagnose`
       # output and the plugin diagnostics are then built from that single walk's results.
       def rule_and_plugin_diagnostics(path, parse_result, scope, index, self_call_misses)
+        # MEASUREMENT PROTOTYPE v2 (#2709): the type_of memo is open for the rule walk only.
+        Inference::ExpressionTyper.with_type_memo_window do
+          rule_and_plugin_diagnostics_body(path, parse_result, scope, index, self_call_misses)
+        end
+      end
+
+      def rule_and_plugin_diagnostics_body(path, parse_result, scope, index, self_call_misses)
         root = parse_result.value
         node_collectors = CheckRules.build_node_collectors(path, index, root)
         node_results = node_rule_results_by_plugin(path, root, scope, node_collectors, index)

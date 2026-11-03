@@ -24,6 +24,11 @@ trade-off nobody had set.
   them (`new`, in-place mutators, reflective calls), and let a receiver only ever written a new
   object reach only foreign aliased locals. Keeps every row fixed and the residue pins where they
   were; loses precision only where a local really escaped before the mutation.
+- Within that, count a value as handing a local on only where the value may be the local itself
+  (review round 1). Reading every local inside a write's value floored `a` after `n = a.size`,
+  `b = a.dup` or a read-only alias, and lost true positives on bodies where nothing escapes. Copies
+  and element reads are links between locals instead, and an element link floors only a binding
+  that can hold a mutable element.
 - Skip the callee paths for a method parameter. The callee census reads every opaque hand-off as a
   write, and flooring each local a parameter was copied into moved two residue pins with no
   finding.

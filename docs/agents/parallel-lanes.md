@@ -122,9 +122,9 @@ lives in the PR body and the issues, which the coordinator reads only when a dec
    #2295's +31% passed as an advisory warning and surfaced only at the v0.4.6 release gate, where
    #2329 had to win it back. Send each fix back to the lane that wrote the change with SendMessage,
    so it keeps its context; do not start a fresh fixer, which re-derives what the lane knew. A lane
-that can no longer be resumed is taken over by [When a lane has ended or died](#when-a-lane-has-ended-or-died). Route a
-   severe fix in intricate logic to the strongest model by resuming the lane on it only when the
-   lane already runs that model. Delta rounds go to the same reviewer with SendMessage and follow
+   that can no longer be resumed is taken over per
+   [When a lane has ended or died](#when-a-lane-has-ended-or-died). Route a severe fix in intricate
+   logic to the strongest model by resuming the lane on it only when the lane already runs that model. Delta rounds go to the same reviewer with SendMessage and follow
    contribution-flow.md steps 4–5: three rounds at most; after round 3, a narrow severe finding with
    a conservative fix lands only through one fix-only delta check that finds nothing severe, and a
    non-converging design goes to the user. When a lane stops at a gate or an open choice, decide it
@@ -178,17 +178,27 @@ and returned prose (#2333).
 
 ## When a lane has ended or died
 
-A fix round, a rebase or a ruling goes to the lane that wrote the PR, even after it has handed back:
-resume it with SendMessage. Only when that fails (its session ended, an API error killed it, or it
-died before any handback) does a new agent take the lane over, and it takes it over rather than
-starting fresh. Its brief is a lane brief (step 5) plus:
+A fix round or a ruling goes to the lane that wrote the PR, even after it has handed back: resume it
+with SendMessage. A bare rebase of an ended lane stays step 7's: run `bin/lane-push` in its worktree
+yourself. Only when a resume fails (its session ended, an API error killed it, or it died before any
+handback) does a new agent take the lane over, and it takes it over rather than starting fresh.
+First confirm the old lane is gone (`ListAgents`, or the session list): a failed SendMessage can be
+the coordinator's own API error while the lane still runs, and two writers in one worktree race.
 
-- the PR, its branch and the existing worktree path, which the new lane works in instead of creating
-  one, after `git fetch && git status` shows what the old lane left uncommitted;
-- what has landed on the branch so far (the PR body, the last report, `git log origin/master..`);
-- every open review finding and ruling, quoted, and the approaches already withdrawn.
+The takeover brief is a lane brief (step 5) with these overrides and additions:
 
-It pushes with `bin/lane-push` and reports in the `rigor-lane` shape like any lane. The v0.4.7 window
+- It skips the `rigor-lane` skill's "Before you write code": the PR and the worktree exist, and the
+  premise was checked when the lane started. It works in the old lane's worktree; when that is gone,
+  `nix develop --command bin/rigor-worktree <branch>` checks the existing branch out again.
+- It runs `git fetch && git merge --ff-only origin/<branch>` first, since a coordinator fix-up pushed
+  by step 7's procedure is on the remote only, then reads `git status`. Uncommitted leftovers from the
+  old lane are inspected and deliberately committed or discarded (never `git stash`), and the report's
+  `Open` line says which.
+- It carries what has landed so far (the PR body, the last report, `git log origin/master..`), every
+  open review finding and ruling, quoted, and the approaches already withdrawn.
+
+It pushes with `bin/lane-push` and reports in the `rigor-lane` shape like any lane; its `PR:` line is
+the existing PR. The v0.4.7 window
 measured why: four fresh fixers started on PRs whose lane had finished (#2454, #2584, #2594, #2587),
 against one in v0.4.6, and lanes #2503 and #2505, killed in an API outage, were redone by agents that
 re-derived the work (#2333).

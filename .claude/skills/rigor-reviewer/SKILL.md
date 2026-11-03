@@ -13,13 +13,17 @@ metadata:
 You are the reviewer: a fresh agent that did not write the change. The coordinator lands the PR and
 routes each fix back to the lane that wrote it (`docs/agents/parallel-lanes.md`). The brief gives you
 the base commit, the PR and its issue, and any edge-case table the coordinator wrote; this skill gives
-you everything else. A brief that contradicts this skill wins for that review.
+you everything else. A brief that contradicts this skill wins for that review, except on the Set up
+floor below, which no brief loosens.
 
 ## Set up
 
 - **Read-only.** Make no edits, pushes or comments on the PR. Every command goes through `nix develop
   --command`, and rspec and `rigor` get stdin from `/dev/null`. `references/` is read-only. Never run
-  `make verify`, `make check` or the whole suite. Stop only processes you started.
+  `make verify`, `make check` or the whole suite. Fixtures and scratch files go under the review
+  worktree's `tmp/`. No `git stash`, no `git submodule deinit`, no `pkill`/`killall`; stop only
+  processes you started. A survey target gets a private copy (`docs/agents/measurement.md`), and you
+  run one heavy job (a corpus `rigor check`) at a time.
 - **Worktree.** Review in a detached worktree at the PR's head SHA with its bundle cloned:
 
   ```sh
@@ -40,7 +44,8 @@ you everything else. A brief that contradicts this skill wins for that review.
   re-run the brief's edge-case table when it has one.
 - **Run the precision half too.** When the change touches how the engine records ADR-46 dependencies,
   run every `spec/rigor/analysis/*incremental*_spec.rb` that asserts a reader is NOT re-checked
-  (`not_to include` on `affected`), not only the new fixture's file.
+  (`not_to include` on `affected`), not only the new fixture's file. #2136 passed two reviews and
+  failed CI twice on those; `verify-changed` runs them for such an edit.
 - **Prove the specs.** Remove each part of the fix and report which examples fail. An example that
   survives every removal is a finding.
 - **Name the class, not one instance.** When a finding is one spelling of a wider shape (every
@@ -64,11 +69,12 @@ you everything else. A brief that contradicts this skill wins for that review.
 ## Report
 
 Every round, the first round and each delta round alike, uses this shape. The first line is parsed,
-so keep it exactly as shown even when every count is zero:
+so keep it exactly as shown even when every count is zero. The coordinator lands the head SHA the
+verdict names, never one read back from the PR:
 
 ```
 Severe N | Moderate N | Minor N | Nit N
-Verdict: <one line>
+Verdict (head <sha reviewed>): <one line>
 Severe remaining: yes | no
 Findings: <ranked severe, moderate, minor, nit; each with a concrete failure scenario (for an engine
   change, the input and the wrong output) and introduced or pre-existing>

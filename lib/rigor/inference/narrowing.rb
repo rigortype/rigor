@@ -9,6 +9,7 @@ require_relative "../environment"
 require_relative "../rbs_extended"
 require_relative "../analysis/fact_store"
 require_relative "../builtins/regex_refinement"
+require_relative "attribute_reader_chain"
 require_relative "guard_rebinding"
 require_relative "intervening_ivar_reset"
 require_relative "key_presence_guard"
@@ -1251,7 +1252,10 @@ module Rigor
             # when the call itself carries no other flow fact, so `v&.start_with?('[') &&
             # v.end_with?(']')` sees `v` non-nil in the `&&` right operand. The falsey edge is
             # the conservative no-op (falsey could mean nil receiver OR a falsey method result).
-            safe_nav_result = analyse_safe_nav_receiver(node, scope)
+            #
+            # Issue #2685 — `if x.r` where `r` is an RBS attribute: the truthy edge also carries the reader's truthy
+            # fragment to the next `x.r` read, on top of that `&.` receiver narrowing.
+            safe_nav_result = analyse_truthy_reader(node, scope)
             return safe_nav_result if safe_nav_result
 
             # Issue #606 slice 1 — the same proof one call further out, where the `&.` result is
@@ -2209,7 +2213,7 @@ module Rigor
           return nil unless argument_free?(node)
 
           case name
-          when :nil? then analyse_nil_predicate(node.receiver, scope)
+          when :nil? then analyse_nil_predicate(node.receiver, scope) || analyse_attribute_chain_nil(node, scope)
           when :! then analyse(node.receiver, scope)&.reverse
           end
         end
@@ -2584,6 +2588,60 @@ module Rigor
             scope.with_method_chain_narrowing(*address, truthy_type),
             scope.with_method_chain_narrowing(*address, falsey_type)
           ]
+        end
+
+        # Issue #2685 — truthiness and `nil?` guards on a single-hop chain, recorded the way
+        # {.analyse_class_predicate_on_chain} records an `is_a?` guard and dropped by the same rules (a rebind of
+        # the root, any later call on the root). Unlike `is_a?`, which narrows any reader, these narrow only an
+        # attribute ({AttributeReaderChain}): a guard says the reader returned a non-nil value once, and only a
+        # stored field promises the next read returns it again.
+        #
+        # Only the edge that removes `nil` (and `false`, for truthiness) is recorded. The other edge keeps the
+        # reader's declared type, so a branch that tests the reader again is not folded to a constant.
+        #
+        # The edges the shape had without this rule stay and the chain fact is added on top, after them, since
+        # rebinding `x` drops the facts keyed on it: `x&.r` keeps {.analyse_safe_nav_receiver}'s and
+        # {.analyse_safe_nav_chain}'s narrowing of `x`, and an attribute carrying `RBS::Extended` predicate facts
+        # keeps {.analyse_rbs_extended_contribution}'s edges.
+        def analyse_attribute_chain_truthiness(node, scope)
+          fact = attribute_chain_fact(node, scope) { |current| narrow_truthy(current) }
+          return nil if fact.nil?
+
+          truthy, falsey = analyse_safe_nav_receiver(node, scope) || analyse_rbs_extended_contribution(node, scope) ||
+                           [scope, scope]
+          [truthy.with_method_chain_narrowing(*fact), falsey]
+        end
+
+        # The truthy-edge narrowing a bare call `x.r` / `x&.r` carries: the attribute fact (with the `&.` receiver
+        # narrowing inside it), else the `&.` receiver narrowing alone.
+        def analyse_truthy_reader(node, scope)
+          analyse_attribute_chain_truthiness(node, scope) || analyse_safe_nav_receiver(node, scope)
+        end
+
+        # `x.r.nil?` — the falsey edge proves the read non-nil.
+        def analyse_attribute_chain_nil(node, scope)
+          return nil unless argument_free?(node) && node.block.nil?
+
+          fact = attribute_chain_fact(node.receiver, scope) { |current| narrow_non_nil(current) }
+          return nil if fact.nil?
+
+          falsey = (node.receiver.safe_navigation? && analyse_safe_nav_chain(node, scope)&.last) || scope
+          [scope, falsey.with_method_chain_narrowing(*fact)]
+        end
+
+        # `[receiver_kind, receiver_name, method_name, narrowed]` for an attribute read, `narrowed` being the block's
+        # answer, or nil. A fact equal to the current type is still recorded: evaluating the guard is itself a call on
+        # the root, which drops the fact an earlier guard left, so a repeated guard must put it back.
+        def attribute_chain_fact(chain_call, scope)
+          address = stable_chain_address(chain_call)
+          return nil if address.nil?
+          return nil unless AttributeReaderChain.attribute_read?(chain_call, scope)
+
+          current = scope.type_of(chain_call)
+          narrowed = yield(current)
+          return nil if narrowed.is_a?(Type::Bot)
+
+          [*address, narrowed]
         end
 
         # Returns `[receiver_kind, receiver_name, method_name]` iff `chain_call` is a stable

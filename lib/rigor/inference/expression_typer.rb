@@ -303,6 +303,36 @@ module Rigor
         infer_user_method_return(def_node, receiver, arg_types)
       end
 
+      # Issue #2685 — whether a project `def` can answer the instance method `method_name` on a `class_name`
+      # receiver: a `def` on the class or one of its ancestors ({Scope#user_def_through_ancestors}, which
+      # counts a cross-file `def` reopening an RBS class), or one on a project class or module the receiver may
+      # be at runtime, which descends from `class_name`. {AttributeReaderChain} asks it so an RBS attribute a
+      # project method redefines no longer reads as a stored field.
+      #
+      # The descent test is not the ADR-57 N5 gate's {#related_to_owner?}: there the owner is a project class,
+      # while here it is usually an RBS one, which a project class's {Scope::ResolutionChain} holds only as an
+      # external entry. An external entry relates when one of its candidate names is `class_name` or an RBS
+      # subclass of it.
+      def instance_method_redefined_in_project?(class_name, method_name)
+        return true if resolve_user_def_through_ancestors(class_name, method_name)
+
+        redefiners_of(method_name, :instance).any? do |candidate|
+          candidate != class_name && descends_from?(candidate, class_name)
+        end
+      end
+
+      def descends_from?(candidate, owner)
+        environment = scope.environment
+        chain = Scope::ResolutionChain.for(scope, candidate.to_s, :instance, :methods)
+        found = chain.search(scope) do |entry|
+          next entry.name == owner unless entry.external?
+
+          entry.candidates.any? { |name| name == owner || environment.class_ordering(name, owner) == :subclass }
+        end
+        !found.nil?
+      end
+      private :descends_from?
+
       # The `receiver[args]` read a compound index write performs before it stores (`c[k] += v` reads `c[k]`),
       # or nil when no tier answers. No `Prism::CallNode` for that read exists in the tree, so the write node
       # itself stands in as the call context: it carries the same `receiver` / `arguments` / `block` a

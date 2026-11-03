@@ -3,7 +3,7 @@
 - **PR:** [#2707](https://github.com/rigortype/rigor/pull/2707)
 - **Issue:** none
 - **Class:** process
-- **Precedent:** [ADR-49](https://github.com/rigortype/rigor/blob/master/docs/adr/49-adr-authoring-guidelines.md)
+- **Precedent:** [ADR-49](../docs/adr/49-adr-authoring-guidelines.md)
 - **Decided:** 2026-11-03
 
 ## Background

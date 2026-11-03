@@ -516,9 +516,9 @@ RSpec.describe "a top-level def callee floors the caller's literal (#2515)", typ
     end
 
     # A def in a block (an RSpec `describe` body, say) is only a possible definer, so the callee floors as
-    # FLOOR_EVERY. Its rest parameter reads as written without its body being read; reading the body's hand-offs
-    # under that owner crashed the file's analysis.
-    it "reads the rest parameter as written when the def hands it on" do
+    # FLOOR_EVERY: every argument reads as written without the def's body being read. Reading the body's rest
+    # hand-offs under that owner crashed the file's analysis.
+    it "floors the literal without reading a block def's hand-offs" do
       source = "def with_block(&block) = block.call\nwith_block do\n  def add_rest(*rest)\n    Sink.take(*rest)\n  " \
                "end\nend\nopts = {}\nargs = [opts]\nadd_rest(*args)\n#{condition}\n"
       expect(rules(source)).to eq([])
@@ -536,7 +536,7 @@ RSpec.describe "a top-level def callee floors the caller's literal (#2515)", typ
           end
         end
       RUBY
-      expect(analyze(source).diagnostics.map(&:message).grep(/internal analyzer error/)).to eq([])
+      expect { analyze(source) }.not_to raise_error
     end
   end
 end

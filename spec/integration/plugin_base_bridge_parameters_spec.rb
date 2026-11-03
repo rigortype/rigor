@@ -229,6 +229,21 @@ RSpec.describe "ADR-43 bridge: block, override and reader types for a source-onl
     )
   end
 
+  # A project `def` on a manifest-declared ancestor is a reopen, and Ruby calls it rather than the declaration, so it
+  # still withholds the bridge. Only the engine seed's own source (`lib/rigor/plugin/base.rb`) does not.
+  it "lets a project reopen of a manifest-declared ancestor shadow the call bridge" do
+    source = <<~RUBY
+      class GraphQL::Schema::Object
+        def self.description(text = nil) = 1
+      end
+
+      class Thing < GraphQL::Schema::Object
+        Rigor.dump_type(description)
+      end
+    RUBY
+    expect(dump_with_plugins(source)).to eq([[6, "dump_type: 1"]])
+  end
+
   def dump_with_plugins(source)
     Rigor::Plugin.unregister!
     plugins = [Rigor::Plugin::Graphql, Rigor::Plugin::Sorbet, Rigor::Plugin::Grape]

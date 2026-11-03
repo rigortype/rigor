@@ -201,6 +201,8 @@ RSpec.describe Rigor::Inference::MethodParameterBinder do
               def go: (Integer x, ?String y, *Symbol rest, **Float kw) -> void
               def kws: (Integer x, path: String, **Float kw) -> void
               def posts: (Integer a, Symbol z) -> void
+              def absorb: (Integer x) -> void
+                        | (*Symbol rest) -> void
             end
           RBS
           project_env = Rigor::Environment.for_project(root: dir)
@@ -248,6 +250,14 @@ RSpec.describe Rigor::Inference::MethodParameterBinder do
 
           expect(result).to eq(x: nominal("Integer"), path: nominal("String"),
                                opts: nominal("Hash", [nominal("Symbol"), nominal("Float")]))
+        end
+      end
+
+      # The `(*Symbol rest)` overload alone would bind `Array[Symbol]`, but under `(Integer x)` the same `*args`
+      # receives the Integer: one overload that does not line up leaves the slot Dynamic[Top].
+      it "leaves a slot Dynamic[Top] when any overload does not line up with it" do
+        with_shape_demo do |binder|
+          expect(binder.bind(def_node("def absorb(*args); args; end"))).to eq(args: untyped)
         end
       end
 

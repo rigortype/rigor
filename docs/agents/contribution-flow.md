@@ -144,8 +144,7 @@ Once the change is implemented and `make verify-changed` passes:
    one PR or a batch, tells the agent to load the
    [`rigor-reviewer`](../../.claude/skills/rigor-reviewer/SKILL.md) skill, which holds that contract.
    A PR that changes a skill also runs the `waza` review in [`skill-authoring.md`](skill-authoring.md)
-   at the same time; its
-   findings join this triage.
+   at the same time; its findings join this triage.
 3. **Triage.** For a PR that changes the engine, read the "Engine allocations (advisory)" job's
    summary too: it stays green when it warns, so `gh pr checks` does not show it. A warning is a
    finding, fixed or answered with the reason in a PR comment like any other; a delta above

@@ -192,12 +192,12 @@ The takeover brief is a lane brief (step 5) with these overrides and additions:
   premise was checked when the lane started. It works in the old lane's worktree; when that is gone,
   `nix develop --command bin/rigor-worktree <branch> origin/<branch>` checks the pushed branch out
   again (the start point is ignored when the local branch still exists).
-- It reads `git fetch`, `git status` and `git log --oneline origin/<branch>...HEAD` before changing
-  anything. Uncommitted leftovers from the old lane are inspected and deliberately committed or
-  discarded (never `git stash`), and the report's `Open` line says which. Then `git merge --ff-only
+- It runs `git fetch`, then reads `git status` and `git log --oneline origin/<branch>...HEAD` before
+  changing anything. With the old lane's leftovers still uncommitted, `git merge --ff-only
   origin/<branch>` picks up a coordinator fix-up that step 7's procedure pushed to the remote only.
-  When the fast-forward fails (the old lane died mid-rebase, so local and remote diverge), it stops
-  and reports; it never resets.
+  When the fast-forward fails (local and remote diverge, or a leftover overlaps the fix-up), it stops
+  and reports; it never resets. Then the leftovers are deliberately committed or discarded (never
+  `git stash`), and the report's `Open` line says which.
 - It carries what has landed so far (the PR body, the last report, `git log origin/master..`), every
   open review finding and ruling, quoted, and the approaches already withdrawn.
 

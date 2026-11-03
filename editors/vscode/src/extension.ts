@@ -30,6 +30,9 @@ import {
   LanguageClientOptions,
   RevealOutputChannelOn,
   ServerOptions,
+  State,
+  StreamMessageReader,
+  StreamMessageWriter,
 } from "vscode-languageclient/node";
 import {
   ResolvedServer,
@@ -39,7 +42,7 @@ import {
   shouldManageFolder,
 } from "./discovery";
 import { MIN_VERSION, ProbeResult, probeServer } from "./probe";
-import { StatusBar, describeFolder } from "./status";
+import { FolderStatus, StatusBar, describeFolder } from "./status";
 
 const DOCS_URL = "https://github.com/rigortype/rigor";
 
@@ -88,6 +91,9 @@ interface ManagedClient {
    */
   abandon(): void;
 }
+
+/** `client.start()` did not finish in time; the extension gave up on it. */
+class StartTimeoutError extends Error {}
 
 let outputChannel: OutputChannel;
 let statusBar: StatusBar;
@@ -211,6 +217,11 @@ async function syncClientsNow(): Promise<void> {
   const wanted = new Set<string>();
 
   for (const folder of folders) {
+    // A sync that was already running when the window closed must not
+    // probe the remaining folders.
+    if (shuttingDown) {
+      return;
+    }
     if (shouldManageFolder(folder)) {
       wanted.add(folder.uri.toString());
       await startClient(folder);
@@ -270,6 +281,9 @@ async function startClient(folder: WorkspaceFolder): Promise<void> {
 
   let child: ChildProcess | undefined;
   let abandoned = false;
+  // Cuts the client off from the server's streams without telling it the
+  // connection closed. See the start timeout below.
+  let detach = (): void => undefined;
   const serverOptions: ServerOptions = async () => {
     if (abandoned || shuttingDown) {
       throw new Error("the Rigor client was stopped");
@@ -288,7 +302,19 @@ async function startClient(folder: WorkspaceFolder): Promise<void> {
       );
     });
     child = spawned;
-    return spawned;
+    // Own transports instead of returning the process, so the streams can
+    // be detached when the start times out.
+    const reader = new StreamMessageReader(spawned.stdout!);
+    const writer = new StreamMessageWriter(spawned.stdin!);
+    spawned.stderr!.on("data", (data: Buffer | string) =>
+      outputChannel.append(data.toString()),
+    );
+    detach = () => {
+      reader.dispose();
+      writer.dispose();
+      spawned.stdout!.destroy();
+    };
+    return { reader, writer };
   };
 
   const watchers = [
@@ -329,9 +355,31 @@ async function startClient(folder: WorkspaceFolder): Promise<void> {
   let fallback: ErrorHandler | undefined;
   const defaultErrorHandler = (): ErrorHandler =>
     (fallback ??= client.createDefaultErrorHandler());
+  // Which status entry the client's own transitions update. Set once the
+  // first start succeeded; until then the start below reports its outcome.
+  let running: FolderStatus | undefined;
+  const stateListener = client.onDidChangeState((e) => {
+    if (abandoned || !running) {
+      return;
+    }
+    // A crash the client restarts goes Running -> Stopped -> Starting in
+    // one tick, so only a restart that gives up (or fails) leaves it shown.
+    if (e.newState === State.Stopped) {
+      statusBar.update(key, { ...running, state: "error" });
+      outputChannel.appendLine(
+        `[rigor] ${label}: the server stopped unexpectedly`,
+      );
+    } else if (e.newState === State.Starting) {
+      statusBar.update(key, { ...running, state: "starting" });
+    } else {
+      statusBar.update(key, running);
+      outputChannel.appendLine(`[rigor] ${label}: the server is running again`);
+    }
+  });
+  const disposables = [...watchers, stateListener];
   clients.set(key, {
     client,
-    disposables: watchers,
+    disposables,
     process: () => child,
     abandon: () => {
       abandoned = true;
@@ -344,13 +392,14 @@ async function startClient(folder: WorkspaceFolder): Promise<void> {
       START_TIMEOUT_MS,
       `the server did not answer \`initialize\` within ${START_TIMEOUT_MS / 1000} s`,
     );
-    statusBar.update(key, {
+    running = {
       label,
       state: "running",
       kind: server.kind,
       version: probe.version,
       commandLine,
-    });
+    };
+    statusBar.update(key, running);
     logStartup(label, root, server, commandLine, probe.version, "running");
   } catch (err) {
     statusBar.update(key, {
@@ -364,8 +413,19 @@ async function startClient(folder: WorkspaceFolder): Promise<void> {
       `[rigor] failed to start the server for ${label}: ${String(err)}`,
     );
     clients.delete(key);
-    for (const disposable of watchers) {
+    for (const disposable of disposables) {
       disposable.dispose();
+    }
+    if (err instanceof StartTimeoutError) {
+      // Killing the server closes the connection, which the client would
+      // report as two more errors (the rejected `initialize`, then
+      // "couldn't create connection"). Detached first, the pending
+      // `initialize` is simply never answered and the client says nothing;
+      // this is the one message.
+      detach();
+      void window
+        .showErrorMessage(`Rigor: ${label}: ${err.message}.`, "Show Output")
+        .then((choice) => choice && outputChannel.show());
     }
     // A start that failed part way (or timed out) leaves the spawned
     // process running. Kill it before disposing, so a late `initialize`
@@ -461,7 +521,7 @@ function killTree(child: ChildProcess): void {
 function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(message)), ms);
+    timer = setTimeout(() => reject(new StartTimeoutError(message)), ms);
   });
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
@@ -472,8 +532,16 @@ function onConfigChange(e: ConfigurationChangeEvent): void {
     e.affectsConfiguration("rigor.enable")
   ) {
     // Explain a folder again after its setting changed, even back to a
-    // value that was explained before.
-    explained.clear();
+    // value that was explained before. Only that folder: another folder's
+    // dismissed offer stays dismissed.
+    for (const folder of workspace.workspaceFolders ?? []) {
+      if (
+        e.affectsConfiguration("rigor.rootDir", folder.uri) ||
+        e.affectsConfiguration("rigor.enable", folder.uri)
+      ) {
+        explained.delete(folder.uri.toString());
+      }
+    }
   }
   if (SERVER_AFFECTING_SETTINGS.some((s) => e.affectsConfiguration(s))) {
     void restartAll();

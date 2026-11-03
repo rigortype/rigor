@@ -1,4 +1,6 @@
 - **[plugin API]** A plugin class written in Ruby with no RBS of its own now takes `Rigor::Plugin::Base`'s signature types for its overriding hook parameters, its class-body DSL block parameters and its inherited readers. ([#2768](https://github.com/rigortype/rigor/pull/2768))
   - These positions read `Dynamic[top]` before unless the plugin shipped an empty RBS declaration of its class.
+  - The same holds in application code for the classes rigor-graphql, rigor-grape and rigor-sorbet declare complete (`rbs_complete_ancestors:`): a `def` overriding a method their bundled RBS declares, in a `GraphQL::Schema::Object`, `Grape::API` or `T::Struct` subclass for example, now binds its parameters from that RBS.
+  - A `dynamic_return` block declared with a static `methods:` Array types its `call_node` as `Prism::CallNode`.
   - The `_Scope` and `_Services` positions stay `Dynamic[top]` while interface types erase (#929).
-  - An overriding `initialize`, a hook that a class between the plugin and `Base` also defines, and a subclass of a class outside the ADR-43 allow-list keep `Dynamic[top]` parameters.
+  - An overriding `initialize`, a hook that a class between the subclass and the declaring class also defines, a method `Object` or `Kernel` declares, and a subclass of a class outside the ADR-43 allow-list keep `Dynamic[top]` parameters.

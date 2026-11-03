@@ -228,15 +228,22 @@ RBS omits.
   plugin class, so the declared hook types never reached plugin code; an empty
   RBS declaration of each plugin class was the only workaround. Two changes
   close it, both bounded by the same allow-list:
-  (1) the allow-listed ancestor's own source `def` no longer counts as a nearer
-  definer. This repository's plugin check discovers `lib/rigor/plugin/base.rb`,
-  so every member Base defines in Ruby withheld the bridge, which is why a
-  class-body `manifest` typed `Dynamic[top] | Rigor::Plugin::Manifest` and the
-  block-parameter probe, which already read the bridge, found nothing.
+  (1) the engine seed's own source `def` no longer counts as a nearer definer.
+  This repository's plugin check discovers `lib/rigor/plugin/base.rb`, so every
+  member Base defines in Ruby withheld the bridge, which is why a class-body
+  `manifest` typed `Dynamic[top] | Rigor::Plugin::Manifest` and the
+  block-parameter probe, which already read the bridge, found nothing. A
+  project `def` on a manifest-declared ancestor still withholds: there it is a
+  reopen (`class Grape::API; def self.desc`), and Ruby calls it.
   (2) `MethodParameterBinder` binds an overriding `def` from the declaration it
   overrides: the bridge's resolution with the class's own definition set aside,
   every other decline kept. `initialize` is excluded, because a constructor does
-  not override its superclass's contract. A source subclass of a class off the
+  not override its superclass's contract, and so is a declaration the resolved
+  ancestor answers from `BasicObject`, `Object`, `Kernel`, `Module` or `Class`
+  (`Kernel#load` under `GraphQL::Schema::Object`), which is every class's
+  surface rather than that ancestor's contract. A slot binds only where the
+  def's parameter shape lines up with the declaration's, the rule the binder
+  applies to every RBS-declared `def`. A source subclass of a class off the
   allow-list (`< ActionController::Base`) keeps `Dynamic[top]` in every one of
   these positions. Binding contract:
   [`inference-engine.md`](../internal-spec/inference-engine.md) § "Inherited

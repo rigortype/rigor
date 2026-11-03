@@ -251,6 +251,24 @@ module Rigor
           )
         end
 
+        # The RBS declaration a `def method_name` on `class_name` (`kind` side) binds its parameters from
+        # (`MethodParameterBinder`): the class's own, or nil.
+        #
+        # #2681 — when `class_name` is a Ruby-source class with no RBS, the declaration the `def` overrides on an
+        # ADR-43 allow-listed ancestor, as an empty RBS declaration of the class would inherit it. Nil whenever the
+        # call bridge would decline for a reason other than `class_name`'s own definition: no scope, no allow-listed
+        # ancestor, or a nearer definer between them. `initialize` is never bridged: a constructor does not
+        # override its superclass's contract, and a subclass routinely takes different arguments.
+        def def_declaration(environment, class_name, kind, method_name, scope)
+          direct = lookup_method_on(environment, class_name, kind, method_name)
+          return direct if direct
+          return nil if environment.nil? || scope.nil? || method_name == :initialize
+
+          ancestor = allowed_rbs_complete_ancestor(environment, class_name, kind, method_name, scope,
+                                                   overriding: true)
+          ancestor && lookup_method_on(environment, ancestor, kind, method_name)
+        end
+
         # rubocop:disable-next Metrics/ClassLength
         class << self
           private
@@ -515,7 +533,10 @@ module Rigor
           # ADR-43 WD4 — the allow-list's manifest-declared half: a loaded plugin may name its own
           # contract classes in `rbs_complete_ancestors:` (e.g. rigor-graphql's `GraphQL::Schema::Object`),
           # extending the engine's hard-coded seed without editing this constant.
-          def allowed_rbs_complete_ancestor(environment, class_name, kind, method_name, scope)
+          #
+          # #2681 — `overriding: true` asks for the declaration a `def` on `class_name` overrides (its parameter
+          # binding), so `class_name`'s own definition of the name is set aside; every nearer ancestor still shadows.
+          def allowed_rbs_complete_ancestor(environment, class_name, kind, method_name, scope, overriding: false)
             return nil if scope.nil?
             return nil if Rigor::Reflection.rbs_class_known?(class_name, environment: environment)
 
@@ -524,15 +545,20 @@ module Rigor
             # this guard the bridge would resolve e.g. `field` on `GraphQL::Schema::Object` while
             # the runtime actually calls a user `def self.field` on an intermediate `BaseObject` —
             # a wrong return type and a false `undefined-method`/arity reading downstream.
-            return nil if scope.discovered_method?(class_name, method_name, kind)
+            return nil if !overriding && scope.discovered_method?(class_name, method_name, kind)
 
             registry = environment&.plugin_registry
             each_source_ancestor_candidate(scope, class_name) do |candidate|
-              return nil if scope.discovered_method?(candidate, method_name, kind)
-              next unless ALLOWED_RBS_COMPLETE_ANCESTORS.include?(candidate) ||
-                          registry&.rbs_complete_ancestor?(candidate)
+              # #2681 — the allow-listed ancestor's own source (`lib/rigor/plugin/base.rb`, which this
+              # repository's plugin check discovers) is not a nearer definer: its RBS is the authority the
+              # allow-list names, so only the classes below it shadow.
+              if ALLOWED_RBS_COMPLETE_ANCESTORS.include?(candidate) || registry&.rbs_complete_ancestor?(candidate)
+                return nil if shadowed_in_ruby_order?(scope, class_name, kind, method_name, candidate,
+                                                      overriding: overriding)
 
-              return shadowed_in_ruby_order?(scope, class_name, kind, method_name, candidate) ? nil : candidate
+                return candidate
+              end
+              return nil if scope.discovered_method?(candidate, method_name, kind)
             end
             nil
           end
@@ -546,7 +572,8 @@ module Rigor
           # passed over, as the breadth-first walk always did. An unsettled chain withholds too: a mixin edge the
           # tables cannot place (a receiver-form `Demo.include(M)` after the body, an edge in a conditional, a block or
           # a hook) may put a definer ahead of the ancestor.
-          def shadowed_in_ruby_order?(scope, class_name, kind, method_name, ancestor)
+          # With `overriding`, `class_name`'s own entry is the overriding `def` itself and does not shadow.
+          def shadowed_in_ruby_order?(scope, class_name, kind, method_name, ancestor, overriding: false)
             chain = Scope::ResolutionChain.for(scope, class_name.to_s, kind, :methods)
             return true if chain.unsettled?
 
@@ -557,6 +584,8 @@ module Rigor
             return true if stop.nil?
 
             entries.first(stop).any? do |entry|
+              next false if overriding && !entry.external? && entry.name == class_name.to_s
+
               if entry.external?
                 rbs_declares_ahead?(scope, entry, method_name)
               else

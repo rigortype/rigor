@@ -64,11 +64,15 @@ module Rigor
       # @param source_path — the project-relative path of the file the method is
       #   defined in. Used to match ADR-28 path-scoped protocol contracts; `nil` (the default
       #   for synthetic / probe scopes) disables the contract tier.
-      def initialize(environment:, class_path:, singleton:, source_path: nil)
+      # @param scope — the scope the `def` is written in. When supplied, a `def` on a Ruby-source class with no RBS
+      #   of its own binds the parameters of the declaration it overrides on an ADR-43 allow-listed ancestor (#2681);
+      #   `nil` keeps that class's parameters `Dynamic[Top]`.
+      def initialize(environment:, class_path:, singleton:, source_path: nil, scope: nil)
         @environment = environment
         @class_path = class_path
         @singleton = singleton
         @source_path = source_path
+        @scope = scope
       end
 
       # @return ordered map from parameter name to bound type.
@@ -186,11 +190,11 @@ module Rigor
         # `def self.foo` always means a singleton method on the immediate enclosing class. `def
         # foo` inside `class << self` is also a singleton method (the StatementEvaluator threads
         # the `singleton:` flag through this case).
-        if def_node.receiver.is_a?(Prism::SelfNode) || @singleton
-          Rigor::Reflection.singleton_method_definition(@class_path, method_name, environment: @environment)
-        else
-          Rigor::Reflection.instance_method_definition(@class_path, method_name, environment: @environment)
-        end
+        # ADR-43 (#2681) — a source-only subclass of an allow-listed RBS-complete ancestor (`Rigor::Plugin::Base`)
+        # overriding one of its hooks binds the hook's declared parameters, as an empty RBS declaration of the
+        # subclass would through RBS's own inheritance.
+        kind = def_node.receiver.is_a?(Prism::SelfNode) || @singleton ? :singleton : :instance
+        MethodDispatcher::RbsDispatch.def_declaration(@environment, @class_path, kind, method_name, @scope)
       end
 
       # Bind each parameter slot to the union of the matching parameter types across every

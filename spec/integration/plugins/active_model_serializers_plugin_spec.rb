@@ -823,4 +823,69 @@ RSpec.describe "plugins/rigor-active-model-serializers" do
       end
     end
   end
+
+  # ADR-128 WD1 — the facade answers `maybe` where an ancestor chain is cut at `ResolutionChain::LIMIT`, and this
+  # plugin reads `maybe` as "no project definition found" (`yes?`), as the def walk always has: the walk read a cut
+  # as absence, so the serializer still answers over `object` and a declared name nobody defines still declines.
+  describe "a chain that runs past the ancestor budget" do
+    def cut_count = Rigor::Scope::ResolutionChain::LIMIT + 5
+
+    def cut_modules
+      (1..cut_count).map { |i| "module CutM#{i}\n  def cut_m#{i}; end\nend" }.join("\n")
+    end
+
+    def cut_includes = (1..cut_count).map { |i| "  include CutM#{i}" }.join("\n")
+
+    def probe_source(declaration)
+      <<~SRC
+        class AccountSerializer < ApplicationSerializer
+        #{cut_includes}
+          attributes #{declaration}
+
+          def probe
+            Rigor.dump_type(object)
+          end
+        end
+      SRC
+    end
+
+    let(:serializer_base) do
+      { "app/serializers/cut_modules.rb" => "#{cut_modules}\n",
+        "app/serializers/application_serializer.rb" => "class ApplicationSerializer < ActiveModel::Serializer\nend\n" }
+    end
+
+    it "keeps answering over `object` when the serializer's chain is cut before any `def object`" do
+      types = dumped_types(files: serializer_base.merge(
+        "app/serializers/account_serializer.rb" => probe_source(":username")
+      ))
+
+      expect(types).to eq(["dump_type: Account"])
+    end
+
+    it "declines a declared name that a cut serializer chain does not show it defining" do
+      types = dumped_types(files: serializer_base.merge(
+        "app/serializers/account_serializer.rb" => probe_source(":ghost")
+      ))
+
+      expect(types).to eq(["dump_type: Dynamic[top]"])
+    end
+
+    it "declines a declared name that a cut model chain does not show it defining" do
+      types = dumped_types(files: serializer_base.merge(
+        "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+        "app/models/account.rb" => "class Account < ApplicationRecord\n#{cut_includes}\nend\n",
+        "app/serializers/account_serializer.rb" => <<~SRC
+          class AccountSerializer < ApplicationSerializer
+            attributes :ghost
+
+            def probe
+              Rigor.dump_type(object)
+            end
+          end
+        SRC
+      ))
+
+      expect(types).to eq(["dump_type: Dynamic[top]"])
+    end
+  end
 end

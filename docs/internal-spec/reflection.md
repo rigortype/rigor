@@ -64,7 +64,7 @@ The RBS-consulting methods accept **either** `scope:` **or** `environment:` (the
   - `:discovered` — the discovery table (`Scope#discovered_method_through_ancestors?`), which also counts `attr_*` and `define_method`.
   - `:either` — their union as a three-valued OR: `yes` wins, then `maybe`, then `no`.
 
-  The answer is `yes` where the walk found a definer, `no` where it walked the whole chain and found none, and `maybe` exactly where the chain's `ResolutionChain` was cut at its budget (ADR-41 WD4) before a definer was found; a definer found inside a cut chain is still `yes`. The two existing walks read a cut differently — the def walk as absent (`[nil, nil]`), the discovery walk as present (`true`) — and keep doing so. A caller keeps its walk's reading by testing `yes?` for `:def` and `!no?` for `:discovered` and `:either`. A `nil` `class_name` answers `no`.
+  The answer is `yes` where the walk found a definer, `no` where it found none and its `ResolutionChain` was not truncated, and `maybe` exactly where the chain was truncated at its budget (ADR-41 WD4) before a definer was found; a definer found inside a truncated chain is still `yes`. The two existing walks read a cut differently — the def walk as absent (`[nil, nil]`), the discovery walk as present (`true`) — and keep doing so. A caller keeps its walk's reading by testing `yes?` for `:def` and `!no?` for `:discovered` and `:either`. A `nil` `class_name` answers `no`. The ADR-46 negative-dependency recording that `discovered_method?` above specifies is not part of this contract: `project_method_defined` promises the `Trinary` answer and nothing about which dependencies a miss records.
 
 ## Provenance
 

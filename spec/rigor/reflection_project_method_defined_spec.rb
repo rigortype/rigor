@@ -15,6 +15,11 @@ RSpec.describe Rigor::Reflection, ".project_method_defined" do
     described_class.project_method_defined(class_name, method_name, kind: kind, source: source, scope: scope)
   end
 
+  # RSpec's failure printer lexes the failing line with Ripper and counts a `def` keyword as an unclosed
+  # block, and `source: :def` lexes as symbol-start plus `def`; the printer then never terminates (rspec-core
+  # 3.13.6, `SnippetExtractor`). Keeping the literal `:def` off the expectation lines makes a failure print.
+  let(:def_source) { :def }
+
   # `Child` reaches `Base` and `Greeter`. Per the table that holds each method:
   #
   # - `plain`, `greet`, `self.build`, `self.shout`: a `def` (the def-node table, hence the discovery table too);
@@ -48,12 +53,12 @@ RSpec.describe Rigor::Reflection, ".project_method_defined" do
 
   describe "an instance definer" do
     it "answers yes from the def walk for a def on the class, an ancestor and an included module" do
-      expect(answer(scope, "Child", :plain, kind: :instance, source: :def)).to eq(Rigor::Trinary.yes)
-      expect(answer(scope, "Child", :greet, kind: :instance, source: :def)).to eq(Rigor::Trinary.yes)
+      expect(answer(scope, "Child", :plain, kind: :instance, source: def_source)).to eq(Rigor::Trinary.yes)
+      expect(answer(scope, "Child", :greet, kind: :instance, source: def_source)).to eq(Rigor::Trinary.yes)
     end
 
     it "answers no from the def walk for an absent name" do
-      expect(answer(scope, "Child", :absent, kind: :instance, source: :def)).to eq(Rigor::Trinary.no)
+      expect(answer(scope, "Child", :absent, kind: :instance, source: def_source)).to eq(Rigor::Trinary.no)
     end
 
     it "answers yes from the discovery walk for a def, an attr_reader and a define_method" do
@@ -68,7 +73,7 @@ RSpec.describe Rigor::Reflection, ".project_method_defined" do
 
     it "does not count attr_reader or define_method as a def, but counts them as discovered" do
       %i[reader defined].each do |name|
-        expect(answer(scope, "Child", name, kind: :instance, source: :def)).to eq(Rigor::Trinary.no)
+        expect(answer(scope, "Child", name, kind: :instance, source: def_source)).to eq(Rigor::Trinary.no)
         expect(answer(scope, "Child", name, kind: :instance, source: :either)).to eq(Rigor::Trinary.yes)
       end
     end
@@ -82,13 +87,13 @@ RSpec.describe Rigor::Reflection, ".project_method_defined" do
 
   describe "a singleton definer" do
     it "answers yes from the def walk for a def self. on an ancestor and for an extended module's def" do
-      expect(answer(scope, "Child", :build, kind: :singleton, source: :def)).to eq(Rigor::Trinary.yes)
-      expect(answer(scope, "Child", :shout, kind: :singleton, source: :def)).to eq(Rigor::Trinary.yes)
+      expect(answer(scope, "Child", :build, kind: :singleton, source: def_source)).to eq(Rigor::Trinary.yes)
+      expect(answer(scope, "Child", :shout, kind: :singleton, source: def_source)).to eq(Rigor::Trinary.yes)
     end
 
     it "answers no from the def walk for an absent name and for an attr_reader on the singleton" do
-      expect(answer(scope, "Child", :absent, kind: :singleton, source: :def)).to eq(Rigor::Trinary.no)
-      expect(answer(scope, "Child", :config, kind: :singleton, source: :def)).to eq(Rigor::Trinary.no)
+      expect(answer(scope, "Child", :absent, kind: :singleton, source: def_source)).to eq(Rigor::Trinary.no)
+      expect(answer(scope, "Child", :config, kind: :singleton, source: def_source)).to eq(Rigor::Trinary.no)
     end
 
     it "answers from the discovery walk for the singleton table" do
@@ -144,9 +149,9 @@ RSpec.describe Rigor::Reflection, ".project_method_defined" do
     end
 
     it "answers maybe from the def walk for a name past the cut, and yes for one inside it" do
-      expect(answer(cut_scope, "Cut", :deep, kind: :instance, source: :def)).to eq(Rigor::Trinary.maybe)
-      expect(answer(cut_scope, "Cut", :absent, kind: :instance, source: :def)).to eq(Rigor::Trinary.maybe)
-      expect(answer(cut_scope, "Cut", :near, kind: :instance, source: :def)).to eq(Rigor::Trinary.yes)
+      expect(answer(cut_scope, "Cut", :deep, kind: :instance, source: def_source)).to eq(Rigor::Trinary.maybe)
+      expect(answer(cut_scope, "Cut", :absent, kind: :instance, source: def_source)).to eq(Rigor::Trinary.maybe)
+      expect(answer(cut_scope, "Cut", :near, kind: :instance, source: def_source)).to eq(Rigor::Trinary.yes)
     end
 
     it "answers maybe from the discovery walk for a name past the cut, and yes for one inside it" do
@@ -164,23 +169,23 @@ RSpec.describe Rigor::Reflection, ".project_method_defined" do
     it "lets a discovered hit inside the cut beat the def half's maybe" do
       near_attr = scope_for(modules_source({ count => "attr_reader :near_reader" }))
 
-      expect(answer(near_attr, "Cut", :near_reader, kind: :instance, source: :def)).to eq(Rigor::Trinary.maybe)
+      expect(answer(near_attr, "Cut", :near_reader, kind: :instance, source: def_source)).to eq(Rigor::Trinary.maybe)
       expect(answer(near_attr, "Cut", :near_reader, kind: :instance, source: :either)).to eq(Rigor::Trinary.yes)
     end
 
     it "answers maybe on the singleton chain too, from each walk" do
       extended = scope_for(modules_source({ 1 => "def deep = 1", count => "def near = 1" }, extend: true))
 
-      expect(answer(extended, "Cut", :deep, kind: :singleton, source: :def)).to eq(Rigor::Trinary.maybe)
+      expect(answer(extended, "Cut", :deep, kind: :singleton, source: def_source)).to eq(Rigor::Trinary.maybe)
       expect(answer(extended, "Cut", :deep, kind: :singleton, source: :discovered)).to eq(Rigor::Trinary.maybe)
-      expect(answer(extended, "Cut", :near, kind: :singleton, source: :def)).to eq(Rigor::Trinary.yes)
+      expect(answer(extended, "Cut", :near, kind: :singleton, source: def_source)).to eq(Rigor::Trinary.yes)
       expect(answer(extended, "Cut", :near, kind: :singleton, source: :discovered)).to eq(Rigor::Trinary.yes)
     end
 
     it "reads the class object's own singleton table inside a cut singleton chain" do
       extended = scope_for(modules_source({ 1 => "def deep = 1" }, extend: true))
 
-      expect(answer(extended, "Cut", :own_config, kind: :singleton, source: :def)).to eq(Rigor::Trinary.maybe)
+      expect(answer(extended, "Cut", :own_config, kind: :singleton, source: def_source)).to eq(Rigor::Trinary.maybe)
       expect(answer(extended, "Cut", :own_config, kind: :singleton, source: :discovered)).to eq(Rigor::Trinary.yes)
       expect(answer(extended, "Cut", :own_config, kind: :singleton, source: :either)).to eq(Rigor::Trinary.yes)
     end
@@ -202,7 +207,7 @@ RSpec.describe Rigor::Reflection, ".project_method_defined" do
     end
 
     it "rejects an unknown kind or source" do
-      expect { answer(scope, "Child", :plain, kind: :class, source: :def) }.to raise_error(ArgumentError, /kind/)
+      expect { answer(scope, "Child", :plain, kind: :class, source: def_source) }.to raise_error(ArgumentError, /kind/)
       expect { answer(scope, "Child", :plain, kind: :instance, source: :any) }.to raise_error(ArgumentError, /source/)
     end
   end

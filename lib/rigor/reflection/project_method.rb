@@ -12,8 +12,8 @@ module Rigor
     private_constant :PROJECT_METHOD_KINDS, :PROJECT_METHOD_SOURCES
 
     # ADR-128 WD1 — does the project define `method_name` on `class_name` or on an ancestor the project itself
-    # declares? Answers a {Trinary}: `yes` where the walk found a definer, `no` where it walked the whole chain
-    # and found none, and `maybe` where the walk's `ResolutionChain` was cut at its budget before it found one
+    # declares? Answers a {Trinary}: `yes` where the walk found a definer, `no` where it found none and its
+    # `ResolutionChain` was not truncated, and `maybe` where the chain was truncated at its budget before it found one
     # (ADR-41 WD4), so a definer past the cut cannot be ruled out. It replaces a plugin's direct call to the
     # two `Scope` walks, whose budget answers differ and are not a promise to plugin authors.
     #
@@ -38,7 +38,8 @@ module Rigor
       end
     end
 
-    # `yes` wins, then `maybe`, then `no`; the discovery walk only runs where the def walk did not already say `yes`.
+    # `yes` wins, then `maybe`, then `no`. The early return is a short-circuit and carries no answer of its own:
+    # `yes.or(x)` is `yes`, so removing it changes only which walks run, and so which dependencies they read.
     def project_either_defined(class_name, method_name, kind, scope)
       by_def = project_def_defined(class_name, method_name, kind, scope)
       return by_def if by_def.yes?
@@ -65,10 +66,13 @@ module Rigor
     # settled by searching the chain's entries for a definer, as the walk does.
     def project_discovered_defined(class_name, method_name, kind, scope)
       return Trinary.no unless scope.discovered_method_through_ancestors?(class_name, method_name, kind)
+      # A shortcut, not a decision: on an untruncated chain the search below finds the same definer.
       return Trinary.yes unless project_chain_truncated?(class_name, kind, scope)
 
       chain = Scope::ResolutionChain.for(scope, class_name.to_s, kind, :methods)
       found = chain.search(scope) do |entry|
+        # A guard, not a decision: it mirrors `Scope#discovered_method_through_ancestors?`, whose search skips
+        # an external entry (no project name to look up). `discovered_method?(nil, ...)` is false anyway.
         next false if entry.external?
 
         scope.discovered_method?(entry.name, method_name, discovered_entry_kind(entry, kind))

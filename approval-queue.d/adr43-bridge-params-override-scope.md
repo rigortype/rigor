@@ -21,7 +21,7 @@
 - **Which ancestors.**
   - The engine seed (`Rigor::Plugin::Base`) alone is the narrowest reading.
   - The whole allow-list also covers the ancestors that rigor-graphql, rigor-grape and rigor-sorbet declare in `rbs_complete_ancestors:`, whose calls and block parameters already bridge. That changes typing in users' application code (a `GraphQL::Schema::Object` subclass's `def resolve`), which the bundled plugin trees do not exercise.
-  - GitLab's `app/graphql` and `lib/api` with those plugins enabled, base against head: 358 diagnostics on both sides, identical. An instrumented head run bridged 242 overrides there, mostly `resolve` and `ready?` on Resolver and Mutation subclasses.
+  - GitLab's `app/graphql` and `lib/api` (2,279 files) with its configured rigor-graphql, rigor-grape and rigor-sorbet: 358 diagnostics on both sides, identical. An instrumented head run bound 217 overrides there from the plugins' RBS, 181 of them `resolve` on Resolver and RelayClassicMutation subclasses.
 - **`initialize`.** Bridging it is what RBS inheritance does. But a subclass constructor routinely takes other arguments, so declining costs only the typed parameters of an `initialize` that keeps the base's shape.
 - **Object-surface members.** An ancestor's built definition answers `load` from `Kernel`. That is every class's member, not the ancestor's contract, so the bridge rejects a declaration owned by `BasicObject`, `Object`, `Kernel`, `Module` or `Class`. The name gate in front of the walk is only a cost filter.
 - **A nearer definer.** `class Leaf < Mid < Base` where `Mid` also defines the hook: declining matches the call bridge, which already withholds past a nearer definer.

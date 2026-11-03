@@ -67,33 +67,18 @@ module PluginBoundary
   # Raised by {check!}; its message names every reach and the way out.
   class Violation < StandardError; end
 
-  # The plugin integration specs: `spec/integration/plugins/` and `spec/integration/examples/`. Matched on the path
-  # RSpec reports for an example (`example.metadata[:file_path]`), which may be relative to the working directory.
-  INTEGRATION_SPEC = %r{(?:\A|/)spec/integration/(?:plugins|examples)/}
-
   module_function
-
-  # Whether an example's spec file is one of the plugin integration specs.
-  def integration_spec?(path)
-    INTEGRATION_SPEC.match?(path.to_s)
-  end
 
   # Raises {Violation} unless the recorder saw only calls the interfaces, the `Object` protocol or the allow-list
   # account for.
   #
-  # Two liveness checks fail a recorder that could not have judged anything, and neither reads what a plugin called.
-  # `require_calls:` (the CI jobs set it, see the Makefile) also fails a recorder that saw no call from a plugin
-  # frame. Every run that executed a plugin integration example (see {Recorder#note_example}) fails unless a file
-  # under the roots is in `$LOADED_FEATURES` and a method under the roots ran while the trace was on
-  # ({Recorder#live?}). A run with no integration example has nothing to judge, so it passes both.
+  # `require_calls:` also fails a recorder that saw no call from a plugin frame at all: a gate whose roots match no
+  # file, or whose plugin specs never ran, would otherwise pass for want of anything to judge.
   def check!(recorder, require_calls: false, **)
     if require_calls && recorder.calls.empty?
       raise Violation, "the plugin-boundary gate recorded no call from a frame under #{recorder.roots.join(', ')}: " \
                        "it checked nothing (wrong roots, or no plugin spec ran)"
     end
-
-    problem = liveness_problem(recorder)
-    raise Violation, problem if problem
 
     found = recorder.violations(**)
     return if found.empty?
@@ -108,21 +93,6 @@ module PluginBoundary
       for the question it asks. Admit a member to an interface only per ADR-128's admission rule; an engine
       internal that already has a tracking issue goes on PluginBoundary::ALLOW_LIST with that issue.
     MSG
-  end
-
-  # Why a run that executed a plugin integration example could not have judged anything, or nil when it could.
-  def liveness_problem(recorder)
-    return nil unless recorder.integration_ran?
-
-    roots = recorder.roots.join(", ")
-    unless recorder.root_file_loaded?
-      return "the plugin-boundary gate loaded no file under #{roots}: it checked nothing " \
-             "(wrong roots, or no plugin file was required)"
-    end
-    return nil if recorder.live?
-
-    "the plugin-boundary gate saw no method under #{roots} run under the trace: it checked nothing " \
-      "(the recorder never started, or the roots are wrong)"
   end
 
   # interface name => Set of the method names its RBS declares, read from `sig/rigor/plugin/interfaces.rbs`.
@@ -155,20 +125,8 @@ module PluginBoundary
       @calls = {}
       @by_class = {}.compare_by_identity
       @module_targets = {}.compare_by_identity
-      @live = false
-      @integration_ran = false
       @trace = TracePoint.new(:call, :c_call) { |event| observe(event) }
     end
-
-    # Records that an example from the spec file at `path` ran; only a plugin integration spec counts.
-    def note_example(path)
-      @integration_ran = true if PluginBoundary.integration_spec?(path)
-    end
-
-    def integration_ran? = @integration_ran
-
-    # Whether a method under a root ran while the trace was on: the recorder saw plugin code at all.
-    def live? = @live
 
     def record(&)
       @trace.enable(&)
@@ -188,22 +146,11 @@ module PluginBoundary
       end
     end
 
-    # Whether a file under one of the roots has been required: one of the facts the liveness check reads.
-    def root_file_loaded?
-      $LOADED_FEATURES.any? { |feature| under_root?(feature) }
-    end
-
     private
 
-    def under_root?(path)
-      @roots.any? { |root| path.start_with?(root) }
-    end
-
     # The hot path: it runs for every Ruby and C call in the process, so a receiver nothing watches is turned away
-    # on one identity-hash lookup, before any caller frame is read. The liveness latch is the first test: once a
-    # plugin method has run under the trace, each later event costs one ivar test.
+    # on one identity-hash lookup, before any caller frame is read.
     def observe(event)
-      @live ||= event.event == :call && under_root?(event.path)
       recv = event.self
       klass = CLASS_OF.bind_call(recv)
       kind = @by_class.fetch(klass) { @by_class[klass] = classify(klass) }

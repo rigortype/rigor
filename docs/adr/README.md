@@ -141,6 +141,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-125 | [Plugin-declared per-invocation classes](125-per-invocation-classes.md) | Accepted (implemented for #575; rigor-actionmailer adoption is #2308) |
 | ADR-126 | [One CLI grammar, versioned JSON documents, and a gated command catalogue](126-cli-grammar-and-catalogue.md) | Accepted (not yet implemented; work filed as #2502–#2505) |
 | ADR-127 | [The callee mutation floor answers a graph property, not a walk](127-callee-floor-graph-budget.md) | Accepted (K = 64; implemented in #2564) |
+| ADR-128 | [The plugin hook surface as structural interfaces, and how its breaking changes ship](128-plugin-hook-surface-interfaces.md) | Proposed (not implemented; live checking waits on #929 and #2681) |
 
 ## Adding a New ADR
 

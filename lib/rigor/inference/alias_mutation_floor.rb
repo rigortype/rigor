@@ -8,6 +8,7 @@ require_relative "mutation_widening"
 require_relative "receiver_alias"
 require_relative "remover_holder_scan"
 require_relative "set_mutation"
+require_relative "string_mutation"
 require_relative "unknown_store_widening"
 
 module Rigor
@@ -110,9 +111,8 @@ module Rigor
       end
 
       # `scope` after `call_node` wrote the object the local `name` holds (a callee that writes its argument or mutates
-      # the ivars of an object holding it): every local that may be that object takes one unknown store
-      # ({UnknownStoreWidening.callee_block_floor}), which leaves a class-level nominal claim as it is, as the named
-      # path's unknown store does. A method parameter the body never rebinds floors nothing here: the callee census
+      # the ivars of an object holding it): every local that may be that object and holds a literal shape
+      # ({.literal_shape?}) takes one unknown store ({UnknownStoreWidening.callee_block_floor}). A method parameter the body never rebinds floors nothing here: the callee census
       # reads every opaque hand-off as a write, and flooring each local a parameter was copied into at every such call
       # cost precision across the corpus for no finding (a known limit of #2335).
       def floor_after_written_local(scope, name, call_node)
@@ -123,13 +123,33 @@ module Rigor
         targets = targets(name, facts, aliased_at(facts, call_node))
         return scope if targets.empty?
 
-        floor_targets(scope, targets, [name]) { |type| UnknownStoreWidening.callee_block_floor(type) }
+        floor_targets(scope, targets, [name]) do |type|
+          UnknownStoreWidening.callee_block_floor(type) if literal_shape?(type)
+        end
       end
 
-      # Whether {.floor_after_written_local} may floor anything for the local `name` at `call_node`.
+      # Whether {.floor_after_written_local} may floor anything for the local `name` at `call_node`: a target bound to a
+      # literal shape.
       def reaches_other_locals?(scope, name, call_node)
         facts = facts_for(scope)
-        !facts.nil? && !facts.entry.include?(name) && !targets(name, facts, aliased_at(facts, call_node)).empty?
+        return false if facts.nil? || facts.entry.include?(name)
+
+        targets = targets(name, facts, aliased_at(facts, call_node))
+        names = targets.equal?(ALL) ? scope.locals.keys : targets
+        names.any? { |target| target != name && literal_shape?(scope.local(target)) }
+      end
+
+      # A literal shape a store can make stale: a `Tuple`, a `HashShape`, a literal String or Set, or an empty-witness
+      # refinement, alone or in a union. The callee paths floor only these: a nominal `Array[String]` is a claim the
+      # named path's unknown store leaves as it is too.
+      def literal_shape?(type)
+        case type
+        when Type::Tuple, Type::HashShape then true
+        when Type::Constant then StringMutation.constant?(type) || SetMutation.constant?(type)
+        when Type::Difference then type.removes_empty_witness?
+        when Type::Union then type.members.any? { |member| literal_shape?(member) }
+        else false
+        end
       end
 
       # Whether the body of `def_node` runs a shape mutator on one of its own instance variables or an element of one

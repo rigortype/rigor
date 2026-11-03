@@ -550,6 +550,19 @@ RSpec.describe "attribute-reader chain narrowing on truthiness and nil? guards (
       RUBY
     end
 
+    # Ruby: `def obj.r = nil` on a `Holder` makes that object's `r` nil.
+    it "does not narrow an attribute a singleton def on some object redefines" do
+      extra = "obj = Holder.new\ndef obj.r = nil\n"
+      expect(findings(<<~RUBY, extra: extra)).to eq([[4, "call.argument-type-mismatch"]])
+        def f(x, s, h = nil)
+          return unless x.r
+          s.int(x.r)
+          return unless x.w
+          s.int(x.w)
+        end
+      RUBY
+    end
+
     it "does not narrow an attribute of a class whose body defines singleton methods" do
       extra = "class HSing\n  def initialize = define_singleton_method(:r) { nil }\nend\n"
       expect(findings(<<~RUBY, extra: extra)).to eq([[4, "call.argument-type-mismatch"]])

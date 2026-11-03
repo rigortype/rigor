@@ -106,7 +106,8 @@ parameters:
     for `kind: :singleton`);
   - `:discovered` is the discovery-table walk (`discovered_method_through_ancestors?`), which also
     counts `attr_*` and `define_method`;
-  - `:either` is their union, as `rigor-rspec` asks today.
+  - `:either` is their union, as `rigor-rspec` asks today, combined as a three-valued OR: `yes` wins,
+    then `maybe`, then `no`.
 
 It answers `maybe` where a walk gives up on budget. Each migrated site maps `maybe` to the answer its
 walk gives today, whatever the site does with a hit:
@@ -206,9 +207,12 @@ in 0.3.0, where it raises at class-definition time.
 
 **The check slice 3 turns on is a new discipline.** A call outside an interface works at runtime, so
 `call.undefined-method` must not fire on it. Slice 3 reports such a call under a dedicated rule
-(`plugin.api-surface`), whose receiver is typed by a plugin-facing interface. Since WD5 keeps
-interfaces out of engine signatures, `lib/` never meets the rule. The rule sits in the bleeding-edge
-overlay until the next hard break (ADR-50 Decision 3, WD2, WD7).
+(`plugin.api-surface`), whose receiver is typed by a plugin-facing interface. The rule applies only
+to plugin source, meaning classes that inherit `Plugin::Base` outside `lib/`. `Plugin::Base`'s own
+hook implementations in `lib/rigor/plugin/base.rb` take interface-typed parameters and hand them to
+engine helpers. For example, `dynamic_return_type` reaches `environment.class_ordering`, which
+`_Environment` does not carry. They are engine code, so the rule must not judge them. The rule sits in
+the bleeding-edge overlay until the next hard break (ADR-50 Decision 3, WD2, WD7).
 
 **WD7 — Sequencing.**
 

@@ -1,4 +1,0 @@
-- **[engine]** A hash or array literal handed to a method that writes it through `merge!` or another in-place mutator, a local or ivar alias, `tap` or a container's block, or a hand-off on an ivar receiver no longer reports `flow.always-truthy-condition` after the call. ([#2624](https://github.com/rigortype/rigor/pull/2624))
-  - Every in-place `Array` / `Hash` mutator now counts, and so does a write through a value that may be the parameter (`(h).merge!`, `[h].first.merge!`, `other = h`, `@x = h`, `instance_variable_set(:@x, h)`, `h.tap { |x| }`, `[h].each { |x| }`).
-  - A write to an element of a `*args` or `**kw` parameter floors the arguments bound to it.
-  - A pure reader (`h.merge`, `h.fetch`, `h.dup.merge!`, `h.slice(:a)`) and a write after `h = h.dup` keep the literal.

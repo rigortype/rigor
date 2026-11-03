@@ -1,3 +1,0 @@
-- **[rigor sig-gen]** `rigor sig-gen --write` no longer appends a duplicate top-level class when a sig file declares a rooted class inside a module, such as `module A; class ::Box`. ([#2654](https://github.com/rigortype/rigor/pull/2654))
-  - `module A; class ::Box` declares the top-level `Box`, but the sig-gen readers keyed it as `A::Box`, so a candidate for `Box` was appended as a second `class Box` that then failed `rigor check` with a duplicated method.
-  - The same rooted-name keying is fixed in the inline-declaration reader, the generic type-parameter lookup and the effect-envelope scanner.

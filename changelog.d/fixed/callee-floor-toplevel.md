@@ -1,3 +1,0 @@
-- **[engine]** A hash or array literal passed to a top-level `def` that writes it no longer reports `flow.always-truthy-condition` when the call sits inside a class or method body (`def add_default(h) = h[:k] = 1` at the top level, `add_default(opts)` in `Host#run`). ([#2515](https://github.com/rigortype/rigor/issues/2515))
-  - The class chain is searched first. A top-level def hands the literal on to another top-level def, and `self.name(...)` and `send(:name, ...)` follow the same way.
-  - A top-level def that may not be the one the call runs (the name defined twice, aliased, reopened on `Object`, defined in a block or an anonymous class body, or a class chain that may answer it first) floors every argument of the call instead of being read.

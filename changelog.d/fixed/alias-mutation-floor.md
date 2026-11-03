@@ -1,0 +1,4 @@
+- **[inference]** A local's literal type no longer goes stale when the object is changed through a copy, a block parameter, a container, an instance variable or a method that keeps it, so a later read no longer reports a false `undefined method`. ([#2677](https://github.com/rigortype/rigor/pull/2677))
+  - Covers `y = x; y << "s"`, `a.each { |x| x << "s" }` on an Array holding the local, `a.tap { |x| x << "s" }`, `h[:k] = a; h[:k] << "s"`, `@a = a; @a << "s"`, `Hash.new(a)[:k] << "s"`, `Array.new(1, a)[0] << "s"`, `Struct.new(:v).new(a).v << "s"`, `box = Box.new(a); box.add("s")` where `add` appends to the ivar `initialize` kept, and `[acc].each { |a| poke(a) }` where `poke` writes its parameter.
+  - `a.send(:push, "s")` now widens `a` as `a.push("s")` does.
+  - A local that escaped before such a mutation loses its literal size and element values; a body where nothing escapes keeps them.

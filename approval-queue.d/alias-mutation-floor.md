@@ -1,6 +1,6 @@
 # A mutation through another holder floors every local that may share the object, at a precision cost on bodies where locals escape
 
-- **PR:** [#0](https://github.com/rigortype/rigor/pull/0)
+- **PR:** [#2677](https://github.com/rigortype/rigor/pull/2677)
 - **Issue:** [#2335](https://github.com/rigortype/rigor/issues/2335)
 - **Class:** open-choice
 - **Precedent:** [#2621](https://github.com/rigortype/rigor/pull/2621)
@@ -36,7 +36,7 @@ before a mutation through an unknown receiver loses its literal size and element
 nothing escapes keeps its answers exactly. Two fixture goldens moved (`loop_value`'s alias case now
 reads as the direct mutation does, and `aliased_mutation_receiver`'s `declared` takes one unknown
 store) and one remover-narrowing spec now reads the copied-from name as floored. #2621's holder scan
-is the precedent for reading object facts off a per-body escape scan.
+is the precedent for reading object facts off a per-body escape scan. The engine cost (+5.75% allocations on the frozen corpus, over the per-PR band and the `bench-perf` band) is reported on the PR for the maintainer's ruling, not decided here.
 
 ## To undo
 

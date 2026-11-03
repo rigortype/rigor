@@ -141,6 +141,33 @@ RSpec.describe "plugins/rigor-mangrove" do
     end
   end
 
+  # #2717 — the receivers-only unwrap rule has no `methods:` gate, so the name gate does not screen it and the
+  # engine offers it every node it dispatches on a Result/Option receiver: the compound writes and the `&:symbol`
+  # block argument, none of which is a CallNode. The rule must decline each with nil. The engine's rescue would
+  # also nil a raise, so this drives the rule block directly: a raise would fail here, and a nil answer would
+  # stay invisible to a typed-result assertion.
+  describe "receivers-only unwrap rule on the nodes that are not a CallNode (#2717)" do
+    {
+      "a &:symbol block argument" => "xs.map(&:unwrap!)",
+      "a compound attribute write" => "x.unwrap += 1",
+      "a compound index write" => "x[0] ||= 1"
+    }.each do |label, form|
+      it "declines #{label} with nil instead of raising: `#{form}`" do
+        plugin = plugin_class.new(services: nil)
+        rule = plugin_class.dynamic_returns.first
+        node = Prism.parse(form).value.statements.body.first
+        node = node.block if node.is_a?(Prism::CallNode) && node.block.is_a?(Prism::BlockArgumentNode)
+        expect(node).not_to be_a(Prism::CallNode)
+        # A typed Result receiver, so a write node reaches the rule's `name` read instead of declining at the
+        # receiver: without the guard, that read raises here.
+        scope = Struct.new(:receiver_type) { def type_of(_node) = receiver_type }
+                      .new(Rigor::Type::Combinator.nominal_of("Mangrove::Result::Ok"))
+
+        expect(plugin.instance_exec(node, scope, &rule[:block])).to be_nil
+      end
+    end
+  end
+
   # ADR-36 nested-class emission — the `variants do … end` Enum DSL mints a nested subclass per variant with a
   # typed `#inner` reader.
   describe "Enum variant synthesis (ADR-36)" do

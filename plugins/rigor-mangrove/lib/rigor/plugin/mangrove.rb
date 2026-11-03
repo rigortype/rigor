@@ -113,7 +113,13 @@ module Rigor
       # ADR-37 slice 2 — a pure return-type contributor. The engine gates on the receiver being a known
       # carrier class (so the block only runs on Result/Option receivers); the block then confirms the call
       # is an unwrap method on an instantiated carrier and yields the carried `type_args[0]`.
+      # #2717 — the rule has no `methods:` gate, so the name gate does not screen it: the engine also offers it
+      # the compound-write nodes (`x.attr op= v`, `x[i] ||= v`, ...) and the `&:symbol` block's
+      # `Prism::BlockArgumentNode`. None of those has `name`, which the rule reads after `receiver`, so decline
+      # anything that is not a `CallNode` rather than raise into the rescue.
       dynamic_return receivers: (RESULT_CARRIERS + OPTION_CARRIERS) do |call_node, scope|
+        next nil unless call_node.is_a?(Prism::CallNode)
+
         receiver = call_node.receiver
         next nil if receiver.nil?
 

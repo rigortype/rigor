@@ -38,7 +38,7 @@ class Rigor::Plugin::Base
   def self.node_file_context: () { (::Prism::ProgramNode root, Rigor::Plugin::_Scope scope) -> untyped } -> void
   def self.node_file_context_block: () -> (^(::Prism::ProgramNode root, Rigor::Plugin::_Scope scope) -> untyped)?
 
-  def self.dynamic_return: (?receivers: (Array[String] | ^() -> Array[String])?, ?methods: (Array[untyped] | ^() -> Array[untyped])?, ?file_methods: (^(String path) -> Array[untyped])?) { (::Prism::CallNode | ::Prism::BlockArgumentNode call_node, Rigor::Plugin::_Scope scope) -> Rigor::Type::t? } -> nil
+  def self.dynamic_return: (?receivers: (Array[String] | ^() -> Array[String])?, ?methods: (Array[untyped] | ^() -> Array[untyped])?, ?file_methods: (^(String path) -> Array[untyped])?) { (::Prism::CallNode | ::Prism::CallOperatorWriteNode | ::Prism::CallOrWriteNode | ::Prism::CallAndWriteNode | ::Prism::IndexOperatorWriteNode | ::Prism::IndexOrWriteNode | ::Prism::IndexAndWriteNode | ::Prism::BlockArgumentNode call_node, Rigor::Plugin::_Scope scope) -> Rigor::Type::t? } -> nil
   def self.dynamic_returns: () -> Array[untyped]
 
   # The block answers the facts that hold after the call returns normally, or nil. The element is a
@@ -76,11 +76,14 @@ class Rigor::Plugin::Base
   # sig-gen gap: #1007 — the true `return result if result` branch (base.rb:594) flows through an
   # `instance_exec`'d, plugin-supplied Proc that sig-gen's inference does not fold into the return
   # join, so it proposes the literal fallback `nil` instead of the honest contract.
-  # `call_node` is a `CallNode` except on the `&:symbol` block path, which dispatches with the
-  # `Prism::BlockArgumentNode` itself (`ExpressionTyper#symbol_block_return_type`) and reaches a `receivers:`-only
-  # rule. The `dynamic_return` block is typed with the same union for that reason; a rule that reads a
-  # `CallNode`-only member off the `BlockArgumentNode` raises into the rescue below (nil), which #2717 tracks.
-  def dynamic_return_type: (call_node: ::Prism::CallNode | ::Prism::BlockArgumentNode, scope: Rigor::Plugin::_Scope, receiver_type: Rigor::Type::t) -> Rigor::Type::t?
+  # `call_node` is a `CallNode` except where the engine dispatches a compound write or a block argument. The
+  # compound writes (`x.attr op= v`, `x.attr ||= v`, `x.attr &&= v`, and the `x[i]` forms) reach a rule through
+  # `ExpressionTyper#attribute_compound_read_type`, `#call_operator_write_type_for` and `#index_read_dispatch`;
+  # the `&:symbol` block arguments through `ExpressionTyper#symbol_block_return_type` and `#apply_hash_block`.
+  # A rule the name gate does not screen out (a `receivers:`-only rule, for one) is offered those nodes, so the
+  # `dynamic_return` block union above is the full set. A rule that reads a `CallNode`-only member (`receiver`,
+  # `name`, `arguments`) must guard with `call_node.is_a?(::Prism::CallNode)` first (#2717).
+  def dynamic_return_type: (call_node: ::Prism::CallNode | ::Prism::CallOperatorWriteNode | ::Prism::CallOrWriteNode | ::Prism::CallAndWriteNode | ::Prism::IndexOperatorWriteNode | ::Prism::IndexOrWriteNode | ::Prism::IndexAndWriteNode | ::Prism::BlockArgumentNode, scope: Rigor::Plugin::_Scope, receiver_type: Rigor::Type::t) -> Rigor::Type::t?
   def narrowing_facts_for: (call_node: ::Prism::CallNode, scope: Rigor::Plugin::_Scope) -> Array[untyped]
 
   # Authoring helpers.

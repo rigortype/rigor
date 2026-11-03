@@ -23,8 +23,9 @@ the extension is versioned independently of the `rigortype` gem.
 - Workspace-trust gating — the server is not started in restricted
   mode.
 - Extension icon (`icon.png`, from the Rigor branding asset).
-- `rigor.rootDir`, for a Rigor project in a subdirectory of the
-  workspace folder. When a folder has no root config but a nested
+- `rigor.rootDir`, a relative subdirectory of the workspace folder
+  holding the Rigor project (an absolute path is rejected with a
+  warning). When a folder has no root config but a nested
   one, the extension says so and offers to set it, instead of
   activating and staying silent.
 - **Rigor: Show Server Version**, a per-folder status bar tooltip
@@ -37,11 +38,6 @@ the extension is versioned independently of the `rigortype` gem.
   appear too.
 - **Rigor: Check Workspace**, which runs that task for the active
   editor's folder.
-
-### Changed
-
-- `rigor.rootDir` must be a relative subdirectory. An absolute path is
-  rejected: no server is started, and the usual warning is shown.
 
 ### Fixed
 

@@ -571,7 +571,9 @@ async function explainUnmanaged(folder: WorkspaceFolder): Promise<void> {
     const root = projectRoot(folder);
     let problem: string | undefined;
     if (!root) {
-      problem = "is outside the workspace folder. It must be a subdirectory.";
+      problem = path.isAbsolute(rootDir)
+        ? 'is an absolute path. Use a path relative to the folder, such as "sub".'
+        : "is outside the workspace folder. It must be a subdirectory.";
     } else if (!fs.existsSync(root)) {
       problem = "does not exist.";
     } else {

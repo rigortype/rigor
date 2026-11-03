@@ -55,7 +55,7 @@
           "type": "string",
           "default": "",
           "scope": "resource",
-          "markdownDescription": "Relative subdirectory of the workspace folder that holds the Rigor project, for example `api` when `.rigor.yml` lives in `api/`. The server runs there, and Ruby files outside it get no Rigor features. An absolute path is rejected. Leave empty to use the workspace folder itself."
+          "markdownDescription": "Relative subdirectory of the workspace folder that holds the Rigor project, for example `api` when `.rigor.yml` lives in `api/`. The server runs there, and Ruby files outside it get no Rigor features. An absolute path is rejected, and the value is used exactly as written (no surrounding spaces). Leave empty to use the workspace folder itself."
         },
         "rigor.server.path": {
           "type": "string",

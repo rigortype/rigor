@@ -1,4 +1,0 @@
-- **[plugins]** Bundled FFI sub-plugins (`rigor-ethon`, `rigor-sassc`, `rigor-ffi-rzmq`, `rigor-rbnacl`) no longer fail to load from `plugins:` config with `cannot load such file -- rigor-ffi`. ([#2566](https://github.com/rigortype/rigor/issues/2566), [#2651](https://github.com/rigortype/rigor/pull/2651))
-  - They `require "rigor-ffi"` by gem name, which failed with `cannot load such file -- rigor-ffi` when rigor ran outside the bundle, such as `ruby -I lib exe/rigor`.
-  - The loader now puts each bundled plugin's `lib` on the load path before it requires that plugin.
-  - `rigor-rbnacl` also needs `rbs` loadable from the same process; outside the bundle, its native extensions may not be built, so it can still fail there.

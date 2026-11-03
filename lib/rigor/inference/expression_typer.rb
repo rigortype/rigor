@@ -433,8 +433,22 @@ module Rigor
       # The two call-site channels a user-method body may read from its caller — the block a `yield`
       # reaches ({#with_yield_value_type}) and the argument list `...` re-supplies
       # ({#with_forwarded_arg_types}) — installed together, both even when nil, for exactly one frame.
+      #
+      # The frame also clears the two flags that describe the CALLER's walk, not the callee's: the block-body
+      # threading suppression ({#without_block_body_threading}) and the reflective-ivar repeat depth
+      # ({ReflectiveIvarWrite.in_repeating_body}). Both only widen, and the return memo's key has no term for
+      # either, so a body walked under the caller's flag stored a wider return that every later caller was served,
+      # and whether a call reported depended on which caller the run reached first.
       def self.with_call_site_frame(yield_type, forwarded_arg_types, &)
-        with_yield_value_type(yield_type) { with_forwarded_arg_types(forwarded_arg_types, &) }
+        previous_threading = Thread.current[THREADED_BLOCK_BODY_KEY]
+        Thread.current[THREADED_BLOCK_BODY_KEY] = nil
+        begin
+          ReflectiveIvarWrite.outside_repeating_body do
+            with_yield_value_type(yield_type) { with_forwarded_arg_types(forwarded_arg_types, &) }
+          end
+        ensure
+          Thread.current[THREADED_BLOCK_BODY_KEY] = previous_threading
+        end
       end
 
       private

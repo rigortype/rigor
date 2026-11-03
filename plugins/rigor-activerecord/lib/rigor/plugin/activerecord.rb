@@ -491,8 +491,8 @@ module Rigor
       # The project's OWN definition wins, and is not merely a precision preference: `def name` on the
       # model — or on an ancestor it declares — is an override Ruby dispatches to, and the plugin tier sits
       # ABOVE the engine's body-inference tiers, so answering here would displace the override's real return
-      # type with `Dynamic`. `discovered_method_through_ancestors?` is the same table the veto's own
-      # discovery arm reads, and it fails toward declining (a budget-exhausted walk answers true).
+      # type with `Dynamic`. `Reflection.project_method_defined(source: :discovered)` is the same table the veto's own
+      # discovery arm reads, and it fails toward declining (a budget-exhausted walk answers `maybe`).
       def implicit_self_instance_member_type(call_node, scope, index)
         return nil if scope.nil?
         return nil unless call_node.arguments.nil?
@@ -504,7 +504,9 @@ module Rigor
         entry = index.find(self_type.class_name)
         return nil if entry.nil?
         return nil unless instance_member_name?(entry, call_node.name)
-        return nil if scope.discovered_method_through_ancestors?(self_type.class_name, call_node.name, :instance)
+        return nil unless Rigor::Reflection.project_method_defined(
+          self_type.class_name, call_node.name, kind: :instance, source: :discovered, scope: scope
+        ).no?
         return nil if rbs_answers_before_object?(self_type.class_name, call_node.name, scope)
 
         Rigor::Type::Combinator.untyped
@@ -552,6 +554,13 @@ module Rigor
         !entry.column(column_name).nil?
       end
 
+      # A project `self.find` on the model or an ancestor, or a walk that ran out of budget before ruling one out
+      # (`maybe`): the veto fails toward declining, as the discovery walk always has.
+      def project_find_defined?(entry, scope)
+        !Rigor::Reflection.project_method_defined(entry.class_name, :find, kind: :singleton, source: :discovered,
+                                                                            scope: scope).no?
+      end
+
       # Class-side finders + the class-side relation entry points. `find` returns the model, or an Array of
       # them for two or more ids, or with a block the model or `nil`; `find_by!` returns the model;
       # `find_by` adds the `nil` arm; `where` / `all` / `order` / `limit` / `none` open a relation. The
@@ -572,7 +581,7 @@ module Rigor
 
           # A model that defines its own `self.find` (`find(owner, id)`) takes two arguments for its own
           # reasons, so the Array reading of Rails' `find` is withheld and the project's method answers.
-          return nil if scope.discovered_method_through_ancestors?(entry.class_name, :find, :singleton)
+          return nil if project_find_defined?(entry, scope)
 
           Rigor::Type::Combinator.nominal_of("Array", type_args: [model])
         when :find_by!
@@ -615,7 +624,7 @@ module Rigor
       # `Relation#find` overload does. A project `self.find` keeps its own answer, as it does for the
       # multi-id form.
       def block_find_return_type(call_node, entry, scope)
-        return nil if scope.discovered_method_through_ancestors?(entry.class_name, :find, :singleton)
+        return nil if project_find_defined?(entry, scope)
         return Rigor::Type::Combinator.untyped unless call_argument_count(call_node).zero?
 
         Rigor::Type::Combinator.union(

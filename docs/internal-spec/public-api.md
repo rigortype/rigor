@@ -72,8 +72,16 @@ pins instance and singleton method sets for:
 - `Rigor::Reflection` — every `class_known?`, `class_ordering`,
   `class_type_param_names`, `constant_type_for`, `discovered_class?`,
   `discovered_method?`, `instance_definition`, `instance_method_definition`,
-  `nominal_for_name`, `rbs_class_known?`, `singleton_definition`,
-  `singleton_for_name`, `singleton_method_definition`.
+  `nominal_for_name`, `project_method_defined`, `rbs_class_known?`,
+  `singleton_definition`, `singleton_for_name`, `singleton_method_definition`.
+  `project_method_defined(class_name, method_name, kind:, source:, scope:)`
+  (ADR-128 WD1) is the ancestor question plugins used to ask through two
+  `Scope` walks: it answers a `Rigor::Trinary`, and `maybe` exactly where
+  the walk's ancestor budget ran out before it found a definer. See
+  [`reflection.md`](reflection.md) § "Source-side discoveries".
+- `Rigor::Trinary` — the value `Reflection.project_method_defined` returns:
+  `yes?` / `no?` / `maybe?`, `and`, `or`, `negate`, `value`, `==` and the
+  `Trinary.yes` / `.no` / `.maybe` / `.from_symbol` constructors.
 - `Rigor::Plugin` — `register`, `registered`, `registered_for`,
   `unregister!` (test helper). v0.1.0 slice 1.
 - `Rigor::Plugin::Base` — the class-level `manifest(**fields)`,

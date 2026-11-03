@@ -84,7 +84,7 @@ Use an absolute path — the setting is not `~`-expanded.
 | Setting | Default | Description |
 |---|---|---|
 | `rigor.enable` | `true` | Enable the server for the folder. |
-| `rigor.rootDir` | `""` | Subdirectory holding the Rigor project (such as `api`). Empty uses the folder itself. |
+| `rigor.rootDir` | `""` | Relative subdirectory holding the Rigor project (such as `api`). Empty uses the folder itself; an absolute path is rejected. |
 | `rigor.server.path` | `""` | Explicit `rigor` executable path. |
 | `rigor.server.useBundler` | `auto` | `auto` / `always` / `never`. |
 | `rigor.server.configPath` | `""` | Passed as `--config=PATH`. |
@@ -118,14 +118,31 @@ every finding in the project, run the `rigor: check` task
 (**Terminal → Run Task…**, or **Rigor: Check Workspace**). The task runs
 the same `rigor` the server uses, from the project root, with the same
 `rigor.server.configPath`, and its text output fills the Problems panel
-through the `$rigor` problem matcher. The matcher reads one
-`PATH:LINE:COL: SEVERITY: MESSAGE [RULE]` line per finding, and the
-problems carry `source: "rigor"`, like the server's.
+through the `$rigor` problem matcher. The problems carry
+`source: "rigor"`, like the server's.
+
+The matcher reads each `PATH:LINE:COL: SEVERITY: MESSAGE` line, where
+`SEVERITY` is `error`, `warning` or `info`. A trailing `[RULE]` is
+optional: when the line ends with one, it is the rule (the last
+bracketed token), so a message that itself ends in brackets without a
+rule is read as having that rule. Summary lines such as
+`1 error(s) in 1 file(s)` and the `Check targets` and timing output
+are not problems.
+
+Relative paths resolve against the project root (`rigor.rootDir`, or
+the folder itself), through `${config:rigor.rootDir}`. Absolute paths
+are used as given. The base was checked per folder in a multi-root
+workspace where each folder has its own `rootDir`. An absolute
+`rigor.rootDir` is rejected, as it is for the server.
 
 - The task is provided once per managed folder, and only in trusted
   workspaces. In a multi-root workspace the task is named
   `check (<folder>)`.
-- To clear the task's problems, rerun the task or close its terminal.
+- Each run replaces the task's previous problems, including those of a
+  task for another folder. To clear them, rerun the task or close its
+  terminal.
+- VS Code keeps one problem per file, line and column. Two findings at
+  the same position show only the first one.
 - A file open in the editor can show the same finding twice: once from
   the language server and once from the task. Both entries have
   `source: "rigor"` and the same position. VS Code does not merge them,

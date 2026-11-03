@@ -55,7 +55,7 @@
           "type": "string",
           "default": "",
           "scope": "resource",
-          "markdownDescription": "Subdirectory of the workspace folder that holds the Rigor project, for example `api` when `.rigor.yml` lives in `api/`. The server runs there, and Ruby files outside it get no Rigor features. Leave empty to use the workspace folder itself."
+          "markdownDescription": "Relative subdirectory of the workspace folder that holds the Rigor project, for example `api` when `.rigor.yml` lives in `api/`. The server runs there, and Ruby files outside it get no Rigor features. An absolute path is rejected. Leave empty to use the workspace folder itself."
         },
         "rigor.server.path": {
           "type": "string",
@@ -149,9 +149,9 @@
         "name": "rigor",
         "owner": "rigor",
         "source": "rigor",
-        "fileLocation": ["autoDetect", "${workspaceFolder}"],
+        "fileLocation": ["autoDetect", "${workspaceFolder}/${config:rigor.rootDir}"],
         "pattern": {
-          "regexp": "^(.+?):(\\d+):(\\d+): (error|warning|info): (.*) \\[([^\\[\\]\\s]+)\\]$",
+          "regexp": "^(.+?):(\\d+):(\\d+): (error|warning|info): (.*?)(?: \\[([^\\[\\]\\s]+)\\])?$",
           "file": 1,
           "line": 2,
           "column": 3,

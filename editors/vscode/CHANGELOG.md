@@ -32,9 +32,16 @@ the extension is versioned independently of the `rigortype` gem.
   startup summary in the output channel.
 - A `rigor: check` task (`type: "rigor"`) per managed folder, which runs
   `rigor check` from the project root and fills the Problems panel
-  through the `$rigor` problem matcher. Trusted workspaces only.
+  through the `$rigor` problem matcher. Trusted workspaces only. The
+  matcher's trailing `[RULE]` is optional, so parse and path errors
+  appear too.
 - **Rigor: Check Workspace**, which runs that task for the active
   editor's folder.
+
+### Changed
+
+- `rigor.rootDir` must be a relative subdirectory. An absolute path is
+  rejected: no server is started, and the usual warning is shown.
 
 ### Fixed
 

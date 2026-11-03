@@ -30,24 +30,18 @@ const TASK_TYPE = "rigor";
 const TASK_SOURCE = "rigor";
 const PROBLEM_MATCHER = "$rigor";
 
-/** Quote one argument for a Windows command line run through `cmd`. */
-function quoteWin(arg: string): string {
-  return /[\s"]/.test(arg) ? `"${arg.replace(/"/g, '\\"')}"` : arg;
-}
-
 /** The `rigor check` task for one managed folder. */
 function checkTask(folder: WorkspaceFolder, label: string): Task {
   const server = resolveServer(folder);
   const root = projectRoot(folder) ?? folder.uri.fsPath;
   const args = [...server.prefixArgs, "check", ...configArgs(folder)];
   const definition: TaskDefinition = { type: TASK_TYPE, command: "check" };
-  // `bundle` and the mise shim are not plain executables on Windows, so the
-  // task runs through the shell there, as the language server does.
+  // On Windows `bundle` and the version-manager shim are .cmd or .bat files,
+  // which only a shell can start. ShellExecution takes the command and its
+  // arguments separately, so VS Code quotes them for the user's shell.
   const execution =
     process.platform === "win32"
-      ? new ShellExecution([server.command, ...args].map(quoteWin).join(" "), {
-          cwd: root,
-        })
+      ? new ShellExecution(server.command, args, { cwd: root })
       : new ProcessExecution(server.command, args, { cwd: root });
   const task = new Task(
     definition,
@@ -98,6 +92,12 @@ function taskFolder(task: Task): WorkspaceFolder | undefined {
  * when the active file is in none of them.
  */
 async function checkWorkspace(): Promise<void> {
+  if (!workspace.isTrusted) {
+    void window.showWarningMessage(
+      "Rigor: this workspace is not trusted, so rigor check does not run here. Trust the workspace to check it.",
+    );
+    return;
+  }
   const all = (await tasks.fetchTasks({ type: TASK_TYPE })).filter(
     (task) => taskFolder(task) !== undefined,
   );

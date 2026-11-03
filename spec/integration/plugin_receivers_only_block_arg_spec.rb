@@ -83,7 +83,7 @@ RSpec.describe "the nodes a receivers-only dynamic_return rule is offered (#2717
   # The distinct node classes the rule was offered for one form, in first-seen order.
   def offered(form)
     seen = []
-    run_analysis(prelude + form + "\n", seen)
+    run_analysis("#{prelude}#{form}\n", seen)
     seen.uniq
   end
 

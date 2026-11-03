@@ -366,7 +366,8 @@ jobs:
   # process: `runner_pool_spec.rb` (also gated behind
   # RIGOR_INCLUDE_RACTOR_POOL, see spec/spec_helper.rb) and
   # `spec/integration/plugins/` (rigor-ffi re-opens Rigor::Plugin::Base,
-  # which flakes `public_api_drift_spec.rb`). Without a job they have no
+  # which flakes `public_api_drift_spec.rb`) and `spec/integration/examples/`
+  # (which the ADR-128 plugin-boundary gate runs beside them). Without a job they have no
   # CI coverage at all — a deterministic failure in the pool spec once
   # rotted unnoticed for three weeks (fork-backend default 86ed9129 →
   # fixed 7ebeac08).
@@ -377,10 +378,17 @@ jobs:
   # against shard 3's 117s. As a peer job the 145s runs concurrently and
   # leaves the matrix's wall time to the matrix (run 34269150881).
   excluded-specs:
-    name: Excluded specs (pool runner + plugin integration)
+    name: Excluded specs (pool runner + plugin integration, shard ${{ matrix.shard }}/3)
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    # The plugin integration specs run under the ADR-128 plugin-boundary gate, a TracePoint that roughly doubles
+    # them. Three shards (tool/plugin_integration_shard.rb partitions the files by size, with no timing cache to
+    # agree on) keep the longest below the default suite's slowest shard; the pool-runner spec rides shard 1.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -394,10 +402,11 @@ jobs:
           bundler-cache: true
 
       - name: Run pool-runner spec
+        if: matrix.shard == 1
         run: make test-ractor-pool
 
       - name: Run plugin integration tests
-        run: make test-integration-plugins
+        run: make test-integration-plugins PLUGIN_SHARD=${{ matrix.shard }}/3
 
   # ── 1b. Shard coverage ──────────────────────────────────────────
   # Sharding's one silent failure: shards never coordinate, so each trusts

@@ -91,10 +91,13 @@ interface Rigor::Plugin::_Scope
   def self_type: () -> Rigor::Type::t?
   def local: (String | Symbol name) -> Rigor::Type::t?
   def source_path: () -> String?
+  def with_local: (String | Symbol name, Rigor::Type::t type) -> Rigor::Plugin::_Scope
   def environment: () -> Rigor::Plugin::_Environment
 end
 ```
 
+`with_local` is a pure functional update that returns a new scope. Slice 1's boundary gate found
+`rigor-web`'s protocol checker rebinding parameter types through it before `type_of`, so it joined the list.
 `environment` is non-nil, matching `Scope#environment`. A nilable promise would make
 `call.possible-nil-receiver` fire on plugins that call it unguarded.
 
@@ -137,8 +140,11 @@ where every engine call site provably passes a `Scope`; otherwise it is `_Scope?
 - The `narrowing_facts` block returns the fact array `narrowing_facts_for` collects (`base.rb`
   ~L644); slice 1 declares its element type.
 - Diagnostic hooks return `Array[Rigor::Analysis::Diagnostic]`.
-- `services` becomes `_Services`: `fact_store`, `configuration`, `reflection` and `type`, each
-  narrowed to the members plugins call.
+- `services` becomes `_Services`: `fact_store`, `configuration`, `reflection` and `type`.
+  `fact_store` and `configuration` are narrowed to the members plugins call; `reflection` and `type` are
+  `singleton(Rigor::Reflection)` and `singleton(Rigor::Type::Combinator)`, because both are listed public
+  namespaces and a narrower interface would promise less than the constant path (slice 1's approval-queue
+  entry `adr128-plugin-interfaces`, PR #2714).
 - `config` becomes `Hash[String, untyped]`. Its values are schema-driven per plugin, and typing them
   precisely is out of scope.
 - `TypeNodeResolver` hooks receive a `TypeNode::NameScope`. `plugin.md` documents it, but

@@ -4,9 +4,17 @@
 # declared surface and give plugin subclasses (once they enter a check
 # target) method resolution for the DSL + hook surface.
 #
-# Collaborators that have no RBS yet (Diagnostic, Cache::Descriptor,
-# FlowContribution, NodeContext, Prism nodes) are typed `untyped`; the
-# precision ceiling is the sparse `sig/` tree, not this file.
+# ADR-128 WD2 — every hook position takes a plugin-facing interface
+# (`sig/rigor/plugin/interfaces.rbs`), a concrete Prism node class, a
+# `Rigor::Type::t` or a core type, instead of `untyped`. A hook's `scope`
+# is non-nil where every engine call site passes one: the per-file hooks
+# receive the seeded `Scope.empty(...)`, `MethodDispatcher#try_plugin_contribution`
+# returns before consulting a plugin when its scope is nil, and
+# `StatementEvaluator#apply_plugin_assertions` has already read its own. The
+# existing `scope.nil?` guards in plugin source stay valid either way.
+#
+# Collaborators that have no RBS yet (Cache::Descriptor, FlowContribution)
+# stay `untyped`; the precision ceiling is the sparse `sig/` tree.
 class Rigor::Plugin::Base
   # --- class-level declaration DSLs ---------------------------------
 
@@ -17,16 +25,25 @@ class Rigor::Plugin::Base
   def self.producer: (untyped id, ?watch: untyped, ?serialize: untyped, ?deserialize: untyped, ?generation_cap: untyped) { (untyped params) -> untyped } -> Symbol
   def self.producers: () -> Hash[Symbol, untyped]
 
-  def self.node_rule: (untyped node_type) { (*untyped) -> untyped } -> Class
+  # One overload per node class the bundled plugins name, so the block's `node` is that class; `Prism::Node` is the
+  # fallback for any other (RBS cannot write `singleton(N)` over a type variable). The block runs `instance_exec`'d
+  # on the plugin: `file_context` is whatever the `node_file_context` block returned (plugin-defined), and a rule
+  # may answer one diagnostic, an array of them, or nil.
+  def self.node_rule: (singleton(::Prism::CallNode) node_type) { (::Prism::CallNode node, Rigor::Plugin::_Scope scope, String path, untyped file_context, Rigor::Plugin::NodeContext context) -> (Rigor::Analysis::Diagnostic | Array[Rigor::Analysis::Diagnostic] | nil) } -> singleton(::Prism::CallNode)
+                    | (singleton(::Prism::ClassNode) node_type) { (::Prism::ClassNode node, Rigor::Plugin::_Scope scope, String path, untyped file_context, Rigor::Plugin::NodeContext context) -> (Rigor::Analysis::Diagnostic | Array[Rigor::Analysis::Diagnostic] | nil) } -> singleton(::Prism::ClassNode)
+                    | (singleton(::Prism::ProgramNode) node_type) { (::Prism::ProgramNode node, Rigor::Plugin::_Scope scope, String path, untyped file_context, Rigor::Plugin::NodeContext context) -> (Rigor::Analysis::Diagnostic | Array[Rigor::Analysis::Diagnostic] | nil) } -> singleton(::Prism::ProgramNode)
+                    | (singleton(::Prism::Node) node_type) { (::Prism::Node node, Rigor::Plugin::_Scope scope, String path, untyped file_context, Rigor::Plugin::NodeContext context) -> (Rigor::Analysis::Diagnostic | Array[Rigor::Analysis::Diagnostic] | nil) } -> singleton(::Prism::Node)
   def self.node_rules: () -> Array[untyped]
 
-  def self.node_file_context: () { (untyped root, untyped scope) -> untyped } -> void
-  def self.node_file_context_block: () -> (^(untyped root, untyped scope) -> untyped)?
+  def self.node_file_context: () { (::Prism::ProgramNode root, Rigor::Plugin::_Scope scope) -> untyped } -> void
+  def self.node_file_context_block: () -> (^(::Prism::ProgramNode root, Rigor::Plugin::_Scope scope) -> untyped)?
 
-  def self.dynamic_return: (?receivers: (Array[String] | ^() -> Array[String])?, ?methods: (Array[untyped] | ^() -> Array[untyped])?, ?file_methods: (^(untyped path) -> Array[untyped])?) { (untyped call_node, untyped scope) -> untyped } -> nil
+  def self.dynamic_return: (?receivers: (Array[String] | ^() -> Array[String])?, ?methods: (Array[untyped] | ^() -> Array[untyped])?, ?file_methods: (^(String path) -> Array[untyped])?) { (::Prism::CallNode | ::Prism::BlockArgumentNode call_node, Rigor::Plugin::_Scope scope) -> Rigor::Type::t? } -> nil
   def self.dynamic_returns: () -> Array[untyped]
 
-  def self.narrowing_facts: (methods: Array[untyped]) { (untyped call_node, untyped scope) -> untyped } -> nil
+  # The block answers the facts that hold after the call returns normally, or nil. The element is a
+  # `Rigor::FlowContribution::Fact`, which has no RBS declaration yet, so it stays `untyped`.
+  def self.narrowing_facts: (methods: Array[untyped]) { (::Prism::CallNode call_node, Rigor::Plugin::_Scope scope) -> Array[untyped]? } -> nil
   # The engine-facing reader for the declared `narrowing_facts` rules. Named
   # `type_specifiers` before ADR-80; that spelling was removed in 0.3.0.
   def self.narrowing_facts_rules: () -> Array[untyped]
@@ -35,15 +52,16 @@ class Rigor::Plugin::Base
 
   # --- instance surface --------------------------------------------
 
-  attr_reader services: untyped
-  attr_reader config: untyped
+  attr_reader services: Rigor::Plugin::_Services
+  # Schema-driven per plugin, so the values stay `untyped` (ADR-128 WD2).
+  attr_reader config: Hash[String, untyped]
 
-  def initialize: (services: untyped, ?config: untyped) -> void
+  def initialize: (services: Rigor::Plugin::_Services, ?config: Hash[String, untyped]) -> void
 
   # Overridable lifecycle / extension hooks (default no-ops).
-  def init: (untyped services) -> nil
-  def prepare: (untyped services) -> nil
-  def diagnostics_for_file: (path: untyped, scope: untyped, root: untyped) -> Array[untyped]
+  def init: (Rigor::Plugin::_Services services) -> nil
+  def prepare: (Rigor::Plugin::_Services services) -> nil
+  def diagnostics_for_file: (path: String, scope: Rigor::Plugin::_Scope, root: ::Prism::ProgramNode) -> Array[Rigor::Analysis::Diagnostic]
   # authored: hook-contract widening — the element type comes from a plugin gem sig-gen never
   # sees, so no engine work would let it answer; the declared `Array[Rigor::Plugin::TemplateUnit]`
   # over a bare-`[]` default body is the author's contract.
@@ -54,12 +72,16 @@ class Rigor::Plugin::Base
   def declared_members: (untyped class_name) -> Array[untyped]
 
   # Engine-executed dispatch over the declared DSLs.
-  def node_rule_diagnostics: (path: untyped, scope: untyped, root: untyped) -> Array[untyped]
+  def node_rule_diagnostics: (path: String, scope: Rigor::Plugin::_Scope, root: ::Prism::ProgramNode) -> Array[untyped]
   # sig-gen gap: #1007 — the true `return result if result` branch (base.rb:594) flows through an
   # `instance_exec`'d, plugin-supplied Proc that sig-gen's inference does not fold into the return
   # join, so it proposes the literal fallback `nil` instead of the honest contract.
-  def dynamic_return_type: (call_node: untyped, scope: untyped, receiver_type: untyped) -> Rigor::Type::t?
-  def narrowing_facts_for: (call_node: untyped, scope: untyped) -> Array[untyped]
+  # `call_node` is a `CallNode` except on the `&:symbol` block path, which dispatches with the
+  # `Prism::BlockArgumentNode` itself (`ExpressionTyper#symbol_block_return_type`) and reaches a `receivers:`-only
+  # rule. The `dynamic_return` block is typed with the same union for that reason; a rule that reads a
+  # `CallNode`-only member off the `BlockArgumentNode` raises into the rescue below (nil), which #2717 tracks.
+  def dynamic_return_type: (call_node: ::Prism::CallNode | ::Prism::BlockArgumentNode, scope: Rigor::Plugin::_Scope, receiver_type: Rigor::Type::t) -> Rigor::Type::t?
+  def narrowing_facts_for: (call_node: ::Prism::CallNode, scope: Rigor::Plugin::_Scope) -> Array[untyped]
 
   # Authoring helpers.
   def diagnostic: (untyped node, path: untyped, message: untyped, ?severity: untyped, ?rule: untyped, ?location: untyped) -> Rigor::Analysis::Diagnostic

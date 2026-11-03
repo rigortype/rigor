@@ -97,7 +97,7 @@ engine_changed=""
 add_spec() {
   case "$1" in
     spec/rigor/analysis/runner_pool_spec.rb) pool_specs+="$1"$'\n' ;;
-    spec/integration/plugins/*_spec.rb) plugin_specs+="$1"$'\n' ;;
+    spec/integration/plugins/*_spec.rb | spec/integration/examples/*_spec.rb) plugin_specs+="$1"$'\n' ;;
     *) specs+="$1"$'\n' ;;
   esac
 }
@@ -283,9 +283,9 @@ run_on "rspec (plugin integration)" "$plugin_specs" env RIGOR_INCLUDE_INTEGRATIO
 if [[ -n "$engine_changed" ]]; then
   if pins="$(bundle exec ruby tool/pin_examples.rb)" && [[ -n "$pins" ]]; then
     # Plugin integration pins run in their own process, as their files do above.
-    run_on "rspec (pinned flip-this-when examples)" "$(printf '%s\n' "$pins" | grep -v '^spec/integration/plugins/')" \
+    run_on "rspec (pinned flip-this-when examples)" "$(printf '%s\n' "$pins" | grep -Ev '^spec/integration/(plugins|examples)/')" \
       bundle exec rspec
-    run_on "rspec (pinned plugin examples)" "$(printf '%s\n' "$pins" | grep '^spec/integration/plugins/')" \
+    run_on "rspec (pinned plugin examples)" "$(printf '%s\n' "$pins" | grep -E '^spec/integration/(plugins|examples)/')" \
       env RIGOR_INCLUDE_INTEGRATION_PLUGINS=1 bundle exec rspec
   else
     echo

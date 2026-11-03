@@ -1,0 +1,51 @@
+# ADR-128 — the plugin-facing structural interfaces: what a hook may call on the engine objects it receives.
+#
+# The criterion (ADR-128): a method is public plugin API only if it is declared on `Plugin::Base`, on one of the
+# interfaces below, or in a namespace `docs/internal-spec/public-api.md` lists as public. Being reachable at
+# runtime does not make a method public. `spec/rigor/plugin_boundary_spec.rb` gates the bundled plugins against
+# these member lists, so adding a member here is an API promise, and `public_api_drift_spec.rb` pins the sets.
+#
+# Each interface is backed by a concrete engine class (the `BACKING` table in `spec/support/plugin_boundary.rb`).
+# Engine signatures keep those concrete classes (ADR-128 WD5); an interface appears only at a plugin-facing
+# position, in `base.rbs`.
+module Rigor
+  module Plugin
+    # The scope a hook receives. Backed by `Rigor::Scope`, which has far more members (about 200); only these are
+    # promised. `environment` is non-nil, matching `Scope#environment`.
+    interface _Scope
+      def type_of: (::Prism::Node node) -> Rigor::Type::t
+      def self_type: () -> Rigor::Type::t?
+      def local: (String | Symbol name) -> Rigor::Type::t?
+      def source_path: () -> String?
+      def with_local: (String | Symbol name, Rigor::Type::t type) -> Rigor::Plugin::_Scope
+      def environment: () -> Rigor::Plugin::_Environment
+    end
+
+    # The project's RBS and class-registry handle, backed by `Rigor::Environment`.
+    interface _Environment
+      def nominal_for_name: (String | Symbol name) -> Rigor::Type::Nominal?
+      def rbs_module?: (String | Symbol name) -> bool
+    end
+
+    # The services container `Plugin::Base#init` / `#prepare` receive, backed by `Rigor::Plugin::Services`.
+    # `reflection` and `type` are public namespaces (`Rigor::Reflection`, `Rigor::Type::Combinator`) that a plugin
+    # also reaches by constant, so they are typed as those modules rather than narrowed to an interface.
+    interface _Services
+      def fact_store: () -> Rigor::Plugin::_FactStore
+      def configuration: () -> Rigor::Plugin::_Configuration
+      def reflection: () -> singleton(Rigor::Reflection)
+      def type: () -> singleton(Rigor::Type::Combinator)
+    end
+
+    # The per-run cross-plugin fact store, backed by `Rigor::Plugin::FactStore`.
+    interface _FactStore
+      def publish: (plugin_id: String | Symbol, name: Symbol, value: untyped) -> nil
+      def read: (plugin_id: String | Symbol, name: Symbol) -> untyped
+    end
+
+    # The project configuration, backed by `Rigor::Configuration`.
+    interface _Configuration
+      def paths: () -> Array[String]
+    end
+  end
+end

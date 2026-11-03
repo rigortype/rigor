@@ -17,7 +17,7 @@ Corpora: Rigor's own `lib` (654 files, 536K AST nodes, no plugins); Mastodon `ap
 235K nodes, 10 Rails plugins); Redmine `app lib` (876 files, 6 plugins). The survey checkouts were
 copied to a private directory first. Both carry an untracked `sig/` that the 2026-10-27
 `rigor-project-init` re-init wrote (Phase 5, `rigor sig-gen`) before #2437 was fixed: it declares
-subclasses against superclasses it wrote no declaration for. That made 70 (Mastodon) and 68 (Redmine)
+subclasses against superclasses it wrote no declaration for. That made 70 (Mastodon) and 74 (Redmine)
 RBS definition builds fail and would have skewed the inference mass, so the copies drop it. They keep
 the checkouts' gem RBS collection.
 
@@ -231,6 +231,7 @@ first compute has already written the entry.
 - The harness classifies callee computes at entry. A class's CPU is the body's exclusive time, and
   nested computes are charged to their own class.
 - The survey checkouts under `~/repo/ruby/rigor-survey/` still carry that pre-#2437 `sig/`
-  (§ Method). Any measurement taken from them in place inherits the same RBS build failures until the
-  targets are re-initialized with a current `rigor sig-gen`.
+  (§ Method), and any measurement taken from them in place inherits the same RBS build failures.
+  Re-running `rigor sig-gen` over it does not help, because sig-gen keeps a stale header (#2716).
+  Deleting `sig/` and regenerating clears Mastodon's failures but leaves 6 in Redmine (#2715).
 - The prototype memo is not a candidate implementation (§ The prototype memo).

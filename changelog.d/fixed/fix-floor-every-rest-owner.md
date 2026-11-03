@@ -1,0 +1,2 @@
+- **[inference]** `rigor check` and `rigor sig-gen` no longer crash on a splat handed to a variable-arity `def` that may not be the method the call runs, such as a `def` inside an RSpec `describe` block that passes its rest parameter on. ([#2734](https://github.com/rigortype/rigor/pull/2734))
+  - `check` used to report the whole file as an internal analyzer error, and `sig-gen` aborted.

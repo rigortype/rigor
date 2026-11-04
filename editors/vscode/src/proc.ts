@@ -21,6 +21,24 @@ export function shellArg(arg: string): string {
     : arg;
 }
 
+/**
+ * The command and arguments to hand to `spawn` / `execFile`, quoted for the
+ * `cmd.exe` that `shell: true` interposes on Windows. Node joins them with
+ * spaces and does no quoting of its own, so a path with a space (a user
+ * profile such as `C:\Users\First Last`, `Program Files`) would otherwise
+ * be split. Without a shell the vector passes through untouched. Every
+ * spawn of the server and of `rigor version` goes through this.
+ */
+export function shellInvocation(
+  command: string,
+  args: string[],
+  shell: boolean,
+): { command: string; args: string[] } {
+  return shell
+    ? { command: shellArg(command), args: args.map(shellArg) }
+    : { command, args };
+}
+
 const live = new Set<ChildProcess>();
 
 /**
@@ -38,7 +56,8 @@ export function spawnCli(
   // The managed kind (ADR-27 WD10) spawns its Ruby directly, without a
   // shell, under its own Bundler environment.
   const shell = options.shell ?? win;
-  const child = spawn(shell ? shellArg(command) : command, shell ? args.map(shellArg) : args, {
+  const invocation = shellInvocation(command, args, shell);
+  const child = spawn(invocation.command, invocation.args, {
     cwd,
     env: options.env,
     shell,

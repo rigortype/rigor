@@ -86,6 +86,18 @@ the extension is versioned independently of the `rigortype` gem.
   `rigor version` for the folders not yet reached.
 - **Rigor: Show Server Log** reads the setting of the active editor's
   folder (or asks) instead of always the first folder.
+- Each start that times out no longer leaves an empty diagnostics
+  collection registered, nor a timer, until the window closes.
+- **Rigor: Restart Server**, a setting change, or closing the window while
+  the client is still (re)starting a server no longer shows the client's
+  two "Pending response rejected" / "couldn't create connection" errors.
+- A server the client restarts after a crash, and which then never
+  answers `initialize`, is abandoned after 60 s and shown as `error`
+  instead of `starting` forever.
+- On Windows the language server and the `rigor version` probe are now
+  quoted for `cmd.exe`, so a `rigor` or `rigor.server.path` whose path
+  contains a space (a user profile such as `C:\Users\First Last`,
+  `Program Files`) is no longer split. Not yet tried on a Windows host.
 
 ### Known limitations
 

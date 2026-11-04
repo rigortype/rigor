@@ -45,7 +45,7 @@ import {
 } from "./discovery";
 import { clearRuleCache, registerCommands } from "./commands";
 import { killTree } from "./kill";
-import { killAllCli } from "./proc";
+import { killAllCli, shellInvocation } from "./proc";
 import { MIN_VERSION, ProbeResult, probeServer } from "./probe";
 import {
   INSTALL_GUIDE_URL,
@@ -105,6 +105,13 @@ interface ManagedClient {
    * spawned for it.
    */
   abandon(): void;
+  /**
+   * Cut the client off from a server that is about to be killed while the
+   * client is not `Running`, so the kill is not reported as a lost
+   * connection (two library toasts), and release what the unfinished start
+   * left registered.
+   */
+  cutOff(): void;
 }
 
 /** `client.start()` did not finish in time; the extension gave up on it. */
@@ -355,10 +362,12 @@ async function startClient(folder: WorkspaceFolder): Promise<void> {
     if (abandoned || shuttingDown) {
       throw new Error("the Rigor client was stopped");
     }
-    const spawned = spawn(server.command, args, {
+    const shell = useShell(server);
+    const invocation = shellInvocation(server.command, args, shell);
+    const spawned = spawn(invocation.command, invocation.args, {
       cwd: root,
       env: server.env,
-      shell: useShell(server),
+      shell,
       // Its own process group on POSIX, so `killTree` reaches the forked
       // workers too.
       detached: process.platform !== "win32",
@@ -378,6 +387,9 @@ async function startClient(folder: WorkspaceFolder): Promise<void> {
       outputChannel.append(data.toString()),
     );
     detach = () => {
+      // `dispose` leaves a pending partial-message timer armed, which
+      // re-arms itself every period; a zero timeout ends that chain.
+      reader.partialMessageTimeout = 0;
       reader.dispose();
       writer.dispose();
       spawned.stdout!.destroy();
@@ -426,9 +438,35 @@ async function startClient(folder: WorkspaceFolder): Promise<void> {
   // Which status entry the client's own transitions update. Set once the
   // first start succeeded; until then the start below reports its outcome.
   let running: FolderStatus | undefined;
+  // A restart the client starts itself after a crash is not on the
+  // extension's start timeout, so it gets its own.
+  let restartTimer: NodeJS.Timeout | undefined;
+  const clearRestartTimer = (): void => {
+    if (restartTimer) {
+      clearTimeout(restartTimer);
+      restartTimer = undefined;
+    }
+  };
+  const cutOff = (): void => {
+    detach();
+    client.diagnostics?.dispose();
+  };
   const stateListener = client.onDidChangeState((e) => {
     if (abandoned || !running) {
       return;
+    }
+    clearRestartTimer();
+    if (e.newState === State.Starting) {
+      restartTimer = setTimeout(() => {
+        restartTimer = undefined;
+        if (abandoned) {
+          return;
+        }
+        const message = `the restarted server did not answer \`initialize\` within ${START_TIMEOUT_MS / 1000} s`;
+        statusBar.update(key, { ...running!, state: "error" });
+        outputChannel.appendLine(`[rigor] ${label}: ${message}`);
+        void discardClient(message);
+      }, START_TIMEOUT_MS);
     }
     // A crash the client restarts goes Running -> Stopped -> Starting in
     // one tick, so only a restart that gives up (or fails) leaves it shown.
@@ -444,7 +482,36 @@ async function startClient(folder: WorkspaceFolder): Promise<void> {
       outputChannel.appendLine(`[rigor] ${label}: the server is running again`);
     }
   });
-  const disposables = [...watchers, stateListener];
+  const disposables = [
+    ...watchers,
+    stateListener,
+    { dispose: clearRestartTimer },
+  ];
+  // Gives up on a client the extension still holds: out of `clients`,
+  // transports detached (see `cutOff`), server killed, client disposed.
+  const discardClient = async (toastMessage?: string): Promise<void> => {
+    clients.delete(key);
+    setInUse(key, undefined);
+    for (const disposable of disposables) {
+      disposable.dispose();
+    }
+    abandoned = true;
+    if (toastMessage !== undefined) {
+      // Killing the server closes the connection, which the client would
+      // report as two more errors (the rejected `initialize`, then
+      // "couldn't create connection"). Detached first, the pending
+      // `initialize` is simply never answered and the client says nothing;
+      // this is the one message.
+      cutOff();
+      void window
+        .showErrorMessage(`Rigor: ${label}: ${toastMessage}.`, "Show Output")
+        .then((choice) => choice && outputChannel.show());
+    }
+    // Kill before disposing, so a late `initialize` answer cannot register
+    // providers on an abandoned client.
+    await reap(child, 0);
+    await client.dispose(STOP_TIMEOUT_MS).catch(() => undefined);
+  };
   // Before the spawn, so a prune in another window keeps this version.
   setInUse(key, server);
   clients.set(key, {
@@ -454,6 +521,7 @@ async function startClient(folder: WorkspaceFolder): Promise<void> {
     abandon: () => {
       abandoned = true;
     },
+    cutOff,
   });
 
   try {
@@ -482,28 +550,9 @@ async function startClient(folder: WorkspaceFolder): Promise<void> {
     outputChannel.appendLine(
       `[rigor] failed to start the server for ${label}: ${String(err)}`,
     );
-    clients.delete(key);
-    setInUse(key, undefined);
-    for (const disposable of disposables) {
-      disposable.dispose();
-    }
-    if (err instanceof StartTimeoutError) {
-      // Killing the server closes the connection, which the client would
-      // report as two more errors (the rejected `initialize`, then
-      // "couldn't create connection"). Detached first, the pending
-      // `initialize` is simply never answered and the client says nothing;
-      // this is the one message.
-      detach();
-      void window
-        .showErrorMessage(`Rigor: ${label}: ${err.message}.`, "Show Output")
-        .then((choice) => choice && outputChannel.show());
-    }
-    // A start that failed part way (or timed out) leaves the spawned
-    // process running. Kill it before disposing, so a late `initialize`
-    // answer cannot register providers on an abandoned client.
-    abandoned = true;
-    await reap(child, 0);
-    await client.dispose(STOP_TIMEOUT_MS).catch(() => undefined);
+    await discardClient(
+      err instanceof StartTimeoutError ? err.message : undefined,
+    );
   }
 }
 
@@ -523,12 +572,23 @@ async function stopClient(
   for (const disposable of managed.disposables) {
     disposable.dispose();
   }
+  // `stop()` cannot shut down a client that is still starting (the
+  // library's own restart after a crash, or the first start at deactivate),
+  // so the server is killed below; cut the client off first, or the closed
+  // connection shows the library's two error toasts.
+  const unfinished = managed.client.state !== State.Running;
+  if (unfinished) {
+    managed.cutOff();
+  }
   try {
     await managed.client.stop(stopTimeoutMs);
   } catch {
     // The server may already be gone, or ignored `shutdown`; reaped below.
   }
   await reap(managed.process(), exitGraceMs);
+  if (unfinished) {
+    await managed.client.dispose(stopTimeoutMs).catch(() => undefined);
+  }
 }
 
 async function stopAllNow(): Promise<void> {

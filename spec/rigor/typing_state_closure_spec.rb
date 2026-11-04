@@ -13,14 +13,20 @@ require "prism"
 #   method (`def self.x`, `class << self`, `module_function`, `extend self`), and any class-variable or global write;
 # - a module-level instance variable called with anything but a reader (`@x[k] ||= v`, `@x << v`, `@x.merge(o)`), a
 #   global or a constant mutated in place, and `instance_variable_get` / `_set`;
-# - module state behind an accessor: a singleton `attr_accessor` / `attr_writer`, and a setter, `||=` or in-place write
-#   through `self` at module level or through a constant (`self.flag = v`, `Owner.x ||= {}`, `Owner.x[k] = v`);
+# - module state behind an accessor: a singleton `attr_accessor` / `attr_writer` (`singleton_class.attr_accessor`
+#   included), and a setter, `||=` or in-place write through `self` at module level, `self.class`, a constant or a
+#   constant's reader (`self.flag = v`, `self.class.x ||= {}`, `Owner.x ||= {}`, `Owner.lookup(k)[:x] = v`), or through
+#   `send` / `public_send` with a setter's name;
 # - a constant whose value is not frozen by construction, or a constant reassigned;
 # - a read of one of the four advisory tables outside `Scope` (stage 2 puts them behind slots).
 #
 # The allow-list names each remaining site by file, rule and name, with how many there are and why. A site that is not
 # listed, one more than listed, and a listed site that is gone all fail. ADR-129 WD5 allows only `TypingState` itself
 # and the process counters on it for good; any other entry is a slot still to declare, and says which stage declares it.
+#
+# A comparison of `Thread.current`, `Fiber.current` or `Ractor.current` (`Ractor.current == Ractor.main`) reads no
+# storage and is not flagged. A local alias of a module (`owner = Folding; owner.fold = true`) is beyond a syntactic
+# scan; G1 (stage 3) is what catches state reached that way.
 #
 # Stage 1 converts files a PR at a time; each conversion adds its files to {#covered_files}.
 RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
@@ -41,8 +47,6 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
     stage2 = "ADR-129 stage 2 puts the four advisory tables behind journaled Table slots"
     {
       [state, :thread_state, "Thread.current"] => [3, "the one per-thread anchor every slot lives in"],
-      [state, :module_accessor_write, "current"] => [1, "TypingState.current stores the thread's new state"],
-      [state, :thread_state, "Fiber.current"] => [2, "a state's owning fiber, so a cached state is dropped elsewhere"],
       [state, :weak_map, "WeakKeyMap"] => [1, "State#weak_key_map makes the store a run-scoped Table or Memo holds"],
       [state, :module_ivar_write, "@slots"] => [2, "the slot registry, written only while files load"],
       [state, :module_ivar_write, "@run_scoped"] => [2, "the run-scoped slot indices, written only while files load"],
@@ -116,7 +120,7 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
       comment.key == "frozen_string_literal" && comment.value == "true"
     end
     file = { path: path, frozen_strings: frozen_strings, data: lib_data_classes | data_classes_in(source),
-             findings: [] }
+             findings: [], identity_reads: Set.new }
     walk(result.value, :top, file)
     file[:findings]
   end
@@ -220,7 +224,9 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
 
   def check_call(node, context, file)
     name = node.name
+    note_identity_reads(node, file)
     check_thread_state(node, file)
+    check_reflective_send(node, context, file)
     check_module_state_call(node, context, file)
     found(file, node, :table_access, name) if table_readers.include?(name)
     if %i[instance_variable_set instance_variable_get class_variable_set const_set].include?(name)
@@ -243,10 +249,45 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
     end
   end
 
+  # `X.current == …`, `… == X.current` and `X.current.equal?(…)` compare identities; they read no storage.
+  def note_identity_reads(node, file)
+    return unless %i[== != equal?].include?(node.name)
+
+    [node.receiver, *node.arguments&.arguments].each do |operand|
+      file[:identity_reads] << operand.object_id if local_storage_call?(operand)
+    end
+  end
+
+  def local_storage_call?(node)
+    node.is_a?(Prism::CallNode) && %i[current main].include?(node.name) && local_storage_owner?(node.receiver)
+  end
+
+  # `send(:x=, v)`, `public_send(:current)` and the like, which spell a setter or a storage read the rules above match
+  # by name.
+  def check_reflective_send(node, context, file)
+    return unless %i[send public_send __send__].include?(node.name)
+
+    first = node.arguments&.arguments&.first
+    return unless first.is_a?(Prism::SymbolNode)
+
+    sent = first.unescaped.to_sym
+    if %i[current main].include?(sent) && local_storage_owner?(node.receiver)
+      found(file, node, :thread_state, "#{node.receiver.name}.#{sent}")
+    elsif setter?(sent) && sent_to_module_state?(node.receiver, context)
+      found(file, node, :module_accessor_write, sent.to_s.delete_suffix("="))
+    end
+  end
+
+  def sent_to_module_state?(receiver, context)
+    receiver.nil? ? module_level?(context) : module_state_receiver?(receiver, context)
+  end
+
   def check_thread_state(node, file)
     name = node.name
     receiver = node.receiver
-    found(file, node, :thread_state, "#{receiver.name}.current") if name == :current && local_storage_owner?(receiver)
+    if local_storage_call?(node) && !file[:identity_reads].include?(node.object_id)
+      found(file, node, :thread_state, "#{receiver.name}.#{name}")
+    end
     if %i[thread_variable_get thread_variable_set thread_variable? storage store_if_absent].include?(name)
       found(file, node, :thread_state, name)
     end
@@ -263,24 +304,32 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
 
   def setter?(name) = name.end_with?("=") && !%i[== != <= >= === []= =~].include?(name)
 
-  # A reader call on a constant (`Owner.x`, not a constructor): what an index write or a mutator through it changes is
-  # module state.
+  # A reader call on a constant or on `self.class` (`Owner.x`, `Owner.lookup(k)`, `self.class.x`), not a constructor
+  # and not the per-thread storage the thread-state rule reports: what an index write or a mutator through it changes
+  # is module state.
   def accessor_read?(node)
-    node.is_a?(Prism::CallNode) && node.arguments.nil? && constant?(node.receiver) &&
-      !%i[new allocate].include?(node.name)
+    return false unless node.is_a?(Prism::CallNode) && (constant?(node.receiver) || self_class?(node.receiver))
+    return false if %i[new allocate].include?(node.name) || local_storage_call?(node)
+
+    !(node.name == :[] && %i[Set Hash Array].any? { |name| named_constant?(node.receiver, name) })
   end
 
+  def self_class?(node) = node.is_a?(Prism::CallNode) && node.name == :class && node.receiver.is_a?(Prism::SelfNode)
+
   def module_state_receiver?(receiver, context)
-    constant?(receiver) || accessor_read?(receiver) || (receiver.is_a?(Prism::SelfNode) && module_level?(context))
+    constant?(receiver) || self_class?(receiver) || accessor_read?(receiver) ||
+      (receiver.is_a?(Prism::SelfNode) && module_level?(context))
   end
 
   def state_name(node) = node.respond_to?(:name) ? node.name : node.class.name.split("::").last
 
-  # `attr_accessor` / `attr_writer` in `class << self`, or a module attribute macro anywhere.
+  # `attr_accessor` / `attr_writer` in `class << self` or on `singleton_class`, or a module attribute macro anywhere.
   def accessor_macro?(node, context)
-    return false unless node.receiver.nil?
+    receiver = node.receiver
+    singleton = receiver.is_a?(Prism::CallNode) && receiver.name == :singleton_class
+    return false unless receiver.nil? || singleton
 
-    (context == :singleton && %i[attr_accessor attr_writer].include?(node.name)) ||
+    ((context == :singleton || singleton) && %i[attr_accessor attr_writer].include?(node.name)) ||
       %i[mattr_accessor mattr_writer cattr_accessor cattr_writer class_attribute].include?(node.name)
   end
 
@@ -494,6 +543,35 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
         [3, :module_accessor, "attr_accessor"], [5, :module_accessor_write, "fold"],
         [6, :module_accessor_write, "fold"], [9, :module_accessor_write, "x"], [10, :module_accessor_write, "x"],
         [11, :module_accessor_write, "x"], [12, :module_accessor_write, "REGISTRY"]
+      )
+    end
+
+    it "flags module state through self.class, singleton_class, a reader with arguments, Thread.main or send" do
+      expect(rules_in(<<~RUBY)).to contain_exactly(
+        class Reader
+          def a = self.class.x ||= {}
+          def b(key) = self.class.x[key] = 1
+          def c = singleton_class.attr_accessor(:y)
+          def d(key) = Owner.lookup(key)[:x] = 1
+          def e = Thread.main[:k]
+          def f = Thread.send(:current)[:k]
+          def g = Owner.public_send(:x=, 1)
+          def h = Set[1] << 2
+        end
+      RUBY
+        [2, :module_accessor_write, "x"], [3, :module_accessor_write, "x"], [4, :module_accessor, "attr_accessor"],
+        [5, :module_accessor_write, "lookup"], [6, :thread_state, "Thread.main"], [7, :thread_state, "Thread.current"],
+        [8, :module_accessor_write, "x"]
+      )
+    end
+
+    it "reads an identity comparison of the current thread, fiber or Ractor as no storage, and a write once" do
+      expect(rules_in(<<~RUBY)).to contain_exactly(
+        def a = Ractor.current == Ractor.main
+        def b(thread) = thread.equal?(Thread.current)
+        def c = Thread.current[:k] = 1
+      RUBY
+        [3, :thread_state, "Thread.current"]
       )
     end
 

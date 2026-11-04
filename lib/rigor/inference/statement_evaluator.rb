@@ -1298,17 +1298,12 @@ module Rigor
 
       attr_reader :scope, :tracer
 
-      # ADR-129 WD2 — the calling thread's {TypingState::State}, cached on the evaluator the first time a slot is read,
-      # and dropped when the evaluator runs on another fiber or thread ({ExpressionTyper#typing_state}): the language
-      # server keeps an evaluator across save rounds, each on a thread of its own. A frame install whose block's value
-      # is the answer calls {TypingState.current} instead: Rigor's own analysis does not adopt this memoised reader's
-      # type at a self-call (#525's self-purity), so the install's answer would read as `Dynamic` through it.
-      def typing_state
-        state = @typing_state
-        return state if state&.owned?
-
-        @typing_state = TypingState.current
-      end
+      # ADR-129 WD2 — the calling thread's {TypingState::State}, cached on the evaluator the first time a slot is read.
+      # An evaluator kept across threads must be kept per state instead ({ExpressionTyper#typing_state}). A frame
+      # install whose block's value is the answer calls {TypingState.current} instead: Rigor's own analysis does not
+      # adopt this memoised reader's type at a self-call (#525's self-purity), so the install's answer would read as
+      # `Dynamic` through it.
+      def typing_state = @typing_state ||= TypingState.current
 
       # Thread the scope through every child statement in declaration order. The body's value is the type of the last
       # statement (or `Constant[nil]` for an empty body); intermediate statements' types are discarded, but their scope

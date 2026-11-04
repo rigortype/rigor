@@ -185,13 +185,14 @@ RSpec.describe Rigor::TypingState do
   describe "a real run's slot accesses" do
     let(:audited_class) do
       Class.new(described_class::State) do
-        attr_reader :violations, :reached, :accesses
+        attr_reader :violations, :reached, :accesses, :break_touchers
 
         def initialize
           super
           @violations = []
           @reached = Set.new
           @accesses = Hash.new(0)
+          @break_touchers = Set.new
         end
 
         def [](slot)
@@ -222,6 +223,9 @@ RSpec.describe Rigor::TypingState do
 
         def touch(slot)
           check(slot, :touch) { |s| s.kind == :resource || s.contents }
+          if Rigor::TypingState.slots[slot].name == :break_sink
+            @break_touchers << caller_locations(1, 1).first.base_label
+          end
           super
         end
 
@@ -332,12 +336,34 @@ RSpec.describe Rigor::TypingState do
               end
             end
           end
+
+          def ensured_break(items)
+            while items.any?
+              begin
+                break if items.first
+              ensure
+                items = []
+              end
+            end
+            items
+          end
+
+          def rescued_break(items)
+            while items.any?
+              begin
+                break if items.first
+              rescue StandardError
+                items = []
+              end
+            end
+            items
+          end
         end
 
         probe = Probe.new
         [probe.lookup(nil), probe.fact(5), probe.even?(4), probe.first_even([1, 2]), probe.nexts([nil, 1]),
          probe.breaks([1]), probe.value_break([nil, 2]), probe.total, probe.forward(1), probe.use_yield,
-         probe.retrying, probe.ensure_jump([1])]
+         probe.retrying, probe.ensure_jump([1]), probe.ensured_break([1]), probe.rescued_break([1])]
       RUBY
     end
 
@@ -349,6 +375,7 @@ RSpec.describe Rigor::TypingState do
       previous = Thread.current[key]
       Thread.current[key] = audited
       Rigor::Inference::BudgetTrace.enable!
+      Rigor::Inference::BudgetTrace.reset
       audited.open_capture
       analyze_probe
       refused, records = audited.close_capture
@@ -397,6 +424,13 @@ RSpec.describe Rigor::TypingState do
       )
     end
 
+    # A `begin` rewrites the `break`s it recorded itself: `restoring_error_info` and `carry_jumps_through_ensure` touch
+    # the break sink as well as the `break` that records into it.
+    it "touches the break sink where a begin rewrites the breaks it recorded" do
+      expect(audited_run.fetch(:state).break_touchers)
+        .to include("eval_break", "restoring_error_info", "carry_jumps_through_ensure")
+    end
+
     it "journals the inject record's and the return memo's reads and stores while a capture is open, refusing it" do
       run = audited_run
 
@@ -419,18 +453,21 @@ RSpec.describe Rigor::TypingState do
     end
   end
 
-  # Review of #2796 — an object that cached the state and then runs on another thread (the language server keeps an
-  # evaluator across save rounds, each on its own thread) must use that thread's state, not write into the first one,
-  # whose slots that thread's release already emptied.
-  it "drops a cached state when the typer or the evaluator runs on another thread" do
-    scope = Rigor::Scope.empty
-    [Rigor::Inference::ExpressionTyper.new(scope: scope), Rigor::Inference::StatementEvaluator.new(scope: scope)]
-      .each do |owner|
-        first = Thread.new { owner.send(:typing_state) }.value
-        second = Thread.new { owner.send(:typing_state) }.value
+  # Review of #2796 — a typer or an evaluator caches the state it first reads, so one kept across threads would write
+  # into a state whose thread's release has already run. The language server keeps the incremental session across save
+  # rounds, each on a thread of its own, so the session's effects evaluator is kept per state.
+  it "builds the incremental session's effects evaluator anew under another thread's state" do
+    session = Rigor::Analysis::IncrementalSession.allocate
+    round = lambda do
+      evaluator = session.send(:effects_evaluator)
+      [evaluator, session.send(:effects_evaluator), evaluator.send(:typing_state), described_class.current]
+    end
+    first, again, first_state, first_current = Thread.new(&round).value
+    second, _, second_state, = Thread.new(&round).value
 
-        expect(second).not_to be(first)
-        expect(owner.send(:typing_state)).to be(described_class.current)
-      end
+    expect(again).to be(first)
+    expect(first_state).to be(first_current)
+    expect(second).not_to be(first)
+    expect(second_state).not_to be(first_state)
   end
 end

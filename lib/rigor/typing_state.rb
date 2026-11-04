@@ -141,7 +141,6 @@ module Rigor
       attr_reader :id
 
       def initialize
-        @fiber = Fiber.current
         @values = []
         @id = 0
         @last_id = 0
@@ -150,10 +149,6 @@ module Rigor
         @marks = []
         @refused = []
       end
-
-      # Whether this is the calling fiber's state (`Thread.current[]` is fiber-local), so an object that cached it can
-      # tell that it now runs on another fiber or thread ({Inference::ExpressionTyper#typing_state}).
-      def owned? = @fiber.equal?(Fiber.current)
 
       # A Frame or Memo read, or a Table's container.
       def [](slot) = @values[slot]

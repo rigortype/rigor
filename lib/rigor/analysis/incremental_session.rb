@@ -1608,10 +1608,22 @@ module Rigor
       end
 
       def content_effects_for(node)
-        (@effects_evaluator ||= Inference::StatementEvaluator.new(scope: Scope.empty))
-          .content_mutated_parameter_positions(node)
+        effects_evaluator.content_mutated_parameter_positions(node)
       rescue StandardError
         nil
+      end
+
+      # The evaluator {#content_effects_for} asks, kept for as long as the calling thread's {TypingState} is the one it
+      # was built under. An evaluator caches that state, and the owner evaluators it builds cache theirs, so one kept
+      # across the language server's save rounds, each on a thread of its own, would keep writing its run-scoped memos
+      # into a finished round's state, which that round's release has already emptied (ADR-129).
+      def effects_evaluator
+        state = TypingState.current
+        unless @effects_state.equal?(state)
+          @effects_state = state
+          @effects_evaluator = Inference::StatementEvaluator.new(scope: Scope.empty)
+        end
+        @effects_evaluator
       end
 
       # ADR-89 WD2 — the subset of `pairs` whose (edited) def re-evaluates to the SAME return descriptor at

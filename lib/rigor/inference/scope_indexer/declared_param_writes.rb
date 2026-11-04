@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../../reflection"
 require_relative "../method_parameter_binder"
+require_relative "../../typing_state"
 require_relative "../global_write_census"
 require_relative "unseen_ivar_writers"
 require_relative "derived_param_value"
@@ -58,27 +59,25 @@ module Rigor
                                module_exec].to_set.freeze
         private_constant :OPAQUE_EVAL_CALLS
 
-        WRITER_SCOPE_KEY = :__rigor_declared_param_writer_scope__
-        private_constant :WRITER_SCOPE_KEY
+        # ADR-129 WD1 — a Frame: the scope is installed around a census and restored on the way out.
+        WRITER_SCOPE = TypingState.frame(
+          :declared_param_writer_scope,
+          reason: "the scope whose project tables the writer gates read, installed per census"
+        )
+        private_constant :WRITER_SCOPE
 
         module_function
 
         # Runs the block with `scope` as the one whose project tables the unseen-writer and single-file gates read, in
         # place of the census's own scope. `rigor sig-gen` indexes each file over the project tables less the member
         # layouts; this scope carries all of them, so another file's writer, ancestor or reopening is seen.
-        def with_writer_scope(scope)
+        def with_writer_scope(scope, &)
           return yield if scope.nil?
 
-          previous = Thread.current[WRITER_SCOPE_KEY]
-          Thread.current[WRITER_SCOPE_KEY] = scope
-          begin
-            yield
-          ensure
-            Thread.current[WRITER_SCOPE_KEY] = previous
-          end
+          TypingState.current.with(WRITER_SCOPE, scope, &)
         end
 
-        def writer_scope(scope) = Thread.current[WRITER_SCOPE_KEY] || scope
+        def writer_scope(scope) = TypingState.current[WRITER_SCOPE] || scope
 
         # `{InstanceVariableWriteNode => Rigor::Type}` for `def_node`'s creditable writes, or {EMPTY}. The caller
         # passes only an instance `def`: a singleton body's `@x` is the class object's.

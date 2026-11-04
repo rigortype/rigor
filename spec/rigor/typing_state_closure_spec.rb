@@ -34,6 +34,9 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
     %w[
       lib/rigor/inference/expression_typer.rb
       lib/rigor/inference/key_presence_guard.rb
+      lib/rigor/inference/loop_value_record.rb
+      lib/rigor/inference/reflective_ivar_write.rb
+      lib/rigor/inference/scope_indexer/declared_param_writes.rb
       lib/rigor/inference/statement_evaluator.rb
       lib/rigor/typing_state.rb
     ]
@@ -159,6 +162,7 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
 
     statements = body.is_a?(Prism::StatementsNode) ? body.body : [body]
     singleton = module_function_defs(statements)
+    note_extended_accessors(statements, context, file)
     statements.each_with_index do |statement, position|
       if statement.is_a?(Prism::DefNode) && context == :module_body && singleton.call(position, statement)
         walk_def(statement, :singleton, file)
@@ -177,6 +181,19 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
     named = marks.flat_map { |node| call_arguments(node).grep(Prism::SymbolNode).map { |name| name.unescaped.to_sym } }
     lambda do |position, definition|
       extended || named.include?(definition.name) || (!all_from.nil? && position > all_from)
+    end
+  end
+
+  # Under `extend self` a module's instance accessors are its own singleton methods too, so `attr_accessor` there is
+  # module state.
+  def note_extended_accessors(statements, context, file)
+    return unless context == :module_body
+    return unless statements.any? { |node| bare_call?(node, :extend) && call_arguments(node).any?(Prism::SelfNode) }
+
+    statements.each do |node|
+      next unless node.is_a?(Prism::CallNode) && node.receiver.nil? && %i[attr_accessor attr_writer].include?(node.name)
+
+      found(file, node, :module_accessor, node.name)
     end
   end
 
@@ -268,10 +285,12 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
     return unless %i[send public_send __send__].include?(node.name)
 
     first = node.arguments&.arguments&.first
-    return unless first.is_a?(Prism::SymbolNode)
+    return unless first.is_a?(Prism::SymbolNode) || first.is_a?(Prism::StringNode)
 
     sent = first.unescaped.to_sym
-    if %i[current main].include?(sent) && local_storage_owner?(node.receiver)
+    if accessor_macro_named?(node.receiver, sent, context)
+      found(file, node, :module_accessor, sent)
+    elsif %i[current main].include?(sent) && local_storage_owner?(node.receiver)
       found(file, node, :thread_state, "#{node.receiver.name}.#{sent}")
     elsif setter?(sent) && sent_to_module_state?(node.receiver, context)
       found(file, node, :module_accessor_write, sent.to_s.delete_suffix("="))
@@ -323,15 +342,20 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
 
   def state_name(node) = node.respond_to?(:name) ? node.name : node.class.name.split("::").last
 
-  # `attr_accessor` / `attr_writer` in `class << self` or on `singleton_class`, or a module attribute macro anywhere.
-  def accessor_macro?(node, context)
-    receiver = node.receiver
-    singleton = receiver.is_a?(Prism::CallNode) && receiver.name == :singleton_class
-    return false unless receiver.nil? || singleton
+  # `attr_accessor` / `attr_writer` in `class << self`, through `self.` there, or on `singleton_class`, or a module
+  # attribute macro anywhere. A plain `attr_accessor` in a class body defines instance accessors, which are not
+  # module state. Spelled `send(:attr_writer, :x)` too ({#check_reflective_send}).
+  def accessor_macro?(node, context) = accessor_macro_named?(node.receiver, node.name, context)
 
-    ((context == :singleton || singleton) && %i[attr_accessor attr_writer].include?(node.name)) ||
-      %i[mattr_accessor mattr_writer cattr_accessor cattr_writer class_attribute].include?(node.name)
+  def accessor_macro_named?(receiver, name, context)
+    return true if %i[mattr_accessor mattr_writer cattr_accessor cattr_writer class_attribute].include?(name) &&
+                   (receiver.nil? || receiver.is_a?(Prism::SelfNode))
+    return false unless %i[attr_accessor attr_writer].include?(name)
+
+    singleton_class_call?(receiver) || (context == :singleton && (receiver.nil? || receiver.is_a?(Prism::SelfNode)))
   end
+
+  def singleton_class_call?(node) = node.is_a?(Prism::CallNode) && node.name == :singleton_class
 
   def named_constant?(node, name)
     (node.is_a?(Prism::ConstantReadNode) || node.is_a?(Prism::ConstantPathNode)) && node.name == name
@@ -562,6 +586,36 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
         [2, :module_accessor_write, "x"], [3, :module_accessor_write, "x"], [4, :module_accessor, "attr_accessor"],
         [5, :module_accessor_write, "lookup"], [6, :thread_state, "Thread.main"], [7, :thread_state, "Thread.current"],
         [8, :module_accessor_write, "x"]
+      )
+    end
+
+    # Review of #2796, round 3, and of #2803: an accessor macro spelled through `send` or `self.`, or under `extend
+    # self`, and not an instance accessor in a class body. A macro inside `singleton_class.class_eval { … }` is
+    # beyond the scan, like a local alias.
+    it "flags a module accessor macro however it is spelled, and not an instance accessor" do
+      expect(rules_in(<<~RUBY)).to contain_exactly(
+        class Owner
+          singleton_class.send(:attr_accessor, :w)
+          send(:attr_writer, :x)
+          def self.y = public_send(:attr_reader, :z)
+          class << self
+            self.send(:attr_writer, :v)
+            send("attr_accessor", :u)
+            self.attr_writer :t
+            send("flag=", 1)
+          end
+          send(:mattr_accessor, :s)
+        end
+        module Shared
+          extend self
+
+          attr_accessor :r
+        end
+      RUBY
+        [2, :module_accessor, "attr_accessor"], [6, :module_accessor, "attr_writer"],
+        [7, :module_accessor, "attr_accessor"], [8, :module_accessor, "attr_writer"],
+        [9, :module_accessor_write, "flag"], [11, :module_accessor, "mattr_accessor"],
+        [16, :module_accessor, "attr_accessor"]
       )
     end
 

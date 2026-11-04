@@ -232,7 +232,7 @@ RSpec.describe Rigor::RunScopedSlots do
   # The constants a file defines as symbols, by name; a `*_KEY` / `*MEMO*` one with a `rigor` symbol is a key.
   def scan_thread_constants(source, path, keys)
     constants = {}
-    source.scan(/^\s*([A-Z][A-Z0-9_]*) = (?:RunScopedSlots\.register\()?(:[A-Za-z0-9_]+)\)?\s*(?:#.*)?$/) do
+    source.scan(/^\s*([A-Z][A-Z0-9_]*) = (:[A-Za-z0-9_]+)\s*(?:#.*)?$/) do
       name, symbol = Regexp.last_match.captures
       constants[name] = symbol
       next unless name.end_with?("_KEY") || name.include?("MEMO")
@@ -242,9 +242,9 @@ RSpec.describe Rigor::RunScopedSlots do
     constants
   end
 
-  # The one assignment `lib/` may make of `Thread.current`: the `thread = Thread.current` that `release` empties the
-  # slots through. It is allowed only as the file's sole such assignment, and only inside `def release`.
-  def alias_allowlist = { "lib/rigor/run_scoped_slots.rb" => { line: "thread = Thread.current", in_def: "release" } }
+  # The assignments of `Thread.current` `lib/` may make, keyed by file with the `line:` and the enclosing `in_def:`.
+  # Empty today: the registry's `release` was the one, and it no longer aliases the thread.
+  def alias_allowlist = {}
 
   # #2572: the access shapes are `Thread.current[`, `thread_variable_get` / `_set` with or without parentheses, and
   # `fetch` / `key?` / `store` on the thread. A key is a symbol or a constant of this file; a dynamic key (a local
@@ -491,37 +491,12 @@ RSpec.describe Rigor::RunScopedSlots do
     expect(unresolved).to eq(["fixture.rb:2 B_PROBE_KEY"])
   end
 
-  # #2572: the registry's one allowed alias is pinned to `thread = Thread.current` inside `def self.release`, and
-  # nothing else in the registry is excused by the allowlist.
-  def registry_aliases(source)
+  # #2572: no `lib/` file may alias `Thread.current` any more, the registry's own `release` included (it empties the
+  # run-scoped TypingState slots and holds no thread key), so every alias is reported.
+  it "reports every Thread.current alias, the registry's included" do
     keys = {}
     unresolved = []
-    scan_thread_keys(source, "lib/rigor/run_scoped_slots.rb", keys, unresolved)
-    unresolved
-  end
-
-  it "allows the registry's alias only as the assignment inside release" do
-    expect(registry_aliases(<<~RUBY)).to be_empty
-      def self.release
-        thread = Thread.current
-        thread[:x] = nil
-      end
-    RUBY
-    expect(registry_aliases(<<~RUBY)).to eq(["lib/rigor/run_scoped_slots.rb:2 Thread.current alias"])
-      def self.release
-        other = Thread.current
-        other[:x] = nil
-      end
-    RUBY
-    expect(registry_aliases(<<~RUBY)).to eq(["lib/rigor/run_scoped_slots.rb:2 Thread.current alias"])
-      def self.other
-        thread = Thread.current
-      end
-    RUBY
-  end
-
-  it "reports every alias in the registry when there is more than one" do
-    both = <<~RUBY
+    scan_thread_keys(<<~RUBY, "lib/rigor/run_scoped_slots.rb", keys, unresolved)
       def self.release
         thread = Thread.current
       end
@@ -530,8 +505,8 @@ RSpec.describe Rigor::RunScopedSlots do
       end
     RUBY
 
-    expect(registry_aliases(both)).to eq(["lib/rigor/run_scoped_slots.rb:2 Thread.current alias",
-                                          "lib/rigor/run_scoped_slots.rb:5 Thread.current alias"])
+    expect(unresolved).to eq(["lib/rigor/run_scoped_slots.rb:2 Thread.current alias",
+                              "lib/rigor/run_scoped_slots.rb:5 Thread.current alias"])
   end
 
   # #2572 nit: a trailing comment names no access, so an access it spells out is not read.

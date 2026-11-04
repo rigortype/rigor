@@ -186,7 +186,7 @@ list kept beside the memo. State without a kind fails the gate.
   - On `ExpressionTyper#type_of` and nowhere else. `@typing_node` is a function of the key only there, and a spec pins
     the budget-cutoff writes that key on it (`record_dynamic_origin(@typing_node`) to an adjacent
     `note_transient_fallback`.
-  - The table is per file and registered in `RunScopedSlots`. It is cleared when a file's analysis ends, on the runner
+  - The table is per file and declared `run_scoped: true`. It is cleared when a file's analysis ends, on the runner
     path and in `WorkerSession#analyze_body` alike.
   - Which phases open it is a stage decision (WD6).
   - It stays shut while a tracer is attached, and while ADR-46 recording runs. Once the dependency reads are a

@@ -744,7 +744,10 @@ RSpec.describe Rigor::TypingState do
       seen << typing_slot(:acceptance_unread_shape_refused)
       answers << asked.call.no?
       begin
-        acceptance.send(:refusing_unread, :all) { raise "boom" }
+        acceptance.send(:refusing_unread, :all) do
+          seen << typing_slot(:acceptance_unread_shape_refused)
+          raise "boom"
+        end
       rescue RuntimeError
         nil
       end
@@ -753,7 +756,7 @@ RSpec.describe Rigor::TypingState do
     end
     answers << asked.call.maybe?
 
-    expect(seen).to eq(%i[array array])
+    expect(seen).to eq(%i[array all array])
     expect(answers).to all(be(true))
     expect(typing_slot(:acceptance_unread_shape_refused)).to be_nil
   end

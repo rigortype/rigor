@@ -2,6 +2,7 @@
 
 require "spec_helper"
 require "json"
+require "yaml"
 
 require "rigor/analysis/runner"
 require "rigor/configuration"
@@ -45,6 +46,12 @@ module InterfaceParity
 
   def normalise(text) = text.gsub(FACET_NAME, "Dynamic[top]")
 
+  # A fixture's own configuration keys (`parity.yml`), merged over the harness's.
+  def fixture_config(dir)
+    path = File.join(dir, "parity.yml")
+    File.exist?(path) ? YAML.safe_load_file(path) : {}
+  end
+
   # The `[path, line]` of every line a fixture marks as a declared-member call.
   def declared_lines(dir)
     Dir.glob("lib/**/*.rb", base: dir).flat_map do |path|
@@ -66,16 +73,17 @@ RSpec.describe "ADR-130 interface parity (behavioural gate)" do
   def normalise(text) = InterfaceParity.normalise(text)
 
   # Sequential: the erasure switch is per thread, and a pooled run under it raises.
-  def configuration(workers: 0)
+  def configuration(dir, workers: 0)
     Rigor::Configuration.new(
       Rigor::Configuration::DEFAULTS.merge("paths" => %w[lib], "signature_paths" => %w[sig],
                                            "parallel" => { "workers" => workers })
+                                    .merge(InterfaceParity.fixture_config(dir))
     )
   end
 
   # The fixture's `rigor check --format json` diagnostics, as text.
   def render(dir, workers: 0)
-    runner = Rigor::Analysis::Runner.new(configuration: configuration(workers: workers), cache_store: nil,
+    runner = Rigor::Analysis::Runner.new(configuration: configuration(dir, workers: workers), cache_store: nil,
                                          workers: workers)
     result = Dir.chdir(dir) { guarded_run(runner) }
     JSON.pretty_generate(result.to_h.fetch("diagnostics"))

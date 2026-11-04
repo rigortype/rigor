@@ -1,0 +1,36 @@
+module Rigor
+  module Plugin
+    interface _ProbeS
+      def to_str: () -> String
+    end
+
+    interface _ProbeEach
+      def each: () { (Integer) -> void } -> Array[Integer]
+    end
+  end
+end
+
+class Sites
+  def range_endpoint: (Rigor::Plugin::_ProbeS x) -> untyped
+  def top_result: (Rigor::Plugin::_ProbeS x, Integer n) -> untyped
+  def ping: (Rigor::Plugin::_ProbeS x, Integer n) -> untyped
+  def pong: (Rigor::Plugin::_ProbeS x, Integer n) -> untyped
+  def last_line: (Rigor::Plugin::_ProbeS x) -> untyped
+  def loop_break: (Rigor::Plugin::_ProbeS x, bool f, bool g) -> untyped
+  def for_element: (Rigor::Plugin::_ProbeS x, Array[Rigor::Plugin::_ProbeS] xs, Rigor::Plugin::_ProbeEach each) -> untyped
+  def block_break: (Rigor::Plugin::_ProbeS x, Array[Integer] xs) -> untyped
+  def pattern_join: (Rigor::Plugin::_ProbeS x, bool f) -> untyped
+  def multi_assign: (Rigor::Plugin::_ProbeS x, bool f) -> untyped
+  def clause_widening: (Rigor::Plugin::_ProbeS x) -> untyped
+  def auto_splat: (Rigor::Plugin::_ProbeS x) -> untyped
+  def boundary: (Rigor::Plugin::_ProbeS x) -> untyped
+  def match_kind: (Rigor::Plugin::_ProbeS x) -> untyped
+  def unknown_store: (Rigor::Plugin::_ProbeS x, Array[Integer] xs) -> untyped
+  def facet_distribution: (Rigor::Plugin::_ProbeS x) -> untyped
+  def self_substitute: (Array[Rigor::Plugin::_ProbeS] xs) -> untyped
+  def imprecise: (Rigor::Plugin::_ProbeS x) -> untyped
+  def value_pinning: (Rigor::Plugin::_ProbeS x) -> untyped
+  def type_variable: (Rigor::Plugin::_ProbeS x) -> untyped
+  def explicit_untyped: (Rigor::Plugin::_ProbeS x) -> untyped
+  def wrap: [T] (T value) -> Array[T]
+end

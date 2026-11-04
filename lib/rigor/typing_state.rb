@@ -12,7 +12,8 @@ module Rigor
   # - **Frame** ({.frame}): an input installed for a dynamic extent with {State#with}, restored exactly on the way
   #   out, and frozen while installed. A frame whose installed object is a container mutated in place (a jump sink,
   #   the key-presence walk) declares `contents: :resource`: the installation is the Frame, and each mutation of
-  #   the contents is a Resource touch ({State#touch}, {State#rewrite}).
+  #   the contents is a Resource touch ({State#touch}, {State#rewrite}). The installed value may also hold
+  #   extensional caches its owner fills in place: those are Memos by kind and take no touch.
   # - **Table** ({.table}): a keyed store typing writes and may read back. Its reads and writes are logged to the
   #   journal ({State#log_read}, {State#log_write}) while a capture is open. A table that answers what reading
   #   ABSENT would have computed declares `read_through: true` (WD1).

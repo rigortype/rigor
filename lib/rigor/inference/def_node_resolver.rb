@@ -21,18 +21,21 @@ module Rigor
     # file, and finally nil — conservative (the accessor then reports no user def, losing precision but never
     # firing a wrong diagnostic), never silent.
     #
-    # The memo is a thread-local installed for the duration of a run (the {Cache::FileDigest} pattern:
-    # process-local, Ractor-safe, never crosses a fork boundary, reset per run). Outside a run scope every
+    # The memo is a {TypingState} Frame installed for the duration of a run ({.with_run}) and restored on the way
+    # out: per thread, and a fork child inherits whatever is installed at the fork. Outside a run scope every
     # resolution parses directly — a correct if un-memoised fallback for runner-less probes.
     module DefNodeResolver
       # ADR-129 WD1 — the run's memo is a Frame: {.with_run} installs it for the run and restores the previous one, and
       # whether one is installed changes answers (outside a run every resolution parses afresh and no `Module.nesting`
-      # is recorded). The installed hash is frozen; the four tables in it are extensional caches of the files they
-      # parse (one stable node per `(path, node_id)`), filled in place without a touch, as the key-presence walk's
-      # per-file scans are.
+      # is recorded). The installed hash is frozen; the four tables in it are extensional caches its owner fills in
+      # place without a touch (Memos by kind, whose entry is fixed once written): `nodes` is keyed on
+      # `(path, node_id)`, `indexes` and `refinement_queries` on the file's path, and `nestings` on the identity of
+      # the node this module minted, holding the nesting the handle's bundle row (or the file's `refine` bodies)
+      # recorded for it.
       RUN_MEMO = TypingState.frame(
         :def_node_resolver_run,
-        reason: "installed per run by with_run; its tables are extensional caches of the parsed files"
+        reason: "installed per run by with_run; its tables are extensional caches, keyed on (path, node_id), on the " \
+                "path, and (nestings) on the minted node's identity, filled in place"
       )
       private_constant :RUN_MEMO
 

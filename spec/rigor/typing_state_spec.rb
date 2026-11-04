@@ -394,8 +394,11 @@ RSpec.describe Rigor::TypingState do
       Dir.mktmpdir do |dir|
         path = File.join(dir, "probe.rb")
         File.write(path, source)
+        patch = File.join(dir, "patch.rb")
+        File.write(patch, "class String\n  def x = 1 unless method_defined?(:x)\n  private def y = 2\nend\n")
         configuration = Rigor::Configuration.new(
-          Rigor::Configuration::DEFAULTS.merge("paths" => [path], "parallel" => { "workers" => 0 })
+          Rigor::Configuration::DEFAULTS.merge("paths" => [path], "pre_eval" => [patch],
+                                                "parallel" => { "workers" => 0 })
         )
         guarded_run(Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil), [path])
       end
@@ -475,7 +478,9 @@ RSpec.describe Rigor::TypingState do
         :yield_value_type, :forwarded_call_arg_types, :threaded_block_body, :user_method_inference_stack,
         :user_method_return_summary, :user_method_summary_consult_depths, :user_method_transient_event_depths,
         :user_method_unroll_fuel, :user_method_return_memo, :inject_accumulator, :class_graph_cache,
-        :key_presence_walk, :reflective_ivar_write_repeating, :loop_value_record, :loops_evaluated
+        :key_presence_walk, :reflective_ivar_write_repeating, :loop_value_record, :loops_evaluated,
+        :def_node_resolver_run, :definers_index_layers, :definers_index_seed, :definers_index_seed_alt,
+        :patched_scanner_guarded_defs, :patched_scanner_def_visibilities
       )
     end
 

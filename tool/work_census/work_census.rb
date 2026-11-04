@@ -284,6 +284,7 @@ if ENV['MEMO'] == '1'
 end
 
 require_relative 'memo3' if ENV['MEMO'] == '3' || ENV['COUNT3'] == '1'
+require_relative 'memo3_shadow' if ENV['MEMO'] == '3' && ENV['SHADOW'] == '1'
 
 if WC::CENSUS
   Rigor::Inference::ExpressionTyper.prepend(Module.new do

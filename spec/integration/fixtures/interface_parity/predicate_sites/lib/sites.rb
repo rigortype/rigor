@@ -164,7 +164,7 @@ class Sites
   def type_variable(x)
     Rigor.dump_type(wrap(x))
     Rigor.dump_type([x].push(1))
-    Rigor.dump_type(ident(x).to_str)
+    Rigor.dump_type(Ident.ident(x).to_str)
   end
 
   # `method_dispatcher.rb`, the `EXPLICIT_UNTYPED` origin: an untyped RBS result is recorded as declared untyped.
@@ -175,6 +175,4 @@ class Sites
   end
 
   def wrap(value) = [value]
-
-  def ident(value) = value
 end

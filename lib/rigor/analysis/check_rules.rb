@@ -12,6 +12,7 @@ require_relative "../type"
 require_relative "diagnostic"
 require_relative "dependency_recorder"
 require_relative "check_rules/rule_ids"
+require_relative "check_rules/call_facts"
 require_relative "check_rules/inferred_param_guard"
 require_relative "check_rules/declaration_sourced_guard"
 require_relative "check_rules/published_constant_guard"
@@ -300,18 +301,21 @@ module Rigor
         shadow_verify_node_collectors(path, root, scope_index, collectors)
       end
 
+      # Issue #2786 — the rules that type the call's receiver read it from one {CallFacts}, so the receiver chain is
+      # typed once per call node rather than once per rule.
       def call_node_diagnostics(path, node, scope_index, eval_ranges = nil, lexical_sites = nil)
+        facts = CallFacts.new(node, scope_index)
         [
-          undefined_method_diagnostic(path, node, scope_index, lexical_sites),
+          undefined_method_diagnostic(path, node, facts, lexical_sites),
           unresolved_toplevel_diagnostic(path, node, scope_index, eval_ranges, lexical_sites),
-          wrong_arity_diagnostic(path, node, scope_index, lexical_sites),
-          argument_type_diagnostic(path, node, scope_index, lexical_sites),
-          nil_receiver_diagnostic(path, node, scope_index, lexical_sites),
+          wrong_arity_diagnostic(path, node, facts, lexical_sites),
+          argument_type_diagnostic(path, node, facts, lexical_sites),
+          nil_receiver_diagnostic(path, node, facts, lexical_sites),
           dump_type_diagnostic(path, node, scope_index),
           assert_type_diagnostic(path, node, scope_index),
-          always_raises_diagnostic(path, node, scope_index, lexical_sites),
+          always_raises_diagnostic(path, node, facts, lexical_sites),
           raise_non_exception_diagnostic(path, node, scope_index),
-          visibility_mismatch_diagnostic(path, node, scope_index, lexical_sites)
+          visibility_mismatch_diagnostic(path, node, facts, lexical_sites)
         ].compact
       end
 
@@ -740,10 +744,10 @@ module Rigor
       class << self
         private
 
-        def undefined_method_diagnostic(path, call_node, scope_index, lexical_sites = nil) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+        def undefined_method_diagnostic(path, call_node, facts, lexical_sites = nil) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
           return nil if call_node.receiver.nil?
 
-          scope = scope_index[call_node]
+          scope = facts.scope
           return nil if scope.nil?
 
           # The exemptions that hold whatever shape the receiver has. Ahead of the receiver-shape
@@ -776,7 +780,7 @@ module Rigor
           # below — preserving that keeps `&.` from newly firing on the
           # non-nil constituent (which, for a cross-file project def, would
           # be a working-code false positive).
-          receiver_type = safe_navigation_receiver(call_node, scope)
+          receiver_type = safe_navigation_receiver(call_node, facts.receiver_type)
 
           # #320 — the private-singleton-object idiom (`class << Merger = Object.new`). The body's methods
           # are recorded on the constant's own name, but the receiver reads back as `Object`, so the
@@ -1750,6 +1754,16 @@ module Rigor
           method_def
         end
 
+        # Issue #2786 — {#trustworthy_signature} on the call's receiver as {CallFacts} types it, resolved once per
+        # call node: `call.wrong-arity` and `call.argument-type-mismatch` both ask it with that receiver type and its
+        # concrete class.
+        def receiver_signature(facts)
+          facts.receiver_signature do
+            receiver_type = facts.receiver_type
+            trustworthy_signature(receiver_type, concrete_class_name(receiver_type), facts.call_node, facts.scope)
+          end
+        end
+
         def unauthoritative_inherited_signature?(class_name, method_def, scope)
           return false unless unbounded_receiver_surface?(class_name, scope)
           return true unless method_def.respond_to?(:defined_in)
@@ -1942,18 +1956,18 @@ module Rigor
         # it returns nil when the call's receiver / RBS coverage /
         # call shape disqualifies the rule.
         # rubocop:disable-next Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
-        def wrong_arity_diagnostic(path, call_node, scope_index, lexical_sites = nil)
+        def wrong_arity_diagnostic(path, call_node, facts, lexical_sites = nil)
           return nil if call_node.receiver.nil?
           return nil unless plain_positional_call?(call_node)
 
-          scope = scope_index[call_node]
+          scope = facts.scope
           return nil if scope.nil?
 
           # ADR-67 WD6b — an inferred-parameter receiver's type is an open-call-site lower bound; a wrong-arity
           # firing against it is an FP by construction. Decline.
           return nil if inferred_param_receiver?(call_node, scope)
 
-          receiver_type = scope.type_of(call_node.receiver)
+          receiver_type = facts.receiver_type
           class_name = concrete_class_name(receiver_type)
           return nil if class_name.nil?
 
@@ -1974,7 +1988,7 @@ module Rigor
           # false positive. Skip arity-checking the chained position.
           return nil if anonymous_struct_new_call?(call_node, class_name, kind)
 
-          arity_envelope = arity_envelope_for(receiver_type, class_name, call_node, scope, kind)
+          arity_envelope = arity_envelope_for(facts, class_name, kind)
           return nil if arity_envelope.nil?
 
           actual = (call_node.arguments&.arguments || []).size
@@ -2005,11 +2019,14 @@ module Rigor
         # declaration. `trustworthy_signature` is the same lookup `argument_type_diagnostic` treats as
         # authoritative over a source `def` (see its own comment beside that call), and the two rules must agree
         # on whose contract binds, so a declared method is checked against its declaration.
-        def arity_envelope_for(receiver_type, class_name, call_node, scope, kind)
+        def arity_envelope_for(facts, class_name, kind)
+          receiver_type = facts.receiver_type
+          call_node = facts.call_node
+          scope = facts.scope
           if Rigor::Reflection.rbs_class_known?(class_name, scope: scope)
             return nil unless definition_available?(receiver_type, class_name, scope)
 
-            method_def = trustworthy_signature(receiver_type, class_name, call_node, scope)
+            method_def = receiver_signature(facts)
             if method_def && !Rigor::RbsExtended.inferred_signature?(method_def)
               return nil if undeclared_constructor?(class_name, call_node, kind, method_def)
 
@@ -2194,7 +2211,7 @@ module Rigor
         # and union receivers where every member already
         # disqualifies the call (avoid duplicating the
         # undefined-method diagnostic).
-        def nil_receiver_diagnostic(path, call_node, scope_index, lexical_sites = nil)
+        def nil_receiver_diagnostic(path, call_node, facts, lexical_sites = nil)
           return nil if call_node.receiver.nil?
           # Safe-navigation calls (`recv&.method`) already
           # short-circuit on nil at runtime, so a nil-bearing
@@ -2208,7 +2225,7 @@ module Rigor
           # produce false positives we cannot suppress.
           return nil unless call_node.receiver.is_a?(Prism::LocalVariableReadNode)
 
-          scope = scope_index[call_node]
+          scope = facts.scope
           return nil if scope.nil?
 
           # ADR-58 WD1 — a receiver whose `nil` constituent is purely
@@ -2234,7 +2251,7 @@ module Rigor
           # construction. Decline.
           return nil if scope.inferred_param?(call_node.receiver.name)
 
-          receiver_type = scope.type_of(call_node.receiver)
+          receiver_type = facts.receiver_type
           return nil unless receiver_type.is_a?(Type::Union)
 
           # The rule only fires when the analyzer has access to
@@ -2243,7 +2260,7 @@ module Rigor
           return nil unless Rigor::Reflection.rbs_class_known?("NilClass", scope: scope)
 
           return nil unless nil_bearing_union_witnesses?(receiver_type, call_node.name, scope)
-          return nil if nil_receiver_withheld?(call_node, receiver_type, scope, scope_index, lexical_sites)
+          return nil if nil_receiver_withheld?(call_node, receiver_type, scope, facts.scope_index, lexical_sites)
 
           build_nil_receiver_diagnostic(path, call_node)
         end
@@ -2282,8 +2299,7 @@ module Rigor
         # nil so the rule bails (silent). Every other receiver (including a
         # `T | nil` union, which already has no single concrete class) flows
         # through unchanged.
-        def safe_navigation_receiver(call_node, scope)
-          receiver_type = scope.type_of(call_node.receiver)
+        def safe_navigation_receiver(call_node, receiver_type)
           return receiver_type unless call_node.safe_navigation?
           return receiver_type unless nil_member?(receiver_type)
 
@@ -2605,22 +2621,21 @@ module Rigor
         INTEGER_RAISING_OPERATORS = %i[/ % div modulo divmod].freeze
         private_constant :INTEGER_RAISING_OPERATORS
 
-        def always_raises_diagnostic(path, call_node, scope_index, lexical_sites = nil)
-          return nil unless integer_zero_division?(call_node, scope_index)
+        def always_raises_diagnostic(path, call_node, facts, lexical_sites = nil)
+          return nil unless integer_zero_division?(call_node, facts)
 
           # ADR-121 WD7 — a refinement of `Integer`'s operator (or one Rigor cannot read) in effect may not raise.
-          scope = scope_index[call_node]
-          return nil if refined_method_in_effect?("Integer", call_node, scope, :instance, lexical_sites)
+          return nil if refined_method_in_effect?("Integer", call_node, facts.scope, :instance, lexical_sites)
 
           build_always_raises_diagnostic(path, call_node)
         end
 
-        def integer_zero_division?(call_node, scope_index)
+        def integer_zero_division?(call_node, facts)
           return false unless raising_call_shape?(call_node)
 
-          scope = scope_index[call_node]
+          scope = facts.scope
           return false if scope.nil?
-          return false unless integer_rooted_for_diagnostic?(scope.type_of(call_node.receiver))
+          return false unless integer_rooted_for_diagnostic?(facts.receiver_type)
 
           arg = single_argument(call_node)
           arg && integer_zero_constant?(scope.type_of(arg))
@@ -3132,17 +3147,17 @@ module Rigor
         # - Issue #1984 — Ruby hands a private call to `method_missing`, so a `method_missing` or
         #   `respond_to_missing?` a project entry on the receiver's chain records, on the side the call reaches,
         #   declines the rule ({#missing_hook_on_chain?}).
-        def visibility_mismatch_diagnostic(path, call_node, scope_index, lexical_sites = nil)
+        def visibility_mismatch_diagnostic(path, call_node, facts, lexical_sites = nil)
           return nil unless explicit_non_self_receiver?(call_node.receiver)
 
-          scope = scope_index[call_node]
+          scope = facts.scope
           return nil if scope.nil?
 
           # ADR-67 WD6b — an inferred-parameter receiver's nominal type is an open-call-site lower bound; a
           # private-method visibility firing against it is an FP by construction. Decline.
           return nil if inferred_param_receiver?(call_node, scope)
 
-          receiver_type = scope.type_of(call_node.receiver)
+          receiver_type = facts.receiver_type
           case receiver_type
           when Type::Nominal then instance_visibility_mismatch(path, call_node, scope, receiver_type, lexical_sites)
           when Type::Singleton then singleton_visibility_mismatch(path, call_node, scope, receiver_type, lexical_sites)
@@ -3512,15 +3527,15 @@ module Rigor
         COERCE_DISPATCH_METHODS = %i[+ - * / % ** & | ^ << >> < > <= >=].to_set.freeze
         private_constant :COERCE_DISPATCH_METHODS
 
-        def argument_type_diagnostic(path, call_node, scope_index, lexical_sites = nil)
+        def argument_type_diagnostic(path, call_node, facts, lexical_sites = nil)
           return nil if call_node.receiver.nil?
           return nil if UNIVERSAL_EQUALITY_METHODS.include?(call_node.name)
           return nil unless plain_positional_call?(call_node)
 
-          scope = scope_index[call_node]
+          scope = facts.scope
           return nil if scope.nil?
 
-          receiver_type = scope.type_of(call_node.receiver)
+          receiver_type = facts.receiver_type
           class_name = concrete_class_name(receiver_type)
           return nil if class_name.nil?
 
@@ -3533,11 +3548,11 @@ module Rigor
           return nil unless Rigor::Reflection.rbs_class_known?(class_name, scope: scope)
           return nil unless definition_available?(receiver_type, class_name, scope)
 
-          method_def = trustworthy_signature(receiver_type, class_name, call_node, scope)
+          method_def = receiver_signature(facts)
           return nil if method_def.nil?
 
           param_overrides = Rigor::RbsExtended.param_type_override_map(method_def, environment: scope.environment)
-          mismatch = argument_mismatch(method_def.method_types, call_node, scope, param_overrides, scope_index)
+          mismatch = argument_mismatch(method_def.method_types, call_node, scope, param_overrides, facts.scope_index)
           return nil if mismatch.nil?
           return nil if argument_report_withheld?(receiver_type, class_name, call_node, mismatch, scope, lexical_sites)
 

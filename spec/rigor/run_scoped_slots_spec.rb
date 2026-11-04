@@ -57,15 +57,10 @@ RSpec.describe Rigor::RunScopedSlots do
       __rigor_acceptance_unread_shape_refused__: "frame flag, installed and restored around a block",
       __rigor_project_round__: "a Debouncer key in the language server, not a thread-local",
       __rigor_typing_state__: "ADR-129 TypingState, whose own run-scoped slots release empties",
-      rigor_cache_file_digest_memo: "Cache::FileDigest.with_run frame",
-      rigor_cache_file_stat_memo: "Cache::FileDigest.with_run frame",
-      rigor_cache_recording_instant: "Cache::FileDigest.with_run frame",
-      rigor_cache_strict_validation: "Cache::FileDigest.with_run frame",
       rigor_interface_erasure: "RbsTypeTranslator.with_interface_erasure frame flag, restored on the way out",
       rigor_io_boundary_attribution: "thread-variable frame, installed and restored around a block",
       rigor_rbs_core_root: "RbsLoader.with_core_root frame, installed and restored around an env build",
-      rigor_run_disclosure_attribution: "thread-variable frame, installed and restored around a block",
-      rigor_scope_index_unentered_evaluator: "frame slot, installed and restored around the index walk"
+      rigor_run_disclosure_attribution: "thread-variable frame, installed and restored around a block"
     }
   end
 
@@ -131,7 +126,7 @@ RSpec.describe Rigor::RunScopedSlots do
         end
         expect(holding).to be_empty
         expect(described_class.keys.map { |key| Thread.current[key] }).to all(be_nil)
-        expect(Rigor::TypingState.current.holding).to be_empty
+        expect(run_scoped_holding).to be_empty
       end
 
       it "retains no more environments after the third run than after the first" do
@@ -162,7 +157,7 @@ RSpec.describe Rigor::RunScopedSlots do
 
     described_class.release
     first = hover.call
-    filled = described_class.keys.reject { |key| Thread.current[key].nil? }
+    filled = described_class.keys.reject { |key| Thread.current[key].nil? } + run_scoped_holding
     described_class.release
 
     expect(filled).not_to be_empty

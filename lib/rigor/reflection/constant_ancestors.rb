@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative "../run_scoped_slots"
+require_relative "../typing_state"
 
 module Rigor
   # {Reflection}'s constant-ancestor walk ([#354](https://github.com/rigortype/rigor/issues/354)), split out for
@@ -9,13 +9,22 @@ module Rigor
   # name's owner inherits constants from, and this file answers that once for both. Reopening the module
   # keeps the walk behind the facade its callers already read.
   module Reflection
-    # #354 — thread-local slot for the per-run ancestor-scope memo. See {.ancestor_constant_scopes}.
-    ANCESTOR_SCOPES_KEY = RunScopedSlots.register(:__rigor_ancestor_constant_scopes__)
-    private_constant :ANCESTOR_SCOPES_KEY
+    # #354 — the per-run ancestor-scope memo. See {.ancestor_constant_scopes}. ADR-129 WD1 — a run-scoped Memo.
+    ANCESTOR_SCOPES = TypingState.memo(
+      :ancestor_constant_scopes,
+      run_scoped: true, reason: "one [generation, scopes by class name] slot keyed on the identity of " \
+                                "`scope.run_generation || scope.discovered_superclasses`; the " \
+                                "scopes are read from the resolution chain of that run's tables"
+    )
+    private_constant :ANCESTOR_SCOPES
 
-    # The recording run's slot. See {.recorded_ancestor_constant_scopes}.
-    RECORDED_ANCESTOR_SCOPES_KEY = RunScopedSlots.register(:__rigor_recorded_ancestor_constant_scopes__)
-    private_constant :RECORDED_ANCESTOR_SCOPES_KEY
+    # The recording run's slot. See {.recorded_ancestor_constant_scopes}. ADR-129 WD1 — a run-scoped Memo.
+    RECORDED_ANCESTOR_SCOPES = TypingState.memo(
+      :recorded_ancestor_constant_scopes,
+      run_scoped: true, reason: "one [discovery, scopes by class name] slot keyed on the discovery index's identity; " \
+                                "a hit replays the chain's edges, so the key is exact"
+    )
+    private_constant :RECORDED_ANCESTOR_SCOPES
 
     module_function
 
@@ -88,10 +97,11 @@ module Rigor
       return recorded_ancestor_constant_scopes(class_name, scope) if Analysis::DependencyRecorder.active?
 
       generation = scope.run_generation || scope.discovered_superclasses
-      slot = Thread.current[ANCESTOR_SCOPES_KEY]
+      state = TypingState.current
+      slot = state[ANCESTOR_SCOPES]
       unless slot && slot[0].equal?(generation)
         slot = [generation, {}]
-        Thread.current[ANCESTOR_SCOPES_KEY] = slot
+        state[ANCESTOR_SCOPES] = slot
       end
       bucket = slot[1]
       bucket.fetch(class_name) { bucket[class_name] = compute_ancestor_constant_scopes(class_name, scope) }
@@ -104,10 +114,11 @@ module Rigor
     # both read from it, so the key is exact, and the slot never pins more than the index it serves.
     def recorded_ancestor_constant_scopes(class_name, scope)
       discovery = scope.discovery
-      slot = Thread.current[RECORDED_ANCESTOR_SCOPES_KEY]
+      state = TypingState.current
+      slot = state[RECORDED_ANCESTOR_SCOPES]
       unless slot && slot[0].equal?(discovery)
         slot = [discovery, {}]
-        Thread.current[RECORDED_ANCESTOR_SCOPES_KEY] = slot
+        state[RECORDED_ANCESTOR_SCOPES] = slot
       end
       bucket = slot[1]
       worlds = bucket[class_name]

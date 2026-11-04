@@ -3,7 +3,7 @@
 require_relative "type"
 require_relative "environment"
 require_relative "scope/discovery_index"
-require_relative "run_scoped_slots"
+require_relative "typing_state"
 require_relative "scope/resolution_chain"
 require_relative "inference/definer_resolution"
 require_relative "inference/in_effect_refinements"
@@ -1281,7 +1281,7 @@ module Rigor
     # a file that starts or stops defining it re-analyses the reader (issue #1459's `defines:` edge).
     def project_method_name?(method_name)
       Analysis::DependencyRecorder.read_name(:defines, method_name) if Analysis::DependencyRecorder.active?
-      table = (Thread.current[PROJECT_METHOD_NAMES_KEY] ||= ObjectSpace::WeakKeyMap.new)
+      table = TypingState.current.weak_key_map(PROJECT_METHOD_NAMES)
       return true if (table[@discovery] ||= collect_project_method_names).include?(method_name.to_sym)
 
       false
@@ -1297,9 +1297,12 @@ module Rigor
     end
     private :collect_project_method_names
 
-    # A run-scoped slot ({RunScopedSlots}): emptied when a run ends, so an edited project is read afresh.
-    PROJECT_METHOD_NAMES_KEY = RunScopedSlots.register(:__rigor_project_method_names)
-    private_constant :PROJECT_METHOD_NAMES_KEY
+    # ADR-129 WD1 — a run-scoped Memo ({TypingState}): emptied when a run ends, so an edited project is read afresh.
+    PROJECT_METHOD_NAMES = TypingState.memo(
+      :project_method_names,
+      run_scoped: true, reason: "a WeakKeyMap keyed on the discovery index; the name set reads only its tables"
+    )
+    private_constant :PROJECT_METHOD_NAMES
 
     def record_discovered_method(class_name, method_name)
       record_class_dependency(class_name)
@@ -1541,7 +1544,8 @@ module Rigor
     # call's literal name and a def in a block. Held by the table's identity, as {#toplevel_definition_rows} is.
     def deferred_definition_names
       ranges = @discovery.discovered_deferred_ranges
-      slots = (Thread.current[DEFERRED_NAMES_KEY] ||= [])
+      state = TypingState.current
+      slots = (state[DEFERRED_NAMES] ||= [])
       slot = slots.find { |entry| entry[0].equal?(ranges) }
       return slot[1] if slot
 
@@ -1572,7 +1576,8 @@ module Rigor
     # a singleton row. Held by the table's identity (a file's merged copy and the seed), released with the run.
     def toplevel_definition_rows
       ranges = @discovery.discovered_deferred_ranges
-      slots = (Thread.current[TOPLEVEL_ROWS_KEY] ||= [])
+      state = TypingState.current
+      slots = (state[TOPLEVEL_ROWS] ||= [])
       slot = slots.find { |entry| entry[0].equal?(ranges) }
       return slot[1] if slot
 
@@ -1593,7 +1598,8 @@ module Rigor
     # census's identity as {#toplevel_definition_rows} is.
     def method_alias_names
       census = @discovery.discovered_global_write_census
-      slots = (Thread.current[METHOD_ALIASES_KEY] ||= [])
+      state = TypingState.current
+      slots = (state[METHOD_ALIASES] ||= [])
       slot = slots.find { |entry| entry[0].equal?(census) }
       return slot[1] if slot
 
@@ -1604,10 +1610,24 @@ module Rigor
     private :method_alias_names
 
     MAIN_SINGLETON_ROWS = -1
-    TOPLEVEL_ROWS_KEY = RunScopedSlots.register(:__rigor_toplevel_definition_rows)
-    METHOD_ALIASES_KEY = RunScopedSlots.register(:__rigor_method_alias_names)
-    DEFERRED_NAMES_KEY = RunScopedSlots.register(:__rigor_deferred_definition_names)
-    private_constant :MAIN_SINGLETON_ROWS, :TOPLEVEL_ROWS_KEY, :METHOD_ALIASES_KEY, :DEFERRED_NAMES_KEY
+    # ADR-129 WD1 — three run-scoped Memos, each a two-entry list of `[table, derived]` held by the identity of the
+    # table the derived value reads (the deferred ranges, or the global write census).
+    TOPLEVEL_ROWS = TypingState.memo(
+      :toplevel_definition_rows,
+      run_scoped: true, reason: "[deferred ranges, rows] entries keyed on the identity of the ranges table, the only " \
+                                "input the rows read"
+    )
+    METHOD_ALIASES = TypingState.memo(
+      :method_alias_names,
+      run_scoped: true, reason: "[census, names] entries keyed on the identity of the global write census, the only " \
+                                "input the names read"
+    )
+    DEFERRED_NAMES = TypingState.memo(
+      :deferred_definition_names,
+      run_scoped: true, reason: "[deferred ranges, names] entries keyed on the identity of the ranges table, the " \
+                                "only input the names read"
+    )
+    private_constant :MAIN_SINGLETON_ROWS, :TOPLEVEL_ROWS, :METHOD_ALIASES, :DEFERRED_NAMES
 
     # Issue #316 — the CONFIDENCE-GATED companion of {#top_level_def_for}, and the only accessor the type
     # inference may bind through. {#top_level_def_for} stays unrestricted because it also serves the

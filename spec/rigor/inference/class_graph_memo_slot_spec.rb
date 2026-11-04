@@ -48,7 +48,7 @@ RSpec.describe "class-graph memo storage" do
     runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil)
     allow(Rigor::RunScopedSlots).to receive(:release).and_wrap_original do |original|
       at_release.replace(slot_key => typing_slot(slot_key),
-                         __rigor_resolution_chain__: Thread.current[:__rigor_resolution_chain__])
+                         resolution_chain: typing_slot(:resolution_chain))
       original.call
     end
     guarded_run(runner)
@@ -83,8 +83,8 @@ RSpec.describe "class-graph memo storage" do
   # slot keyed on the index, holding per-flavor buckets of chains. The chains themselves are asserted
   # non-empty, which is the positive control that the run built them there.
   it "keeps the resolution-chain memo in one slot keyed on the discovery index" do
-    chain_key = :__rigor_resolution_chain__
-    Thread.current[chain_key] = nil
+    chain_key = :resolution_chain
+    set_typing_slot(chain_key, nil)
     sizes = [2, 6].map do |files|
       Dir.mktmpdir do |dir|
         write_project(dir, files)
@@ -99,7 +99,7 @@ RSpec.describe "class-graph memo storage" do
     end
     expect(sizes.uniq.size).to eq(1)
   ensure
-    Thread.current[chain_key] = nil
+    set_typing_slot(chain_key, nil)
   end
 
   # The positive control for the example above: a bounded slot that was never CONSULTED would also be a

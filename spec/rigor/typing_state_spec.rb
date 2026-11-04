@@ -395,6 +395,13 @@ RSpec.describe Rigor::TypingState do
         class Child < Parent; end
         Constructed = Class.new(StandardError)
 
+        # A `class_eval` on a constant receiver inside a namespace: the file's declared names settle which constant it
+        # denotes.
+        module Outer
+          class Inner; end
+          Inner.class_eval { def made = 1 }
+        end
+
         Holder.new(nil).run(1)
         aliasing
         Child.new
@@ -470,8 +477,9 @@ RSpec.describe Rigor::TypingState do
     end
 
     # A cross-file read (dependencies), a repeated callee (a replayed return-memo hit), a wrong-arity call (a withheld
-    # read set), an external mixin (a resolution chain's prebuilt hook keys) and an unresolved implicit-self call (the
-    # self-call recorder).
+    # read set), an external mixin (a resolution chain's prebuilt hook keys), a class extending a module whose
+    # `extended` hook mixes into it (the extend hook keys) and an unresolved implicit-self call (the self-call
+    # recorder).
     def recorded_probe_files
       {
         "base.rb" => <<~RUBY,
@@ -480,7 +488,7 @@ RSpec.describe Rigor::TypingState do
             def twice(n) = n * 2
           end
         RUBY
-        "child.rb" => <<~RUBY
+        "child.rb" => <<~RUBY,
           class Child < Base
             include Comparable
             extend Forwardable
@@ -495,7 +503,24 @@ RSpec.describe Rigor::TypingState do
           Child.new.run
           Child.new.again
         RUBY
+        "hooked.rb" => hooked_probe_file
       }
+    end
+
+    def hooked_probe_file
+      <<~RUBY
+        module Mixer
+          def self.extended(base)
+            base.include(Comparable)
+          end
+        end
+
+        class Hooked < Base
+          extend Mixer
+          def run = greet
+        end
+        Hooked.new.run
+      RUBY
     end
 
     # The journal records as `[kind, slot name]` pairs.
@@ -518,16 +543,26 @@ RSpec.describe Rigor::TypingState do
         :alias_mutation_floor_facts, :alias_mutation_floor_ivar_mutators, :alias_mutation_floor_callee_floors,
         :alias_mutation_floor_unknown_stores, :self_call_ivar_writes_definition_counts, :void_tail_summary,
         :project_method_ownership, :ivar_contributions_table, :constructed_class, :own_method_subclasses,
-        :toplevel_def_reliable, :construction_escape, :remover_narrowing_unsafe
+        :toplevel_def_reliable, :construction_escape, :remover_narrowing_unsafe,
+        :user_class_fallback_external_ancestor, :rbs_complete_member_names, :mixin_ancestor_dispatch,
+        :core_stdlib_ancestor_dispatch, :project_method_names, :toplevel_definition_rows, :method_alias_names,
+        :deferred_definition_names, :resolution_chain, :ancestor_constant_scopes,
+        :check_rules_private_singleton_names, :file_digest_run, :scope_index_unentered_evaluator,
+        :scope_index_declared_names
       )
     end
 
     # Each run-scoped slot a run reached declares `run_scoped: true`, so the run's release empties it: a finished run
     # keeps none of its scopes, bodies or tables alive.
+    #
+    # The Memos that are not run-scoped hold no run's tables: a file's declared names live as long as the parse they are
+    # keyed on, and the resolution chain's interned keys are built from names alone.
     it "leaves no value in a slot the run reached once the run has ended" do
       audited = audited_run.fetch(:state)
+      kept = %i[scope_index_declared_names resolution_chain_extend_hook_keys resolution_chain_hook_keys
+                resolution_chain_external_keys]
 
-      expect(audited.holding).to be_empty
+      expect(audited.holding - kept).to be_empty
     end
 
     it "touches each jump sink and the retry frames as it records into them, and rewrites the walk at each guard" do
@@ -573,6 +608,26 @@ RSpec.describe Rigor::TypingState do
       expect(touchers[:self_call_resolution_recorder]).to include("record")
     end
 
+    # The memos only a recording run fills: the user-class fallback's name table, the recording run's ancestor scopes
+    # and the resolution chain's interned negative keys (an external mixin's, and an `extended` hook's).
+    it "reaches the memos a dependency-recording run fills" do
+      audited = audited_recording_run.fetch(:state)
+
+      expect(audited.violations).to be_empty
+      expect(audited.reached).to include(
+        :user_class_fallback_defines_name, :recorded_ancestor_constant_scopes, :resolution_chain_hook_keys,
+        :resolution_chain_external_keys, :resolution_chain_extend_hook_keys
+      )
+    end
+
+    it "leaves no value in a run-scoped slot a dependency-recording run reached once it has ended" do
+      audited = audited_recording_run.fetch(:state)
+      kept = %i[scope_index_declared_names resolution_chain_extend_hook_keys resolution_chain_hook_keys
+                resolution_chain_external_keys]
+
+      expect(audited.holding - kept).to be_empty
+    end
+
     # WD3: a return-memo hit neither reads nor writes the ADR-55 summaries; only a compute takes them.
     it "takes the ADR-55 summaries once per return-memo compute and never on a hit" do
       run = audited_run
@@ -599,6 +654,40 @@ RSpec.describe Rigor::TypingState do
 
     expect(inside.values).to all(satisfy { |value| !value.nil? })
     expect(inside.keys.map { |name| typing_slot(name) }).to all(be_nil)
+  end
+
+  # A run's release must not empty what outlives a run: a file's declared names live as long as the parse they are keyed
+  # on, and the interned negative keys are rebuilt from a name alone.
+  it "keeps the declared-names and interned-key memos out of the run release" do
+    kept = %i[scope_index_declared_names resolution_chain_extend_hook_keys resolution_chain_hook_keys
+              resolution_chain_external_keys]
+
+    expect(kept.map { |name| described_class.slot(name).run_scoped }).to all(be(false))
+    expect(kept.map { |name| described_class.slot(name).kind }).to all(be(:memo))
+  end
+
+  # The index walk's evaluation is installed for that walk only; walks nest, so the outer one returns on the way out,
+  # a raise included.
+  it "restores the outer index walk's unentered evaluator on the way out of an inner one" do
+    indexer = Rigor::Inference::ScopeIndexer
+    outer = -> {}
+    inner = -> {}
+    seen = []
+    indexer.send(:with_unentered_evaluator, outer) do
+      seen << typing_slot(:scope_index_unentered_evaluator)
+      begin
+        indexer.send(:with_unentered_evaluator, inner) do
+          seen << typing_slot(:scope_index_unentered_evaluator)
+          raise "boom"
+        end
+      rescue RuntimeError
+        nil
+      end
+      seen << typing_slot(:scope_index_unentered_evaluator)
+    end
+
+    expect(seen).to eq([outer, inner, outer])
+    expect(typing_slot(:scope_index_unentered_evaluator)).to be_nil
   end
 
   # Review of #2796 — a typer or an evaluator caches the state it first reads, so one kept across threads would write

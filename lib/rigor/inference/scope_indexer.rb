@@ -12,6 +12,7 @@ require_relative "../source/node_children"
 require_relative "../source/node_walker"
 require_relative "../source/parameter_envelope"
 require_relative "../cache/file_digest"
+require_relative "../typing_state"
 require_relative "../analysis/check_rules/published_constant_guard"
 require_relative "anonymous_meta_class"
 require_relative "def_handle"
@@ -5518,18 +5519,25 @@ module Rigor
       # proves `S::A` exists). Memoized on the `Prism::Source` every node's
       # location shares — threading the set through the dozen eval-consuming
       # walks would dwarf the resolution it feeds, so the one re-parse this
-      # needs happens once per file. The memo lives in an ivar ON the source
-      # (rather than a WeakMap keyed on it): the entry's lifetime is the
-      # parse's own, nothing mutable sits in a constant, and a worker parsing
-      # the same text gets its own source and its own set.
+      # needs happens once per file. The memo is a {TypingState} Memo, a
+      # WeakKeyMap keyed on the source: the entry's lifetime is the parse's own
+      # (the map holds the key weakly), the set is a pure function of the
+      # source's text, and a worker parsing the same text gets its own source
+      # and its own set. Not run-scoped: an entry holds no run's tables.
+      DECLARED_NAMES = TypingState.memo(
+        :scope_index_declared_names,
+        reason: "a WeakKeyMap keyed on the Prism::Source; the frozen set is a pure function of the source's text"
+      )
+      private_constant :DECLARED_NAMES
+
       def eval_file_declared_names(node)
         source = node.location.send(:source)
-        source.instance_variable_get(:@rigor_declared_names) ||
-          source.instance_variable_set(:@rigor_declared_names, begin
-            names = Set.new
-            collect_declared_constant_names(Prism.parse(source.source).value, [], names)
-            names.freeze
-          end)
+        table = TypingState.current.weak_key_map(DECLARED_NAMES)
+        table[source] ||= begin
+          names = Set.new
+          collect_declared_constant_names(Prism.parse(source.source).value, [], names)
+          names.freeze
+        end
       end
 
       # The walk behind {eval_file_declared_names}: every qualified constant
@@ -9321,13 +9329,14 @@ module Rigor
       # because they are not monkey-patches), and no plugin surface reaches it — the ADR-16 synthetic-method
       # tier feeds the DISPATCHER, which `Analysis::CheckRules` does not consult. A name table is the smallest
       # thing that works; a plugin-supplied one can replace it whenever that surface exists.
-      MODULE_ATTR_MACROS = {
-        mattr_reader: [true, false, false], mattr_writer: [false, true, false],
-        mattr_accessor: [true, true, false], cattr_reader: [true, false, false],
-        cattr_writer: [false, true, false], cattr_accessor: [true, true, false],
-        class_attribute: [true, true, true]
-      }.freeze
-      Ractor.make_shareable(MODULE_ATTR_MACROS)
+      MODULE_ATTR_MACROS = Ractor.make_shareable(
+        {
+          mattr_reader: [true, false, false], mattr_writer: [false, true, false],
+          mattr_accessor: [true, true, false], cattr_reader: [true, false, false],
+          cattr_writer: [false, true, false], cattr_accessor: [true, true, false],
+          class_attribute: [true, true, true]
+        }
+      )
 
       # Both kinds, unconditionally. `instance_accessor: false` (and its `instance_reader:` /
       # `instance_writer:` / `instance_predicate:` siblings) narrows the real surface, and honouring them here
@@ -11825,8 +11834,16 @@ module Rigor
       }.freeze
       private_constant :UNENTERED_FLOW_ENTRY
 
-      UNENTERED_EVALUATOR_KEY = :rigor_scope_index_unentered_evaluator
-      private_constant :UNENTERED_EVALUATOR_KEY
+      # ADR-129 WD1 — a Frame: {#with_unentered_evaluator} installs the walk's evaluation for the walk and restores the
+      # outer one, and whether one is installed changes answers (an unentered construct is evaluated only inside a
+      # walk).
+      UNENTERED_EVALUATOR = TypingState.frame(
+        :scope_index_unentered_evaluator,
+        reason: "installed around the index walk that evaluates its unentered constructs; the lambda writes the " \
+                "walk's own table (the walk's state, not typing state) and reads its converged-loop recording and " \
+                "clause widening, and is frozen while installed"
+      )
+      private_constant :UNENTERED_EVALUATOR
 
       # Issues #2196 and #2056 — an `&&` / `||` / `and` / `or`, an `if` / `unless` / ternary or a `while` / `until`
       # in a value position (an array element, a hash value, a call argument, an interpolation, a multi-value
@@ -11845,7 +11862,7 @@ module Rigor
         part = node.public_send(entry) || (node.conditions.first&.conditions&.first if node.is_a?(Prism::CaseNode))
         return if part.nil? || table.key?(part)
 
-        evaluate = Thread.current[UNENTERED_EVALUATOR_KEY]
+        evaluate = TypingState.current[UNENTERED_EVALUATOR]
         evaluate&.call(node, current_scope, code_body_nodes(node, current_scope.source_path))
       end
 
@@ -11882,12 +11899,8 @@ module Rigor
       # Index walks nest (a rule may re-index a file while another file's walk is suspended), so the outer one is
       # restored on exit. A `propagate` called directly while an outer index walk is running would record into the
       # OUTER index's table through it; nothing outside {#index} calls `propagate`.
-      def with_unentered_evaluator(evaluate)
-        outer = Thread.current[UNENTERED_EVALUATOR_KEY]
-        Thread.current[UNENTERED_EVALUATOR_KEY] = evaluate
-        yield
-      ensure
-        Thread.current[UNENTERED_EVALUATOR_KEY] = outer
+      def with_unentered_evaluator(evaluate, &)
+        TypingState.current.with(UNENTERED_EVALUATOR, evaluate.freeze, &)
       end
 
       SELF_OPENING_BODIES = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze

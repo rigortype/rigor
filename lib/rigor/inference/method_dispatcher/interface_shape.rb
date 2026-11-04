@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "../../type"
+require_relative "../../typing_state"
 require_relative "argument_nodes"
 
 module Rigor
@@ -21,7 +22,19 @@ module Rigor
       # A shape the AST cannot state, a splat (`*xs`), a keyword splat (`**opts`) or a forwarded `...`, is taken
       # by no overload, so the call reads `untyped` as it does on master.
       module InterfaceShape
+        # ADR-130 WD5 — the dispatch-off flag {.without_dispatch} installs (`RbsDispatch.without_interface_dispatch`).
+        DISPATCH_OFF = TypingState.frame(
+          :interface_dispatch_off, reason: "a flag installed around a dispatch-off run (sig-gen, the parity harness)"
+        )
+        private_constant :DISPATCH_OFF
+
         module_function
+
+        # Runs the block with interface dispatch switched off.
+        def without_dispatch(&) = TypingState.current.with(DISPATCH_OFF, true, &)
+
+        # False inside {.without_dispatch}.
+        def dispatch? = TypingState.current[DISPATCH_OFF] != true
 
         # `definition` narrowed to the overloads that take the call's shape (the definition itself when every
         # overload does), or nil when none does.

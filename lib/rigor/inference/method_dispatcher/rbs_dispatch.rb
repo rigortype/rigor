@@ -240,19 +240,12 @@ module Rigor
         # carrier, but no call on it resolves through the interface's members: the receiver names no class, as
         # `Dynamic[top]` names none. `rigor sig-gen` analyses here, so it writes no RBS from an interface a plugin
         # author did not write against, and the behavioural parity gate's `:dispatch_off` mode runs here
-        # (`spec/integration/interface_parity_spec.rb`). The switch is per thread, so a run under it is sequential: a
-        # pooled run raises (`PoolCoordinator`). No CLI flag or configuration key sets it.
-        def without_interface_dispatch
-          previous = Thread.current.thread_variable_get(:rigor_interface_dispatch_off)
-          Thread.current.thread_variable_set(:rigor_interface_dispatch_off, true)
-          yield
-        ensure
-          Thread.current.thread_variable_set(:rigor_interface_dispatch_off, previous)
-        end
+        # (`spec/integration/interface_parity_spec.rb`). The switch is a per-thread `TypingState` frame
+        # ({InterfaceShape.without_dispatch}), so a run under it is sequential: a pooled run raises (`PoolCoordinator`).
+        # No CLI flag or configuration key sets it.
+        def without_interface_dispatch(&) = InterfaceShape.without_dispatch(&)
 
-        def interface_dispatch?
-          Thread.current.thread_variable_get(:rigor_interface_dispatch_off) != true
-        end
+        def interface_dispatch? = InterfaceShape.dispatch?
 
         # Slice 6 (Phase C sub-phase 1) probe: returns the positional block-parameter types declared by
         # the receiving method's selected RBS overload, translated into `Rigor::Type`. Used by the

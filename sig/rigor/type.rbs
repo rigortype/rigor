@@ -170,21 +170,8 @@ module Rigor
     end
 
     # ADR-130 — a `Rigor::Plugin` interface, carried only as a `Dynamic`'s facet (`Dynamic[Rigor::Plugin::_Scope]`), so
-    # it is not a member of `Type::t`.
+    # it is not a member of `Type::t`. Declared for that name only; its members are read from the source.
     class Interface
-      attr_reader name: String
-      attr_reader type_args: Array[Type::t]
-      def initialize: (String name, ?Array[Type::t] type_args) -> void
-      def describe: (?Symbol verbosity) -> String
-      def erase_to_rbs: () -> String
-      def top: () -> Trinary
-      def bot: () -> Trinary
-      def dynamic: () -> Trinary
-      def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
-      def ==: (untyped other) -> bool
-      def eql?: (untyped other) -> bool
-      def hash: () -> Integer
-      def inspect: () -> String
     end
 
     class Union

@@ -51,7 +51,7 @@ RSpec.describe "ADR-130 plugin-interface dispatch in a plugin hook" do
                                              "parallel" => { "workers" => 0 })
       )
       runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil, workers: 0)
-      run = -> { Dir.chdir(dir) { runner.run } }
+      run = -> { Dir.chdir(dir) { guarded_run(runner) } }
       result = dispatch ? run.call : Rigor::Inference::MethodDispatcher::RbsDispatch.without_interface_dispatch(&run)
       result.to_h.fetch("diagnostics").to_h do |row|
         [row.fetch("line"), "#{row.fetch('rule')}: #{row.fetch('message')}"]

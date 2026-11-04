@@ -130,6 +130,7 @@ RSpec.describe Rigor::Inference::TypingState do
       expect(refused).to be(false)
       expect(records).to eq([:read, table, :key, described_class::ABSENT, :write, table, :key, :value])
       expect(state.capturing?).to be(false)
+      expect(state.instance_variable_get(:@journal)).to be_empty
     end
 
     it "hands a nested capture's records on to the enclosing one" do
@@ -177,17 +178,20 @@ RSpec.describe Rigor::Inference::TypingState do
   end
 
   # The kind discipline of every slot a real run reaches: each access goes through its kind's API, and a Frame value
-  # is frozen while installed unless the frame declares its contents a Resource. An audited state stands in for the
-  # thread's own, so every typer and evaluator of the run caches it.
+  # is frozen while installed unless the frame declares its contents a Resource (the retry frames' stack is frozen
+  # even so: its edges are the contents). An audited state stands in for the thread's own, so every typer and
+  # evaluator of the run caches it, and a capture stays open across the run, so the journal records what a future
+  # `type_of` memo would see.
   describe "a real run's slot accesses" do
     let(:audited_class) do
       Class.new(described_class::State) do
-        attr_reader :violations, :reached
+        attr_reader :violations, :reached, :accesses
 
         def initialize
           super
           @violations = []
           @reached = Set.new
+          @accesses = Hash.new(0)
         end
 
         def [](slot)
@@ -257,13 +261,15 @@ RSpec.describe Rigor::Inference::TypingState do
         def check(slot, access)
           declared = Rigor::Inference::TypingState.slots[slot]
           @reached << declared.name
+          @accesses[[declared.name, access]] += 1
           @violations << [declared.name, access] unless yield(declared)
         end
 
         def check_install(slot, value)
           check(slot, :install) { |s| s.kind == :frame }
           declared = Rigor::Inference::TypingState.slots[slot]
-          @violations << [declared.name, :unfrozen, value.class] unless declared.contents || value.frozen?
+          frozen_needed = declared.contents.nil? || declared.name == :retry_frames
+          @violations << [declared.name, :unfrozen, value.class] if frozen_needed && !value.frozen?
         end
       end
     end
@@ -271,9 +277,15 @@ RSpec.describe Rigor::Inference::TypingState do
     let(:source) do
       <<~RUBY
         class Probe
-          MAP = { a: 1, b: 2 }.freeze
+          MAP = { integer: { type: :integer }, string: { type: :string } }.freeze
 
-          def lookup(key) = MAP.key?(key) && MAP[key].succ
+          def lookup(prop)
+            k = prop.column_type
+            if MAP.key?(k)
+              r = MAP[k].dup
+              r[:a] = 1
+            end
+          end
           def fact(n) = n <= 1 ? 1 : n * fact(n - 1)
           def even?(n) = n.zero? ? true : odd?(n - 1)
           def odd?(n) = n.zero? ? false : even?(n - 1)
@@ -323,30 +335,48 @@ RSpec.describe Rigor::Inference::TypingState do
         end
 
         probe = Probe.new
-        [probe.lookup(:a), probe.fact(5), probe.even?(4), probe.first_even([1, 2]), probe.nexts([nil, 1]),
+        [probe.lookup(nil), probe.fact(5), probe.even?(4), probe.first_even([1, 2]), probe.nexts([nil, 1]),
          probe.breaks([1]), probe.value_break([nil, 2]), probe.total, probe.forward(1), probe.use_yield,
          probe.retrying, probe.ensure_jump([1])]
       RUBY
     end
 
+    # The audited state after one run of `source`, with the capture open across the run closed into `:refused` and
+    # `:records`, and the run's `BudgetTrace` counts.
     def audited_run
       audited = audited_class.new
       key = described_class.const_get(:STATE_KEY)
       previous = Thread.current[key]
       Thread.current[key] = audited
-      Dir.mktmpdir do |dir|
-        path = File.join(dir, "probe.rb")
-        File.write(path, source)
-        configuration = Rigor::Configuration.new("paths" => [path], "parallel" => { "workers" => 0 })
-        guarded_run(Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil), [path])
-      end
-      audited
+      Rigor::Inference::BudgetTrace.enable!
+      audited.open_capture
+      analyze_probe
+      refused, records = audited.close_capture
+      { state: audited, refused: refused, records: records, counts: Rigor::Inference::BudgetTrace.snapshot }
     ensure
+      Rigor::Inference::BudgetTrace.disable!
+      Rigor::Inference::BudgetTrace.reset
       Thread.current[key] = previous
     end
 
+    def analyze_probe
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, "probe.rb")
+        File.write(path, source)
+        configuration = Rigor::Configuration.new(
+          Rigor::Configuration::DEFAULTS.merge("paths" => [path], "parallel" => { "workers" => 0 })
+        )
+        guarded_run(Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil), [path])
+      end
+    end
+
+    # The journal records as `[kind, slot name]` pairs.
+    def journaled(records)
+      records.each_slice(4).map { |kind, slot, _key, _value| [kind, described_class.slots[slot].name] }.uniq
+    end
+
     it "reaches each slot only through its kind's API, with every installed Frame value frozen" do
-      audited = audited_run
+      audited = audited_run.fetch(:state)
 
       expect(audited.violations).to be_empty
       expect(audited.reached).to include(
@@ -357,5 +387,50 @@ RSpec.describe Rigor::Inference::TypingState do
         :key_presence_walk
       )
     end
+
+    it "touches each jump sink and the retry frames as it records into them, and rewrites the walk at each guard" do
+      accesses = audited_run.fetch(:state).accesses
+
+      expect(accesses.keys).to include(
+        %i[return_sink touch], %i[next_sink touch], %i[break_sink touch], %i[break_value_sink touch],
+        %i[retry_frames touch], %i[key_presence_walk rewrite]
+      )
+    end
+
+    it "journals the inject record's and the return memo's reads and stores while a capture is open, refusing it" do
+      run = audited_run
+
+      expect(run.fetch(:refused)).to be(true)
+      expect(journaled(run.fetch(:records))).to include(
+        %i[read inject_accumulator], %i[write inject_accumulator], %i[read user_method_return_memo],
+        %i[write user_method_return_memo]
+      )
+    end
+
+    # WD3: a return-memo hit neither reads nor writes the ADR-55 summaries; only a compute takes them.
+    it "takes the ADR-55 summaries once per return-memo compute and never on a hit" do
+      run = audited_run
+      counts = run.fetch(:counts)
+      hits = counts.fetch(Rigor::Inference::BudgetTrace::MEMO_HITS)
+
+      expect(hits).to be_positive
+      expect(run.fetch(:state).accesses[%i[user_method_return_summary acquire]])
+        .to eq(counts.fetch(Rigor::Inference::BudgetTrace::MEMO_ENTRIES) - hits)
+    end
+  end
+
+  # Review of #2796 — an object that cached the state and then runs on another thread (the language server keeps an
+  # evaluator across save rounds, each on its own thread) must use that thread's state, not write into the first one,
+  # whose slots that thread's release already emptied.
+  it "drops a cached state when the typer or the evaluator runs on another thread" do
+    scope = Rigor::Scope.empty
+    [Rigor::Inference::ExpressionTyper.new(scope: scope), Rigor::Inference::StatementEvaluator.new(scope: scope)]
+      .each do |owner|
+        first = Thread.new { owner.send(:typing_state) }.value
+        second = Thread.new { owner.send(:typing_state) }.value
+
+        expect(second).not_to be(first)
+        expect(owner.send(:typing_state)).to be(described_class.current)
+      end
   end
 end

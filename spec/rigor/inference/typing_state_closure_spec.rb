@@ -6,11 +6,15 @@ require "prism"
 # ADR-129 G3 — deny by default: a file this spec covers keeps no typing state outside a declared
 # `Rigor::Inference::TypingState` slot. Read by Prism, not by text, it flags:
 #
-# - per-thread and per-fiber storage: `Thread.current`, `Fiber.current`, `thread_variable_get` / `_set`, `Fiber[]`;
+# - per-thread, per-fiber and per-Ractor storage: `Thread.current`, `Fiber.current`, `Ractor.current`,
+#   `thread_variable_get` / `_set`, `Fiber[]`, `Ractor[]`, `Ractor.store_if_absent`;
 # - `ObjectSpace::WeakMap` and `WeakKeyMap`;
 # - a module-level write: an instance variable written in a class or module body, at the top level, or in a singleton
 #   method (`def self.x`, `class << self`, `module_function`, `extend self`), and any class-variable or global write;
-# - a module-level instance variable mutated in place (`@x[k] ||= v`, `@x << v`), and `instance_variable_set`;
+# - a module-level instance variable called with anything but a reader (`@x[k] ||= v`, `@x << v`, `@x.merge(o)`), a
+#   global or a constant mutated in place, and `instance_variable_get` / `_set`;
+# - module state behind an accessor: a singleton `attr_accessor` / `attr_writer`, and a setter, `||=` or in-place write
+#   through `self` at module level or through a constant (`self.flag = v`, `Owner.x ||= {}`, `Owner.x[k] = v`);
 # - a constant whose value is not frozen by construction, or a constant reassigned;
 # - a read of one of the four advisory tables outside `Scope` (stage 2 puts them behind slots).
 #
@@ -37,6 +41,8 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
     stage2 = "ADR-129 stage 2 puts the four advisory tables behind journaled Table slots"
     {
       [state, :thread_state, "Thread.current"] => [3, "the one per-thread anchor every slot lives in"],
+      [state, :module_accessor_write, "current"] => [1, "TypingState.current stores the thread's new state"],
+      [state, :thread_state, "Fiber.current"] => [2, "a state's owning fiber, so a cached state is dropped elsewhere"],
       [state, :weak_map, "WeakKeyMap"] => [1, "State#weak_key_map makes the store a run-scoped Table or Memo holds"],
       [state, :module_ivar_write, "@slots"] => [2, "the slot registry, written only while files load"],
       [state, :module_ivar_write, "@run_scoped"] => [2, "the run-scoped slot indices, written only while files load"],
@@ -53,6 +59,16 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
       []= << push append prepend unshift insert concat store update merge! replace clear delete delete_if keep_if
       select! reject! filter! map! collect! compact! flatten! uniq! sort! sort_by! reverse! rotate! fill shift pop
       slice! transform_values! transform_keys! compare_by_identity add add? subtract default= rehash
+    ]
+  end
+
+  # The calls on a module-level instance variable that only read it. Any other call may change it in place.
+  def ivar_readers
+    %i[
+      [] fetch dig key? include? member? has_key? size length count empty? any? none? all? one? find detect each
+      each_with_index each_with_object each_key each_value each_pair map flat_map filter_map select reject sum min max
+      sort sort_by group_by first last take to_a to_h to_s inspect keys values values_at dup frozen? positive?
+      negative? zero? nil? equal? eql? == != hash is_a? respond_to? call synchronize index find_index
     ]
   end
 
@@ -186,36 +202,87 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
     case node
     when *ivar_writes then found(file, node, :module_ivar_write, node.name) if module_level?(context)
     when *cvar_and_global_writes then found(file, node, :module_variable_write, node.name)
-    when *receiver_writes
-      receiver = node.receiver
-      found(file, node, :module_ivar_mutation, receiver.name) if module_level?(context) && ivar_read?(receiver)
+    when *receiver_writes then check_receiver_write(node, context, file)
+    end
+  end
+
+  # `@x[k] ||= v`, `$g[k] = v`, `self.x ||= v`, `Owner.x ||= v`, `Owner.x[k] = v`, `CONST[k] ||= v`.
+  def check_receiver_write(node, context, file)
+    receiver = node.receiver
+    if ivar_read?(receiver)
+      found(file, node, :module_ivar_mutation, receiver.name) if module_level?(context)
+    elsif receiver.is_a?(Prism::GlobalVariableReadNode)
+      found(file, node, :module_variable_write, receiver.name)
+    elsif module_state_receiver?(receiver, context)
+      found(file, node, :module_accessor_write, node.respond_to?(:read_name) ? node.read_name : state_name(receiver))
     end
   end
 
   def check_call(node, context, file)
     name = node.name
-    receiver = node.receiver
     check_thread_state(node, file)
+    check_module_state_call(node, context, file)
     found(file, node, :table_access, name) if table_readers.include?(name)
-    if module_level?(context) && ivar_read?(receiver) && mutators.include?(name)
-      found(file, node, :module_ivar_mutation, receiver.name)
+    if %i[instance_variable_set instance_variable_get class_variable_set const_set].include?(name)
+      found(file, node, :ivar_reflection, name)
     end
-    found(file, node, :ivar_reflection, name) if %i[instance_variable_set class_variable_set const_set].include?(name)
+    found(file, node, :module_accessor, name) if accessor_macro?(node, context)
+  end
+
+  def check_module_state_call(node, context, file)
+    name = node.name
+    receiver = node.receiver
+    if ivar_read?(receiver)
+      found(file, node, :module_ivar_mutation, receiver.name) if module_level?(context) && !ivar_readers.include?(name)
+    elsif receiver.is_a?(Prism::GlobalVariableReadNode)
+      found(file, node, :module_variable_write, receiver.name) if mutators.include?(name)
+    elsif setter?(name) && module_state_receiver?(receiver, context)
+      found(file, node, :module_accessor_write, name.to_s.delete_suffix("="))
+    elsif mutators.include?(name) && (constant?(receiver) || accessor_read?(receiver))
+      found(file, node, :module_accessor_write, state_name(receiver))
+    end
   end
 
   def check_thread_state(node, file)
     name = node.name
     receiver = node.receiver
-    found(file, node, :thread_state, "#{receiver.name}.current") if name == :current && thread_or_fiber?(receiver)
-    if %i[thread_variable_get thread_variable_set thread_variable? storage].include?(name)
+    found(file, node, :thread_state, "#{receiver.name}.current") if name == :current && local_storage_owner?(receiver)
+    if %i[thread_variable_get thread_variable_set thread_variable? storage store_if_absent].include?(name)
       found(file, node, :thread_state, name)
     end
-    found(file, node, :thread_state, "Fiber#{name}") if %i[[] []=].include?(name) && named_constant?(receiver, :Fiber)
+    return unless %i[[] []=].include?(name) && (named_constant?(receiver, :Fiber) || named_constant?(receiver, :Ractor))
+
+    found(file, node, :thread_state, "#{receiver.name}#{name}")
   end
 
   def ivar_read?(node) = node.is_a?(Prism::InstanceVariableReadNode)
 
-  def thread_or_fiber?(node) = named_constant?(node, :Thread) || named_constant?(node, :Fiber)
+  def local_storage_owner?(node) = %i[Thread Fiber Ractor].any? { |name| named_constant?(node, name) }
+
+  def constant?(node) = node.is_a?(Prism::ConstantReadNode) || node.is_a?(Prism::ConstantPathNode)
+
+  def setter?(name) = name.end_with?("=") && !%i[== != <= >= === []= =~].include?(name)
+
+  # A reader call on a constant (`Owner.x`, not a constructor): what an index write or a mutator through it changes is
+  # module state.
+  def accessor_read?(node)
+    node.is_a?(Prism::CallNode) && node.arguments.nil? && constant?(node.receiver) &&
+      !%i[new allocate].include?(node.name)
+  end
+
+  def module_state_receiver?(receiver, context)
+    constant?(receiver) || accessor_read?(receiver) || (receiver.is_a?(Prism::SelfNode) && module_level?(context))
+  end
+
+  def state_name(node) = node.respond_to?(:name) ? node.name : node.class.name.split("::").last
+
+  # `attr_accessor` / `attr_writer` in `class << self`, or a module attribute macro anywhere.
+  def accessor_macro?(node, context)
+    return false unless node.receiver.nil?
+
+    (context == :singleton && %i[attr_accessor attr_writer].include?(node.name)) ||
+      %i[mattr_accessor mattr_writer cattr_accessor cattr_writer class_attribute].include?(node.name)
+  end
 
   def named_constant?(node, name)
     (node.is_a?(Prism::ConstantReadNode) || node.is_a?(Prism::ConstantPathNode)) && node.name == name
@@ -240,7 +307,7 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
 
   def frozen_call?(node, file)
     receiver = node.receiver
-    return frozen_literal?(receiver) if node.name == :freeze && receiver
+    return frozen_literal?(receiver, file) if node.name == :freeze && receiver
     return true if frozen_factory?(receiver, node.name)
     return false unless node.name == :new && receiver.respond_to?(:name) && file[:data].include?(receiver.name.to_s)
 
@@ -262,17 +329,17 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
     node.elements.all? { |element| element.is_a?(Prism::AssocNode) && frozen_value?(element.value, file) }
   end
 
-  # The receiver of a `.freeze`: a collection literal whose nested collection literals are frozen too. Any other
-  # receiver (a computed collection) is frozen at its top.
-  def frozen_literal?(node)
+  # The receiver of a `.freeze`: a collection literal whose every element is frozen by construction too (a splat of
+  # another constant is). Any other receiver (a computed collection) is frozen at its top.
+  def frozen_literal?(node, file)
     elements =
       case node
       when Prism::ArrayNode then node.elements
       when Prism::HashNode then node.elements.flat_map { |e| e.is_a?(Prism::AssocNode) ? [e.key, e.value] : [e] }
       else return true
       end
-    elements.none? do |element|
-      element.is_a?(Prism::ArrayNode) || element.is_a?(Prism::HashNode) || element.is_a?(Prism::AssocSplatNode)
+    elements.all? do |element|
+      element.is_a?(Prism::SplatNode) ? constant?(element.expression) : frozen_value?(element, file)
     end
   end
 
@@ -391,6 +458,75 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
       RUBY
         [2, :unfrozen_constant, "A"], [4, :unfrozen_constant, "C"], [5, :unfrozen_constant, "D"],
         [9, :unfrozen_constant, "H"], [11, :unfrozen_constant, "J"], [12, :constant_reassign, "K"]
+      )
+    end
+
+    it "flags per-Ractor storage" do
+      expect(rules_in(<<~RUBY)).to contain_exactly(
+        def a = Ractor.current[:k]
+        def b = Ractor[:k]
+        def c = Ractor.store_if_absent(:k) { 1 }
+      RUBY
+        [1, :thread_state, "Ractor.current"], [2, :thread_state, "Ractor[]"], [3, :thread_state, "store_if_absent"]
+      )
+    end
+
+    # Review of #2796: `MethodDispatcher::FileFolding` keeps a per-run flag behind a singleton accessor, which no ivar
+    # node shows.
+    it "flags module state behind an accessor, and a setter or in-place write through self or a constant" do
+      expect(rules_in(<<~RUBY)).to contain_exactly(
+        module Folding
+          class << self
+            attr_accessor :fold
+          end
+          self.fold = false
+          def self.reset = (self.fold = true)
+        end
+        class Reader
+          def a = Owner.x ||= {}
+          def b(key) = Owner.x[key] = 1
+          def c = Owner.x << 1
+          def d = REGISTRY << 1
+          def e = Set.new.compare_by_identity
+          def f = self.name = 1
+        end
+      RUBY
+        [3, :module_accessor, "attr_accessor"], [5, :module_accessor_write, "fold"],
+        [6, :module_accessor_write, "fold"], [9, :module_accessor_write, "x"], [10, :module_accessor_write, "x"],
+        [11, :module_accessor_write, "x"], [12, :module_accessor_write, "REGISTRY"]
+      )
+    end
+
+    it "flags a module ivar called with anything but a reader, and a global mutated in place" do
+      expect(rules_in(<<~RUBY)).to contain_exactly(
+        module M
+          def self.a(other) = @a.merge(other)
+          def self.b = @b.delete_at(0)
+          def self.c = (@c.field = 1)
+          def self.d(key) = @d.fetch(key)
+          def self.e = @e.synchronize { 1 }
+          def self.f(key) = instance_variable_get(:@f)[key] = 1
+          def g = $g << 1
+          def h = $stderr.puts("x")
+        end
+      RUBY
+        [2, :module_ivar_mutation, "@a"], [3, :module_ivar_mutation, "@b"], [4, :module_ivar_mutation, "@c"],
+        [7, :ivar_reflection, "instance_variable_get"], [8, :module_variable_write, "$g"]
+      )
+    end
+
+    it "reads a frozen literal as frozen only when each element is" do
+      expect(rules_in(<<~RUBY)).to contain_exactly(
+        # frozen_string_literal: true
+        A = { a: Set.new }.freeze
+        B = [{}.compare_by_identity].freeze
+        C = [Hash.new].freeze
+        D = [:a, B, "s", 1..2, [1].freeze].freeze
+        E = [*D, :b].freeze
+        F = [*compute].freeze
+      RUBY
+        [2, :unfrozen_constant, "A"], [3, :unfrozen_constant, "B"], [4, :unfrozen_constant, "C"],
+        [7, :unfrozen_constant, "F"]
       )
     end
 

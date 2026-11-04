@@ -262,10 +262,17 @@ module Rigor
       end
 
       # ADR-129 WD2 — the calling thread's {TypingState::State}, cached on the typer the first time a slot is read, so
-      # a later read is an ivar and an array index rather than a `Thread.current` lookup. A frame install whose block's
-      # value is the answer calls {TypingState.current} instead: Rigor's own analysis does not adopt this memoised
-      # reader's type at a self-call (#525's self-purity), so the install's answer would read as `Dynamic` through it.
-      def typing_state = @typing_state ||= TypingState.current
+      # a later read is an ivar, a fiber check and an array index rather than a `Thread.current` lookup. The cache is
+      # dropped when the typer runs on another fiber or thread: a state written from a thread it does not belong to
+      # would outlive that thread's {RunScopedSlots.release}. A frame install whose block's value is the answer calls
+      # {TypingState.current} instead: Rigor's own analysis does not adopt this memoised reader's type at a self-call
+      # (#525's self-purity), so the install's answer would read as `Dynamic` through it.
+      def typing_state
+        state = @typing_state
+        return state if state&.owned?
+
+        @typing_state = TypingState.current
+      end
 
       def type_of(node)
         previous = @typing_node

@@ -104,7 +104,7 @@ module Rigor
         end
 
         def untyped?(type)
-          type.is_a?(Type::Dynamic) && type.static_facet.is_a?(Type::Top)
+          Type::Combinator.untyped?(type)
         end
 
         # `widen_value_pinned`, extended through nested shape carriers and applied type arguments.

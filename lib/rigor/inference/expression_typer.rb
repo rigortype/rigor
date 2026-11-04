@@ -1343,7 +1343,7 @@ module Rigor
       # to bare `Nominal[Range]` when no endpoint contributes a typable shape.
       def nominal_range_for_endpoints(left_node, right_node)
         endpoints = [left_node, right_node].compact.map { |n| range_endpoint_element_type(n) }
-        endpoints.reject! { |t| t.equal?(Type::Combinator.untyped) }
+        endpoints.reject! { |t| Type::Combinator.untyped?(t) }
         return Type::Combinator.nominal_of("Range") if endpoints.empty?
 
         Type::Combinator.nominal_of("Range", type_args: [Type::Combinator.union(*endpoints)])
@@ -3600,7 +3600,7 @@ module Rigor
       # happen in practice is the byte-identical `--format json` runs over `lib`, `plugins/*/lib`,
       # `examples/*/lib` and the survey projects recorded on issue #872.
       def top_result?(result)
-        result.equal?(Type::Combinator.untyped)
+        Type::Combinator.untyped?(result)
       end
 
       # ADR-84 WD2 — the memo-miss compute, wrapped in a `DependencyRecorder.capture` window when ADR-46

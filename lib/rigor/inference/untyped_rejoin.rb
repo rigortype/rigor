@@ -57,7 +57,7 @@ module Rigor
       end
 
       def candidate?(entry_type, joined_type)
-        entry_type.is_a?(Type::Dynamic) && entry_type.static_facet.is_a?(Type::Top) &&
+        Type::Combinator.untyped?(entry_type) &&
           joined_type.is_a?(Type::Union) && joined_type.members.any?(Type::Dynamic)
       end
 

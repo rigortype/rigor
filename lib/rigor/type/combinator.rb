@@ -46,6 +46,26 @@ module Rigor
         @untyped
       end
 
+      # ADR-130 WD2 — the parity predicate. Every site that keys a leniency on `untyped` asks this instead of testing
+      # a `Dynamic`'s facet for `Top` or comparing with {untyped}, so a value whose facet parity erases
+      # ({erased_facet?}) reads as `untyped` everywhere but member dispatch. `spec/rigor/type/untyped_parity_spec.rb`
+      # rejects the raw forms outside this module. No facet erases yet, so today this is `Dynamic[top]` alone.
+      def untyped?(type)
+        return false unless type.is_a?(Dynamic)
+
+        facet = type.static_facet
+        facet.is_a?(Top) || erased_facet?(facet)
+      end
+
+      # ADR-130 WD1 — true for a `Dynamic` facet that parity reads as `top`: {untyped?} answers true for it, and
+      # {merge_erased_members} merges it with `Dynamic[top]`. Slice 1b answers for the `Rigor::Plugin` interface
+      # carrier; until it lands no facet erases, and `spec/rigor/type/combinator_facet_erasure_spec.rb` pins the
+      # merge with a stub facet. An engine hook, not public API.
+      def erased_facet?(_facet)
+        false
+      end
+      private_class_method :erased_facet?
+
       # Wraps the static facet in a Dynamic[T] carrier. Idempotent on the static facet so
       # Dynamic[Dynamic[T]] collapses to Dynamic[T] per the value-lattice algebra.
       def dynamic(static_facet)
@@ -821,7 +841,65 @@ module Rigor
 
           return [top] if flattened.any?(Top)
 
-          absorb_contained_members(unique_members(flattened))
+          absorb_contained_members(merge_erased_members(unique_members(flattened)))
+        end
+
+        # ADR-130 WD1 — a facet parity erases ({erased_facet?}) must not give a join a shape master's dedup would
+        # not: `Dynamic[_A] | Dynamic[top]` is `Dynamic[top]`, and so are the same members one level down inside a
+        # `Tuple` element, a `HashShape` value, a `Nominal` type argument or a nested union. Members equal after
+        # {erase_facets} merge into the erased form, at the first one's position; a member no other matches keeps
+        # its facet. The facet scan runs on every join and allocates nothing (no enumerator, no array), so the merge
+        # costs only where a facet is present, which is nowhere until ADR-130 slice 1b.
+        def merge_erased_members(members)
+          return members if members.size < 2
+          return members unless members.any? { |member| facet_bearing?(member) }
+
+          erased = members.map { |member| erase_facets(member) }
+          counts = Hash.new(0)
+          erased.each { |type| counts[type] += 1 }
+          merged = {}
+          result = []
+          members.each_with_index do |member, index|
+            type = erased[index]
+            if counts[type] == 1
+              result << member
+            elsif !merged.key?(type)
+              merged[type] = true
+              result << type
+            end
+          end
+          result
+        end
+
+        def facet_bearing?(type)
+          case type
+          when Dynamic then erased_facet?(type.static_facet) || facet_bearing?(type.static_facet)
+          when Tuple then type.elements.any? { |element| facet_bearing?(element) }
+          when HashShape
+            type.pairs.each_value { |value| return true if facet_bearing?(value) }
+            false
+          when Nominal then type.type_args.any? { |arg| facet_bearing?(arg) }
+          when Union then type.members.any? { |member| facet_bearing?(member) }
+          else false
+          end
+        end
+
+        # `type` with every facet {erased_facet?} accepts rewritten to `top`, through the carriers
+        # {merge_erased_members} names. The identity, by reference, on a type that bears none.
+        def erase_facets(type)
+          return type unless facet_bearing?(type)
+
+          case type
+          when Dynamic then erased_facet?(type.static_facet) ? untyped : dynamic(erase_facets(type.static_facet))
+          when Tuple then tuple_of(*type.elements.map { |element| erase_facets(element) })
+          when HashShape
+            HashShape.new(type.pairs.transform_values { |value| erase_facets(value) },
+                          required_keys: type.required_keys, optional_keys: type.optional_keys,
+                          read_only_keys: type.read_only_keys, extra_keys: type.extra_keys)
+          when Nominal then nominal_of(type.class_name, type_args: type.type_args.map { |arg| erase_facets(arg) })
+          when Union then union(*type.members.map { |member| erase_facets(member) })
+          else type
+          end
         end
 
         # Drops every member another member already contains, so the join after a guard names one set

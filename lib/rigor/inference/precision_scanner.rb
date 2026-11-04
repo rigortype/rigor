@@ -168,7 +168,7 @@ module Rigor
       end
 
       def classify_dynamic(type)
-        type.static_facet.is_a?(Type::Top) ? :dynamic_top : :dynamic_specific
+        Type::Combinator.untyped?(type) ? :dynamic_top : :dynamic_specific
       end
 
       def worst_of(members)

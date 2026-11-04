@@ -20,12 +20,12 @@ module Rigor
         module_function
 
         # The literal `untyped` carrier, `Dynamic[top]`.
-        def untyped?(type) = type.is_a?(Type::Dynamic) && type.static_facet.is_a?(Type::Top)
+        def untyped?(type) = Type::Combinator.untyped?(type)
 
         # The untyped carrier itself, or a union or `Dynamic` holding it at any depth.
         def imprecise?(type)
           case type
-          when Type::Dynamic then type.static_facet.is_a?(Type::Top) || imprecise?(type.static_facet)
+          when Type::Dynamic then Type::Combinator.untyped?(type) || imprecise?(type.static_facet)
           when Type::Union then type.members.any? { |member| imprecise?(member) }
           else false
           end

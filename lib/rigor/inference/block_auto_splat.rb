@@ -194,7 +194,7 @@ module Rigor
         softened = []
         joined = Array.new(tables.map(&:size).max) do |i|
           column = tables.map { |table| table[i] }
-          next Type::Combinator.untyped if column.any? { |t| t.nil? || t == Type::Combinator.untyped }
+          next Type::Combinator.untyped if column.any? { |t| t.nil? || Type::Combinator.untyped?(t) }
 
           firm = column.reject { |t| nil_literal?(t) }
           next Type::Combinator.union(*column) if firm.empty? || firm.size == column.size

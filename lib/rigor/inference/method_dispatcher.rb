@@ -195,7 +195,7 @@ module Rigor
         rbs_result = RbsDispatch.try_dispatch(context)
         if rbs_result
           record_boundary_cross_if_applicable(receiver_type, method_name, rbs_result, environment)
-          if rbs_result.is_a?(Type::Dynamic) && rbs_result.static_facet.is_a?(Type::Top)
+          if Type::Combinator.untyped?(rbs_result)
             scope&.record_dynamic_origin(call_node, DynamicOrigin::EXPLICIT_UNTYPED)
           end
           return rbs_result
@@ -826,7 +826,7 @@ module Rigor
       end
 
       def rbs_result_untyped?(rbs_result)
-        rbs_result.is_a?(Type::Dynamic) && rbs_result.static_facet.is_a?(Type::Top)
+        Type::Combinator.untyped?(rbs_result)
       end
 
       def rbs_display_for(rbs_result)

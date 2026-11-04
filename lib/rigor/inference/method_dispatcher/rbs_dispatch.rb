@@ -1893,7 +1893,7 @@ module Rigor
           # dress up an absence of evidence as an inference. The variable stays unbound and degrades as it
           # did before, which is the same value anyway.
           def no_static_evidence?(arg)
-            arg.is_a?(Type::Dynamic) && arg.static_facet.is_a?(Type::Top)
+            Type::Combinator.untyped?(arg)
           end
 
           # Issue #303 — the FP guard on the argument-position binding.

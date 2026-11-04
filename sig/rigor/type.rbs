@@ -446,6 +446,7 @@ module Rigor
       def self?.top: () -> Top
       def self?.bot: () -> Bot
       def self?.untyped: () -> Dynamic
+      def self?.untyped?: (Type::t? type) -> bool
       def self?.dynamic: (Type::t static_facet) -> Dynamic
       def self?.nominal_of: (Module | String class_name_or_object, ?type_args: Array[Type::t]) -> Nominal
       def self?.singleton_of: (Module | String class_name_or_object) -> Singleton

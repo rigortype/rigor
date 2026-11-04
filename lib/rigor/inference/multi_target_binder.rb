@@ -302,7 +302,7 @@ module Rigor
         # and a per-slot `T | nil` fires `call.possible-nil-receiver` on the guarded read.
         def join_member_bindings(types, soften_slots)
           untyped = Type::Combinator.untyped
-          return [untyped, false] if types.any? { |type| type == untyped }
+          return [untyped, false] if types.any? { |type| Type::Combinator.untyped?(type) }
 
           firm = types.reject { |type| nil_literal?(type) }
           return [Type::Combinator.union(*types), false] if !soften_slots || firm.empty? || firm.size == types.size

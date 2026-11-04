@@ -3271,7 +3271,7 @@ module Rigor
       # True when the clause's scope `after` still binds `$_` to the `Dynamic[top]` the entry gave it and the clause
       # holds nothing that may set it ({LastLine.may_set?}).
       def last_line_kept?(after, node)
-        after.global(:$_) == Type::Combinator.untyped && !LastLine.may_set?(node.statements, scope)
+        Type::Combinator.untyped?(after.global(:$_)) && !LastLine.may_set?(node.statements, scope)
       end
 
       # Issue #1889 — {#eval_for} with a literal-name `instance_variable_set` in the body joining its value into the
@@ -4032,7 +4032,7 @@ module Rigor
       # signature, unknown receiver) the structural answer stands.
       def for_iteration_element_type(coll_type)
         structural = collection_element_type(coll_type)
-        return structural unless structural.equal?(Type::Combinator.untyped)
+        return structural unless Type::Combinator.untyped?(structural)
 
         block_params = MethodDispatcher.expected_block_param_types(
           receiver_type: coll_type,
@@ -8752,7 +8752,7 @@ module Rigor
       # True for the `Dynamic[Top]` carrier `MethodParameterBinder` leaves on an undeclared parameter — the only
       # bindings ADR-67 WD3 overrides.
       def untyped_binding?(type)
-        type.is_a?(Type::Dynamic) && type.static_facet.is_a?(Type::Top)
+        Type::Combinator.untyped?(type)
       end
 
       def seed_instance_ivars(body_scope, singleton:)

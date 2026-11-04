@@ -119,7 +119,7 @@ module Rigor
         # `Dynamic`, the untyped carrier, a facet that is only `nil`, one wider than {MEMBER_LIMIT}, or one with a
         # member that is not sealed, an untyped member included.
         def facet_members(arg)
-          return nil unless arg.is_a?(Type::Dynamic) && !arg.static_facet.is_a?(Type::Top)
+          return nil unless arg.is_a?(Type::Dynamic) && !Type::Combinator.untyped?(arg)
 
           facet = arg.static_facet
           members = (facet.is_a?(Type::Union) ? facet.members : [facet]).reject { |member| nil_value?(member) }

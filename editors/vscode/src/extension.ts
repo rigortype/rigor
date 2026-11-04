@@ -8,7 +8,6 @@
 
 import { ChildProcess, spawn } from "child_process";
 import * as fs from "fs";
-import * as os from "os";
 import * as path from "path";
 import {
   ConfigurationChangeEvent,
@@ -159,6 +158,8 @@ let pinTimer: NodeJS.Timeout | undefined;
 /** Folders whose pin files were written since the last pin re-sync. */
 const pinsTouched = new Set<string>();
 let pinWatchers: Disposable[] = [];
+/** The (directory, file name) pairs `pinWatchers` watch, and their folders. */
+let pinWatcherSignature = "";
 
 function enqueue(task: () => Promise<void>): Promise<void> {
   const run = lifecycle.then(() => (shuttingDown ? undefined : task()));
@@ -880,28 +881,31 @@ function logStartup(
   );
 }
 
-/** Every file `findPin` reads in one directory, as a watcher glob. */
-const MISE_PIN_GLOB =
-  "{mise.toml,.mise.toml,mise.*.toml,.mise.*.toml,.mise/config.toml," +
-  "mise/config.toml,.config/mise.toml,.config/mise/config.toml," +
-  ".config/mise/conf.d/*.toml,.tool-versions}";
+/** The pin files watched in the project root (and the workspace folder). */
+const ROOT_PIN_FILES = [
+  "Gemfile.lock",
+  "gems.locked",
+  "mise.toml",
+  ".mise.toml",
+  "mise.local.toml",
+  ".tool-versions",
+];
 
 /**
- * Re-resolve a folder when what pins rigortype for it changes: its
- * `Gemfile.lock` / `gems.locked`, the pinned bundle's Gemfile or lockfile,
- * or a mise or asdf file in the project root or a directory above it
- * below the home directory, appearing, disappearing or pinning another
- * version (or another Ruby, for the pinned bundle). Which `rigor` serves
- * it may change, and the server, the task and the commands must keep
- * running the same one. A write that leaves the pin as it was restarts
- * nothing. Rebuilt on every sync, since a setting can move the root.
+ * Re-resolve a folder when what pins rigortype for it changes: one of
+ * `ROOT_PIN_FILES` in the project root or the workspace folder, or the
+ * pinned bundle's Gemfile or lockfile, appearing, disappearing or pinning
+ * another version (or another Ruby, for the pinned bundle). Which `rigor`
+ * serves it may change, and the server, the task and the commands must
+ * keep running the same one. A write that leaves the pin as it was
+ * restarts nothing. Each file is its own non-recursive watcher; the other
+ * files `findPin` reads (`.mise/`, `.config/mise/`, parent directories)
+ * are read when the folder resolves, and a change to them needs
+ * **Rigor: Restart Server**. The watchers are recreated only when the set
+ * of watched files changes.
  */
 function refreshPinWatchers(): void {
-  for (const watcher of pinWatchers) {
-    watcher.dispose();
-  }
-  pinWatchers = [];
-  const home = path.resolve(os.homedir());
+  const wanted = new Map<string, { key: string; dir: string; name: string }[]>();
   for (const folder of workspace.workspaceFolders ?? []) {
     const root = projectRoot(folder);
     if (!root) {
@@ -909,34 +913,47 @@ function refreshPinWatchers(): void {
     }
     const key = folder.uri.toString();
     const gemfile = pinnedBundleGemfile(folder, root).gemfile;
-    const lock = lockfileFor(gemfile);
-    const patterns = [
-      new RelativePattern(Uri.file(root), "{Gemfile.lock,gems.locked}"),
-      new RelativePattern(
-        Uri.file(path.dirname(gemfile)),
-        `{${path.basename(gemfile)},${path.basename(lock)}}`,
-      ),
-    ];
-    // Up to, not including, the home directory or an ancestor of it:
-    // those hold the user's configuration, which `findPin` reads as global.
-    for (let dir = path.resolve(root); ; dir = path.dirname(dir)) {
-      const toHome = path.relative(dir, home);
-      if (toHome === "" || (!toHome.startsWith("..") && !path.isAbsolute(toHome))) {
-        break;
-      }
-      patterns.push(new RelativePattern(Uri.file(dir), MISE_PIN_GLOB));
-      if (path.dirname(dir) === dir) {
-        break;
+    const pairs: [string, string][] = [];
+    for (const dir of new Set([root, folder.uri.fsPath])) {
+      for (const name of ROOT_PIN_FILES) {
+        pairs.push([dir, name]);
       }
     }
-    for (const pattern of patterns) {
-      const watcher = workspace.createFileSystemWatcher(pattern);
-      const touched = (): void => onPinTouched(key);
-      watcher.onDidCreate(touched);
-      watcher.onDidChange(touched);
-      watcher.onDidDelete(touched);
-      pinWatchers.push(watcher);
+    for (const file of [gemfile, lockfileFor(gemfile)]) {
+      pairs.push([path.dirname(file), path.basename(file)]);
     }
+    for (const [dir, name] of pairs) {
+      const id = JSON.stringify([dir, name]);
+      const owners = wanted.get(id) ?? [];
+      owners.push({ key, dir, name });
+      wanted.set(id, owners);
+    }
+  }
+  const signature = JSON.stringify(
+    [...wanted.entries()].map(([id, owners]) => [id, owners.map((o) => o.key)]).sort(),
+  );
+  if (signature === pinWatcherSignature) {
+    return;
+  }
+  pinWatcherSignature = signature;
+  for (const watcher of pinWatchers) {
+    watcher.dispose();
+  }
+  pinWatchers = [];
+  for (const owners of wanted.values()) {
+    const { dir, name } = owners[0];
+    const watcher = workspace.createFileSystemWatcher(
+      new RelativePattern(Uri.file(dir), name),
+    );
+    const touched = (): void => {
+      for (const owner of owners) {
+        onPinTouched(owner.key);
+      }
+    };
+    watcher.onDidCreate(touched);
+    watcher.onDidChange(touched);
+    watcher.onDidDelete(touched);
+    pinWatchers.push(watcher);
   }
 }
 

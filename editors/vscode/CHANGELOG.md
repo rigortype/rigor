@@ -78,8 +78,9 @@ the extension is versioned independently of the `rigortype` gem.
   rejected. `useBundler: never` warns once that a lockfile pin is not
   used. A hung probe is rejected after 20 s and the
   search skips unpinned candidates after 45 s. The result is kept per
-  folder until a restart, a settings change, or a change to what pins
-  `rigortype`. A project `gems.locked` counts as a lockfile pin. The
+  folder until a restart, a settings change, or a change to a pin file
+  in the project root or the pinned bundle (other mise files, such as
+  `.config/mise/` or a parent directory's, need a restart). A project `gems.locked` counts as a lockfile pin. The
   `rigor: check` task is always offered: it waits for a search still
   running, and reports a failed one. On Windows, `rigor.bat` / `.cmd` /
   `.exe` on `PATH` and as mise (`%LOCALAPPDATA%\mise`) or asdf shims.

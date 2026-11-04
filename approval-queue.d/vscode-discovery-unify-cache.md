@@ -25,10 +25,11 @@ dropped were left open.
 
 ## Decision
 
-Cache passing and failing results. A write to the project's `Gemfile.lock` / `gems.locked`, the
-pinned bundle's lockfile, or a `mise.toml` / `.mise.toml` / `.tool-versions` at the project root
-(and every mise config file `findPin` reads, from the project root up to the home directory, and
-the pinned bundle's Gemfile) re-reads the pin; only when it appeared, disappeared, names another version or (for the pinned
+Cache passing and failing results. A write to `Gemfile.lock`, `gems.locked`, `mise.toml`,
+`.mise.toml`, `mise.local.toml` or `.tool-versions` in the project root (or the workspace folder),
+or to the pinned bundle's Gemfile or lockfile, re-reads the pin (one non-recursive watcher per file,
+recreated only when that set changes; the other files `findPin` reads, in `.mise/`, `.config/mise/`
+or parent directories, need **Rigor: Restart Server**); only when it appeared, disappeared, names another version or (for the pinned
 bundle) another Ruby is the folder's
 result forgotten and its server restarted (debounced). A server-affecting setting change, a restart,
 or a managed install or clear forgets all. `rigor.server.bundleGemfile` and `rigor.runtime.rubyPath`

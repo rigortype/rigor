@@ -561,30 +561,6 @@ export function versionManagerRoots(): string[] {
   return [...new Set(roots)];
 }
 
-/**
- * Whether a file lies, after symlinks, inside a version manager's `shims/`
- * or `installs/`: a `rigor` on PATH that mise or asdf put there (`mise
- * activate`) and so serves the project's mise or asdf pin.
- */
-export function underVersionManager(file: string): boolean {
-  let real: string;
-  try {
-    real = fs.realpathSync(file);
-  } catch {
-    return false;
-  }
-  return versionManagerRoots().some((root) => {
-    let base = root;
-    try {
-      base = fs.realpathSync(root);
-    } catch {
-      // A root that does not exist holds nothing.
-      return false;
-    }
-    return ["shims", "installs"].some((sub) => isBelow(real, path.join(base, sub)));
-  });
-}
-
 /** The `--config=` flag, shared by `rigor lsp` and `rigor check`. */
 export function configArgs(folder: WorkspaceFolder): string[] {
   const cfg = workspace.getConfiguration("rigor", folder.uri);

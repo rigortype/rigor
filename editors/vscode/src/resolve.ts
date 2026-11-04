@@ -37,7 +37,6 @@ import {
   pinnedBundleGemfile,
   pinnedBundleLock,
   projectLockPin,
-  underVersionManager,
   findPin,
   projectRoot,
   versionManagerShims,
@@ -296,16 +295,7 @@ async function walk(
     // global pin is the user's default, not the project's, so PATH may
     // still serve it (the managed Rigor may not).
     pin = { kind: "tool", file: found.file };
-    steps.push({
-      candidates: async () => [
-        ...(await shims()),
-        // A `rigor` on PATH that mise or asdf put there serves the pin too.
-        ...pathExecutables("rigor")
-          .found.filter(underVersionManager)
-          .map((command) => ({ kind: "global" as const, command, prefixArgs: [] })),
-      ],
-      final: true,
-    });
+    steps.push({ candidates: shims, final: true });
   } else {
     steps.push({
       candidates: async () => {

@@ -67,9 +67,11 @@ same one.
 A pin is final. A project whose lockfile pins `rigortype` (2 or 3) runs
 that and nothing else, and one whose `mise.toml`, `.mise.toml` or
 `.tool-versions` (or another mise config file, at the project root or
-above it) pins it runs the mise or asdf shim (5), or a `rigor` on
-`PATH` that lies in mise's or asdf's directories, and nothing else: a different Rigor would report
-diagnostics that differ from CI's. When the pin does not run, the
+above it) pins it runs the mise or asdf shim (5) and nothing else: a
+different Rigor would report diagnostics that differ from CI's. On
+Windows that means mise's shim directory (`%LOCALAPPDATA%\mise\shims`,
+or `MISE_DATA_DIR`) must hold `rigor.cmd`, `rigor.bat` or `rigor.exe`;
+this is reasoned from the code, not tested on Windows. When the pin does not run, the
 message says to install it (`bundle install`, or `mise install`)
 instead of falling back. Because `bundle exec rigor` runs any `rigor`
 on `PATH` when the bundle has none installed, a Bundler candidate that
@@ -88,9 +90,15 @@ rejected candidate and why (a probe that hangs is rejected after
 skipped, which can leave out a later one such as the managed Rigor).
 Every folder's search starts at once. A `rigor` that runs but is older than 0.1.6 stops the search
 with an upgrade warning. The result is kept until **Rigor: Restart
-Server**, a settings change, or a change to what pins `rigortype`
-(the files above appearing, disappearing or pinning another version),
-which restarts that folder's server. The `rigor: check` task is always
+Server**, a settings change, or a change to what pins `rigortype`,
+which restarts that folder's server. Only `Gemfile.lock`, `gems.locked`,
+`mise.toml`, `.mise.toml`, `mise.local.toml` and `.tool-versions` in the
+project root (and the workspace folder), and the pinned bundle's
+`Gemfile` and lockfile, are watched, and only a pin that appears,
+disappears or names another version (or Ruby) restarts anything. The
+other mise files (`.mise/`, `.config/mise/`, parent directories) are
+read when the folder is resolved; after changing one, run **Rigor:
+Restart Server**. The `rigor: check` task is always
 there: while the search is still running it waits for it, and when the
 search found no `rigor` that runs it prints why and fails.
 **Rigor: Check Workspace** names every folder whose search failed.

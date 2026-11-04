@@ -38,6 +38,12 @@ module Rigor
 
         # `definition` narrowed to the overloads that take the call's shape (the definition itself when every
         # overload does), or nil when none does.
+        #
+        # Nil too when more than one overload takes the shape and one of them has a parameter that mentions `self`
+        # (`(self other)`, `(Array[self] others)`): which of them the call reaches depends on whether an argument is
+        # the receiver's kind, and the interface names no class acceptance could decide that against. Read as a
+        # precise overload, `x.same(1)` against `(self) -> Integer | (Integer) -> String` answered the first one's
+        # `Integer`; the call reads `untyped` instead.
         def accepting(definition, args, block:, call_node:)
           shape = call_shape(args, call_node)
           return nil if shape.nil?
@@ -45,12 +51,31 @@ module Rigor
           positional, keywords = shape
           defs = definition.defs.select { |type_def| takes?(type_def.type, positional, keywords, block) }
           return nil if defs.empty?
+          return nil if defs.size > 1 && defs.any? { |type_def| self_parameter?(type_def.type.type) }
 
           defs.size == definition.defs.size ? definition : definition.update(defs: defs)
         end
 
+        # True when a parameter type of `function` mentions RBS `self`, at any depth.
+        def self_parameter?(function)
+          return false unless function.respond_to?(:required_positionals)
+
+          params = function.required_positionals + function.optional_positionals + function.trailing_positionals +
+                   function.required_keywords.values + function.optional_keywords.values
+          params << function.rest_positionals if function.rest_positionals
+          params << function.rest_keywords if function.rest_keywords
+          params.any? { |param| mentions_self?(param.type) }
+        end
+
+        def mentions_self?(rbs_type)
+          return true if rbs_type.is_a?(RBS::Types::Bases::Self)
+
+          rbs_type.each_type { |inner| return true if mentions_self?(inner) }
+          false
+        end
+
         # True when the call's block is a block-pass whose value may be nil at runtime, so the call may run
-        # block-less: `&blk` where `blk` is a nil-bearing union or a `Dynamic`, and an anonymous `&`, which forwards
+        # block-less: `&blk` unless `blk` is provably not nil ({.never_nil?}), and an anonymous `&`, which forwards
         # the enclosing method's own block. `&:sym` is never nil.
         def nilable_block_pass?(call_node, scope)
           block = call_node.respond_to?(:block) ? call_node.block : nil
@@ -61,9 +86,26 @@ module Rigor
           return false if expression.is_a?(Prism::SymbolNode)
           return true if scope.nil?
 
-          type = scope.type_of(expression)
-          members = type.is_a?(Type::Union) ? type.members : [type]
-          members.any? { |member| member.is_a?(Type::Dynamic) || nil_constant?(member) }
+          !never_nil?(scope.type_of(expression))
+        end
+
+        # The classes a value of which may be `nil`: `NilClass` and its ancestors.
+        NIL_ANCESTORS = %w[NilClass Object BasicObject Kernel].freeze
+        private_constant :NIL_ANCESTORS
+
+        # True only for a type that provably excludes `nil`: a non-nil literal, an instance of a class `nil` is not
+        # (a `Proc`, a `Method`), a class object, or a shape. `top`, `Dynamic`, `Object` and anything this does not
+        # list may be `nil` (ADR-130 WD3, as amended).
+        def never_nil?(type)
+          case type
+          when Type::Union then type.members.all? { |member| never_nil?(member) }
+          when Type::Constant then !type.value.nil?
+          when Type::Nominal then !NIL_ANCESTORS.include?(type.class_name)
+          when Type::Refined, Type::Difference then never_nil?(type.base)
+          when Type::Singleton, Type::Tuple, Type::HashShape, Type::BoundMethod, Type::IntegerRange, Type::FloatRange,
+               Type::DataInstance, Type::StructInstance, Type::DataClass, Type::StructClass then true
+          else false
+          end
         end
 
         # `[positional count, keyword names or nil]`, or nil for a shape the AST cannot state, which includes a keyword
@@ -127,10 +169,6 @@ module Rigor
 
         def keywords?(function)
           !function.required_keywords.empty? || !function.optional_keywords.empty? || !function.rest_keywords.nil?
-        end
-
-        def nil_constant?(type)
-          type.is_a?(Type::Constant) && type.value.nil?
         end
       end
     end

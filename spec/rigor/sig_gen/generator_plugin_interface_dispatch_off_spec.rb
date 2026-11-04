@@ -54,4 +54,42 @@ RSpec.describe Rigor::SigGen::Generator do
 
     expect(prepare_row(candidates).rbs).to eq("def prepare: () -> nil")
   end
+
+  # `--params=observed`: the observation collector analyses the test tree with dispatch off too, so an argument read
+  # through an interface member is not written into a parameter type.
+  describe "observed parameters" do
+    def observed_types
+      write_fixture("sig/maker.rbs", <<~RBS)
+        module Rigor
+          module Plugin
+            interface _ProbeBox
+              def get: () -> Integer
+            end
+          end
+        end
+
+        class Maker
+          def self.make: () -> Rigor::Plugin::_ProbeBox
+        end
+      RBS
+      write_fixture("lib/target.rb", "class Target\n  def take(value)\n    value.inspect\n    1\n  end\nend\n")
+      spec = write_fixture("spec/target_spec.rb", "Target.new.take(Maker.make.get)\n")
+      configuration = Rigor::Configuration.new(
+        Rigor::Configuration::DEFAULTS.merge("paths" => [File.join(tmpdir, "lib")],
+                                             "signature_paths" => [File.join(tmpdir, "sig")])
+      )
+      observations = Rigor::SigGen::ObservationCollector.new(configuration: configuration, paths: [spec]).collect
+      observations.fetch(["Target", :take]).flat_map(&:positional).map(&:erase_to_rbs)
+    end
+
+    it "records no argument type read through a plugin-interface member" do
+      expect(observed_types).to eq(["untyped"])
+    end
+
+    it "would record the member's return with dispatch on" do
+      allow(Rigor::Inference::MethodDispatcher::RbsDispatch).to receive(:without_interface_dispatch).and_yield
+
+      expect(observed_types).to eq(["Integer"])
+    end
+  end
 end

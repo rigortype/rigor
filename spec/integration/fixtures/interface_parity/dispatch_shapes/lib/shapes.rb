@@ -2,7 +2,7 @@
 # as master reads a call on `Dynamic[top]`, so only the calls some overload takes are marked as declared-member calls.
 class Shapes
   # Block presence, and a block-pass that may be nil.
-  def block_shape(x, blk, sure)
+  def block_shape(x, blk, sure, top_blk, object_blk)
     Rigor.dump_type(x.blockful { |i| i }) # parity: declared-member => Integer
     Rigor.dump_type(x.blockful)
     Rigor.dump_type(x.blockless) # parity: declared-member => Integer
@@ -17,6 +17,10 @@ class Shapes
     Rigor.dump_type(x.blockful(&blk))
     # A block-pass that is never nil keeps the ordinary block shape, and so does `&:sym`.
     Rigor.dump_type(x.overloaded(&sure)) # parity: declared-member => String
+    # A `top` or `Object` value may be nil, so it takes both shapes too.
+    Rigor.dump_type(x.overloaded(&top_blk))
+    Rigor.dump_type(x.overloaded(&object_blk))
+    Rigor.dump_type(x.agree(&top_blk)) # parity: declared-member => Integer
     Rigor.dump_type(x.overloaded(&:to_s)) # parity: declared-member => String
     # A block literal binds its parameters only through an overload that takes the call.
     x.blk_pos { |s| Rigor.dump_type(s) }
@@ -47,7 +51,10 @@ class Shapes
   def self_instance(x)
     Rigor.dump_type(x.me) # parity: declared-member => Dynamic[Rigor::Plugin::_ProbeShapes]
     Rigor.dump_type(x.me.blockless) # parity: declared-member => Integer
-    Rigor.dump_type(x.same(1)) # parity: declared-member => Integer
+    # A `self` parameter beside another overload leaves which one the call reaches open, nested or not.
+    Rigor.dump_type(x.same(1))
+    Rigor.dump_type(x.same_nested(1))
+    Rigor.dump_type(x.only_self(1)) # parity: declared-member => Integer
     x.yield_self_value { |s| Rigor.dump_type(s) } # parity: declared-member => Dynamic[Rigor::Plugin::_ProbeShapes]
   end
 

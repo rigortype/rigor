@@ -15,6 +15,9 @@ module Rigor
       def yield_self_value: () { (self) -> void } -> Integer
       def same: (self other) -> Integer
               | (Integer other) -> String
+      def same_nested: (Array[self] others) -> Integer
+                     | (Integer other) -> String
+      def only_self: (self other) -> Integer
       def blk_pos: (Integer a) { (String) -> void } -> Integer
       def agree: () -> Integer
                | () { (Integer) -> void } -> Integer
@@ -36,7 +39,7 @@ module Rigor
 end
 
 class Shapes
-  def block_shape: (Rigor::Plugin::_ProbeShapes x, (^(Integer) -> void)? blk, ^(Integer) -> void sure) -> untyped
+  def block_shape: (Rigor::Plugin::_ProbeShapes x, (^(Integer) -> void)? blk, ^(Integer) -> void sure, top top_blk, Object object_blk) -> untyped
   def arity: (Rigor::Plugin::_ProbeShapes x, Array[Integer] xs, Hash[Symbol, Integer] opts) -> untyped
   def self_instance: (Rigor::Plugin::_ProbeShapes x) -> untyped
   def generics: (Rigor::Plugin::_ProbeBox[String] box) -> untyped

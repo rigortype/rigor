@@ -157,13 +157,22 @@ RSpec.describe "ADR-130 interface parity (behavioural gate)" do
         expect(candidate).to eq(baseline)
       end
 
-      it "#{fixture}: #{mode} answers each declared-member call as its mark says" do
+      # A marked line holds exactly the baseline's rows there, with one `dump.type` row whose answer is the mark's
+      # `T`, so no other row on a marked line can hide behind the mark.
+      it "#{fixture}: #{mode} answers each declared-member call as its mark says, and nothing else differs there" do
         dir = fixture_dir(fixture)
         answers = InterfaceParity.declared_answers(dir)
-        rows = JSON.parse(run_in(mode, dir)).select { |row| answers.key?([row["path"], row["line"]]) }
-        read = rows.to_h { |row| [[row["path"], row["line"]], row["message"].delete_prefix("dump_type: ")] }
+        baseline = JSON.parse(run_in(:erasure, dir))
+        candidate = JSON.parse(run_in(mode, dir))
+        on = ->(rows, key) { rows.select { |row| [row["path"], row["line"]] == key } }
+        unanswered = ->(rows) { rows.map { |row| row["rule"] == "dump.type" ? row.merge("message" => nil) : row } }
 
-        expect(read).to eq(answers)
+        InterfaceParity.declared_lines(dir).each do |key|
+          dumps = on.call(candidate, key).select { |row| row["rule"] == "dump.type" }
+
+          expect(dumps.map { |row| row["message"] }).to eq(["dump_type: #{answers.fetch(key)}"]), key.inspect
+          expect(unanswered.call(on.call(candidate, key))).to eq(unanswered.call(on.call(baseline, key))), key.inspect
+        end
       end
     end
   end

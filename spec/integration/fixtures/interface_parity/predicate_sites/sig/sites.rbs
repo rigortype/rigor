@@ -33,4 +33,5 @@ class Sites
   def type_variable: (Rigor::Plugin::_ProbeS x) -> untyped
   def explicit_untyped: (Rigor::Plugin::_ProbeS x) -> untyped
   def wrap: [T] (T value) -> Array[T]
+  def ident: [T] (T value) -> T
 end

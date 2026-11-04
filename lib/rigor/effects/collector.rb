@@ -2,6 +2,7 @@
 
 require_relative "../type"
 require_relative "../inference/origin_lookup"
+require_relative "../typing_state"
 require_relative "attribution"
 require_relative "envelope_index"
 require_relative "file_collection"
@@ -24,8 +25,13 @@ module Rigor
     # `dynamic_origins` cause the typer already recorded. With no `effects:` block nothing calls
     # {collect_for}, `@active_count` stays zero, and `rigor check` is byte-identical.
     module Collector
-      KEY = :__rigor_effects_collector__
-      private_constant :KEY
+      # ADR-129 WD1 — the installed accumulator is a Frame whose contents are a Resource: each record into it touches.
+      # The activation count below is a process switch, outside the typing state (WD5).
+      ACCUMULATOR = TypingState.frame(
+        :effects_collector,
+        contents: :resource, reason: "the accumulator a file's collection installs; each call site records into it"
+      )
+      private_constant :ACCUMULATOR
 
       # What one call site decided, as the typer saw it.
       #
@@ -97,17 +103,18 @@ module Rigor
       # site imports must not depend on which process typed the file.
       def collect_for(path, attribution: Attribution.empty, envelopes: EnvelopeIndex.empty,
                       plugin_facts: PluginFacts.empty, unit_key: nil, unit_owner: nil)
-        previous = Thread.current[KEY]
         accumulator = Accumulator.new(path.to_s, attribution: attribution, envelopes: envelopes,
                                                  plugin_facts: plugin_facts, unit_key: unit_key,
                                                  unit_owner: unit_owner)
-        Thread.current[KEY] = accumulator
-        @mutex.synchronize { @active_count += 1 }
-        yield
-        build(accumulator)
-      ensure
-        Thread.current[KEY] = previous
-        @mutex.synchronize { @active_count -= 1 }
+        TypingState.current.with(ACCUMULATOR, accumulator) do
+          @mutex.synchronize { @active_count += 1 }
+          begin
+            yield
+            build(accumulator)
+          ensure
+            @mutex.synchronize { @active_count -= 1 }
+          end
+        end
       end
 
       def active?
@@ -117,8 +124,12 @@ module Rigor
       # The parsed root of the file being analyzed. Recorded by the analysis body once the parse is known
       # to have succeeded, so the scan runs over exactly what the typer saw.
       def record_root(root)
-        accumulator = Thread.current[KEY]
-        accumulator.root = root if accumulator && accumulator.root.nil?
+        state = TypingState.current
+        accumulator = state[ACCUMULATOR]
+        return unless accumulator
+
+        state.touch(ACCUMULATOR)
+        accumulator.root = root if accumulator.root.nil?
       end
 
       # One call site's dispatch decision. `receiver` is the type the typer computed for the receiver and
@@ -127,8 +138,12 @@ module Rigor
       # The `scope.source_path` guard matters: inter-procedural inference re-types a *callee's* body while
       # the caller's file is being analyzed, and those nodes belong to the callee's own file collection.
       def record_call(node, receiver, scope)
-        accumulator = Thread.current[KEY]
+        state = TypingState.current
+        accumulator = state[ACCUMULATOR]
         return if accumulator.nil? || accumulator.path != scope.source_path
+
+        # A read of the contents, so a touch even when the site is already recorded (ADR-129 WD3).
+        state.touch(ACCUMULATOR)
         # First write wins, so a re-query has nothing to add — and asking here rather than inside
         # {Accumulator#record} is what stops it paying for the `Data` and the origin lookup below.
         return if accumulator.recorded?(node)
@@ -147,9 +162,11 @@ module Rigor
 
       # The typer's fallback verdict: no tier resolved this call.
       def record_unresolved(node, source_path)
-        accumulator = Thread.current[KEY]
+        state = TypingState.current
+        accumulator = state[ACCUMULATOR]
         return if accumulator.nil? || accumulator.path != source_path
 
+        state.touch(ACCUMULATOR)
         accumulator.mark_unresolved(node)
       end
 

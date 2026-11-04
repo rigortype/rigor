@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "../typing_state"
+
 module Rigor
   module Inference
     # Thread-local event recorder behind `rigor trace`: while a block runs under {record}, the inference engine
@@ -13,8 +15,13 @@ module Rigor
     # hot paths (`ExpressionTyper#type_of`, `Scope#with_local`, `Type::Combinator.union`, `MethodDispatcher.dispatch`)
     # each guard their emit behind {active?}, so a normal (non-tracing) run pays one integer comparison.
     module FlowTracer
-      KEY = :__rigor_flow_tracer__
-      private_constant :KEY
+      # ADR-129 WD1 — the installed recorder is a Frame whose contents are a Resource: each emit into it touches. It is
+      # an output the engine never reads back, and the activation count below is a process switch, outside the typing
+      # state (WD5).
+      RECORDER = TypingState.frame(
+        :flow_tracer, contents: :resource, reason: "the recorder a trace installs; each emit records into it"
+      )
+      private_constant :RECORDER
 
       # One animation-relevant moment.
       #
@@ -95,15 +102,16 @@ module Rigor
       # Activates recording on the current thread for the duration of the block and returns the frozen event list.
       # Nests safely; restores the previous recorder on exit.
       def record
-        previous = Thread.current[KEY]
         recorder = Recorder.new
-        Thread.current[KEY] = recorder
-        @mutex.synchronize { @active_count += 1 }
-        yield
-        recorder.events.freeze
-      ensure
-        Thread.current[KEY] = previous
-        @mutex.synchronize { @active_count -= 1 }
+        TypingState.current.with(RECORDER, recorder) do
+          @mutex.synchronize { @active_count += 1 }
+          begin
+            yield
+            recorder.events.freeze
+          ensure
+            @mutex.synchronize { @active_count -= 1 }
+          end
+        end
       end
 
       # Plain integer read (GVL-atomic) — the disabled fast path.
@@ -114,20 +122,28 @@ module Rigor
       # Brackets one expression-typing recursion. Falls through to the bare block when the current thread is not
       # recording (another thread may have flipped {active?}).
       def trace_node(node, &)
-        recorder = Thread.current[KEY]
+        recorder = recording
         return yield unless recorder
 
         recorder.node(node, &)
       end
 
+      # The recorder installed on this thread, touched because the caller is about to record into it, or nil.
+      def recording
+        state = TypingState.current
+        recorder = state[RECORDER]
+        state.touch(RECORDER) if recorder
+        recorder
+      end
+
       # `Scope#with_local` — the moment a local enters the scope.
       def bind(name, type)
-        Thread.current[KEY]&.emit(:bind, data: { name: name.to_s, type: describe(type) })
+        recording&.emit(:bind, data: { name: name.to_s, type: describe(type) })
       end
 
       # `Type::Combinator.union` — the moment branch types merge (including degenerate collapses like `1 | 1 → 1`).
       def union(members, result)
-        Thread.current[KEY]&.emit(
+        recording&.emit(
           :union,
           data: { members: members.map { |m| describe(m) }.freeze, type: describe(result) }
         )
@@ -136,7 +152,7 @@ module Rigor
       # `MethodDispatcher.dispatch` — resolution or the fail-soft `nil` ("no rule matched"; the caller will widen
       # to `Dynamic[Top]`).
       def dispatch(receiver:, method_name:, args:, result:, location: nil)
-        recorder = Thread.current[KEY]
+        recorder = recording
         return unless recorder
 
         recorder.emit(

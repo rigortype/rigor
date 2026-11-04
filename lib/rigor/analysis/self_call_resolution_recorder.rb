@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "../typing_state"
+
 module Rigor
   module Analysis
     # ADR-24 slice 4a — records every *implicit-self* method call the inference engine could not resolve to any
@@ -25,8 +27,13 @@ module Rigor
     # Modelled on {DependencyRecorder}: process-thread-local accumulator, a cheap disabled fast path, and a
     # frozen snapshot for consumers.
     module SelfCallResolutionRecorder
-      KEY = :__rigor_self_call_resolution_recorder__
-      private_constant :KEY
+      # ADR-129 WD1 — the installed accumulator is a Frame whose contents are a Resource: each record into it touches.
+      # The activation count below is a process switch, outside the typing state (WD5).
+      RECORDER = TypingState.frame(
+        :self_call_resolution_recorder,
+        contents: :resource, reason: "the consumer's accumulator a recording installs; each unresolved call records"
+      )
+      private_constant :RECORDER
 
       # One unresolved implicit-self call. `class_name` is the receiver's statically known class (the
       # enclosing `self` type); `method_name` the called name; `node` the Prism `CallNode` (held in-memory so
@@ -69,15 +76,16 @@ module Rigor
       # Activates recording for `consumer` (the path being analyzed) for the duration of the block and returns
       # the frozen {Record}. Nests safely; restores the previous recorder on exit.
       def record_for(consumer)
-        previous = Thread.current[KEY]
         accumulator = Accumulator.new(consumer.to_s)
-        Thread.current[KEY] = accumulator
-        @mutex.synchronize { @active_count += 1 }
-        yield
-        accumulator.snapshot
-      ensure
-        Thread.current[KEY] = previous
-        @mutex.synchronize { @active_count -= 1 }
+        TypingState.current.with(RECORDER, accumulator) do
+          @mutex.synchronize { @active_count += 1 }
+          begin
+            yield
+            accumulator.snapshot
+          ensure
+            @mutex.synchronize { @active_count -= 1 }
+          end
+        end
       end
 
       # Plain integer read (GVL-atomic) — no `Thread.current` lookup on the disabled fast path.
@@ -88,9 +96,11 @@ module Rigor
       # Records one unresolved implicit-self call. No-op when no consumer is active on this thread (another
       # thread may have flipped {active?}).
       def record(class_name:, method_name:, node:, path:, line:, column:)
-        accumulator = Thread.current[KEY]
+        state = TypingState.current
+        accumulator = state[RECORDER]
         return if accumulator.nil?
 
+        state.touch(RECORDER)
         accumulator.add(
           UnresolvedSelfCall.new(
             class_name: class_name.to_s,

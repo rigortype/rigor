@@ -55,14 +55,8 @@ RSpec.describe Rigor::RunScopedSlots do
   let(:not_run_scoped) do
     {
       __rigor_acceptance_unread_shape_refused__: "frame flag, installed and restored around a block",
-      __rigor_dependency_capture_stack__: "frame slot of the ADR-46 dependency recorder",
-      __rigor_dependency_recorder__: "frame slot of the ADR-46 dependency recorder",
-      __rigor_effects_collector__: "frame slot of the effects collector",
-      __rigor_flow_tracer__: "frame slot of the flow tracer",
       __rigor_project_round__: "a Debouncer key in the language server, not a thread-local",
-      __rigor_self_call_resolution_recorder__: "frame slot of the self-call resolution recorder",
       __rigor_typing_state__: "ADR-129 TypingState, whose own run-scoped slots release empties",
-      rigor_memo_audit_suspended: "frame flag of MemoAudit, installed and restored around a recomputation",
       rigor_cache_file_digest_memo: "Cache::FileDigest.with_run frame",
       rigor_cache_file_stat_memo: "Cache::FileDigest.with_run frame",
       rigor_cache_recording_instant: "Cache::FileDigest.with_run frame",

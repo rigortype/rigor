@@ -186,14 +186,14 @@ RSpec.describe Rigor::TypingState do
   describe "a real run's slot accesses" do
     let(:audited_class) do
       Class.new(described_class::State) do
-        attr_reader :violations, :reached, :accesses, :break_touchers
+        attr_reader :violations, :reached, :accesses, :touchers
 
         def initialize
           super
           @violations = []
           @reached = Set.new
           @accesses = Hash.new(0)
-          @break_touchers = Set.new
+          @touchers = Hash.new { |hash, name| hash[name] = Set.new }
         end
 
         def [](slot)
@@ -224,9 +224,7 @@ RSpec.describe Rigor::TypingState do
 
         def touch(slot)
           check(slot, :touch) { |s| s.kind == :resource || s.contents }
-          if Rigor::TypingState.slots[slot].name == :break_sink
-            @break_touchers << caller_locations(1, 1).first.base_label
-          end
+          @touchers[Rigor::TypingState.slots[slot].name] << toucher
           super
         end
 
@@ -262,6 +260,11 @@ RSpec.describe Rigor::TypingState do
         end
 
         private
+
+        # The first caller outside `TypingState` and this spec: the engine method that touched.
+        def toucher
+          caller_locations(2, 8).find { |location| !location.path.end_with?("typing_state.rb", "_spec.rb") }&.base_label
+        end
 
         def check(slot, access)
           declared = Rigor::TypingState.slots[slot]
@@ -398,6 +401,66 @@ RSpec.describe Rigor::TypingState do
       end
     end
 
+    # The audited state after a run with every recorder on: ADR-46 dependency recording (nested inside an outer
+    # window, so each file's window suspends it), the self-call recorder, an `effects:` block and a flow trace.
+    def audited_recording_run
+      audited = audited_class.new
+      key = described_class.const_get(:STATE_KEY)
+      previous = Thread.current[key]
+      Thread.current[key] = audited
+      audited.open_capture
+      Rigor::Inference::FlowTracer.record do
+        Rigor::Analysis::DependencyRecorder.record_for("outer.rb") { analyze_recorded_probe }
+      end
+      refused, = audited.close_capture
+      { state: audited, refused: refused }
+    ensure
+      Thread.current[key] = previous
+    end
+
+    def analyze_recorded_probe
+      Dir.mktmpdir do |dir|
+        paths = recorded_probe_files.map do |name, text|
+          File.join(dir, name).tap { |path| File.write(path, text) }
+        end
+        configuration = Rigor::Configuration.new(
+          Rigor::Configuration::DEFAULTS.merge("paths" => paths, "parallel" => { "workers" => 0 }, "effects" => {})
+        )
+        runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil,
+                                             record_dependencies: true, record_self_calls: true)
+        guarded_run(runner, paths)
+      end
+    end
+
+    # A cross-file read (dependencies), a repeated callee (a replayed return-memo hit), a wrong-arity call (a withheld
+    # read set), an external mixin (a resolution chain's prebuilt hook keys) and an unresolved implicit-self call (the
+    # self-call recorder).
+    def recorded_probe_files
+      {
+        "base.rb" => <<~RUBY,
+          class Base
+            def greet = "hi"
+            def twice(n) = n * 2
+          end
+        RUBY
+        "child.rb" => <<~RUBY
+          class Child < Base
+            include Comparable
+            extend Forwardable
+
+            def run
+              greet.upcase
+              missing_helper
+            end
+
+            def again = [twice(1), twice(1), Base.new.twice(1, 2)]
+          end
+          Child.new.run
+          Child.new.again
+        RUBY
+      }
+    end
+
     # The journal records as `[kind, slot name]` pairs.
     def journaled(records)
       records.each_slice(4).map { |kind, slot, _key, _value| [kind, described_class.slots[slot].name] }.uniq
@@ -428,7 +491,7 @@ RSpec.describe Rigor::TypingState do
     # A `begin` rewrites the `break`s it recorded itself: `restoring_error_info` and `carry_jumps_through_ensure` touch
     # the break sink as well as the `break` that records into it.
     it "touches the break sink where a begin rewrites the breaks it recorded" do
-      expect(audited_run.fetch(:state).break_touchers)
+      expect(audited_run.fetch(:state).touchers[:break_sink])
         .to include("eval_break", "restoring_error_info", "carry_jumps_through_ensure")
     end
 
@@ -442,6 +505,23 @@ RSpec.describe Rigor::TypingState do
       )
     end
 
+    # Review of #2804 — each recorder's contents are a Resource in stage 1, so a record into them refuses the capture.
+    it "touches each recorder's contents as a recording, effects and tracing run records into them" do
+      run = audited_recording_run
+      audited = run.fetch(:state)
+
+      expect(audited.violations).to be_empty
+      expect(run.fetch(:refused)).to be(true)
+      touchers = audited.touchers
+      expect(touchers[:dependency_recorder]).to include("read_site", "read_name", "read_keys", "file_chain_once",
+                                                        "note_captured", "replay", "record_for")
+      expect(touchers[:dependency_capture_stack]).to include("capture", "withhold", "replay", "read_site", "read_name",
+                                                             "read_keys")
+      expect(touchers[:effects_collector]).to include("record_root", "record_call", "record_unresolved")
+      expect(touchers[:flow_tracer]).to include("recording")
+      expect(touchers[:self_call_resolution_recorder]).to include("record")
+    end
+
     # WD3: a return-memo hit neither reads nor writes the ADR-55 summaries; only a compute takes them.
     it "takes the ADR-55 summaries once per return-memo compute and never on a hit" do
       run = audited_run
@@ -452,6 +532,22 @@ RSpec.describe Rigor::TypingState do
       expect(run.fetch(:state).accesses[%i[user_method_return_summary acquire]])
         .to eq(counts.fetch(Rigor::Inference::BudgetTrace::MEMO_ENTRIES) - hits)
     end
+  end
+
+  # Review of #2804 — each recorder a process switch installs is restored on the way out, and the slot holds it inside.
+  it "restores the effects, self-call, dependency and tracer frames on the way out" do
+    inside = {}
+    Rigor::Effects::Collector.collect_for("probe.rb") { inside[:effects_collector] = typing_slot(:effects_collector) }
+    Rigor::Analysis::SelfCallResolutionRecorder.record_for("probe.rb") do
+      inside[:self_call_resolution_recorder] = typing_slot(:self_call_resolution_recorder)
+    end
+    Rigor::Analysis::DependencyRecorder.record_for("probe.rb") do
+      inside[:dependency_recorder] = typing_slot(:dependency_recorder)
+    end
+    Rigor::Inference::FlowTracer.record { inside[:flow_tracer] = typing_slot(:flow_tracer) }
+
+    expect(inside.values).to all(satisfy { |value| !value.nil? })
+    expect(inside.keys.map { |name| typing_slot(name) }).to all(be_nil)
   end
 
   # Review of #2796 — a typer or an evaluator caches the state it first reads, so one kept across threads would write

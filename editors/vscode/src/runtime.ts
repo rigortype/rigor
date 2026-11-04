@@ -1769,7 +1769,7 @@ export function registerRuntimeCommands(
   );
 }
 
-async function checkForUpdate(output: OutputChannel): Promise<void> {
+export async function checkForUpdate(output: OutputChannel): Promise<void> {
   const installed = installedVersions();
   const requested = requestedVersion();
   if (requested === DEV_VERSION && !devGemPath) {

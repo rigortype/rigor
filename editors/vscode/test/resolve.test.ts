@@ -78,6 +78,14 @@ describe("explicit rigor.server.path", () => {
     assert.equal(res.managedReachable, false);
   });
 
+  it("strips one pair of surrounding quotes (the pre-#2743 Windows workaround)", async () => {
+    const explicit = fakeRigor(path.join(sb.dir, "own dir", "rigor"), "0.4.7");
+    stub.set("rigor.server.path", `"${explicit}"`);
+    const res = await walk();
+    assert.equal(res.server.command, explicit);
+    assert.equal(res.probe.ok, true);
+  });
+
   it("wins over a project lockfile pin", async () => {
     write(path.join(sb.project, "Gemfile.lock"), lockfile("0.4.7"));
     fakeBundle("0.4.7");

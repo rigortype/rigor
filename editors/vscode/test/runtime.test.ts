@@ -9,6 +9,7 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
 import {
+  checkForUpdate,
   classifyBuildFailure,
   dedupeCandidates,
   findRuby,
@@ -348,6 +349,14 @@ describe("miseLogActive", () => {
     });
   }
 
+  it("an earlier step's check mark does not end an install still running", () => {
+    assert.equal(miseLogActive("mise ruby@4.0.1 ✓ installed deps\nBuilding ruby...\n", 1000), true);
+  });
+
+  it("a compiler Error: line followed by more output does not end the install", () => {
+    assert.equal(miseLogActive("Error: unused variable x\nmake[2]: Leaving directory\n\n", 1000), true);
+  });
+
   it("the word error in the middle of a build line is not an ending", () => {
     assert.equal(miseLogActive("checking for error.h... yes\ncc -Werror -c x.c", 1000), true);
   });
@@ -515,5 +524,26 @@ describe("prune", () => {
     write(path.join(root(), "stray", "file"));
     prune("0.4.9");
     assert.deepEqual(fs.readdirSync(root()).sort(), [".lock", "0.4.9", "stray"]);
+  });
+});
+
+describe("checkForUpdate with rigor.runtime.version dev", () => {
+  const info = (): string[] => stub.messages.filter((m) => m.level === "info").map((m) => m.text);
+
+  it("a production window says dev is only valid in an extension development host", async () => {
+    initRuntime(fakeContext(path.join(sb.dir, "storage"), ExtensionMode.Production));
+    stub.set("rigor.runtime.version", "dev");
+    await checkForUpdate(fakeOutput() as never);
+    assert.equal(info().length, 1);
+    assert.match(info()[0], /only valid in an extension development host/);
+    assert.doesNotMatch(info()[0], /development install from a local checkout/);
+  });
+
+  it("a development host with the override keeps the development-install message", async () => {
+    process.env.RIGOR_VSCODE_RUNTIME_GEM_PATH = sb.dir;
+    initRuntime(fakeContext(path.join(sb.dir, "storage"), ExtensionMode.Development));
+    stub.set("rigor.runtime.version", "dev");
+    await checkForUpdate(fakeOutput() as never);
+    assert.match(info()[0], /development install from a local checkout/);
   });
 });

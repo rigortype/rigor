@@ -131,7 +131,11 @@ Base figures:
     configurations together: 101K–236K, 158K–652K and 119K–394K.
   - Types mismatched **0** times. No recompute was refused, and none moved the id.
   - The harness neither logged nor validated Table reads, so these hit counts are an upper bound. In particular, an
-    entry whose computation read a key ABSENT and then wrote it would invalidate itself under read validation.
+    entry whose computation read a key ABSENT and then wrote it would invalidate itself under plain read
+    validation; ADR-129's read-through-cache rule exists for that case.
+  - The harness refused on resource writes only. A rule that also refuses every resource read measured −24.2%
+    allocations on Mastodon instead of −30.1% (the round-2 review of ADR-129). ADR-129 states the two read
+    exemptions that make the writes-only count its rule.
 - A recompute's write list differed from the stored one 416, 846 and 1,104 times under `rmc_a` (Mastodon, `lib`,
   Redmine). In the 60 samples per run, the lists differed only in the identity of the target scope. The final table
   state is what the comparison below uses.

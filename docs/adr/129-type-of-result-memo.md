@@ -55,13 +55,16 @@ deterministic axis:
 
 | Memo opened in | Mastodon | Redmine | Rigor's `lib` |
 | --- | ---: | ---: | ---: |
-| rule walk | −19.0% | −10.9% | −2.0% |
+| rule walk | −18.9% | −10.9% | −1.9% |
 | rule walk + main pass + callee bodies | −30.1% | −18.1% | −5.1% |
 
 - Live CPU was noise on the shared host (load average about 70 on 12 cores).
-- A count-mode projection puts the main pass and callee bodies at 7.1% of Mastodon's CPU beyond the rule walk, 4.3%
-  of Redmine's and 3.1% of `lib`'s. The projection is gross: it does not subtract lookup and store costs, and it
+- A count-mode projection puts the main pass and callee bodies at 7.1% of Mastodon's CPU beyond the rule walk, 4.2%
+  of Redmine's and 3.0% of `lib`'s. The projection is gross: it does not subtract lookup and store costs, and it
   overstated the rule walk against that phase's live figure.
+- These figures are for the refusal rule WD3 states: a Resource write refuses, and so does a Resource read, except
+  the two read exemptions it names. A stricter rule where every read refuses measured −24.2% on Mastodon (9.0
+  points beyond the rule walk, about 5.1% projected).
 - Diagnostics were identical in every run.
 - A shadow mode recomputed every hit with the `type_of` memo suspended and every other memo live, and compared the
   type and the final table state. Under the refusal rule chosen below it checked 101K (Mastodon), 158K (`lib`) and
@@ -92,26 +95,33 @@ list kept beside the memo. State without a kind fails the gate.
   | --- | --- | --- | --- |
   | **Frame** | an input installed for a dynamic extent, restored exactly, and frozen while installed | in the key, through the state id | yield and forwarded-argument frames, threaded flag, repeat depth, the key-presence walk's installation, Acceptance refusal, writer scope, unentered evaluator, tracer and effects switches, sink presence |
   | **Table** | a keyed store typing writes and may read back | reads logged and validated on a hit; writes logged and replayed | `dynamic_origins`, `void_origins`, `plugin_typed_calls`, `optimistic_origins`, `LoopValueRecord` and the inject record, effects and self-call records, ADR-46 dependency reads, ADR-84 return-memo entries |
-  | **Resource** | state consumed or rewritten in place, or read as a delta | any read or write refuses the computation and every enclosing one | unroll fuel, ADR-55 summaries, guard stack, consult and transient logs, `loops_evaluated`, sink and retry-frame pushes, the key-presence walk's `record`, a `rescue SystemStackError` |
+  | **Resource** | state consumed or rewritten in place, or read as a delta | a write refuses the computation and every enclosing one; so does a read, unless the slot declares one of WD3's two read exemptions | unroll fuel, ADR-55 summaries, guard stack, consult and transient logs, `loops_evaluated`, sink and retry-frame pushes, the key-presence walk's `record`, entering a region protected by `rescue SystemStackError` |
   | **Memo** | an extensional cache keyed on all its inputs | unlogged; its purity is audited | `RunScopedSlots` memo slots, `class_graph_buckets`, `ResolutionChain`, `MatchRebinding::Frame#memo`, the environment's and `RbsLoader`'s lazy memos |
 
   - **Frame values must be frozen.** State that changes after it is installed is a Table or a Resource. The
     key-presence walk is therefore split: its installation is a Frame, and `record`, which rewrites `guard_ends` in
-    place, is a Resource touch. Stage 0's harness did the same.
+    place, is a Resource touch. Stage 0's harness bumped the id on `record` and refused the captures open at that moment.
   - **Table reads:**
     - A read records `(table, key, observed value or ABSENT)`.
     - A read of a key the same computation has already written is internal and is not validated.
-    - A key the computation read ABSENT and then wrote validates when it is still ABSENT, or when it holds the
-      value the computation wrote.
+    - A Table may declare itself a read-through cache of the computation's own value (`LoopValueRecord`, the inject
+      record): reading its own write answers what reading ABSENT would have computed. For such a Table, a key the
+      computation read ABSENT and then wrote validates when it is still ABSENT or holds the value the computation
+      wrote. For every other Table, an ABSENT read validates only while the key is ABSENT.
   - **The ADR-84 return memo is a Table, not a Memo.** It is not extensional by design: its WD3 serves a standalone
     result where a fresh compute inside a cycle would be tainted, and its WD6 serves a stored `untyped`. A `type_of`
     computation that hits it logs the entry it read. Entries are never removed or rewritten within a run, so that
     read validates. A computation that misses it pushes the guard stack, which is a Resource touch, so it is refused.
   - **Two Memo rules:**
     - A Memo miss that writes a Table counts as a Resource touch.
-    - Each Memo declares the Frames its computation may read. In audit mode, reading an undeclared Frame slot during
-      a Memo miss is a mismatch. This is the check that turns the class behind #2773 and #2782 into a failing gate.
-      A known gap is allowed only by naming its issue.
+    - **The key audit.** A Memo, or a Table filled by a computation (the ADR-84 return memo), whose computation
+      reads a Frame must key on the state id or on that Frame's value.
+      - Audit mode records the Frame slots each miss computation reads, with the `type_of` memo suspended so that
+        reads behind its hits are seen.
+      - It compares them with the Frame terms the key declares. A read Frame that the key does not carry is a
+        mismatch.
+      - This is the check that turns the class behind #2773 and #2782 into a failing gate: the return memo reads the
+        threading suppression without keying on it. A known gap is allowed only by naming its issue.
   - **Instance state of the typer** (`@operand_types`, `@tracer`) stays a bypass. A spec compares
     `ExpressionTyper#initialize`'s parameters with a declared list, so a new field must be classified.
 
@@ -130,12 +140,19 @@ list kept beside the memo. State without a kind fails the gate.
   - **The journal:**
     - One flat per-thread array logs Table reads and writes.
     - A computation's capture is a start index plus a refusal flag.
-    - A Resource touch, whether a read or a write, sets the refusal flag on every open capture: the `any` rule.
+    - A Resource touch sets the refusal flag on every open capture: the `any` rule.
       - The alternative `escape` rule refused only captures outside the resource's owner.
       - `any` lost 0.05–0.24 points of allocations, and it was the only rule with zero table mismatches.
-      - Stage 0's harness counted resource writes. That equals counting reads and writes today because two
-        invariants hold: every ADR-55 read is paired with a write or an event, and every guard-stack push sits inside
-        `with_call_site_frame`. G1 sees any difference.
+    - **A touch is a write, or a read the slot does not exempt.** A Resource slot may declare one of two read
+      exemptions, each a claim G1 checks:
+      - **Id-determined:** the slot's value is fixed while the state id is fixed. The guard stack qualifies because
+        every push sits inside `with_call_site_frame`, a Frame install; a G2 spec asserts that invariant.
+      - **Delta-internal:** the read only feeds a before/after delta taken within the same computation, so with no
+        write in between the delta is zero. `loops_evaluated` in `record_conditional_value` qualifies.
+
+      The ADR-55 summaries' lazy initialisation (`||= {}` on entry) moves off the hit path in stage 1, so a
+      return-memo hit reads but does not write them. Stage 0's harness counted writes, which is this rule with both
+      exemptions. Refusing every read loses hits but stays sound: it measured −24.2% on Mastodon instead of −30.1%.
   - **Store:** a computation that was not refused stores either its bare `Rigor::Type` (empty slice, no allocation)
     or a frozen entry `(type, read slice, write slice)`.
     - Leaf nodes (local, instance, class and global reads, `self`, literals, constant reads) are never stored.
@@ -168,14 +185,21 @@ list kept beside the memo. State without a kind fails the gate.
       output is production's by construction. Afterwards G1 checks four things:
       - the type equals the entry's;
       - the live tables equal a copy of their pre-computation state with the entry's write slice replayed;
-      - the entry's read slice validates;
       - the live computation touched no Resource.
-    - **Stage 4 and later (CI audit job).** On a hit the memo serves. Then it recomputes with only the `type_of` memo
-      suspended, on cloned tables, with every Resource slot saved and restored around the recompute. A Resource
-      touch during the recompute is itself a mismatch.
-    - **What is compared.** Final table state, not write slices. A recompute that hits a Memo writes less than the
-      stored computation did. Stage 0 saw 416–1,104 such write-list differences under `any`, all differing only in
-      the target scope's identity.
+
+      An entry whose read slice does not validate is a miss, not a mismatch; stage 3 counts such misses, because a
+      high count would mean the journal costs hits.
+    - **Stage 4 and later (CI audit job).** On a hit, before anything is served:
+      1. Recompute on the same scope objects with only the `type_of` memo suspended. The recompute's Table writes go
+         to an undo log keyed on table identity, and every Resource slot is saved.
+      2. Record the final state of every key either side touches, then undo the recompute's writes and restore the
+         Resources.
+      3. Serve the entry: validate, replay, and compare the same keys against the recorded state.
+
+      Recomputing on the same objects keeps scope identity, so the one-slot caches hit exactly as they would in
+      production. A Resource touch during the recompute is itself a mismatch.
+    - **What is compared.** Final table state, not write slices. Stage 0 saw 416–1,104 write-list differences under
+      `any`, all differing only in the target scope's identity.
     - **Reporting.** Mismatches are collected per thread and asserted when the run ends. A raise would be swallowed:
       the typing path rescues `StandardError` in many places (#2785).
     - **Where it runs.** CI runs it beside `RIGOR_MEMO_AUDIT` over `lib`, the integration fixtures and the plugin
@@ -192,17 +216,24 @@ list kept beside the memo. State without a kind fails the gate.
       - skip a restore;
       - skip the Memo-miss-writes-a-Table rule.
 
-      For each switch, a spec asserts that G1 reports a mismatch on a fixture.
-    - Each Frame slot declares either a witness fixture, on which G1 must fail with that slot ignored, or
-      `typing_unreachable: true`. Audit mode asserts the latter by failing on any `type_of` while that slot is
-      installed. The threaded-flag fixture from Context is a witness.
+      For each switch, a spec asserts that G1's stage-4 form reports a mismatch on a fixture. The hit-path switches
+      (the upward merge, journaling the replay) need a served hit, so G1′ runs the stage-4 form even while the
+      corpora run the stage-3 form.
+    - Each Frame slot declares one of three things:
+      - a witness fixture, on which G1 must fail with that slot ignored. The threaded-flag fixture from Context is a
+        witness;
+      - `typing_unreachable: true`, which audit mode asserts by failing on any `type_of` while that slot is installed;
+      - `typing_never_reads: true`, which audit mode asserts by tracking reads of the slot during typing. This option
+        is for slots such as the writer scope or the effects switch, which wrap typing but are read only elsewhere.
   - **G2 Perturbation specs per kind**, generic over the registry:
     - Frame: distinct installs give distinct ids, `ensure` restores the id exactly, and an installed value is frozen.
-    - Table: an overwrite, or a new key that was read ABSENT, between store and hit makes the hit recompute. An
-      out-of-band clear is restored by the replay, in recompute order.
-    - Resource: a read or a write refuses the capture and every enclosing one.
+    - Table: an overwrite, or a new key that was read ABSENT, between store and hit makes the hit recompute; for a
+      declared read-through cache, the computation's own value does not. An out-of-band clear is restored by the
+      replay, in recompute order.
+    - Resource: a write, and a read the slot does not exempt, refuse the capture and every enclosing one; an exempt
+      read does not, and the guard-stack invariant behind its exemption holds.
     - Nested hit: its read slice reaches the enclosing entry.
-    - Memo: each slot is wired to `MemoAudit.check`, and to the frame-read audit (WD1).
+    - Memo: each slot is wired to `MemoAudit.check`, and every Memo and computed Table to the key audit (WD1).
   - **G3 Deny-by-default static spec**, Prism over `lib/rigor/{inference,scope*,reflection,analysis,effects,environment,plugin,type,cache}`.
     - It flags:
       - `Thread.current[]`, `thread_variable_get` / `thread_variable_set`, and Fiber storage;
@@ -238,10 +269,10 @@ list kept beside the memo. State without a kind fails the gate.
 
   | Stage | What lands | Exit |
   | --- | --- | --- |
-  | 0 (done) | harness ceiling | ≥ 5% of Mastodon CPU beyond the rule walk. Met on the gross count projection (7.1%) and on allocations (11.2 points); not confirmed live |
+  | 0 (done) | harness ceiling | ≥ 5% of Mastodon CPU beyond the rule walk. Met on the gross count projection (7.1%) and on allocations (11.2 points) under WD3's rule; not confirmed live |
   | 1 | `TypingState` with the four kinds, the id and the journal; behaviour-identical, memo off. Typer and evaluator first (90 of about 240 `Thread.current[]` sites), then the rest; G3 | `engine-wall` 0 ± noise; allocations within the CI band (1%; the harness's frame instrumentation alone measured +0.5% on Mastodon and +0.8% on `lib`); G3 green |
-  | 2 | Tables and the one-slot caches behind slots; Memos wired to `MemoAudit` and the frame-read audit; `MemoAudit` collects mismatches per thread (#2785); G4 | the audit job green; settles #2767 |
-  | 3 | Shadow only (G1, stage-3 form), with G1′ and G2; measure ELIDE under `any` | zero mismatches over `lib`, the fixtures, the plugin fixtures, Mastodon and Redmine; every injected fault detected |
+  | 2 | Tables and the one-slot caches behind slots; Memos wired to `MemoAudit` and the key audit; `MemoAudit` collects mismatches per thread (#2785); G4 | the audit job green; settles #2767 |
+  | 3 | Shadow only (G1, stage-3 form, on the corpora), with G1′ (stage-4 form, on fixtures) and G2; measure ELIDE under `any` | zero mismatches over `lib`, the fixtures, the plugin fixtures, Mastodon and Redmine; every injected fault detected |
   | 4 | Live in the rule walk | G5, G6; the `engine-warm` `default`-mode leaf and hub rows separate on Mastodon, and `engine-wall` on `lib` does not regress |
   | 5 | Live in the main pass and callee bodies; the recording evaluator's configuration becomes a Frame | as stage 4, plus at least half of stage 0's Mastodon allocation gain beyond the rule walk; RSS within +10% of stage 4 |
 
@@ -279,21 +310,21 @@ list kept beside the memo. State without a kind fails the gate.
   | Corpus | Allocations | CPU beyond the rule walk (gross count-mode projection) |
   | --- | ---: | ---: |
   | Mastodon | −30% | 7.1% |
-  | Redmine | −18% | 4.3% |
-  | `lib` | −5% | 3.1% |
+  | Redmine | −18% | 4.2% |
+  | `lib` | −5% | 3.0% |
 
   The rule walk's own share is not in the CPU column: its projection overstated the live figure. The gain grows with
   the number of rules and plugins that re-type a receiver.
 - **Costs:**
   - Every change that adds typing state must declare its kind, and G3 enforces it. That is a standing tax on engine
-    PRs, paid on purpose: together with the Memo frame-read audit, it turns the class of defect behind #2773 and #2782
+    PRs, paid on purpose: together with the key audit, it turns the class of defect behind #2773 and #2782
     from "found in review" into "fails a gate".
   - Instrumenting the frames cost +0.5% to +0.8% allocations in the harness.
   - RSS rises by +1.6% (Mastodon) to +9.6% (`lib`) with every phase open, close to stage 5's +10% bound on `lib`.
   - Plugin `dynamic_return` and `narrowing_facts` blocks run fewer times.
 - **Unchanged:**
   - `lib`-shaped code gains little. #1228 (one shared block entry scope) and #2711 stay the levers there.
-  - #2782 is not fixed by this ADR. Stage 2's frame-read audit makes it a named exception instead of a hidden one.
+  - #2782 is not fixed by this ADR. Stage 2's key audit makes it a named exception instead of a hidden one.
 - **Settled on the way:**
   - #2767: the one-slot caches become Tables;
   - #2785: `MemoAudit` mismatches are no longer swallowed;

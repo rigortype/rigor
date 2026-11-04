@@ -7,6 +7,41 @@ require "rigor/inference/project_patched_scanner"
 
 RSpec.describe Rigor::Inference::ProjectPatchedScanner do
   describe ".scan" do
+    # ADR-129 — the guarded `def`s and the visibilities are Frames installed (frozen) for one file's walk.
+    it "installs the walk's guarded defs and visibilities as frozen frames, and restores them after the file" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, "ext.rb")
+        File.write(path, "class Foo\n  def a = 1 unless method_defined?(:a)\n  private def b = 2\nend\n")
+        inside = nil
+        allow(Rigor::Inference::ProjectPatchedScanner::Visibility).to receive(:applied).and_wrap_original do |m, *args|
+          inside = %i[patched_scanner_guarded_defs patched_scanner_def_visibilities].map { |name| typing_slot(name) }
+          m.call(*args)
+        end
+
+        described_class.scan([path])
+
+        expect(inside).to all(be_frozen)
+        expect(inside.first.size).to eq(1)
+        expect(inside.last.values).to include(:private)
+        expect(typing_slot(:patched_scanner_guarded_defs)).to be_nil
+        expect(typing_slot(:patched_scanner_def_visibilities)).to be_nil
+      end
+    end
+
+    it "restores the frames when the walk raises" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, "ext.rb")
+        File.write(path, "class Foo\n  def a = 1\nend\n")
+        allow(Rigor::Inference::ProjectPatchedScanner::Visibility).to receive(:applied).and_raise("boom")
+
+        outcome = described_class.scan([path])
+
+        expect(outcome.diagnostics.map { |d| d[:rule] }).to include("pre-eval.parse-error")
+        expect(typing_slot(:patched_scanner_guarded_defs)).to be_nil
+        expect(typing_slot(:patched_scanner_def_visibilities)).to be_nil
+      end
+    end
+
     it "records every `def` declared inside a top-level class reopening" do
       Dir.mktmpdir do |dir|
         path = File.join(dir, "string_ext.rb")

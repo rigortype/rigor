@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative "../run_scoped_slots"
+require_relative "../typing_state"
 
 module Rigor
   module Inference
@@ -21,12 +21,25 @@ module Rigor
     module DefinersIndex
       # These thread slots are bounded, like `ExpressionTyper#method_definers_index`'s two ways. Each is a fixed
       # number of entries, replaced rather than accumulated: two `[merged, seed]` pairs (the last file's two def
-      # tables) and two seed indexes. The run that filled them releases them when it ends ({RunScopedSlots}, #2399),
+      # tables) and two seed indexes. The run that filled them releases them when it ends (run-scoped, #2399),
       # so a finished run keeps none of its seed tables or their indexes alive.
-      LAYERS_KEY = RunScopedSlots.register(:__rigor_definers_index_layers__)
-      SEED_INDEX_KEY = RunScopedSlots.register(:__rigor_definers_index_seed__)
-      SEED_INDEX_ALT_KEY = RunScopedSlots.register(:__rigor_definers_index_seed_alt__)
-      private_constant :LAYERS_KEY, :SEED_INDEX_KEY, :SEED_INDEX_ALT_KEY
+      #
+      # ADR-129 WD1 — all three are run-scoped Memos keyed on table identity. The layers say only which seed a merged
+      # table was built over, a shortcut: {.for} answers the same index owners, `Layered` or whole, so the answer is
+      # a function of the table alone. Each seed index is a pure function of its seed table.
+      LAYERS = TypingState.memo(
+        :definers_index_layers,
+        run_scoped: true, reason: "the seed each of the last two merged tables was built over; keyed on table identity"
+      )
+      SEED_INDEX = TypingState.memo(
+        :definers_index_seed,
+        run_scoped: true, reason: "pure function of the seed table it keys on"
+      )
+      SEED_INDEX_ALT = TypingState.memo(
+        :definers_index_seed_alt,
+        run_scoped: true, reason: "pure function of the seed table it keys on"
+      )
+      private_constant :LAYERS, :SEED_INDEX, :SEED_INDEX_ALT
 
       # A name's owners: the seed's, less the owners the file replaced, plus the replaced owners' own.
       class Layered
@@ -53,13 +66,14 @@ module Rigor
       # Records that the final `merged` table was built over `seed`. The last two are kept (a file merges an
       # instance and a singleton table), replaced rather than accumulated.
       def record_layers(merged, seed)
-        previous = Thread.current[LAYERS_KEY]
-        Thread.current[LAYERS_KEY] = [[merged, seed], previous&.first].compact
+        state = TypingState.current
+        previous = state[LAYERS]
+        state[LAYERS] = [[merged, seed], previous&.first].compact
       end
 
       # The definers index over `table`.
       def for(table)
-        seed = Thread.current[LAYERS_KEY]&.find { |entry| entry[0].equal?(table) }&.last
+        seed = TypingState.current[LAYERS]&.find { |entry| entry[0].equal?(table) }&.last
         return build(table) if seed.nil? || !deeply_frozen?(seed)
 
         replaced = {}
@@ -82,13 +96,14 @@ module Rigor
 
       # The seed's index, built once per seed table. Two ways, an instance and a singleton seed table.
       def seed_index(seed)
-        [SEED_INDEX_KEY, SEED_INDEX_ALT_KEY].each do |key|
-          slot = Thread.current[key]
+        state = TypingState.current
+        [SEED_INDEX, SEED_INDEX_ALT].each do |key|
+          slot = state[key]
           return slot[1] if slot && slot[0].equal?(seed)
         end
         index = build(seed)
-        Thread.current[SEED_INDEX_ALT_KEY] = Thread.current[SEED_INDEX_KEY]
-        Thread.current[SEED_INDEX_KEY] = [seed, index]
+        state[SEED_INDEX_ALT] = state[SEED_INDEX]
+        state[SEED_INDEX] = [seed, index]
         index
       end
 

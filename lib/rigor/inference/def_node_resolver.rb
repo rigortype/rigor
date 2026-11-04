@@ -2,6 +2,7 @@
 
 require "prism"
 require_relative "def_handle"
+require_relative "../typing_state"
 require_relative "../source/node_children"
 
 module Rigor
@@ -20,23 +21,31 @@ module Rigor
     # file, and finally nil — conservative (the accessor then reports no user def, losing precision but never
     # firing a wrong diagnostic), never silent.
     #
-    # The memo is a thread-local installed for the duration of a run (the {Cache::FileDigest} pattern:
-    # process-local, Ractor-safe, never crosses a fork boundary, reset per run). Outside a run scope every
+    # The memo is a {TypingState} Frame installed for the duration of a run ({.with_run}) and restored on the way
+    # out: per thread, and a fork child inherits whatever is installed at the fork. Outside a run scope every
     # resolution parses directly — a correct if un-memoised fallback for runner-less probes.
     module DefNodeResolver
-      MEMO_KEY = :rigor_def_node_resolver_memo
-      private_constant :MEMO_KEY
+      # ADR-129 WD1 — the run's memo is a Frame: {.with_run} installs it for the run and restores the previous one, and
+      # whether one is installed changes answers (outside a run every resolution parses afresh and no `Module.nesting`
+      # is recorded). The installed hash is frozen; the four tables in it are extensional caches its owner fills in
+      # place without a touch (Memos by kind, whose entry is fixed once written): `nodes` is keyed on
+      # `(path, node_id)`, `indexes` and `refinement_queries` on the file's path, and `nestings` on the identity of
+      # the node this module minted, holding the nesting the handle's bundle row (or the file's `refine` bodies)
+      # recorded for it.
+      RUN_MEMO = TypingState.frame(
+        :def_node_resolver_run,
+        reason: "installed per run by with_run; its tables are extensional caches, keyed on (path, node_id), on the " \
+                "path, and (nestings) on the minted node's identity, filled in place"
+      )
+      private_constant :RUN_MEMO
 
       # Installs a fresh per-run resolution memo, restoring the previous one on exit (always, even on a raise).
       # `nodes` caches the resolved node per `(path, node_id)`; `indexes` caches each file's parse index;
       # `nestings` re-attaches each handle's recorded `Module.nesting` to the node this module minted for it
       # ({.rehydrated_nesting}).
-      def self.with_run
-        previous = Thread.current[MEMO_KEY]
-        Thread.current[MEMO_KEY] = { nodes: {}, indexes: {}, nestings: {}.compare_by_identity, refinement_queries: {} }
-        yield
-      ensure
-        Thread.current[MEMO_KEY] = previous
+      def self.with_run(&)
+        memo = { nodes: {}, indexes: {}, nestings: {}.compare_by_identity, refinement_queries: {} }.freeze
+        TypingState.current.with(RUN_MEMO, memo, &)
       end
 
       # Whether a per-run memo scope is in force. The rehydrated `Module.nesting` ({.rehydrated_nesting}) is
@@ -44,7 +53,7 @@ module Rigor
       # per-run memo scope" clause states — and lets a spec assert that no handle-consuming entry point
       # resolves outside it, which is the difference between the peel fallback being a documented edge and
       # being silently reachable from production.
-      def self.run_scope? = !Thread.current[MEMO_KEY].nil?
+      def self.run_scope? = !TypingState.current[RUN_MEMO].nil?
 
       # Resolves `handle` to a `Prism::DefNode` (the same object across the run for a given (path, node_id)), or
       # nil. A non-handle argument is returned unchanged, so callers can pass a table value that is either a live
@@ -52,7 +61,7 @@ module Rigor
       def self.resolve(handle)
         return handle unless handle.is_a?(DefHandle)
 
-        memo = Thread.current[MEMO_KEY]
+        memo = TypingState.current[RUN_MEMO]
         return locate(handle, {}) if memo.nil?
 
         key = [handle.path, handle.node_id].freeze
@@ -96,7 +105,7 @@ module Rigor
       # def_node_resolver_spec.rb` pins that, so a new one added outside a run scope fails there rather than
       # silently reverting to the peel.
       def self.rehydrated_nesting(node)
-        memo = Thread.current[MEMO_KEY]
+        memo = TypingState.current[RUN_MEMO]
         memo && memo[:nestings][node]
       end
 
@@ -117,7 +126,7 @@ module Rigor
       # read: the typed refined arm reads another file's refine body through it. The bodies' `Module.nesting`
       # is recorded as a handle's is, so the re-typed body reads its constants where it is written.
       def self.refinement_query(path)
-        memo = Thread.current[MEMO_KEY]
+        memo = TypingState.current[RUN_MEMO]
         return build_refinement_query(path, nil) if memo.nil?
 
         queries = memo[:refinement_queries]

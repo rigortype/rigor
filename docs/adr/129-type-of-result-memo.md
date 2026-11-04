@@ -102,9 +102,10 @@ list kept beside the memo. State without a kind fails the gate.
   | **Resource** | state consumed or rewritten in place, or read as a delta | a write refuses the computation and every enclosing one; so does a read, unless the slot declares one of WD3's two read exemptions | unroll fuel, ADR-55 summaries, guard stack, consult and transient logs, `loops_evaluated`, sink and retry-frame pushes, the key-presence walk's `record`, entering a region protected by `rescue SystemStackError` |
   | **Memo** | an extensional cache keyed on all its inputs | unlogged; its purity is audited | `RunScopedSlots` memo slots, `class_graph_buckets`, `ResolutionChain`, `MatchRebinding::Frame#memo`, the environment's and `RbsLoader`'s lazy memos |
 
-  - **Frame values must be frozen.** State that changes after it is installed is a Table or a Resource. The
-    key-presence walk is therefore split: its installation is a Frame, and `record`, which rewrites `guard_ends` in
-    place, is a Resource touch. Stage 0's harness bumped the id on `record` and refused the captures open at that moment.
+  - **Frame values must be frozen.** State that changes after it is installed is a Table or a Resource, or an
+    extensional cache its owner fills in place, a Memo. The key-presence walk is therefore split: its installation is a
+    Frame, and `record`, which rewrites `guard_ends` in place, is a Resource touch. Stage 0's harness bumped the id on
+    `record` and refused the captures open at that moment.
   - **Table reads:**
     - A read records `(table, key, observed value or ABSENT)`.
     - A read of a key the same computation has already written is internal and is not validated.

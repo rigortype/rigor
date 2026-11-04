@@ -401,15 +401,17 @@ RSpec.describe Rigor::TypingState do
       end
     end
 
-    # The audited state after a run with every recorder on: ADR-46 dependency recording, the self-call recorder, an
-    # `effects:` block and a flow trace, over two files with a cross-file read and an unresolved implicit-self call.
+    # The audited state after a run with every recorder on: ADR-46 dependency recording (nested inside an outer
+    # window, so each file's window suspends it), the self-call recorder, an `effects:` block and a flow trace.
     def audited_recording_run
       audited = audited_class.new
       key = described_class.const_get(:STATE_KEY)
       previous = Thread.current[key]
       Thread.current[key] = audited
       audited.open_capture
-      Rigor::Inference::FlowTracer.record { analyze_recorded_probe }
+      Rigor::Inference::FlowTracer.record do
+        Rigor::Analysis::DependencyRecorder.record_for("outer.rb") { analyze_recorded_probe }
+      end
       refused, = audited.close_capture
       { state: audited, refused: refused }
     ensure
@@ -431,7 +433,8 @@ RSpec.describe Rigor::TypingState do
     end
 
     # A cross-file read (dependencies), a repeated callee (a replayed return-memo hit), a wrong-arity call (a withheld
-    # read set) and an unresolved implicit-self call (the self-call recorder).
+    # read set), an external mixin (a resolution chain's prebuilt hook keys) and an unresolved implicit-self call (the
+    # self-call recorder).
     def recorded_probe_files
       {
         "base.rb" => <<~RUBY,
@@ -442,6 +445,9 @@ RSpec.describe Rigor::TypingState do
         RUBY
         "child.rb" => <<~RUBY
           class Child < Base
+            include Comparable
+            extend Forwardable
+
             def run
               greet.upcase
               missing_helper
@@ -507,9 +513,10 @@ RSpec.describe Rigor::TypingState do
       expect(audited.violations).to be_empty
       expect(run.fetch(:refused)).to be(true)
       touchers = audited.touchers
-      expect(touchers[:dependency_recorder]).to include("read_site", "read_name", "file_chain_once", "note_captured",
-                                                        "replay")
-      expect(touchers[:dependency_capture_stack]).to include("capture", "withhold", "replay", "read_site", "read_name")
+      expect(touchers[:dependency_recorder]).to include("read_site", "read_name", "read_keys", "file_chain_once",
+                                                        "note_captured", "replay", "record_for")
+      expect(touchers[:dependency_capture_stack]).to include("capture", "withhold", "replay", "read_site", "read_name",
+                                                             "read_keys")
       expect(touchers[:effects_collector]).to include("record_root", "record_call", "record_unresolved")
       expect(touchers[:flow_tracer]).to include("recording")
       expect(touchers[:self_call_resolution_recorder]).to include("record")

@@ -96,8 +96,9 @@ its `declaration` resolves against the lens sites of its target, never against a
    (`attr_reader :a, :b`); with `declaration_mismatch` when the member the request names does not list it.
 3. When its `span` equals the `span` of an omission (`lens.md` § Omissions), the claim is `unknown` with
    `unsupported_declaration`: the declaration exists, but revision 1 does not model it.
-4. Otherwise no declaration of the analysed file has that span, so the request does not describe the source
-   it says it read: an integrity error.
+4. Otherwise the claim is `unknown` with `no_such_declaration`. The file's digest already matched, so the
+   consumer and Rigor read the same bytes; a span Rigor has no declaration for is a declaration the consumer
+   models and Rigor does not (a documentation directive attached to a DSL call, say), not a stale request.
 
 The result names the bound site by its lens `key`, so the consumer can join it to the lens document of the
 same run. A site key is not stable across runs and MUST NOT be stored.
@@ -110,10 +111,9 @@ Each of these is exit 64 with no document, because no per-claim answer could be 
 - an unsupported `schema`, `revision` or `grammar`;
 - a duplicate `id`, a duplicate `files` path, or a claim whose `file` is not in `files`;
 - a `files` path that is not one of the invocation's targets;
-- a `files` digest that differs from the digest of the file's bytes, for a target whose `status` is `ok` or
-  `parse_error`;
-- for such a target, a `declaration` or `tag` span outside its file, or, when it is `ok`, a declaration that
-  does not resolve (§ Resolving the declaration, step 4).
+- a `files` digest that differs from the digest of the file's bytes, for a file Rigor can read, whatever
+  status its target ends with (a target with no readable file, `not_found`, answers `unavailable`);
+- for such a file, a `declaration` or `tag` span outside it.
 
 Rigor validates the request, and compares each digest with the file on disk, before analysis starts, so a
 malformed or stale request costs no run. A file that changes during the run still makes its digest differ from
@@ -186,6 +186,7 @@ The lens document carries the answer as its `claims` field:
 
 | `reason` | When |
 | --- | --- |
+| `no_such_declaration` | No site or omission of the analysed file has the declaration's span. |
 | `unsupported_declaration` | The declaration is an omission, is not a `method` site, or shares its span with another site. |
 | `declaration_mismatch` | A site has the declaration's span, but the member the request names does not list it. |
 | `unsupported_subject` | The tag is not `@param` or `@return`, or a `@param` has no `subject`. |
@@ -228,18 +229,25 @@ both answers must name the same class or module, or the claim is `unknown`:
 
 - in RBS, as an inline `@rbs` annotation on the bound declaration resolves it (`unresolved_name` when it does
   not resolve);
-- in Ruby, as the constant of that spelling would resolve in the declaration's body under `check`: the
-  declaration's lexical nesting from its source file, then the ancestors of the innermost class or module,
-  against the run's seeded project index (`ambiguous_name` when the answers differ or Ruby's does not
-  resolve). The index is rooted at the configuration's `paths:` (`lens.md` § Computation), so the answer does
-  not depend on which files were requested.
+- in Ruby, over the run's seeded project index, following Ruby's constant lookup from the declaration's body:
+  the declaration's lexical nesting from its source file (innermost first, the top level excluded), then the
+  ancestors of the innermost class or module, then `Object` when that is a module. The index is rooted at the
+  configuration's `paths:` (`lens.md` § Computation), so the answer does not depend on which files were
+  requested. When no constant the index records on that path has the name, the Ruby answer is the RBS answer:
+  the index holds project Ruby only, and core, stdlib and gem classes are known through RBS. When the index
+  finds a project constant the RBS answer does not name, the claim is `ambiguous_name`: a Ruby-only
+  `App::Data < Hash` is not the core `::Data`.
 
-A relative name may still reach a class Rigor sees in neither: a gem constant defined in Ruby with no RBS. So
-a relative name counts toward a `conflict` (§ Relation, Non-inclusion) only when every namespace of the
-declaration's lexical nesting and every ancestor of its innermost class or module is a Ruby core or stdlib
-class or module, or one the project declares. Otherwise that arm can still prove `compatible` but never
-`conflict`; the reason this guard exists is `Comparator#provable_names?`, which refuses every relative name for
-`rbs.contradicting-signature` (a relative `String` inside `module App` may be a Ruby-only `App::String`).
+Agreement is enough for `compatible`. It is not enough for `conflict`, because the index does not see every
+constant a namespace may hold: a file outside `paths:` or matched by `exclude:`, a gem without RBS that reopens a
+project namespace, `const_set` with a computed name, a `class_eval` string. `rbs.contradicting-signature`
+refuses relative names outright for that reason (`Comparator#provable_names?`). So a relative name counts toward
+a `conflict` (§ Relation, Non-inclusion) only when Rigor sees the whole lookup path: every namespace of the
+declaration's lexical nesting and every ancestor of its innermost class or module is a Ruby core or stdlib class
+or module, and every one of them can be named (an ancestor written as a call, `Sequel::Model(:t)`, or included
+from a block cannot). In practice that is a top-level declaration, or a reopened core class. Anywhere else a
+relative arm can prove `compatible` but never `conflict`, and a conflict needs the absolute spelling
+(`::Integer`).
 
 ## Relation
 
@@ -325,16 +333,20 @@ Before a release advertises `claims`, the producer's spec suite MUST run the rea
 project and check in each request, the source and signature files, the expected document, stderr and the
 exit status, so ZARD's adapter can pin them. The fixtures cover:
 
-- `compatible` and `conflict` in both directions, including the five rows of #2737's table;
+- `compatible` and `conflict` in both directions, including the five rows of #2737's table (its `Formatter` is a
+  project class, so its conflict rows read `conflict` spelled `::Integer` and `unproven` spelled `Integer`);
 - equal types spelled differently (a relative name, an absolute name, a type alias);
 - a narrower parameter claim and a broader return claim (`compatible`), and overlap only (`unproven`);
 - project-class inclusion through declared ancestry (`compatible`), and project classes that cannot be
   ranked (`unproven`, never `conflict`);
 - a relative name a project namespace shadows in Ruby alone (`Data` inside `module App` that defines
-  `App::Data < Hash` with no RBS), which never reads `conflict`, and a relative core name under a gem
-  ancestor, which reads `unproven` where the absolute spelling reads `conflict`;
-- a span that matches a site under another identity (`declaration_mismatch`) or an attribute site;
+  `App::Data < Hash` with no RBS, `ambiguous_name`); the same shadow in a file outside `paths:`, which reads
+  `unproven`, never `conflict`; a relative core name in a project class, which reads `unproven` where the
+  absolute spelling reads `conflict`; and a relative core name in a top-level `def`, which reads `conflict`;
+- a relative gem name with RBS (`Faraday::Response`) that compares `equal`;
+- a span that matches a site under another identity (`declaration_mismatch`), an attribute site, and a span
+  with no declaration (`no_such_declaration`);
 - each `unknown` reason, and `unavailable` for a failed target;
 - `invalid_claim` against a valid extended payload (`unsupported_grammar_feature`);
-- each integrity error (exit 64, no document), including a stale digest and a locator that matches no site;
+- each integrity error (exit 64, no document), including a stale digest and a span outside its file;
 - a lens document equal to the one produced without `--claims`, apart from `claims`.

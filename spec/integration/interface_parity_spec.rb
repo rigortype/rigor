@@ -78,6 +78,11 @@ RSpec.describe "ADR-130 interface parity (behavioural gate)" do
     yield
   end
 
+  # The examples below are generated per fixture, and zero fixtures would be zero failures.
+  it "has parity fixtures to run" do
+    expect(InterfaceParity::FIXTURES).to include("joins")
+  end
+
   InterfaceParity::FIXTURES.each do |fixture|
     InterfaceParity::PARITY_MODES.each do |mode|
       it "#{fixture}: #{mode} matches the erasure baseline modulo facet names" do

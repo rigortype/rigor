@@ -34,6 +34,9 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
     %w[
       lib/rigor/inference/expression_typer.rb
       lib/rigor/inference/key_presence_guard.rb
+      lib/rigor/inference/loop_value_record.rb
+      lib/rigor/inference/reflective_ivar_write.rb
+      lib/rigor/inference/scope_indexer/declared_param_writes.rb
       lib/rigor/inference/statement_evaluator.rb
       lib/rigor/typing_state.rb
     ]
@@ -271,12 +274,16 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
     return unless first.is_a?(Prism::SymbolNode)
 
     sent = first.unescaped.to_sym
-    if %i[current main].include?(sent) && local_storage_owner?(node.receiver)
+    if sent_macro?(node.receiver, sent)
+      found(file, node, :module_accessor, sent)
+    elsif %i[current main].include?(sent) && local_storage_owner?(node.receiver)
       found(file, node, :thread_state, "#{node.receiver.name}.#{sent}")
     elsif setter?(sent) && sent_to_module_state?(node.receiver, context)
       found(file, node, :module_accessor_write, sent.to_s.delete_suffix("="))
     end
   end
+
+  def sent_macro?(receiver, sent) = accessor_macro_name?(sent) && (receiver.nil? || singleton_class_call?(receiver))
 
   def sent_to_module_state?(receiver, context)
     receiver.nil? ? module_level?(context) : module_state_receiver?(receiver, context)
@@ -326,11 +333,20 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
   # `attr_accessor` / `attr_writer` in `class << self` or on `singleton_class`, or a module attribute macro anywhere.
   def accessor_macro?(node, context)
     receiver = node.receiver
-    singleton = receiver.is_a?(Prism::CallNode) && receiver.name == :singleton_class
+    singleton = singleton_class_call?(receiver)
     return false unless receiver.nil? || singleton
 
     ((context == :singleton || singleton) && %i[attr_accessor attr_writer].include?(node.name)) ||
       %i[mattr_accessor mattr_writer cattr_accessor cattr_writer class_attribute].include?(node.name)
+  end
+
+  def singleton_class_call?(node) = node.is_a?(Prism::CallNode) && node.name == :singleton_class
+
+  # A macro name `send` can spell (`send(:attr_writer, :x)`, `singleton_class.send(:attr_accessor, :w)`). A bare
+  # `send(:attr_accessor, …)` is read as module state wherever it is written: the scan does not know whether `self`
+  # is a class there.
+  def accessor_macro_name?(name)
+    %i[attr_accessor attr_writer mattr_accessor mattr_writer cattr_accessor cattr_writer class_attribute].include?(name)
   end
 
   def named_constant?(node, name)
@@ -562,6 +578,19 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
         [2, :module_accessor_write, "x"], [3, :module_accessor_write, "x"], [4, :module_accessor, "attr_accessor"],
         [5, :module_accessor_write, "lookup"], [6, :thread_state, "Thread.main"], [7, :thread_state, "Thread.current"],
         [8, :module_accessor_write, "x"]
+      )
+    end
+
+    # Review of #2796, round 3: an accessor macro spelled through `send`.
+    it "flags an accessor macro called through send" do
+      expect(rules_in(<<~RUBY)).to contain_exactly(
+        class Owner
+          singleton_class.send(:attr_accessor, :w)
+          send(:attr_writer, :x)
+          def self.y = public_send(:attr_reader, :z)
+        end
+      RUBY
+        [2, :module_accessor, "attr_accessor"], [3, :module_accessor, "attr_writer"]
       )
     end
 

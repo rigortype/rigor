@@ -32,7 +32,7 @@ module Rigor
     READ_EXEMPTIONS = %i[id_determined delta_internal].freeze
 
     # One declared slot: its name, kind and index, why it is the kind it is, and its kind's options.
-    # - `run_scoped`: a Table or Memo whose contents belong to one analysis run, emptied by
+    # - `run_scoped`: a Table, Memo or Resource whose contents belong to one analysis run, emptied by
     #   {.release_run_scoped} when the run ends ({RunScopedSlots.release}).
     # - `read_exemption`: a Resource, or a `contents: :resource` Frame's contents, whose reads do not refuse (WD3).
     # - `contents`: `:resource` for a Frame whose installed container is mutated in place.
@@ -69,9 +69,9 @@ module Rigor
       end
 
       # Declares a Resource slot and returns its index.
-      def resource(name, reason:, read_exemption: nil)
+      def resource(name, reason:, read_exemption: nil, run_scoped: false)
         check_read_exemption(name, read_exemption)
-        declare(name, :resource, reason, read_exemption: read_exemption)
+        declare(name, :resource, reason, read_exemption: read_exemption, run_scoped: run_scoped)
       end
 
       # Declares a Memo slot and returns its index.

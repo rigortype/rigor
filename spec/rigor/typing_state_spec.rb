@@ -36,7 +36,7 @@ RSpec.describe Rigor::TypingState do
     it "gives each kind only the options it can carry" do
       slots = described_class.slots
 
-      expect(slots.select(&:run_scoped).map(&:kind).uniq - %i[table memo]).to be_empty
+      expect(slots.select(&:run_scoped).map(&:kind).uniq - %i[table memo resource]).to be_empty
       expect(slots.select(&:read_through).map(&:kind).uniq).to eq([:table])
       expect(slots.select(&:contents).map(&:kind).uniq).to eq([:frame])
       expect(slots.select(&:read_exemption).reject { |slot| slot.kind == :resource || slot.contents }).to be_empty
@@ -411,7 +411,7 @@ RSpec.describe Rigor::TypingState do
         :yield_value_type, :forwarded_call_arg_types, :threaded_block_body, :user_method_inference_stack,
         :user_method_return_summary, :user_method_summary_consult_depths, :user_method_transient_event_depths,
         :user_method_unroll_fuel, :user_method_return_memo, :inject_accumulator, :class_graph_cache,
-        :key_presence_walk
+        :key_presence_walk, :reflective_ivar_write_repeating, :loop_value_record, :loops_evaluated
       )
     end
 

@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "../type"
+require_relative "../typing_state"
 
 module Rigor
   module Inference
@@ -26,8 +27,12 @@ module Rigor
       IVAR_NAME = /\A@[A-Za-z_]\w*\z/
       private_constant :IVAR_NAME
 
-      REPEATING_KEY = :__rigor_reflective_ivar_write_repeating__
-      private_constant :REPEATING_KEY
+      # ADR-129 WD1 — a Frame: the depth is installed for a region and restored on the way out.
+      REPEATING = TypingState.frame(
+        :reflective_ivar_write_repeating,
+        reason: "the repeat depth of `for` bodies and loop predicates, installed per region"
+      )
+      private_constant :REPEATING
 
       module_function
 
@@ -69,31 +74,20 @@ module Rigor
       # rebind fixpoint, and a predicate runs before every iteration but is walked once, so a literal-name write there
       # must not replace the binding with one pass's value ({.apply}). A `while` / `until` body does not enter it: its
       # fixpoint widens the ivar (issue #1930).
-      def in_repeating_body
-        depth = Thread.current[REPEATING_KEY] || 0
-        Thread.current[REPEATING_KEY] = depth + 1
-        begin
-          yield
-        ensure
-          Thread.current[REPEATING_KEY] = depth
-        end
+      def in_repeating_body(&)
+        state = TypingState.current
+        state.with(REPEATING, (state[REPEATING] || 0) + 1, &)
       end
 
       # Runs the block at repeat depth zero, restoring the depth on exit. A user-method body re-typed for its return
       # starts from its own scope and reads its own write, so a caller's `for` body does not repeat it
       # ({ExpressionTyper.with_call_site_frame}).
-      def outside_repeating_body
-        depth = Thread.current[REPEATING_KEY]
-        Thread.current[REPEATING_KEY] = 0
-        begin
-          yield
-        ensure
-          Thread.current[REPEATING_KEY] = depth
-        end
+      def outside_repeating_body(&)
+        TypingState.current.with(REPEATING, 0, &)
       end
 
       def repeating_body?
-        (Thread.current[REPEATING_KEY] || 0).positive?
+        (TypingState.current[REPEATING] || 0).positive?
       end
 
       # `scope` after `node` runs. A literal name binds that ivar to the value's type (yielded), as `@n = v` does.

@@ -55,13 +55,11 @@ RSpec.describe Rigor::RunScopedSlots do
   let(:not_run_scoped) do
     {
       __rigor_acceptance_unread_shape_refused__: "frame flag, installed and restored around a block",
-      __rigor_declared_param_writer_scope__: "frame slot, installed and restored around a block",
       __rigor_dependency_capture_stack__: "frame slot of the ADR-46 dependency recorder",
       __rigor_dependency_recorder__: "frame slot of the ADR-46 dependency recorder",
       __rigor_effects_collector__: "frame slot of the effects collector",
       __rigor_flow_tracer__: "frame slot of the flow tracer",
       __rigor_project_round__: "a Debouncer key in the language server, not a thread-local",
-      __rigor_reflective_ivar_write_repeating__: "frame depth counter, restored on the way out",
       __rigor_self_call_resolution_recorder__: "frame slot of the self-call resolution recorder",
       __rigor_typing_state__: "ADR-129 TypingState, whose own run-scoped slots release empties",
       rigor_memo_audit_suspended: "frame flag of MemoAudit, installed and restored around a recomputation",
@@ -81,37 +79,26 @@ RSpec.describe Rigor::RunScopedSlots do
 
   after do
     FileUtils.remove_entry(tmpdir)
-    loop_keys.each { |key| Thread.current[key] = nil }
-    set_typing_slot(:inject_accumulator, nil)
+    loop_records.each { |name| set_typing_slot(name, nil) }
   end
 
   def check_run = guarded_run(Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil), [path])
 
   def sig_gen_run = Rigor::SigGen::Generator.new(configuration: configuration, paths: [path]).run
 
-  def loop_keys = %i[rigor_loop_value_record]
+  # The two records #2412 is about, `LoopValueRecord`'s and the inject record's TypingState slots.
+  def loop_records = %i[loop_value_record inject_accumulator]
 
-  # The two records #2412 is about: `LoopValueRecord`'s thread key and the inject record's TypingState slot, each as
-  # `name => [reader, writer]`.
-  def loop_records
-    {
-      rigor_loop_value_record: [-> { Thread.current[:rigor_loop_value_record] },
-                                ->(value) { Thread.current[:rigor_loop_value_record] = value }],
-      inject_accumulator: [-> { typing_slot(:inject_accumulator) },
-                           ->(value) { set_typing_slot(:inject_accumulator, value) }]
-    }
-  end
+  def fill_loop_records = loop_records.each { |name| set_typing_slot(name, :filled) }
 
-  def fill_loop_records = loop_records.each_value { |_, writer| writer.call(:filled) }
-
-  def loop_record_values = loop_records.values.map { |reader, _| reader.call }
+  def loop_record_values = loop_records.map { |name| typing_slot(name) }
 
   # The names of `loop_records` that hold something when the run calls {.release}, so an example reads a slot the run
   # really filled.
   def filled_at_release
     filled = []
     allow(described_class).to receive(:release).and_wrap_original do |original|
-      filled.concat(loop_records.reject { |_, (reader, _)| reader.call.nil? }.keys)
+      filled.concat(loop_records.reject { |name| typing_slot(name).nil? })
       original.call
     end
     filled
@@ -129,7 +116,7 @@ RSpec.describe Rigor::RunScopedSlots do
 
         send(run)
 
-        expect(filled).to match_array(loop_records.keys)
+        expect(filled).to match_array(loop_records)
         expect(loop_record_values).to all(be_nil)
       end
 
@@ -631,7 +618,7 @@ RSpec.describe Rigor::RunScopedSlots do
     slots = Rigor::TypingState.slots
     run_scoped = slots.select(&:run_scoped)
     expect(run_scoped.map(&:name)).to include(:inject_accumulator, :user_method_return_memo, :callee_def_census)
-    expect(slots.select(&:run_scoped).map(&:kind).uniq - %i[table memo]).to be_empty
+    expect(slots.select(&:run_scoped).map(&:kind).uniq - %i[table memo resource]).to be_empty
 
     slots.each { |slot| set_typing_slot(slot.name, :filled) }
     described_class.release

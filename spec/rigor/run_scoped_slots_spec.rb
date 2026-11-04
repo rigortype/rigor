@@ -126,7 +126,7 @@ RSpec.describe Rigor::RunScopedSlots do
         end
         expect(holding).to be_empty
         expect(described_class.keys.map { |key| Thread.current[key] }).to all(be_nil)
-        expect(Rigor::TypingState.current.holding).to be_empty
+        expect(run_scoped_holding).to be_empty
       end
 
       it "retains no more environments after the third run than after the first" do
@@ -157,7 +157,7 @@ RSpec.describe Rigor::RunScopedSlots do
 
     described_class.release
     first = hover.call
-    filled = described_class.keys.reject { |key| Thread.current[key].nil? } + Rigor::TypingState.current.holding
+    filled = described_class.keys.reject { |key| Thread.current[key].nil? } + run_scoped_holding
     described_class.release
 
     expect(filled).not_to be_empty

@@ -46,7 +46,8 @@ module Rigor
       RUN = TypingState.frame(
         :file_digest_run,
         reason: "installed per run by with_run; the digest and stat tables are extensional caches keyed on the path, " \
-                "filled in place, and the recording instant and strict flag are fixed at install"
+                "filled in place, both reading the filesystem under the run's stable-filesystem premise, and the " \
+                "recording instant and strict flag are fixed at install"
       )
       private_constant :RUN
 

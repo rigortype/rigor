@@ -11839,8 +11839,9 @@ module Rigor
       # walk).
       UNENTERED_EVALUATOR = TypingState.frame(
         :scope_index_unentered_evaluator,
-        reason: "installed around the index walk that evaluates its unentered constructs; the lambda reads the " \
-                "walk's table, its converged-loop recording and its clause widening, and is frozen while installed"
+        reason: "installed around the index walk that evaluates its unentered constructs; the lambda writes the " \
+                "walk's own table (the walk's state, not typing state) and reads its converged-loop recording and " \
+                "clause widening, and is frozen while installed"
       )
       private_constant :UNENTERED_EVALUATOR
 

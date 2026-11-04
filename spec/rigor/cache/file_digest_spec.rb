@@ -116,6 +116,19 @@ RSpec.describe Rigor::Cache::FileDigest do
       expect(File).to have_received(:stat).with(path).twice
     end
 
+    # An outer run that stat-ed a path (change detection) must not answer for a nested run: the file may have been
+    # saved between them, and the inner run's validation would serve the pre-save tuple.
+    it "gives a nested run a stat table of its own" do
+      described_class.with_run do
+        described_class.validation_stat(path)
+        described_class.with_run do
+          allow(File).to receive(:stat).and_call_original
+          described_class.validation_stat(path)
+          expect(File).to have_received(:stat).with(path).once
+        end
+      end
+    end
+
     it "shares one stat per path inside a run" do
       described_class.with_run do
         allow(File).to receive(:stat).and_call_original

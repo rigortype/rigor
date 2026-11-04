@@ -433,8 +433,18 @@ module Rigor
       # The two call-site channels a user-method body may read from its caller — the block a `yield`
       # reaches ({#with_yield_value_type}) and the argument list `...` re-supplies
       # ({#with_forwarded_arg_types}) — installed together, both even when nil, for exactly one frame.
+      #
+      # The frame also clears the reflective-ivar repeat depth ({ReflectiveIvarWrite.in_repeating_body}): it says
+      # the CALLER's loop body is walked once for many runs, while the callee's body starts from its own scope and
+      # reads its own write. The depth only widens and the return memo's key has no term for it, so a body first
+      # reached from a `for` body stored a wider return that every later caller was served. The block-body
+      # threading suppression is the same kind of caller flag and is NOT cleared here (issue #2782): it is what
+      # keeps a fold from nesting through callee frames, and clearing it re-walked unstorable frames
+      # exponentially, while keying the memo on it cost a fifth of `lib`'s allocations.
       def self.with_call_site_frame(yield_type, forwarded_arg_types, &)
-        with_yield_value_type(yield_type) { with_forwarded_arg_types(forwarded_arg_types, &) }
+        ReflectiveIvarWrite.outside_repeating_body do
+          with_yield_value_type(yield_type) { with_forwarded_arg_types(forwarded_arg_types, &) }
+        end
       end
 
       private

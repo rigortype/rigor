@@ -79,6 +79,19 @@ module Rigor
         end
       end
 
+      # Runs the block at repeat depth zero, restoring the depth on exit. A user-method body re-typed for its return
+      # starts from its own scope and reads its own write, so a caller's `for` body does not repeat it
+      # ({ExpressionTyper.with_call_site_frame}).
+      def outside_repeating_body
+        depth = Thread.current[REPEATING_KEY]
+        Thread.current[REPEATING_KEY] = 0
+        begin
+          yield
+        ensure
+          Thread.current[REPEATING_KEY] = depth
+        end
+      end
+
       def repeating_body?
         (Thread.current[REPEATING_KEY] || 0).positive?
       end

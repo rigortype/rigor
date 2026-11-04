@@ -242,10 +242,6 @@ RSpec.describe Rigor::RunScopedSlots do
     constants
   end
 
-  # The assignments of `Thread.current` `lib/` may make, keyed by file with the `line:` and the enclosing `in_def:`.
-  # Empty today: the registry's `release` was the one, and it no longer aliases the thread.
-  def alias_allowlist = {}
-
   # #2572: the access shapes are `Thread.current[`, `thread_variable_get` / `_set` with or without parentheses, and
   # `fetch` / `key?` / `store` on the thread. A key is a symbol or a constant of this file; a dynamic key (a local
   # variable) is skipped, and the constants it is read from are scanned. Anything else is unresolved: a quoted or
@@ -311,22 +307,8 @@ RSpec.describe Rigor::RunScopedSlots do
     offsets = []
     source.scan(/(?<![=!<>])=(?![=~>])[ \t]*Thread\.current\b(?![\[.])/) { offsets << Regexp.last_match.begin(0) }
     offsets.each do |offset|
-      next if alias_allowed?(source, path, offset, offsets.size)
-
       unresolved << "#{path}:#{line_at(source, offset)} Thread.current alias"
     end
-  end
-
-  def alias_allowed?(source, path, offset, count)
-    alias_allowlist.any? do |file, rule|
-      path.end_with?(file) && count == 1 && line_text(source, offset).strip == rule[:line] &&
-        source[0...offset].scan(/^[ \t]*def (?:self\.)?(\w+)/).last&.first == rule[:in_def]
-    end
-  end
-
-  def line_text(source, offset)
-    start = (source.rindex("\n", offset) || -1) + 1
-    source[start...(source.index("\n", offset) || source.length)]
   end
 
   # A `*_KEY` constant without a `rigor` symbol is a key only where the file reads it directly. In a file that reads a

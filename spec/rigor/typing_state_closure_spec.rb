@@ -27,11 +27,12 @@ require "prism"
 # is a slot still to declare, and says which stage declares it.
 #
 # A comparison of `Thread.current`, `Fiber.current` or `Ractor.current` (`Ractor.current == Ractor.main`) reads no
-# storage and is not flagged. Nor is `Ractor.main.send(m)` / `Ractor.main << m` whose value is discarded (or a local
-# that is only ever assigned `Ractor.main` and used that way), or `Ractor.current.default_port` passed to `monitor` /
-# `unmonitor`: the Ractor is an address there, not a store. Those calls answer the Ractor itself, so
-# `Ractor.main.send(m)[:k]` is storage and flagged, as are `Ractor.current.send`, `Ractor.current[:k]`, `Ractor[:k]`
-# and `store_if_absent`. A local alias of a module (`owner = Folding; owner.fold = true`) and a Ractor read back
+# storage and is not flagged. Nor is `Ractor.main.send(m)` / `Ractor.main << m` inside a `Ractor.new` block (worker to
+# main) whose value is discarded (or a local that is only ever assigned `Ractor.main` and used that way), or
+# `Ractor.current.default_port` passed to `monitor` / `unmonitor`: the Ractor is an address there, not a store. Those
+# calls answer the Ractor itself, so `Ractor.main.send(m)[:k]` is storage and flagged, as are `Ractor.main.send(m)`
+# outside `Ractor.new` (the main mailbox as a queue), `Ractor.current.send`, `Ractor.current[:k]`, `Ractor[:k]` and
+# `store_if_absent`. A local alias of a module (`owner = Folding; owner.fold = true`) and a Ractor read back
 # through `binding.local_variable_get(:r)[:k]` are beyond a syntactic scan; G1 (stage 3) is what catches state reached
 # that way.
 #
@@ -260,8 +261,10 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
   # so a call counts only while its value is discarded.
   def messaging_calls = %i[send << monitor unmonitor]
 
-  # A block whose value its caller discards, so the block's last statement is a discarded statement.
-  def discarding_iterators = %i[loop each each_with_index times]
+  # A block whose value its caller discards, so the block's last statement is a discarded statement. Only `loop`:
+  # `pool_coordinator.rb`'s worker ends its message loop with `main.send`, and a name-matched `each` or `times` would
+  # also match a custom iterator that stores what its block returns.
+  def discarding_iterators = %i[loop]
 
   def ractor_identity_call?(node, name = nil)
     node.is_a?(Prism::CallNode) && (name ? node.name == name : %i[current main].include?(node.name)) &&
@@ -271,24 +274,33 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
   # Marks a `Ractor.main` / `Ractor.current` as an identity read, an address and no store, in two cases:
   #
   # - `Ractor.main.send(m)` / `Ractor.main << m`, or the same through a local (`main = Ractor.main; main.send(m)`),
-  #   where the call's value is discarded: a non-last statement, or the last of a `loop` / `each` / `times` block. A
-  #   messaging call's value is the Ractor, so `Ractor.main.send(m)[:k]` or `x = Ractor.main.send(m)` is storage. The
-  #   local counts when every write to its name (anywhere in the file, any scope) is a discarded `name = Ractor.main`,
-  #   and every read of it is the receiver of a discarded `send` / `<<`. A parameter of that name, another kind of
-  #   write (`r = nil`, `r = Ractor.current`, a target, an operator write) or any other read disqualifies it. A def's
-  #   last expression is returned, so it never counts.
+  #   lexically inside a `Ractor.new` block, where it is worker-to-main messaging, and with its value discarded: a
+  #   non-last statement, or the last of a `loop` block. Outside `Ractor.new` the main Ractor's own mailbox is a queue
+  #   (`Ractor.main.send(v)` here, `Ractor.receive` there). A messaging call's value is the Ractor, so
+  #   `Ractor.main.send(m)[:k]` or `x = Ractor.main.send(m)` is storage. The local counts when every write to its name
+  #   (anywhere in the file, any scope) is a discarded `name = Ractor.main` inside a `Ractor.new` block, and every read
+  #   of it is the receiver of a discarded `send` / `<<`. A parameter of that name, another kind of write (`r = nil`,
+  #   `r = Ractor.current`, a target, an operator write) or any other read disqualifies it. A def's last expression is
+  #   returned, so it never counts.
   # - `Ractor.current.default_port` as an argument of `monitor` / `unmonitor`.
   #
   # `Ractor.current.send` and `<<` never count: a Ractor's own mailbox, written and read back, is a queue.
   def note_messaging_identity(root, file)
-    state = { discarded: Set.new, calls: [], writes: [], reads: Hash.new(0), other: Set.new }
-    stack = [root]
+    state = { discarded: Set.new, worker: Set.new, calls: [], writes: [], reads: Hash.new(0), other: Set.new }
+    stack = [[root, false]]
     until stack.empty?
-      node = stack.pop
+      node, worker = stack.pop
+      state[:worker] << node.object_id if worker
       tally_messaging(node, state)
-      stack.concat(node.compact_child_nodes)
+      node.compact_child_nodes.each { |child| stack << [child, worker || worker_block?(node, child)] }
     end
     resolve_messaging(file, state)
+  end
+
+  # Whether `child` is the block of a `Ractor.new` call `node`.
+  def worker_block?(node, child)
+    node.is_a?(Prism::CallNode) && node.name == :new && named_constant?(node.receiver, :Ractor) &&
+      child.equal?(node.block)
   end
 
   def tally_messaging(node, state)
@@ -314,15 +326,18 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
     messaged = Hash.new(0)
     state[:calls].each do |call|
       if %i[monitor unmonitor].include?(call.name)
-        call_arguments(call).each do |argument|
-          file[:identity_reads] << argument.receiver.object_id if ractor_identity_call?(argument.receiver, :current) &&
-                                                                  argument.name == :default_port
-        end
-      elsif state[:discarded].include?(call.object_id)
+        call_arguments(call).each { |argument| note_default_port(argument, file) }
+      elsif state[:discarded].include?(call.object_id) && state[:worker].include?(call.object_id)
         main_messaging(call, file, messaged)
       end
     end
     resolve_main_locals(file, state, messaged)
+  end
+
+  def note_default_port(argument, file)
+    return unless argument.is_a?(Prism::CallNode) && argument.name == :default_port
+
+    file[:identity_reads] << argument.receiver.object_id if ractor_identity_call?(argument.receiver, :current)
   end
 
   def main_messaging(call, file, messaged)
@@ -331,10 +346,16 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
     messaged[receiver.name] += 1 if receiver.is_a?(Prism::LocalVariableReadNode)
   end
 
+  # A discarded `name = Ractor.main` inside a `Ractor.new` block.
+  def worker_main_write?(write, state)
+    ractor_identity_call?(write.value, :main) && state[:discarded].include?(write.object_id) &&
+      state[:worker].include?(write.object_id)
+  end
+
   def resolve_main_locals(file, state, messaged)
     assigned = Hash.new { |hash, key| hash[key] = [] }
     state[:writes].each do |write|
-      if ractor_identity_call?(write.value, :main) && state[:discarded].include?(write.object_id)
+      if worker_main_write?(write, state)
         assigned[write.name] << write.value
       else
         state[:other] << write.name
@@ -689,10 +710,13 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
     file = scan(source, path)
     found = file[:findings].select { |finding| finding[1] == :thread_state }
     unaccounted = found.size - allowed_thread_findings(path)
-    # A chained `Thread.current.thread_variable_*` is one site of two findings; only its unaccounted ones count.
+    # A chained `Thread.current.thread_variable_*` is one site of two findings. The rows account for chained calls first
+    # (the sinks' are all chained), so the chained ones left over are the file's chained calls beyond the rows'
+    # `thread_variable_*` count, and an unchained `thread.thread_variable_get` that is not a row stays a whole site.
     unaccounted_variables = found.count { |finding| finding[2].start_with?("thread_variable") } -
                             allowed_thread_findings(path, variables: true)
-    unaccounted - [file[:chained], unaccounted_variables].min.clamp(0, unaccounted)
+    chained = (file[:chained] - allowed_thread_findings(path, variables: true)).clamp(0, [unaccounted_variables, 0].max)
+    unaccounted - chained
   end
 
   def allowed_thread_findings(path, variables: false)
@@ -714,6 +738,20 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
       Hash. New typing state belongs in a declared Rigor::TypingState slot, not here; a converted file's row is
       removed (or its count lowered) in the same change.
     MESSAGE
+  end
+
+  # The formula, on a file that has allow-list rows (the fiber-crossing sinks: 4 chained `thread_variable_*` calls).
+  it "counts only a row-bearing file's unaccounted thread-state sites" do
+    path = "lib/rigor/plugin/io_boundary.rb"
+    source = File.read(project_path(path))
+    count = ->(extra) { thread_site_count("#{source}\nmodule Probe\n#{extra}\nend\n", project_path(path)) }
+    plain = ->(number) { (1..number).map { |index| "def self.p#{index} = Thread.current[:a]" }.join("\n") }
+
+    expect(count.call("")).to eq(0)
+    expect(count.call(plain.call(1))).to eq(1)
+    expect(count.call(plain.call(4))).to eq(4)
+    expect(count.call("def self.q(thread) = thread.thread_variable_get(:z)")).to eq(1)
+    expect(count.call("def self.q = Thread.current.thread_variable_get(:z)")).to eq(1)
   end
 
   it "gives every allow-list entry a covered file and a reason" do
@@ -931,31 +969,29 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
 
     # ADR-129 stage 1, PR 7: `Ractor.main.send(m)` and `worker.monitor(Ractor.current.default_port)` address a
     # mailbox; they keep nothing. A local counts only while every read of it is a messaging receiver.
-    it "reads Ractor.main messaged with its value discarded, and Ractor.current's port given to monitor" do # rubocop:disable RSpec/ExampleLength
-      expect(rules_in(<<~RUBY)).to contain_exactly([14, :thread_state, "Ractor.current"])
-        def a
-          Ractor.main.send([:x])
-          nil
+    it "reads a worker's Ractor.main messages and Ractor.current's port given to monitor as addresses" do
+      expect(rules_in(<<~RUBY)).to be_empty
+        def worker
+          Ractor.new do
+            main = Ractor.main
+            main.send(1)
+            main << 2
+            Ractor.main.send([:x])
+            loop { Ractor.main << 3 }
+          end
         end
         def b(worker) = worker.monitor(Ractor.current.default_port)
-        def c
-          main = Ractor.main
-          main.send(1)
-          main << 2
-          nil
-        end
-        def d(workers) = workers.each { |worker| worker.unmonitor(Ractor.current.default_port) }
-        def e
-          other = Ractor.current
-          other.send(1)
-          nil
-        end
-        def f = loop { Ractor.main << 3 }
-        def g
-          r = Ractor.main
-          [1].each { r = Ractor.main }
-          r.send(1)
-          nil
+        def d(workers) = workers.each { |w| w.unmonitor(Ractor.current.default_port) }
+        def e(worker, port) = worker.monitor(port)
+        def f(obj) = obj.monitor(:x)
+        def g = unmonitor(1)
+        def h
+          Ractor.new do
+            r = Ractor.main
+            r = Ractor.main
+            r.send(1)
+            nil
+          end
         end
       RUBY
     end
@@ -1008,6 +1044,31 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
           nil
         end
         def y = [1].map { Ractor.main.send(1) }
+        def stash_main(v)
+          Ractor.main.send(v)
+          nil
+        end
+        def unstash_main = Ractor.receive
+        def queue_local(v)
+          me = Ractor.main
+          me << v
+          nil
+        end
+        def enum_each
+          Enumerator.new { |y| y.yield(nil)[:memo] = 1 }.each { Ractor.main.send(nil) }
+        end
+        def each_yield = yield
+        def custom
+          each_yield { Ractor.main.send(nil) }
+        end
+        def r3(worker) = worker.monitor(Ractor.current[:k])
+        def w2
+          Ractor.new do
+            other = Ractor.current
+            other.send(1)
+            nil
+          end
+        end
       RUBY
         [2, :thread_state, "Ractor.main"], [7, :thread_state, "Ractor.current"], [8, :thread_state, "Ractor.main"],
         [9, :thread_state, "Ractor[]"], [10, :thread_state, "store_if_absent"], [11, :thread_state, "Ractor.main"],
@@ -1018,7 +1079,9 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
         [26, :thread_state, "Ractor.current"], [27, :thread_state, "Ractor.main"],
         [31, :thread_state, "Ractor.main"], [33, :thread_state, "Ractor.main"], [36, :thread_state, "Ractor.current"],
         [37, :thread_state, "Ractor.main"], [39, :thread_state, "Ractor.main"],
-        [43, :thread_state, "Ractor.current"], [46, :thread_state, "Ractor.main"]
+        [43, :thread_state, "Ractor.current"], [46, :thread_state, "Ractor.main"],
+        [48, :thread_state, "Ractor.main"], [53, :thread_state, "Ractor.main"], [58, :thread_state, "Ractor.main"],
+        [62, :thread_state, "Ractor.main"], [64, :thread_state, "Ractor.current"], [67, :thread_state, "Ractor.current"]
       )
     end
 

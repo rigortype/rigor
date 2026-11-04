@@ -133,9 +133,9 @@ Base figures:
   - The harness neither logged nor validated Table reads, so these hit counts are an upper bound. In particular, an
     entry whose computation read a key ABSENT and then wrote it would invalidate itself under plain read
     validation; ADR-129's read-through-cache rule exists for that case.
-  - The harness refused on resource writes only. A rule that also refuses every resource read measured −24.2%
-    allocations on Mastodon instead of −30.1% (the round-2 review of ADR-129). ADR-129 states the two read
-    exemptions that make the writes-only count its rule.
+  - The harness refused on resource writes only. Also refusing the two read sites the round-2 review of ADR-129
+    probed (user-method inference entry and `record_conditional_value`) measured −24.2% allocations on Mastodon
+    instead of −30.1%. ADR-129 exempts those two reads, which the writes-only count approximates.
 - A recompute's write list differed from the stored one 416, 846 and 1,104 times under `rmc_a` (Mastodon, `lib`,
   Redmine). In the 60 samples per run, the lists differed only in the identity of the target scope. The final table
   state is what the comparison below uses.

@@ -1069,6 +1069,13 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
             nil
           end
         end
+        def mixed
+          held_main = Ractor.main
+          Ractor.new do
+            held_main.send(1)
+            nil
+          end
+        end
       RUBY
         [2, :thread_state, "Ractor.main"], [7, :thread_state, "Ractor.current"], [8, :thread_state, "Ractor.main"],
         [9, :thread_state, "Ractor[]"], [10, :thread_state, "store_if_absent"], [11, :thread_state, "Ractor.main"],
@@ -1081,7 +1088,8 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
         [37, :thread_state, "Ractor.main"], [39, :thread_state, "Ractor.main"],
         [43, :thread_state, "Ractor.current"], [46, :thread_state, "Ractor.main"],
         [48, :thread_state, "Ractor.main"], [53, :thread_state, "Ractor.main"], [58, :thread_state, "Ractor.main"],
-        [62, :thread_state, "Ractor.main"], [64, :thread_state, "Ractor.current"], [67, :thread_state, "Ractor.current"]
+        [62, :thread_state, "Ractor.main"], [64, :thread_state, "Ractor.current"],
+        [67, :thread_state, "Ractor.current"], [73, :thread_state, "Ractor.main"]
       )
     end
 

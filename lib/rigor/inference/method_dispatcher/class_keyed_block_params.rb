@@ -16,7 +16,7 @@ module Rigor
       # - a class argument the engine cannot read (`def self.reg(k) = node_rule(k) { ... }`) matches every overload
       #   gradually, and the block probe took the first, `Prism::CallNode`.
       #
-      # This rebinds the block's first parameter from the class argument once an overload has matched:
+      # This rebinds the block's first parameter from the class argument:
       #
       # - `singleton(X)` binds `X`, and a union of class objects the union of their instances;
       # - any other argument (an untyped parameter, a `Class` value) binds `Dynamic[top]`, so the body is not
@@ -39,8 +39,8 @@ module Rigor
         # @param method_definition — the RBS declaration the probe read.
         # @param params — the block parameters the overloads bound.
         # @return the block parameters, the first rebound for `Base.node_rule`.
-        def rebind(method_definition, kind, method_name, args, params)
-          return params if params.empty? || method_name != METHOD || kind != :singleton
+        def rebind(method_definition, method_name, args, params)
+          return params unless method_name == METHOD
           return params unless method_definition.defined_in.to_s == OWNER
 
           [instance_of(args.first), *params.drop(1)]

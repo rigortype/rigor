@@ -94,8 +94,9 @@ RSpec.describe "plugin.api-surface" do
   describe "node_rule's block binding" do
     let(:rows) { run_check }
 
-    it "binds nothing it cannot read from an unknown class argument" do
+    it "binds untyped from a class argument it cannot read, so no member reports" do
       expect(rows.fetch("unknown-class")).to be_empty
+      expect(rows.fetch("unknown-class-type")).to eq(["dump.type: dump_type: Dynamic[top]"])
     end
 
     it "binds the class argument's instances where no overload names the class" do
@@ -104,8 +105,18 @@ RSpec.describe "plugin.api-surface" do
         .to eq(["call.undefined-method: undefined method `not_a_member' for Prism::IfNode"])
     end
 
-    it "keeps an overload's own class" do
+    it "binds a union of class objects to the union of their instances" do
+      expect(rows.fetch("class-union-type")).to eq(["dump.type: dump_type: Prism::IfNode | Prism::UnlessNode"])
+    end
+
+    it "keeps an overload's own class and the other block parameters" do
       expect(rows.fetch("overload-class")).to be_empty
+      expect(rows.fetch("no-overload-class-scope")).to eq(["dump.type: dump_type: Dynamic[Rigor::Plugin::_Scope]"])
+    end
+
+    it "rebinds neither another Base hook nor a project's own node_rule" do
+      expect(rows.fetch("other-hook")).to eq(["dump.type: dump_type: Prism::ProgramNode"])
+      expect(rows.fetch("own-node-rule")).to eq(["dump.type: dump_type: Prism::Node"])
     end
   end
 end

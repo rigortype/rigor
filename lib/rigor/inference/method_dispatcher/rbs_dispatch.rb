@@ -2149,7 +2149,7 @@ module Rigor
               keywords_last: ArgumentNodes.keyword_hash_last?(call_node, args),
               positional_splat: splat_indices(call_node, args)
             )
-            ClassKeyedBlockParams.rebind(method_definition, kind, method_name, args, params)
+            ClassKeyedBlockParams.rebind(method_definition, method_name, args, params)
           rescue StandardError
             []
           end

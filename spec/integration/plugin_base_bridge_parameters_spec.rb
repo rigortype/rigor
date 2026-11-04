@@ -46,6 +46,7 @@ RSpec.describe "ADR-43 bridge: block, override and reader types for a source-onl
               def self.load: (Symbol name) -> void
               def self.respond_to_missing?: (Symbol name, bool include_all) -> bool
               def diagnostics_for_file: (path: String, scope: Rigor::Scope, root: Rigor::Plugin::ProgramNode) -> Array[untyped]
+              def pos_kw: (Integer x, ?String y, path: String) -> void
             end
           end
         end
@@ -203,6 +204,23 @@ RSpec.describe "ADR-43 bridge: block, override and reader types for a source-onl
       end
     RUBY
     expect(dump_lines(source)).to eq([[5, "dump_type: Dynamic[top]"], [9, "dump_type: Dynamic[top]"]])
+  end
+
+  # The override takes no keywords, so `pos_kw(1, path: "a")` hands `opts` the Hash `{ path: "a" }`, not a String.
+  it "leaves an override slot that may receive the keywords as a positional Hash Dynamic[top]" do
+    source = <<~RUBY
+      module Rigor
+        module Plugin
+          class ZzProbe < Base
+            def pos_kw(x, opts = {})
+              Rigor.dump_type(x)
+              Rigor.dump_type(opts)
+            end
+          end
+        end
+      end
+    RUBY
+    expect(dump_lines(source)).to eq([[5, "dump_type: Integer"], [6, "dump_type: Dynamic[top]"]])
   end
 
   # The bridge serves the manifest-declared ancestors too (`rbs_complete_ancestors:`). With rigor-graphql,

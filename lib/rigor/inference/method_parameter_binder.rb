@@ -74,18 +74,24 @@ module Rigor
       MISALIGNED = :misaligned
       NOT_PASSED = :not_passed
 
-      Shape = Data.define(:requireds, :leading, :posts, :keywords)
+      # `accepts_keywords` is false for a def with no keyword parameter and no `**`, `**nil` or `...`: Ruby passes a
+      # call's keywords to such a def as a Hash in one more positional argument.
+      Shape = Data.define(:requireds, :leading, :posts, :keywords, :accepts_keywords)
 
       def shape_of(params_node)
-        return Shape.new(0, 0, 0, [].freeze) if params_node.nil?
+        return Shape.new(0, 0, 0, [].freeze, false) if params_node.nil?
 
         requireds = params_node.requireds.size
         keywords = params_node.keywords.map(&:name).freeze
-        Shape.new(requireds, requireds + params_node.optionals.size, params_node.posts.size, keywords)
+        accepts_keywords = !keywords.empty? || !params_node.keyword_rest.nil?
+        Shape.new(requireds, requireds + params_node.optionals.size, params_node.posts.size, keywords,
+                  accepts_keywords)
       end
 
       # The RBS type the overload `function` declares for `slot`, {MISALIGNED} or {NOT_PASSED}.
       def declared(function, slot, shape)
+        return MISALIGNED if keyword_hash_reaches?(function, slot, shape)
+
         case slot.kind
         when :required_positional then leading(function, shape, slot.index)
         when :optional_positional then leading(function, shape, shape.requireds + slot.index)
@@ -94,6 +100,22 @@ module Rigor
         when :required_keyword, :optional_keyword then keyword(function, slot.name)
         when :rest_keyword then rest_keyword(function, shape)
         else NOT_PASSED
+        end
+      end
+
+      # Whether the overload's keywords may reach `slot` as a positional Hash: the def accepts no keywords, so a
+      # call's keywords arrive as one more positional argument, which lands past the declared required leading
+      # positionals, in the `*rest`, or (shifting every post positional) in a post positional.
+      def keyword_hash_reaches?(function, slot, shape)
+        return false if shape.accepts_keywords
+        return false if function.required_keywords.empty? && function.optional_keywords.empty? &&
+                        function.rest_keywords.nil?
+
+        case slot.kind
+        when :required_positional then slot.index >= function.required_positionals.size
+        when :optional_positional then shape.requireds + slot.index >= function.required_positionals.size
+        when :rest_positional, :trailing_positional then true
+        else false
         end
       end
 

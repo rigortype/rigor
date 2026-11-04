@@ -203,6 +203,13 @@ RSpec.describe Rigor::Inference::MethodParameterBinder do
               def posts: (Integer a, Symbol z) -> void
               def absorb: (Integer x) -> void
                         | (*Symbol rest) -> void
+              def pos_kw: (Integer x, ?String y, path: String) -> void
+              def rest_kw: (*Integer xs, path: String) -> void
+              def past_rest: (Integer x, String y) -> void
+                           | (Integer x, *Symbol r) -> void
+              def kw_rest: (path: String) -> void
+                         | (**Float kw) -> void
+              def posts_rest: (Integer x, *Symbol s, Float u, String t) -> void
             end
           RBS
           project_env = Rigor::Environment.for_project(root: dir)
@@ -228,9 +235,10 @@ RSpec.describe Rigor::Inference::MethodParameterBinder do
         end
       end
 
-      it "binds *rest to the declared rest when the def has every declared leading positional" do
+      # `**kw` takes the declared keywords, so none of them reach `*rest` as a positional Hash.
+      it "binds *rest to the declared rest when the def has exactly the declared leading positionals" do
         with_shape_demo do |binder|
-          result = binder.bind(def_node("def go(x, y = '', *rest); x; end"))
+          result = binder.bind(def_node("def go(x, y = '', *rest, **kw); x; end"))
 
           expect(result[:rest]).to eq(nominal("Array", [nominal("Symbol")]))
         end
@@ -258,6 +266,44 @@ RSpec.describe Rigor::Inference::MethodParameterBinder do
       it "leaves a slot Dynamic[Top] when any overload does not line up with it" do
         with_shape_demo do |binder|
           expect(binder.bind(def_node("def absorb(*args); args; end"))).to eq(args: untyped)
+        end
+      end
+
+      # A def with no keyword parameter and no `**` takes a call's keywords as a Hash in one more positional argument,
+      # so a slot past the declared required leading positionals, a `*rest` or a post positional may hold that Hash.
+      it "leaves a slot that may receive the keywords as a positional Hash Dynamic[Top]" do
+        with_shape_demo do |binder|
+          expect(binder.bind(def_node("def pos_kw(x, opts = {}); x; end"))).to eq(x: nominal("Integer"), opts: untyped)
+          expect(binder.bind(def_node("def pos_kw(x, y); x; end"))).to eq(x: nominal("Integer"), y: untyped)
+          expect(binder.bind(def_node("def rest_kw(*xs); xs; end"))).to eq(xs: untyped)
+        end
+      end
+
+      it "still binds those slots when the def takes the keywords itself" do
+        with_shape_demo do |binder|
+          result = binder.bind(def_node("def pos_kw(x, y = '', path:); x; end"))
+
+          expect(result).to eq(x: nominal("Integer"), y: nominal("String"), path: nominal("String"))
+        end
+      end
+
+      it "leaves a leading positional past the declared ones Dynamic[Top] when an overload declares a rest" do
+        with_shape_demo do |binder|
+          expect(binder.bind(def_node("def past_rest(a, b); a; end"))).to eq(a: nominal("Integer"), b: untyped)
+        end
+      end
+
+      # The `(**Float kw)` overload hands `path:` a Float; the rule leaves a keyword an overload does not declare
+      # beside its `**` rest Dynamic[Top] rather than unioning the rest's value type in.
+      it "leaves a keyword an overload covers only through its ** rest Dynamic[Top]" do
+        with_shape_demo do |binder|
+          expect(binder.bind(def_node("def kw_rest(path:); path; end"))).to eq(path: untyped)
+        end
+      end
+
+      it "leaves a post positional Dynamic[Top] when the trailing counts differ" do
+        with_shape_demo do |binder|
+          expect(binder.bind(def_node("def posts_rest(*r, z); z; end"))).to eq(r: untyped, z: untyped)
         end
       end
 

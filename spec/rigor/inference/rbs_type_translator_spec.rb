@@ -312,6 +312,25 @@ RSpec.describe Rigor::Inference::RbsTypeTranslator do
       expect(loader.closed_alias_translations.size).to eq(1)
     end
 
+    it "does not memoise an open alias, whose answer depends on the caller's type variables" do
+      loader = Rigor::Environment::RbsLoader.new(virtual_rbs: [["(spec: #775 open)", "type list[T] = ::Array[T] | T\n"]])
+      translate_list = lambda do |arg|
+        described_class.translate(parse_rbs("::list[X]", variables: [:X]), type_vars: { X: arg }, alias_expander: loader)
+      end
+
+      expect(translate_list.call(Rigor::Type::Combinator.nominal_of("Integer")).describe).to eq("Array[Integer] | Integer")
+      expect(translate_list.call(Rigor::Type::Combinator.nominal_of("String")).describe).to eq("Array[String] | String")
+    end
+
+    it "is bypassed while a trace records, so the union events are recorded" do
+      loader = loader_with("::String")
+      translate_a(loader)
+
+      events = Rigor::Inference::FlowTracer.record { translate_a(loader) }
+
+      expect(events.count { |event| event.kind == :union }).to eq(1)
+    end
+
     it "keeps no memo for an expander that offers none" do
       loader = loader_with("::String")
       expander = Struct.new(:loader) do

@@ -1,2 +1,1 @@
-- **[inference]** The language server no longer reads a stale declared type for an unchanged alias after a `.rbs` edit changes an alias nested inside it. ([#2821](https://github.com/rigortype/rigor/pull/2821))
-  - With `type a = b | Integer`, editing `b` left parameters and returns declared as `a` reading the previous `b` until the old signature set was collected, because the translated alias was remembered across signature sets instead of per set.
+- **[rigor lsp]** The language server no longer reads a stale declared type for an unchanged alias after a `.rbs` edit changes an alias nested inside it, which could last until Ruby garbage-collected the previous signatures. ([#2821](https://github.com/rigortype/rigor/pull/2821))

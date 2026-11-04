@@ -193,7 +193,11 @@ The scope also keeps the alias memo sound:
 
 - Whether an interface carries the facet is a pure function of its `TypeName`, through the namespace path.
   A closed alias therefore translates to the same type whichever file or worker translates it first.
-- So `@closed_alias_translations`, keyed by the expansion, stays correct.
+- So the closed-alias memo, keyed by the expansion and held per loader (`RbsLoader#closed_alias_translations`),
+  stays correct.
+
+  > Amended by [#2821](https://github.com/rigortype/rigor/pull/2821): a closed expansion can hold a nested alias, which is expanded through the loader, so one memo shared by every loader answered a second loader with the first one's translation.
+
 - If a later slice makes the facet depend on anything but the type name, it must add that input to the memo
   key. If it cannot, it must bypass the memo, as a requirement translation would.
 

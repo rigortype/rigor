@@ -40,6 +40,11 @@ the extension is versioned independently of the `rigortype` gem.
   through the `$rigor` problem matcher. Trusted workspaces only. The
   matcher's trailing `[RULE]` is optional, so parse and path errors
   appear too.
+- The `rigor: check` task keeps each folder's problems apart (#2747):
+  it runs in a terminal that parses the output itself, so running one
+  folder's task no longer clears another's. The problems have
+  `source: "rigor check"`. New **Rigor: Clear Check Results**. The
+  `$rigor` matcher stays for your own `tasks.json` shell tasks.
 - **Rigor: Check Workspace**, which runs that task for the active
   editor's folder.
 - A **managed Rigor** for first-time users (#2725): when no `rigor` is

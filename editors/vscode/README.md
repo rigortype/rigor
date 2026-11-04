@@ -312,11 +312,12 @@ The language server only reports diagnostics for open files. To see
 every finding in the project, run the `rigor: check` task
 (**Terminal → Run Task…**, or **Rigor: Check Workspace**). The task runs
 the same `rigor` the server uses, from the project root, with the same
-`rigor.server.configPath`, and its text output fills the Problems panel
-through the `$rigor` problem matcher. The problems carry
-`source: "rigor"`, like the server's.
+`rigor.server.configPath`. It runs in a terminal that reads the output
+itself and fills the Problems panel, under the collection `rigor
+check`. The problems carry `source: "rigor check"`, apart from the
+language server's `source: "rigor"`.
 
-The matcher reads each `PATH:LINE:COL: SEVERITY: MESSAGE` line, where
+Each output line is read as `PATH:LINE:COL: SEVERITY: MESSAGE` line, where
 `SEVERITY` is `error`, `warning` or `info`. A trailing `[RULE]` is
 optional: when the line ends with one, it is the rule (the last
 bracketed token), so a message that itself ends in brackets without a
@@ -325,22 +326,30 @@ rule is read as having that rule. Summary lines such as
 are not problems.
 
 Relative paths resolve against the project root (`rigor.rootDir`, or
-the folder itself), through `${config:rigor.rootDir}`. Absolute paths
-are used as given. The base was checked per folder in a multi-root
-workspace where each folder has its own `rootDir`. An absolute
+the folder itself). Absolute paths are used as given. An absolute
 `rigor.rootDir` is rejected, as it is for the server.
 
 - The task is provided once per managed folder, and only in trusted
   workspaces. In a multi-root workspace the task is named
   `check (<folder>)`.
-- Each run replaces the task's previous problems, including those of a
-  task for another folder. To clear them, rerun the task or close its
-  terminal.
+- Each folder keeps its own problems. A run replaces only that
+  folder's earlier problems, so in a multi-root workspace running the
+  task for one folder leaves the others' in place. A file that two
+  folders report (nested roots) shows both folders' problems. A
+  folder's problems are cleared when its task runs again, when the
+  folder leaves the workspace or stops being managed, and by **Rigor:
+  Clear Check Results** (every folder). A cancelled run leaves none.
+- The contributed `$rigor` problem matcher remains for a `tasks.json`
+  shell task you write yourself, for example
+  `{ "type": "shell", "command": "rigor check", "problemMatcher": "$rigor" }`.
+  Its problems belong to the owner `rigor`, which every task using the
+  matcher shares, so one such task's run replaces another's. The
+  provided task does not use it, so nothing is reported twice.
 - VS Code keeps one problem per file, line and column. Two findings at
   the same position show only the first one.
 - A file open in the editor can show the same finding twice: once from
-  the language server and once from the task. Both entries have
-  `source: "rigor"` and the same position. VS Code does not merge them,
+  the language server (`source: "rigor"`) and once from the task
+  (`source: "rigor check"`). VS Code does not merge them,
   so clearing the task's problems does not clear the server's entry.
 
 ## Multi-root workspaces

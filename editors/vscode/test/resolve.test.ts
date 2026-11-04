@@ -124,6 +124,16 @@ describe("project lockfile pin", () => {
     assert.equal(res.probe.notFound, true);
   });
 
+  it("a bundle that falls through to an old rigor is rejected as a mismatch, not as too old", async () => {
+    write(path.join(sb.project, "Gemfile.lock"), lockfile("0.4.7"));
+    fakeBundle("0.1.0");
+    const res = await walk();
+    assert.equal(res.probe.ok, false);
+    assert.equal(res.probe.tooOld, false);
+    assert.equal(res.rejected.length, 1);
+    assert.match(res.rejected[0].reason, /runs rigortype 0\.1\.0, but .* pins 0\.4\.7/);
+  });
+
   it("accepts a lockfile version with a platform suffix", async () => {
     write(path.join(sb.project, "Gemfile.lock"), lockfile("0.4.7-arm64-darwin"));
     fakeBundle("0.4.7");

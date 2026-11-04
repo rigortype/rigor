@@ -41,6 +41,11 @@ describe("tomlToolsNameRigortype", () => {
     assert.equal(pins('[ tools ]  # the tools\nrigortype = "1"\n'), true);
   });
 
+  it("mismatched quotes around the key are not a pin", () => {
+    assert.equal(pins("[tools]\n\"gem:rigortype' = \"1\"\n"), false);
+    assert.equal(pins("[tools]\n'rigortype\" = \"1\"\n"), false);
+  });
+
   it("reads a [tools.\"gem:rigortype\"] table", () => {
     assert.equal(pins('[tools."gem:rigortype"]\nversion = "0.4.7"\n'), true);
     assert.equal(pins('[tools.rigortype]\nversion = "0.4.7"\n'), true);

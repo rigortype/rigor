@@ -119,4 +119,19 @@ describe("the $rigor problem matcher", () => {
     assert.equal(match("a.rb:x:1: error: line is not a number"), undefined);
     assert.equal(match("a.rb:1:1:error: no space after the colon"), undefined);
   });
+
+  it("a rule-like token holding a bracket is not the rule", () => {
+    const m = match("a.rb:1:1: error: msg [a[b]");
+    assert.equal(m?.code, undefined);
+    assert.equal(m?.message, "msg [a[b]");
+  });
+
+  it("a message that contains a position keeps the first one as the location", () => {
+    const m = match("a.rb:1:2: error: see b.rb:3:4: error: x [r]");
+    assert.equal(m?.file, "a.rb");
+    assert.equal(m?.line, "1");
+    assert.equal(m?.column, "2");
+    assert.equal(m?.message, "see b.rb:3:4: error: x");
+    assert.equal(m?.code, "r");
+  });
 });

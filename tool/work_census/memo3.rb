@@ -469,9 +469,9 @@ module WC3
           @depth[m] += 1
         end
 
-        i0 = @instr
         t0 = cpu
         @instr += t0 - t_in
+        i0 = @instr
         WC3.open_capture
         begin
           result = yield

@@ -1589,10 +1589,20 @@ export function miseLogActive(tail: string, quietMs: number): boolean {
   if (quietMs >= MISE_LOG_QUIET_MS) {
     return false;
   }
-  return !/Installed ruby-\S+ to|BUILD FAILED|\bmise\b[^\n]*\b(ERROR|error)\b|^\s*(ERROR|Error)\b|✓|\binstalled\b[^\n]*ruby@/im.test(
-    tail,
-  );
+  // Only the final non-empty line counts: a tick printed by an earlier
+  // step, or a compiler line that starts with `Error:` and is followed by
+  // more output, is not the end of the install.
+  const last =
+    tail
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line !== "")
+      .pop() ?? "";
+  return !MISE_LOG_FINISHED.test(last);
 }
+
+const MISE_LOG_FINISHED =
+  /^(?:.*\bInstalled ruby-\S+ to|.*\bBUILD FAILED|mise\b.*\b(?:ERROR|error)\b|(?:ERROR|Error)\b.*|.*✓.*\binstalled\b.*|.*\binstalled\b.*ruby@.*)/;
 
 function miseLogTail(file: string): string {
   let fd: number | undefined;
@@ -1762,6 +1772,14 @@ export function registerRuntimeCommands(
 async function checkForUpdate(output: OutputChannel): Promise<void> {
   const installed = installedVersions();
   const requested = requestedVersion();
+  if (requested === DEV_VERSION && !devGemPath) {
+    void window.showInformationMessage(
+      `Rigor: "rigor.runtime.version" is "${DEV_VERSION}", which is only ` +
+        `valid in an extension development host with ${DEV_GEM_PATH_ENV} set; ` +
+        "use latest or a release version.",
+    );
+    return;
+  }
   if (requested === DEV_VERSION) {
     void window.showInformationMessage(
       "Rigor: the managed Rigor is a development install from a local " +

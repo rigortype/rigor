@@ -123,6 +123,12 @@ interface ManagedClient {
    * client is not `Running`, so the kill is not reported as a lost
    * connection (two library toasts), and release what the unfinished start
    * left registered.
+   *
+   * Invariant: every caller must follow `cutOff` with `client.dispose()`.
+   * It leaves the library's `_diagnostics` field pointing at a disposed
+   * collection; only the dispose that follows ends the client's use of it.
+   * The library's already queued diagnostics cannot be guarded through its
+   * public API (the queue is private), so this stays a documented invariant.
    */
   cutOff(): void;
 }
@@ -161,6 +167,15 @@ const pinsTouched = new Set<string>();
 let pinWatchers: Disposable[] = [];
 /** The (directory, file name) pairs `pinWatchers` watch, and their folders. */
 let pinWatcherSignature = "";
+
+/**
+ * Consecutive start timeouts per folder. After `START_TIMEOUT_LIMIT` a
+ * watcher-driven sync no longer starts the folder (each try is another
+ * 60 s hang and toast); Restart Server and a settings change reset it.
+ */
+const startTimeouts = new Map<string, number>();
+const startBackoffLogged = new Set<string>();
+const START_TIMEOUT_LIMIT = 2;
 
 function enqueue(task: () => Promise<void>): Promise<void> {
   const run = lifecycle.then(() => (shuttingDown ? undefined : task()));
@@ -261,12 +276,31 @@ export async function deactivate(): Promise<void> {
 
 /** Bring the running clients in line with the current workspace state. */
 function syncClients(): Promise<void> {
-  return enqueue(syncClientsNow);
+  // A sync still waiting behind a running task would do the same work as
+  // this one, so the request joins it instead of queueing another.
+  if (pendingSync) {
+    return pendingSync;
+  }
+  const run = enqueue(() => {
+    pendingSync = undefined;
+    return syncClientsNow();
+  });
+  pendingSync = run;
+  void run.then(() => {
+    if (pendingSync === run) {
+      pendingSync = undefined;
+    }
+  });
+  return run;
 }
+
+let pendingSync: Promise<void> | undefined;
 
 function restartAll(): Promise<void> {
   return enqueue(async () => {
     probeFailureReported.clear();
+    startTimeouts.clear();
+    startBackoffLogged.clear();
     forgetResolutions();
     clearRuleCache();
     await stopAllNow();
@@ -333,6 +367,15 @@ async function setManagedContext(value: boolean): Promise<void> {
 async function startClient(folder: WorkspaceFolder): Promise<void> {
   const key = folder.uri.toString();
   if (clients.has(key)) {
+    return;
+  }
+  if ((startTimeouts.get(key) ?? 0) >= START_TIMEOUT_LIMIT) {
+    if (!startBackoffLogged.has(key)) {
+      startBackoffLogged.add(key);
+      outputChannel.appendLine(
+        `[rigor] ${folder.name}: the server did not answer \`initialize\` ${START_TIMEOUT_LIMIT} times in a row; not restarting it until "Rigor: Restart Server" or a settings change.`,
+      );
+    }
     return;
   }
   // `shouldManageFolder` only returns true for a root inside the folder.
@@ -512,13 +555,16 @@ async function startClient(folder: WorkspaceFolder): Promise<void> {
   // Gives up on a client the extension still holds: out of `clients`,
   // transports detached (see `cutOff`), server killed, client disposed.
   const discardClient = async (toastMessage?: string): Promise<void> => {
+    // Already abandoned (deactivate or a restart during the start): the
+    // extension itself ended the client, so the timeout is no news.
+    const alreadyAbandoned = abandoned;
     clients.delete(key);
     setInUse(key, undefined);
     for (const disposable of disposables) {
       disposable.dispose();
     }
     abandoned = true;
-    if (toastMessage !== undefined) {
+    if (toastMessage !== undefined && !alreadyAbandoned) {
       // Killing the server closes the connection, which the client would
       // report as two more errors (the rejected `initialize`, then
       // "couldn't create connection"). Detached first, the pending
@@ -559,6 +605,7 @@ async function startClient(folder: WorkspaceFolder): Promise<void> {
       version: probe.version,
       commandLine,
     };
+    startTimeouts.delete(key);
     statusBar.update(key, running);
     logStartup(label, root, resolution, commandLine, "running");
   } catch (err) {
@@ -572,6 +619,10 @@ async function startClient(folder: WorkspaceFolder): Promise<void> {
     outputChannel.appendLine(
       `[rigor] failed to start the server for ${label}: ${String(err)}`,
     );
+    if (err instanceof StartTimeoutError && !abandoned) {
+      const count = (startTimeouts.get(key) ?? 0) + 1;
+      startTimeouts.set(key, count);
+    }
     await discardClient(
       err instanceof StartTimeoutError ? err.message : undefined,
     );

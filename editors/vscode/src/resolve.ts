@@ -40,6 +40,7 @@ import {
   findPin,
   projectRoot,
   versionManagerShims,
+  explicitServerPath,
 } from "./discovery";
 import { ProbeResult, probeServer } from "./probe";
 import { findRubyMatching, managedServer } from "./runtime";
@@ -219,7 +220,7 @@ async function walk(
 ): Promise<Resolution> {
   const cfg = workspace.getConfiguration("rigor", folder.uri);
   const root = projectRoot(folder) ?? folder.uri.fsPath;
-  const explicitPath = (cfg.get<string>("server.path") ?? "").trim();
+  const explicitPath = explicitServerPath(cfg.get<string>("server.path"));
   const mode = cfg.get<BundlerMode>("server.useBundler", "auto");
   const pinned = pinnedBundleGemfile(folder, root);
   if (pinned.rejected) {

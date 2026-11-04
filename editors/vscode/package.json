@@ -163,6 +163,11 @@
         "category": "Rigor"
       },
       {
+        "command": "rigor.clearCheckResults",
+        "title": "Clear Check Results",
+        "category": "Rigor"
+      },
+      {
         "command": "rigor.installManagedRuntime",
         "title": "Install Managed Rigor",
         "category": "Rigor"
@@ -253,6 +258,10 @@
         },
         {
           "command": "rigor.updateBaseline",
+          "when": "rigor.managedFolder"
+        },
+        {
+          "command": "rigor.clearCheckResults",
           "when": "rigor.managedFolder"
         }
       ]

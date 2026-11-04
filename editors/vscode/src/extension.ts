@@ -76,7 +76,7 @@ import {
   setInUse,
 } from "./runtime";
 import { FolderStatus, StatusBar, describeFolder } from "./status";
-import { registerTasks } from "./tasks";
+import { pruneCheckResults, registerTasks } from "./tasks";
 
 /** Settings that change the server invocation and require a restart. */
 const SERVER_AFFECTING_SETTINGS = [
@@ -295,6 +295,7 @@ function restartAll(): Promise<void> {
 }
 
 async function syncClientsNow(): Promise<void> {
+  pruneCheckResults();
   if (!workspace.isTrusted) {
     // Spawning `bundle exec rigor` is withheld in untrusted workspaces.
     await stopAllNow();

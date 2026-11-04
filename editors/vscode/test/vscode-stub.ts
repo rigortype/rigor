@@ -170,7 +170,50 @@ export const commands = {
 /** Providers handed to `registerCodeActionsProvider`, newest last. */
 export const registeredCodeActionProviders: unknown[] = [];
 
+export enum DiagnosticSeverity {
+  Error = 0,
+  Warning = 1,
+  Information = 2,
+  Hint = 3,
+}
+
+export class Range {
+  readonly start: { line: number; character: number };
+  readonly end: { line: number; character: number };
+  constructor(startLine: number, startCharacter: number, endLine: number, endCharacter: number) {
+    this.start = { line: startLine, character: startCharacter };
+    this.end = { line: endLine, character: endCharacter };
+  }
+}
+
+export class Diagnostic {
+  source?: string;
+  code?: string | number;
+  constructor(
+    readonly range: Range,
+    readonly message: string,
+    readonly severity?: DiagnosticSeverity,
+  ) {}
+}
+
+class DiagnosticCollection {
+  readonly entries = new Map<string, Diagnostic[]>();
+  constructor(readonly name: string) {}
+  set(uri: Uri, diagnostics: Diagnostic[]): void {
+    this.entries.set(uri.fsPath, diagnostics);
+  }
+  delete(uri: Uri): void {
+    this.entries.delete(uri.fsPath);
+  }
+  dispose(): void {
+    this.entries.clear();
+  }
+}
+
 export const languages = {
+  createDiagnosticCollection(name: string): DiagnosticCollection {
+    return new DiagnosticCollection(name);
+  },
   registerCodeActionsProvider(_selector: unknown, provider: unknown): Disposable {
     registeredCodeActionProviders.push(provider);
     return new Disposable(() => {});

@@ -9,6 +9,7 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
 import {
+  checkForUpdate,
   classifyBuildFailure,
   dedupeCandidates,
   findRuby,
@@ -338,15 +339,32 @@ describe("miseLogActive", () => {
     ["ruby-build failure", "BUILD FAILED (macOS 15 using ruby-build 20260101)"],
     ["a mise error", "mise ERROR failed to install ruby@4.0.1"],
     ["a lower-case mise error", "mise error: install failed"],
-    ["an error line", "  ERROR: could not compile"],
-    ["a capitalised error line", "Error: boom"],
     ["mise's check mark", "mise ruby@4.0.1 ✓ installed"],
-    ["mise's installed line", "mise installed ruby@4.0.1"],
+    ["mise's check mark followed by a warning", "mise ruby@4.0.1 ✓ installed\nmise WARN something\nmise hint: run mise use"],
   ] as const) {
     it(`${label} ends the install`, () => {
       assert.equal(miseLogActive(`compiling\n${tail}\n`, 1000), false);
     });
   }
+
+  it("an earlier step's check mark does not end an install still running", () => {
+    const earlier = "mise ruby@4.0.1 ✓ updated\n" + "cc -c a.c\n".repeat(6);
+    assert.equal(miseLogActive(earlier, 1000), true);
+  });
+
+  it("a compiler Error: line, last or followed by more output, does not end the install", () => {
+    assert.equal(miseLogActive("cc -c a.c\nError: unused variable x\n", 1000), true);
+    assert.equal(miseLogActive("Error: unused variable x\nmake[2]: Leaving directory\n\n", 1000), true);
+    assert.equal(miseLogActive("  ERROR: could not compile\n", 1000), true);
+  });
+
+  it("a final marker followed by a warning still ends the install", () => {
+    assert.equal(miseLogActive("compiling\nInstalled ruby-4.0.1 to /x\nmise WARN stale cache\n", 1000), false);
+  });
+
+  it("a final marker more than five lines back is not the end", () => {
+    assert.equal(miseLogActive("BUILD FAILED\n" + "retrying step\n".repeat(5), 1000), true);
+  });
 
   it("the word error in the middle of a build line is not an ending", () => {
     assert.equal(miseLogActive("checking for error.h... yes\ncc -Werror -c x.c", 1000), true);
@@ -515,5 +533,32 @@ describe("prune", () => {
     write(path.join(root(), "stray", "file"));
     prune("0.4.9");
     assert.deepEqual(fs.readdirSync(root()).sort(), [".lock", "0.4.9", "stray"]);
+  });
+});
+
+describe("checkForUpdate with rigor.runtime.version dev", () => {
+  afterEach(() => {
+    // `devGemPath` is module state: leave it as a production window has it.
+    delete process.env.RIGOR_VSCODE_RUNTIME_GEM_PATH;
+    initRuntime(fakeContext(path.join(sb.dir, "storage"), ExtensionMode.Production));
+  });
+
+  const info = (): string[] => stub.messages.filter((m) => m.level === "info").map((m) => m.text);
+
+  it("a production window says dev is only valid in an extension development host", async () => {
+    initRuntime(fakeContext(path.join(sb.dir, "storage"), ExtensionMode.Production));
+    stub.set("rigor.runtime.version", "dev");
+    await checkForUpdate(fakeOutput() as never);
+    assert.equal(info().length, 1);
+    assert.match(info()[0], /only valid in an extension development host/);
+    assert.doesNotMatch(info()[0], /development install from a local checkout/);
+  });
+
+  it("a development host with the override keeps the development-install message", async () => {
+    process.env.RIGOR_VSCODE_RUNTIME_GEM_PATH = sb.dir;
+    initRuntime(fakeContext(path.join(sb.dir, "storage"), ExtensionMode.Development));
+    stub.set("rigor.runtime.version", "dev");
+    await checkForUpdate(fakeOutput() as never);
+    assert.match(info()[0], /development install from a local checkout/);
   });
 });

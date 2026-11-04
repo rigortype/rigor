@@ -349,6 +349,14 @@ describe("shouldManageFolder", () => {
     assert.equal(manage(), true);
   });
 
+  it("a quoted explicit path counts, and a quoted empty string is unset", () => {
+    stub.set("rigor.server.path", '"/x/rigor"');
+    assert.equal(manage(), true);
+    stub.reset();
+    stub.set("rigor.server.path", '""');
+    assert.equal(manage(), false);
+  });
+
   it("rigor.enable false turns it off, and a rejected rootDir too", () => {
     write(path.join(sb.project, ".rigor.yml"));
     stub.set("rigor.enable", false);

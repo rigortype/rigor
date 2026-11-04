@@ -151,6 +151,18 @@ export function projectRoot(folder: WorkspaceFolder): string | undefined {
 }
 
 /**
+ * `rigor.server.path` as the command to run: trimmed, with one pair of
+ * surrounding double quotes removed. Quoting a path with spaces was the
+ * user's own Windows workaround before #2743; `shellArg` now quotes it.
+ * A quoted empty string (`"\"\""`) is deliberately the same as unset.
+ */
+export function explicitServerPath(raw: string | undefined): string {
+  const trimmed = (raw ?? "").trim();
+  const m = /^"([^"]*)"$/.exec(trimmed);
+  return m ? m[1].trim() : trimmed;
+}
+
+/**
  * Decide whether the extension should manage a language client for this
  * workspace folder. We only start a server where there is positive
  * evidence the project uses Rigor — a config file, the gem in the
@@ -167,7 +179,7 @@ export function shouldManageFolder(folder: WorkspaceFolder): boolean {
   if (!root || !fs.existsSync(root)) {
     return false;
   }
-  if ((cfg.get<string>("server.path") ?? "").trim()) {
+  if (explicitServerPath(cfg.get<string>("server.path"))) {
     return true;
   }
   return (

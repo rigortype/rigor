@@ -6,6 +6,14 @@
 // configuration, lifecycle commands, the status bar, and — because the
 // v1 LSP is single-root — one client per Rigor-configured folder.
 
+import {
+  SKIPPED_NOTE,
+  START_TIMEOUT_LIMIT,
+  StartBackoff,
+  SyncCoalescer,
+  backoffNotice,
+  startTimeoutIsNews,
+} from "./syncPolicy";
 import { ChildProcess, spawn } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
@@ -123,6 +131,12 @@ interface ManagedClient {
    * client is not `Running`, so the kill is not reported as a lost
    * connection (two library toasts), and release what the unfinished start
    * left registered.
+   *
+   * Invariant: every caller must follow `cutOff` with `client.dispose()`.
+   * It leaves the library's `_diagnostics` field pointing at a disposed
+   * collection; only the dispose that follows ends the client's use of it.
+   * The library's already queued diagnostics cannot be guarded through its
+   * public API (the queue is private), so this stays a documented invariant.
    */
   cutOff(): void;
 }
@@ -162,6 +176,8 @@ let pinWatchers: Disposable[] = [];
 /** The (directory, file name) pairs `pinWatchers` watch, and their folders. */
 let pinWatcherSignature = "";
 
+const startBackoff = new StartBackoff();
+
 function enqueue(task: () => Promise<void>): Promise<void> {
   const run = lifecycle.then(() => (shuttingDown ? undefined : task()));
   lifecycle = run.catch((err) => {
@@ -182,6 +198,7 @@ export function activate(context: ExtensionContext): void {
   initRuntime(context);
   registerRuntimeCommands(context, outputChannel, afterManagedInstall, (task) =>
     enqueue(async () => {
+      startBackoff.resetAll();
       await stopAllNow();
       try {
         await task();
@@ -261,12 +278,15 @@ export async function deactivate(): Promise<void> {
 
 /** Bring the running clients in line with the current workspace state. */
 function syncClients(): Promise<void> {
-  return enqueue(syncClientsNow);
+  return syncCoalescer.request(syncClientsNow);
 }
+
+const syncCoalescer = new SyncCoalescer((task) => enqueue(task));
 
 function restartAll(): Promise<void> {
   return enqueue(async () => {
     probeFailureReported.clear();
+    startBackoff.resetAll();
     forgetResolutions();
     clearRuleCache();
     await stopAllNow();
@@ -278,6 +298,7 @@ async function syncClientsNow(): Promise<void> {
   if (!workspace.isTrusted) {
     // Spawning `bundle exec rigor` is withheld in untrusted workspaces.
     await stopAllNow();
+    startBackoff.resetAll();
     void setManagedContext(false);
     return;
   }
@@ -317,6 +338,9 @@ async function syncClientsNow(): Promise<void> {
       await stopClient(key);
     }
   }
+  // A folder that left (removed, disabled, no longer Rigor's) starts over
+  // if it comes back.
+  startBackoff.retainOnly(wanted);
   // A folder whose probe failed has a status entry but no client.
   for (const key of statusBar.keys()) {
     if (!wanted.has(key)) {
@@ -333,6 +357,20 @@ async function setManagedContext(value: boolean): Promise<void> {
 async function startClient(folder: WorkspaceFolder): Promise<void> {
   const key = folder.uri.toString();
   if (clients.has(key)) {
+    return;
+  }
+  if (startBackoff.skip(key)) {
+    // Keep an error entry: the stops that precede a sync remove it.
+    statusBar.update(key, {
+      label: folderLabel(folder, projectRoot(folder) ?? folder.uri.fsPath),
+      state: "error",
+      note: SKIPPED_NOTE,
+    });
+    if (startBackoff.firstSkipNote(key)) {
+      outputChannel.appendLine(
+        `[rigor] ${folder.name}: the server did not answer \`initialize\` ${START_TIMEOUT_LIMIT} times in a row; not restarting it automatically. Run "Rigor: Restart Server" to try again.`,
+      );
+    }
     return;
   }
   // `shouldManageFolder` only returns true for a root inside the folder.
@@ -512,13 +550,16 @@ async function startClient(folder: WorkspaceFolder): Promise<void> {
   // Gives up on a client the extension still holds: out of `clients`,
   // transports detached (see `cutOff`), server killed, client disposed.
   const discardClient = async (toastMessage?: string): Promise<void> => {
+    // Already abandoned (deactivate or a restart during the start): the
+    // extension itself ended the client, so the timeout is no news.
+    const alreadyAbandoned = abandoned;
     clients.delete(key);
     setInUse(key, undefined);
     for (const disposable of disposables) {
       disposable.dispose();
     }
     abandoned = true;
-    if (toastMessage !== undefined) {
+    if (toastMessage !== undefined && startTimeoutIsNews(alreadyAbandoned)) {
       // Killing the server closes the connection, which the client would
       // report as two more errors (the rejected `initialize`, then
       // "couldn't create connection"). Detached first, the pending
@@ -559,6 +600,7 @@ async function startClient(folder: WorkspaceFolder): Promise<void> {
       version: probe.version,
       commandLine,
     };
+    startBackoff.recordSuccess(key);
     statusBar.update(key, running);
     logStartup(label, root, resolution, commandLine, "running");
   } catch (err) {
@@ -572,9 +614,14 @@ async function startClient(folder: WorkspaceFolder): Promise<void> {
     outputChannel.appendLine(
       `[rigor] failed to start the server for ${label}: ${String(err)}`,
     );
-    await discardClient(
-      err instanceof StartTimeoutError ? err.message : undefined,
-    );
+    let toast: string | undefined;
+    if (err instanceof StartTimeoutError) {
+      toast = err.message;
+      if (startTimeoutIsNews(abandoned)) {
+        toast += backoffNotice(startBackoff.recordTimeout(key));
+      }
+    }
+    await discardClient(toast);
   }
 }
 
@@ -979,6 +1026,7 @@ function onPinTouched(key: string): void {
           );
           forgetResolutions(folder);
           probeFailureReported.delete(key);
+          startBackoff.reset(key);
           await stopClient(key);
         }
       }

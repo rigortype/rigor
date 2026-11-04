@@ -57,6 +57,7 @@ RSpec.describe Rigor::RunScopedSlots do
       __rigor_acceptance_unread_shape_refused__: "frame flag, installed and restored around a block",
       __rigor_project_round__: "a Debouncer key in the language server, not a thread-local",
       __rigor_typing_state__: "ADR-129 TypingState, whose own run-scoped slots release empties",
+      rigor_interface_dispatch_off: "RbsDispatch.without_interface_dispatch frame flag, restored on the way out",
       rigor_interface_erasure: "RbsTypeTranslator.with_interface_erasure frame flag, restored on the way out",
       rigor_io_boundary_attribution: "thread-variable frame, installed and restored around a block",
       rigor_rbs_core_root: "RbsLoader.with_core_root frame, installed and restored around an env build",

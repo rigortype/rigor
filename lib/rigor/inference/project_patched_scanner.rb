@@ -2,6 +2,7 @@
 
 require "prism"
 
+require_relative "../typing_state"
 require_relative "project_patched_methods"
 require_relative "project_patched_definedness_guard"
 require_relative "project_patched_visibility"
@@ -44,6 +45,13 @@ module Rigor
         def source_path = entry.source_path
       end
       private_constant :GuardedDef
+
+      # ADR-129 WD1 — the two per-file inputs of the walk, each a Frame {.walk_file} installs for the file's walk and
+      # restores on the way out: the `def`s on the undefined side of a definedness guard, and each `def`'s visibility.
+      # Both are frozen once built and read only by {.walk_node}'s callees.
+      GUARDED_DEFS = TypingState.frame(:patched_scanner_guarded_defs, reason: "installed per scanned file's walk")
+      DEF_VISIBILITIES = TypingState.frame(:patched_scanner_def_visibilities, reason: "installed per scanned file's walk")
+      private_constant :GUARDED_DEFS, :DEF_VISIBILITIES
 
       module_function
 
@@ -184,18 +192,16 @@ module Rigor
                    "#{e.class}: #{e.message}. Pre-evaluation skipped for this file; " \
                    "the rest of the run proceeds."
         )
-      ensure
-        Thread.current[:rigor_guarded_defs] = nil
-        Thread.current[:rigor_def_visibilities] = nil
       end
       private_class_method :scan_file
 
       # Walks one parsed file with its definedness guards and `def` visibilities (issue #1708) in reach of
       # {record_def_node}.
       def walk_file(root, path, entries)
-        Thread.current[:rigor_guarded_defs] = DefinednessGuard.defs(root)
-        Thread.current[:rigor_def_visibilities] = Visibility.defs(root)
-        walk_node(root, [], false, path, entries)
+        TypingState.current.with_pair(GUARDED_DEFS, DefinednessGuard.defs(root).freeze,
+                                      DEF_VISIBILITIES, Visibility.defs(root).freeze) do
+          walk_node(root, [], false, path, entries)
+        end
       end
       private_class_method :walk_file
 
@@ -237,7 +243,7 @@ module Rigor
         when Prism::CallNode
           record_alias(node, Source::AliasNames.alias_method_call_names(node), qualified_prefix,
                        in_singleton_class, source_path, entries)
-          if Thread.current[:rigor_def_visibilities]&.[](node).equal?(Visibility::STATEMENT)
+          if TypingState.current[DEF_VISIBILITIES]&.[](node).equal?(Visibility::STATEMENT)
             pending = Visibility.pending(node, qualified_prefix, in_singleton_class, source_path)
             entries << pending if pending
             entries.concat(Mixins.pending(node, qualified_prefix, in_singleton_class))
@@ -288,8 +294,8 @@ module Rigor
           source_path: source_path, source_line: line,
           return_type: return_type
         )
-        entry, *copies = Visibility.applied(entry, Thread.current[:rigor_def_visibilities]&.[](node) || :public)
-        entries << (Thread.current[:rigor_guarded_defs]&.key?(node) ? GuardedDef.new(entry: entry) : entry)
+        entry, *copies = Visibility.applied(entry, TypingState.current[DEF_VISIBILITIES]&.[](node) || :public)
+        entries << (TypingState.current[GUARDED_DEFS]&.key?(node) ? GuardedDef.new(entry: entry) : entry)
         entries.concat(copies)
       end
       private_class_method :record_def_node

@@ -32,6 +32,23 @@ RSpec.describe Rigor::Inference::DefNodeResolver do
                       nesting: nesting)]
   end
 
+  # ADR-129 — the run memo is a Frame: installed frozen for the run, restored on the way out (even on a raise).
+  it "installs the run memo as a frozen frame and restores the previous one on the way out" do
+    expect(typing_slot(:def_node_resolver_run)).to be_nil
+    outer = inner = nil
+    described_class.with_run do
+      outer = typing_slot(:def_node_resolver_run)
+      described_class.with_run { inner = typing_slot(:def_node_resolver_run) }
+      expect(typing_slot(:def_node_resolver_run)).to equal(outer)
+    end
+    expect { described_class.with_run { raise "boom" } }.to raise_error("boom")
+
+    expect(outer).to be_frozen
+    expect(inner).not_to equal(outer)
+    expect(typing_slot(:def_node_resolver_run)).to be_nil
+    expect(described_class.run_scope?).to be(false)
+  end
+
   it "resolves a handle to one stable node object for the run (identity)" do
     Dir.mktmpdir do |dir|
       path, handle = write_and_handle(dir)

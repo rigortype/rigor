@@ -95,6 +95,29 @@ RSpec.describe Rigor::Inference::DefinersIndex do
     expect(described_class.for(merged)).to be_a(Hash)
   end
 
+  # ADR-129 — the layers and the two seed-index ways are run-scoped Memos in the thread's TypingState.
+  describe "the thread's typing state" do
+    let(:slots) { %i[definers_index_layers definers_index_seed definers_index_seed_alt] }
+    let(:seed) { { "Base" => { run: :node }.freeze }.freeze }
+    let(:other_seed) { { "Other" => { run: :node }.freeze }.freeze }
+
+    it "files the layers and both seed-index ways, and a finished run releases them" do
+      [seed, other_seed].each do |table|
+        merged = table.merge("Child" => { go: :node })
+        described_class.record_layers(merged, table)
+        described_class.for(merged)
+      end
+
+      expect(slots.map { |name| typing_slot(name) }).to all(satisfy { |value| !value.nil? })
+      expect(typing_slot(:definers_index_layers).size).to eq(2)
+      expect(typing_slot(:definers_index_seed).first).to equal(other_seed)
+      expect(typing_slot(:definers_index_seed_alt).first).to equal(seed)
+
+      Rigor::RunScopedSlots.release
+      expect(slots.map { |name| typing_slot(name) }).to all(be_nil)
+    end
+  end
+
   describe "the #1596 definition count" do
     it "counts every file's instance rows, built once per deferred-ranges table" do
       table = file_scope(paths.last).discovered_deferred_ranges

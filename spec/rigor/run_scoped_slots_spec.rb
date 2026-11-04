@@ -6,10 +6,10 @@
 # added its whole analysis to the heap. Both are run-scoped slots ({Rigor::RunScopedSlots}), emptied when a run ends.
 #
 # Issue #2399 — about twenty other per-thread memo slots held the last run's discovery tables and environment until
-# the next run on the thread replaced them. They are registered too, so a finished run leaves none of them behind.
+# the next run on the thread replaced them. They are run-scoped too, so a finished run leaves none of them behind.
 #
-# ADR-129 — a slot that has moved into `Rigor::TypingState` declares `run_scoped: true` there instead of
-# registering, and `release` empties it with the registered keys.
+# ADR-129 — run-scoped state is a `Rigor::TypingState` slot that declares `run_scoped: true`, and `release` empties
+# exactly those.
 
 require "spec_helper"
 require "fileutils"
@@ -54,12 +54,10 @@ RSpec.describe Rigor::RunScopedSlots do
   # and clearing it from inside a frame would break that frame.
   let(:not_run_scoped) do
     {
-      __rigor_acceptance_unread_shape_refused__: "frame flag, installed and restored around a block",
       __rigor_project_round__: "a Debouncer key in the language server, not a thread-local",
       __rigor_typing_state__: "ADR-129 TypingState, whose own run-scoped slots release empties",
       rigor_interface_erasure: "RbsTypeTranslator.with_interface_erasure frame flag, restored on the way out",
       rigor_io_boundary_attribution: "thread-variable frame, installed and restored around a block",
-      rigor_rbs_core_root: "RbsLoader.with_core_root frame, installed and restored around an env build",
       rigor_run_disclosure_attribution: "thread-variable frame, installed and restored around a block"
     }
   end
@@ -116,7 +114,7 @@ RSpec.describe Rigor::RunScopedSlots do
         expect(settled_environments).to eq(before)
       end
 
-      # A slot a new owner adds is caught here until it is registered: the run fills it and nothing empties it.
+      # A slot a new owner adds is caught here until it is run-scoped: the run fills it and nothing empties it.
       it "leaves every per-thread memo slot empty" do
         send(run)
 
@@ -125,7 +123,6 @@ RSpec.describe Rigor::RunScopedSlots do
           key == :__rigor_typing_state__ || value.nil? || value == 0 || (value.respond_to?(:empty?) && value.empty?)
         end
         expect(holding).to be_empty
-        expect(described_class.keys.map { |key| Thread.current[key] }).to all(be_nil)
         expect(run_scoped_holding).to be_empty
       end
 
@@ -157,7 +154,7 @@ RSpec.describe Rigor::RunScopedSlots do
 
     described_class.release
     first = hover.call
-    filled = described_class.keys.reject { |key| Thread.current[key].nil? } + run_scoped_holding
+    filled = run_scoped_holding
     described_class.release
 
     expect(filled).not_to be_empty
@@ -351,16 +348,15 @@ RSpec.describe Rigor::RunScopedSlots do
 
   def line_at(source, offset) = source[0...offset].count("\n") + 1
 
-  # A memo slot a new owner adds is caught here even when no fixture fills it.
-  it "registers every per-thread key in lib/ that is not a listed frame slot" do
+  # A per-thread key a new owner adds is caught here even when no fixture fills it: a memo belongs in a run-scoped
+  # `TypingState` slot, and a frame flag is listed with its reason.
+  it "lists every per-thread key in lib/ that is not a TypingState slot" do
     keys, unresolved = thread_keys_in_lib
 
     expect(unresolved).to be_empty
-    unlisted = keys.keys - described_class.keys - not_run_scoped.keys
+    unlisted = keys.keys - not_run_scoped.keys
     expect(unlisted.to_h { |key| [key, keys[key]] }).to be_empty
-    expect(described_class.keys - keys.keys).to be_empty
     expect(not_run_scoped.keys - keys.keys).to be_empty
-    expect(not_run_scoped.keys & described_class.keys).to be_empty
   end
 
   # #2458: the two shapes the scan used to drop, a trailing comment on the constant and a key spelled without `rigor`.
@@ -616,14 +612,21 @@ RSpec.describe Rigor::RunScopedSlots do
     Rigor::TypingState.slots.each { |slot| set_typing_slot(slot.name, nil) }
   end
 
-  it "registers a key once and hands it back" do
-    registered = described_class.instance_variable_get(:@keys)
-    described_class.instance_variable_set(:@keys, registered.dup)
+  # The hover-only slots (`StatementEvaluator`'s instance-def index and unrecorded hand-offs) are filled by a
+  # language-server hover and by no run the other examples audit, so each is released by its own declaration.
+  it "empties the hover-only evaluator memos, which declare run_scoped" do
+    names = %i[callee_instance_def_index callee_unrecorded_hand_offs]
+    expect(names.map { |name| Rigor::TypingState.slot(name).run_scoped }).to all(be(true))
 
-    expect(2.times.map { described_class.register(:rigor_run_scoped_slots_probe) })
-      .to eq(%i[rigor_run_scoped_slots_probe rigor_run_scoped_slots_probe])
-    expect(described_class.keys.count(:rigor_run_scoped_slots_probe)).to eq(1)
+    names.each { |name| set_typing_slot(name, :filled) }
+    described_class.release
+
+    expect(names.map { |name| typing_slot(name) }).to all(be_nil)
   ensure
-    described_class.instance_variable_set(:@keys, registered)
+    names.each { |name| set_typing_slot(name, nil) }
+  end
+
+  it "keeps no key registry of its own" do
+    expect(described_class.singleton_methods(false)).to eq([:release])
   end
 end

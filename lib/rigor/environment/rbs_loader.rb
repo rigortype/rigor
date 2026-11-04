@@ -15,6 +15,7 @@ require_relative "vendored_signature_plan"
 require_relative "ruby_library_roots"
 require_relative "core_root"
 require_relative "../rooted_glob"
+require_relative "../typing_state"
 
 module Rigor
   class Environment
@@ -63,12 +64,23 @@ module Rigor
           .compact.map { |root| "#{root}/".freeze }.freeze
       rescue StandardError
         [].freeze
-      end
+      end.freeze
 
       # Cap on how many quarantined `signature_paths:` files {#warn_about_quarantined_signatures} lists by name
       # before collapsing the tail to "… and N more" — a broken generator can emit many, and a wall of parse
       # errors buries the signal.
       QUARANTINE_WARN_LIMIT = 10
+
+      # ADR-129 WD1 — a Frame: {.with_core_root} installs the core root for one environment build and restores the
+      # previous one on the way out. It changes answers (a loader built under it reads a different `core/`), and the
+      # installed value is a {CoreRoot.validate!}d frozen String or nil. Per thread (per fiber), so a concurrent build
+      # on another thread keeps its own.
+      CORE_ROOT = TypingState.frame(
+        :rbs_core_root,
+        reason: "installed per environment build by with_core_root; selects the core/ directory every loader of the " \
+                "build reads (a validated absolute path, or nil for the rbs gem's own)"
+      )
+      private_constant :CORE_ROOT
 
       class << self
         # Issue #1902 — the fixed total order that picks ONE detail tuple for a class out of several: its two
@@ -116,12 +128,8 @@ module Rigor
         # {.build_env_from} must read the same core, and a parameter missed on one of them would build that attempt
         # against the default core without a sign. Thread-local, so a concurrent build on another thread keeps its
         # own.
-        def with_core_root(core_root)
-          previous = Thread.current[:rigor_rbs_core_root]
-          Thread.current[:rigor_rbs_core_root] = core_root
-          yield
-        ensure
-          Thread.current[:rigor_rbs_core_root] = previous
+        def with_core_root(core_root, &)
+          TypingState.current.with(CORE_ROOT, core_root, &)
         end
 
         def build_env_from(libraries, inputs)
@@ -296,7 +304,7 @@ module Rigor
 
         # An `RBS::EnvironmentLoader` with every library of `libraries` that resolves added, and those libraries.
         def library_loader(libraries)
-          core_root = Thread.current[:rigor_rbs_core_root]
+          core_root = TypingState.current[CORE_ROOT]
           rbs_loader = core_root ? RBS::EnvironmentLoader.new(core_root: Pathname(core_root)) : RBS::EnvironmentLoader.new
           # Issue #1700 — a `RequiredFeatures` token names a gated vendored directory, never an RBS library.
           loaded_libraries = libraries.select do |library|
@@ -2147,7 +2155,7 @@ module Rigor
         [::RBS::EnvironmentLoader::DEFAULT_CORE_ROOT].compact.map { |root| "#{root}/".freeze }.freeze
       rescue StandardError
         [].freeze
-      end
+      end.freeze
       private_constant :CORE_ROOTS
 
       def build_core_stdlib_classes(roots = core_stdlib_roots)

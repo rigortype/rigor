@@ -945,6 +945,14 @@ module Rigor
         @io_boundary ||= services.io_boundary_for(manifest.id)
       end
 
+      # The boundary {#io_boundary} has built, or nil when this plugin never asked for one, without building it: a
+      # plugin that never built one read nothing through it. Engine-internal ({Analysis::RunDisclosureCredit} sends it,
+      # being outside the class), so it is private and part of no plugin-facing contract.
+      #
+      # @api private
+      def built_io_boundary = @io_boundary
+      private :built_io_boundary
+
       # ADR-7 § "Slice 6-A" / ADR-60 WD3 — returns a callable that performs a `Cache::Store#fetch_or_validate`
       # round-trip for the named producer (the ADR-45 record-and-validate path). The entry is KEYED on the
       # stable identity inputs — the plugin's `PluginEntry` template (id, version, config_hash) composed with

@@ -25,8 +25,11 @@ require "prism"
 # and the process counters on it for good; any other entry is a slot still to declare, and says which stage declares it.
 #
 # A comparison of `Thread.current`, `Fiber.current` or `Ractor.current` (`Ractor.current == Ractor.main`) reads no
-# storage and is not flagged. A local alias of a module (`owner = Folding; owner.fold = true`) is beyond a syntactic
-# scan; G1 (stage 3) is what catches state reached that way.
+# storage and is not flagged. Nor is a `Ractor.main` / `Ractor.current` whose only use is a messaging call
+# (`Ractor.main.send(m)`, `worker.monitor(Ractor.current.default_port)`, or a local used only that way): the Ractor is
+# an address there, not a store. `Ractor.current[:k]`, `Ractor[:k]` and `store_if_absent` stay flagged. A local alias
+# of a module (`owner = Folding; owner.fold = true`) is beyond a syntactic scan; G1 (stage 3) is what catches state
+# reached that way.
 #
 # Stage 1 converts files a PR at a time; each conversion adds its files to {#covered_files}.
 RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
@@ -36,14 +39,18 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
     %w[
       lib/rigor/analysis/check_rules.rb
       lib/rigor/analysis/dependency_recorder.rb
+      lib/rigor/analysis/run_disclosure_credit.rb
+      lib/rigor/analysis/runner/pool_coordinator.rb
       lib/rigor/analysis/self_call_resolution_recorder.rb
       lib/rigor/cache/file_digest.rb
       lib/rigor/effects/collector.rb
+      lib/rigor/environment/rbs_loader.rb
     ]
   end
 
   def inference_files
     %w[
+      lib/rigor/inference/acceptance.rb
       lib/rigor/inference/alias_mutation_floor.rb
       lib/rigor/inference/budget_trace.rb
       lib/rigor/inference/construction_escape.rb
@@ -75,6 +82,7 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
 
   def other_files
     %w[
+      lib/rigor/plugin/io_boundary.rb
       lib/rigor/reflection/constant_ancestors.rb
       lib/rigor/scope.rb
       lib/rigor/scope/resolution_chain.rb
@@ -83,7 +91,7 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
   end
 
   # `[file, rule, name] => [count, reason]`.
-  def allow_list = typing_state_rows.merge(process_switch_rows)
+  def allow_list = typing_state_rows.merge(process_switch_rows, storage_rows)
 
   def typing_state_rows
     state = "lib/rigor/typing_state.rb"
@@ -117,6 +125,44 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
       ["lib/rigor/inference/memo_audit.rb", :module_ivar_write, "@enabled"] =>
         [3, "MemoAudit's process switch (ADR-129 WD5)"]
     }.merge(activation_count_rows)
+  end
+
+  # The two shapes ADR-129 WD5 allows outside TypingState besides its own storage and the process counters (user
+  # decision 2026-11-05, option A). Each row names its key, and the shape:
+  #
+  # 1. a process-wide memo whose value is built from its key and frozen constants alone, reading no scope, environment,
+  #    run option or typing state;
+  # 2. a per-thread output sink that crosses fibers on purpose and that typing never reads. Stage 2 must treat such a
+  #    sink as a Resource before a capture opens around plugin code (#2814).
+  def storage_rows
+    loader = "lib/rigor/environment/rbs_loader.rb"
+    acceptance = "lib/rigor/inference/acceptance.rb"
+    memo = "WD5 shape 1, a process-wide memo pure in its key"
+    default = "#{memo}: RbsLoader.default's `@default` is `RbsLoader.new` with no argument, which reads no scope, " \
+              "environment, run option or typing state, and stays shared by every thread"
+    parts = "#{memo}: `class_name_parts` is the split of its String argument, the `@class_name_parts` key, and reads " \
+            "nothing else; a non-main Ractor cannot read it and answers nil, as before"
+    {
+      [loader, :module_ivar_write, "@default"] => [2, default],
+      [acceptance, :module_ivar_write, "@class_name_parts"] => [1, parts],
+      [acceptance, :module_ivar_mutation, "@class_name_parts"] => [1, parts]
+    }.merge(sink_rows)
+  end
+
+  # WD5 shape 2: thread-variable sinks that cross fibers on purpose (an `Enumerator` in plugin code still lands in
+  # them) and that typing never reads.
+  def sink_rows
+    boundary = "lib/rigor/plugin/io_boundary.rb"
+    credit = "lib/rigor/analysis/run_disclosure_credit.rb"
+    shape = "WD5 shape 2, a per-thread output sink typing never reads (stage 2 treats it as a Resource, #2814)"
+    {
+      [boundary, :thread_state, "Thread.current"] => [4, "#{shape}: IoBoundary.attributing's ATTRIBUTION_KEY"],
+      [boundary, :thread_state, "thread_variable_get"] => [2, "#{shape}: IoBoundary's ATTRIBUTION_KEY"],
+      [boundary, :thread_state, "thread_variable_set"] => [2, "#{shape}: IoBoundary's ATTRIBUTION_KEY"],
+      [credit, :thread_state, "Thread.current"] => [4, "#{shape}: RunDisclosureCredit's ATTRIBUTION_KEY"],
+      [credit, :thread_state, "thread_variable_get"] => [2, "#{shape}: RunDisclosureCredit's ATTRIBUTION_KEY"],
+      [credit, :thread_state, "thread_variable_set"] => [2, "#{shape}: RunDisclosureCredit's ATTRIBUTION_KEY"]
+    }
   end
 
   # A switch whose activation count keeps the disabled path an integer read (ADR-129 WD5), and the mutex guarding it.
@@ -200,8 +246,58 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
     end
     file = { path: path, frozen_strings: frozen_strings, data: lib_data_classes | data_classes_in(source),
              findings: [], identity_reads: Set.new, chained: 0 }
+    note_messaging_identity(result.value, file)
     walk(result.value, :top, file)
     file
+  end
+
+  # The calls on a Ractor that deliver a message or name its port: the Ractor is an address there, not a store.
+  def messaging_calls = %i[send << default_port receive take monitor unmonitor close_incoming close_outgoing]
+
+  def ractor_identity_call?(node)
+    node.is_a?(Prism::CallNode) && %i[current main].include?(node.name) && named_constant?(node.receiver, :Ractor)
+  end
+
+  # Marks every `Ractor.main` / `Ractor.current` whose only use is a messaging call as an identity read: the call is
+  # the receiver of one (`Ractor.main.send(m)`), or it is assigned to a local that is only ever the receiver of one
+  # (`main = Ractor.main; main.send(m)`). A name is read by name across the file, so a second write, a parameter of the
+  # same name or any other read of the local leaves every `Ractor` call assigned to it flagged.
+  def note_messaging_identity(root, file)
+    locals = { assigned: Hash.new { |h, k| h[k] = [] }, reads: Hash.new(0), messaged: Hash.new(0), other: Set.new }
+    stack = [root]
+    until stack.empty?
+      node = stack.pop
+      tally_messaging(node, file, locals)
+      stack.concat(node.compact_child_nodes)
+    end
+    locals[:assigned].each do |name, values|
+      next if locals[:other].include?(name) || locals[:reads][name] != locals[:messaged][name]
+
+      values.each { |value| file[:identity_reads] << value.object_id }
+    end
+  end
+
+  def tally_messaging(node, file, locals)
+    case node
+    when Prism::CallNode then tally_message(node, file, locals)
+    when Prism::LocalVariableReadNode then locals[:reads][node.name] += 1
+    when Prism::LocalVariableWriteNode
+      ractor_identity_call?(node.value) ? locals[:assigned][node.name] << node.value : locals[:other] << node.name
+    else locals[:other] << node.name if other_local_binding?(node)
+    end
+  end
+
+  def tally_message(node, file, locals)
+    return unless messaging_calls.include?(node.name)
+
+    file[:identity_reads] << node.receiver.object_id if ractor_identity_call?(node.receiver)
+    locals[:messaged][node.receiver.name] += 1 if node.receiver.is_a?(Prism::LocalVariableReadNode)
+  end
+
+  # Every other way to bind or rewrite a local: a target, an operator write, a parameter or a block-local.
+  def other_local_binding?(node)
+    node.class.name.match?(/\APrism::(LocalVariable.*(Write|Target)|.*Parameter|BlockLocalVariable)Node\z/) &&
+      node.respond_to?(:name) && node.name
   end
 
   # `context` is `:top`, `:module_body`, `:singleton` (a singleton method or `class << self`) or `:instance`.
@@ -515,16 +611,12 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
   # yet, per file, under the directories stage 1 covers. A site is one call: `Thread.current[:k]` is one, and
   # `Thread.current.thread_variable_get(:k)` is one (the `thread_variable_*` call, not also its receiver). Compared for
   # equality, so a new site anywhere in these directories fails, and a conversion that does not update the Hash fails
-  # too. A file leaves the Hash when its last site becomes a declared slot; it never gains a row. The Hash spans the
-  # nine directories G3 covers; PRs before this one counted six (without `plugin`, `type` and `cache`).
+  # too. A file leaves the Hash when its last site becomes a declared slot, or an allow-list row accounts for it
+  # (WD5's fiber-crossing sinks, {#sink_rows}); it never gains a row. The Hash spans the nine directories G3
+  # covers; PRs before #2811 counted six (without `plugin`, `type` and `cache`).
   def unconverted_thread_sites
     {
-      "lib/rigor/analysis/run_disclosure_credit.rb" => 4,
-      "lib/rigor/analysis/runner/pool_coordinator.rb" => 2,
-      "lib/rigor/environment/rbs_loader.rb" => 4,
-      "lib/rigor/inference/acceptance.rb" => 4,
-      "lib/rigor/inference/rbs_type_translator.rb" => 4,
-      "lib/rigor/plugin/io_boundary.rb" => 4
+      "lib/rigor/inference/rbs_type_translator.rb" => 4
     }
   end
 
@@ -539,9 +631,16 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
 
   # G3's own thread-state rule, so every spelling it flags counts (`::Thread.current`, `Thread.send(:current)`,
   # `Fiber[]`, `Ractor.current[]`, `thread_variable_*`, ...), with a `thread_variable_*` on a `Thread.current` one site.
+  # A `:thread_state` finding that an allow-list row accounts for is not a site; a file whose findings all are has none.
   def thread_site_count(source, path)
     file = scan(source, path)
-    file[:findings].count { |finding| finding[1] == :thread_state } - file[:chained]
+    unaccounted = file[:findings].count { |finding| finding[1] == :thread_state } - allowed_thread_findings(path)
+    unaccounted.zero? ? 0 : unaccounted - file[:chained]
+  end
+
+  def allowed_thread_findings(path)
+    relative = path.delete_prefix("#{project_path('')}/")
+    allow_list.sum { |(file, rule, _), (count, _)| file == relative && rule == :thread_state ? count : 0 }
   end
 
   it "counts the unconverted G3 thread-state sites per file (ADR-129 stage 1 ratchet)" do
@@ -768,6 +867,46 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
         def c = Thread.current[:k] = 1
       RUBY
         [3, :thread_state, "Thread.current"]
+      )
+    end
+
+    # ADR-129 stage 1, PR 7: `Ractor.main.send(m)` and `worker.monitor(Ractor.current.default_port)` address a
+    # mailbox; they keep nothing. A local counts only while every read of it is a messaging receiver.
+    it "reads a Ractor used only to message as an address" do
+      expect(rules_in(<<~RUBY)).to contain_exactly([9, :thread_state, "Ractor.current"])
+        def a = Ractor.main.send([:x])
+        def b(worker) = worker.monitor(Ractor.current.default_port)
+        def c
+          main = Ractor.main
+          main.send(1)
+          main << 2
+        end
+        def d
+          other = Ractor.current
+          other.send(1)
+          other.name
+        end
+      RUBY
+    end
+
+    it "flags a Ractor that is stored in, passed on, rebound or a parameter's alias" do
+      expect(rules_in(<<~RUBY)).to contain_exactly(
+        def e
+          third = Ractor.main
+          third.send(1)
+          third = nil
+        end
+        def f = Ractor.current[:k]
+        def g = Ractor.main[:k]
+        def h = Ractor[:k]
+        def i = Ractor.store_if_absent(:k) { 1 }
+        def j(registry) = registry.hold(Ractor.main)
+        def k(held) = (held = Ractor.main).send(1)
+        def l(fourth) = fourth.send(Ractor.current)
+      RUBY
+        [2, :thread_state, "Ractor.main"], [6, :thread_state, "Ractor.current"], [7, :thread_state, "Ractor.main"],
+        [8, :thread_state, "Ractor[]"], [9, :thread_state, "store_if_absent"], [10, :thread_state, "Ractor.main"],
+        [11, :thread_state, "Ractor.main"], [12, :thread_state, "Ractor.current"]
       )
     end
 

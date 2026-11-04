@@ -548,7 +548,7 @@ RSpec.describe Rigor::TypingState do
         :core_stdlib_ancestor_dispatch, :project_method_names, :toplevel_definition_rows, :method_alias_names,
         :deferred_definition_names, :resolution_chain, :ancestor_constant_scopes,
         :check_rules_private_singleton_names, :file_digest_run, :scope_index_unentered_evaluator,
-        :scope_index_declared_names
+        :scope_index_declared_names, :acceptance_unread_shape_refused
       )
     end
 
@@ -706,5 +706,55 @@ RSpec.describe Rigor::TypingState do
     expect(first_state).to be(first_current)
     expect(second).not_to be(first)
     expect(second_state).not_to be(first_state)
+  end
+
+  # ADR-129 stage 1, PR 7 — the core root an environment build reads is installed for that build only; builds nest, so
+  # the outer one returns on the way out, a raise included.
+  it "restores the outer core root on the way out of an inner environment build" do
+    loader = Rigor::Environment::RbsLoader
+    seen = []
+    loader.with_core_root("/outer") do
+      seen << typing_slot(:rbs_core_root)
+      begin
+        loader.with_core_root("/inner") do
+          seen << typing_slot(:rbs_core_root)
+          raise "boom"
+        end
+      rescue RuntimeError
+        nil
+      end
+      seen << typing_slot(:rbs_core_root)
+    end
+
+    expect(seen).to eq(["/outer", "/inner", "/outer"])
+    expect(typing_slot(:rbs_core_root)).to be_nil
+  end
+
+  # The refused kind of unread shape is installed for one block: inside it a tuple against an unknown-arity `Array`
+  # answers `no`, outside it `maybe`; nested blocks restore the outer kind, a raise included.
+  it "refuses unread shapes only inside the block, and restores the outer kind on the way out" do
+    acceptance = Rigor::Inference::Acceptance
+    int = Rigor::Type::Combinator.nominal_of(Integer)
+    pair = Rigor::Type::Combinator.tuple_of(int, int)
+    array = Rigor::Type::Combinator.nominal_of(Array, type_args: [int])
+    asked = -> { acceptance.accepts(pair, array, mode: :gradual) }
+    seen = []
+    answers = [asked.call.maybe?]
+    acceptance.refusing_unread_arrays do
+      seen << typing_slot(:acceptance_unread_shape_refused)
+      answers << asked.call.no?
+      begin
+        acceptance.send(:refusing_unread, :all) { raise "boom" }
+      rescue RuntimeError
+        nil
+      end
+      seen << typing_slot(:acceptance_unread_shape_refused)
+      answers << asked.call.no?
+    end
+    answers << asked.call.maybe?
+
+    expect(seen).to eq(%i[array array])
+    expect(answers).to all(be(true))
+    expect(typing_slot(:acceptance_unread_shape_refused)).to be_nil
   end
 end

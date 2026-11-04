@@ -5,9 +5,9 @@ require "fileutils"
 require "tmpdir"
 
 # ADR-129 stage 1 — the typing state's four kinds, its state id (WD2) and its journal (WD3). No `type_of` memo exists
-# yet, so these examples drive a bare {Rigor::Inference::TypingState::State}; the last group audits a real run's use of
+# yet, so these examples drive a bare {Rigor::TypingState::State}; the last group audits a real run's use of
 # the declared slots.
-RSpec.describe Rigor::Inference::TypingState do
+RSpec.describe Rigor::TypingState do
   let(:state) { described_class::State.new }
 
   def index(name) = described_class.slot(name).index
@@ -259,7 +259,7 @@ RSpec.describe Rigor::Inference::TypingState do
         private
 
         def check(slot, access)
-          declared = Rigor::Inference::TypingState.slots[slot]
+          declared = Rigor::TypingState.slots[slot]
           @reached << declared.name
           @accesses[[declared.name, access]] += 1
           @violations << [declared.name, access] unless yield(declared)
@@ -267,7 +267,7 @@ RSpec.describe Rigor::Inference::TypingState do
 
         def check_install(slot, value)
           check(slot, :install) { |s| s.kind == :frame }
-          declared = Rigor::Inference::TypingState.slots[slot]
+          declared = Rigor::TypingState.slots[slot]
           frozen_needed = declared.contents.nil? || declared.name == :retry_frames
           @violations << [declared.name, :unfrozen, value.class] if frozen_needed && !value.frozen?
         end

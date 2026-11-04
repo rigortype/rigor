@@ -62,7 +62,7 @@ require_relative "unknown_store_widening"
 require_relative "untyped_rejoin"
 require_relative "version_guard"
 require_relative "../run_scoped_slots"
-require_relative "typing_state"
+require_relative "../typing_state"
 
 module Rigor
   module Inference

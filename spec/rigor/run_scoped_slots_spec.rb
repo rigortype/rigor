@@ -8,7 +8,7 @@
 # Issue #2399 — about twenty other per-thread memo slots held the last run's discovery tables and environment until
 # the next run on the thread replaced them. They are registered too, so a finished run leaves none of them behind.
 #
-# ADR-129 — a slot that has moved into `Rigor::Inference::TypingState` declares `run_scoped: true` there instead of
+# ADR-129 — a slot that has moved into `Rigor::TypingState` declares `run_scoped: true` there instead of
 # registering, and `release` empties it with the registered keys.
 
 require "spec_helper"
@@ -152,7 +152,7 @@ RSpec.describe Rigor::RunScopedSlots do
         end
         expect(holding).to be_empty
         expect(described_class.keys.map { |key| Thread.current[key] }).to all(be_nil)
-        expect(Rigor::Inference::TypingState.current.holding).to be_empty
+        expect(Rigor::TypingState.current.holding).to be_empty
       end
 
       it "retains no more environments after the third run than after the first" do
@@ -628,7 +628,7 @@ RSpec.describe Rigor::RunScopedSlots do
   # ADR-129 — the TypingState half of the registry: release empties exactly the slots that declare `run_scoped: true`,
   # and leaves a frame slot alone (clearing it from inside its frame would break the frame).
   it "empties every run-scoped TypingState slot and no other" do
-    slots = Rigor::Inference::TypingState.slots
+    slots = Rigor::TypingState.slots
     run_scoped = slots.select(&:run_scoped)
     expect(run_scoped.map(&:name)).to include(:inject_accumulator, :user_method_return_memo, :callee_def_census)
     expect(slots.select(&:run_scoped).map(&:kind).uniq - %i[table memo]).to be_empty
@@ -639,7 +639,7 @@ RSpec.describe Rigor::RunScopedSlots do
     expect(run_scoped.map { |slot| typing_slot(slot.name) }).to all(be_nil)
     expect((slots - run_scoped).map { |slot| typing_slot(slot.name) }).to all(eq(:filled))
   ensure
-    Rigor::Inference::TypingState.slots.each { |slot| set_typing_slot(slot.name, nil) }
+    Rigor::TypingState.slots.each { |slot| set_typing_slot(slot.name, nil) }
   end
 
   it "registers a key once and hands it back" do

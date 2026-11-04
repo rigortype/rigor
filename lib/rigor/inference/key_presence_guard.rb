@@ -5,7 +5,7 @@ require "prism"
 require_relative "../type"
 require_relative "mutation_widening"
 require_relative "key_presence_guard/scan"
-require_relative "typing_state"
+require_relative "../typing_state"
 
 module Rigor
   module Inference

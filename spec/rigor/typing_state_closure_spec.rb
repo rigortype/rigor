@@ -4,7 +4,7 @@ require "spec_helper"
 require "prism"
 
 # ADR-129 G3 — deny by default: a file this spec covers keeps no typing state outside a declared
-# `Rigor::Inference::TypingState` slot. Read by Prism, not by text, it flags:
+# `Rigor::TypingState` slot. Read by Prism, not by text, it flags:
 #
 # - per-thread, per-fiber and per-Ractor storage: `Thread.current`, `Fiber.current`, `Ractor.current`,
 #   `thread_variable_get` / `_set`, `Fiber[]`, `Ractor[]`, `Ractor.store_if_absent`;
@@ -29,13 +29,13 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
       lib/rigor/inference/expression_typer.rb
       lib/rigor/inference/key_presence_guard.rb
       lib/rigor/inference/statement_evaluator.rb
-      lib/rigor/inference/typing_state.rb
+      lib/rigor/typing_state.rb
     ]
   end
 
   # `[file, rule, name] => [count, reason]`.
   def allow_list
-    state = "lib/rigor/inference/typing_state.rb"
+    state = "lib/rigor/typing_state.rb"
     typer = "lib/rigor/inference/expression_typer.rb"
     evaluator = "lib/rigor/inference/statement_evaluator.rb"
     stage2 = "ADR-129 stage 2 puts the four advisory tables behind journaled Table slots"
@@ -343,7 +343,7 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
     end
   end
 
-  def project_path(path) = File.expand_path("../../../#{path}", __dir__)
+  def project_path(path) = File.expand_path("../../#{path}", __dir__)
 
   it "keeps no typing state outside a declared slot in a covered file" do
     found = covered_files.flat_map { |path| findings_in(File.read(project_path(path)), path) }

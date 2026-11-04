@@ -20,8 +20,8 @@ RSpec.describe "a hand-off inside a callee resolves its constants in the callee'
   # The run's resolved-census memo (`StatementEvaluator::RESOLVED_CENSUS`), as a broken copy of `resolved_census`
   # reaches it.
   def resolved_census_table
-    state = Rigor::Inference::TypingState.current
-    state.weak_key_map(Rigor::Inference::TypingState.slot(:callee_resolved_census).index)
+    state = Rigor::TypingState.current
+    state.weak_key_map(Rigor::TypingState.slot(:callee_resolved_census).index)
   end
 
   # `:mismatch` when the audit raised (the runner reports a raise in a rule as an internal analyzer error).

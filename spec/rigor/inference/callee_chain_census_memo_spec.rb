@@ -124,7 +124,7 @@ RSpec.describe "the callee-chain census memo (#2104)" do
       Thread.current.keys.grep(/rigor/).each do |key|
         Thread.current[key] = nil unless key == :__rigor_typing_state__
       end
-      Rigor::Inference::TypingState.slots.each do |slot|
+      Rigor::TypingState.slots.each do |slot|
         set_typing_slot(slot.name, nil) unless slot.name == :callee_resolved_census
       end
       5.times { GC.start }

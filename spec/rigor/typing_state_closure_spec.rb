@@ -531,16 +531,17 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
     file[:findings].count { |finding| finding[1] == :thread_state } - file[:chained]
   end
 
-  it "counts the unconverted Thread.current / thread_variable sites per file (ADR-129 stage 1 ratchet)" do
+  it "counts the unconverted G3 thread-state sites per file (ADR-129 stage 1 ratchet)" do
     counted = stage1_files.to_h do |path|
       [path.delete_prefix("#{project_path('')}/"), thread_site_count(File.read(path), path)]
     end
     found = counted.reject { |_, count| count.zero? }
 
     expect(found).to eq(unconverted_thread_sites), <<~MESSAGE
-      ADR-129 stage 1: the Thread.current / thread_variable_* sites under lib/rigor/{inference,scope*,reflection,
-      analysis,effects,environment,plugin,type,cache} must match this spec's Hash. A new site belongs in a declared
-      Rigor::TypingState slot, not here; a converted file's row is removed (or its count lowered) in the same change.
+      ADR-129 stage 1: G3's thread-state sites (Thread/Fiber/Ractor storage and identity reads) under
+      lib/rigor/{inference,scope*,reflection,analysis,effects,environment,plugin,type,cache} must match this spec's
+      Hash. New typing state belongs in a declared Rigor::TypingState slot, not here; a converted file's row is
+      removed (or its count lowered) in the same change.
     MESSAGE
   end
 

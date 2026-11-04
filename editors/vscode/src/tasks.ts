@@ -1,11 +1,13 @@
 // `rigor check` as a VS Code task. The task runs the same `rigor` that the
-// language server resolves (`resolveRigor`), from the same project root,
-// and its text output is matched by the `$rigor` problem matcher that
-// package.json contributes. The problems it reports carry `source: "rigor"`,
-// the same source as the server's diagnostics.
+// language server resolves (`resolveRigor`), from the same project root, in a
+// pseudoterminal that parses its text output (see `checkTask`). The problems
+// it reports carry `source: "rigor check"`, apart from the server's
+// `source: "rigor"`.
 
+import * as path from "path";
 import {
   CustomExecution,
+  Diagnostic,
   Disposable,
   EventEmitter,
   ExtensionContext,
@@ -23,6 +25,13 @@ import {
   window,
   workspace,
 } from "vscode";
+import { CheckFinding, LineSplitter, completedRun, parseCheckLine } from "./checkOutput";
+import {
+  CheckResults,
+  collectionSink,
+  createCheckCollection,
+  groupFindings,
+} from "./checkResults";
 import {
   ResolvedServer,
   configArgs,
@@ -31,7 +40,7 @@ import {
   useShell,
 } from "./discovery";
 import { killTree, spawnCli } from "./proc";
-import { describeCandidate, peekResolution, resolveRigor } from "./resolve";
+import { Resolution, describeCandidate, peekResolution, resolveRigor } from "./resolve";
 
 const TASK_TYPE = "rigor";
 const TASK_SOURCE = "rigor";
@@ -47,47 +56,108 @@ function definedEnv(env: NodeJS.ProcessEnv): Record<string, string> {
   return out;
 }
 
-/** The `rigor check` task for one managed folder. */
-function checkTask(
+/**
+ * The pre-#2794 form of the task, for a `tasks.json` entry without a
+ * `folder`: a shell or process execution scoped to its folder, with the
+ * contributed `$rigor` problem matcher. Its problems share the matcher's
+ * owner, so another such task's run replaces them; but two entries with the
+ * same definition each run in their own folder, which a pseudoterminal
+ * cannot promise (VS Code finds it by definition).
+ */
+export function shellCheckTask(
   folder: WorkspaceFolder,
   label: string,
   server: ResolvedServer,
+  definition: TaskDefinition,
 ): Task {
   const root = projectRoot(folder) ?? folder.uri.fsPath;
   const args = [...server.prefixArgs, "check", ...configArgs(folder)];
-  const definition: TaskDefinition = { type: TASK_TYPE, command: "check" };
   // On Windows `bundle` and the version-manager shim are .cmd or .bat files,
-  // which only a shell can start. ShellExecution takes the command and its
-  // arguments separately, so VS Code quotes them for the user's shell.
-  // The managed kind (ADR-27 WD10) runs under its own Bundler environment.
-  // VS Code adds a task's `env` to the window's environment rather than
-  // replacing it, so variables the managed spawn strips can still reach it.
+  // which only a shell can start. The managed kind (ADR-27 WD10) runs under
+  // its own Bundler environment.
   const env = server.env ? definedEnv(server.env) : undefined;
   const execution = useShell(server)
     ? new ShellExecution(server.command, args, { cwd: root, env })
     : new ProcessExecution(server.command, args, { cwd: root, env });
-  const task = new Task(
-    definition,
-    folder,
-    label,
-    TASK_SOURCE,
-    execution,
-    PROBLEM_MATCHER,
-  );
-  return task;
+  return new Task(definition, folder, label, TASK_SOURCE, execution, PROBLEM_MATCHER);
+}
+
+/** Check results of every folder, in the one `rigor check` collection. */
+let results: CheckResults<Diagnostic> | undefined;
+
+function folderKey(folder: WorkspaceFolder): string {
+  return folder.uri.toString();
 }
 
 /**
- * The `rigor check` task for a folder whose discovery has not finished, or
- * found no `rigor` that runs. It waits for the walk, then runs the resolved
- * `rigor check` in a pseudoterminal; after a failed walk it prints why and
- * exits 1, so the task is never missing and never runs a Rigor discovery
- * rejected (a failed pinned bundle must not become an unpinned run).
+ * The `folder` property of a provided task's definition, which tells two
+ * folders' tasks apart (VS Code finds a pseudoterminal by definition). The
+ * folder's name when no other workspace folder has it; otherwise the
+ * folder's path relative to the directory of the `.code-workspace` file,
+ * with `/` separators, which is the same on every machine and survives a
+ * reorder. A workspace without a file (an untitled one) falls back to the
+ * absolute path.
  */
-function pendingCheckTask(
+export function definitionKey(folder: WorkspaceFolder): string {
+  const all = workspace.workspaceFolders ?? [];
+  if (all.filter((f) => f.name === folder.name).length <= 1) {
+    return folder.name;
+  }
+  const file = workspace.workspaceFile;
+  if (file && file.scheme === "file") {
+    return path.relative(path.dirname(file.fsPath), folder.uri.fsPath).split(path.sep).join("/");
+  }
+  return folder.uri.fsPath;
+}
+
+/** Why no `rigor` runs in `folder`, as the lines the task prints. */
+function failureLines(folder: WorkspaceFolder, res: Resolution): string[] {
+  return [
+    `Rigor: could not run Rigor in ${folder.name}.`,
+    ...(res.hint ? [res.hint] : []),
+    ...res.rejected.map((r) => `  rejected ${describeCandidate(r.server)}: ${r.reason}`),
+    'Fix the setup, then run "Rigor: Restart Server".',
+  ];
+}
+
+/**
+ * The task for a folder-less entry whose Rigor could not be found: a process
+ * that prints why on stderr and exits 1. It is the extension host's own
+ * executable run as Node (`ELECTRON_RUN_AS_NODE`), which needs no shell, so
+ * it behaves alike on POSIX and Windows, and, unlike a pseudoterminal, it
+ * does not collide with another folder's entry of the same definition.
+ */
+export function failureTask(
+  folder: WorkspaceFolder,
+  label: string,
+  definition: TaskDefinition,
+  lines: string[],
+): Task {
+  const root = projectRoot(folder) ?? folder.uri.fsPath;
+  const script = "process.stderr.write(process.argv[1] + '\\n'); process.exit(1);";
+  const execution = new ProcessExecution(process.execPath, ["-e", script, lines.join("\n")], {
+    cwd: root,
+    env: { ELECTRON_RUN_AS_NODE: "1" },
+  });
+  return new Task(definition, folder, label, TASK_SOURCE, execution);
+}
+
+/**
+ * The `rigor: check` task for one managed folder, always a pseudoterminal.
+ * It waits for the folder's discovery, runs the resolved `rigor check` in
+ * the project root and echoes its output. It parses the output itself
+ * rather than through a problem matcher, whose owner is static and would
+ * make folders clear each other's problems (#2747); a folder's run replaces
+ * only that folder's results. After a failed walk it prints why and exits 1,
+ * so the task is never missing and never runs a Rigor discovery rejected (a
+ * failed pinned bundle must not become an unpinned run). It closes with
+ * `rigor check`'s exit code.
+ */
+export function checkTask(
   folder: WorkspaceFolder,
   label: string,
   output: OutputChannel,
+  definition: TaskDefinition = { type: TASK_TYPE, command: "check", folder: definitionKey(folder) },
 ): Task {
   const root = projectRoot(folder) ?? folder.uri.fsPath;
   const execution = new CustomExecution(async (): Promise<Pseudoterminal> => {
@@ -95,6 +165,17 @@ function pendingCheckTask(
     const close = new EventEmitter<number>();
     let child: ReturnType<typeof spawnCli> | undefined;
     let closed = false;
+    const findings: CheckFinding[] = [];
+    // Findings are on stdout; stderr is echoed but not parsed.
+    const splitter = new LineSplitter();
+    const take = (lines: string[]): void => {
+      for (const line of lines) {
+        const finding = parseCheckLine(line, root);
+        if (finding) {
+          findings.push(finding);
+        }
+      }
+    };
     const finish = (code: number): void => {
       if (!closed) {
         closed = true;
@@ -111,13 +192,7 @@ function pendingCheckTask(
             return;
           }
           if (!res.probe.ok && !res.probe.tooOld) {
-            const lines = [
-              `Rigor: could not run Rigor in ${folder.name}.`,
-              ...(res.hint ? [res.hint] : []),
-              ...res.rejected.map((r) => `  rejected ${describeCandidate(r.server)}: ${r.reason}`),
-              'Fix the setup, then run "Rigor: Restart Server".',
-            ];
-            write.fire(crlf(`${lines.join("\n")}\n`));
+            write.fire(crlf(`${failureLines(folder, res).join("\n")}\n`));
             finish(1);
             return;
           }
@@ -127,13 +202,28 @@ function pendingCheckTask(
             shell: useShell(server),
             env: server.env,
           });
-          child.stdout?.on("data", (d: Buffer) => write.fire(crlf(d.toString())));
-          child.stderr?.on("data", (d: Buffer) => write.fire(crlf(d.toString())));
+          // Decode as UTF-8 here, so a character split across chunks is whole.
+          child.stdout?.setEncoding("utf8");
+          child.stderr?.setEncoding("utf8");
+          child.stdout?.on("data", (text: string) => {
+            write.fire(crlf(text));
+            take(splitter.push(text));
+          });
+          child.stderr?.on("data", (text: string) => write.fire(crlf(text)));
           child.on("error", (err) => {
             write.fire(crlf(`${String(err)}\n`));
             finish(1);
           });
-          child.on("close", (code) => finish(code ?? 1));
+          child.on("close", (code) => {
+            // Only a run that finished replaces the folder's results (exit
+            // 0 or 1). A cancel, a spawn or discovery failure, a signal, or
+            // a usage/internal error (64, 70) or 127 keeps the earlier ones.
+            if (!closed && completedRun(code)) {
+              take(splitter.flush());
+              results?.replace(folderKey(folder), groupFindings(findings));
+            }
+            finish(code ?? 1);
+          });
         });
       },
       close: () => {
@@ -145,12 +235,11 @@ function pendingCheckTask(
     };
   });
   return new Task(
-    { type: TASK_TYPE, command: "check" },
+    definition,
     folder,
     label,
     TASK_SOURCE,
     execution,
-    PROBLEM_MATCHER,
   );
 }
 
@@ -159,13 +248,14 @@ function pendingCheckTask(
  * workspaces get none: the task spawns `bundle exec rigor` from the
  * workspace, as the language server does.
  */
-class RigorCheckTaskProvider implements TaskProvider {
+export class RigorCheckTaskProvider implements TaskProvider {
+  private readonly warned = new Set<string>();
+
   constructor(private readonly output: OutputChannel) {}
 
   /**
    * Never waits for a discovery walk, which can take seconds per
-   * candidate: a folder whose resolution has not finished, or failed, gets
-   * a `pendingCheckTask` instead (its walk is started).
+   * candidate: the task waits for it when it runs.
    */
   provideTasks(): Task[] {
     if (!workspace.isTrusted) {
@@ -177,19 +267,54 @@ class RigorCheckTaskProvider implements TaskProvider {
     const out: Task[] = [];
     for (const folder of folders) {
       const label = folders.length > 1 ? `check (${folder.name})` : "check";
-      const resolution = peekResolution(folder, this.output);
-      out.push(
-        resolution && (resolution.probe.ok || resolution.probe.tooOld)
-          ? checkTask(folder, label, resolution.server)
-          : pendingCheckTask(folder, label, this.output),
-      );
+      // Starts the folder's walk; the task itself waits for it.
+      peekResolution(folder, this.output);
+      out.push(checkTask(folder, label, this.output));
     }
     return out;
   }
 
-  resolveTask(): undefined {
-    // Only the tasks provided above run; a tasks.json entry is not resolved.
-    return undefined;
+  /**
+   * A `tasks.json` entry `{ "type": "rigor", "command": "check" }` in a
+   * managed folder. Without a `folder` property it runs as a shell or
+   * process execution with the `$rigor` matcher, as before #2747 (see
+   * `shellCheckTask`); with one it is the per-folder pseudoterminal. Either
+   * way the task keeps its own definition, which is what VS Code matches
+   * it by. The shell form needs the resolved rigor, so this waits for the
+   * folder's discovery; it falls back to the pseudoterminal, which reports
+   * a failed walk, when no rigor runs.
+   */
+  async resolveTask(task: Task): Promise<Task | undefined> {
+    const folder = taskFolder(task);
+    if (
+      !workspace.isTrusted ||
+      !folder ||
+      task.definition.type !== TASK_TYPE ||
+      task.definition.command !== "check" ||
+      !shouldManageFolder(folder)
+    ) {
+      return undefined;
+    }
+    // Only an entry whose `folder` is its own folder's key may be the
+    // pseudoterminal: any other has a definition another entry can share.
+    if (task.definition.folder === definitionKey(folder)) {
+      return checkTask(folder, task.name, this.output, task.definition);
+    }
+    if (task.definition.folder !== undefined) {
+      const note = `${folder.name}:${String(task.definition.folder)}`;
+      if (!this.warned.has(note)) {
+        this.warned.add(note);
+        this.output.appendLine(
+          `Rigor: the rigor task "${task.name}" in ${folder.name} has folder "${String(task.definition.folder)}", ` +
+            `which is not this folder's key "${definitionKey(folder)}"; it runs without per-folder results.`,
+        );
+      }
+    }
+    const res = await resolveRigor(folder, this.output);
+    if (res.probe.ok || res.probe.tooOld) {
+      return shellCheckTask(folder, task.name, res.server, task.definition);
+    }
+    return failureTask(folder, task.name, task.definition, failureLines(folder, res));
   }
 }
 
@@ -287,12 +412,38 @@ export function registerTasks(
   channel: OutputChannel,
 ): void {
   output = channel;
+  const collection = createCheckCollection();
+  results = new CheckResults(collectionSink(collection));
   const provider: Disposable = tasks.registerTaskProvider(
     TASK_TYPE,
     new RigorCheckTaskProvider(channel),
   );
   context.subscriptions.push(
     provider,
+    collection,
+    { dispose: () => (results = undefined) },
     commands.registerCommand("rigor.checkWorkspace", () => checkWorkspace()),
+    commands.registerCommand("rigor.clearCheckResults", () => results?.clearAll()),
+    workspace.onDidChangeWorkspaceFolders(() => pruneCheckResults()),
   );
+}
+
+/**
+ * Drop the results of folders that left the workspace or are no longer
+ * managed. Called when the workspace folders change and after each sync.
+ */
+export function pruneCheckResults(): void {
+  if (!results) {
+    return;
+  }
+  const managed = new Set(
+    (workspace.workspaceFolders ?? [])
+      .filter((folder) => shouldManageFolder(folder))
+      .map(folderKey),
+  );
+  for (const key of results.folders()) {
+    if (!managed.has(key)) {
+      results.clear(key);
+    }
+  }
 }

@@ -37,7 +37,10 @@ esbuild
     platform: "node",
     target: "node18",
     outdir,
-    alias: { vscode: path.join(__dirname, "vscode-stub.ts") },
+    alias: {
+      vscode: path.join(__dirname, "vscode-stub.ts"),
+      "vscode-languageclient/node": path.join(__dirname, "languageclient-stub.ts"),
+    },
     logLevel: "warning",
   })
   .then(() => {

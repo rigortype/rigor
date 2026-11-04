@@ -312,11 +312,12 @@ The language server only reports diagnostics for open files. To see
 every finding in the project, run the `rigor: check` task
 (**Terminal → Run Task…**, or **Rigor: Check Workspace**). The task runs
 the same `rigor` the server uses, from the project root, with the same
-`rigor.server.configPath`, and its text output fills the Problems panel
-through the `$rigor` problem matcher. The problems carry
-`source: "rigor"`, like the server's.
+`rigor.server.configPath`. It runs in a terminal that reads the output
+itself and fills the Problems panel, under the collection `rigor
+check`. The problems carry `source: "rigor check"`, apart from the
+language server's `source: "rigor"`.
 
-The matcher reads each `PATH:LINE:COL: SEVERITY: MESSAGE` line, where
+Each output line is read as `PATH:LINE:COL: SEVERITY: MESSAGE` line, where
 `SEVERITY` is `error`, `warning` or `info`. A trailing `[RULE]` is
 optional: when the line ends with one, it is the rule (the last
 bracketed token), so a message that itself ends in brackets without a
@@ -325,22 +326,52 @@ rule is read as having that rule. Summary lines such as
 are not problems.
 
 Relative paths resolve against the project root (`rigor.rootDir`, or
-the folder itself), through `${config:rigor.rootDir}`. Absolute paths
-are used as given. The base was checked per folder in a multi-root
-workspace where each folder has its own `rootDir`. An absolute
+the folder itself). Absolute paths are used as given. An absolute
 `rigor.rootDir` is rejected, as it is for the server.
 
 - The task is provided once per managed folder, and only in trusted
   workspaces. In a multi-root workspace the task is named
   `check (<folder>)`.
-- Each run replaces the task's previous problems, including those of a
-  task for another folder. To clear them, rerun the task or close its
-  terminal.
-- VS Code keeps one problem per file, line and column. Two findings at
-  the same position show only the first one.
+- Each folder keeps its own problems. A run replaces only that
+  folder's earlier problems, so in a multi-root workspace running the
+  task for one folder leaves the others' in place. A file that two
+  folders report (nested roots) shows both folders' problems. A
+  folder's problems are cleared when the folder leaves the workspace
+  or stops being managed, and by **Rigor: Clear Check Results** (every
+  folder). A run replaces the folder's
+  problems only when it finishes, that is, `rigor check` exits 0 (no
+  findings) or 1 (findings). A cancelled run, a Rigor that could not be
+  found or started, and an exit for a usage, configuration or internal
+  error (64, 70) leave the folder's earlier problems as they were.
+- Only standard output is read for findings. Standard error is shown in
+  the terminal but not read.
+- You can run the task from `tasks.json` too, with `runOptions`, a
+  `group` or `dependsOn`. An entry
+  `{ "label": "rigor", "type": "rigor", "command": "check" }` runs
+  `rigor check` for the folder that holds the file, as a plain process
+  with the `$rigor` problem matcher. Like any matcher task, its problems
+  belong to the shared owner `rigor`, so in a multi-root workspace one
+  such entry's run replaces another's problems, and **Rigor: Clear Check
+  Results** does not clear them (rerun the task, or close its terminal).
+  If no Rigor runs in the folder, the entry prints why and exits 1.
+- To keep each folder's problems apart, give the entry
+  `"folder": "<key>"`: it then runs in the terminal described above,
+  with per-folder results under `source: "rigor check"`. The key is the
+  folder's name, or, when two workspace folders share a name, the
+  folder's path relative to the directory of the `.code-workspace` file
+  with `/` separators (`../x/app`; an untitled workspace uses the
+  absolute path). The provided tasks carry their key in the same
+  property. A `folder` that is not the key of the entry's own folder (a
+  copied or stale one) is ignored: the entry runs as one without
+  `folder`, and the Rigor output channel says so once. Entries that
+  start together (`runOn: folderOpen`) need their key because VS Code
+  tells terminal tasks apart only by their definition.
+- The extension publishes every finding it reads, including several at
+  one position. (The contributed matcher's problems showed only the
+  first at a position.)
 - A file open in the editor can show the same finding twice: once from
-  the language server and once from the task. Both entries have
-  `source: "rigor"` and the same position. VS Code does not merge them,
+  the language server (`source: "rigor"`) and once from the task
+  (`source: "rigor check"`). VS Code does not merge them,
   so clearing the task's problems does not clear the server's entry.
 
 ## Multi-root workspaces

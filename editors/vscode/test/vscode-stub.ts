@@ -10,12 +10,27 @@ export const stub = {
   /** `"rigor.server.path"` -> value; every folder and scope reads the same map. */
   config: new Map<string, unknown>(),
   trusted: true,
+  /** The `.code-workspace` file, if the window has one. */
+  workspaceFile: undefined as Uri | undefined,
   folders: [] as WorkspaceFolder[],
   /** Every `show*Message`, in order. */
   messages: [] as { level: "info" | "warning" | "error"; text: string }[],
+  /** Handlers registered through `commands.registerCommand`, by id. */
+  commandHandlers: new Map<string, (...args: unknown[]) => unknown>(),
+  /** Listeners of `workspace.onDidChangeWorkspaceFolders`. */
+  folderListeners: [] as (() => void)[],
+  /** Task providers by type, from `tasks.registerTaskProvider`. */
+  taskProviders: new Map<string, import("vscode").TaskProvider>(),
+  /** Every collection `languages.createDiagnosticCollection` made, newest last. */
+  collections: [] as DiagnosticCollection[],
   reset(): void {
+    this.commandHandlers.clear();
+    this.folderListeners = [];
+    this.taskProviders.clear();
+    this.collections = [];
     this.config.clear();
     this.trusted = true;
+    this.workspaceFile = undefined;
     this.folders = [];
     this.messages = [];
   },
@@ -124,6 +139,9 @@ export const workspace = {
   get workspaceFolders(): WorkspaceFolder[] {
     return stub.folders;
   },
+  get workspaceFile(): Uri | undefined {
+    return stub.workspaceFile;
+  },
   getWorkspaceFolder(uri: Uri): WorkspaceFolder | undefined {
     return stub.folders.find((f) => {
       const rel = path.relative(f.uri.fsPath, uri.fsPath);
@@ -137,6 +155,10 @@ export const workspace = {
         return (stub.config.has(full) ? stub.config.get(full) : fallback) as T | undefined;
       },
     };
+  },
+  onDidChangeWorkspaceFolders(listener: () => void): Disposable {
+    stub.folderListeners.push(listener);
+    return new Disposable(() => {});
   },
   registerTextDocumentContentProvider: () => new Disposable(() => {}),
   onDidCloseTextDocument: () => new Disposable(() => {}),
@@ -163,16 +185,119 @@ export const window = {
 };
 
 export const commands = {
-  registerCommand: () => new Disposable(() => {}),
+  registerCommand(id: string, handler: (...args: unknown[]) => unknown): Disposable {
+    stub.commandHandlers.set(id, handler);
+    return new Disposable(() => {});
+  },
   executeCommand: () => Promise.resolve(undefined),
 };
 
 /** Providers handed to `registerCodeActionsProvider`, newest last. */
 export const registeredCodeActionProviders: unknown[] = [];
 
+export enum DiagnosticSeverity {
+  Error = 0,
+  Warning = 1,
+  Information = 2,
+  Hint = 3,
+}
+
+export class Range {
+  readonly start: { line: number; character: number };
+  readonly end: { line: number; character: number };
+  constructor(startLine: number, startCharacter: number, endLine: number, endCharacter: number) {
+    this.start = { line: startLine, character: startCharacter };
+    this.end = { line: endLine, character: endCharacter };
+  }
+}
+
+export class Diagnostic {
+  source?: string;
+  code?: string | number;
+  constructor(
+    readonly range: Range,
+    readonly message: string,
+    readonly severity?: DiagnosticSeverity,
+  ) {}
+}
+
+export class DiagnosticCollection {
+  readonly entries = new Map<string, Diagnostic[]>();
+  constructor(readonly name: string) {}
+  set(uri: Uri, diagnostics: Diagnostic[]): void {
+    this.entries.set(uri.fsPath, diagnostics);
+  }
+  delete(uri: Uri): void {
+    this.entries.delete(uri.fsPath);
+  }
+  dispose(): void {
+    this.entries.clear();
+  }
+}
+
+export class CustomExecution {
+  constructor(readonly callback: (definition: unknown) => Promise<unknown>) {}
+}
+
+export class ShellExecution {
+  constructor(
+    readonly command: string,
+    readonly args: string[],
+    readonly options: { cwd?: string; env?: Record<string, string> },
+  ) {}
+}
+
+export class ProcessExecution {
+  constructor(
+    readonly process: string,
+    readonly args: string[],
+    readonly options: { cwd?: string; env?: Record<string, string> },
+  ) {}
+}
+
+export class Task {
+  constructor(
+    readonly definition: { type: string; [key: string]: unknown },
+    readonly scope: unknown,
+    readonly name: string,
+    readonly source: string,
+    readonly execution?: unknown,
+    readonly problemMatchers?: string | string[],
+  ) {}
+}
+
+export const tasks = {
+  registerTaskProvider(type: string, provider: import("vscode").TaskProvider): Disposable {
+    stub.taskProviders.set(type, provider);
+    return new Disposable(() => {});
+  },
+};
+
 export const languages = {
+  createDiagnosticCollection(name: string): DiagnosticCollection {
+    const collection = new DiagnosticCollection(name);
+    stub.collections.push(collection);
+    return collection;
+  },
   registerCodeActionsProvider(_selector: unknown, provider: unknown): Disposable {
     registeredCodeActionProviders.push(provider);
     return new Disposable(() => {});
   },
 };
+
+// Only so `src/extension.ts` loads: its top level imports them.
+export enum ConfigurationTarget {
+  Global = 1,
+  Workspace = 2,
+  WorkspaceFolder = 3,
+}
+export enum StatusBarAlignment {
+  Left = 1,
+  Right = 2,
+}
+export class ThemeColor {
+  constructor(readonly id: string) {}
+}
+export class MarkdownString {
+  constructor(readonly value = "") {}
+}

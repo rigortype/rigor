@@ -163,6 +163,11 @@
         "category": "Rigor"
       },
       {
+        "command": "rigor.clearCheckResults",
+        "title": "Clear Check Results",
+        "category": "Rigor"
+      },
+      {
         "command": "rigor.installManagedRuntime",
         "title": "Install Managed Rigor",
         "category": "Rigor"
@@ -212,6 +217,10 @@
             "type": "string",
             "enum": ["check"],
             "description": "The Rigor subcommand the task runs."
+          },
+          "folder": {
+            "type": "string",
+            "description": "Optional. The workspace folder's name; the extension sets it on the tasks it provides."
           }
         }
       }
@@ -253,6 +262,10 @@
         },
         {
           "command": "rigor.updateBaseline",
+          "when": "rigor.managedFolder"
+        },
+        {
+          "command": "rigor.clearCheckResults",
           "when": "rigor.managedFolder"
         }
       ]

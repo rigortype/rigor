@@ -313,13 +313,16 @@ RSpec.describe Rigor::Inference::RbsTypeTranslator do
     end
 
     it "does not memoise an open alias, whose answer depends on the caller's type variables" do
-      loader = Rigor::Environment::RbsLoader.new(virtual_rbs: [["(spec: #775 open)", "type list[T] = ::Array[T] | T\n"]])
-      translate_list = lambda do |arg|
-        described_class.translate(parse_rbs("::list[X]", variables: [:X]), type_vars: { X: arg }, alias_expander: loader)
+      loader = Rigor::Environment::RbsLoader.new(virtual_rbs: [["(spec: #775 open)",
+                                                                "type list[T] = ::Array[T] | T\n"]])
+      open_alias = parse_rbs("::list[X]", variables: [:X])
+      describe_with = lambda do |name|
+        arg = Rigor::Type::Combinator.nominal_of(name)
+        described_class.translate(open_alias, type_vars: { X: arg }, alias_expander: loader).describe
       end
 
-      expect(translate_list.call(Rigor::Type::Combinator.nominal_of("Integer")).describe).to eq("Array[Integer] | Integer")
-      expect(translate_list.call(Rigor::Type::Combinator.nominal_of("String")).describe).to eq("Array[String] | String")
+      expect(describe_with.call("Integer")).to eq("Array[Integer] | Integer")
+      expect(describe_with.call("String")).to eq("Array[String] | String")
     end
 
     it "is bypassed while a trace records, so the union events are recorded" do

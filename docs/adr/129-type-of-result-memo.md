@@ -267,7 +267,9 @@ list kept beside the memo. State without a kind fails the gate.
     - The tracer, effects and recorder switches (`FlowTracer`, `Effects::Collector`, `DependencyRecorder`,
       `SelfCallResolutionRecorder`) are process switches of the same kind as the counters: their activation counts
       keep the disabled path an integer read, and the allow-list names them. The recorders and accumulators they
-      install are Frame slots.
+      install are Frame slots whose contents are a Resource in stage 1, so every record refuses the capture. WD1 lists
+      the effects and self-call records and the ADR-46 dependency reads as Tables: stage 2 makes them journaled Tables,
+      replayed on a hit.
     - Plugin code is outside G3. It is covered by G1 and the contract sentence below.
     - The precedent is `spec/rigor/run_scoped_slots_spec.rb`.
   - **G4 Reachability audit.**

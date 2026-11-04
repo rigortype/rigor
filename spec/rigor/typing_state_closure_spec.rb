@@ -77,7 +77,7 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
       [budget, :module_ivar_write, "@counts"] => [1, counters],
       [budget, :module_ivar_mutation, "@counts"] => [2, counters],
       [budget, :module_ivar_write, "@distributions"] => [1, counters],
-      [budget, :module_ivar_mutation, "@distributions"] => [1, counters],
+      [budget, :module_ivar_mutation, "@distributions"] => [3, counters],
       [budget, :module_ivar_write, "@distinct_seen"] => [1, counters],
       [budget, :module_ivar_mutation, "@distinct_seen"] => [1, counters],
       ["lib/rigor/inference/memo_audit.rb", :module_ivar_write, "@enabled"] =>
@@ -258,11 +258,11 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
     end
   end
 
-  # `@x[k] ||= v`, `$g[k] = v`, `self.x ||= v`, `Owner.x ||= v`, `Owner.x[k] = v`, `CONST[k] ||= v`.
+  # `@x[k] ||= v`, `@x[k][j] += 1`, `$g[k] = v`, `self.x ||= v`, `Owner.x ||= v`, `Owner.x[k] = v`, `CONST[k] ||= v`.
   def check_receiver_write(node, context, file)
     receiver = node.receiver
-    if ivar_read?(receiver)
-      found(file, node, :module_ivar_mutation, receiver.name) if module_level?(context)
+    if (root = ivar_root(receiver))
+      found(file, node, :module_ivar_mutation, root.name) if module_level?(context)
     elsif receiver.is_a?(Prism::GlobalVariableReadNode)
       found(file, node, :module_variable_write, receiver.name)
     elsif module_state_receiver?(receiver, context)
@@ -286,8 +286,8 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
   def check_module_state_call(node, context, file)
     name = node.name
     receiver = node.receiver
-    if ivar_read?(receiver)
-      found(file, node, :module_ivar_mutation, receiver.name) if module_level?(context) && !ivar_readers.include?(name)
+    if (root = ivar_root(receiver))
+      found(file, node, :module_ivar_mutation, root.name) if module_level?(context) && !ivar_readers.include?(name)
     elsif receiver.is_a?(Prism::GlobalVariableReadNode)
       found(file, node, :module_variable_write, receiver.name) if mutators.include?(name)
     elsif setter?(name) && module_state_receiver?(receiver, context)
@@ -347,6 +347,17 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
   end
 
   def ivar_read?(node) = node.is_a?(Prism::InstanceVariableReadNode)
+
+  # The instance variable `node` reads, directly or through a chain of element readers (`@h[k]`, `@h.fetch(k)`,
+  # `@h[k][j]`), so a mutation of what the chain answers is a mutation of the ivar's contents; nil otherwise. A reader
+  # that answers a copy (`dup`, `to_a`, `map`) ends the chain. A local alias (`seen = @h[k]; seen.add(x)`) is beyond
+  # the scan.
+  def ivar_root(node)
+    node = node.receiver while node.is_a?(Prism::CallNode) && element_readers.include?(node.name) && node.receiver
+    ivar_read?(node) ? node : nil
+  end
+
+  def element_readers = %i[[] fetch dig first last find detect]
 
   def local_storage_owner?(node) = %i[Thread Fiber Ractor].any? { |name| named_constant?(node, name) }
 
@@ -671,6 +682,21 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
         def c = Thread.current[:k] = 1
       RUBY
         [3, :thread_state, "Thread.current"]
+      )
+    end
+
+    # Review of #2804: a mutation through an element reader is a mutation of the ivar's contents; one of a copy is not.
+    it "flags a module ivar mutated through an element reader, and not a copy of it" do
+      expect(rules_in(<<~RUBY)).to contain_exactly(
+        module M
+          def self.a(key, value) = @a[key] << value
+          def self.b(key, other) = @b[key][other] += 1
+          def self.c(key, value) = @c.fetch(key).push(value)
+          def self.d(key) = @d[key].dup.freeze
+          def self.e = @e.map(&:to_s).freeze
+        end
+      RUBY
+        [2, :module_ivar_mutation, "@a"], [3, :module_ivar_mutation, "@b"], [4, :module_ivar_mutation, "@c"]
       )
     end
 

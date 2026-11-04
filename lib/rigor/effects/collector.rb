@@ -126,10 +126,10 @@ module Rigor
       def record_root(root)
         state = TypingState.current
         accumulator = state[ACCUMULATOR]
-        return unless accumulator && accumulator.root.nil?
+        return unless accumulator
 
         state.touch(ACCUMULATOR)
-        accumulator.root = root
+        accumulator.root = root if accumulator.root.nil?
       end
 
       # One call site's dispatch decision. `receiver` is the type the typer computed for the receiver and
@@ -141,13 +141,15 @@ module Rigor
         state = TypingState.current
         accumulator = state[ACCUMULATOR]
         return if accumulator.nil? || accumulator.path != scope.source_path
+
+        # A read of the contents, so a touch even when the site is already recorded (ADR-129 WD3).
+        state.touch(ACCUMULATOR)
         # First write wins, so a re-query has nothing to add — and asking here rather than inside
         # {Accumulator#record} is what stops it paying for the `Data` and the origin lookup below.
         return if accumulator.recorded?(node)
 
         dynamic = dynamic_receiver?(receiver)
         class_name, kind = descriptor_for(receiver)
-        state.touch(ACCUMULATOR)
         accumulator.record(
           node,
           CallRecord.new(

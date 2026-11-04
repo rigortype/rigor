@@ -165,7 +165,7 @@ module Rigor
           arg.members.any? { |member| !member.is_a?(Type::Constant) && !gradual_top?(member) }
       end
 
-      def gradual_top?(member) = member.is_a?(Type::Dynamic) && member.static_facet.is_a?(Type::Top)
+      def gradual_top?(member) = Type::Combinator.untyped?(member)
 
       # `Dynamic[top] | A | B` as `Dynamic[A | B]` for the class members; a literal member (a value-pinned key) and any
       # other element stay as they are.

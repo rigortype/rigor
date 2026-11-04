@@ -46,6 +46,27 @@ module Rigor
         @untyped
       end
 
+      # ADR-130 WD2 — the parity predicate. Every site that keys a leniency on `untyped` asks this instead of testing
+      # a `Dynamic`'s facet for `Top` or comparing with {untyped}, so a value whose facet parity erases
+      # ({erased_facet?}) reads as `untyped` everywhere but member dispatch. `spec/rigor/type/untyped_parity_spec.rb`
+      # flags the raw spellings it knows outside this module. No facet erases yet, so today this is `Dynamic[top]`
+      # alone.
+      def untyped?(type)
+        return false unless type.is_a?(Dynamic)
+
+        facet = type.static_facet
+        facet.is_a?(Top) || erased_facet?(facet)
+      end
+
+      # ADR-130 WD1 — true for a `Dynamic` facet that parity reads as `top`: {untyped?} answers true for it, and
+      # {merge_erased_members} merges it with `Dynamic[top]`. Slice 1b answers for the `Rigor::Plugin` interface
+      # carrier; until it lands no facet erases, and `spec/rigor/type/combinator_facet_erasure_spec.rb` pins the
+      # merge with a stub facet. An engine hook, not public API.
+      def erased_facet?(_facet)
+        false
+      end
+      private_class_method :erased_facet?
+
       # Wraps the static facet in a Dynamic[T] carrier. Idempotent on the static facet so
       # Dynamic[Dynamic[T]] collapses to Dynamic[T] per the value-lattice algebra.
       def dynamic(static_facet)
@@ -821,7 +842,102 @@ module Rigor
 
           return [top] if flattened.any?(Top)
 
-          absorb_contained_members(unique_members(flattened))
+          absorb_contained_members(merge_erased_members(unique_members(flattened)))
+        end
+
+        # ADR-130 WD1 — a facet parity erases ({erased_facet?}) must not give a join a shape master's dedup would
+        # not: `Dynamic[_A] | Dynamic[top]` is `Dynamic[top]`, and so are the same members anywhere inside a carrier
+        # that holds a type ({TYPE_CHILDREN}). Members equal after {erase_facets} merge into the erased form, at the
+        # first one's position; a member no other matches keeps its facet, and {absorb_contained_members} compares
+        # the erased forms too. The facet scan runs on every join and allocates nothing (no enumerator, no array),
+        # so the merge costs only where a facet is present, which is nowhere until ADR-130 slice 1b.
+        def merge_erased_members(members)
+          return members if members.size < 2
+          return members unless members.any? { |member| facet_bearing?(member) }
+
+          erased = members.map { |member| erase_facets(member) }
+          counts = Hash.new(0)
+          erased.each { |type| counts[type] += 1 }
+          merged = {}
+          result = []
+          members.each_with_index do |member, index|
+            type = erased[index]
+            if counts[type] == 1
+              result << member
+            elsif !merged.key?(type)
+              merged[type] = true
+              result << type
+            end
+          end
+          result
+        end
+
+        def facet_bearing?(type)
+          return erased_facet?(type.static_facet) || facet_bearing?(type.static_facet) if type.is_a?(Dynamic)
+
+          readers = TYPE_CHILDREN[type.class]
+          return false if readers.nil?
+
+          readers.each { |reader| return true if child_facet_bearing?(type.public_send(reader)) }
+          false
+        end
+
+        def child_facet_bearing?(child)
+          case child
+          when Array then child.any? { |type| facet_bearing?(type) }
+          when Hash
+            child.each_value { |type| return true if facet_bearing?(type) }
+            false
+          else facet_bearing?(child)
+          end
+        end
+
+        # `type` with every facet {erased_facet?} accepts rewritten to `top`, through every carrier
+        # {TYPE_CHILDREN} lists. The identity, by reference, on a type that bears none. A facet-bearing `Dynamic`
+        # is never `Dynamic[top]`, so {untyped?} answers the hook for it here.
+        def erase_facets(type)
+          return type unless facet_bearing?(type)
+
+          case type
+          when Dynamic then untyped?(type) ? untyped : dynamic(erase_facets(type.static_facet))
+          when Union then union(*erase_each(type.members))
+          when Intersection then intersection(*erase_each(type.members))
+          when Tuple then tuple_of(*erase_each(type.elements))
+          when Nominal then nominal_of(type.class_name, type_args: erase_each(type.type_args))
+          when HashShape then erase_shape_facets(type)
+          else erase_wrapper_facets(type)
+          end
+        end
+
+        def erase_wrapper_facets(type)
+          case type
+          when Difference then Difference.new(erase_facets(type.base), erase_facets(type.removed))
+          when Refined then Refined.new(erase_facets(type.base), type.predicate_id)
+          when Maybe then Maybe.new(erase_facets(type.value_type))
+          when Result then Result.new(erase_facets(type.ok_type), erase_facets(type.err_type))
+          else erase_bearer_facets(type)
+          end
+        end
+
+        def erase_bearer_facets(type)
+          case type
+          when App then App.new(type.uri, erase_each(type.args), bound: erase_facets(type.bound))
+          when BoundMethod
+            BoundMethod.new(receiver_type: erase_facets(type.receiver_type), method_name: type.method_name)
+          when DataInstance then DataInstance.new(erase_values(type.members), type.class_name)
+          when StructInstance then StructInstance.new(erase_values(type.members), type.class_name)
+          else type
+          end
+        end
+
+        def erase_each(types) = types.map { |type| erase_facets(type) }
+
+        def erase_values(pairs) = pairs.transform_values { |type| erase_facets(type) }
+
+        def erase_shape_facets(shape)
+          HashShape.new(erase_values(shape.pairs),
+                        required_keys: shape.required_keys, optional_keys: shape.optional_keys,
+                        read_only_keys: shape.read_only_keys, extra_keys: shape.extra_keys)
         end
 
         # Drops every member another member already contains, so the join after a guard names one set
@@ -835,15 +951,30 @@ module Rigor
         # The `!absorbed_by?(other, member)` re-check costs one predicate call per pair that absorbed
         # at all, and it is what makes "both arms dropped" unrepresentable should a future clause make
         # the relation symmetric on a pair of distinct members.
+        #
+        # ADR-130 WD1 — the relation reads each member's erased form ({erase_facets}), so a facet does not keep an
+        # arm master absorbs: `[Dynamic[_A]] | [Dynamic[top] | Integer]` drops the first arm as master's
+        # `[Dynamic[top]] | [Dynamic[top] | Integer]` does. Without a facet the readings are the members themselves.
         def absorb_contained_members(members)
           return members unless members.any? { |m| absorbable_member?(m) }
 
           members = join_sequence_elements(members)
-          members.reject do |member|
-            absorbable_member?(member) &&
-              members.any? do |other|
-                !other.equal?(member) && absorbed_by?(member, other) && !absorbed_by?(other, member)
-              end
+          readings = members.any? { |member| facet_bearing?(member) } ? members.map { |m| erase_facets(m) } : members
+          # `each_index`, not `each_with_index`: the Enumerable form allocates an iterator object on every join.
+          kept = []
+          members.each_index do |index|
+            member = members[index]
+            kept << member unless absorbable_member?(member) && absorbed_reading?(readings, index)
+          end
+          kept
+        end
+
+        # `any?` rather than an early `return` from an `each` block: a non-local return allocates on every absorbed
+        # member. Readings are distinct objects (the members were made unique, and an erased form is a new object).
+        def absorbed_reading?(readings, index)
+          reading = readings[index]
+          readings.any? do |wider|
+            !wider.equal?(reading) && absorbed_by?(reading, wider) && !absorbed_by?(wider, reading)
           end
         end
 
@@ -1040,10 +1171,18 @@ module Rigor
         # need not render alike (`Constant[1..2]` and `Constant[1..2.0]`), so equality is not a safe key. A
         # non-main Ractor may not read the module's ivar, so a pool worker renders the key every time, as every
         # run did before.
+        #
+        # ADR-130 WD1 — a member bearing a facet sorts by its erased form's rendering, so a facet does not move it:
+        # `Dynamic[_A] | Dynamic[String]` keeps master's `Dynamic[String] | Dynamic[top]` order. The facet scan runs
+        # only when a key is rendered, and a member without a facet renders as it always did.
         def sort_key(member)
-          return member.describe(:short) unless Ractor.main?
+          return render_sort_key(member) unless Ractor.main?
 
-          @sort_keys[member] ||= member.describe(:short)
+          @sort_keys[member] ||= render_sort_key(member)
+        end
+
+        def render_sort_key(member)
+          (facet_bearing?(member) ? erase_facets(member) : member).describe(:short)
         end
       end
 
@@ -1051,6 +1190,20 @@ module Rigor
       @untyped = Dynamic.new(Top.instance)
       # The main Ractor's {sort_key} memo, allocated here for the same reason.
       @sort_keys = ObjectSpace::WeakMap.new
+
+      # ADR-130 WD1 — the readers of every type a carrier holds, which facet erasure walks. A leaf lists none.
+      # `spec/rigor/type/combinator_facet_erasure_spec.rb` fails on a `Rigor::Type` carrier missing here, and on a
+      # listed carrier whose erasure leaves a facet in any of its type slots.
+      TYPE_CHILDREN = Ractor.make_shareable(
+        {
+          Top => [], Bot => [], Constant => [], IntegerRange => [], FloatRange => [], Singleton => [],
+          DataClass => [], StructClass => [],
+          Dynamic => %i[static_facet], Nominal => %i[type_args], Tuple => %i[elements], HashShape => %i[pairs],
+          Union => %i[members], Intersection => %i[members], Difference => %i[base removed], Refined => %i[base],
+          Maybe => %i[value_type], Result => %i[ok_type err_type], App => %i[args bound],
+          BoundMethod => %i[receiver_type], DataInstance => %i[members], StructInstance => %i[members]
+        }
+      )
 
       NIL_CONSTANT = Constant.new(nil)
       TRUE_CONSTANT = Constant.new(true)

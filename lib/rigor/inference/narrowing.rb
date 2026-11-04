@@ -1815,7 +1815,7 @@ module Rigor
 
         def match_dynamic_kind(member, scope)
           facet = member.static_facet
-          return :dynamic if facet.is_a?(Type::Top)
+          return :dynamic if Type::Combinator.untyped?(member)
 
           facet_kinds = match_member_kinds(facet, scope)
           :dynamic if facet_kinds.all? { |kind| (STRING_MATCH_KINDS + [:nil]).include?(kind) }

@@ -64,6 +64,7 @@ RSpec.describe Rigor::RunScopedSlots do
       rigor_def_node_resolver_memo: "DefNodeResolver.with_run frame",
       rigor_def_visibilities: "per-file scan state, cleared in the scanner's ensure",
       rigor_guarded_defs: "per-file scan state, cleared in the scanner's ensure",
+      rigor_interface_erasure: "RbsTypeTranslator.with_interface_erasure frame flag, restored on the way out",
       rigor_io_boundary_attribution: "thread-variable frame, installed and restored around a block",
       rigor_rbs_core_root: "RbsLoader.with_core_root frame, installed and restored around an env build",
       rigor_run_disclosure_attribution: "thread-variable frame, installed and restored around a block",

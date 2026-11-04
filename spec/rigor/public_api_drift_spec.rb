@@ -827,6 +827,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     union(rest:types)
     universal_int()
     untyped()
+    untyped?(req:type)
     uppercase_string()
     value_of(req:type)
     widen_value_pinned(req:type)

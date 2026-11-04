@@ -57,7 +57,7 @@ module Rigor
         widened = names.reduce(scope) do |acc, name|
           ivar = name.start_with?("@")
           current = ivar ? scope.ivar(name) : scope.local(name)
-          next acc if current.nil? || current == untyped
+          next acc if current.nil? || Type::Combinator.untyped?(current)
 
           ivar ? acc.with_ivar(name, untyped).without_ivar_guard(name) : acc.with_local(name, untyped)
         end

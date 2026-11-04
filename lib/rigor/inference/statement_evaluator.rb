@@ -3271,7 +3271,7 @@ module Rigor
       # True when the clause's scope `after` still binds `$_` to the `Dynamic[top]` the entry gave it and the clause
       # holds nothing that may set it ({LastLine.may_set?}).
       def last_line_kept?(after, node)
-        after.global(:$_) == Type::Combinator.untyped && !LastLine.may_set?(node.statements, scope)
+        Type::Combinator.untyped?(after.global(:$_)) && !LastLine.may_set?(node.statements, scope)
       end
 
       # Issue #1889 — {#eval_for} with a literal-name `instance_variable_set` in the body joining its value into the
@@ -3636,12 +3636,11 @@ module Rigor
       def join_break_scopes(continuation, breaks, names)
         return continuation if breaks.empty? || names.empty?
 
-        floor = Type::Combinator.untyped
         breaks.reduce(continuation) do |cont, break_scope|
           names.reduce(cont) do |acc, name|
             break_value = CapturedLocals.bound_type(break_scope, name)
             current = CapturedLocals.bound_type(acc, name)
-            next acc if break_value.nil? || current == floor
+            next acc if break_value.nil? || Type::Combinator.untyped?(current)
 
             bind_capture(acc, name, current ? Type::Combinator.union(current, break_value) : break_value)
           end
@@ -4032,7 +4031,7 @@ module Rigor
       # signature, unknown receiver) the structural answer stands.
       def for_iteration_element_type(coll_type)
         structural = collection_element_type(coll_type)
-        return structural unless structural.equal?(Type::Combinator.untyped)
+        return structural unless Type::Combinator.untyped?(structural)
 
         block_params = MethodDispatcher.expected_block_param_types(
           receiver_type: coll_type,
@@ -7190,9 +7189,8 @@ module Rigor
           end
         return converged if arms.empty?
 
-        floor = Type::Combinator.untyped
         converged.to_h do |name, type|
-          next [name, type] if type == floor
+          next [name, type] if Type::Combinator.untyped?(type)
 
           [name, Type::Combinator.union(type, *arms.filter_map { |arm| CapturedLocals.bound_type(arm, name) })]
         end
@@ -8752,7 +8750,7 @@ module Rigor
       # True for the `Dynamic[Top]` carrier `MethodParameterBinder` leaves on an undeclared parameter — the only
       # bindings ADR-67 WD3 overrides.
       def untyped_binding?(type)
-        type.is_a?(Type::Dynamic) && type.static_facet.is_a?(Type::Top)
+        Type::Combinator.untyped?(type)
       end
 
       def seed_instance_ivars(body_scope, singleton:)
@@ -9598,7 +9596,8 @@ module Rigor
         floor = Type::Combinator.untyped
         walks.first.map do |name, _type|
           types = walks.map { |walk| walk.assoc(name)&.last }
-          [name, types.any? { |type| type.nil? || type == floor } ? floor : Type::Combinator.union(*types)]
+          floored = types.any? { |type| type.nil? || Type::Combinator.untyped?(type) }
+          [name, floored ? floor : Type::Combinator.union(*types)]
         end
       end
 

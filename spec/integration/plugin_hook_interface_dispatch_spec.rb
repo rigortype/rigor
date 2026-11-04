@@ -11,32 +11,36 @@ require "rigor/configuration"
 # `base.rbs`): the hook's `scope` is `Dynamic[Rigor::Plugin::_Scope]`, a member `_Scope` declares types its call, one it
 # does not declare is silent, and a nilable result reports `call.possible-nil-receiver` as on a `Rigor::Scope`.
 RSpec.describe "ADR-130 plugin-interface dispatch in a plugin hook" do
-  sig_root = File.expand_path("../../sig", __dir__)
+  let(:sig_root) { File.expand_path("../../sig", __dir__) }
 
-  source = <<~RUBY
-    class HookProbe < Rigor::Plugin::Base
-      node_rule(Prism::CallNode) do |node, scope, _path, _file_context, _context|
-        Rigor.dump_type(scope)
-        Rigor.dump_type(scope.type_of(node))
-        Rigor.dump_type(t_probe)
-        Rigor.dump_type(scope.environment)
-        Rigor.dump_type(scope.not_declared)
-        local = scope.local(:x)
-        local.describe
-        nil
+  let(:source) do
+    <<~RUBY
+      class HookProbe < Rigor::Plugin::Base
+        node_rule(Prism::CallNode) do |node, scope, _path, _file_context, _context|
+          Rigor.dump_type(scope)
+          Rigor.dump_type(scope.type_of(node))
+          Rigor.dump_type(t_probe)
+          Rigor.dump_type(scope.environment)
+          Rigor.dump_type(scope.not_declared)
+          local = scope.local(:x)
+          local.describe
+          nil
+        end
+
+        def self.t_probe = nil
       end
+    RUBY
+  end
 
-      def self.t_probe = nil
-    end
-  RUBY
+  let(:probe_sig) do
+    <<~RBS
+      class HookProbe < Rigor::Plugin::Base
+        def self.t_probe: () -> Rigor::Type::t
+      end
+    RBS
+  end
 
-  probe_sig = <<~RBS
-    class HookProbe < Rigor::Plugin::Base
-      def self.t_probe: () -> Rigor::Type::t
-    end
-  RBS
-
-  def run_check(sig_root, source, probe_sig, dispatch: true)
+  def run_check(dispatch: true)
     Dir.mktmpdir("rigor-hook-probe") do |dir|
       FileUtils.mkdir_p(File.join(dir, "lib"))
       FileUtils.mkdir_p(File.join(dir, "sig"))
@@ -56,7 +60,7 @@ RSpec.describe "ADR-130 plugin-interface dispatch in a plugin hook" do
   end
 
   it "types the hook's scope and its declared members" do
-    rows = run_check(sig_root, source, probe_sig)
+    rows = run_check
 
     expect(rows.fetch(3)).to eq("dump.type: dump_type: Dynamic[Rigor::Plugin::_Scope]")
     expect(rows.fetch(5)).to start_with("dump.type: dump_type: Rigor::Type::App | ")
@@ -67,7 +71,7 @@ RSpec.describe "ADR-130 plugin-interface dispatch in a plugin hook" do
   end
 
   it "reads every member as untyped with dispatch off" do
-    rows = run_check(sig_root, source, probe_sig, dispatch: false)
+    rows = run_check(dispatch: false)
 
     expect(rows.fetch(4)).to eq("dump.type: dump_type: Dynamic[top]")
     expect(rows.fetch(6)).to eq("dump.type: dump_type: Dynamic[top]")

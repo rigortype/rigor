@@ -45,7 +45,7 @@ RSpec.describe Rigor::SigGen::Generator do
     row = prepare_row(candidates)
 
     expect(row.rbs).to be_nil
-    expect([row.classification, row.skip_reason]).to eq([:skipped, :untyped_return])
+    expect([row.classification, row.skip_reason]).to eq(%i[skipped untyped_return])
   end
 
   # The control: the same run with the switch made a no-op writes the interface member's `nil`.

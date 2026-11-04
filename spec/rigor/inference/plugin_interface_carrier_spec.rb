@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+require "fileutils"
 require "tmpdir"
 
 # ADR-130 slice 1b — the `Rigor::Plugin` interface carrier (WD1, WD4), the closed-alias memo under the erasure switch,
@@ -9,36 +10,35 @@ require "tmpdir"
 RSpec.describe "ADR-130 Rigor::Plugin interface carrier" do
   let(:translator) { Rigor::Inference::RbsTypeTranslator }
   let(:untyped) { Rigor::Type::Combinator.untyped }
+  let(:sig_dir) { Dir.mktmpdir("rigor-plugin-interface") }
+  let(:environment) do
+    File.write(File.join(sig_dir, "probe.rbs"), <<~RBS)
+      module Rigor
+        module Plugin
+          interface _ProbeS
+            def to_str: () -> String
+          end
+        end
+      end
+
+      interface _Outside
+        def to_str: () -> String
+      end
+
+      type probe_alias = ::Rigor::Plugin::_ProbeS | ::Integer
+
+      class OriginProbe
+        def interface_result: () -> ::Rigor::Plugin::_ProbeS
+        def outside_result: () -> ::_Outside
+        def nominal_result: () -> ::String
+      end
+    RBS
+    Rigor::Environment.for_project(signature_paths: [sig_dir])
+  end
 
   def parse(text) = RBS::Parser.parse_type(text)
 
-  around do |example|
-    Dir.mktmpdir("rigor-plugin-interface") do |dir|
-      File.write(File.join(dir, "probe.rbs"), <<~RBS)
-        module Rigor
-          module Plugin
-            interface _ProbeS
-              def to_str: () -> String
-            end
-          end
-        end
-
-        interface _Outside
-          def to_str: () -> String
-        end
-
-        type probe_alias = ::Rigor::Plugin::_ProbeS | ::Integer
-
-        class OriginProbe
-          def interface_result: () -> ::Rigor::Plugin::_ProbeS
-          def outside_result: () -> ::_Outside
-          def nominal_result: () -> ::String
-        end
-      RBS
-      @environment = Rigor::Environment.for_project(signature_paths: [dir])
-      example.run
-    end
-  end
+  after { FileUtils.remove_entry(sig_dir) }
 
   describe "the carrier (WD1, WD4)" do
     it "carries a Rigor::Plugin interface as Dynamic[Interface], with its type arguments" do
@@ -66,7 +66,7 @@ RSpec.describe "ADR-130 Rigor::Plugin interface carrier" do
   # WD4 — the memo is keyed by the expansion alone, so the erasure baseline must neither read nor write it.
   describe "the closed-alias memo" do
     let(:alias_type) { parse("probe_alias") }
-    let(:loader) { @environment.rbs_loader }
+    let(:loader) { environment.rbs_loader }
 
     def translate_alias = translator.translate(alias_type, alias_expander: loader)
 
@@ -91,10 +91,10 @@ RSpec.describe "ADR-130 Rigor::Plugin interface carrier" do
   describe "the EXPLICIT_UNTYPED origin" do
     def origin_for(method_name)
       node = Prism.parse("o.#{method_name}").value.statements.body.first
-      scope = Rigor::Scope.empty(environment: @environment)
+      scope = Rigor::Scope.empty(environment: environment)
       Rigor::Inference::MethodDispatcher.dispatch(
         receiver_type: Rigor::Type::Combinator.nominal_of("OriginProbe"), method_name: method_name,
-        arg_types: [], environment: @environment, call_node: node, scope: scope
+        arg_types: [], environment: environment, call_node: node, scope: scope
       )
       scope.dynamic_origins[node]
     end

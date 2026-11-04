@@ -76,7 +76,6 @@ module InterfaceParity
   def without_rows(document, lines)
     JSON.pretty_generate(JSON.parse(document).reject { |row| lines.include?([row["path"], row["line"]]) })
   end
-
 end
 
 RSpec.describe "ADR-130 interface parity (behavioural gate)" do

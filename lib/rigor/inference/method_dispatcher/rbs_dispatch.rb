@@ -362,11 +362,7 @@ module Rigor
 
           def dispatch_one(receiver, method_name, args, environment, block_type, self_type_override = nil, # rubocop:disable Metrics/ParameterLists
                            public_only: false, scope: nil, call_node: nil)
-            # Issue #1794 — a sequence's inherited Enumerable surface reads its Rigor-private element argument, with
-            # `self` still the sequence.
-            element = ArithmeticSequenceElements.element_receiver(receiver, method_name, environment)
-            self_type_override ||= receiver if element
-            receiver = element || receiver
+            receiver, self_type_override = element_or_receiver(receiver, method_name, environment, self_type_override)
             descriptor = receiver_descriptor(receiver)
             return nil unless descriptor
 
@@ -375,7 +371,6 @@ module Rigor
               return dispatch_interface(receiver, class_name, receiver_args, method_name, args, environment, block_type,
                                         scope: scope, call_node: call_node)
             end
-
             method_definition = lookup_method(environment, class_name, kind, method_name, scope,
                                               call_node: call_node)
             return nil unless method_definition
@@ -393,13 +388,8 @@ module Rigor
             type_vars = build_type_vars(environment, class_name, receiver_args)
             translate_return_type(
               method_definition,
-              class_name: class_name,
-              kind: kind,
-              method_name: method_name,
-              args: args,
-              type_vars: type_vars,
-              block_type: block_type,
-              environment: environment,
+              class_name: class_name, kind: kind, method_name: method_name, args: args, type_vars: type_vars,
+              block_type: block_type, environment: environment,
               self_type_override: self_type_override ||
                                   SelfSubstitute.for(receiver, receiver_args, method_name, args, block_type),
               scope: scope,
@@ -409,6 +399,13 @@ module Rigor
             # Defensive: if RBS' definition builder raises on a broken hierarchy (e.g., partially loaded
             # user signatures), the dispatcher MUST stay fail-soft.
             nil
+          end
+
+          # Issue #1794 — a sequence's inherited Enumerable surface reads its Rigor-private element argument, with
+          # `self` still the sequence: `[receiver, self_type_override]` for the dispatch.
+          def element_or_receiver(receiver, method_name, environment, self_type_override)
+            element = ArithmeticSequenceElements.element_receiver(receiver, method_name, environment)
+            element ? [element, self_type_override || receiver] : [receiver, self_type_override]
           end
 
           # ADR-130 WD3 — a call on a `Rigor::Plugin` interface value (`Dynamic[Interface]`). A member the interface
@@ -537,12 +534,16 @@ module Rigor
               # (ConstantFolding, ShapeDispatch#dispatch_integer_range) do not own.
               ["Integer", :instance, []]
             when Type::Dynamic
-              receiver_descriptor(receiver.static_facet)
-            when Type::Interface
-              # ADR-130 WD3 — a `Rigor::Plugin` interface value's facet, unless dispatch is switched off, where it
-              # names nothing, as `top` does.
-              [receiver.name, :interface, receiver.type_args] if interface_dispatch?
+              facet_descriptor(receiver.static_facet)
             end
+          end
+
+          # A `Dynamic`'s facet names what the facet names, and a `Rigor::Plugin` interface facet names the interface
+          # (ADR-130 WD3), unless dispatch is switched off, where it names nothing, as `top` does.
+          def facet_descriptor(facet)
+            return receiver_descriptor(facet) unless facet.is_a?(Type::Interface)
+
+            [facet.name, :interface, facet.type_args] if interface_dispatch?
           end
 
           # ADR-48 — project a `Data`/`Struct` member carrier to its tagging class (or the `Data`/`Struct`
@@ -2150,8 +2151,6 @@ module Rigor
               end
             return [] unless method_definition
 
-            keywords_last = ArgumentNodes.keyword_hash_last?(call_node, args)
-            splat = splat_indices(call_node, args)
             extract_block_param_types(
               method_definition,
               class_name: class_name,
@@ -2162,7 +2161,8 @@ module Rigor
               receiver: receiver,
               receiver_args: receiver_args,
               method_name: method_name,
-              keywords_last: keywords_last, positional_splat: splat
+              keywords_last: ArgumentNodes.keyword_hash_last?(call_node, args),
+              positional_splat: splat_indices(call_node, args)
             )
           rescue StandardError
             []
@@ -2174,13 +2174,7 @@ module Rigor
                                         method_name: nil, keywords_last: false, positional_splat: nil)
             # rubocop:enable Metrics/ParameterLists
             instance_type = Type::Combinator.nominal_of(class_name)
-            self_type =
-              case kind
-              when :singleton then Type::Combinator.singleton_of(class_name)
-              # ADR-130 WD1 — inside an interface member `self` is the receiver.
-              when :interface then receiver
-              else                 instance_type
-              end
+            self_type = block_self_type(kind, class_name, instance_type, receiver)
 
             # Issue #1130 — a block parameter that receives `self` (`Object#tap` yields it) must see the
             # receiver's type arguments through the SAME {SelfSubstitute} verdict the return path applies
@@ -2223,6 +2217,16 @@ module Rigor
             return [] unless method_type
 
             block_params_of(method_type, self_type, instance_type, type_vars, environment) || []
+          end
+
+          # What RBS `self` reads in a block parameter of the member: the class's instance or singleton, and inside an
+          # interface member the receiver (ADR-130 WD1).
+          def block_self_type(kind, class_name, instance_type, receiver)
+            case kind
+            when :singleton then Type::Combinator.singleton_of(class_name)
+            when :interface then receiver
+            else instance_type
+            end
           end
 
           # The block parameters every overload in `matches` declares alike, or no information (`[]`).

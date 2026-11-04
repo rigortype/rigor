@@ -352,7 +352,7 @@ the folder itself). Absolute paths are used as given. An absolute
   with the `$rigor` problem matcher. Like any matcher task, its problems
   belong to the shared owner `rigor`, so in a multi-root workspace one
   such entry's run replaces another's problems, and **Rigor: Clear Check
-  Results** does not clear them (clear them from the Problems panel).
+  Results** does not clear them (rerun the task, or close its terminal).
   If no Rigor runs in the folder, the entry prints why and exits 1.
 - To keep each folder's problems apart, give the entry
   `"folder": "<key>"`: it then runs in the terminal described above,

@@ -144,7 +144,6 @@ the extension is versioned independently of the `rigortype` gem.
   quoted for `cmd.exe`, so a `rigor` or `rigor.server.path` whose path
   contains a space (a user profile such as `C:\Users\First Last`,
   `Program Files`) is no longer split. Not yet tried on a Windows host.
-
 - A folder whose server did not answer `initialize` twice in a row is no
   longer restarted by every config-file event (each try was another 60 s
   hang and error toast); Restart Server or a settings change tries again.

@@ -967,15 +967,13 @@ module Rigor
           kept
         end
 
+        # `any?` rather than an early `return` from an `each` block: a non-local return allocates on every absorbed
+        # member. Readings are distinct objects (the members were made unique, and an erased form is a new object).
         def absorbed_reading?(readings, index)
           reading = readings[index]
-          readings.each_index do |other|
-            next if other == index
-
-            wider = readings[other]
-            return true if absorbed_by?(reading, wider) && !absorbed_by?(wider, reading)
+          readings.any? do |wider|
+            !wider.equal?(reading) && absorbed_by?(reading, wider) && !absorbed_by?(wider, reading)
           end
-          false
         end
 
         def absorbable_member?(type)

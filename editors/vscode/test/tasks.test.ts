@@ -3,13 +3,15 @@
 // `vscode` stub records the provider, the commands and the collection.
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
+import { syncClientsNow } from "../src/extension";
 import { forgetResolutions } from "../src/resolve";
 import { registerTasks, shellCheckTask } from "../src/tasks";
-import { CustomExecution, ExtensionMode, ProcessExecution, ShellExecution, Task, addFolder, stub } from "./vscode-stub";
+import { CustomExecution, ExtensionMode, ProcessExecution, ShellExecution, Task, Uri, addFolder, stub } from "./vscode-stub";
 import { Sandbox, fakeContext, fakeOutput, sandbox, script } from "./helpers";
 
 type Provider = import("vscode").TaskProvider;
@@ -121,6 +123,27 @@ describe("the provided tasks", () => {
   });
 });
 
+describe("the folder key of a provided task", () => {
+  const keys = () =>
+    (provider().provideTasks!({} as never) as Task[]).map((t) => t.definition.folder);
+
+  it("is the folder's name when no other folder has it", () => {
+    assert.deepEqual(keys(), [folderA.name, folderB.name]);
+  });
+
+  it("is the path relative to the workspace file when names collide", () => {
+    stub.folders = [];
+    const x = addFolder(path.join(sb.dir, "x", "app"));
+    const y = addFolder(path.join(sb.dir, "y", "app"));
+    fs.mkdirSync(x.uri.fsPath, { recursive: true });
+    fs.mkdirSync(y.uri.fsPath, { recursive: true });
+    stub.workspaceFile = Uri.file(path.join(sb.dir, "ws", "my.code-workspace"));
+    assert.deepEqual(keys(), ["../x/app", "../y/app"]);
+    stub.workspaceFile = undefined;
+    assert.deepEqual(keys(), [x.uri.fsPath, y.uri.fsPath]);
+  });
+});
+
 describe("resolveTask", () => {
   const resolve = async (task: Task) =>
     (await provider().resolveTask!(task as never, {} as never)) as Task | undefined;
@@ -174,12 +197,31 @@ describe("resolveTask", () => {
     assert.match(ran.out, new RegExp(sb.project.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   });
 
-  it("a folder-less entry whose rigor does not run falls back to the pseudoterminal that says why", async () => {
+  it("a folder-less entry whose rigor does not run is a process that says why and exits 1, not a pseudoterminal", async () => {
     stub.set("rigor.server.path", path.join(sb.dir, "missing", "rigor"));
     forgetResolutions();
     const resolved = (await resolve(entry(folderA)))!;
-    assert.ok(resolved.execution instanceof CustomExecution);
-    assert.match((await runTask(resolved)).out, /could not run Rigor/);
+    assert.ok(!(resolved.execution instanceof CustomExecution));
+    const exec = resolved.execution as ProcessExecution;
+    assert.ok(exec instanceof ProcessExecution);
+    const ran = spawnSync(exec.process, exec.args, { env: { ...process.env, ...exec.options.env }, cwd: exec.options.cwd, encoding: "utf8" });
+    assert.equal(ran.status, 1);
+    assert.match(ran.stderr, /could not run Rigor in/);
+    assert.match(ran.stderr, /Restart Server/);
+    assert.equal(resolved.problemMatchers, undefined);
+  });
+
+  it("an entry whose folder names another folder is treated as folder-less, and says so once", async () => {
+    const out = fakeOutput();
+    registerTasks(fakeContext(path.join(sb.dir, "storage"), ExtensionMode.Production), out as never);
+    const p = stub.taskProviders.get("rigor")!;
+    const stale = () => entry(folderA, { folder: folderB.name });
+    const first = (await p.resolveTask!(stale() as never, {} as never)) as Task;
+    assert.ok(first.execution instanceof ProcessExecution);
+    assert.equal(first.problemMatchers, "$rigor");
+    assert.equal(first.definition.folder, folderB.name);
+    await p.resolveTask!(stale() as never, {} as never);
+    assert.equal(out.lines.filter((l) => /not this folder's key/.test(l)).length, 1);
   });
 
   it("declines other commands, other scopes, unmanaged folders and untrusted workspaces", async () => {
@@ -296,6 +338,23 @@ describe("pruning and the clear command", () => {
     checkDoes(`${finding(folderB.uri.fsPath)}; exit 1`);
     await runTask(taskFor(folderB));
     stub.commandHandlers.get("rigor.clearCheckResults")!();
+    assert.deepEqual(files(), []);
+  });
+});
+
+describe("syncing the clients", () => {
+  it("prunes the check results of a folder that is gone", async () => {
+    checkDoes(`${finding(sb.project)}; exit 1`);
+    await runTask(taskFor(folderA));
+    assert.equal(files().length, 1);
+    stub.folders = stub.folders.filter((f) => f !== folderA);
+    stub.trusted = false;
+    try {
+      await syncClientsNow();
+    } catch {
+      // The untrusted branch then touches the status bar, which only
+      // `activate` creates. The prune runs first.
+    }
     assert.deepEqual(files(), []);
   });
 });

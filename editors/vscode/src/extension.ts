@@ -294,7 +294,7 @@ function restartAll(): Promise<void> {
   });
 }
 
-async function syncClientsNow(): Promise<void> {
+export async function syncClientsNow(): Promise<void> {
   pruneCheckResults();
   if (!workspace.isTrusted) {
     // Spawning `bundle exec rigor` is withheld in untrusted workspaces.

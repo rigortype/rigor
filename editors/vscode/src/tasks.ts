@@ -4,6 +4,7 @@
 // it reports carry `source: "rigor check"`, apart from the server's
 // `source: "rigor"`.
 
+import * as path from "path";
 import {
   CustomExecution,
   Diagnostic,
@@ -39,7 +40,7 @@ import {
   useShell,
 } from "./discovery";
 import { killTree, spawnCli } from "./proc";
-import { describeCandidate, peekResolution, resolveRigor } from "./resolve";
+import { Resolution, describeCandidate, peekResolution, resolveRigor } from "./resolve";
 
 const TASK_TYPE = "rigor";
 const TASK_SOURCE = "rigor";
@@ -89,6 +90,59 @@ function folderKey(folder: WorkspaceFolder): string {
 }
 
 /**
+ * The `folder` property of a provided task's definition, which tells two
+ * folders' tasks apart (VS Code finds a pseudoterminal by definition). The
+ * folder's name when no other workspace folder has it; otherwise the
+ * folder's path relative to the directory of the `.code-workspace` file,
+ * with `/` separators, which is the same on every machine and survives a
+ * reorder. A workspace without a file (an untitled one) falls back to the
+ * absolute path.
+ */
+export function definitionKey(folder: WorkspaceFolder): string {
+  const all = workspace.workspaceFolders ?? [];
+  if (all.filter((f) => f.name === folder.name).length <= 1) {
+    return folder.name;
+  }
+  const file = workspace.workspaceFile;
+  if (file && file.scheme === "file") {
+    return path.relative(path.dirname(file.fsPath), folder.uri.fsPath).split(path.sep).join("/");
+  }
+  return folder.uri.fsPath;
+}
+
+/** Why no `rigor` runs in `folder`, as the lines the task prints. */
+function failureLines(folder: WorkspaceFolder, res: Resolution): string[] {
+  return [
+    `Rigor: could not run Rigor in ${folder.name}.`,
+    ...(res.hint ? [res.hint] : []),
+    ...res.rejected.map((r) => `  rejected ${describeCandidate(r.server)}: ${r.reason}`),
+    'Fix the setup, then run "Rigor: Restart Server".',
+  ];
+}
+
+/**
+ * The task for a folder-less entry whose Rigor could not be found: a process
+ * that prints why on stderr and exits 1. It is the extension host's own
+ * executable run as Node (`ELECTRON_RUN_AS_NODE`), which needs no shell, so
+ * it behaves alike on POSIX and Windows, and, unlike a pseudoterminal, it
+ * does not collide with another folder's entry of the same definition.
+ */
+export function failureTask(
+  folder: WorkspaceFolder,
+  label: string,
+  definition: TaskDefinition,
+  lines: string[],
+): Task {
+  const root = projectRoot(folder) ?? folder.uri.fsPath;
+  const script = "process.stderr.write(process.argv[1] + '\\n'); process.exit(1);";
+  const execution = new ProcessExecution(process.execPath, ["-e", script, lines.join("\n")], {
+    cwd: root,
+    env: { ELECTRON_RUN_AS_NODE: "1" },
+  });
+  return new Task(definition, folder, label, TASK_SOURCE, execution);
+}
+
+/**
  * The `rigor: check` task for one managed folder, always a pseudoterminal.
  * It waits for the folder's discovery, runs the resolved `rigor check` in
  * the project root and echoes its output. It parses the output itself
@@ -103,7 +157,7 @@ export function checkTask(
   folder: WorkspaceFolder,
   label: string,
   output: OutputChannel,
-  definition: TaskDefinition = { type: TASK_TYPE, command: "check", folder: folder.name },
+  definition: TaskDefinition = { type: TASK_TYPE, command: "check", folder: definitionKey(folder) },
 ): Task {
   const root = projectRoot(folder) ?? folder.uri.fsPath;
   const execution = new CustomExecution(async (): Promise<Pseudoterminal> => {
@@ -138,13 +192,7 @@ export function checkTask(
             return;
           }
           if (!res.probe.ok && !res.probe.tooOld) {
-            const lines = [
-              `Rigor: could not run Rigor in ${folder.name}.`,
-              ...(res.hint ? [res.hint] : []),
-              ...res.rejected.map((r) => `  rejected ${describeCandidate(r.server)}: ${r.reason}`),
-              'Fix the setup, then run "Rigor: Restart Server".',
-            ];
-            write.fire(crlf(`${lines.join("\n")}\n`));
+            write.fire(crlf(`${failureLines(folder, res).join("\n")}\n`));
             finish(1);
             return;
           }
@@ -201,6 +249,8 @@ export function checkTask(
  * workspace, as the language server does.
  */
 export class RigorCheckTaskProvider implements TaskProvider {
+  private readonly warned = new Set<string>();
+
   constructor(private readonly output: OutputChannel) {}
 
   /**
@@ -245,13 +295,26 @@ export class RigorCheckTaskProvider implements TaskProvider {
     ) {
       return undefined;
     }
-    if (task.definition.folder === undefined) {
-      const res = await resolveRigor(folder, this.output);
-      if (res.probe.ok || res.probe.tooOld) {
-        return shellCheckTask(folder, task.name, res.server, task.definition);
+    // Only an entry whose `folder` is its own folder's key may be the
+    // pseudoterminal: any other has a definition another entry can share.
+    if (task.definition.folder === definitionKey(folder)) {
+      return checkTask(folder, task.name, this.output, task.definition);
+    }
+    if (task.definition.folder !== undefined) {
+      const note = `${folder.name}:${String(task.definition.folder)}`;
+      if (!this.warned.has(note)) {
+        this.warned.add(note);
+        this.output.appendLine(
+          `Rigor: the rigor task "${task.name}" in ${folder.name} has folder "${String(task.definition.folder)}", ` +
+            `which is not this folder's key "${definitionKey(folder)}"; it runs without per-folder results.`,
+        );
       }
     }
-    return checkTask(folder, task.name, this.output, task.definition);
+    const res = await resolveRigor(folder, this.output);
+    if (res.probe.ok || res.probe.tooOld) {
+      return shellCheckTask(folder, task.name, res.server, task.definition);
+    }
+    return failureTask(folder, task.name, task.definition, failureLines(folder, res));
   }
 }
 

@@ -10,6 +10,8 @@ export const stub = {
   /** `"rigor.server.path"` -> value; every folder and scope reads the same map. */
   config: new Map<string, unknown>(),
   trusted: true,
+  /** The `.code-workspace` file, if the window has one. */
+  workspaceFile: undefined as Uri | undefined,
   folders: [] as WorkspaceFolder[],
   /** Every `show*Message`, in order. */
   messages: [] as { level: "info" | "warning" | "error"; text: string }[],
@@ -28,6 +30,7 @@ export const stub = {
     this.collections = [];
     this.config.clear();
     this.trusted = true;
+    this.workspaceFile = undefined;
     this.folders = [];
     this.messages = [];
   },
@@ -135,6 +138,9 @@ export const workspace = {
   },
   get workspaceFolders(): WorkspaceFolder[] {
     return stub.folders;
+  },
+  get workspaceFile(): Uri | undefined {
+    return stub.workspaceFile;
   },
   getWorkspaceFolder(uri: Uri): WorkspaceFolder | undefined {
     return stub.folders.find((f) => {
@@ -278,3 +284,20 @@ export const languages = {
     return new Disposable(() => {});
   },
 };
+
+// Only so `src/extension.ts` loads: its top level imports them.
+export enum ConfigurationTarget {
+  Global = 1,
+  Workspace = 2,
+  WorkspaceFolder = 3,
+}
+export enum StatusBarAlignment {
+  Left = 1,
+  Right = 2,
+}
+export class ThemeColor {
+  constructor(readonly id: string) {}
+}
+export class MarkdownString {
+  constructor(readonly value = "") {}
+}

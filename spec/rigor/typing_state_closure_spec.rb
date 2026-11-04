@@ -200,7 +200,9 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
 
     statements = body.is_a?(Prism::StatementsNode) ? body.body : [body]
     singleton = module_function_defs(statements)
-    note_extended_accessors(statements, context, file)
+    # Under `extend self` the body's instance methods and accessors are its own singleton ones too, so the whole body
+    # reads as a singleton context.
+    context = :singleton if context == :module_body && extends_self?(statements)
     statements.each_with_index do |statement, position|
       if statement.is_a?(Prism::DefNode) && context == :module_body && singleton.call(position, statement)
         walk_def(statement, :singleton, file)
@@ -222,17 +224,8 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
     end
   end
 
-  # Under `extend self` a module's instance accessors are its own singleton methods too, so `attr_accessor` there is
-  # module state.
-  def note_extended_accessors(statements, context, file)
-    return unless context == :module_body
-    return unless statements.any? { |node| bare_call?(node, :extend) && call_arguments(node).any?(Prism::SelfNode) }
-
-    statements.each do |node|
-      next unless node.is_a?(Prism::CallNode) && node.receiver.nil? && %i[attr_accessor attr_writer].include?(node.name)
-
-      found(file, node, :module_accessor, node.name)
-    end
+  def extends_self?(statements)
+    statements.any? { |node| bare_call?(node, :extend) && call_arguments(node).any?(Prism::SelfNode) }
   end
 
   def bare_call?(node, name) = node.is_a?(Prism::CallNode) && node.receiver.nil? && node.name == name
@@ -380,14 +373,15 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
 
   def state_name(node) = node.respond_to?(:name) ? node.name : node.class.name.split("::").last
 
-  # `attr_accessor` / `attr_writer` in `class << self`, through `self.` there, or on `singleton_class`, or a module
-  # attribute macro anywhere. A plain `attr_accessor` in a class body defines instance accessors, which are not
+  # `attr_accessor` / `attr_writer` in `class << self` or an `extend self` body (bare or through `self.`) or on
+  # `singleton_class`, or a module attribute macro (`mattr_*`, `cattr_*`, `class_attribute`) with a nil, `self` or
+  # `singleton_class` receiver. A plain `attr_accessor` in a class body defines instance accessors, which are not
   # module state. Spelled `send(:attr_writer, :x)` too ({#check_reflective_send}).
   def accessor_macro?(node, context) = accessor_macro_named?(node.receiver, node.name, context)
 
   def accessor_macro_named?(receiver, name, context)
     return true if %i[mattr_accessor mattr_writer cattr_accessor cattr_writer class_attribute].include?(name) &&
-                   (receiver.nil? || receiver.is_a?(Prism::SelfNode))
+                   (receiver.nil? || receiver.is_a?(Prism::SelfNode) || singleton_class_call?(receiver))
     return false unless %i[attr_accessor attr_writer].include?(name)
 
     singleton_class_call?(receiver) || (context == :singleton && (receiver.nil? || receiver.is_a?(Prism::SelfNode)))
@@ -643,17 +637,30 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
             send("flag=", 1)
           end
           send(:mattr_accessor, :s)
-        end
-        module Shared
-          extend self
-
-          attr_accessor :r
+          singleton_class.mattr_accessor :n
         end
       RUBY
         [2, :module_accessor, "attr_accessor"], [6, :module_accessor, "attr_writer"],
         [7, :module_accessor, "attr_accessor"], [8, :module_accessor, "attr_writer"],
         [9, :module_accessor_write, "flag"], [11, :module_accessor, "mattr_accessor"],
-        [16, :module_accessor, "attr_accessor"]
+        [12, :module_accessor, "mattr_accessor"]
+      )
+    end
+
+    # Review of #2803, delta: an `extend self` body reads as a singleton context, whatever the spelling or nesting.
+    it "flags an accessor macro anywhere in an extend self body" do
+      expect(rules_in(<<~RUBY)).to contain_exactly(
+        module Shared
+          extend self
+
+          attr_accessor :r
+          send(:attr_accessor, :q)
+          self.attr_writer :p
+          attr_accessor :o if true
+        end
+      RUBY
+        [4, :module_accessor, "attr_accessor"], [5, :module_accessor, "attr_accessor"],
+        [6, :module_accessor, "attr_writer"], [7, :module_accessor, "attr_accessor"]
       )
     end
 

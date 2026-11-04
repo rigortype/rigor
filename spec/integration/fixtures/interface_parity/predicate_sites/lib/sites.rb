@@ -110,15 +110,16 @@ class Sites
     Rigor.dump_type(wrap(x))
   end
 
-  # `narrowing.rb`, `match_dynamic_kind`: an untyped `=~` operand narrows as a dynamic one.
+  # `narrowing.rb`, `match_dynamic_kind`: an untyped `!~` operand keeps the match edge on the falsey branch.
   def match_kind(x)
-    if x =~ /a/
-      Rigor.dump_type(x)
+    if x !~ /(a)/
+      Rigor.dump_type($1)
     else
-      Rigor.dump_type(x)
+      Rigor.dump_type($1)
+      Rigor.dump_type($~)
     end
-    case x
-    when /b/ then Rigor.dump_type(x)
+    if x =~ /(b)/
+      Rigor.dump_type(x)
     end
   end
 

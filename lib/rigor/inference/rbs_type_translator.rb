@@ -3,6 +3,7 @@
 require "rbs"
 
 require_relative "../type"
+require_relative "../typing_state"
 
 module Rigor
   module Inference
@@ -107,14 +108,11 @@ module Rigor
       # repeat with one frozen String.
       @relative_names = {}
 
-      # #775 — the translated form of a CLOSED alias expansion, keyed by the expansion. Closed means no
-      # `self`, `instance` or type variable anywhere inside, so the caller's context cannot change the
-      # answer; at expansion depth 0 the budget cannot either. rbs compares types by value, so the memo
-      # is per distinct expansion, not per loader (a re-parsed identical alias hits), and the weak keys
-      # let an entry go with the loader whose memo held the expansion. `Rigor::Type::t` on the self-check
-      # is a 21-member union that was re-translated ~13k times, each time re-normalising the union from
-      # scratch; every repeat now shares one Union.
-      @closed_alias_translations = ObjectSpace::WeakKeyMap.new
+      # ADR-130 WD2 — the erasure baseline's flag, installed by {.with_interface_erasure}.
+      INTERFACE_ERASURE = TypingState.frame(
+        :interface_erasure, reason: "a flag installed around an erasure-baseline run (the parity harness)"
+      )
+      private_constant :INTERFACE_ERASURE
 
       class << self
         # @param self_type — substitute for `Bases::Self`.
@@ -134,20 +132,13 @@ module Rigor
         # ADR-130 WD2 — the erasure baseline. Inside the block every RBS interface translates to `untyped`, as it did
         # before ADR-130, whatever carrier the default engine has; the behavioural parity gate
         # (`spec/integration/interface_parity_spec.rb`) runs its baseline here, so the baseline never comes from the
-        # default engine. {translate_interface} reads {interface_erasure?}, and {translate_alias} bypasses
-        # `@closed_alias_translations` under it, so a translation made in one mode is never served in the other (ADR-130
-        # WD4). The switch is per thread, so a run under it is sequential: a pooled run raises (`PoolCoordinator`).
-        def with_interface_erasure
-          previous = Thread.current.thread_variable_get(:rigor_interface_erasure)
-          Thread.current.thread_variable_set(:rigor_interface_erasure, true)
-          yield
-        ensure
-          Thread.current.thread_variable_set(:rigor_interface_erasure, previous)
-        end
+        # default engine. {translate_interface} reads {interface_erasure?}, and {translate_alias} bypasses the loader's
+        # closed-alias memo under it, so a translation made in one mode is never served in the other (ADR-130 WD4). The
+        # switch lives in the calling thread's (and fiber's) `TypingState`, so a run under it is sequential: a pooled
+        # run raises (`PoolCoordinator`).
+        def with_interface_erasure(&) = TypingState.current.with(INTERFACE_ERASURE, true, &)
 
-        def interface_erasure?
-          Thread.current.thread_variable_get(:rigor_interface_erasure) == true
-        end
+        def interface_erasure? = TypingState.current[INTERFACE_ERASURE] == true
 
         private
 
@@ -295,16 +286,28 @@ module Rigor
           # A nested expansion is translated under its parent's budget, and `rigor trace` records every
           # union merge as it happens, so neither consults the memo. Nor does the erasure baseline (ADR-130 WD4): the
           # memo holds the default engine's translations, where a `Rigor::Plugin` interface keeps its facet.
-          unless context.alias_depth.zero? && !FlowTracer.active? && !interface_erasure?
+          memo = closed_translations_of(expander)
+          unless memo && context.alias_depth.zero? && !FlowTracer.active? && !interface_erasure?
             return translate_in(expanded, context.deeper)
           end
 
-          cached = @closed_alias_translations[expanded]
+          cached = memo[expanded]
           return cached if cached
 
           translated = translate_in(expanded, context.deeper)
-          @closed_alias_translations[expanded] = translated if closed_type?(expanded)
+          memo[expanded] = translated if closed_type?(expanded)
           translated
+        end
+
+        # #775 — the translated form of a CLOSED alias expansion, keyed by the expansion, lives with the expander. Closed
+        # means no `self`, `instance` or type variable anywhere inside, so the caller's context cannot change the answer;
+        # at expansion depth 0 the budget cannot either. But a nested alias inside the expansion is expanded through the
+        # expander (`type a = b | Integer` holds `b`), so the translation reads the expander's environment: a memo
+        # shared by every expander answered a second loader, whose `b` differs, with the first loader's translation
+        # (equal expansions are equal keys). The expander owns its memo, so it dies with it. An expander that offers none
+        # (anything answering only `expand_type_alias`) is translated afresh each time.
+        def closed_translations_of(expander)
+          expander.closed_alias_translations if expander.respond_to?(:closed_alias_translations)
         end
 
         # True when nothing in `rbs_type`'s tree reads the translation context: no `self`, no `instance`,

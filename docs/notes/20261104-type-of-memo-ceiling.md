@@ -49,18 +49,19 @@ Both also concluded:
 Opus added several points:
 
 - Typing state also lives outside `Thread.current[]`: in `thread_variable_set` (`Plugin::IoBoundary`,
-  `RunDisclosureCredit`), in Fiber storage, and in module-level ivars.
+  `RunDisclosureCredit`) and in module-level ivars.
 - `FlowTracer.active?` changes `Combinator.union`'s fast path, so it is an input, not only a bypass.
 - A gate needs fault injection, so that it is shown to fail when a mechanism is removed.
 
 Fable added:
 
-- `MemoAudit::Mismatch` is a `StandardError`, so the engine's 46 and 139 `rescue`s swallow it inside shadow mode.
+- `MemoAudit::Mismatch` is a `StandardError`, so a `rescue StandardError` on the typing path swallows it inside
+  shadow mode (filed as #2785 for the existing audit).
 - A leaf node is not worth storing.
 
 The same inventory found that the ADR-84 return memo's own key omits two of these inputs:
 
-- the reflective-ivar repeat depth, fixed in #2773;
+- the reflective-ivar repeat depth (#2773);
 - the block-body threading suppression, filed as #2782.
 
 That is the same failure class, inside a memo four review cycles old.
@@ -125,8 +126,15 @@ Base figures:
 **Correctness:**
 
 - Diagnostics: −0 / +0 in every configuration and every rep, on all three corpora.
-- Shadow mode checked 101K–236K hits on Mastodon, 158K–652K on `lib` and 119K–394K on Redmine. Types mismatched
-  **0** times; no recompute was refused and none moved the id.
+- Shadow mode suspended only the `type_of` memo; the ADR-84 return memo and every other memo stayed live.
+  - Hits checked under `rmc_a` (the `any` rule): 101K on Mastodon, 158K on `lib` and 119K on Redmine. All
+    configurations together: 101K–236K, 158K–652K and 119K–394K.
+  - Types mismatched **0** times. No recompute was refused, and none moved the id.
+  - The harness neither logged nor validated Table reads, so these hit counts are an upper bound. In particular, an
+    entry whose computation read a key ABSENT and then wrote it would invalidate itself under read validation.
+- A recompute's write list differed from the stored one 416, 846 and 1,104 times under `rmc_a` (Mastodon, `lib`,
+  Redmine). In the 60 samples per run, the lists differed only in the identity of the target scope. The final table
+  state is what the comparison below uses.
 - Table state after a replay mismatched a recompute 1 time under `rmc_e` (`lib`), 0 times under `rmc_a`, and 167,
   198 and 43 times when identical installs kept the id.
   - Each mismatch is a `dynamic_origins` cause written inside a callee body during a nested inference. On a later

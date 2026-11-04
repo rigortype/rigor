@@ -1,8 +1,16 @@
 # ADR-130 — Plugin-interface values: member dispatch, and `untyped` everywhere else
 
-Status: **Proposed, 2026-11-04.** Nothing is implemented. This ADR proposes only part of #929's value half:
-values typed by the plugin-facing interfaces under `Rigor::Plugin`. Three things are deferred, each with a
-re-entry condition: the same facet for every RBS interface, structural assignability, and the role table.
+Status: **Accepted, 2026-11-04, ratified by the maintainer.** It is not implemented yet:
+
+- slices 1a and 1b are pending;
+- #2686 is slice 2.
+
+The ADR covers only part of #929's value half: values typed by the plugin-facing interfaces under
+`Rigor::Plugin`. Three things are deferred, each with a re-entry condition:
+
+- the same facet for every RBS interface;
+- structural assignability;
+- the role table.
 
 The prototype was measured on `lib`, 48 plugin and example trees, and fourteen survey targets:
 
@@ -15,8 +23,6 @@ The prototype was measured on `lib`, 48 plugin and example trees, and fourteen s
 Three review rounds reproduced findings on earlier drafts: eleven false positives and two structural
 divergences, nested tuple and hash-shape joins. All of them are fixtures. The false positives are silent
 under this draft, and the joins match master.
-
-The decision awaits the maintainer's ruling before slice 1a lands.
 
 Grounding: [`docs/notes/20261104-interface-types-prototype-measurement.md`](../notes/20261104-interface-types-prototype-measurement.md)
 (per-target deltas for all three drafts, the parity differential, sig-gen and lens output, the fixtures,

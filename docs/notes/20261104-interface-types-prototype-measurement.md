@@ -3,58 +3,63 @@
 Status: measurement note, 2026-11-04, engine at `0a53fe62e`. It grounds
 [ADR-130](../adr/130-interface-typed-values-dispatch-under-untyped-parity.md) and binds nothing.
 
-**Result (A-only with parity, the proposal).** An interface value reads as `untyped` to every site and
-resolves its declared members at dispatch. That rule added **no** diagnostic row on any of these corpora:
+**Result (draft 3, the proposal).** The proposal scopes the facet to the `Rigor::Plugin` interfaces and adds
+the parity predicate, the untyped union merge and the overload-shape rule. Measured on `lib`, the 48 plugin
+and example trees and fourteen survey targets:
 
-- `lib`;
-- 48 plugin and example trees;
-- fourteen survey targets.
+- Dispatch on added **no** diagnostic row, and **no** row was removed.
+- The behavioural parity differential (dispatch off) was empty.
+- With dispatch on, sig-gen and lens output changed on the plugin trees. With dispatch off, which is what
+  ADR-130 WD5 prescribes for those commands, it was byte-identical to master on `lib` and the plugin trees.
+- All ten false positives the two review rounds reproduced on drafts 1 and 2 fire on those drafts' heads and
+  are silent here.
+- Allocations: +0.007% on `lib` and +0.005% on Mastodon `app`, after the attribution below.
 
-The two exceptions are both out-of-scope differences:
+The earlier drafts, kept for the record:
 
-- Rows that name a scratch path change between runs; each is the same row on both arms.
-- The `dump_type` text in the fixtures changes, which is the intended precision.
-
-Every one of the independent review's seven repros fires without parity and is silent with it.
-
-**First draft (superseded), without parity.** That prototype also reported no new diagnostic over the
-same trees, but the seven repros show it was not safe: the zero was an artefact of what the corpus
-happens to contain.
-
-**Assignability (half B, now deferred).** It added 3 rows at its proposed default, all of them false
-positives. With the standard union reading it added 20 on `lib`, also all false positives.
+- **Draft 1** carried every interface as `Dynamic[_Foo]` without parity.
+- **Draft 2** added parity for every interface.
+- Both also read zero on the corpus, yet the reviews reproduced ten false positives between them. A zero on
+  the corpus is therefore not evidence of safety here; the fixtures and the parity differential are.
 
 ## The prototype
 
-The prototype is the local branch `interface-proto` in the `interface-assignability` worktree. It is
-not pushed. Its commits on `0a53fe62e`:
+The prototype is the local branch `interface-proto` in the `interface-assignability` worktree. It is not
+pushed, and its head is `992d583c6`. Each commit sits on `0a53fe62e`:
 
 | SHA | What it adds |
 | --- | --- |
-| `89d12edbb` | Carrier, half A dispatch, half B oracle |
-| `0afcfa73d` | Reach counters |
-| `8b980c6b2`, `41869d92b` | Every-member union reading for half B |
-| `b9011b6ac` | Root-class `maybe` for half B |
-| `b7e7d73d9` | **The parity predicate and core-alias erasure**: the ADR's proposal |
+| `89d12edbb`, `0afcfa73d`, `8b980c6b2`, `41869d92b`, `b9011b6ac` | Draft 1: the carrier, dispatch, the half-B oracle and the reach counters |
+| `b7e7d73d9` | Draft 2: the parity predicate and core-alias erasure, for every interface |
+| `3410399da`, `992d583c6` | **Draft 3 (the proposal):** `Rigor::Plugin` scope, the untyped union merge, the overload-shape rule; then a counting merge for allocation |
+| `1e5972f66` (branch `interface-proto-d2-typename`) | Draft 2 with a `TypeName`-set alias check, for allocation attribution only |
 
-`RIGOR_PROTO_IFACE` selects the behaviour:
+`RIGOR_PROTO_IFACE` selects the mode:
 
-- `a`: half A;
-- `b`: half B;
-- `bu`: half B with the standard union reading;
-- `ac`: half A carrying the core conversion aliases.
+- `a`: dispatch on;
+- `an`: the carrier present, dispatch off (the parity differential);
+- `b`, `bu`: half B.
 
 `RIGOR_PROTO_REACH=<file>` writes the counters.
 
-The parity predicate is `Type::Combinator.untyped?`: true for `Dynamic[top]` and `Dynamic[Interface]`. The
-family of sites routed through it was re-derived from `lib/` with two patterns:
+### Draft 3's rules as prototyped
 
-- `static_facet.is_a?(Type::Top)` and `facet.is_a?(Type::Top)`;
-- `== Combinator.untyped`, `equal?(Combinator.untyped)`, `== untyped` and `equal?(untyped)`.
+- **Scope.** `translate_interface` carries the facet only when the interface's `TypeName` namespace path is
+  `[:Rigor, :Plugin]`. Every other interface returns `Combinator.untyped`. This is a pure function of the
+  name, so the closed-alias memo (keyed by expansion) is order-independent.
+- **The predicate.** `Type::Combinator.untyped?` is true for `Dynamic[top]` and for `Dynamic[Interface]`. It
+  replaces the site family below, which was re-derived from `lib/` with two greps:
+  - `static_facet.is_a?(Type::Top)` and `facet.is_a?(Type::Top)`;
+  - `== Combinator.untyped`, `equal?(Combinator.untyped)`, `== untyped` and `equal?(untyped)`.
+- **The union merge.** `normalized_union_members` merges two or more `untyped?` members into one
+  `Dynamic[top]` (`merge_untyped_members`). A lone interface member keeps its facet.
+- **The overload-shape rule.** `interface_shape_accepted?` lets dispatch through an interface member
+  resolve only when some overload takes the call's block presence, positional count and required
+  keywords. Otherwise the tier declines and the call reads `untyped`.
 
 | Site | Form | Purpose |
 | --- | --- | --- |
-| `type/combinator.rb:55` | facet `Top` | `Combinator.dynamic`'s own fold to `untyped` (kept: the constructor) |
+| `type/combinator.rb:55` | facet `Top` | `Combinator.dynamic`'s own fold (kept: the constructor) |
 | `inference/method_dispatcher/imprecise_argument.rb:23`, `:28` | facet `Top` | overload selection's imprecise-actual passes |
 | `inference/method_dispatcher/facet_distribution.rb:122` | facet `Top` | member-wise selection over a `Dynamic` facet |
 | `inference/untyped_rejoin.rb:60` | facet `Top` | the #1840 rejoin |
@@ -62,7 +67,7 @@ family of sites routed through it was re-derived from `lib/` with two patterns:
 | `inference/statement_evaluator.rb:3256` | `== untyped` | the `$_` check |
 | `inference/statement_evaluator.rb:4023` | `equal?(untyped)` | `for` element fallback |
 | `inference/method_dispatcher.rb:198`, `:829` | facet `Top` | `EXPLICIT_UNTYPED` origin; boundary-cross report |
-| `inference/method_dispatcher/rbs_dispatch.rb:1918` | facet `Top` | the untyped-argument test in RBS dispatch |
+| `inference/method_dispatcher/rbs_dispatch.rb:1918` | facet `Top` | untyped-argument test in RBS dispatch |
 | `inference/method_dispatcher/self_substitute.rb:107` | facet `Top` | `self` substitution's untyped type arguments |
 | `inference/unknown_store_widening.rb:168` | facet `Top` | the unknown-store gradual arm |
 | `inference/narrowing.rb:1818` | facet `Top` | `match_dynamic_kind` |
@@ -73,135 +78,153 @@ family of sites routed through it was re-derived from `lib/` with two patterns:
 | `inference/multi_target_binder.rb:305` | `== untyped` | multiple-assignment binding |
 | `inference/block_auto_splat.rb:197` | `== untyped` | block auto-splat columns |
 
-That is 21 tests at 20 sites. `imprecise_argument.rb` holds two, and all of them except the constructor's
-moved to the predicate.
+Two files hold two tests each (`imprecise_argument.rb` and `method_dispatcher.rb`), so the table's 20 sites
+make 21 tests.
 
-The facet readers have no arm for `Interface`, so for an `Interface` facet they answer what they answer for
-`top`:
-
-- `receiver_blind_block.rb:209`;
-- `scope_indexer.rb:2858`;
-- `block_auto_splat.rb:129`;
-- `match_rebinding/operands.rb:105`;
-- `effects/collector.rb:167`.
-
-The exception is `rbs_dispatch.rb`'s `receiver_descriptor`, which is the dispatch path.
-
-The core conversion aliases are `::int`, `::float`, `::range`, `::string`, `::array`, `::hash`, `::io` and
-`::path`. Each is an alias from rbs core's `builtin.rbs` of the form `C | _ToC`. An interface reached through
-one of them translates to `Dynamic[top]`.
+Some sites read a facet for its content: `receiver_blind_block.rb:209`, `scope_indexer.rb:2858`,
+`block_auto_splat.rb:129`, `match_rebinding/operands.rb:105` and `effects/collector.rb:167`. None of them has
+an `Interface` arm, so they answer as for `top`. The exception is `rbs_dispatch.rb`'s `receiver_descriptor`,
+which is the dispatch path.
 
 ## Method
 
-**Differential.** `tool/engine_diag_diff.rb --base 0a53fe62e --head <proto>` ran each arm in a fresh process
-with `--no-cache`.
+- **Differential.**
+  - `tool/engine_diag_diff.rb --base 0a53fe62e --head 3410399da`, with each arm in a fresh process and
+    `--no-cache`.
+  - `lib` and the 48 plugin and example trees were analysed with `--corpus 0a53fe62e`, from the repository
+    root so `sig/` loads.
+  - The survey targets were analysed with `--corpus-dir` on private `rsync` copies, without `.git`,
+    `node_modules` or the cache, and with every baseline renamed away. A baseline is count-keyed per file
+    and rule, so one new firing in a file releases every baselined firing of that rule there.
+- **Survey set.** textbringer, rgl, kramdown, alba, mail, liquid, faraday, mangrove, haml, herb, net-ssh,
+  yard (the delegator- and `method_missing`-heavy target), redmine and mastodon.
+  - rails was dropped: its environment fails to build 1,610 class definitions
+    (`RBS::GenericParameterMismatchError` on `::Array`), so it measures nothing.
+  - Every original checkout's `git status` was compared before and after; none changed.
+- **Behavioural parity.** The same differential ran with `RIGOR_PROTO_IFACE=an`: the carrier present,
+  dispatch off. The criterion is zero rows.
+- **sig-gen and lens.** Each engine was archived with `exe/`, and `rigor sig-gen --format=json` and
+  `rigor lens --format=json` were run over a corpus archive of `0a53fe62e`, base against head. The lens run
+  over the plugin trees used a configuration whose `paths:` names them, because lens reports a file outside
+  `paths:` as `outside_project`.
 
-- `lib` and the plugin and example trees used `--corpus 0a53fe62e`.
-- The survey targets used `--corpus-dir` on private `rsync` copies, without `.git`, `node_modules` or the
-  cache.
-- **Every survey baseline was renamed away.** A baseline is count-keyed per file and rule, so one new firing
-  in a file releases every baselined firing of that rule there.
+## Fixtures
 
-**Survey set.** textbringer, rgl, kramdown, alba, mail, liquid, faraday, mangrove, haml, herb, net-ssh, yard
-(the delegator- and `method_missing`-heavy target), redmine and mastodon.
+The fixture is `tmp/p5` in the worktree. It declares four interfaces under `Rigor::Plugin` so the draft 3
+scope applies:
 
-- rails was dropped. Its environment fails to build 1,610 class definitions
-  (`RBS::GenericParameterMismatchError` on `::Array`), so every call reads `Dynamic[top]` and the run
-  measures nothing.
-- `git status` was compared before and after on every original checkout, and none changed.
+- `_ProbeA` (`to_str`);
+- `_ProbeB` (`to_s`);
+- `_ProbeInt` (`to_int`);
+- `_ProbeEach` (`each: () { (Integer) -> void } -> Array[Integer]`).
 
-**Plugins.** `plugins/*/lib examples/*/lib` (48 trees) ran from the repository root, so `sig/` loads. #2681
-already carries `base.rbs` types into hook blocks.
+It reproduces the reviews' findings with those types:
 
-A probe plugin read these types under the parity head in mode `a`:
+| Method | Shape | Finding |
+| --- | --- | --- |
+| `mul` | `(arr * x).first` | review 1 |
+| `plus`, `minus`, `times`, `pow` | `(1 + x).nan?` and siblings | review 1 |
+| `rejoin_if`, `rejoin_case` | `x.to_str` after a nil / `String` branch | review 1 |
+| `r3` | `x = f ? a : b`, then a nil / `String` case, then `x + "z"`, with two interface arms | review 2, severe 1 |
+| `r3u` | the same, with an `untyped` arm | review 2, severe 1 |
+| `e` | `xs.each.with_index { … }` | review 2, severe 2 |
+| `mix` | an interface value joined with `String` (the other side of the union rule) | — |
+| `facet` | a control: `x.to_str` resolves | — |
 
-| Expression in the hook | Reads |
+| Base → head (mode) | Removed | Added |
+| --- | --- | --- |
+| `b9011b6ac` (draft 1) → `3410399da` (`a`) | 10: 5 `call.undefined-method` (review 1), 4 `call.possible-nil-receiver` (review 1 ×2, `r3`, `r3u`), 1 `call.undefined-method` `with_index` | 0 |
+| `b7e7d73d9` (draft 2) → `3410399da` (`a`) | 3: `r3`, `r3u`, `with_index` | 0 |
+| `0a53fe62e` (master) → `3410399da` (`a`) | 5 `dump_type` texts | 5 `dump_type` texts: `Integer` for `_ProbeEach` block values, `Dynamic[Rigor::Plugin::_ProbeA] \| String`, `String` from `to_str` |
+| `0a53fe62e` (master) → `3410399da` (`an`, dispatch off) | 2 `dump_type` texts | 2: the rendered `Dynamic[Rigor::Plugin::_ProbeA]` only |
+
+**The other side of the union rule (`mix`).**
+
+| Expression | master | draft 3, dispatch on | draft 3, dispatch off |
+| --- | --- | --- | --- |
+| `y` after `y = f ? a : s` | `Dynamic[top] \| String` | `Dynamic[Rigor::Plugin::_ProbeA] \| String` | `Dynamic[Rigor::Plugin::_ProbeA] \| String` |
+| `y.to_str` | `Dynamic[top]` | `String`: each arm resolves, and the join is `String` | `Dynamic[top]` |
+
+The `possible-nil-receiver` at `mix`'s `y + "z"` fires on master and on both modes alike. It is a master
+reading of `Dynamic[top] | String` after a nil branch, and parity keeps it.
+
+**A plugin hook (probe).** Under draft 3 with dispatch on:
+
+| Expression | Reads |
 | --- | --- |
 | `scope` | `Dynamic[Rigor::Plugin::_Scope]` |
-| `scope.type_of(node)` | the 21-member `Rigor::Type::t` union |
+| `scope.type_of(node)` | `Rigor::Type::t` (the 21-member union) |
 | `scope.environment` | `Dynamic[Rigor::Plugin::_Environment]` |
 | `scope.self_type` | `Rigor::Type::t \| nil` |
 
-All four read `Dynamic[top]` on the base. An undeclared `scope.not_in_interface` reports nothing.
+`scope.not_in_interface` reports nothing.
 
-## The review's repros as fixtures
-
-The fixture is `tmp/p4` in the worktree, with every parameter declared in `sig/r.rbs`:
-
-- `R#mul`: `(arr * x).first`;
-- `R#plus`, `#minus`, `#times`, `#pow`: `(1 + x).nan?` and its three siblings;
-- `R#rejoin_if`, `#rejoin_case`: `x.to_str` after a nil / `String` branch;
-- `R#facet`: a control that dumps `x.to_str`;
-- `R2#over`: an interface parameter with project call sites.
-
-It ran through `engine_diag_diff` with `--corpus-dir tmp/p4`:
-
-| Base → head | Removed | Added |
-| --- | --- | --- |
-| `b9011b6ac` (no parity) → `b7e7d73d9` (parity) | the 7 repros (5 `call.undefined-method`, 2 `call.possible-nil-receiver`) | 0 |
-| `0a53fe62e` (master) → `b7e7d73d9` | `dump_type: Dynamic[top]` ×2 | `dump_type: String` (`x.to_str` via `_ToStr`), `dump_type: Dynamic[_ToStr]` |
-
-The parity head reports no diagnostic on the fixture other than the two `dump_type` rows. The `R2#over`
-parameter reads `Dynamic[_ToStr]` with parity and `Dynamic[top]` on master. ADR-67 WD3 overrode neither,
-so the fixture does not exercise the override branch. The predicate routes that branch, but no
-measurement here proves it.
-
-## Diagnostic delta
+## Diagnostic delta (draft 3, `3410399da`)
 
 Rows are `[path, line, column, rule, message]`. "Added" and "removed" are head minus base.
 
-| Corpus | Base rows | A with parity (`b7e7d73d9`, `a`): added / removed | A carrying core aliases (`ac`) | First draft A, no parity (`41869d92b`, `a`) |
-| --- | ---: | --- | --- | --- |
-| `lib` | 1 | 0 / 0 | 0 / 0 | 0 / 0 |
-| plugins + examples (48) | 1 | 0 / 0 | — | 0 / 0 |
-| textbringer | 86 | 0 / 0 | — | 0 / 0 |
-| rgl | 17 | 0 / 0 | — | 0 / 0 |
-| kramdown | 7 | 0 / 0 | — | 0 / 0 |
-| alba | 0 | 0 / 0 | — | 0 / 0 |
-| mail | 22 | 0 / 0 | — | 0 / 0 |
-| liquid | 45 | 0 / 0 | — | 0 / 0 |
-| faraday | 3 | 0 / 0 | — | 0 / 0 |
-| mangrove | 2 | 0 / 0 | — | 0 / 0 |
-| haml | 14 | 0 / 0 | — | 0 / 0 |
-| herb | 21 | 0 / 0 | — | 0 / 0 |
-| net-ssh | 20 | 0 / 0 | — | — |
-| yard | 105 | 0 / 0 | — | — |
-| redmine | 1,876 | 0 / 0 | — | — |
-| mastodon | 2,967 | 0 / 0 | 2 / 2 (message text) | 2 / 2 (message text) |
+| Corpus | Base rows | Dispatch on (`a`): added / removed | Parity differential, dispatch off (`an`): added / removed |
+| --- | ---: | --- | --- |
+| `lib` | 1 | 0 / 0 | 0 / 0 |
+| 48 plugin + example trees | 1 | 0 / 0 | 0 / 0 |
+| textbringer | 86 | 0 / 0 | 0 / 0 |
+| rgl | 17 | 0 / 0 | 0 / 0 |
+| kramdown | 7 | 0 / 0 | 0 / 0 |
+| alba | 0 | 0 / 0 | 0 / 0 |
+| mail | 22 | 0 / 0 | 0 / 0 |
+| liquid | 45 | 0 / 0 | 0 / 0 |
+| faraday | 3 | 0 / 0 | 0 / 0 |
+| mangrove | 2 | 0 / 0 | 0 / 0 |
+| haml | 14 | 0 / 0 | 0 / 0 |
+| herb | 21 | 0 / 0 | 0 / 0 |
+| net-ssh | 20 | 0 / 0 | 0 / 0 |
+| yard | 105 | 0 / 0 | 0 / 0 |
+| redmine | 1,876 | 0 / 0 | 0 / 0 |
+| mastodon | 2,967 | 0 / 0 | 0 / 0 |
 
 How to read the table:
 
-- Redmine's and Mastodon's runs each also list their `rbs.coverage.plugin-signature-stood-down` rows (3 and 4)
-  as both removed and added. Those rows name the per-arm scratch path; they are the same rows.
-- Mastodon's two `ac` rows are `app/lib/request.rb:323` and `:326`. They print `got Dynamic[_ToInt] | Integer`
-  where master prints `got Dynamic[top] | Integer`. That is the core-alias rendering that ADR-130 WD4 avoids.
+- Redmine's and Mastodon's runs also list their `rbs.coverage.plugin-signature-stood-down` rows (3 and 4)
+  as both removed and added. Those rows name the per-arm scratch path and are the same rows; they are
+  excluded from the counts above.
+- Every survey target holds no `Rigor::Plugin` interface value, so draft 3 changes nothing there by
+  construction. Those rows show the predicate and the union merge alone are neutral. The plugin trees are
+  where the facet is live.
+- Earlier drafts on the same set, mode `a`, all read 0 added and 0 removed, except Mastodon's two rows
+  whose message text changed under core-alias carrying:
+  - draft 1, `41869d92b`: `lib`, the plugin trees and twelve targets;
+  - draft 2, `b7e7d73d9`: `lib`, the plugin trees and fourteen targets.
 
-## Reach (parity head, mode `a`)
+## sig-gen and lens
 
-"Parity-predicate hits" counts the `Type::Combinator.untyped?` calls that answered `true` because the facet
-is an interface: each is a site where the first draft's value fell out of an `untyped` leniency. The
-"Top sites" column names the three sites with the most hits in that corpus.
+Both commands ran over a corpus archive of `0a53fe62e`. Lens JSON was compared with its `producer` block
+(the engine digest) removed.
 
-| Corpus | Interface-receiver calls, declared / undeclared | Parity-predicate hits on an interface value | Top sites |
-| --- | --- | ---: | --- |
-| lib | 16 / 53 | 2494 | imprecise_argument.rb:28 1174; imprecise_argument.rb:23 774; facet_distribution.rb:122 400 |
-| plugins | 299 / 4 | 599 | untyped_rejoin.rb:60 251; method_dispatcher.rb:198 234; statement_evaluator.rb:8742 54 |
-| textbringer | 0 / 0 | 96 | imprecise_argument.rb:28 48; imprecise_argument.rb:23 32; facet_distribution.rb:122 16 |
-| rgl | 0 / 0 | 0 | — |
-| kramdown | 0 / 2 | 150 | imprecise_argument.rb:28 75; imprecise_argument.rb:23 50; facet_distribution.rb:122 25 |
-| alba | 37 / 60 | 72 | imprecise_argument.rb:28 37; method_dispatcher.rb:198 15; imprecise_argument.rb:23 8 |
-| mail | 0 / 6 | 29 | imprecise_argument.rb:28 10; untyped_rejoin.rb:60 10; self_substitute.rb:107 6 |
-| liquid | 0 / 0 | 0 | — |
-| faraday | 0 / 7 | 51 | imprecise_argument.rb:28 28; imprecise_argument.rb:23 12; facet_distribution.rb:122 6 |
-| mangrove | 0 / 0 | 0 | — |
-| haml | 0 / 0 | 0 | — |
-| herb | 1 / 0 | 87 | imprecise_argument.rb:28 42; imprecise_argument.rb:23 28; facet_distribution.rb:122 14 |
-| net-ssh | 0 / 0 | 0 | — |
-| yard | 0 / 0 | 14 | imprecise_argument.rb:28 6; imprecise_argument.rb:23 4; facet_distribution.rb:122 2 |
-| redmine | 0 / 12 | 204 | imprecise_argument.rb:28 94; imprecise_argument.rb:23 60; facet_distribution.rb:122 30 |
-| mastodon | 0 / 0 | 84 | imprecise_argument.rb:28 42; imprecise_argument.rb:23 28; facet_distribution.rb:122 14 |
+| Output | Dispatch on (`a`) | Dispatch off (`an`) |
+| --- | --- | --- |
+| `sig-gen --format=json lib` | identical | identical |
+| `sig-gen --format=json` over the 48 plugin and example trees | **13 of 1,358 candidates change**: 11 plugin `prepare: (untyped) -> nil` methods (through `_FactStore#publish`) and 2 others, from `skipped` / `untyped-return` to `new_method` | identical |
+| `lens --format=json` over `lib` (607 files) | identical | identical |
+| `lens --format=json` over the plugin trees (201 files) | **15 sites change**: `body_return` goes from `untyped` / `dynamic` to `nil` (12), `Array[String]`, `Array[untyped]` and one tuple array | identical |
 
-Totals across all corpora, by site:
+The changed outputs are correct readings, but WD5 keeps them out of `sig-gen` and lens.
+
+- **sig-gen.** A plugin's `prepare` returns `nil` because `publish` declares `-> nil`. sig-gen would now
+  write that reading into generated RBS, from an interface the plugin author never wrote against.
+- **lens.** Lens reports the same reading as precision.
+- **Mechanism.** Both commands analyse with dispatch off, and the parity criterion makes that output
+  master's.
+- **What this measurement does not prove.** sig-gen's `--no-cache` covers effect collection only, so the
+  dispatch switch must also be part of the analysis-cache identity. This measurement ran cold and does not
+  prove that part.
+
+## Reach (draft 2, `b7e7d73d9`, every interface)
+
+Draft 3 has nothing to reach in the survey targets. Draft 2's counts show where the parity predicate binds
+once the facet is general, which is the deferred step.
+
+- The predicate answered `true` for an interface value 3,880 times, at 7 of the 20 sites.
+- The other 13 sites were never reached on the corpus, so slice 1b needs a fixture per site.
 
 | Site | Hits |
 | --- | ---: |
@@ -213,44 +236,59 @@ Totals across all corpora, by site:
 | `self_substitute.rb:107` | 93 |
 | `statement_evaluator.rb:8742` | 75 |
 
-The other 13 sites were not reached on these corpora. They are why slice 1 needs a fixture per site rather
-than corpus evidence.
+Draft 1's interface-receiver calls, declared and undeclared:
 
-Without the core-alias erasure, the first draft's interface-receiver counts were higher, because core-alias
-values reached dispatch. For example mail recorded 46 undeclared calls where it now records 6.
+| Corpus | Declared | Undeclared |
+| --- | ---: | ---: |
+| `lib` | 16 | 53 |
+| plugins | 299 | 4 |
+| alba | 37 | 60 |
+| mail | 0 | 46 |
+| faraday | 0 | 27 |
 
+Every undeclared call inspected exists at runtime.
 
 ## Cost
 
 Setup:
 
-- `rigor check --no-cache`, one fresh process per arm.
-- The parity head `b7e7d73d9` in mode `a`. The head also carries the reach counters, which are inert
-  without their variable.
+- `rigor check --no-cache`, one fresh process per arm, mode `a`.
+- `lib` is measured with `tool/engine_alloc_ab.rb` on a frozen corpus.
+- Mastodon is measured with its `--measure` child.
 - The band is `pr_allocations_pct: 1` (`bench/thresholds.yml`).
+- Allocations are deterministic to a few hundred objects. Wall time is noise on this host.
 
-| Corpus | Base allocations | Parity head (`a`) | First draft (`a`, `b9011b6ac`) |
-| --- | ---: | --- | --- |
-| Rigor `lib` (`engine_alloc_ab.rb`, frozen corpus) | 74,397,018 | +518,226 (+0.70%) | +276,922 (+0.37%) |
-| Mastodon `app` (`--measure`) | 85,484,052 | +72,109 (+0.08%) | +68,365 (+0.08%) |
-| Mastodon `lib` (`--measure`) | 30,804,152 | +10,588 (+0.03%) | +7,011 (+0.02%) |
+| Engine | Rigor `lib` | Mastodon `app` | Mastodon `lib` |
+| --- | --- | --- | --- |
+| draft 2, `b7e7d73d9` | +520,176 (+0.70%) | +72,109 (+0.08%) | +10,588 (+0.03%) |
+| draft 2 with a `TypeName`-set alias check, `1e5972f66` | +187,301 (+0.25%) | — | — |
+| draft 3, `3410399da` | +943,727 (+1.27%) | +142,280 (+0.17%) | +57,089 (+0.19%) |
+| **draft 3 with a counting merge, `992d583c6`** | **+5,269 (+0.007%)** | **+4,364 (+0.005%)** | **−2,175 (−0.007%)** |
 
-The diagnostic count is equal on every arm: Mastodon `app` 2,868, `lib` 393, Rigor `lib` 1.
+Attribution, each step measured as the one change between two arms:
 
-The parity head's extra cost on Rigor `lib` over the first draft is not attributed. The likely source is
-the prototype's alias check, which builds `rbs_type.name.to_s`, a new String, on every alias translation.
-The implementation would compare `TypeName` values instead. Wall time is noise on this host.
+- `TypeName#to_s` in draft 2's core-alias check cost 332,875 allocations on `lib`, 0.45 percentage points
+  (`b7e7d73d9` against `1e5972f66`). The review measured 0.42.
+- Draft 3 has no core-alias check. The plugin scope compares the `TypeName`'s namespace path, which
+  allocates nothing.
+- Draft 3's first union merge built a `select` array on every union normalisation. That was +938,458 on
+  `lib` (`3410399da` against `992d583c6`), and it is the whole of draft 3's cost above the band.
+- Counting before merging removes it.
+
+The diagnostic count is equal on every arm. The diagnostic, parity, sig-gen and lens measurements ran on
+`3410399da`. `992d583c6` changes only how the merge decides, not what it returns, and the fixture
+differential on it again removes all 10 review false positives and adds 0.
 
 ## First draft: half B (deferred)
 
-Measured on `89d12edbb`–`b9011b6ac`, kept here for the deferred half's re-entry. Method:
+Commits `89d12edbb` to `b9011b6ac`. Mechanism:
 
-- The argument rule's and return rule's declared types translated interfaces bare.
-- A thread-local oracle answered `Acceptance`'s `Interface` handler.
-  - Every public member on the RBS or source surface answered `yes`.
-  - A member the undefined-method receiver-side chain proves absent answered `no`. The chain ran without its
-    call-site-lexical arms.
-  - Anything else answered `maybe`.
+- The argument rule's and the return rule's declared types translated interfaces bare.
+- A thread-local oracle answered `Acceptance`'s `Interface` handler:
+  - `yes` when every public member is on the RBS or source surface;
+  - `no` when a member is proven absent by the undefined-method receiver-side chain, run without its
+    call-site-lexical arms;
+  - `maybe` otherwise.
 
 | Corpus | B added | B with the standard union reading (`bu`) |
 | --- | ---: | ---: |
@@ -258,31 +296,30 @@ Measured on `89d12edbb`–`b9011b6ac`, kept here for the deferred half's re-entr
 | 48 plugin and example trees | 0 | — |
 | textbringer | 3 | — |
 | alba | 1, then 0 with the root-class rule | — |
-| other ten 2026-11-04 targets (rails vacuous) | 0 | — |
+| the other eight targets measured then | 0 | — |
 
-Adjudication: every row is a false positive.
+Every added row is a false positive:
 
 | Row | Cause |
 | --- | --- |
-| textbringer `buffer.rb:642`, `rectangle.rb:148:26`, `:148:39` | Wrong project signatures: `save_point: () -> Integer` and `save_excursion: () -> Array[untyped]`; both return their block's value. The base already fires on the same cause at `rectangle.rb:141`. |
+| textbringer `buffer.rb:642`, `rectangle.rb:148:26`, `:148:39` | Wrong project signatures: `save_point: () -> Integer` and `save_excursion: () -> Array[untyped]`. Both methods return their block's value. The base already fires on the same cause at `rectangle.rb:141`. |
 | alba `layout.rb:53` | `check_and_return: (...) -> Object` widens `@body`, and its `String` guard sits in another method. |
 | `lib` ×16 `File.expand_path(x, __dir__)` (`bu`) | Nullability: `__dir__` is `String?`. |
 | `lib` ×2 `result << bytes.byteslice(...)` (`bu`) | Nullability: `byteslice` is `String?`. |
 | `lib/rigor/effects/snapshot.rb:287` (`bu`) | Nullability of a project helper's return. |
 | `lib/rigor/lens/plugins.rb:28` (`bu`) | `const_source_location`'s pair typed as `Array[String \| Integer]`. |
 
-The half found no true positive. Its member-level oracle verdicts on `lib` were 1,276 `yes`, 494 `no` and
-0 `maybe`, over 2,999 interface-parameter argument sites. A `no` on one arm of `String | _ToStr` is not a
-firing. Allocation cost with A and B both on: +0.67% on `lib` and +0.18% on Mastodon `app`.
-
-The review found that the oracle does not implement its own criterion: it drops the lexical arms, and the
-chain misses #2792 and #2793. The re-entry conditions are in ADR-130 § "Deferred".
+No true positive was found. The review found that the oracle drops the lexical arms, and that the chain
+misses #2792 and #2793. ADR-130 § "Deferred" holds the re-entry conditions.
 
 ## Limitations
 
-- Nine of the fourteen survey targets hold no interface-typed value in reach. Half A's evidence is `lib`,
-  the plugins, alba and the fixtures.
-- The prototype erases the core aliases with a thread-local flag around their expansion. The
-  implementation needs a context field instead, because the closed-alias memo is keyed by the expansion.
-- No fixture exercised ADR-67 WD3's override of an interface parameter (above).
-- The instrument is `interface-proto` at `b7e7d73d9`. It stays local; the coordinator chose not to push it.
+- In the survey targets draft 3 is inert by construction. Its live evidence is the plugin trees, `lib`
+  (`lib/rigor/plugin/base.rb`) and the fixtures.
+- No fixture exercised ADR-67 WD3's override of an interface parameter. The predicate routes that branch,
+  but nothing here proves it.
+- The overload-shape rule's keyword handling is approximate in the prototype: a trailing keyword hash
+  against an overload without keywords. Slice 1b needs a fixture per arm.
+- The instrument is `interface-proto` at `992d583c6`, local only.
+- One base-engine run of the faraday differential crashed with `SIGSEGV`. The rerun was clean, and the
+  table reports the rerun.

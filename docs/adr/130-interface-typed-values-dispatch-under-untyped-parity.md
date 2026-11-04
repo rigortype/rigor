@@ -1,275 +1,269 @@
-# ADR-130 — Interface-typed values: member dispatch, and `untyped` everywhere else
+# ADR-130 — Plugin-interface values: member dispatch, and `untyped` everywhere else
 
-Status: **Proposed, 2026-11-04.** Nothing is implemented. The value half of #929 is proposed. The
-assignability half is deferred (§ "Deferred: structural assignability").
+Status: **Proposed, 2026-11-04.** Nothing is implemented. This ADR proposes only part of #929's value half:
+values typed by the plugin-facing interfaces under `Rigor::Plugin`. Three things are deferred, each with a
+re-entry condition: the same facet for every RBS interface, structural assignability, and the role table.
 
-The prototype with the parity rule added no diagnostic row on `lib`, on 48 plugin and example trees, or on
-fourteen survey targets. All seven false positives the review reproduced in the first draft are silent
-under it. The decision awaits the
-maintainer's ruling before slice 1 lands.
+The prototype was measured on `lib`, 48 plugin and example trees, and fourteen survey targets:
+
+- it added no diagnostic row on any of them;
+- its behavioural parity differential was empty;
+- with interface dispatch off, sig-gen and lens output on `lib` and the plugin trees was byte-identical to
+  master;
+- allocations rose by 0.007%.
+
+Two review rounds reproduced ten false positives on earlier drafts. All ten are fixtures, and all ten are
+silent under this draft. The decision awaits the maintainer's ruling before slice 1a lands.
 
 Grounding: [`docs/notes/20261104-interface-types-prototype-measurement.md`](../notes/20261104-interface-types-prototype-measurement.md)
-(per-target deltas with and without the parity rule, the review's repros as fixtures, parity-site reach,
-allocation cost).
+(per-target deltas for all three drafts, the parity differential, sig-gen and lens output, the fixtures,
+allocation attribution).
 
 ## Context
 
-RBS interface types (`_ToStr`, `_Each[T]`, `_Reader`, `Rigor::Plugin::_Scope`) carry no information in Rigor
-today. `RbsTypeTranslator::TRANSLATORS` maps `RBS::Types::Interface` to `:translate_untyped`
-(`lib/rigor/inference/rbs_type_translator.rb` ~L81), so a value typed `_Foo` is `Dynamic[top]`. Two things
-wait on that:
+RBS interface types erase to `untyped` today. `RbsTypeTranslator::TRANSLATORS` maps `RBS::Types::Interface`
+to `:translate_untyped` (`lib/rigor/inference/rbs_type_translator.rb` ~L81). That leaves ADR-128's plugin
+interfaces inert:
 
-- **ADR-128's plugin interfaces are inert.**
-  - `base.rbs` types each hook's scope as `Rigor::Plugin::_Scope`, and #2681 carries those types into
-    plugin code.
-  - Even so, `scope.type_of(node)` reads `Dynamic[top]`.
-  - #2686's `plugin.api-surface` rule therefore has nothing to read.
-- **ADR-1's capability roles are inert.** An interface-typed parameter checks nothing. That is the
-  assignability half, which this ADR defers.
+- `base.rbs` types each hook's scope as `Rigor::Plugin::_Scope`, and #2681 carries those types into plugin
+  code.
+- `scope.type_of(node)` still reads `Dynamic[top]`.
+- So #2686's `plugin.api-surface` rule has nothing to read.
 
-`Dynamic[top]` is more than a value in the engine: it is a signal that 20 sites in `lib/` key on. Each
-one either tests a `Dynamic`'s static facet for `Type::Top`, or compares a type with the
-`Combinator.untyped` value. The sites are:
+The obvious fix is to carry an interface value as `Dynamic[_Foo]` and let dispatch read the facet. Two review
+rounds showed this is unsafe, because the engine keys behaviour on `Dynamic[top]` itself. Each failure
+below was reproduced:
 
-- the imprecise-argument passes of overload selection (`ImpreciseArgument`, `FacetDistribution`);
-- the #1840 rejoin (`UntypedRejoin`);
-- ADR-67 WD3's inferred-parameter override (`StatementEvaluator#untyped_binding?`);
-- the unknown-store widening, `SelfSubstitute`, `MultiTargetBinder`, `BlockAutoSplat`, `ClauseWidening` and
-  narrowing's `match_dynamic_kind`;
-- the ADR-84 memo exemption, the `for` element fallback and the `$_` check;
-- the dynamic-origin and boundary-cross records (`MethodDispatcher` ~L198, ~L829);
-- the precision lens.
-
-The first draft of this ADR carried an interface value as `Dynamic[_Foo]` and claimed the wrapper kept
-those leniencies. It did not.
-
-- Every site above tests for `top`, not for `Dynamic`, so an interface value fell out of all of them.
-- The independent review reproduced seven false positives the base does not report, each with `x` typed
-  by an interface:
-  - with `x : _ToInt`, `(arr * x).first` reports undefined `first` for `String`;
-  - with `x : _ToInt`, `(1 + x).nan?` reports undefined `nan?`, and so do the `-`, `*` and `**` forms;
-  - with `x : _ToStr`, `x.to_str` after `if x.nil? … elsif x.is_a?(String) … end` reports
-    `possible-nil-receiver`, and so does the `case` form.
+- **The `untyped`-keyed sites.** 20 sites in `lib/` test a `Dynamic`'s facet for `Type::Top`, or compare a
+  type with `Combinator.untyped`. An interface facet falls out of every one, and seven false positives
+  followed. The sites include overload selection's imprecise passes, the #1840 rejoin, ADR-67 WD3's
+  override and the ADR-84 memo exemption; the note lists them all.
+  - Example: `(1 + x).nan?` with `x : _ToInt` reports undefined `nan?`.
+- **Union normalisation.** `Dynamic[top] | Dynamic[top]` dedups to one member. `Dynamic[_A] | Dynamic[_B]`
+  stays a two-member union that no `Dynamic` test sees, so `possible-nil-receiver` follows any join of two
+  interface values.
+- **A member whose overloads do not take the call.** For `xs.each.with_index` with
+  `xs : _Each[Integer, Array[Integer]]`, the block-less call took the block overload's return and reported
+  undefined `with_index`.
+- **Alias memoisation.** Erasing some interfaces and not others made the closed-alias memo depend on
+  translation order.
+- **sig-gen.** Dispatch through an interface changed sig-gen output.
 
 Terminology ([`CONTEXT.md`](../../CONTEXT.md)): *interface* is the RBS structural type; *protocol* is ADR-28's.
 
 ## Decision
 
-An interface-typed value is `untyped` to every site in the engine, with one exception: a call on it to a
-member the interface declares resolves through that member's RBS.
+A value typed by an interface under `Rigor::Plugin` is `untyped` to every site in the engine, with one
+exception: a call on it to a member the interface declares resolves through that member's RBS, when one of
+the member's overloads takes the call's shape. Every other RBS interface erases to `untyped` as it does
+today.
 
-**Criterion (parity).** With interface dispatch switched off, `rigor check --format json` must be
-byte-identical to erasure on every corpus.
+**Criterion (behavioural parity).** With interface dispatch switched off, `rigor check --format json` must
+be byte-identical to erasure on every corpus.
 
-- The one allowed exception is where a type is rendered: `dump_type`, and diagnostic messages that print
-  an interface value's type.
-- Any other difference is a parity bug.
+- The only exception is rendered type text: `dump_type`, hover, `type-of`, and diagnostic messages that
+  print the value's type.
 - Dispatch is the only behaviour the facet may change.
+- A spec enforces the criterion by running the parity fixtures in both modes. The note records the same
+  differential over the corpus.
 
 ## Working decisions
 
-**WD1 — Representation.** An interface-typed value is `Dynamic[Type::Interface(name, type_args)]`.
+**WD1 — Representation.** A plugin-interface value is `Dynamic[Type::Interface(name, type_args)]`.
 
-- *The carrier.* `Type::Interface` is a plain-lattice carrier.
-  - In this ADR it appears only as a `Dynamic` facet.
-  - `name` is the RBS type name, spelled as `Nominal` spells class names.
-- *Generics.*
-  - Type arguments translate in the caller's context.
-  - Dispatch binds the interface's own type parameters from
-    `RbsLoader#interface_definition(name).type_params`.
-  - A defaulted parameter left unbound reads `Dynamic[top]`; for example `R` in `_Each[T, R = void]`
-    written `_Each[Integer]`.
-- *`self`, `instance` and `class`.* Inside an interface member, `self` is the receiver.
-  - `instance` and `class` have no class to name there, so they read `Dynamic[top]`.
-  - The prototype passed `Nominal[_Foo]` for `instance`; the implementation corrects that.
-- *Aliases.* A user alias that expands to an interface carries the facet. rbs core's conversion aliases
-  do not (WD4).
-- *Intersections.* An intersection keeps #529's first-informative-member rule: `Node & _Node` reads
-  `Prism::Node`, and `_A & _B` stays `Dynamic[top]`.
-- *Erasure.* `Dynamic#erase_to_rbs` prints `untyped`, so `sig-gen` output does not change.
+- `Type::Interface` is a plain-lattice carrier that appears only as a `Dynamic` facet. `name` uses
+  `Nominal`'s spelling.
+- **Generics.** Type arguments translate in the caller's context. Dispatch binds the interface's own
+  parameters from `RbsLoader#interface_definition(name).type_params`. A defaulted parameter left unbound
+  reads `Dynamic[top]`.
+- **`self`, `instance` and `class`.** Inside a member, `self` is the receiver. `instance` and `class` read
+  `Dynamic[top]`.
+- **Unions.** `Combinator.union` merges two or more members that are `untyped?` (WD2) into one
+  `Dynamic[top]`. The facet is lost there; it is a last resort, not a type.
+  - A union of one interface member and other members keeps the facet on that member.
+  - In `Dynamic[_Scope] | Rigor::Scope`, every `untyped`-keyed consumer sees the interface member through
+    the predicate, exactly as master sees `Dynamic[top] | Rigor::Scope`.
+  - Dispatch on that union resolves per member. A call declared on both arms answers the join of the two
+    answers, where master answers `Dynamic[top]`.
+- **Intersections.** #529's first-informative-member rule is unchanged.
 
-**WD2 — Parity through one predicate.**
+**WD2 — Parity: one predicate and two gates.**
 
-- The predicate is `Type::Combinator.untyped?(type)`. It is true for `Dynamic[top]` and for
-  `Dynamic[Interface]`.
-- Every `untyped`-keyed site calls it, instead of testing the facet or comparing with the value.
-
-The site family has a mechanical definition: every expression in `lib/` that does one of these:
+`Type::Combinator.untyped?(type)` is true for `Dynamic[top]` and for `Dynamic[Interface]`. Every site that
+keys a leniency on `untyped` calls it. Mechanically, that is every expression in `lib/` that does either
+of these:
 
 - tests a `Dynamic`'s `static_facet` for `Type::Top`;
 - compares a type with `Combinator.untyped` by `==` or `equal?`.
 
-The family and its gate:
+All of them move to the predicate except `Combinator.dynamic`'s own constructor check, and the union merge
+(WD1) uses the predicate too.
 
-- Today the family is 20 sites, listed in the measurement note.
-- All of them except `Combinator.dynamic`'s own constructor check move to the predicate.
-- A spec gates the family: it greps `lib/` for both raw forms outside `Combinator`, and fails on any hit.
-  A new site cannot opt out silently.
+Some sites read a facet for its content: `ReceiverBlindBlock`, `BlockAutoSplat#opaque_array_carrier?`,
+`MatchRebinding`'s Regexp test, the effects collector and the census widening. None of them has an arm for
+`Interface`, so for an `Interface` facet each answers what it answers for `top`. `receiver_descriptor` also
+reads the facet; it is the dispatch exception (WD3).
 
-A second group of sites reads a `Dynamic`'s facet for its content:
+Parity keeps today's behaviour even where the facet would be more precise:
 
-- `receiver_descriptor`, `ReceiverBlindBlock`, `BlockAutoSplat#opaque_array_carrier?`;
-- `MatchRebinding`'s Regexp test, the effects collector and the census widening.
+- ADR-67 WD3 overrides an interface parameter.
+- An RBS `-> _Foo` result is treated as an `untyped` result wherever one is treated specially.
 
-None of them has an arm for `Interface`, so for an `Interface` facet each answers what it answers for `top`.
-The exception is `receiver_descriptor`, which is where dispatch happens (WD3).
+Two gates enforce parity:
 
-Parity settles the two precision losses the review named, by keeping today's behaviour:
+- **Behavioural.** A spec runs every parity fixture twice.
+  - With dispatch off, the run must match the erasure baseline, apart from rendered type text.
+  - With dispatch on, the run may differ only at calls of declared members.
+- **Lint.** A spec greps `lib/` for the two raw forms outside `Combinator` and fails on any hit. It is
+  cheap, but it only catches a known spelling, so the behavioural gate is the one that binds.
 
-- **ADR-67 WD3.** An interface-declared parameter is overridden the same way an undeclared one is.
-  - The type inferred from call sites replaces the facet in the method body.
-  - The facet survives only where nothing inferred the parameter.
-- **An RBS `-> _Foo` result.** It is treated as an `untyped` result wherever one is treated specially:
-  - the `EXPLICIT_UNTYPED` origin;
-  - the boundary-cross report;
-  - the ADR-84 memo exemption;
-  - the `for` element fallback.
+**WD3 — Member dispatch.**
 
-  It loses the facet exactly where an `untyped` result would defer to another answer.
+- `RbsDispatch#receiver_descriptor` (`rbs_dispatch.rb` ~L431) maps an `Interface` facet to
+  `[name, :interface, type_args]`.
+- `lookup_method` (~L517) answers from the interface definition.
+- Overload selection, block-parameter binding and `self` substitution then run on the member's method
+  types.
 
-The alternative choke point, making `Type::Interface` a subclass of `Type::Top`, was rejected
-(§ "Rejected alternatives").
+**The overload-shape rule.** Dispatch resolves only when one of the member's overloads takes the call's
+shape:
 
-**WD3 — Member dispatch, the exception to parity.**
+- a block when the call passes one, and no required block when it does not;
+- the positional count, within required plus optional unless the overload has a rest parameter;
+- no required keyword the call omits.
 
-- *How a call resolves.*
-  - `RbsDispatch#receiver_descriptor` (`rbs_dispatch.rb` ~L431) maps an `Interface` facet to
-    `[name, :interface, type_args]`.
-  - `lookup_method` (~L517) answers from the interface definition.
-  - Overload selection, block-parameter binding and `self` substitution then run on the member's method
-    types.
-  - The arguments still go through the parity predicate, so a declared member's overloads are selected as
-    they would be for any receiver.
-- *A member the interface does not declare reports nothing.*
-  - The call falls through the later tiers as a call on an `untyped` receiver does.
-    `UniversalObjectDispatch` still answers `is_a?` and `nil?`, and anything else reads `Dynamic[top]`.
-  - `call.undefined-method` would be a false positive, because the argument's class is wider than the
-    contract its callee wrote. The first-draft prototype recorded 192 such calls, and every one inspected
-    exists at runtime.
-  - Reporting such calls is an opt-in discipline: #2686's `plugin.api-surface`, scoped to plugin source.
-- *Calls on an interface receiver are not argument-checked.* The argument, arity and nil rules skip
-  `Dynamic` receivers today, and parity keeps that.
+Otherwise the call reads `untyped`. The argument rules never check a call on a `Dynamic` receiver, so
+nothing else would catch a shape mismatch. Without the rule, dispatch took whichever overload the
+selector's fallback picked, and that overload's return made the next call wrong.
 
-**WD4 — rbs core's conversion aliases stay erased.** The eight aliases in rbs core's `builtin.rbs` that
-have the form `C | _ToC` are `int`, `float`, `range`, `string`, `array`, `hash`, `io` and `path`. An
-interface reached through one of them translates to `Dynamic[top]`. The reasons:
+**A member the interface does not declare reports nothing.**
 
-- They sit on most core method signatures. Carrying them would turn a large share of every program's
-  core-call values into interface values.
-- Under parity that costs no behaviour, but it changes the rendered type in diagnostic messages, for
-  example `got Dynamic[_ToInt] | Integer` where master prints `got Dynamic[top] | Integer`. Carrying the aliases changed 2 Mastodon rows this way; erasing them changed none.
-- It gains almost nothing. The class member of the union answers every call the interface member could,
-  so the facet adds only `to_str` / `to_int` on the interface arm.
+- The call falls through the later tiers, as a call on an `untyped` receiver does.
+- `call.undefined-method` would be a false positive, because the value's class is wider than the
+  interface. `lib/rigor/plugin/base.rb` itself reads `class_ordering` and `io_boundary_for` beyond what
+  `_Environment` and `_Services` declare.
+- Reporting such calls is the job of #2686's opt-in `plugin.api-surface`.
 
-The rule is one fixed set of names. A spec gates it by listing `builtin.rbs`'s aliases of the form
-`C | _I`, so a new upstream alias of that form fails the gate until someone classifies it.
+**WD4 — Scope: the `Rigor::Plugin` interfaces only.** An interface carries the facet when its absolute name
+is in the `::Rigor::Plugin` namespace. Today that means the five interfaces in
+`sig/rigor/plugin/interfaces.rbs`. The reasons:
 
-**WD5 — Slices, rollout and triggers.**
+- This is all #2686 needs.
+- It reaches no user code; only plugin source and `lib/` hold such values.
+- rbs core's conversion aliases (`int`, `string`, `path`, …) contain no plugin interface, so they need no
+  rule of their own.
+
+The scope also keeps the alias memo sound:
+
+- Whether an interface carries the facet is a pure function of its `TypeName`, through the namespace path.
+  A closed alias therefore translates to the same type whichever file or worker translates it first.
+- So `@closed_alias_translations`, keyed by the expansion, stays correct.
+- If a later slice makes the facet depend on anything but the type name, it must add that input to the memo
+  key. If it cannot, it must bypass the memo, as a requirement translation would.
+
+**WD5 — The facet stays out of generated and measured output.**
+
+| Output | Behaviour |
+| --- | --- |
+| `sig-gen` | Analyses with interface dispatch off, so its output is master's by the parity criterion. Measured with dispatch on, 13 of 1,358 plugin-tree candidates changed from skipped to a new return; 11 of them were `prepare: (untyped) -> nil` through `_FactStore#publish`. With dispatch off, both `lib` and the plugin trees were identical to master. |
+| lens | Analyses with interface dispatch off, for the same reason. Measured with dispatch on, 15 plugin-tree sites changed their `body_return` from `untyped` to a type. With dispatch off, both `lib` and the plugin trees were identical to master. |
+| `type-of`, hover, `dump_type` | These render `Dynamic[Rigor::Plugin::_Scope]` and the precise results of declared-member calls. That rendering is the intended text. |
+
+The dispatch switch is part of the analysis-cache identity, so a `sig-gen` or lens run never reads a result
+`check` computed with dispatch on.
+
+**WD6 — Slices, rollout and triggers.**
 
 | Slice | Content | Default |
 | --- | --- | --- |
-| 1 | WD1 carrier, WD2 predicate and gate, WD3 dispatch, WD4 alias set. A fixture per parity site, the review's seven repros included. A spec section "Interface-typed values" in `structural-interfaces-and-object-shapes.md` | on |
-| 2 | #2686 (`plugin.api-surface`, ADR-128 WD6), which reads the facet | bleeding-edge (ADR-128) |
+| 1a | The `untyped?` predicate at every site, the union merge, both gates and the parity fixture harness. No `Interface` carrier exists yet, so output is byte-identical by construction | on |
+| 1b | The `Rigor::Plugin` interface carrier and dispatch with the overload-shape rule; a fixture per parity site and the ten review repros on plugin interfaces; a spec section "Interface-typed values" in `structural-interfaces-and-object-shapes.md` | on |
+| 2 | #2686 (`plugin.api-surface`, ADR-128 WD6), which reads the facet | bleeding-edge |
 
-Slice 1's acceptance is the criterion:
+Triggers:
 
-- On `lib`, the plugin and example trees and the survey set, its diagnostics differ from master only in
-  rendered type text.
-- Each parity fixture is silent with the predicate and fires without it.
+- **Re-evaluation.** A false positive traced to an interface value is a parity bug. The fix widens the
+  predicate or a gate, never a per-site exception.
+- **Withdrawal.** If a parity break cannot be expressed through the predicate, revert to erasure and give
+  #2686 a receiver-syntax test instead. An example is a leniency keyed on a facet's class name.
 
-Re-evaluation triggers:
+## Deferred
 
-- A false positive traced to an interface value means the gate missed a form. Widen the gate's pattern and
-  route the site through the predicate; never add a per-site exception.
-- Revisit WD4 if a core alias's interface arm is ever the only member that answers a call people make.
-- Revisit the deferred half when its re-entry conditions hold (below).
+**The facet for every RBS interface.** It re-enters when the behavioural parity differential is green over
+the corpus with the facet on all interfaces. At that point, rbs core's conversion aliases are decided by
+measurement. The first draft found that carrying them changes diagnostic text (`got Dynamic[_ToInt] |
+Integer`) for a facet the union's class member already covers.
 
-Withdrawal trigger:
+**Structural assignability (half B).**
 
-- The trigger is a release cycle that shows a parity break the predicate cannot express. An example is a
-  leniency keyed on something other than the two forms, such as a facet's class name.
-- If that happens, revert to erasure, and keep the facet only for the `Rigor::Plugin` interfaces, the scope
-  #2686 needs.
+- What it was: an interface parameter refuting a value when `call.undefined-method` would fire on one of the
+  interface's members.
+- What the prototype found: 3 diagnostics, all false positives from wrong project signatures, and no true
+  positive.
+- What the review found: the oracle drops the undefined-method chain's call-site-lexical arms, and the
+  chain itself misses #2792 and #2793.
 
-## Deferred: structural assignability (half B)
-
-**What was prototyped.** A requirement-side check that refutes a value passed to an interface parameter
-when `call.undefined-method` would fire on one of the interface's members.
-
-- On the first draft's corpus it added 3 diagnostics. All 3 are false positives from wrong project
-  signatures, and the check found no true positive.
-- The review also found that this criterion is not what the oracle implements:
-  - the oracle drops the undefined-method chain's call-site-lexical arms;
-  - the chain itself misses an RBS-declared `method_missing` (#2792);
-  - it also misses Forwardable and non-literal `define_method` (#2793).
-
-**Re-entry conditions.** The half comes back only when all three hold:
+It re-enters when all three of these hold:
 
 1. #2792 and #2793 are fixed.
-2. The oracle keeps the chain's lexical arms: the singleton `def` on the local, the `extend` /
-   `define_singleton_method` on the local, and the `self.class` mixin form. "Refuted only when
-   `call.undefined-method` would fire on `value.member`" is then what the oracle implements.
-3. A corpus that includes delegator-heavy applications shows true positives.
+2. The oracle keeps the lexical arms: the singleton `def`, `extend` / `define_singleton_method` on the
+   local, and the `self.class` mixin form.
+3. A delegator-heavy corpus shows true positives.
 
-**Open questions that move with it:**
+Open questions that move with it:
 
-- Should a value typed `Object` or `BasicObject` be `maybe`?
-- Should a union be refuted only when every member other than `nil` and `Dynamic` is refuted? The
-  standard union reading added 20 nullability and element-width false positives on `lib`.
-- Should ADR-64's multi-overload channel, whose `interface_accepts_arg?` checks names only, move onto the
-  oracle?
-- Should signature compatibility be an opt-in tier, for members both sides declare in authored RBS?
-- Where should the oracle live? `Acceptance` has no environment, and the prototype installed the oracle
-  thread-locally.
+- Should a root-class (`Object`, `BasicObject`) value read `maybe`?
+- Should the union reading be every-member? The standard reading added 20 nullability and element-width
+  false positives on `lib`.
+- Should ADR-64's name-only multi-overload channel move onto the oracle?
+- Should there be a signature tier for RBS authored on both sides?
+- Where should the oracle live?
 
-The spec's § "Assignability rules" stays unchanged until then.
+**The reused-RBS role table** is deferred with half B.
 
-**The reused-RBS role table (#929's first half) is deferred with half B.**
+- Its consumers are half B, role inference and `hint.role-generalization.*`, and none of them is built.
+- `conforms-to _Reader` already resolves through `ConformanceChecker` without it.
 
-- The table's consumers are this check, role inference and `hint.role-generalization.*`. None of them is
-  built.
-- `%a{rigor:v1:conforms-to _Reader}` already resolves without the table: `ConformanceChecker` looks the name
-  up in an environment that loads rbs core.
-- A table with no reader would be a gate guarding nothing.
-- #929 stays open for both halves.
+#929 stays open for all three.
 
 ## Rejected alternatives
 
 | Alternative | Reason |
 | --- | --- |
-| Keep erasing interfaces | It costs nothing and changes nothing, but #2686 cannot start: a plugin-facing interface whose members never resolve cannot back a rule about calls outside it. Parity removes the risk that made the wrapper unsafe, so the remaining choice is dispatch against no change at all. Measured, dispatch adds precision on plugin and sig'd code and adds no diagnostic. |
-| `Dynamic[Interface]` without parity (the first draft) | The review reproduced 7 false positives on correct code. |
-| `Type::Interface < Type::Top` as the choke point | It needs no site edits, but it misses the seven identity comparisons, `Combinator.dynamic` would collapse the value to `untyped`, and a later requirement-side carrier would inherit "is the universal type". |
-| Hand edits at each site, with no predicate | The next `untyped`-keyed site would silently opt out; the gate needs one name to allow. |
-| `call.undefined-method` for an undeclared member | The method exists at runtime. ADR-128 WD6 made the same call. |
-| Carrying the core conversion aliases | It changes diagnostic text across every corpus, for a facet the union's class member already covers (WD4). |
-| A bare `Interface` as the value | Every `untyped`-keyed site would need an arm, and a missed one would be a false positive. |
+| **The facet for every interface (draft 2)** | It reaches every program's core calls and user signatures, while #2686 needs only the plugin interfaces. This is deferred, not rejected: it re-enters on a green corpus parity differential. |
+| **Keep erasing** | It costs nothing and changes nothing, but #2686 cannot start: it has no interface to check calls against. Scoped to `Rigor::Plugin`, the facet now reaches no user code, and the gates hold parity. |
+| A receiver-syntax test for #2686 (no carrier) | It cannot follow `scope` through locals, helpers or `with_local`. It is the withdrawal fallback. |
+| `Dynamic[Interface]` without parity (draft 1) | It produced 7 false positives on correct code. |
+| Parity without the union merge and the shape rule (draft 2) | It produced 3 more false positives: two joins and `each.with_index`. |
+| `Type::Interface < Type::Top` | It misses the identity comparisons, and `Combinator.dynamic` would fold it away. |
+| A grep gate alone | It cannot see a leniency keyed on a form it does not know; the behavioural gate can. |
+| `call.undefined-method` for an undeclared member | The method exists at runtime. |
 
 ## Consequences
 
-- **Positive:** declared members of an interface value type their calls.
-  - `scope.type_of(node)` reads `Rigor::Type::t` in a plugin hook.
-  - `_Each[Integer]#each`'s block parameter reads `Integer`.
-  - `_ToStr`'s `to_str` reads `String`.
-  - #2686 can start.
-- **Positive:** the parity gate turns "an interface value behaves as `untyped`" from a code-reading claim
-  into a spec that fails.
-- **Negative:** the facet is lost wherever an `untyped` value is replaced, for example by ADR-67 WD3, rejoins
-  and joins. It is a last resort, not a type.
-- **Negative:** #929's assignability half and role table stay open.
-- **Measured:** the parity prototype costs +0.70% allocations on `lib` and +0.08% on Mastodon `app`, inside the 1%
-  band. 7 of the 20 parity sites were reached on the corpus, with 3,880 hits; the other 13 need slice 1's
-  fixtures.
+- **Positive:** in plugin code, declared members of the plugin interfaces type their calls.
+  `scope.type_of(node)` reads `Rigor::Type::t`, and `scope.environment` reads
+  `Dynamic[Rigor::Plugin::_Environment]`. #2686 can start.
+- **Positive:** parity is held by a behavioural gate, not a code-reading claim.
+- **Negative:** the facet is lost at every join with another `untyped` value, and wherever ADR-67 WD3
+  overrides it.
+- **Negative:** most of #929 stays open, and the general facet waits on its own measurement.
+- **Measured:**
+  - +0.007% allocations on `lib` and +0.005% on Mastodon `app`.
+  - Draft 2's 0.45 points came from `TypeName#to_s`, which draft 3 does not call.
+  - Draft 3's first union merge cost 1.26 points by building an array on every normalisation. Counting
+    first removed it.
 
 ## Relationship to other ADRs
 
-- [ADR-1](1-types.md) — capability roles and structural interfaces. This ADR covers interface values only;
-  assignability is deferred.
+- [ADR-1](1-types.md) — capability roles and structural interfaces. This ADR covers plugin-interface values
+  only.
 - [ADR-5](5-robustness-principle.md) — why the value stays `untyped` to every other rule.
-- [ADR-64](64-non-nil-argument-type-mismatch.md) — the name-only interface channel, which this ADR leaves as
-  it is.
-- [ADR-67](67-parameter-type-inference.md) — WD3's override, which applies to interface parameters unchanged.
-- [ADR-84](84-cross-file-return-memo-scoping.md) — the memo exemption the predicate now covers.
-- [ADR-128](128-plugin-hook-surface-interfaces.md) — the plugin interfaces this makes resolvable.
+- [ADR-64](64-non-nil-argument-type-mismatch.md) — the name-only interface channel, which this ADR does not
+  change.
+- [ADR-67](67-parameter-type-inference.md) — WD3's override, which applies to interface parameters
+  unchanged.
+- [ADR-84](84-cross-file-return-memo-scoping.md) — the memo exemption the predicate covers.
+- [ADR-128](128-plugin-hook-surface-interfaces.md) — the plugin interfaces this ADR makes resolvable.
   - WD5's seam does not arise: the value is `untyped`, so `_Scope` passes `scope: Scope`.
   - WD6's rule reads the facet.

@@ -2728,6 +2728,14 @@ module Rigor
         nil
       end
 
+      # #775 — the memo {Inference::RbsTypeTranslator} keeps, per loader, for the translated form of a closed alias
+      # expansion (keyed by the expansion). It lives here because the translation reads this loader's environment
+      # through any alias nested in the expansion ({#expand_type_alias}): another loader's `b` may differ under an
+      # equal `a`, and the entry goes with the loader. The translator is its only reader and writer.
+      def closed_alias_translations
+        @state[:closed_alias_translations] ||= {}
+      end
+
       # @return the resolved singleton (class object) definition for `class_name`. The
       #   methods on this definition are the *class methods* of `class_name`, including those inherited from
       #   `Class` and `Module` for class types. Returns nil for unknown names and on RBS build errors

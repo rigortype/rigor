@@ -71,6 +71,7 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
       lib/rigor/inference/method_dispatcher/rbs_dispatch.rb
       lib/rigor/inference/project_method_ownership.rb
       lib/rigor/inference/project_patched_scanner.rb
+      lib/rigor/inference/rbs_type_translator.rb
       lib/rigor/inference/refined_dispatch/constructed_class.rb
       lib/rigor/inference/refined_dispatch/own_method.rb
       lib/rigor/inference/reflective_ivar_write.rb
@@ -147,8 +148,14 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
               "environment, run option or typing state, and stays shared by every thread"
     parts = "#{memo}: `class_name_parts` is the split of its String argument, the `@class_name_parts` key, and reads " \
             "nothing else; a non-main Ractor cannot read it and answers nil, as before"
+    translator = "lib/rigor/inference/rbs_type_translator.rb"
+    names = "#{memo}: `relative_name` is the frozen `type_name.relative!.to_s` of its `RBS::TypeName` key, the " \
+            "`@relative_names` key (#775), and reads no scope, environment, run option or typing state; a non-main " \
+            "Ractor cannot read it, as before"
     {
       [loader, :module_ivar_write, "@default"] => [2, default],
+      [translator, :module_ivar_write, "@relative_names"] => [1, names],
+      [translator, :module_ivar_mutation, "@relative_names"] => [1, names],
       [acceptance, :module_ivar_write, "@class_name_parts"] => [1, parts],
       [acceptance, :module_ivar_mutation, "@class_name_parts"] => [1, parts]
     }.merge(sink_rows)
@@ -689,9 +696,7 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
   # (WD5's fiber-crossing sinks, {#sink_rows}); it never gains a row. The Hash spans the nine directories G3
   # covers; PRs before #2811 counted six (without `plugin`, `type` and `cache`).
   def unconverted_thread_sites
-    {
-      "lib/rigor/inference/rbs_type_translator.rb" => 4
-    }
+    {}
   end
 
   # ADR-129's G3 scope, which the ratchet shares.

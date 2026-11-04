@@ -253,4 +253,96 @@ RSpec.describe Rigor::Inference::RbsTypeTranslator do
       end
     end
   end
+
+  # ADR-129 / ADR-130 WD2 — the erasure switch is a `TypingState` Frame on the calling thread.
+  describe ".with_interface_erasure" do
+    it "reads true only inside the block, in the calling thread's typing state" do
+      expect(described_class.interface_erasure?).to be(false)
+      described_class.with_interface_erasure do
+        expect(described_class.interface_erasure?).to be(true)
+        expect(typing_slot(:interface_erasure)).to be(true)
+      end
+      expect(described_class.interface_erasure?).to be(false)
+      expect(typing_slot(:interface_erasure)).to be_nil
+    end
+
+    it "returns the block's value and restores the flag when the block raises" do
+      expect(described_class.with_interface_erasure { :answer }).to eq(:answer)
+      expect { described_class.with_interface_erasure { raise "boom" } }.to raise_error("boom")
+      expect(described_class.interface_erasure?).to be(false)
+    end
+
+    it "nests, restoring the outer switch" do
+      described_class.with_interface_erasure do
+        described_class.with_interface_erasure { nil }
+        expect(described_class.interface_erasure?).to be(true)
+      end
+      expect(described_class.interface_erasure?).to be(false)
+    end
+
+    it "is not seen by another thread" do
+      seen = described_class.with_interface_erasure { Thread.new { described_class.interface_erasure? }.value }
+      expect(seen).to be(false)
+    end
+  end
+
+  # #775 — the translated form of a closed alias expansion is memoised per expander: a nested alias in the expansion is
+  # expanded through the expander, so another loader's `b` must not be answered with this loader's translation.
+  describe "the closed-alias memo" do
+    def loader_with(inner)
+      Rigor::Environment::RbsLoader.new(virtual_rbs: [["(spec: #775)", "type b = #{inner}\ntype a = b | ::Integer\n"]])
+    end
+
+    def translate_a(expander) = described_class.translate(parse_rbs("::a"), alias_expander: expander)
+
+    it "does not answer one loader with another loader's nested alias" do
+      strings = loader_with("::String")
+      symbols = loader_with("::Symbol")
+      first = translate_a(strings)
+
+      expect(first.describe).to eq("Integer | String")
+      expect(translate_a(symbols).describe).to eq("Integer | Symbol")
+      expect(translate_a(strings)).to equal(first)
+    end
+
+    it "shares one translation across repeats under the same loader" do
+      loader = loader_with("::String")
+
+      expect(translate_a(loader)).to equal(translate_a(loader))
+      expect(loader.closed_alias_translations.size).to eq(1)
+    end
+
+    it "does not memoise an open alias, whose answer depends on the caller's type variables" do
+      loader = Rigor::Environment::RbsLoader.new(virtual_rbs: [["(spec: #775 open)",
+                                                                "type list[T] = ::Array[T] | T\n"]])
+      open_alias = parse_rbs("::list[X]", variables: [:X])
+      describe_with = lambda do |name|
+        arg = Rigor::Type::Combinator.nominal_of(name)
+        described_class.translate(open_alias, type_vars: { X: arg }, alias_expander: loader).describe
+      end
+
+      expect(describe_with.call("Integer")).to eq("Array[Integer] | Integer")
+      expect(describe_with.call("String")).to eq("Array[String] | String")
+    end
+
+    it "is bypassed while a trace records, so the union events are recorded" do
+      loader = loader_with("::String")
+      translate_a(loader)
+
+      events = Rigor::Inference::FlowTracer.record { translate_a(loader) }
+
+      expect(events.count { |event| event.kind == :union }).to eq(1)
+    end
+
+    it "keeps no memo for an expander that offers none" do
+      loader = loader_with("::String")
+      expander = Struct.new(:loader) do
+        def expand_type_alias(rbs_alias) = loader.expand_type_alias(rbs_alias)
+      end.new(loader)
+
+      expect(translate_a(expander).describe).to eq("Integer | String")
+      expect(translate_a(expander)).not_to equal(translate_a(expander))
+      expect(loader.closed_alias_translations).to be_empty
+    end
+  end
 end

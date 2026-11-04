@@ -3,8 +3,9 @@
 require "spec_helper"
 
 # Issue #2786 — the per-call-node rules read the call's receiver type, and the signature the call resolves to on
-# it, from one {CheckRules::CallFacts} instead of each deriving them again. Output is unchanged by construction (one
-# `(scope, node)` pair types structurally equal within a run); what this pins is the count: once per call node.
+# it, from one {CheckRules::CallFacts} instead of each deriving them again. Output stays unchanged because one
+# `(scope, node)` pair types structurally equal under the same ambient inputs, and no rule between two readers changes
+# them (the invariant {CheckRules::CallFacts} states); what this pins is the count: once per call node.
 RSpec.describe Rigor::Analysis::CheckRules::CallFacts do
   def index_for(source)
     program = Prism.parse(source).value
@@ -24,14 +25,21 @@ RSpec.describe Rigor::Analysis::CheckRules::CallFacts do
     let(:scope_index) { indexed.last }
 
     # `Rigor::Scope` is frozen, so the count is taken one level down, where `Scope#type_of` hands each query to a
-    # fresh `ExpressionTyper`.
+    # fresh `ExpressionTyper`. Only root typings count: a rule that types the call node itself types the receiver
+    # inside it, which is not a re-typing of the shared fact.
     def receiver_typings
       count = 0
+      depth = 0
       receiver = call_node.receiver
       typer = Rigor::Inference::ExpressionTyper
       allow_any_instance_of(typer).to receive(:type_of).and_wrap_original do |original, node| # rubocop:disable RSpec/AnyInstance
-        count += 1 if node.equal?(receiver)
-        original.call(node)
+        count += 1 if depth.zero? && node.equal?(receiver)
+        depth += 1
+        begin
+          original.call(node)
+        ensure
+          depth -= 1
+        end
       end
       rules = rules_for(call_node, scope_index)
       [count, rules]

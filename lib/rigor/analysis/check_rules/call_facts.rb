@@ -12,8 +12,14 @@ module Rigor
       # rule typed before: `scope_index[call_node]` and `call_node.receiver`. Every later rule reads that value
       # instead of re-typing the receiver chain. This is not a memo over `type_of`: nothing is served across call
       # nodes or across scopes, and no fact is computed anywhere but at the first point a rule computed it before.
-      # It rests on the `Scope#type_of` contract that one `(scope, node)` pair types structurally equal within a
-      # run (`docs/internal-spec/inference-engine.md`).
+      # It rests on the `Scope#type_of` contract that one `(scope, node)` pair types structurally equal within a run
+      # *under the same ambient inputs* (`docs/internal-spec/inference-engine.md`), which holds here because of
+      # an invariant of the rule list: between the first rule that types the receiver and the last that reads it, no
+      # frame is installed and nothing types a node inside the receiver's subtree under another state or adds an
+      # `optimistic_origins` mark there. The other typings in that window are the call's arguments (outside the
+      # subtree), `receiver.receiver` under the same scope (which rewrites what the receiver's typing already
+      # wrote), and the key-presence re-walk, which runs on `with_isolated_side_tables`. A rule inserted between
+      # two readers that breaks this must type the receiver itself.
       #
       # Of the typing, only the receiver is shared. A rule that types a sub-expression (`receiver.receiver`), an
       # argument, or any node under a scope other than the call's keeps its own `type_of` call: arguments are typed

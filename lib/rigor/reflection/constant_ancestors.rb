@@ -13,7 +13,8 @@ module Rigor
     ANCESTOR_SCOPES = TypingState.memo(
       :ancestor_constant_scopes,
       run_scoped: true, reason: "one [generation, scopes by class name] slot keyed on the identity of " \
-                                "`scope.run_generation || scope.discovered_superclasses`; the scopes are read from the resolution chain of that run's tables"
+                                "`scope.run_generation || scope.discovered_superclasses`; the " \
+                                "scopes are read from the resolution chain of that run's tables"
     )
     private_constant :ANCESTOR_SCOPES
 

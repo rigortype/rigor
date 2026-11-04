@@ -2,7 +2,7 @@
 
 require_relative "../builtins/cruby_definers"
 require_relative "constructed_class"
-require_relative "../../run_scoped_slots"
+require_relative "../../typing_state"
 
 module Rigor
   module Inference
@@ -318,19 +318,25 @@ module Rigor
           all.include?(name) ? all - [name] : all
         end
 
-        SUBCLASS_MEMO_KEY = RunScopedSlots.register(:__rigor_own_method_subclasses__)
-        private_constant :SUBCLASS_MEMO_KEY
+        # ADR-129 WD1 — a run-scoped Memo keyed on the identities of the discovery index and environment, the only
+        # inputs of the buckets it holds.
+        SUBCLASS_MEMO = TypingState.memo(
+          :own_method_subclasses,
+          run_scoped: true, reason: "subclass buckets keyed on the discovery index and environment identities"
+        )
+        private_constant :SUBCLASS_MEMO
 
         # One thread-local slot keyed on the scope's discovery index (a frozen `Data`) and environment, the only
         # inputs `children_by_parent` and the unknown-superclass list read; neither files a dependency edge
         # (`each_subclass` files its own `subclass_of:` edges on every call), so a hit drops none.
         def subclass_memo(scope)
-          slot = Thread.current[SUBCLASS_MEMO_KEY]
+          state = TypingState.current
+          slot = state[SUBCLASS_MEMO]
           discovery = scope.discovery
           environment = scope.environment
           unless slot && slot[0].equal?(discovery) && slot[1].equal?(environment)
             slot = [discovery, environment, {}]
-            Thread.current[SUBCLASS_MEMO_KEY] = slot
+            state[SUBCLASS_MEMO] = slot
           end
           slot[2]
         end

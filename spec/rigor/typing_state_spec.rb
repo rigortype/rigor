@@ -364,6 +364,40 @@ RSpec.describe Rigor::TypingState do
           end
         end
 
+        # The run-scoped Memos the alias-mutation floor, the self-call ivar proof, the toplevel def census and the
+        # construction scans fill: a literal Hash held by two locals and a holder object, a `remove`r through the
+        # alias, a self-call chain over an ivar, a receiverless call of a top-level def, and a constructed subclass.
+        class Holder
+          def initialize(items) = @items = items
+          def add(item) = @items << item
+          def log = note
+          def note = (@count = 1)
+          def run(first)
+            @first = first
+            log
+            @first.to_s
+          end
+        end
+
+        def top_helper(items) = items.size
+
+        def aliasing
+          first = { a: 1 }
+          second = first
+          second.delete(:a)
+          holder = Holder.new(first)
+          holder.add(2)
+          top_helper(first)
+          first
+        end
+
+        class Parent; end
+        class Child < Parent; end
+        Constructed = Class.new(StandardError)
+
+        Holder.new(nil).run(1)
+        aliasing
+        Child.new
         probe = Probe.new
         [probe.lookup(nil), probe.fact(5), probe.even?(4), probe.first_even([1, 2]), probe.nexts([nil, 1]),
          probe.breaks([1]), probe.value_break([nil, 2]), probe.total, probe.forward(1), probe.use_yield,
@@ -480,8 +514,20 @@ RSpec.describe Rigor::TypingState do
         :user_method_unroll_fuel, :user_method_return_memo, :inject_accumulator, :class_graph_cache,
         :key_presence_walk, :reflective_ivar_write_repeating, :loop_value_record, :loops_evaluated,
         :def_node_resolver_run, :definers_index_layers, :definers_index_seed, :definers_index_seed_alt,
-        :patched_scanner_guarded_defs, :patched_scanner_def_visibilities
+        :patched_scanner_guarded_defs, :patched_scanner_def_visibilities,
+        :alias_mutation_floor_facts, :alias_mutation_floor_ivar_mutators, :alias_mutation_floor_callee_floors,
+        :alias_mutation_floor_unknown_stores, :self_call_ivar_writes_definition_counts, :void_tail_summary,
+        :project_method_ownership, :ivar_contributions_table, :constructed_class, :own_method_subclasses,
+        :toplevel_def_reliable, :construction_escape, :remover_narrowing_unsafe
       )
+    end
+
+    # Each run-scoped slot a run reached declares `run_scoped: true`, so the run's release empties it: a finished run
+    # keeps none of its scopes, bodies or tables alive.
+    it "leaves no value in a slot the run reached once the run has ended" do
+      audited = audited_run.fetch(:state)
+
+      expect(audited.holding).to be_empty
     end
 
     it "touches each jump sink and the retry frames as it records into them, and rewrites the walk at each guard" do

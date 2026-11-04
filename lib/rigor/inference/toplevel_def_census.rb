@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative "../run_scoped_slots"
+require_relative "../typing_state"
 require_relative "memo_audit"
 
 module Rigor
@@ -23,8 +23,13 @@ module Rigor
     # is bypassed while one is active, as the callee floor's other memos are.
     module ToplevelDefCensus
       OBJECT_OWNERS = %w[Object Kernel BasicObject].freeze
-      RELIABLE_KEY = RunScopedSlots.register(:rigor_toplevel_def_reliable)
-      private_constant :OBJECT_OWNERS, :RELIABLE_KEY
+      # ADR-129 WD1 — a run-scoped Memo, per discovery index and name: the answer is a function of both, and
+      # `MemoAudit` checks it on a hit.
+      RELIABLE = TypingState.memo(
+        :toplevel_def_reliable,
+        run_scoped: true, reason: "keyed by discovery index and name, the only inputs of the verdict; audited by MemoAudit"
+      )
+      private_constant :OBJECT_OWNERS, :RELIABLE
 
       module_function
 
@@ -32,7 +37,7 @@ module Rigor
       def reliable?(scope, name)
         return compute?(scope, name) if Analysis::DependencyRecorder.active? || MemoAudit.suspended?
 
-        table = (Thread.current[RELIABLE_KEY] ||= ObjectSpace::WeakKeyMap.new)
+        table = TypingState.current.weak_key_map(RELIABLE)
         by_name = (table[scope.discovery] ||= {})
         return by_name[name] = compute?(scope, name) unless by_name.key?(name)
 

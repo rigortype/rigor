@@ -3,7 +3,7 @@
 require "prism"
 require_relative "../source/node_walker"
 require_relative "../source/node_children"
-require_relative "../run_scoped_slots"
+require_relative "../typing_state"
 
 module Rigor
   module Inference
@@ -73,10 +73,13 @@ module Rigor
       ].freeze
       ALL = :all
       EMPTY_CALLS = Set.new.freeze
-      # A run-scoped slot ({RunScopedSlots}): emptied when a run ends, so a long-lived process never serves a verdict
-      # from a body an earlier run parsed.
-      CACHE_KEY = RunScopedSlots.register(:__rigor_construction_escape)
-      private_constant :CLOSURES, :LOCAL_REFERENCES, :LOCAL_WRITES, :ALL, :EMPTY_CALLS, :CACHE_KEY,
+      # ADR-129 WD1 — a run-scoped Memo, emptied when a run ends so a long-lived process never serves a verdict from
+      # a body an earlier run parsed: keyed by body node, the only input of the scan.
+      CACHE = TypingState.memo(
+        :construction_escape,
+        run_scoped: true, reason: "keyed by the body node; the escape scan is a pure function of the body"
+      )
+      private_constant :CLOSURES, :LOCAL_REFERENCES, :LOCAL_WRITES, :ALL, :EMPTY_CALLS, :CACHE,
                        :STRING_EVAL_CALLS
 
       # One body's answer: per name, ALL or the classes it escapes as, and the calls the scan admitted on it.
@@ -91,7 +94,7 @@ module Rigor
       def escaped?(body, name, class_name, scope)
         return true if body.nil? || class_name.nil?
 
-        table = (Thread.current[CACHE_KEY] ||= ObjectSpace::WeakKeyMap.new)
+        table = TypingState.current.weak_key_map(CACHE)
         result = table[body] ||= scan(body)
         return true if result.equal?(ALL)
 

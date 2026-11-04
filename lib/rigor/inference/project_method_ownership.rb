@@ -2,7 +2,7 @@
 
 require_relative "../type"
 require_relative "external_ancestor_resolution"
-require_relative "../run_scoped_slots"
+require_relative "../typing_state"
 
 module Rigor
   module Inference
@@ -20,8 +20,13 @@ module Rigor
       NO_TARGETS = [].freeze
       private_constant :NO_TARGETS
 
-      MEMO_KEY = RunScopedSlots.register(:__rigor_project_method_ownership_memo__)
-      private_constant :MEMO_KEY
+      # ADR-129 WD1 — a run-scoped Memo keyed on the identity of the discovery index and the environment, the only
+      # inputs the buckets' answers read.
+      MEMO = TypingState.memo(
+        :project_method_ownership,
+        run_scoped: true, reason: "answer buckets keyed on the discovery index and environment identities"
+      )
+      private_constant :MEMO
 
       module_function
 
@@ -72,17 +77,18 @@ module Rigor
       # changes: the shape of `ExpressionTyper#class_graph_buckets`, whose rationale applies unchanged. A
       # `Scope` merges each file's discovery with the project pre-pass, so the slot turns over per file, and
       # an ADR-46 dependency the first lookup recorded belongs to the file every later hit serves. Pool
-      # workers are separate processes, and a Ractor has its own `Thread.current`. The `:ancestry` bucket
+      # workers are separate processes, and a Ractor has its own {TypingState}. The `:ancestry` bucket
       # belongs to {ClosureEscapeAnalyzer}'s ancestry step. The `:block_runs` bucket belongs to
       # {BlockRunCount}.
       def memo(scope)
         discovery = scope.discovery
         environment = scope.environment
-        slot = Thread.current[MEMO_KEY]
+        state = TypingState.current
+        slot = state[MEMO]
         unless slot && slot[0].equal?(discovery) && slot[1].equal?(environment)
           buckets = { instance: {}, singleton: {}, ancestry: {}, block_runs: {}.compare_by_identity }
           slot = [discovery, environment, buckets]
-          Thread.current[MEMO_KEY] = slot
+          state[MEMO] = slot
         end
         slot[2]
       end

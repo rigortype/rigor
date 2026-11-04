@@ -5,7 +5,7 @@ require "prism"
 require_relative "void_origin"
 require_relative "../reflection"
 require_relative "../source/node_children"
-require_relative "../run_scoped_slots"
+require_relative "../typing_state"
 
 module Rigor
   module Inference
@@ -54,8 +54,8 @@ module Rigor
     # cycle (nil). Memoising is therefore always sound, and the cycle guard only ever rejects a node that
     # is still mid-computation on the current chain (never yet memoised).
     class VoidTailSummary
-      # Run-scoped memo, the ADR-84 `return_memo_bucket` house pattern: a single retained slot on
-      # `Thread.current` keyed by the run-generation token's identity, so a re-run in one process (LSP,
+      # Run-scoped memo, the ADR-84 `return_memo_bucket` house pattern: a single retained slot in
+      # the thread's {TypingState} keyed by the run-generation token's identity, so a re-run in one process (LSP,
       # ADR-62 warm loop) lands in a fresh bucket and can neither serve stale entries nor accumulate
       # them. Thread-local ⇒ each fork-pool worker (a separate process) and each Ractor-pool worker (its
       # own Ractor-local `Thread.current`) builds its own bucket; the bucket hash is created and mutated
@@ -63,8 +63,14 @@ module Rigor
       # graceful-degradation branch is needed. `def_node` identity is stable per run (the ADR-85
       # {DefNodeResolver} yields one node object per `(path, node_id)`), the same identity the ADR-84
       # return memo relies on.
-      MEMO_KEY = RunScopedSlots.register(:__rigor_void_tail_summary_memo__)
-      private_constant :MEMO_KEY
+      #
+      # ADR-129 WD1 — a run-scoped Memo keyed on the token's identity: the bucket holds summaries that are pure
+      # functions of the def node they key on within one run.
+      MEMO = TypingState.memo(
+        :void_tail_summary,
+        run_scoped: true, reason: "a bucket of per-def-node summaries, keyed on the run-generation token's identity"
+      )
+      private_constant :MEMO
 
       def initialize(scope)
         @scope = scope
@@ -207,10 +213,11 @@ module Rigor
 
       def memo_bucket
         generation = scope.run_generation || scope.discovered_def_nodes
-        slot = Thread.current[MEMO_KEY]
+        state = TypingState.current
+        slot = state[MEMO]
         unless slot && slot[0].equal?(generation)
           slot = [generation, {}.compare_by_identity]
-          Thread.current[MEMO_KEY] = slot
+          state[MEMO] = slot
         end
         slot[1]
       end

@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative "../../run_scoped_slots"
+require_relative "../../typing_state"
 
 module Rigor
   module Inference
@@ -18,9 +18,14 @@ module Rigor
       # the name itself, and no constant write of it. Any other shape answers false, as does a class a
       # `K = Class.new(...)` write names.
       module ConstructedClass
-        MEMO_KEY = RunScopedSlots.register(:__rigor_constructed_class__)
+        # ADR-129 WD1 — a run-scoped Memo keyed on the run-generation token and the environment, whose tables every
+        # answer reads and which are fixed for a run.
+        MEMO = TypingState.memo(
+          :constructed_class,
+          run_scoped: true, reason: "verdicts keyed on the run-generation token and environment identities"
+        )
         EMPTY = [].freeze
-        private_constant :MEMO_KEY, :EMPTY
+        private_constant :MEMO, :EMPTY
 
         module_function
 
@@ -100,12 +105,13 @@ module Rigor
         # `discovered_def_nodes`, as `ExpressionTyper` falls back) and the environment: every table read here is
         # fixed for a run, so each answer is computed once a run, and a new run replaces the slot.
         def memo(scope)
-          slot = Thread.current[MEMO_KEY]
+          state = TypingState.current
+          slot = state[MEMO]
           generation = scope.run_generation || scope.discovered_def_nodes
           environment = scope.environment
           unless slot && slot[0].equal?(generation) && slot[1].equal?(environment)
             slot = [generation, environment, { names: {}.compare_by_identity, verdicts: {} }]
-            Thread.current[MEMO_KEY] = slot
+            state[MEMO] = slot
           end
           slot[2]
         end

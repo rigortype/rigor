@@ -35,7 +35,9 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
       lib/rigor/analysis/dependency_recorder.rb
       lib/rigor/analysis/self_call_resolution_recorder.rb
       lib/rigor/effects/collector.rb
+      lib/rigor/inference/alias_mutation_floor.rb
       lib/rigor/inference/budget_trace.rb
+      lib/rigor/inference/construction_escape.rb
       lib/rigor/inference/def_node_resolver.rb
       lib/rigor/inference/definers_index.rb
       lib/rigor/inference/expression_typer.rb
@@ -43,10 +45,18 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
       lib/rigor/inference/key_presence_guard.rb
       lib/rigor/inference/loop_value_record.rb
       lib/rigor/inference/memo_audit.rb
+      lib/rigor/inference/project_method_ownership.rb
       lib/rigor/inference/project_patched_scanner.rb
+      lib/rigor/inference/refined_dispatch/constructed_class.rb
+      lib/rigor/inference/refined_dispatch/own_method.rb
       lib/rigor/inference/reflective_ivar_write.rb
+      lib/rigor/inference/remover_holder_scan.rb
       lib/rigor/inference/scope_indexer/declared_param_writes.rb
+      lib/rigor/inference/scope_indexer/ivar_contributions.rb
+      lib/rigor/inference/self_call_ivar_writes.rb
       lib/rigor/inference/statement_evaluator.rb
+      lib/rigor/inference/toplevel_def_census.rb
+      lib/rigor/inference/void_tail_summary.rb
       lib/rigor/typing_state.rb
     ]
   end
@@ -473,6 +483,73 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
     stale = expected.reject { |key, count| counts[key] == count }
     expect(unlisted.map { |file, rule, name, line| "#{file}:#{line} #{rule} #{name}" }).to be_empty
     expect(stale).to be_empty
+  end
+
+  # The ADR-129 stage 1 ratchet: the `Thread.current` / `thread_variable_*` call sites that no conversion has reached
+  # yet, per file, under the directories stage 1 covers. A site is one call: `Thread.current[:k]` is one, and
+  # `Thread.current.thread_variable_get(:k)` is one (the `thread_variable_*` call, not also its receiver). Compared for
+  # equality, so a new site anywhere in these directories fails, and a conversion that does not update the Hash fails
+  # too. A file leaves the Hash when its last site becomes a declared slot; it never gains a row.
+  def unconverted_thread_sites
+    {
+      "lib/rigor/analysis/check_rules.rb" => 2,
+      "lib/rigor/analysis/run_disclosure_credit.rb" => 4,
+      "lib/rigor/environment/rbs_loader.rb" => 4,
+      "lib/rigor/inference/acceptance.rb" => 4,
+      "lib/rigor/inference/method_dispatcher.rb" => 4,
+      "lib/rigor/inference/method_dispatcher/rbs_dispatch.rb" => 3,
+      "lib/rigor/inference/rbs_type_translator.rb" => 4,
+      "lib/rigor/inference/scope_indexer.rb" => 4,
+      "lib/rigor/reflection/constant_ancestors.rb" => 4,
+      "lib/rigor/scope.rb" => 4,
+      "lib/rigor/scope/resolution_chain.rb" => 2
+    }
+  end
+
+  def stage1_directories = %w[inference scope reflection analysis effects environment]
+
+  def stage1_files
+    stage1_directories.flat_map { |dir| Dir[project_path("lib/rigor/#{dir}/**/*.rb")] }
+                      .push(*%w[scope reflection effects environment].map { |name| project_path("lib/rigor/#{name}.rb") })
+                      .select { |path| File.file?(path) }.uniq.sort
+  end
+
+  def thread_site_count(source)
+    counter = Class.new(Prism::Visitor) do
+      attr_reader :count
+
+      def initialize
+        super
+        @count = 0
+        @chained = []
+      end
+
+      def visit_call_node(node)
+        receiver = node.receiver
+        if node.name.to_s.start_with?("thread_variable")
+          @count += 1
+          @chained << receiver
+        elsif node.name == :current && receiver.is_a?(Prism::ConstantReadNode) && receiver.name == :Thread &&
+              @chained.none? { |chained| chained.equal?(node) }
+          @count += 1
+        end
+        super
+      end
+    end.new
+    Prism.parse(source).value.accept(counter)
+    counter.count
+  end
+
+  it "counts the unconverted Thread.current / thread_variable sites per file (ADR-129 stage 1 ratchet)" do
+    found = stage1_files.to_h do |path|
+      [path.delete_prefix("#{project_path('')}/"), thread_site_count(File.read(path))]
+    end.reject { |_, count| count.zero? }
+
+    expect(found).to eq(unconverted_thread_sites), <<~MESSAGE
+      ADR-129 stage 1: the Thread.current / thread_variable_* sites under lib/rigor/{inference,scope*,reflection,
+      analysis,effects,environment} must match this spec's Hash. A new site belongs in a declared
+      Rigor::TypingState slot, not here; a converted file's row is removed (or its count lowered) in the same change.
+    MESSAGE
   end
 
   it "gives every allow-list entry a covered file and a reason" do

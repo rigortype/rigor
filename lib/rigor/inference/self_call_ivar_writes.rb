@@ -9,7 +9,7 @@ require_relative "../type"
 require_relative "guard_rebinding"
 require_relative "project_method_ownership"
 require_relative "refined_dispatch/own_method"
-require_relative "../run_scoped_slots"
+require_relative "../typing_state"
 
 module Rigor
   module Inference
@@ -116,17 +116,23 @@ module Rigor
         nil
       end
 
-      DEFINITION_COUNTS_KEY = RunScopedSlots.register(:__rigor_self_call_ivar_writes_definition_counts__)
-      private_constant :DEFINITION_COUNTS_KEY
+      # ADR-129 WD1 — a run-scoped Memo: the `[deferred_ranges, counts]` pair is one table and the counts computed
+      # from it alone, so the counts are a function of the table identity the pair is keyed on.
+      DEFINITION_COUNTS = TypingState.memo(
+        :self_call_ivar_writes_definition_counts,
+        run_scoped: true, reason: "the instance-def counts of one deferred-ranges table; keyed on its identity"
+      )
+      private_constant :DEFINITION_COUNTS
 
       # `{[owner, name] => the number of instance `def` rows of name the project records for owner}`, over every
       # file of `deferred_ranges` (a `discovered_deferred_ranges` table). Built once per table and kept in ONE
       # thread slot keyed by the table's identity (#2300): the table is never written in place, a file whose rows
       # equal the seed's keeps the seed's table, and a scan of every file's rows per query was the cost once the
       # table held the whole project. The slot holds one table and its counts, the next table replaces them, and the
-      # run that filled it releases it when it ends ({RunScopedSlots}, #2399).
+      # run that filled it releases it when it ends (run-scoped, #2399).
       def definition_counts(deferred_ranges)
-        slot = Thread.current[DEFINITION_COUNTS_KEY]
+        state = TypingState.current
+        slot = state[DEFINITION_COUNTS]
         return slot[1] if slot && slot[0].equal?(deferred_ranges)
 
         counts = {}
@@ -138,7 +144,7 @@ module Rigor
             counts[key] = counts.fetch(key, 0) + 1
           end
         end
-        Thread.current[DEFINITION_COUNTS_KEY] = [deferred_ranges, counts]
+        state[DEFINITION_COUNTS] = [deferred_ranges, counts]
         counts
       end
 

@@ -1,6 +1,6 @@
 # The rigor check task parses its own output into a per-folder collection instead of using the problem matcher
 
-- **PR:** [#2747](https://github.com/rigortype/rigor/issues/2747)
+- **PR:** [#2794](https://github.com/rigortype/rigor/pull/2794)
 - **Issue:** [#2747](https://github.com/rigortype/rigor/issues/2747)
 - **Class:** open-choice
 - **Precedent:** none — sets one

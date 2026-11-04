@@ -283,6 +283,7 @@ module Rigor
 
           expanded = expander.expand_type_alias(rbs_type)
           return Type::Combinator.untyped if expanded.nil?
+
           # A nested expansion is translated under its parent's budget, and `rigor trace` records every
           # union merge as it happens, so neither consults the memo. Nor does the erasure baseline (ADR-130 WD4): the
           # memo holds the default engine's translations, where a `Rigor::Plugin` interface keeps its facet.
@@ -299,13 +300,13 @@ module Rigor
           translated
         end
 
-        # #775 — the translated form of a CLOSED alias expansion, keyed by the expansion, lives with the expander. Closed
-        # means no `self`, `instance` or type variable anywhere inside, so the caller's context cannot change the answer;
-        # at expansion depth 0 the budget cannot either. But a nested alias inside the expansion is expanded through the
-        # expander (`type a = b | Integer` holds `b`), so the translation reads the expander's environment: a memo
-        # shared by every expander answered a second loader, whose `b` differs, with the first loader's translation
-        # (equal expansions are equal keys). The expander owns its memo, so it dies with it. An expander that offers none
-        # (anything answering only `expand_type_alias`) is translated afresh each time.
+        # #775 — the translated form of a CLOSED alias expansion, keyed by the expansion, lives with the expander.
+        # Closed means no `self`, `instance` or type variable anywhere inside, so the caller's context cannot change
+        # the answer; at expansion depth 0 the budget cannot either. But a nested alias inside the expansion is
+        # expanded through the expander (`type a = b | Integer` holds `b`), so the translation reads the expander's
+        # environment: a memo shared by every expander answered a second loader, whose `b` differs, with the first
+        # loader's translation (equal expansions are equal keys). The expander owns its memo, so it dies with it. An
+        # expander that offers none (anything answering only `expand_type_alias`) is translated afresh each time.
         def closed_translations_of(expander)
           expander.closed_alias_translations if expander.respond_to?(:closed_alias_translations)
         end

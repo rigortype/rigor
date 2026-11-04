@@ -149,9 +149,9 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
     parts = "#{memo}: `class_name_parts` is the split of its String argument, the `@class_name_parts` key, and reads " \
             "nothing else; a non-main Ractor cannot read it and answers nil, as before"
     translator = "lib/rigor/inference/rbs_type_translator.rb"
-    names = "#{memo}: `relative_name` is the frozen `type_name.relative!.to_s` of its `RBS::TypeName` key (#775), the " \
-            "`@relative_names` key, and reads no scope, environment, run option or typing state; a non-main Ractor " \
-            "cannot read it, as before"
+    names = "#{memo}: `relative_name` is the frozen `type_name.relative!.to_s` of its `RBS::TypeName` key, the " \
+            "`@relative_names` key (#775), and reads no scope, environment, run option or typing state; a non-main " \
+            "Ractor cannot read it, as before"
     {
       [loader, :module_ivar_write, "@default"] => [2, default],
       [translator, :module_ivar_write, "@relative_names"] => [1, names],

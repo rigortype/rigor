@@ -93,7 +93,7 @@ comparison) appears nowhere else in this index.
 | 2026-09-17 | [Render-site locals and layouts — corpus measurement](20260917-render-locals-and-layouts.md) |
 | 2026-09-26 | [`sig/` against inline — the consistency rule's false-positive gate (issue #1075)](20260926-sig-inline-consistency-fp-gate.md) |
 | 2026-10-12 | [alba onboarding + rbs-inline migration — hand-written `sig/` vs sig-gen `--overwrite`, inline integration, and a 10-file batch migration with the rbs-inline generation-boundary catalogue](20261012-alba-onboarding-rbs-inline-pilot.md) |
-| 2026-11-04 | [RBS interface types prototype (ADR-130, #929) — the value half adds no diagnostic on `lib`, 48 plugin trees and 12 survey targets; the absence-oracle half adds 3, all wrong-signature false positives; the standard union reading adds 20 false positives on `lib`](20261104-interface-types-prototype-measurement.md) |
+| 2026-11-04 | [RBS interface types prototype (ADR-130, #929) — an interface value kept `untyped` at all 20 `untyped`-keyed sites but dispatch adds no diagnostic on `lib`, 48 plugin trees and 14 survey targets, and silences the 7 false positives the unguarded wrapper caused; the deferred assignability half added only false positives](20261104-interface-types-prototype-measurement.md) |
 
 ## Analyzer self-testing (teeth / false-negatives)
 

@@ -58,12 +58,7 @@ end
 - Callable object shapes MAY satisfy proc-like or interface-like call contracts through a known `call` method when the signature is compatible.
 - Singleton class and module object shapes MAY satisfy interfaces through singleton methods and module-level members. This SHOULD be implemented after instance-side structural checks.
 
-Member compatibility is checked in tiers ([ADR-130](../adr/130-interface-types-value-facet-and-absence-requirement.md), proposed; until it lands, RBS interface types erase to `Dynamic[top]`, and only `call.argument-type-mismatch`'s nil channel and its multi-overload non-nil channel read them, by member name):
-
-- **Default tier: absence.** A value is refuted against an interface only when, for some public member the interface requires, `call.undefined-method` would fire on `value.member`. Every member the value's RBS or the project's source provides is present; anything the undefined-method rule cannot prove absent (a class only the source declares, a `method_missing`, an unknown mixin, a project subclass that may define it) is `maybe`, and `maybe` MUST NOT fire. Signatures, overloads and generic arguments are not compared. A union value is refuted only when every member other than `nil` and `Dynamic` is refuted.
-- **Signature tier (opt-in).** For a member both sides declare in authored RBS, Rigor compares visibility, arity, positional and keyword parameters, blocks and return types as `%a{rigor:v1:conforms-to}` does. It MUST NOT compare against an inferred signature.
-
-An interface-typed **value** (a return, a bound parameter, a block parameter) is gradual: `Dynamic[_Foo]`, whose static facet answers the calls `_Foo` declares and whose other calls read `Dynamic[top]`. A call to a member the interface does not declare MUST NOT report `call.undefined-method`; the value's class is open, and the method may exist.
+Member compatibility follows method-type compatibility, not just name existence. Rigor MUST compare visibility, arity, positional parameters, keyword parameters, blocks, overloads, return types, and receiver constraints through the ordinary method-assignability rules once those exist.
 
 ## Reader and writer capabilities
 

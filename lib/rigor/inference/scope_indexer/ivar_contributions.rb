@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../../analysis/dependency_recorder"
-require_relative "../../run_scoped_slots"
+require_relative "../../typing_state"
 require_relative "../../type"
 require_relative "../refined_dispatch/own_method"
 
@@ -29,9 +29,13 @@ module Rigor
       # incremental session fires when a file's entries for the pair appear, vanish or change value; and the chain
       # files its class edges ({Scope::ResolutionChain#record}), so an `include` added or removed re-checks the reader.
       module IvarContributions
-        TABLE_KEY = RunScopedSlots.register(:__rigor_ivar_contributions_table__)
+        # ADR-129 WD1 — a run-scoped Memo: the table is a pure function of the census it is keyed on by identity.
+        TABLE = TypingState.memo(
+          :ivar_contributions_table,
+          run_scoped: true, reason: "the contribution table of one census; keyed on the census's identity"
+        )
         EMPTY = {}.freeze
-        private_constant :TABLE_KEY, :EMPTY
+        private_constant :TABLE, :EMPTY
 
         module_function
 
@@ -114,7 +118,8 @@ module Rigor
         # `{ owner => { ivar => { path => [value, ...] } } }` over `census`'s path-tagged `:own_write_type` entries,
         # built once per census and kept in one run-scoped slot keyed by its identity.
         def table(census)
-          slot = Thread.current[TABLE_KEY]
+          state = TypingState.current
+          slot = state[TABLE]
           return slot[1] if slot && slot[0].equal?(census)
 
           table = {}
@@ -125,7 +130,7 @@ module Rigor
             by_path = ((table[entry[1]] ||= {})[entry[2]] ||= {})
             (by_path[canonical_paths[entry[4]] ||= canonical(entry[4])] ||= []) << entry[3]
           end
-          Thread.current[TABLE_KEY] = [census, table]
+          state[TABLE] = [census, table]
           table
         end
         private_class_method :chain_owners, :contributed, :value_type, :canonical, :table

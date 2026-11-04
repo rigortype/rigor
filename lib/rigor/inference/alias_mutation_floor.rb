@@ -2,7 +2,7 @@
 
 require "prism"
 
-require_relative "../run_scoped_slots"
+require_relative "../typing_state"
 require_relative "../source/node_children"
 require_relative "closure_escape_analyzer"
 require_relative "element_read_widening"
@@ -72,13 +72,26 @@ module Rigor
       NUMBERED_PARAMETER = /\A_[1-9]\z/
       SEND_NAMES = %i[send public_send __send__].to_set.freeze
       ELEMENT_READS = %i[[] first last fetch dig].to_set.freeze
-      FACTS_CACHE_KEY = RunScopedSlots.register(:__rigor_alias_mutation_floor_facts)
-      IVAR_CACHE_KEY = RunScopedSlots.register(:__rigor_alias_mutation_floor_ivar_mutators)
-      FLOOR_CACHE_KEY = RunScopedSlots.register(:__rigor_alias_mutation_floor_callee_floors)
-      STORE_CACHE_KEY = RunScopedSlots.register(:__rigor_alias_mutation_floor_unknown_stores)
+      # ADR-129 WD1 — four run-scoped Memos, each a pure function of the key it holds.
+      FACTS_CACHE = TypingState.memo(
+        :alias_mutation_floor_facts,
+        run_scoped: true, reason: "keyed by the body node; the facts are a pure function of the body and its parameters"
+      )
+      IVAR_CACHE = TypingState.memo(
+        :alias_mutation_floor_ivar_mutators,
+        run_scoped: true, reason: "keyed by def node; whether its body mutates an ivar is a pure function of the body"
+      )
+      FLOOR_CACHE = TypingState.memo(
+        :alias_mutation_floor_callee_floors,
+        run_scoped: true, reason: "keyed by the literal shape; the callee block floor is a pure function of it"
+      )
+      STORE_CACHE = TypingState.memo(
+        :alias_mutation_floor_unknown_stores,
+        run_scoped: true, reason: "keyed by call node, removed-keys mode and type, every input of the widened store"
+      )
       private_constant :FULL, :PART, :NO_KEYS, :NO_LINKS, :SELF_RETURNERS, :ALL, :NUMBERED_PARAMETER,
-                       :SEND_NAMES, :ELEMENT_READS, :FACTS_CACHE_KEY, :IVAR_CACHE_KEY, :FLOOR_CACHE_KEY,
-                       :STORE_CACHE_KEY
+                       :SEND_NAMES, :ELEMENT_READS, :FACTS_CACHE, :IVAR_CACHE, :FLOOR_CACHE,
+                       :STORE_CACHE
 
       module_function
 
@@ -128,7 +141,8 @@ module Rigor
       # `type` after `call_node`'s unknown store ({UnknownStoreWidening.widen_store}), memoised per call site for the
       # run as {.callee_floor} is.
       def unknown_store(call_node, type, removed_keys:)
-        table = (Thread.current[STORE_CACHE_KEY] ||= {}.compare_by_identity)
+        state = TypingState.current
+        table = (state[STORE_CACHE] ||= {}.compare_by_identity)
         per_mode = ((table[call_node] ||= {})[removed_keys] ||= {})
         per_mode.fetch(type) do
           method_name, arg_types = UnknownStoreWidening.unknown_store(call_node)
@@ -155,7 +169,8 @@ module Rigor
       def callee_floor(type)
         return nil unless literal_shape?(type)
 
-        table = (Thread.current[FLOOR_CACHE_KEY] ||= {})
+        state = TypingState.current
+        table = (state[FLOOR_CACHE] ||= {})
         table.fetch(type) { table[type] = UnknownStoreWidening.callee_block_floor(type) }
       end
 
@@ -226,7 +241,7 @@ module Rigor
       def mutates_ivar?(def_node)
         return false if def_node.nil?
 
-        table = (Thread.current[IVAR_CACHE_KEY] ||= ObjectSpace::WeakKeyMap.new)
+        table = TypingState.current.weak_key_map(IVAR_CACHE)
         cached = table[def_node]
         return cached unless cached.nil?
 
@@ -268,7 +283,7 @@ module Rigor
         body = frame&.body
         return nil if body.nil?
 
-        table = (Thread.current[FACTS_CACHE_KEY] ||= ObjectSpace::WeakKeyMap.new)
+        table = TypingState.current.weak_key_map(FACTS_CACHE)
         facts = (table[body] ||= scan(body, frame.parameters))
         facts.held.empty? && facts.held_part.empty? && facts.links.empty? ? nil : facts
       end

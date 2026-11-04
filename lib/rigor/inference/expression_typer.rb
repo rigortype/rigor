@@ -434,20 +434,16 @@ module Rigor
       # reaches ({#with_yield_value_type}) and the argument list `...` re-supplies
       # ({#with_forwarded_arg_types}) — installed together, both even when nil, for exactly one frame.
       #
-      # The frame also clears the two flags that describe the CALLER's walk, not the callee's: the block-body
-      # threading suppression ({#without_block_body_threading}) and the reflective-ivar repeat depth
-      # ({ReflectiveIvarWrite.in_repeating_body}). Both only widen, and the return memo's key has no term for
-      # either, so a body walked under the caller's flag stored a wider return that every later caller was served,
-      # and whether a call reported depended on which caller the run reached first.
+      # The frame also clears the reflective-ivar repeat depth ({ReflectiveIvarWrite.in_repeating_body}): it says
+      # the CALLER's loop body is walked once for many runs, while the callee's body starts from its own scope and
+      # reads its own write. The depth only widens and the return memo's key has no term for it, so a body first
+      # reached from a `for` body stored a wider return that every later caller was served. The block-body
+      # threading suppression is NOT cleared here, although it is the same kind of caller flag: it is what keeps a
+      # fold from nesting through callee frames, so it is a memo-key term instead
+      # ({#consult_and_store_return_memo}).
       def self.with_call_site_frame(yield_type, forwarded_arg_types, &)
-        previous_threading = Thread.current[THREADED_BLOCK_BODY_KEY]
-        Thread.current[THREADED_BLOCK_BODY_KEY] = nil
-        begin
-          ReflectiveIvarWrite.outside_repeating_body do
-            with_yield_value_type(yield_type) { with_forwarded_arg_types(forwarded_arg_types, &) }
-          end
-        ensure
-          Thread.current[THREADED_BLOCK_BODY_KEY] = previous_threading
+        ReflectiveIvarWrite.outside_repeating_body do
+          with_yield_value_type(yield_type) { with_forwarded_arg_types(forwarded_arg_types, &) }
         end
       end
 
@@ -3465,10 +3461,17 @@ module Rigor
         # passed in for the same reason: a yielding callee's return depends on the block THIS call site
         # hands it, so two call sites passing differently-typed blocks must not share an entry. It is nil
         # for every def that cannot reach a `yield`, which is where the memo's mass is.
+        # PR #2773 — the FIFTH: the block-body threading suppression the caller's fold installed
+        # ({#without_block_body_threading}). A body walked under it types its block tails without their
+        # prefix and answers wider, so without the term the first caller decided the return every later
+        # caller was served. It is a key term rather than reset at the frame because the suppression is what
+        # stops a fold from nesting through every callee below it, which re-walked unstorable frames
+        # exponentially.
         memo_key = [receiver.describe(:short),
                     arg_types.map { |type| type.describe(:short) },
                     body_scope.struct_fold_safe?(:self),
-                    ExpressionTyper.current_yield_value_type&.describe(:short)]
+                    ExpressionTyper.current_yield_value_type&.describe(:short),
+                    block_body_threading_suppressed?]
         if (entry = per_def[memo_key])
           BudgetTrace.hit(BudgetTrace::MEMO_HITS)
           Analysis::DependencyRecorder.replay(entry.read_set) if Analysis::DependencyRecorder.active?

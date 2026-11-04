@@ -2,9 +2,10 @@
 
 # A user-method body re-typed for its return ran under two thread-local flags its CALLER had set: the block-body
 # threading suppression (a block fold, a `break` arm, a block joined with its `next` values) and the reflective-ivar
-# repeat depth (a `for` body, a loop predicate). Both only widen, and the return memo's key has no term for either, so
+# repeat depth (a `for` body, a loop predicate). Both only widen, and the return memo's key had no term for either, so
 # the first caller decided the return every later caller was served: `h.upcase` reported or not depending on whether a
-# `for` body reached `h` first, down to the order of the file names. The callee frame now clears both flags.
+# `for` body reached `h` first, down to the order of the file names. The callee frame now clears the repeat depth, and
+# the threading suppression is a memo-key term (clearing it let folds nest; callee_fold_nesting_growth_spec.rb).
 require "spec_helper"
 require "tmpdir"
 require "fileutils"
@@ -67,6 +68,17 @@ RSpec.describe "a callee's return does not depend on its caller's frame flags", 
     it "gives the call inside the `for` body the same return" do
       src = source(ivar_callee, "for i in [1, 2]\n      h.upcase\n    end", "nil")
       expect(rules(src)).to eq([[line_of(src, "h.upcase"), undefined]])
+    end
+
+    it "restores the caller's depth after the callee frame" do
+      # A literal-name write later in the same `for` body still joins the prior binding `0` into the new value. With
+      # the depth left at zero after the call, it would bind the one pass's value alone.
+      dump = lambda do |call|
+        src = source(ivar_callee, "@n = 0\n    for i in [1, 2]\n      #{call}\n      instance_variable_set(:@n, @n + 1)\n      " \
+                                  "Rigor.dump_type(@n)\n    end", "nil")
+        analyze(src).diagnostics.select { |d| d.qualified_rule == "dump.type" }.map(&:message)
+      end
+      expect(dump.call("h")).to eq(["dump_type: 0 | Dynamic[top]"])
     end
   end
 

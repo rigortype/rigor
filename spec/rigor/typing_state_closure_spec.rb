@@ -166,7 +166,11 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
   def data_classes_in(source) = source.scan(/^\s*([A-Z]\w*) = Data\.define\b/).flatten
 
   # Every finding in `source` as `[path, rule, name, line]`.
-  def findings_in(source, path)
+  def findings_in(source, path) = scan(source, path)[:findings]
+
+  # The scan state of `source`: its findings, and how many `thread_variable_*` calls sit directly on a
+  # `Thread.current` that G3 reports as a finding of its own (`:chained`).
+  def scan(source, path)
     result = Prism.parse(source)
     raise "#{path}: #{result.errors.first.message}" if result.failure?
 
@@ -174,9 +178,9 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
       comment.key == "frozen_string_literal" && comment.value == "true"
     end
     file = { path: path, frozen_strings: frozen_strings, data: lib_data_classes | data_classes_in(source),
-             findings: [], identity_reads: Set.new }
+             findings: [], identity_reads: Set.new, chained: 0 }
     walk(result.value, :top, file)
-    file[:findings]
+    file
   end
 
   # `context` is `:top`, `:module_body`, `:singleton` (a singleton method or `class << self`) or `:instance`.
@@ -353,6 +357,7 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
     end
     if %i[thread_variable_get thread_variable_set thread_variable? storage store_if_absent].include?(name)
       found(file, node, :thread_state, name)
+      file[:chained] += 1 if name.start_with?("thread_variable") && local_storage_call?(receiver)
     end
     return unless %i[[] []=].include?(name) && (named_constant?(receiver, :Fiber) || named_constant?(receiver, :Ractor))
 
@@ -489,66 +494,52 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
   # yet, per file, under the directories stage 1 covers. A site is one call: `Thread.current[:k]` is one, and
   # `Thread.current.thread_variable_get(:k)` is one (the `thread_variable_*` call, not also its receiver). Compared for
   # equality, so a new site anywhere in these directories fails, and a conversion that does not update the Hash fails
-  # too. A file leaves the Hash when its last site becomes a declared slot; it never gains a row.
+  # too. A file leaves the Hash when its last site becomes a declared slot; it never gains a row. The Hash spans the
+  # nine directories G3 covers; PRs before this one counted six (without `plugin`, `type` and `cache`).
   def unconverted_thread_sites
     {
       "lib/rigor/analysis/check_rules.rb" => 2,
       "lib/rigor/analysis/run_disclosure_credit.rb" => 4,
+      "lib/rigor/analysis/runner/pool_coordinator.rb" => 2,
+      "lib/rigor/cache/file_digest.rb" => 16,
       "lib/rigor/environment/rbs_loader.rb" => 4,
       "lib/rigor/inference/acceptance.rb" => 4,
       "lib/rigor/inference/method_dispatcher.rb" => 4,
       "lib/rigor/inference/method_dispatcher/rbs_dispatch.rb" => 3,
       "lib/rigor/inference/rbs_type_translator.rb" => 4,
       "lib/rigor/inference/scope_indexer.rb" => 4,
+      "lib/rigor/plugin/io_boundary.rb" => 4,
       "lib/rigor/reflection/constant_ancestors.rb" => 4,
       "lib/rigor/scope.rb" => 4,
       "lib/rigor/scope/resolution_chain.rb" => 2
     }
   end
 
-  def stage1_directories = %w[inference scope reflection analysis effects environment]
+  # ADR-129's G3 scope, which the ratchet shares.
+  def stage1_directories = %w[inference scope reflection analysis effects environment plugin type cache]
 
   def stage1_files
     directories = stage1_directories.flat_map { |dir| Dir[project_path("lib/rigor/#{dir}/**/*.rb")] }
-    siblings = %w[scope reflection effects environment].map { |name| project_path("lib/rigor/#{name}.rb") }
+    siblings = stage1_directories.map { |name| project_path("lib/rigor/#{name}.rb") }
     (directories + siblings).select { |path| File.file?(path) }.uniq.sort
   end
 
-  def thread_site_count(source)
-    counter = Class.new(Prism::Visitor) do
-      attr_reader :count
-
-      def initialize
-        super
-        @count = 0
-        @chained = []
-      end
-
-      def visit_call_node(node)
-        receiver = node.receiver
-        if node.name.to_s.start_with?("thread_variable")
-          @count += 1
-          @chained << receiver
-        elsif node.name == :current && receiver.is_a?(Prism::ConstantReadNode) && receiver.name == :Thread &&
-              @chained.none? { |chained| chained.equal?(node) }
-          @count += 1
-        end
-        super
-      end
-    end.new
-    Prism.parse(source).value.accept(counter)
-    counter.count
+  # G3's own thread-state rule, so every spelling it flags counts (`::Thread.current`, `Thread.send(:current)`,
+  # `Fiber[]`, `Ractor.current[]`, `thread_variable_*`, ...), with a `thread_variable_*` on a `Thread.current` one site.
+  def thread_site_count(source, path)
+    file = scan(source, path)
+    file[:findings].count { |finding| finding[1] == :thread_state } - file[:chained]
   end
 
   it "counts the unconverted Thread.current / thread_variable sites per file (ADR-129 stage 1 ratchet)" do
     counted = stage1_files.to_h do |path|
-      [path.delete_prefix("#{project_path('')}/"), thread_site_count(File.read(path))]
+      [path.delete_prefix("#{project_path('')}/"), thread_site_count(File.read(path), path)]
     end
     found = counted.reject { |_, count| count.zero? }
 
     expect(found).to eq(unconverted_thread_sites), <<~MESSAGE
       ADR-129 stage 1: the Thread.current / thread_variable_* sites under lib/rigor/{inference,scope*,reflection,
-      analysis,effects,environment} must match this spec's Hash. A new site belongs in a declared
+      analysis,effects,environment,plugin,type,cache} must match this spec's Hash. A new site belongs in a declared
       Rigor::TypingState slot, not here; a converted file's row is removed (or its count lowered) in the same change.
     MESSAGE
   end

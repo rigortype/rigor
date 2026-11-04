@@ -27,7 +27,8 @@ module Rigor
       # `MemoAudit` checks it on a hit.
       RELIABLE = TypingState.memo(
         :toplevel_def_reliable,
-        run_scoped: true, reason: "keyed by discovery index and name, the verdict's only inputs; audited by MemoAudit"
+        run_scoped: true,
+        reason: "keyed by discovery index, then name; the environment is the run's; audited by MemoAudit"
       )
       private_constant :OBJECT_OWNERS, :RELIABLE
 

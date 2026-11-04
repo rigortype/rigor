@@ -732,6 +732,9 @@ module Rigor
               # so the worker's own table is the only place a disclosure exists, and it is complete only
               # once the worker has finished its files.
               main.send([:done, Rigor::Analysis::Runner::WorkerPayload.harvest(session)])
+              # `Ractor#send` answers the Ractor; the worker's own value is unread (`join` only), and G3 reads a
+              # messaging call as an address only while its value is discarded.
+              nil
             end
           end
 

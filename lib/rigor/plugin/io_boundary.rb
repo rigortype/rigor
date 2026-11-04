@@ -52,7 +52,7 @@ module Rigor
     #   descriptor and any enclosing producer's descriptor then carry the served value's inputs.
     class IoBoundary
       URL_TIMEOUT_SECONDS = 10
-      URL_MAX_BYTES = 10 * 1024 * 1024
+      URL_MAX_BYTES = 10_485_760 # 10 MiB
 
       ATTRIBUTION_KEY = :rigor_io_boundary_attribution
       private_constant :ATTRIBUTION_KEY

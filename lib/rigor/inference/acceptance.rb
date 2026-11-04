@@ -3,6 +3,7 @@
 require_relative "../type"
 require_relative "range_constant"
 require_relative "content_join"
+require_relative "../typing_state"
 
 module Rigor
   module Inference
@@ -75,8 +76,15 @@ module Rigor
       }.freeze
       private_constant :TYPE_HANDLERS
 
-      UNREAD_SHAPE_REFUSED_KEY = :__rigor_acceptance_unread_shape_refused__
-      private_constant :UNREAD_SHAPE_REFUSED_KEY
+      # ADR-129 WD1 — a Frame: {#refusing_unread} installs the kind of unread shape that answers `no` for one block
+      # and restores the previous one on the way out. It changes answers (`unread_shape_maybe` reads it), and the
+      # installed value is a Symbol (`:all`, `:array`) or nil.
+      UNREAD_SHAPE_REFUSED = TypingState.frame(
+        :acceptance_unread_shape_refused,
+        reason: "installed around a block by refusing_unread; read by unread_shape_maybe, which answers no for " \
+                "the refused kind of unread shape instead of maybe"
+      )
+      private_constant :UNREAD_SHAPE_REFUSED
 
       # Whether a `maybe` for `param` against `arg` rests on a shape that could not read its argument: a record
       # against a `Hash` with a gradual arm ({#gradual_hash?}) or an open `HashShape`, or a tuple against an
@@ -120,18 +128,14 @@ module Rigor
         # calls below the one asked (a tuple element, a `Hash` value, a union member), and those calls go
         # through each carrier's `Type#accepts`. It is set only for the duration of the block. `kind` is `:all`
         # (records and tuples) or `:array` (tuples only).
-        def refusing_unread(kind)
-          previous = Thread.current[UNREAD_SHAPE_REFUSED_KEY]
-          Thread.current[UNREAD_SHAPE_REFUSED_KEY] = kind
-          yield
-        ensure
-          Thread.current[UNREAD_SHAPE_REFUSED_KEY] = previous
+        def refusing_unread(kind, &)
+          TypingState.current.with(UNREAD_SHAPE_REFUSED, kind, &)
         end
 
         # The `maybe` a shape of `kind` (`:hash` or `:array`) answers for an argument it cannot read, or `no`
         # inside {#refusing_unread} for that kind.
         def unread_shape_maybe(mode, reason, kind)
-          refused = Thread.current[UNREAD_SHAPE_REFUSED_KEY]
+          refused = TypingState.current[UNREAD_SHAPE_REFUSED]
           if refused == :all || refused == kind
             return Type::AcceptsResult.no(mode: mode, reasons: "#{reason} (refused as evidence)")
           end

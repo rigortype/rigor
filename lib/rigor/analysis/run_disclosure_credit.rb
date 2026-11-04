@@ -63,9 +63,9 @@ module Rigor
       end
 
       # The boundary's file and listing rows, read without triggering its lazy initializer: a plugin that never
-      # built one read nothing through it.
+      # built one read nothing through it. {Plugin::Base#built_io_boundary} is private to the engine, so it is sent.
       def boundary_rows(plugin)
-        boundary = plugin.instance_variable_get(:@io_boundary) or return []
+        boundary = plugin.__send__(:built_io_boundary) or return []
         descriptor = boundary.cache_descriptor
         descriptor.files + descriptor.globs
       end

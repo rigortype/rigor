@@ -186,7 +186,7 @@ list kept beside the memo. State without a kind fails the gate.
   - On `ExpressionTyper#type_of` and nowhere else. `@typing_node` is a function of the key only there, and a spec pins
     the budget-cutoff writes that key on it (`record_dynamic_origin(@typing_node`) to an adjacent
     `note_transient_fallback`.
-  - The table is per file and registered in `RunScopedSlots`. It is cleared when a file's analysis ends, on the runner
+  - The table is per file and declared `run_scoped: true`. It is cleared when a file's analysis ends, on the runner
     path and in `WorkerSession#analyze_body` alike.
   - Which phases open it is a stage decision (WD6).
   - It stays shut while a tracer is attached, and while ADR-46 recording runs. Once the dependency reads are a
@@ -271,6 +271,11 @@ list kept beside the memo. State without a kind fails the gate.
       install are Frame slots whose contents are a Resource in stage 1, so every record refuses the capture. WD1 lists
       the effects and self-call records and the ADR-46 dependency reads as Tables: stage 2 makes them journaled Tables,
       replayed on a hit.
+    - Two more shapes may keep storage outside `TypingState`, each with its own allow-list row naming its key: a
+      process-wide memo whose value is built from its key and frozen constants alone, reading no scope, environment,
+      run option or typing state; and a per-thread output sink that crosses fibers on purpose and that typing never
+      reads. Stage 2 must treat such a sink as a Resource before a capture opens around plugin code
+      ([#2814](https://github.com/rigortype/rigor/issues/2814)).
     - Plugin code is outside G3. It is covered by G1 and the contract sentence below.
     - The precedent is `spec/rigor/run_scoped_slots_spec.rb`.
   - **G4 Reachability audit.**

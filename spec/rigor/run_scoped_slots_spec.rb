@@ -6,10 +6,10 @@
 # added its whole analysis to the heap. Both are run-scoped slots ({Rigor::RunScopedSlots}), emptied when a run ends.
 #
 # Issue #2399 — about twenty other per-thread memo slots held the last run's discovery tables and environment until
-# the next run on the thread replaced them. They are registered too, so a finished run leaves none of them behind.
+# the next run on the thread replaced them. They are run-scoped too, so a finished run leaves none of them behind.
 #
-# ADR-129 — a slot that has moved into `Rigor::TypingState` declares `run_scoped: true` there instead of
-# registering, and `release` empties it with the registered keys.
+# ADR-129 — run-scoped state is a `Rigor::TypingState` slot that declares `run_scoped: true`, and `release` empties
+# exactly those.
 
 require "spec_helper"
 require "fileutils"
@@ -54,12 +54,10 @@ RSpec.describe Rigor::RunScopedSlots do
   # and clearing it from inside a frame would break that frame.
   let(:not_run_scoped) do
     {
-      __rigor_acceptance_unread_shape_refused__: "frame flag, installed and restored around a block",
       __rigor_project_round__: "a Debouncer key in the language server, not a thread-local",
       __rigor_typing_state__: "ADR-129 TypingState, whose own run-scoped slots release empties",
       rigor_interface_erasure: "RbsTypeTranslator.with_interface_erasure frame flag, restored on the way out",
       rigor_io_boundary_attribution: "thread-variable frame, installed and restored around a block",
-      rigor_rbs_core_root: "RbsLoader.with_core_root frame, installed and restored around an env build",
       rigor_run_disclosure_attribution: "thread-variable frame, installed and restored around a block"
     }
   end
@@ -116,7 +114,7 @@ RSpec.describe Rigor::RunScopedSlots do
         expect(settled_environments).to eq(before)
       end
 
-      # A slot a new owner adds is caught here until it is registered: the run fills it and nothing empties it.
+      # A slot a new owner adds is caught here until it is run-scoped: the run fills it and nothing empties it.
       it "leaves every per-thread memo slot empty" do
         send(run)
 
@@ -125,7 +123,6 @@ RSpec.describe Rigor::RunScopedSlots do
           key == :__rigor_typing_state__ || value.nil? || value == 0 || (value.respond_to?(:empty?) && value.empty?)
         end
         expect(holding).to be_empty
-        expect(described_class.keys.map { |key| Thread.current[key] }).to all(be_nil)
         expect(run_scoped_holding).to be_empty
       end
 
@@ -157,7 +154,7 @@ RSpec.describe Rigor::RunScopedSlots do
 
     described_class.release
     first = hover.call
-    filled = described_class.keys.reject { |key| Thread.current[key].nil? } + run_scoped_holding
+    filled = run_scoped_holding
     described_class.release
 
     expect(filled).not_to be_empty
@@ -235,7 +232,7 @@ RSpec.describe Rigor::RunScopedSlots do
   # The constants a file defines as symbols, by name; a `*_KEY` / `*MEMO*` one with a `rigor` symbol is a key.
   def scan_thread_constants(source, path, keys)
     constants = {}
-    source.scan(/^\s*([A-Z][A-Z0-9_]*) = (?:RunScopedSlots\.register\()?(:[A-Za-z0-9_]+)\)?\s*(?:#.*)?$/) do
+    source.scan(/^\s*([A-Z][A-Z0-9_]*) = (:[A-Za-z0-9_]+)\s*(?:#.*)?$/) do
       name, symbol = Regexp.last_match.captures
       constants[name] = symbol
       next unless name.end_with?("_KEY") || name.include?("MEMO")
@@ -244,10 +241,6 @@ RSpec.describe Rigor::RunScopedSlots do
     end
     constants
   end
-
-  # The one assignment `lib/` may make of `Thread.current`: the `thread = Thread.current` that `release` empties the
-  # slots through. It is allowed only as the file's sole such assignment, and only inside `def release`.
-  def alias_allowlist = { "lib/rigor/run_scoped_slots.rb" => { line: "thread = Thread.current", in_def: "release" } }
 
   # #2572: the access shapes are `Thread.current[`, `thread_variable_get` / `_set` with or without parentheses, and
   # `fetch` / `key?` / `store` on the thread. A key is a symbol or a constant of this file; a dynamic key (a local
@@ -314,22 +307,8 @@ RSpec.describe Rigor::RunScopedSlots do
     offsets = []
     source.scan(/(?<![=!<>])=(?![=~>])[ \t]*Thread\.current\b(?![\[.])/) { offsets << Regexp.last_match.begin(0) }
     offsets.each do |offset|
-      next if alias_allowed?(source, path, offset, offsets.size)
-
       unresolved << "#{path}:#{line_at(source, offset)} Thread.current alias"
     end
-  end
-
-  def alias_allowed?(source, path, offset, count)
-    alias_allowlist.any? do |file, rule|
-      path.end_with?(file) && count == 1 && line_text(source, offset).strip == rule[:line] &&
-        source[0...offset].scan(/^[ \t]*def (?:self\.)?(\w+)/).last&.first == rule[:in_def]
-    end
-  end
-
-  def line_text(source, offset)
-    start = (source.rindex("\n", offset) || -1) + 1
-    source[start...(source.index("\n", offset) || source.length)]
   end
 
   # A `*_KEY` constant without a `rigor` symbol is a key only where the file reads it directly. In a file that reads a
@@ -351,16 +330,15 @@ RSpec.describe Rigor::RunScopedSlots do
 
   def line_at(source, offset) = source[0...offset].count("\n") + 1
 
-  # A memo slot a new owner adds is caught here even when no fixture fills it.
-  it "registers every per-thread key in lib/ that is not a listed frame slot" do
+  # A per-thread key a new owner adds is caught here even when no fixture fills it: a memo belongs in a run-scoped
+  # `TypingState` slot, and a frame flag is listed with its reason.
+  it "lists every per-thread key in lib/ that is not a TypingState slot" do
     keys, unresolved = thread_keys_in_lib
 
     expect(unresolved).to be_empty
-    unlisted = keys.keys - described_class.keys - not_run_scoped.keys
+    unlisted = keys.keys - not_run_scoped.keys
     expect(unlisted.to_h { |key| [key, keys[key]] }).to be_empty
-    expect(described_class.keys - keys.keys).to be_empty
     expect(not_run_scoped.keys - keys.keys).to be_empty
-    expect(not_run_scoped.keys & described_class.keys).to be_empty
   end
 
   # #2458: the two shapes the scan used to drop, a trailing comment on the constant and a key spelled without `rigor`.
@@ -495,37 +473,12 @@ RSpec.describe Rigor::RunScopedSlots do
     expect(unresolved).to eq(["fixture.rb:2 B_PROBE_KEY"])
   end
 
-  # #2572: the registry's one allowed alias is pinned to `thread = Thread.current` inside `def self.release`, and
-  # nothing else in the registry is excused by the allowlist.
-  def registry_aliases(source)
+  # #2572: no `lib/` file may alias `Thread.current` any more, the registry's own `release` included (it empties the
+  # run-scoped TypingState slots and holds no thread key), so every alias is reported.
+  it "reports every Thread.current alias, the registry's included" do
     keys = {}
     unresolved = []
-    scan_thread_keys(source, "lib/rigor/run_scoped_slots.rb", keys, unresolved)
-    unresolved
-  end
-
-  it "allows the registry's alias only as the assignment inside release" do
-    expect(registry_aliases(<<~RUBY)).to be_empty
-      def self.release
-        thread = Thread.current
-        thread[:x] = nil
-      end
-    RUBY
-    expect(registry_aliases(<<~RUBY)).to eq(["lib/rigor/run_scoped_slots.rb:2 Thread.current alias"])
-      def self.release
-        other = Thread.current
-        other[:x] = nil
-      end
-    RUBY
-    expect(registry_aliases(<<~RUBY)).to eq(["lib/rigor/run_scoped_slots.rb:2 Thread.current alias"])
-      def self.other
-        thread = Thread.current
-      end
-    RUBY
-  end
-
-  it "reports every alias in the registry when there is more than one" do
-    both = <<~RUBY
+    scan_thread_keys(<<~RUBY, "lib/rigor/run_scoped_slots.rb", keys, unresolved)
       def self.release
         thread = Thread.current
       end
@@ -534,8 +487,8 @@ RSpec.describe Rigor::RunScopedSlots do
       end
     RUBY
 
-    expect(registry_aliases(both)).to eq(["lib/rigor/run_scoped_slots.rb:2 Thread.current alias",
-                                          "lib/rigor/run_scoped_slots.rb:5 Thread.current alias"])
+    expect(unresolved).to eq(["lib/rigor/run_scoped_slots.rb:2 Thread.current alias",
+                              "lib/rigor/run_scoped_slots.rb:5 Thread.current alias"])
   end
 
   # #2572 nit: a trailing comment names no access, so an access it spells out is not read.
@@ -616,14 +569,21 @@ RSpec.describe Rigor::RunScopedSlots do
     Rigor::TypingState.slots.each { |slot| set_typing_slot(slot.name, nil) }
   end
 
-  it "registers a key once and hands it back" do
-    registered = described_class.instance_variable_get(:@keys)
-    described_class.instance_variable_set(:@keys, registered.dup)
+  # The hover-only slots (`StatementEvaluator`'s instance-def index and unrecorded hand-offs) are filled by a
+  # language-server hover and by no run the other examples audit, so each is released by its own declaration.
+  it "empties the hover-only evaluator memos, which declare run_scoped" do
+    names = %i[callee_instance_def_index callee_unrecorded_hand_offs]
+    expect(names.map { |name| Rigor::TypingState.slot(name).run_scoped }).to all(be(true))
 
-    expect(2.times.map { described_class.register(:rigor_run_scoped_slots_probe) })
-      .to eq(%i[rigor_run_scoped_slots_probe rigor_run_scoped_slots_probe])
-    expect(described_class.keys.count(:rigor_run_scoped_slots_probe)).to eq(1)
+    names.each { |name| set_typing_slot(name, :filled) }
+    described_class.release
+
+    expect(names.map { |name| typing_slot(name) }).to all(be_nil)
   ensure
-    described_class.instance_variable_set(:@keys, registered)
+    names.each { |name| set_typing_slot(name, nil) }
+  end
+
+  it "keeps no key registry of its own" do
+    expect(described_class.singleton_methods(false)).to eq([:release])
   end
 end

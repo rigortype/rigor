@@ -1,0 +1,16 @@
+module Rigor
+  module Plugin
+    interface _ProbeS
+      def to_str: () -> String
+    end
+  end
+end
+
+class Joins
+  def facet: (Rigor::Plugin::_ProbeS a) -> untyped
+  def mix: (Rigor::Plugin::_ProbeS a, String s, bool f) -> untyped
+  def scalar: (Rigor::Plugin::_ProbeS a, untyped b, bool f) -> untyped
+  def tup: (Rigor::Plugin::_ProbeS a, untyped b, bool f) -> untyped
+  def shape: (Rigor::Plugin::_ProbeS a, untyped b, bool f) -> untyped
+  def nested: (Rigor::Plugin::_ProbeS a, untyped b, bool f) -> untyped
+end

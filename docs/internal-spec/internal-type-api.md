@@ -138,6 +138,7 @@ Combinators MUST live on a factory module (working name `Rigor::Type::Combinator
 - `union(*types)`, `intersect(*types)`, `difference(left, right)`, `complement_within(domain, type)`.
 - `refine(base, predicate)` for attaching a refinement to an existing type. The exact shape of `predicate` depends on the refinement family being applied (see [`rigor-extensions.md`](../type-specification/rigor-extensions.md)).
 - `dynamic(static_facet)` for constructing a `Dynamic[T]` wrapper. `dynamic(top)` MUST be the canonical form for `untyped`.
+- `untyped?(type)`, the parity predicate of [ADR-130](../adr/130-interface-typed-values-dispatch-under-untyped-parity.md) WD2: true for `Dynamic[top]` and for a `Dynamic` whose facet ADR-130 erases. A site that keys a leniency on `untyped` MUST ask it rather than test a `Dynamic`'s facet for `Top` or compare a type with `untyped`; `spec/rigor/type/untyped_parity_spec.rb` rejects the raw forms outside the factory.
 
 Type instances MUST NOT expose mutating combinators. An instance method that returns a new type with an additional refinement (working name `with_refinement`) MAY be added once open question 1 in ADR-3 is resolved.
 

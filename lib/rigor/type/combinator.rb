@@ -892,14 +892,17 @@ module Rigor
           case type
           when Dynamic then erased_facet?(type.static_facet) ? untyped : dynamic(erase_facets(type.static_facet))
           when Tuple then tuple_of(*type.elements.map { |element| erase_facets(element) })
-          when HashShape
-            HashShape.new(type.pairs.transform_values { |value| erase_facets(value) },
-                          required_keys: type.required_keys, optional_keys: type.optional_keys,
-                          read_only_keys: type.read_only_keys, extra_keys: type.extra_keys)
+          when HashShape then erase_shape_facets(type)
           when Nominal then nominal_of(type.class_name, type_args: type.type_args.map { |arg| erase_facets(arg) })
           when Union then union(*type.members.map { |member| erase_facets(member) })
           else type
           end
+        end
+
+        def erase_shape_facets(shape)
+          HashShape.new(shape.pairs.transform_values { |value| erase_facets(value) },
+                        required_keys: shape.required_keys, optional_keys: shape.optional_keys,
+                        read_only_keys: shape.read_only_keys, extra_keys: shape.extra_keys)
         end
 
         # Drops every member another member already contains, so the join after a guard names one set

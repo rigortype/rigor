@@ -112,7 +112,7 @@ interface Manifest {
   bundler: string;
 }
 
-interface RubyCandidate {
+export interface RubyCandidate {
   ruby: string;
   bundler: string;
   version: string;
@@ -348,9 +348,10 @@ const RUBY_PROBE = [
  * then `ruby` on PATH, then the version managers' install directories.
  * A prerelease (`4.1.0.preview1`, `4.1.0.dev`) satisfies the gemspec's
  * `< 4.1` by RubyGems' rules, so it qualifies only as the named
- * `rubyPath`. `skip` holds the real paths of Rubies already tried.
+ * `rubyPath`. `skip` holds the real paths of Rubies already tried. The
+ * pinned bundle (`resolve.ts`) runs under the Ruby this finds, too.
  */
-async function findRuby(
+export async function findRuby(
   output: OutputChannel,
   skip: ReadonlySet<string> = new Set(),
 ): Promise<RubyCandidate | undefined> {

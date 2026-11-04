@@ -18,6 +18,8 @@ export interface ProbeResult {
   notFound?: boolean;
   /** True when a version was found but is older than MIN_VERSION. */
   tooOld?: boolean;
+  /** Why a failed probe failed: the first stderr line, or the error. */
+  detail?: string;
 }
 
 function compareSemver(a: string, b: string): number {
@@ -50,10 +52,22 @@ export function probeServer(
         windowsHide: true,
         shell,
       },
-      (error, stdout) => {
+      (error, stdout, stderr) => {
         if (error) {
           const code = (error as NodeJS.ErrnoException).code;
-          resolve({ ok: false, notFound: code === "ENOENT" });
+          const firstErr = String(stderr)
+            .split("\n")
+            .map((l) => l.trim())
+            .find((l) => l !== "");
+          resolve({
+            ok: false,
+            notFound: code === "ENOENT",
+            detail:
+              code === "ENOENT"
+                ? "not found"
+                : firstErr ??
+                  (typeof code === "number" ? `exit ${code}` : error.message),
+          });
           return;
         }
         const match = /\b(\d+\.\d+\.\d+)\b/.exec(stdout);

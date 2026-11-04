@@ -63,6 +63,25 @@ the extension is versioned independently of the `rigortype` gem.
   and tries the next one once when the build fails because the Ruby
   cannot load OpenSSL (never for a named `rubyPath`); a `mise install ruby@4.0` in progress finishes when the window
   closes.
+- One discovery path for the language server, the `rigor: check` task
+  and every CLI-backed command (#2748): each candidate is probed with
+  `rigor version` in order, and one that exists but does not run is
+  rejected for the next one (every `rigor` on `PATH` in turn, each mise
+  or asdf shim, then the managed Rigor). The output channel logs each
+  rejected candidate and why, and the not-found message lists them. An
+  explicit `rigor.server.path` that fails is reported, never replaced,
+  and a `rigor` that runs but is too old gets the upgrade warning. The
+  result is kept per folder until a restart, a settings change, or a
+  change to the project's or the pinned bundle's lockfile.
+- The pinned bundle (ADR-27 WD9, #2750): when `.github/rigor/Gemfile.lock`
+  pins `rigortype`, the extension runs `bundle exec rigor` with
+  `BUNDLE_GEMFILE` set to `.github/rigor/Gemfile`, from the project root,
+  under the first Ruby 4.0 with Bundler that the managed runtime's search
+  finds (falling back to `bundle` on `PATH`). It comes after the
+  project's own `Gemfile.lock` and before `PATH`; the kind shows as
+  `pinned-bundle`. A folder with only that pin is managed. New setting
+  `rigor.server.bundleGemfile` for another location, which
+  `rigor.server.useBundler: always` also uses.
 - Background update checks for the managed Rigor (#2746):
   `rigor.runtime.autoUpdate` (on by default) and
   `rigor.runtime.updateCheckIntervalHours` (24). While a folder runs it

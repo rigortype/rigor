@@ -35,18 +35,24 @@ import {
   StreamMessageWriter,
 } from "vscode-languageclient/node";
 import {
-  ResolvedServer,
+  displayCommand,
+  lockfileFor,
   lspArgs,
-  managedReachable,
+  pinnedBundleGemfile,
   projectRoot,
-  resolveServer,
   shouldManageFolder,
   useShell,
 } from "./discovery";
+import {
+  Resolution,
+  describeCandidate,
+  forgetResolutions,
+  resolveRigor,
+} from "./resolve";
 import { clearRuleCache, registerCommands } from "./commands";
 import { killTree } from "./kill";
 import { killAllCli, shellInvocation } from "./proc";
-import { MIN_VERSION, ProbeResult, probeServer } from "./probe";
+import { MIN_VERSION } from "./probe";
 import {
   INSTALL_GUIDE_URL,
   initRuntime,
@@ -66,9 +72,12 @@ const SERVER_AFFECTING_SETTINGS = [
   "rigor.rootDir",
   "rigor.server.path",
   "rigor.server.useBundler",
+  "rigor.server.bundleGemfile",
   "rigor.server.configPath",
   "rigor.server.logPath",
   "rigor.runtime.version",
+  // The pinned bundle runs under the Ruby this setting names.
+  "rigor.runtime.rubyPath",
 ];
 
 /** How long `stop()` may take before the process is killed. */
@@ -128,7 +137,7 @@ const clients = new Map<string, ManagedClient>();
  * not repeated on every sync but a changed setting is explained again.
  */
 const explained = new Map<string, string>();
-/** Whether the fall-through-to-managed notice was shown this session. */
+/** Whether the fall-through notice was shown this session. */
 let fallThroughShown = false;
 /** Folders whose probe failure was already reported since the last restart. */
 const probeFailureReported = new Set<string>();
@@ -142,6 +151,9 @@ let lifecycle: Promise<void> = Promise.resolve();
 /** Set by `deactivate`: no sync, start or spawn runs after it. */
 let shuttingDown = false;
 let syncTimer: NodeJS.Timeout | undefined;
+let pinTimer: NodeJS.Timeout | undefined;
+/** Folders whose pin lockfile changed since the last pin re-sync. */
+const pinChanged = new Set<string>();
 
 function enqueue(task: () => Promise<void>): Promise<void> {
   const run = lifecycle.then(() => (shuttingDown ? undefined : task()));
@@ -159,7 +171,7 @@ export function activate(context: ExtensionContext): void {
   outputChannel = window.createOutputChannel("Rigor");
   statusBar = new StatusBar();
   context.subscriptions.push(outputChannel, statusBar);
-  registerTasks(context);
+  registerTasks(context, outputChannel);
   initRuntime(context);
   registerRuntimeCommands(context, outputChannel, afterManagedInstall, (task) =>
     enqueue(async () => {
@@ -209,6 +221,7 @@ export function activate(context: ExtensionContext): void {
     configWatcher.onDidCreate(scheduleSync),
     configWatcher.onDidDelete(scheduleSync),
     { dispose: () => syncTimer && clearTimeout(syncTimer) },
+    ...watchPins(),
     workspace.onDidChangeWorkspaceFolders(() => void syncClients()),
     workspace.onDidChangeConfiguration((e) => onConfigChange(e)),
     workspace.onDidGrantWorkspaceTrust(() => void syncClients()),
@@ -226,6 +239,9 @@ export async function deactivate(): Promise<void> {
   if (syncTimer) {
     clearTimeout(syncTimer);
   }
+  if (pinTimer) {
+    clearTimeout(pinTimer);
+  }
   await Promise.all(
     [...clients.keys()].map((key) => stopClient(key, SHUTDOWN_STOP_MS, 0)),
   );
@@ -240,6 +256,7 @@ function syncClients(): Promise<void> {
 function restartAll(): Promise<void> {
   return enqueue(async () => {
     probeFailureReported.clear();
+    forgetResolutions();
     clearRuleCache();
     await stopAllNow();
     await syncClientsNow();
@@ -301,37 +318,12 @@ async function startClient(folder: WorkspaceFolder): Promise<void> {
   const root = projectRoot(folder) ?? folder.uri.fsPath;
   const label = folderLabel(folder, root);
 
-  let server = resolveServer(folder);
-  statusBar.update(key, { label, state: "starting", kind: server.kind });
+  statusBar.update(key, { label, state: "starting" });
 
-  let probe = await probeServer(server, root);
-  // A `rigor` on PATH or a shim that exists but does not run would hide
-  // an installed managed Rigor behind it for good: fall through to it.
-  // Not for a `rigor` that runs but is too old: that one gets the
-  // upgrade warning, since it is the user's own install.
-  if (
-    !probe.ok &&
-    !probe.tooOld &&
-    server.kind !== "managed" &&
-    managedReachable(server.kind, root)
-  ) {
-    const fallback = managedServer();
-    if (fallback && !shuttingDown) {
-      const fallbackProbe = await probeServer(fallback, root);
-      if (fallbackProbe.ok) {
-        const note = `\`${server.command}\` (${server.kind}) did not run in ${label}, so the managed Rigor serves it.`;
-        outputChannel.appendLine(`[rigor] ${note}`);
-        if (!fallThroughShown) {
-          fallThroughShown = true;
-          void window.showInformationMessage(`Rigor: ${note}`);
-        }
-        server = fallback;
-        probe = fallbackProbe;
-      }
-    }
-  }
+  const resolution = await resolveRigor(folder, outputChannel);
+  const { server, probe } = resolution;
   const args = lspArgs(server, folder);
-  const commandLine = [server.command, ...args].join(" ");
+  const commandLine = displayCommand(server, args);
   if (!probe.ok) {
     statusBar.update(key, {
       label,
@@ -339,14 +331,23 @@ async function startClient(folder: WorkspaceFolder): Promise<void> {
       kind: server.kind,
       version: probe.version,
     });
-    logStartup(label, root, server, commandLine, probe.version, "failed");
+    logStartup(label, root, resolution, commandLine, "failed");
     // A config-file watcher or folder change re-syncs often; say it once
     // until the user restarts or the probe passes.
     if (!probeFailureReported.has(key)) {
       probeFailureReported.add(key);
-      reportProbeFailure(server, probe, label, root);
+      reportProbeFailure(resolution, label);
     }
     return;
+  }
+  if (resolution.rejected.length > 0) {
+    // A `rigor` that exists but does not run would otherwise hide every
+    // later candidate for good (#2748); say once which one serves instead.
+    const note = `${describeCandidate(resolution.rejected[0].server)} did not run in ${label}, so ${describeCandidate(server)} serves it.`;
+    if (!fallThroughShown) {
+      fallThroughShown = true;
+      void window.showInformationMessage(`Rigor: ${note}`);
+    }
   }
   probeFailureReported.delete(key);
   if (shuttingDown) {
@@ -538,7 +539,7 @@ async function startClient(folder: WorkspaceFolder): Promise<void> {
       commandLine,
     };
     statusBar.update(key, running);
-    logStartup(label, root, server, commandLine, probe.version, "running");
+    logStartup(label, root, resolution, commandLine, "running");
   } catch (err) {
     statusBar.update(key, {
       label,
@@ -683,7 +684,8 @@ async function explainUnmanaged(folder: WorkspaceFolder): Promise<void> {
     } else if (!fs.existsSync(root)) {
       problem = "does not exist.";
     } else {
-      problem = "has no .rigor.yml or .rigor.dist.yml (and Gemfile.lock does not pin rigortype).";
+      problem =
+        "has no .rigor.yml or .rigor.dist.yml (and neither Gemfile.lock nor the pinned bundle's lockfile pins rigortype).";
     }
     if (explained.get(key) !== `rootDir:${rootDir}`) {
       explained.set(key, `rootDir:${rootDir}`);
@@ -755,35 +757,47 @@ async function explainUnmanaged(folder: WorkspaceFolder): Promise<void> {
   }
 }
 
-function reportProbeFailure(
-  server: ResolvedServer,
-  probe: ProbeResult,
-  label: string,
-  root: string,
-): void {
+function reportProbeFailure(resolution: Resolution, label: string): void {
+  const { server, probe } = resolution;
   if (probe.tooOld) {
     void window.showWarningMessage(
-      `Rigor: ${label} has rigortype ${probe.version}, but the extension ` +
-        `needs >= ${MIN_VERSION} (the version that ships \`rigor lsp\`). ` +
-        `Update the gem, then run "Rigor: Restart Server".`,
+      `Rigor: ${label} has rigortype ${probe.version} (${describeCandidate(server)}), ` +
+        `but the extension needs >= ${MIN_VERSION} (the version that ships ` +
+        `\`rigor lsp\`). Update the gem, then run "Rigor: Restart Server".`,
     );
     return;
   }
 
   const guide = "Installation guide";
   // The managed install is offered only where discovery would fall
-  // through to it: no explicit path, no Bundler, no project pin (ADR-27
-  // WD9). When one is installed and still failed, offer to repair it.
-  const offerManaged = managedReachable(server.kind, root);
+  // through to it: no explicit path, no `useBundler: always`, no project
+  // pin (ADR-27 WD9). When one is installed and still failed, offer to
+  // repair it.
+  const offerManaged = resolution.managedReachable;
   const repair = offerManaged && managedServer() !== undefined;
   const managed = repair ? "Repair Managed Rigor" : "Install Rigor for this editor";
   const choices = offerManaged ? [managed, guide] : [guide];
+  const tried =
+    resolution.rejected.length > 0
+      ? " Tried: " +
+        resolution.rejected
+          .map((r) => `${describeCandidate(r.server)}: ${r.reason}`)
+          .join("; ") +
+        "."
+      : "";
+  const lead =
+    server.kind === "explicit"
+      ? `"rigor.server.path" is \`${server.command}\`, which did not run in ${label}.` +
+        tried +
+        ' Fix the setting, then run "Rigor: Restart Server".'
+      : `could not run Rigor in ${label}.` +
+        (resolution.rejected.length > 0 ? tried : " No `rigor` was found.") +
+        " Install Rigor so `rigor` is on `PATH` (`mise use gem:rigortype` " +
+        "is the recommended setup), or set `rigor.server.path` to the " +
+        'executable, then run "Rigor: Restart Server".';
   void window
     .showErrorMessage(
-      `Rigor: could not run \`${server.command}\` in ${label}. ` +
-        "Install Rigor so `rigor` is on `PATH` (`mise use gem:rigortype` " +
-        "is the recommended setup), or set `rigor.server.path` to the " +
-        'executable, then run "Rigor: Restart Server".' +
+      `Rigor: ${lead}` +
         (repair
           ? " The managed Rigor did not run either; repairing reinstalls it."
           : offerManaged
@@ -818,19 +832,78 @@ async function afterManagedInstall(): Promise<void> {
 function logStartup(
   label: string,
   root: string,
-  server: ResolvedServer,
+  resolution: Resolution,
   commandLine: string,
-  version: string | undefined,
   outcome: string,
 ): void {
+  const { server, probe } = resolution;
   outputChannel.appendLine(
     [
       `[rigor] ${label}: ${outcome}`,
-      `  extension ${extensionVersion} · rigortype ${version ?? "unknown"} · ${server.kind}`,
+      `  extension ${extensionVersion} · rigortype ${probe.version ?? "unknown"} · ${server.kind}`,
       `  root: ${root}`,
       `  command: ${commandLine}`,
+      ...resolution.rejected.map(
+        (r) => `  rejected: ${describeCandidate(r.server)}: ${r.reason}`,
+      ),
     ].join("\n"),
   );
+}
+
+/**
+ * Re-resolve a folder when a lockfile that can pin rigortype for it (the
+ * project's `Gemfile.lock`, the pinned bundle's) is created, changed or
+ * deleted: which `rigor` serves it may change, and the server, the task
+ * and the commands must keep running the same one.
+ */
+function watchPins(): Disposable[] {
+  const watcher = workspace.createFileSystemWatcher("**/{Gemfile.lock,gems.locked}");
+  const onPin = (uri: Uri): void => {
+    if (shuttingDown) {
+      return;
+    }
+    for (const folder of workspace.workspaceFolders ?? []) {
+      const root = projectRoot(folder);
+      if (!root) {
+        continue;
+      }
+      const locks = [
+        path.join(root, "Gemfile.lock"),
+        lockfileFor(pinnedBundleGemfile(folder, root).gemfile),
+      ];
+      if (locks.includes(uri.fsPath)) {
+        pinChanged.add(folder.uri.toString());
+      }
+    }
+    if (pinChanged.size === 0) {
+      return;
+    }
+    if (pinTimer) {
+      clearTimeout(pinTimer);
+    }
+    pinTimer = setTimeout(() => {
+      pinTimer = undefined;
+      const keys = [...pinChanged];
+      pinChanged.clear();
+      void enqueue(async () => {
+        for (const folder of workspace.workspaceFolders ?? []) {
+          const key = folder.uri.toString();
+          if (keys.includes(key)) {
+            forgetResolutions(folder);
+            probeFailureReported.delete(key);
+            await stopClient(key);
+          }
+        }
+        await syncClientsNow();
+      });
+    }, SYNC_DEBOUNCE_MS);
+  };
+  return [
+    watcher,
+    watcher.onDidCreate(onPin),
+    watcher.onDidChange(onPin),
+    watcher.onDidDelete(onPin),
+  ];
 }
 
 function showServerVersion(): void {

@@ -1,5 +1,5 @@
 // `rigor check` as a VS Code task. The task runs the same `rigor` that the
-// language server resolves (`resolveServer`), from the same project root,
+// language server resolves (`resolveRigor`), from the same project root,
 // and its text output is matched by the `$rigor` problem matcher that
 // package.json contributes. The problems it reports carry `source: "rigor"`,
 // the same source as the server's diagnostics.
@@ -7,6 +7,7 @@
 import {
   Disposable,
   ExtensionContext,
+  OutputChannel,
   ProcessExecution,
   QuickPickItem,
   ShellExecution,
@@ -22,10 +23,10 @@ import {
 import {
   configArgs,
   projectRoot,
-  resolveServer,
   shouldManageFolder,
   useShell,
 } from "./discovery";
+import { resolveRigor } from "./resolve";
 
 const TASK_TYPE = "rigor";
 const TASK_SOURCE = "rigor";
@@ -42,8 +43,14 @@ function definedEnv(env: NodeJS.ProcessEnv): Record<string, string> {
 }
 
 /** The `rigor check` task for one managed folder. */
-function checkTask(folder: WorkspaceFolder, label: string): Task {
-  const server = resolveServer(folder);
+async function checkTask(
+  folder: WorkspaceFolder,
+  label: string,
+  output: OutputChannel,
+): Promise<Task> {
+  // When nothing passes the probe, the task still runs the candidate the
+  // server reports, so the failure shows in the terminal.
+  const { server } = await resolveRigor(folder, output);
   const root = projectRoot(folder) ?? folder.uri.fsPath;
   const args = [...server.prefixArgs, "check", ...configArgs(folder)];
   const definition: TaskDefinition = { type: TASK_TYPE, command: "check" };
@@ -74,17 +81,22 @@ function checkTask(folder: WorkspaceFolder, label: string): Task {
  * workspace, as the language server does.
  */
 class RigorCheckTaskProvider implements TaskProvider {
-  provideTasks(): Task[] {
+  constructor(private readonly output: OutputChannel) {}
+
+  async provideTasks(): Promise<Task[]> {
     if (!workspace.isTrusted) {
       return [];
     }
     const folders = (workspace.workspaceFolders ?? []).filter((folder) =>
       shouldManageFolder(folder),
     );
-    return folders.map((folder) =>
-      checkTask(
-        folder,
-        folders.length > 1 ? `check (${folder.name})` : "check",
+    return Promise.all(
+      folders.map((folder) =>
+        checkTask(
+          folder,
+          folders.length > 1 ? `check (${folder.name})` : "check",
+          this.output,
+        ),
       ),
     );
   }
@@ -156,10 +168,13 @@ async function checkWorkspace(): Promise<void> {
  * Register the `rigor` task provider and the `Rigor: Check Workspace`
  * command. Called once from `activate`.
  */
-export function registerTasks(context: ExtensionContext): void {
+export function registerTasks(
+  context: ExtensionContext,
+  output: OutputChannel,
+): void {
   const provider: Disposable = tasks.registerTaskProvider(
     TASK_TYPE,
-    new RigorCheckTaskProvider(),
+    new RigorCheckTaskProvider(output),
   );
   context.subscriptions.push(
     provider,

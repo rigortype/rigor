@@ -71,13 +71,19 @@
             "never"
           ],
           "enumDescriptions": [
-            "Use `bundle exec rigor` when a Gemfile.lock pinning `rigortype` is found.",
-            "Always use `bundle exec rigor`.",
+            "Use `bundle exec rigor` when the project's Gemfile.lock, or the pinned bundle's (`.github/rigor/Gemfile.lock`, or `rigor.server.bundleGemfile`), pins `rigortype`.",
+            "Always use `bundle exec rigor`: with `rigor.server.bundleGemfile` when it is set, else with the project's Gemfile. Nothing else is tried.",
             "Never use Bundler; run `rigor` from PATH."
           ],
           "default": "auto",
           "scope": "resource",
           "description": "How to resolve the rigor executable relative to Bundler."
+        },
+        "rigor.server.bundleGemfile": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "markdownDescription": "Gemfile of a pinned bundle that holds only Rigor, relative to the project root (`#rigor.rootDir#`). The server then runs `bundle exec rigor` with `BUNDLE_GEMFILE` set to it. Leave empty to use `.github/rigor/Gemfile` when its lockfile pins `rigortype`."
         },
         "rigor.server.configPath": {
           "type": "string",

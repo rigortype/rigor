@@ -44,21 +44,53 @@ Ruby syntax highlighting — keep your existing Ruby grammar extension.
 
 ## Server discovery
 
-For each workspace folder the extension resolves the `rigor`
-executable in this order:
+For each workspace folder the extension tries these candidates in
+order and uses the first whose `rigor version` runs. The language
+server, the `rigor: check` task and every CLI-backed command use that
+same one.
 
-1. `rigor.server.path`, if set — explicit path / command.
-2. `bundle exec rigor`, when `rigor.server.useBundler` allows it and a
-   `Gemfile.lock` pinning `rigortype` is found (`auto`, the default).
-3. `rigor` from `PATH`.
-4. A `mise` or `asdf` shim — when `rigor` is not on `PATH`, the
-   extension looks for a runtime-version-manager shim (e.g.
-   `~/.local/share/mise/shims/rigor`) and uses it directly.
+1. `rigor.server.path`, if set — explicit path / command. When it
+   fails, the extension says so and tries nothing else.
+2. `bundle exec rigor`, when the project's `Gemfile.lock` pins
+   `rigortype` (`rigor.server.useBundler: auto`, the default).
+3. The **pinned bundle** — `bundle exec rigor` with `BUNDLE_GEMFILE`
+   set to `.github/rigor/Gemfile` (or `rigor.server.bundleGemfile`),
+   when its lockfile pins `rigortype`. See below.
+4. Every `rigor` on `PATH`, in `PATH` order.
+5. A `mise` or `asdf` shim (e.g. `~/.local/share/mise/shims/rigor`),
+   used directly.
+6. The **managed Rigor**, when you installed one — see below.
 
-5. The **managed Rigor**, when you installed one — see below.
+`rigor.server.useBundler: always` makes 2 the only candidate, or 3
+when `rigor.server.bundleGemfile` is set; `never` skips 2 and 3. A
+candidate that exists but does not run (an rbenv shim whose Ruby lacks
+the gem, a broken script) is rejected for the next one; the output
+channel logs each rejected candidate and why. A `rigor` that runs but
+is older than 0.1.6 stops the search with an upgrade warning. The
+result is kept until **Rigor: Restart Server**, a settings change, or
+a change to the project's or the pinned bundle's lockfile, which
+restarts that folder's server.
 
-If none works, the extension shows an actionable message and stays
-loaded — fix the setup and run **Rigor: Restart Server**.
+If none works, the extension shows an actionable message listing the
+candidates it tried and stays loaded — fix the setup and run
+**Rigor: Restart Server**.
+
+### The pinned bundle
+
+A Rigor-only `Gemfile` and lockfile committed at `.github/rigor/` (the
+manual's
+[pinned bundle](https://github.com/rigortype/rigor/blob/master/docs/manual/01-installation.md#secondary--a-pinned-bundle))
+is enough for the extension to manage the folder and run it, kind
+`pinned-bundle`. It runs from the project root, with `BUNDLE_GEMFILE`
+set to the Gemfile's absolute path, as `<ruby> <bundle> exec rigor`
+under the first Ruby 4.0 with Bundler found the way the managed Rigor
+finds one (`rigor.runtime.rubyPath`, `ruby` on `PATH`, the version
+managers' install directories), so the project's own Ruby does not
+have to be 4.0. When that does not run, `bundle exec rigor` from
+`PATH` is tried with the same `BUNDLE_GEMFILE`. Install the bundle
+under that Ruby first (`BUNDLE_GEMFILE=.github/rigor/Gemfile bundle
+install`). Set `rigor.server.bundleGemfile` (relative to the project
+root) for a bundle somewhere else.
 
 ### The managed Rigor (first-time setup)
 
@@ -138,8 +170,8 @@ files and fail until those windows restart them.
 gem:rigortype` (see the manual's
 [Installing Rigor](https://github.com/rigortype/rigor/blob/master/docs/manual/01-installation.md)
 chapter). A GUI-launched VS Code does not inherit the shell `PATH`
-that `mise activate` sets up, so step 3 above often misses a
-mise-managed `rigor` — step 4 covers that automatically by finding
+that `mise activate` sets up, so step 4 above often misses a
+mise-managed `rigor` — step 5 covers that automatically by finding
 the shim, a stable self-contained executable. `asdf` shims
 (`~/.asdf/shims/rigor`) are detected the same way.
 
@@ -161,6 +193,7 @@ Use an absolute path — the setting is not `~`-expanded.
 | `rigor.rootDir` | `""` | Relative subdirectory holding the Rigor project (such as `api`). Empty uses the folder itself; an absolute path is rejected. |
 | `rigor.server.path` | `""` | Explicit `rigor` executable path. |
 | `rigor.server.useBundler` | `auto` | `auto` / `always` / `never`. |
+| `rigor.server.bundleGemfile` | `""` | Gemfile of a pinned bundle, relative to the project root. Empty uses `.github/rigor/Gemfile` when its lockfile pins `rigortype`. |
 | `rigor.server.configPath` | `""` | Passed as `--config=PATH`. |
 | `rigor.server.logPath` | `""` | Passed as `--log=PATH`. |
 | `rigor.runtime.version` | `latest` | `rigortype` version of the managed Rigor; `latest` resolves the newest release on rubygems.org. |

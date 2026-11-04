@@ -32,9 +32,15 @@ require "prism"
 RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
   def covered_files
     %w[
+      lib/rigor/analysis/dependency_recorder.rb
+      lib/rigor/analysis/self_call_resolution_recorder.rb
+      lib/rigor/effects/collector.rb
+      lib/rigor/inference/budget_trace.rb
       lib/rigor/inference/expression_typer.rb
+      lib/rigor/inference/flow_tracer.rb
       lib/rigor/inference/key_presence_guard.rb
       lib/rigor/inference/loop_value_record.rb
+      lib/rigor/inference/memo_audit.rb
       lib/rigor/inference/reflective_ivar_write.rb
       lib/rigor/inference/scope_indexer/declared_param_writes.rb
       lib/rigor/inference/statement_evaluator.rb
@@ -43,7 +49,9 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
   end
 
   # `[file, rule, name] => [count, reason]`.
-  def allow_list
+  def allow_list = typing_state_rows.merge(process_switch_rows)
+
+  def typing_state_rows
     state = "lib/rigor/typing_state.rb"
     typer = "lib/rigor/inference/expression_typer.rb"
     evaluator = "lib/rigor/inference/statement_evaluator.rb"
@@ -57,6 +65,36 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
       [typer, :table_access, "dynamic_origins"] => [1, stage2],
       [evaluator, :table_access, "dynamic_origins"] => [2, stage2]
     }
+  end
+
+  # The process counters and switches ADR-129 WD5 names, which are never read back into a type.
+  def process_switch_rows
+    budget = "lib/rigor/inference/budget_trace.rb"
+    counters = "BudgetTrace's process counters (ADR-129 WD5), never read back into a type"
+    {
+      [budget, :module_ivar_write, "@enabled"] => [3, "BudgetTrace's process switch (ADR-129 WD5)"],
+      [budget, :module_ivar_write, "@mutex"] => [1, "guards BudgetTrace's process counters"],
+      [budget, :module_ivar_write, "@counts"] => [1, counters],
+      [budget, :module_ivar_mutation, "@counts"] => [2, counters],
+      [budget, :module_ivar_write, "@distributions"] => [1, counters],
+      [budget, :module_ivar_mutation, "@distributions"] => [1, counters],
+      [budget, :module_ivar_write, "@distinct_seen"] => [1, counters],
+      [budget, :module_ivar_mutation, "@distinct_seen"] => [1, counters],
+      ["lib/rigor/inference/memo_audit.rb", :module_ivar_write, "@enabled"] =>
+        [3, "MemoAudit's process switch (ADR-129 WD5)"]
+    }.merge(activation_count_rows)
+  end
+
+  # A switch whose activation count keeps the disabled path an integer read (ADR-129 WD5), and the mutex guarding it.
+  def activation_count_rows
+    switch = "a process switch (ADR-129 WD5): the activation count keeps the disabled path an integer read"
+    %w[
+      lib/rigor/inference/flow_tracer.rb lib/rigor/effects/collector.rb lib/rigor/analysis/dependency_recorder.rb
+      lib/rigor/analysis/self_call_resolution_recorder.rb
+    ].each_with_object({}) do |file, rows|
+      rows[[file, :module_ivar_write, "@active_count"]] = [3, switch]
+      rows[[file, :module_ivar_write, "@mutex"]] = [1, "guards the activation count"]
+    end
   end
 
   def table_readers = %i[dynamic_origins void_origins plugin_typed_calls optimistic_origins]

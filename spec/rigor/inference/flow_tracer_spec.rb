@@ -59,6 +59,6 @@ RSpec.describe Rigor::Inference::FlowTracer do
   it "restores the previous recorder and deactivates after the block" do
     described_class.record { expect(described_class.active?).to be(true) }
     expect(described_class.active?).to be(false)
-    expect(Thread.current[:__rigor_flow_tracer__]).to be_nil
+    expect(typing_slot(:flow_tracer)).to be_nil
   end
 end

@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "../typing_state"
+
 module Rigor
   module Analysis
     # ADR-46 slice 1 — records, per analyzed file, which OTHER source files its analysis read declarations /
@@ -12,9 +14,15 @@ module Rigor
     #
     # Modelled on {Inference::BudgetTrace}: process-thread-local state, a cheap disabled fast path, and a
     # frozen snapshot for consumers.
-    module DependencyRecorder
-      KEY = :__rigor_dependency_recorder__
-      private_constant :KEY
+    module DependencyRecorder # rubocop:disable Metrics/ModuleLength
+      # ADR-129 WD1 — the installed accumulator is a Frame whose contents are a Resource: each read files into it and
+      # touches. The `type_of` memo stays shut while recording runs (WD4). The activation count below is a process
+      # switch, outside the typing state (WD5).
+      RECORDER = TypingState.frame(
+        :dependency_recorder,
+        contents: :resource, reason: "the consumer's accumulator a recording installs; each read files into it"
+      )
+      private_constant :RECORDER
 
       # ADR-84 WD2 — thread-local Array of active {Capture}s (nil when none). A capture observes-and-forwards:
       # every read recorded while it is active flows into the current consumer's accumulator exactly as before
@@ -27,8 +35,10 @@ module Rigor
       # each outer one's: the inner capture was pushed after the outer, and everything added since reached both.
       # {withhold} swaps in a fresh stack and restores this one untouched, so it keeps the property too.
       # {tee_read} and {tee_missing} rely on it to stop at the first capture that already holds an event.
-      CAPTURE_KEY = :__rigor_dependency_capture_stack__
-      private_constant :CAPTURE_KEY
+      CAPTURES = TypingState.resource(
+        :dependency_capture_stack, reason: "the open capture windows, pushed per window and swapped by withhold"
+      )
+      private_constant :CAPTURES
 
       # The read sets an {Accumulator} or {Capture} already holds in full, by identity: replayed into it, or
       # captured by a window it saw every event of ({capture}). Both only ever grow and a {ReadSet} is frozen,
@@ -154,16 +164,22 @@ module Rigor
       # the frozen {Record}. Nests safely (the inner consumer's reads do not leak to the outer one); restores
       # the previous recorder on exit.
       def record_for(consumer)
-        previous = Thread.current[KEY]
-        previous&.suspend!
+        state = TypingState.current
+        previous = state[RECORDER]
+        if previous
+          state.touch(RECORDER)
+          previous.suspend!
+        end
         accumulator = Accumulator.new(consumer.to_s)
-        Thread.current[KEY] = accumulator
-        @mutex.synchronize { @active_count += 1 }
-        yield
-        accumulator.snapshot
-      ensure
-        Thread.current[KEY] = previous
-        @mutex.synchronize { @active_count -= 1 }
+        state.with(RECORDER, accumulator) do
+          @mutex.synchronize { @active_count += 1 }
+          begin
+            yield
+            accumulator.snapshot
+          ensure
+            @mutex.synchronize { @active_count -= 1 }
+          end
+        end
       end
 
       # Plain integer read (GVL-atomic) — no `Thread.current` lookup on the disabled fast path.
@@ -175,23 +191,25 @@ module Rigor
       # window. {active?} answers for the process and is the cheap gate; this is the exact one, for a caller
       # that must know whether an empty {capture} means "nothing to record" or "nothing was watching".
       def recording?
-        !Thread.current[KEY].nil?
+        !TypingState.current[RECORDER].nil?
       end
 
       # ADR-84 WD2 — runs the block under an observe-and-forward capture window and returns
       # `[block_result, read_set]`. Reads recorded during the window reach the current consumer's accumulator
       # unchanged (forwarding) and are additionally collected into the returned frozen {ReadSet} (observing),
-      # which {replay} can later apply to a different consumer. Nests (see CAPTURE_KEY). Callers guard on
+      # which {replay} can later apply to a different consumer. Nests (see CAPTURES). Callers guard on
       # {active?}; opening a capture with no accumulator active would collect reads no run is recording.
       def capture
-        captures = (Thread.current[CAPTURE_KEY] ||= [])
-        accumulator = Thread.current[KEY]
+        state = TypingState.current
+        captures = state.acquire(CAPTURES) { [] }
+        accumulator = state[RECORDER]
         suspensions = accumulator&.suspensions
         capture = Capture.new
         captures.push(capture)
         begin
           result = yield
         ensure
+          state.touch(CAPTURES)
           captures.pop
         end
         read_set = capture.snapshot
@@ -208,10 +226,13 @@ module Rigor
       def note_captured(read_set, captures, accumulator, suspensions)
         return if read_set.equal?(EMPTY_READ_SET)
 
+        state = TypingState.current
+        state.touch(CAPTURES)
         captures.last&.hold!(read_set)
-        return unless accumulator && Thread.current[KEY].equal?(accumulator)
+        return unless accumulator && state[RECORDER].equal?(accumulator)
         return unless accumulator.suspensions == suspensions
 
+        state.touch(RECORDER)
         accumulator.hold!(read_set)
       end
       private_class_method :note_captured
@@ -223,18 +244,19 @@ module Rigor
       # edge would make every correct call on a project class re-check on any edit to the class's files.
       # Returns a nil read set when no recording is active.
       def withhold
-        previous = Thread.current[KEY]
+        state = TypingState.current
+        previous = state[RECORDER]
         return [yield, nil] if previous.nil?
 
-        previous_captures = Thread.current[CAPTURE_KEY]
+        previous_captures = state.read(CAPTURES)
         capture = Capture.new
-        Thread.current[KEY] = Accumulator.new(previous.consumer)
-        Thread.current[CAPTURE_KEY] = [capture]
-        begin
-          result = yield
-        ensure
-          Thread.current[KEY] = previous
-          Thread.current[CAPTURE_KEY] = previous_captures
+        result = state.with(RECORDER, Accumulator.new(previous.consumer)) do
+          state.write(CAPTURES, [capture])
+          begin
+            yield
+          ensure
+            state.write(CAPTURES, previous_captures)
+          end
         end
         [result, capture.snapshot]
       end
@@ -243,10 +265,12 @@ module Rigor
       # here, applying the same per-consumer self-read filter as {read_site}, and tees into every active
       # capture so an enclosing capture window stays transitive when a memo hit substitutes for a body walk.
       def replay(read_set)
-        accumulator = Thread.current[KEY]
+        state = TypingState.current
+        accumulator = state[RECORDER]
         return if accumulator.nil? || read_set.nil? || read_set.equal?(EMPTY_READ_SET)
 
-        captures = Thread.current[CAPTURE_KEY]
+        state.touch(RECORDER)
+        captures = state.read(CAPTURES)
         tee_read_set(captures, read_set) if captures && !captures.empty?
         # Each set keeps its own insertion order whichever target is filled first, and a skipped replay is one
         # that could only have re-added what the target already holds.
@@ -265,15 +289,17 @@ module Rigor
       # #1590 — runs the block, which files a resolution chain's edges from entry `start` (nil: the root and the
       # whole chain) against `discovery`, unless the current consumer's accumulator AND the innermost open capture
       # already hold that filing; the block files the same edges every time, so skipping it there changes nothing.
-      # Every event reaches every capture open at the time (see CAPTURE_KEY), so the innermost capture holding the
+      # Every event reaches every capture open at the time (see CAPTURES), so the innermost capture holding the
       # filing means every open capture does. A filing the accumulator holds but a capture opened since does not is
       # filed again, so that capture's read set, replayed elsewhere, still carries it; and {withhold} starts a fresh
       # accumulator and capture, which hold nothing. The marks are made only once the block has run, as {hold!}'s are.
       def file_chain_once(chain, start, discovery)
-        accumulator = Thread.current[KEY]
+        state = TypingState.current
+        accumulator = state[RECORDER]
         return if accumulator.nil?
 
-        captures = Thread.current[CAPTURE_KEY]
+        state.touch(RECORDER)
+        captures = state.read(CAPTURES)
         open = captures && !captures.empty?
         if accumulator.chain_filed?(chain, start, discovery) &&
            (!open || captures.last.chain_filed?(chain, start, discovery))
@@ -286,7 +312,7 @@ module Rigor
       end
 
       # {replay}'s share for the open captures. The innermost capture having seen `read_set` already means every
-      # open capture holds all of it (see CAPTURE_KEY).
+      # open capture holds all of it (see CAPTURES).
       def tee_read_set(captures, read_set)
         innermost = captures.last
         return if innermost.holds?(read_set)
@@ -298,7 +324,7 @@ module Rigor
       private_class_method :tee_read_set
 
       # Adds a read pair to the open captures, innermost first, and stops at the first capture that already holds
-      # it: every capture outside that one holds it too (see CAPTURE_KEY). The capture sets end up exactly as
+      # it: every capture outside that one holds it too (see CAPTURES). The capture sets end up exactly as
       # adding it to every capture would leave them, in the same insertion order.
       def tee_read(captures, pair)
         index = captures.size - 1
@@ -321,13 +347,15 @@ module Rigor
       # (ADR-84 WD2) observe every valid-path read UNfiltered — the self-read filter is per-consumer and is
       # re-applied by {replay} against whichever consumer a replay serves.
       def read_site(path_line, symbol = nil)
-        accumulator = Thread.current[KEY]
+        state = TypingState.current
+        accumulator = state[RECORDER]
         return if accumulator.nil? || path_line.nil?
 
         path = site_path(path_line)
         return unless path
 
-        captures = Thread.current[CAPTURE_KEY]
+        state.touch(RECORDER)
+        captures = state.read(CAPTURES)
         tee_read(captures, [path, symbol].freeze) if captures && !captures.empty?
         return if path == accumulator.consumer
 
@@ -355,11 +383,13 @@ module Rigor
       # currently wins: a second declarer appearing in a file the reader has no edge to must drop the name to
       # `Dynamic` at that reader, and only a name-keyed edge can see it.
       def read_name(kind, name)
-        accumulator = Thread.current[KEY]
+        state = TypingState.current
+        accumulator = state[RECORDER]
         return if accumulator.nil?
 
         entry = "#{kind}:#{name}"
-        captures = Thread.current[CAPTURE_KEY]
+        state.touch(RECORDER)
+        captures = state.read(CAPTURES)
         tee_missing(captures, entry) if captures && !captures.empty?
         accumulator.missing.add(entry)
       end
@@ -370,7 +400,7 @@ module Rigor
       # objects a call over half a million calls. A name the scan could read differently from `split` (one
       # that is not ASCII, or carries a run of colons or a trailing one) takes `split`'s answer.
       def read_last_segment(kind, name)
-        return if Thread.current[KEY].nil?
+        return unless recording?
 
         segment = last_segment(name)
         read_name(kind, segment) if segment
@@ -394,10 +424,12 @@ module Rigor
       # {read_name} for prebuilt, frozen `"kind:name"` keys: a caller that files the same keys on every read
       # (a resolution chain's hook edges, #1641) builds them once and adds them here without a String apiece.
       def read_keys(keys)
-        accumulator = Thread.current[KEY]
+        state = TypingState.current
+        accumulator = state[RECORDER]
         return if accumulator.nil?
 
-        captures = Thread.current[CAPTURE_KEY]
+        state.touch(RECORDER)
+        captures = state.read(CAPTURES)
         open = captures && !captures.empty?
         missing = accumulator.missing
         keys.each do |entry|
@@ -412,7 +444,7 @@ module Rigor
       # the name private passes `"*"` as the class; the key fires when any entry of the name moves. A wildcard
       # slot (`[:singleton, :*]`) is `*` as the method name.
       def read_visibility(class_name, method_name)
-        return if Thread.current[KEY].nil?
+        return unless recording?
 
         read_name(:visibility, "#{class_name}##{method_name}")
       end

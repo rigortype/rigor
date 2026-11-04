@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "../typing_state"
+
 module Rigor
   module Inference
     # ADR-127 WD3 — the callee floor's memo audit. A memo hit is correct only when the key holds every input the value
@@ -15,7 +17,12 @@ module Rigor
       # A memo hit whose stored value differs from a fresh computation.
       class Mismatch < StandardError; end
 
-      SUSPENDED_KEY = :rigor_memo_audit_suspended
+      # ADR-129 WD1 — a Frame, installed around a recomputation. `@enabled` is a process switch, outside the typing
+      # state (WD5).
+      SUSPENDED = TypingState.frame(
+        :memo_audit_suspended, reason: "set around an audit recomputation, which bypasses every memo"
+      )
+      private_constant :SUSPENDED
 
       @enabled = %w[1 true].include?(ENV["RIGOR_MEMO_AUDIT"].to_s.downcase)
 
@@ -26,7 +33,7 @@ module Rigor
       # True while an audit recomputation runs on this thread. The callee floor's memos are then bypassed (read and
       # write), so the recomputation reads no stored entry of another memo: a defect shared across a table (a stale
       # `resolved_census(:edges)` entry) would otherwise make the recomputed value match the stored one.
-      def suspended? = Thread.current[SUSPENDED_KEY]
+      def suspended? = TypingState.current[SUSPENDED]
 
       def enable! = (@enabled = true)
 
@@ -35,7 +42,7 @@ module Rigor
       # `stored`, after checking it against `yield` when the audit is on. `label` and the key parts (`key`, `key2`) name
       # the memo entry in the failure; they are passed apart so an audit that is off allocates nothing.
       def check(label, stored, key, key2 = nil, &)
-        return stored unless @enabled && !Thread.current[SUSPENDED_KEY]
+        return stored unless @enabled && !TypingState.current[SUSPENDED]
 
         fresh = suspended(&)
         return stored if fresh == stored
@@ -44,11 +51,8 @@ module Rigor
                         "stored #{stored.inspect[0, 200]}, fresh #{fresh.inspect[0, 200]}"
       end
 
-      def suspended
-        Thread.current[SUSPENDED_KEY] = true
-        yield
-      ensure
-        Thread.current[SUSPENDED_KEY] = nil
+      def suspended(&)
+        TypingState.current.with(SUSPENDED, true, &)
       end
     end
   end

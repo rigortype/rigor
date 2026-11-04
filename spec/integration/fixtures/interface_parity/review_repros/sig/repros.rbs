@@ -1,0 +1,35 @@
+module Rigor
+  module Plugin
+    interface _ProbeA
+      def to_str: () -> String
+    end
+
+    interface _ProbeB
+      def to_s: () -> String
+    end
+
+    interface _ProbeInt
+      def to_int: () -> Integer
+    end
+
+    interface _ProbeEach
+      def each: () { (Integer) -> void } -> Array[Integer]
+    end
+  end
+end
+
+class Repros
+  def mul: (Array[Integer] arr, Rigor::Plugin::_ProbeInt x) -> untyped
+  def plus: (Rigor::Plugin::_ProbeInt x) -> untyped
+  def minus: (Rigor::Plugin::_ProbeInt x) -> untyped
+  def times: (Rigor::Plugin::_ProbeInt x) -> untyped
+  def pow: (Rigor::Plugin::_ProbeInt x) -> untyped
+  def rejoin_if: (Rigor::Plugin::_ProbeA x) -> untyped
+  def rejoin_case: (Rigor::Plugin::_ProbeA x) -> untyped
+  def r3: (Rigor::Plugin::_ProbeA a, Rigor::Plugin::_ProbeB b, bool f) -> untyped
+  def r3u: (Rigor::Plugin::_ProbeA a, untyped b, bool f) -> untyped
+  def each_with_index: (Rigor::Plugin::_ProbeEach xs) -> untyped
+  def mix: (Rigor::Plugin::_ProbeA a, String s, bool f) -> untyped
+  def facet: (Rigor::Plugin::_ProbeA x) -> untyped
+  def blockpass: (Rigor::Plugin::_ProbeEach xs, (^(Integer) -> void)? blk) -> untyped
+end

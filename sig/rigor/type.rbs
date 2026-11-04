@@ -56,8 +56,8 @@ module Rigor
     end
 
     class Dynamic
-      attr_reader static_facet: Type::t
-      def initialize: (Type::t static_facet) -> void
+      attr_reader static_facet: Type::t | Interface
+      def initialize: (Type::t | Interface static_facet) -> void
       def describe: (?Symbol verbosity) -> String
       def erase_to_rbs: () -> "untyped"
       def top: () -> Trinary
@@ -167,6 +167,11 @@ module Rigor
       def eql?: (untyped other) -> bool
       def hash: () -> Integer
       def inspect: () -> String
+    end
+
+    # ADR-130 — a `Rigor::Plugin` interface, carried only as a `Dynamic`'s facet (`Dynamic[Rigor::Plugin::_Scope]`), so
+    # it is not a member of `Type::t`. Declared for that name only; its members are read from the source.
+    class Interface
     end
 
     class Union
@@ -447,7 +452,7 @@ module Rigor
       def self?.bot: () -> Bot
       def self?.untyped: () -> Dynamic
       def self?.untyped?: (Type::t? type) -> bool
-      def self?.dynamic: (Type::t static_facet) -> Dynamic
+      def self?.dynamic: (Type::t | Interface static_facet) -> Dynamic
       def self?.nominal_of: (Module | String class_name_or_object, ?type_args: Array[Type::t]) -> Nominal
       def self?.singleton_of: (Module | String class_name_or_object) -> Singleton
       def self?.constant_of: (untyped value) -> Constant

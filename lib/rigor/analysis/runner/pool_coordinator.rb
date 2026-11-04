@@ -198,12 +198,16 @@ module Rigor
           @buffer.nil?
         end
 
-        # ADR-130 WD2 — `RbsTypeTranslator.with_interface_erasure` is a per-thread switch, which a Ractor worker would
-        # not see: a pooled run under it would analyse with the default engine and pass as the erasure baseline.
-        def refuse_pool_under_interface_erasure
-          return unless Rigor::Inference::RbsTypeTranslator.interface_erasure?
+        # ADR-130 WD2/WD5 — `RbsTypeTranslator.with_interface_erasure` and `RbsDispatch.without_interface_dispatch`
+        # are per-thread switches, which a Ractor worker would not see: a pooled run under either would analyse with
+        # the default engine and pass as the erasure baseline or the dispatch-off mode.
+        def refuse_pool_under_interface_switches
+          if Rigor::Inference::RbsTypeTranslator.interface_erasure?
+            raise ArgumentError, "RbsTypeTranslator.with_interface_erasure supports only a sequential run (workers: 0)"
+          end
+          return if Rigor::Inference::MethodDispatcher::RbsDispatch.interface_dispatch?
 
-          raise ArgumentError, "RbsTypeTranslator.with_interface_erasure supports only a sequential run (workers: 0)"
+          raise ArgumentError, "RbsDispatch.without_interface_dispatch supports only a sequential run (workers: 0)"
         end
 
         # ADR-15 Phase 4b — routes per-file analysis to either the sequential coordinator-side Environment
@@ -233,7 +237,7 @@ module Rigor
           source_files = project_files || files
           result =
             if pool_mode?
-              refuse_pool_under_interface_erasure
+              refuse_pool_under_interface_switches
               dispatch_pool(files, source_files: source_files)
             else
               environment ||= resolve_sequential_environment(source_files: source_files)

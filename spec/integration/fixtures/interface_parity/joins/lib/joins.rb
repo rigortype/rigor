@@ -41,7 +41,7 @@ class Joins
 
   # A call of a member the interface declares: the one row a dispatching carrier may change.
   def declared(a)
-    Rigor.dump_type(a.to_str) # parity: declared-member
+    Rigor.dump_type(a.to_str) # parity: declared-member => String
   end
 
   def put(set) = set.add(1)

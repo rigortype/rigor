@@ -1,9 +1,10 @@
 # ADR-130 — Plugin-interface values: member dispatch, and `untyped` everywhere else
 
-Status: **Accepted, 2026-11-04, ratified by the maintainer.** It is not implemented yet:
+Status: **Accepted, 2026-11-04, ratified by the maintainer.** Partly implemented:
 
-- slices 1a and 1b are pending;
-- #2686 is slice 2.
+- slice 1a landed in #2808;
+- slice 1b landed in #2815;
+- slice 2 (#2686) is pending.
 
 The ADR covers only part of #929's value half: values typed by the plugin-facing interfaces under
 `Rigor::Plugin`. Three things are deferred, each with a re-entry condition:
@@ -160,8 +161,9 @@ Otherwise the call reads `untyped`. The argument rules never check a call on a `
 nothing else would catch a shape mismatch. Without the rule, dispatch took whichever overload the
 selector's fallback picked, and that overload's return made the next call wrong.
 
-**A block-pass that may be nil matches both shapes.** This covers `&expr` where `expr` is a nil-bearing union
-or `Dynamic`. At runtime the call may be block-less, so the call answers only when two things hold:
+**A block-pass that may be nil matches both shapes.** This covers `&expr` where `expr` is any value not provably
+non-nil (amended in #2815: a `top` or `Object` value may be nil too). At runtime the call may be block-less, so the
+call answers only when two things hold:
 
 - both the block-ful and the block-less shape are taken;
 - their returns agree.

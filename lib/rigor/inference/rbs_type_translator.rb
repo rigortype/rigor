@@ -36,8 +36,9 @@ module Rigor
     #   `untyped`. `Type::Intersection` stays out of this path: it is the same-base refinement composite
     #   carrier, and the dispatch tiers do not accept it as a receiver.
     #
-    # Interface types still degrade to `Dynamic[Top]`; they are bound to acceptance and dispatch rules
-    # not yet implemented.
+    # Interface types degrade to `Dynamic[Top]`, except an interface in the `Rigor::Plugin` namespace, which
+    # translates to `Dynamic[Type::Interface]` (ADR-130 WD1/WD4): `untyped` to every rule, and resolvable only by a
+    # call of a member it declares (`RbsDispatch`).
     #
     # The optional `self_type:` and `instance_type:` arguments are the Rigor counterparts of RBS's
     # `self` and `instance` tokens:
@@ -78,7 +79,7 @@ module Rigor
         RBS::Types::Alias => :translate_alias,
         RBS::Types::Intersection => :translate_intersection,
         RBS::Types::Variable => :translate_variable,
-        RBS::Types::Interface => :translate_untyped
+        RBS::Types::Interface => :translate_interface
       }.freeze
       private_constant :TRANSLATORS
 
@@ -133,10 +134,9 @@ module Rigor
         # ADR-130 WD2 — the erasure baseline. Inside the block every RBS interface translates to `untyped`, as it did
         # before ADR-130, whatever carrier the default engine has; the behavioural parity gate
         # (`spec/integration/interface_parity_spec.rb`) runs its baseline here, so the baseline never comes from the
-        # default engine. Slice 1b's carrier reads {interface_erasure?}; until it lands every interface erases inside
-        # the block and outside it. A carrier that reads the switch must also key `@closed_alias_translations` on it,
-        # or bypass that memo, so a translation made in one mode is not served in the other (ADR-130 WD4). The switch
-        # is per thread, so a run under it is sequential: a pooled run raises (`PoolCoordinator`).
+        # default engine. {translate_interface} reads {interface_erasure?}, and {translate_alias} bypasses
+        # `@closed_alias_translations` under it, so a translation made in one mode is never served in the other (ADR-130
+        # WD4). The switch is per thread, so a run under it is sequential: a pooled run raises (`PoolCoordinator`).
         def with_interface_erasure
           previous = Thread.current.thread_variable_get(:rigor_interface_erasure)
           Thread.current.thread_variable_set(:rigor_interface_erasure, true)
@@ -168,6 +168,28 @@ module Rigor
 
         def translate_untyped(_rbs_type, _context)
           Type::Combinator.untyped
+        end
+
+        # ADR-130 WD4 — the namespace whose interfaces carry the facet: `::Rigor::Plugin::_Scope` and its siblings.
+        PLUGIN_INTERFACE_PATH = %i[Rigor Plugin].freeze
+        private_constant :PLUGIN_INTERFACE_PATH
+
+        # ADR-130 WD1/WD4 — a `Rigor::Plugin` interface is `Dynamic[Interface]`; every other interface, rbs core's
+        # conversion aliases (`int`, `string`, ...) included, is `untyped` as before. Which one is a pure function of
+        # the `TypeName` (its namespace path, read without allocating), so a closed alias translates alike whichever
+        # file or worker reaches it first. Under {with_interface_erasure} every interface is `untyped`.
+        def translate_interface(rbs_type, context)
+          name = rbs_type.name
+          return Type::Combinator.untyped unless name.namespace.path == PLUGIN_INTERFACE_PATH
+          return Type::Combinator.untyped if interface_erasure?
+
+          carrier =
+            if rbs_type.args.empty?
+              Type::Interface.new(relative_name(name))
+            else
+              Type::Interface.new(relative_name(name), rbs_type.args.map { |arg| translate_in(arg, context) })
+            end
+          Type::Combinator.dynamic(carrier)
         end
 
         def translate_nil(_rbs_type, _context)
@@ -271,8 +293,11 @@ module Rigor
           expanded = expander.expand_type_alias(rbs_type)
           return Type::Combinator.untyped if expanded.nil?
           # A nested expansion is translated under its parent's budget, and `rigor trace` records every
-          # union merge as it happens, so neither consults the memo.
-          return translate_in(expanded, context.deeper) unless context.alias_depth.zero? && !FlowTracer.active?
+          # union merge as it happens, so neither consults the memo. Nor does the erasure baseline (ADR-130 WD4): the
+          # memo holds the default engine's translations, where a `Rigor::Plugin` interface keeps its facet.
+          unless context.alias_depth.zero? && !FlowTracer.active? && !interface_erasure?
+            return translate_in(expanded, context.deeper)
+          end
 
           cached = @closed_alias_translations[expanded]
           return cached if cached

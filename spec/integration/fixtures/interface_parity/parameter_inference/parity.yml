@@ -1,0 +1,2 @@
+# Merged into the harness configuration: ADR-67's call-site parameter inference, which WD3 seeds only when enabled.
+parameter_inference: true

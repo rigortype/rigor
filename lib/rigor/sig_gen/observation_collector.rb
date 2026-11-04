@@ -56,8 +56,12 @@ module Rigor
         environment = build_environment(resolved)
         discovered_classes = preindex_source_classes
         observations = Hash.new { |h, k| h[k] = [] }
-        resolved.each do |path|
-          collect_from_file(path, environment, discovered_classes, observations)
+        # ADR-130 WD5 — with interface dispatch off, as {Generator#run} analyses: an argument read through a
+        # `Rigor::Plugin` interface member is not written into a parameter type either.
+        Inference::MethodDispatcher::RbsDispatch.without_interface_dispatch do
+          resolved.each do |path|
+            collect_from_file(path, environment, discovered_classes, observations)
+          end
         end
         observations.transform_values(&:freeze).freeze
       end

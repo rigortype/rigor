@@ -131,6 +131,14 @@ RSpec.describe Rigor::Inference::PrecisionScanner do
       expect(scanner.send(:classify, struct_instance)).to eq(:shaped)
       expect(scanner.send(:classify, bound)).to eq(:shaped)
     end
+
+    # ADR-130 WD2 — a `Rigor::Plugin` interface value is `untyped` to every reading but dispatch, this tier included.
+    it "classifies a plugin-interface value as dynamic_top, as untyped" do
+      value = Rigor::Type::Combinator.dynamic(Rigor::Type::Interface.new("Rigor::Plugin::_Scope"))
+      expect(scanner.send(:classify, value)).to eq(:dynamic_top)
+      expect(scanner.send(:classify, Rigor::Type::Combinator.dynamic(Rigor::Type::Combinator.nominal_of("String"))))
+        .to eq(:dynamic_specific)
+    end
   end
 
   describe "union and intersection classification" do

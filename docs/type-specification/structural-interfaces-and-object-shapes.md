@@ -48,6 +48,50 @@ end
 # structurally. No Ruby inheritance or runtime marker is required.
 ```
 
+## Interface-typed values
+
+A value an RBS signature types with an interface is `untyped` (`Dynamic[top]`), with one exception
+([ADR-130](../adr/130-interface-typed-values-dispatch-under-untyped-parity.md)): an interface whose absolute name is in
+the `::Rigor::Plugin` namespace (`_Scope`, `_Environment`, `_Services`, `_FactStore`, `_Configuration`) is carried as
+`Dynamic[Rigor::Plugin::_Scope]`. Every other interface, rbs core's conversion aliases (`int`, `string`, `path`, …)
+included, still reads `Dynamic[top]`. Which interfaces carry the facet depends on the interface's name alone.
+
+Such a value is `untyped` to every rule but one. Every check, narrowing, overload selection and leniency that treats
+`Dynamic[top]` specially treats it the same way, and a join reads as the join of `Dynamic[top]` reads (facet erasure,
+[normalization.md](normalization.md)). The exception is a call of a member the interface declares:
+
+- The call resolves through the member's RBS only when one of its overloads takes the call's shape:
+  - a block when the call passes one, and no required block when it does not;
+  - the positional count, within required plus optional unless the overload has a rest parameter;
+  - no required keyword the call omits. A keyword hash passed to an overload without keywords is its last positional
+    argument.
+
+  Overload selection then runs over the overloads that take the shape. A call whose shape the source does not state (a
+  splat, a `**` keyword splat, a forwarded `...`) is taken by no overload.
+- When more than one overload takes the shape and one of them has a parameter that mentions `self` (`(self other)`,
+  `(Array[self] others)`), which one the call reaches depends on whether an argument is the receiver's kind, which no
+  class names; the call is typed as the same call on `Dynamic[top]` is. A single overload taking the shape still
+  answers.
+- A block-pass whose value may be `nil` may make the call block-less at runtime: `&blk` where `blk` is anything but a
+  non-nil literal, an instance of a class `nil` is not (a `Proc`, a `Method`), a class object or a shape, so a `top` or
+  `Object` value counts; and an anonymous `&`. The call resolves only when both the block-less and the block-ful shape are
+  taken and their returns are equal. `&:sym` is never `nil`.
+- Inside the member, `self` is the receiver. The interface's type parameters bind from the value's type arguments; one
+  left unbound (a defaulted parameter the value does not spell) reads `Dynamic[top]`.
+- A call no overload takes is typed as the same call on `Dynamic[top]` is.
+- A call of a member the interface does not declare reports nothing, because the value's class is wider than the
+  interface. It is typed as the same call on `Dynamic[top]` is.
+
+So in a plugin hook, `scope.type_of(node)` reads `Rigor::Type::t` and `scope.environment` reads
+`Dynamic[Rigor::Plugin::_Environment]`, while `scope.not_declared` is silent. A member the interface declares as
+returning a nilable value (`_Scope#local`, `#self_type`, `#source_path`, `_Environment#nominal_for_name`) reports
+`call.possible-nil-receiver` when its result, held in a local variable, is used unguarded, as the same code on a
+`Rigor::Scope` receiver does. (That rule reads only local-variable receivers.)
+
+`rigor check`, `type-of`, hover and lens read the declared members this way. `rigor sig-gen` analyses with interface
+dispatch switched off, so its output is what erasure gives: it does not write a return it read through an interface a
+plugin author never wrote against.
+
 ## Assignability rules
 
 - A concrete nominal type is assignable to an interface when its instance method shape satisfies every interface member.

@@ -1,0 +1,11 @@
+module Rigor
+  module Plugin
+    interface _ProbeS
+      def to_str: () -> String
+    end
+  end
+end
+
+class Inference
+  def take: (Rigor::Plugin::_ProbeS x) -> untyped
+end

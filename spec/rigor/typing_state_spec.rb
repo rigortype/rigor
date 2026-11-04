@@ -656,6 +656,16 @@ RSpec.describe Rigor::TypingState do
     expect(inside.keys.map { |name| typing_slot(name) }).to all(be_nil)
   end
 
+  # A run's release must not empty what outlives a run: a file's declared names live as long as the parse they are keyed
+  # on, and the interned negative keys are rebuilt from a name alone.
+  it "keeps the declared-names and interned-key memos out of the run release" do
+    kept = %i[scope_index_declared_names resolution_chain_extend_hook_keys resolution_chain_hook_keys
+              resolution_chain_external_keys]
+
+    expect(kept.map { |name| described_class.slot(name).run_scoped }).to all(be(false))
+    expect(kept.map { |name| described_class.slot(name).kind }).to all(be(:memo))
+  end
+
   # The index walk's evaluation is installed for that walk only; walks nest, so the outer one returns on the way out,
   # a raise included.
   it "restores the outer index walk's unentered evaluator on the way out of an inner one" do

@@ -825,7 +825,7 @@ async function generateSignatures(options?: CommandOptions): Promise<void> {
 
 // ---- Update Baseline ---------------------------------------------------------
 
-type BaselineLookup =
+export type BaselineLookup =
   | { kind: "file"; rel: string }
   /** `unset`: no `baseline:` key at all (the CLI default is no baseline). */
   | { kind: "off"; unset?: boolean }
@@ -840,7 +840,7 @@ type BaselineLookup =
  * in an included file (later files override), and a bare `baseline:` followed
  * by an indented line takes that line as its value, so neither is guessed.
  */
-function baselineLookup(folder: WorkspaceFolder, root: string): BaselineLookup {
+export function baselineLookup(folder: WorkspaceFolder, root: string): BaselineLookup {
   const cfg = findConfig(folder, root);
   let text = "";
   if (cfg) {

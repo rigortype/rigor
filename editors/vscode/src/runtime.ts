@@ -918,7 +918,7 @@ function liveMarkers(dir: string, includeSelf: boolean): number[] {
  * that no live window (this one included) uses. A directory without a manifest that is not a
  * leftover is not ours to judge and stays.
  */
-function prune(keep: string): void {
+export function prune(keep: string): void {
   const root = runtimeRoot;
   if (!root) {
     return;

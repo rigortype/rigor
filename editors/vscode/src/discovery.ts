@@ -601,3 +601,19 @@ export function displayCommand(server: ResolvedServer, args: string[]): string {
 export function versionArgs(server: ResolvedServer): string[] {
   return [...server.prefixArgs, "version"];
 }
+
+/**
+ * A glob matching every file under `root`. Forward slashes so it matches
+ * on Windows too. `*`, `?`, `[` and `]` are wrapped in a character class
+ * (`[[]`, `[]]`, ...) so `a[1]` matches literally. A brace cannot be: VS
+ * Code splits glob segments on `{`/`}` before it reads brackets, so `[{]`
+ * opens a group that never closes. A brace becomes `?` instead, which also
+ * matches a sibling directory differing in just that character.
+ */
+export function rootGlob(root: string): string {
+  const base = root
+    .replace(/\\/g, "/")
+    .replace(/[*?[\]]/g, "[$&]")
+    .replace(/[{}]/g, "?");
+  return `${base}/**/*`;
+}

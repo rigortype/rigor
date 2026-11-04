@@ -45,6 +45,9 @@ jobs:
       - name: Type-check
         run: npm run typecheck
 
+      - name: Unit tests
+        run: npm test
+
       - name: Bundle
         run: npm run compile
 

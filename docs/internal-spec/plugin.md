@@ -300,7 +300,18 @@ recursion. The block runs through
 receives `(node, scope, path, file_context, context)`, and returns an
 `Array<Rigor::Analysis::Diagnostic>` (empty to fire nothing).
 `node_type` MUST be a `Prism::Node` subclass. Multiple rules per type
-run in declaration order. The engine dispatches them through one
+run in declaration order.
+
+When `rigor check` analyses plugin source, the block's `node` binds
+from the class argument (#2686): `node_rule(Prism::IfNode)` binds
+`Prism::IfNode`, a union of class objects binds the union of their
+instances, and an argument whose class is not known (a method
+parameter, a `Class` value) binds `untyped`. The per-class overloads in
+`sig/rigor/plugin/base.rbs` and its `Prism::Node` fallback state the
+same contract for a literal class the overloads name, and the engine
+reads the argument for every other class
+(`MethodDispatcher::ClassKeyedBlockParams`). The other four block
+parameters bind from the overloads. The engine dispatches them through one
 shared per-run walk, `Plugin::Registry#node_rule_walk`
 ([`NodeRuleWalk`](../../lib/rigor/plugin/node_rule_walk.rb), ADR-52
 WD4): a single traversal per file serves every node-rule plugin, and

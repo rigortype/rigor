@@ -1,10 +1,12 @@
 # ADR-128 — The plugin hook surface as structural interfaces, and how its breaking changes ship
 
-Status: **Accepted, 2026-11-03.** Nothing is implemented. Slice 1 (WD7) can land today. It adds no
-diagnostic to plugin source, because the interface types stay inert there until two issues land:
-#929 (RBS interface types erase to `untyped`) and #2681 (a source-only plugin class does not take
-`Plugin::Base`'s RBS types). Slice 2 must land before those two. Slice 3 makes the types live, behind
-a dedicated rule (WD6).
+Status: **Accepted, 2026-11-03.** Implemented:
+
+- slice 1 (WD7) landed in #2714;
+- slice 2 landed in #2694;
+- slice 3 landed in #PR_NUMBER. #2681 (#2768) and ADR-130's half of #929 (#2808, #2815) made the hook types
+  live, and the `plugin.api-surface` rule (WD6) ships in the bleeding-edge overlay. WD5's seam was settled by
+  ADR-130's untyped parity rather than by assignability (WD5 note).
 
 Grounding: the measurement in #2681 (`make check-plugins`, 47 plugin classes, 2026-11-03).
 
@@ -188,6 +190,13 @@ where the interface's backing class is expected, or `call.argument-type-mismatch
 plugins. Slice 3 decides how, and measures it: a declared backing class for each plugin-facing
 interface, or an exemption confined to those interfaces.
 
+> **Settled in slice 3 (#PR_NUMBER) by [ADR-130](130-interface-typed-values-dispatch-under-untyped-parity.md).**
+> ADR-130 carries a plugin-interface value as `Dynamic[Rigor::Plugin::_Scope]`, which is `untyped` to every rule
+> but member dispatch, assignability included. The value passes `scope: Scope` as `Dynamic[top]` does, so the
+> seam does not arise; a fixture pins a plugin handing its hook scope to `Reflection` with no
+> `call.argument-type-mismatch`. No backing-class mechanism is built. The seam re-arises with structural
+> assignability (ADR-130's deferred half B), which must decide it then.
+
 **WD6 — How a breaking plugin-API change ships.** Classify the change first; the class decides the
 release vehicle. ADR-50 WD5's tiers apply unchanged: a patch carries no behaviour surprise, and a
 maintenance line gets no new diagnostic.
@@ -216,7 +225,11 @@ in 0.3.0, where it raises at class-definition time.
 **The check slice 3 turns on is a new discipline.** A call outside an interface works at runtime, so
 `call.undefined-method` must not fire on it. Slice 3 reports such a call under a dedicated rule
 (`plugin.api-surface`), whose receiver is typed by a plugin-facing interface. The rule applies only
-to plugin source, meaning classes that inherit `Plugin::Base` outside `lib/`. `Plugin::Base`'s own
+to plugin source, meaning classes that inherit `Plugin::Base` outside `lib/`.
+
+> **Amended in slice 3 (#PR_NUMBER).** Plugin source is read from the class declarations, not a path: code
+> lexically inside a class whose superclass chain reaches `Plugin::Base`, and in no `Plugin::Base` body. A
+> third-party plugin gem keeps its plugin under its own `lib/`, so a path test would exempt every one of them. `Plugin::Base`'s own
 hook implementations in `lib/rigor/plugin/base.rb` take interface-typed parameters and hand them to
 engine helpers. For example, `dynamic_return_type` reaches `environment.class_ordering`, which
 `_Environment` does not carry. They are engine code, so the rule must not judge them. The rule sits in

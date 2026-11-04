@@ -1087,6 +1087,39 @@ module Rigor
           since: "0.4.0"
         ),
 
+        CheckRules::RULE_PLUGIN_API_SURFACE => Entry.new(
+          id: CheckRules::RULE_PLUGIN_API_SURFACE,
+          summary: "Plugin code calls a member a `Rigor::Plugin` interface does not declare.",
+          fires_when: [
+            "The call's receiver is typed by a `Rigor::Plugin` interface (`_Scope`, `_Environment`, " \
+            "`_Services`, `_FactStore`, `_Configuration`), possibly with `nil`: a hook's `scope`, " \
+            "`scope.environment`, `services.fact_store`, and so on.",
+            "The interface does not declare the called method, and neither does `Object` (with `Kernel` and " \
+            "`BasicObject`).",
+            "The call sits inside a class whose superclass chain reaches `Rigor::Plugin::Base`.",
+            "The `plugin-api-surface` bleeding-edge feature is enabled (the rule resolves `:off` otherwise)."
+          ],
+          does_not_fire_when: [
+            "The interface declares the method (`scope.type_of(node)`), or every object answers it " \
+            "(`scope.nil?`, `scope.respond_to?(...)`).",
+            "The value lost its interface type: a join with an untyped value, a helper parameter with no " \
+            "signature, or the result of a `&.` call on a value that may be nil. It reads as `untyped` there.",
+            "The call is outside a `Rigor::Plugin::Base` subclass, or inside `Rigor::Plugin::Base` itself.",
+            "The `plugin-api-surface` bleeding-edge feature is not enabled (the default)."
+          ],
+          suppression: "`# rigor:disable plugin.api-surface` on the call line, or " \
+                       "`disable: [\"plugin.api-surface\"]` in `.rigor.yml`. The fix is to call a member the " \
+                       "interface declares or a public namespace (`Rigor::Reflection`, ...).",
+          severity_authored: :warning,
+          severity_by_profile: { lenient: :off, balanced: :off, strict: :off },
+          # The receiver's interface type comes from Rigor's own signatures and the member list is the
+          # interface's declaration, so a firing is a call outside the declared surface. It ships `:off`
+          # behind `bleeding_edge:` because it is a new discipline (ADR-50 Decision 3), not for lack of
+          # confidence.
+          evidence_tier: :high,
+          since: "0.4.8"
+        ),
+
         CheckRules::RULE_SUPPRESSION_UNKNOWN_MARKER => Entry.new(
           id: CheckRules::RULE_SUPPRESSION_UNKNOWN_MARKER,
           summary: "A comment uses a suppression marker Rigor does not recognise " \

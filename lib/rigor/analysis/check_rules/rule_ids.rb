@@ -81,6 +81,12 @@ module Rigor
       # Issue #1692 (the ADR-47 WD5 amendment) — a call to the `ruby2_keywords` family Ruby 4.1 deprecates. Runs only
       # under an explicit `target_ruby` of 4.1 or later; see {RubyDeprecations}.
       RULE_DEPRECATED_RUBY2_KEYWORDS = "call.deprecated-ruby2-keywords"
+      # ADR-128 WD6 / ADR-130 slice 2 (#2686) — a call in plugin source on a `Rigor::Plugin` interface value to a
+      # member the interface does not declare. Authored `:warning`, resolved `:off` by every profile and promoted
+      # only by the `plugin-api-surface` bleeding-edge feature. The one built-in id under `plugin.`, the prefix a
+      # plugin's own rows carry as `plugin.<id>.<rule>`: it is in {ALL_RULES}, so `disable:`, markers and
+      # `severity_overrides:` resolve it as a catalogue id before any plugin-id reading.
+      RULE_PLUGIN_API_SURFACE = "plugin.api-surface"
 
       ALL_RULES = [
         RULE_UNDEFINED_METHOD,
@@ -117,7 +123,8 @@ module Rigor
         RULE_EFFECT_LISKOV_WIDENED,
         RULE_EFFECT_UNKNOWN_LABEL,
         RULE_EFFECT_ANNOTATIONS_UNCHECKED,
-        RULE_CONTRADICTING_SIGNATURE
+        RULE_CONTRADICTING_SIGNATURE,
+        RULE_PLUGIN_API_SURFACE
       ].freeze
 
       # Backward-compat alias table (ADR-8 § "Backward compatibility"). Existing user code with

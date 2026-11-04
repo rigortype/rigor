@@ -86,6 +86,7 @@ module Rigor
           # a config edit the author may deliberately not want.
           "effect.annotations-unchecked" => :info,
           "static.value-use.void" => :off,
+          "plugin.api-surface" => :off,
           # Opt-in author assertion: you only see it if you wrote a
           # `conforms-to` directive, so it stays a :warning even in
           # lenient — it is never unsolicited noise.
@@ -131,6 +132,7 @@ module Rigor
           "suppression.empty" => :warning,
           "suppression.unknown-marker" => :warning,
           "static.value-use.void" => :off,
+          "plugin.api-surface" => :off,
           "effect.envelope-exceeded" => :warning,
           "effect.liskov-widened" => :warning,
           "effect.unknown-label" => :info,
@@ -173,6 +175,7 @@ module Rigor
           "suppression.unknown-marker" => :warning,
           # `:off` even under strict: the gate is `bleeding_edge:`, not the profile (ADR-50 WD1 / ADR-100).
           "static.value-use.void" => :off,
+          "plugin.api-surface" => :off,
           "effect.envelope-exceeded" => :error,
           "effect.liskov-widened" => :error,
           "effect.unknown-label" => :warning,

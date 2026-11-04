@@ -79,11 +79,12 @@ Such a value is `untyped` to every rule but one. Every check, narrowing, overloa
 - Inside the member, `self` is the receiver. The interface's type parameters bind from the value's type arguments; one
   left unbound (a defaulted parameter the value does not spell) reads `Dynamic[top]`.
 - A call no overload takes is typed as the same call on `Dynamic[top]` is.
-- A call of a member the interface does not declare reports nothing, because the value's class is wider than the
-  interface. It is typed as the same call on `Dynamic[top]` is.
+- A call of a member the interface does not declare is typed as the same call on `Dynamic[top]` is. It never reports
+  `call.undefined-method`, because the value's class is wider than the interface; in plugin source it reports
+  `plugin.api-surface` under the bleeding-edge overlay (§ "Calls outside the plugin API").
 
 So in a plugin hook, `scope.type_of(node)` reads `Rigor::Type::t` and `scope.environment` reads
-`Dynamic[Rigor::Plugin::_Environment]`, while `scope.not_declared` is silent. A member the interface declares as
+`Dynamic[Rigor::Plugin::_Environment]`, while `scope.not_declared` is silent by default. A member the interface declares as
 returning a nilable value (`_Scope#local`, `#self_type`, `#source_path`, `_Environment#nominal_for_name`) reports
 `call.possible-nil-receiver` when its result, held in a local variable, is used unguarded, as the same code on a
 `Rigor::Scope` receiver does. (That rule reads only local-variable receivers.)
@@ -91,6 +92,34 @@ returning a nilable value (`_Scope#local`, `#self_type`, `#source_path`, `_Envir
 `rigor check`, `type-of`, hover and lens read the declared members this way. `rigor sig-gen` analyses with interface
 dispatch switched off, so its output is what erasure gives: it does not write a return it read through an interface a
 plugin author never wrote against.
+
+### Calls outside the plugin API
+
+`plugin.api-surface` ([ADR-128](../adr/128-plugin-hook-surface-interfaces.md) WD6, ADR-130 slice 2) reports a call
+that works at runtime but is outside what Rigor promises plugins. It fires on a call when all of these hold:
+
+- the receiver is `Dynamic[<Rigor::Plugin interface>]`, or a union of such values with `nil`;
+- no interface the receiver carries declares the method, and `Object` (with `Kernel` and `BasicObject`) does not
+  declare it either, so `scope.nil?` and `scope.respond_to?(:x)` stay silent;
+- the call is plugin source: lexically inside a class whose discovered superclass chain reaches
+  `Rigor::Plugin::Base`, and not inside a `Rigor::Plugin::Base` body. The test reads class declarations, never a
+  path, because a third-party plugin keeps its plugin under `lib/` as Rigor's engine does. `Base`'s own hooks pass
+  interface values to engine helpers and are engine code. A value typed by an interface outside plugin source (an
+  engine signature that names one) is not judged.
+
+The rule reads the facet only where it survives. Where a join with an untyped value, a clause widening, a helper
+parameter with no signature or a `&.` call drops it, the value reads `Dynamic[top]` and the call is silent.
+
+The rule is authored `:warning`, resolves `:off` in every profile, and is promoted to `:warning` only by the
+`plugin-api-surface` bleeding-edge feature ([ADR-50](../adr/50-release-engineering-and-stability-strategy.md)
+Decision 3, WD2). It graduates at the next hard break.
+
+### Interface values at engine parameters
+
+A plugin passes its hook `scope` (`Dynamic[Rigor::Plugin::_Scope]`) to `Rigor::Reflection`, whose RBS takes
+`scope: Scope`. The value is `untyped` to assignability, so no `call.argument-type-mismatch` fires
+([ADR-128](../adr/128-plugin-hook-surface-interfaces.md) WD5). The question of an interface value meeting its
+backing class returns with structural assignability, which ADR-130 defers.
 
 ## Assignability rules
 

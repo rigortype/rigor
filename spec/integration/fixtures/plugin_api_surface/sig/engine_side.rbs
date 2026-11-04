@@ -1,0 +1,3 @@
+class EngineHelper
+  def walk: (Rigor::Plugin::_Scope scope) -> untyped
+end

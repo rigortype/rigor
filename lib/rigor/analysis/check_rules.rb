@@ -34,6 +34,7 @@ require_relative "check_rules/rebinding_block_callees"
 require_relative "check_rules/rbs_receiver_surface"
 require_relative "check_rules/special_global_setters"
 require_relative "check_rules/ruby_deprecations"
+require_relative "check_rules/plugin_api_surface"
 require_relative "../typing_state"
 
 module Rigor
@@ -315,7 +316,8 @@ module Rigor
           assert_type_diagnostic(path, node, scope_index),
           always_raises_diagnostic(path, node, facts, lexical_sites),
           raise_non_exception_diagnostic(path, node, scope_index),
-          visibility_mismatch_diagnostic(path, node, facts, lexical_sites)
+          visibility_mismatch_diagnostic(path, node, facts, lexical_sites),
+          PluginApiSurface.diagnostic(path, node, facts)
         ].compact
       end
 

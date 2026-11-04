@@ -32,4 +32,15 @@ class Joins
     n = f ? [{ k: [a] }] : [{ k: [b] }]
     Rigor.dump_type(n)
   end
+
+  # Absorption: master drops the `[a]` arm, which `[b | 1]` contains.
+  def absorb(a, b, f, g)
+    t = f ? [a] : [g ? b : 1]
+    Rigor.dump_type(t)
+  end
+
+  # A call of a member the interface declares: the one row a dispatching carrier may change.
+  def declared(a)
+    Rigor.dump_type(a.to_str) # parity: declared-member
+  end
 end

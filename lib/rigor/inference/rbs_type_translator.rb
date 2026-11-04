@@ -130,6 +130,24 @@ module Rigor
           translate_in(rbs_type, Context.new(self_type, instance_type, type_vars, alias_expander, 0))
         end
 
+        # ADR-130 WD2 — the erasure baseline. Inside the block every RBS interface translates to `untyped`, as it did
+        # before ADR-130, whatever carrier the default engine has; the behavioural parity gate
+        # (`spec/integration/interface_parity_spec.rb`) runs its baseline here, so the baseline never comes from the
+        # default engine. Slice 1b's carrier reads {interface_erasure?}; until it lands every interface erases inside
+        # the block and outside it. A carrier that reads the switch must also key `@closed_alias_translations` on it,
+        # or bypass that memo, so a translation made in one mode is not served in the other (ADR-130 WD4).
+        def with_interface_erasure
+          previous = Thread.current.thread_variable_get(:rigor_interface_erasure)
+          Thread.current.thread_variable_set(:rigor_interface_erasure, true)
+          yield
+        ensure
+          Thread.current.thread_variable_set(:rigor_interface_erasure, previous)
+        end
+
+        def interface_erasure?
+          Thread.current.thread_variable_get(:rigor_interface_erasure) == true
+        end
+
         private
 
         def translate_in(rbs_type, context)

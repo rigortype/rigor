@@ -8,9 +8,9 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
 import { forgetResolutions } from "../src/resolve";
-import { registerTasks } from "../src/tasks";
+import { registerTasks, shellCheckTask } from "../src/tasks";
 import { CustomExecution, ExtensionMode, ProcessExecution, ShellExecution, Task, addFolder, stub } from "./vscode-stub";
-import { Sandbox, fakeContext, fakeOutput, sandbox, script, withPlatform } from "./helpers";
+import { Sandbox, fakeContext, fakeOutput, sandbox, script } from "./helpers";
 
 type Provider = import("vscode").TaskProvider;
 type Folder = import("vscode").WorkspaceFolder;
@@ -149,10 +149,14 @@ describe("resolveTask", () => {
     assert.equal((b.execution as ProcessExecution).options.cwd, folderB.uri.fsPath);
   });
 
-  it("on Windows the folder-less entry is a shell execution, so .cmd shims start", async () => {
-    const resolved = (await withPlatform("win32", () => resolve(entry(folderA))))!;
-    assert.ok(resolved.execution instanceof ShellExecution);
-    assert.equal(resolved.problemMatchers, "$rigor");
+  it("a server that needs a shell (a Windows .cmd shim) gets a shell execution", () => {
+    const server = { command: "rigor.cmd", prefixArgs: ["x"], shell: true } as never;
+    const task = shellCheckTask(folderA, "mine", server, { type: "rigor", command: "check" });
+    const exec = task.execution as ShellExecution;
+    assert.ok(exec instanceof ShellExecution);
+    assert.deepEqual(exec.args, ["x", "check"]);
+    assert.equal(exec.options.cwd, folderA.uri.fsPath);
+    assert.equal(task.problemMatchers, "$rigor");
   });
 
   it("an entry with a folder is the per-folder pseudoterminal, no matcher, own definition kept", async () => {

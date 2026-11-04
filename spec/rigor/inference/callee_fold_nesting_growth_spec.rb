@@ -47,7 +47,8 @@ RSpec.describe "a callee reached inside a block fold does not fold again" do
     end
     calls = (0...keys).map { |k| "    x#{k} = layer0(:k#{k})\n" }.join
     results = (0...keys).map { |k| "x#{k}" }.join(", ")
-    "class View\n  def show\n    render.size\n  end\n\n#{layers.join("\n")}\n  def render\n#{calls}    [#{results}]\n  end\nend\n"
+    render = "  def render\n#{calls}    [#{results}]\n  end\n"
+    "class View\n  def show\n    render.size\n  end\n\n#{layers.join("\n")}\n#{render}end\n"
   end
 
   # `m0(n)` .. `m<depth - 1>(n)`, each folding a block over the next, entered from inside a fold with `arg`.

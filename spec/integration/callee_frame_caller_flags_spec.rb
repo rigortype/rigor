@@ -74,8 +74,8 @@ RSpec.describe "a callee's return does not depend on its caller's frame flags", 
       # A literal-name write later in the same `for` body still joins the prior binding `0` into the new value. With
       # the depth left at zero after the call, it would bind the one pass's value alone.
       dump = lambda do |call|
-        src = source(ivar_callee, "@n = 0\n    for i in [1, 2]\n      #{call}\n      instance_variable_set(:@n, @n + 1)\n      " \
-                                  "Rigor.dump_type(@n)\n    end", "nil")
+        loop_body = "#{call}\n      instance_variable_set(:@n, @n + 1)\n      Rigor.dump_type(@n)"
+        src = source(ivar_callee, "@n = 0\n    for i in [1, 2]\n      #{loop_body}\n    end", "nil")
         analyze(src).diagnostics.select { |d| d.qualified_rule == "dump.type" }.map(&:message)
       end
       expect(dump.call("h")).to eq(["dump_type: 0 | Dynamic[top]"])

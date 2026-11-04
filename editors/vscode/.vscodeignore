@@ -4,6 +4,7 @@
 esbuild.js
 tsconfig.json
 src/**
+test/**
 out/**
 node_modules/**
 icon.svg

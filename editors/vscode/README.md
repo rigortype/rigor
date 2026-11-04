@@ -364,6 +364,21 @@ for diagnostics-not-appearing, empty-completion, and `untyped`-hover
 cases. For server-side detail, set `rigor.server.logPath` and open the
 log with **Rigor: Show Server Log**.
 
+## Development
+
+```sh
+npm ci
+npm run typecheck   # src/ and test/
+npm test            # unit tests, no editor needed
+```
+
+`npm test` bundles each `test/*.test.ts` with esbuild, with the `vscode`
+module replaced by `test/vscode-stub.ts`, and runs the result with
+`node --test`. `node test/build.js discovery` runs only the files whose name
+contains `discovery`. The discovery walk is exercised against fake `rigor`,
+`bundle` and `ruby` shell scripts in a temporary directory, so the tests need
+a POSIX shell. Add to the stub only what the code under test touches.
+
 ## License
 
 [MPL-2.0](LICENSE), matching the `rigortype` gem.

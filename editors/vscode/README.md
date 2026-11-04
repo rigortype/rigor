@@ -67,9 +67,16 @@ for this editor** (also **Rigor: Install Managed Rigor**). The
 extension then installs `rigortype` into its own storage, outside
 every project:
 
-- **A Ruby 4.0 is on the machine** — from `rigor.runtime.rubyPath`,
-  `ruby` on `PATH`, or the mise, rbenv, chruby and asdf install
-  directories. The extension runs `bundle install` for a one-line
+- **A Ruby 4.0 is on the machine** — the first that qualifies of
+  `rigor.runtime.rubyPath`, `ruby` on `PATH`, and the mise, rbenv,
+  chruby and asdf install directories. It must carry Bundler and load
+  OpenSSL; a preview or dev build is used only when
+  `rigor.runtime.rubyPath` names it. When the build fails because the
+  Ruby cannot load OpenSSL or another standard library, the next Ruby
+  that qualifies is tried once (not when `rigor.runtime.rubyPath`
+  named it); a certificate error or a missing compiler is reported
+  with a hint instead. The
+  extension runs `bundle install` for a one-line
   `Gemfile` (`gem 'rigortype', '= X'`), then starts the server as
   `ruby <bundle> exec rigor lsp` in the project. Bundler's config
   files are ignored, and the inherited `BUNDLE_*`, `GEM_HOME`,
@@ -84,7 +91,11 @@ every project:
   store, and no file in the project changes, but mise applies your
   own mise settings while it runs (an auto-prune, for example). It is
   the only `mise` command the extension runs: it reads mise's files to
-  find pins and Rubies.
+  find pins and Rubies. Closing the window does not stop it: it
+  finishes on its own, writing its output to a
+  `.mise-install-<pid>.log` file in the extension's storage. While
+  that log is still growing and does not show mise finishing, no
+  window starts another; the message names the log.
 - **Neither** — the extension points you to the
   [installation guide](https://github.com/rigortype/rigor/blob/master/docs/install.md).
   A self-contained Rigor that needs no Ruby is tracked in
@@ -104,7 +115,17 @@ untrusted workspace, or without your click. When no folder has a
 
 `rigor.runtime.version` chooses the version (`latest` by default).
 **Rigor: Check for Rigor Update** installs a newer release, which
-takes effect when the server restarts. Every VS Code window shares
+takes effect when the server restarts. While a folder runs the managed
+Rigor and the version is `latest`, the extension also checks by itself
+(`rigor.runtime.autoUpdate`, on by default): shortly after the
+server starts, and at most once every
+`rigor.runtime.updateCheckIntervalHours` (24) across all windows on
+the machine. A newer release is offered with **Install update** /
+**Later**; it installs beside the current one and is used after a
+restart, which the extension offers. **Later** is remembered, so no
+window asks about that version again. A pinned version never updates, an untrusted
+workspace is never checked, and an unreachable rubygems.org leaves
+the install alone and logs one line. Every VS Code window shares
 the install: the extension keeps the newest two versions plus any
 version a window's server still runs, and **Rigor: Clear Managed
 Rigor** deletes them all. Clear stops this window's servers and starts
@@ -143,7 +164,9 @@ Use an absolute path — the setting is not `~`-expanded.
 | `rigor.server.configPath` | `""` | Passed as `--config=PATH`. |
 | `rigor.server.logPath` | `""` | Passed as `--log=PATH`. |
 | `rigor.runtime.version` | `latest` | `rigortype` version of the managed Rigor; `latest` resolves the newest release on rubygems.org. |
-| `rigor.runtime.rubyPath` | `""` | Ruby 4.0 the managed Rigor is installed with. Empty searches `PATH` and the version managers' install directories. |
+| `rigor.runtime.autoUpdate` | `true` | Background update checks for the managed Rigor while `rigor.runtime.version` is `latest`. |
+| `rigor.runtime.updateCheckIntervalHours` | `24` | Hours between those checks (1–168). |
+| `rigor.runtime.rubyPath` | `""` | Ruby 4.0 the managed Rigor is installed with. Empty searches `PATH` and the version managers' install directories, in that order; a prerelease Ruby is used only when named here. |
 | `rigor.trace.server` | `off` | JSON-RPC trace into the output channel. |
 
 `rootDir` and the `server.*` settings are per-folder; changing one

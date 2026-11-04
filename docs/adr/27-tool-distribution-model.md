@@ -387,7 +387,13 @@ Tiers, by what the machine has (`editors/vscode/src/runtime.ts`):
 - **A — a Ruby 4.0 exists** (`rigor.runtime.rubyPath`, `ruby` on
   `PATH`, the mise / rbenv / chruby / asdf install directories; each
   candidate checks `Gem.ruby_version` against the gemspec's
-  `required_ruby_version`). The extension writes a one-line `Gemfile`
+  `required_ruby_version`, which a gate keeps the extension's copy
+  equal to; the first in that order with Bundler and OpenSSL wins, a
+  prerelease, which `< 4.1` admits, only when `rigor.runtime.rubyPath`
+  names it, and a build that fails because the Ruby cannot load
+  OpenSSL or another standard library is tried once more with the next,
+  unless `rigor.runtime.rubyPath` named it).
+  The extension writes a one-line `Gemfile`
   into its storage and runs `bundle install` with `BUNDLE_GEMFILE`,
   `BUNDLE_PATH` and `BUNDLE_IGNORE_CONFIG=1` set, dropping every
   inherited `BUNDLE_*` / `BUNDLER_*` variable (but
@@ -397,7 +403,10 @@ Tiers, by what the machine has (`editors/vscode/src/runtime.ts`):
 - **B — no Ruby 4.0, but mise.** The extension offers to run `mise
   install ruby@4.0` — its one deliberate `mise` invocation, after a
   click, with a prompt that says mise applies the user's own settings
-  (auto-prune among them) — then continues as A.
+  (auto-prune among them) — then continues as A. Closing the window
+  leaves that install running to completion, writing to a log file in
+  the storage, rather than killing it half-built; while that log still
+  grows and shows no end, no window starts another.
 - **C — neither.** The extension shows the installation guide and
   points at WD5's single binary
   ([#926](https://github.com/rigortype/rigor/issues/926)); when that
@@ -407,7 +416,22 @@ The storage is per user and every VS Code window shares it: an install
 builds in a temporary directory under a heartbeat lock file and is
 renamed into `runtime/<version>/`; each window marks the version its
 servers run, and pruning (newest two kept) and repair skip a version
-another live window marks.
+another live window marks (a repair also one another folder of the
+same window runs, and checks before it builds). The lock's heartbeat
+and the markers follow the wall clock and refresh within seconds of a
+wake, since a timer does not advance while macOS sleeps; a window that
+judges a lock stale in those seconds can still take it over, the one
+residue.
+
+Updates follow PHPantom's model: while a folder runs the managed Rigor
+and `rigor.runtime.version` is `latest`, the extension checks
+rubygems.org shortly after startup and at most once every
+`rigor.runtime.updateCheckIntervalHours` across the machine's windows
+(`rigor.runtime.autoUpdate`, on by default; the last check and the
+declined versions live in the extension's global state). A newer
+release installs beside the current one only on the user's click and
+is used from the next restart; a pin, an untrusted workspace or an
+unreachable rubygems.org changes nothing.
 
 Rigor reads the analysed project as data from this foreign bundle as
 from a global install: measured for #2725,

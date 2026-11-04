@@ -97,11 +97,25 @@
           "scope": "application",
           "markdownDescription": "The `rigortype` version of the Rigor the extension installs for itself (**Rigor: Install Managed Rigor**), used only when no other `rigor` is found. `latest` resolves the newest release on rubygems.org; a version such as `0.4.7` pins it."
         },
+        "rigor.runtime.autoUpdate": {
+          "type": "boolean",
+          "default": true,
+          "scope": "application",
+          "markdownDescription": "Check rubygems.org for a newer `rigortype` while a folder runs the managed Rigor and `rigor.runtime.version` is `latest`: shortly after it starts, and at most once every `#rigor.runtime.updateCheckIntervalHours#` hours across all windows. A newer release is offered with a prompt, installs beside the current one, and is used from the next server restart. Never in an untrusted workspace."
+        },
+        "rigor.runtime.updateCheckIntervalHours": {
+          "type": "number",
+          "default": 24,
+          "minimum": 1,
+          "maximum": 168,
+          "scope": "application",
+          "markdownDescription": "Hours between the managed Rigor's background update checks (`#rigor.runtime.autoUpdate#`)."
+        },
         "rigor.runtime.rubyPath": {
           "type": "string",
           "default": "",
           "scope": "machine",
-          "markdownDescription": "Path to the Ruby 4.0 executable the managed Rigor is installed with. Leave empty to look for one on `PATH` and in mise, rbenv, chruby and asdf install directories."
+          "markdownDescription": "Path to the Ruby 4.0 executable the managed Rigor is installed with. Leave empty to take the first that qualifies on `PATH`, then in mise, rbenv, chruby and asdf install directories; a prerelease Ruby is used only when named here."
         },
         "rigor.trace.server": {
           "type": "string",

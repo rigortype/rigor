@@ -960,8 +960,10 @@ module Rigor
 
           members = join_sequence_elements(members)
           readings = members.any? { |member| facet_bearing?(member) } ? members.map { |m| erase_facets(m) } : members
+          # `each_index`, not `each_with_index`: the Enumerable form allocates an iterator object on every join.
           kept = []
-          members.each_with_index do |member, index|
+          members.each_index do |index|
+            member = members[index]
             kept << member unless absorbable_member?(member) && absorbed_reading?(readings, index)
           end
           kept

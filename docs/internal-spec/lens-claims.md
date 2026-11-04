@@ -242,12 +242,17 @@ Agreement is enough for `compatible`. It is not enough for `conflict`, because t
 constant a namespace may hold: a file outside `paths:` or matched by `exclude:`, a gem without RBS that reopens a
 project namespace, `const_set` with a computed name, a `class_eval` string. `rbs.contradicting-signature`
 refuses relative names outright for that reason (`Comparator#provable_names?`). So a relative name counts toward
-a `conflict` (§ Relation, Non-inclusion) only when Rigor sees the whole lookup path: every namespace of the
-declaration's lexical nesting and every ancestor of its innermost class or module is a Ruby core or stdlib class
-or module, and every one of them can be named (an ancestor written as a call, `Sequel::Model(:t)`, or included
-from a block cannot). In practice that is a top-level declaration, or a reopened core class. Anywhere else a
-relative arm can prove `compatible` but never `conflict`, and a conflict needs the absolute spelling
-(`::Integer`).
+a `conflict` (§ Relation, Non-inclusion) only in a top-level declaration (a `def` outside any class or module
+body, owner `Object`). There the lexical nesting is empty and Ruby finds the name in `Object`'s own constant
+table before any module `Object` includes, so a project or gem can shadow a core name only by reassigning the
+core constant itself. Not even a reopened core class qualifies: a file outside `paths:` or a gem without RBS can
+give `class Integer` a nested `Integer::Data`, which Ruby finds before `::Data`. Anywhere else a relative arm can
+prove `compatible` but never `conflict`, and a conflict needs the absolute spelling (`::Integer`).
+
+The same blind spot bounds `compatible`: agreement between the two lookups proves the inclusion for the classes
+Rigor can see. A relative name that Ruby resolves to a constant only an unread file defines can read
+`compatible` against the class RBS names. That is a missed finding, never a diagnostic, but a consumer MUST NOT
+present a relative-name `compatible` as a proof against the running program.
 
 ## Relation
 
@@ -341,8 +346,9 @@ exit status, so ZARD's adapter can pin them. The fixtures cover:
   ranked (`unproven`, never `conflict`);
 - a relative name a project namespace shadows in Ruby alone (`Data` inside `module App` that defines
   `App::Data < Hash` with no RBS, `ambiguous_name`); the same shadow in a file outside `paths:`, which reads
-  `unproven`, never `conflict`; a relative core name in a project class, which reads `unproven` where the
-  absolute spelling reads `conflict`; and a relative core name in a top-level `def`, which reads `conflict`;
+  `unproven`, never `conflict`; a relative core name in a project class and in a reopened core class, each
+  reading `unproven` where the absolute spelling reads `conflict`; and a relative core name in a top-level
+  `def`, which reads `conflict`;
 - a relative gem name with RBS (`Faraday::Response`) that compares `equal`;
 - a span that matches a site under another identity (`declaration_mismatch`), an attribute site, and a span
   with no declaration (`no_such_declaration`);

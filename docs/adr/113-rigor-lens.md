@@ -262,9 +262,11 @@ and ZARD's mismatch diagnostics wait for a release that advertises it.
   `conflict`. A relative claim name is resolved in RBS and again by Ruby's constant lookup over the run's
   project index; the two must agree before either verdict. Agreement still assumes the index saw every
   constant of the project's namespaces, which a file outside `paths:` or a gem reopening a namespace breaks,
-  so a relative name proves a `conflict` only where the whole lookup path is core or stdlib: a top-level
-  declaration or a reopened core class. Elsewhere a conflict needs the absolute spelling (`::Integer`). An inclusion may lean on any declared ancestry, project classes included, since the authored
-  contract is authoritative. A wrong `conflict` is a diagnostic on documentation that may be correct, the
+  so a relative name proves a `conflict` only in a top-level declaration, where Ruby looks it up in
+  `Object`'s own table first and nothing can shadow a core name without reassigning it. Even a reopened core
+  class can be given a nested constant by a file Rigor does not read. Elsewhere a conflict needs the absolute
+  spelling (`::Integer`), so most real conflicts will need it. An inclusion may lean on any declared
+  ancestry, project classes included, since the authored contract is authoritative. A wrong `conflict` is a diagnostic on documentation that may be correct, the
   error AGENTS.md weighs most; a missed one is an `unknown`.
 - **Gradual acceptance is not the relation.** `Inference::Acceptance` lets `Dynamic` pass every boundary;
   claim checking answers `unknown` wherever `untyped` appears.

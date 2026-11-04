@@ -398,7 +398,7 @@ RSpec.describe Rigor::TypingState do
         File.write(patch, "class String\n  def x = 1 unless method_defined?(:x)\n  private def y = 2\nend\n")
         configuration = Rigor::Configuration.new(
           Rigor::Configuration::DEFAULTS.merge("paths" => [path], "pre_eval" => [patch],
-                                                "parallel" => { "workers" => 0 })
+                                               "parallel" => { "workers" => 0 })
         )
         guarded_run(Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil), [path])
       end

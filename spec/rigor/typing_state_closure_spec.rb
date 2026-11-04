@@ -509,9 +509,9 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
   def stage1_directories = %w[inference scope reflection analysis effects environment]
 
   def stage1_files
-    stage1_directories.flat_map { |dir| Dir[project_path("lib/rigor/#{dir}/**/*.rb")] }
-                      .push(*%w[scope reflection effects environment].map { |name| project_path("lib/rigor/#{name}.rb") })
-                      .select { |path| File.file?(path) }.uniq.sort
+    directories = stage1_directories.flat_map { |dir| Dir[project_path("lib/rigor/#{dir}/**/*.rb")] }
+    siblings = %w[scope reflection effects environment].map { |name| project_path("lib/rigor/#{name}.rb") }
+    (directories + siblings).select { |path| File.file?(path) }.uniq.sort
   end
 
   def thread_site_count(source)
@@ -541,9 +541,10 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
   end
 
   it "counts the unconverted Thread.current / thread_variable sites per file (ADR-129 stage 1 ratchet)" do
-    found = stage1_files.to_h do |path|
+    counted = stage1_files.to_h do |path|
       [path.delete_prefix("#{project_path('')}/"), thread_site_count(File.read(path))]
-    end.reject { |_, count| count.zero? }
+    end
+    found = counted.reject { |_, count| count.zero? }
 
     expect(found).to eq(unconverted_thread_sites), <<~MESSAGE
       ADR-129 stage 1: the Thread.current / thread_variable_* sites under lib/rigor/{inference,scope*,reflection,

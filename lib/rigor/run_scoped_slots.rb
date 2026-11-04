@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "typing_state"
+
 module Rigor
   # Issues #2412 and #2399 — the registry of per-thread memo slots whose contents belong to one analysis run. An
   # owner registers its `Thread.current` key where it names it (`KEY = RunScopedSlots.register(:key)`), and each
@@ -15,6 +17,9 @@ module Rigor
   # Only memo slots belong here. A slot a `with_*` frame installs and restores around a block is already empty
   # when the frame returns, and clearing it from inside a frame would break the frame.
   #
+  # ADR-129 — a slot that has moved into {TypingState} declares `run_scoped: true` there instead of registering here,
+  # and {.release} empties those too.
+  #
   # The registry is a module-level array filled at require time, so it is for the main Ractor only.
   module RunScopedSlots
     @keys = []
@@ -28,10 +33,11 @@ module Rigor
     # Every registered key, in registration order.
     def self.keys = @keys.dup.freeze
 
-    # Empties every registered slot on the calling thread.
+    # Empties every registered slot on the calling thread, and every run-scoped {TypingState} slot.
     def self.release
       thread = Thread.current
       @keys.each { |key| thread[key] = nil }
+      TypingState.release_run_scoped
       nil
     end
   end

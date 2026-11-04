@@ -17,6 +17,13 @@ RSpec.describe "a hand-off inside a callee resolves its constants in the callee'
     allow_any_instance_of(Rigor::Inference::StatementEvaluator).to receive(name, &) # rubocop:disable RSpec/AnyInstance
   end
 
+  # The run's resolved-census memo (`StatementEvaluator::RESOLVED_CENSUS`), as a broken copy of `resolved_census`
+  # reaches it.
+  def resolved_census_table
+    state = Rigor::TypingState.current
+    state.weak_key_map(Rigor::TypingState.slot(:callee_resolved_census).index)
+  end
+
   # `:mismatch` when the audit raised (the runner reports a raise in a rule as an internal analyzer error).
   def audited_rules(source)
     analyze(source)
@@ -1016,7 +1023,7 @@ RSpec.describe "a hand-off inside a callee resolves its constants in the callee'
         next block.call if Rigor::Analysis::DependencyRecorder.active? || Rigor::Inference::MemoAudit.suspended?
 
         scope = evaluator.send(:scope)
-        table = (Thread.current[:rigor_callee_resolved_census] ||= ObjectSpace::WeakKeyMap.new)
+        table = resolved_census_table
         slot = (table[scope.discovery] ||= [{}, {}])
         self_type = scope.self_type
         by_class = (slot[self_type.is_a?(Rigor::Type::Singleton) ? 1 : 0][kind] ||= {})
@@ -1095,7 +1102,7 @@ RSpec.describe "a hand-off inside a callee resolves its constants in the callee'
         next block.call if evaluator.send(:hand_off_memo_bypassed?)
 
         scope = evaluator.send(:scope)
-        table = (Thread.current[:rigor_callee_resolved_census] ||= ObjectSpace::WeakKeyMap.new)
+        table = resolved_census_table
         by_class = ((table[scope.discovery] ||= [{}, {}])[0][kind] ||= {})
         by_def = (by_class[evaluator.send(:enclosing_class_name_for, scope.self_type)] ||= {}.compare_by_identity)
         next by_def[def_node] = block.call unless by_def.key?(def_node)

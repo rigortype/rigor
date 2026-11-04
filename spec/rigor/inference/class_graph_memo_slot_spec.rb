@@ -14,12 +14,12 @@ require "tmpdir"
 # memos bounded the same way (`MethodDispatcher::RbsDispatch`'s `core_stdlib_memo`,
 # `Reflection.ancestor_constant_scopes`) have the same invariant.
 #
-# The key is read as a literal Symbol because `CLASS_GRAPH_CACHE_KEY` is a `private_constant` — the
-# spec deliberately reaches for the thread-local rather than a public accessor, since the whole point is
+# The slot is read by name ({TypingStateSlots}) because `CLASS_GRAPH_CACHE` is a `private_constant` — the
+# spec deliberately reaches for the per-thread slot rather than a public accessor, since the whole point is
 # that no production caller can observe this. A run releases its slots when it ends (`Rigor::RunScopedSlots`,
 # #2399), so each example reads them as the run left them, captured when the run calls the release.
 RSpec.describe "class-graph memo storage" do
-  def slot_key = :__rigor_class_graph_cache__
+  def slot_key = :class_graph_cache
 
   # Every file gets its own class pair so every file's analysis drives the ancestor walk through its own
   # merged discovery index — which is exactly the condition that grew the old store.
@@ -47,7 +47,8 @@ RSpec.describe "class-graph memo storage" do
     configuration = Rigor::Configuration.new("paths" => [dir], "parallel" => { "workers" => 0 })
     runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil)
     allow(Rigor::RunScopedSlots).to receive(:release).and_wrap_original do |original|
-      at_release.replace([slot_key, :__rigor_resolution_chain__].to_h { |key| [key, Thread.current[key]] })
+      at_release.replace(slot_key => typing_slot(slot_key),
+                         __rigor_resolution_chain__: Thread.current[:__rigor_resolution_chain__])
       original.call
     end
     guarded_run(runner)
@@ -58,10 +59,10 @@ RSpec.describe "class-graph memo storage" do
   def run_slot(key) = at_release.fetch(key)
 
   around do |example|
-    Thread.current[slot_key] = nil
+    set_typing_slot(slot_key, nil)
     example.run
   ensure
-    Thread.current[slot_key] = nil
+    set_typing_slot(slot_key, nil)
   end
 
   it "holds one slot after a multi-file run, whatever the file count" do
@@ -126,7 +127,7 @@ RSpec.describe "class-graph memo storage" do
       run_check(dir)
       two = run_slot(slot_key).size
     end
-    Thread.current[slot_key] = nil
+    set_typing_slot(slot_key, nil)
     Dir.mktmpdir do |dir|
       write_project(dir, 6)
       run_check(dir)
@@ -146,7 +147,7 @@ RSpec.describe "class-graph memo storage" do
       run_check(dir)
       slot = run_slot(slot_key)
       # Back on the thread, so the probe below reads the memo the run filled.
-      Thread.current[slot_key] = slot
+      set_typing_slot(slot_key, slot)
       index = slot[0]
       bucket = slot[1]
 
@@ -160,7 +161,7 @@ RSpec.describe "class-graph memo storage" do
                                                 possible_discovered_methods: index.possible_discovered_methods))
       shifted_bucket = Rigor::Inference::ExpressionTyper.new(scope: shifted).send(:class_graph_buckets)
       expect(shifted_bucket).not_to be(bucket)
-      expect(Thread.current[slot_key][0]).to be(shifted.discovery)
+      expect(typing_slot(slot_key)[0]).to be(shifted.discovery)
     end
   end
 end

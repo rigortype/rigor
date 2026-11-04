@@ -11,6 +11,7 @@ require_relative "../source/node_children"
 require_relative "../source/node_walker"
 require_relative "../analysis/self_call_resolution_recorder"
 require_relative "../run_scoped_slots"
+require_relative "../typing_state"
 require_relative "block_call_timing"
 require_relative "block_repetition"
 require_relative "project_yielder"
@@ -260,6 +261,15 @@ module Rigor
         @typing_node = typing_node
       end
 
+      # ADR-129 WD2 — the calling thread's {TypingState::State}, cached on the typer the first time a slot is read, so
+      # a later read is an ivar and an array index rather than a `Thread.current` lookup. A typer lives for one query on
+      # one thread; an object kept across threads must not keep one (see {Analysis::IncrementalSession}'s effects
+      # evaluator), or it would write into a state whose thread's {RunScopedSlots.release} has already run. A frame
+      # install whose block's value is the answer calls {TypingState.current} instead: Rigor's own analysis does not
+      # adopt this memoised reader's type at a self-call (#525's self-purity), so the install's answer would read as
+      # `Dynamic` through it.
+      def typing_state = @typing_state ||= TypingState.current
+
       def type_of(node)
         previous = @typing_node
         @typing_node = node
@@ -346,21 +356,29 @@ module Rigor
         self.class.recorded_inject_accumulator(block, scope)
       end
 
-      INJECT_ACCUMULATOR_KEY = RunScopedSlots.register(:__rigor_inject_accumulator__)
-      private_constant :INJECT_ACCUMULATOR_KEY
+      # ADR-129 WD1 — a Table, and a read-through cache of the computation's own value: a record read back answers
+      # what typing the call again from the same scope would compute.
+      INJECT_ACCUMULATOR = TypingState.table(
+        :inject_accumulator,
+        run_scoped: true, read_through: true,
+        reason: "keyed by block node; a read-through cache of the fold that the call's own typing computes"
+      )
+      private_constant :INJECT_ACCUMULATOR
 
       # The accumulator type {#record_inject_accumulator} stored for `block` when the call was typed from `scope`
       # itself (by identity), else nil.
       def self.recorded_inject_accumulator(block, scope)
-        slot = Thread.current[INJECT_ACCUMULATOR_KEY]&.[](block)
+        state = TypingState.current
+        slot = state[INJECT_ACCUMULATOR]&.[](block)
+        state.log_read(INJECT_ACCUMULATOR, block, slot || TypingState::ABSENT)
         slot && slot[0].equal?(scope) ? slot[1] : nil
       end
 
       # ADR-89 WD2 — the current run's return memo bucket as `{ def_node => [MemoEntry, …] }` (only entries
       # that carry a call descriptor, i.e. every stored entry). Read by the incremental session right after a
       # recording run to harvest each analyzed callee's observed call keys → return descriptors. Returns an
-      # empty hash when no bucket exists (a run that memoised nothing). Class method: the bucket lives on
-      # `Thread.current`, independent of any one `ExpressionTyper` instance.
+      # empty hash when no bucket exists (a run that memoised nothing). Class method: the bucket lives in the thread's
+      # {TypingState}, independent of any one `ExpressionTyper` instance.
       #
       # `bucket` defaults to the calling thread's current one; `Runner#run` keeps the bucket its run filled
       # ({.current_return_memo}) and passes it, since the run releases the thread's slot when it ends.
@@ -371,7 +389,7 @@ module Rigor
       end
 
       # The calling thread's return memo bucket (`{ def_node => { descriptor => MemoEntry } }`), or nil.
-      def self.current_return_memo = Thread.current[RETURN_MEMO_KEY]&.last
+      def self.current_return_memo = TypingState.current[RETURN_MEMO]&.last
 
       # Issue #720 — the value the block passed by the call site currently being re-typed evaluates to, or
       # `nil` outside such a frame. Read by {#type_of_yield}.
@@ -381,22 +399,16 @@ module Rigor
       # inference rebuilds freely. It is installed unconditionally — with `nil` — at every user-method
       # inference frame, so a callee reached WITHOUT a block from inside a yielding body cannot read its
       # caller's block.
-      YIELD_VALUE_KEY = :__rigor_yield_value_type__
-      private_constant :YIELD_VALUE_KEY
+      YIELD_VALUE = TypingState.frame(:yield_value_type, reason: "the caller's block value, installed per frame")
+      private_constant :YIELD_VALUE
 
       def self.current_yield_value_type
-        Thread.current[YIELD_VALUE_KEY]
+        TypingState.current[YIELD_VALUE]
       end
 
       # Runs `block` with `type` installed as the frame's yield value, restoring the previous frame on exit.
-      def self.with_yield_value_type(type)
-        previous = Thread.current[YIELD_VALUE_KEY]
-        Thread.current[YIELD_VALUE_KEY] = type
-        begin
-          yield
-        ensure
-          Thread.current[YIELD_VALUE_KEY] = previous
-        end
+      def self.with_yield_value_type(type, &)
+        TypingState.current.with(YIELD_VALUE, type, &)
       end
 
       # Issue #1125 — the argument types of the call currently being re-typed into the body being walked,
@@ -404,30 +416,25 @@ module Rigor
       # `m` itself was called with, so {#call_arg_types} expands the forwarding node to THIS list instead of
       # the `Dynamic[top]` a bare `Prism::ForwardingArgumentsNode` types as.
       #
-      # A thread-local for the same reason the yield value is (see {YIELD_VALUE_KEY}): `...` names the
+      # A thread-local for the same reason the yield value is (see {YIELD_VALUE}): `...` names the
       # frame's caller, not a binding, and the body is walked through scopes the inference rebuilds freely.
       # It is installed unconditionally — with nil — at every user-method inference frame, so a body reached
       # without `...` cannot read its caller's argument list. Because each frame installs its OWN list, a
       # chain `a(...) -> b(...) -> c(...)` threads through: `b`'s frame holds the types `a` expanded and
       # `c`'s holds `b`'s. The list is the callee's call-site `arg_types`, which is what keeps the ADR-84
       # return memo's `(def_node, receiver, arg_types)` key complete for a forwarding def.
-      FORWARDED_ARGS_KEY = :__rigor_forwarded_call_arg_types__
-      private_constant :FORWARDED_ARGS_KEY
+      FORWARDED_ARGS = TypingState.frame(:forwarded_call_arg_types,
+                                         reason: "the caller's frozen argument list, installed per frame")
+      private_constant :FORWARDED_ARGS
 
       def self.current_forwarded_arg_types
-        Thread.current[FORWARDED_ARGS_KEY]
+        TypingState.current[FORWARDED_ARGS]
       end
 
-      # Runs `block` with `types` installed as the frame's forwarded argument list, restoring the previous
+      # Runs `block` with `types` (frozen) installed as the frame's forwarded argument list, restoring the previous
       # frame on exit.
-      def self.with_forwarded_arg_types(types, &block)
-        previous = Thread.current[FORWARDED_ARGS_KEY]
-        Thread.current[FORWARDED_ARGS_KEY] = types
-        begin
-          block.call
-        ensure
-          Thread.current[FORWARDED_ARGS_KEY] = previous
-        end
+      def self.with_forwarded_arg_types(types, &)
+        TypingState.current.with(FORWARDED_ARGS, types, &)
       end
 
       # The two call-site channels a user-method body may read from its caller — the block a `yield`
@@ -443,7 +450,7 @@ module Rigor
       # exponentially, while keying the memo on it cost a fifth of `lib`'s allocations.
       def self.with_call_site_frame(yield_type, forwarded_arg_types, &)
         ReflectiveIvarWrite.outside_repeating_body do
-          with_yield_value_type(yield_type) { with_forwarded_arg_types(forwarded_arg_types, &) }
+          TypingState.current.with_pair(YIELD_VALUE, yield_type, FORWARDED_ARGS, forwarded_arg_types, &)
         end
       end
 
@@ -2766,8 +2773,11 @@ module Rigor
       # external entries this lookup passes over. Cross-file: the chain is built from the tables the runner
       # seeds from the project-wide pre-pass, cycle-guarded and capped at `Scope::ANCESTOR_WALK_LIMIT`.
 
-      CLASS_GRAPH_CACHE_KEY = RunScopedSlots.register(:__rigor_class_graph_cache__)
-      private_constant :CLASS_GRAPH_CACHE_KEY
+      CLASS_GRAPH_CACHE = TypingState.memo(
+        :class_graph_cache,
+        run_scoped: true, reason: "pure functions of the frozen discovery index it keys on"
+      )
+      private_constant :CLASS_GRAPH_CACHE
 
       # Memo for the static class-graph resolvers below. They are pure functions of the scope's *frozen*
       # discovery tables — `user_def_for` / `superclass_of` / `includes_of` and the ancestor-name resolver
@@ -2785,8 +2795,8 @@ module Rigor
       #
       # ONE slot, replaced rather than accumulated — the same shape, and now the same key, as
       # {MethodDispatcher::RbsDispatch}'s `core_stdlib_memo`. `ExpressionTyper` is rebuilt per
-      # `Scope#type_of`, so the slot lives on `Thread.current` rather than on `self`. A `Scope` merges its
-      # file's discovery with the project pre-pass, so every analysed file arrives with a fresh index: an
+      # `Scope#type_of`, so the slot lives in the thread's {TypingState} rather than on `self`. A `Scope` merges
+      # its file's discovery with the project pre-pass, so every analysed file arrives with a fresh index: an
       # identity-keyed *store* grew one bucket per file and, because the keys ARE the tables, pinned every
       # file's whole discovery index for the length of the run. What that bought, measured over
       # `lib`+`plugins`: 552 buckets holding 1,834 entries between them, and 58 of 80,106 calls answered
@@ -2796,19 +2806,20 @@ module Rigor
       # because one `equal?` is cheaper than three identity-hash lookups.
       #
       # Steady-state cost is one `equal?` check and zero allocation; the array and the buckets are
-      # allocated once per index. (Pool mode forks per worker, so the `Thread.current` slot is
+      # allocated once per index. (Pool mode forks per worker, so the per-thread slot is
       # process-local and never crosses a project boundary — and note that the parent's reported
       # `Memory peak` therefore does not see a worker's share of this at all.)
       def class_graph_buckets
         discovery = scope.discovery
-        slot = Thread.current[CLASS_GRAPH_CACHE_KEY]
+        state = typing_state
+        slot = state[CLASS_GRAPH_CACHE]
         unless slot && slot[0].equal?(discovery)
           # `self_pure` is issue #525's grant scan (identity-keyed by def node); it belongs here because it
           # is a pure function of the same frozen index — the sibling resolver it walks reads nothing else.
           # `singleton_def` is added lazily by {#singleton_def_through_ancestors}'s caller.
           slot = [discovery,
                   { user_def: {}, typing_def: {}, self_pure: {}.compare_by_identity, yields: {}.compare_by_identity }]
-          Thread.current[CLASS_GRAPH_CACHE_KEY] = slot
+          state[CLASS_GRAPH_CACHE] = slot
         end
         slot[1]
       end
@@ -2967,8 +2978,11 @@ module Rigor
         dynamic_top
       end
 
-      OVERRIDE_GATE_CACHE_KEY = RunScopedSlots.register(:__rigor_overridable_method_gate__)
-      private_constant :OVERRIDE_GATE_CACHE_KEY
+      OVERRIDE_GATE_CACHE = TypingState.memo(
+        :overridable_method_gate,
+        run_scoped: true, reason: "pure functions of the frozen discovery index it keys on"
+      )
+      private_constant :OVERRIDE_GATE_CACHE
 
       # Memo for {#overridden_in_project?}, nested `kind → owner → method_name`. The predicate is a pure
       # function of the scope's frozen discovery tables, so that index's *identity* is what says whether a
@@ -2998,10 +3012,11 @@ module Rigor
       # keyed and bounded differently for exactly that reason.
       def override_gate_buckets
         discovery = scope.discovery
-        slot = Thread.current[OVERRIDE_GATE_CACHE_KEY]
+        state = typing_state
+        slot = state[OVERRIDE_GATE_CACHE]
         unless slot && slot[0].equal?(discovery)
           slot = [discovery, { instance: {}, singleton: {} }]
-          Thread.current[OVERRIDE_GATE_CACHE_KEY] = slot
+          state[OVERRIDE_GATE_CACHE] = slot
         end
         slot[1]
       end
@@ -3040,16 +3055,21 @@ module Rigor
       EMPTY_REDEFINERS = [].freeze
       private_constant :EMPTY_REDEFINERS
 
-      METHOD_DEFINERS_INDEX_KEY = RunScopedSlots.register(:__rigor_method_definers_index__)
-      private_constant :METHOD_DEFINERS_INDEX_KEY
+      METHOD_DEFINERS_INDEX = TypingState.memo(
+        :method_definers_index,
+        run_scoped: true, reason: "pure functions of the def tables it keys on"
+      )
+      private_constant :METHOD_DEFINERS_INDEX
 
-      # The second way. Two flat thread slots rather than one slot holding an array of ways: a
-      # `Thread.current[KEY] ||= […]` seeds the store with an array LITERAL, which folds to a tuple whose
-      # elements are pinned, and the engine then reads the `way[0].equal?(…)` guards below as always-falsey
-      # (`make check` fires `flow.always-truthy-condition` on this very file). Two keys read as two plain
-      # `Thread.current` reads and keep the guards analysable.
-      METHOD_DEFINERS_INDEX_ALT_KEY = RunScopedSlots.register(:__rigor_method_definers_index_alt__)
-      private_constant :METHOD_DEFINERS_INDEX_ALT_KEY
+      # The second way. Two flat slots rather than one slot holding an array of ways: a `slot ||= […]` seeds the
+      # store with an array LITERAL, which folds to a tuple whose elements are pinned, and the engine then reads the
+      # `way[0].equal?(…)` guards below as always-falsey (`make check` fires `flow.always-truthy-condition` on this
+      # very file). Two slots read as two plain reads and keep the guards analysable.
+      METHOD_DEFINERS_INDEX_ALT = TypingState.memo(
+        :method_definers_index_alt,
+        run_scoped: true, reason: "pure functions of the def tables it keys on"
+      )
+      private_constant :METHOD_DEFINERS_INDEX_ALT
 
       # `method_name (Symbol) → [owner names]` inverted index over the instance / singleton def tables,
       # valid for exactly as long as the table it inverts: a new analysis generation, or a `Scope` that swaps
@@ -3093,13 +3113,14 @@ module Rigor
       def method_definers_index(kind)
         def_nodes = scope.discovered_def_nodes
         singleton_def_nodes = scope.discovered_singleton_def_nodes
-        way = Thread.current[METHOD_DEFINERS_INDEX_KEY]
+        state = typing_state
+        way = state[METHOD_DEFINERS_INDEX]
         unless way && way[0].equal?(def_nodes) && way[1].equal?(singleton_def_nodes)
-          alt = Thread.current[METHOD_DEFINERS_INDEX_ALT_KEY]
+          alt = state[METHOD_DEFINERS_INDEX_ALT]
           alt = nil unless alt && alt[0].equal?(def_nodes) && alt[1].equal?(singleton_def_nodes)
-          Thread.current[METHOD_DEFINERS_INDEX_ALT_KEY] = way
+          state[METHOD_DEFINERS_INDEX_ALT] = way
           way = alt || [def_nodes, singleton_def_nodes, nil, nil]
-          Thread.current[METHOD_DEFINERS_INDEX_KEY] = way
+          state[METHOD_DEFINERS_INDEX] = way
         end
         singleton = kind == :singleton
         way[singleton ? 3 : 2] ||= DefinersIndex.for(singleton ? singleton_def_nodes : def_nodes)
@@ -3115,18 +3136,30 @@ module Rigor
         !chain.search(scope) { |entry| entry.name == owner }.nil?
       end
 
-      INFERENCE_GUARD_KEY = :__rigor_user_method_inference_stack__
-      private_constant :INFERENCE_GUARD_KEY
+      # ADR-129 WD3 — an id-determined Resource: {TypingState::State#push} and {TypingState::State#pop} each take a
+      # fresh id, so the stack's contents are fixed while the id is and a read of it refuses nothing.
+      INFERENCE_GUARD = TypingState.resource(
+        :user_method_inference_stack,
+        read_exemption: :id_determined,
+        reason: "the ADR-55 recursion guard, pushed and popped in place by each inference frame"
+      )
+      private_constant :INFERENCE_GUARD
 
-      INFERENCE_UNROLL_FUEL_KEY = :__rigor_user_method_unroll_fuel__
-      private_constant :INFERENCE_UNROLL_FUEL_KEY
+      INFERENCE_UNROLL_FUEL = TypingState.resource(
+        :user_method_unroll_fuel,
+        reason: "ADR-55 unroll fuel, consumed in place per outermost entry"
+      )
+      private_constant :INFERENCE_UNROLL_FUEL
 
       # ADR-55 slice 2 — thread-local fixpoint return-summary table, keyed by the plain `(receiver, method)`
       # signature (NOT the value-extended signature: extended frames from slice 1 share the same summary).
       # Each entry is `{ assumption:, consulted: }` where `assumption` is the current Kleene iterate (seeded
       # `bot`) and `consulted` flips true when an in-cycle re-entry returns it.
-      INFERENCE_SUMMARY_KEY = :__rigor_user_method_return_summary__
-      private_constant :INFERENCE_SUMMARY_KEY
+      INFERENCE_SUMMARY = TypingState.resource(
+        :user_method_return_summary,
+        reason: "ADR-55 Kleene summaries and their `:consulted` flag, rewritten in place"
+      )
+      private_constant :INFERENCE_SUMMARY
 
       # Per-thread append-only log of the seed depths of every in-flight summary `consult_summary` read
       # (ADR-55 slice 2 mutual-recursion soundness fix, 2026-06-12). Each fixpoint owner records the guard
@@ -3137,8 +3170,11 @@ module Rigor
       # `untyped` rather than fold one branch's seed into a "final" constant. Own-signature consults log
       # depth == own depth, and a nested fixpoint that completes within the evaluation logs depths > own
       # depth; neither is foreign. Cleared with the summary table when the guard stack drains to empty.
-      SUMMARY_CONSULT_DEPTHS_KEY = :__rigor_user_method_summary_consult_depths__
-      private_constant :SUMMARY_CONSULT_DEPTHS_KEY
+      SUMMARY_CONSULT_DEPTHS = TypingState.resource(
+        :user_method_summary_consult_depths,
+        reason: "ADR-55 consult log, appended in place and read as a delta"
+      )
+      private_constant :SUMMARY_CONSULT_DEPTHS
 
       # ADR-57 follow-up — run-scoped memo for resolved user-method return types. The ADR-57 gate-open made
       # every resolved in-body self-call adopt the callee's inferred return, which re-types the callee body
@@ -3161,7 +3197,7 @@ module Rigor
       # post-hoc (ADR-84 WD3): candidacy only requires that the plain signature not already be on the
       # recursion guard stack (a frame inside its own cycle returns a Kleene iterate by construction), and
       # the store gate brackets the compute over the transient-event depth log
-      # (TRANSIENT_EVENT_DEPTHS_KEY), refusing only when an event referenced a frame BELOW the bracket's
+      # (TRANSIENT_EVENT_DEPTHS), refusing only when an event referenced a frame BELOW the bracket's
       # entry depth — proof the ancestor context (an in-flight ancestor summary, the shared unroll fuel, a
       # possibly-ancestor-caused clamp) influenced the result. Events at-or-above the entry depth are the
       # compute's own deterministic machinery — a recursive method's own converged fixpoint stores from a
@@ -3185,10 +3221,18 @@ module Rigor
       # parse). Only the current generation's bucket is retained (single slot) — a rolled-over run's entries
       # become garbage instead of accumulating across LSP runs, and the run that filled the slot releases it
       # when it ends ({RunScopedSlots}; `Runner#run` keeps its bucket for `#return_summaries`).
-      # `ExpressionTyper` is rebuilt per `Scope#type_of`, so the store lives on `Thread.current`; fork-pool
+      # `ExpressionTyper` is rebuilt per `Scope#type_of`, so the store lives in the thread's {TypingState}; fork-pool
       # workers are separate processes, so it never crosses a project boundary (ADR-84 WD5).
-      RETURN_MEMO_KEY = RunScopedSlots.register(:__rigor_user_method_return_memo__)
-      private_constant :RETURN_MEMO_KEY
+      #
+      # ADR-129 WD1 — a Table, not a Memo: its WD3 serves a standalone result where a fresh compute inside a cycle
+      # would be tainted, and its WD6 serves a stored `untyped`, so it is not extensional. Its reads and stores are
+      # journaled ({#log_return_memo}).
+      RETURN_MEMO = TypingState.table(
+        :user_method_return_memo,
+        run_scoped: true,
+        reason: "ADR-84 return memo; not extensional (its WD3 and WD6), so its reads and stores are journaled"
+      )
+      private_constant :RETURN_MEMO
 
       # ADR-84 WD2 — one memo entry: the final inferred return plus, when the entry was computed under
       # ADR-46 dependency recording, the frozen `Analysis::DependencyRecorder::ReadSet` its body walk
@@ -3256,8 +3300,11 @@ module Rigor
       # sense above — position 0 is always a sound (conservative) choice; spec/rigor/inference/
       # return_memo_taint_spec.rb pins this (no raw `BudgetTrace.hit` on the recursion categories outside
       # the helper).
-      TRANSIENT_EVENT_DEPTHS_KEY = :__rigor_user_method_transient_event_depths__
-      private_constant :TRANSIENT_EVENT_DEPTHS_KEY
+      TRANSIENT_EVENT_DEPTHS = TypingState.resource(
+        :user_method_transient_event_depths,
+        reason: "ADR-84 WD3 event log, appended in place and read as a delta"
+      )
+      private_constant :TRANSIENT_EVENT_DEPTHS
 
       # Per-inference recursion context threaded through the guard / fixpoint helpers (ADR-55 slice 2).
       # Bundles the call descriptor (`receiver`, `arg_types`, `plain_signature`), the thread-local summary
@@ -3335,8 +3382,7 @@ module Rigor
         # resolving during the main walk. `describe(:short)` keeps non-Nominal receivers (the implicit
         # `Object` carrier for top-level / DSL-block defs) printable.
         plain_signature = [receiver.describe(:short), def_node.name]
-        stack = (Thread.current[INFERENCE_GUARD_KEY] ||= [])
-        summaries = (Thread.current[INFERENCE_SUMMARY_KEY] ||= {})
+        stack = typing_state.stack(INFERENCE_GUARD)
 
         # WD0 (RIGOR_BUDGET_TRACE) — one entry into user-method return inference. No-op when disabled.
         BudgetTrace.hit(BudgetTrace::MEMO_ENTRIES)
@@ -3362,8 +3408,7 @@ module Rigor
         ExpressionTyper.with_call_site_frame(yield_type, forwarded_frame_types(def_node, arg_types)) do
           unless memo_candidate?(stack, plain_signature)
             trace_memo_refusal(stack, plain_signature)
-            next compute_user_method_return(def_node, body_scope, stack, summaries,
-                                            receiver, arg_types, plain_signature)
+            next compute_user_method_return(def_node, body_scope, stack, receiver, arg_types, plain_signature)
           end
 
           # INVARIANT (ADR-46 recording soundness, ADR-84 WD2) — the deep cross-file dependency edges (the
@@ -3380,8 +3425,7 @@ module Rigor
           # (ActiveStorage video_analyzer.rb's subtree, 0.43s -> >90s; PR #79) and stays rejected. Pinned by
           # spec/rigor/inference/return_memo_recording_spec.rb (cross-file replay completeness) and
           # dependency_recorder_spec.rb's transitive deep-edge example.
-          consult_and_store_return_memo(def_node, body_scope, stack, summaries,
-                                        receiver, arg_types, plain_signature)
+          consult_and_store_return_memo(def_node, body_scope, stack, receiver, arg_types, plain_signature)
         end
       end
 
@@ -3435,7 +3479,7 @@ module Rigor
       # The candidate-frame memo path: consult the current run generation's bucket, and on a miss compute
       # and store a FINAL result. Reached only when `memo_candidate?` held (see `infer_user_method_return`).
       # The store gate (ADR-84 WD3): a result is stored when no transient-machinery event during the
-      # bracket referenced a stack frame BELOW the bracket's entry depth (see TRANSIENT_EVENT_DEPTHS_KEY).
+      # bracket referenced a stack frame BELOW the bracket's entry depth (see TRANSIENT_EVENT_DEPTHS).
       # A separate ADR-55 fixpoint-consult bracket counter used to sit in front of this test; it is gone
       # (issue #875) because the event log already subsumes it — the sole `consult_summary` call site is
       # the in-cycle guard hit, which logs its event at the consulted owner's position first, so a consult
@@ -3449,8 +3493,10 @@ module Rigor
       # is already `Dynamic[top]` is stored anyway — see `top_result?`. A hit under ADR-46 recording
       # replays the entry's captured read-set into the current consumer (see the INVARIANT comment at the
       # call site).
-      def consult_and_store_return_memo(def_node, body_scope, stack, summaries,
-                                        receiver, arg_types, plain_signature)
+      #
+      # ADR-129 WD3 — the ADR-55 summaries are not read here: a hit neither reads nor writes them, and a miss's
+      # compute takes them ({#return_summaries}).
+      def consult_and_store_return_memo(def_node, body_scope, stack, receiver, arg_types, plain_signature)
         per_def = (return_memo_bucket[def_node] ||= {})
         # Issue #525 — the `:self` fold-safety grant is a THIRD call-site-varying dimension: the same
         # `(receiver, arg_types)` body returns a folded member type when the caller's receiver expression
@@ -3465,7 +3511,7 @@ module Rigor
                     arg_types.map { |type| type.describe(:short) },
                     body_scope.struct_fold_safe?(:self),
                     ExpressionTyper.current_yield_value_type&.describe(:short)]
-        if (entry = per_def[memo_key])
+        if (entry = recall_return_memo(per_def, def_node, memo_key))
           BudgetTrace.hit(BudgetTrace::MEMO_HITS)
           Analysis::DependencyRecorder.replay(entry.read_set) if Analysis::DependencyRecorder.active?
           return entry.result
@@ -3475,20 +3521,42 @@ module Rigor
 
         entry_depth = stack.size
         event_mark = transient_event_mark
-        result, read_set = compute_with_read_capture(def_node, body_scope, stack, summaries,
-                                                     receiver, arg_types, plain_signature)
+        result, read_set = compute_with_read_capture(def_node, body_scope, stack, receiver, arg_types, plain_signature)
 
         if context_tainted?(event_mark, entry_depth) && !top_result?(result)
           BudgetTrace.hit(BudgetTrace::MEMO_REFUSE_TRANSIENT)
         else
-          per_def[memo_key] = MemoEntry.new(result: result, read_set: read_set,
-                                            receiver: receiver, arg_types: arg_types)
+          store_return_memo(per_def, def_node, memo_key,
+                            MemoEntry.new(result: result, read_set: read_set, receiver: receiver, arg_types: arg_types))
         end
         result
       end
 
+      # The entry `per_def` holds for `memo_key`, or nil, journaled as a Table read (ADR-129 WD3).
+      def recall_return_memo(per_def, def_node, memo_key)
+        entry = per_def[memo_key]
+        log_return_memo(:read, def_node, memo_key, entry || TypingState::ABSENT)
+        entry
+      end
+
+      # Stores `entry` for `memo_key`, journaled as a Table write (ADR-129 WD3).
+      def store_return_memo(per_def, def_node, memo_key, entry)
+        per_def[memo_key] = entry
+        log_return_memo(:write, def_node, memo_key, entry)
+      end
+
+      # ADR-129 WD3 — journals a return-memo read or store under `[def_node, memo_key]`. The composite key is built
+      # only while a capture is open, so a run with the `type_of` memo off allocates nothing here.
+      def log_return_memo(kind, def_node, memo_key, value)
+        state = typing_state
+        return unless state.capturing?
+
+        key = [def_node, memo_key].freeze
+        kind == :read ? state.log_read(RETURN_MEMO, key, value) : state.log_write(RETURN_MEMO, key, value)
+      end
+
       def transient_event_mark
-        Thread.current[TRANSIENT_EVENT_DEPTHS_KEY]&.size || 0
+        typing_state.read(TRANSIENT_EVENT_DEPTHS)&.size || 0
       end
 
       # ADR-84 WD3 — true when a transient-machinery event logged during the bracket (entries past
@@ -3500,7 +3568,7 @@ module Rigor
       # outermost entry, so the suffix slice allocated an array per candidate compute — a term quadratic in
       # the event count, and the `ary_ensure_room_for_push` / GC-sweep profile issue #870 sampled.
       def context_tainted?(event_mark, entry_depth)
-        log = Thread.current[TRANSIENT_EVENT_DEPTHS_KEY]
+        log = typing_state.read(TRANSIENT_EVENT_DEPTHS)
         return false if log.nil? || log.size <= event_mark
 
         index = event_mark
@@ -3538,25 +3606,22 @@ module Rigor
       # ADR-84 WD2 — the memo-miss compute, wrapped in a `DependencyRecorder.capture` window when ADR-46
       # recording is active so the entry can carry its replayable read-set. Returns `[result, read_set]`
       # (`read_set` nil when not recording).
-      def compute_with_read_capture(def_node, body_scope, stack, summaries,
-                                    receiver, arg_types, plain_signature)
+      def compute_with_read_capture(def_node, body_scope, stack, receiver, arg_types, plain_signature)
         unless Analysis::DependencyRecorder.active?
-          return [compute_user_method_return(def_node, body_scope, stack, summaries,
-                                             receiver, arg_types, plain_signature), nil]
+          return [compute_user_method_return(def_node, body_scope, stack, receiver, arg_types, plain_signature), nil]
         end
 
         Analysis::DependencyRecorder.capture do
-          compute_user_method_return(def_node, body_scope, stack, summaries,
-                                     receiver, arg_types, plain_signature)
+          compute_user_method_return(def_node, body_scope, stack, receiver, arg_types, plain_signature)
         end
       end
 
       # The ADR-55 recursion-guard + value-unroll + fixpoint body of user-method return inference, factored
       # out so `infer_user_method_return` is a thin memo wrapper (the memo is the ADR-57 follow-up; this is
       # unchanged from pre-memo behaviour).
-      def compute_user_method_return(def_node, body_scope, stack, summaries,
-                                     receiver, arg_types, plain_signature)
+      def compute_user_method_return(def_node, body_scope, stack, receiver, arg_types, plain_signature)
         trace_body_eval(plain_signature)
+        summaries = return_summaries
         # ADR-55 slice 1: when every bound argument is value-pinned, extend the guard key with a stable
         # descriptor of the argument *values* so distinct constant frames may recurse (e.g. `factorial(5)`
         # folds to `Constant[120]`). Distinct constant frames are bounded by `RECURSION_UNROLL_FUEL` per
@@ -3601,6 +3666,10 @@ module Rigor
         evaluate_guarded_user_method_body(def_node, body_scope, stack, signature, context)
       end
 
+      # ADR-55 — the thread's in-flight fixpoint summaries, created on first use. Taken only by a compute, never on a
+      # return-memo hit (ADR-129 WD3), and cleared when the guard stack drains.
+      def return_summaries = typing_state.acquire(INFERENCE_SUMMARY) { {} }
+
       # Issue #1125 — the argument list a `def m(...)` body's `...` re-supplies, or nil for a def without the
       # forwarding parameter (whose body cannot contain a `...` call at all) and for a call that does not even
       # satisfy `m`'s own required positionals (that call raises at runtime; the body is not worth re-typing).
@@ -3619,8 +3688,9 @@ module Rigor
         kw_shape = positional.pop if takes_keywords?(params) && positional.last.is_a?(Type::HashShape)
         return nil if positional.size < params.requireds.size
 
+        # Frozen: a Frame value does not change while it is installed (ADR-129 WD1).
         tail = positional[(params.requireds.size + params.optionals.size)..] || []
-        kw_shape ? tail + [kw_shape] : tail
+        (kw_shape ? tail + [kw_shape] : tail).freeze
       end
 
       # True when this frame's result is a candidate for the return memo: the one structural precondition,
@@ -3641,13 +3711,14 @@ module Rigor
       # `def_nodes` table identity for runner-less scopes (single-file probes) — the pre-WD2 per-file
       # scope. A generation mismatch drops the previous bucket whole, so a re-run in one process (LSP,
       # ADR-62 warm loop) can neither hit stale entries nor accumulate them. The bucket maps `def_node`
-      # (object identity, held strongly — see RETURN_MEMO_KEY) to its per-descriptor entries.
+      # (object identity, held strongly — see RETURN_MEMO) to its per-descriptor entries.
       def return_memo_bucket
         generation = scope.run_generation || scope.discovered_def_nodes
-        slot = Thread.current[RETURN_MEMO_KEY]
+        state = typing_state
+        slot = state[RETURN_MEMO]
         unless slot && slot[0].equal?(generation)
           slot = [generation, {}.compare_by_identity]
-          Thread.current[RETURN_MEMO_KEY] = slot
+          state[RETURN_MEMO] = slot
         end
         slot[1]
       end
@@ -3697,10 +3768,10 @@ module Rigor
       # referenced frame's stack position to the load-bearing thread-local event log (regardless of
       # RIGOR_BUDGET_TRACE) and forwards the category to `BudgetTrace`. The taint spec pins that no
       # recursion-machinery `BudgetTrace.hit` exists outside this helper, so a future fallback cannot
-      # silently join unlogged (see the audit table at TRANSIENT_EVENT_DEPTHS_KEY; `context_depth` 0 is
+      # silently join unlogged (see the audit table at TRANSIENT_EVENT_DEPTHS; `context_depth` 0 is
       # always a sound conservative choice).
       def note_transient_fallback(category, context_depth)
-        (Thread.current[TRANSIENT_EVENT_DEPTHS_KEY] ||= []) << context_depth
+        typing_state.append(TRANSIENT_EVENT_DEPTHS, context_depth)
         BudgetTrace.hit(category)
       end
 
@@ -3712,7 +3783,8 @@ module Rigor
         # The outermost frame for this plain signature owns the summary entry and runs the fixpoint loop.
         # ADR-55 WD2.
         outermost = stack.none? { |frame| plain_part(frame) == context.plain_signature }
-        stack.push(signature)
+        state = typing_state
+        state.push(INFERENCE_GUARD, signature)
         begin
           if outermost
             fixpoint_user_method_return(def_node, body_scope, context)
@@ -3721,12 +3793,12 @@ module Rigor
             clamp_unroll_result(type, context.would_have_been_guarded)
           end
         ensure
-          stack.pop
+          state.pop(INFERENCE_GUARD)
           if stack.empty?
-            Thread.current[INFERENCE_UNROLL_FUEL_KEY] = nil
-            Thread.current[INFERENCE_SUMMARY_KEY] = nil
-            Thread.current[SUMMARY_CONSULT_DEPTHS_KEY] = nil
-            Thread.current[TRANSIENT_EVENT_DEPTHS_KEY] = nil
+            state.write(INFERENCE_UNROLL_FUEL, nil)
+            state.write(INFERENCE_SUMMARY, nil)
+            state.write(SUMMARY_CONSULT_DEPTHS, nil)
+            state.write(TRANSIENT_EVENT_DEPTHS, nil)
           end
         end
       end
@@ -3760,7 +3832,7 @@ module Rigor
         plain_signature = context.plain_signature
         summaries = context.summaries
         depth = seed_fixpoint_summary(summaries, plain_signature)
-        consult_depths = (Thread.current[SUMMARY_CONSULT_DEPTHS_KEY] ||= [])
+        consult_depths = typing_state.acquire(SUMMARY_CONSULT_DEPTHS) { [] }
 
         RECURSION_FIXPOINT_CAP.times do |iteration|
           summaries[plain_signature][:consulted] = false
@@ -3810,7 +3882,7 @@ module Rigor
       # `consult_summary` logs so nested fixpoints can detect a foreign in-flight (ancestor) consult.
       # Returns the seed depth. ADR-55 slice 2.
       def seed_fixpoint_summary(summaries, plain_signature)
-        depth = (Thread.current[INFERENCE_GUARD_KEY] || []).size
+        depth = typing_state[INFERENCE_GUARD]&.size || 0
         summaries[plain_signature] = {
           assumption: Type::Combinator.bot, consulted: false, depth: depth
         }
@@ -3832,7 +3904,7 @@ module Rigor
       # The stack position of the currently-evaluating owner frame (the guard stack's top) — the
       # self-referential `context_depth` for events that are deterministic per owner (ADR-84 WD3).
       def own_guard_frame_position
-        size = Thread.current[INFERENCE_GUARD_KEY]&.size || 0
+        size = typing_state[INFERENCE_GUARD]&.size || 0
         size.positive? ? size - 1 : 0
       end
 
@@ -3937,7 +4009,7 @@ module Rigor
         return Type::Combinator.untyped if entry.nil?
 
         entry[:consulted] = true
-        (Thread.current[SUMMARY_CONSULT_DEPTHS_KEY] ||= []) << entry[:depth]
+        typing_state.append(SUMMARY_CONSULT_DEPTHS, entry[:depth])
         entry[:assumption]
       end
 
@@ -3976,10 +4048,11 @@ module Rigor
       # drains back to empty. On exhaustion (return 0) it records a `RECURSION_UNROLL_FUEL` hit so the caller
       # keeps the plain `(receiver, method)` signature — today's behaviour.
       def unroll_fuel_remaining(stack)
-        remaining = Thread.current[INFERENCE_UNROLL_FUEL_KEY]
+        state = typing_state
+        remaining = state.read(INFERENCE_UNROLL_FUEL)
         remaining = RECURSION_UNROLL_FUEL if remaining.nil? || stack.empty?
         if remaining.positive?
-          Thread.current[INFERENCE_UNROLL_FUEL_KEY] = remaining - 1
+          state.write(INFERENCE_UNROLL_FUEL, remaining - 1)
         else
           # ADR-84 WD3 — position 0: fuel is one shared resource seeded at the stack bottom, so its
           # exhaustion is context-dependent for every nested bracket.
@@ -4310,7 +4383,7 @@ module Rigor
       # now carry what the callee needs:
       #
       # - `f(...)` inside `def m(...)` re-supplies the arguments `m` was called with, read from the frame
-      #   {#infer_user_method_return} installed ({FORWARDED_ARGS_KEY}) — so it expands to a whole LIST, not
+      #   {#infer_user_method_return} installed ({FORWARDED_ARGS}) — so it expands to a whole LIST, not
       #   one type, which is why the map became a flat_map.
       # - a keyword hash built ENTIRELY from a double splat (`f(**h)`) is the shape of `h`, so `f(**h)`
       #   binds the same parameters the literal form `f(a: 1, b: 2)` does.
@@ -4826,23 +4899,17 @@ module Rigor
       # Suppression flag for {#threaded_block_body_type} — set while a fold is running (so a fold never nests)
       # and while the per-element Tuple fold is over its arity cap. Thread-local because block typing is
       # re-entrant within one thread and the fork-pool workers each own their own.
-      THREADED_BLOCK_BODY_KEY = :__rigor_threaded_block_body__
-      private_constant :THREADED_BLOCK_BODY_KEY
+      THREADED_BLOCK_BODY = TypingState.frame(:threaded_block_body, reason: "a suppression flag installed per fold")
+      private_constant :THREADED_BLOCK_BODY
 
       def block_body_threading_suppressed?
-        Thread.current[THREADED_BLOCK_BODY_KEY] ? true : false
+        typing_state[THREADED_BLOCK_BODY] ? true : false
       end
 
       # Runs the block with the scope-threading fold suppressed, restoring the previous state (not clearing
       # it) on the way out, so nesting a suppressed region inside another cannot re-enable threading.
-      def without_block_body_threading
-        previous = Thread.current[THREADED_BLOCK_BODY_KEY]
-        Thread.current[THREADED_BLOCK_BODY_KEY] = true
-        begin
-          yield
-        ensure
-          Thread.current[THREADED_BLOCK_BODY_KEY] = previous
-        end
+      def without_block_body_threading(&)
+        TypingState.current.with(THREADED_BLOCK_BODY, true, &)
       end
 
       # Every variable-write form whose name `StatementEvaluator` threads into the following statement's
@@ -5647,9 +5714,13 @@ module Rigor
       # Records `type` as the accumulator `block` receives when typed from this typer's scope
       # ({.recorded_inject_accumulator}). Prism nodes compare by identity. The keys are weak but the values strong,
       # and a recorded scope reaches the parse tree that holds the key, so a record never goes on its own (issue
-      # #2412): the map is a run-scoped slot ({RunScopedSlots}), emptied when the run that filled it ends.
+      # #2412): the map is a run-scoped slot ({TypingState.release_run_scoped}), emptied when the run that filled it
+      # ends.
       def record_inject_accumulator(block, type)
-        (Thread.current[INJECT_ACCUMULATOR_KEY] ||= ObjectSpace::WeakKeyMap.new)[block] = [scope, type].freeze
+        record = [scope, type].freeze
+        state = typing_state
+        state.weak_key_map(INJECT_ACCUMULATOR)[block] = record
+        state.log_write(INJECT_ACCUMULATOR, block, record)
       end
 
       # Issue #1332 — the #587 (b) captured-block binding ({#captured_block_bindings}) both inject arms lay under

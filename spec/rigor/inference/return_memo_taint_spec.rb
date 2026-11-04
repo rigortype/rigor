@@ -127,11 +127,11 @@ RSpec.describe "ADR-84 return memo event-taint store gate" do
   it "logs transient events with RIGOR_BUDGET_TRACE disabled and taints only below-entry references" do
     Rigor::Inference::BudgetTrace.disable!
     typer = Rigor::Inference::ExpressionTyper.new(scope: nil)
-    key = :__rigor_user_method_transient_event_depths__
-    Thread.current[key] = nil
+    key = :user_method_transient_event_depths
+    set_typing_slot(key, nil)
 
     typer.send(:note_transient_fallback, Rigor::Inference::BudgetTrace::RECURSION_GUARD, 2)
-    expect(Thread.current[key]).to eq([2]) # logged despite tracing being disabled
+    expect(typing_slot(key)).to eq([2]) # logged despite tracing being disabled
 
     aggregate_failures do
       # Event at position 2: taints a bracket entered at depth 3 (ancestor state), not one at depth 2 or 1
@@ -144,10 +144,10 @@ RSpec.describe "ADR-84 return memo event-taint store gate" do
       expect(typer.send(:context_tainted?, 0, 0)).to be(false)
     end
   ensure
-    Thread.current[key] = nil
+    set_typing_slot(key, nil)
   end
 
-  # The audit-table pin (see TRANSIENT_EVENT_DEPTHS_KEY in expression_typer.rb): every recursion-machinery
+  # The audit-table pin (see TRANSIENT_EVENT_DEPTHS in expression_typer.rb): every recursion-machinery
   # fallback must route through `note_transient_fallback`, never a raw `BudgetTrace.hit`, so adding a
   # fallback without tainting the bracket fails here rather than silently poisoning the memo.
   describe "audit-table discipline" do

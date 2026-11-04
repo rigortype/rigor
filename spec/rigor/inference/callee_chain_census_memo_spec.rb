@@ -118,11 +118,14 @@ RSpec.describe "the callee-chain census memo (#2104)" do
         WeakRef.new(derived.discovery)
       end
       ref = probe.call
-      expect(Thread.current[:rigor_callee_resolved_census]).to be_a(ObjectSpace::WeakKeyMap)
+      expect(typing_slot(:callee_resolved_census)).to be_a(ObjectSpace::WeakKeyMap)
 
       # The other per-thread memos key on the index too (one slot each); drop them so only the census can hold it.
       Thread.current.keys.grep(/rigor/).each do |key|
-        Thread.current[key] = nil unless key == :rigor_callee_resolved_census
+        Thread.current[key] = nil unless key == :__rigor_typing_state__
+      end
+      Rigor::TypingState.slots.each do |slot|
+        set_typing_slot(slot.name, nil) unless slot.name == :callee_resolved_census
       end
       5.times { GC.start }
 
@@ -159,7 +162,7 @@ RSpec.describe "the callee-chain census memo (#2104)" do
 
     it "empties the thread slot when a run ends" do
       floored_for(caller_source)
-      expect(Thread.current[:rigor_callee_resolved_census]).not_to be_nil
+      expect(typing_slot(:callee_resolved_census)).not_to be_nil
 
       Dir.mktmpdir do |dir|
         path = File.join(dir, "mut.rb")
@@ -169,7 +172,7 @@ RSpec.describe "the callee-chain census memo (#2104)" do
         guarded_run(runner, [path])
       end
 
-      expect(Thread.current[:rigor_callee_resolved_census]).to be_nil
+      expect(typing_slot(:callee_resolved_census)).to be_nil
     end
   end
 end

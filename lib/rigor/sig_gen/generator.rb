@@ -176,7 +176,12 @@ module Rigor
         @file_base_scope = nil
         # #2461 — which `sig/` targets the writer will write to, read from the files as they are now.
         @writable_targets = {}
-        candidates = resolved.flat_map { |path| analyse_file(path, @environment) }
+        # ADR-130 WD5 — with interface dispatch off, so a return read through a `Rigor::Plugin` interface member
+        # (`_FactStore#publish: ... -> nil`) is not written into RBS a plugin author never wrote against the
+        # interface: the output is the output of erasure.
+        candidates = Inference::MethodDispatcher::RbsDispatch.without_interface_dispatch do
+          resolved.flat_map { |path| analyse_file(path, @environment) }
+        end
         demoted = demote_overridden_base_methods(
           demote_unresolvable_superclasses(
             demote_generic_reopenings(demote_inline_generic_classes(resolve_superclass_spellings(candidates)))

@@ -49,8 +49,8 @@ module Rigor
       # ADR-130 WD2 — the parity predicate. Every site that keys a leniency on `untyped` asks this instead of testing
       # a `Dynamic`'s facet for `Top` or comparing with {untyped}, so a value whose facet parity erases
       # ({erased_facet?}) reads as `untyped` everywhere but member dispatch. `spec/rigor/type/untyped_parity_spec.rb`
-      # flags the raw spellings it knows outside this module. No facet erases yet, so today this is `Dynamic[top]`
-      # alone.
+      # flags the raw spellings it knows outside this module. True for `Dynamic[top]` and for a plugin-interface
+      # value, `Dynamic[Rigor::Plugin::_Scope]`.
       def untyped?(type)
         return false unless type.is_a?(Dynamic)
 
@@ -58,12 +58,12 @@ module Rigor
         facet.is_a?(Top) || erased_facet?(facet)
       end
 
-      # ADR-130 WD1 — true for a `Dynamic` facet that parity reads as `top`: {untyped?} answers true for it, and
-      # {merge_erased_members} merges it with `Dynamic[top]`. Slice 1b answers for the `Rigor::Plugin` interface
-      # carrier; until it lands no facet erases, and `spec/rigor/type/combinator_facet_erasure_spec.rb` pins the
-      # merge with a stub facet. An engine hook, not public API.
-      def erased_facet?(_facet)
-        false
+      # ADR-130 WD1 — true for a `Dynamic` facet that parity reads as `top`: the `Rigor::Plugin` interface carrier
+      # ({Interface}). {untyped?} answers true for it, and {merge_erased_members} merges it with `Dynamic[top]`.
+      # `spec/rigor/type/combinator_facet_erasure_spec.rb` also drives the merge through a stub facet. An engine
+      # hook, not public API.
+      def erased_facet?(facet)
+        facet.is_a?(Interface)
       end
       private_class_method :erased_facet?
 
@@ -926,6 +926,8 @@ module Rigor
             BoundMethod.new(receiver_type: erase_facets(type.receiver_type), method_name: type.method_name)
           when DataInstance then DataInstance.new(erase_values(type.members), type.class_name)
           when StructInstance then StructInstance.new(erase_values(type.members), type.class_name)
+          # The facet itself, erased apart from its `Dynamic` (which erases whole, to `untyped`).
+          when Interface then Interface.new(type.name, erase_each(type.type_args))
           else type
           end
         end
@@ -1201,7 +1203,8 @@ module Rigor
           Dynamic => %i[static_facet], Nominal => %i[type_args], Tuple => %i[elements], HashShape => %i[pairs],
           Union => %i[members], Intersection => %i[members], Difference => %i[base removed], Refined => %i[base],
           Maybe => %i[value_type], Result => %i[ok_type err_type], App => %i[args bound],
-          BoundMethod => %i[receiver_type], DataInstance => %i[members], StructInstance => %i[members]
+          BoundMethod => %i[receiver_type], DataInstance => %i[members], StructInstance => %i[members],
+          Interface => %i[type_args]
         }
       )
 

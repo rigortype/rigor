@@ -2,10 +2,11 @@
 
 require "spec_helper"
 
-# ADR-130 WD1 — `Combinator.union` dedups members modulo facet erasure. No facet erases until slice 1b adds the
-# `Rigor::Plugin` interface carrier, so the merge is the identity today; these examples drive it through a stub facet
-# that the erasure hook (`erased_facet?`) is stubbed to accept. Each nested example is the round-3 review shape: a join
-# whose arms master's dedup collapses must collapse the same way when one arm carries the facet.
+# ADR-130 WD1 — `Combinator.union` dedups members modulo facet erasure. The facet that erases is the `Rigor::Plugin`
+# interface carrier (`Type::Interface`); most examples drive the merge through a stub facet that the erasure hook
+# (`erased_facet?`) is stubbed to accept, so they pin the merge apart from the carrier. Each nested example is the
+# round-3 review shape: a join whose arms master's dedup collapses must collapse the same way when one arm carries the
+# facet.
 
 # A facet the engine has no carrier for: a value type that renders, compares and hashes.
 ErasureStubFacet = Data.define(:name) do
@@ -48,7 +49,8 @@ ERASURE_SAMPLES = {
   },
   Rigor::Type::StructInstance => lambda { |fill|
     Rigor::Type::Combinator.struct_instance_of(members: { x: fill.call(:members) })
-  }
+  },
+  Rigor::Type::Interface => ->(fill) { Rigor::Type::Interface.new("Rigor::Plugin::_Each", [fill.call(:type_args)]) }
 }.freeze
 
 # One instance per carrier that holds no type.
@@ -84,7 +86,30 @@ RSpec.describe Rigor::Type::Combinator do
 
     def array_of(element) = c.nominal_of("Array", type_args: [element])
 
-    context "when no facet erases (today)" do
+    context "with the Rigor::Plugin interface carrier" do
+      let(:scope_value) { c.dynamic(Rigor::Type::Interface.new("Rigor::Plugin::_Scope")) }
+      let(:each_value) { c.dynamic(Rigor::Type::Interface.new("Rigor::Plugin::_Each", [integer])) }
+
+      it "reads an interface value as untyped, and its bare facet as no Dynamic" do
+        expect(c.untyped?(scope_value)).to be(true)
+        expect(c.untyped?(each_value)).to be(true)
+        expect(c.untyped?(scope_value.static_facet)).to be(false)
+      end
+
+      it "merges two interface values, or one with Dynamic[top], into Dynamic[top]" do
+        expect(c.union(scope_value, each_value)).to equal(untyped)
+        expect(c.union(scope_value, untyped)).to equal(untyped)
+        expect(c.union(c.tuple_of(scope_value), c.tuple_of(untyped))).to eq(c.tuple_of(untyped))
+      end
+
+      it "keeps the facet on an interface value nothing else matches" do
+        string = c.nominal_of("String")
+
+        expect(c.union(scope_value, string).members).to contain_exactly(scope_value, string)
+      end
+    end
+
+    context "when only the carrier erases" do
       it "reads a stub-facet Dynamic as typed and keeps it beside Dynamic[top]" do
         expect(c.untyped?(facet_a)).to be(false)
         expect(c.union(facet_a, untyped).members).to contain_exactly(facet_a, untyped)

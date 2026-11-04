@@ -9,6 +9,7 @@ require_relative "../external_ancestor_resolution"
 require_relative "../void_origin"
 require_relative "../optimistic_origin"
 require_relative "argument_distribution"
+require_relative "interface_shape"
 require_relative "overload_selector"
 require_relative "self_substitute"
 require_relative "../../typing_state"
@@ -235,6 +236,24 @@ module Rigor
           )
         end
 
+        # ADR-130 WD5 — interface dispatch switched off. Inside the block a `Rigor::Plugin` interface value keeps its
+        # carrier, but no call on it resolves through the interface's members: the receiver names no class, as
+        # `Dynamic[top]` names none. `rigor sig-gen` analyses here, so it writes no RBS from an interface a plugin
+        # author did not write against, and the behavioural parity gate's `:dispatch_off` mode runs here
+        # (`spec/integration/interface_parity_spec.rb`). The switch is per thread, so a run under it is sequential: a
+        # pooled run raises (`PoolCoordinator`). No CLI flag or configuration key sets it.
+        def without_interface_dispatch
+          previous = Thread.current.thread_variable_get(:rigor_interface_dispatch_off)
+          Thread.current.thread_variable_set(:rigor_interface_dispatch_off, true)
+          yield
+        ensure
+          Thread.current.thread_variable_set(:rigor_interface_dispatch_off, previous)
+        end
+
+        def interface_dispatch?
+          Thread.current.thread_variable_get(:rigor_interface_dispatch_off) != true
+        end
+
         # Slice 6 (Phase C sub-phase 1) probe: returns the positional block-parameter types declared by
         # the receiving method's selected RBS overload, translated into `Rigor::Type`. Used by the
         # StatementEvaluator to bind block parameter names before evaluating the block body.
@@ -352,6 +371,11 @@ module Rigor
             return nil unless descriptor
 
             class_name, kind, receiver_args = descriptor
+            if kind == :interface
+              return dispatch_interface(receiver, class_name, receiver_args, method_name, args, environment, block_type,
+                                        scope: scope, call_node: call_node)
+            end
+
             method_definition = lookup_method(environment, class_name, kind, method_name, scope,
                                               call_node: call_node)
             return nil unless method_definition
@@ -385,6 +409,49 @@ module Rigor
             # Defensive: if RBS' definition builder raises on a broken hierarchy (e.g., partially loaded
             # user signatures), the dispatcher MUST stay fail-soft.
             nil
+          end
+
+          # ADR-130 WD3 — a call on a `Rigor::Plugin` interface value (`Dynamic[Interface]`). A member the interface
+          # does not declare declines, so the call falls through the later tiers as one on `Dynamic[top]` does:
+          # the value's class is wider than the interface, and reporting such a call is #2686's opt-in rule. A
+          # declared member answers through the overloads that take the call's shape ({InterfaceShape}), with
+          # `self` the receiver and `instance` untyped. A block-pass that may be nil may run the call block-less, so
+          # it answers only when both shapes are taken and their returns agree.
+          # rubocop:disable-next Metrics/ParameterLists
+          def dispatch_interface(receiver, name, receiver_args, method_name, args, environment, block_type, scope:,
+                                 call_node:)
+            definition = interface_method(environment, name, method_name)
+            return nil if definition.nil?
+
+            type_vars = interface_type_vars(environment, name, receiver_args)
+            shape = lambda do |shape_block|
+              accepted = InterfaceShape.accepting(definition, args, block: !shape_block.nil?, call_node: call_node)
+              accepted && translate_return_type(
+                accepted, class_name: name, kind: :interface, method_name: method_name, args: args,
+                          type_vars: type_vars, block_type: shape_block, environment: environment,
+                          self_type_override: receiver, scope: scope, call_node: call_node
+              )
+            end
+            return shape.call(block_type) unless InterfaceShape.nilable_block_pass?(call_node, scope)
+
+            block_less = shape.call(nil)
+            block_less if block_less && block_less == shape.call(block_type || Type::Combinator.untyped)
+          end
+
+          # The interface's declaration of `method_name`, or nil when it declares none.
+          def interface_method(environment, name, method_name)
+            environment.rbs_loader.interface_definition(name)&.methods&.[](method_name.to_sym)
+          end
+
+          # The interface's own type parameters bound to the value's type arguments, as {#build_type_vars} binds a
+          # class's: a parameter left unbound (a defaulted one) reads `Dynamic[top]`.
+          def interface_type_vars(environment, name, receiver_args)
+            return NO_TYPE_VARS if receiver_args.empty?
+
+            param_names = environment.rbs_loader.interface_definition(name)&.type_params || []
+            return NO_TYPE_VARS if param_names.empty? || receiver_args.size > param_names.size
+
+            param_names.first(receiver_args.size).zip(receiver_args).to_h
           end
 
           # Issue #661 — `Kernel#<=>: (untyped other) -> 0?` is the IDENTITY comparison: `0` when the two
@@ -471,6 +538,10 @@ module Rigor
               ["Integer", :instance, []]
             when Type::Dynamic
               receiver_descriptor(receiver.static_facet)
+            when Type::Interface
+              # ADR-130 WD3 — a `Rigor::Plugin` interface value's facet, unless dispatch is switched off, where it
+              # names nothing, as `top` does.
+              [receiver.name, :interface, receiver.type_args] if interface_dispatch?
             end
           end
 
@@ -1139,6 +1210,21 @@ module Rigor
           NO_TYPE_VARS = {}.freeze
           private_constant :NO_TYPE_VARS
 
+          # What RBS `instance` reads in a member of `class_name`. An interface names no class, so its `instance`
+          # is untyped (ADR-130 WD1).
+          def instance_type_for(class_name, kind)
+            kind == :interface ? Type::Combinator.untyped : Type::Combinator.nominal_of(class_name)
+          end
+
+          # The `self` overload selection reads: a `Dynamic` self's static facet, except a plugin-interface value,
+          # which is kept whole so a `self` parameter reads the value rather than its bare facet (ADR-130 WD1).
+          def selection_self(self_type)
+            return self_type unless self_type.is_a?(Type::Dynamic)
+
+            facet = self_type.static_facet
+            facet.is_a?(Type::Interface) ? self_type : facet
+          end
+
           # rubocop:disable Metrics/ParameterLists
           def translate_return_type(method_definition, class_name:, kind:, args:, type_vars:, block_type:,
                                     method_name: nil, environment: nil, self_type_override: nil,
@@ -1150,7 +1236,7 @@ module Rigor
             override = merged_return_type(method_definition, environment: environment)
             return override if override
 
-            instance_type = Type::Combinator.nominal_of(class_name)
+            instance_type = instance_type_for(class_name, kind)
             # `self_type_override` lets the user-class fallback path preserve the ORIGINAL receiver as the
             # substitute for `Bases::Self` — so `Kernel#dup: () -> self` resolved through the Object
             # fallback returns the caller's type, not Object. `dispatch_one` also routes the receiver's
@@ -1172,7 +1258,7 @@ module Rigor
               keywords_last: keywords_last, splats: splat_indices(call_node, args),
               # A `Dynamic` self (#1092) is a return-side answer; overload selection and ReceiverAffinity
               # read the static facet, as they did before the substitute carried the wrapping.
-              self_type: self_type.is_a?(Type::Dynamic) ? self_type.static_facet : self_type,
+              self_type: selection_self(self_type),
               instance_type: instance_type, type_vars: type_vars,
               block_required: !block_type.nil?,
               environment: environment
@@ -1251,7 +1337,7 @@ module Rigor
             keywords = args.last
             return NOT_DISTRIBUTED if keywords.pairs.none? { |_name, value| KeywordArguments.union_members(value) }
 
-            selector_self = self_type.is_a?(Type::Dynamic) ? self_type.static_facet : self_type
+            selector_self = selection_self(self_type)
             per_list = distributed_keyword_matches(method_definition, args, selector_self, instance_type, type_vars,
                                                    !block_type.nil?, environment, splat_indices(call_node, args))
             return NOT_DISTRIBUTED if per_list.equal?(NOT_DISTRIBUTED)
@@ -1310,7 +1396,7 @@ module Rigor
           def distributed_argument_return(method_definition, chosen, self_type, instance_type, type_vars, args,
                                           block_type, scope, call_node, call_site, environment)
             # rubocop:enable Metrics/ParameterLists
-            selector = { self_type: self_type.is_a?(Type::Dynamic) ? self_type.static_facet : self_type,
+            selector = { self_type: selection_self(self_type),
                          instance_type: instance_type, type_vars: type_vars, block_required: !block_type.nil?,
                          environment: environment }
             return NOT_DISTRIBUTED unless distributable_arguments?(method_definition, args, call_node)
@@ -2037,13 +2123,11 @@ module Rigor
 
           def probe_block_param_types(receiver:, method_name:, args:, environment:, scope: nil, call_node: nil)
             args ||= []
-            keywords_last = ArgumentNodes.keyword_hash_last?(call_node, args)
-            splat = splat_indices(call_node, args)
             case receiver
             when Type::Union
-              probe_block_param_types_union(receiver, method_name, args, environment, scope, keywords_last, splat)
+              probe_block_param_types_union(receiver, method_name, args, environment, scope, call_node)
             else
-              probe_block_param_types_one(receiver, method_name, args, environment, scope, keywords_last, splat)
+              probe_block_param_types_one(receiver, method_name, args, environment, scope, call_node)
             end
           end
 
@@ -2051,9 +2135,9 @@ module Rigor
           # member resolves the same arity and types (otherwise the call sites would have to thread
           # per-member binders, which the slice does not support yet). Mismatches degrade to the empty
           # array so the binder defaults all params to Dynamic[Top].
-          def probe_block_param_types_union(receiver, method_name, args, environment, scope, keywords_last, splat)
+          def probe_block_param_types_union(receiver, method_name, args, environment, scope, call_node)
             results = receiver.members.map do |member|
-              probe_block_param_types_one(member, method_name, args, environment, scope, keywords_last, splat)
+              probe_block_param_types_one(member, method_name, args, environment, scope, call_node)
             end
             return [] if results.empty?
             return [] unless results.all? { |r| r == results.first }
@@ -2061,17 +2145,28 @@ module Rigor
             results.first
           end
 
-          def probe_block_param_types_one(receiver, method_name, args, environment, scope, keywords_last, splat)
+          def probe_block_param_types_one(receiver, method_name, args, environment, scope, call_node)
             receiver = ArithmeticSequenceElements.element_receiver(receiver, method_name, environment, block: true) ||
                        receiver
             descriptor = receiver_descriptor(receiver)
             return [] unless descriptor
 
             class_name, kind, receiver_args = descriptor
-            method_definition = lookup_method(environment, class_name, kind, method_name, scope)
+            method_definition, type_vars =
+              if kind == :interface
+                # ADR-130 WD3 — a block literal binds its parameters through the overloads that take the call's
+                # shape, as the call's return does ({#dispatch_interface}).
+                declared = interface_method(environment, class_name, method_name)
+                [declared && InterfaceShape.accepting(declared, args, block: true, call_node: call_node),
+                 interface_type_vars(environment, class_name, receiver_args)]
+              else
+                [lookup_method(environment, class_name, kind, method_name, scope),
+                 build_type_vars(environment, class_name, receiver_args)]
+              end
             return [] unless method_definition
 
-            type_vars = build_type_vars(environment, class_name, receiver_args)
+            keywords_last = ArgumentNodes.keyword_hash_last?(call_node, args)
+            splat = splat_indices(call_node, args)
             extract_block_param_types(
               method_definition,
               class_name: class_name,
@@ -2093,10 +2188,12 @@ module Rigor
                                         environment: nil, receiver: nil, receiver_args: [],
                                         method_name: nil, keywords_last: false, positional_splat: nil)
             # rubocop:enable Metrics/ParameterLists
-            instance_type = Type::Combinator.nominal_of(class_name)
+            instance_type = instance_type_for(class_name, kind)
             self_type =
               case kind
               when :singleton then Type::Combinator.singleton_of(class_name)
+              # ADR-130 WD1 — inside an interface member `self` is the receiver.
+              when :interface then receiver
               else                 instance_type
               end
 
@@ -2112,7 +2209,7 @@ module Rigor
             substitute = SelfSubstitute.for(receiver, receiver_args, method_name, args, nil)
             self_type = Type::Combinator.nominal_of(class_name, type_args: receiver_args) if substitute
 
-            selector_self = self_type.is_a?(Type::Dynamic) ? self_type.static_facet : self_type
+            selector_self = selection_self(self_type)
             if keywords_last
               return agreed_keyword_block_params(method_definition, args, self_type, selector_self, instance_type,
                                                  type_vars, environment, positional_splat)

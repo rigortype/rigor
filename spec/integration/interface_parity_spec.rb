@@ -17,21 +17,25 @@ require "rigor/configuration"
 # - a mode in `DISPATCH_MODES` may also differ on the rows of a declared-member call, a fixture line marked
 #   `# parity: declared-member`, and nowhere else.
 #
-# Slice 1a has no carrier, so its default engine is in both lists. Slice 1b moves `:default` (dispatch on) to
-# `DISPATCH_MODES` only, adds `:dispatch_off` (its carrier with dispatch off) to `PARITY_MODES` and `#run_in`, and
-# adds a fixture per parity site under `fixtures/interface_parity/`.
+# `:dispatch_off` is the default engine's `Rigor::Plugin` interface carrier with member dispatch switched off
+# (`RbsDispatch.without_interface_dispatch`), and `:default` is the engine as `rigor check` runs it, dispatch on.
+# Each fixture under `fixtures/interface_parity/` declares its own `Rigor::Plugin::_Probe*` interfaces, so the carrier
+# is live there.
 #
-# The controls install a simulated carrier for the whole example, default-on as 1b's will be: `Rigor::Plugin`
-# interfaces translate to `Dynamic[Nominal[<name>]]`, a facet the `Combinator.erased_facet?` hook accepts, except
-# under the erasure switch. With the union merge the gate passes; with the merge planted out it fails on review round
-# 3's join divergence, so it tells a facet rename from a structural change.
+# A row whose text a declared-member call changes, the call's own line or a line reading its result, is marked
+# `# parity: declared-member`; the `:default` mode may differ there and nowhere else. The `:dispatch_off` mode may not
+# differ on any row, marked or not.
+#
+# The controls show the gate can fail: with the union merge planted out the carrier fails on review round 3's join
+# divergence, so the gate tells a facet rename from a structural change; and dispatch on differs from the baseline at
+# a declared-member call, so the dispatch mode is not compared with itself.
 module InterfaceParity
   FIXTURE_ROOT = File.expand_path("fixtures/interface_parity", __dir__)
   FIXTURES = Dir.children(FIXTURE_ROOT).sort.freeze
 
-  # Must equal the erasure baseline modulo facet names. Slice 1b: `%i[dispatch_off]`.
-  PARITY_MODES = %i[default].freeze
-  # May also differ on a declared-member call's rows. Slice 1b: `%i[default]`.
+  # Must equal the erasure baseline modulo facet names.
+  PARITY_MODES = %i[dispatch_off].freeze
+  # May also differ on a declared-member call's rows.
   DISPATCH_MODES = %i[default].freeze
 
   DECLARED_MARK = "# parity: declared-member"
@@ -55,13 +59,6 @@ module InterfaceParity
     JSON.pretty_generate(JSON.parse(document).reject { |row| lines.include?([row["path"], row["line"]]) })
   end
 
-  def plugin_interface?(rbs_type)
-    rbs_type.is_a?(RBS::Types::Interface) && rbs_type.name.namespace.path == %i[Rigor Plugin]
-  end
-
-  def simulated_facet?(facet)
-    facet.is_a?(Rigor::Type::Nominal) && facet.class_name.start_with?("Rigor::Plugin::_")
-  end
 end
 
 RSpec.describe "ADR-130 interface parity (behavioural gate)" do
@@ -87,6 +84,7 @@ RSpec.describe "ADR-130 interface parity (behavioural gate)" do
   def run_in(mode, dir)
     case mode
     when :erasure then Rigor::Inference::RbsTypeTranslator.with_interface_erasure { render(dir) }
+    when :dispatch_off then Rigor::Inference::MethodDispatcher::RbsDispatch.without_interface_dispatch { render(dir) }
     when :default then render(dir)
     else raise ArgumentError, "unknown parity mode #{mode}"
     end
@@ -106,6 +104,17 @@ RSpec.describe "ADR-130 interface parity (behavioural gate)" do
   # The examples below are generated per fixture, and zero fixtures would be zero failures.
   it "has parity fixtures to run" do
     expect(InterfaceParity::FIXTURES).to include("joins")
+  end
+
+  # The dispatch examples drop the marked rows; a fixture whose marks covered every row would compare nothing.
+  it "marks only some rows of each fixture" do
+    InterfaceParity::FIXTURES.each do |fixture|
+      dir = fixture_dir(fixture)
+      rows = JSON.parse(run_in(:erasure, dir))
+      kept = JSON.parse(InterfaceParity.without_rows(JSON.generate(rows), InterfaceParity.declared_lines(dir)))
+
+      expect(kept).not_to be_empty, fixture
+    end
   end
 
   InterfaceParity::FIXTURES.each do |fixture|
@@ -135,22 +144,15 @@ RSpec.describe "ADR-130 interface parity (behavioural gate)" do
   describe "the controls" do
     let(:dir) { fixture_dir("joins") }
 
-    # Default-on, as slice 1b's carrier: every mode but the erasure baseline sees it.
-    def install_simulated_carrier
-      allow(Rigor::Type::Combinator).to receive(:erased_facet?).and_wrap_original do |original, facet|
-        InterfaceParity.simulated_facet?(facet) || original.call(facet)
-      end
-      translator = Rigor::Inference::RbsTypeTranslator
-      allow(translator).to receive(:translate_untyped).and_wrap_original do |original, type, ctx|
-        next original.call(type, ctx) if translator.interface_erasure? || !InterfaceParity.plugin_interface?(type)
-
-        Rigor::Type::Combinator.dynamic(Rigor::Type::Combinator.nominal_of(type.name.relative!.to_s))
-      end
-    end
-
     it "refuses a pooled run under the erasure switch" do
       expect { Rigor::Inference::RbsTypeTranslator.with_interface_erasure { render(dir, workers: 2) } }
-        .to raise_error(ArgumentError, /sequential run/)
+        .to raise_error(ArgumentError, /with_interface_erasure supports only a sequential run/)
+    end
+
+    it "refuses a pooled run with dispatch off" do
+      dispatch = Rigor::Inference::MethodDispatcher::RbsDispatch
+      expect { dispatch.without_interface_dispatch { render(dir, workers: 2) } }
+        .to raise_error(ArgumentError, /without_interface_dispatch supports only a sequential run/)
     end
 
     it "normalises a facet name and nothing else" do
@@ -160,22 +162,28 @@ RSpec.describe "ADR-130 interface parity (behavioural gate)" do
         .to eq("Dynamic[Rigor::Scope] | Rigor::Plugin::_Scope")
     end
 
-    it "passes a default-on carrier whose joins keep master's shape, though its rendered text differs" do
-      install_simulated_carrier
-      baseline, candidate = parity_pair(:default, dir)
+    it "passes the carrier with dispatch off, whose joins keep master's shape though its rendered text differs" do
+      baseline, candidate = parity_pair(:dispatch_off, dir)
 
-      expect(run_in(:default, dir)).to include("Dynamic[Rigor::Plugin::_ProbeS]")
+      expect(run_in(:dispatch_off, dir)).to include("Dynamic[Rigor::Plugin::_ProbeS]")
       expect(run_in(:erasure, dir)).not_to include("Rigor::Plugin")
       expect(candidate).to eq(baseline)
     end
 
-    it "fails a default-on carrier whose joins keep an extra arm (the planted structural divergence)" do
-      install_simulated_carrier
+    it "fails a carrier whose joins keep an extra arm (the planted structural divergence)" do
       allow(Rigor::Type::Combinator).to receive(:merge_erased_members) { |members| members }
-      baseline, candidate = parity_pair(:default, dir)
+      baseline, candidate = parity_pair(:dispatch_off, dir)
 
       expect(candidate).not_to eq(baseline)
       expect(candidate).to include("[Dynamic[top]] | [Dynamic[top]]")
+    end
+
+    it "fails dispatch on under the parity criterion, at a declared-member call only" do
+      baseline, candidate = parity_pair(:default, dir)
+
+      expect(candidate).not_to eq(baseline)
+      expect(candidate).to include("dump_type: String")
+      expect(dispatch_pair(:default, dir).uniq.size).to eq(1)
     end
 
     it "lets a dispatch mode differ on a declared-member call's row and nowhere else" do

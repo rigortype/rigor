@@ -12,7 +12,7 @@ ADR-128 WD6 confines `plugin.api-surface` to "classes that inherit `Plugin::Base
 
 ## Options and trade-offs
 
-- **Plugin source.** A call is plugin source when the scope's recorded `Module.nesting` holds a class whose discovered superclass chain reaches `Rigor::Plugin::Base` (through a project base class too), and holds no `Rigor::Plugin::Base`. Taking only the innermost entry would miss a module nested in a plugin class; reading `self_type` would miss a `node_rule` block, whose `self` is the plugin instance at runtime but whose lexical class is what the ADR names. A scope with no recorded nesting is not plugin source, so the rule stays silent rather than guess.
+- **Plugin source.** A call is plugin source when the scope's recorded `Module.nesting` holds a class whose discovered superclass chain reaches `Rigor::Plugin::Base` (through a project base class too). `Base`'s own body is not plugin source, because `Base` does not inherit itself. Taking only the innermost entry would miss a module nested in a plugin class; reading `self_type` would miss a `node_rule` block, whose `self` is the plugin instance at runtime but whose lexical class is what the ADR names. A scope with no recorded nesting is not plugin source, so the rule stays silent rather than guess.
 - **Surface.** A WD4-style allowance for `Object` / `Kernel` / `BasicObject` members (`nil?`, `respond_to?`, `is_a?`), which the boundary gate also allows. Without it, `scope.nil?` guards, which ADR-128 counts as valid, would report.
 - **Receivers.** `Dynamic[<Rigor::Plugin interface>]`, or a union of such values with `nil`, since a nilable hook position keeps the facet on its non-nil arm (ADR-130 WD1). A union with any other member is skipped, because that member may declare the call.
 

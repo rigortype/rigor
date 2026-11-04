@@ -22,9 +22,9 @@ module Rigor
       #   facet survives only where ADR-130 WD1 keeps it; a value that lost it at a join reads `Dynamic[top]`);
       # - the interface declares no member of the name, and `Object` (with `Kernel` and `BasicObject`) declares
       #   none either: `nil?`, `respond_to?` and `is_a?` are every object's surface, not the engine's;
-      # - the call sits lexically inside a class whose discovered superclass chain reaches `Rigor::Plugin::Base`,
-      #   and inside no `Rigor::Plugin::Base` body. `Base`'s own hooks hand interface values to engine helpers
-      #   (`environment.class_ordering`), and they are engine code.
+      # - the call sits lexically inside a class whose discovered superclass chain reaches `Rigor::Plugin::Base`.
+      #   `Base` itself is not such a class, so its own hooks, which hand interface values to engine helpers
+      #   (`environment.class_ordering`), are not judged: they are engine code.
       #
       # The plugin-source test reads the class declarations, not a path: a third-party plugin gem keeps its plugin
       # under `lib/` as Rigor's own engine does.
@@ -83,7 +83,8 @@ module Rigor
         end
 
         # An interface that does not resolve declares nothing the rule can read, so it is treated as declaring
-        # every member.
+        # every member. A guard: the carrier exists only for an interface the loader translated, so no fixture
+        # reaches it.
         def declares?(environment, interface, method_name)
           definition = environment.rbs_loader.interface_definition(interface.name)
           return true if definition.nil?
@@ -95,12 +96,12 @@ module Rigor
           !Rigor::Reflection.instance_method_definition("Object", method_name, environment: environment).nil?
         end
 
-        # Whether the call is plugin source: lexically inside a class that inherits `Rigor::Plugin::Base`, and in
-        # no `Rigor::Plugin::Base` body. An unrecorded nesting (a scope built outside a declaration walk) is not.
+        # Whether the call is plugin source: lexically inside a class that inherits `Rigor::Plugin::Base`. A
+        # `Rigor::Plugin::Base` body has no superclass to walk, so it is not. An unrecorded nesting (a scope built
+        # outside a declaration walk) is not either.
         def plugin_source?(scope)
           nesting = scope.lexical_nesting
           return false if nesting.nil? || nesting.empty?
-          return false if nesting.include?(PLUGIN_BASE)
 
           nesting.any? { |name| inherits_plugin_base?(scope, name) }
         end

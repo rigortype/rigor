@@ -109,6 +109,11 @@ RSpec.describe "plugin.api-surface" do
       expect(rows.fetch("class-union-type")).to eq(["dump.type: dump_type: Prism::IfNode | Prism::UnlessNode"])
     end
 
+    it "binds untyped from a union with a member that is not a class object, keeping the other parameters" do
+      expect(rows.fetch("mixed-union-type")).to eq(["dump.type: dump_type: Dynamic[top]"])
+      expect(rows.fetch("mixed-union-scope")).to eq(["dump.type: dump_type: Dynamic[Rigor::Plugin::_Scope]"])
+    end
+
     it "keeps an overload's own class and the other block parameters" do
       expect(rows.fetch("overload-class")).to be_empty
       expect(rows.fetch("no-overload-class-scope")).to eq(["dump.type: dump_type: Dynamic[Rigor::Plugin::_Scope]"])

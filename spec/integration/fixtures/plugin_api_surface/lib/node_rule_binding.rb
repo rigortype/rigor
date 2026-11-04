@@ -15,6 +15,14 @@ class BindingPlugin < Rigor::Plugin::Base
     end
   end
 
+  def self.register_mixed(flag, node_class)
+    node_rule(flag ? Prism::IfNode : node_class) do |node, scope, _path, _file_context, _context|
+      Rigor.dump_type(node) # surface: mixed-union-type
+      Rigor.dump_type(scope) # surface: mixed-union-scope
+      nil
+    end
+  end
+
   node_rule(Prism::IfNode) do |node, scope, _path, _file_context, _context|
     node.predicate # surface: no-overload-class
     node.not_a_member # surface: no-overload-class-miss

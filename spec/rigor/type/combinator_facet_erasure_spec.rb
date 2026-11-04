@@ -51,6 +51,29 @@ ERASURE_SAMPLES = {
   }
 }.freeze
 
+# One instance per carrier that holds no type.
+ERASURE_LEAVES = [
+  Rigor::Type::Combinator.top, Rigor::Type::Combinator.bot, Rigor::Type::Combinator.constant_of(1),
+  Rigor::Type::Combinator.integer_range(1, 2), Rigor::Type::Combinator.float_range(0.0, 1.0),
+  Rigor::Type::Combinator.singleton_of("String"), Rigor::Type::Combinator.data_class_of(members: [:x]),
+  Rigor::Type::Combinator.struct_class_of(members: [:x])
+].freeze
+
+# The instance variables of `type` that hold a type, or an Array or Hash of types, by reflection: the slots
+# `TYPE_CHILDREN` must list, whatever a sample names.
+def erasure_type_slots(type)
+  holds_type = ->(value) { ERASURE_CARRIERS.any? { |carrier| value.is_a?(carrier) } }
+  type.instance_variables.filter_map do |ivar|
+    value = type.instance_variable_get(ivar)
+    values = case value
+             when Array then value
+             when Hash then value.values
+             else [value]
+             end
+    ivar.to_s.delete_prefix("@").to_sym if values.any?(&holds_type)
+  end
+end
+
 RSpec.describe Rigor::Type::Combinator do
   describe "union dedup modulo facet erasure (ADR-130 WD1)" do
     let(:c) { described_class }
@@ -176,10 +199,19 @@ RSpec.describe Rigor::Type::Combinator do
     # Every carrier that holds a type is walked: a new carrier fails here until `TYPE_CHILDREN` lists its type slots,
     # and a listed carrier fails when erasure leaves the facet in any slot its sample fills.
     describe "erasure coverage of every carrier" do
-      it "lists every carrier, and samples every one that holds a type" do
+      it "lists every carrier, and has an instance of each" do
         expect(described_class::TYPE_CHILDREN.keys).to match_array(ERASURE_CARRIERS)
-        holders = described_class::TYPE_CHILDREN.reject { |_, readers| readers.empty? }.keys
-        expect(ERASURE_SAMPLES.keys).to match_array(holders)
+        expect(ERASURE_SAMPLES.keys + ERASURE_LEAVES.map(&:class)).to match_array(ERASURE_CARRIERS)
+      end
+
+      it "lists exactly the type-holding slots reflection finds on each carrier" do
+        plain = ->(_) { described_class.untyped }
+        instances = ERASURE_LEAVES + ERASURE_SAMPLES.values.map { |sample| sample.call(plain) }
+
+        instances.each do |instance|
+          expect(erasure_type_slots(instance))
+            .to match_array(described_class::TYPE_CHILDREN.fetch(instance.class)), instance.class.name
+        end
       end
 
       ERASURE_SAMPLES.each do |carrier, sample|

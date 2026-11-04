@@ -2,8 +2,8 @@
 
 Status: **Accepted, 2026-11-04.** A design for [#2709](https://github.com/rigortype/rigor/issues/2709), accepted by the
 maintainer after three adversarial review rounds. Stage 0 (the harness ceiling) is done. Stage 1 is under way:
-`TypingState` and G3 have landed with the typer, the statement evaluator and the key-presence guard converted, and the
-remaining sites convert in later PRs. WD6 says what lands in each stage and what can stop it. This is the third design: the first two each
+`TypingState` and G3 have landed with the typer, the statement evaluator and the key-presence guard converted
+([#2796](https://github.com/rigortype/rigor/pull/2796)), and the remaining sites convert in later PRs. WD6 says what lands in each stage and what can stop it. This is the third design: the first two each
 had a key that missed an input. Sharing call facts across the rules ("option 2", § Alternatives) lands independently
 as [#2786](https://github.com/rigortype/rigor/issues/2786).
 

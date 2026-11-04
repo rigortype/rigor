@@ -1,8 +1,10 @@
 # ADR-129 — Remember `type_of` results under a closed typing state
 
-Status: **Proposed, 2026-11-04.** A design for [#2709](https://github.com/rigortype/rigor/issues/2709), put to the
-maintainer before any code lands. Nothing is implemented. This is the third design: the first two each had a key that
-missed an input. Stage 0 measured the ceiling of this one with a harness. WD6 says what lands first and what can stop it.
+Status: **Accepted, 2026-11-04.** A design for [#2709](https://github.com/rigortype/rigor/issues/2709), accepted by the
+maintainer after three adversarial review rounds. Nothing is implemented: stage 0 (the harness ceiling) is done, and
+stage 1 is next. WD6 says what lands in each stage and what can stop it. This is the third design: the first two each
+had a key that missed an input. Sharing call facts across the rules ("option 2", § Alternatives) lands independently
+as [#2786](https://github.com/rigortype/rigor/issues/2786).
 
 Grounding:
 - [`20261104-work-multiplier-census.md`](../notes/20261104-work-multiplier-census.md): where `rigor check` repeats

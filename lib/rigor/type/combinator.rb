@@ -885,12 +885,13 @@ module Rigor
         end
 
         # `type` with every facet {erased_facet?} accepts rewritten to `top`, through the carriers
-        # {merge_erased_members} names. The identity, by reference, on a type that bears none.
+        # {merge_erased_members} names. The identity, by reference, on a type that bears none. A facet-bearing `Dynamic`
+        # is never `Dynamic[top]`, so {untyped?} answers the hook for it here.
         def erase_facets(type)
           return type unless facet_bearing?(type)
 
           case type
-          when Dynamic then erased_facet?(type.static_facet) ? untyped : dynamic(erase_facets(type.static_facet))
+          when Dynamic then untyped?(type) ? untyped : dynamic(erase_facets(type.static_facet))
           when Tuple then tuple_of(*type.elements.map { |element| erase_facets(element) })
           when HashShape then erase_shape_facets(type)
           when Nominal then nominal_of(type.class_name, type_args: type.type_args.map { |arg| erase_facets(arg) })

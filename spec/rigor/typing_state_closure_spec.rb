@@ -998,11 +998,16 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
           kept
         end
         def u(sink) = sink.call(Ractor.current.default_port)
-        def v = (held = Ractor.main).send(1)
+        def v = (pending = Ractor.main).send(1)
         def w
           Ractor.main.receive
           nil
         end
+        def x
+          Ractor.current.send(1)
+          nil
+        end
+        def y = [1].map { Ractor.main.send(1) }
       RUBY
         [2, :thread_state, "Ractor.main"], [7, :thread_state, "Ractor.current"], [8, :thread_state, "Ractor.main"],
         [9, :thread_state, "Ractor[]"], [10, :thread_state, "store_if_absent"], [11, :thread_state, "Ractor.main"],
@@ -1012,7 +1017,8 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
         [21, :thread_state, "Ractor.current"], [23, :thread_state, "Ractor.main"],
         [26, :thread_state, "Ractor.current"], [27, :thread_state, "Ractor.main"],
         [31, :thread_state, "Ractor.main"], [33, :thread_state, "Ractor.main"], [36, :thread_state, "Ractor.current"],
-        [37, :thread_state, "Ractor.main"], [39, :thread_state, "Ractor.main"]
+        [37, :thread_state, "Ractor.main"], [39, :thread_state, "Ractor.main"],
+        [43, :thread_state, "Ractor.current"], [46, :thread_state, "Ractor.main"]
       )
     end
 

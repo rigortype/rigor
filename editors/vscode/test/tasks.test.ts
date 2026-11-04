@@ -67,7 +67,7 @@ interface Ran {
 }
 
 /** Run the provided task for `folder` as VS Code does, to its close. */
-async function runTask(task: Task, cancelAfterMs?: number): Promise<Ran> {
+async function runTask(task: Task, cancelAfterMs?: number, cancelOnFirstOutput = false): Promise<Ran> {
   const execution = task.execution as { callback: (d: unknown) => Promise<import("vscode").Pseudoterminal> };
   const pty = await execution.callback(task.definition);
   const ran: Ran = { code: undefined, out: "", closes: 0 };
@@ -78,7 +78,19 @@ async function runTask(task: Task, cancelAfterMs?: number): Promise<Ran> {
       resolve();
     });
   });
-  pty.onDidWrite((text) => (ran.out += text));
+  let cancelled = false;
+  pty.onDidWrite((text) => {
+    ran.out += text;
+    if (cancelOnFirstOutput && !cancelled) {
+      cancelled = true;
+      // Block until rigor has exited, so the cancel races its natural end.
+      const until = Date.now() + 300;
+      while (Date.now() < until) {
+        /* spin */
+      }
+      pty.close();
+    }
+  });
   pty.open(undefined);
   if (cancelAfterMs !== undefined) {
     await new Promise((r) => setTimeout(r, cancelAfterMs));
@@ -176,16 +188,24 @@ describe("when a run replaces a folder's results", () => {
     assert.deepEqual(files(), [path.join(A(), "lib/a.rb")]);
   });
 
-  it("a cancelled run closes with 130 once and keeps them, even when rigor then exits 1", async () => {
+  it("a cancelled run closes with 130 once and keeps them", async () => {
     checkDoes(`${finding(A())}; exit 1`);
     await runTask(taskFor(folderA));
-    checkDoes(
-      `trap '${finding(A(), "lib/late.rb")}; exit 1' TERM\nsleep 5 &\nwait\n`,
-    );
-    const ran = await runTask(taskFor(folderA), 700);
+    checkDoes("sleep 5");
+    const ran = await runTask(taskFor(folderA), 500);
     assert.equal(ran.code, 130);
     assert.equal(ran.closes, 1);
-    await new Promise((r) => setTimeout(r, 300));
+    assert.deepEqual(files(), [path.join(A(), "lib/a.rb")]);
+  });
+
+  it("a run cancelled as rigor finishes on its own (exit 1) still keeps them", async () => {
+    checkDoes(`${finding(A())}; exit 1`);
+    await runTask(taskFor(folderA));
+    checkDoes(`${finding(A(), "lib/late.rb")}; exit 1`);
+    const ran = await runTask(taskFor(folderA), undefined, true);
+    assert.equal(ran.code, 130);
+    assert.equal(ran.closes, 1);
+    await new Promise((r) => setTimeout(r, 200));
     assert.deepEqual(files(), [path.join(A(), "lib/a.rb")]);
   });
 

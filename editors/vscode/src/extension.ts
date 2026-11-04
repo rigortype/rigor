@@ -47,7 +47,9 @@ import {
   Resolution,
   describeCandidate,
   forgetResolutions,
+  pinChanged,
   resolveRigor,
+  stopResolving,
 } from "./resolve";
 import { clearRuleCache, registerCommands } from "./commands";
 import { killTree } from "./kill";
@@ -152,8 +154,8 @@ let lifecycle: Promise<void> = Promise.resolve();
 let shuttingDown = false;
 let syncTimer: NodeJS.Timeout | undefined;
 let pinTimer: NodeJS.Timeout | undefined;
-/** Folders whose pin lockfile changed since the last pin re-sync. */
-const pinChanged = new Set<string>();
+/** Folders whose pin files were written since the last pin re-sync. */
+const pinsTouched = new Set<string>();
 
 function enqueue(task: () => Promise<void>): Promise<void> {
   const run = lifecycle.then(() => (shuttingDown ? undefined : task()));
@@ -179,6 +181,9 @@ export function activate(context: ExtensionContext): void {
       try {
         await task();
       } finally {
+        // The task changes what `managedServer()` returns (a clear, an
+        // install), so every folder resolves again.
+        forgetResolutions();
         await syncClientsNow();
       }
     }),
@@ -235,6 +240,7 @@ export async function deactivate(): Promise<void> {
   // No exit grace either: the extension host is torn down within seconds,
   // so a server still alive after `stop()` is killed at once.
   shuttingDown = true;
+  stopResolving();
   killAllCli();
   if (syncTimer) {
     clearTimeout(syncTimer);
@@ -785,11 +791,21 @@ function reportProbeFailure(resolution: Resolution, label: string): void {
           .join("; ") +
         "."
       : "";
+  const pin = resolution.pin;
   const lead =
     server.kind === "explicit"
       ? `"rigor.server.path" is \`${server.command}\`, which did not run in ${label}.` +
         tried +
         ' Fix the setting, then run "Rigor: Restart Server".'
+      : pin
+        ? `could not run the rigortype that ${pin.file} pins in ${label}.` +
+          tried +
+          (pin.kind === "tool"
+            ? " Install that pin (`mise install` or `asdf install` in the project)"
+            : pin.kind === "pinned-bundle"
+              ? ` Install the bundle under a Ruby 4.0 (\`BUNDLE_GEMFILE=${pin.gemfile} bundle install\`)`
+              : " Install the bundle (`bundle install` in the project)") +
+          ', then run "Rigor: Restart Server". A pinned project is not served by another Rigor.'
       : `could not run Rigor in ${label}.` +
         (resolution.rejected.length > 0 ? tried : " No `rigor` was found.") +
         " Install Rigor so `rigor` is on `PATH` (`mise use gem:rigortype` " +
@@ -851,13 +867,17 @@ function logStartup(
 }
 
 /**
- * Re-resolve a folder when a lockfile that can pin rigortype for it (the
- * project's `Gemfile.lock`, the pinned bundle's) is created, changed or
- * deleted: which `rigor` serves it may change, and the server, the task
- * and the commands must keep running the same one.
+ * Re-resolve a folder when what pins rigortype for it changes: its
+ * `Gemfile.lock` / `gems.locked`, the pinned bundle's lockfile, or a
+ * `mise.toml`, `.mise.toml` or `.tool-versions` at its root appearing,
+ * disappearing or pinning another version. Which `rigor` serves it may
+ * change, and the server, the task and the commands must keep running the
+ * same one. A write that leaves the pin as it was restarts nothing.
  */
 function watchPins(): Disposable[] {
-  const watcher = workspace.createFileSystemWatcher("**/{Gemfile.lock,gems.locked}");
+  const watcher = workspace.createFileSystemWatcher(
+    "**/{*.lock,*.locked,mise.toml,.mise.toml,.tool-versions}",
+  );
   const onPin = (uri: Uri): void => {
     if (shuttingDown) {
       return;
@@ -867,15 +887,19 @@ function watchPins(): Disposable[] {
       if (!root) {
         continue;
       }
-      const locks = [
+      const files = [
         path.join(root, "Gemfile.lock"),
+        path.join(root, "gems.locked"),
+        path.join(root, "mise.toml"),
+        path.join(root, ".mise.toml"),
+        path.join(root, ".tool-versions"),
         lockfileFor(pinnedBundleGemfile(folder, root).gemfile),
       ];
-      if (locks.includes(uri.fsPath)) {
-        pinChanged.add(folder.uri.toString());
+      if (files.includes(uri.fsPath)) {
+        pinsTouched.add(folder.uri.toString());
       }
     }
-    if (pinChanged.size === 0) {
+    if (pinsTouched.size === 0) {
       return;
     }
     if (pinTimer) {
@@ -883,12 +907,15 @@ function watchPins(): Disposable[] {
     }
     pinTimer = setTimeout(() => {
       pinTimer = undefined;
-      const keys = [...pinChanged];
-      pinChanged.clear();
+      const keys = [...pinsTouched];
+      pinsTouched.clear();
       void enqueue(async () => {
         for (const folder of workspace.workspaceFolders ?? []) {
           const key = folder.uri.toString();
-          if (keys.includes(key)) {
+          if (keys.includes(key) && pinChanged(folder)) {
+            outputChannel.appendLine(
+              `[rigor] ${folder.name}: the rigortype pin changed; resolving again`,
+            );
             forgetResolutions(folder);
             probeFailureReported.delete(key);
             await stopClient(key);

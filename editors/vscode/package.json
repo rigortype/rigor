@@ -83,7 +83,7 @@
           "type": "string",
           "default": "",
           "scope": "resource",
-          "markdownDescription": "Gemfile of a pinned bundle that holds only Rigor, relative to the project root (`#rigor.rootDir#`). The server then runs `bundle exec rigor` with `BUNDLE_GEMFILE` set to it. Leave empty to use `.github/rigor/Gemfile` when its lockfile pins `rigortype`."
+          "markdownDescription": "Gemfile of a pinned bundle that holds only Rigor, relative to the project root (`#rigor.rootDir#`) and inside it; an absolute path or one outside the root is rejected with a warning. The server then runs `bundle exec rigor` with `BUNDLE_GEMFILE` set to it. Leave empty to use `.github/rigor/Gemfile` when its lockfile pins `rigortype`."
         },
         "rigor.server.configPath": {
           "type": "string",

@@ -70,18 +70,28 @@ the extension is versioned independently of the `rigortype` gem.
   or asdf shim, then the managed Rigor). The output channel logs each
   rejected candidate and why, and the not-found message lists them. An
   explicit `rigor.server.path` that fails is reported, never replaced,
-  and a `rigor` that runs but is too old gets the upgrade warning. The
-  result is kept per folder until a restart, a settings change, or a
-  change to the project's or the pinned bundle's lockfile.
+  and a `rigor` that runs but is too old gets the upgrade warning. A
+  project pin is final: a lockfile pin runs only Bundler, a project
+  `mise.toml` / `.tool-versions` pin only the shim, and a failure says
+  to install the pin; a Bundler candidate that runs another rigortype
+  than its lockfile pins is rejected. A hung probe is rejected after 20 s and the
+  search skips unpinned candidates after 45 s. The result is kept per
+  folder until a restart, a settings change, or a change to what pins
+  `rigortype`. A project `gems.locked` counts as a lockfile pin. The
+  `rigor: check` task is offered once a folder's search finished with a
+  `rigor` that runs.
 - The pinned bundle (ADR-27 WD9, #2750): when `.github/rigor/Gemfile.lock`
   pins `rigortype`, the extension runs `bundle exec rigor` with
   `BUNDLE_GEMFILE` set to `.github/rigor/Gemfile`, from the project root,
-  under the first Ruby 4.0 with Bundler that the managed runtime's search
-  finds (falling back to `bundle` on `PATH`). It comes after the
+  under the first Ruby that the managed runtime's search finds matching
+  the lockfile's `RUBY VERSION`, else the Gemfile's `ruby` line, else
+  rigortype's range (falling back to `bundle` on `PATH`), without the
+  inherited `GEM_HOME`, `GEM_PATH`, `RUBYOPT`, `RUBYLIB` and Bundler
+  overrides. It comes after the
   project's own `Gemfile.lock` and before `PATH`; the kind shows as
   `pinned-bundle`. A folder with only that pin is managed. New setting
-  `rigor.server.bundleGemfile` for another location, which
-  `rigor.server.useBundler: always` also uses.
+  `rigor.server.bundleGemfile` for another location inside the project
+  root, which `rigor.server.useBundler: always` also uses.
 - Background update checks for the managed Rigor (#2746):
   `rigor.runtime.autoUpdate` (on by default) and
   `rigor.runtime.updateCheckIntervalHours` (24). While a folder runs it

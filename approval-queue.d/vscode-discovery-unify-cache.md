@@ -1,4 +1,4 @@
-# The VS Code extension caches each folder's discovery result, failures included, and restarts the folder when a pin lockfile changes
+# The VS Code extension caches each folder's discovery result, failures included, and restarts the folder when its rigortype pin changes
 
 - **PR:** [#2778](https://github.com/rigortype/rigor/pull/2778)
 - **Issue:** [#2748](https://github.com/rigortype/rigor/issues/2748)
@@ -25,12 +25,16 @@ dropped were left open.
 
 ## Decision
 
-Cache passing and failing results. A create, change or delete of the project's `Gemfile.lock` or the
-pinned bundle's lockfile (the files that choose a Bundler kind) forgets that folder's result and
-restarts its server, debounced; a server-affecting setting change or a restart forgets all.
-`rigor.server.bundleGemfile` and `rigor.runtime.rubyPath` join the server-affecting settings.
+Cache passing and failing results. A write to the project's `Gemfile.lock` / `gems.locked`, the
+pinned bundle's lockfile, or a `mise.toml` / `.mise.toml` / `.tool-versions` at the project root
+re-reads the pin; only when it appeared, disappeared or names another version is the folder's
+result forgotten and its server restarted (debounced). A server-affecting setting change, a restart,
+or a managed install or clear forgets all. `rigor.server.bundleGemfile` and `rigor.runtime.rubyPath`
+join the server-affecting settings. The `rigor: check` task provider never waits for a walk: a
+folder without a finished result gets no task until VS Code asks again, while **Rigor: Check
+Workspace** waits for it.
 
 ## To undo
 
-`resolveRigor` / `forgetResolutions` in `editors/vscode/src/resolve.ts` and `watchPins` in
+`resolveRigor` / `forgetResolutions` / `pinChanged` in `editors/vscode/src/resolve.ts` and `watchPins` in
 `editors/vscode/src/extension.ts`; the README *Server discovery* paragraph says the same.

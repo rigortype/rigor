@@ -380,8 +380,10 @@ Rigor's, and your application's Ruby is never constrained by Rigor's.
 
 Commit it, with its `Gemfile.lock`, at `.github/rigor/`, the path Rigor's
 CI template uses. The VS Code extension runs it (discovery kind
-`pinned-bundle`, under a Ruby 4.0 it finds the way it does for its
-managed Rigor; `rigor.server.bundleGemfile` names another location).
+`pinned-bundle`, under a Ruby it finds the way it does for its managed
+Rigor, preferring one that matches the lockfile's `RUBY VERSION` or
+the Gemfile's `ruby` line; `rigor.server.bundleGemfile` names another
+location), and never a different Rigor while it pins one.
 `rigor doctor` does not recognise it yet
 ([#2751](https://github.com/rigortype/rigor/issues/2751)):
 

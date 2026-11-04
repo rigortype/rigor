@@ -251,7 +251,7 @@ async function runRigor(
     const tried = rejected
       .map((r) => `${describeCandidate(r.server)}: ${r.reason}`)
       .join("; ");
-    const stderr = `could not run Rigor in ${folder.name}${tried ? ` (tried ${tried})` : ": no \`rigor\` was found"}\n`;
+    const stderr = `could not run Rigor in ${folder.name}${tried ? ` (tried ${tried})` : ": no \`rigor\` was found"}; fix the setup, then run "Rigor: Restart Server"\n`;
     out.appendLine(`[rigor] ${stderr.trimEnd()}`);
     return { code: null, stdout: "", stderr, cancelled: false };
   }

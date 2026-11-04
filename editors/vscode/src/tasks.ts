@@ -21,12 +21,13 @@ import {
   workspace,
 } from "vscode";
 import {
+  ResolvedServer,
   configArgs,
   projectRoot,
   shouldManageFolder,
   useShell,
 } from "./discovery";
-import { resolveRigor } from "./resolve";
+import { peekResolution, resolveRigor } from "./resolve";
 
 const TASK_TYPE = "rigor";
 const TASK_SOURCE = "rigor";
@@ -43,14 +44,11 @@ function definedEnv(env: NodeJS.ProcessEnv): Record<string, string> {
 }
 
 /** The `rigor check` task for one managed folder. */
-async function checkTask(
+function checkTask(
   folder: WorkspaceFolder,
   label: string,
-  output: OutputChannel,
-): Promise<Task> {
-  // When nothing passes the probe, the task still runs the candidate the
-  // server reports, so the failure shows in the terminal.
-  const { server } = await resolveRigor(folder, output);
+  server: ResolvedServer,
+): Task {
   const root = projectRoot(folder) ?? folder.uri.fsPath;
   const args = [...server.prefixArgs, "check", ...configArgs(folder)];
   const definition: TaskDefinition = { type: TASK_TYPE, command: "check" };
@@ -83,22 +81,35 @@ async function checkTask(
 class RigorCheckTaskProvider implements TaskProvider {
   constructor(private readonly output: OutputChannel) {}
 
-  async provideTasks(): Promise<Task[]> {
+  /**
+   * Never waits for a discovery walk, which can take seconds per
+   * candidate: a folder whose resolution is not finished gets no task yet
+   * (its walk is started), and VS Code asks again. A folder where no
+   * `rigor` passed the probe gets none either: running the failed candidate
+   * anyway could run an unpinned Rigor (`bundle exec rigor` falls back to
+   * PATH), and **Rigor: Check Workspace** reports the failure instead.
+   */
+  provideTasks(): Task[] {
     if (!workspace.isTrusted) {
       return [];
     }
     const folders = (workspace.workspaceFolders ?? []).filter((folder) =>
       shouldManageFolder(folder),
     );
-    return Promise.all(
-      folders.map((folder) =>
-        checkTask(
-          folder,
-          folders.length > 1 ? `check (${folder.name})` : "check",
-          this.output,
-        ),
-      ),
-    );
+    const out: Task[] = [];
+    for (const folder of folders) {
+      const resolution = peekResolution(folder, this.output);
+      if (resolution && (resolution.probe.ok || resolution.probe.tooOld)) {
+        out.push(
+          checkTask(
+            folder,
+            folders.length > 1 ? `check (${folder.name})` : "check",
+            resolution.server,
+          ),
+        );
+      }
+    }
+    return out;
   }
 
   resolveTask(): undefined {
@@ -123,6 +134,26 @@ async function checkWorkspace(): Promise<void> {
       "Rigor: this workspace is not trusted, so rigor check does not run here. Trust the workspace to check it.",
     );
     return;
+  }
+  // A command may wait: finish each managed folder's discovery first, so
+  // the provider below has every folder's task.
+  if (output) {
+    const managed = (workspace.workspaceFolders ?? []).filter((folder) =>
+      shouldManageFolder(folder),
+    );
+    const resolutions = await Promise.all(
+      managed.map((folder) => resolveRigor(folder, output!)),
+    );
+    const failedNames = managed
+      .filter((_, i) => !resolutions[i].probe.ok && !resolutions[i].probe.tooOld)
+      .map((folder) => folder.name);
+    if (failedNames.length > 0 && failedNames.length === managed.length) {
+      void window.showErrorMessage(
+        `Rigor: could not run Rigor in ${failedNames.join(", ")}, so rigor check does not run. ` +
+          'The Rigor output lists what was tried; fix the setup, then run "Rigor: Restart Server".',
+      );
+      return;
+    }
   }
   const all = (await tasks.fetchTasks({ type: TASK_TYPE })).filter(
     (task) => taskFolder(task) !== undefined,
@@ -168,13 +199,16 @@ async function checkWorkspace(): Promise<void> {
  * Register the `rigor` task provider and the `Rigor: Check Workspace`
  * command. Called once from `activate`.
  */
+let output: OutputChannel | undefined;
+
 export function registerTasks(
   context: ExtensionContext,
-  output: OutputChannel,
+  channel: OutputChannel,
 ): void {
+  output = channel;
   const provider: Disposable = tasks.registerTaskProvider(
     TASK_TYPE,
-    new RigorCheckTaskProvider(output),
+    new RigorCheckTaskProvider(channel),
   );
   context.subscriptions.push(
     provider,

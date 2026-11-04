@@ -51,25 +51,45 @@ same one.
 
 1. `rigor.server.path`, if set — explicit path / command. When it
    fails, the extension says so and tries nothing else.
-2. `bundle exec rigor`, when the project's `Gemfile.lock` pins
-   `rigortype` (`rigor.server.useBundler: auto`, the default).
+2. `bundle exec rigor`, when the project's `Gemfile.lock` (or
+   `gems.locked`) pins `rigortype` (`rigor.server.useBundler: auto`,
+   the default).
 3. The **pinned bundle** — `bundle exec rigor` with `BUNDLE_GEMFILE`
    set to `.github/rigor/Gemfile` (or `rigor.server.bundleGemfile`),
    when its lockfile pins `rigortype`. See below.
-4. Every `rigor` on `PATH`, in `PATH` order.
+4. Every `rigor` on `PATH`, in `PATH` order (on Windows `rigor.bat`,
+   `rigor.cmd` and `rigor.exe`). Relative entries such as `.` are not
+   searched, and the same file reached twice is tried once.
 5. A `mise` or `asdf` shim (e.g. `~/.local/share/mise/shims/rigor`),
    used directly.
 6. The **managed Rigor**, when you installed one — see below.
 
+A pin is final. A project whose lockfile pins `rigortype` (2 or 3) runs
+that and nothing else, and one whose `mise.toml`, `.mise.toml` or
+`.tool-versions` (at the project root or above it) pins it runs the
+mise or asdf shim (5) and nothing else: a different Rigor would report
+diagnostics that differ from CI's. When the pin does not run, the
+message says to install it (`bundle install`, or `mise install`)
+instead of falling back. Because `bundle exec rigor` runs any `rigor`
+on `PATH` when the bundle has none installed, a Bundler candidate that
+reports another version than its lockfile pins is rejected too. Your global mise config is not a project
+pin: it only keeps the managed Rigor away.
+
 `rigor.server.useBundler: always` makes 2 the only candidate, or 3
-when `rigor.server.bundleGemfile` is set; `never` skips 2 and 3. A
-candidate that exists but does not run (an rbenv shim whose Ruby lacks
-the gem, a broken script) is rejected for the next one; the output
-channel logs each rejected candidate and why. A `rigor` that runs but
-is older than 0.1.6 stops the search with an upgrade warning. The
-result is kept until **Rigor: Restart Server**, a settings change, or
-a change to the project's or the pinned bundle's lockfile, which
-restarts that folder's server.
+when `rigor.server.bundleGemfile` is set; `never` skips 2 and 3, and
+then a lockfile pin no longer decides. A candidate that exists but
+does not run (an rbenv shim whose Ruby lacks the gem, a broken
+script) is rejected for the next one; the output channel logs each
+rejected candidate and why (a probe that hangs is rejected after
+20 s, and after 45 s in all the candidates no pin requires are
+skipped). A `rigor` that runs but is older than 0.1.6 stops the search
+with an upgrade warning. The result is kept until **Rigor: Restart
+Server**, a settings change, or a change to what pins `rigortype`
+(the files above appearing, disappearing or pinning another version),
+which restarts that folder's server. The `rigor: check` task appears
+once the folder's search has finished, and only when it found a
+`rigor` that runs; **Rigor: Check Workspace** otherwise reports the
+failure.
 
 If none works, the extension shows an actionable message listing the
 candidates it tried and stays loaded — fix the setup and run
@@ -82,15 +102,20 @@ manual's
 [pinned bundle](https://github.com/rigortype/rigor/blob/master/docs/manual/01-installation.md#secondary--a-pinned-bundle))
 is enough for the extension to manage the folder and run it, kind
 `pinned-bundle`. It runs from the project root, with `BUNDLE_GEMFILE`
-set to the Gemfile's absolute path, as `<ruby> <bundle> exec rigor`
-under the first Ruby 4.0 with Bundler found the way the managed Rigor
-finds one (`rigor.runtime.rubyPath`, `ruby` on `PATH`, the version
-managers' install directories), so the project's own Ruby does not
-have to be 4.0. When that does not run, `bundle exec rigor` from
-`PATH` is tried with the same `BUNDLE_GEMFILE`. Install the bundle
-under that Ruby first (`BUNDLE_GEMFILE=.github/rigor/Gemfile bundle
-install`). Set `rigor.server.bundleGemfile` (relative to the project
-root) for a bundle somewhere else.
+set to the Gemfile's absolute path, as `<ruby> <bundle> exec rigor`.
+The Ruby is found the way the managed Rigor finds one
+(`rigor.runtime.rubyPath`, `ruby` on `PATH`, the version managers'
+install directories), so the project's own Ruby does not have to be
+4.0: the first that matches the lockfile's `RUBY VERSION`, else the
+Gemfile's `ruby` line, else rigortype's own Ruby range. When that does
+not run, `bundle exec rigor` from `PATH` is tried with the same
+`BUNDLE_GEMFILE`. Both drop the inherited `GEM_HOME`, `GEM_PATH`,
+`RUBYOPT`, `RUBYLIB`, `BUNDLE_BIN_PATH`, `BUNDLER_*` and
+`BUNDLE_GEMFILE`, and keep your other `BUNDLE_*` settings (a
+`BUNDLE_PATH` you install with). Install the bundle under that Ruby
+first (`BUNDLE_GEMFILE=.github/rigor/Gemfile bundle install`). Set
+`rigor.server.bundleGemfile` (relative to the project root, and inside
+it) for a bundle somewhere else.
 
 ### The managed Rigor (first-time setup)
 
@@ -193,7 +218,7 @@ Use an absolute path — the setting is not `~`-expanded.
 | `rigor.rootDir` | `""` | Relative subdirectory holding the Rigor project (such as `api`). Empty uses the folder itself; an absolute path is rejected. |
 | `rigor.server.path` | `""` | Explicit `rigor` executable path. |
 | `rigor.server.useBundler` | `auto` | `auto` / `always` / `never`. |
-| `rigor.server.bundleGemfile` | `""` | Gemfile of a pinned bundle, relative to the project root. Empty uses `.github/rigor/Gemfile` when its lockfile pins `rigortype`. |
+| `rigor.server.bundleGemfile` | `""` | Gemfile of a pinned bundle, relative to the project root and inside it. Empty uses `.github/rigor/Gemfile` when its lockfile pins `rigortype`. |
 | `rigor.server.configPath` | `""` | Passed as `--config=PATH`. |
 | `rigor.server.logPath` | `""` | Passed as `--log=PATH`. |
 | `rigor.runtime.version` | `latest` | `rigortype` version of the managed Rigor; `latest` resolves the newest release on rubygems.org. |

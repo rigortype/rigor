@@ -37,40 +37,73 @@ export function useShell(server: ResolvedServer): boolean {
 
 /** Whether the folder pins the `rigortype` gem in its lockfile. */
 export function lockfileHasRigortype(folderPath: string): boolean {
-  return lockPinsRigortype(path.join(folderPath, "Gemfile.lock"));
+  return projectLockPin(folderPath) !== undefined;
+}
+
+/**
+ * The folder's own lockfile (`Gemfile.lock`, or `gems.locked` for a
+ * `gems.rb`) when it pins `rigortype`, else undefined.
+ */
+export function projectLockPin(folderPath: string): string | undefined {
+  return [
+    path.join(folderPath, "Gemfile.lock"),
+    path.join(folderPath, "gems.locked"),
+  ].find(lockPinsRigortype);
 }
 
 /** Whether a Bundler lockfile pins the `rigortype` gem. */
 export function lockPinsRigortype(lockfile: string): boolean {
+  return lockedRigortype(lockfile) !== undefined;
+}
+
+/**
+ * The `rigortype` version a Bundler lockfile pins, or undefined. Bundler
+ * indents gem entries by four spaces under `specs:`.
+ */
+export function lockedRigortype(lockfile: string): string | undefined {
   try {
     const contents = fs.readFileSync(lockfile, "utf8");
-    // Bundler indents gem entries by four spaces under `specs:`.
-    return /^\s{4}rigortype\s/m.test(contents);
+    return /^\s{4}rigortype \(([^)]*)\)/m.exec(contents)?.[1];
   } catch {
-    return false;
+    return undefined;
   }
 }
 
 /** The canonical pinned bundle (ADR-27 WD9), relative to the project root. */
 export const PINNED_BUNDLE_GEMFILE = path.join(".github", "rigor", "Gemfile");
 
+export interface PinnedBundle {
+  gemfile: string;
+  /** Set by `rigor.server.bundleGemfile` rather than the canonical path. */
+  explicit: boolean;
+  /**
+   * The setting's raw value when it is absolute or leaves the project
+   * root, the containment rule of `rigor.rootDir`. No pinned bundle is
+   * used then.
+   */
+  rejected?: string;
+}
+
 /**
  * The pinned bundle's Gemfile for a project root: `rigor.server.bundleGemfile`
  * resolved against the root when set, else `.github/rigor/Gemfile`.
- * `explicit` says which.
  */
 export function pinnedBundleGemfile(
   folder: WorkspaceFolder,
   root: string,
-): { gemfile: string; explicit: boolean } {
+): PinnedBundle {
   const configured = (
     workspace
       .getConfiguration("rigor", folder.uri)
       .get<string>("server.bundleGemfile") ?? ""
   ).trim();
-  return configured
-    ? { gemfile: path.resolve(root, configured), explicit: true }
-    : { gemfile: path.join(root, PINNED_BUNDLE_GEMFILE), explicit: false };
+  if (!configured) {
+    return { gemfile: path.join(root, PINNED_BUNDLE_GEMFILE), explicit: false };
+  }
+  const gemfile = path.resolve(root, configured);
+  return path.isAbsolute(configured) || !isBelow(gemfile, root)
+    ? { gemfile, explicit: true, rejected: configured }
+    : { gemfile, explicit: true };
 }
 
 /** Bundler's lockfile for a Gemfile: `gems.rb` locks to `gems.locked`. */
@@ -140,8 +173,18 @@ export function shouldManageFolder(folder: WorkspaceFolder): boolean {
   return (
     hasRigorConfig(root) ||
     lockfileHasRigortype(root) ||
-    lockPinsRigortype(lockfileFor(pinnedBundleGemfile(folder, root).gemfile))
+    pinnedBundleLock(folder, root) !== undefined
   );
+}
+
+/** The pinned bundle's lockfile when it pins `rigortype`, else undefined. */
+export function pinnedBundleLock(
+  folder: WorkspaceFolder,
+  root: string,
+): string | undefined {
+  const pinned = pinnedBundleGemfile(folder, root);
+  const lock = lockfileFor(pinned.gemfile);
+  return !pinned.rejected && lockPinsRigortype(lock) ? lock : undefined;
 }
 
 /**
@@ -162,13 +205,22 @@ export function shouldManageFolder(folder: WorkspaceFolder): boolean {
  *   never installed would otherwise block the managed Rigor everywhere.
  */
 export function rigortypePin(root: string): string | undefined {
-  for (const lock of [
-    path.join(root, "Gemfile.lock"),
-    path.join(root, ".github", "rigor", "Gemfile.lock"),
-  ]) {
-    if (lockfileHasRigortype(path.dirname(lock))) {
-      return lock;
-    }
+  return findPin(root)?.file;
+}
+
+/**
+ * Like `rigortypePin`, and which kind of file pins: a Bundler lockfile, a
+ * mise or asdf file of the project (the root or above it, below the home
+ * directory), or the user's global one.
+ */
+export function findPin(
+  root: string,
+): { file: string; scope: "lock" | "project" | "global" } | undefined {
+  const lock =
+    projectLockPin(root) ??
+    [lockfileFor(path.join(root, PINNED_BUNDLE_GEMFILE))].find(lockPinsRigortype);
+  if (lock) {
+    return { file: lock, scope: "lock" };
   }
   const home = path.resolve(os.homedir());
   const globalFiles = globalPinFiles(home);
@@ -181,7 +233,7 @@ export function rigortypePin(root: string): string | undefined {
       if (!projectLevel) {
         globalFiles.push(file);
       } else if (fileNamesRigortype(file)) {
-        return file;
+        return { file, scope: "project" };
       }
     }
     const parent = path.dirname(dir);
@@ -191,7 +243,8 @@ export function rigortypePin(root: string): string | undefined {
     dir = parent;
   }
   if (globalPinInstalled()) {
-    return globalFiles.find(fileNamesRigortype);
+    const file = globalFiles.find(fileNamesRigortype);
+    return file ? { file, scope: "global" } : undefined;
   }
   return undefined;
 }
@@ -398,25 +451,44 @@ function globalPinInstalled(): boolean {
  * absolute path. Each is a separate discovery candidate: the first may
  * exist and not run (an rbenv shim for a Ruby without the gem).
  */
-export function pathExecutables(name: string): string[] {
-  const sep = process.platform === "win32" ? ";" : ":";
-  const candidates =
-    process.platform === "win32"
-      ? [name, `${name}.exe`, `${name}.cmd`, `${name}.bat`]
-      : [name];
+export function pathExecutables(name: string): {
+  found: string[];
+  /** Relative `PATH` entries (`.` among them), which are never searched. */
+  skipped: string[];
+} {
+  const win = process.platform === "win32";
+  const sep = win ? ";" : ":";
+  // On Windows an extensionless `rigor` is the POSIX script RubyGems also
+  // writes, which only a POSIX shell runs.
+  const candidates = win
+    ? [`${name}.bat`, `${name}.cmd`, `${name}.exe`]
+    : [name];
   const found: string[] = [];
+  const real = new Set<string>();
+  const skipped: string[] = [];
   for (const dir of (process.env.PATH ?? "").split(sep)) {
     if (!dir) {
       continue;
     }
+    // A relative entry resolves against the extension host's working
+    // directory, which is no directory the user chose.
+    if (!path.isAbsolute(dir)) {
+      if (!skipped.includes(dir)) {
+        skipped.push(dir);
+      }
+      continue;
+    }
     for (const candidate of candidates) {
-      const file = path.resolve(dir, candidate);
+      const file = path.join(dir, candidate);
       try {
-        if (
-          !found.includes(file) &&
-          fs.existsSync(file) &&
-          fs.statSync(file).isFile()
-        ) {
+        if (!fs.existsSync(file) || !fs.statSync(file).isFile()) {
+          continue;
+        }
+        // The same file reached through two PATH entries (a symlinked
+        // directory) is one candidate.
+        const target = fs.realpathSync(file);
+        if (!real.has(target)) {
+          real.add(target);
           found.push(file);
         }
       } catch {
@@ -424,7 +496,7 @@ export function pathExecutables(name: string): string[] {
       }
     }
   }
-  return found;
+  return { found, skipped };
 }
 
 /**

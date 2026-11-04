@@ -9,6 +9,9 @@ import { shellInvocation } from "./proc";
 /** First `rigor lsp` release. Older gems cannot serve the LSP. */
 export const MIN_VERSION = "0.1.6";
 
+/** How long one `rigor version` probe may take. */
+export const PROBE_TIMEOUT_MS = 20000;
+
 export interface ProbeResult {
   /** True when a usable server (>= MIN_VERSION) was found. */
   ok: boolean;
@@ -48,7 +51,7 @@ export function probeServer(
       {
         cwd,
         env: server.env,
-        timeout: 20000,
+        timeout: PROBE_TIMEOUT_MS,
         windowsHide: true,
         shell,
       },
@@ -65,8 +68,10 @@ export function probeServer(
             detail:
               code === "ENOENT"
                 ? "not found"
-                : firstErr ??
-                  (typeof code === "number" ? `exit ${code}` : error.message),
+                : error.killed && error.signal
+                  ? `timed out after ${PROBE_TIMEOUT_MS / 1000} s`
+                  : firstErr ??
+                    (typeof code === "number" ? `exit ${code}` : error.message),
           });
           return;
         }

@@ -24,7 +24,8 @@ kind and said `useBundler: always` must honour `rigor.server.bundleGemfile`. It 
 
 ## Decision
 
-`never` skips both Bundler kinds. `always` makes the Bundler candidate the only one — the pinned
+`never` skips both Bundler kinds, and then a lockfile pin no longer makes the walk final (PATH and
+the shims may serve; the managed Rigor still may not). `always` makes the Bundler candidate the only one — the pinned
 bundle when `rigor.server.bundleGemfile` is set, the project's Gemfile otherwise — and a failure is
 reported, not replaced, and never offers the managed Rigor (as before).
 

@@ -14,6 +14,7 @@ import {
   Pseudoterminal,
   QuickPickItem,
   Task,
+  TaskDefinition,
   TaskProvider,
   WorkspaceFolder,
   commands,
@@ -21,7 +22,7 @@ import {
   window,
   workspace,
 } from "vscode";
-import { CheckFinding, LineSplitter, parseCheckLine } from "./checkOutput";
+import { CheckFinding, LineSplitter, completedRun, parseCheckLine } from "./checkOutput";
 import {
   CheckResults,
   collectionSink,
@@ -58,10 +59,11 @@ function folderKey(folder: WorkspaceFolder): string {
  * failed pinned bundle must not become an unpinned run). It closes with
  * `rigor check`'s exit code.
  */
-function checkTask(
+export function checkTask(
   folder: WorkspaceFolder,
   label: string,
   output: OutputChannel,
+  definition: TaskDefinition = { type: TASK_TYPE, command: "check", folder: folder.name },
 ): Task {
   const root = projectRoot(folder) ?? folder.uri.fsPath;
   const execution = new CustomExecution(async (): Promise<Pseudoterminal> => {
@@ -70,7 +72,8 @@ function checkTask(
     let child: ReturnType<typeof spawnCli> | undefined;
     let closed = false;
     const findings: CheckFinding[] = [];
-    const splitters = [new LineSplitter(), new LineSplitter()];
+    // Findings are on stdout; stderr is echoed but not parsed.
+    const splitter = new LineSplitter();
     const take = (lines: string[]): void => {
       for (const line of lines) {
         const finding = parseCheckLine(line, root);
@@ -90,9 +93,6 @@ function checkTask(
       onDidWrite: write.event,
       onDidClose: close.event,
       open: () => {
-        // A new run replaces this folder's earlier results, even when it
-        // never gets as far as running rigor.
-        results?.clear(folderKey(folder));
         void resolveRigor(folder, output).then((res) => {
           if (closed) {
             return;
@@ -114,22 +114,24 @@ function checkTask(
             shell: useShell(server),
             env: server.env,
           });
-          const pipe = (stream: NodeJS.ReadableStream | null, splitter: LineSplitter): void => {
-            stream?.on("data", (d: Buffer) => {
-              const text = d.toString();
-              write.fire(crlf(text));
-              take(splitter.push(text));
-            });
-          };
-          pipe(child.stdout, splitters[0]);
-          pipe(child.stderr, splitters[1]);
+          // Decode as UTF-8 here, so a character split across chunks is whole.
+          child.stdout?.setEncoding("utf8");
+          child.stderr?.setEncoding("utf8");
+          child.stdout?.on("data", (text: string) => {
+            write.fire(crlf(text));
+            take(splitter.push(text));
+          });
+          child.stderr?.on("data", (text: string) => write.fire(crlf(text)));
           child.on("error", (err) => {
             write.fire(crlf(`${String(err)}\n`));
             finish(1);
           });
           child.on("close", (code) => {
-            if (!closed) {
-              splitters.forEach((s) => take(s.flush()));
+            // Only a run that finished replaces the folder's results (exit
+            // 0 or 1). A cancel, a spawn or discovery failure, a signal, or
+            // a usage/internal error (64, 70) or 127 keeps the earlier ones.
+            if (!closed && completedRun(code)) {
+              take(splitter.flush());
               results?.replace(folderKey(folder), groupFindings(findings));
             }
             finish(code ?? 1);
@@ -145,10 +147,7 @@ function checkTask(
     };
   });
   return new Task(
-    // `folder` keeps two folders' definitions distinct: VS Code looks a
-    // pseudoterminal up by definition, so identical ones ran the wrong
-    // folder's `rigor check`.
-    { type: TASK_TYPE, command: "check", folder: folderKey(folder) },
+    definition,
     folder,
     label,
     TASK_SOURCE,
@@ -161,7 +160,7 @@ function checkTask(
  * workspaces get none: the task spawns `bundle exec rigor` from the
  * workspace, as the language server does.
  */
-class RigorCheckTaskProvider implements TaskProvider {
+export class RigorCheckTaskProvider implements TaskProvider {
   constructor(private readonly output: OutputChannel) {}
 
   /**
@@ -185,9 +184,23 @@ class RigorCheckTaskProvider implements TaskProvider {
     return out;
   }
 
-  resolveTask(): undefined {
-    // Only the tasks provided above run; a tasks.json entry is not resolved.
-    return undefined;
+  /**
+   * A `tasks.json` entry `{ "type": "rigor", "command": "check" }` in a
+   * managed folder runs the same pseudoterminal; the task keeps its own
+   * definition, which is what VS Code matches it by.
+   */
+  resolveTask(task: Task): Task | undefined {
+    const folder = taskFolder(task);
+    if (
+      !workspace.isTrusted ||
+      !folder ||
+      task.definition.type !== TASK_TYPE ||
+      task.definition.command !== "check" ||
+      !shouldManageFolder(folder)
+    ) {
+      return undefined;
+    }
+    return checkTask(folder, task.name, this.output, task.definition);
   }
 }
 

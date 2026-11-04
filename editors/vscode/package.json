@@ -220,7 +220,7 @@
           },
           "folder": {
             "type": "string",
-            "description": "Set by the extension: the workspace folder the task belongs to."
+            "description": "Optional. The workspace folder's name; the extension sets it on the tasks it provides."
           }
         }
       }

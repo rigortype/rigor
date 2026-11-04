@@ -13,7 +13,19 @@ export const stub = {
   folders: [] as WorkspaceFolder[],
   /** Every `show*Message`, in order. */
   messages: [] as { level: "info" | "warning" | "error"; text: string }[],
+  /** Handlers registered through `commands.registerCommand`, by id. */
+  commandHandlers: new Map<string, (...args: unknown[]) => unknown>(),
+  /** Listeners of `workspace.onDidChangeWorkspaceFolders`. */
+  folderListeners: [] as (() => void)[],
+  /** Task providers by type, from `tasks.registerTaskProvider`. */
+  taskProviders: new Map<string, import("vscode").TaskProvider>(),
+  /** Every collection `languages.createDiagnosticCollection` made, newest last. */
+  collections: [] as DiagnosticCollection[],
   reset(): void {
+    this.commandHandlers.clear();
+    this.folderListeners = [];
+    this.taskProviders.clear();
+    this.collections = [];
     this.config.clear();
     this.trusted = true;
     this.folders = [];
@@ -138,6 +150,10 @@ export const workspace = {
       },
     };
   },
+  onDidChangeWorkspaceFolders(listener: () => void): Disposable {
+    stub.folderListeners.push(listener);
+    return new Disposable(() => {});
+  },
   registerTextDocumentContentProvider: () => new Disposable(() => {}),
   onDidCloseTextDocument: () => new Disposable(() => {}),
 };
@@ -163,7 +179,10 @@ export const window = {
 };
 
 export const commands = {
-  registerCommand: () => new Disposable(() => {}),
+  registerCommand(id: string, handler: (...args: unknown[]) => unknown): Disposable {
+    stub.commandHandlers.set(id, handler);
+    return new Disposable(() => {});
+  },
   executeCommand: () => Promise.resolve(undefined),
 };
 
@@ -196,7 +215,7 @@ export class Diagnostic {
   ) {}
 }
 
-class DiagnosticCollection {
+export class DiagnosticCollection {
   readonly entries = new Map<string, Diagnostic[]>();
   constructor(readonly name: string) {}
   set(uri: Uri, diagnostics: Diagnostic[]): void {
@@ -210,9 +229,32 @@ class DiagnosticCollection {
   }
 }
 
+export class CustomExecution {
+  constructor(readonly callback: (definition: unknown) => Promise<unknown>) {}
+}
+
+export class Task {
+  constructor(
+    readonly definition: { type: string; [key: string]: unknown },
+    readonly scope: unknown,
+    readonly name: string,
+    readonly source: string,
+    readonly execution?: unknown,
+  ) {}
+}
+
+export const tasks = {
+  registerTaskProvider(type: string, provider: import("vscode").TaskProvider): Disposable {
+    stub.taskProviders.set(type, provider);
+    return new Disposable(() => {});
+  },
+};
+
 export const languages = {
   createDiagnosticCollection(name: string): DiagnosticCollection {
-    return new DiagnosticCollection(name);
+    const collection = new DiagnosticCollection(name);
+    stub.collections.push(collection);
+    return collection;
   },
   registerCodeActionsProvider(_selector: unknown, provider: unknown): Disposable {
     registeredCodeActionProviders.push(provider);

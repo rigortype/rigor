@@ -65,3 +65,13 @@ export class LineSplitter {
     return rest === "" ? [] : [rest];
   }
 }
+
+/**
+ * Whether a `rigor check` exit status means the run finished and its
+ * findings are the folder's results: 0 (clean) or 1 (findings). Anything
+ * else (64 usage or config error, 70 internal error, 127, a signal) is a
+ * run that did not complete.
+ */
+export function completedRun(code: number | null): boolean {
+  return code === 0 || code === 1;
+}

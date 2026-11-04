@@ -99,11 +99,17 @@ test-ractor-pool:
 # run. spec/integration/examples/ is excluded from the default suite the same way, because the gate covers examples/
 # as well as plugins/. CI splits the run across jobs: PLUGIN_SHARD=I/N runs one deterministic slice of the files
 # (tool/plugin_integration_shard.rb); unset, it runs them all.
+#
+# RIGOR_PLUGIN_BOUNDARY_REQUIRE_CALLS=1 makes the gate also fail a run that recorded no plugin->engine call. It is set
+# here, for the whole run and each CI shard, because a run that recorded nothing would otherwise pass for want of
+# anything to judge; the shard counts (25, 42, 58 calls) say a full run always records some, and that holds for CI's
+# 3-way split. A much finer PLUGIN_SHARD can isolate an engine-silent spec, which then fails. A narrow run of one spec
+# file, run through rspec directly, leaves the variable unset: an engine-silent plugin spec legitimately records no call.
 PLUGIN_SHARD ?=
 test-integration-plugins:
 	@files="$$(bundle exec ruby tool/plugin_integration_shard.rb $(PLUGIN_SHARD))" || exit 1; \
 	[ -n "$$files" ] || { echo "tool/plugin_integration_shard.rb listed no spec files for PLUGIN_SHARD='$(PLUGIN_SHARD)'" >&2; exit 1; }; \
-	RIGOR_PLUGIN_BOUNDARY=1 RIGOR_INCLUDE_INTEGRATION_PLUGINS=1 bundle exec rspec $$files
+	RIGOR_PLUGIN_BOUNDARY=1 RIGOR_PLUGIN_BOUNDARY_REQUIRE_CALLS=1 RIGOR_INCLUDE_INTEGRATION_PLUGINS=1 bundle exec rspec $$files
 
 # Spec suite via `binpacker`, distributing files across worker
 # processes using LPT scheduling driven by measured per-file

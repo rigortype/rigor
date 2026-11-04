@@ -10,15 +10,20 @@ require_relative "plugin_boundary"
 #
 # It records nothing from the default suite, whose plugin specs use fixture plugins outside `plugins/` and
 # `examples/`; its coverage is whatever the plugin integration specs in the run exercise.
+#
+# `RIGOR_PLUGIN_BOUNDARY_REQUIRE_CALLS=1` (set by `make test-integration-plugins`) also fails the run when the recorder
+# saw no plugin->engine call. A narrow run leaves it unset, because an engine-silent plugin's spec legitimately records
+# none.
 return unless ENV["RIGOR_PLUGIN_BOUNDARY"]
 
 RSpec.configure do |config|
   recorder = PluginBoundary::Recorder.new
+  require_calls = ENV["RIGOR_PLUGIN_BOUNDARY_REQUIRE_CALLS"] == "1"
 
   config.before(:suite) { recorder.start }
   config.after(:suite) do
     recorder.stop
     config.reporter.message("plugin-boundary gate: #{recorder.calls.size} distinct plugin->engine call(s) recorded")
-    PluginBoundary.check!(recorder, require_calls: true)
+    PluginBoundary.check!(recorder, require_calls: require_calls)
   end
 end

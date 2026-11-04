@@ -114,6 +114,14 @@ RSpec.describe PluginBoundary do
     end
   end
 
+  describe "the default roots" do
+    it "are the bundled plugins/ and examples/ directories" do
+      expect(PluginBoundary::Recorder.new.roots)
+        .to eq([File.join(PluginBoundary::REPO_ROOT, "plugins", ""),
+                File.join(PluginBoundary::REPO_ROOT, "examples", "")])
+    end
+  end
+
   describe "the allow-list" do
     it "is empty: #2708's facade retired the last tracked reach" do
       expect(PluginBoundary::ALLOW_LIST).to be_empty

@@ -8653,7 +8653,8 @@ module Rigor
           # def's contract; it binds its parameters as an undeclared method does.
           class_path: @class_context.last&.refinement ? nil : current_class_path,
           singleton: singleton,
-          source_path: scope.source_path
+          source_path: scope.source_path,
+          scope: scope
         )
         bindings = binder.bind(def_node)
         # ADR-67 WD3 — override an undeclared parameter with its call-site inferred type (precision-additive; an

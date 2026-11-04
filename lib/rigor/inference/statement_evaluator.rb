@@ -62,6 +62,7 @@ require_relative "unknown_store_widening"
 require_relative "untyped_rejoin"
 require_relative "version_guard"
 require_relative "../run_scoped_slots"
+require_relative "typing_state"
 
 module Rigor
   module Inference
@@ -194,13 +195,18 @@ module Rigor
       # return type. The flow value of a `return` is still `Bot` (it transfers control rather than producing a value);
       # the sink only records what the method *returns* through that edge. nil means "not collecting" — a top-level /
       # DSL-block walk, or inside a nested `def` barrier (whose returns belong to the inner method).
-      RETURN_SINK_KEY = :rigor_return_sink
-      private_constant :RETURN_SINK_KEY
+      #
+      # ADR-129 WD1 — the installation is a Frame and each record is a Resource touch.
+      RETURN_SINK = TypingState.frame(
+        :return_sink,
+        contents: :resource, reason: "installed per method body; each `return` records into it"
+      )
+      private_constant :RETURN_SINK
 
       # Thread-local flag: set while a side pass ({.provisional_returns}) re-types part of a body from a scope other
       # than the one the statement walk holds, so the `return`s it reaches are filed as provisional ({ReturnSink}).
-      PROVISIONAL_RETURNS_KEY = :rigor_provisional_returns
-      private_constant :PROVISIONAL_RETURNS_KEY
+      PROVISIONAL_RETURNS = TypingState.frame(:provisional_returns, reason: "a flag installed around a side pass")
+      private_constant :PROVISIONAL_RETURNS
 
       # The `return` sink {.with_return_sink} installs. Issue #2299 — a `return` the statement walk records is typed
       # with its real bindings; one a side pass records ({.provisional_returns}) may read a name the pass skipped the
@@ -215,8 +221,9 @@ module Rigor
           @provisional = []
         end
 
-        def record(node, type)
-          if Thread.current[PROVISIONAL_RETURNS_KEY]
+        # `provisional` is the {PROVISIONAL_RETURNS} frame the evaluator reached the `return` under.
+        def record(node, type, provisional)
+          if provisional
             @provisional << [node, type]
           else
             @types << type
@@ -234,14 +241,17 @@ module Rigor
       # Thread-local sink (an Array of `[NextNode, Type]`) collecting the value each `next` carries out of the block it
       # leaves, so `ExpressionTyper#type_block_body` can join those arms into the block's value type. Issue #841: the
       # block-return pass modelled only the fall-through tail, so `ops.all? { |o| next false unless o; true }` read as
-      # `Constant[true]` and folded the call to always-truthy — the same defect `RETURN_SINK_KEY` fixes one level up for
+      # `Constant[true]` and folded the call to always-truthy — the same defect `RETURN_SINK` fixes one level up for
       # a method's early `return`. The flow value of a `next` stays `Bot`.
       #
       # The sink also collects `next`s from nested blocks / loops / defs evaluated under the same installation (they do
       # not install their own), so the consumer filters by node identity against a statically computed
       # directly-targeting set, exactly as the break sink does. nil means "not collecting".
-      NEXT_SINK_KEY = :rigor_next_sink
-      private_constant :NEXT_SINK_KEY
+      NEXT_SINK = TypingState.frame(
+        :next_sink,
+        contents: :resource, reason: "installed per block body; each `next` records into it"
+      )
+      private_constant :NEXT_SINK
 
       # Thread-local sink (an Array of `[BreakNode, Scope]`) collecting the scope at each `break` reached while
       # evaluating a loop body, so `eval_loop` / `eval_for` can join a `break`-path binding (`flag = true; break`) into
@@ -249,21 +259,31 @@ module Rigor
       # installs its own sink, restored on exit, so an inner loop's break does not leak to the outer one. A `break`
       # inside a block / nested loop targets that inner construct, not the lexical loop — filtered out by the loop's
       # {JumpTargets} set ({#loop_jumps}). See docs/notes/20260615-loop-break-binding-propagation-design.md.
-      BREAK_SINK_KEY = :rigor_break_sink
-      private_constant :BREAK_SINK_KEY
+      #
+      # ADR-129 WD3 — a construct reads the sink's size before it runs and again after, to find the jumps it recorded
+      # itself ({#restoring_error_info}, {#ensure_jump_marks}), so a read of the contents is delta-internal.
+      BREAK_SINK = TypingState.frame(
+        :break_sink,
+        contents: :resource, read_exemption: :delta_internal,
+        reason: "installed per loop body; each `break` records into it, and an enclosing `ensure` rewrites them"
+      )
+      private_constant :BREAK_SINK
 
       # Thread-local sink (an Array of `[BreakNode, Type]`) collecting the value each `break` carries out of the
       # construct it leaves. Issue #853: `break value` terminates the yielding CALL and is that call's value, so —
-      # unlike `next`, which {NEXT_SINK_KEY} joins into the block — these arms are consumed one level up, by
+      # unlike `next`, which {NEXT_SINK} joins into the block — these arms are consumed one level up, by
       # `ExpressionTyper#call_dispatch_type_for`. Without them `ops.all? { |o| break false unless o; true }` folded to
       # `Constant[true]` and warned about a program that really can answer false.
       #
-      # Separate from {BREAK_SINK_KEY}, which records SCOPES for the loop-continuation join: the two consumers want
+      # Separate from {BREAK_SINK}, which records SCOPES for the loop-continuation join: the two consumers want
       # different things from the same node, and a loop body evaluated under a call's collection must keep feeding its
       # own sink. Both are filtered by node identity against a statically computed directly-targeting set, so a `break`
       # that belongs to an inner loop or block never reaches the wrong consumer. nil means "not collecting".
-      BREAK_VALUE_SINK_KEY = :rigor_break_value_sink
-      private_constant :BREAK_VALUE_SINK_KEY
+      BREAK_VALUE_SINK = TypingState.frame(
+        :break_value_sink,
+        contents: :resource, reason: "installed per yielding call; each `break` records into it"
+      )
+      private_constant :BREAK_VALUE_SINK
 
       # Lexical class frame: the `name:` field is the qualified class name as it would render in Ruby (e.g.,
       # `"Foo::Bar"`); the `singleton:` field is `true` for `class << self` frames so nested defs resolve to
@@ -356,18 +376,9 @@ module Rigor
       # so a `def` evaluated inside another method's body (which itself installed a sink) does not corrupt the outer
       # one. Used by `ExpressionTyper#infer_user_method_return` to join the explicit returns into the inferred
       # method-return type.
-      def self.with_return_sink
-        previous = Thread.current[RETURN_SINK_KEY]
-        previous_provisional = Thread.current[PROVISIONAL_RETURNS_KEY]
+      def self.with_return_sink(&)
         sink = ReturnSink.new
-        Thread.current[RETURN_SINK_KEY] = sink
-        Thread.current[PROVISIONAL_RETURNS_KEY] = nil
-        begin
-          result = yield
-        ensure
-          Thread.current[RETURN_SINK_KEY] = previous
-          Thread.current[PROVISIONAL_RETURNS_KEY] = previous_provisional
-        end
+        result = TypingState.current.with_pair(RETURN_SINK, sink, PROVISIONAL_RETURNS, nil, &)
         [result, sink.types]
       end
 
@@ -375,29 +386,17 @@ module Rigor
       # on exit. Issue #2299 — {ExpressionTyper#type_block_body}'s tail-only answer types `return r if r` without the
       # `r = yield e` before it, so `r` read `Dynamic[top]` and that went into the enclosing method's return type
       # although the statement walk of the same block recorded `r` with its real binding.
-      def self.provisional_returns
-        previous = Thread.current[PROVISIONAL_RETURNS_KEY]
-        Thread.current[PROVISIONAL_RETURNS_KEY] = true
-        begin
-          yield
-        ensure
-          Thread.current[PROVISIONAL_RETURNS_KEY] = previous
-        end
+      def self.provisional_returns(&)
+        TypingState.current.with(PROVISIONAL_RETURNS, true, &)
       end
 
       # Runs `block` with a fresh `next` sink installed, then yields the collected `[NextNode, Type]` pairs to the
       # caller. Stacks like the return sink, and for the same reason: a block body evaluated inside another block body's
       # evaluation must not spill its arms into the outer collection. Used by `ExpressionTyper#type_block_body` to join
       # the `next` arms into the block's value type.
-      def self.with_next_sink
-        previous = Thread.current[NEXT_SINK_KEY]
+      def self.with_next_sink(&)
         sink = []
-        Thread.current[NEXT_SINK_KEY] = sink
-        begin
-          result = yield
-        ensure
-          Thread.current[NEXT_SINK_KEY] = previous
-        end
+        result = TypingState.current.with(NEXT_SINK, sink, &)
         [result, sink]
       end
 
@@ -405,15 +404,9 @@ module Rigor
       # the caller. Stacks like the other sinks: a block body evaluated inside another block body's evaluation must not
       # spill its arms into the outer collection. Used by `ExpressionTyper#call_dispatch_type_for` to union the `break`
       # arms into the yielding call's type (issue #853).
-      def self.with_break_value_sink
-        previous = Thread.current[BREAK_VALUE_SINK_KEY]
+      def self.with_break_value_sink(&)
         sink = []
-        Thread.current[BREAK_VALUE_SINK_KEY] = sink
-        begin
-          result = yield
-        ensure
-          Thread.current[BREAK_VALUE_SINK_KEY] = previous
-        end
+        result = TypingState.current.with(BREAK_VALUE_SINK, sink, &)
         [result, sink]
       end
 
@@ -832,14 +825,18 @@ module Rigor
       # the class `self` is and its side (a constant's ancestor lookup differs between the class object and an
       # instance), and the called name, not on the def it sits in.
       def unrecorded_hand_off_memo(written)
-        table = (Thread.current[UNRECORDED_HAND_OFF_KEY] ||= ObjectSpace::WeakKeyMap.new)
+        table = typing_state.weak_key_map(UNRECORDED_HAND_OFFS)
         self_type = scope.self_type
         by_side = ((table[scope.discovery] ||= {})[self_type.is_a?(Type::Singleton)] ||= {})
         (by_side[enclosing_class_name_for(self_type)] ||= {})[written] ||= {}
       end
 
-      UNRECORDED_HAND_OFF_KEY = RunScopedSlots.register(:rigor_callee_unrecorded_hand_offs)
-      private_constant :UNRECORDED_HAND_OFF_KEY
+      UNRECORDED_HAND_OFFS = TypingState.memo(
+        :callee_unrecorded_hand_offs,
+        run_scoped: true,
+        reason: "keyed by discovery, side, class and spelling, all its answer reads"
+      )
+      private_constant :UNRECORDED_HAND_OFFS
 
       # The scopes {#unrecorded_hand_off_callees} types a receiver written as `written` in. A rooted constant and a
       # top-level def are typed once.
@@ -1131,7 +1128,7 @@ module Rigor
       def instance_def_owners(name)
         return scope.user_instance_def_owners(name) if MemoAudit.suspended?
 
-        table = (Thread.current[INSTANCE_DEF_INDEX_KEY] ||= ObjectSpace::WeakKeyMap.new)
+        table = typing_state.weak_key_map(INSTANCE_DEF_INDEX)
         by_name = (table[scope.discovery] ||= {})
         return by_name[name] = scope.user_instance_def_owners(name) unless by_name.key?(name)
 
@@ -1144,7 +1141,7 @@ module Rigor
       def subclassing_opaque?
         return scope.subclassing_opacity.first if MemoAudit.suspended?
 
-        table = (Thread.current[INSTANCE_DEF_INDEX_KEY] ||= ObjectSpace::WeakKeyMap.new)
+        table = typing_state.weak_key_map(INSTANCE_DEF_INDEX)
         by_name = (table[scope.discovery] ||= {})
         entry = by_name[OPACITY_ENTRY] ||= scope.subclassing_opacity
         Analysis::DependencyRecorder.read_keys(entry.last) if Analysis::DependencyRecorder.active?
@@ -1159,8 +1156,11 @@ module Rigor
         owners.map(&:first).each { |owner| Analysis::DependencyRecorder.read_last_segment(:subclass_of, owner) }
       end
 
-      INSTANCE_DEF_INDEX_KEY = RunScopedSlots.register(:rigor_callee_instance_def_index)
-      private_constant :INSTANCE_DEF_INDEX_KEY
+      INSTANCE_DEF_INDEX = TypingState.memo(
+        :callee_instance_def_index,
+        run_scoped: true, reason: "keyed by discovery and name, all its answer reads"
+      )
+      private_constant :INSTANCE_DEF_INDEX
 
       def constant_node?(node) = node.is_a?(Prism::ConstantReadNode) || node.is_a?(Prism::ConstantPathNode)
 
@@ -1298,6 +1298,12 @@ module Rigor
 
       attr_reader :scope, :tracer
 
+      # ADR-129 WD2 — the calling thread's {TypingState::State}, cached on the evaluator the first time a slot is read.
+      # A frame install whose block's value is the answer calls {TypingState.current} instead: Rigor's own analysis
+      # does not adopt this memoised reader's type at a self-call (#525's self-purity), so the install's answer would
+      # read as `Dynamic` through it.
+      def typing_state = @typing_state ||= TypingState.current
+
       # Thread the scope through every child statement in declaration order. The body's value is the type of the last
       # statement (or `Constant[nil]` for an empty body); intermediate statements' types are discarded, but their scope
       # effects are preserved.
@@ -1307,7 +1313,7 @@ module Rigor
       def eval_statements(node)
         result_type = Type::Combinator.constant_of(nil)
         current = scope
-        raising = Thread.current[RETRY_FRAMES_KEY]
+        raising = typing_state[RETRY_FRAMES]
         node.body.each do |stmt|
           result_type, current = sub_eval(stmt, current)
           record_raise_points(raising, stmt, current) if raising
@@ -2635,9 +2641,12 @@ module Rigor
       # while it ran, put back as this scope binds them ({ErrorInfo.restore}): the control those carry has left every
       # rescue clause the construct entered.
       def restoring_error_info
-        marks = [@next_scope_sink&.size, Thread.current[BREAK_SINK_KEY]&.size]
+        state = typing_state
+        marks = [@next_scope_sink&.size, state[BREAK_SINK]&.size]
         type, after = yield
-        [[@next_scope_sink, marks.first], [Thread.current[BREAK_SINK_KEY], marks.last]].each do |sink, mark|
+        break_sink = state[BREAK_SINK]
+        state.touch(BREAK_SINK) if break_sink && marks.last && marks.last < break_sink.size
+        [[@next_scope_sink, marks.first], [break_sink, marks.last]].each do |sink, mark|
           next if sink.nil? || mark.nil?
 
           (mark...sink.size).each do |index|
@@ -2758,7 +2767,10 @@ module Rigor
       # none, so an `ensure` clause inside it, nested at any depth, is evaluated once rather than once per pass of
       # every enclosing clause holding a jump.
       def jump_sinks_installed?
-        !@next_scope_sink.nil? || JUMP_SINK_KEYS.any? { |key| Thread.current[key] }
+        return true unless @next_scope_sink.nil?
+
+        state = typing_state
+        JUMP_SINKS.any? { |slot| state[slot] }
       end
 
       # Whether `node` holds a `return`, `next` or `break` outside a nested `def`.
@@ -2814,12 +2826,8 @@ module Rigor
       end
 
       # Runs `block` with no `return`, `next`, `break` or retry-frame sink installed.
-      def without_jump_sinks
-        previous = CLAUSE_SINK_KEYS.map { |key| Thread.current[key] }
-        CLAUSE_SINK_KEYS.each { |key| Thread.current[key] = nil }
-        yield
-      ensure
-        CLAUSE_SINK_KEYS.zip(previous).each { |key, value| Thread.current[key] = value } if previous
+      def without_jump_sinks(&)
+        TypingState.current.without(CLAUSE_SINKS, &)
       end
 
       # The scope a rescue clause of `node` enters with: it runs after any prefix of the body, so neither a `$_`
@@ -2846,7 +2854,7 @@ module Rigor
       def ensure_jump_marks(node)
         return nil unless node.ensure_clause
 
-        [@next_scope_sink&.size, Thread.current[BREAK_SINK_KEY]&.size]
+        [@next_scope_sink&.size, typing_state[BREAK_SINK]&.size]
       end
 
       # A `next` or `break` inside `begin … ensure` leaves only once the `ensure` clause has run, so each jump scope the
@@ -2856,7 +2864,10 @@ module Rigor
       def carry_jumps_through_ensure(ensure_clause, marks)
         next_mark, break_mark = marks
         carry_through_ensure(ensure_clause, @next_scope_sink, next_mark)
-        carry_through_ensure(ensure_clause, Thread.current[BREAK_SINK_KEY], break_mark)
+        state = typing_state
+        break_sink = state[BREAK_SINK]
+        state.touch(BREAK_SINK) if break_sink && break_mark && break_mark < break_sink.size
+        carry_through_ensure(ensure_clause, break_sink, break_mark)
       end
 
       def carry_through_ensure(ensure_clause, sink, mark)
@@ -2913,17 +2924,22 @@ module Rigor
       end
       private_constant :RetryWidening
 
-      # The thread-local stack of the {RetryEdge}s whose primary body is being evaluated, innermost last, or nil.
-      RETRY_FRAMES_KEY = :rigor_retry_frames
-      private_constant :RETRY_FRAMES_KEY
+      # The thread-local stack of the {RetryEdge}s whose primary body is being evaluated, innermost last, or nil. The
+      # frozen stack is the Frame; a statement's raise point recorded into an edge is a Resource touch
+      # ({#record_raise_points}).
+      RETRY_FRAMES = TypingState.frame(
+        :retry_frames,
+        contents: :resource, reason: "installed per retrying body; each raise point records into it"
+      )
+      private_constant :RETRY_FRAMES
 
       # The thread-local sinks a widened clause pass ({#without_jump_sinks}) leaves uninstalled.
-      CLAUSE_SINK_KEYS = [RETURN_SINK_KEY, NEXT_SINK_KEY, BREAK_SINK_KEY, BREAK_VALUE_SINK_KEY, RETRY_FRAMES_KEY].freeze
-      private_constant :CLAUSE_SINK_KEYS
+      CLAUSE_SINKS = [RETURN_SINK, NEXT_SINK, BREAK_SINK, BREAK_VALUE_SINK, RETRY_FRAMES].freeze
+      private_constant :CLAUSE_SINKS
 
       # The thread-local sinks a `return`, `next` or `break` is collected into.
-      JUMP_SINK_KEYS = (CLAUSE_SINK_KEYS - [RETRY_FRAMES_KEY]).freeze
-      private_constant :JUMP_SINK_KEYS
+      JUMP_SINKS = (CLAUSE_SINKS - [RETRY_FRAMES]).freeze
+      private_constant :JUMP_SINKS
 
       # The retry edge of `node`, or nil when no `retry` in its rescue chain targets it. Allocation-free for a `begin`
       # no `retry` targets.
@@ -3028,16 +3044,12 @@ module Rigor
       end
 
       # Runs `block` with `edge` on top of the thread-local stack {#record_raise_points} reads.
-      def with_raise_frame(edge)
+      def with_raise_frame(edge, &)
         return yield unless edge
 
-        previous = Thread.current[RETRY_FRAMES_KEY]
-        Thread.current[RETRY_FRAMES_KEY] = previous ? [*previous, edge] : [edge]
-        begin
-          yield
-        ensure
-          Thread.current[RETRY_FRAMES_KEY] = previous
-        end
+        state = TypingState.current
+        previous = state[RETRY_FRAMES]
+        state.with(RETRY_FRAMES, (previous ? [*previous, edge] : [edge]).freeze, &)
       end
 
       # The scope after each statement of a retrying primary body's frame is a point the body can raise from, the next
@@ -3048,7 +3060,12 @@ module Rigor
       # on this frame shows in the post-scope of the statement holding it. Recording from the evaluator rather than
       # `on_enter` keeps a statement reached with the index recorder off (a threaded operand, a loop fixpoint pass).
       def record_raise_points(frames, stmt, stmt_scope)
-        frames.each { |edge| edge.raise_scopes << stmt_scope if edge.frame.include?(stmt) }
+        frames.each do |edge|
+          next unless edge.frame.include?(stmt)
+
+          typing_state.touch(RETRY_FRAMES)
+          edge.raise_scopes << stmt_scope
+        end
       end
 
       # An `on_enter` that records, besides forwarding to the installed one, the entry scope of each `retry` of `edge`
@@ -3527,15 +3544,9 @@ module Rigor
       # Installs a fresh thread-local break sink around `yield` (a loop-body evaluation), returning `[collected,
       # yield_result]`. Stacks: the previous sink is restored on exit so a nested loop's breaks do not leak to the
       # enclosing loop.
-      def collect_break_scopes
-        previous = Thread.current[BREAK_SINK_KEY]
+      def collect_break_scopes(&)
         sink = []
-        Thread.current[BREAK_SINK_KEY] = sink
-        begin
-          result = yield
-        ensure
-          Thread.current[BREAK_SINK_KEY] = previous
-        end
+        result = TypingState.current.with(BREAK_SINK, sink, &)
         [sink, result]
       end
 
@@ -3612,7 +3623,7 @@ module Rigor
       # from the widened binding reaches it ({#loop_break_arms}); without it the method inferred `true` and a
       # caller's test on it folded always-truthy on correct code.
       def later_pass_returns?(statements)
-        !Thread.current[RETURN_SINK_KEY].nil? && ReturnBarrier.exits_method?(statements)
+        !typing_state[RETURN_SINK].nil? && ReturnBarrier.exits_method?(statements)
       end
 
       # Joins each `break` arm's body-written local bindings into the loop continuation, so a `break`-path binding the
@@ -4411,13 +4422,9 @@ module Rigor
         # false positives in `prism-1.9.0`'s auto-generated `copy` methods alone. A nested `def` is a return barrier:
         # its body's `return`s belong to the inner method, not the one currently being inferred. Suspend the return sink
         # across the nested body so `eval_return` does not record them into the outer method's return type.
-        outer_sink = Thread.current[RETURN_SINK_KEY]
-        Thread.current[RETURN_SINK_KEY] = nil
-        begin
+        typing_state.with(RETURN_SINK, nil) do
           sub_eval(node.parameters, body_scope, class_context: @class_context) if node.parameters
           sub_eval(node.body, body_scope, class_context: @class_context) if node.body
-        ensure
-          Thread.current[RETURN_SINK_KEY] = outer_sink
         end
         [Type::Combinator.constant_of(node.name), scope]
       end
@@ -5270,14 +5277,8 @@ module Rigor
       end
 
       # Runs the block with the method's return sink suspended, for a body whose `return` is not the method's.
-      def without_return_sink
-        outer_sink = Thread.current[RETURN_SINK_KEY]
-        Thread.current[RETURN_SINK_KEY] = nil
-        begin
-          yield
-        ensure
-          Thread.current[RETURN_SINK_KEY] = outer_sink
-        end
+      def without_return_sink(&)
+        TypingState.current.with(RETURN_SINK, nil, &)
       end
 
       # Issue #963 — `define_method(:name) { ... }` in a class body defines an INSTANCE method, and Ruby runs
@@ -5873,15 +5874,19 @@ module Rigor
       def callee_chain_store
         return NO_CHAIN_STORE if hand_off_memo_bypassed?
 
-        table = (Thread.current[CHAIN_STORE_KEY] ||= ObjectSpace::WeakKeyMap.new)
+        table = typing_state.weak_key_map(CHAIN_STORE)
         self_type = scope.self_type
         { store: (table[scope.discovery] ||= {}.compare_by_identity),
           ctx: [self_type.is_a?(Type::Singleton), enclosing_class_name_for(self_type)] }
       end
 
-      CHAIN_STORE_KEY = RunScopedSlots.register(:rigor_callee_chain_successors)
+      CHAIN_STORE = TypingState.memo(
+        :callee_chain_successors,
+        run_scoped: true,
+        reason: "graph facts keyed by discovery, the same whichever census reads them"
+      )
       NO_CHAIN_STORE = {}.freeze
-      private_constant :CHAIN_STORE_KEY, :NO_CHAIN_STORE
+      private_constant :CHAIN_STORE, :NO_CHAIN_STORE
 
       # Issue #2296 — the `{ name => slot }` parameters the callee mutates inside a block in its body
       # ({#own_block_content_parameters}), closed over hand-offs as {#callee_content_mutated_parameters} is.
@@ -5920,7 +5925,7 @@ module Rigor
         return yield if hand_off_memo_bypassed?
 
         discovery = scope.discovery
-        table = (Thread.current[RESOLVED_CENSUS_KEY] ||= ObjectSpace::WeakKeyMap.new)
+        table = typing_state.weak_key_map(RESOLVED_CENSUS)
         slot = (table[discovery] ||= [{}, {}])
         self_type = scope.self_type
         by_class = (slot[self_type.is_a?(Type::Singleton) ? 1 : 0][kind] ||= {})
@@ -5931,8 +5936,12 @@ module Rigor
         MemoAudit.check("resolved census", by_def[def_node], kind, class_name, &)
       end
 
-      RESOLVED_CENSUS_KEY = RunScopedSlots.register(:rigor_callee_resolved_census)
-      private_constant :RESOLVED_CENSUS_KEY
+      RESOLVED_CENSUS = TypingState.memo(
+        :callee_resolved_census,
+        run_scoped: true,
+        reason: "keyed by discovery, side, kind, class and def, all its answer reads; audited by MemoAudit"
+      )
+      private_constant :RESOLVED_CENSUS
 
       # The parameters `def_node` mutates itself, from either channel: those escape-mutated inside a block (which may
       # run later / repeatedly) AND those mutated directly in the method body during the call itself
@@ -6187,15 +6196,18 @@ module Rigor
 
       # Issue #2104 — the per-thread memo of a census that reads nothing but `def_node`'s AST, under `kind`.
       def def_census(kind, def_node, &)
-        table = (Thread.current[DEF_CENSUS_KEY] ||= ObjectSpace::WeakKeyMap.new)
+        table = typing_state.weak_key_map(DEF_CENSUS)
         entry = (table[def_node] ||= {})
         return entry[kind] = yield unless entry.key?(kind)
 
         MemoAudit.check("def census", entry[kind], kind, &)
       end
 
-      DEF_CENSUS_KEY = RunScopedSlots.register(:rigor_callee_def_census)
-      private_constant :DEF_CENSUS_KEY
+      DEF_CENSUS = TypingState.memo(
+        :callee_def_census,
+        run_scoped: true, reason: "keyed by def node, the only input it reads; audited by MemoAudit"
+      )
+      private_constant :DEF_CENSUS
 
       # Issue #2104 — the {CalleeMutationChain::Edge}s along which `def_node` hands one of its parameters, unchanged, to
       # a self-call resolving to a user def: a positional argument or a keyword value that reads the parameter itself
@@ -7003,7 +7015,7 @@ module Rigor
       # continuation holds each rebound capture at `Dynamic[top]` ({#drop_captured_narrowing}), and the pass reads it
       # so: `seen = 0; yielder { return :ret if (seen += 1) > 1 }` reaches the `return`.
       def collect_repeated_block_returns(call_node, post_scope)
-        return if Thread.current[RETURN_SINK_KEY].nil?
+        return if typing_state[RETURN_SINK].nil?
 
         block = call_node.block
         return unless repeated_block_return_candidate?(call_node, block)
@@ -8951,8 +8963,13 @@ module Rigor
       # nested body, so this handler only ever appends a return that genuinely exits the method currently being
       # inferred.
       def eval_return(node)
-        sink = Thread.current[RETURN_SINK_KEY]
-        sink&.record(node, jump_value_type(node))
+        state = typing_state
+        sink = state[RETURN_SINK]
+        if sink
+          type = jump_value_type(node)
+          state.touch(RETURN_SINK)
+          sink.record(node, type, state[PROVISIONAL_RETURNS])
+        end
         [Type::Combinator.bot, scope]
       end
 
@@ -8966,8 +8983,13 @@ module Rigor
       # dead arm), so the join is flow-sensitive for free: `[1, 2].map { |x| next nil if x.nil?; x.to_s }` keeps its
       # exact per-element answer.
       def eval_next(node)
-        sink = Thread.current[NEXT_SINK_KEY]
-        sink << [node, jump_value_type(node)] if sink
+        state = typing_state
+        sink = state[NEXT_SINK]
+        if sink
+          type = jump_value_type(node)
+          state.touch(NEXT_SINK)
+          sink << [node, type]
+        end
         @next_scope_sink << [node, jump_scope(node)] if @next_scope_sink
         [Type::Combinator.bot, scope]
       end
@@ -8993,10 +9015,19 @@ module Rigor
       # break-value sink for `ExpressionTyper#call_dispatch_type_for` to union in. Both sinks are optional and
       # independent — a loop body collects scopes while an enclosing call collects values from the same walk.
       def eval_break(node)
-        sink = Thread.current[BREAK_SINK_KEY]
-        sink << [node, jump_scope(node)] if sink
-        value_sink = Thread.current[BREAK_VALUE_SINK_KEY]
-        value_sink << [node, jump_value_type(node)] if value_sink
+        state = typing_state
+        sink = state[BREAK_SINK]
+        if sink
+          jump = jump_scope(node)
+          state.touch(BREAK_SINK)
+          sink << [node, jump]
+        end
+        value_sink = state[BREAK_VALUE_SINK]
+        if value_sink
+          type = jump_value_type(node)
+          state.touch(BREAK_VALUE_SINK)
+          value_sink << [node, type]
+        end
         [Type::Combinator.bot, scope]
       end
 

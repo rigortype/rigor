@@ -7,6 +7,9 @@
 #
 # Issue #2399 — about twenty other per-thread memo slots held the last run's discovery tables and environment until
 # the next run on the thread replaced them. They are registered too, so a finished run leaves none of them behind.
+#
+# ADR-129 — a slot that has moved into `Rigor::Inference::TypingState` declares `run_scoped: true` there instead of
+# registering, and `release` empties it with the registered keys.
 
 require "spec_helper"
 require "fileutils"
@@ -57,21 +60,11 @@ RSpec.describe Rigor::RunScopedSlots do
       __rigor_dependency_recorder__: "frame slot of the ADR-46 dependency recorder",
       __rigor_effects_collector__: "frame slot of the effects collector",
       __rigor_flow_tracer__: "frame slot of the flow tracer",
-      __rigor_forwarded_call_arg_types__: "frame slot, installed and restored around a block",
-      __rigor_key_presence_guard: "frame slot of KeyPresenceGuard.with_guards",
       __rigor_project_round__: "a Debouncer key in the language server, not a thread-local",
       __rigor_reflective_ivar_write_repeating__: "frame depth counter, restored on the way out",
       __rigor_self_call_resolution_recorder__: "frame slot of the self-call resolution recorder",
-      __rigor_threaded_block_body__: "frame flag, installed and restored around a block",
-      __rigor_user_method_inference_stack__: "ADR-55 guard stack, popped to empty by each frame",
-      __rigor_user_method_return_summary__: "ADR-55 state, cleared when the guard stack drains",
-      __rigor_user_method_summary_consult_depths__: "ADR-55 state, cleared when the guard stack drains",
-      __rigor_user_method_transient_event_depths__: "ADR-55 state, cleared when the guard stack drains",
-      __rigor_user_method_unroll_fuel__: "ADR-55 state, cleared when the guard stack drains",
-      __rigor_yield_value_type__: "frame slot, installed and restored around a block",
+      __rigor_typing_state__: "ADR-129 TypingState, whose own run-scoped slots release empties",
       rigor_memo_audit_suspended: "frame flag of MemoAudit, installed and restored around a recomputation",
-      rigor_break_sink: "jump sink frame, installed and restored around a loop",
-      rigor_break_value_sink: "jump sink frame, installed and restored around a loop",
       rigor_cache_file_digest_memo: "Cache::FileDigest.with_run frame",
       rigor_cache_file_stat_memo: "Cache::FileDigest.with_run frame",
       rigor_cache_recording_instant: "Cache::FileDigest.with_run frame",
@@ -80,11 +73,7 @@ RSpec.describe Rigor::RunScopedSlots do
       rigor_def_visibilities: "per-file scan state, cleared in the scanner's ensure",
       rigor_guarded_defs: "per-file scan state, cleared in the scanner's ensure",
       rigor_io_boundary_attribution: "thread-variable frame, installed and restored around a block",
-      rigor_next_sink: "jump sink frame, installed and restored around a block",
-      rigor_provisional_returns: "return sink frame, installed and restored around a body",
       rigor_rbs_core_root: "RbsLoader.with_core_root frame, installed and restored around an env build",
-      rigor_retry_frames: "frame stack of the enclosing `begin` / `retry` edges",
-      rigor_return_sink: "return sink frame, installed and restored around a body",
       rigor_run_disclosure_attribution: "thread-variable frame, installed and restored around a block",
       rigor_scope_index_unentered_evaluator: "frame slot, installed and restored around the index walk"
     }
@@ -93,20 +82,36 @@ RSpec.describe Rigor::RunScopedSlots do
   after do
     FileUtils.remove_entry(tmpdir)
     loop_keys.each { |key| Thread.current[key] = nil }
+    set_typing_slot(:inject_accumulator, nil)
   end
 
   def check_run = guarded_run(Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil), [path])
 
   def sig_gen_run = Rigor::SigGen::Generator.new(configuration: configuration, paths: [path]).run
 
-  def loop_keys = %i[rigor_loop_value_record __rigor_inject_accumulator__]
+  def loop_keys = %i[rigor_loop_value_record]
 
-  # The keys of `loop_keys` that hold something when the run calls {.release}, so an example reads a slot the run
+  # The two records #2412 is about: `LoopValueRecord`'s thread key and the inject record's TypingState slot, each as
+  # `name => [reader, writer]`.
+  def loop_records
+    {
+      rigor_loop_value_record: [-> { Thread.current[:rigor_loop_value_record] },
+                                ->(value) { Thread.current[:rigor_loop_value_record] = value }],
+      inject_accumulator: [-> { typing_slot(:inject_accumulator) },
+                           ->(value) { set_typing_slot(:inject_accumulator, value) }]
+    }
+  end
+
+  def fill_loop_records = loop_records.each_value { |_, writer| writer.call(:filled) }
+
+  def loop_record_values = loop_records.values.map { |reader, _| reader.call }
+
+  # The names of `loop_records` that hold something when the run calls {.release}, so an example reads a slot the run
   # really filled.
-  def filled_at_release(keys)
+  def filled_at_release
     filled = []
     allow(described_class).to receive(:release).and_wrap_original do |original|
-      filled.concat(keys.reject { |key| Thread.current[key].nil? })
+      filled.concat(loop_records.reject { |_, (reader, _)| reader.call.nil? }.keys)
       original.call
     end
     filled
@@ -120,12 +125,12 @@ RSpec.describe Rigor::RunScopedSlots do
   { "Runner#run" => :check_run, "SigGen::Generator#run" => :sig_gen_run }.each do |entry_point, run|
     context "with #{entry_point}" do
       it "empties the loop-value and inject-accumulator records the run filled" do
-        filled = filled_at_release(loop_keys)
+        filled = filled_at_release
 
         send(run)
 
-        expect(filled).to match_array(loop_keys)
-        expect(loop_keys.map { |key| Thread.current[key] }).to all(be_nil)
+        expect(filled).to match_array(loop_records.keys)
+        expect(loop_record_values).to all(be_nil)
       end
 
       it "leaves no environment of its own behind" do
@@ -143,10 +148,11 @@ RSpec.describe Rigor::RunScopedSlots do
 
         holding = Thread.current.keys.grep(/rigor/).reject do |key|
           value = Thread.current[key]
-          value.nil? || value == 0 || (value.respond_to?(:empty?) && value.empty?)
+          key == :__rigor_typing_state__ || value.nil? || value == 0 || (value.respond_to?(:empty?) && value.empty?)
         end
         expect(holding).to be_empty
         expect(described_class.keys.map { |key| Thread.current[key] }).to all(be_nil)
+        expect(Rigor::Inference::TypingState.current.holding).to be_empty
       end
 
       it "retains no more environments after the third run than after the first" do
@@ -188,35 +194,35 @@ RSpec.describe Rigor::RunScopedSlots do
   it "empties the slots when the incremental session's return-type probe ends" do
     runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil)
     allow(runner).to receive(:evaluate_return_types_setup) do
-      loop_keys.each { |key| Thread.current[key] = :filled }
+      fill_loop_records
       {}
     end
 
     runner.evaluate_return_types([path], [{ class_name: "Looper", method_name: :id, singleton: false }])
 
-    expect(loop_keys.map { |key| Thread.current[key] }).to all(be_nil)
+    expect(loop_record_values).to all(be_nil)
   end
 
   it "empties the records when a run raises" do
     runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil)
     allow(runner).to receive(:run_analysis) do
-      loop_keys.each { |key| Thread.current[key] = :filled }
+      fill_loop_records
       raise "boom"
     end
 
     expect { guarded_run(runner, [path]) }.to raise_error(RuntimeError, "boom")
-    expect(loop_keys.map { |key| Thread.current[key] }).to all(be_nil)
+    expect(loop_record_values).to all(be_nil)
   end
 
   it "empties the records when a sig-gen run raises" do
     generator = Rigor::SigGen::Generator.new(configuration: configuration, paths: [path])
     allow(generator).to receive(:analyse_file) do
-      loop_keys.each { |key| Thread.current[key] = :filled }
+      fill_loop_records
       raise "boom"
     end
 
     expect { generator.run }.to raise_error(RuntimeError, "boom")
-    expect(loop_keys.map { |key| Thread.current[key] }).to all(be_nil)
+    expect(loop_record_values).to all(be_nil)
   end
 
   # Every per-thread key `lib/` names, and the accesses it cannot resolve. A key is a symbol read through
@@ -617,6 +623,23 @@ RSpec.describe Rigor::RunScopedSlots do
 
     expect(keys).to be_empty
     expect(unresolved).to eq(["fixture.rb:4 Thread.current alias"])
+  end
+
+  # ADR-129 — the TypingState half of the registry: release empties exactly the slots that declare `run_scoped: true`,
+  # and leaves a frame slot alone (clearing it from inside its frame would break the frame).
+  it "empties every run-scoped TypingState slot and no other" do
+    slots = Rigor::Inference::TypingState.slots
+    run_scoped = slots.select(&:run_scoped)
+    expect(run_scoped.map(&:name)).to include(:inject_accumulator, :user_method_return_memo, :callee_def_census)
+    expect(slots.select(&:run_scoped).map(&:kind).uniq - %i[table memo]).to be_empty
+
+    slots.each { |slot| set_typing_slot(slot.name, :filled) }
+    described_class.release
+
+    expect(run_scoped.map { |slot| typing_slot(slot.name) }).to all(be_nil)
+    expect((slots - run_scoped).map { |slot| typing_slot(slot.name) }).to all(eq(:filled))
+  ensure
+    Rigor::Inference::TypingState.slots.each { |slot| set_typing_slot(slot.name, nil) }
   end
 
   it "registers a key once and hands it back" do

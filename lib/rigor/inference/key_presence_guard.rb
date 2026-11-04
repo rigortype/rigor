@@ -5,7 +5,7 @@ require "prism"
 require_relative "../type"
 require_relative "mutation_widening"
 require_relative "key_presence_guard/scan"
-require_relative "../run_scoped_slots"
+require_relative "typing_state"
 
 module Rigor
   module Inference
@@ -58,9 +58,20 @@ module Rigor
         ] + MutationWidening::SHAPE_MUTATORS.to_a
       ).to_set.freeze
 
-      STATE_KEY = :__rigor_key_presence_guard
-      CACHE_KEY = RunScopedSlots.register(:__rigor_key_presence_guard_rewalk)
-      private_constant :STATE_KEY, :CACHE_KEY
+      # ADR-129 WD1 — the walk {.with_guards} installs is a Frame, and {.record}, which rewrites its `guard_ends` in
+      # place, is a Resource touch that also takes a fresh id ({TypingState::State#rewrite}), so a read of the walk's
+      # guards is fixed while the id is. The walk's `defs`, `frozen_constants` and `memo` are extensional caches of
+      # `root`, filled in place without a touch.
+      WALK = TypingState.frame(
+        :key_presence_walk,
+        contents: :resource, read_exemption: :id_determined,
+        reason: "installed per guarded re-walk; each recorded guard rewrites its `guard_ends`"
+      )
+      REWALK = TypingState.memo(
+        :key_presence_rewalk,
+        run_scoped: true, reason: "the last file's guarded index, keyed by the file's root"
+      )
+      private_constant :WALK, :REWALK
 
       # The re-walk's state: the file's root, the end offset of each recorded guard, and the per-file scans.
       Walk = Struct.new(:root, :guard_ends, :defs, :frozen_constants, :memo) do
@@ -88,25 +99,17 @@ module Rigor
 
       # Runs the block with guards recorded and read, for the re-walk of `root`. Thread-local, so it holds under a
       # Ractor worker too.
-      def with_guards(root)
-        previous = Thread.current[STATE_KEY]
-        Thread.current[STATE_KEY] = Walk.new(root, {}, nil, nil, {})
-        yield
-      ensure
-        Thread.current[STATE_KEY] = previous
+      def with_guards(root, &)
+        TypingState.current.with(WALK, Walk.new(root, {}, nil, nil, {}), &)
       end
 
       # Runs the block with guards off again: a callee's return summary, memoised for the whole run, must be the one
       # the file's analysis reads.
-      def without_guards
-        previous = Thread.current[STATE_KEY]
-        Thread.current[STATE_KEY] = nil
-        yield
-      ensure
-        Thread.current[STATE_KEY] = previous
+      def without_guards(&)
+        TypingState.current.with(WALK, nil, &)
       end
 
-      def active? = !Thread.current[STATE_KEY].nil?
+      def active? = !TypingState.current[WALK].nil?
 
       # Whether `call.possible-nil-receiver` should withhold its report on `call_node`, whose receiver the file's
       # analysis types `receiver_type`: true only when the guarded re-walk types that receiver as exactly
@@ -130,18 +133,19 @@ module Rigor
       # The guarded scope index of `root`, built once per file (the cache holds the last file only), or nil when the
       # file holds no guard-shaped call.
       def rewalk(root, scope_index)
-        cached = Thread.current[CACHE_KEY]
+        state = TypingState.current
+        cached = state[REWALK]
         return cached.last if cached&.first.equal?(root)
 
         # Cached before the walk, so a re-walk that raises is attempted once per file and then answers nil.
-        Thread.current[CACHE_KEY] = [root, nil]
+        state[REWALK] = [root, nil]
         return nil unless guard_shaped_call?(root)
 
         base = scope_index[root]
         index = base && with_guards(root) do
           ScopeIndexer.index(root, default_scope: base.with_isolated_side_tables)
         end
-        Thread.current[CACHE_KEY] = [root, index]
+        state[REWALK] = [root, index]
         index
       end
 
@@ -206,7 +210,8 @@ module Rigor
       # The truthy edge of `receiver.key?(key)` with a non-literal key, inside the re-walk: `scope` with the guard
       # recorded, or nil when the guard does not apply.
       def record(call_node, scope)
-        walk = Thread.current[STATE_KEY]
+        state = TypingState.current
+        walk = state[WALK]
         return nil if walk.nil?
 
         args = call_node.arguments&.arguments
@@ -217,6 +222,7 @@ module Rigor
         return nil unless receiver_type?(scope.type_of(call_node.receiver))
         return nil unless Scan.eligible?(walk, call_node, guard)
 
+        state.rewrite(WALK)
         walk.guard_ends[guard] = call_node.location.end_offset
         scope.with_indexed_narrowing(*guard, PRESENT)
       end
@@ -226,7 +232,7 @@ module Rigor
       # read may have changed it ({.intervening?}), and no value of the receiver can be `nil` (the read cannot tell a
       # value's own `nil` from the miss). Nil when no guard applies or nothing would change.
       def guarded_read(node, type, scope)
-        walk = Thread.current[STATE_KEY]
+        walk = TypingState.current[WALK]
         guard = walk && held_guard(node, scope)
         return nil if guard.nil? || Scan.intervening?(walk, guard, node)
 

@@ -15,14 +15,14 @@ require "tmpdir"
 # more, which is why it survived until it was measured. These examples pin the shape instead, the way
 # `class_graph_memo_slot_spec.rb` does for the sibling memo.
 #
-# The keys are read as literal Symbols because the `*_KEY` constants are `private_constant` — the spec
-# deliberately reaches for the thread-locals, since the whole point is that no production caller can
+# The slots are read by name ({TypingStateSlots}) because their constants are `private_constant` — the spec
+# deliberately reaches for the per-thread slots, since the whole point is that no production caller can
 # observe this. A run releases its slots when it ends (`Rigor::RunScopedSlots`, #2399), so each example reads
 # them as the run left them, captured when the run calls the release.
 RSpec.describe "override-gate memo storage" do
-  def gate_key = :__rigor_overridable_method_gate__
-  def index_key = :__rigor_method_definers_index__
-  def index_alt_key = :__rigor_method_definers_index_alt__
+  def gate_key = :overridable_method_gate
+  def index_key = :method_definers_index
+  def index_alt_key = :method_definers_index_alt
 
   # Each file carries its own base/subclass pair with an overridden literal-returning method read
   # through implicit self, which is what drives a file's analysis into the gate. The read inside
@@ -58,7 +58,7 @@ RSpec.describe "override-gate memo storage" do
   def run_check(dir)
     configuration = Rigor::Configuration.new("paths" => [dir], "parallel" => { "workers" => 0 })
     allow(Rigor::RunScopedSlots).to receive(:release).and_wrap_original do |original|
-      at_release.replace([gate_key, index_key, index_alt_key].to_h { |key| [key, Thread.current[key]] })
+      at_release.replace([gate_key, index_key, index_alt_key].to_h { |key| [key, typing_slot(key)] })
       original.call
     end
     guarded_run(Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil))
@@ -69,7 +69,7 @@ RSpec.describe "override-gate memo storage" do
 
   # Puts the last run's slots back on the thread, so a probe after the run reads the memos the run filled.
   def reinstate_run_slots
-    at_release.each { |key, value| Thread.current[key] = value }
+    at_release.each { |key, value| set_typing_slot(key, value) }
   end
 
   # Counts the inverted indexes the memo is holding, under EITHER shape: a store keeps one per def
@@ -92,9 +92,9 @@ RSpec.describe "override-gate memo storage" do
   end
 
   def clear_memos
-    Thread.current[gate_key] = nil
-    Thread.current[index_key] = nil
-    Thread.current[index_alt_key] = nil
+    set_typing_slot(gate_key, nil)
+    set_typing_slot(index_key, nil)
+    set_typing_slot(index_alt_key, nil)
   end
 
   around do |example|
@@ -176,8 +176,8 @@ RSpec.describe "override-gate memo storage" do
       write_project(dir, 2)
       run_check(dir)
       reinstate_run_slots
-      index = Thread.current[gate_key][0]
-      bucket = Thread.current[gate_key][1]
+      index = typing_slot(gate_key)[0]
+      bucket = typing_slot(gate_key)[1]
 
       environment = Rigor::Environment.new(rbs_loader: Rigor::Environment::RbsLoader.default)
       scope = Rigor::Scope.new(environment: environment, locals: {}).with_discovery(index)
@@ -188,7 +188,7 @@ RSpec.describe "override-gate memo storage" do
                                                 possible_discovered_methods: index.possible_discovered_methods))
       shifted_bucket = Rigor::Inference::ExpressionTyper.new(scope: shifted).send(:override_gate_buckets)
       expect(shifted_bucket).not_to be(bucket)
-      expect(Thread.current[gate_key][0]).to be(shifted.discovery)
+      expect(typing_slot(gate_key)[0]).to be(shifted.discovery)
     end
   end
 
@@ -201,11 +201,11 @@ RSpec.describe "override-gate memo storage" do
       write_project(dir, 2)
       run_check(dir)
       reinstate_run_slots
-      index = Thread.current[index_key]
+      index = typing_slot(index_key)
       def_nodes = index[0]
 
       environment = Rigor::Environment.new(rbs_loader: Rigor::Environment::RbsLoader.default)
-      discovery = Thread.current[gate_key][0]
+      discovery = typing_slot(gate_key)[0]
       scope = Rigor::Scope.new(environment: environment, locals: {}).with_discovery(discovery)
       typer = Rigor::Inference::ExpressionTyper.new(scope: scope)
       first = typer.send(:method_definers_index, :instance)
@@ -215,7 +215,7 @@ RSpec.describe "override-gate memo storage" do
                                                     possible_discovered_methods: discovery.possible_discovered_methods))
       second = Rigor::Inference::ExpressionTyper.new(scope: shifted).send(:method_definers_index, :instance)
       expect(second).to be(first)
-      expect(Thread.current[index_key][0]).to be(def_nodes)
+      expect(typing_slot(index_key)[0]).to be(def_nodes)
     end
   end
 end

@@ -1,8 +1,9 @@
 # ADR-129 — Remember `type_of` results under a closed typing state
 
 Status: **Accepted, 2026-11-04.** A design for [#2709](https://github.com/rigortype/rigor/issues/2709), accepted by the
-maintainer after three adversarial review rounds. Nothing is implemented: stage 0 (the harness ceiling) is done, and
-stage 1 is next. WD6 says what lands in each stage and what can stop it. This is the third design: the first two each
+maintainer after three adversarial review rounds. Stage 0 (the harness ceiling) is done. Stage 1 is under way:
+`TypingState` and G3 have landed with the typer, the statement evaluator and the key-presence guard converted, and the
+remaining sites convert in later PRs. WD6 says what lands in each stage and what can stop it. This is the third design: the first two each
 had a key that missed an input. Sharing call facts across the rules ("option 2", § Alternatives) lands independently
 as [#2786](https://github.com/rigortype/rigor/issues/2786).
 
@@ -260,6 +261,8 @@ list kept beside the memo. State without a kind fails the gate.
       - any direct table access outside `Scope`.
     - Its allow-list names `TypingState` and the process counters (`BudgetTrace`, `MemoAudit`), each with a reason.
       Growing the allow-list needs an ADR line.
+    - During stage 1, G3 covers the files converted so far, and each conversion PR adds its own. Until stage 2 puts
+      the advisory tables behind slots, the allow-list also names each table read in a covered file.
     - Plugin code is outside G3. It is covered by G1 and the contract sentence below.
     - The precedent is `spec/rigor/run_scoped_slots_spec.rb`.
   - **G4 Reachability audit.**

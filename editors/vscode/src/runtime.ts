@@ -112,7 +112,7 @@ interface Manifest {
   bundler: string;
 }
 
-interface RubyCandidate {
+export interface RubyCandidate {
   ruby: string;
   bundler: string;
   version: string;
@@ -348,9 +348,10 @@ const RUBY_PROBE = [
  * then `ruby` on PATH, then the version managers' install directories.
  * A prerelease (`4.1.0.preview1`, `4.1.0.dev`) satisfies the gemspec's
  * `< 4.1` by RubyGems' rules, so it qualifies only as the named
- * `rubyPath`. `skip` holds the real paths of Rubies already tried.
+ * `rubyPath`. `skip` holds the real paths of Rubies already tried. The
+ * pinned bundle uses `findRubyMatching` instead.
  */
-async function findRuby(
+export async function findRuby(
   output: OutputChannel,
   skip: ReadonlySet<string> = new Set(),
 ): Promise<RubyCandidate | undefined> {
@@ -565,6 +566,73 @@ function run(
       (error, stdout) => resolve(error ? undefined : stdout),
     );
   });
+}
+
+/**
+ * The Ruby for the pinned bundle (`resolve.ts`): the first candidate, in
+ * `findRuby`'s order, that satisfies the first of `requirements` any
+ * candidate satisfies (the bundle's lockfile `RUBY VERSION`, then its
+ * Gemfile's `ruby` line), else rigortype's own range. Each candidate is
+ * probed once, for every requirement at a time. Unlike the managed
+ * install, a named `rubyPath` that misses a requirement is not warned
+ * about: the next requirement may take it.
+ */
+export async function findRubyMatching(
+  output: OutputChannel,
+  requirements: readonly (readonly string[])[],
+): Promise<RubyCandidate | undefined> {
+  const all = [...requirements, REQUIRED_RUBY];
+  const script = [
+    `reqs = [${all.map((r) => `Gem::Requirement.new(${r.map((x) => JSON.stringify(x)).join(", ")})`).join(", ")}]`,
+    'ssl = begin; require "openssl"; true; rescue LoadError, StandardError; false; end',
+    'print RUBY_VERSION, "\n", RbConfig.ruby, "\n", (Gem.bin_path("bundler", "bundle") rescue ""), "\n", Gem.ruby_version.prerelease?, "\n", ssl, "\n", reqs.map { |r| r.satisfied_by?(Gem.ruby_version) }.join(",")',
+  ].join("; ");
+  const configured = (
+    workspace.getConfiguration("rigor").get<string>("runtime.rubyPath") ?? ""
+  ).trim();
+  const candidates = dedupeCandidates(
+    [...(configured ? [configured] : []), ...rubyCandidates()],
+    (c) => realPath(resolveExecutable(c)),
+  );
+  const probed = new Map<string, (RubyProbe & { satisfies: boolean[] }) | null>();
+  const probe = async (candidate: string) => {
+    if (!probed.has(candidate)) {
+      const out = await run(candidate, ["-e", script], 15000, os.homedir());
+      const [version, ruby, bundler, prerelease, openssl, sat] = (out ?? "").split("\n");
+      probed.set(
+        candidate,
+        out === undefined || !ruby || !bundler
+          ? null
+          : {
+              version,
+              ruby,
+              bundler,
+              prerelease: prerelease === "true",
+              openssl: openssl === "true",
+              satisfies: (sat ?? "").split(",").map((v) => v === "true"),
+            },
+      );
+    }
+    return probed.get(candidate);
+  };
+  for (let i = 0; i < all.length; i++) {
+    for (const candidate of candidates) {
+      const found = await probe(candidate);
+      const explicit = configured !== "" && candidate === configured;
+      if (found && found.satisfies[i] && rubyQualifies(found, explicit)) {
+        if (i > 0) {
+          output.appendLine(
+            `[rigor] info: no Ruby matches ${all.slice(0, i).map((r) => r.join(", ")).join(" or ")}; using ${found.ruby} (Ruby ${found.version})`,
+          );
+        }
+        return { version: found.version, ruby: found.ruby, bundler: found.bundler, explicit };
+      }
+    }
+  }
+  output.appendLine(
+    `[rigor] no Ruby ${REQUIRED_RUBY.join(", ")} with Bundler and OpenSSL among: ${candidates.join(", ")}`,
+  );
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------

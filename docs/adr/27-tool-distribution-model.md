@@ -345,8 +345,15 @@ them. A lockfile produced at release time would change that
 ([#2754](https://github.com/rigortype/rigor/issues/2754)); until then
 it is not claimed.
 
-Follow-ups: the VS Code extension discovers `.github/rigor/`
-([#2750](https://github.com/rigortype/rigor/issues/2750)), `rigor
+Follow-ups: the VS Code extension discovers and runs `.github/rigor/`
+(done in [#2750](https://github.com/rigortype/rigor/issues/2750): kind
+`pinned-bundle`, after the project's own `Gemfile.lock` and before
+`PATH`, under the Ruby its managed runtime's search finds, matching the
+lockfile's `RUBY VERSION` first; a pin is final, so a failing pin is
+reported rather than served by another Rigor, and a project mise pin is
+served only by the mise or asdf shim, on Windows the `rigor.cmd` /
+`.bat` / `.exe` in `%LOCALAPPDATA%\mise\shims`, reasoned from the code
+and not tested there), `rigor
 doctor` recognises it (#2751), and the CI template's `bundler-cache`
 must not install Rigor's gems where Rigor reads them as the project's
 bundle ([#2753](https://github.com/rigortype/rigor/issues/2753)).

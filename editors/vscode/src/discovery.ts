@@ -5,13 +5,13 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { WorkspaceFolder, workspace } from "vscode";
-import { managedServer } from "./runtime";
 
 export type BundlerMode = "auto" | "always" | "never";
 
 export type DiscoveryKind =
   | "explicit"
   | "bundler"
+  | "pinned-bundle"
   | "global"
   | "version-manager"
   | "managed";
@@ -37,16 +37,80 @@ export function useShell(server: ResolvedServer): boolean {
 
 /** Whether the folder pins the `rigortype` gem in its lockfile. */
 export function lockfileHasRigortype(folderPath: string): boolean {
+  return projectLockPin(folderPath) !== undefined;
+}
+
+/**
+ * The folder's own lockfile (`Gemfile.lock`, or `gems.locked` for a
+ * `gems.rb`) when it pins `rigortype`, else undefined.
+ */
+export function projectLockPin(folderPath: string): string | undefined {
+  return [
+    path.join(folderPath, "Gemfile.lock"),
+    path.join(folderPath, "gems.locked"),
+  ].find(lockPinsRigortype);
+}
+
+/** Whether a Bundler lockfile pins the `rigortype` gem. */
+export function lockPinsRigortype(lockfile: string): boolean {
+  return lockedRigortype(lockfile) !== undefined;
+}
+
+/**
+ * The `rigortype` version a Bundler lockfile pins, or undefined. Bundler
+ * indents gem entries by four spaces under `specs:`.
+ */
+export function lockedRigortype(lockfile: string): string | undefined {
   try {
-    const contents = fs.readFileSync(
-      path.join(folderPath, "Gemfile.lock"),
-      "utf8",
-    );
-    // Bundler indents gem entries by four spaces under `specs:`.
-    return /^\s{4}rigortype\s/m.test(contents);
+    const contents = fs.readFileSync(lockfile, "utf8");
+    return /^\s{4}rigortype \(([^)]*)\)/m.exec(contents)?.[1];
   } catch {
-    return false;
+    return undefined;
   }
+}
+
+/** The canonical pinned bundle (ADR-27 WD9), relative to the project root. */
+export const PINNED_BUNDLE_GEMFILE = path.join(".github", "rigor", "Gemfile");
+
+export interface PinnedBundle {
+  gemfile: string;
+  /** Set by `rigor.server.bundleGemfile` rather than the canonical path. */
+  explicit: boolean;
+  /**
+   * The setting's raw value when it is absolute or leaves the project
+   * root, the containment rule of `rigor.rootDir`. No pinned bundle is
+   * used then.
+   */
+  rejected?: string;
+}
+
+/**
+ * The pinned bundle's Gemfile for a project root: `rigor.server.bundleGemfile`
+ * resolved against the root when set, else `.github/rigor/Gemfile`.
+ */
+export function pinnedBundleGemfile(
+  folder: WorkspaceFolder,
+  root: string,
+): PinnedBundle {
+  const configured = (
+    workspace
+      .getConfiguration("rigor", folder.uri)
+      .get<string>("server.bundleGemfile") ?? ""
+  ).trim();
+  if (!configured) {
+    return { gemfile: path.join(root, PINNED_BUNDLE_GEMFILE), explicit: false };
+  }
+  const gemfile = path.resolve(root, configured);
+  return path.isAbsolute(configured) || !isBelow(gemfile, root)
+    ? { gemfile, explicit: true, rejected: configured }
+    : { gemfile, explicit: true };
+}
+
+/** Bundler's lockfile for a Gemfile: `gems.rb` locks to `gems.locked`. */
+export function lockfileFor(gemfile: string): string {
+  return path.basename(gemfile) === "gems.rb"
+    ? path.join(path.dirname(gemfile), "gems.locked")
+    : `${gemfile}.lock`;
 }
 
 /** Whether the folder carries a Rigor config file at its root. */
@@ -106,61 +170,21 @@ export function shouldManageFolder(folder: WorkspaceFolder): boolean {
   if ((cfg.get<string>("server.path") ?? "").trim()) {
     return true;
   }
-  return hasRigorConfig(root) || lockfileHasRigortype(root);
-}
-
-/** Resolve which executable to spawn for a folder. */
-export function resolveServer(folder: WorkspaceFolder): ResolvedServer {
-  const cfg = workspace.getConfiguration("rigor", folder.uri);
-  const explicitPath = (cfg.get<string>("server.path") ?? "").trim();
-  if (explicitPath) {
-    return { kind: "explicit", command: explicitPath, prefixArgs: [] };
-  }
-
-  const mode = cfg.get<BundlerMode>("server.useBundler", "auto");
-  const useBundler =
-    mode === "always" ||
-    (mode === "auto" &&
-      lockfileHasRigortype(projectRoot(folder) ?? folder.uri.fsPath));
-
-  if (useBundler) {
-    return { kind: "bundler", command: "bundle", prefixArgs: ["exec", "rigor"] };
-  }
-
-  // Neither explicit nor Bundler. Prefer `rigor` from PATH; when PATH
-  // does not carry it — common when a GUI-launched editor never ran
-  // the shell's `mise activate` hook — fall back to a mise / asdf
-  // shim, the recommended install path (ADR-27).
-  if (isOnPath("rigor")) {
-    return { kind: "global", command: "rigor", prefixArgs: [] };
-  }
-  const shim = versionManagerShim();
-  if (shim) {
-    return { kind: "version-manager", command: shim, prefixArgs: [] };
-  }
-  // Last: the Rigor the extension installed for itself (ADR-27 WD9). A
-  // project that pins rigortype is never served by it, even when its pin
-  // is not installed yet: the not-found message says to install the pin.
-  const managed = rigortypePin(projectRoot(folder) ?? folder.uri.fsPath)
-    ? undefined
-    : managedServer();
-  if (managed) {
-    return managed;
-  }
-  return { kind: "global", command: "rigor", prefixArgs: [] };
-}
-
-/**
- * Whether discovery falls through to the managed install after `kind`
- * fails: only from the kinds that come before it in the fall-through
- * (`PATH`, the shim) or from itself, and only for a project with no pin.
- * An explicit path or Bundler is the user's choice and is never replaced.
- */
-export function managedReachable(kind: DiscoveryKind, root: string): boolean {
   return (
-    (kind === "global" || kind === "version-manager" || kind === "managed") &&
-    rigortypePin(root) === undefined
+    hasRigorConfig(root) ||
+    lockfileHasRigortype(root) ||
+    pinnedBundleLock(folder, root) !== undefined
   );
+}
+
+/** The pinned bundle's lockfile when it pins `rigortype`, else undefined. */
+export function pinnedBundleLock(
+  folder: WorkspaceFolder,
+  root: string,
+): string | undefined {
+  const pinned = pinnedBundleGemfile(folder, root);
+  const lock = lockfileFor(pinned.gemfile);
+  return !pinned.rejected && lockPinsRigortype(lock) ? lock : undefined;
 }
 
 /**
@@ -181,13 +205,26 @@ export function managedReachable(kind: DiscoveryKind, root: string): boolean {
  *   never installed would otherwise block the managed Rigor everywhere.
  */
 export function rigortypePin(root: string): string | undefined {
-  for (const lock of [
-    path.join(root, "Gemfile.lock"),
-    path.join(root, ".github", "rigor", "Gemfile.lock"),
-  ]) {
-    if (lockfileHasRigortype(path.dirname(lock))) {
-      return lock;
-    }
+  return findPin(root)?.file;
+}
+
+/**
+ * Like `rigortypePin`, and which kind of file pins: a Bundler lockfile, a
+ * mise or asdf file of the project (the root or above it, below the home
+ * directory), or the user's global one.
+ */
+export function findPin(
+  root: string,
+  options: { skipLocks?: boolean } = {},
+): { file: string; scope: "lock" | "project" | "global" } | undefined {
+  // `skipLocks`: `useBundler: never` opts out of a lockfile pin, so a
+  // mise or asdf pin behind it still decides.
+  const lock = options.skipLocks
+    ? undefined
+    : (projectLockPin(root) ??
+      [lockfileFor(path.join(root, PINNED_BUNDLE_GEMFILE))].find(lockPinsRigortype));
+  if (lock) {
+    return { file: lock, scope: "lock" };
   }
   const home = path.resolve(os.homedir());
   const globalFiles = globalPinFiles(home);
@@ -200,7 +237,7 @@ export function rigortypePin(root: string): string | undefined {
       if (!projectLevel) {
         globalFiles.push(file);
       } else if (fileNamesRigortype(file)) {
-        return file;
+        return { file, scope: "project" };
       }
     }
     const parent = path.dirname(dir);
@@ -210,7 +247,8 @@ export function rigortypePin(root: string): string | undefined {
     dir = parent;
   }
   if (globalPinInstalled()) {
-    return globalFiles.find(fileNamesRigortype);
+    const file = globalFiles.find(fileNamesRigortype);
+    return file ? { file, scope: "global" } : undefined;
   }
   return undefined;
 }
@@ -227,7 +265,7 @@ function isBelow(dir: string, base: string): boolean {
 }
 
 /** The mise and asdf config files a directory can hold. */
-function pinFilesIn(dir: string): string[] {
+export function pinFilesIn(dir: string): string[] {
   const envs = (process.env.MISE_ENV ?? "")
     .split(",")
     .map((e) => e.trim())
@@ -412,28 +450,57 @@ function globalPinInstalled(): boolean {
   });
 }
 
-/** Whether `name` resolves to an executable on the current `PATH`. */
-function isOnPath(name: string): boolean {
-  const sep = process.platform === "win32" ? ";" : ":";
-  const candidates =
-    process.platform === "win32"
-      ? [name, `${name}.exe`, `${name}.cmd`, `${name}.bat`]
-      : [name];
+/**
+ * Every file named `name` on the current `PATH`, in `PATH` order, as an
+ * absolute path. Each is a separate discovery candidate: the first may
+ * exist and not run (an rbenv shim for a Ruby without the gem).
+ */
+export function pathExecutables(name: string): {
+  found: string[];
+  /** Relative `PATH` entries (`.` among them), which are never searched. */
+  skipped: string[];
+} {
+  const win = process.platform === "win32";
+  const sep = win ? ";" : ":";
+  // On Windows an extensionless `rigor` is the POSIX script RubyGems also
+  // writes, which only a POSIX shell runs.
+  const candidates = win
+    ? [`${name}.bat`, `${name}.cmd`, `${name}.exe`]
+    : [name];
+  const found: string[] = [];
+  const real = new Set<string>();
+  const skipped: string[] = [];
   for (const dir of (process.env.PATH ?? "").split(sep)) {
     if (!dir) {
       continue;
     }
+    // A relative entry resolves against the extension host's working
+    // directory, which is no directory the user chose.
+    if (!path.isAbsolute(dir)) {
+      if (!skipped.includes(dir)) {
+        skipped.push(dir);
+      }
+      continue;
+    }
     for (const candidate of candidates) {
+      const file = path.join(dir, candidate);
       try {
-        if (fs.existsSync(path.join(dir, candidate))) {
-          return true;
+        if (!fs.existsSync(file) || !fs.statSync(file).isFile()) {
+          continue;
+        }
+        // The same file reached through two PATH entries (a symlinked
+        // directory) is one candidate.
+        const target = fs.realpathSync(file);
+        if (!real.has(target)) {
+          real.add(target);
+          found.push(file);
         }
       } catch {
         // Unreadable PATH entry — skip it.
       }
     }
   }
-  return false;
+  return { found, skipped };
 }
 
 /**
@@ -443,38 +510,55 @@ function isOnPath(name: string): boolean {
  * installed gem's executables as fixed "shim" files at a stable
  * location. Unlike a PATH entry, a shim is found even when a
  * GUI-launched editor never ran the shell's `mise activate` hook.
- * Returns the first shim that exists, or undefined.
+ * Returns every shim that exists, mise's first.
  */
-function versionManagerShim(): string | undefined {
-  const home = os.homedir();
-  const dirs: string[] = [];
-
-  // mise — honour MISE_DATA_DIR / XDG_DATA_HOME, then the default.
-  if (process.env.MISE_DATA_DIR) {
-    dirs.push(path.join(process.env.MISE_DATA_DIR, "shims"));
-  }
-  if (process.env.XDG_DATA_HOME) {
-    dirs.push(path.join(process.env.XDG_DATA_HOME, "mise", "shims"));
-  }
-  dirs.push(path.join(home, ".local", "share", "mise", "shims"));
-
-  // asdf — honour ASDF_DATA_DIR, then the default.
-  if (process.env.ASDF_DATA_DIR) {
-    dirs.push(path.join(process.env.ASDF_DATA_DIR, "shims"));
-  }
-  dirs.push(path.join(home, ".asdf", "shims"));
-
-  for (const dir of dirs) {
-    const shim = path.join(dir, "rigor");
-    try {
-      if (fs.existsSync(shim)) {
-        return shim;
+export function versionManagerShims(): string[] {
+  const names =
+    process.platform === "win32"
+      ? ["rigor.bat", "rigor.cmd", "rigor.exe"]
+      : ["rigor"];
+  const shims: string[] = [];
+  for (const root of versionManagerRoots()) {
+    for (const name of names) {
+      const shim = path.join(root, "shims", name);
+      try {
+        if (!shims.includes(shim) && fs.existsSync(shim)) {
+          shims.push(shim);
+        }
+      } catch {
+        // Unreadable candidate — skip it.
       }
-    } catch {
-      // Unreadable candidate — skip it.
     }
   }
-  return undefined;
+  return shims;
+}
+
+/**
+ * mise's and asdf's data directories, mise's first: `MISE_DATA_DIR`,
+ * `XDG_DATA_HOME/mise`, then `%LOCALAPPDATA%\mise` on Windows or
+ * `~/.local/share/mise` elsewhere; `ASDF_DATA_DIR`, then `~/.asdf`. Each
+ * holds `shims/` and `installs/`. Read from the environment, never by
+ * running `mise`.
+ */
+export function versionManagerRoots(): string[] {
+  const home = os.homedir();
+  const roots: string[] = [];
+  if (process.env.MISE_DATA_DIR) {
+    roots.push(process.env.MISE_DATA_DIR);
+  }
+  if (process.env.XDG_DATA_HOME) {
+    roots.push(path.join(process.env.XDG_DATA_HOME, "mise"));
+  }
+  roots.push(
+    process.platform === "win32"
+      ? path.join(process.env.LOCALAPPDATA ?? path.join(home, "AppData", "Local"), "mise")
+      : path.join(home, ".local", "share", "mise"),
+  );
+  if (process.env.ASDF_DATA_DIR) {
+    roots.push(process.env.ASDF_DATA_DIR);
+  }
+  roots.push(path.join(home, ".asdf"));
+  return [...new Set(roots)];
 }
 
 /** The `--config=` flag, shared by `rigor lsp` and `rigor check`. */
@@ -497,6 +581,20 @@ export function lspArgs(
   folder: WorkspaceFolder,
 ): string[] {
   return [...server.prefixArgs, "lsp", ...serverOptionArgs(folder)];
+}
+
+/**
+ * The command line as the log and the status tooltip show it. The pinned
+ * bundle's `BUNDLE_GEMFILE` is part of what runs, so it is shown first.
+ */
+export function displayCommand(server: ResolvedServer, args: string[]): string {
+  const gemfile =
+    server.kind === "pinned-bundle" ? server.env?.BUNDLE_GEMFILE : undefined;
+  return [
+    ...(gemfile ? [`BUNDLE_GEMFILE=${gemfile}`] : []),
+    server.command,
+    ...args,
+  ].join(" ");
 }
 
 /** Full argument vector for `rigor version`. */

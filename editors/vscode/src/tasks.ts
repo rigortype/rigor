@@ -1,13 +1,17 @@
 // `rigor check` as a VS Code task. The task runs the same `rigor` that the
-// language server resolves (`resolveServer`), from the same project root,
+// language server resolves (`resolveRigor`), from the same project root,
 // and its text output is matched by the `$rigor` problem matcher that
 // package.json contributes. The problems it reports carry `source: "rigor"`,
 // the same source as the server's diagnostics.
 
 import {
+  CustomExecution,
   Disposable,
+  EventEmitter,
   ExtensionContext,
+  OutputChannel,
   ProcessExecution,
+  Pseudoterminal,
   QuickPickItem,
   ShellExecution,
   Task,
@@ -20,12 +24,14 @@ import {
   workspace,
 } from "vscode";
 import {
+  ResolvedServer,
   configArgs,
   projectRoot,
-  resolveServer,
   shouldManageFolder,
   useShell,
 } from "./discovery";
+import { killTree, spawnCli } from "./proc";
+import { describeCandidate, peekResolution, resolveRigor } from "./resolve";
 
 const TASK_TYPE = "rigor";
 const TASK_SOURCE = "rigor";
@@ -42,8 +48,11 @@ function definedEnv(env: NodeJS.ProcessEnv): Record<string, string> {
 }
 
 /** The `rigor check` task for one managed folder. */
-function checkTask(folder: WorkspaceFolder, label: string): Task {
-  const server = resolveServer(folder);
+function checkTask(
+  folder: WorkspaceFolder,
+  label: string,
+  server: ResolvedServer,
+): Task {
   const root = projectRoot(folder) ?? folder.uri.fsPath;
   const args = [...server.prefixArgs, "check", ...configArgs(folder)];
   const definition: TaskDefinition = { type: TASK_TYPE, command: "check" };
@@ -69,11 +78,95 @@ function checkTask(folder: WorkspaceFolder, label: string): Task {
 }
 
 /**
+ * The `rigor check` task for a folder whose discovery has not finished, or
+ * found no `rigor` that runs. It waits for the walk, then runs the resolved
+ * `rigor check` in a pseudoterminal; after a failed walk it prints why and
+ * exits 1, so the task is never missing and never runs a Rigor discovery
+ * rejected (a failed pinned bundle must not become an unpinned run).
+ */
+function pendingCheckTask(
+  folder: WorkspaceFolder,
+  label: string,
+  output: OutputChannel,
+): Task {
+  const root = projectRoot(folder) ?? folder.uri.fsPath;
+  const execution = new CustomExecution(async (): Promise<Pseudoterminal> => {
+    const write = new EventEmitter<string>();
+    const close = new EventEmitter<number>();
+    let child: ReturnType<typeof spawnCli> | undefined;
+    let closed = false;
+    const finish = (code: number): void => {
+      if (!closed) {
+        closed = true;
+        close.fire(code);
+      }
+    };
+    const crlf = (text: string): string => text.replace(/\r?\n/g, "\r\n");
+    return {
+      onDidWrite: write.event,
+      onDidClose: close.event,
+      open: () => {
+        void resolveRigor(folder, output).then((res) => {
+          if (closed) {
+            return;
+          }
+          if (!res.probe.ok && !res.probe.tooOld) {
+            const lines = [
+              `Rigor: could not run Rigor in ${folder.name}.`,
+              ...(res.hint ? [res.hint] : []),
+              ...res.rejected.map((r) => `  rejected ${describeCandidate(r.server)}: ${r.reason}`),
+              'Fix the setup, then run "Rigor: Restart Server".',
+            ];
+            write.fire(crlf(`${lines.join("\n")}\n`));
+            finish(1);
+            return;
+          }
+          const server = res.server;
+          const args = [...server.prefixArgs, "check", ...configArgs(folder)];
+          child = spawnCli(server.command, args, root, {
+            shell: useShell(server),
+            env: server.env,
+          });
+          child.stdout?.on("data", (d: Buffer) => write.fire(crlf(d.toString())));
+          child.stderr?.on("data", (d: Buffer) => write.fire(crlf(d.toString())));
+          child.on("error", (err) => {
+            write.fire(crlf(`${String(err)}\n`));
+            finish(1);
+          });
+          child.on("close", (code) => finish(code ?? 1));
+        });
+      },
+      close: () => {
+        if (child) {
+          killTree(child);
+        }
+        finish(130);
+      },
+    };
+  });
+  return new Task(
+    { type: TASK_TYPE, command: "check" },
+    folder,
+    label,
+    TASK_SOURCE,
+    execution,
+    PROBLEM_MATCHER,
+  );
+}
+
+/**
  * One `rigor: check` task per folder the extension manages. Untrusted
  * workspaces get none: the task spawns `bundle exec rigor` from the
  * workspace, as the language server does.
  */
 class RigorCheckTaskProvider implements TaskProvider {
+  constructor(private readonly output: OutputChannel) {}
+
+  /**
+   * Never waits for a discovery walk, which can take seconds per
+   * candidate: a folder whose resolution has not finished, or failed, gets
+   * a `pendingCheckTask` instead (its walk is started).
+   */
   provideTasks(): Task[] {
     if (!workspace.isTrusted) {
       return [];
@@ -81,12 +174,17 @@ class RigorCheckTaskProvider implements TaskProvider {
     const folders = (workspace.workspaceFolders ?? []).filter((folder) =>
       shouldManageFolder(folder),
     );
-    return folders.map((folder) =>
-      checkTask(
-        folder,
-        folders.length > 1 ? `check (${folder.name})` : "check",
-      ),
-    );
+    const out: Task[] = [];
+    for (const folder of folders) {
+      const label = folders.length > 1 ? `check (${folder.name})` : "check";
+      const resolution = peekResolution(folder, this.output);
+      out.push(
+        resolution && (resolution.probe.ok || resolution.probe.tooOld)
+          ? checkTask(folder, label, resolution.server)
+          : pendingCheckTask(folder, label, this.output),
+      );
+    }
+    return out;
   }
 
   resolveTask(): undefined {
@@ -111,6 +209,32 @@ async function checkWorkspace(): Promise<void> {
       "Rigor: this workspace is not trusted, so rigor check does not run here. Trust the workspace to check it.",
     );
     return;
+  }
+  // A command may wait: finish each managed folder's discovery first, so
+  // the provider below has every folder's task.
+  if (output) {
+    const managed = (workspace.workspaceFolders ?? []).filter((folder) =>
+      shouldManageFolder(folder),
+    );
+    const resolutions = await Promise.all(
+      managed.map((folder) => resolveRigor(folder, output!)),
+    );
+    const failedNames = managed
+      .filter((_, i) => !resolutions[i].probe.ok && !resolutions[i].probe.tooOld)
+      .map((folder) => folder.name);
+    if (failedNames.length > 0) {
+      void window
+        .showErrorMessage(
+          `Rigor: could not run Rigor in ${failedNames.join(", ")}, so rigor check cannot check ` +
+            `${failedNames.length === 1 ? "it" : "them"}. The Rigor output lists what was tried; ` +
+            'fix the setup, then run "Rigor: Restart Server".',
+          "Show Output",
+        )
+        .then((choice) => choice && output?.show());
+      if (failedNames.length === managed.length) {
+        return;
+      }
+    }
   }
   const all = (await tasks.fetchTasks({ type: TASK_TYPE })).filter(
     (task) => taskFolder(task) !== undefined,
@@ -156,10 +280,16 @@ async function checkWorkspace(): Promise<void> {
  * Register the `rigor` task provider and the `Rigor: Check Workspace`
  * command. Called once from `activate`.
  */
-export function registerTasks(context: ExtensionContext): void {
+let output: OutputChannel | undefined;
+
+export function registerTasks(
+  context: ExtensionContext,
+  channel: OutputChannel,
+): void {
+  output = channel;
   const provider: Disposable = tasks.registerTaskProvider(
     TASK_TYPE,
-    new RigorCheckTaskProvider(),
+    new RigorCheckTaskProvider(channel),
   );
   context.subscriptions.push(
     provider,

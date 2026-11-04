@@ -9,6 +9,9 @@ import { shellInvocation } from "./proc";
 /** First `rigor lsp` release. Older gems cannot serve the LSP. */
 export const MIN_VERSION = "0.1.6";
 
+/** How long one `rigor version` probe may take. */
+export const PROBE_TIMEOUT_MS = 20000;
+
 export interface ProbeResult {
   /** True when a usable server (>= MIN_VERSION) was found. */
   ok: boolean;
@@ -18,6 +21,10 @@ export interface ProbeResult {
   notFound?: boolean;
   /** True when a version was found but is older than MIN_VERSION. */
   tooOld?: boolean;
+  /** The whole version token `rigor version` printed, prerelease included. */
+  fullVersion?: string;
+  /** Why a failed probe failed: the first stderr line, or the error. */
+  detail?: string;
 }
 
 function compareSemver(a: string, b: string): number {
@@ -46,14 +53,28 @@ export function probeServer(
       {
         cwd,
         env: server.env,
-        timeout: 20000,
+        timeout: PROBE_TIMEOUT_MS,
         windowsHide: true,
         shell,
       },
-      (error, stdout) => {
+      (error, stdout, stderr) => {
         if (error) {
           const code = (error as NodeJS.ErrnoException).code;
-          resolve({ ok: false, notFound: code === "ENOENT" });
+          const firstErr = String(stderr)
+            .split("\n")
+            .map((l) => l.trim())
+            .find((l) => l !== "");
+          resolve({
+            ok: false,
+            notFound: code === "ENOENT",
+            detail:
+              code === "ENOENT"
+                ? "not found"
+                : error.killed && error.signal
+                  ? `timed out after ${PROBE_TIMEOUT_MS / 1000} s`
+                  : firstErr ??
+                    (typeof code === "number" ? `exit ${code}` : error.message),
+          });
           return;
         }
         const match = /\b(\d+\.\d+\.\d+)\b/.exec(stdout);
@@ -65,7 +86,10 @@ export function probeServer(
         }
         const version = match[1];
         const tooOld = compareSemver(version, MIN_VERSION) < 0;
-        resolve({ ok: !tooOld, version, tooOld });
+        // `rigor version` prints `rigor #{Rigor::VERSION}`; the full token
+        // keeps a prerelease segment (`0.5.0.pre1`).
+        const fullVersion = /\brigor\s+(\S+)/.exec(stdout)?.[1];
+        resolve({ ok: !tooOld, version, tooOld, fullVersion });
       },
     );
   });

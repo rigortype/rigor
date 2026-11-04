@@ -44,21 +44,91 @@ Ruby syntax highlighting — keep your existing Ruby grammar extension.
 
 ## Server discovery
 
-For each workspace folder the extension resolves the `rigor`
-executable in this order:
+For each workspace folder the extension tries these candidates in
+order and uses the first whose `rigor version` runs. The language
+server, the `rigor: check` task and every CLI-backed command use that
+same one.
 
-1. `rigor.server.path`, if set — explicit path / command.
-2. `bundle exec rigor`, when `rigor.server.useBundler` allows it and a
-   `Gemfile.lock` pinning `rigortype` is found (`auto`, the default).
-3. `rigor` from `PATH`.
-4. A `mise` or `asdf` shim — when `rigor` is not on `PATH`, the
-   extension looks for a runtime-version-manager shim (e.g.
-   `~/.local/share/mise/shims/rigor`) and uses it directly.
+1. `rigor.server.path`, if set — explicit path / command. When it
+   fails, the extension says so and tries nothing else.
+2. `bundle exec rigor`, when the project's `Gemfile.lock` (or
+   `gems.locked`) pins `rigortype` (`rigor.server.useBundler: auto`,
+   the default).
+3. The **pinned bundle** — `bundle exec rigor` with `BUNDLE_GEMFILE`
+   set to `.github/rigor/Gemfile` (or `rigor.server.bundleGemfile`),
+   when its lockfile pins `rigortype`. See below.
+4. Every `rigor` on `PATH`, in `PATH` order (on Windows `rigor.bat`,
+   `rigor.cmd` and `rigor.exe`). Relative entries such as `.` are not
+   searched, and the same file reached twice is tried once.
+5. A `mise` or `asdf` shim (e.g. `~/.local/share/mise/shims/rigor`),
+   used directly.
+6. The **managed Rigor**, when you installed one — see below.
 
-5. The **managed Rigor**, when you installed one — see below.
+A pin is final. A project whose lockfile pins `rigortype` (2 or 3) runs
+that and nothing else, and one whose `mise.toml`, `.mise.toml` or
+`.tool-versions` (or another mise config file, at the project root or
+above it) pins it runs the mise or asdf shim (5) and nothing else: a
+different Rigor would report diagnostics that differ from CI's. On
+Windows that means mise's shim directory (`%LOCALAPPDATA%\mise\shims`,
+or `MISE_DATA_DIR`) must hold `rigor.cmd`, `rigor.bat` or `rigor.exe`;
+this is reasoned from the code, not tested on Windows. When the pin does not run, the
+message says to install it (`bundle install`, or `mise install`)
+instead of falling back. Because `bundle exec rigor` runs any `rigor`
+on `PATH` when the bundle has none installed, a Bundler candidate that
+reports another version than its lockfile pins (or none) is rejected
+too. Your global mise config is not a project
+pin: it only keeps the managed Rigor away.
 
-If none works, the extension shows an actionable message and stays
-loaded — fix the setup and run **Rigor: Restart Server**.
+`rigor.server.useBundler: always` makes 2 the only candidate, or 3
+when `rigor.server.bundleGemfile` is set; `never` skips 2 and 3, and
+then a lockfile pin no longer decides: the extension warns once that
+the pinned rigortype is not used (a mise or asdf pin still decides). A candidate that exists but
+does not run (an rbenv shim whose Ruby lacks the gem, a broken
+script) is rejected for the next one; the output channel logs each
+rejected candidate and why (a probe that hangs is rejected after
+20 s, and after 45 s in all the candidates no pin requires are
+skipped, which can leave out a later one such as the managed Rigor).
+Every folder's search starts at once. A `rigor` that runs but is older than 0.1.6 stops the search
+with an upgrade warning. The result is kept until **Rigor: Restart
+Server**, a settings change, or a change to what pins `rigortype`,
+which restarts that folder's server. Only `Gemfile.lock`, `gems.locked`,
+`mise.toml`, `.mise.toml`, `mise.local.toml` and `.tool-versions` in the
+project root (and the workspace folder), and the pinned bundle's
+`Gemfile` and lockfile, are watched, and only a pin that appears,
+disappears or names another version (or Ruby) restarts anything. The
+other mise files (`.mise/`, `.config/mise/`, parent directories) are
+read when the folder is resolved; after changing one, run **Rigor:
+Restart Server**. The `rigor: check` task is always
+there: while the search is still running it waits for it, and when the
+search found no `rigor` that runs it prints why and fails.
+**Rigor: Check Workspace** names every folder whose search failed.
+
+If none works, the extension shows an actionable message listing the
+candidates it tried and stays loaded — fix the setup and run
+**Rigor: Restart Server**.
+
+### The pinned bundle
+
+A Rigor-only `Gemfile` and lockfile committed at `.github/rigor/` (the
+manual's
+[pinned bundle](https://github.com/rigortype/rigor/blob/master/docs/manual/01-installation.md#secondary--a-pinned-bundle))
+is enough for the extension to manage the folder and run it, kind
+`pinned-bundle`. It runs from the project root, with `BUNDLE_GEMFILE`
+set to the Gemfile's absolute path, as `<ruby> <bundle> exec rigor`.
+The Ruby is found among the ones the managed Rigor considers
+(`rigor.runtime.rubyPath`, `ruby` on `PATH`, the version managers'
+install directories, each asked once), so the project's own Ruby does
+not have to be 4.0: the first that matches the lockfile's `RUBY
+VERSION`, else the Gemfile's `ruby` line, else rigortype's own Ruby
+range. When that does
+not run, `bundle exec rigor` from `PATH` is tried with the same
+`BUNDLE_GEMFILE`. Both drop the inherited `GEM_HOME`, `GEM_PATH`,
+`RUBYOPT`, `RUBYLIB`, `BUNDLE_BIN_PATH`, `BUNDLER_*` and
+`BUNDLE_GEMFILE`, and keep your other `BUNDLE_*` settings (a
+`BUNDLE_PATH` you install with). Install the bundle under that Ruby
+first (`BUNDLE_GEMFILE=.github/rigor/Gemfile bundle install`). Set
+`rigor.server.bundleGemfile` (relative to the project root, and inside
+it) for a bundle somewhere else.
 
 ### The managed Rigor (first-time setup)
 
@@ -138,8 +208,8 @@ files and fail until those windows restart them.
 gem:rigortype` (see the manual's
 [Installing Rigor](https://github.com/rigortype/rigor/blob/master/docs/manual/01-installation.md)
 chapter). A GUI-launched VS Code does not inherit the shell `PATH`
-that `mise activate` sets up, so step 3 above often misses a
-mise-managed `rigor` — step 4 covers that automatically by finding
+that `mise activate` sets up, so step 4 above often misses a
+mise-managed `rigor` — step 5 covers that automatically by finding
 the shim, a stable self-contained executable. `asdf` shims
 (`~/.asdf/shims/rigor`) are detected the same way.
 
@@ -161,6 +231,7 @@ Use an absolute path — the setting is not `~`-expanded.
 | `rigor.rootDir` | `""` | Relative subdirectory holding the Rigor project (such as `api`). Empty uses the folder itself; an absolute path is rejected. |
 | `rigor.server.path` | `""` | Explicit `rigor` executable path. |
 | `rigor.server.useBundler` | `auto` | `auto` / `always` / `never`. |
+| `rigor.server.bundleGemfile` | `""` | Gemfile of a pinned bundle, relative to the project root and inside it. Empty uses `.github/rigor/Gemfile` when its lockfile pins `rigortype`. |
 | `rigor.server.configPath` | `""` | Passed as `--config=PATH`. |
 | `rigor.server.logPath` | `""` | Passed as `--log=PATH`. |
 | `rigor.runtime.version` | `latest` | `rigortype` version of the managed Rigor; `latest` resolves the newest release on rubygems.org. |

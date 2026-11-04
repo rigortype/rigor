@@ -63,6 +63,39 @@ the extension is versioned independently of the `rigortype` gem.
   and tries the next one once when the build fails because the Ruby
   cannot load OpenSSL (never for a named `rubyPath`); a `mise install ruby@4.0` in progress finishes when the window
   closes.
+- One discovery path for the language server, the `rigor: check` task
+  and every CLI-backed command (#2748): each candidate is probed with
+  `rigor version` in order, and one that exists but does not run is
+  rejected for the next one (every `rigor` on `PATH` in turn, each mise
+  or asdf shim, then the managed Rigor). The output channel logs each
+  rejected candidate and why, and the not-found message lists them. An
+  explicit `rigor.server.path` that fails is reported, never replaced,
+  and a `rigor` that runs but is too old gets the upgrade warning. A
+  project pin is final: a lockfile pin runs only Bundler, a project
+  `mise.toml` / `.tool-versions` pin only the shim, and a failure says
+  to install the pin; a Bundler candidate that runs another rigortype
+  than its lockfile pins (compared in full, prerelease included) is
+  rejected. `useBundler: never` warns once that a lockfile pin is not
+  used. A hung probe is rejected after 20 s and the
+  search skips unpinned candidates after 45 s. The result is kept per
+  folder until a restart, a settings change, or a change to a pin file
+  in the project root or the pinned bundle (other mise files, such as
+  `.config/mise/` or a parent directory's, need a restart). A project `gems.locked` counts as a lockfile pin. The
+  `rigor: check` task is always offered: it waits for a search still
+  running, and reports a failed one. On Windows, `rigor.bat` / `.cmd` /
+  `.exe` on `PATH` and as mise (`%LOCALAPPDATA%\mise`) or asdf shims.
+- The pinned bundle (ADR-27 WD9, #2750): when `.github/rigor/Gemfile.lock`
+  pins `rigortype`, the extension runs `bundle exec rigor` with
+  `BUNDLE_GEMFILE` set to `.github/rigor/Gemfile`, from the project root,
+  under the first Ruby that the managed runtime's search finds matching
+  the lockfile's `RUBY VERSION`, else the Gemfile's `ruby` line, else
+  rigortype's range (falling back to `bundle` on `PATH`), without the
+  inherited `GEM_HOME`, `GEM_PATH`, `RUBYOPT`, `RUBYLIB` and Bundler
+  overrides. It comes after the
+  project's own `Gemfile.lock` and before `PATH`; the kind shows as
+  `pinned-bundle`. A folder with only that pin is managed. New setting
+  `rigor.server.bundleGemfile` for another location inside the project
+  root, which `rigor.server.useBundler: always` also uses.
 - Background update checks for the managed Rigor (#2746):
   `rigor.runtime.autoUpdate` (on by default) and
   `rigor.runtime.updateCheckIntervalHours` (24). While a folder runs it

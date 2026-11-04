@@ -30,11 +30,12 @@ import {
   workspace,
 } from "vscode";
 import {
+  displayCommand,
   projectRoot,
-  resolveServer,
   shouldManageFolder,
   useShell,
 } from "./discovery";
+import { describeCandidate, resolveRigor } from "./resolve";
 import { killTree, spawnCli } from "./proc";
 
 export const OUTPUT_SCHEME = "rigor-output";
@@ -235,15 +236,27 @@ function configArgs(folder: WorkspaceFolder): string[] {
   return configPath ? [`--config=${configPath}`] : [];
 }
 
-function runRigor(
+async function runRigor(
   folder: WorkspaceFolder,
   root: string,
   subArgs: string[],
   token?: CancellationToken,
 ): Promise<CliResult> {
-  const server = resolveServer(folder);
+  // The same resolution as the language server's (#2748).
+  const { server, probe, rejected } = await resolveRigor(folder, out);
+  if (token?.isCancellationRequested) {
+    return { code: null, stdout: "", stderr: "", cancelled: true };
+  }
+  if (!probe.ok && !probe.tooOld) {
+    const tried = rejected
+      .map((r) => `${describeCandidate(r.server)}: ${r.reason}`)
+      .join("; ");
+    const stderr = `could not run Rigor in ${folder.name}${tried ? ` (tried ${tried})` : ": no \`rigor\` was found"}; fix the setup, then run "Rigor: Restart Server"\n`;
+    out.appendLine(`[rigor] ${stderr.trimEnd()}`);
+    return { code: null, stdout: "", stderr, cancelled: false };
+  }
   const args = [...server.prefixArgs, ...subArgs];
-  out.appendLine(`[rigor] $ ${[server.command, ...args].join(" ")}  (cwd ${root})`);
+  out.appendLine(`[rigor] $ ${displayCommand(server, args)}  (cwd ${root})`);
   return new Promise((resolve) => {
     let stdout = "";
     let stderr = "";

@@ -144,15 +144,18 @@ the extension is versioned independently of the `rigortype` gem.
   quoted for `cmd.exe`, so a `rigor` or `rigor.server.path` whose path
   contains a space (a user profile such as `C:\Users\First Last`,
   `Program Files`) is no longer split. Not yet tried on a Windows host.
-- A folder whose server did not answer `initialize` twice in a row is no
-  longer restarted by every config-file event (each try was another 60 s
-  hang and error toast); Restart Server or a settings change tries again.
+- A folder whose server did not answer `initialize` twice in a row is
+  no longer restarted automatically (each try was another 60 s hang and
+  error toast). It stays shown as an error, with a note, until Restart
+  Server, a settings change, a change to its `rigortype` pin, an install
+  or clear of the managed runtime, or the folder leaving and coming back.
   Sync requests queued behind a running start are merged, and no timeout
   toast is shown for a start the extension itself abandoned.
 - A `rigor.server.path` wrapped in double quotes (the Windows workaround
   from before the path was quoted automatically) works again.
 - The managed runtime no longer reads an earlier step's check mark or a
-  compiler `Error:` line as the end of a running `mise install`.
+  compiler `Error:` line as the end of a running `mise install`; only
+  mise's or ruby-build's own closing lines in the log's last few lines count.
 - `rigor.runtime.version: "dev"` in a normal window now says it is only
   valid in an extension development host.
 

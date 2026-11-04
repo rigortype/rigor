@@ -8,12 +8,15 @@ The prototype was measured on `lib`, 48 plugin and example trees, and fourteen s
 
 - it added no diagnostic row on any of them;
 - its behavioural parity differential was empty;
-- with interface dispatch off, sig-gen and lens output on `lib` and the plugin trees was byte-identical to
-  master;
-- allocations rose by 0.007%.
+- with dispatch off, sig-gen output on `lib` and the plugin trees was byte-identical to master;
+- lens, with dispatch on, changed 15 plugin-tree return sites, which is the intended precision;
+- allocations rose by 0.085% on `lib` (round-3 head).
 
-Two review rounds reproduced ten false positives on earlier drafts. All ten are fixtures, and all ten are
-silent under this draft. The decision awaits the maintainer's ruling before slice 1a lands.
+Three review rounds reproduced findings on earlier drafts: eleven false positives and two structural
+divergences, nested tuple and hash-shape joins. All of them are fixtures. The false positives are silent
+under this draft, and the joins match master.
+
+The decision awaits the maintainer's ruling before slice 1a lands.
 
 Grounding: [`docs/notes/20261104-interface-types-prototype-measurement.md`](../notes/20261104-interface-types-prototype-measurement.md)
 (per-target deltas for all three drafts, the parity differential, sig-gen and lens output, the fixtures,
@@ -48,6 +51,11 @@ below was reproduced:
 - **Alias memoisation.** Erasing some interfaces and not others made the closed-alias memo depend on
   translation order.
 - **sig-gen.** Dispatch through an interface changed sig-gen output.
+- **Nested joins** (round 3). The top-level merge left `[Dynamic[_A]] | [Dynamic[top]]` as two arms, where
+  master has one. It also left `{ k: Dynamic[_A] } | { k: Dynamic[top] }` as two shapes, which a later
+  `merge` collapsed to a `Hash`.
+- **A possibly-nil block-pass** (round 3). `xs.each(&blk).with_index` took the block overload and reported
+  undefined `with_index`.
 
 Terminology ([`CONTEXT.md`](../../CONTEXT.md)): *interface* is the RBS structural type; *protocol* is ADR-28's.
 
@@ -78,8 +86,14 @@ be byte-identical to erasure on every corpus.
   reads `Dynamic[top]`.
 - **`self`, `instance` and `class`.** Inside a member, `self` is the receiver. `instance` and `class` read
   `Dynamic[top]`.
-- **Unions.** `Combinator.union` merges two or more members that are `untyped?` (WD2) into one
-  `Dynamic[top]`. The facet is lost there; it is a last resort, not a type.
+- **Unions.** `Combinator.union` deduplicates members modulo facet erasure.
+  - *Facet erasure* rewrites `Dynamic[<plugin interface>]` to `Dynamic[top]`. It applies recursively inside
+    `Tuple` elements, `HashShape` values, `Nominal` type arguments and nested unions.
+  - Two or more members that are equal after erasure merge into their erased form. So
+    `Dynamic[_A] | Dynamic[top]` becomes `Dynamic[top]`, `[Dynamic[_A]] | [Dynamic[top]]` becomes
+    `[Dynamic[top]]`, and `{ k: Dynamic[_A] } | { k: Dynamic[top] }` becomes `{ k: Dynamic[top] }`. A join
+    therefore has the shape master's dedup gives it.
+  - The facet is lost there. It is a last resort, not a type.
   - A union of one interface member and other members keeps the facet on that member.
   - In `Dynamic[_Scope] | Rigor::Scope`, every `untyped`-keyed consumer sees the interface member through
     the predicate, exactly as master sees `Dynamic[top] | Rigor::Scope`.
@@ -96,8 +110,8 @@ of these:
 - tests a `Dynamic`'s `static_facet` for `Type::Top`;
 - compares a type with `Combinator.untyped` by `==` or `equal?`.
 
-All of them move to the predicate except `Combinator.dynamic`'s own constructor check, and the union merge
-(WD1) uses the predicate too.
+All of them move to the predicate except `Combinator.dynamic`'s own constructor check. The union merge
+(WD1) uses the same erasure.
 
 Some sites read a facet for its content: `ReceiverBlindBlock`, `BlockAutoSplat#opaque_array_carrier?`,
 `MatchRebinding`'s Regexp test, the effects collector and the census widening. None of them has an arm for
@@ -112,7 +126,10 @@ Parity keeps today's behaviour even where the facet would be more precise:
 Two gates enforce parity:
 
 - **Behavioural.** A spec runs every parity fixture twice.
-  - With dispatch off, the run must match the erasure baseline, apart from rendered type text.
+  - With dispatch off, the run must match the erasure baseline after a single normalisation: each rendered
+    facet name, `Dynamic[<plugin interface>]`, becomes `Dynamic[top]`.
+  - Everything else must be byte-identical, so a structural divergence (an extra union arm, a lost shape)
+    cannot pass as rendered text.
   - With dispatch on, the run may differ only at calls of declared members.
 - **Lint.** A spec greps `lib/` for the two raw forms outside `Combinator` and fails on any hit. It is
   cheap, but it only catches a known spelling, so the behavioural gate is the one that binds.
@@ -135,6 +152,16 @@ shape:
 Otherwise the call reads `untyped`. The argument rules never check a call on a `Dynamic` receiver, so
 nothing else would catch a shape mismatch. Without the rule, dispatch took whichever overload the
 selector's fallback picked, and that overload's return made the next call wrong.
+
+**A block-pass that may be nil matches both shapes.** This covers `&expr` where `expr` is a nil-bearing union
+or `Dynamic`. At runtime the call may be block-less, so the call answers only when two things hold:
+
+- both the block-ful and the block-less shape are taken;
+- their returns agree.
+
+Otherwise the call reads `untyped`. Before this rule, `xs.each(&blk).with_index` with a possibly-nil `blk`
+took the block overload's `Array[Integer]` and reported undefined `with_index`. `&:sym` is never nil, so
+it keeps the ordinary block shape.
 
 **A member the interface does not declare reports nothing.**
 
@@ -161,23 +188,23 @@ The scope also keeps the alias memo sound:
 - If a later slice makes the facet depend on anything but the type name, it must add that input to the memo
   key. If it cannot, it must bypass the memo, as a requirement translation would.
 
-**WD5 — The facet stays out of generated and measured output.**
+**WD5 — Which outputs show the facet.**
 
 | Output | Behaviour |
 | --- | --- |
 | `sig-gen` | Analyses with interface dispatch off, so its output is master's by the parity criterion. Measured with dispatch on, 13 of 1,358 plugin-tree candidates changed from skipped to a new return; 11 of them were `prepare: (untyped) -> nil` through `_FactStore#publish`. With dispatch off, both `lib` and the plugin trees were identical to master. |
-| lens | Analyses with interface dispatch off, for the same reason. Measured with dispatch on, 15 plugin-tree sites changed their `body_return` from `untyped` to a type. With dispatch off, both `lib` and the plugin trees were identical to master. |
+| lens | Runs with dispatch **on**, as `check` does. Lens is documented as the type `rigor check` gives, so it shares `check`'s snapshot and needs no separate fingerprint. The 15 plugin-tree `body_return` sites that change from `untyped` to a type are intended precision: 12 read `nil` through `_FactStore#publish`, and 3 read an `Array` type. `lib` is unchanged. |
 | `type-of`, hover, `dump_type` | These render `Dynamic[Rigor::Plugin::_Scope]` and the precise results of declared-member calls. That rendering is the intended text. |
 
-The dispatch switch is part of the analysis-cache identity, so a `sig-gen` or lens run never reads a result
-`check` computed with dispatch on.
+sig-gen alone runs with dispatch off. It writes RBS a plugin author did not write against an interface, and
+it reads no analysis cache, so no cache identity is involved.
 
 **WD6 — Slices, rollout and triggers.**
 
 | Slice | Content | Default |
 | --- | --- | --- |
 | 1a | The `untyped?` predicate at every site, the union merge, both gates and the parity fixture harness. No `Interface` carrier exists yet, so output is byte-identical by construction | on |
-| 1b | The `Rigor::Plugin` interface carrier and dispatch with the overload-shape rule; a fixture per parity site and the ten review repros on plugin interfaces; a spec section "Interface-typed values" in `structural-interfaces-and-object-shapes.md` | on |
+| 1b | The `Rigor::Plugin` interface carrier and dispatch with the overload-shape and nil block-pass rules; a fixture per parity site and every review repro on plugin interfaces; a spec section "Interface-typed values" in `structural-interfaces-and-object-shapes.md` | on |
 | 2 | #2686 (`plugin.api-surface`, ADR-128 WD6), which reads the facet | bleeding-edge |
 
 Triggers:
@@ -245,11 +272,17 @@ Open questions that move with it:
   `scope.type_of(node)` reads `Rigor::Type::t`, and `scope.environment` reads
   `Dynamic[Rigor::Plugin::_Environment]`. #2686 can start.
 - **Positive:** parity is held by a behavioural gate, not a code-reading claim.
+- **Newly reachable:** a `call.possible-nil-receiver` in third-party plugin code. It applies to results
+  of `_Scope#local`, `_Scope#self_type`, `_Scope#source_path` and `_Environment#nominal_for_name`, which
+  the interfaces declare nilable. The finding is correct by contract, and it is the same finding a nominal
+  `Rigor::Scope` receiver would give. The bundled plugins measured clean. Slice 1b ships it on by default,
+  with a changelog line.
 - **Negative:** the facet is lost at every join with another `untyped` value, and wherever ADR-67 WD3
   overrides it.
 - **Negative:** most of #929 stays open, and the general facet waits on its own measurement.
 - **Measured:**
-  - +0.007% allocations on `lib` and +0.005% on Mastodon `app`.
+  - +0.085% allocations on `lib` at the round-3 head. Before the nested merge, the draft 3 head measured
+    +0.007% on `lib` and +0.005% on Mastodon `app`.
   - Draft 2's 0.45 points came from `TypeName#to_s`, which draft 3 does not call.
   - Draft 3's first union merge cost 1.26 points by building an array on every normalisation. Counting
     first removed it.

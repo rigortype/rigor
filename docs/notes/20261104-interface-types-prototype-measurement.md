@@ -9,10 +9,14 @@ and example trees and fourteen survey targets:
 
 - Dispatch on added **no** diagnostic row, and **no** row was removed.
 - The behavioural parity differential (dispatch off) was empty.
-- With dispatch on, sig-gen and lens output changed on the plugin trees. With dispatch off, which is what
-  ADR-130 WD5 prescribes for those commands, it was byte-identical to master on `lib` and the plugin trees.
-- All ten false positives the two review rounds reproduced on drafts 1 and 2 fire on those drafts' heads and
-  are silent here.
+- With dispatch on, sig-gen output changed on the plugin trees. With dispatch off, which is how ADR-130 WD5
+  runs sig-gen, it was byte-identical to master on `lib` and the plugin trees.
+- Lens runs with dispatch on, as `check` does. It changes 15 plugin-tree return sites, and these are the
+  intended precision.
+- Three review rounds reproduced findings on earlier drafts: eleven false positives, and two structural
+  divergences in nested joins. Every one is a fixture.
+  - Each false positive fires on its draft's head and is silent on the final head.
+  - Each join reads as master reads it.
 - Allocations: +0.007% on `lib` and +0.005% on Mastodon `app`, after the attribution below.
 
 The earlier drafts, kept for the record:
@@ -25,13 +29,14 @@ The earlier drafts, kept for the record:
 ## The prototype
 
 The prototype is the local branch `interface-proto` in the `interface-assignability` worktree. It is not
-pushed, and its head is `992d583c6`. Each commit sits on `0a53fe62e`:
+pushed, and its head is `6037e728a`. Each commit sits on `0a53fe62e`:
 
 | SHA | What it adds |
 | --- | --- |
 | `89d12edbb`, `0afcfa73d`, `8b980c6b2`, `41869d92b`, `b9011b6ac` | Draft 1: the carrier, dispatch, the half-B oracle and the reach counters |
 | `b7e7d73d9` | Draft 2: the parity predicate and core-alias erasure, for every interface |
 | `3410399da`, `992d583c6` | **Draft 3 (the proposal):** `Rigor::Plugin` scope, the untyped union merge, the overload-shape rule; then a counting merge for allocation |
+| `6037e728a` | **Round 3:** union merge modulo facet erasure, nested inside Tuple, HashShape, Nominal and Union; a possibly-nil block-pass matches both shapes |
 | `1e5972f66` (branch `interface-proto-d2-typename`) | Draft 2 with a `TypeName`-set alias check, for allocation attribution only |
 
 `RIGOR_PROTO_IFACE` selects the mode:
@@ -51,8 +56,14 @@ pushed, and its head is `992d583c6`. Each commit sits on `0a53fe62e`:
   replaces the site family below, which was re-derived from `lib/` with two greps:
   - `static_facet.is_a?(Type::Top)` and `facet.is_a?(Type::Top)`;
   - `== Combinator.untyped`, `equal?(Combinator.untyped)`, `== untyped` and `equal?(untyped)`.
-- **The union merge.** `normalized_union_members` merges two or more `untyped?` members into one
-  `Dynamic[top]` (`merge_untyped_members`). A lone interface member keeps its facet.
+- **The union merge.** `normalized_union_members` compares members modulo facet erasure (`merge_untyped_members`,
+  `erase_facets`). The erasure rewrites `Dynamic[<plugin interface>]` to `Dynamic[top]` recursively inside
+  `Tuple` elements, `HashShape` values, `Nominal` type arguments and unions. Members that are equal after
+  erasure merge into the erased form, and a member alone in its class keeps its facet. The check runs only
+  when some member bears a facet, and it allocates nothing otherwise.
+- **The nil block-pass rule.** For `&expr`, where `expr` is a nil-bearing union or `Dynamic`, dispatch
+  requires both the block-ful and the block-less shape. It answers only when the two returns agree;
+  otherwise the call reads `untyped`. `&:sym` is never nil.
 - **The overload-shape rule.** `interface_shape_accepted?` lets dispatch through an interface member
   resolve only when some overload takes the call's block presence, positional count and required
   keywords. Otherwise the tier declines and the call reads `untyped`.
@@ -148,6 +159,24 @@ It reproduces the reviews' findings with those types:
 The `possible-nil-receiver` at `mix`'s `y + "z"` fires on master and on both modes alike. It is a master
 reading of `Dynamic[top] | String` after a nil branch, and parity keeps it.
 
+**Round 3 fixtures** (`tmp/p6`, on `Rigor::Plugin::_ProbeS` and `_ProbeEach`):
+
+| Method | Shape | master | `992d583c6` (`a` and `an`) | `6037e728a` (`a` and `an`) |
+| --- | --- | --- | --- | --- |
+| `tup` | `f ? [a] : [b]` | `[Dynamic[top]]` | `[Dynamic[_ProbeS]] \| [Dynamic[top]]` | `[Dynamic[top]]` |
+| `shape` | `f ? { k: a } : { k: b }` | `{ k: Dynamic[top] }` | `{ k: Dynamic[_ProbeS] } \| { k: Dynamic[top] }` | `{ k: Dynamic[top] }` |
+| `shape` | then `h.merge(z: 1)` | `{ k: Dynamic[top], z: 1 }` | `Hash[:k \| Dynamic[top], Dynamic[top]]` | `{ k: Dynamic[top], z: 1 }` |
+| `blockpass` | `xs.each(&blk)`, `blk : (^(Integer) -> void)?` | `Dynamic[top]` | `Array[Integer]` (`a`); `with_index` reports `call.undefined-method` | `Dynamic[top]`; silent |
+
+Results through `engine_diag_diff`:
+
+- `992d583c6` → `6037e728a` on `tmp/p6`: removes the `with_index` false positive and the three divergent
+  `dump_type` texts.
+- master → `6037e728a` on `tmp/p6`: 0 rows in both modes.
+- On `tmp/p5`, `6037e728a` keeps the earlier results:
+  - from draft 1, 10 removed and 0 added;
+  - against master, only `dump_type` text differs.
+
 **A plugin hook (probe).** Under draft 3 with dispatch on:
 
 | Expression | Reads |
@@ -160,6 +189,10 @@ reading of `Dynamic[top] | String` after a nil branch, and parity keeps it.
 `scope.not_in_interface` reports nothing.
 
 ## Diagnostic delta (draft 3, `3410399da`)
+
+The round-3 head `6037e728a` was re-run on `lib` and the 48 plugin and example trees, in both modes. It
+read 0 added and 0 removed in every run. The survey targets hold no `Rigor::Plugin` value, so they were not
+re-run.
 
 Rows are `[path, line, column, rule, message]`. "Added" and "removed" are head minus base.
 
@@ -207,16 +240,20 @@ Both commands ran over a corpus archive of `0a53fe62e`. Lens JSON was compared w
 | `lens --format=json` over `lib` (607 files) | identical | identical |
 | `lens --format=json` over the plugin trees (201 files) | **15 sites change**: `body_return` goes from `untyped` / `dynamic` to `nil` (12), `Array[String]`, `Array[untyped]` and one tuple array | identical |
 
-The changed outputs are correct readings, but WD5 keeps them out of `sig-gen` and lens.
+Both changes are correct readings, and ADR-130 WD5 treats the two commands differently:
 
-- **sig-gen.** A plugin's `prepare` returns `nil` because `publish` declares `-> nil`. sig-gen would now
-  write that reading into generated RBS, from an interface the plugin author never wrote against.
-- **lens.** Lens reports the same reading as precision.
-- **Mechanism.** Both commands analyse with dispatch off, and the parity criterion makes that output
-  master's.
-- **What this measurement does not prove.** sig-gen's `--no-cache` covers effect collection only, so the
-  dispatch switch must also be part of the analysis-cache identity. This measurement ran cold and does not
-  prove that part.
+- **sig-gen runs with dispatch off.** A plugin's `prepare` returns `nil` because `publish` declares `-> nil`.
+  With dispatch on, sig-gen would write that reading into generated RBS, from an interface the plugin author
+  never wrote against. sig-gen reads no analysis cache, so no cache identity is involved.
+- **Lens runs with dispatch on, as `check` does.** Lens is documented as the type `rigor check` gives, so the
+  15 changed plugin-tree sites are the intended precision, and lens shares `check`'s snapshot.
+
+**A newly reachable finding.** `call.possible-nil-receiver` can now fire in third-party plugin code. It
+applies to results of `_Scope#local`, `_Scope#self_type`, `_Scope#source_path` and
+`_Environment#nominal_for_name`, which the interfaces declare nilable.
+
+- It is correct by contract, and it is the same finding a `Rigor::Scope` receiver would give.
+- The bundled plugin trees measured clean: 0 added rows above.
 
 ## Reach (draft 2, `b7e7d73d9`, every interface)
 
@@ -264,6 +301,7 @@ Setup:
 | draft 2 with a `TypeName`-set alias check, `1e5972f66` | +187,301 (+0.25%) | — | — |
 | draft 3, `3410399da` | +943,727 (+1.27%) | +142,280 (+0.17%) | +57,089 (+0.19%) |
 | **draft 3 with a counting merge, `992d583c6`** | **+5,269 (+0.007%)** | **+4,364 (+0.005%)** | **−2,175 (−0.007%)** |
+| round 3, `6037e728a` (nested erasure merge, nil block-pass) | +63,380 (+0.085%) | not re-measured | not re-measured |
 
 Attribution, each step measured as the one change between two arms:
 
@@ -274,6 +312,10 @@ Attribution, each step measured as the one change between two arms:
 - Draft 3's first union merge built a `select` array on every union normalisation. That was +938,458 on
   `lib` (`3410399da` against `992d583c6`), and it is the whole of draft 3's cost above the band.
 - Counting before merging removes it.
+
+Round 3 is not attributed. Its nested facet check runs on every union normalisation, and
+`HashShape#pairs.each_value.any?` builds an enumerator per shape member; that is the likely source. It
+stays inside the band, and the implementation can walk the shape without an enumerator.
 
 The diagnostic count is equal on every arm. The diagnostic, parity, sig-gen and lens measurements ran on
 `3410399da`. `992d583c6` changes only how the merge decides, not what it returns, and the fixture
@@ -320,6 +362,6 @@ misses #2792 and #2793. ADR-130 § "Deferred" holds the re-entry conditions.
   but nothing here proves it.
 - The overload-shape rule's keyword handling is approximate in the prototype: a trailing keyword hash
   against an overload without keywords. Slice 1b needs a fixture per arm.
-- The instrument is `interface-proto` at `992d583c6`, local only.
+- The instrument is `interface-proto` at `6037e728a`, local only.
 - One base-engine run of the faraday differential crashed with `SIGSEGV`. The rerun was clean, and the
   table reports the rerun.

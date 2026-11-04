@@ -70,7 +70,7 @@ class Repros
   def each_with_index(xs)
     Rigor.dump_type(xs.each)
     xs.each.with_index { |v, i| v + i }
-    xs.each { |v| Rigor.dump_type(v) } # parity: declared-member
+    xs.each { |v| Rigor.dump_type(v) } # parity: declared-member => Integer
   end
 
   # The other side of the union rule: an interface value joined with a nominal keeps its facet, and a call declared
@@ -78,7 +78,7 @@ class Repros
   def mix(a, s, f)
     y = f ? a : s
     Rigor.dump_type(y)
-    Rigor.dump_type(y.to_str) # parity: declared-member
+    Rigor.dump_type(y.to_str) # parity: declared-member => String
     case y
     when nil then 1
     when String then 2
@@ -89,7 +89,7 @@ class Repros
   # A control: the declared member resolves, and an undeclared one is silent.
   def facet(x)
     Rigor.dump_type(x)
-    Rigor.dump_type(x.to_str) # parity: declared-member
+    Rigor.dump_type(x.to_str) # parity: declared-member => String
     Rigor.dump_type(x.undeclared)
   end
 

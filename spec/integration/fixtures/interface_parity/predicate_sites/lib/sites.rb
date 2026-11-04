@@ -51,7 +51,7 @@ class Sites
       Rigor.dump_type(b)
     end
     for c in each
-      Rigor.dump_type(c) # parity: declared-member
+      Rigor.dump_type(c) # parity: declared-member => Integer
     end
   end
 

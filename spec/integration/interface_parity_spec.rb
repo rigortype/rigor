@@ -24,8 +24,8 @@ require "rigor/configuration"
 # is live there.
 #
 # A row whose text a declared-member call changes, the call's own line or a line reading its result, is marked
-# `# parity: declared-member`; the `:default` mode may differ there and nowhere else. The `:dispatch_off` mode may not
-# differ on any row, marked or not.
+# `# parity: declared-member => T`; the `:default` mode may differ there and nowhere else, and there it must read `T`,
+# so the dispatch it permits is pinned too. The `:dispatch_off` mode may not differ on any row, marked or not.
 #
 # The controls show the gate can fail: with the union merge planted out the carrier fails on review round 3's join
 # divergence, so the gate tells a facet rename from a structural change; and dispatch on differs from the baseline at
@@ -40,6 +40,7 @@ module InterfaceParity
   DISPATCH_MODES = %i[default].freeze
 
   DECLARED_MARK = "# parity: declared-member"
+  DECLARED_ANSWER = /# parity: declared-member => (?<type>.+)$/
   FACET_NAME = /Dynamic\[(?:::)?Rigor::Plugin::_\w+(?<args>\[(?:[^\[\]]|\g<args>)*\])?\]/
 
   module_function
@@ -57,6 +58,16 @@ module InterfaceParity
     Dir.glob("lib/**/*.rb", base: dir).flat_map do |path|
       File.readlines(File.join(dir, path)).each_with_index.filter_map do |line, index|
         [path, index + 1] if line.include?(DECLARED_MARK)
+      end
+    end
+  end
+
+  # `[path, line] => T` for every marked line, `T` being what the dispatching engine must answer there.
+  def declared_answers(dir)
+    Dir.glob("lib/**/*.rb", base: dir).each_with_object({}) do |path, answers|
+      File.readlines(File.join(dir, path)).each_with_index do |line, index|
+        match = DECLARED_ANSWER.match(line)
+        answers[[path, index + 1]] = match[:type].strip if match
       end
     end
   end
@@ -145,6 +156,15 @@ RSpec.describe "ADR-130 interface parity (behavioural gate)" do
         expect(baseline).to include("dump_type")
         expect(run_in(:erasure, fixture_dir(fixture))).not_to include("Rigor::Plugin::_")
         expect(candidate).to eq(baseline)
+      end
+
+      it "#{fixture}: #{mode} answers each declared-member call as its mark says" do
+        dir = fixture_dir(fixture)
+        answers = InterfaceParity.declared_answers(dir)
+        rows = JSON.parse(run_in(mode, dir)).select { |row| answers.key?([row["path"], row["line"]]) }
+        read = rows.to_h { |row| [[row["path"], row["line"]], row["message"].delete_prefix("dump_type: ")] }
+
+        expect(read).to eq(answers)
       end
     end
   end

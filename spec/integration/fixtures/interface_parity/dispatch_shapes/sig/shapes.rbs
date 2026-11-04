@@ -12,6 +12,9 @@ module Rigor
       def hash_positional: (Integer a, Hash[Symbol, Integer] h) -> Integer
       def untyped_params: (?) -> Integer
       def me: () -> self
+      def same: (self other) -> Integer
+              | (Integer other) -> String
+      def blk_pos: (Integer a) { (String) -> void } -> Integer
       def agree: () -> Integer
                | () { (Integer) -> void } -> Integer
     end

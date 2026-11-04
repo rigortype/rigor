@@ -50,7 +50,7 @@ module Rigor
       # restores on the way out: the `def`s on the undefined side of a definedness guard, and each `def`'s visibility.
       # Both are frozen once built and read only by {.walk_node}'s callees.
       GUARDED_DEFS = TypingState.frame(:patched_scanner_guarded_defs, reason: "installed per scanned file's walk")
-      DEF_VISIBILITIES = TypingState.frame(:patched_scanner_def_visibilities, reason: "installed per scanned file's walk")
+      DEF_VISIBILITIES = TypingState.frame(:patched_scanner_def_visibilities, reason: "installed per scanned file")
       private_constant :GUARDED_DEFS, :DEF_VISIBILITIES
 
       module_function

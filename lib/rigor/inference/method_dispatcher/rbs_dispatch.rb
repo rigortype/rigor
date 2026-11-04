@@ -302,6 +302,9 @@ module Rigor
 
           def collect_rbs_complete_member_names(environment)
             loader = environment.rbs_loader
+            # An RBS-blind environment declares nothing, so no override takes an ancestor's parameters.
+            return Set.new.freeze if loader.nil?
+
             ancestors = ALLOWED_RBS_COMPLETE_ANCESTORS + (environment.plugin_registry&.rbs_complete_ancestors || [])
             ancestors.each_with_object(Set.new) do |ancestor, names|
               names.merge(loader.declared_method_names(ancestor, skip: OBJECT_SURFACE_OWNERS))

@@ -314,6 +314,17 @@ RSpec.describe Rigor::Inference::MethodParameterBinder do
       end
     end
 
+    # #2681 — an RBS-blind environment (no loader) declares no ancestor member, so an override in a source-only
+    # class binds nothing from the bridge and the name gate must not reach for the missing loader.
+    it "binds nothing from an ancestor in an RBS-blind environment" do
+      blind = Rigor::Environment.new(rbs_loader: nil)
+      binder = described_class.new(environment: blind, class_path: "BlindLeaf", singleton: false,
+                                   scope: Rigor::Scope.empty(environment: blind))
+
+      expect(binder.bind(def_node("def diagnostics_for_file(path:); path; end")))
+        .to eq(path: Rigor::Type::Combinator.untyped)
+    end
+
     # Issue #1430 — `(?)` is `RBS::Types::UntypedFunction`, which carries no parameter lists. Before the guard the
     # binder's slot providers called `required_positionals` on it and the whole file failed with an internal error.
     context "with an untyped-parameter `(?)` signature" do

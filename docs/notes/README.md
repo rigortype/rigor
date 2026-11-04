@@ -147,6 +147,7 @@ comparison) appears nowhere else in this index.
 | 2026-09-27 | [v0.3.9 → v0.4.0 engine allocations per merge on a frozen corpus — +19.1% is mostly feature volume; a third is four accidental hot-path costs](20260927-v040-engine-allocation-attribution.md) |
 | 2026-10-15 | [`rigor lens` computation spike — a forced target reads check's seeded index with matching diagnostics; a warm lens on redmine costs 11 s, 80% of it view templates](20261015-lens-computation-spike.md) |
 | 2026-11-04 | [Work-multiplier census — `type_of` results are never remembered and callee bodies run once per call context; a prototype memo cuts Rails-corpus allocations 24–34% with identical diagnostics](20261104-work-multiplier-census.md) |
+| 2026-11-04 | [The `type_of` memo's ceiling under a state-id key — main pass and callee bodies remove 11% of Mastodon's allocations beyond the rule walk (3% on `lib`), with identical diagnostics and 0 shadow type mismatches; what two independent design reviews agreed on](20261104-type-of-memo-ceiling.md) |
 
 ## Process & meta
 

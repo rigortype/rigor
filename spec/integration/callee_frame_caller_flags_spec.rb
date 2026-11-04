@@ -4,8 +4,9 @@
 # threading suppression (a block fold, a `break` arm, a block joined with its `next` values) and the reflective-ivar
 # repeat depth (a `for` body, a loop predicate). Both only widen, and the return memo's key had no term for either, so
 # the first caller decided the return every later caller was served: `h.upcase` reported or not depending on whether a
-# `for` body reached `h` first, down to the order of the file names. The callee frame now clears the repeat depth, and
-# the threading suppression is a memo-key term (clearing it let folds nest; callee_fold_nesting_growth_spec.rb).
+# `for` body reached `h` first, down to the order of the file names. The callee frame now clears the repeat depth. The
+# threading suppression stays order-dependent (#2782): clearing it let folds nest (callee_fold_nesting_growth_spec.rb)
+# and keying the memo on it cost a fifth of `lib`'s allocations, so its examples are pending and fail once it is fixed.
 require "spec_helper"
 require "tmpdir"
 require "fileutils"
@@ -89,6 +90,7 @@ RSpec.describe "a callee's return does not depend on its caller's frame flags", 
       "a block joined with its `next` values" => "[1].map { |e| next g if e; 2 }"
     }.each do |frame, in_frame|
       it "reports the call outside the block after #{frame} reached the callee first" do
+        pending("the threading suppression is not a memo-key term yet (#2782)")
         src = source(fold_callee, in_frame, "g.foo")
         expect(rules(src)).to eq([[line_of(src, "g.foo"), undefined]])
       end

@@ -1,2 +1,3 @@
-- **[inference]** A call on a user method's inferred return now reports the same diagnostics whichever caller the run reaches first. ([#2773](https://github.com/rigortype/rigor/pull/2773))
-  - A method first reached from inside a `for` body, a loop predicate, a block fold, a `break` arm or a block joined with its `next` values had its return widened for every later caller. A true `call.undefined-method` on that return then went unreported, depending on statement order or on the order of the file names.
+- **[inference]** A call on a user method's inferred return no longer depends on whether a `for` body or a loop predicate reached the method first. ([#2773](https://github.com/rigortype/rigor/pull/2773))
+  - The loop's one-pass widening of `instance_variable_set` leaked into the method's body, and the widened return was served to every later caller. A true `call.undefined-method` on that return then went unreported, depending on statement order or on the order of the file names.
+  - The same order dependence through a block fold remains (#2782).

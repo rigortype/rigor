@@ -438,9 +438,9 @@ module Rigor
       # the CALLER's loop body is walked once for many runs, while the callee's body starts from its own scope and
       # reads its own write. The depth only widens and the return memo's key has no term for it, so a body first
       # reached from a `for` body stored a wider return that every later caller was served. The block-body
-      # threading suppression is NOT cleared here, although it is the same kind of caller flag: it is what keeps a
-      # fold from nesting through callee frames, so it is a memo-key term instead
-      # ({#consult_and_store_return_memo}).
+      # threading suppression is the same kind of caller flag and is NOT cleared here (issue #2782): it is what
+      # keeps a fold from nesting through callee frames, and clearing it re-walked unstorable frames
+      # exponentially, while keying the memo on it cost a fifth of `lib`'s allocations.
       def self.with_call_site_frame(yield_type, forwarded_arg_types, &)
         ReflectiveIvarWrite.outside_repeating_body do
           with_yield_value_type(yield_type) { with_forwarded_arg_types(forwarded_arg_types, &) }
@@ -3461,17 +3461,10 @@ module Rigor
         # passed in for the same reason: a yielding callee's return depends on the block THIS call site
         # hands it, so two call sites passing differently-typed blocks must not share an entry. It is nil
         # for every def that cannot reach a `yield`, which is where the memo's mass is.
-        # PR #2773 — the FIFTH: the block-body threading suppression the caller's fold installed
-        # ({#without_block_body_threading}). A body walked under it types its block tails without their
-        # prefix and answers wider, so without the term the first caller decided the return every later
-        # caller was served. It is a key term rather than reset at the frame because the suppression is what
-        # stops a fold from nesting through every callee below it, which re-walked unstorable frames
-        # exponentially.
         memo_key = [receiver.describe(:short),
                     arg_types.map { |type| type.describe(:short) },
                     body_scope.struct_fold_safe?(:self),
-                    ExpressionTyper.current_yield_value_type&.describe(:short),
-                    block_body_threading_suppressed?]
+                    ExpressionTyper.current_yield_value_type&.describe(:short)]
         if (entry = per_def[memo_key])
           BudgetTrace.hit(BudgetTrace::MEMO_HITS)
           Analysis::DependencyRecorder.replay(entry.read_set) if Analysis::DependencyRecorder.active?

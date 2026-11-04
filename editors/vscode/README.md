@@ -351,11 +351,21 @@ the folder itself). Absolute paths are used as given. An absolute
   `rigor check` for the folder that holds the file, as a plain process
   with the `$rigor` problem matcher. Like any matcher task, its problems
   belong to the shared owner `rigor`, so in a multi-root workspace one
-  such entry's run replaces another's problems. To keep each folder's
-  problems apart, give the entry `"folder": "<folder name>"`: it then
-  runs in the terminal described above, with per-folder results under
-  `source: "rigor check"`. Entries for several folders need distinct
-  `folder` values anyway when they start together (`folderOpen`).
+  such entry's run replaces another's problems, and **Rigor: Clear Check
+  Results** does not clear them (clear them from the Problems panel).
+  If no Rigor runs in the folder, the entry prints why and exits 1.
+- To keep each folder's problems apart, give the entry
+  `"folder": "<key>"`: it then runs in the terminal described above,
+  with per-folder results under `source: "rigor check"`. The key is the
+  folder's name, or, when two workspace folders share a name, the
+  folder's path relative to the directory of the `.code-workspace` file
+  with `/` separators (`../x/app`; an untitled workspace uses the
+  absolute path). The provided tasks carry their key in the same
+  property. A `folder` that is not the key of the entry's own folder (a
+  copied or stale one) is ignored: the entry runs as one without
+  `folder`, and the Rigor output channel says so once. Entries that
+  start together (`runOn: folderOpen`) need their key because VS Code
+  tells terminal tasks apart only by their definition.
 - The extension publishes every finding it reads, including several at
   one position. (The contributed matcher's problems showed only the
   first at a position.)

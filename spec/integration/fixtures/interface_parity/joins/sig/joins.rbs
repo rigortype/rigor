@@ -15,4 +15,5 @@ class Joins
   def nested: (Rigor::Plugin::_ProbeS a, untyped b, bool f) -> untyped
   def absorb: (Rigor::Plugin::_ProbeS a, untyped b, bool f, bool g) -> untyped
   def declared: (Rigor::Plugin::_ProbeS a) -> untyped
+  def order: (Rigor::Plugin::_ProbeS a, bool f) -> untyped
 end

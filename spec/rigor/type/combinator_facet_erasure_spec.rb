@@ -145,6 +145,14 @@ RSpec.describe Rigor::Type::Combinator do
         expect(c.union(deep.call(facet_a), deep.call(facet_b))).to eq(deep.call(untyped))
       end
 
+      # Member order reads the erased forms: a facet does not move its member ahead of one master sorts first.
+      it "orders a facet member where its erased form sorts" do
+        string = c.dynamic(c.nominal_of("String"))
+
+        expect(c.union(facet_a, string).members).to eq([string, facet_a])
+        expect(c.union(string, facet_a).members).to eq([string, facet_a])
+      end
+
       # Absorption reads the erased forms: an arm master absorbs is absorbed with a facet in it too.
       it "absorbs a Tuple arm whose erased form another arm contains" do
         wider = c.tuple_of(c.union(untyped, integer))

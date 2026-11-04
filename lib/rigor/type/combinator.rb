@@ -1171,10 +1171,18 @@ module Rigor
         # need not render alike (`Constant[1..2]` and `Constant[1..2.0]`), so equality is not a safe key. A
         # non-main Ractor may not read the module's ivar, so a pool worker renders the key every time, as every
         # run did before.
+        #
+        # ADR-130 WD1 — a member bearing a facet sorts by its erased form's rendering, so a facet does not move it:
+        # `Dynamic[_A] | Dynamic[String]` keeps master's `Dynamic[String] | Dynamic[top]` order. The facet scan runs
+        # only when a key is rendered, and a member without a facet renders as it always did.
         def sort_key(member)
-          return member.describe(:short) unless Ractor.main?
+          return render_sort_key(member) unless Ractor.main?
 
-          @sort_keys[member] ||= member.describe(:short)
+          @sort_keys[member] ||= render_sort_key(member)
+        end
+
+        def render_sort_key(member)
+          (facet_bearing?(member) ? erase_facets(member) : member).describe(:short)
         end
       end
 

@@ -43,4 +43,15 @@ class Joins
   def declared(a)
     Rigor.dump_type(a.to_str) # parity: declared-member
   end
+
+  def put(set) = set.add(1)
+
+  # Member order: master sorts `Dynamic[String] | Dynamic[top]`, and a facet must not move its member first.
+  def order(a, f)
+    names = ARGV.to_set
+    put(names)
+    names.each do |name|
+      Rigor.dump_type(f ? a : name)
+    end
+  end
 end

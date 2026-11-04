@@ -16,27 +16,39 @@ end
 ERASURE_CARRIERS = Rigor::Type.constants.map { |name| Rigor::Type.const_get(name) }
                               .select { |k| k.is_a?(Class) && k.method_defined?(:erase_to_rbs) }.freeze
 
-# One instance per type-holding carrier, with `leaf` in every type slot.
+# One instance per type-holding carrier. `fill.call(slot)` answers the type for each type slot, named by the reader
+# `TYPE_CHILDREN` lists for it, so a slot the table misses is one the sample asks for and the table does not name.
 ERASURE_SAMPLES = {
-  Rigor::Type::Dynamic => ->(leaf) { Rigor::Type::Combinator.dynamic(Rigor::Type::Combinator.tuple_of(leaf)) },
-  Rigor::Type::Nominal => ->(leaf) { Rigor::Type::Combinator.nominal_of("Array", type_args: [leaf]) },
-  Rigor::Type::Tuple => ->(leaf) { Rigor::Type::Combinator.tuple_of(leaf) },
-  Rigor::Type::HashShape => ->(leaf) { Rigor::Type::Combinator.hash_shape_of({ k: leaf }) },
-  Rigor::Type::Union => ->(leaf) { Rigor::Type::Combinator.union(leaf, Rigor::Type::Combinator.nominal_of("Integer")) },
-  Rigor::Type::Intersection => lambda { |leaf|
-    Rigor::Type::Combinator.intersection(Rigor::Type::Combinator.tuple_of(leaf),
+  Rigor::Type::Dynamic => lambda { |fill|
+    Rigor::Type::Combinator.dynamic(Rigor::Type::Combinator.tuple_of(fill.call(:static_facet)))
+  },
+  Rigor::Type::Nominal => ->(fill) { Rigor::Type::Combinator.nominal_of("Array", type_args: [fill.call(:type_args)]) },
+  Rigor::Type::Tuple => ->(fill) { Rigor::Type::Combinator.tuple_of(fill.call(:elements)) },
+  Rigor::Type::HashShape => ->(fill) { Rigor::Type::Combinator.hash_shape_of({ k: fill.call(:pairs) }) },
+  Rigor::Type::Union => lambda { |fill|
+    Rigor::Type::Combinator.union(fill.call(:members), Rigor::Type::Combinator.nominal_of("Integer"))
+  },
+  Rigor::Type::Intersection => lambda { |fill|
+    Rigor::Type::Combinator.intersection(Rigor::Type::Combinator.tuple_of(fill.call(:members)),
                                          Rigor::Type::Combinator.nominal_of("Comparable"))
   },
-  Rigor::Type::Difference => lambda { |leaf|
-    Rigor::Type::Difference.new(Rigor::Type::Combinator.tuple_of(leaf), Rigor::Type::Combinator.tuple_of(leaf))
+  Rigor::Type::Difference => lambda { |fill|
+    Rigor::Type::Difference.new(Rigor::Type::Combinator.tuple_of(fill.call(:base)),
+                                Rigor::Type::Combinator.tuple_of(fill.call(:removed)))
   },
-  Rigor::Type::Refined => ->(leaf) { Rigor::Type::Refined.new(Rigor::Type::Combinator.tuple_of(leaf), :lowercase) },
-  Rigor::Type::Maybe => ->(leaf) { Rigor::Type::Combinator.maybe_of(leaf) },
-  Rigor::Type::Result => ->(leaf) { Rigor::Type::Combinator.result_of(leaf, leaf) },
-  Rigor::Type::App => ->(leaf) { Rigor::Type::App.new(:"probe::box", [leaf], bound: leaf) },
-  Rigor::Type::BoundMethod => ->(leaf) { Rigor::Type::Combinator.bound_method_of(leaf, :call) },
-  Rigor::Type::DataInstance => ->(leaf) { Rigor::Type::Combinator.data_instance_of(members: { x: leaf }) },
-  Rigor::Type::StructInstance => ->(leaf) { Rigor::Type::Combinator.struct_instance_of(members: { x: leaf }) }
+  Rigor::Type::Refined => lambda { |fill|
+    Rigor::Type::Refined.new(Rigor::Type::Combinator.tuple_of(fill.call(:base)), :lowercase)
+  },
+  Rigor::Type::Maybe => ->(fill) { Rigor::Type::Combinator.maybe_of(fill.call(:value_type)) },
+  Rigor::Type::Result => ->(fill) { Rigor::Type::Combinator.result_of(fill.call(:ok_type), fill.call(:err_type)) },
+  Rigor::Type::App => ->(fill) { Rigor::Type::App.new(:"probe::box", [fill.call(:args)], bound: fill.call(:bound)) },
+  Rigor::Type::BoundMethod => ->(fill) { Rigor::Type::Combinator.bound_method_of(fill.call(:receiver_type), :call) },
+  Rigor::Type::DataInstance => lambda { |fill|
+    Rigor::Type::Combinator.data_instance_of(members: { x: fill.call(:members) })
+  },
+  Rigor::Type::StructInstance => lambda { |fill|
+    Rigor::Type::Combinator.struct_instance_of(members: { x: fill.call(:members) })
+  }
 }.freeze
 
 RSpec.describe Rigor::Type::Combinator do
@@ -163,15 +175,25 @@ RSpec.describe Rigor::Type::Combinator do
       end
 
       ERASURE_SAMPLES.each do |carrier, sample|
-        it "erases the facet in every type slot of #{carrier.name.split('::').last}" do
+        it "finds and erases the facet in each type slot of #{carrier.name.split('::').last}" do
           allow(described_class).to receive(:erased_facet?).and_wrap_original do |original, facet|
             facet.is_a?(ErasureStubFacet) || original.call(facet)
           end
-          carried = sample.call(described_class.dynamic(ErasureStubFacet.new("_A")))
+          untyped = described_class.untyped
+          slots = []
+          plain = sample.call(lambda { |slot|
+            slots << slot
+            untyped
+          })
 
-          expect(carried).to be_a(carrier)
-          expect(described_class.send(:facet_bearing?, carried)).to be(true)
-          expect(described_class.send(:erase_facets, carried)).to eq(sample.call(described_class.untyped))
+          expect(slots.uniq).to match_array(described_class::TYPE_CHILDREN.fetch(carrier))
+          slots.uniq.each do |slot|
+            carried = sample.call(->(at) { at == slot ? described_class.dynamic(ErasureStubFacet.new("_A")) : untyped })
+
+            expect(carried).to be_a(carrier)
+            expect(described_class.send(:facet_bearing?, carried)).to be(true), slot.to_s
+            expect(described_class.send(:erase_facets, carried)).to eq(plain), slot.to_s
+          end
         end
       end
     end

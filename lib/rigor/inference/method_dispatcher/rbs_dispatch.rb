@@ -362,7 +362,11 @@ module Rigor
 
           def dispatch_one(receiver, method_name, args, environment, block_type, self_type_override = nil, # rubocop:disable Metrics/ParameterLists
                            public_only: false, scope: nil, call_node: nil)
-            receiver, self_type_override = element_or_receiver(receiver, method_name, environment, self_type_override)
+            # Issue #1794 — a sequence's inherited Enumerable surface reads its Rigor-private element argument, with
+            # `self` still the sequence.
+            element = ArithmeticSequenceElements.element_receiver(receiver, method_name, environment)
+            self_type_override = sequence_self(element, receiver, self_type_override)
+            receiver = element || receiver
             descriptor = receiver_descriptor(receiver)
             return nil unless descriptor
 
@@ -371,8 +375,7 @@ module Rigor
               return dispatch_interface(receiver, class_name, receiver_args, method_name, args, environment, block_type,
                                         scope: scope, call_node: call_node)
             end
-            method_definition = lookup_method(environment, class_name, kind, method_name, scope,
-                                              call_node: call_node)
+            method_definition = lookup_method(environment, class_name, kind, method_name, scope, call_node: call_node)
             return nil unless method_definition
             return nil if public_only && method_private?(method_definition)
             # Issue #823 — a declaration that states the member's presence and parameters but not its
@@ -392,8 +395,7 @@ module Rigor
               block_type: block_type, environment: environment,
               self_type_override: self_type_override ||
                                   SelfSubstitute.for(receiver, receiver_args, method_name, args, block_type),
-              scope: scope,
-              call_node: call_node
+              scope: scope, call_node: call_node
             )
           rescue StandardError
             # Defensive: if RBS' definition builder raises on a broken hierarchy (e.g., partially loaded
@@ -401,11 +403,10 @@ module Rigor
             nil
           end
 
-          # Issue #1794 — a sequence's inherited Enumerable surface reads its Rigor-private element argument, with
-          # `self` still the sequence: `[receiver, self_type_override]` for the dispatch.
-          def element_or_receiver(receiver, method_name, environment, self_type_override)
-            element = ArithmeticSequenceElements.element_receiver(receiver, method_name, environment)
-            element ? [element, self_type_override || receiver] : [receiver, self_type_override]
+          # The `self` a call on a sequence's element keeps: the sequence (#1794), unless the caller already set one.
+          # A method rather than a two-value return, which would allocate an Array on every dispatch.
+          def sequence_self(element, receiver, self_type_override)
+            element ? (self_type_override || receiver) : self_type_override
           end
 
           # ADR-130 WD3 — a call on a `Rigor::Plugin` interface value (`Dynamic[Interface]`). A member the interface
@@ -2138,34 +2139,34 @@ module Rigor
             return [] unless descriptor
 
             class_name, kind, receiver_args = descriptor
-            method_definition, type_vars =
-              if kind == :interface
-                # ADR-130 WD3 — a block literal binds its parameters through the overloads that take the call's
-                # shape, as the call's return does ({#dispatch_interface}).
-                declared = interface_method(environment, class_name, method_name)
-                [declared && InterfaceShape.accepting(declared, args, block: true, call_node: call_node),
-                 interface_type_vars(environment, class_name, receiver_args)]
-              else
-                [lookup_method(environment, class_name, kind, method_name, scope),
-                 build_type_vars(environment, class_name, receiver_args)]
-              end
+            method_definition = probe_definition(environment, class_name, kind, method_name, args, scope, call_node)
             return [] unless method_definition
 
+            type_vars =
+              if kind == :interface
+                interface_type_vars(environment, class_name, receiver_args)
+              else
+                build_type_vars(environment, class_name, receiver_args)
+              end
             extract_block_param_types(
               method_definition,
-              class_name: class_name,
-              kind: kind,
-              args: args,
-              type_vars: type_vars,
-              environment: environment,
-              receiver: receiver,
-              receiver_args: receiver_args,
-              method_name: method_name,
+              class_name: class_name, kind: kind, args: args, type_vars: type_vars, environment: environment,
+              receiver: receiver, receiver_args: receiver_args, method_name: method_name,
               keywords_last: ArgumentNodes.keyword_hash_last?(call_node, args),
               positional_splat: splat_indices(call_node, args)
             )
           rescue StandardError
             []
+          end
+
+          # The declaration the block-parameter probe reads. On an interface value a block literal binds its parameters
+          # through the overloads that take the call's shape, as the call's return does (ADR-130 WD3,
+          # {#dispatch_interface}).
+          def probe_definition(environment, class_name, kind, method_name, args, scope, call_node)
+            return lookup_method(environment, class_name, kind, method_name, scope) unless kind == :interface
+
+            declared = interface_method(environment, class_name, method_name)
+            declared && InterfaceShape.accepting(declared, args, block: true, call_node: call_node)
           end
 
           # rubocop:disable Metrics/ParameterLists

@@ -1,8 +1,9 @@
 # ADR-113 — `rigor lens`: a declaration map with type provenance, for agents and tools
 
-Status: **Accepted, 2026-09-19; amended 2026-10-15 (§ Amendment).** #1081 (xxh3), #1082
-(`declared_members`) and phase 1 (#1083, `rigor lens FILE…` and the `rigor_lens` MCP tool, #1923)
-are implemented; symbol targets (#1080), phase 2 (#1085) and the `type-of` convergence are not.
+Status: **Accepted, 2026-09-19; amended 2026-10-15 and 2026-11-04 (§ Amendment sections).** #1081
+(xxh3), #1082 (`declared_members`) and phase 1 (#1083, `rigor lens FILE…` and the `rigor_lens` MCP
+tool, #1923) are implemented; symbol targets (#1080), phase 2 (#1085), the `type-of` convergence and
+claim checking (`--claims`) are not.
 Adds a `rigor lens` command. It is the "Rigor lens" that ZARD's `CONTEXT.md` and ADR-0003 already
 name. This ADR reverses #512's ruling for `rigor type-of`: that command stops printing "unseeded" and
 adopts WD2's computation. Implementation is tracked by #1080–#1085.
@@ -236,3 +237,44 @@ premises above do not hold on current code. The binding output contract is now
   `define_method`, other explicit receivers, defs in blocks, `Data` / `Struct` classes,
   `module_function`, `refine` and plugin members are listed as omissions, never dropped silently. The
   #1083 fixture for `refine` therefore moves to the slice that models it.
+
+## Amendment 2026-11-04 — documentation claim checking, as agreed with ZARD in #2737
+
+[#1907](https://github.com/rigortype/rigor/issues/1907) left claim checking open as item 7, with one firm
+answer: ZARD should not build a type-compatibility engine, so the check belongs to a Rigor capability. [#2737](https://github.com/rigortype/rigor/issues/2737) settled the
+boundary with ZARD's adapter. The binding contract is
+[`docs/internal-spec/lens-claims.md`](../internal-spec/lens-claims.md); it is accepted and not implemented,
+and ZARD's mismatch diagnostics wait for a release that advertises it.
+
+- **Inside the lens run, not a new command.** `rigor lens --claims REQUEST` answers claims in the run that
+  produces the lens document. ZARD already calls lens to render signatures, and a second command would pay
+  the cold run twice (28 s on Rigor's tree, 31 s on redmine in the #1908 spike). A claim binds to a lens site
+  by the consumer's own declaration span, validated against the site, so no preflight lens run is needed. The
+  request and its `claims` section carry their own schema and revision; `lens/v0` only gains a capability and
+  a field.
+- **The relation is directional inclusion** (`C ⊆ F` for a parameter, `F ⊆ C` for a return), and a `conflict`
+  needs a proof that the inclusion is false, never a failed proof that it holds.
+- **The proofs are the ones `rbs.contradicting-signature` already makes.** `Environment::MemberConsistency`
+  compares two authored types for one member: which is more precise, whether they share any value. Its
+  disjointness proof trusts only Ruby core and stdlib classes, never modules, project classes or gem classes,
+  because a reopening or an `include` can change what those share, and it refuses relative names, because
+  `String` inside `module App` may be a Ruby-only `App::String`. Claim checking reuses that fragment for
+  `conflict`. A relative claim name is resolved in RBS and again by Ruby's constant lookup over the run's
+  project index; the two must agree before either verdict. Agreement still assumes the index saw every
+  constant of the project's namespaces, which a file outside `paths:` or a gem reopening a namespace breaks,
+  so a relative name proves a `conflict` only in a top-level declaration, where Ruby looks it up in
+  `Object`'s own table first and nothing can shadow a core name without reassigning it. Even a reopened core
+  class can be given a nested constant by a file Rigor does not read. Elsewhere a conflict needs the absolute
+  spelling (`::Integer`), so most real conflicts will need it. An inclusion may lean on any declared
+  ancestry, project classes included, since the authored contract is authoritative. A wrong `conflict` is a diagnostic on documentation that may be correct, the
+  error AGENTS.md weighs most; a missed one is an `unknown`.
+- **Gradual acceptance is not the relation.** `Inference::Acceptance` lets `Dynamic` pass every boundary;
+  claim checking answers `unknown` wherever `untyped` appears.
+- **Most claims will read `unknown`.** Revision 1 checks one authored overload's return and required
+  positional and keyword parameters, in plain RBS. Inferred slots, library and plugin contracts, `@extrbs`,
+  refinements, generics beyond equality, interfaces and overloads are each `unknown` with a reason. ZARD
+  accepted that and summarises the reasons on its side.
+- **A failed target is `unavailable`, not `unknown`.** `unknown` means Rigor analysed the target and proved
+  neither verdict; a target with no analysis gives no semantic answer.
+- **Claims never reach the analysis.** A lens document with `--claims` equals the one without it, apart
+  from the `claims` field.

@@ -89,6 +89,9 @@ define *behaviour*.
   effective type with its type provenance, plus the facts Rigor already holds about the member. One
   model, rendered as compact text for agents and as a versioned structure for tools such as ZARD. Not
   a second analyzer, and not the source text.
+- **documentation claim** — the type written in an API documentation tag (`@param text [String]`).
+  An optional statement about an API, not a contract: `rigor lens --claims` checks whether the member's
+  authored contract supports it, and the claim never enters the analysis.
 - **type provenance** — where a slot's effective type comes from: `sig` (a `.rbs` file), `inline`
   (`@rbs` / `#:`), `extrbs`, `inferred`, `plugin:<name>`, or `library` (gem or stdlib RBS). A
   `Dynamic` slot carries its dynamic origin instead. Distinct from ADR-108's provenance *criterion*,

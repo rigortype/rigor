@@ -395,3 +395,4 @@ line numbers or documentation: a consumer re-associates on the current file when
 Named-type references, inherited members, symbol queries, plugin-synthesized members, `@extrbs`,
 inferred refinements, effect labels, source bodies and callers. Each is a later capability and appears in
 `capabilities` when it ships.
+Documentation claim checking is specified, not yet shipped, in [`lens-claims.md`](lens-claims.md).

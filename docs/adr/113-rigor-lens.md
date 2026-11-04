@@ -240,8 +240,8 @@ premises above do not hold on current code. The binding output contract is now
 
 ## Amendment 2026-11-04 — documentation claim checking, as agreed with ZARD in #2737
 
-[#1907](https://github.com/rigortype/rigor/issues/1907) item 7 placed claim checking in Rigor: ZARD should
-not build a type-compatibility engine. [#2737](https://github.com/rigortype/rigor/issues/2737) settled the
+[#1907](https://github.com/rigortype/rigor/issues/1907) left claim checking open as item 7, with one firm
+answer: ZARD should not build a type-compatibility engine, so the check belongs to a Rigor capability. [#2737](https://github.com/rigortype/rigor/issues/2737) settled the
 boundary with ZARD's adapter. The binding contract is
 [`docs/internal-spec/lens-claims.md`](../internal-spec/lens-claims.md); it is accepted and not implemented,
 and ZARD's mismatch diagnostics wait for a release that advertises it.
@@ -257,8 +257,11 @@ and ZARD's mismatch diagnostics wait for a release that advertises it.
 - **The proofs are the ones `rbs.contradicting-signature` already makes.** `Environment::MemberConsistency`
   compares two authored types for one member: which is more precise, whether they share any value. Its
   disjointness proof trusts only Ruby core and stdlib classes, never modules, project classes or gem classes,
-  because a reopening or an `include` can change what those share. Claim checking reuses that fragment for
-  `conflict`. An inclusion may lean on any declared ancestry, project classes included, since the authored
+  because a reopening or an `include` can change what those share, and it refuses relative names, because
+  `String` inside `module App` may be a Ruby-only `App::String`. Claim checking reuses that fragment for
+  `conflict`. Claim text is relative almost always, so instead of refusing it, a relative name is resolved in
+  RBS and again by Ruby's constant lookup over the run's project index, which is rooted at `paths:`; the two
+  must agree, and the name proves a `conflict` only when nothing from a gem sits on that lookup path. An inclusion may lean on any declared ancestry, project classes included, since the authored
   contract is authoritative. A wrong `conflict` is a diagnostic on documentation that may be correct, the
   error AGENTS.md weighs most; a missed one is an `unknown`.
 - **Gradual acceptance is not the relation.** `Inference::Acceptance` lets `Dynamic` pass every boundary;

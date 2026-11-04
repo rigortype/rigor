@@ -65,8 +65,10 @@ The offsets and digest are illustrative.
 
 - `grammar` names how `claim` text is read. Revision 1 supports `rbs` only (§ Grammar).
 - `files` lists each file the claims refer to, once, with the digest of the exact bytes the consumer read,
-  spelled and computed as `lens.md`'s file `digest`. Each `path` MUST be the root-relative `path` of one of
-  the invocation's `FILE` targets.
+  spelled and computed as `lens.md`'s file `digest`. Each `path` is root-relative and MUST name one of the
+  invocation's `FILE` targets: some `FILE` argument, resolved against the working directory, is that path,
+  whether or not the file exists. A path several arguments name refers to the first of them; the later ones
+  read `duplicate` in the lens document and answer no claim.
 - `claims` lists the claims to check. `id` is the caller's opaque identifier, unique within the request;
   Rigor echoes it and assigns it no meaning.
 - `declaration` locates the declaration the claim documents, from the consumer's own parse of the file; no
@@ -82,14 +84,20 @@ The offsets and digest are illustrative.
 
 ### Resolving the declaration
 
-A claim's `declaration` resolves against the lens sites of its target, never against a neighbour:
+A claim whose target's lens `status` is not `ok` is not resolved: it is `unavailable` (§ Verdicts). Otherwise
+its `declaration` resolves against the lens sites of its target, never against a neighbour:
 
-1. When its `span` equals the `span` of exactly one site, and that site's `kind`, `owner`, `scope` and `name`
-   equal the request's, the claim is bound to that site. Sites that share a span (`attr_reader :a, :b`) never
-   bind: the claim is `unknown` with `unsupported_declaration`.
-2. When its `span` equals the `span` of an omission (`lens.md` § Omissions), the claim is `unknown` with
+1. When its `span` equals the `span` of exactly one site of kind `method`, and the member
+   `(owner, scope, name)` the request names lists that site (`lens.md` § Members, `sites`), the claim is bound
+   to that site and that member. A module function's site binds under either scope, each to its own member.
+2. When its `span` equals the `span` of a site, but step 1 does not bind it, the claim is `unknown`: with
+   `unsupported_declaration` when the site is not a `method` site (an `attribute`, which a documentation tool
+   may model as a method, or a `class`, `module` or `constant`), or when sites share the span
+   (`attr_reader :a, :b`); with `declaration_mismatch` when the member the request names does not list it.
+3. When its `span` equals the `span` of an omission (`lens.md` § Omissions), the claim is `unknown` with
    `unsupported_declaration`: the declaration exists, but revision 1 does not model it.
-3. Otherwise the request is inconsistent with the source it says it read, which is an integrity error.
+4. Otherwise no declaration of the analysed file has that span, so the request does not describe the source
+   it says it read: an integrity error.
 
 The result names the bound site by its lens `key`, so the consumer can join it to the lens document of the
 same run. A site key is not stable across runs and MUST NOT be stored.
@@ -102,11 +110,15 @@ Each of these is exit 64 with no document, because no per-claim answer could be 
 - an unsupported `schema`, `revision` or `grammar`;
 - a duplicate `id`, a duplicate `files` path, or a claim whose `file` is not in `files`;
 - a `files` path that is not one of the invocation's targets;
-- a `files` digest that differs from the digest of the bytes the analysis read, for a target that has one;
-- a `declaration` or `tag` span outside its file, or a declaration that does not resolve (§ Resolving the
-  declaration, step 3).
+- a `files` digest that differs from the digest of the file's bytes, for a target whose `status` is `ok` or
+  `parse_error`;
+- for such a target, a `declaration` or `tag` span outside its file, or, when it is `ok`, a declaration that
+  does not resolve (§ Resolving the declaration, step 4).
 
-A per-claim problem inside a valid request is a result, never an integrity error (§ Verdicts).
+Rigor validates the request, and compares each digest with the file on disk, before analysis starts, so a
+malformed or stale request costs no run. A file that changes during the run still makes its digest differ from
+the bytes the analysis read, which is the same error. Fields revision 1 does not define are ignored. A
+per-claim problem inside a valid request is a result, never an integrity error (§ Verdicts).
 
 ## Response
 
@@ -130,7 +142,7 @@ The lens document carries the answer as its `claims` field:
       "member": { "owner": "Widget", "scope": "instance", "name": "result" },
       "slot": { "kind": "return" },
       "contract": { "type": "::Integer", "provenance": "sig", "path": "sig/widget.rbs" },
-      "evidence": [{ "rule": "unrelated_classes", "subset_arm": "::Integer", "superset": "::String" }]
+      "evidence": [{ "rule": "unrelated_classes", "arm": "::Integer", "against": "::String" }]
     }
   ]
 }
@@ -158,7 +170,7 @@ The lens document carries the answer as its `claims` field:
 | `member` | `{owner, scope, name}` of the member whose contract was read, or `null`. |
 | `slot` | `{kind: "return"}`, or `{kind: "param", name, param_kind, index}` with `lens.md`'s parameter `kind` vocabulary and the 0-based index in the contract overload's `params`; `null` when no slot was resolved. |
 | `contract` | The contract slot read: `{type, provenance, path}`, spelled as a `typed` lens slot; `null` when none was read. |
-| `evidence` | `[{rule, subset_arm, superset}]`, the arms that decided a `compatible` or `conflict` (one entry per arm for `compatible`, the deciding arm for `conflict`); `[]` otherwise. Types are display text: they explain the verdict and are not a contract (ADR-50 § Decision 3). The consumer MUST NOT re-derive a verdict from them. |
+| `evidence` | `[{rule, arm, against}]`, the arms of `S` (§ Relation) that decided a `compatible` or `conflict`, each with the arm of `P` that included it, or all of `P` that it is disjoint from (one entry per arm for `compatible`, the deciding arm for `conflict`); `[]` otherwise. Types are display text: they explain the verdict and are not a contract (ADR-50 § Decision 3). The consumer MUST NOT re-derive a verdict from them. |
 
 ## Verdicts
 
@@ -174,8 +186,9 @@ The lens document carries the answer as its `claims` field:
 
 | `reason` | When |
 | --- | --- |
-| `unsupported_declaration` | The declaration is an omission, or shares its span with another site. |
-| `unsupported_subject` | The tag is not `@param` or `@return`, a `@param` has no `subject`, or the declaration is not a `method` site. |
+| `unsupported_declaration` | The declaration is an omission, is not a `method` site, or shares its span with another site. |
+| `declaration_mismatch` | A site has the declaration's span, but the member the request names does not list it. |
+| `unsupported_subject` | The tag is not `@param` or `@return`, or a `@param` has no `subject`. |
 | `no_authored_contract` | The slot has no `sig` or `inline` contract: the member's `basis` is not `contract`, the slot is inferred (an `inferred-return` member's return), or the slot reads `unavailable`. |
 | `unsupported_contract_source` | The contract slot's provenance is `library` or `plugin:<id>`. |
 | `extrbs_contract` | The site carries an `@extrbs` contract comment. Rigor does not read `@extrbs` yet ([#1073](https://github.com/rigortype/rigor/issues/1073)), so the contract it holds may be an erasure of the authored one. |
@@ -183,16 +196,19 @@ The lens document carries the answer as its `claims` field:
 | `unsupported_overloads` | The contract has more than one overload, or a forwarding parameter list (`params` is `null`). |
 | `no_such_parameter` | No parameter of the site is named `subject`. |
 | `unsupported_parameter_kind` | The named parameter is not a required positional or required keyword. |
-| `unmatched_parameter` | The site's parameter kinds and the contract overload's do not line up position by position, so the positional parameter cannot be found in the contract. |
+| `unmatched_parameter` | The site's positional parameter kinds and the contract overload's do not line up, or the contract does not declare the named keyword as required (§ Subjects). |
 | `unsupported_grammar_feature` | The claim is not a plain RBS type but is a Rigor extended type (`non-empty-string`). |
 | `unresolved_name` | A type name in the claim does not resolve. |
+| `ambiguous_name` | A relative type name in the claim may name a class Rigor cannot see (§ Grammar, Name resolution), so the claim cannot be compared. |
 | `dynamic_type` | The claim or the contract slot contains `untyped`, anywhere. |
 | `unsupported_type` | The claim or the contract slot contains a form § Relation does not reason about. |
 | `unproven` | Every input was supported, and neither inclusion nor its refutation was proved. |
 
 For a claim in a target whose `status` is `ok`, `invalid_claim` is decided first and wins over every
-`unknown` reason. The `unknown` reasons are then checked in the order listed; the first that applies is
-reported. A later revision MAY add
+`unknown` reason. The `unknown` reasons are then checked in the order listed, and the first that applies is
+reported. Only when none of them applies is the relation computed, giving `compatible`, `conflict` or, last,
+`unproven`: a claim with `untyped` anywhere is `dynamic_type` even when every arm would compare equal. A later
+revision MAY add
 reason codes; a consumer MUST treat an unrecognised code as `unknown` with no further meaning.
 
 ## Grammar
@@ -204,9 +220,26 @@ names it).
   parameterised forms of `%a{rigor:v1:…}` payloads) is `unknown` with `unsupported_grammar_feature`. Only
   text both reject is `invalid_claim`. A type that parses but is ill-formed (an unknown name, a wrong number
   of type arguments) is not `invalid_claim` in revision 1.
-- Type names resolve as they would in an inline `@rbs` annotation on the bound declaration: relative names
-  against the owner's namespace, then upward. A type alias is expanded; a generic alias is `unsupported_type`.
-- Type variables are not in scope: a claim naming one fails to resolve.
+- A type alias is expanded; a generic alias is `unsupported_type`. Type variables are not in scope: a claim
+  naming one fails to resolve.
+
+**Name resolution.** An absolute name (`::String`) is read as written. A relative name is resolved twice, and
+both answers must name the same class or module, or the claim is `unknown`:
+
+- in RBS, as an inline `@rbs` annotation on the bound declaration resolves it (`unresolved_name` when it does
+  not resolve);
+- in Ruby, as the constant of that spelling would resolve in the declaration's body under `check`: the
+  declaration's lexical nesting from its source file, then the ancestors of the innermost class or module,
+  against the run's seeded project index (`ambiguous_name` when the answers differ or Ruby's does not
+  resolve). The index is rooted at the configuration's `paths:` (`lens.md` § Computation), so the answer does
+  not depend on which files were requested.
+
+A relative name may still reach a class Rigor sees in neither: a gem constant defined in Ruby with no RBS. So
+a relative name counts toward a `conflict` (§ Relation, Non-inclusion) only when every namespace of the
+declaration's lexical nesting and every ancestor of its innermost class or module is a Ruby core or stdlib
+class or module, or one the project declares. Otherwise that arm can still prove `compatible` but never
+`conflict`; the reason this guard exists is `Comparator#provable_names?`, which refuses every relative name for
+`rbs.contradicting-signature` (a relative `String` inside `module App` may be a Ruby-only `App::String`).
 
 ## Relation
 
@@ -224,7 +257,8 @@ describes the whole contract is not checked.
 Both types are read as unions of **arms**. `T?` is `T | nil`, and `bool` is `true | false`. An arm is one of:
 
 - a **literal**: a string, symbol or integer literal, `true`, `false` or `nil`, whose class is its Ruby class
-  (`nil` is a `NilClass`);
+  (`nil` is a `NilClass`). The classes `TrueClass`, `FalseClass` and `NilClass` without type arguments are
+  read as the one literal each holds, as the comparator reads them;
 - a **class instance**: a class or module name, with or without type arguments.
 
 Any other form, anywhere in either type (`top`, `bot`, `void`, `self`, `instance`, `class`, `singleton(…)`,
@@ -235,14 +269,17 @@ an interface, a tuple, a record, a proc type, an intersection, a type variable),
 
 An arm `s` of `S` is **included** in `P` when some arm `p` of `P`:
 
-- equals `s` after name resolution and alias expansion, type arguments included (`equal`);
+- equals `s` after name resolution and alias expansion, type arguments included, where a union compares as
+  the set of its arms (`Array[String | Integer]` equals `Array[Integer | String]`) (`equal`);
 - is a class instance without type arguments whose class is an RBS ancestor of the literal `s`'s class
   (`literal_class_ancestor`); or
 - is a class instance without type arguments, of a non-generic class or module, that is an RBS ancestor of
   the class instance `s` (`class_ancestor`). `s` may carry type arguments.
 
 Ancestry is the RBS environment's, project declarations included: the authored contract is authoritative, so
-`class B < A` in it proves `B ⊆ A`. The verdict is `compatible` when every arm of `S` is included.
+`class B < A` in it proves `B ⊆ A`. A class whose RBS ancestry is known to disagree with Ruby's
+(`MemberConsistency::RbsProof::UNRELIABLE_ANCESTRY`: rbs says `Tempfile < File`, Ruby `Tempfile < Delegator`)
+proves no inclusion through its ancestry, on either side. The verdict is `compatible` when every arm of `S` is included.
 
 ### Non-inclusion: `conflict`
 
@@ -254,7 +291,8 @@ An arm `s` of `S` is **disjoint** from `P` when it shares no value with any arm 
 - two class instances neither of whose classes is an RBS ancestor of the other (`unrelated_classes`).
 
 A class counts only when it is a Ruby core or stdlib **class** (never a module) whose RBS ancestry Rigor
-trusts: `MemberConsistency::RbsProof#class_ancestors` answers it. A project class, a gem class or a module
+trusts, `MemberConsistency::RbsProof#class_ancestors` answers it, and its name, if the claim wrote it
+relatively, passes § Grammar's guard. A project class, a gem class or a module
 never proves disjointness, because a reopening or an `include` elsewhere can change what it shares. Type
 arguments are ignored here: classes that share no instance share none with any arguments. Every arm in this
 fragment has a value, so a disjoint arm of `S` is a value outside `P`. The verdict is `conflict` when some
@@ -267,12 +305,15 @@ Overlap alone proves neither: a `String` return documented as `"hello"` is `unpr
 
 - **Return.** The contract overload's `return` slot.
 - **Required positional parameter.** The bound site's own parameter list (`lens.md` § Sites, `params`) gives
-  the index of the parameter named `subject`; it MUST be `required`. The contract overload's parameter at the
-  same index is read only when the two lists have the same length and the same `kind` at every position;
-  otherwise `unmatched_parameter`. Contract parameter names are not consulted: RBS names a positional
+  the index of the parameter named `subject` among its positional parameters (`required`, `optional`, `rest`,
+  `post`); it MUST be `required`. The contract overload's positional parameter at the same index is read only
+  when the two positional lists have the same length and the same `kind` at every position; otherwise
+  `unmatched_parameter`. Keywords are not compared here: the contract lists required keywords before optional
+  ones whatever the source order. Contract parameter names are not consulted: RBS names a positional
   parameter for documentation only.
-- **Required keyword parameter.** The contract overload's `keyreq` parameter whose name is `subject`; the
-  site MUST declare a `keyreq` of that name.
+- **Required keyword parameter.** The site declares a `keyreq` named `subject`, and the contract overload's
+  `keyreq` of that name is read; when the contract declares that keyword optional, or not at all, the claim is
+  `unmatched_parameter`.
 
 The contract is the member's, after Rigor's own merge of `sig/` and inline declarations (the one `check` reads,
 which `lens.md` § Members reports). It is read only when the member's `basis` is `contract` and it has
@@ -289,6 +330,10 @@ exit status, so ZARD's adapter can pin them. The fixtures cover:
 - a narrower parameter claim and a broader return claim (`compatible`), and overlap only (`unproven`);
 - project-class inclusion through declared ancestry (`compatible`), and project classes that cannot be
   ranked (`unproven`, never `conflict`);
+- a relative name a project namespace shadows in Ruby alone (`Data` inside `module App` that defines
+  `App::Data < Hash` with no RBS), which never reads `conflict`, and a relative core name under a gem
+  ancestor, which reads `unproven` where the absolute spelling reads `conflict`;
+- a span that matches a site under another identity (`declaration_mismatch`) or an attribute site;
 - each `unknown` reason, and `unavailable` for a failed target;
 - `invalid_claim` against a valid extended payload (`unsupported_grammar_feature`);
 - each integrity error (exit 64, no document), including a stale digest and a locator that matches no site;

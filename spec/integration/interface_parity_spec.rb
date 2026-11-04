@@ -68,15 +68,19 @@ RSpec.describe "ADR-130 interface parity (behavioural gate)" do
   def fixture_dir(name) = File.join(InterfaceParity::FIXTURE_ROOT, name)
   def normalise(text) = InterfaceParity.normalise(text)
 
-  def configuration
+  # Sequential: the erasure switch is per thread, and a pooled run under it raises.
+  def configuration(workers: 0)
     Rigor::Configuration.new(
-      Rigor::Configuration::DEFAULTS.merge("paths" => %w[lib], "signature_paths" => %w[sig], "workers" => 0)
+      Rigor::Configuration::DEFAULTS.merge("paths" => %w[lib], "signature_paths" => %w[sig],
+                                           "parallel" => { "workers" => workers })
     )
   end
 
   # The fixture's `rigor check --format json` diagnostics, as text.
-  def render(dir)
-    result = Dir.chdir(dir) { guarded_run(Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil)) }
+  def render(dir, workers: 0)
+    runner = Rigor::Analysis::Runner.new(configuration: configuration(workers: workers), cache_store: nil,
+                                         workers: workers)
+    result = Dir.chdir(dir) { guarded_run(runner) }
     JSON.pretty_generate(result.to_h.fetch("diagnostics"))
   end
 
@@ -109,8 +113,10 @@ RSpec.describe "ADR-130 interface parity (behavioural gate)" do
       it "#{fixture}: #{mode} matches the erasure baseline modulo facet names" do
         baseline, candidate = parity_pair(mode, fixture_dir(fixture))
 
-        # A fixture that types nothing would compare two empty documents.
+        # A fixture that types nothing would compare two empty documents, and a baseline that kept a facet would
+        # compare the carrier with itself.
         expect(baseline).to include("dump_type")
+        expect(run_in(:erasure, fixture_dir(fixture))).not_to include("Rigor::Plugin::_")
         expect(candidate).to eq(baseline)
       end
     end
@@ -120,6 +126,7 @@ RSpec.describe "ADR-130 interface parity (behavioural gate)" do
         baseline, candidate = dispatch_pair(mode, fixture_dir(fixture))
 
         expect(baseline).to include("dump_type")
+        expect(run_in(:erasure, fixture_dir(fixture))).not_to include("Rigor::Plugin::_")
         expect(candidate).to eq(baseline)
       end
     end
@@ -139,6 +146,11 @@ RSpec.describe "ADR-130 interface parity (behavioural gate)" do
 
         Rigor::Type::Combinator.dynamic(Rigor::Type::Combinator.nominal_of(type.name.relative!.to_s))
       end
+    end
+
+    it "refuses a pooled run under the erasure switch" do
+      expect { Rigor::Inference::RbsTypeTranslator.with_interface_erasure { render(dir, workers: 2) } }
+        .to raise_error(ArgumentError, /sequential run/)
     end
 
     it "normalises a facet name and nothing else" do

@@ -135,7 +135,8 @@ module Rigor
         # (`spec/integration/interface_parity_spec.rb`) runs its baseline here, so the baseline never comes from the
         # default engine. Slice 1b's carrier reads {interface_erasure?}; until it lands every interface erases inside
         # the block and outside it. A carrier that reads the switch must also key `@closed_alias_translations` on it,
-        # or bypass that memo, so a translation made in one mode is not served in the other (ADR-130 WD4).
+        # or bypass that memo, so a translation made in one mode is not served in the other (ADR-130 WD4). The switch
+        # is per thread, so a run under it is sequential: a pooled run raises (`PoolCoordinator`).
         def with_interface_erasure
           previous = Thread.current.thread_variable_get(:rigor_interface_erasure)
           Thread.current.thread_variable_set(:rigor_interface_erasure, true)

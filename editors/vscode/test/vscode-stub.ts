@@ -233,6 +233,22 @@ export class CustomExecution {
   constructor(readonly callback: (definition: unknown) => Promise<unknown>) {}
 }
 
+export class ShellExecution {
+  constructor(
+    readonly command: string,
+    readonly args: string[],
+    readonly options: { cwd?: string; env?: Record<string, string> },
+  ) {}
+}
+
+export class ProcessExecution {
+  constructor(
+    readonly process: string,
+    readonly args: string[],
+    readonly options: { cwd?: string; env?: Record<string, string> },
+  ) {}
+}
+
 export class Task {
   constructor(
     readonly definition: { type: string; [key: string]: unknown },
@@ -240,6 +256,7 @@ export class Task {
     readonly name: string,
     readonly source: string,
     readonly execution?: unknown,
+    readonly problemMatchers?: string | string[],
   ) {}
 }
 

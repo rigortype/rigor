@@ -11,8 +11,10 @@ import {
   EventEmitter,
   ExtensionContext,
   OutputChannel,
+  ProcessExecution,
   Pseudoterminal,
   QuickPickItem,
+  ShellExecution,
   Task,
   TaskDefinition,
   TaskProvider,
@@ -30,6 +32,7 @@ import {
   groupFindings,
 } from "./checkResults";
 import {
+  ResolvedServer,
   configArgs,
   projectRoot,
   shouldManageFolder,
@@ -40,6 +43,43 @@ import { describeCandidate, peekResolution, resolveRigor } from "./resolve";
 
 const TASK_TYPE = "rigor";
 const TASK_SOURCE = "rigor";
+const PROBLEM_MATCHER = "$rigor";
+
+function definedEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (value !== undefined) {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
+/**
+ * The pre-#2794 form of the task, for a `tasks.json` entry without a
+ * `folder`: a shell or process execution scoped to its folder, with the
+ * contributed `$rigor` problem matcher. Its problems share the matcher's
+ * owner, so another such task's run replaces them; but two entries with the
+ * same definition each run in their own folder, which a pseudoterminal
+ * cannot promise (VS Code finds it by definition).
+ */
+export function shellCheckTask(
+  folder: WorkspaceFolder,
+  label: string,
+  server: ResolvedServer,
+  definition: TaskDefinition,
+): Task {
+  const root = projectRoot(folder) ?? folder.uri.fsPath;
+  const args = [...server.prefixArgs, "check", ...configArgs(folder)];
+  // On Windows `bundle` and the version-manager shim are .cmd or .bat files,
+  // which only a shell can start. The managed kind (ADR-27 WD10) runs under
+  // its own Bundler environment.
+  const env = server.env ? definedEnv(server.env) : undefined;
+  const execution = useShell(server)
+    ? new ShellExecution(server.command, args, { cwd: root, env })
+    : new ProcessExecution(server.command, args, { cwd: root, env });
+  return new Task(definition, folder, label, TASK_SOURCE, execution, PROBLEM_MATCHER);
+}
 
 /** Check results of every folder, in the one `rigor check` collection. */
 let results: CheckResults<Diagnostic> | undefined;
@@ -186,10 +226,15 @@ export class RigorCheckTaskProvider implements TaskProvider {
 
   /**
    * A `tasks.json` entry `{ "type": "rigor", "command": "check" }` in a
-   * managed folder runs the same pseudoterminal; the task keeps its own
-   * definition, which is what VS Code matches it by.
+   * managed folder. Without a `folder` property it runs as a shell or
+   * process execution with the `$rigor` matcher, as before #2747 (see
+   * `shellCheckTask`); with one it is the per-folder pseudoterminal. Either
+   * way the task keeps its own definition, which is what VS Code matches
+   * it by. The shell form needs the resolved rigor, so this waits for the
+   * folder's discovery; it falls back to the pseudoterminal, which reports
+   * a failed walk, when no rigor runs.
    */
-  resolveTask(task: Task): Task | undefined {
+  async resolveTask(task: Task): Promise<Task | undefined> {
     const folder = taskFolder(task);
     if (
       !workspace.isTrusted ||
@@ -199,6 +244,12 @@ export class RigorCheckTaskProvider implements TaskProvider {
       !shouldManageFolder(folder)
     ) {
       return undefined;
+    }
+    if (task.definition.folder === undefined) {
+      const res = await resolveRigor(folder, this.output);
+      if (res.probe.ok || res.probe.tooOld) {
+        return shellCheckTask(folder, task.name, res.server, task.definition);
+      }
     }
     return checkTask(folder, task.name, this.output, task.definition);
   }

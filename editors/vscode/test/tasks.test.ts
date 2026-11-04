@@ -9,8 +9,8 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 
 import { forgetResolutions } from "../src/resolve";
 import { registerTasks } from "../src/tasks";
-import { ExtensionMode, Task, addFolder, stub } from "./vscode-stub";
-import { Sandbox, fakeContext, fakeOutput, sandbox, script } from "./helpers";
+import { CustomExecution, ExtensionMode, ProcessExecution, ShellExecution, Task, addFolder, stub } from "./vscode-stub";
+import { Sandbox, fakeContext, fakeOutput, sandbox, script, withPlatform } from "./helpers";
 
 type Provider = import("vscode").TaskProvider;
 type Folder = import("vscode").WorkspaceFolder;
@@ -122,35 +122,70 @@ describe("the provided tasks", () => {
 });
 
 describe("resolveTask", () => {
-  const resolve = (task: Task) => provider().resolveTask!(task as never, {} as never) as Task | undefined;
+  const resolve = async (task: Task) =>
+    (await provider().resolveTask!(task as never, {} as never)) as Task | undefined;
   const entry = (scope: unknown, extra: object = {}) =>
     new Task({ type: "rigor", command: "check", ...extra }, scope, "mine", "Workspace");
 
-  it("resolves a tasks.json entry to a task that keeps the entry's own definition object", () => {
+  it("a folder-less entry runs as before #2747: a process in its own folder with $rigor", async () => {
     const original = entry(folderB);
-    const resolved = resolve(original)!;
-    assert.ok(resolved);
+    const resolved = (await resolve(original))!;
     assert.equal(resolved.definition, original.definition);
     assert.equal(resolved.scope, folderB);
     assert.equal(resolved.name, "mine");
+    assert.equal(resolved.problemMatchers, "$rigor");
+    const exec = resolved.execution as ProcessExecution;
+    assert.ok(exec instanceof ProcessExecution);
+    assert.equal(exec.process, rigor);
+    assert.deepEqual(exec.args, ["check"]);
+    assert.equal(exec.options.cwd, folderB.uri.fsPath);
     assert.deepEqual(original.definition, { type: "rigor", command: "check" });
   });
 
-  it("the resolved task runs the check in its own folder", async () => {
+  it("two folder-less entries with one definition each run in their own folder", async () => {
+    const a = (await resolve(entry(folderA)))!;
+    const b = (await resolve(entry(folderB)))!;
+    assert.equal((a.execution as ProcessExecution).options.cwd, folderA.uri.fsPath);
+    assert.equal((b.execution as ProcessExecution).options.cwd, folderB.uri.fsPath);
+  });
+
+  it("on Windows the folder-less entry is a shell execution, so .cmd shims start", async () => {
+    const resolved = (await withPlatform("win32", () => resolve(entry(folderA))))!;
+    assert.ok(resolved.execution instanceof ShellExecution);
+    assert.equal(resolved.problemMatchers, "$rigor");
+  });
+
+  it("an entry with a folder is the per-folder pseudoterminal, no matcher, own definition kept", async () => {
+    const original = entry(folderB, { folder: folderB.name });
+    const resolved = (await resolve(original))!;
+    assert.equal(resolved.definition, original.definition);
+    assert.ok(resolved.execution instanceof CustomExecution);
+    assert.equal(resolved.problemMatchers, undefined);
+  });
+
+  it("the folder entry's pseudoterminal runs the check in its own folder", async () => {
     checkDoes(`pwd; ${finding(sb.project)}; exit 1`);
-    const ran = await runTask(resolve(entry(folderA))!);
+    const ran = await runTask((await resolve(entry(folderA, { folder: folderA.name })))!);
     assert.equal(ran.code, 1);
     assert.match(ran.out, new RegExp(sb.project.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   });
 
-  it("declines other commands, other scopes, unmanaged folders and untrusted workspaces", () => {
-    assert.equal(resolve(entry(folderA, { command: "other" })), undefined);
-    assert.equal(resolve(new Task({ type: "rigor", command: "check" }, 1, "x", "Workspace")), undefined);
+  it("a folder-less entry whose rigor does not run falls back to the pseudoterminal that says why", async () => {
+    stub.set("rigor.server.path", path.join(sb.dir, "missing", "rigor"));
+    forgetResolutions();
+    const resolved = (await resolve(entry(folderA)))!;
+    assert.ok(resolved.execution instanceof CustomExecution);
+    assert.match((await runTask(resolved)).out, /could not run Rigor/);
+  });
+
+  it("declines other commands, other scopes, unmanaged folders and untrusted workspaces", async () => {
+    assert.equal(await resolve(entry(folderA, { command: "other" })), undefined);
+    assert.equal(await resolve(new Task({ type: "rigor", command: "check" }, 1, "x", "Workspace")), undefined);
     stub.set("rigor.enable", false);
-    assert.equal(resolve(entry(folderA)), undefined);
+    assert.equal(await resolve(entry(folderA)), undefined);
     stub.set("rigor.enable", true);
     stub.trusted = false;
-    assert.equal(resolve(entry(folderA)), undefined);
+    assert.equal(await resolve(entry(folderA)), undefined);
   });
 });
 

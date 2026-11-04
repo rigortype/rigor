@@ -37,12 +37,13 @@ import {
   pinnedBundleGemfile,
   pinnedBundleLock,
   projectLockPin,
+  underVersionManager,
   findPin,
   projectRoot,
   versionManagerShims,
 } from "./discovery";
 import { ProbeResult, probeServer } from "./probe";
-import { findRuby, managedServer } from "./runtime";
+import { findRubyMatching, managedServer } from "./runtime";
 
 /** After this long, the walk skips the candidates no pin requires. */
 const WALK_BUDGET_MS = 45000;
@@ -71,6 +72,8 @@ export interface Resolution {
   managedReachable: boolean;
   /** The pin that ended the walk, when one did. */
   pin?: Pin;
+  /** A sentence for the not-found message, when the settings explain it. */
+  hint?: string;
 }
 
 /** A group of candidates; `final` ends the walk after it. */
@@ -84,6 +87,8 @@ const settled = new Map<string, Resolution>();
 /** Each folder's pin signature when its resolution was made. */
 const signatures = new Map<string, string>();
 let stopping = false;
+/** Folders already warned that `useBundler: never` ignores their lockfile pin. */
+const neverWarned = new Set<string>();
 
 /**
  * Resolve the `rigor` for a folder. The result, passing or failing, is
@@ -187,9 +192,21 @@ function pinSignature(folder: WorkspaceFolder): string {
     lockedRigortype(path.join(root, "Gemfile.lock")),
     lockedRigortype(path.join(root, "gems.locked")),
     pinned.rejected ? undefined : lockedRigortype(lockfileFor(pinned.gemfile)),
+    // The pinned bundle's Ruby is chosen by these.
+    pinned.rejected ? undefined : bundleRubyRequirements(pinned.gemfile),
     tool,
     toolLines,
   ]);
+}
+
+/**
+ * Whether the version `rigor version` printed is the one a lockfile pins:
+ * equal, or the lockfile's with a platform suffix (`0.4.7-x86_64-linux`).
+ * `0.4.1` is not `0.4.10`, `0.5.0` not `0.5.0.pre1`, and no version is no
+ * match.
+ */
+export function lockMatches(locked: string, printed: string | undefined): boolean {
+  return printed !== undefined && (locked === printed || locked.startsWith(`${printed}-`));
 }
 
 /** `/path/to/rigor` (global) — one candidate as the log names it. */
@@ -213,8 +230,20 @@ async function walk(
   }
   const projectLock = projectLockPin(root);
   const pinnedLock = pinnedBundleLock(folder, root);
-  const found = findPin(root);
-  const anyPin = found?.file ?? pinnedLock;
+  const anyPin = findPin(root)?.file ?? pinnedLock;
+  // `never` opts out of a lockfile pin; a mise or asdf pin behind it
+  // still decides.
+  const found = findPin(root, { skipLocks: mode === "never" });
+  const optedOut = mode === "never" && !explicitPath ? (projectLock ?? pinnedLock) : undefined;
+  if (optedOut) {
+    const note = `"rigor.server.useBundler" is "never" in ${folder.name}, so the rigortype that ${path.basename(optedOut)} pins is not used; a Rigor from PATH or a shim may report differently from CI.`;
+    output.appendLine(`[rigor] ${note}`);
+    const key = folder.uri.toString();
+    if (!neverWarned.has(key)) {
+      neverWarned.add(key);
+      void window.showWarningMessage(`Rigor: ${note}`);
+    }
+  }
   const managedReachable =
     !explicitPath && mode !== "always" && anyPin === undefined;
 
@@ -231,6 +260,7 @@ async function walk(
     }));
   const steps: Step[] = [];
   let pin: Pin | undefined;
+  let hint: string | undefined;
   if (explicitPath) {
     steps.push({
       candidates: async () => [
@@ -240,9 +270,13 @@ async function walk(
     });
   } else if (mode === "always") {
     const usePinned = pinned.explicit && !pinned.rejected;
-    pin = usePinned
-      ? { kind: "pinned-bundle", file: lockfileFor(pinned.gemfile), gemfile: pinned.gemfile }
-      : { kind: "lock", file: path.join(root, "Gemfile.lock") };
+    if (usePinned) {
+      pin = { kind: "pinned-bundle", file: lockfileFor(pinned.gemfile), gemfile: pinned.gemfile };
+    } else if (projectLock) {
+      pin = { kind: "lock", file: projectLock };
+    } else {
+      hint = '"rigor.server.useBundler" is "always", but no Gemfile.lock or pinned bundle pins rigortype.';
+    }
     steps.push({
       candidates: async () =>
         usePinned ? pinnedBundleServers(pinned.gemfile, output) : [bundler],
@@ -262,7 +296,16 @@ async function walk(
     // global pin is the user's default, not the project's, so PATH may
     // still serve it (the managed Rigor may not).
     pin = { kind: "tool", file: found.file };
-    steps.push({ candidates: shims, final: true });
+    steps.push({
+      candidates: async () => [
+        ...(await shims()),
+        // A `rigor` on PATH that mise or asdf put there serves the pin too.
+        ...pathExecutables("rigor")
+          .found.filter(underVersionManager)
+          .map((command) => ({ kind: "global" as const, command, prefixArgs: [] })),
+      ],
+      final: true,
+    });
   } else {
     steps.push({
       candidates: async () => {
@@ -327,17 +370,20 @@ async function walk(
         pin.kind !== "tool"
           ? lockedRigortype(pin.file)
           : undefined;
-      // The probe reads `X.Y.Z`; a lockfile may add a prerelease suffix.
-      if (locked && probe.version && !locked.startsWith(probe.version)) {
+      if (
+        locked &&
+        (probe.ok || probe.tooOld) &&
+        !lockMatches(locked, probe.fullVersion)
+      ) {
         reject(
           server,
-          `runs rigortype ${probe.version}, but ${pin!.file} pins ${locked} (is the bundle installed?)`,
+          `runs rigortype ${probe.fullVersion ?? "(no version printed)"}, but ${pin!.file} pins ${locked} (is the bundle installed?)`,
         );
         firstFailure ??= { server, probe: { ...probe, ok: false, tooOld: false } };
         continue;
       }
       if (probe.ok || probe.tooOld) {
-        return { server, probe, rejected, managedReachable, pin };
+        return { server, probe, rejected, managedReachable, pin, hint };
       }
       reject(server, probe.detail ?? "did not run");
       firstFailure ??= { server, probe };
@@ -347,7 +393,7 @@ async function walk(
     }
   }
   if (firstFailure) {
-    return { ...firstFailure, rejected, managedReachable, pin };
+    return { ...firstFailure, rejected, managedReachable, pin, hint };
   }
   // Nothing to try at all.
   return {
@@ -356,6 +402,7 @@ async function walk(
     rejected,
     managedReachable,
     pin,
+    hint,
   };
 }
 
@@ -428,14 +475,7 @@ async function pinnedBundleServers(
   const env = pinnedBundleEnv(gemfile);
   const servers: ResolvedServer[] = [];
   if (fs.existsSync(gemfile)) {
-    let ruby;
-    for (const requirement of bundleRubyRequirements(gemfile)) {
-      ruby = await findRuby(output, new Set(), requirement);
-      if (ruby) {
-        break;
-      }
-    }
-    ruby ??= await findRuby(output);
+    const ruby = await findRubyMatching(output, bundleRubyRequirements(gemfile));
     if (ruby) {
       servers.push({
         kind: "pinned-bundle",

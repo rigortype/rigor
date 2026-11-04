@@ -74,12 +74,15 @@ the extension is versioned independently of the `rigortype` gem.
   project pin is final: a lockfile pin runs only Bundler, a project
   `mise.toml` / `.tool-versions` pin only the shim, and a failure says
   to install the pin; a Bundler candidate that runs another rigortype
-  than its lockfile pins is rejected. A hung probe is rejected after 20 s and the
+  than its lockfile pins (compared in full, prerelease included) is
+  rejected. `useBundler: never` warns once that a lockfile pin is not
+  used. A hung probe is rejected after 20 s and the
   search skips unpinned candidates after 45 s. The result is kept per
   folder until a restart, a settings change, or a change to what pins
   `rigortype`. A project `gems.locked` counts as a lockfile pin. The
-  `rigor: check` task is offered once a folder's search finished with a
-  `rigor` that runs.
+  `rigor: check` task is always offered: it waits for a search still
+  running, and reports a failed one. On Windows, `rigor.bat` / `.cmd` /
+  `.exe` on `PATH` and as mise (`%LOCALAPPDATA%\mise`) or asdf shims.
 - The pinned bundle (ADR-27 WD9, #2750): when `.github/rigor/Gemfile.lock`
   pins `rigortype`, the extension runs `bundle exec rigor` with
   `BUNDLE_GEMFILE` set to `.github/rigor/Gemfile`, from the project root,

@@ -27,12 +27,14 @@ dropped were left open.
 
 Cache passing and failing results. A write to the project's `Gemfile.lock` / `gems.locked`, the
 pinned bundle's lockfile, or a `mise.toml` / `.mise.toml` / `.tool-versions` at the project root
-re-reads the pin; only when it appeared, disappeared or names another version is the folder's
+(and every mise config file `findPin` reads, from the project root up to the home directory, and
+the pinned bundle's Gemfile) re-reads the pin; only when it appeared, disappeared, names another version or (for the pinned
+bundle) another Ruby is the folder's
 result forgotten and its server restarted (debounced). A server-affecting setting change, a restart,
 or a managed install or clear forgets all. `rigor.server.bundleGemfile` and `rigor.runtime.rubyPath`
 join the server-affecting settings. The `rigor: check` task provider never waits for a walk: a
-folder without a finished result gets no task until VS Code asks again, while **Rigor: Check
-Workspace** waits for it.
+folder without a finished or passing result gets a task that waits for the walk and then runs the
+resolved `rigor check`, or prints why discovery failed and exits 1.
 
 ## To undo
 

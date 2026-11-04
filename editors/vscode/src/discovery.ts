@@ -215,10 +215,14 @@ export function rigortypePin(root: string): string | undefined {
  */
 export function findPin(
   root: string,
+  options: { skipLocks?: boolean } = {},
 ): { file: string; scope: "lock" | "project" | "global" } | undefined {
-  const lock =
-    projectLockPin(root) ??
-    [lockfileFor(path.join(root, PINNED_BUNDLE_GEMFILE))].find(lockPinsRigortype);
+  // `skipLocks`: `useBundler: never` opts out of a lockfile pin, so a
+  // mise or asdf pin behind it still decides.
+  const lock = options.skipLocks
+    ? undefined
+    : (projectLockPin(root) ??
+      [lockfileFor(path.join(root, PINNED_BUNDLE_GEMFILE))].find(lockPinsRigortype));
   if (lock) {
     return { file: lock, scope: "lock" };
   }
@@ -261,7 +265,7 @@ function isBelow(dir: string, base: string): boolean {
 }
 
 /** The mise and asdf config files a directory can hold. */
-function pinFilesIn(dir: string): string[] {
+export function pinFilesIn(dir: string): string[] {
   const envs = (process.env.MISE_ENV ?? "")
     .split(",")
     .map((e) => e.trim())
@@ -509,36 +513,76 @@ export function pathExecutables(name: string): {
  * Returns every shim that exists, mise's first.
  */
 export function versionManagerShims(): string[] {
-  const home = os.homedir();
-  const dirs: string[] = [];
-
-  // mise — honour MISE_DATA_DIR / XDG_DATA_HOME, then the default.
-  if (process.env.MISE_DATA_DIR) {
-    dirs.push(path.join(process.env.MISE_DATA_DIR, "shims"));
-  }
-  if (process.env.XDG_DATA_HOME) {
-    dirs.push(path.join(process.env.XDG_DATA_HOME, "mise", "shims"));
-  }
-  dirs.push(path.join(home, ".local", "share", "mise", "shims"));
-
-  // asdf — honour ASDF_DATA_DIR, then the default.
-  if (process.env.ASDF_DATA_DIR) {
-    dirs.push(path.join(process.env.ASDF_DATA_DIR, "shims"));
-  }
-  dirs.push(path.join(home, ".asdf", "shims"));
-
+  const names =
+    process.platform === "win32"
+      ? ["rigor.bat", "rigor.cmd", "rigor.exe"]
+      : ["rigor"];
   const shims: string[] = [];
-  for (const dir of dirs) {
-    const shim = path.join(dir, "rigor");
-    try {
-      if (!shims.includes(shim) && fs.existsSync(shim)) {
-        shims.push(shim);
+  for (const root of versionManagerRoots()) {
+    for (const name of names) {
+      const shim = path.join(root, "shims", name);
+      try {
+        if (!shims.includes(shim) && fs.existsSync(shim)) {
+          shims.push(shim);
+        }
+      } catch {
+        // Unreadable candidate — skip it.
       }
-    } catch {
-      // Unreadable candidate — skip it.
     }
   }
   return shims;
+}
+
+/**
+ * mise's and asdf's data directories, mise's first: `MISE_DATA_DIR`,
+ * `XDG_DATA_HOME/mise`, then `%LOCALAPPDATA%\mise` on Windows or
+ * `~/.local/share/mise` elsewhere; `ASDF_DATA_DIR`, then `~/.asdf`. Each
+ * holds `shims/` and `installs/`. Read from the environment, never by
+ * running `mise`.
+ */
+export function versionManagerRoots(): string[] {
+  const home = os.homedir();
+  const roots: string[] = [];
+  if (process.env.MISE_DATA_DIR) {
+    roots.push(process.env.MISE_DATA_DIR);
+  }
+  if (process.env.XDG_DATA_HOME) {
+    roots.push(path.join(process.env.XDG_DATA_HOME, "mise"));
+  }
+  roots.push(
+    process.platform === "win32"
+      ? path.join(process.env.LOCALAPPDATA ?? path.join(home, "AppData", "Local"), "mise")
+      : path.join(home, ".local", "share", "mise"),
+  );
+  if (process.env.ASDF_DATA_DIR) {
+    roots.push(process.env.ASDF_DATA_DIR);
+  }
+  roots.push(path.join(home, ".asdf"));
+  return [...new Set(roots)];
+}
+
+/**
+ * Whether a file lies, after symlinks, inside a version manager's `shims/`
+ * or `installs/`: a `rigor` on PATH that mise or asdf put there (`mise
+ * activate`) and so serves the project's mise or asdf pin.
+ */
+export function underVersionManager(file: string): boolean {
+  let real: string;
+  try {
+    real = fs.realpathSync(file);
+  } catch {
+    return false;
+  }
+  return versionManagerRoots().some((root) => {
+    let base = root;
+    try {
+      base = fs.realpathSync(root);
+    } catch {
+      // A root that does not exist holds nothing.
+      return false;
+    }
+    return ["shims", "installs"].some((sub) => isBelow(real, path.join(base, sub)));
+  });
 }
 
 /** The `--config=` flag, shared by `rigor lsp` and `rigor check`. */

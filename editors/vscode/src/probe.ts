@@ -21,6 +21,8 @@ export interface ProbeResult {
   notFound?: boolean;
   /** True when a version was found but is older than MIN_VERSION. */
   tooOld?: boolean;
+  /** The whole version token `rigor version` printed, prerelease included. */
+  fullVersion?: string;
   /** Why a failed probe failed: the first stderr line, or the error. */
   detail?: string;
 }
@@ -84,7 +86,10 @@ export function probeServer(
         }
         const version = match[1];
         const tooOld = compareSemver(version, MIN_VERSION) < 0;
-        resolve({ ok: !tooOld, version, tooOld });
+        // `rigor version` prints `rigor #{Rigor::VERSION}`; the full token
+        // keeps a prerelease segment (`0.5.0.pre1`).
+        const fullVersion = /\brigor\s+(\S+)/.exec(stdout)?.[1];
+        resolve({ ok: !tooOld, version, tooOld, fullVersion });
       },
     );
   });

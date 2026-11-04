@@ -66,30 +66,34 @@ same one.
 
 A pin is final. A project whose lockfile pins `rigortype` (2 or 3) runs
 that and nothing else, and one whose `mise.toml`, `.mise.toml` or
-`.tool-versions` (at the project root or above it) pins it runs the
-mise or asdf shim (5) and nothing else: a different Rigor would report
+`.tool-versions` (or another mise config file, at the project root or
+above it) pins it runs the mise or asdf shim (5), or a `rigor` on
+`PATH` that lies in mise's or asdf's directories, and nothing else: a different Rigor would report
 diagnostics that differ from CI's. When the pin does not run, the
 message says to install it (`bundle install`, or `mise install`)
 instead of falling back. Because `bundle exec rigor` runs any `rigor`
 on `PATH` when the bundle has none installed, a Bundler candidate that
-reports another version than its lockfile pins is rejected too. Your global mise config is not a project
+reports another version than its lockfile pins (or none) is rejected
+too. Your global mise config is not a project
 pin: it only keeps the managed Rigor away.
 
 `rigor.server.useBundler: always` makes 2 the only candidate, or 3
 when `rigor.server.bundleGemfile` is set; `never` skips 2 and 3, and
-then a lockfile pin no longer decides. A candidate that exists but
+then a lockfile pin no longer decides: the extension warns once that
+the pinned rigortype is not used (a mise or asdf pin still decides). A candidate that exists but
 does not run (an rbenv shim whose Ruby lacks the gem, a broken
 script) is rejected for the next one; the output channel logs each
 rejected candidate and why (a probe that hangs is rejected after
 20 s, and after 45 s in all the candidates no pin requires are
-skipped). A `rigor` that runs but is older than 0.1.6 stops the search
+skipped, which can leave out a later one such as the managed Rigor).
+Every folder's search starts at once. A `rigor` that runs but is older than 0.1.6 stops the search
 with an upgrade warning. The result is kept until **Rigor: Restart
 Server**, a settings change, or a change to what pins `rigortype`
 (the files above appearing, disappearing or pinning another version),
-which restarts that folder's server. The `rigor: check` task appears
-once the folder's search has finished, and only when it found a
-`rigor` that runs; **Rigor: Check Workspace** otherwise reports the
-failure.
+which restarts that folder's server. The `rigor: check` task is always
+there: while the search is still running it waits for it, and when the
+search found no `rigor` that runs it prints why and fails.
+**Rigor: Check Workspace** names every folder whose search failed.
 
 If none works, the extension shows an actionable message listing the
 candidates it tried and stays loaded — fix the setup and run
@@ -103,11 +107,12 @@ manual's
 is enough for the extension to manage the folder and run it, kind
 `pinned-bundle`. It runs from the project root, with `BUNDLE_GEMFILE`
 set to the Gemfile's absolute path, as `<ruby> <bundle> exec rigor`.
-The Ruby is found the way the managed Rigor finds one
+The Ruby is found among the ones the managed Rigor considers
 (`rigor.runtime.rubyPath`, `ruby` on `PATH`, the version managers'
-install directories), so the project's own Ruby does not have to be
-4.0: the first that matches the lockfile's `RUBY VERSION`, else the
-Gemfile's `ruby` line, else rigortype's own Ruby range. When that does
+install directories, each asked once), so the project's own Ruby does
+not have to be 4.0: the first that matches the lockfile's `RUBY
+VERSION`, else the Gemfile's `ruby` line, else rigortype's own Ruby
+range. When that does
 not run, `bundle exec rigor` from `PATH` is tried with the same
 `BUNDLE_GEMFILE`. Both drop the inherited `GEM_HOME`, `GEM_PATH`,
 `RUBYOPT`, `RUBYLIB`, `BUNDLE_BIN_PATH`, `BUNDLER_*` and

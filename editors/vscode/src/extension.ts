@@ -8,6 +8,7 @@
 
 import { ChildProcess, spawn } from "child_process";
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import {
   ConfigurationChangeEvent,
@@ -47,6 +48,7 @@ import {
   Resolution,
   describeCandidate,
   forgetResolutions,
+  peekResolution,
   pinChanged,
   resolveRigor,
   stopResolving,
@@ -156,6 +158,7 @@ let syncTimer: NodeJS.Timeout | undefined;
 let pinTimer: NodeJS.Timeout | undefined;
 /** Folders whose pin files were written since the last pin re-sync. */
 const pinsTouched = new Set<string>();
+let pinWatchers: Disposable[] = [];
 
 function enqueue(task: () => Promise<void>): Promise<void> {
   const run = lifecycle.then(() => (shuttingDown ? undefined : task()));
@@ -226,7 +229,7 @@ export function activate(context: ExtensionContext): void {
     configWatcher.onDidCreate(scheduleSync),
     configWatcher.onDidDelete(scheduleSync),
     { dispose: () => syncTimer && clearTimeout(syncTimer) },
-    ...watchPins(),
+    { dispose: () => pinWatchers.forEach((w) => w.dispose()) },
     workspace.onDidChangeWorkspaceFolders(() => void syncClients()),
     workspace.onDidChangeConfiguration((e) => onConfigChange(e)),
     workspace.onDidGrantWorkspaceTrust(() => void syncClients()),
@@ -282,6 +285,16 @@ async function syncClientsNow(): Promise<void> {
   // Before any client start (each may probe for seconds), so the palette
   // entries do not lag the folder state.
   void setManagedContext(folders.some((f) => shouldManageFolder(f)));
+
+  refreshPinWatchers();
+  // Start every managed folder's discovery at once; the starts below run
+  // one at a time, and a multi-root window would otherwise wait for each
+  // folder's walk in turn.
+  for (const folder of folders) {
+    if (shouldManageFolder(folder)) {
+      peekResolution(folder, outputChannel);
+    }
+  }
 
   for (const folder of folders) {
     // A sync that was already running when the window closed must not
@@ -807,6 +820,7 @@ function reportProbeFailure(resolution: Resolution, label: string): void {
               : " Install the bundle (`bundle install` in the project)") +
           ', then run "Rigor: Restart Server". A pinned project is not served by another Rigor.'
       : `could not run Rigor in ${label}.` +
+        (resolution.hint ? ` ${resolution.hint}` : "") +
         (resolution.rejected.length > 0 ? tried : " No `rigor` was found.") +
         " Install Rigor so `rigor` is on `PATH` (`mise use gem:rigortype` " +
         "is the recommended setup), or set `rigor.server.path` to the " +
@@ -866,71 +880,93 @@ function logStartup(
   );
 }
 
+/** Every file `findPin` reads in one directory, as a watcher glob. */
+const MISE_PIN_GLOB =
+  "{mise.toml,.mise.toml,mise.*.toml,.mise.*.toml,.mise/config.toml," +
+  "mise/config.toml,.config/mise.toml,.config/mise/config.toml," +
+  ".config/mise/conf.d/*.toml,.tool-versions}";
+
 /**
  * Re-resolve a folder when what pins rigortype for it changes: its
- * `Gemfile.lock` / `gems.locked`, the pinned bundle's lockfile, or a
- * `mise.toml`, `.mise.toml` or `.tool-versions` at its root appearing,
- * disappearing or pinning another version. Which `rigor` serves it may
- * change, and the server, the task and the commands must keep running the
- * same one. A write that leaves the pin as it was restarts nothing.
+ * `Gemfile.lock` / `gems.locked`, the pinned bundle's Gemfile or lockfile,
+ * or a mise or asdf file in the project root or a directory above it
+ * below the home directory, appearing, disappearing or pinning another
+ * version (or another Ruby, for the pinned bundle). Which `rigor` serves
+ * it may change, and the server, the task and the commands must keep
+ * running the same one. A write that leaves the pin as it was restarts
+ * nothing. Rebuilt on every sync, since a setting can move the root.
  */
-function watchPins(): Disposable[] {
-  const watcher = workspace.createFileSystemWatcher(
-    "**/{*.lock,*.locked,mise.toml,.mise.toml,.tool-versions}",
-  );
-  const onPin = (uri: Uri): void => {
-    if (shuttingDown) {
-      return;
+function refreshPinWatchers(): void {
+  for (const watcher of pinWatchers) {
+    watcher.dispose();
+  }
+  pinWatchers = [];
+  const home = path.resolve(os.homedir());
+  for (const folder of workspace.workspaceFolders ?? []) {
+    const root = projectRoot(folder);
+    if (!root) {
+      continue;
     }
-    for (const folder of workspace.workspaceFolders ?? []) {
-      const root = projectRoot(folder);
-      if (!root) {
-        continue;
+    const key = folder.uri.toString();
+    const gemfile = pinnedBundleGemfile(folder, root).gemfile;
+    const lock = lockfileFor(gemfile);
+    const patterns = [
+      new RelativePattern(Uri.file(root), "{Gemfile.lock,gems.locked}"),
+      new RelativePattern(
+        Uri.file(path.dirname(gemfile)),
+        `{${path.basename(gemfile)},${path.basename(lock)}}`,
+      ),
+    ];
+    // Up to, not including, the home directory or an ancestor of it:
+    // those hold the user's configuration, which `findPin` reads as global.
+    for (let dir = path.resolve(root); ; dir = path.dirname(dir)) {
+      const toHome = path.relative(dir, home);
+      if (toHome === "" || (!toHome.startsWith("..") && !path.isAbsolute(toHome))) {
+        break;
       }
-      const files = [
-        path.join(root, "Gemfile.lock"),
-        path.join(root, "gems.locked"),
-        path.join(root, "mise.toml"),
-        path.join(root, ".mise.toml"),
-        path.join(root, ".tool-versions"),
-        lockfileFor(pinnedBundleGemfile(folder, root).gemfile),
-      ];
-      if (files.includes(uri.fsPath)) {
-        pinsTouched.add(folder.uri.toString());
+      patterns.push(new RelativePattern(Uri.file(dir), MISE_PIN_GLOB));
+      if (path.dirname(dir) === dir) {
+        break;
       }
     }
-    if (pinsTouched.size === 0) {
-      return;
+    for (const pattern of patterns) {
+      const watcher = workspace.createFileSystemWatcher(pattern);
+      const touched = (): void => onPinTouched(key);
+      watcher.onDidCreate(touched);
+      watcher.onDidChange(touched);
+      watcher.onDidDelete(touched);
+      pinWatchers.push(watcher);
     }
-    if (pinTimer) {
-      clearTimeout(pinTimer);
-    }
-    pinTimer = setTimeout(() => {
-      pinTimer = undefined;
-      const keys = [...pinsTouched];
-      pinsTouched.clear();
-      void enqueue(async () => {
-        for (const folder of workspace.workspaceFolders ?? []) {
-          const key = folder.uri.toString();
-          if (keys.includes(key) && pinChanged(folder)) {
-            outputChannel.appendLine(
-              `[rigor] ${folder.name}: the rigortype pin changed; resolving again`,
-            );
-            forgetResolutions(folder);
-            probeFailureReported.delete(key);
-            await stopClient(key);
-          }
+  }
+}
+
+function onPinTouched(key: string): void {
+  if (shuttingDown) {
+    return;
+  }
+  pinsTouched.add(key);
+  if (pinTimer) {
+    clearTimeout(pinTimer);
+  }
+  pinTimer = setTimeout(() => {
+    pinTimer = undefined;
+    const keys = [...pinsTouched];
+    pinsTouched.clear();
+    void enqueue(async () => {
+      for (const folder of workspace.workspaceFolders ?? []) {
+        const key = folder.uri.toString();
+        if (keys.includes(key) && pinChanged(folder)) {
+          outputChannel.appendLine(
+            `[rigor] ${folder.name}: the rigortype pin changed; resolving again`,
+          );
+          forgetResolutions(folder);
+          probeFailureReported.delete(key);
+          await stopClient(key);
         }
-        await syncClientsNow();
-      });
-    }, SYNC_DEBOUNCE_MS);
-  };
-  return [
-    watcher,
-    watcher.onDidCreate(onPin),
-    watcher.onDidChange(onPin),
-    watcher.onDidDelete(onPin),
-  ];
+      }
+      await syncClientsNow();
+    });
+  }, SYNC_DEBOUNCE_MS);
 }
 
 function showServerVersion(): void {

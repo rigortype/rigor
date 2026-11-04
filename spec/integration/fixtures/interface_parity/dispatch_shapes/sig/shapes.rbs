@@ -1,0 +1,41 @@
+module Rigor
+  module Plugin
+    interface _ProbeShapes
+      def blockful: () { (Integer) -> void } -> Integer
+      def blockless: () -> Integer
+      def optional_block: () ?{ (Integer) -> void } -> Integer
+      def overloaded: () -> Integer
+                    | () { (Integer) -> void } -> String
+      def positional: (Integer a, ?Integer b) -> Integer
+      def rest: (Integer a, *Integer rest) -> Integer
+      def keywords: (Integer a, key: Integer, ?opt: Integer) -> Integer
+      def hash_positional: (Integer a, Hash[Symbol, Integer] h) -> Integer
+      def untyped_params: (?) -> Integer
+      def me: () -> self
+      def agree: () -> Integer
+               | () { (Integer) -> void } -> Integer
+    end
+
+    interface _ProbeBox[T, U = Integer]
+      def get: () -> T
+      def other: () -> U
+    end
+
+    interface _ProbeLeft
+      def name: () -> String
+    end
+
+    interface _ProbeRight
+      def name: () -> Symbol
+    end
+  end
+end
+
+class Shapes
+  def block_shape: (Rigor::Plugin::_ProbeShapes x, (^(Integer) -> void)? blk, ^(Integer) -> void sure) -> untyped
+  def arity: (Rigor::Plugin::_ProbeShapes x, Array[Integer] xs, Hash[Symbol, Integer] opts) -> untyped
+  def self_instance: (Rigor::Plugin::_ProbeShapes x) -> untyped
+  def generics: (Rigor::Plugin::_ProbeBox[String] box) -> untyped
+  def union_receiver: (Rigor::Plugin::_ProbeLeft l, Rigor::Plugin::_ProbeRight r, bool f) -> untyped
+  def anonymous_block: (Rigor::Plugin::_ProbeShapes x) ?{ (Integer) -> void } -> untyped
+end

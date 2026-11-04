@@ -46,7 +46,8 @@ the extension is versioned independently of the `rigortype` gem.
   `source: "rigor check"`. New **Rigor: Clear Check Results**. The
   `$rigor` matcher stays for your own `tasks.json` shell tasks. A
   `tasks.json` entry `{ "type": "rigor", "command": "check" }` runs
-  the same task. A folder's problems are replaced only by a run that
+  `rigor check` with the `$rigor` matcher as before; add `"folder":
+  "<name>"` for per-folder results. A folder's problems are replaced only by a run that
   finishes (exit 0 or 1).
 - **Rigor: Check Workspace**, which runs that task for the active
   editor's folder.

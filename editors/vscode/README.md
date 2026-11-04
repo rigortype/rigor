@@ -345,20 +345,17 @@ the folder itself). Absolute paths are used as given. An absolute
   error (64, 70) leave the folder's earlier problems as they were.
 - Only standard output is read for findings. Standard error is shown in
   the terminal but not read.
-- You can run the task from `tasks.json` too, for example with
-  `"runOptions": { "runOn": "folderOpen" }`, a `group` or `dependsOn`:
+- You can run the task from `tasks.json` too, with `runOptions`, a
+  `group` or `dependsOn`. An entry
   `{ "label": "rigor", "type": "rigor", "command": "check" }` runs
-  `rigor check` for the folder that holds the file. In a multi-root
-  workspace, give each folder's entry `"folder": "<folder name>"` when
-  they start at the same moment (`folderOpen`); VS Code tells such
-  entries apart only by their definition, and identical ones can run
-  the wrong folder's check.
-- The contributed `$rigor` problem matcher remains for a `tasks.json`
-  shell task you write yourself, for example
-  `{ "type": "shell", "command": "rigor check", "problemMatcher": "$rigor" }`.
-  Its problems belong to the owner `rigor`, which every task using the
-  matcher shares, so one such task's run replaces another's. The
-  provided task does not use it, so nothing is reported twice.
+  `rigor check` for the folder that holds the file, as a plain process
+  with the `$rigor` problem matcher. Like any matcher task, its problems
+  belong to the shared owner `rigor`, so in a multi-root workspace one
+  such entry's run replaces another's problems. To keep each folder's
+  problems apart, give the entry `"folder": "<folder name>"`: it then
+  runs in the terminal described above, with per-folder results under
+  `source: "rigor check"`. Entries for several folders need distinct
+  `folder` values anyway when they start together (`folderOpen`).
 - The extension publishes every finding it reads, including several at
   one position. (The contributed matcher's problems showed only the
   first at a position.)

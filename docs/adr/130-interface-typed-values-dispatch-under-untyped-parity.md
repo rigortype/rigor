@@ -94,7 +94,8 @@ be byte-identical to erasure on every corpus.
   `Dynamic[top]`.
 - **Unions.** `Combinator.union` deduplicates members modulo facet erasure.
   - *Facet erasure* rewrites `Dynamic[<plugin interface>]` to `Dynamic[top]`. It applies recursively inside
-    `Tuple` elements, `HashShape` values, `Nominal` type arguments and nested unions.
+    every carrier that holds a type, a `Dynamic` facet included.
+  - Member absorption compares the erased forms too, so a facet keeps no arm master absorbs.
   - Two or more members that are equal after erasure merge into their erased form. So
     `Dynamic[_A] | Dynamic[top]` becomes `Dynamic[top]`, `[Dynamic[_A]] | [Dynamic[top]]` becomes
     `[Dynamic[top]]`, and `{ k: Dynamic[_A] } | { k: Dynamic[top] }` becomes `{ k: Dynamic[top] }`. A join

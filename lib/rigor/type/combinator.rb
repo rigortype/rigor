@@ -49,7 +49,8 @@ module Rigor
       # ADR-130 WD2 — the parity predicate. Every site that keys a leniency on `untyped` asks this instead of testing
       # a `Dynamic`'s facet for `Top` or comparing with {untyped}, so a value whose facet parity erases
       # ({erased_facet?}) reads as `untyped` everywhere but member dispatch. `spec/rigor/type/untyped_parity_spec.rb`
-      # rejects the raw forms outside this module. No facet erases yet, so today this is `Dynamic[top]` alone.
+      # flags the raw spellings it knows outside this module. No facet erases yet, so today this is `Dynamic[top]`
+      # alone.
       def untyped?(type)
         return false unless type.is_a?(Dynamic)
 

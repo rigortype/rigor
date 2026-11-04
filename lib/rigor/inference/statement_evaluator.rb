@@ -3636,12 +3636,11 @@ module Rigor
       def join_break_scopes(continuation, breaks, names)
         return continuation if breaks.empty? || names.empty?
 
-        floor = Type::Combinator.untyped
         breaks.reduce(continuation) do |cont, break_scope|
           names.reduce(cont) do |acc, name|
             break_value = CapturedLocals.bound_type(break_scope, name)
             current = CapturedLocals.bound_type(acc, name)
-            next acc if break_value.nil? || current == floor
+            next acc if break_value.nil? || Type::Combinator.untyped?(current)
 
             bind_capture(acc, name, current ? Type::Combinator.union(current, break_value) : break_value)
           end
@@ -7190,9 +7189,8 @@ module Rigor
           end
         return converged if arms.empty?
 
-        floor = Type::Combinator.untyped
         converged.to_h do |name, type|
-          next [name, type] if type == floor
+          next [name, type] if Type::Combinator.untyped?(type)
 
           [name, Type::Combinator.union(type, *arms.filter_map { |arm| CapturedLocals.bound_type(arm, name) })]
         end
@@ -9598,7 +9596,8 @@ module Rigor
         floor = Type::Combinator.untyped
         walks.first.map do |name, _type|
           types = walks.map { |walk| walk.assoc(name)&.last }
-          [name, types.any? { |type| type.nil? || type == floor } ? floor : Type::Combinator.union(*types)]
+          floored = types.any? { |type| type.nil? || Type::Combinator.untyped?(type) }
+          [name, floored ? floor : Type::Combinator.union(*types)]
         end
       end
 

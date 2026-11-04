@@ -42,11 +42,13 @@ class Shapes
     Rigor.dump_type(x.keywords(1, **opts))
   end
 
-  # Inside a member `self` is the receiver. (RBS refuses `instance` in an interface.)
+  # Inside a member `self` is the receiver, a block parameter typed `self` included. (RBS refuses `instance` in an
+  # interface.)
   def self_instance(x)
     Rigor.dump_type(x.me) # parity: declared-member => Dynamic[Rigor::Plugin::_ProbeShapes]
     Rigor.dump_type(x.me.blockless) # parity: declared-member => Integer
     Rigor.dump_type(x.same(1)) # parity: declared-member => Integer
+    x.yield_self_value { |s| Rigor.dump_type(s) } # parity: declared-member => Dynamic[Rigor::Plugin::_ProbeShapes]
   end
 
   # The interface's own type parameters bind from the value's type arguments; a defaulted one left unbound is untyped.

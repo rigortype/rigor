@@ -1210,21 +1210,6 @@ module Rigor
           NO_TYPE_VARS = {}.freeze
           private_constant :NO_TYPE_VARS
 
-          # What RBS `instance` reads in a member of `class_name`. An interface names no class, so its `instance`
-          # is untyped (ADR-130 WD1).
-          def instance_type_for(class_name, kind)
-            kind == :interface ? Type::Combinator.untyped : Type::Combinator.nominal_of(class_name)
-          end
-
-          # The `self` overload selection reads: a `Dynamic` self's static facet, except a plugin-interface value,
-          # which is kept whole so a `self` parameter reads the value rather than its bare facet (ADR-130 WD1).
-          def selection_self(self_type)
-            return self_type unless self_type.is_a?(Type::Dynamic)
-
-            facet = self_type.static_facet
-            facet.is_a?(Type::Interface) ? self_type : facet
-          end
-
           # rubocop:disable Metrics/ParameterLists
           def translate_return_type(method_definition, class_name:, kind:, args:, type_vars:, block_type:,
                                     method_name: nil, environment: nil, self_type_override: nil,
@@ -1236,7 +1221,7 @@ module Rigor
             override = merged_return_type(method_definition, environment: environment)
             return override if override
 
-            instance_type = instance_type_for(class_name, kind)
+            instance_type = Type::Combinator.nominal_of(class_name)
             # `self_type_override` lets the user-class fallback path preserve the ORIGINAL receiver as the
             # substitute for `Bases::Self` — so `Kernel#dup: () -> self` resolved through the Object
             # fallback returns the caller's type, not Object. `dispatch_one` also routes the receiver's
@@ -1258,7 +1243,7 @@ module Rigor
               keywords_last: keywords_last, splats: splat_indices(call_node, args),
               # A `Dynamic` self (#1092) is a return-side answer; overload selection and ReceiverAffinity
               # read the static facet, as they did before the substitute carried the wrapping.
-              self_type: selection_self(self_type),
+              self_type: self_type.is_a?(Type::Dynamic) ? self_type.static_facet : self_type,
               instance_type: instance_type, type_vars: type_vars,
               block_required: !block_type.nil?,
               environment: environment
@@ -1337,7 +1322,7 @@ module Rigor
             keywords = args.last
             return NOT_DISTRIBUTED if keywords.pairs.none? { |_name, value| KeywordArguments.union_members(value) }
 
-            selector_self = selection_self(self_type)
+            selector_self = self_type.is_a?(Type::Dynamic) ? self_type.static_facet : self_type
             per_list = distributed_keyword_matches(method_definition, args, selector_self, instance_type, type_vars,
                                                    !block_type.nil?, environment, splat_indices(call_node, args))
             return NOT_DISTRIBUTED if per_list.equal?(NOT_DISTRIBUTED)
@@ -1396,7 +1381,7 @@ module Rigor
           def distributed_argument_return(method_definition, chosen, self_type, instance_type, type_vars, args,
                                           block_type, scope, call_node, call_site, environment)
             # rubocop:enable Metrics/ParameterLists
-            selector = { self_type: selection_self(self_type),
+            selector = { self_type: self_type.is_a?(Type::Dynamic) ? self_type.static_facet : self_type,
                          instance_type: instance_type, type_vars: type_vars, block_required: !block_type.nil?,
                          environment: environment }
             return NOT_DISTRIBUTED unless distributable_arguments?(method_definition, args, call_node)
@@ -2188,7 +2173,7 @@ module Rigor
                                         environment: nil, receiver: nil, receiver_args: [],
                                         method_name: nil, keywords_last: false, positional_splat: nil)
             # rubocop:enable Metrics/ParameterLists
-            instance_type = instance_type_for(class_name, kind)
+            instance_type = Type::Combinator.nominal_of(class_name)
             self_type =
               case kind
               when :singleton then Type::Combinator.singleton_of(class_name)
@@ -2209,7 +2194,7 @@ module Rigor
             substitute = SelfSubstitute.for(receiver, receiver_args, method_name, args, nil)
             self_type = Type::Combinator.nominal_of(class_name, type_args: receiver_args) if substitute
 
-            selector_self = selection_self(self_type)
+            selector_self = self_type.is_a?(Type::Dynamic) ? self_type.static_facet : self_type
             if keywords_last
               return agreed_keyword_block_params(method_definition, args, self_type, selector_self, instance_type,
                                                  type_vars, environment, positional_splat)

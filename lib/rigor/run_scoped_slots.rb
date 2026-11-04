@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require_relative "inference/typing_state"
-
 module Rigor
   # Issues #2412 and #2399 — the registry of per-thread memo slots whose contents belong to one analysis run. An
   # owner registers its `Thread.current` key where it names it (`KEY = RunScopedSlots.register(:key)`), and each
@@ -18,7 +16,9 @@ module Rigor
   # when the frame returns, and clearing it from inside a frame would break the frame.
   #
   # ADR-129 — a slot that has moved into {Inference::TypingState} declares `run_scoped: true` there instead of
-  # registering here, and {.release} empties those too.
+  # registering here, and {.release} empties those too. This file does not require `TypingState`: every declaration
+  # requires it, so where it is not loaded there is no such slot to empty, and a path that never loads the engine
+  # (ADR-104's warm effects probe) stays off `inference/`.
   #
   # The registry is a module-level array filled at require time, so it is for the main Ractor only.
   module RunScopedSlots
@@ -37,7 +37,7 @@ module Rigor
     def self.release
       thread = Thread.current
       @keys.each { |key| thread[key] = nil }
-      Inference::TypingState.release_run_scoped
+      Inference::TypingState.release_run_scoped if defined?(Inference::TypingState)
       nil
     end
   end

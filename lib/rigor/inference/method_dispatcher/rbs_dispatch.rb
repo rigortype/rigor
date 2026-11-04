@@ -11,7 +11,7 @@ require_relative "../optimistic_origin"
 require_relative "argument_distribution"
 require_relative "overload_selector"
 require_relative "self_substitute"
-require_relative "../../run_scoped_slots"
+require_relative "../../typing_state"
 
 module Rigor
   module Inference
@@ -79,8 +79,14 @@ module Rigor
         # Per-thread memo, keyed by environment: the Set of the names an allow-listed ancestor's RBS declarations
         # declare outside {OBJECT_SURFACE_OWNERS}. It keeps {.def_declaration} off the ancestor walk for any other
         # `def`.
-        RBS_COMPLETE_MEMBER_NAMES_KEY = RunScopedSlots.register(:__rigor_rbs_complete_member_names)
-        private_constant :RBS_COMPLETE_MEMBER_NAMES_KEY
+        #
+        # ADR-129 WD1 — a run-scoped Memo: the names are a pure function of the environment the entry is keyed on.
+        RBS_COMPLETE_MEMBER_NAMES = TypingState.memo(
+          :rbs_complete_member_names,
+          run_scoped: true, reason: "a WeakKeyMap keyed on the environment; the names are read from its loader " \
+                                    "and plugin registry alone"
+        )
+        private_constant :RBS_COMPLETE_MEMBER_NAMES
 
         # Issue #1094 — the methods through which a value can answer Ruby's implicit `to_ary` conversion.
         # Multiple assignment and block auto-splat convert through `rb_check_array_type`, which calls
@@ -295,7 +301,7 @@ module Rigor
           # in a project with no plugin class, on the cost it had before #2681. Read from the declarations, so a
           # gem signature that fails to build reports nothing more than it did.
           def rbs_complete_member_name?(environment, method_name)
-            table = (Thread.current[RBS_COMPLETE_MEMBER_NAMES_KEY] ||= ObjectSpace::WeakKeyMap.new)
+            table = TypingState.current.weak_key_map(RBS_COMPLETE_MEMBER_NAMES)
             names = (table[environment] ||= collect_rbs_complete_member_names(environment))
             names.include?(method_name)
           end
@@ -753,11 +759,17 @@ module Rigor
 
           # The same one-slot memo shape as {#core_stdlib_memo}; see there for why it is one slot keyed
           # on the discovery index's identity, and what a recording run may store in it.
-          MIXIN_ANCESTOR_MEMO_KEY = RunScopedSlots.register(:__rigor_mixin_ancestor_dispatch__)
-          private_constant :MIXIN_ANCESTOR_MEMO_KEY
+          #
+          # ADR-129 WD1 — a run-scoped Memo, keyed as {#ancestor_memo_slot} says.
+          MIXIN_ANCESTOR_MEMO = TypingState.memo(
+            :mixin_ancestor_dispatch,
+            run_scoped: true, reason: "one slot keyed on the identities of the discovery index and environment, and " \
+                                      "on whether the thread is recording; the answers read nothing else"
+          )
+          private_constant :MIXIN_ANCESTOR_MEMO
 
           def mixin_ancestor_memo(environment, scope)
-            ancestor_memo_slot(MIXIN_ANCESTOR_MEMO_KEY, environment, scope)
+            ancestor_memo_slot(MIXIN_ANCESTOR_MEMO, environment, scope)
           end
 
           # The declines are conjunctive, so their ORDER is free — and it is chosen so the two that walk
@@ -927,23 +939,30 @@ module Rigor
           # the measurement. A `Scope` hands each analysed file its own discovery index, so an
           # identity-keyed store would pin every file's index, and every RBS definition resolved
           # against it, for the length of the run.
-          CORE_STDLIB_ANCESTOR_MEMO_KEY = RunScopedSlots.register(:__rigor_core_stdlib_ancestor_dispatch__)
-          private_constant :CORE_STDLIB_ANCESTOR_MEMO_KEY
+          #
+          # ADR-129 WD1 — a run-scoped Memo, keyed as {#ancestor_memo_slot} says.
+          CORE_STDLIB_ANCESTOR_MEMO = TypingState.memo(
+            :core_stdlib_ancestor_dispatch,
+            run_scoped: true, reason: "one slot keyed on the identities of the discovery index and environment, and " \
+                                      "on whether the thread is recording; the answers read nothing else"
+          )
+          private_constant :CORE_STDLIB_ANCESTOR_MEMO
 
           def core_stdlib_memo(environment, scope)
-            ancestor_memo_slot(CORE_STDLIB_ANCESTOR_MEMO_KEY, environment, scope)
+            ancestor_memo_slot(CORE_STDLIB_ANCESTOR_MEMO, environment, scope)
           end
 
           # The slot behind both memos. Whether this thread is recording is part of its key, so a slot
           # filled with every answer is never read by a recording caller, which may only reuse the
           # answers {#store_unless_recorded} lets through.
-          def ancestor_memo_slot(memo_key, environment, scope)
+          def ancestor_memo_slot(memo_slot, environment, scope)
             discovery = scope.discovery
             recording = Rigor::Analysis::DependencyRecorder.recording?
-            slot = Thread.current[memo_key]
+            state = TypingState.current
+            slot = state[memo_slot]
             unless slot && slot[0].equal?(discovery) && slot[1].equal?(environment) && slot[2] == recording
               slot = [discovery, environment, recording, {}]
-              Thread.current[memo_key] = slot
+              state[memo_slot] = slot
             end
             slot[3]
           end

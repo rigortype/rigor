@@ -80,6 +80,50 @@ RSpec.describe Rigor::Cache::FileDigest do
       expect(Digest::SHA256).to have_received(:file).with(path).twice
     end
 
+    # ADR-129: the run is one Frame, so the digest table, the stat table, the recording instant and the strict flag
+    # leave together, and an inner run's four do not outlive it.
+    it "restores the stat table, the recording instant and the strict flag of the outer run after a nested run" do
+      described_class.with_run(strict: false) do
+        outer_instant = described_class.recording_instant_ns
+        described_class.validation_stat(path)
+        begin
+          described_class.with_run(strict: true) do
+            expect(described_class.strict_validation?).to be(true)
+            raise "boom"
+          end
+        rescue RuntimeError
+          nil
+        end
+
+        expect(described_class.strict_validation?).to be(false)
+        expect(described_class.recording_instant_ns).to eq(outer_instant)
+        allow(File).to receive(:stat).and_call_original
+        described_class.validation_stat(path)
+        expect(File).not_to have_received(:stat)
+      end
+    end
+
+    it "keeps the strict flag, the recording instant and the stat table to the run, not the thread" do
+      instant = described_class.with_run(strict: true) do
+        expect(described_class.strict_validation?).to be(true)
+        described_class.recording_instant_ns
+      end
+
+      expect(described_class.strict_validation?).to be(false)
+      expect(described_class.recording_instant_ns).to be > instant
+      allow(File).to receive(:stat).and_call_original
+      2.times { described_class.validation_stat(path) }
+      expect(File).to have_received(:stat).with(path).twice
+    end
+
+    it "shares one stat per path inside a run" do
+      described_class.with_run do
+        allow(File).to receive(:stat).and_call_original
+        2.times { described_class.validation_stat(path) }
+        expect(File).to have_received(:stat).with(path).once
+      end
+    end
+
     it "propagates a read failure without memoising it" do
       missing = File.join(tmpdir, "gone.rb")
       described_class.with_run do

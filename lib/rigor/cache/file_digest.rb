@@ -2,6 +2,8 @@
 
 require "digest"
 
+require_relative "../typing_state"
+
 module Rigor
   module Cache
     # Per-run content-digest memo AND the ADR-87 stat-then-digest freshness choke point. Within a single
@@ -20,20 +22,33 @@ module Rigor
     # zero SHA-256 bytes. The SHA-256 digest remains the sole change AUTHORITY — the stat tier only decides
     # whether the digest needs recomputing.
     #
-    # Soundness: the memo + recording-instant + strict flag are process-local (thread-locals, so Ractor-safe
-    # and never crossing a fork boundary), never persisted to disk, and scoped to exactly one run via
-    # {.with_run} (which installs a fresh table and restores the previous one on exit — a second run, or a run
+    # Soundness: the memo + recording-instant + strict flag are process-local (a per-thread {TypingState}
+    # Frame, so Ractor-safe and never crossing a fork boundary), never persisted to disk, and scoped to exactly one
+    # run via {.with_run} (which installs a fresh table and restores the previous one on exit — a second run, or a run
     # that re-reads a file the user edited between runs, gets a clean table). Within a single run the analyzer
     # already assumes the filesystem is stable — {Descriptor#fresh?} validates the whole dependency set against
     # the live tree in one pass and never re-checks mid-run — so caching a coherent per-run snapshot changes
     # nothing about what a run observes. Outside a run scope (no active table) every call digests directly,
     # identical to a bare `Digest::SHA256.file`.
     module FileDigest
-      MEMO_KEY = :rigor_cache_file_digest_memo
-      STAT_KEY = :rigor_cache_file_stat_memo
-      INSTANT_KEY = :rigor_cache_recording_instant
-      STRICT_KEY = :rigor_cache_strict_validation
-      private_constant :MEMO_KEY, :STAT_KEY, :INSTANT_KEY, :STRICT_KEY
+      # One run's state: the digest table, the stat table, the recording instant and the strict flag, installed
+      # together by {.with_run}.
+      Run = Data.define(:digests, :stats, :instant, :strict)
+      private_constant :Run
+
+      # ADR-129 WD1 — a Frame: {.with_run} installs the run and restores the previous one on the way out, and whether
+      # one is installed changes answers (outside a run every call digests or stats directly, the recording instant
+      # is the moment of the call, and validation is not strict). The installed {Run} is frozen; its two tables are
+      # extensional caches its owner fills in place without a touch (Memos by kind, whose entry is fixed once
+      # written): `digests` is keyed on the path and reads the file's bytes, `stats` is keyed on the path and reads
+      # its `File::Stat`, both under the run's premise that the filesystem is stable. The instant and the flag are
+      # read at install time.
+      RUN = TypingState.frame(
+        :file_digest_run,
+        reason: "installed per run by with_run; the digest and stat tables are extensional caches keyed on the path, " \
+                "filled in place, and the recording instant and strict flag are fixed at install"
+      )
+      private_constant :RUN
 
       # Set in the environment to force the strict digest-always validation path for a single run, regardless
       # of the `cache.validation` config setting (the env wins). The escape hatch for a filesystem whose stat
@@ -46,21 +61,9 @@ module Rigor
       # captured at run start — a file whose recorded mtime is not strictly older than it is treated as racy
       # (always re-hashed), catching a file edited during the analysis window. `strict:` forces the
       # digest-always path for `cache.validation: digest`.
-      def self.with_run(strict: false)
-        previous_memo = Thread.current[MEMO_KEY]
-        previous_stat = Thread.current[STAT_KEY]
-        previous_instant = Thread.current[INSTANT_KEY]
-        previous_strict = Thread.current[STRICT_KEY]
-        Thread.current[MEMO_KEY] = {}
-        Thread.current[STAT_KEY] = {}
-        Thread.current[INSTANT_KEY] = now_ns
-        Thread.current[STRICT_KEY] = strict
-        yield
-      ensure
-        Thread.current[MEMO_KEY] = previous_memo
-        Thread.current[STAT_KEY] = previous_stat
-        Thread.current[INSTANT_KEY] = previous_instant
-        Thread.current[STRICT_KEY] = previous_strict
+      def self.with_run(strict: false, &)
+        run = Run.new(digests: {}, stats: {}, instant: now_ns, strict: strict)
+        TypingState.current.with(RUN, run, &)
       end
 
       # The SHA-256 hex digest of `path`'s current content. Served from the active per-run table when one is
@@ -68,10 +71,10 @@ module Rigor
       # read failure (missing / unreadable file) propagates exactly as `Digest::SHA256.file` would and is NOT
       # memoised, so a caller's own rescue path is unchanged.
       def self.hexdigest(path)
-        memo = Thread.current[MEMO_KEY]
-        return Digest::SHA256.file(path).hexdigest if memo.nil?
+        run = TypingState.current[RUN]
+        return Digest::SHA256.file(path).hexdigest if run.nil?
 
-        memo[path] ||= Digest::SHA256.file(path).hexdigest
+        run.digests[path] ||= Digest::SHA256.file(path).hexdigest
       end
 
       # @return whether digest-always validation is forced for this run. The env var wins over the
@@ -79,7 +82,7 @@ module Rigor
       def self.strict_validation?
         return true if ENV[STRICT_ENV] == "1"
 
-        Thread.current[STRICT_KEY] == true
+        TypingState.current[RUN]&.strict == true
       end
 
       # ADR-87 WD1 — packs the `:stat` FileEntry value: `"<digest> <size> <mtime_ns> <ctime_ns> <inode>
@@ -156,14 +159,14 @@ module Rigor
       # describe that moment rather than an earlier probe's. A stat failure propagates un-memoised, exactly
       # as {.hexdigest} treats a read failure.
       def self.validation_stat(path)
-        memo = Thread.current[STAT_KEY]
-        return File.stat(path) if memo.nil?
+        run = TypingState.current[RUN]
+        return File.stat(path) if run.nil?
 
-        memo[path] ||= File.stat(path)
+        run.stats[path] ||= File.stat(path)
       end
 
       def self.recording_instant_ns
-        Thread.current[INSTANT_KEY] || now_ns
+        TypingState.current[RUN]&.instant || now_ns
       end
 
       # value layout: [digest, size, mtime_ns, ctime_ns, inode, recording_instant_ns]

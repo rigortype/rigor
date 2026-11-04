@@ -30,11 +30,20 @@ require "prism"
 #
 # Stage 1 converts files a PR at a time; each conversion adds its files to {#covered_files}.
 RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
-  def covered_files
+  def covered_files = analysis_files + inference_files + other_files
+
+  def analysis_files
     %w[
+      lib/rigor/analysis/check_rules.rb
       lib/rigor/analysis/dependency_recorder.rb
       lib/rigor/analysis/self_call_resolution_recorder.rb
+      lib/rigor/cache/file_digest.rb
       lib/rigor/effects/collector.rb
+    ]
+  end
+
+  def inference_files
+    %w[
       lib/rigor/inference/alias_mutation_floor.rb
       lib/rigor/inference/budget_trace.rb
       lib/rigor/inference/construction_escape.rb
@@ -45,18 +54,29 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
       lib/rigor/inference/key_presence_guard.rb
       lib/rigor/inference/loop_value_record.rb
       lib/rigor/inference/memo_audit.rb
+      lib/rigor/inference/method_dispatcher.rb
+      lib/rigor/inference/method_dispatcher/rbs_dispatch.rb
       lib/rigor/inference/project_method_ownership.rb
       lib/rigor/inference/project_patched_scanner.rb
       lib/rigor/inference/refined_dispatch/constructed_class.rb
       lib/rigor/inference/refined_dispatch/own_method.rb
       lib/rigor/inference/reflective_ivar_write.rb
       lib/rigor/inference/remover_holder_scan.rb
+      lib/rigor/inference/scope_indexer.rb
       lib/rigor/inference/scope_indexer/declared_param_writes.rb
       lib/rigor/inference/scope_indexer/ivar_contributions.rb
       lib/rigor/inference/self_call_ivar_writes.rb
       lib/rigor/inference/statement_evaluator.rb
       lib/rigor/inference/toplevel_def_census.rb
       lib/rigor/inference/void_tail_summary.rb
+    ]
+  end
+
+  def other_files
+    %w[
+      lib/rigor/reflection/constant_ancestors.rb
+      lib/rigor/scope.rb
+      lib/rigor/scope/resolution_chain.rb
       lib/rigor/typing_state.rb
     ]
   end
@@ -498,20 +518,12 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
   # nine directories G3 covers; PRs before this one counted six (without `plugin`, `type` and `cache`).
   def unconverted_thread_sites
     {
-      "lib/rigor/analysis/check_rules.rb" => 2,
       "lib/rigor/analysis/run_disclosure_credit.rb" => 4,
       "lib/rigor/analysis/runner/pool_coordinator.rb" => 2,
-      "lib/rigor/cache/file_digest.rb" => 16,
       "lib/rigor/environment/rbs_loader.rb" => 4,
       "lib/rigor/inference/acceptance.rb" => 4,
-      "lib/rigor/inference/method_dispatcher.rb" => 4,
-      "lib/rigor/inference/method_dispatcher/rbs_dispatch.rb" => 3,
       "lib/rigor/inference/rbs_type_translator.rb" => 4,
-      "lib/rigor/inference/scope_indexer.rb" => 4,
-      "lib/rigor/plugin/io_boundary.rb" => 4,
-      "lib/rigor/reflection/constant_ancestors.rb" => 4,
-      "lib/rigor/scope.rb" => 4,
-      "lib/rigor/scope/resolution_chain.rb" => 2
+      "lib/rigor/plugin/io_boundary.rb" => 4
     }
   end
 

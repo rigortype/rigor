@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../reflection"
+require_relative "../typing_state"
 require_relative "../type"
 require_relative "../flow_contribution"
 require_relative "../flow_contribution/merger"
@@ -1110,34 +1111,47 @@ module Rigor
         memo[method_name] = BlockCallTiming.project_defines_anywhere?(method_name, scope)
       end
 
-      DEFINES_NAME_MEMO_KEY = RunScopedSlots.register(:__rigor_user_class_fallback_defines_name__)
-      private_constant :DEFINES_NAME_MEMO_KEY
+      # ADR-129 WD1 — a run-scoped Memo: one slot keyed on the identity of the discovery index and the environment,
+      # the only inputs the name table's answers read.
+      DEFINES_NAME_MEMO = TypingState.memo(
+        :user_class_fallback_defines_name,
+        run_scoped: true, reason: "one [discovery, environment, names] slot keyed on the identities of the discovery " \
+                                  "index and the environment; each name's answer reads only them"
+      )
+      private_constant :DEFINES_NAME_MEMO
 
       # One slot per discovery index and environment, as {#external_ancestor_memo} keeps its own: the answer reads
       # only the frozen discovery tables and the environment's `pre_eval:` patches.
       def defines_name_memo(scope)
         discovery = scope.discovery
         environment = scope.environment
-        slot = Thread.current[DEFINES_NAME_MEMO_KEY]
+        state = TypingState.current
+        slot = state[DEFINES_NAME_MEMO]
         unless slot && slot[0].equal?(discovery) && slot[1].equal?(environment)
           slot = [discovery, environment, {}]
-          Thread.current[DEFINES_NAME_MEMO_KEY] = slot
+          state[DEFINES_NAME_MEMO] = slot
         end
         slot[2]
       end
 
-      EXTERNAL_ANCESTOR_MEMO_KEY = RunScopedSlots.register(:__rigor_user_class_fallback_external_ancestor__)
-      private_constant :EXTERNAL_ANCESTOR_MEMO_KEY
+      # ADR-129 WD1 — a run-scoped Memo, keyed as {DEFINES_NAME_MEMO} is.
+      EXTERNAL_ANCESTOR_MEMO = TypingState.memo(
+        :user_class_fallback_external_ancestor,
+        run_scoped: true, reason: "one [discovery, environment, answers] slot keyed on the identities of the " \
+                                  "discovery index and the RBS environment, the only inputs the walk reads"
+      )
+      private_constant :EXTERNAL_ANCESTOR_MEMO
 
       # One slot per discovery index and environment, as `RbsDispatch#ancestor_memo_slot` keeps its own: the answer
       # reads only the frozen discovery tables and the RBS environment, and its walk is withheld from dependency
       # recording, so it may be served again for the same pair.
       def external_ancestor_memo(scope, environment)
         discovery = scope.discovery
-        slot = Thread.current[EXTERNAL_ANCESTOR_MEMO_KEY]
+        state = TypingState.current
+        slot = state[EXTERNAL_ANCESTOR_MEMO]
         unless slot && slot[0].equal?(discovery) && slot[1].equal?(environment)
           slot = [discovery, environment, {}]
-          Thread.current[EXTERNAL_ANCESTOR_MEMO_KEY] = slot
+          state[EXTERNAL_ANCESTOR_MEMO] = slot
         end
         slot[2]
       end

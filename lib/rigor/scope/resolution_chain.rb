@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative "../run_scoped_slots"
+require_relative "../typing_state"
 
 module Rigor
   class Scope
@@ -359,11 +359,28 @@ module Rigor
       SINGLETON_EXTEND_HOOKS = %i[extended extend_object].freeze
       INSTANCE_EXTEND_HOOKS = %i[included append_features prepended prepend_features inherited].freeze
 
-      @extend_hook_keys = {}
+      # ADR-129 WD1 — three interning Memos, not run-scoped: a value is a frozen Array of frozen Strings built from the
+      # name and frozen constants alone, so an entry is fixed once written and holds nothing of a run.
+      EXTEND_HOOK_KEYS = TypingState.memo(
+        :resolution_chain_extend_hook_keys,
+        reason: "keyed on the module name; a frozen Array of frozen Strings built from the name and the extend-hook " \
+                "constants alone"
+      )
+      HOOK_KEYS = TypingState.memo(
+        :resolution_chain_hook_keys,
+        reason: "keyed on the class name; a frozen Array of frozen Strings built from the name and " \
+                "Relevance::HOOKS alone"
+      )
+      EXTERNAL_KEYS = TypingState.memo(
+        :resolution_chain_external_keys,
+        reason: "keyed on the class name; HOOK_KEYS' answer plus one frozen String built from the name"
+      )
+      private_constant :EXTEND_HOOK_KEYS, :HOOK_KEYS, :EXTERNAL_KEYS
 
       # The frozen negative method keys of `name`'s {SINGLETON_EXTEND_HOOKS} and {INSTANCE_EXTEND_HOOKS}.
       def self.extend_hook_keys(name)
-        @extend_hook_keys[name] ||= (
+        state = TypingState.current
+        (state[EXTEND_HOOK_KEYS] ||= {})[name] ||= (
           SINGLETON_EXTEND_HOOKS.map { |hook| "method:#{name}.#{hook}".freeze } +
           INSTANCE_EXTEND_HOOKS.map { |hook| "method:#{name}##{hook}".freeze }
         ).freeze
@@ -401,17 +418,16 @@ module Rigor
         end.uniq.freeze
       end
 
-      @hook_keys = {}
-      @external_keys = {}
-
       # The frozen `method:Name.hook` negative keys of `name`'s {Relevance::HOOKS}, built once per name.
       def self.hook_keys(name)
-        @hook_keys[name] ||= Relevance::HOOKS.map { |hook| "method:#{name}.#{hook}".freeze }.freeze
+        state = TypingState.current
+        (state[HOOK_KEYS] ||= {})[name] ||= Relevance::HOOKS.map { |hook| "method:#{name}.#{hook}".freeze }.freeze
       end
 
       # {hook_keys} plus the `mixin:<name>` key an external entry files for its unpositioned mixins (#1661).
       def self.external_keys(name)
-        @external_keys[name] ||= (hook_keys(name) + ["mixin:#{name}".freeze]).freeze
+        state = TypingState.current
+        (state[EXTERNAL_KEYS] ||= {})[name] ||= (hook_keys(name) + ["mixin:#{name}".freeze]).freeze
       end
 
       def record_head(scope, start, side)
@@ -496,8 +512,14 @@ module Rigor
       end
       private :compute_levels
 
-      MEMO_KEY = RunScopedSlots.register(:__rigor_resolution_chain__)
-      private_constant :MEMO_KEY
+      # ADR-129 WD1 — a run-scoped Memo: one `[discovery, flavors]` slot keyed on the discovery index's identity, the
+      # only input a chain reads.
+      MEMO = TypingState.memo(
+        :resolution_chain,
+        run_scoped: true, reason: "one slot keyed on the discovery index's identity; a chain is a pure function of " \
+                                  "that frozen index and the flavor"
+      )
+      private_constant :MEMO
 
       FLAVORS = %i[methods constants arity].freeze
 
@@ -513,10 +535,11 @@ module Rigor
       end
 
       def self.flavor_bucket(discovery, flavor)
-        slot = Thread.current[MEMO_KEY]
+        state = TypingState.current
+        slot = state[MEMO]
         unless slot && slot[0].equal?(discovery)
           slot = [discovery, {}]
-          Thread.current[MEMO_KEY] = slot
+          state[MEMO] = slot
         end
         slot[1][flavor] ||= { instance: {}, singleton: {}, names: {}, interned: {}, externals: {}, master: {},
                               marks: {} }

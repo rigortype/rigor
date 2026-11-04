@@ -34,7 +34,7 @@ require_relative "check_rules/rebinding_block_callees"
 require_relative "check_rules/rbs_receiver_surface"
 require_relative "check_rules/special_global_setters"
 require_relative "check_rules/ruby_deprecations"
-require_relative "../run_scoped_slots"
+require_relative "../typing_state"
 
 module Rigor
   module Analysis
@@ -3202,7 +3202,13 @@ module Rigor
           build_visibility_mismatch_diagnostic(path, call_node, "singleton(#{class_name})")
         end
 
-        PRIVATE_NAMES_MEMO = RunScopedSlots.register(:rigor_check_rules_private_singleton_names)
+        # ADR-129 WD1 — a run-scoped Memo: one `[discovery, names]` slot keyed on the discovery index's identity, the
+        # only input the name set reads.
+        PRIVATE_NAMES_MEMO = TypingState.memo(
+          :check_rules_private_singleton_names,
+          run_scoped: true, reason: "one [discovery, names] slot keyed on the discovery index's identity; the name " \
+                                    "set reads only its method-visibility tables"
+        )
         private_constant :PRIVATE_NAMES_MEMO
 
         # Issue #1984 — the table-only gate the singleton side asks before it reads a chain, as the instance side asks
@@ -3213,10 +3219,11 @@ module Rigor
         def private_singleton_candidate?(scope, name)
           DependencyRecorder.read_visibility("*", name) if DependencyRecorder.active?
           discovery = scope.discovery
-          slot = Thread.current[PRIVATE_NAMES_MEMO]
+          state = TypingState.current
+          slot = state[PRIVATE_NAMES_MEMO]
           unless slot && slot[0].equal?(discovery)
             slot = [discovery, private_recorded_names(discovery.discovered_method_visibilities)]
-            Thread.current[PRIVATE_NAMES_MEMO] = slot
+            state[PRIVATE_NAMES_MEMO] = slot
           end
           slot[1].include?(name.to_sym)
         end

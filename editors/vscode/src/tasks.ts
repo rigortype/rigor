@@ -145,7 +145,10 @@ function checkTask(
     };
   });
   return new Task(
-    { type: TASK_TYPE, command: "check" },
+    // `folder` keeps two folders' definitions distinct: VS Code looks a
+    // pseudoterminal up by definition, so identical ones ran the wrong
+    // folder's `rigor check`.
+    { type: TASK_TYPE, command: "check", folder: folderKey(folder) },
     folder,
     label,
     TASK_SOURCE,

@@ -217,6 +217,10 @@
             "type": "string",
             "enum": ["check"],
             "description": "The Rigor subcommand the task runs."
+          },
+          "folder": {
+            "type": "string",
+            "description": "Set by the extension: the workspace folder the task belongs to."
           }
         }
       }

@@ -90,7 +90,7 @@ RSpec.describe "a callee's return does not depend on its caller's frame flags", 
       "a block joined with its `next` values" => "[1].map { |e| next g if e; 2 }"
     }.each do |frame, in_frame|
       it "reports the call outside the block after #{frame} reached the callee first" do
-        pending("the threading suppression is not a memo-key term yet (#2782)")
+        pending("the threading suppression is still order-dependent (#2782)")
         src = source(fold_callee, in_frame, "g.foo")
         expect(rules(src)).to eq([[line_of(src, "g.foo"), undefined]])
       end

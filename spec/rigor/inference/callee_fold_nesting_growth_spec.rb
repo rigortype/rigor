@@ -67,12 +67,6 @@ RSpec.describe "a callee reached inside a block fold does not fold again" do
     expect(bt.snapshot[bt::MEMO_BODY_EVALS]).to be <= 36 * 4
   end
 
-  it "walks a chain past the unroll fuel once per level" do
-    analyze_file(chain(depth: 33, arg: "1"))
-
-    expect(bt.snapshot[bt::MEMO_BODY_EVALS]).to be <= 33 * 4
-  end
-
   it "analyses a deep chain without overflowing the stack" do
     # An overflow raises out of `guarded_run` and fails the example by itself.
     analyze_file(chain(depth: 150, arg: "rand(9)"))

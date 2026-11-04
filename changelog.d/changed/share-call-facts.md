@@ -1,0 +1,1 @@
+- **[rigor check]** `rigor check` types each call's receiver once for all of its call rules instead of once per rule, which cuts about 16% of the allocations on Mastodon, 10% on Redmine and 3% on a codebase the size of Rigor's own, with every diagnostic unchanged. ([#2789](https://github.com/rigortype/rigor/pull/2789))

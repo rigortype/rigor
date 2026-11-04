@@ -26,6 +26,8 @@ export interface FolderStatus {
   kind?: DiscoveryKind;
   /** The command line the server was spawned with. */
   commandLine?: string;
+  /** Why the folder is in this state, when the state alone does not say. */
+  note?: string;
 }
 
 export class StatusBar {
@@ -118,6 +120,10 @@ export class StatusBar {
     md.appendText(`Rigor language server: ${state}\n\n`);
     for (const folder of folders) {
       md.appendMarkdown(`- ${escapeMarkdown(describeFolder(folder))}`);
+      if (folder.note) {
+        md.appendMarkdown("  \n  ");
+        md.appendText(folder.note);
+      }
       if (folder.commandLine) {
         md.appendMarkdown("  \n  ");
         md.appendText(folder.commandLine);

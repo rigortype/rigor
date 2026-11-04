@@ -154,6 +154,7 @@ export function projectRoot(folder: WorkspaceFolder): string | undefined {
  * `rigor.server.path` as the command to run: trimmed, with one pair of
  * surrounding double quotes removed. Quoting a path with spaces was the
  * user's own Windows workaround before #2743; `shellArg` now quotes it.
+ * A quoted empty string (`"\"\""`) is deliberately the same as unset.
  */
 export function explicitServerPath(raw: string | undefined): string {
   const trimmed = (raw ?? "").trim();

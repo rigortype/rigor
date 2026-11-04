@@ -1589,20 +1589,23 @@ export function miseLogActive(tail: string, quietMs: number): boolean {
   if (quietMs >= MISE_LOG_QUIET_MS) {
     return false;
   }
-  // Only the final non-empty line counts: a tick printed by an earlier
-  // step, or a compiler line that starts with `Error:` and is followed by
-  // more output, is not the end of the install.
-  const last =
-    tail
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => line !== "")
-      .pop() ?? "";
-  return !MISE_LOG_FINISHED.test(last);
+  // Look at the last few non-empty lines only, and only for markers that
+  // name the end of an install: a tick printed by an earlier step or a
+  // compiler line starting with `Error:` is not one. mise may print a
+  // warning or hint after its last line, hence a few lines, not one.
+  // (Real non-TTY mise output is not measured yet; see #2774.)
+  const lines = tail
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line !== "")
+    .slice(-MISE_LOG_FINAL_LINES);
+  return !lines.some((line) => MISE_LOG_FINISHED.test(line));
 }
 
+const MISE_LOG_FINAL_LINES = 5;
+
 const MISE_LOG_FINISHED =
-  /^(?:.*\bInstalled ruby-\S+ to|.*\bBUILD FAILED|mise\b.*\b(?:ERROR|error)\b|(?:ERROR|Error)\b.*|.*✓.*\binstalled\b.*|.*\binstalled\b.*ruby@.*)/;
+  /Installed ruby-\S+ to|BUILD FAILED|^mise\b.*✓.*\binstalled\b|^mise\s+(?:ERROR|error)\b/;
 
 function miseLogTail(file: string): string {
   let fd: number | undefined;

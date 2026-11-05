@@ -1,9 +1,15 @@
 # frozen_string_literal: true
 
+require_relative "../typing_state"
+
 module Rigor
   class Environment
     # Small hierarchy oracle backed by RBS instance definitions.
     class RbsHierarchy
+      TypingState.memo_field(self, :@ancestor_names_cache, :@class_ordering_cache,
+                             reason: "keyed on the class names; answered from the loader's RBS environment, fixed " \
+                                     "for the loader's lifetime")
+
       def initialize(loader)
         @loader = loader
         @ancestor_names_cache = {}

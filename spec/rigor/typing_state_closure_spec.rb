@@ -110,6 +110,8 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
       [state, :weak_map, "WeakKeyMap"] => [1, "State#weak_key_map makes the store a run-scoped Table or Memo holds"],
       [state, :module_ivar_write, "@slots"] => [2, "the slot registry, written only while files load"],
       [state, :module_ivar_write, "@run_scoped"] => [2, "the run-scoped slot indices, written only while files load"],
+      [state, :module_ivar_write, "@fields"] =>
+        [2, "the G4 registry of memo and store fields outside the slots, written only while files load"],
       [typer, :table_access, "dynamic_origins"] => [1, hand_off],
       [evaluator, :table_access, "dynamic_origins"] => [1, hand_off]
     }

@@ -36,6 +36,12 @@ module Rigor
     # See docs/internal-spec/inference-engine.md for the binding contract.
     # rubocop:disable-next Metrics/ClassLength
     class RbsLoader
+      # ADR-129 G4 — keyed on the class name, answered from the loader's RBS environment (or, for `class_known?`, the
+      # known-name set cached for it), fixed for the loader's lifetime. `@state` is not declared: beside its lazy
+      # derivations it holds warn-once flags and failure counters.
+      TypingState.memo_field(self, :@instance_definition_cache, :@singleton_definition_cache, :@class_known_cache,
+                             reason: "keyed on the class name; a function of the loader's RBS environment")
+
       # Buffer name stamped on the `module` declarations synthesized by {.synthesize_missing_namespaces}.
       # Re-read off the built env by {#synthesized_namespaces} so the analysis layer can surface an `:info`
       # diagnostic naming the project's malformed-RBS namespaces — robust across the marshalled env cache,

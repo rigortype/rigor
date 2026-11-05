@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "../typing_state"
+
 module Rigor
   class Environment
     # Per-key memoization container for {Environment#constant_for_name}. Held by {Environment} so the
@@ -22,6 +24,9 @@ module Rigor
     # reader path. If a future caller introduces a multi-threaded reader against one Environment, the
     # synchronisation belongs at that caller's seam, not here.
     class ConstantTypeCacheHolder
+      TypingState.memo_field(self, :@cache, reason: "keyed on the constant name; a pure function of the name for " \
+                                                    "the environment's lifetime (Environment#constant_for_name)")
+
       def initialize
         @cache = {}
       end

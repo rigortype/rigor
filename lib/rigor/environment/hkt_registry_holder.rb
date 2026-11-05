@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "../typing_state"
+
 module Rigor
   class Environment
     # ADR-20 slice 2e — mutable single-slot memoization container for the per-Environment HKT registry. Held
@@ -10,6 +12,10 @@ module Rigor
     # prevent cross-thread races. If a future caller introduces a multi-threaded reader path against a
     # shared Environment, the synchronisation belongs at that caller's seam, not here.
     class HktRegistryHolder
+      TypingState.memo_field(self, :@value, :@loaded,
+                             reason: "the one value its owner's block builds from the environment's fixed inputs, " \
+                                     "kept once built")
+
       def initialize
         @loaded = false
         @value = nil

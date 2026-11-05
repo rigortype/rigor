@@ -58,6 +58,26 @@ RSpec.describe Rigor::TypingState do
       expect(described_class.slots.map(&:name)).not_to include(:typing_state_spec_probe)
     end
 
+    # ADR-129 G4 — the fields outside the slots that the reachability audit accepts.
+    it "declares memo and store fields with a reason, a bound table and one owner each" do
+      fields = described_class.fields
+      expect(Ractor.shareable?(fields)).to be(true)
+      expect(fields).to all(satisfy { |field| %i[memo store].include?(field.kind) && !field.reason.strip.empty? })
+      expect(fields.select { |field| field.kind == :store }.map { |field| described_class.slot(field.slot) })
+        .to all(have_attributes(kind: :table, bound: true))
+      probe = Class.new
+      expect do
+        described_class.memo_field(probe, :cache, reason: "x")
+      end.to raise_error(ArgumentError, /instance variable/)
+      expect { described_class.memo_field(probe, :@cache, reason: " ") }.to raise_error(ArgumentError, /why/)
+      expect { described_class.memo_field(probe, reason: "x") }.to raise_error(ArgumentError, /at least one/)
+      expect { described_class.store_field(probe, :@store, index(:user_method_return_memo)) }
+        .to raise_error(ArgumentError, /bound table/)
+      expect { described_class.store_field(Rigor::Scope, :@dynamic_origins, index(:dynamic_origins)) }
+        .to raise_error(ArgumentError, /already declared/)
+      expect(described_class.fields.map(&:owner)).not_to include(probe)
+    end
+
     it "hands each thread its own state" do
       expect(Thread.new { described_class.current }.value).not_to be(described_class.current)
     end

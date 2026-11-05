@@ -34,6 +34,7 @@ module Rigor
       # recorded for it.
       RUN_MEMO = TypingState.frame(
         :def_node_resolver_run,
+        memos: %i[nodes indexes nestings refinement_queries],
         reason: "installed per run by with_run; its tables are extensional caches, keyed on (path, node_id), on the " \
                 "path, and (nestings) on the minted node's identity, filled in place"
       )

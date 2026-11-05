@@ -2795,6 +2795,10 @@ RSpec.describe "Rigor type construction (integration)" do
   describe "fixtures/singleton_type_variable_binding/ — `[T] (singleton(T)) -> T` binds the class's instances" do
     let(:harness) { harness_for("singleton_type_variable_binding") }
 
+    # With `Resolv` loaded in the analyzer process, `singleton(T)` read as a class named `T` refused the
+    # typeclass and the base overload answered; the full suite loads it, a lone run of this file does not.
+    before { require "resolv" }
+
     it "reads each record's own readers, and still fires on the controls" do
       undefined = harness.diagnostics.select { |d| d.rule == "call.undefined-method" }
       expect(undefined.map(&:line)).to eq(marked_lines(harness, "# GENUINE-UNDEFINED"))

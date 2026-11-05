@@ -53,9 +53,9 @@ module Rigor
       # * Method-level type parameters bind from the block return type (Slice 6 phase C) and from a
       #   positional parameter whose declared type is EXACTLY a type variable (issue #303 —
       #   `def foo[T]: (T) -> T` binds `T` from the first argument, and carries it into a generic return
-      #   such as `-> Array[T]`), plus a `Range[A]` element (#834) and a `singleton(T)` class object (#2828). A variable reachable only through other
-      #   container positions (`Array[T] arg`), a rest positional (`*T`), or a keyword parameter is still
-      #   unbound and degrades to `Dynamic[Top]`.
+      #   such as `-> Array[T]`), plus a `Range[A]` element (#834) and a `singleton(T)` class object (#2828).
+      #   A variable reachable only through other container positions (`Array[T] arg`), a rest positional
+      #   (`*T`), or a keyword parameter is still unbound and degrades to `Dynamic[Top]`.
       #   A block-return variable that a parameter also names takes the value class the argument and the
       #   block share once the call passes an argument, or stays unbound when they share none (see
       #   {compose_block_type_vars}).
@@ -1870,7 +1870,10 @@ module Rigor
               next if arg.nil?
 
               name, bound = param_binding(param, arg, declared, type_vars)
-              name, bound = singleton_param_binding(method_type, param, arg, declared, type_vars, environment) if name.nil?
+              if name.nil?
+                name, bound = singleton_param_binding(method_type, param, arg, declared, type_vars,
+                                                      environment)
+              end
               next if name.nil?
 
               bound = Type::Combinator.widen_value_pinned(bound) if upper_bounded?(method_type, name)
@@ -1919,7 +1922,9 @@ module Rigor
 
             members = arg.is_a?(Type::Union) ? arg.members : [arg]
             return NO_BINDING unless members.all?(Type::Singleton)
-            return NO_BINDING unless members.all? { |member| within_upper_bound?(method_type, name, member, environment) }
+
+            within = members.all? { |member| within_upper_bound?(method_type, name, member, environment) }
+            return NO_BINDING unless within
 
             instances = members.map { |member| Type::Combinator.nominal_of(member.class_name) }
             [name, instances.size == 1 ? instances.first : Type::Combinator.union(*instances)]
@@ -2285,7 +2290,8 @@ module Rigor
           end
 
           def singleton_bindings(method_type, fun, args, declared, type_vars, environment)
-            (fun.required_positionals + fun.optional_positionals).zip(args).each_with_object({}) do |(param, arg), bindings|
+            positionals = fun.required_positionals + fun.optional_positionals
+            positionals.zip(args).each_with_object({}) do |(param, arg), bindings|
               next if arg.nil?
 
               name, bound = singleton_param_binding(method_type, param, arg, declared, type_vars, environment)

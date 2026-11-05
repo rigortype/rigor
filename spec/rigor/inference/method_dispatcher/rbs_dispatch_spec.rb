@@ -289,6 +289,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RbsDispatch do
             def self.build_comparable: [T < ::_ToS] (singleton(T) klass) -> T
             def self.each_built: [T] (singleton(T) klass) { (T) -> void } -> void
             def self.each_wrapped: [T] (T obj) { (T) -> void } -> void
+            def self.make: [T] (singleton(T) klass) -> T
+                         | (singleton(::Object) klass) -> ::Object
           end
 
           class RigorSpecCrate[T]
@@ -443,6 +445,12 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RbsDispatch do
 
         it "leaves T unbound for a Dynamic argument" do
           expect(bind(box, :build, [Rigor::Type::Combinator.untyped])).to equal(Rigor::Type::Combinator.untyped)
+        end
+
+        # The class object's class is loaded in the analyzer process, which once made `singleton(T)` refuse it
+        # (read as a class named `T`) and the base overload win.
+        it "selects the `singleton(T)` overload ahead of a later `singleton(Object)` one" do
+          expect(bind(box, :make, [integer_class])).to eq(Rigor::Type::Combinator.nominal_of(Integer))
         end
 
         it "binds a class inside the declared upper bound" do

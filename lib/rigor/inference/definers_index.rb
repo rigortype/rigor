@@ -142,7 +142,7 @@ module Rigor
           return MemoAudit.check("definers index seed alt", slot[1], seed.size) { build(seed) }
         end
 
-        index = build(seed)
+        index = MemoAudit.key_audit("definers index seed") { build(seed) }
         state[SEED_INDEX_ALT] = state[SEED_INDEX]
         state[SEED_INDEX] = [seed, index]
         index

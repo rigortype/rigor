@@ -316,7 +316,11 @@ module Rigor
         def all_unknown_superclass_classes(scope)
           table = subclass_memo(scope)
           stored = table[:unknown]
-          return table[:unknown] = compute_unknown_superclass_classes(scope) if stored.nil?
+          if stored.nil?
+            return table[:unknown] = MemoAudit.key_audit("own method unknown superclasses") do
+              compute_unknown_superclass_classes(scope)
+            end
+          end
 
           MemoAudit.check("own method unknown superclasses", stored, :unknown) do
             compute_unknown_superclass_classes(scope)
@@ -365,7 +369,9 @@ module Rigor
         def children_by_parent(scope)
           table = subclass_memo(scope)
           stored = table[:children]
-          return table[:children] = compute_children_by_parent(scope) if stored.nil?
+          if stored.nil?
+            return table[:children] = MemoAudit.key_audit("own method children") { compute_children_by_parent(scope) }
+          end
 
           MemoAudit.check("own method children", stored, :children) { compute_children_by_parent(scope) }
         end

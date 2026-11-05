@@ -323,7 +323,11 @@ module Rigor
 
             table = TypingState.current.weak_key_map(RBS_COMPLETE_MEMBER_NAMES)
             names = table[environment]
-            return table[environment] = collect_rbs_complete_member_names(environment) if names.nil?
+            if names.nil?
+              return table[environment] = MemoAudit.key_audit("rbs complete member names") do
+                collect_rbs_complete_member_names(environment)
+              end
+            end
 
             MemoAudit.check("rbs complete member names", names, :environment) do
               collect_rbs_complete_member_names(environment)
@@ -785,7 +789,9 @@ module Rigor
             end
 
             store_unless_recorded(memo, key) do
-              compute_core_stdlib_ancestor_method(environment, class_name, method_name, scope)
+              MemoAudit.key_audit("core stdlib ancestor dispatch") do
+                compute_core_stdlib_ancestor_method(environment, class_name, method_name, scope)
+              end
             end
           end
 
@@ -826,7 +832,9 @@ module Rigor
             end
 
             store_unless_recorded(memo, key) do
-              compute_included_module_method(environment, class_name, method_name, scope)
+              MemoAudit.key_audit("mixin ancestor dispatch") do
+                compute_included_module_method(environment, class_name, method_name, scope)
+              end
             end
           end
 

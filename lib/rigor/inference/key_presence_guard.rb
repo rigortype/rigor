@@ -113,6 +113,10 @@ module Rigor
 
       def active? = !TypingState.current[WALK].nil?
 
+      # {.active?}, read only to decide whether to turn the walk off for the extent that follows ({.without_guards}):
+      # that extent reads it off either way, so the key audit does not count the read (ADR-129 WD1).
+      def forcing_off? = !TypingState.current.forcing_read(WALK).nil?
+
       # Whether `call.possible-nil-receiver` should withhold its report on `call_node`, whose receiver the file's
       # analysis types `receiver_type`: true only when the guarded re-walk types that receiver as exactly
       # `receiver_type` without `nil`. False for a file with no guard-shaped call, while an effect or flow trace
@@ -150,7 +154,7 @@ module Rigor
 
         # Cached before the walk, so a re-walk that raises is attempted once per file and then answers nil.
         state[REWALK] = [root, nil]
-        index = guarded_index(root, scope_index)
+        index = MemoAudit.key_audit("key presence rewalk") { guarded_index(root, scope_index) }
         state[REWALK] = [root, index]
         index
       end

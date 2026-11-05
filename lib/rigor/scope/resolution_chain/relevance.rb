@@ -43,7 +43,9 @@ module Rigor
           entry = memo[key]
           verdict, edges =
             if entry.nil?
-              memo[key] = compute(scope, chain.flavor, mark, name)
+              memo[key] = Inference::MemoAudit.key_audit("resolution chain relevance") do
+                compute(scope, chain.flavor, mark, name)
+              end
             else
               Inference::MemoAudit.check("resolution chain relevance", entry, mark, name) do
                 Analysis::DependencyRecorder.withhold { compute(scope, chain.flavor, mark, name) }.first

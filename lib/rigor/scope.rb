@@ -1348,7 +1348,11 @@ module Rigor
 
       table = TypingState.current.weak_key_map(PROJECT_METHOD_NAMES)
       names = table[@discovery]
-      return table[@discovery] = collect_project_method_names if names.nil?
+      if names.nil?
+        return table[@discovery] = Inference::MemoAudit.key_audit("project method names") do
+          collect_project_method_names
+        end
+      end
 
       Inference::MemoAudit.check("project method names", names, :discovery) { collect_project_method_names }
     end
@@ -1628,7 +1632,7 @@ module Rigor
         end
       end
 
-      names = collect_deferred_definition_names(ranges)
+      names = Inference::MemoAudit.key_audit("deferred definition names") { collect_deferred_definition_names(ranges) }
       slots.unshift([ranges, names]).slice!(2..)
       names
     end
@@ -1672,7 +1676,7 @@ module Rigor
         end
       end
 
-      rows = collect_toplevel_definition_rows(ranges)
+      rows = Inference::MemoAudit.key_audit("toplevel definition rows") { collect_toplevel_definition_rows(ranges) }
       slots.unshift([ranges, rows]).slice!(2..)
       rows
     end
@@ -1704,7 +1708,7 @@ module Rigor
         return Inference::MemoAudit.check("method alias names", slot[1], :census) { collect_method_alias_names(census) }
       end
 
-      names = collect_method_alias_names(census)
+      names = Inference::MemoAudit.key_audit("method alias names") { collect_method_alias_names(census) }
       slots.unshift([census, names]).slice!(2..)
       names
     end

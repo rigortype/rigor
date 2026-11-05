@@ -50,8 +50,10 @@ module Rigor
     #   per file's scopes, per installed recorder); its journal records key on `[store, key]`.
     # - `audit`: a Memo's `MemoAudit.check` labels, the hit sites that recompute and compare (WD1, G2).
     # - `memos`: a Frame's members or keys that hold Memos its owner fills in place (G4 accepts them).
+    # - `computed`: a Table filled by a computation (the ADR-84 return memo), the `MemoAudit.key_audit` label of its
+    #   miss (WD1's key audit, G2).
     Slot = Data.define(:name, :kind, :index, :reason, :run_scoped, :read_exemption, :contents, :read_through, :bound,
-                       :audit, :memos)
+                       :audit, :memos, :computed)
 
     # A field declared outside the slots: `kind` is `:memo` ({.memo_field}) or `:store` ({.store_field}, whose `slot`
     # names the bound Table).
@@ -87,11 +89,13 @@ module Rigor
       end
 
       # Declares a Table slot and returns its index. A `bound` table's stores live with their owners, so the slot holds
-      # nothing a run could release.
-      def table(name, reason:, run_scoped: false, read_through: false, bound: false)
+      # nothing a run could release. A table a computation fills on a miss names the miss's `MemoAudit.key_audit` label
+      # as `computed`.
+      def table(name, reason:, run_scoped: false, read_through: false, bound: false, computed: nil)
         raise ArgumentError, "#{name}: a bound table holds no run-scoped value" if bound && run_scoped
 
-        declare(name, :table, reason, run_scoped: run_scoped, read_through: read_through, bound: bound)
+        declare(name, :table, reason, run_scoped: run_scoped, read_through: read_through, bound: bound,
+                                      computed: computed)
       end
 
       # Declares a Resource slot and returns its index.
@@ -175,7 +179,7 @@ module Rigor
       end
 
       def declare(name, kind, reason, run_scoped: false, read_exemption: nil, contents: nil, read_through: false, # rubocop:disable Metrics/ParameterLists
-                  bound: false, audit: nil, memos: nil)
+                  bound: false, audit: nil, memos: nil, computed: nil)
         if @slots.any? { |slot| slot.name == name }
           raise ArgumentError, "typing-state slot #{name.inspect} is already declared"
         end
@@ -184,7 +188,7 @@ module Rigor
         index = @slots.size
         slot = Slot.new(name: name, kind: kind, index: index, reason: reason.dup.freeze, run_scoped: run_scoped,
                         read_exemption: read_exemption, contents: contents, read_through: read_through, bound: bound,
-                        audit: audit, memos: memos)
+                        audit: audit, memos: memos, computed: computed)
         @slots = Ractor.make_shareable([*@slots, slot])
         @run_scoped = [*@run_scoped, index].freeze if run_scoped
         index
@@ -217,6 +221,19 @@ module Rigor
 
       # A Frame or Memo read, or a Table's container.
       def [](slot) = @values[slot]
+
+      # A Frame read only to decide whether to install it at a constant for the extent that follows (the return memo
+      # turning the key-presence walk off): whichever way it goes, that extent reads the constant, so the key audit
+      # ({KeyAudit}) does not note it. Any other read goes through {#[]}.
+      def forcing_read(slot) = @values[slot]
+
+      # A Frame read as a term of a memo key (ADR-129 WD1's key audit): the value {#[]} answers. Under the key audit
+      # ({KeyAudit}) the read is also noted, so the audit compares what the key carries with what its miss read.
+      def key_frame(slot) = @values[slot]
+
+      # The state id read as a term of a memo key: it names every installed Frame value (WD2), so a key carrying it
+      # carries every Frame.
+      def key_state_id = @id
 
       # A Memo write, or a Table's container (an entry's own write is {#log_write}).
       def []=(slot, value)
@@ -404,6 +421,135 @@ module Rigor
         TypingState.slots.filter_map do |slot|
           value = @values[slot.index]
           slot.name unless value.nil? || (value.respond_to?(:empty?) && value.empty?)
+        end
+      end
+    end
+
+    # ADR-129 WD1's key audit, on one {State}: `MemoAudit` extends a thread's state with this module the first time an
+    # audited run reaches a memo miss, so a run with the audit off reads a slot through the plain {State#[]}.
+    #
+    # While a miss computation runs ({#open_key_audit} .. {#close_key_audit}, nested for a miss inside a miss) every
+    # Frame read is noted on each open audit, except a read of a Frame installed since that audit opened: the
+    # computation installed it itself, so it is internal (the return memo's `with_return_sink`). A read an inner audit
+    # declares a known gap reaches the audits around it as that gap, named through the inner audit's label: the outer
+    # value is computed from the inner one. {#collect_key_terms} notes the Frames a key builder reads through
+    # {State#key_frame} and {State#key_state_id}.
+    module KeyAudit
+      # The key term {State#key_state_id} notes: the id names every installed Frame.
+      STATE_ID = :state_id
+
+      def self.extended(state) = state.send(:start_key_audit)
+
+      def [](slot)
+        note_frame_read(slot) unless @key_audits.empty?
+        super
+      end
+
+      def key_frame(slot)
+        @key_terms&.push(slot)
+        note_frame_read(slot) unless @key_audits.empty?
+        super
+      end
+
+      def key_state_id
+        @key_terms&.push(STATE_ID)
+        super
+      end
+
+      def with(slot, value)
+        @key_installs.push(slot)
+        begin
+          super
+        ensure
+          @key_installs.pop
+        end
+      end
+
+      def with_pair(slot, value, other, other_value)
+        installs = @key_installs
+        installs.push(slot, other)
+        begin
+          super
+        ensure
+          installs.pop(2)
+        end
+      end
+
+      def without(slots)
+        installs = @key_installs
+        installs.concat(slots)
+        begin
+          super
+        ensure
+          installs.pop(slots.size)
+        end
+      end
+
+      # Runs the block, a key builder, and remembers the key it answers with the Frame terms it read, for the
+      # {#key_terms_for} of the miss that follows. Answers the key.
+      def collect_key_terms
+        saved = @key_terms
+        terms = @key_terms = []
+        key = yield
+        @last_key = [key, terms.uniq.freeze]
+        key
+      ensure
+        @key_terms = saved
+      end
+
+      # The Frame terms (slot indices, or {STATE_ID}) the key builder of `key` read, or an empty list when `key` is not
+      # the last key {#collect_key_terms} built (a memo whose key reads no Frame passes nil).
+      def key_terms_for(key)
+        last = @last_key
+        last && !key.nil? && last[0].equal?(key) ? last[1] : EMPTY_TERMS
+      end
+
+      # Opens the audit of the miss computation `label` names, whose site declares `gaps` (slot name => reason).
+      def open_key_audit(label, gaps)
+        @key_audits.push([@key_installs.size, {}, label, gaps])
+        nil
+      end
+
+      # Closes the innermost audit and answers what its computation read from outside it: `slot => true` for a read of
+      # its own, or `slot => [inner label, reason]` for one an audit nested in it declared a gap.
+      def close_key_audit
+        @key_audits.pop[1]
+      end
+
+      EMPTY_TERMS = [].freeze
+      private_constant :EMPTY_TERMS
+
+      private
+
+      def start_key_audit
+        @key_audits = []
+        @key_installs = []
+        @key_terms = nil
+        @last_key = nil
+      end
+
+      # Innermost audit first: an audit whose computation installed the slot, and every audit around it, read it
+      # internally.
+      def note_frame_read(slot)
+        declared = TypingState.slots[slot]
+        return unless declared.kind == :frame
+
+        at = @key_installs.rindex(slot)
+        audits = @key_audits
+        gap = nil
+        index = audits.size - 1
+        while index >= 0
+          mark, reads, label, gaps = audits[index]
+          break if at && at >= mark
+
+          if gap
+            reads[slot] ||= gap
+          else
+            reads[slot] = true
+            reason = gaps[declared.name]
+            gap = [label, reason].freeze if reason
+          end
+          index -= 1
         end
       end
     end

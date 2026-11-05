@@ -117,7 +117,7 @@ module Rigor
         end
 
         visited[def_node] = true
-        memo[def_node] = compute(def_node, owner, kind, visited)
+        memo[def_node] = MemoAudit.key_audit("void tail walk") { compute(def_node, owner, kind, visited) }
       end
 
       def compute(def_node, owner, kind, visited)

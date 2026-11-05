@@ -128,7 +128,7 @@ module Rigor
             return MemoAudit.check("ivar contributions table", slot[1], census.size) { build_table(census) }
           end
 
-          table = build_table(census)
+          table = MemoAudit.key_audit("ivar contributions table") { build_table(census) }
           state[TABLE] = [census, table]
           table
         end

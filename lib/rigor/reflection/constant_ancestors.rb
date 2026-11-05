@@ -141,7 +141,11 @@ module Rigor
       end
       bucket = slot[1]
       worlds = bucket[class_name]
-      return bucket[class_name] = compute_ancestor_constant_scopes(class_name, scope) if worlds.nil?
+      if worlds.nil?
+        return bucket[class_name] = Inference::MemoAudit.key_audit("recorded ancestor constant scopes") do
+          compute_ancestor_constant_scopes(class_name, scope)
+        end
+      end
 
       if Inference::MemoAudit.enabled?
         Inference::MemoAudit.check("recorded ancestor constant scopes", audit_view(worlds), class_name) do

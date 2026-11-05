@@ -396,7 +396,9 @@ module Rigor
         state = TypingState.current
         table = (state[EXTEND_HOOK_KEYS] ||= {})
         stored = table[name]
-        return table[name] = build_extend_hook_keys(name) if stored.nil?
+        if stored.nil?
+          return table[name] = Inference::MemoAudit.key_audit("extend hook keys") { build_extend_hook_keys(name) }
+        end
 
         Inference::MemoAudit.check("extend hook keys", stored, name) { build_extend_hook_keys(name) }
       end
@@ -447,7 +449,7 @@ module Rigor
         state = TypingState.current
         table = (state[HOOK_KEYS] ||= {})
         stored = table[name]
-        return table[name] = build_hook_keys(name) if stored.nil?
+        return table[name] = Inference::MemoAudit.key_audit("hook keys") { build_hook_keys(name) } if stored.nil?
 
         Inference::MemoAudit.check("hook keys", stored, name) { build_hook_keys(name) }
       end
@@ -461,7 +463,9 @@ module Rigor
         state = TypingState.current
         table = (state[EXTERNAL_KEYS] ||= {})
         stored = table[name]
-        return table[name] = build_external_keys(name) if stored.nil?
+        if stored.nil?
+          return table[name] = Inference::MemoAudit.key_audit("external keys") { build_external_keys(name) }
+        end
 
         Inference::MemoAudit.check("external keys", stored, name) { build_external_keys(name) }
       end
@@ -578,7 +582,11 @@ module Rigor
         bucket = flavor_bucket(scope.discovery, flavor)
         chains = bucket[side]
         cached = chains[class_name]
-        return chains[class_name] = Builder.new(scope, flavor, bucket).chain(class_name, side) if cached.nil?
+        if cached.nil?
+          return chains[class_name] = Inference::MemoAudit.key_audit("resolution chain") do
+            Builder.new(scope, flavor, bucket).chain(class_name, side)
+          end
+        end
         return cached unless Inference::MemoAudit.enabled?
 
         Inference::MemoAudit.check("resolution chain", cached.audit_signature, class_name, side) do
@@ -623,7 +631,9 @@ module Rigor
         # ambiguous spelling names (`:arity` only), or nil.
         def resolve(owner, raw)
           by_owner = (@names[owner] ||= {})
-          return by_owner[raw] = compute(owner, raw) unless by_owner.key?(raw)
+          unless by_owner.key?(raw)
+            return by_owner[raw] = Inference::MemoAudit.key_audit("resolution chain name") { compute(owner, raw) }
+          end
 
           Inference::MemoAudit.check("resolution chain name", by_owner[raw], owner, raw) do
             Analysis::DependencyRecorder.withhold { compute(owner, raw) }.first
@@ -807,7 +817,11 @@ module Rigor
       def self.master_memo(scope, flavor, key)
         bucket = flavor_bucket(scope.discovery, flavor)
         memo = bucket[:master]
-        return memo[key] = yield(Resolver.new(scope, flavor, bucket)) unless memo.key?(key)
+        unless memo.key?(key)
+          return memo[key] = Inference::MemoAudit.key_audit("resolution chain master order") do
+            yield(Resolver.new(scope, flavor, bucket))
+          end
+        end
 
         Inference::MemoAudit.check("resolution chain master order", memo[key], flavor, key) do
           fresh = flavor_bucket(scope.discovery, flavor)
@@ -921,7 +935,7 @@ module Rigor
           memoised(@retro ? :lin_singleton_retro : :lin_singleton, name, depth) { compute_singleton(name, depth) }
         end
 
-        def memoised(table, name, depth)
+        def memoised(table, name, depth, &)
           memo = (@bucket[table] ||= {})
           cached = memo[name]
           return absorb_cached(audited_lin(cached, table, name)) if cached
@@ -939,7 +953,7 @@ module Rigor
           frame = Frame.new(0, false, NO_MARKS, true)
           @frames.push(frame)
           stack.push(name)
-          entries, starts, classes = yield
+          entries, starts, classes = Inference::MemoAudit.key_audit("resolution chain linearisation", &)
           stack.pop
           @frames.pop
           lin = [entries, starts, classes, frame.forks, frame.marks, frame.retro_ok].freeze
@@ -1022,7 +1036,11 @@ module Rigor
         def mark_for(name, kind, listed, multi)
           by_node = (@bucket[:marks][kind] ||= {})
           cached = by_node[name]
-          return by_node[name] = new_mark(name, kind, listed, multi) if cached.nil?
+          if cached.nil?
+            return by_node[name] = Inference::MemoAudit.key_audit("resolution chain mark") do
+              new_mark(name, kind, listed, multi)
+            end
+          end
           return cached unless Inference::MemoAudit.enabled?
 
           # The failure names the whole key: the bucket's flavor, the mark's kind, the node.
@@ -1173,7 +1191,11 @@ module Rigor
         def project_entry(name, side)
           by_side = (@bucket[:interned][side] ||= {})
           cached = by_side[name]
-          return by_side[name] = new_project_entry(name, side) if cached.nil?
+          if cached.nil?
+            return by_side[name] = Inference::MemoAudit.key_audit("resolution chain entry") do
+              new_project_entry(name, side)
+            end
+          end
           return cached unless Inference::MemoAudit.enabled?
 
           Inference::MemoAudit.check("resolution chain entry", cached, [@flavor, side], name) do
@@ -1189,7 +1211,11 @@ module Rigor
           by_edge = ((@bucket[:externals][side] ||= {})[superclass_edge] ||= {})
           by_owner = (by_edge[owner] ||= {})
           cached = by_owner[raw]
-          return by_owner[raw] = new_external_entry(owner, raw, side, superclass_edge) if cached.nil?
+          if cached.nil?
+            return by_owner[raw] = Inference::MemoAudit.key_audit("resolution chain external entry") do
+              new_external_entry(owner, raw, side, superclass_edge)
+            end
+          end
           return cached unless Inference::MemoAudit.enabled?
 
           # The failure names the whole key: flavor, side, superclass edge, owner and spelling.

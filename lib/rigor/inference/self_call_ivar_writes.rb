@@ -143,7 +143,7 @@ module Rigor
           end
         end
 
-        counts = count_definitions(deferred_ranges)
+        counts = MemoAudit.key_audit("self-call ivar definition counts") { count_definitions(deferred_ranges) }
         state[DEFINITION_COUNTS] = [deferred_ranges, counts]
         counts
       end

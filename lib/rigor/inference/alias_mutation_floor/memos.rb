@@ -36,12 +36,12 @@ module Rigor
         module_function
 
         # The facts of `body`. A hit is audited without the facts' per-read memos, which fill as reads are answered.
-        def facts(body)
+        def facts(body, &)
           return yield if MemoAudit.enabled? && MemoAudit.suspended?
 
           table = TypingState.current.weak_key_map(FACTS)
           facts = table[body]
-          return table[body] = yield if facts.nil?
+          return table[body] = MemoAudit.key_audit("alias floor facts", &) if facts.nil?
 
           MemoAudit.check("alias floor facts", audited(facts), body) { audited(yield) } if MemoAudit.enabled?
           facts
@@ -52,7 +52,7 @@ module Rigor
 
           table = TypingState.current.weak_key_map(IVAR)
           cached = table[def_node]
-          return table[def_node] = yield if cached.nil?
+          return table[def_node] = MemoAudit.key_audit("alias floor ivar mutator", &) if cached.nil?
 
           MemoAudit.check("alias floor ivar mutator", cached, def_node, &)
         end
@@ -62,7 +62,7 @@ module Rigor
 
           state = TypingState.current
           table = (state[FLOOR] ||= {})
-          return table[type] = yield unless table.key?(type)
+          return table[type] = MemoAudit.key_audit("alias floor callee floor", &) unless table.key?(type)
 
           MemoAudit.check("alias floor callee floor", table[type], type, &)
         end
@@ -73,7 +73,7 @@ module Rigor
           state = TypingState.current
           table = (state[STORE] ||= {}.compare_by_identity)
           per_mode = ((table[call_node] ||= {})[removed_keys] ||= {})
-          return per_mode[type] = yield unless per_mode.key?(type)
+          return per_mode[type] = MemoAudit.key_audit("alias floor unknown store", &) unless per_mode.key?(type)
 
           MemoAudit.check("alias floor unknown store", per_mode[type], call_node, type, &)
         end

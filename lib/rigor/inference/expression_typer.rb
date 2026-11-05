@@ -444,13 +444,18 @@ module Rigor
       # The frame also clears the reflective-ivar repeat depth ({ReflectiveIvarWrite.in_repeating_body}): it says
       # the CALLER's loop body is walked once for many runs, while the callee's body starts from its own scope and
       # reads its own write. The depth only widens and the return memo's key has no term for it, so a body first
-      # reached from a `for` body stored a wider return that every later caller was served. The block-body
+      # reached from a `for` body stored a wider return that every later caller was served. It clears the caller's
+      # jump sinks and retry frames too ({StatementEvaluator.outside_caller_sinks}): a `next`, `break` or raise point
+      # in the callee's body is never the caller's, and a recursive re-walk of the caller's own block otherwise
+      # recorded the callee's arms into it. The block-body
       # threading suppression is the same kind of caller flag and is NOT cleared here (issue #2782): it is what
       # keeps a fold from nesting through callee frames, and clearing it re-walked unstorable frames
       # exponentially, while keying the memo on it cost a fifth of `lib`'s allocations.
       def self.with_call_site_frame(yield_type, forwarded_arg_types, &)
         ReflectiveIvarWrite.outside_repeating_body do
-          TypingState.current.with_pair(YIELD_VALUE, yield_type, FORWARDED_ARGS, forwarded_arg_types, &)
+          StatementEvaluator.outside_caller_sinks do
+            TypingState.current.with_pair(YIELD_VALUE, yield_type, FORWARDED_ARGS, forwarded_arg_types, &)
+          end
         end
       end
 
@@ -2682,7 +2687,9 @@ module Rigor
           end
         end
 
-        table[key] = compute_singleton_def_with_owner(class_name, method_name)
+        table[key] = MemoAudit.key_audit("class graph singleton def") do
+          compute_singleton_def_with_owner(class_name, method_name)
+        end
       end
 
       def compute_singleton_def_with_owner(class_name, method_name)
@@ -2863,7 +2870,9 @@ module Rigor
           end
         end
 
-        table[key] = compute_typing_def_with_owner(class_name, method_name)
+        table[key] = MemoAudit.key_audit("class graph typing def") do
+          compute_typing_def_with_owner(class_name, method_name)
+        end
       end
 
       def compute_typing_def_with_owner(class_name, method_name)
@@ -2971,7 +2980,9 @@ module Rigor
           end
         end
 
-        table[key] = compute_user_def_with_owner(class_name, method_name)
+        table[key] = MemoAudit.key_audit("class graph user def") do
+          compute_user_def_with_owner(class_name, method_name)
+        end
       end
 
       # ADR-24 slice 2 — the walk itself lives on `Scope` ({Scope#user_def_through_ancestors}); it reads
@@ -3067,7 +3078,9 @@ module Rigor
           end
         end
 
-        by_owner[method_name] = compute_overridden_in_project?(owner, method_name, kind)
+        by_owner[method_name] = MemoAudit.key_audit("overridable method gate") do
+          compute_overridden_in_project?(owner, method_name, kind)
+        end
       end
 
       def compute_overridden_in_project?(owner, method_name, kind)
@@ -3162,7 +3175,7 @@ module Rigor
         way = primary ? state[METHOD_DEFINERS_INDEX] : rotate_definers_ways(state)
         position = singleton ? 3 : 2
         index = way[position]
-        return way[position] = DefinersIndex.for(table) if index.nil?
+        return way[position] = MemoAudit.key_audit("method definers index") { DefinersIndex.for(table) } if index.nil?
 
         audit_definers_index(primary, index, kind, table) if MemoAudit.enabled?
         index
@@ -3300,10 +3313,34 @@ module Rigor
       # journaled ({#log_return_memo}).
       RETURN_MEMO = TypingState.table(
         :user_method_return_memo,
-        run_scoped: true,
+        run_scoped: true, computed: "return memo",
         reason: "ADR-84 return memo; not extensional (its WD3 and WD6), so its reads and stores are journaled"
       )
       private_constant :RETURN_MEMO
+
+      # ADR-129 WD1's key audit of a return-memo miss. The key carries the yield value ({YIELD_VALUE}, read through
+      # `key_frame`). {.with_call_site_frame} installs the forwarded-argument list, derived from `arg_types`, repeat
+      # depth zero and none of the caller's jump sinks or retry frames before the key is built, and
+      # {#infer_user_method_return} installs the key-presence walk off, so the computation reads those forms. The
+      # bucket keys on the run generation ({#return_memo_bucket}), within which ADR-130's run-level flags are fixed, so
+      # the key carries them. Two Frames are read without a key term, each a known gap: the block-body threading
+      # suppression (#2782) and Acceptance's unread-shape refusal (#2866).
+      RETURN_MEMO_KEY_AUDIT = MemoAudit.key_declaration(
+        forced: %i[forwarded_call_arg_types reflective_ivar_write_repeating key_presence_walk next_sink break_sink
+                   break_value_sink retry_frames],
+        carried: {
+          interface_erasure: "installed around a whole run; the bucket keys on the run generation",
+          interface_dispatch_off: "installed around a whole run; the bucket keys on the run generation"
+        },
+        gaps: {
+          threaded_block_body: "#2782: the return memo reads the block-body threading suppression without keying on " \
+                               "it; keying on it cost a fifth of lib's allocations, and clearing it per callee " \
+                               "frame re-walked unstorable frames exponentially",
+          acceptance_unread_shape_refused: "#2866: a callee body typed inside Acceptance.refusing_unread " \
+                                           "reads the caller's refusal, and the return memo does not key on it"
+        }
+      ).freeze
+      private_constant :RETURN_MEMO_KEY_AUDIT
 
       # ADR-84 WD2 — one memo entry: the final inferred return plus, when the entry was computed under
       # ADR-46 dependency recording, the frozen `Analysis::DependencyRecorder::ReadSet` its body walk
@@ -3426,7 +3463,7 @@ module Rigor
       def infer_user_method_return(def_node, receiver, arg_types, self_fold_safe: false, yield_type: nil,
                                    refinements: nil)
         return nil if def_node.body.nil?
-        unless KeyPresenceGuard.active?
+        unless KeyPresenceGuard.forcing_off?
           return infer_user_method_return_unguarded(def_node, receiver, arg_types, self_fold_safe, yield_type,
                                                     refinements)
         end
@@ -3523,7 +3560,9 @@ module Rigor
           end
         end
 
-        cache[def_node] = yield_reachable?(def_node.body, def_node.parameters&.block&.name)
+        cache[def_node] = MemoAudit.key_audit("class graph yields") do
+          yield_reachable?(def_node.body, def_node.parameters&.block&.name)
+        end
       end
 
       def yield_reachable?(node, block_name)
@@ -3582,10 +3621,7 @@ module Rigor
         # passed in for the same reason: a yielding callee's return depends on the block THIS call site
         # hands it, so two call sites passing differently-typed blocks must not share an entry. It is nil
         # for every def that cannot reach a `yield`, which is where the memo's mass is.
-        memo_key = [receiver.describe(:short),
-                    arg_types.map { |type| type.describe(:short) },
-                    body_scope.struct_fold_safe?(:self),
-                    ExpressionTyper.current_yield_value_type&.describe(:short)]
+        memo_key = return_memo_key(body_scope, receiver, arg_types)
         if (entry = recall_return_memo(per_def, def_node, memo_key))
           BudgetTrace.hit(BudgetTrace::MEMO_HITS)
           Analysis::DependencyRecorder.replay(entry.read_set) if Analysis::DependencyRecorder.active?
@@ -3596,7 +3632,9 @@ module Rigor
 
         entry_depth = stack.size
         event_mark = transient_event_mark
-        result, read_set = compute_with_read_capture(def_node, body_scope, stack, receiver, arg_types, plain_signature)
+        result, read_set = MemoAudit.key_audit("return memo", RETURN_MEMO_KEY_AUDIT, memo_key) do
+          compute_with_read_capture(def_node, body_scope, stack, receiver, arg_types, plain_signature)
+        end
 
         if context_tainted?(event_mark, entry_depth) && !top_result?(result)
           BudgetTrace.hit(BudgetTrace::MEMO_REFUSE_TRANSIENT)
@@ -3605,6 +3643,17 @@ module Rigor
                             MemoEntry.new(result: result, read_set: read_set, receiver: receiver, arg_types: arg_types))
         end
         result
+      end
+
+      # The return memo's key: the call descriptor, the body scope's `:self` grant, and the yield-value Frame, read as a
+      # key term (ADR-129 WD1's key audit).
+      def return_memo_key(body_scope, receiver, arg_types)
+        MemoAudit.key do
+          [receiver.describe(:short),
+           arg_types.map { |type| type.describe(:short) },
+           body_scope.struct_fold_safe?(:self),
+           typing_state.key_frame(YIELD_VALUE)&.describe(:short)]
+        end
       end
 
       # The entry `per_def` holds for `memo_key`, or nil, journaled as a Table read (ADR-129 WD3).
@@ -4279,7 +4328,9 @@ module Rigor
           end
         end
 
-        per_def[key] = self_fold_safe_body?(def_node.body, receiver, [def_node])
+        per_def[key] = MemoAudit.key_audit("class graph self pure") do
+          self_fold_safe_body?(def_node.body, receiver, [def_node])
+        end
       end
 
       # Whether `body`'s every use of `self` is a pure read, resolving each unrecognised self-call against

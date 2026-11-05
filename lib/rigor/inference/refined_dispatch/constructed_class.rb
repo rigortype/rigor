@@ -50,7 +50,9 @@ module Rigor
             end
           end
 
-          by_class[named] = apart_verdict(scope, named, class_name, table)
+          by_class[named] = MemoAudit.key_audit("constructed class verdict") do
+            apart_verdict(scope, named, class_name, table)
+          end
         end
 
         def apart_verdict(scope, named, class_name, table)
@@ -85,7 +87,11 @@ module Rigor
         # The last segment of every class or module the project declares, reopenings included.
         def declared_segments(scope, table)
           segments = table[:segments]
-          return table[:segments] = compute_declared_segments(scope) if segments.nil?
+          if segments.nil?
+            return table[:segments] = MemoAudit.key_audit("constructed class segments") do
+              compute_declared_segments(scope)
+            end
+          end
 
           MemoAudit.check("constructed class segments", segments, :segments) { compute_declared_segments(scope) }
         end
@@ -105,7 +111,7 @@ module Rigor
             return MemoAudit.check("constructed class names", names[bucket], name) { bucket_constructed_names(bucket) }
           end
 
-          names[bucket] = bucket_constructed_names(bucket)
+          names[bucket] = MemoAudit.key_audit("constructed class names") { bucket_constructed_names(bucket) }
         end
 
         def bucket_constructed_names(bucket)

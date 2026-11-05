@@ -9385,7 +9385,9 @@ module Rigor
 
         kind = forwardable_side(delegation, class_name, in_singleton_class, accumulator)
         delegation.names.each { |name| record_method(accumulator, class_name, name, kind) }
-        record_surface_mark(accumulator, class_name, Scope::DiscoveryIndex::ENVELOPE_OPEN_NAMES_MARK) if delegation.open?
+        return unless delegation.open?
+
+        record_surface_mark(accumulator, class_name, Scope::DiscoveryIndex::ENVELOPE_OPEN_NAMES_MARK)
       end
 
       def note_forwardable_extend(call_node, class_name, accumulator)

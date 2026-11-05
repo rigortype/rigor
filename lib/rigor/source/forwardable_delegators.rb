@@ -32,13 +32,15 @@ module Rigor
 
       # `[side, shape]` per macro: `:alias` takes `(accessor, method, alias = method)`, `:list` takes `(accessor,
       # *methods)`, `:hash` takes `(methods => accessor, …)`.
-      MACROS = {
-        def_instance_delegator: %i[instance alias], def_instance_delegators: %i[instance list],
-        instance_delegate: %i[instance hash],
-        def_single_delegator: %i[singleton alias], def_single_delegators: %i[singleton list],
-        single_delegate: %i[singleton hash],
-        def_delegator: [AMBIGUOUS, :alias], def_delegators: [AMBIGUOUS, :list], delegate: [AMBIGUOUS, :hash]
-      }.freeze
+      MACROS = Ractor.make_shareable(
+        {
+          def_instance_delegator: %i[instance alias], def_instance_delegators: %i[instance list],
+          instance_delegate: %i[instance hash],
+          def_single_delegator: %i[singleton alias], def_single_delegators: %i[singleton list],
+          single_delegate: %i[singleton hash],
+          def_delegator: [AMBIGUOUS, :alias], def_delegators: [AMBIGUOUS, :list], delegate: [AMBIGUOUS, :hash]
+        }
+      )
 
       # `def_instance_delegators` skips these two (`methods - [:__send__, :__id__]` in forwardable.rb).
       LIST_SKIPPED = %i[__send__ __id__].freeze

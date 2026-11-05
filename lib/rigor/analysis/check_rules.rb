@@ -1009,7 +1009,8 @@ module Rigor
         # declines as {Scope#discovered_method_through_ancestors?} does.
         def open_names_through_ancestors?(scope, class_name, kind)
           mark = Scope::DiscoveryIndex::ENVELOPE_OPEN_NAMES_MARK
-          chain = Scope::ResolutionChain.for(scope, class_name.to_s, kind == :singleton ? :singleton : :instance, :methods)
+          side = kind == :singleton ? :singleton : :instance
+          chain = Scope::ResolutionChain.for(scope, class_name.to_s, side, :methods)
           # A project class with no `def` of its own is held as an external entry (#2094), so an external's
           # candidate names are asked too.
           found = chain.search(scope) do |entry|

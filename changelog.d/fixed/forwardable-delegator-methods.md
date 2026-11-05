@@ -1,0 +1,4 @@
+- **[check]** `call.undefined-method` no longer reports a method a `Forwardable` delegator defines (`def_delegators :@credential, :fetch`) on a class whose signature leaves it out. ([#2836](https://github.com/rigortype/rigor/pull/2836))
+  - `def_delegator`, `def_delegators`, `delegate` / `instance_delegate` and their `def_instance_*` and `SingleForwardable` spellings are read, each on the side Ruby defines it. `def_delegator :@x, :last, :final` defines `final` only.
+  - A delegator handed a computed name (`def_delegators :@x, *NAMES`) makes the class open to the rule, as a `method_missing` does.
+  - The delegated methods' return types stay untyped.

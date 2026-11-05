@@ -451,7 +451,6 @@ members:
     - lib/rigor/inference/expression_typer.rb
     - lib/rigor/inference/refined_dispatch/constructed_class.rb
     - lib/rigor/inference/void_tail_summary.rb
-    - lib/rigor/reflection/constant_ancestors.rb
     copies:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/project_seed_tables.rb

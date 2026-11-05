@@ -3,20 +3,13 @@
 require "spec_helper"
 
 # ADR-129 WD1 / G2 — every Memo slot is wired to `MemoAudit.check`: its `audit:` labels name the hit sites that
-# recompute and compare under `RIGOR_MEMO_AUDIT=1`, and each label belongs to one slot. Stage 2 wires the rest group by
-# group; until then an unwired Memo sits in {#unaudited}, which only shrinks.
+# recompute and compare under `RIGOR_MEMO_AUDIT=1`, and each label belongs to one slot. Stage 2 wired them group by
+# group; the last, `ancestor_constant_scopes`, was wired with its key fix (#2848), so the ratchet is gone.
 #
 # Every Memo, and every Table a computation fills (`computed:`, the ADR-84 return memo), is wired to the key audit too:
 # each label names a `MemoAudit.key_audit` site, the miss whose Frame reads the audit compares with the key.
 RSpec.describe "ADR-129 Memo slots and MemoAudit" do
   def memos = Rigor::TypingState.slots.select { |slot| slot.kind == :memo }
-
-  # The Memo slots stage 2 has not wired yet. A wiring PR removes its slots here; a new Memo never joins.
-  def unaudited
-    %i[
-      ancestor_constant_scopes
-    ]
-  end
 
   def audit_labels_in_lib = labels_in_lib(/MemoAudit\.check\(\s*"([^"]+)"/)
 
@@ -44,11 +37,11 @@ RSpec.describe "ADR-129 Memo slots and MemoAudit" do
   # production already, not by `MemoAudit.check`.
   def checked_by_g1 = %i[type_of_memo]
 
-  it "holds every Memo slot to audit labels or the stage-2 ratchet" do
+  it "holds every Memo slot to audit labels" do
     unwired = memos.reject(&:audit).map(&:name).sort - checked_by_g1
-    expect(unwired).to eq(unaudited.sort), <<~MESSAGE
+    expect(unwired).to be_empty, <<~MESSAGE
       ADR-129 WD1/G2: a Memo slot declares `audit:`, the MemoAudit.check labels its hits go through. Wire a new Memo
-      before it lands; a wiring PR removes its slots from #unaudited.
+      before it lands.
     MESSAGE
   end
 

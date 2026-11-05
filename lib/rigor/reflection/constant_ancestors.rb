@@ -13,9 +13,9 @@ module Rigor
     # #354 — the per-run ancestor-scope memo. See {.ancestor_constant_scopes}. ADR-129 WD1 — a run-scoped Memo.
     ANCESTOR_SCOPES = TypingState.memo(
       :ancestor_constant_scopes,
-      run_scoped: true, reason: "one [generation, scopes by class name] slot keyed on the identity of " \
-                                "`scope.run_generation || scope.discovered_superclasses`; the " \
-                                "scopes are read from the resolution chain of that run's tables"
+      run_scoped: true, audit: "ancestor constant scopes",
+      reason: "one [discovery, scopes by class name] slot keyed on the discovery index's identity, as the " \
+              "resolution chain the scopes are read from is (#2848)"
     )
     private_constant :ANCESTOR_SCOPES
 
@@ -48,11 +48,13 @@ module Rigor
     # constant it owns resolves only if the bare name reaches it at step 3: widening to the superclass's
     # RBS graph is a separate question with its own FP surface. See {.external_constant_owner}.
     #
-    # Memoised per run because step 2 runs on every constant reference whose lexical candidates all
-    # miss — which is the common case for a core-class reference (`String` inside `class Foo`). The
-    # bucket keys on the identity of the runner-seeded run-generation token (ADR-84 WD2), falling
-    # back to the per-file discovery table for runner-less scopes, so a re-run in one process (LSP,
-    # ADR-62 warm loop) cannot hit stale entries.
+    # Memoised because step 2 runs on every constant reference whose lexical candidates all miss — which
+    # is the common case for a core-class reference (`String` inside `class Foo`). The bucket keys on the
+    # identity of the discovery index, as the `Scope::ResolutionChain` memo it reads does: the chain's
+    # order depends on the analysing file's own view of the include order (a class declared in two files
+    # orders its `include`s from the reader's file first), so a run-generation key served one file's
+    # order to another (#2848). A re-run in one process (LSP, ADR-62 warm loop) builds a new index, so it
+    # cannot hit stale entries either.
     def ancestor_constant_scopes(class_name, scope)
       ancestor_constant_worlds(class_name, scope).first
     end
@@ -98,15 +100,31 @@ module Rigor
       # every call.
       return recorded_ancestor_constant_scopes(class_name, scope) if Analysis::DependencyRecorder.active?
 
-      generation = scope.run_generation || scope.discovered_superclasses
+      # ADR-129 G2 — an audit recomputation bypasses the memo (neither read nor written).
+      if Inference::MemoAudit.enabled? && Inference::MemoAudit.suspended?
+        return compute_ancestor_constant_scopes(class_name, scope)
+      end
+
+      discovery = scope.discovery
       state = TypingState.current
       slot = state[ANCESTOR_SCOPES]
-      unless slot && slot[0].equal?(generation)
-        slot = [generation, {}]
+      unless slot && slot[0].equal?(discovery)
+        slot = [discovery, {}]
         state[ANCESTOR_SCOPES] = slot
       end
       bucket = slot[1]
-      bucket.fetch(class_name) { bucket[class_name] = compute_ancestor_constant_scopes(class_name, scope) }
+      worlds = bucket[class_name]
+      if worlds.nil?
+        return bucket[class_name] = Inference::MemoAudit.key_audit("ancestor constant scopes") do
+          compute_ancestor_constant_scopes(class_name, scope)
+        end
+      end
+      return worlds unless Inference::MemoAudit.enabled?
+
+      Inference::MemoAudit.check("ancestor constant scopes", audit_view(worlds), class_name) do
+        audit_view(compute_ancestor_constant_scopes(class_name, scope))
+      end
+      worlds
     end
     private_class_method :ancestor_constant_worlds
 

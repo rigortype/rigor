@@ -113,7 +113,7 @@ RSpec.describe "the dependency reads as a journaled bound Table (ADR-129 stage 2
     )
   end
 
-  # The decision `approval-queue.d/adr129-s2-dependency-tables.md` records: a filing logs only the captures it probes,
+  # The decision #2852 took (ratified 2026-11-06): a filing logs only the captures it probes,
   # so a capture outside the first holder is neither probed nor logged (it holds the key by the subset property).
   it "probes no capture outside the first one that holds the key" do
     result = nil

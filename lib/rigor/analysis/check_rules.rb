@@ -112,7 +112,7 @@ module Rigor
         diagnostics = collectors[:main_pass].results.dup
         diagnostics.concat(self_undefined_method_diagnostics(path, self_call_misses, root, scope_index))
         COLLECTOR_DIAGNOSTIC_BUILDERS.each do |role, builder|
-          collector = collectors[role]
+          collector = OPTIONAL_COLLECTOR_ROLES.include?(role) ? collectors[role] : collectors.fetch(role)
           diagnostics.concat(send(builder, path, collector.results)) if collector
         end
         # ADR-47 WD5 — the dead arm of a decidable version guard (#627) reports nothing: it cannot run on
@@ -145,10 +145,14 @@ module Rigor
         dead_assignments: :dead_assignment_diagnostics,
         duplicate_hash_keys: :duplicate_hash_key_diagnostics,
         return_in_ensure: :return_in_ensure_diagnostics,
-        # Built only when the rule is active ({PluginApiSurface.active?}); an absent role is skipped.
         plugin_api_surface: :plugin_api_surface_diagnostics
       }.freeze
       private_constant :COLLECTOR_DIAGNOSTIC_BUILDERS
+
+      # The roles {.build_node_collectors} builds only on request: `plugin_api_surface`, when the rule is active
+      # ({PluginApiSurface.active?}). {.diagnose} skips an absent optional role; every other role is required, and a
+      # missing one raises.
+      OPTIONAL_COLLECTOR_ROLES = %i[plugin_api_surface].freeze
 
       # The verbatim per-node dispatch of the former inline main pass
       # (`diagnose`'s `Source::NodeWalker.each` `case`), now invoked by

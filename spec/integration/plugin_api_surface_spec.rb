@@ -111,6 +111,33 @@ RSpec.describe "plugin.api-surface" do
     end
   end
 
+  # The claim `.active?` exists for: a default run never builds the rule's collector, on either analysis path.
+  it "builds no plugin.api-surface collector in a default run" do
+    collector = Rigor::Analysis::CheckRules::PluginApiSurface::Collector
+    allow(collector).to receive(:new).and_call_original
+    run_check
+    configuration = Rigor::Configuration.new(
+      Rigor::Configuration::DEFAULTS.merge("paths" => %w[lib/surface_plugin.rb], "signature_paths" => [sig_root, "sig"])
+    )
+    Dir.chdir(fixture_dir) do
+      session = Rigor::Analysis::WorkerSession.new(configuration: configuration, cache_store: nil)
+      guarded_session_analyze(session, "lib/surface_plugin.rb")
+    end
+    expect(collector).not_to have_received(:new)
+  end
+
+  # `diagnose` skips only the optional roles when they are absent; a missing required role is a wiring error.
+  it "raises when a required collector role is missing" do
+    root = Prism.parse("x = 1\n").value
+    collectors = Rigor::Analysis::CheckRules.build_node_collectors("mem.rb", {}, root)
+    expect do
+      Rigor::Analysis::CheckRules.diagnose(path: "mem.rb", root: root, scope_index: {},
+                                           node_collectors: collectors.except(:always_truthy))
+    end.to raise_error(KeyError)
+    expect(Rigor::Analysis::CheckRules.diagnose(path: "mem.rb", root: root, scope_index: {},
+                                                node_collectors: collectors)).to eq([])
+  end
+
   # A pooled run analyses each file in a `WorkerSession`, which builds the collectors itself.
   it "reports from a worker session" do
     configuration = Rigor::Configuration.new(

@@ -536,7 +536,7 @@ module Rigor
         # ADR-87 WD1 — `cache.validation` (or the RIGOR_STRICT_VALIDATION env, which wins) selects the
         # freshness path for this run; the `auto` default resolves strict in CI (#190), stat-first elsewhere.
         Cache::FileDigest.with_run(strict: @configuration.cache_validation_strict?) do
-          Inference::DefNodeResolver.with_run { run_analysis(paths) }
+          Inference::DefNodeResolver.with_run { run_analysis(paths) }.tap { Inference::MemoAudit.raise_undrained! }
         ensure
           # ADR-89 WD2 — {#return_summaries} reads the return memo after the run, so the runner keeps the bucket the
           # run filled before the thread's run-scoped slots are released (issues #2412, #2399).
@@ -2661,6 +2661,14 @@ module Rigor
       # `DependencyRecorder.active? == false`. Recording is observational, so diagnostics are byte-identical
       # either way.
       def analyze_file(path, environment)
+        diagnostics = analyze_file_attributed(path, environment)
+        return diagnostics unless Inference::MemoAudit.enabled?
+
+        # ADR-129 WD5 (#2785) — the audit's mismatches this file raised, a swallowed one included.
+        CrashSignature.with_swallowed(path, diagnostics, Inference::MemoAudit.drain)
+      end
+
+      def analyze_file_attributed(path, environment)
         return analyze_with_effects(path, environment) unless @record_dependencies
 
         # ADR-45 WD2 (#1507) — every plugin read this file's analysis makes is attributed to it, so the

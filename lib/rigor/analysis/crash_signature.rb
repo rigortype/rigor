@@ -110,6 +110,17 @@ module Rigor
         frame ? "#{base} (#{frame})" : base
       end
 
+      # ADR-129 WD5 (#2785) — `diagnostics` (one file's) with a crash row for each of `errors`, raised errors the
+      # typing path may have swallowed under a `rescue StandardError` (`MemoAudit`'s mismatches), so a swallowed one
+      # is reported exactly as one no rescue caught. An error that did reach the file's crash row is not repeated.
+      def with_swallowed(path, diagnostics, errors)
+        return diagnostics if errors.empty?
+
+        seen = diagnostics.map(&:message)
+        rows = errors.map { |error| check_rule_message(error) }.uniq.reject { |message| seen.include?(message) }
+        diagnostics + rows.map { |message| Diagnostic.new(path: path, line: 1, column: 1, message: message) }
+      end
+
       # The first `lib/rigor/` backtrace frame — the raise site, path made repo-relative so it reads the
       # same whether Rigor runs from a checkout or an installed gem. A LOCATION, not an attribution: a
       # bundled or third-party plugin also lives under `lib/rigor/<plugin>/`, so a frame here says where

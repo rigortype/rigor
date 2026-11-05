@@ -91,6 +91,10 @@ typed. The rooted `::K` arm reads no nesting.
   and asserts that it equals the stored one. This finds a key that misses an input without needing to
   find the order that exposes it. #2516's and #2524's defects would each have failed it. CI runs it
   over the callee specs and over `rigor check --no-cache --workers 0 lib`.
+  A mismatch is also kept on a per-thread list, which the runner drains after each file into the
+  file's crash row, so a mismatch that a `rescue StandardError` on the typing path swallowed still
+  fails the run (#2785, ADR-129 WD5). One raised outside every file's analysis fails the run at its
+  end.
 - **A permutation spec.** The adversarial programs (the #2516 and #2524 probes, the fan-outs, the
   witness above) run under every in-file def order, under different file-name orders, and under
   `workers: 0` and `workers: 2`, asserting one diagnostic set.

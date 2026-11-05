@@ -4122,7 +4122,7 @@ module Rigor
           return false if param_type.is_a?(Type::Dynamic) || param_type.is_a?(Type::Top)
           return false if type.is_a?(Type::Dynamic) || type.is_a?(Type::Top)
 
-          rejects_beyond_class_objects?(param_type, type)
+          Inference::Acceptance.accepts(param_type, type, mode: :gradual).no?
         end
 
         # The parameter rejects the argument AND the rejection is not a

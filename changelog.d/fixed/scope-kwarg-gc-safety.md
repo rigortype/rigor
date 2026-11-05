@@ -1,0 +1,2 @@
+- **[engine]** `rigor check` no longer crashes the Ruby 4.0 VM intermittently while typing a method body. ([#2879](https://github.com/rigortype/rigor/pull/2879))
+  - The crash was a `[BUG] Segmentation fault`, a YJIT "should only see live objects" panic, or `try to mark T_NONE object`. It came from CRuby Bug #22500: an omitted keyword past a method's 31st with a non-literal default lets a GC free the arguments mid-call. The engine's scope constructor no longer has one.

@@ -1,0 +1,5 @@
+- **[rigor check]** A new opt-in rule, `plugin.api-surface`, reports a call in plugin code to a member that a `Rigor::Plugin` interface does not declare, such as `scope.discovered_method?(...)` on a hook's `scope`, and ships behind the new `plugin-api-surface` bleeding-edge feature. ([#2822](https://github.com/rigortype/rigor/pull/2822))
+  - Plugin code means code inside a class that inherits `Rigor::Plugin::Base`, directly or through your own base class, wherever the file lives.
+  - Such a call works today but is outside the plugin API Rigor promises to keep, so it never reports `call.undefined-method`. The message names the interface and points at `sig/rigor/plugin/interfaces.rbs`.
+  - Calls of members every object has (`scope.nil?`, `scope.respond_to?(:x)`) stay silent, but a call such a guard protects still reports. A value that lost its interface type stays silent too: a helper parameter with no signature, or a join with an untyped value.
+  - The rule is off in every severity profile unless `bleeding_edge:` adopts the feature or `severity_overrides:` names `plugin.api-surface`; a `plugin` family key does not turn it on.

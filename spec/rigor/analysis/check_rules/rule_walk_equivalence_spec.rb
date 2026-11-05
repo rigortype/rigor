@@ -288,6 +288,29 @@ module RuleWalkEquivalenceCases # rubocop:disable Metrics/ModuleLength -- curate
     RUBY
   }.freeze
 
+  # ADR-130 slice 2 — curated shapes for the `plugin.api-surface` collector, which needs this repository's `sig/` (the
+  # spec runs them under that environment).
+  PLUGIN_API_SURFACE_CURATED = {
+    "an undeclared member in a hook, a declared one, and an object member" => <<~RUBY,
+      class CuratedPlugin < Rigor::Plugin::Base
+        node_rule(Prism::CallNode) do |node, scope, _path, _file_context, _context|
+          scope.discovered_method?("Foo", :bar, :instance)
+          scope.type_of(node)
+          scope.nil?
+          [1].each { scope.environment.class_ordering("A", "B") }
+          nil
+        end
+      end
+    RUBY
+    "an interface value outside plugin source" => <<~RUBY
+      class NotAPlugin
+        def run(scope)
+          scope.discovered_method?("Foo", :bar, :instance)
+        end
+      end
+    RUBY
+  }.freeze
+
   FIXTURE_FILES = Dir[File.expand_path("../../../integration/fixtures/*.rb", __dir__)].freeze
 
   # Every {RuleWalk}-hosted collector, in the order it is added to the shared walk. Each keeps its legacy `#collect`
@@ -450,6 +473,52 @@ RSpec.describe Rigor::Analysis::CheckRules::RuleWalk do
         main_pass_oracle("f", root, scope_index).size
       end
       expect(total).to be_positive
+    end
+  end
+
+  # ADR-130 slice 2 — the `plugin.api-surface` collector, which {CheckRules.build_node_collectors} adds only when the
+  # rule is active. It reads a `Rigor::Plugin` interface facet, which needs this repository's `sig/` loaded, so its
+  # curated shapes run under an environment the curated set above does not have.
+  describe "plugin.api-surface collector on the shared walk vs its legacy walk" do
+    let(:environment) do
+      Rigor::Environment.for_project(signature_paths: [File.expand_path("../../../../sig", __dir__)])
+    end
+
+    def plugin_parse_and_index(source)
+      root = Prism.parse(source).value
+      [root, Rigor::Inference::ScopeIndexer.index(root, default_scope: Rigor::Scope.empty(environment: environment))]
+    end
+
+    def oracle(root, scope_index)
+      Rigor::Analysis::CheckRules::PluginApiSurface::Collector.new(scope_index).collect(root)
+    end
+
+    def built_collector(scope_index, root)
+      Rigor::Analysis::CheckRules.build_node_collectors("(spec)", scope_index, root, plugin_api_surface: true)
+                                 .fetch(:plugin_api_surface)
+    end
+
+    RuleWalkEquivalenceCases::PLUGIN_API_SURFACE_CURATED.each do |name, source|
+      it "matches the legacy walk on: #{name}" do
+        root, scope_index = plugin_parse_and_index(source)
+        expected = oracle(root, scope_index)
+
+        walked = built_collector(scope_index, root)
+        described_class.run(root, [walked])
+        expect(walked.results).to eq(expected)
+
+        converged = built_collector(scope_index, root)
+        walk = Rigor::Plugin::NodeRuleWalk.new([])
+        walk.diagnostics_for_file(path: "(spec)", scope: Rigor::Scope.empty, root: root,
+                                  collector_driver: described_class::CollectorDriver.new([converged]))
+        expect(converged.results).to eq(expected)
+      end
+    end
+
+    it "is not vacuous: the curated set fires the collector, inside a block too" do
+      root, scope_index = plugin_parse_and_index(RuleWalkEquivalenceCases::PLUGIN_API_SURFACE_CURATED.values.first)
+      expect(oracle(root, scope_index).map { |result| result.call_node.name })
+        .to eq(%i[discovered_method? class_ordering])
     end
   end
 end

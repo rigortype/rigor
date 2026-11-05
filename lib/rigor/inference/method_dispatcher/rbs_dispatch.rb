@@ -10,6 +10,7 @@ require_relative "../void_origin"
 require_relative "../optimistic_origin"
 require_relative "argument_distribution"
 require_relative "interface_shape"
+require_relative "class_keyed_block_params"
 require_relative "overload_selector"
 require_relative "self_substitute"
 require_relative "../../typing_state"
@@ -2141,13 +2142,14 @@ module Rigor
               else
                 build_type_vars(environment, class_name, receiver_args)
               end
-            extract_block_param_types(
+            params = extract_block_param_types(
               method_definition,
               class_name: class_name, kind: kind, args: args, type_vars: type_vars, environment: environment,
               receiver: receiver, receiver_args: receiver_args, method_name: method_name,
               keywords_last: ArgumentNodes.keyword_hash_last?(call_node, args),
               positional_splat: splat_indices(call_node, args)
             )
+            ClassKeyedBlockParams.rebind(method_definition, method_name, args, params)
           rescue StandardError
             []
           end

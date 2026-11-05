@@ -141,9 +141,9 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-125 | [Plugin-declared per-invocation classes](125-per-invocation-classes.md) | Accepted (implemented for #575; rigor-actionmailer adoption is #2308) |
 | ADR-126 | [One CLI grammar, versioned JSON documents, and a gated command catalogue](126-cli-grammar-and-catalogue.md) | Accepted (not yet implemented; work filed as #2502–#2505) |
 | ADR-127 | [The callee mutation floor answers a graph property, not a walk](127-callee-floor-graph-budget.md) | Accepted (K = 64; implemented in #2564) |
-| ADR-128 | [The plugin hook surface as structural interfaces, and how its breaking changes ship](128-plugin-hook-surface-interfaces.md) | Accepted (not yet implemented; live checking waits on #929 and #2681) |
+| ADR-128 | [The plugin hook surface as structural interfaces, and how its breaking changes ship](128-plugin-hook-surface-interfaces.md) | Accepted (slice 1 landed in #2714, slice 2 in #2694, slice 3 in #2822) |
 | ADR-129 | [Remember `type_of` results under a closed typing state](129-type-of-result-memo.md) | Accepted (design for #2709; stage 0 measured, stages 1–5 not yet implemented) |
-| ADR-130 | [Plugin-interface values: member dispatch, and `untyped` everywhere else](130-interface-typed-values-dispatch-under-untyped-parity.md) | Accepted (slice 1a landed in #2808; slice 1b landed in #2815; slice 2 pending, #2686) |
+| ADR-130 | [Plugin-interface values: member dispatch, and `untyped` everywhere else](130-interface-typed-values-dispatch-under-untyped-parity.md) | Accepted (slice 1a landed in #2808; slice 1b landed in #2815; slice 2 landed in #2822) |
 
 ## Adding a New ADR
 

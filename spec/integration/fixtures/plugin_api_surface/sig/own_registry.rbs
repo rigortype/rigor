@@ -1,0 +1,3 @@
+class OwnRegistry
+  def self.node_rule: (singleton(::Prism::Node) node_class) { (::Prism::Node node) -> void } -> nil
+end

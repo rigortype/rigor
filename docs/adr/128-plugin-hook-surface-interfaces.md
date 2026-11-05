@@ -1,10 +1,10 @@
 # ADR-128 — The plugin hook surface as structural interfaces, and how its breaking changes ship
 
-Status: **Accepted, 2026-11-03.** Nothing is implemented. Slice 1 (WD7) can land today. It adds no
-diagnostic to plugin source, because the interface types stay inert there until two issues land:
-#929 (RBS interface types erase to `untyped`) and #2681 (a source-only plugin class does not take
-`Plugin::Base`'s RBS types). Slice 2 must land before those two. Slice 3 makes the types live, behind
-a dedicated rule (WD6).
+Status: **Accepted, 2026-11-03.** Implemented: slice 1 landed in #2714, slice 2 in #2694 and slice 3 in #2822.
+
+Slice 3 rests on #2681 (#2768) and ADR-130's half of #929 (#2808, #2815), which made the hook types live. Its
+`plugin.api-surface` rule (WD6) ships in the bleeding-edge overlay. WD5's seam was settled by ADR-130's untyped
+parity rather than by assignability (WD5 note).
 
 Grounding: the measurement in #2681 (`make check-plugins`, 47 plugin classes, 2026-11-03).
 
@@ -188,6 +188,15 @@ where the interface's backing class is expected, or `call.argument-type-mismatch
 plugins. Slice 3 decides how, and measures it: a declared backing class for each plugin-facing
 interface, or an exemption confined to those interfaces.
 
+> **Settled in slice 3 (#2822) by [ADR-130](130-interface-typed-values-dispatch-under-untyped-parity.md).**
+> ADR-130 carries a plugin-interface value as `Dynamic[Rigor::Plugin::_Scope]`, which is `untyped` to every rule
+> but member dispatch, assignability included. The value passes a `Scope` parameter as `Dynamic[top]` does, so
+> the seam does not arise. A fixture pins a plugin handing its hook scope to a positional `Rigor::Scope`
+> parameter with no `call.argument-type-mismatch`, beside a control the rule does report. `Reflection`'s
+> `scope:` is a keyword position, which `call.argument-type-mismatch` does not check today; once it does,
+> ADR-130's untyped parity is what keeps those calls passing. No backing-class mechanism is built. The seam
+> re-arises with structural assignability (ADR-130's deferred half B), which must decide it then.
+
 **WD6 — How a breaking plugin-API change ships.** Classify the change first; the class decides the
 release vehicle. ADR-50 WD5's tiers apply unchanged: a patch carries no behaviour surprise, and a
 maintenance line gets no new diagnostic.
@@ -221,6 +230,11 @@ hook implementations in `lib/rigor/plugin/base.rb` take interface-typed paramete
 engine helpers. For example, `dynamic_return_type` reaches `environment.class_ordering`, which
 `_Environment` does not carry. They are engine code, so the rule must not judge them. The rule sits in
 the bleeding-edge overlay until the next hard break (ADR-50 Decision 3, WD2, WD7).
+
+> **Amended in slice 3 (#2822).** Plugin source is read from the class declarations, not a path: code
+> lexically inside a class whose superclass chain reaches `Plugin::Base`. `Plugin::Base`'s own body is not,
+> since `Base` does not inherit itself. A third-party plugin gem keeps its plugin under its own `lib/`, so a
+> path test would exempt every one of them.
 
 **WD7 — Sequencing.**
 

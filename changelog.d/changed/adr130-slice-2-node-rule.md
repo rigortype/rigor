@@ -1,0 +1,3 @@
+- **[plugin API]** In a plugin class, a `node_rule` block's `node` parameter is now typed as the node class the rule registers, so `node_rule(Prism::IfNode) { |node, ...| node.predicate }` checks `node` as a `Prism::IfNode`. ([#2822](https://github.com/rigortype/rigor/pull/2822))
+  - A union of node classes, such as `node_rule(flag ? Prism::IfNode : Prism::UnlessNode)`, types `node` as the union of their instances.
+  - A class argument Rigor cannot read, such as a method parameter, leaves `node` untyped.

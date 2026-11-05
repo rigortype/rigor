@@ -126,6 +126,20 @@ module Rigor
           "static.value-use.void" => :warning
         }.freeze
       ),
+      # ADR-128 WD6 / ADR-130 slice 2 (#2686). Off by default because a new required diagnostic is an ADR-50
+      # Decision 3 new discipline; it graduates at the next hard break.
+      Feature.new(
+        id: "plugin-api-surface",
+        kind: :severity,
+        summary: "In plugin source (code inside a class that inherits `Rigor::Plugin::Base`), a call on a value " \
+                 "typed by a `Rigor::Plugin` interface (`_Scope`, `_Environment`, `_Services`, ...) to a member " \
+                 "the interface does not declare becomes a `:warning` (`plugin.api-surface`). The engine object " \
+                 "answers such a call today, so it is not `call.undefined-method`; it is outside the plugin API " \
+                 "Rigor promises to keep (ADR-128).",
+        severity_overrides: {
+          "plugin.api-surface" => :warning
+        }.freeze
+      ),
       Feature.new(
         id: "discovery-seeded-mutation-sites",
         kind: :behaviour,

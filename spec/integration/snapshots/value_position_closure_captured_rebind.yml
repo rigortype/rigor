@@ -5,5 +5,5 @@ locals:
   cr: '1'
   cs: '1'
 assertions:
-  '1': Dynamic[top]
+  '1': '"s"'
   '2': '1'

@@ -410,6 +410,13 @@ module Rigor
         [result, sink]
       end
 
+      # Issue #1246 — enters only `call`'s block, from the receiver scope, as the statement form enters it
+      # ({#evaluate_block_if_present}): the per-node scope index's evaluation of a block a value-position call holds
+      # ({ScopeIndexer#evaluate_unentered_block}). The call's receiver and arguments are left to the index walk.
+      def evaluate_block_of(call)
+        evaluate_block_if_present(call)
+      end
+
       # Evaluate `node` under the receiver scope. Returns `[type, scope']` where `type` is the value the node produces
       # and `scope'` is the scope observable after the node has run. The receiver scope is never mutated.
       def evaluate(node)

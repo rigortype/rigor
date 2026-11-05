@@ -280,9 +280,9 @@ def ternary_struct_body_write(raw)
 end
 
 # Known gap: the same widening hides a `nil` the body writes, which the statement form reports. `class_body_nil("s")`
-# raises NoMethodError in both forms. Issue #1246 — outside such a construct the unentered block is walked, not
-# evaluated, and a captured local its body writes reads `Dynamic[top]` there too, so it no longer reports either;
-# flip `class_body_outside` back to GENUINE-NIL when value-position blocks are evaluated (#1246's second stage).
+# raises NoMethodError in both forms. Issue #1246 — outside such a construct a class-creating block is still walked,
+# not evaluated (the index evaluates a value-position call's other blocks), and a captured local its body writes
+# reads `Dynamic[top]` there too, so `class_body_outside` does not report either.
 def class_body_nil(raw)
   c = raw ? "s" : nil
   [c && Class.new { c = nil; c.upcase }] # KNOWN-GAP: the statement form below reports it

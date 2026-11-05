@@ -113,11 +113,11 @@ def captured_outer_read
 end
 
 # --- What the reads bind to. A shadowing parameter of a value-position block is the block's own
-# variable, unknown here because the block's body is never evaluated; a captured read keeps the
-# enclosing binding. ---
+# variable, bound from the receiver's elements now that the index evaluates the block (#1246); a
+# captured read keeps the enclosing binding. ---
 def shadowing_parameter_binding
   o = { x: 1 }
-  show([1, 2].map { |o| assert_type("Dynamic[top]", o) })
+  show([1, 2].map { |o| assert_type("1 | 2", o) })
 end
 
 def captured_read_binding

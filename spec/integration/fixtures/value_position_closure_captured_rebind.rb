@@ -2,11 +2,12 @@ require "rigor/testing"
 include Rigor::Testing
 
 # Issue #1246 — a closure in a value position (a call argument, a receiver chain, a literal element, a `super`
-# call's block) is never entered by the statement evaluator, so its body takes its scopes from the scope index's
+# call's block) is never entered by the statement evaluator, so its body took its scopes from the scope index's
 # fallback walk, which threads none of the body's writes. A captured outer local the body rebinds therefore read
 # at its pre-statement binding after the write, and a `def` or `class` body written inside such a closure read its
-# own parameters and locals as the enclosing statement's locals of the same name. Every unmarked line is correct
-# Ruby and MUST stay silent; the marked lines are genuine errors and MUST still fire.
+# own parameters and locals as the enclosing statement's locals of the same name. A call's block is now entered by
+# the index's own evaluation; a `->`, a `super` block and a class-creating block are still walked. Every unmarked
+# line is correct Ruby and MUST stay silent; the marked lines are genuine errors and MUST still fire.
 
 def show(value) = value
 
@@ -114,25 +115,26 @@ def captured_read_only
   show([1].map { r.upcase }) # GENUINE-UNDEFINED
 end
 
-# --- Known gaps. The walk does not thread the body's write, so a rebound capture reads `Dynamic[top]` everywhere
-# in the closure, a read BEFORE the write included, and the misuse below (which Ruby raises on) is no longer
-# reported. Flip both to GENUINE-UNDEFINED when value-position blocks are evaluated (#1246's second stage). ---
+# --- A read before the block rebinds the capture runs with the enclosing binding (Ruby raises on the first
+# iteration), and the evaluated block reports it as the statement form does. ---
 def read_before_rebind
   z = nil
-  show([1, 2].map { z.upcase; z = "s" }) # KNOWN-GAP: reported before #1246 widened the rebound capture
+  show([1, 2].map { z.upcase; z = "s" }) # GENUINE-UNDEFINED
 end
 
+# Known gap: a `->` in a value position is still walked, so a capture its body rebinds reads `Dynamic[top]`
+# throughout it, its parameter defaults included. Flip this to GENUINE-UNDEFINED when `->` bodies are evaluated.
 def lambda_default_before_rebind
   x = 1
   f = ->(a = x.upcase) { x = "s"; a } # KNOWN-GAP: reported before #1246 widened the rebound capture
   f
 end
 
-# --- What the reads bind to. A rebound captured local reads `Dynamic[top]`: the walk does not thread the write.
-# A read-only capture keeps the enclosing binding. ---
+# --- What the reads bind to. The evaluated block threads its own write, and a read-only capture keeps the
+# enclosing binding. ---
 def rebound_capture_binding
   x = 1
-  show([1].map { x = "s"; assert_type("Dynamic[top]", x) })
+  show([1].map { x = "s"; assert_type('"s"', x) })
 end
 
 def read_only_capture_binding

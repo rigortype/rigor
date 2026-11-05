@@ -1,0 +1,11 @@
+class Widget
+end
+
+class Gadget < Widget
+end
+
+class Factory
+  def build: [T] (singleton(T) klass) -> T
+
+  def build_widget: [T < Widget] (singleton(T) klass) -> T
+end

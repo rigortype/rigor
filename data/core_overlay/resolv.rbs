@@ -29,3 +29,33 @@ class Resolv
   def initialize: (?(Array[Resolv::Hosts | Resolv::DNS] | Hash[Symbol, untyped])? resolvers, ?use_ipv6: bool?) -> untyped
                 | ...
 end
+
+# --- Resolv::DNS#getresources / #getresource / #each_resource ---
+#
+# `rbs` declares the three typeclass lookups as answering the base class
+# whatever the typeclass argument names:
+#
+#   def getresources: (dns_name name, singleton(Resolv::DNS::Query) typeclass) -> Array[Resolv::DNS::Resource]
+#
+# so `dns.getresources(d, Resolv::DNS::Resource::IN::MX).map(&:exchange)`
+# false-fires `call.undefined-method` (`exchange` is declared on
+# `Resolv::DNS::Resource::MX`, not on `Resource`). At runtime every returned
+# record is an instance of the typeclass (rigortype/rigor#2828).
+#
+# The overlay prepends a generic overload binding `T` from `singleton(T)`, so
+# the answer is `Array[Resolv::DNS::Resource::IN::MX]`. An argument the
+# binder cannot read as a class object under the `Resource` bound leaves `T`
+# unbound, and the base overload (`| ...`) still accepts every `Query`
+# typeclass the upstream signature does.
+class Resolv
+  class DNS
+    def each_resource: [T < Resolv::DNS::Resource] (Resolv::DNS::dns_name name, singleton(T) typeclass) { (T) -> void } -> void
+                     | ...
+
+    def getresource: [T < Resolv::DNS::Resource] (Resolv::DNS::dns_name name, singleton(T) typeclass) -> T
+                   | ...
+
+    def getresources: [T < Resolv::DNS::Resource] (Resolv::DNS::dns_name name, singleton(T) typeclass) -> Array[T]
+                    | ...
+  end
+end

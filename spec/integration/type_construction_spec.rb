@@ -2790,6 +2790,22 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # Issue #2828 — a `singleton(T)` parameter binds `T` from the class object the call passes, so
+  # `Resolv::DNS#getresources(d, Resolv::DNS::Resource::IN::MX)` answers the typeclass's records.
+  describe "fixtures/singleton_type_variable_binding/ — `[T] (singleton(T)) -> T` binds the class's instances" do
+    let(:harness) { harness_for("singleton_type_variable_binding") }
+
+    it "reads each record's own readers, and still fires on the controls" do
+      undefined = harness.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(undefined.map(&:line)).to eq(marked_lines(harness, "# GENUINE-UNDEFINED"))
+    end
+
+    it "produces no assert_type mismatches" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/complex_catalog.rb — Complex catalog-driven folding" do
     let(:harness) { harness_for("complex_catalog") }
 

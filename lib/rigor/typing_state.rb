@@ -329,9 +329,11 @@ module Rigor
       end
 
       # Opens a priors window: until {#close_priors}, the first write of each Table entry notes the value it replaced.
-      # Windows nest, and a write is noted in every open window that has not seen its key. Open one inside a capture:
-      # some writers log only while a capture is open.
+      # Windows nest, and a write is noted in every open window that has not seen its key. A window opens only inside
+      # a capture, since some writers log only while one is open.
       def open_priors
+        raise ArgumentError, "a priors window opens inside a capture" unless capturing?
+
         (@priors ||= []) << [KeyIndex.new, []]
         nil
       end
@@ -585,11 +587,11 @@ module Rigor
       # Logs a write of `value` at `key` in `store`, one of the bound Table `slot`'s stores, while a capture is open,
       # before the store changes or with the replaced value as `prior` ({#log_write}).
       def log_bound_write(slot, store, key, value, prior = NONE)
-        return if @marks.empty? && @priors.nil?
+        return if @marks.empty?
 
         pair = [store, key].freeze
         note_prior(slot, pair, prior) if @priors
-        @journal.push(:write, slot, pair, value) unless @marks.empty?
+        @journal.push(:write, slot, pair, value)
         nil
       end
 
@@ -613,8 +615,7 @@ module Rigor
       # Whether a capture is open.
       def capturing? = !@marks.empty?
 
-      # Whether a priors window is open ({#open_priors}): a writer that builds its record key only while journaling
-      # builds it then too.
+      # Whether a priors window is open ({#open_priors}).
       def noting_priors? = !@priors.nil?
 
       # Empties the slots at `indices` ({TypingState.release_run_scoped}).

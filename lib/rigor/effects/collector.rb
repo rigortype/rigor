@@ -25,13 +25,24 @@ module Rigor
     # `dynamic_origins` cause the typer already recorded. With no `effects:` block nothing calls
     # {collect_for}, `@active_count` stays zero, and `rigor check` is byte-identical.
     module Collector
-      # ADR-129 WD1 — the installed accumulator is a Frame whose contents are a Resource: each record into it touches.
-      # The activation count below is a process switch, outside the typing state (WD5).
+      # ADR-129 WD1 — the installed accumulator is a Frame whose contents are a Resource; only {record_root} touches it
+      # now, and the call-site decisions are the bound Table {CALLS}. The activation count below is a process switch,
+      # outside the typing state (WD5).
       ACCUMULATOR = TypingState.frame(
         :effects_collector,
         contents: :resource, reason: "the accumulator a file's collection installs; each call site records into it"
       )
       private_constant :ACCUMULATOR
+
+      # ADR-129 WD1 — the per-file call-site decisions are a bound Table: each installed accumulator's `calls` is one of
+      # its stores, journaled while a capture is open so a later `type_of` memo can validate the reads and replay the
+      # writes. The root ({record_root}) stays a touch of the accumulator: it is set once per file, before typing.
+      CALLS = TypingState.table(
+        :effects_calls,
+        bound: true,
+        reason: "node => CallRecord per file accumulator; first write wins, and a re-query reads the pinned decision"
+      )
+      private_constant :CALLS
 
       # What one call site decided, as the typer saw it.
       #
@@ -142,22 +153,21 @@ module Rigor
         accumulator = state[ACCUMULATOR]
         return if accumulator.nil? || accumulator.path != scope.source_path
 
-        # A read of the contents, so a touch even when the site is already recorded (ADR-129 WD3).
-        state.touch(ACCUMULATOR)
         # First write wins, so a re-query has nothing to add — and asking here rather than inside
         # {Accumulator#record} is what stops it paying for the `Data` and the origin lookup below.
+        calls = accumulator.calls
+        state.log_bound_read(CALLS, calls, node, calls.fetch(node, TypingState::ABSENT)) if state.capturing?
         return if accumulator.recorded?(node)
 
         dynamic = dynamic_receiver?(receiver)
         class_name, kind = descriptor_for(receiver)
-        accumulator.record(
-          node,
-          CallRecord.new(
-            receiver_class: class_name, kind: kind, dynamic: dynamic,
-            cause: dynamic ? Inference::OriginLookup.origin_for(scope, node.receiver)&.to_s : nil,
-            resolved: true
-          )
+        call_record = CallRecord.new(
+          receiver_class: class_name, kind: kind, dynamic: dynamic,
+          cause: dynamic ? Inference::OriginLookup.origin_for(scope, node.receiver)&.to_s : nil,
+          resolved: true
         )
+        accumulator.record(node, call_record)
+        state.log_bound_write(CALLS, calls, node, call_record)
       end
 
       # The typer's fallback verdict: no tier resolved this call.
@@ -166,8 +176,11 @@ module Rigor
         accumulator = state[ACCUMULATOR]
         return if accumulator.nil? || accumulator.path != source_path
 
-        state.touch(ACCUMULATOR)
+        calls = accumulator.calls
+        existing = calls.fetch(node, TypingState::ABSENT)
+        state.log_bound_read(CALLS, calls, node, existing)
         accumulator.mark_unresolved(node)
+        state.log_bound_write(CALLS, calls, node, calls[node]) unless TypingState::ABSENT.equal?(existing)
       end
 
       # The class a receiver type projects to, as `[class_name, kind]`. A deliberately small mirror of the

@@ -50,8 +50,11 @@ RSpec.describe Rigor::TypingState do
         .to raise_error(ArgumentError, /read_exemption/)
       expect { described_class.frame(:typing_state_spec_probe, reason: "x", read_exemption: :delta_internal) }
         .to raise_error(ArgumentError, /contents/)
-      expect { described_class.frame(:typing_state_spec_probe, reason: "x", contents: :table) }
+      expect { described_class.frame(:typing_state_spec_probe, reason: "x", contents: :store) }
         .to raise_error(ArgumentError, /contents/)
+      expect do
+        described_class.frame(:typing_state_spec_probe, reason: "x", contents: :table, read_exemption: :delta_internal)
+      end.to raise_error(ArgumentError, /exemption/)
       expect(described_class.slots.map(&:name)).not_to include(:typing_state_spec_probe)
     end
 
@@ -223,7 +226,7 @@ RSpec.describe Rigor::TypingState do
         end
 
         def touch(slot)
-          check(slot, :touch) { |s| s.kind == :resource || s.contents }
+          check(slot, :touch) { |s| s.kind == :resource || s.contents == :resource }
           @touchers[Rigor::TypingState.slots[slot].name] << toucher
           super
         end
@@ -463,8 +466,8 @@ RSpec.describe Rigor::TypingState do
       Rigor::Inference::FlowTracer.record do
         Rigor::Analysis::DependencyRecorder.record_for("outer.rb") { analyze_recorded_probe }
       end
-      refused, = audited.close_capture
-      { state: audited, refused: refused }
+      refused, records = audited.close_capture
+      { state: audited, refused: refused, records: records }
     ensure
       Thread.current[key] = previous
     end
@@ -611,9 +614,22 @@ RSpec.describe Rigor::TypingState do
                                                         "note_captured", "replay", "record_for")
       expect(touchers[:dependency_capture_stack]).to include("capture", "withhold", "replay", "read_site", "read_name",
                                                              "read_keys")
-      expect(touchers[:effects_collector]).to include("record_root", "record_call", "record_unresolved")
+      expect(touchers[:effects_collector]).to include("record_root")
       expect(touchers[:flow_tracer]).to include("recording")
-      expect(touchers[:self_call_resolution_recorder]).to include("record")
+    end
+
+    # ADR-129 stage 2 — the effects call-site decisions and the self-call misses are bound Tables: journaled, not
+    # touched.
+    it "journals the effects and self-call records as bound Tables rather than touching them" do
+      run = audited_recording_run
+      audited = run.fetch(:state)
+
+      expect(audited.violations).to be_empty
+      expect(audited.touchers[:effects_collector]).not_to include("record_call", "record_unresolved")
+      expect(audited.touchers).not_to have_key(:self_call_resolution_recorder)
+      expect(journaled(run.fetch(:records))).to include(
+        %i[read effects_calls], %i[write effects_calls], %i[read self_call_misses], %i[write self_call_misses]
+      )
     end
 
     # The memos only a recording run fills: the user-class fallback's name table, the recording run's ancestor scopes

@@ -1023,8 +1023,12 @@ module Rigor
           by_node = (@bucket[:marks][kind] ||= {})
           cached = by_node[name]
           return by_node[name] = new_mark(name, kind, listed, multi) if cached.nil?
+          return cached unless Inference::MemoAudit.enabled?
 
-          Inference::MemoAudit.check("resolution chain mark", cached, name, kind) { new_mark(name, kind, listed, multi) }
+          # The failure names the whole key: the bucket's flavor, the mark's kind, the node.
+          Inference::MemoAudit.check("resolution chain mark", cached, [@flavor, kind], name) do
+            new_mark(name, kind, listed, multi)
+          end
         end
 
         def new_mark(name, kind, listed, multi)
@@ -1170,8 +1174,11 @@ module Rigor
           by_side = (@bucket[:interned][side] ||= {})
           cached = by_side[name]
           return by_side[name] = new_project_entry(name, side) if cached.nil?
+          return cached unless Inference::MemoAudit.enabled?
 
-          Inference::MemoAudit.check("resolution chain entry", cached, name, side) { new_project_entry(name, side) }
+          Inference::MemoAudit.check("resolution chain entry", cached, [@flavor, side], name) do
+            new_project_entry(name, side)
+          end
         end
 
         def new_project_entry(name, side)
@@ -1183,8 +1190,11 @@ module Rigor
           by_owner = (by_edge[owner] ||= {})
           cached = by_owner[raw]
           return by_owner[raw] = new_external_entry(owner, raw, side, superclass_edge) if cached.nil?
+          return cached unless Inference::MemoAudit.enabled?
 
-          Inference::MemoAudit.check("resolution chain external entry", cached, owner, raw) do
+          # The failure names the whole key: flavor, side, superclass edge, owner and spelling.
+          Inference::MemoAudit.check("resolution chain external entry", cached, [@flavor, side, superclass_edge],
+                                     [owner, raw]) do
             Analysis::DependencyRecorder.withhold { new_external_entry(owner, raw, side, superclass_edge) }.first
           end
         end

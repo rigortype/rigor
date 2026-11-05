@@ -1581,7 +1581,8 @@ RSpec.describe "plugins/rigor-sorbet" do
           const :level, Integer
         end
       RUBY
-      result = struct_run("T.reveal_type(Unsigiled.new(level: 1).level)\n", extra_files: { "unsigiled.rb" => unsigiled })
+      result = struct_run("T.reveal_type(Unsigiled.new(level: 1).level)\n",
+                          extra_files: { "unsigiled.rb" => unsigiled })
 
       expect(undefined_methods(result)).to be_empty
       expect(reveals(result)).to eq(["Integer"])

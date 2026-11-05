@@ -2,8 +2,8 @@
 
 - **PR:** [#2880](https://github.com/rigortype/rigor/pull/2880)
 - **Issue:** [#2709](https://github.com/rigortype/rigor/issues/2709)
-- **Class:** gate-row
-- **Precedent:** [#2830](https://github.com/rigortype/rigor/pull/2830)
+- **Class:** process
+- **Precedent:** none — sets one
 - **Decided:** 2026-11-06
 
 ## Background
@@ -23,8 +23,10 @@ run that shadowed nothing is told apart from a clean one.
 
 ## Decision
 
-The advisory step in the acceptance job, after the memo audit, judged by `tool/type_of_shadow_report.rb`, which fails
-a missing or empty report and a run that checked no would-be hit, so an unwritable report path cannot pass as clean.
+The advisory step in the acceptance job, after the memo audit, with one report per run, judged by
+`tool/type_of_shadow_report.rb`, which fails a missing, empty or unreadable report and a run that checked no would-be
+hit, so neither run can drop out unseen. The landing loop's triage step names the step's summary, since
+`continue-on-error` keeps the job green.
 The plugin fixtures join when the step becomes a gate. This follows the coordinating session's direction for stage 3.
 
 ## To undo

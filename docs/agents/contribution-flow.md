@@ -146,7 +146,9 @@ Once the change is implemented and `make verify-changed` passes:
    A PR that changes a skill also runs the `waza` review in [`skill-authoring.md`](skill-authoring.md)
    at the same time; its findings join this triage.
 3. **Triage.** For a PR that changes the engine, read the "Engine allocations (advisory)" job's
-   summary too: it stays green when it warns, so `gh pr checks` does not show it. A warning is a
+   summary too, and the "Acceptance gates" job's type_of shadow section (ADR-129 stage 3): both stay
+   green when they warn, so `gh pr checks` does not show them. A shadow FAIL is a finding like a
+   failing spec. A warning is a
    finding, fixed or answered with the reason in a PR comment like any other; a delta above
    `pr_allocations_pct` (`bench/thresholds.yml`) holds the PR until it is cut or the session landing
    it accepts it in an approval-queue entry; accepting one past the release gate's band is serious

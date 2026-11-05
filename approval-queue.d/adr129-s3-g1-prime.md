@@ -1,6 +1,6 @@
 # G1's stage-4 form recomputes first and serves after an undo, and six of G1′'s faults are caught on synthetic fixtures
 
-- **PR:** [#PRNUM](https://github.com/rigortype/rigor/pull/PRNUM)
+- **PR:** [#2882](https://github.com/rigortype/rigor/pull/2882)
 - **Issue:** [#2709](https://github.com/rigortype/rigor/issues/2709)
 - **Class:** open-choice
 - **Precedent:** none — sets one

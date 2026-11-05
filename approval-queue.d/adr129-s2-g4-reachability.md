@@ -14,10 +14,10 @@ ADR-129 WD5 G4 says: sampling `type_of` entries over the fixtures, every object 
 
 - **Declaring Memos outside slots:** a registration API in `typing_state.rb` called where the owner names the field (`TypingState.memo_field`, `TypingState.store_field` for a bound Table's store, Frame `memos:`), against a list kept in the spec. The first keeps G3's "declared where the state is declared" rule.
 - **Depth:** a declared Memo or Resource is accepted whole (MemoAudit checks a Memo's purity; a Resource refuses captures), while a Table's container is accepted but its entries are walked, since a hit replays entries by identity. Walking Memo contents strictly would flag every lazily filled cache again.
-- **Memo holders:** an unfrozen object whose class declares a memo field is accepted, and its other ivars must keep their identity across samples; this is what caught `MatchRebinding::Frame`'s first-ask caches (#2864).
-- **Ratchet shape:** rows keyed by field with a class set and a reason, rather than G3's `[count, reason]`, because counts depend on the sampling stride.
-- **Skips:** `Prism::` and `RBS::` objects are accepted without a walk (parse trees, and RBS definitions the loader owns), each with a stated reason.
-- **Sample:** every 50th `type_of` over the 145 top-level `spec/integration/fixtures/*.rb` (about 1.2K samples, about 20 s); subdirectories and plugin fixtures are not sampled.
+- **Memo holders:** an unfrozen object whose class declares a memo field is accepted, and its other ivars must keep the object they held when the holder was first reached, checked at each later sample and once more when the run ends; this is what caught `MatchRebinding::Frame`'s first-ask caches (#2864).
+- **Ratchet shape:** rows keyed by field with a class set and a reason, rather than G3's `[count, reason]`, because counts depend on the sampling stride. A finding fails when its field is unlisted or a class is outside its row; a row is stale only when the walk never passes through its field, because whether a field holds a given class at the sampled calls is sparse evidence. The rows are the union of what all 50 offsets of the stride found (plus strides 25, 37, 150 and 1000).
+- **Skips and leaves:** `Prism::` and `RBS::` objects are accepted without a walk (parse trees, and RBS definitions the loader owns), each with a stated reason. Modules are leaves: their class-level ivars are G3's. A Proc or Method is never walked (its binding and receiver are not followed) and is reported whether frozen or not, so it needs a row naming what it captures (the ScopeIndexer unentered-evaluator lambda); a Hash's `default_proc` is walked as a child.
+- **Sample:** each file's `type_of` calls are counted on their own, and every 50th of a file is sampled, over the 145 top-level `spec/integration/fixtures/*.rb` (about 1.2K samples, about 20 s), so one file's phase does not move with another's call count; subdirectories and plugin fixtures are not sampled. `RIGOR_G4_STRIDE` and `RIGOR_G4_OFFSET` move the sample.
 - **One mechanical freeze:** `ContributionIndex`'s `@dynamic` and `@narrowing_facts` Sets, built once and only read.
 
 ## Decision
@@ -26,4 +26,4 @@ As above. The registry write (`@fields`) in `typing_state.rb` falls under Typing
 
 ## To undo
 
-Walk declared Memos strictly, key the ratchet by count, widen the sample, or move the declarations into the spec; each is local to `spec/support/typing_state_reachability.rb`, the spec and the `typing_state.rb` registry.
+Walk declared Memos strictly, key the ratchet by count or exact class sets, widen the sample, walk Proc bindings, or move the declarations into the spec; each is local to `spec/support/typing_state_reachability.rb`, the spec and the `typing_state.rb` registry.

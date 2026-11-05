@@ -1,12 +1,35 @@
 # frozen_string_literal: true
 
 module TypingStateReachability
+  # Analyses `paths` in one sequential run with no cache and walks a sample of its `ExpressionTyper#type_of` calls.
+  # The calls are counted per analysed file (the typed scope's `source_path`), and a file's call is sampled when its
+  # count is `offset` modulo `stride`, so one file's sample does not shift when another file types more or less. Every
+  # memo holder seen is checked once more when the run ends ({Walker#finish}).
+  def self.sample(paths, stride:, offset: 0, &run)
+    walker = Walker.new
+    counts = Hash.new(0)
+    trace = TracePoint.new(:call) do |point|
+      scope = point.self.instance_variable_get(:@scope)
+      count = (counts[scope.source_path] += 1)
+      walker.sample(scope, Rigor::TypingState.current) if count % stride == offset
+    end
+    configuration = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS.merge("paths" => paths, "workers" => 0))
+    runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil)
+    trace.enable(target: Rigor::Inference::ExpressionTyper.instance_method(:type_of)) do
+      run ? run.call(runner) : runner.run(paths)
+    end
+    walker.finish
+  end
+
   # ADR-129 G4 — walks the object graph a `type_of` call can reach, from its scope and from the thread's TypingState
   # slot values, and reports every mutable object no declaration accounts for. Used by
   # `spec/rigor/typing_state_reachability_spec.rb`.
   #
   # How a reached object is read:
-  # - an immediate, a module, a Prism object or an RBS object is accepted and not walked ({SKIPPED_NAMESPACES});
+  # - an immediate, a module, a Prism object or an RBS object is accepted and not walked ({SKIPPED_NAMESPACES}). A
+  #   module is a leaf: its class-level instance variables are G3's to flag (`typing_state_closure_spec.rb`);
+  # - a Proc or a Method is a finding whether frozen or not: what it closes over (its binding, its receiver) is not
+  #   walked, so it needs a row saying what it captures. A Hash's `default_proc` is walked as one of its children;
   # - a frozen object is accepted, and its contents are walked;
   # - what a Memo holds (a {Rigor::TypingState.memo_field}, a Memo slot, a Frame's declared `memos:` member) and what a
   #   Resource holds (a Resource slot, a `contents: :resource` Frame's installed value) is accepted and not walked:
@@ -15,7 +38,8 @@ module TypingStateReachability
   #   Frame's installed value) is accepted, and its entries are walked: a hit validates and replays entries by
   #   identity, so an entry mutated in place would escape the journal;
   # - an unfrozen object of a class that declares a memo field (a **memo holder**) is accepted, and its other fields
-  #   are walked; each must keep its object from one sample to the next, or it is reported as `reassigned`;
+  #   are walked; each must keep the object it held when the holder was first reached, checked at every later sample
+  #   and once more by {#finish}, or it is reported as `reassigned`;
   # - anything else unfrozen is a finding.
   #
   # A finding is keyed by its **field**: the instance variable (or Data or Struct member, or slot) of the nearest
@@ -33,7 +57,9 @@ module TypingStateReachability
 
     Finding = Struct.new(:classes, :path)
 
-    attr_reader :findings, :samples, :visits
+    # `observed` is every field label the walk passed through, whatever it held: a ratchet row is stale only when its
+    # field is never observed, since whether a field holds something mutable at a given sample is sparse evidence.
+    attr_reader :findings, :samples, :visits, :observed
 
     # `fields` and `slots` default to the declared {Rigor::TypingState.fields} and {Rigor::TypingState.slots}; the
     # walker's own examples pass their own.
@@ -45,6 +71,7 @@ module TypingStateReachability
       @deep_frozen = {}.compare_by_identity
       @snapshots = {}.compare_by_identity
       @findings = {}
+      @observed = Set.new
       @samples = 0
       @visits = 0
     end
@@ -66,12 +93,20 @@ module TypingStateReachability
       end
     end
 
+    # Compares every memo holder seen with the fields it held when first reached, so a field assigned after that is
+    # reported whatever the sampling phase was.
+    def finish
+      @snapshots.each { |holder, (before, path)| check_reassigned(holder, before, path) }
+      self
+    end
+
     private
 
     def visit_slot(slot, value)
       return if value.nil?
 
       label = "slot :#{slot.name}"
+      @observed << label
       case slot_mode(slot)
       when :whole then accept(value)
       when :table then visit_table(value, label, [label])
@@ -94,6 +129,7 @@ module TypingStateReachability
       @visits += 1
       report_unless_frozen(value, label, [label])
       each_child(value, label) do |child, child_field, _kind, step|
+        @observed << child_field
         memos.include?(step.delete_prefix(".").to_sym) ? accept(child) : visit(child, child_field, [label, step])
       end
     end
@@ -103,7 +139,10 @@ module TypingStateReachability
       @accepted[container] = true
       @visits += 1
       @stack.push(container)
-      each_child(container, field) { |child, child_field, _kind, step| visit(child, child_field, [*path, step]) }
+      each_child(container, field) do |child, child_field, _kind, step|
+        @observed << child_field
+        visit(child, child_field, [*path, step])
+      end
       @stack.pop
     end
 
@@ -112,7 +151,9 @@ module TypingStateReachability
     end
 
     # Returns true when nothing mutable is reachable from `object`. A frozen object found so is remembered for good:
-    # a frozen object never thaws, and its references never change.
+    # a frozen object never thaws, and its references never change. Inside a cycle an object's answer is optimistic
+    # until the cycle closes, so an object whose subtree met an open cycle is remembered as `:tainted`: a later visit
+    # in the same sample passes the taint on, and it is never cached across samples.
     def visit(object, field, path) # rubocop:disable Metrics/AbcSize,Metrics/CyclomaticComplexity,Metrics/MethodLength,Metrics/PerceivedComplexity
       return true if immediate?(object) || @deep_frozen.key?(object)
 
@@ -121,8 +162,16 @@ module TypingStateReachability
         @cycle = true
         return true
       end
-      return seen unless seen.nil?
+      unless seen.nil?
+        @cycle = true if seen == :tainted
+        return seen != :shallow
+      end
       return true if skipped?(object.class)
+
+      if object.is_a?(Proc) || object.is_a?(Method)
+        record_closure(object, field, path)
+        return false
+      end
 
       @visits += 1
       @visited[object] = :open
@@ -135,6 +184,7 @@ module TypingStateReachability
       @stack.push(object)
       each_child(object, field) do |child, child_field, kind, step|
         child_path = path.size < MAX_PATH ? [*path, step] : path
+        @observed << child_field
         case kind
         when :memo
           accept(child)
@@ -149,9 +199,21 @@ module TypingStateReachability
       @stack.pop
       cycle_free = !@cycle
       @cycle = outer_cycle || @cycle
-      @visited[object] = deep
+      @visited[object] = if deep
+                           cycle_free ? :deep : :tainted
+                         else
+                           :shallow
+                         end
       @deep_frozen[object] = true if deep && immutable && cycle_free
       deep
+    end
+
+    # A Proc or a Method: reported, never walked.
+    def record_closure(object, field, path)
+      @visits += 1
+      @visited[object] = :shallow
+      @pending[object] ||= [field, path, @stack.dup]
+      nil
     end
 
     def report_unless_frozen(object, field, path)
@@ -163,6 +225,7 @@ module TypingStateReachability
     def each_child(object, field)
       case object
       when Hash
+        yield object.default_proc, field, nil, ".default_proc" if object.default_proc
         object.each do |key, value|
           yield key, field, nil, "{}"
           yield value, field, nil, (key.is_a?(Symbol) ? ".#{key}" : "[]")
@@ -187,16 +250,24 @@ module TypingStateReachability
       declared = fields_of(object.class)
       return false unless declared.each_value.any? { |field| field.kind == :memo }
 
+      before, = (@snapshots[object] ||= [undeclared_fields(object, declared), path])
+      check_reassigned(object, before, path)
+      true
+    end
+
+    def undeclared_fields(object, declared)
+      object.instance_variables.reject { |ivar| declared.key?(ivar) }
+            .to_h { |ivar| [ivar, object.instance_variable_get(ivar)] }
+    end
+
+    def check_reassigned(object, before, path)
       name = class_name(object.class)
-      current = object.instance_variables.reject { |ivar| declared.key?(ivar) }
-                      .to_h { |ivar| [ivar, object.instance_variable_get(ivar)] }
-      before = (@snapshots[object] ||= current)
+      current = undeclared_fields(object, fields_of(object.class))
       (before.keys | current.keys).each do |ivar|
         next if before.key?(ivar) && current.key?(ivar) && before[ivar].equal?(current[ivar])
 
         report("#{name}##{ivar}", :reassigned, [*path, "#{name}##{ivar}"])
       end
-      true
     end
 
     def report(field, klass, path)

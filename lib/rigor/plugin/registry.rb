@@ -225,7 +225,9 @@ module Rigor
     class Registry
       TypingState.memo_field(self, :@contracts_by_path, :@effect_memo,
                              reason: "keyed on the path, and on the one effect-contribution compile; the contract " \
-                                     "set, glob semantics and plugin set are fixed for the run (ADR-52 WD1)")
+                                     "set, glob semantics and plugin set are fixed for the run (ADR-52 WD1), and the " \
+                                     "compile, which may read project facts across the I/O boundary, rests on the " \
+                                     "run's stable-filesystem premise, as FileDigest's run tables do")
 
       attr_reader :plugins, :load_errors, :blueprints, :contribution_index, :resolved_gem_paths
 

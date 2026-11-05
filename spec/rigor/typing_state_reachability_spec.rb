@@ -6,36 +6,29 @@ require "rigor/analysis/runner"
 require "rigor/configuration"
 
 # ADR-129 G4 — the reachability audit. While Rigor analyses the integration fixtures, every {#stride}th
-# `ExpressionTyper#type_of` call is sampled: the walker ({TypingStateReachability::Walker}) follows everything
+# `ExpressionTyper#type_of` call of each file is sampled ({TypingStateReachability.sample}): the walker
+# ({TypingStateReachability::Walker}) follows everything
 # reachable from that call's scope, `scope.environment` included, and from the slot values of the thread's
 # TypingState, and reports each mutable object that is not frozen, a Prism node, a slot's storage, a bound Table's
 # store or a declared Memo ({Rigor::TypingState.memo_field}, a Memo slot, a Frame's `memos:`).
 #
 # The findings no declaration accounts for are listed in {#allow_list}, one row per field with the classes found there
-# and why the field is not yet a slot or a Memo. A field that is not listed, a class a row does not name, and a row or
-# class no longer found all fail: the list only shrinks, and growing it needs a reason a reviewer accepts.
+# and why the field is not yet a slot or a Memo. A field that is not listed and a class a row does not name fail, at any
+# sampling phase: the rows are the union of what every offset of the stride finds. A row fails as stale only when the
+# walk never passes through its field at all, since whether a field holds a given class at the sampled calls is sparse
+# evidence; the list only shrinks, and growing it needs a reason a reviewer accepts. `RIGOR_G4_STRIDE` and
+# `RIGOR_G4_OFFSET` move the sample, to check that the rows hold at another phase.
 RSpec.describe "ADR-129 G4: what a type_of call can reach" do
   # Every top-level `.rb` fixture, analysed in one sequential run with no cache. The stride keeps the walk to about
   # 1,200 samples.
-  def stride = 50
+  def stride = Integer(ENV.fetch("RIGOR_G4_STRIDE", "50"))
+  def offset = Integer(ENV.fetch("RIGOR_G4_OFFSET", "0"))
 
   def fixture_paths = Dir.glob("spec/integration/fixtures/*.rb")
 
   def sample_fixtures
-    walker = TypingStateReachability::Walker.new
-    calls = 0
-    trace = TracePoint.new(:call) do |point|
-      calls += 1
-      next unless (calls % stride).zero?
-
-      walker.sample(point.self.instance_variable_get(:@scope), Rigor::TypingState.current)
-    end
     paths = fixture_paths
-    configuration = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS.merge("paths" => paths, "workers" => 0))
-    trace.enable(target: Rigor::Inference::ExpressionTyper.instance_method(:type_of)) do
-      guarded_run(Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil), paths)
-    end
-    walker
+    TypingStateReachability.sample(paths, stride: stride, offset: offset) { |runner| guarded_run(runner, paths) }
   end
 
   # `field => [classes, reason]`. `reassigned` names a field of a memo holder that took a new object between samples.
@@ -122,6 +115,9 @@ RSpec.describe "ADR-129 G4: what a type_of call can reach" do
         [%w[Array], "a scope field holding unfrozen Arrays; a Scope is frozen but its fields are not deeply"],
       'Rigor::Scope#@lexical_nesting' =>
         [%w[String], "a scope field holding unfrozen Strings; a Scope is frozen but its fields are not deeply"],
+      'Rigor::Scope#@bot_guard_classes' =>
+        [%w[String], "a bot guard's class names, kept in a frozen Array whose Strings are not frozen; a Scope is " \
+                     "frozen but its fields are not deeply"],
       'Rigor::Scope#@struct_fold_safe_locals' =>
         [%w[Set], "a scope field holding an unfrozen Set; a Scope is frozen but its fields are not deeply"],
       'Rigor::Type::Constant#@value' =>
@@ -134,6 +130,10 @@ RSpec.describe "ADR-129 G4: what a type_of call can reach" do
 
   def slot_rows
     {
+      "slot :scope_index_unentered_evaluator" =>
+        [%w[Proc], "the frozen lambda ScopeIndexer installs around its index walk; it closes over the walk's own " \
+                   "table, which it writes (the walk's state, not typing state, per the slot's reason), and the " \
+                   "walk's converged-loop recording and clause widening, which it reads"],
       "slot :user_method_return_memo" =>
         [%w[Array Hash String], "the ADR-84 return memo's slot holds [generation, bucket], whose nested per-def " \
                                 "Hashes, Array keys of unfrozen describe Strings and generation tables are not " \
@@ -145,18 +145,19 @@ RSpec.describe "ADR-129 G4: what a type_of call can reach" do
 
   it "reaches no mutable state outside a slot, a store or a declared Memo, beyond the ratchet" do
     walker = sample_fixtures
-    expect(walker.samples).to be > 500
+    expect(walker.samples).to be > 20_000 / stride
     found = walker.findings.to_h { |field, finding| [field, finding.classes.to_a.sort] }
-    allowed = allow_list.transform_values { |classes, _| classes.sort }
-    unlisted = found.reject { |field, classes| allowed[field] == classes }
+    allowed = allow_list.transform_values(&:first)
+    unlisted = found.reject { |field, classes| allowed.key?(field) && (classes - allowed[field]).empty? }
                     .map { |field, classes| "#{field} #{classes.inspect} via #{walker.findings[field].path}" }
-    stale = allowed.reject { |field, classes| found[field] == classes }.map { |field, classes| "#{field} #{classes}" }
+    stale = allowed.keys.reject { |field| walker.observed.include?(field) }
     expect(unlisted).to be_empty, <<~MESSAGE
       ADR-129 G4: reached a mutable object no declaration accounts for. Freeze it, put it behind a TypingState slot,
       declare the extensional cache with TypingState.memo_field, or add a row with its reason:
         #{unlisted.join("\n  ")}
     MESSAGE
-    expect(stale).to be_empty, "ADR-129 G4: rows no longer found as listed; shrink them:\n  #{stale.join("\n  ")}"
+    expect(stale).to be_empty,
+                     "ADR-129 G4: rows whose field the walk never reaches; remove them:\n  #{stale.join("\n  ")}"
   end
 
   it "gives every ratchet row its classes and a reason" do
@@ -164,13 +165,26 @@ RSpec.describe "ADR-129 G4: what a type_of call can reach" do
     expect(bad.keys).to be_empty
   end
 
+  # Every class body in lib, by its qualified name (a class reopened in several files has several).
+  def class_bodies
+    bodies = Hash.new { |hash, name| hash[name] = [] }
+    collect = lambda do |node, nesting|
+      if node.is_a?(Prism::ClassNode) || node.is_a?(Prism::ModuleNode)
+        nesting = [*nesting, node.constant_path.slice]
+        bodies[nesting.join("::")] << node.body if node.body
+      end
+      node.compact_child_nodes.each { |child| collect.call(child, nesting) }
+    end
+    Dir.glob("lib/**/*.rb").each { |path| collect.call(Prism.parse_file(path).value, []) }
+    bodies
+  end
+
   # A declaration whose field was renamed away would accept nothing and say nothing.
-  it "finds every declared field assigned in its owner's source" do
-    sources = Dir.glob("lib/**/*.rb").map { |path| File.read(path) }
+  it "finds every declared field assigned in its owner's own class body" do
+    bodies = class_bodies
     missing = Rigor::TypingState.fields.reject do |field|
-      opener = /^\s*class #{Regexp.escape(field.owner.name.split('::').last)}\b/
       assignment = /#{Regexp.escape(field.ivar.to_s)}\s*(\|\|)?=[^=]/
-      sources.any? { |text| text.match?(opener) && text.match?(assignment) }
+      bodies[field.owner.name].any? { |body| body.slice.match?(assignment) }
     end
     expect(missing.map { |field| "#{field.owner}##{field.ivar}" }).to be_empty
   end
@@ -243,6 +257,33 @@ RSpec.describe "ADR-129 G4: what a type_of call can reach" do
       expect(walk(nil, slots: [resource], state: [{ a: +"x" }])).to eq({})
       bare = frame.with(memos: nil)
       expect(walk(nil, slots: [bare], state: [value])).to eq("slot :file_digest_run" => %w[Array Hash String])
+    end
+
+    it "carries a cycle's taint to a later visit, so a cycle member is not cached as deeply frozen" do
+      inner = { k: 1 }
+      cycle = []
+      back = [cycle].freeze
+      cycle << back << inner
+      cycle.freeze
+      outer = [back].freeze
+      walker = TypingStateReachability::Walker.new(fields: [], slots: [])
+      walker.sample([cycle, outer].freeze, [])
+      inner[:x] = +"new"
+      walker.sample(outer, [])
+      expect(walker.findings["scope"].classes.to_a.sort).to eq(%w[Hash String])
+    end
+
+    it "reports a Proc, frozen or not, and walks a Hash's default_proc" do
+      expect(walk({ p: -> {}.freeze }.freeze)).to eq("scope" => %w[Proc])
+      expect(walk(Hash.new { |_, key| key }.freeze)).to eq("scope" => %w[Proc])
+    end
+
+    it "checks a memo holder once more when the run ends, whatever the sampling phase" do
+      object = holder_class.new
+      walker = TypingStateReachability::Walker.new(fields: [field(holder_class, :@cache)], slots: [])
+      walker.sample(object, [])
+      object.input = "other"
+      expect(walker.finish.findings.keys).to eq(['Holder#@input'])
     end
 
     it "does not report an object it accepts on another path in the same sample" do

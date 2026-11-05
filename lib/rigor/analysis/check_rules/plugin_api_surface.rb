@@ -106,11 +106,12 @@ module Rigor
           nesting.any? { |name| inherits_plugin_base?(scope, name) }
         end
 
+        # Reads through `Scope#superclass_of`, which files the ADR-46 class dependency, so an incremental recheck
+        # re-judges the call when a superclass declaration on the chain changes in another file.
         def inherits_plugin_base?(scope, class_name)
-          supers = scope.discovered_superclasses
           current = class_name.to_s
           MAX_SUPERCLASS_HOPS.times do
-            raw = supers[current]
+            raw = scope.superclass_of(current)
             return false if raw.nil?
 
             candidates = scope.ancestor_name_candidates(current, raw)

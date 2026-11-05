@@ -150,13 +150,23 @@ doc.title = "u"  # still call.undefined-method when Doc is RBS-known
   it reads `Dynamic[top]`. The `default:` / `factory:` rules do
   not change the type.
 - A relative constant in the type, at any depth (`Thing`,
-  `T.nilable(Thing)`, `T::Array[Thing]`), resolves as Ruby's
-  lexical lookup would from the class body: under each enclosing
-  namespace, innermost first, then at the top level. It must name
-  a class or module that the walked sources declare or that the
-  RBS environment knows. A constant that resolves nowhere reads
-  `Dynamic[top]`. Constants inherited from a superclass are not
-  searched. Sig types do not get this resolution yet.
+  `T.nilable(Thing)`, `T::Array[Thing]`), resolves conservatively,
+  following Ruby's lookup order from the class body:
+  - Each enclosing namespace is tried, innermost first. A class or
+    module that the walked sources declare or that the RBS
+    environment knows answers. A constant there that is not a
+    class (`Thing = Other`, or an RBS constant) reads
+    `Dynamic[top]`.
+  - If a class or constant of that name exists under the struct's
+    superclasses or the modules they `include`, the type reads
+    `Dynamic[top]`. Ancestor lookup is not modelled beyond that
+    check.
+  - The top-level class answers only when no other walked
+    `*::<name>` exists. Otherwise, and for a name that resolves
+    nowhere, the type reads `Dynamic[top]`.
+  - A rooted `::Thing` reads `Thing`.
+
+  Sig types do not get this resolution yet.
 - Only a top-level statement of a `class` body declares a typed
   accessor. A `prop` nested under an `if`, a `begin` or a block
   in the body may not run, so its accessor reads `Dynamic[top]`.

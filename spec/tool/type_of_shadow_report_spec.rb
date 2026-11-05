@@ -11,7 +11,7 @@ require "tmpdir"
 RSpec.describe "tool/type_of_shadow_report.rb" do
   let(:script) { File.expand_path("../../tool/type_of_shadow_report.rb", __dir__) }
 
-  def judge(*reports, summary: nil)
+  def judge(*reports, summary: nil, args: [])
     Dir.mktmpdir do |dir|
       paths = reports.each_with_index.map do |report, index|
         File.join(dir, "report-#{index}.jsonl").tap do |path|
@@ -23,7 +23,7 @@ RSpec.describe "tool/type_of_shadow_report.rb" do
         end
       end
       env = { "GITHUB_STEP_SUMMARY" => summary }
-      output, status = Open3.capture2e(env, RbConfig.ruby, script, *paths, stdin_data: "")
+      output, status = Open3.capture2e(env, RbConfig.ruby, script, *args, *paths, stdin_data: "")
       [status.success?, output]
     end
   end
@@ -47,6 +47,14 @@ RSpec.describe "tool/type_of_shadow_report.rb" do
   # Each run's report is held to its own check, so a run that dropped out cannot hide behind another.
   it "fails a report that checked nothing even when another report checked plenty" do
     expect(judge([line({ rule: { checked: 9 } })], [line({})])).to match([false, /report-1.jsonl: no would-be hit/])
+  end
+
+  it "fails a run whose exit status is above what it may exit with, and a call with no report" do
+    ok = [line({ rule: { checked: 3 } })]
+
+    expect(judge(ok, args: %w[--status lib=0:0 --status fixtures=1:1])).to match([true, /OK/])
+    expect(judge(ok, args: %w[--status fixtures=2:1])).to match([false, /the fixtures run exited 2/])
+    expect(judge).to match([false, /no report given/])
   end
 
   it "fails an unreadable line instead of crashing, and still writes the summary" do

@@ -6,10 +6,21 @@
 # held to this on its own), or when any mismatch was found. Prints the totals per phase, the stale misses by slot and
 # the first mismatch samples, and appends the same to `$GITHUB_STEP_SUMMARY` when CI sets it.
 #
-#   ruby tool/type_of_shadow_report.rb REPORT.jsonl...
+# `--status NAME=STATUS:MAX` records a run's exit status: above MAX (a crash, or `lib` not clean) is a failure, so a run
+# that died before writing its report still shows in the summary.
+#
+#   ruby tool/type_of_shadow_report.rb [--status NAME=STATUS:MAX]... REPORT.jsonl...
 require "json"
 
 failures = []
+while ARGV.first == "--status"
+  ARGV.shift
+  name, status, max = ARGV.shift.to_s.match(/\A(.+)=(\d+):(\d+)\z/)&.captures
+  next failures << "malformed --status" unless name
+
+  failures << "the #{name} run exited #{status}" if status.to_i > max.to_i
+end
+failures << "no report given" if ARGV.empty?
 counts = Hash.new { |hash, phase| hash[phase] = Hash.new(0) }
 stale = Hash.new { |hash, phase| hash[phase] = Hash.new(0) }
 samples = []

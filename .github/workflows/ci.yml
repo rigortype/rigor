@@ -769,7 +769,7 @@ jobs:
   # with no `.rigor/cache` to restore from (which is all "cold" ever meant
   # here), and no longer sit behind the self-check. One job rather than one per
   # gate while it finishes before the Tests shards; with the memo audit and the
-  # advisory type_of shadow it runs about six minutes. Split it if it becomes
+  # advisory type_of shadow it runs about eleven minutes. Split it if it becomes
   # the critical path.
   acceptance-gates:
     name: Acceptance gates (cold analysis)
@@ -834,19 +834,20 @@ jobs:
       # type_of memo is recomputed and compared, and nothing is served, so the diagnostics are not read here. Advisory
       # until the stage-3 corpus runs show zero mismatches; a later PR makes it a gate. Each run writes its own report,
       # and the report check fails a missing or empty report and a run that checked nothing, so neither run can drop out
-      # unseen. `lib` must exit clean; the fixtures exit 1 on their expected diagnostics.
+      # unseen. Each run's exit status goes to the check too: `lib` must exit clean, and the fixtures may exit 1 on
+      # their expected diagnostics.
       - name: Run the type_of shadow (advisory)
         continue-on-error: true
         run: |
           rm -f "$RUNNER_TEMP"/type-of-shadow-*.jsonl
           RIGOR_TYPE_OF_SHADOW=1 RIGOR_TYPE_OF_SHADOW_REPORT="$RUNNER_TEMP/type-of-shadow-lib.jsonl" \
-            bundle exec exe/rigor check --no-cache --workers 0 --format json lib > /dev/null ||
-            { echo "::warning title=type_of shadow (ADR-129 G1)::The lib run did not exit clean."; exit 1; }
-          status=0
+            bundle exec exe/rigor check --no-cache --workers 0 --format json lib > /dev/null || lib_status=$?
           RIGOR_TYPE_OF_SHADOW=1 RIGOR_TYPE_OF_SHADOW_REPORT="$RUNNER_TEMP/type-of-shadow-fixtures.jsonl" \
-            bundle exec exe/rigor check --no-cache --workers 0 --format json spec/integration/fixtures > /dev/null || status=$?
-          [ "$status" -le 1 ] || { echo "::warning title=type_of shadow (ADR-129 G1)::The fixtures run exited $status."; exit 1; }
-          if ! ruby tool/type_of_shadow_report.rb "$RUNNER_TEMP/type-of-shadow-lib.jsonl" "$RUNNER_TEMP/type-of-shadow-fixtures.jsonl"; then
+            bundle exec exe/rigor check --no-cache --workers 0 --format json spec/integration/fixtures > /dev/null ||
+            fixtures_status=$?
+          if ! ruby tool/type_of_shadow_report.rb --status "lib=${lib_status:-0}:0" \
+            --status "fixtures=${fixtures_status:-0}:1" \
+            "$RUNNER_TEMP/type-of-shadow-lib.jsonl" "$RUNNER_TEMP/type-of-shadow-fixtures.jsonl"; then
             echo "::warning title=type_of shadow (ADR-129 G1)::The advisory type_of shadow failed. See the job summary."
             exit 1
           fi

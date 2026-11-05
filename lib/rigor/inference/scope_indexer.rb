@@ -231,13 +231,14 @@ module Rigor
       # nodes in `excluded`: the file's own pass, and each construct {#evaluate_unentered_flow} evaluates in the walk
       # after it.
       def recording_evaluator(table, converged_loop_recording, widen_clauses)
-        lambda do |node, scope, excluded = nil|
+        lambda do |node, scope, excluded = nil, block_only: false|
           on_enter =
             if excluded.nil? || excluded.empty? then ->(visited, at) { table[visited] = at }
             else ->(visited, at) { table[visited] = at unless excluded.include?(visited) }
             end
-          StatementEvaluator.new(scope: scope, on_enter: on_enter, converged_loop_recording: converged_loop_recording,
-                                 widen_clauses: widen_clauses).evaluate(node)
+          evaluator = StatementEvaluator.new(scope: scope, on_enter: on_enter, widen_clauses: widen_clauses,
+                                             converged_loop_recording: converged_loop_recording)
+          block_only ? evaluator.evaluate_block_of(node) : evaluator.evaluate(node)
         end
       end
 
@@ -11932,6 +11933,8 @@ module Rigor
       # the scope this walk reached it with, under the index's own recorder, so each part is recorded with the scope
       # the statement form records it with. What it does not visit (a dead arm) is walked as before.
       def evaluate_unentered_flow(node, table, current_scope)
+        return evaluate_unentered_block(node, table, current_scope) if node.is_a?(Prism::CallNode)
+
         entry = UNENTERED_FLOW_ENTRY[node.class]
         return if entry.nil?
 
@@ -11942,6 +11945,23 @@ module Rigor
 
         evaluate = TypingState.current[UNENTERED_EVALUATOR]
         evaluate&.call(node, current_scope, code_body_nodes(node, current_scope.source_path))
+      end
+
+      # Issue #1246 — the block of a call in a value position (`show([1].map { x = "s"; x.upcase })`, a receiver
+      # chain, an array element, a `->`'s body) is never entered: {StatementEvaluator} types the call through
+      # `ExpressionTyper`, and this walk could only floor a local the block rebinds ({#closure_scope}). Such a block
+      # is entered here instead, alone, from the scope this walk reached its call with, so its body is recorded with
+      # the scopes the statement form records: a capture read before the block rebinds it reads its binding, and the
+      # block's parameters are bound. The call's receiver and arguments stay with the walk. A class-creating or
+      # `refine` block keeps the walk ({#unentered_block_entry}), and a code body inside the block is left out of the
+      # recording ({#code_body_nodes}). A `super` block is a `SuperNode`'s, which the evaluator never enters either.
+      def evaluate_unentered_block(node, table, current_scope)
+        block = node.block
+        return unless block.is_a?(Prism::BlockNode)
+        return if table.key?(block) || class_body_block_call?(node, current_scope.source_path)
+
+        evaluate = TypingState.current[UNENTERED_EVALUATOR]
+        evaluate&.call(node, current_scope, code_body_nodes(block, current_scope.source_path), block_only: true)
       end
 
       # The evaluation of an unentered construct starts with no class frame and no lexical nesting, which only a code
@@ -12030,6 +12050,10 @@ module Rigor
       # argument one scope and threads none, so arguments that write keep the call's: an earlier one may rebind the
       # receiver a later one reads (`return y&.concat((y = nil).to_s, y.upcase)`, where the evaluator threads no
       # operand).
+      #
+      # Issue #1246 — the block of a value-position call is evaluated before this walk reaches it
+      # ({#evaluate_unentered_block}), so it arrives recorded and keeps the evaluator's entry. The block entries
+      # above therefore reach only a block that evaluation declines: a class-creating or `refine` block.
       def propagate_call(node, table, current_scope, recorded: false)
         block = node.block
         operands =

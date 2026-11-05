@@ -1805,9 +1805,12 @@ def fresh_control_iterator(str, items)
   end
 end
 
+# Issue #1246 — the enumerator's body is evaluated as a block whose call holds it is, and its entry reads `$1` as
+# `String?` because a later block in the method rebinds `$~` (`e = Enumerator.new { … }` reads the same): the
+# sound side of a closure that may run after that block. The walk read the narrowing as it stood.
 def fresh_control_enumerator(str)
   if str =~ /(\d+)/
-    Enumerator.new { |y| assert_type("String", $1); y << 1 }.to_a
+    Enumerator.new { |y| assert_type("String?", $1); y << 1 }.to_a
     Enumerator.new { |y| "zz" =~ /(q)/; y << 1 }.to_a
     assert_type("String?", $1)
   end

@@ -410,6 +410,20 @@ module Rigor
         [result, sink]
       end
 
+      # Issue #1246 — enters only `call`'s block, from the receiver scope, as the statement form enters it
+      # ({#evaluate_block_if_present}): the per-node scope index's evaluation of a block a value-position call holds
+      # ({ScopeIndexer#evaluate_unentered_block}). The call's receiver and arguments are left to the index walk.
+      #
+      # Such a block enters with the unknown-`self` mark only ({Scope#with_block_self_unknown}), as the walk entered
+      # it, not with the statement form's opaque-`self` mark ({Scope#entering_opaque_block}): issue #1717 keeps the
+      # latter, which gates binding a call to a cross-file top-level `def`, away from value-position blocks.
+      def evaluate_block_of(call)
+        @value_position_block = call.block
+        evaluate_block_if_present(call)
+      ensure
+        @value_position_block = nil
+      end
+
       # Evaluate `node` under the receiver scope. Returns `[type, scope']` where `type` is the value the node produces
       # and `scope'` is the scope observable after the node has run. The receiver scope is never mutated.
       def evaluate(node)
@@ -5219,8 +5233,15 @@ module Rigor
         narrowed = Narrowing.safe_navigation_block_scope(node, scope)
         return enter_call_block(node, block) if narrowed.equal?(scope)
 
-        evaluator_at(narrowed, operand_scope: operand_scope, operand_types: @operand_types)
-          .send(:enter_call_block, node, block)
+        narrowed_evaluator = evaluator_at(narrowed, operand_scope: operand_scope, operand_types: @operand_types)
+        narrowed_evaluator.send(:enter_call_block_carrying, node, block, @value_position_block)
+      end
+
+      # The safe-navigation arm of {#evaluate_block_if_present}: the narrowed evaluator enters the block carrying the
+      # value-position mark {#evaluate_block_of} set on this one, which {#block_self_entry} reads.
+      def enter_call_block_carrying(node, block, value_position_block)
+        @value_position_block = value_position_block
+        enter_call_block(node, block)
       end
 
       def enter_call_block(node, block)
@@ -8516,6 +8537,16 @@ module Rigor
         InterveningIvarReset.foreign_self_block?(call_node, operand_scope)
       end
 
+      # The scope a block body's `self` marks start from: the statement form's opaque `self` (issue #316), or the
+      # walk's unknown-`self` mark alone (issue #1717) for the value-position block {#evaluate_block_of} enters and for
+      # every block entered beneath it. A scope carrying the unknown-`self` mark without the opaque one comes only from
+      # the index walk ({Scope#with_block_self_unknown}), so it is how a nested block knows it sits under one: the
+      # opaque mark, which declines a cross-file top-level `def`, stays off the whole value-position subtree.
+      def block_self_entry(block_node)
+        walked = block_node.equal?(@value_position_block) || (scope.block_self_unknown? && !scope.opaque_block_self?)
+        walked ? scope.with_block_self_unknown(true) : scope.entering_opaque_block
+      end
+
       # Builds the entry scope for a block body. The block sees the outer scope's locals (Ruby's lexical scoping rule)
       # and adds bindings for every named block parameter on top. Parameter types come from the receiving method's RBS
       # signature when one is available; the rest default to `Dynamic[Top]`.
@@ -8530,7 +8561,7 @@ module Rigor
         # yielding method, not the lexical context, decides what `self` is, and Rigor does not track it.
         # Issue #1358 — a body that may run a match reads the match globals an earlier iteration may have rebound
         # ({MatchRebinding.block_entry}).
-        entry = MatchRebinding.block_entry(scope.entering_opaque_block, block_node, call_node)
+        entry = MatchRebinding.block_entry(block_self_entry(block_node), block_node, call_node)
         scope_with_params = BlockParameterBinder.new(expected_param_types: expected).bind_onto(block_node, entry)
         # ADR-16 Tier A — a plugin `block_as_methods:` entry that matches `(receiver, name)` narrows the
         # body's `self` to the object the DSL `instance_eval`s the block on (`params` on

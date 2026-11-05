@@ -178,32 +178,36 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       end
     end
 
-    it "shadows an outer local inside a block the evaluator never entered" do
+    it "shadows an outer local inside a closure the evaluator never entered" do
       program, idx = index_for(<<~RUBY)
         o = "s"
         k = 2
+        show(->(o) { o + k })
         show([1].map { |o| o + k })
         [1].map { |o| o }
       RUBY
-      value_block = program.statements.body[2].arguments.arguments.first.block
-      sum = value_block.body.body.first
-      statement_read = program.statements.body[3].block.body.body.first
+      lambda_sum = program.statements.body[2].arguments.arguments.first.body.body.first
+      block_sum = program.statements.body[3].arguments.arguments.first.block.body.body.first
+      statement_read = program.statements.body[4].block.body.body.first
 
-      # The argument's block reaches the index only through `propagate`. Its parameter is a new variable, so the
+      # A value-position `->` reaches the index only through `propagate`. Its parameter is a new variable, so the
       # outer `o` MUST NOT be visible inside it, while the captured `k` keeps its enclosing binding.
-      expect(idx[sum.receiver].local(:o)).to eq(Rigor::Type::Combinator.untyped)
-      expect(idx[sum.arguments.arguments.first].local(:k)).to eq(Rigor::Type::Combinator.constant_of(2))
-      # A statement-level block is entered, and its parameter keeps the signature's element type.
+      expect(idx[lambda_sum.receiver].local(:o)).to eq(Rigor::Type::Combinator.untyped)
+      expect(idx[lambda_sum.arguments.arguments.first].local(:k)).to eq(Rigor::Type::Combinator.constant_of(2))
+      # Issue #1246 — a value-position call's block is evaluated by the index, so its parameter is bound from the
+      # receiver's elements, as a statement-level block's is.
+      expect(idx[block_sum.receiver].local(:o)).to eq(Rigor::Type::Combinator.constant_of(1))
+      expect(idx[block_sum.arguments.arguments.first].local(:k)).to eq(Rigor::Type::Combinator.constant_of(2))
       expect(idx[statement_read].local(:o)).to eq(Rigor::Type::Combinator.constant_of(1))
     end
 
-    it "shadows a local the unentered block's body introduces, not only its parameters" do
-      # No outer `z` exists in the source, so Ruby makes the body's `z` the block's own local. The seeded binding
-      # stands in for a name the scope binds for a non-lexical reason; the block's local table MUST still win.
+    it "shadows a local the unentered closure's body introduces, not only its parameters" do
+      # No outer `z` exists in the source, so Ruby makes the body's `z` the closure's own local. The seeded binding
+      # stands in for a name the scope binds for a non-lexical reason; the closure's local table MUST still win.
       seeded = Rigor::Scope.empty.with_local(:z, Rigor::Type::Combinator.constant_of("s"))
-      program = parse("show([1].map { |e| z = e; z })")
+      program = parse("show(->(e) { z = e; z })")
       idx = described_class.index(program, default_scope: seeded)
-      z_read = program.statements.body.first.arguments.arguments.first.block.body.body[1]
+      z_read = program.statements.body.first.arguments.arguments.first.body.body[1]
 
       expect(z_read).to be_a(Prism::LocalVariableReadNode)
       expect(idx[z_read].local(:z)).to eq(Rigor::Type::Combinator.untyped)

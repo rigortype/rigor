@@ -156,6 +156,7 @@ RSpec.describe "an explicit self call in an opaque block (#1717)" do
           end
           File.write("out", [1, 2].map { |r| format(r).digits }.inspect)
           puts [1].map { select(1).upcase }
+          puts([1].map { |r| [2].map { |s| format(s).bit_length } })
         RUBY
       },
       registry_rbs

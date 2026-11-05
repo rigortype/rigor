@@ -1,0 +1,2 @@
+- **[inference]** A block passed as an argument or chained as a receiver is now checked as a statement-level block is: its parameters are typed from the receiver, and a misuse of one, or of an outer local read before the block reassigns it, is reported. ([#2829](https://github.com/rigortype/rigor/pull/2829))
+  - `show([1].map { |v| v.upcase })` and `x = 1; show([1].map { x.upcase; x = "s" })` now report `undefined method 'upcase' for 1`.

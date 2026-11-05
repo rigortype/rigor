@@ -360,7 +360,7 @@ module Rigor
       # what typing the call again from the same scope would compute.
       INJECT_ACCUMULATOR = TypingState.table(
         :inject_accumulator,
-        run_scoped: true, read_through: true,
+        run_scoped: true, read_through: true, entries: TypingState::WeakKeyMapEntries,
         reason: "keyed by block node; a read-through cache of the fold that the call's own typing computes"
       )
       private_constant :INJECT_ACCUMULATOR
@@ -3311,9 +3311,30 @@ module Rigor
       # ADR-129 WD1 — a Table, not a Memo: its WD3 serves a standalone result where a fresh compute inside a cycle
       # would be tainted, and its WD6 serves a stored `untyped`, so it is not extensional. Its reads and stores are
       # journaled ({#log_return_memo}).
+      # ADR-129 WD3 — the return memo's entry protocol. The slot holds `[generation, bucket]` ({#return_memo_bucket}),
+      # and a journal record keys an entry on `[def_node, memo_key]`. A replay writes into the bucket the slot holds: a
+      # `type_of` memo entry lives no longer than its file's analysis, inside one run generation, so a slot with no
+      # bucket means the entry outlived its run, which is a defect to surface rather than a bucket to invent.
+      module ReturnMemoEntries
+        module_function
+
+        def entry(slot_value, key)
+          per_def = slot_value&.[](1)&.[](key[0])
+          per_def.nil? ? TypingState::ABSENT : per_def.fetch(key[1], TypingState::ABSENT)
+        end
+
+        def put(slot_value, key, value)
+          (slot_value[1][key[0]] ||= {})[key[1]] = value
+        end
+
+        def container(state, slot)
+          state[slot] || raise(ArgumentError, "no return memo bucket to replay into: its entry outlived its run")
+        end
+      end
+
       RETURN_MEMO = TypingState.table(
         :user_method_return_memo,
-        run_scoped: true, computed: "return memo",
+        run_scoped: true, computed: "return memo", entries: ReturnMemoEntries,
         reason: "ADR-84 return memo; not extensional (its WD3 and WD6), so its reads and stores are journaled"
       )
       private_constant :RETURN_MEMO
@@ -3663,10 +3684,11 @@ module Rigor
         entry
       end
 
-      # Stores `entry` for `memo_key`, journaled as a Table write (ADR-129 WD3).
+      # Stores `entry` for `memo_key`, journaled as a Table write (ADR-129 WD3), logged before the store so a priors
+      # window notes the entry it replaces.
       def store_return_memo(per_def, def_node, memo_key, entry)
-        per_def[memo_key] = entry
         log_return_memo(:write, def_node, memo_key, entry)
+        per_def[memo_key] = entry
       end
 
       # ADR-129 WD3 — journals a return-memo read or store under `[def_node, memo_key]`. The composite key is built
@@ -5853,8 +5875,8 @@ module Rigor
       def record_inject_accumulator(block, type)
         record = [scope, type, LoopValueRecord.generation].freeze
         state = typing_state
-        state.weak_key_map(INJECT_ACCUMULATOR)[block] = record
         state.log_write(INJECT_ACCUMULATOR, block, record)
+        state.weak_key_map(INJECT_ACCUMULATOR)[block] = record
       end
 
       # Issue #1332 — the #587 (b) captured-block binding ({#captured_block_bindings}) both inject arms lay under

@@ -132,7 +132,7 @@ module Rigor
           column: column
         )
         state.log_bound_read(CALLS, accumulator, call, accumulator.fetch(call, TypingState::ABSENT)) if state.capturing?
-        state.log_bound_write(CALLS, accumulator, call, true) if accumulator.add?(call)
+        state.log_bound_write(CALLS, accumulator, call, true, TypingState::ABSENT) if accumulator.add?(call)
       end
     end
   end

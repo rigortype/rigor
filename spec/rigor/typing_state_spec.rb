@@ -201,6 +201,310 @@ RSpec.describe Rigor::TypingState do
     end
   end
 
+  # ADR-129 WD3's hit, and G2's Table rows: a stored entry's read slice validates only while every table still holds
+  # what the computation read, and its write slice replays the computation's writes in order.
+  describe "validating and replaying a slice (WD3, G2)" do
+    let(:origins) { index(:dynamic_origins) }
+    let(:through) { index(:inject_accumulator) }
+    let(:node) { Object.new }
+    let(:store) { {}.compare_by_identity }
+
+    def absent = described_class::ABSENT
+
+    def capture
+      state.open_capture
+      yield
+      state.slices(state.close_capture.last)
+    end
+
+    it "keeps every read but those of a key the computation had already written, and every write in order" do
+      reads, writes = capture do
+        state.log_bound_read(origins, store, node, absent)
+        state.log_bound_write(origins, store, node, :cause)
+        state.log_bound_read(origins, store, node, :cause)
+        state.log_bound_write(origins, store, node, :other)
+      end
+
+      expect(reads.each_slice(4).map { |slot, key, observed, _| [slot, key, observed] })
+        .to eq([[origins, [store, node], absent]])
+      expect(writes).to eq([origins, [store, node], :cause, origins, [store, node], :other])
+      expect(state.slices([])).to equal(described_class::EMPTY_SLICES)
+    end
+
+    it "holds a read while its table holds what it observed, and not after an overwrite or a new key" do
+      store[node] = :cause
+      fresh = Object.new
+      reads, = capture do
+        state.log_bound_read(origins, store, node, :cause)
+        state.log_bound_read(origins, store, fresh, absent)
+      end
+
+      expect(state.stale_read(reads)).to be_nil
+      store[node] = :overwritten
+      expect(state.stale_read(reads)).to eq(origins)
+      store[node] = :cause
+      store[fresh] = :recorded
+      expect(state.stale_read(reads)).to eq(origins)
+      expect(state.stale_slots(reads)).to eq([origins])
+    end
+
+    it "compares a read's observed value by identity, so an equal but distinct value is stale" do
+      observed = [:scope, :type, 0]
+      store[node] = observed
+      reads, = capture { state.log_bound_read(origins, store, node, observed) }
+      store[node] = [:scope, :type, 0]
+
+      expect(store[node]).to eq(observed)
+      expect(state.stale_read(reads)).to eq(origins)
+    end
+
+    it "holds a read-through cache's ABSENT read once the computation's own write is there, and only that write" do
+      own = [:scope, :type, 0].freeze
+      reads, = capture do
+        state.log_read(through, node, absent)
+        state.log_write(through, node, own)
+      end
+
+      expect(state.stale_read(reads)).to be_nil
+      state.weak_key_map(through)[node] = own
+      expect(state.stale_read(reads)).to be_nil
+      state.weak_key_map(through)[node] = [:scope, :type, 0].freeze
+      expect(state.stale_read(reads)).to eq(through)
+    end
+
+    # #2853's shape: a table that is not a read-through cache never holds a read of ABSENT the computation then filled.
+    it "does not hold another table's ABSENT read once the computation's own write is there" do
+      reads, = capture do
+        state.log_bound_read(origins, store, node, absent)
+        state.log_bound_write(origins, store, node, :cause)
+      end
+      store[node] = :cause
+
+      expect(state.stale_read(reads)).to eq(origins)
+    end
+
+    it "tells a bound table's stores apart by identity, not by their contents" do
+      other = {}.compare_by_identity
+      reads, = capture { state.log_bound_read(origins, store, node, absent) }
+      other[node] = :cause
+
+      expect(store).not_to equal(other)
+      expect(state.stale_read(reads)).to be_nil
+    end
+
+    it "restores an out-of-band clear by replaying the writes in order, journaled like the writes it replays" do
+      _, writes = capture do
+        state.log_bound_write(origins, store, node, :first)
+        state.log_bound_write(origins, store, node, :last)
+        state.log_write(through, node, :record)
+      end
+      state.weak_key_map(through)
+      state.release([through])
+
+      state.open_capture
+      state.replay(writes)
+      _, records = state.close_capture
+
+      expect(store[node]).to eq(:last)
+      expect(state.entry(through, node)).to eq(:record)
+      expect(records).to eq(writes.each_slice(3).flat_map { |slot, key, value| [:write, slot, key, value] })
+    end
+
+    it "notes the value each entry's first write replaces, in every open window, taking a writer's prior as given" do
+      store[node] = :before
+      other = Object.new
+      state.open_capture
+      state.open_priors
+      state.log_bound_write(origins, store, node, :mid)
+      store[node] = :mid
+      state.open_priors
+      state.log_bound_write(origins, store, node, :after)
+      state.log_bound_write(origins, store, other, true, absent)
+      inner = state.close_priors
+      outer = state.close_priors
+      state.close_capture
+
+      expect(inner).to eq([origins, [store, node], :mid, origins, [store, other], absent])
+      expect(outer).to eq([origins, [store, node], :before, origins, [store, other], absent])
+      expect(state.noting_priors?).to be(false)
+    end
+
+    it "notes an unbound table's priors, and a replay's, and opens a window only inside a capture" do
+      record = [:scope, :type, 0].freeze
+      state.weak_key_map(through)[node] = record
+      expect { state.open_priors }.to raise_error(ArgumentError, /inside a capture/)
+
+      state.open_capture
+      state.open_priors
+      state.log_write(through, node, :new)
+      state.replay([origins, [store, node].freeze, :cause])
+      noted = state.close_priors
+      state.close_capture
+
+      expect(noted).to eq([through, node, record, origins, [store, node], absent])
+      expect(noted[2]).to equal(record)
+    end
+
+    # Per Table: a store of the shape its writer fills (nil for an unbound table's slot), a key and a value.
+    def table_stores(key_object)
+      {
+        dynamic_origins: -> { [{}.compare_by_identity, key_object, :cause] },
+        void_origins: -> { [{}.compare_by_identity, key_object, :origin] },
+        plugin_typed_calls: -> { [{}.compare_by_identity, key_object, true] },
+        optimistic_origins: -> { [{}.compare_by_identity, key_object, :cause] },
+        effects_calls: -> { [{}.compare_by_identity, key_object, :record] },
+        self_call_misses: -> { [Rigor::Analysis::SelfCallResolutionRecorder::Accumulator.new("c"), :call, true] },
+        dependency_reads: lambda {
+          [Rigor::Analysis::DependencyRecorder::Accumulator.new("a.rb"), %w[b.rb B#m].freeze, true]
+        },
+        inject_accumulator: -> { [nil, key_object, :record] },
+        loop_value_record: -> { [nil, key_object, :record] },
+        user_method_return_memo: lambda {
+          bucket = {}.compare_by_identity
+          bucket[Object.new] = { [:k] => :other_def }
+          [[:generation, bucket], [key_object, [:k]].freeze, :entry]
+        }
+      }
+    end
+
+    # Each Table's entry protocol reads back what a replayed write stored, in a store of the shape its writer fills.
+    it "reads back through every Table's entry protocol what a replay stored" do
+      key_object = Object.new
+      stores = table_stores(key_object)
+      tables = described_class.slots.select { |slot| slot.kind == :table }
+
+      expect(tables.map(&:name)).to match_array(stores.keys)
+      tables.each do |slot|
+        container, key, value = stores.fetch(slot.name).call
+        state[slot.index] = container unless slot.bound
+        record_key = slot.bound ? [container, key].freeze : key
+
+        expect(state.entry(slot.index, record_key)).to equal(absent), slot.name.to_s
+        state.replay([slot.index, record_key, value])
+        expect(state.entry(slot.index, record_key)).to eq(value), slot.name.to_s
+      end
+    end
+
+    it "replays a dependency filing into an ADR-84 capture's own sets" do
+      capture_store = Rigor::Analysis::DependencyRecorder::Capture.new
+      state.replay([index(:dependency_reads), [capture_store, "const:X"].freeze, true,
+                    index(:dependency_reads), [capture_store, ["b.rb", nil].freeze].freeze, true])
+
+      expect(capture_store.missing.to_a).to eq(["const:X"])
+      expect(capture_store.reads.to_a).to eq([["b.rb", nil]])
+    end
+  end
+
+  # Each Table writer, through its real entry point, logs before it stores or passes the value it replaced, so a
+  # priors window notes what was there: an earlier value, or ABSENT for a first write. G1 builds the pre-computation
+  # state from these priors, so a wrong one would let a dropped write go unseen.
+  describe "the value each Table writer replaced" do
+    let(:current) { described_class.current }
+    let(:scope) { Rigor::Scope.empty(source_path: "/app/a.rb") }
+    let(:call) { Prism.parse("x.y").value.statements.body.first }
+
+    def absent = described_class::ABSENT
+
+    def priors_of
+      current.open_capture
+      current.open_priors
+      begin
+        yield
+      ensure
+        noted = current.close_priors
+        current.close_capture
+      end
+      noted.each_slice(3).map { |slot, key, prior| [described_class.slots[slot].name, key, prior] }
+    end
+
+    def prior_for(noted, name) = noted.find { |slot, _, _| slot == name }&.last
+
+    it "notes the cause each Scope advisory writer replaced, and ABSENT for a first record" do
+      scope.record_dynamic_origin(call, :old)
+      scope.record_void_origin(call, :old_void)
+      noted = priors_of do
+        scope.record_dynamic_origin(call, :new)
+        scope.record_void_origin(call, :new_void)
+        scope.record_plugin_typed_call(call)
+        scope.record_optimistic_origin(call, :cause)
+      end
+
+      expect(noted.map { |name, _, prior| [name, prior] }).to eq(
+        [%i[dynamic_origins old], %i[void_origins old_void], [:plugin_typed_calls, absent],
+         [:optimistic_origins, absent]]
+      )
+    end
+
+    it "notes the record the inject and loop records replaced" do
+      typer = Rigor::Inference::ExpressionTyper.new(scope: scope)
+      int = Rigor::Type::Combinator.nominal_of("Integer")
+      typer.send(:record_inject_accumulator, call, int)
+      Rigor::Inference::LoopValueRecord.conditional(call, scope, int)
+      inject_before = current[index(:inject_accumulator)][call]
+      loop_before = current[index(:loop_value_record)][call]
+      noted = priors_of do
+        typer.send(:record_inject_accumulator, call, int)
+        Rigor::Inference::LoopValueRecord.conditional(call, scope, int)
+      end
+
+      expect(prior_for(noted, :inject_accumulator)).to equal(inject_before)
+      expect(prior_for(noted, :loop_value_record)).to equal(loop_before)
+    ensure
+      described_class.release_run_scoped
+    end
+
+    it "notes the entry a return-memo store replaced" do
+      typer = Rigor::Inference::ExpressionTyper.new(scope: scope)
+      per_def = (typer.send(:return_memo_bucket)[call] ||= {})
+      typer.send(:store_return_memo, per_def, call, [:key], :old_entry)
+      noted = priors_of { typer.send(:store_return_memo, per_def, call, [:key], :new_entry) }
+
+      expect(noted).to eq([[:user_method_return_memo, [call, [:key]], :old_entry]])
+    ensure
+      described_class.release_run_scoped
+    end
+
+    it "notes ABSENT for a new effects record, and the record an unresolved verdict replaced" do
+      other = Prism.parse("p.q").value.statements.body.first
+      noted = nil
+      Rigor::Effects::Collector.collect_for(scope.source_path) do
+        Rigor::Effects::Collector.record_call(call, Rigor::Type::Combinator.nominal_of("Integer"), scope)
+        recorded = current[index(:effects_collector)].calls[call]
+        noted = priors_of do
+          Rigor::Effects::Collector.record_unresolved(call, scope.source_path)
+          Rigor::Effects::Collector.record_call(other, Rigor::Type::Combinator.nominal_of("Integer"), scope)
+        end
+        expect(noted.first.last).to equal(recorded)
+      end
+
+      expect(noted.map(&:last).drop(1)).to eq([absent])
+    end
+
+    it "notes ABSENT for a self-call miss and a dependency filing, which only add" do
+      self_calls = nil
+      Rigor::Analysis::SelfCallResolutionRecorder.record_for("/app/a.rb") do
+        self_calls = priors_of do
+          2.times do
+            Rigor::Analysis::SelfCallResolutionRecorder.record(class_name: "A", method_name: :m, node: call,
+                                                               path: "/app/a.rb", line: 1, column: 1)
+          end
+        end
+      end
+      dependencies = nil
+      Rigor::Analysis::DependencyRecorder.record_for("/app/a.rb") do
+        Rigor::Analysis::DependencyRecorder.read_site("/app/b.rb:3", "B#m")
+        dependencies = priors_of do
+          Rigor::Analysis::DependencyRecorder.read_site("/app/b.rb:3", "B#m")
+          Rigor::Analysis::DependencyRecorder.read_site("/app/c.rb:3", "C#m")
+        end
+      end
+
+      expect(self_calls.map { |name, _, prior| [name, prior] }).to eq([[:self_call_misses, absent]])
+      expect(dependencies.map { |name, key, prior| [name, key[1], prior] })
+        .to eq([[:dependency_reads, ["/app/c.rb", "C#m"], absent]])
+    end
+  end
+
   # The kind discipline of every slot a real run reaches: each access goes through its kind's API, and a Frame value
   # is frozen while installed unless the frame declares its contents a Resource (the retry frames' stack is frozen
   # even so: its edges are the contents). An audited state stands in for the thread's own, so every typer and
@@ -276,16 +580,16 @@ RSpec.describe Rigor::TypingState do
         end
 
         %i[log_read log_write].each do |name|
-          define_method(name) do |slot, key, value|
+          define_method(name) do |slot, key, value, *prior|
             check(slot, name) { |s| s.kind == :table && !s.bound }
-            super(slot, key, value)
+            super(slot, key, value, *prior)
           end
         end
 
         %i[log_bound_read log_bound_write].each do |name|
-          define_method(name) do |slot, store, key, value|
+          define_method(name) do |slot, store, key, value, *prior|
             check(slot, name) { |s| s.kind == :table && s.bound }
-            super(slot, store, key, value)
+            super(slot, store, key, value, *prior)
           end
         end
 
@@ -665,6 +969,27 @@ RSpec.describe Rigor::TypingState do
       expect(audited.accesses.keys.filter_map { |name, access| access if name == :dependency_capture_stack })
         .to contain_exactly(:read, :push, :pop, :write, :rewrite, :touch)
       expect(journaled(run.fetch(:records))).to include(%i[read dependency_reads], %i[write dependency_reads])
+    end
+
+    # ADR-129 WD3 — each bound Table's entry protocol reads what its writers stored: after a recording run, every
+    # entry the run journaled holds the value its last journaled write stored. (The unbound tables are run-scoped, and
+    # the run's release has emptied them.)
+    it "reads back through each bound Table's entry protocol the last value the run journaled at each entry" do
+      run = audited_recording_run
+      audited = run.fetch(:state)
+      last = {}
+      run.fetch(:records).each_slice(4) do |kind, slot, key, value|
+        next unless kind == :write && described_class.slots[slot].bound
+
+        last[[slot, key[0].__id__, key[1]]] = [key, value]
+      end
+      slots = last.keys.map { |slot, _, _| described_class.slots[slot].name }.uniq
+      stale = last.filter_map do |(slot, _, _), (key, value)|
+        [described_class.slots[slot].name, key[1]] unless audited.entry(slot, key) == value
+      end
+
+      expect(slots).to include(:dynamic_origins, :effects_calls, :self_call_misses, :dependency_reads)
+      expect(stale).to be_empty
     end
 
     # The memos only a recording run fills: the user-class fallback's name table, the recording run's ancestor scopes

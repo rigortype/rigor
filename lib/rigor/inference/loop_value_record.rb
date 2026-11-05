@@ -24,7 +24,7 @@ module Rigor
       # what evaluating the loop again from the same scope would.
       RECORD = TypingState.table(
         :loop_value_record,
-        run_scoped: true, read_through: true,
+        run_scoped: true, read_through: true, entries: TypingState::WeakKeyMapEntries,
         reason: "keyed by loop node; a read-through cache of the loop's own evaluation"
       )
       private_constant :RECORD
@@ -81,8 +81,8 @@ module Rigor
       def conditional(node, scope, type)
         record = [scope, type, generation]
         state = TypingState.current
-        state.weak_key_map(RECORD)[node] = record
         state.log_write(RECORD, node, record)
+        state.weak_key_map(RECORD)[node] = record
         type
       end
 

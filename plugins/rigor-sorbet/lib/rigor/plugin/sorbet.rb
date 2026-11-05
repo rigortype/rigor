@@ -364,14 +364,14 @@ module Rigor
         source, nesting = @catalog.struct_prop_type(signature)
         return signature if source.nil?
 
-        signature.with(return_type: struct_prop_type(source, nesting, signature.class_name, scope&.environment))
+        signature.with(return_type: struct_prop_type(source, nesting, signature.class_name, scope))
       end
 
-      def struct_prop_type(source, nesting, class_name, environment)
+      def struct_prop_type(source, nesting, class_name, scope)
         @struct_prop_types ||= {}
-        @struct_prop_types[[source, nesting, class_name, environment.nil?]] ||= begin
+        @struct_prop_types[[source, nesting, class_name, scope.nil?]] ||= begin
           node = Prism.parse(source).value.statements&.body&.first
-          resolve = ->(name) { resolve_struct_constant(name, nesting, class_name, environment) }
+          resolve = ->(name) { resolve_struct_constant(name, nesting, class_name, scope) }
           TypeTranslator.translate(node, resolve)
         end
       end
@@ -383,17 +383,18 @@ module Rigor
       # The top level answers only when the struct's ancestry is closed — no class on its walked superclass
       # chain `include`s or `prepend`s anything, whose constants could shadow it — and no other walked
       # `*::<name>` exists.
-      def resolve_struct_constant(name, nesting, class_name, environment)
+      def resolve_struct_constant(name, nesting, class_name, scope)
+        environment = scope&.environment
         return name.delete_prefix("::") if name.start_with?("::")
 
         nesting.size.downto(1) do |depth|
           candidate = "#{nesting.first(depth).join('::')}::#{name}"
           return candidate if struct_constant_class?(candidate, environment)
-          return nil if struct_constant_bound?(candidate, environment)
+          return nil if struct_constant_bound?(candidate, scope)
         end
         @catalog.constant_ancestry(class_name).each do |ancestor|
           candidate = "#{ancestor}::#{name}"
-          return nil if struct_constant_class?(candidate, environment) || struct_constant_bound?(candidate, environment)
+          return nil if struct_constant_class?(candidate, environment) || struct_constant_bound?(candidate, scope)
         end
         return nil if struct_constant_elsewhere?(name)
         return nil if @catalog.mixes_in_ancestry?(class_name)
@@ -405,8 +406,18 @@ module Rigor
         @catalog.namespace?(name) || !environment&.nominal_for_name(name).nil?
       end
 
-      def struct_constant_bound?(name, environment)
-        @catalog.constant?(name) || !environment&.constant_for_name(name).nil?
+      # A walked constant write, or any constant the engine types at the rooted path `::<name>` — an RBS
+      # constant declaration included. The probe goes through the plugin-facing `Scope#type_of` on a parsed
+      # constant-path node; a name nothing declares types as `Dynamic[top]` and is not bound.
+      def struct_constant_bound?(name, scope)
+        return true if @catalog.constant?(name)
+        return false if scope.nil?
+
+        node = Prism.parse("::#{name}").value.statements&.body&.first
+        type = scope.type_of(node)
+        !(type.nil? || type.is_a?(Rigor::Type::Dynamic))
+      rescue StandardError
+        true
       end
 
       def struct_constant_elsewhere?(name)

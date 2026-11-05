@@ -3,6 +3,7 @@
 require "spec_helper"
 
 require "rigor/analysis/runner"
+require "rigor/analysis/worker_session"
 require "rigor/configuration"
 
 # ADR-130 slice 2 / ADR-128 WD6 (#2686) — `plugin.api-surface`, against this repository's own `sig/`
@@ -93,6 +94,34 @@ RSpec.describe "plugin.api-surface" do
     rows = run_check
     expect(rows.values.flatten.grep(/\Aplugin\.api-surface/)).to be_empty
     expect(rows.fetch("undeclared")).to be_empty
+  end
+
+  # The runner builds the rule's collector only when it can report, so a default run pays nothing for it.
+  describe ".active?" do
+    def configuration(extra = {})
+      Rigor::Configuration.new(Rigor::Configuration::DEFAULTS.merge(extra))
+    end
+
+    it "is off by default and on under the feature, unless `disable:` names the rule" do
+      surface = Rigor::Analysis::CheckRules::PluginApiSurface
+      expect(surface.active?(configuration)).to be(false)
+      expect(surface.active?(configuration("bleeding_edge" => ["plugin-api-surface"]))).to be(true)
+      expect(surface.active?(configuration("bleeding_edge" => ["plugin-api-surface"],
+                                           "disable" => ["plugin.api-surface"]))).to be(false)
+    end
+  end
+
+  # A pooled run analyses each file in a `WorkerSession`, which builds the collectors itself.
+  it "reports from a worker session" do
+    configuration = Rigor::Configuration.new(
+      Rigor::Configuration::DEFAULTS.merge("paths" => %w[lib/surface_plugin.rb], "signature_paths" => [sig_root, "sig"],
+                                           "bleeding_edge" => ["plugin-api-surface"])
+    )
+    diagnostics = Dir.chdir(fixture_dir) do
+      Rigor::Analysis::WorkerSession.new(configuration: configuration,
+                                         cache_store: nil).analyze("lib/surface_plugin.rb")
+    end
+    expect(diagnostics.map(&:rule)).to include("plugin.api-surface")
   end
 
   # A dot-free `plugin` key reads as the plugin rows' family; it does not turn the rule on (#2822).

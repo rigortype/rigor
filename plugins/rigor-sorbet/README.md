@@ -161,9 +161,13 @@ doc.title = "u"  # still call.undefined-method when Doc is RBS-known
     superclasses or the modules they `include`, the type reads
     `Dynamic[top]`. Ancestor lookup is not modelled beyond that
     check.
-  - The top-level class answers only when no other walked
-    `*::<name>` exists. Otherwise, and for a name that resolves
-    nowhere, the type reads `Dynamic[top]`.
+  - The top-level class answers only when the struct's ancestry
+    is closed and no other walked `*::<name>` exists. Closed means
+    no class on its walked superclass chain, the struct itself
+    included, has any `include` or `prepend`. Includes are not
+    resolved, so any mixin reads as a possible shadow. In every
+    other case, and for a name that resolves nowhere, the type
+    reads `Dynamic[top]`.
   - A rooted `::Thing` reads `Thing`.
 
   Sig types do not get this resolution yet.

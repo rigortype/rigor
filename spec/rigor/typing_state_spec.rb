@@ -544,7 +544,7 @@ RSpec.describe Rigor::TypingState do
         :yield_value_type, :forwarded_call_arg_types, :threaded_block_body, :user_method_inference_stack,
         :user_method_return_summary, :user_method_summary_consult_depths, :user_method_transient_event_depths,
         :user_method_unroll_fuel, :user_method_return_memo, :inject_accumulator, :class_graph_cache,
-        :key_presence_walk, :reflective_ivar_write_repeating, :loop_value_record, :loops_evaluated,
+        :key_presence_walk, :reflective_ivar_write_repeating, :loop_value_record, :loops_evaluated, :summary_generation,
         :def_node_resolver_run, :definers_index_layers, :definers_index_seed, :definers_index_seed_alt,
         :patched_scanner_guarded_defs, :patched_scanner_def_visibilities,
         :alias_mutation_floor_facts, :alias_mutation_floor_ivar_mutators, :alias_mutation_floor_callee_floors,

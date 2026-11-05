@@ -51,9 +51,13 @@ module Rigor
       attr_accessor :phase
       attr_reader :entries
 
-      def initialize
+      # Whether the table keys on the ELIDE id ({TypingState::ElideId}) rather than the state id.
+      attr_reader :elide
+
+      def initialize(elide: false)
         @entries = {}.compare_by_identity
         @phase = :other
+        @elide = elide
       end
     end
 
@@ -119,13 +123,21 @@ module Rigor
 
       def reset = @stats.reset
 
-      # A file's analysis starts: a fresh table, in the main pass. A no-op when off.
+      # A file's analysis starts: a fresh table, in the main pass. A no-op when off. With
+      # `RIGOR_TYPE_OF_SHADOW_ELIDE=1` (ADR-129 WD2's ELIDE, measured in stage 3), the table keys on the thread's ELIDE
+      # id, restarted here: every Frame open now stays open until the file ends, so the id names the frames installed
+      # within the file.
       def begin_file
         return unless @enabled && Ractor.main?
 
-        table = Table.new
+        elide = %w[1 true].include?(ENV["RIGOR_TYPE_OF_SHADOW_ELIDE"].to_s.downcase)
+        table = Table.new(elide: elide)
         table.phase = :main
         state = TypingState.current
+        if elide
+          state.extend(TypingState::ElideId) unless state.is_a?(TypingState::ElideId)
+          state.restart_elide_id
+        end
         state[TABLE] = table
         nil
       end
@@ -160,7 +172,7 @@ module Rigor
 
         phase = callee ? :callee : table.phase
         by_id = (table.entries[scope] ||= {}.compare_by_identity)[node] ||= {}
-        id = state.id
+        id = table.elide ? state.elide_id : state.id
         entry = by_id[id]
         count(phase, :lookups)
         return check_hit(state, phase, scope, node, entry, &) if entry && stale_names(state, phase, entry).nil?

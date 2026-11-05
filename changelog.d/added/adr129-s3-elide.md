@@ -1,0 +1,1 @@
+- **[engine]** `RIGOR_TYPE_OF_SHADOW_ELIDE=1` keys the `type_of` shadow on an id that ignores re-installs of an identical frame value, to measure ADR-129's ELIDE. ([#PRNUM](https://github.com/rigortype/rigor/pull/PRNUM))

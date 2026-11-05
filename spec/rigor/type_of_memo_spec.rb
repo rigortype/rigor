@@ -242,6 +242,42 @@ RSpec.describe Rigor::TypeOfMemo do
     expect(counts[:checked]).to eq(0)
   end
 
+  describe "ELIDE (ADR-129 WD2, measured in stage 3)" do
+    let(:frame) { Rigor::TypingState.slot(:yield_value_type).index }
+    let(:walk) { Rigor::TypingState.slot(:key_presence_walk).index }
+
+    before { state.extend(Rigor::TypingState::ElideId) }
+
+    it "keeps the ELIDE id across an install of the value the slot holds, and moves it for any other" do
+      state.with(frame, int) do
+        outer = state.elide_id
+        state.with(frame, state[frame]) { expect(state.elide_id).to eq(outer) }
+        state.with(frame, str) { expect(state.elide_id).not_to eq(outer) }
+        state.without([walk]) { expect(state.elide_id).to eq(outer) }
+        expect(state.elide_id).to eq(outer)
+      end
+    end
+
+    it "moves the ELIDE id on a rewrite, and exits a frame open at one to a fresh id" do
+      before = state.elide_id
+      state.with(frame, int) { state.rewrite(walk) }
+
+      expect(state.elide_id).not_to eq(before)
+    end
+
+    it "keys a table that elides on the ELIDE id, so an identical install looks the entry up" do
+      table = described_class::Table.new(elide: true)
+      state[Rigor::TypingState.slot(:type_of_memo).index] = table
+      state.with(frame, int) do
+        shadow { int }
+        state.with(frame, state[frame]) { shadow { int } }
+      end
+
+      expect(counts).to include(stored: 1, checked: 1)
+      expect(counts[:mismatch]).to eq(0)
+    end
+  end
+
   # A real run: the shadow over fixtures finds would-be hits, compares them all equal, and leaves the run's output
   # byte-identical with the memo off.
   it "leaves a real run's diagnostics unchanged and finds no mismatch over a fixture" do

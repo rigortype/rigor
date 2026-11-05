@@ -344,10 +344,17 @@ module Rigor
         when Rigor::Type::Singleton
           chain_lookup(self_type.class_name, method_name, anchor_kind: :singleton, mixin_kind: :extend)
         when Rigor::Type::Nominal
-          chain_lookup(self_type.class_name, method_name, anchor_kind: :instance, mixin_kind: :include)
+          instance_lookup(self_type.class_name, method_name)
         end
       rescue StandardError
         nil
+      end
+
+      # Instance-side lookup: the sig catalog (the class and its mixins), then — issue #2541 — a
+      # `prop` / `const` accessor the class or a superclass declares under a `T::Struct`-family root.
+      def instance_lookup(class_name, method_name)
+        chain_lookup(class_name, method_name, anchor_kind: :instance, mixin_kind: :include) ||
+          @catalog.lookup_struct_prop(class_name: class_name, method_name: method_name)
       end
 
       def instance_chain_lookup(receiver_node, method_name, scope)
@@ -356,7 +363,7 @@ module Rigor
         receiver_type = scope.type_of(receiver_node)
         return nil unless receiver_type.is_a?(Rigor::Type::Nominal)
 
-        chain_lookup(receiver_type.class_name, method_name, anchor_kind: :instance, mixin_kind: :include)
+        instance_lookup(receiver_type.class_name, method_name)
       rescue StandardError
         # `scope.type_of` can raise on unrecognised synthetic nodes; degrade to "no contribution" rather
         # than bubbling the failure into the dispatcher.
@@ -548,7 +555,7 @@ module Rigor
                         catalog
                       end
 
-        errors = CatalogWalker.walk(root: result.value, catalog: sig_catalog, path: path)
+        errors = CatalogWalker.walk(root: result.value, catalog: sig_catalog, path: path, struct_catalog: catalog)
         # ADR-88 WD2 — store Marshal-clean `{kind:, line:, column:}` tuples, not the `ParseError` (it holds a
         # live Prism node the producer bundle could not serialise). `diagnostics_for_file` rebuilds the
         # diagnostic from the tuple, at the same 1-based line / `start_column + 1` position `from_node` gave.

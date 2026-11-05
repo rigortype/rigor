@@ -123,6 +123,49 @@ demo/errors_demo.rb:34:3: plugin.sorbet.parse-error
   Two `sig` blocks in a row; the first one has no following method definition.
 ```
 
+## `T::Struct` `prop` / `const` accessors (issue #2541)
+
+sorbet-runtime's `prop` / `const` class macros
+(`T::Props::ClassMethods`, which `T::Props::Decorator#add_prop_definition`
+backs) define a reader for both and a writer for `prop` only.
+The catalog walker records them, and the instance-side lookup
+answers them after the sig catalog:
+
+```ruby
+class Doc < T::Struct
+  prop :count, Integer
+  const :title, String
+  prop :note, T.nilable(String)
+end
+
+doc = Doc.new(count: 1, title: "t")
+doc.count        # Integer
+doc.note         # String?
+doc.count = 2    # known writer
+doc.title = "u"  # still call.undefined-method when Doc is RBS-known
+```
+
+- The type is the macro's second argument through the
+  [type vocabulary](#type-vocabulary-slices-1--3); a form outside
+  it reads `Dynamic[top]`. The `default:` / `factory:` rules do
+  not change the type.
+- Only a top-level statement of a `class` body declares a typed
+  accessor. A `prop` nested under an `if`, a `begin` or a block
+  in the body may not run, so its accessor reads `Dynamic[top]`.
+- The accessor answers only when the declaring class reaches
+  `T::Struct`, `T::InexactStruct` or `T::ImmutableStruct`
+  through the walked `class X < Y` superclasses. A relative
+  superclass is tried under each enclosing namespace, innermost
+  first. A project DSL that is also named `prop` defines nothing.
+- Subclasses inherit the accessors. A `def`, `attr_*` or
+  visibility-wrapped `def` of the same name in a class on the
+  way stops the lookup, so the user's method keeps its own
+  typing.
+- Under `T::ImmutableStruct` no writer answers (the runtime's
+  `prop` raises there).
+- A struct file's `# typed:` level does not gate its accessors:
+  sorbet-runtime defines them either way.
+
 ## Slice 8 — Mixin chain resolution (Tapioca DSL compatibility)
 
 Tapioca's standard DSL RBI shape declares sigs on a

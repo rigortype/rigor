@@ -61,9 +61,20 @@ The plugin also types the annotation DSL's own expressions
 `T::Struct` subclass still needs the subclass's own `extend T::Sig`,
 matching the runtime) through a bundled
 `sorbet-runtime` RBS surface — so the sig DSL no longer reads as
-`Dynamic[top]` on a Sorbet codebase. What it does not model:
-`T::Struct` does not synthesise `prop`-declared readers (a
-`Doc#name` accessor still reads opaque), `include T::Props` does
+`Dynamic[top]` on a Sorbet codebase.
+
+On a `T::Struct`, `T::InexactStruct` or `T::ImmutableStruct`
+subclass, `prop :name, Type` and `const :name, Type` at the top
+level of the class body give `obj.name` the translated `Type`
+(`T.nilable(String)` reads `String?`; a form outside the table
+reads `Dynamic[top]`), and `prop` also answers `obj.name = v`.
+A `const` has no writer, so `obj.name = v` still reports.
+Subclasses inherit the accessors, a `def` of the same name in
+the class body wins over the macro, and a `prop` nested under an
+`if` or a block reads `Dynamic[top]`. A `prop` call in a class
+outside the struct family defines nothing.
+
+What it does not model: `include T::Props` does
 not confer the `ClassMethods` surface (only the `< T::Struct`
 subclass path does), and the deeper type-member machinery
 (`T.attached_class` variance, `type_member` bounds) is not

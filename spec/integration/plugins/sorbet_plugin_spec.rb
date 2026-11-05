@@ -1407,6 +1407,190 @@ RSpec.describe "plugins/rigor-sorbet" do
     end
   end
 
+  # Issue #2541 — sorbet-runtime's `prop` / `const` (`T::Props::ClassMethods`, through
+  # `T::Props::Decorator#add_prop_definition`) define a reader for both and a writer for `prop` only on a
+  # `T::Struct` / `T::InexactStruct` / `T::ImmutableStruct` subclass. A class the project's RBS declares
+  # without those accessors (sig-gen's output, as on dependabot-core) answered `call.undefined-method`
+  # for every one of them. Each example declares the structs in `sig/` so the class is RBS-known and a
+  # missing accessor would fire.
+  describe "T::Struct prop / const accessors (issue #2541)" do
+    let(:struct_rbs) do
+      <<~RBS
+        class Doc < ::T::Struct
+        end
+        class SubDoc < Doc
+        end
+        class Frozen < ::T::ImmutableStruct
+        end
+        class Loose < ::T::InexactStruct
+        end
+        class Cond < ::T::Struct
+        end
+        class Plain
+          def self.prop: (*untyped) -> nil
+        end
+        module Outer
+          class Base < ::T::Struct
+          end
+          class Leaf < Base
+          end
+        end
+      RBS
+    end
+
+    let(:struct_source) do
+      <<~RUBY
+        # typed: true
+        class Doc < T::Struct
+          prop :count, Integer
+          const :title, String
+          prop :note, T.nilable(String)
+          const :tag, String, default: "a"
+          const :made, String, factory: -> { "b" }
+          const :callback, T.proc.returns(Integer)
+          prop :label, String
+          def label = 42
+        end
+        class SubDoc < Doc
+          const :extra, Symbol
+        end
+        class Frozen < T::ImmutableStruct
+          const :size, Integer
+        end
+        class Loose < T::InexactStruct
+          prop :width, Float
+        end
+        class Cond < T::Struct
+          if ENV["RIGOR_FIXTURE_PROP"]
+            prop :maybe, Integer
+          end
+        end
+        class Plain
+          def self.prop(*) = nil
+          prop :ghost, Integer
+        end
+        module Outer
+          class Base < T::Struct
+            const :id, Integer
+          end
+          class Leaf < Base
+          end
+        end
+      RUBY
+    end
+
+    def struct_run(calls)
+      run_plugin(
+        source: "# typed: true\n#{calls}",
+        files: { "structs.rb" => struct_source, "sig/structs.rbs" => struct_rbs },
+        paths: ["demo.rb", "structs.rb"],
+        signature_paths: ["sig"]
+      )
+    end
+
+    def reveals(result)
+      result.diagnostics.select { |d| d.rule == "reveal-type" }.map { |d| d.message[/inferred type: (.*)\z/, 1] }
+    end
+
+    def undefined_methods(result)
+      result.diagnostics.select { |d| d.rule == "call.undefined-method" }.map(&:message)
+    end
+
+    it "types `prop` and `const` readers declared in another file by their Sorbet type" do
+      result = struct_run(<<~RUBY)
+        doc = Doc.new(count: 1, title: "t")
+        T.reveal_type(doc.count)
+        T.reveal_type(doc.title)
+        T.reveal_type(doc.note)
+        T.reveal_type(doc.tag)
+        T.reveal_type(doc.made)
+      RUBY
+
+      expect(undefined_methods(result)).to be_empty
+      expect(reveals(result)).to eq(%w[Integer String String? String String])
+    end
+
+    it "answers a reader whose Sorbet type the translator cannot read as Dynamic[top]" do
+      result = struct_run("T.reveal_type(Doc.new(count: 1, title: \"t\").callback)\n")
+
+      expect(undefined_methods(result)).to be_empty
+      expect(reveals(result)).to eq(["Dynamic[top]"])
+    end
+
+    it "knows the `prop` writer and still reports a `const` writer" do
+      result = struct_run(<<~RUBY)
+        doc = Doc.new(count: 1, title: "t")
+        doc.count = 2
+        doc.title = "u"
+      RUBY
+
+      expect(undefined_methods(result)).to eq(["undefined method `title=' for Doc"])
+    end
+
+    it "answers `const` readers on T::ImmutableStruct and `prop` accessors on T::InexactStruct" do
+      result = struct_run(<<~RUBY)
+        T.reveal_type(Frozen.new(size: 1).size)
+        loose = Loose.new(width: 1.0)
+        T.reveal_type(loose.width)
+        loose.width = 2.0
+      RUBY
+
+      expect(undefined_methods(result)).to be_empty
+      expect(reveals(result)).to eq(%w[Integer Float])
+    end
+
+    it "inherits a struct parent's accessors, resolving a relative superclass lexically" do
+      result = struct_run(<<~RUBY)
+        sub = SubDoc.new(count: 1, title: "t", extra: :x)
+        T.reveal_type(sub.extra)
+        T.reveal_type(sub.count)
+        T.reveal_type(Outer::Leaf.new(id: 1).id)
+      RUBY
+
+      expect(undefined_methods(result)).to be_empty
+      expect(reveals(result)).to eq(%w[Symbol Integer Integer])
+    end
+
+    it "lets a `def` in the struct body win over the `prop` of the same name" do
+      result = struct_run("T.reveal_type(Doc.new(count: 1, title: \"t\").label)\n")
+
+      expect(reveals(result)).to eq(["42"])
+    end
+
+    it "synthesises nothing for a `prop` call outside the T::Struct family" do
+      result = struct_run("Plain.new.ghost\n")
+
+      expect(undefined_methods(result)).to eq(["undefined method `ghost' for Plain"])
+    end
+
+    it "keeps a conditional `prop` quiet without claiming its type" do
+      result = struct_run("T.reveal_type(Cond.new.maybe)\n")
+
+      expect(undefined_methods(result)).to be_empty
+      expect(reveals(result)).to eq(["Dynamic[top]"])
+    end
+
+    it "still reports a name no accessor declares" do
+      result = struct_run("Doc.new(count: 1, title: \"t\").missing\n")
+
+      expect(undefined_methods(result)).to eq(["undefined method `missing' for Doc"])
+    end
+
+    it "raises no argument diagnostic on the keyword constructor" do
+      result = struct_run("Doc.new(count: 1, title: \"t\", note: nil)\nSubDoc.new(count: 1, title: \"t\", extra: :x)\n")
+
+      expect(result.diagnostics.map(&:rule).grep(/\Acall\./)).to be_empty
+    end
+
+    it "answers an accessor read inside a block in value position" do
+      result = struct_run(<<~RUBY)
+        [Frozen.new(size: 1)].map { |f| { "size" => f.size } }
+      RUBY
+
+      expect(undefined_methods(result)).to be_empty
+    end
+  end
+
   describe "mixin chain resolution (ADR-11 slice 8)" do
     # Tapioca's standard DSL RBI shape. Slice 8 lifts sigs declared on a `Generated*` module up to the host
     # class via the recorded `include` / `extend` chain.

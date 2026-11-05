@@ -15,11 +15,27 @@ module Rigor
         # Hash on every `mixins_for` query.
         EMPTY_MIXINS = { include: [].freeze, extend: [].freeze }.freeze
 
+        # Issue #2541 — the sorbet-runtime struct roots whose `prop` / `const` calls define accessors
+        # (`T::Props::ClassMethods#prop` → `T::Props::Decorator#add_prop_definition` defines the reader,
+        # and the writer for `prop` only; `const` is `prop(..., immutable: true)`). `T::ImmutableStruct`
+        # overrides `prop` to raise, so a writer is never answered under it.
+        STRUCT_ROOTS = %w[T::Struct T::InexactStruct T::ImmutableStruct].freeze
+        IMMUTABLE_STRUCT_ROOT = "T::ImmutableStruct"
+
         def initialize
           @entries = {}
           # ADR-11 slice 8 — per-class mixin declarations collected by `CatalogWalker`. Lookup-time chain
           # traversal lifts sigs declared on a mixed-in module to call sites on the host class.
           @mixins = {}
+          # Issue #2541 — `prop` / `const` accessors recorded per declaring class, the lexical superclass of
+          # every `class X < Y` the walker saw, and the instance methods each class body `def`s itself. A
+          # struct accessor answers only when the declaring class reaches a {STRUCT_ROOTS} root through
+          # `@superclasses`, and a class's own `def` of the same name shadows it (Ruby: the later `def`
+          # replaces the generated accessor; a subclass `def` overrides it).
+          @struct_props = {}
+          @certain_struct_props = {}
+          @superclasses = {}
+          @defined_methods = {}
           @frozen_after_build = false
         end
 
@@ -42,8 +58,67 @@ module Rigor
           list << module_name unless list.include?(module_name)
         end
 
+        # @param signature — a {MethodSignature} for a `prop` / `const` reader or a `prop` writer.
+        # @param certain — false for a call nested under a conditional or a block, which never displaces
+        #   an accessor the class body declares unconditionally.
+        def record_struct_prop(signature, certain: true)
+          raise "Catalog already finalised" if @frozen_after_build
+
+          props = (@struct_props[signature.class_name] ||= {})
+          if certain
+            @certain_struct_props[[signature.class_name, signature.method_name]] = true
+            props[signature.method_name] = signature
+          elsif !@certain_struct_props.key?([signature.class_name, signature.method_name])
+            props[signature.method_name] = signature
+          end
+        end
+
+        # @param written — the superclass expression as written (`"T::Struct"`, `"Base"`, `"::Foo::Base"`).
+        # @param lexical_prefix — the enclosing namespace names, outermost first, that Ruby resolves a
+        #   relative `written` against.
+        def record_superclass(class_name:, written:, lexical_prefix:)
+          raise "Catalog already finalised" if @frozen_after_build
+
+          @superclasses[class_name] ||= [written, lexical_prefix.dup.freeze].freeze
+        end
+
+        def record_defined_method(class_name:, method_name:)
+          raise "Catalog already finalised" if @frozen_after_build
+
+          list = (@defined_methods[class_name] ||= [])
+          list << method_name unless list.include?(method_name)
+        end
+
+        # Issue #2541 — the signature a `prop` / `const` accessor contributes to `class_name#method_name`,
+        # walking the lexical superclass chain the way Ruby's method lookup does. A class on the way that
+        # `def`s the name itself (or declares it with `attr_*`) stops the walk with nil, leaving the user's
+        # method to the sig lookup and the engine's own tiers. Returns nil unless the declaring class descends from a {STRUCT_ROOTS} root, so a
+        # project DSL that happens to be named `prop` is never read as Sorbet's.
+        def lookup_struct_prop(class_name:, method_name:)
+          return nil if @struct_props.empty?
+
+          current = class_name.to_s.delete_prefix("::")
+          visited = []
+          while current && !visited.include?(current)
+            visited << current
+            return nil if @defined_methods[current]&.include?(method_name)
+
+            signature = @struct_props.dig(current, method_name)
+            return struct_answer(signature, current) if signature
+
+            current = resolve_superclass(current)
+          end
+          nil
+        end
+
         def freeze!
           @frozen_after_build = true
+          @struct_props.each_value(&:freeze)
+          @struct_props.freeze
+          @certain_struct_props.freeze
+          @superclasses.freeze
+          @defined_methods.each_value(&:freeze)
+          @defined_methods.freeze
           @entries.freeze
           @mixins.each_value do |bucket|
             bucket.each_value(&:freeze)
@@ -64,7 +139,7 @@ module Rigor
         end
 
         def empty?
-          @entries.empty?
+          @entries.empty? && @struct_props.empty?
         end
 
         # ADR-52 slice 4 — the distinct method names the catalog carries at least one signature for,
@@ -74,7 +149,9 @@ module Rigor
         # Computed fresh per call — the plugin memoises the resolved set, and `freeze!` freezes the
         # catalog itself so a lazy memo ivar here would raise.
         def method_names
-          @entries.keys.map { |key| key[1] }.uniq
+          names = @entries.keys.map { |key| key[1] }
+          @struct_props.each_value { |props| names.concat(props.keys) }
+          names.uniq
         end
 
         def size
@@ -82,6 +159,45 @@ module Rigor
         end
 
         private
+
+        def struct_answer(signature, declaring_class)
+          root = struct_root(declaring_class)
+          return nil if root.nil?
+          return nil if root == IMMUTABLE_STRUCT_ROOT && signature.method_name.end_with?("=")
+
+          signature
+        end
+
+        def struct_root(class_name)
+          current = class_name
+          visited = []
+          while current && !visited.include?(current)
+            return current if STRUCT_ROOTS.include?(current)
+
+            visited << current
+            current = resolve_superclass(current)
+          end
+          nil
+        end
+
+        # Resolves the superclass expression recorded for `class_name` the way Ruby's lexical constant lookup
+        # would, as far as the walked sources can tell: a rooted `::Foo` is absolute; a relative `Foo` is tried
+        # under each enclosing namespace, innermost first, against the classes the walk saw, then as written.
+        def resolve_superclass(class_name)
+          written, prefix = @superclasses[class_name]
+          return nil if written.nil?
+          return written.delete_prefix("::") if written.start_with?("::")
+
+          prefix.size.downto(1) do |depth|
+            candidate = "#{prefix.first(depth).join('::')}::#{written}"
+            return candidate if known_class?(candidate)
+          end
+          written
+        end
+
+        def known_class?(name)
+          @superclasses.key?(name) || @struct_props.key?(name)
+        end
 
         def key_for(class_name, method_name, kind)
           [class_name.to_s, method_name.to_sym, kind]

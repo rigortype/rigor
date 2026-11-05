@@ -22,9 +22,9 @@ RSpec.describe "plugin.api-surface" do
   end
 
   # `{ mark name => ["rule: message", ...] }` for every diagnostic on a marked line.
-  def run_check(bleeding_edge: false)
+  def run_check(bleeding_edge: false, paths: %w[lib])
     settings = Rigor::Configuration::DEFAULTS.merge(
-      "paths" => %w[lib], "signature_paths" => [sig_root, "sig"], "parallel" => { "workers" => 0 },
+      "paths" => paths, "signature_paths" => [sig_root, "sig"], "parallel" => { "workers" => 0 },
       "bleeding_edge" => bleeding_edge
     )
     runner = Rigor::Analysis::Runner.new(configuration: Rigor::Configuration.new(settings), cache_store: nil,
@@ -53,6 +53,13 @@ RSpec.describe "plugin.api-surface" do
 
     it "reports on a receiver that may be nil, judging its interface arm" do
       expect(surface_rows(rows.fetch("nilable-receiver")).size).to eq(1)
+    end
+
+    # `lib/engine_side.rb` reopens `Rigor::Plugin::Base`, which makes it a project class above. A plugin project
+    # knows it only from Rigor's signatures and the gem.
+    it "reports where Rigor::Plugin::Base is known only from its signatures" do
+      external = run_check(bleeding_edge: ["plugin-api-surface"], paths: %w[lib/surface_plugin.rb])
+      expect(surface_rows(external.fetch("undeclared")).size).to eq(1)
     end
 
     it "reports through a project base class" do

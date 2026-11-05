@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../../reflection"
+require_relative "../../scope/resolution_chain"
 require_relative "../../type"
 require_relative "../diagnostic"
 require_relative "rule_ids"
@@ -30,9 +31,6 @@ module Rigor
       # under `lib/` as Rigor's own engine does.
       module PluginApiSurface
         PLUGIN_BASE = "Rigor::Plugin::Base"
-
-        # Bounds the superclass walk, which a malformed cyclic source cannot otherwise loop on.
-        MAX_SUPERCLASS_HOPS = 32
 
         module_function
 
@@ -97,8 +95,8 @@ module Rigor
         end
 
         # Whether the call is plugin source: lexically inside a class that inherits `Rigor::Plugin::Base`. A
-        # `Rigor::Plugin::Base` body has no superclass to walk, so it is not. An unrecorded nesting (a scope built
-        # outside a declaration walk) is not either.
+        # `Rigor::Plugin::Base` body is not: its chain holds `Base` only as itself. An unrecorded nesting (a scope
+        # built outside a declaration walk) is not either.
         def plugin_source?(scope)
           nesting = scope.lexical_nesting
           return false if nesting.nil? || nesting.empty?
@@ -106,21 +104,23 @@ module Rigor
           nesting.any? { |name| inherits_plugin_base?(scope, name) }
         end
 
-        # Reads through `Scope#superclass_of`, which files the ADR-46 class dependency, so an incremental recheck
-        # re-judges the call when a superclass declaration on the chain changes in another file.
+        # Whether `class_name`'s instance chain ({Scope::ResolutionChain}, the one ancestry reader) holds
+        # `Rigor::Plugin::Base` below the class itself. Reading it files the ADR-46 class dependencies, so
+        # an incremental recheck re-judges the call when a declaration on the chain changes in another file. A
+        # truncated chain reads as no plugin: the rule withholds where it cannot see the whole chain.
         def inherits_plugin_base?(scope, class_name)
-          current = class_name.to_s
-          MAX_SUPERCLASS_HOPS.times do
-            raw = scope.superclass_of(current)
-            return false if raw.nil?
+          root = class_name.to_s
+          chain = Scope::ResolutionChain.for(scope, root, :instance, :methods)
+          chain.record(scope)
+          return false if chain.truncated?
 
-            candidates = scope.ancestor_name_candidates(current, raw)
-            return true if candidates.include?(PLUGIN_BASE)
+          chain.entries.any? { |entry| entry.name != root && plugin_base_entry?(entry) }
+        end
 
-            current = candidates.find { |candidate| scope.known_user_class?(candidate) }
-            return false if current.nil?
-          end
-          false
+        # `Rigor::Plugin::Base` is external where only its RBS and the gem declare it, and a project entry where the
+        # analysed tree holds its source (Rigor's own `lib`, or a reopen).
+        def plugin_base_entry?(entry)
+          entry.external? ? entry.candidates.include?(PLUGIN_BASE) : entry.name == PLUGIN_BASE
         end
 
         def build(path, call_node, interface, method_name)

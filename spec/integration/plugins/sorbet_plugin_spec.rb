@@ -1637,10 +1637,12 @@ RSpec.describe "plugins/rigor-sorbet" do
           T.must(h.maybe_t).thing_only
           h.ts.first&.thing_only
           T.reveal_type(h.t)
+          T.reveal_type(h.maybe_t)
+          T.reveal_type(h.ts)
         RUBY
 
         expect(undefined_methods(result)).to be_empty
-        expect(reveals(result)).to eq(["Outer::Thing"])
+        expect(reveals(result)).to eq(["Outer::Thing", "Outer::Thing?", "Array[Outer::Thing]"])
       end
 
       it "still checks calls against the resolved class" do

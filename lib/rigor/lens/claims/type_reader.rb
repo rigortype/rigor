@@ -2,6 +2,7 @@
 
 require "rbs"
 require_relative "../../rbs_extended"
+require_relative "../../scope/resolution_chain"
 
 module Rigor
   module Lens
@@ -68,7 +69,7 @@ module Rigor
         end
 
         def resolve(name, claim)
-          resolved = @resolver.resolve(name, context: claim ? @context : nil)
+          resolved = @resolver&.resolve(name, context: claim ? @context : nil)
           if resolved.nil?
             @reasons << "unresolved_name"
           elsif claim && !name.absolute? && name.class?
@@ -113,32 +114,45 @@ module Rigor
         # Resolve the first segment before the rest, so a Ruby-only namespace cannot fall through to core.
         def ruby_name(written)
           head, *tail = written.split("::")
-          bases = @nesting.reverse + ruby_ancestors(@nesting.last || "Object", Set.new)
-          bases << "Object" if @nesting.empty? || @loader.rbs_module?(@nesting.last)
-          found = bases.uniq.filter_map do |base|
-            candidate = base == "Object" ? head : "#{base}::#{head}"
-            candidate if project_name?(candidate)
-          end.first
+          found = project_constant_in(@nesting.reverse, head)
+          found ||= ancestor_constant(head)
+          found = head if found.nil? && (@nesting.empty? || @loader.rbs_module?(@nesting.last)) && project_name?(head)
           found && ([found] + tail).join("::")
         end
 
-        def project_name?(name)
-          @scope.discovered_classes.key?(name) || @scope.in_source_constants.key?(name) ||
-            @scope.constant_sources.key?(name) || @scope.bound_constant_names(name).include?(name)
+        def project_constant_in(bases, name)
+          bases.each do |base|
+            candidate = base == "Object" ? name : "#{base}::#{name}"
+            return candidate if project_name?(candidate)
+          end
+          nil
         end
 
-        def ruby_ancestors(name, seen)
-          return [] if seen.include?(name)
+        def project_name?(name)
+          @scope.declared_class?(name) || @scope.bound_constant_names(name).include?(name)
+        end
 
-          seen |= [name]
-          includes = @scope.discovered_includes.fetch(name, [])
-          superclass = @scope.discovered_superclasses[name]
-          inherited = if superclass
-                        ruby_ancestors(superclass.delete_prefix("::"), seen)
-                      else
-                        @loader.ancestor_names_for(name)
-                      end
-          [name] + includes.flat_map { |mod| ruby_ancestors(mod.delete_prefix("::"), seen) } + inherited
+        def ancestor_constant(name)
+          chain = Scope::ResolutionChain.for(@scope, @nesting.last || "Object", :instance, :constants)
+          found = chain_constant(chain, name)
+          settled = chain.settle(@scope, found) { |retro| chain_constant(retro, name) }
+          if chain.truncated? || chain.wildcard_mixin? || settled != :chain
+            @reasons << "ambiguous_name"
+            return nil
+          end
+          found
+        end
+
+        def chain_constant(chain, name)
+          chain.search(@scope) do |entry|
+            bases = entry.external? ? external_ancestors(entry) : [entry.name]
+            project_constant_in(bases, name)
+          end
+        end
+
+        def external_ancestors(entry)
+          name = entry.candidates.find { |candidate| @loader.class_known?(candidate) }
+          name ? @loader.ancestor_names_for(name) : []
         end
       end
     end

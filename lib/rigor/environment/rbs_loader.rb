@@ -2738,7 +2738,10 @@ module Rigor
 
       # An independent resolver for a read-only consumer. Its memo belongs to the caller, never the loader cache.
       def type_name_resolver
-        ::RBS::Resolver::TypeNameResolver.build(env)
+        environment = env
+        return nil if environment.nil?
+
+        ::RBS::Resolver::TypeNameResolver.build(environment)
       end
 
       # The resolved alias declaration, without substituting type arguments or translating its AST.

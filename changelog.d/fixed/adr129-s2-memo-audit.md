@@ -1,0 +1,2 @@
+- **[engine]** `RIGOR_MEMO_AUDIT=1` now fails the run on a memo mismatch that a rescue on the typing path had swallowed. ([#2830](https://github.com/rigortype/rigor/pull/2830))
+  - Each mismatch is kept per thread and reported in its file's crash row; one raised outside every file fails the run at its end.

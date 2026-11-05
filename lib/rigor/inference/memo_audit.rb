@@ -13,6 +13,11 @@ module Rigor
     # Like {BudgetTrace}, a switch for specs and CI (`RIGOR_MEMO_AUDIT=1` in the environment, read once at load, or
     # {enable!}): off by default, a single boolean check when off. A recomputation
     # runs with the audit suspended on its thread and the memos bypassed ({suspended?}), so it reads nothing stored.
+    #
+    # A mismatch raises, and is also kept on this thread's list until {drain} takes it (ADR-129 WD5, #2785): the
+    # typing path rescues `StandardError` in many places, and a raise one of them swallows would turn the defect into
+    # an ordinary fallback answer. The runner drains the list after each file and reports what it holds the way it
+    # reports a mismatch no rescue caught, and {raise_undrained!} fails the run on what a file never drained.
     module MemoAudit
       # A memo hit whose stored value differs from a fresh computation.
       class Mismatch < StandardError; end
@@ -23,6 +28,18 @@ module Rigor
         :memo_audit_suspended, reason: "set around an audit recomputation, which bypasses every memo"
       )
       private_constant :SUSPENDED
+
+      # ADR-129 WD1 — a Resource: the mismatches raised on this thread and not drained yet. Typing never reads it; an
+      # append refuses every open capture, which only an audited run reaches.
+      MISMATCHES = TypingState.resource(
+        :memo_audit_mismatches,
+        run_scoped: true,
+        reason: "the audit's mismatches on this thread, appended where raised, drained per file, never read by typing"
+      )
+      private_constant :MISMATCHES
+
+      EMPTY = [].freeze
+      private_constant :EMPTY
 
       @enabled = %w[1 true].include?(ENV["RIGOR_MEMO_AUDIT"].to_s.downcase)
 
@@ -47,8 +64,33 @@ module Rigor
         fresh = suspended(&)
         return stored if fresh == stored
 
-        raise Mismatch, "#{label} memo hit differs from a fresh computation for #{[key, key2].inspect[0, 120]}: " \
-                        "stored #{stored.inspect[0, 200]}, fresh #{fresh.inspect[0, 200]}"
+        mismatch = Mismatch.new(
+          "#{label} memo hit differs from a fresh computation for #{[key, key2].inspect[0, 120]}: " \
+          "stored #{stored.inspect[0, 200]}, fresh #{fresh.inspect[0, 200]}"
+        )
+        state = TypingState.current
+        state.append(MISMATCHES, mismatch)
+        raise mismatch
+      end
+
+      # The mismatches raised on this thread since the last drain, oldest first, and an empty list for the next file.
+      # Each has been raised, so it carries the backtrace a crash row is built from.
+      def drain
+        state = TypingState.current
+        mismatches = state.read(MISMATCHES)
+        return EMPTY if mismatches.nil? || mismatches.empty?
+
+        state.write(MISMATCHES, nil)
+        mismatches
+      end
+
+      # Raises the first mismatch no file drained (one raised outside every file's analysis), so a run that ends with
+      # one fails instead of releasing it with the run's other slots.
+      def raise_undrained!
+        return unless @enabled
+
+        mismatches = drain
+        raise mismatches.first unless mismatches.empty?
       end
 
       def suspended(&)

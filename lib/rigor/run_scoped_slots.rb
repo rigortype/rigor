@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
+require "English"
 require_relative "typing_state"
+require_relative "inference/memo_audit"
 
 module Rigor
   # Issues #2412 and #2399 — the run-end hook for per-thread state whose contents belong to one analysis run. An
@@ -21,8 +23,15 @@ module Rigor
   # keeps no key list of its own.
   module RunScopedSlots
     # Empties every run-scoped {TypingState} slot on the calling thread.
+    #
+    # ADR-129 WD5 (#2785) — with the memo audit on, a mismatch no file drained (one raised by typing outside the
+    # per-file loop: return summaries, return re-evaluation, sig-gen) would be released here unreported, so it is
+    # raised after the release, unless an exception is already leaving the run.
     def self.release
+      undrained = Inference::MemoAudit.enabled? ? Inference::MemoAudit.drain : nil
       TypingState.release_run_scoped
+      raise undrained.first if undrained && !undrained.empty? && $ERROR_INFO.nil?
+
       nil
     end
   end

@@ -169,6 +169,14 @@ module Rigor
       # worker captures the file's cross-file reads for {#drain_dependencies}; the recorder's own disabled
       # fast path makes the unwrapped case free.
       def analyze(path)
+        diagnostics = analyze_attributed(path)
+        return diagnostics unless Inference::MemoAudit.enabled?
+
+        # ADR-129 WD5 (#2785) — the audit's mismatches this file raised, as `Runner#analyze_file` reports them.
+        CrashSignature.with_swallowed(path, diagnostics, Inference::MemoAudit.drain)
+      end
+
+      def analyze_attributed(path)
         return analyze_with_effects(path) unless @record_dependencies
 
         diagnostics = nil
@@ -204,6 +212,7 @@ module Rigor
         diagnostics
       end
       private :analyze_with_effects
+      private :analyze_attributed
 
       # ADR-103 WD6 / #386 — the worker-side mirror of `Runner#effect_envelope_index`. Derived from the
       # same configuration and the session's own environment, so a worker's `≤` lane is the one the

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "digest"
+require_relative "../typing_state"
 
 require_relative "access_denied_error"
 require_relative "../rooted_glob"
@@ -57,6 +58,15 @@ module Rigor
       ATTRIBUTION_KEY = :rigor_io_boundary_attribution
       private_constant :ATTRIBUTION_KEY
 
+      # ADR-129 WD3 / #2814 — the attribution sink is a Resource: a `type_of` memo hit that served an answer without
+      # re-running the plugin read would not append what the miss appended, so every {.attribute} refuses each open
+      # capture. Its storage stays the thread variable above (ADR-129 WD5 shape 2); this slot declares its kind.
+      SINK = TypingState.resource(
+        :io_boundary_attribution,
+        reason: "every plugin boundary read appends to the attributing sink, which a memo hit would not replay"
+      )
+      private_constant :SINK
+
       # ADR-45 WD2 (#1507) — runs the block with `sink` (an Array) receiving every file and listing row ANY
       # boundary records on this thread meanwhile, in addition to the boundary's own table, and returns the
       # block's value. `Analysis::Runner` wraps each file's analysis in one when it records dependencies, so the
@@ -67,16 +77,28 @@ module Rigor
       # lands in the sink. The boundary's own table is unchanged by it, including its first-existence-row-stands
       # rule: the sink records what each read observed. Only reads are credited: a value a plugin memoised reaches
       # later files without one, so the first file to trigger the read is the only one credited with it.
+      #
+      # The installing fiber's typing state rides with the sink, so a read from inside an `Enumerator` refuses the
+      # captures open where the analysis runs, not only those of the `Enumerator`'s own fiber ({.attribute}).
       def self.attributing(sink)
         previous = Thread.current.thread_variable_get(ATTRIBUTION_KEY)
-        Thread.current.thread_variable_set(ATTRIBUTION_KEY, sink)
+        Thread.current.thread_variable_set(ATTRIBUTION_KEY, [sink, TypingState.current].freeze)
         yield
       ensure
         Thread.current.thread_variable_set(ATTRIBUTION_KEY, previous)
       end
 
+      # Records `entry` in the attributing sink, if one is installed, and touches {SINK} on the calling fiber's typing
+      # state and on the installing fiber's (ADR-129 WD3, #2814).
       def self.attribute(entry)
-        Thread.current.thread_variable_get(ATTRIBUTION_KEY)&.push(entry)
+        state = TypingState.current
+        state.touch(SINK)
+        sink, owner = Thread.current.thread_variable_get(ATTRIBUTION_KEY)
+        return nil if sink.nil?
+
+        owner.touch(SINK)
+        sink.push(entry)
+        nil
       end
 
       attr_reader :policy, :plugin_id

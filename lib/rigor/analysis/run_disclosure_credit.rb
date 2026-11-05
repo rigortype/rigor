@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "../typing_state"
+
 module Rigor
   module Analysis
     # Issue #2020 — what one file's analysis contributed to the run-scoped plugin tables ({Plugin::Base#disclose_once}
@@ -17,16 +19,27 @@ module Rigor
       ATTRIBUTION_KEY = :rigor_run_disclosure_attribution
       private_constant :ATTRIBUTION_KEY
 
+      # ADR-129 WD3 / #2814 — the registrations sink is a Resource: a `type_of` memo hit that served an answer without
+      # re-running the plugin hook would not append the registration the miss appended, so every {.attribute} refuses
+      # each open capture. Its storage stays the thread variable above (ADR-129 WD5 shape 2); this slot declares its
+      # kind.
+      SINK = TypingState.resource(
+        :run_disclosure_attribution,
+        reason: "every run-scoped plugin registration appends to the collecting sink, which a memo hit would not replay"
+      )
+      private_constant :SINK
+
       module_function
 
       # Runs the block with run-scoped registrations attributed and returns the file's records — each a run-disclosure
       # record tagged with its `plugin_id` and carrying the registering plugin's boundary rows as `:reads`, one per
       # `[plugin id, key]` — frozen and Marshal-clean. A thread variable, as {Plugin::IoBoundary.attributing} uses, so a
-      # registration from inside an `Enumerator` still lands.
+      # registration from inside an `Enumerator` still lands, carrying the installing fiber's typing state as
+      # {Plugin::IoBoundary.attributing} does.
       def collect
         registrations = []
         previous = Thread.current.thread_variable_get(ATTRIBUTION_KEY)
-        Thread.current.thread_variable_set(ATTRIBUTION_KEY, registrations)
+        Thread.current.thread_variable_set(ATTRIBUTION_KEY, [registrations, TypingState.current].freeze)
         begin
           yield
         ensure
@@ -35,9 +48,16 @@ module Rigor
         credit(registrations)
       end
 
-      # Called by {Plugin::Base#disclose_once} and {Plugin::Base#emit_once} for every call, a repeat included.
+      # Called by {Plugin::Base#disclose_once} and {Plugin::Base#emit_once} for every call, a repeat included. Touches
+      # {SINK} on the calling fiber's typing state and on the installing fiber's (ADR-129 WD3, #2814).
       def attribute(plugin, record)
-        Thread.current.thread_variable_get(ATTRIBUTION_KEY)&.push([plugin, record])
+        state = TypingState.current
+        state.touch(SINK)
+        registrations, owner = Thread.current.thread_variable_get(ATTRIBUTION_KEY)
+        return nil if registrations.nil?
+
+        owner.touch(SINK)
+        registrations.push([plugin, record])
         nil
       end
 

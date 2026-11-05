@@ -24,6 +24,11 @@ module Rigor
   #   (`:id_determined`, `:delta_internal`).
   # - **Memo** ({.memo}): an extensional cache keyed on all its inputs. Unlogged.
   #
+  # Typing also reaches state that is not a slot value: the instance variables of the objects a scope holds. ADR-129's
+  # G4 (`spec/rigor/typing_state_reachability_spec.rb`) walks everything reachable from a scope and the slot values,
+  # and accepts a mutable object only where a declaration names it: an extensional cache an object fills in place
+  # ({.memo_field}), or the store of a bound Table ({.store_field}).
+  #
   # The values live in one {State} per thread (per fiber, as `Thread.current[]` is), cached by the typer and the
   # evaluator, so a slot read is an ivar and an array index. Each slot constant is the slot's integer index, which
   # keeps the declaration Ractor-shareable and the read an `Array#[]`.
@@ -44,8 +49,13 @@ module Rigor
     # - `bound`: a Table whose stores are not the slot's value but objects its owner holds, several at once (a store
     #   per file's scopes, per installed recorder); its journal records key on `[store, key]`.
     # - `audit`: a Memo's `MemoAudit.check` labels, the hit sites that recompute and compare (WD1, G2).
+    # - `memos`: a Frame's members or keys that hold Memos its owner fills in place (G4 accepts them).
     Slot = Data.define(:name, :kind, :index, :reason, :run_scoped, :read_exemption, :contents, :read_through, :bound,
-                       :audit)
+                       :audit, :memos)
+
+    # A field declared outside the slots: `kind` is `:memo` ({.memo_field}) or `:store` ({.store_field}, whose `slot`
+    # names the bound Table).
+    Field = Data.define(:owner, :ivar, :kind, :slot, :reason)
 
     # A Table read of a key the table does not hold logs this rather than nil, so a stored nil and a miss differ.
     ABSENT = Object.new.freeze
@@ -57,11 +67,13 @@ module Rigor
     # Ractor can read them. Declarations run at require time, on the main Ractor.
     @slots = [].freeze
     @run_scoped = [].freeze
+    @fields = [].freeze
 
     class << self
       # Declares a Frame slot and returns its index. A `contents: :resource` frame may declare a read exemption for
-      # reads of its contents.
-      def frame(name, reason:, contents: nil, read_exemption: nil)
+      # reads of its contents. `memos` names the members (a Data or Struct value) or keys (a Hash value) of the
+      # installed value that hold extensional caches its owner fills in place, Memos by kind, which `reason` explains.
+      def frame(name, reason:, contents: nil, read_exemption: nil, memos: nil)
         unless [nil, :resource, :table].include?(contents)
           raise ArgumentError, "#{name}: contents must be :resource, :table or nil"
         end
@@ -70,7 +82,8 @@ module Rigor
         end
 
         check_read_exemption(name, read_exemption)
-        declare(name, :frame, reason, contents: contents, read_exemption: read_exemption)
+        declare(name, :frame, reason, contents: contents, read_exemption: read_exemption,
+                                      memos: memos && Array(memos).freeze)
       end
 
       # Declares a Table slot and returns its index. A `bound` table's stores live with their owners, so the slot holds
@@ -94,8 +107,31 @@ module Rigor
         declare(name, :memo, reason, run_scoped: run_scoped, audit: labels.empty? ? nil : labels)
       end
 
+      # Declares that `owner`'s instances fill each of `ivars` in place, or assign it lazily, as an extensional cache
+      # keyed on all its inputs: a Memo that lives outside a slot. `reason` says why it is extensional. G4 accepts
+      # what such a field holds without walking it, and accepts an unfrozen `owner` whose other fields keep their
+      # objects.
+      def memo_field(owner, *ivars, reason:)
+        raise ArgumentError, "#{owner}: memo_field names at least one field" if ivars.empty?
+
+        ivars.each { |ivar| declare_field(owner, ivar, :memo, reason, nil) }
+        nil
+      end
+
+      # Declares that `owner`'s instance variable `ivar` holds a store of the bound Table `slot` (an index from
+      # {.table} with `bound: true`), whose entries are journaled through the slot.
+      def store_field(owner, ivar, slot)
+        declared = @slots.fetch(slot)
+        raise ArgumentError, "#{declared.name}: only a bound table has stores in fields" unless declared.bound
+
+        declare_field(owner, ivar, :store, declared.reason, declared.name)
+      end
+
       # Every declared slot, in declaration order (a slot's index is its position).
       attr_reader :slots
+
+      # Every field declared with {.memo_field} or {.store_field}, as `Field` values.
+      attr_reader :fields
 
       # The slot declared as `name`. For specs and diagnostics; the hot path reads by index.
       def slot(name)
@@ -126,8 +162,20 @@ module Rigor
         raise ArgumentError, "#{name}: read_exemption must be one of #{READ_EXEMPTIONS.inspect} or nil"
       end
 
+      def declare_field(owner, ivar, kind, reason, slot_name)
+        raise ArgumentError, "#{owner}##{ivar}: a field is an instance variable" unless ivar.to_s.start_with?("@")
+        raise ArgumentError, "#{owner}##{ivar}: a field names why it is its kind" if reason.to_s.strip.empty?
+        if @fields.any? { |field| field.owner.equal?(owner) && field.ivar == ivar }
+          raise ArgumentError, "#{owner}##{ivar} is already declared"
+        end
+
+        field = Field.new(owner: owner, ivar: ivar, kind: kind, slot: slot_name, reason: reason.dup.freeze)
+        @fields = Ractor.make_shareable([*@fields, field])
+        nil
+      end
+
       def declare(name, kind, reason, run_scoped: false, read_exemption: nil, contents: nil, read_through: false, # rubocop:disable Metrics/ParameterLists
-                  bound: false, audit: nil)
+                  bound: false, audit: nil, memos: nil)
         if @slots.any? { |slot| slot.name == name }
           raise ArgumentError, "typing-state slot #{name.inspect} is already declared"
         end
@@ -136,7 +184,7 @@ module Rigor
         index = @slots.size
         slot = Slot.new(name: name, kind: kind, index: index, reason: reason.dup.freeze, run_scoped: run_scoped,
                         read_exemption: read_exemption, contents: contents, read_through: read_through, bound: bound,
-                        audit: audit)
+                        audit: audit, memos: memos)
         @slots = Ractor.make_shareable([*@slots, slot])
         @run_scoped = [*@run_scoped, index].freeze if run_scoped
         index

@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../../source/constant_path"
 require_relative "../../source/node_children"
+require_relative "../../typing_state"
 
 module Rigor
   module Inference
@@ -50,6 +51,8 @@ module Rigor
       #   `undef_method :gets`), other than `&:gets` and the first argument of a call that only names a method
       #   (`respond_to?(:gets)`, `send(:gets)`).
       class SelfEvidence
+        TypingState.memo_field(self, :@scan, reason: "one walk of the file's root node, built on first ask")
+
         # The context of a reader whose `self` is `main`.
         MAIN = :main
         UNKNOWN = :unknown

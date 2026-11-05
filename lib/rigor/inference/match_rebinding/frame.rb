@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "../../source/node_children"
+require_relative "../../typing_state"
 
 module Rigor
   module Inference
@@ -15,6 +16,16 @@ module Rigor
       # `$_` (issue #1359), whose frame-wide answers ({#last_line_closure?}, {#last_line_fallback?}) are kept here
       # too, asked only while `$_` is narrowed.
       class Frame
+        # ADR-129 G4 — the frame's extensional caches. A scan is keyed on its node (and reading kind) and on the scope's
+        # local and instance-variable tables by identity, the inputs a lookup argument's answer reads; the rest of what
+        # it reads through the scope (constant resolution over the lexical nesting, discovery and environment) is fixed
+        # for the body the frame runs. The other three read the body and the parameters alone.
+        TypingState.memo_field(self, :@scans, :@kind_scans, :@self_call_fallback,
+                               reason: "keyed on the node and the scope's locals and ivars tables by identity; the " \
+                                       "other scope inputs a scan reads are fixed for the frame's body")
+        TypingState.memo_field(self, :@forwarded_block, :@body_locals, :@parameter_names,
+                               reason: "functions of the frame's body and parameters alone")
+
         # The body the frame runs, which issue #2555's escape scan reads ({ConstructionEscape.escaped?}).
         attr_reader :body
         # The method's parameters (nil for a class, module or file body), which issue #2608's holder scan reads for a

@@ -4,6 +4,7 @@ require_relative "blueprint"
 # Issue #806 — {Registry#guarded_manifest} constructs one. `Rigor::Plugin::LoadError` MUST be defined by
 # then: an unresolved bare `LoadError` in this lexical scope silently falls back to Ruby's own ::LoadError.
 require_relative "load_error"
+require_relative "../typing_state"
 
 module Rigor
   module Plugin
@@ -20,6 +21,10 @@ module Rigor
     # exactly the order the ungated walk produced — diagnostics stay byte-identical. The receiver-class
     # ancestry match for `dynamic_return` still happens per-dispatch inside `Plugin::Base#dynamic_return_type`.
     class ContributionIndex
+      TypingState.memo_field(self, :@owns_receiver_memo,
+                             reason: "keyed on the environment's identity and the class name; the plugins' " \
+                                     "owns_receivers set is fixed at construction")
+
       # Ordered (registry-order) subsets relevant to each collector, and the membership sets used to gate the
       # paths within a plugin. `for_file_diagnostics` is the subset the runner's per-file diagnostic loop
       # visits: plugins overriding `#diagnostics_for_file` or declaring at least one `node_rule`.
@@ -103,8 +108,8 @@ module Rigor
       # The categorisation sets + the ordered per-collector subsets.
       def compile_memberships(plugins)
         plugins.each { |p| reject_legacy_flow_hook!(p) }
-        @dynamic = plugins.reject { |p| p.class.dynamic_returns.empty? }.to_set
-        @narrowing_facts = plugins.reject { |p| p.class.narrowing_facts_rules.empty? }.to_set
+        @dynamic = plugins.reject { |p| p.class.dynamic_returns.empty? }.to_set.freeze
+        @narrowing_facts = plugins.reject { |p| p.class.narrowing_facts_rules.empty? }.to_set.freeze
         compile_collector_subsets(plugins)
       end
 
@@ -218,6 +223,10 @@ module Rigor
     # Ractor. The eventual Phase 4 pool ships `blueprints` across the boundary and calls {.materialize}
     # per-Ractor; the live `plugins` carriage on the coordinator registry stays unchanged.
     class Registry
+      TypingState.memo_field(self, :@contracts_by_path, :@effect_memo,
+                             reason: "keyed on the path, and on the one effect-contribution compile; the contract " \
+                                     "set, glob semantics and plugin set are fixed for the run (ADR-52 WD1)")
+
       attr_reader :plugins, :load_errors, :blueprints, :contribution_index, :resolved_gem_paths
 
       # @param plugins — instantiated plugin instances in deterministic order.

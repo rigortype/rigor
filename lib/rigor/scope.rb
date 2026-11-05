@@ -310,6 +310,10 @@ module Rigor
       reason: "node => OptimisticOrigin cause; typing records it and reads it back to keep a value nil-free"
     )
     private_constant :DYNAMIC_ORIGINS, :VOID_ORIGINS, :PLUGIN_TYPED_CALLS, :OPTIMISTIC_ORIGINS
+    TypingState.store_field(self, :@dynamic_origins, DYNAMIC_ORIGINS)
+    TypingState.store_field(self, :@void_origins, VOID_ORIGINS)
+    TypingState.store_field(self, :@plugin_typed_calls, PLUGIN_TYPED_CALLS)
+    TypingState.store_field(self, :@optimistic_origins, OPTIMISTIC_ORIGINS)
 
     class << self
       def empty(environment: Environment.default, source_path: nil)

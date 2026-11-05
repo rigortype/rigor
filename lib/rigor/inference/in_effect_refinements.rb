@@ -6,6 +6,7 @@ require_relative "../source/constant_path"
 require_relative "../source/node_children"
 require_relative "refine_census"
 require_relative "refine_self"
+require_relative "../typing_state"
 require_relative "in_effect_refinements/proc_literals"
 require_relative "in_effect_refinements/scope_reads"
 require_relative "in_effect_refinements/refine_defs"
@@ -53,6 +54,12 @@ module Rigor
     #
     # Built lazily: the walk runs the first time a consumer asks, so a file nobody asks about pays one small object.
     class InEffectRefinements
+      # ADR-129 G4 — {#build} fills every one of these once, from the file's root node alone.
+      TypingState.memo_field(self, :@built, :@activations, :@refinement_defs, :@refine_defs, :@chained_refined_calls,
+                             :@class_body_refines, :@refine_contexts, :@literal_bindings, :@refine_offsets,
+                             :@unresolved_using, :@nesting,
+                             reason: "built once by #build from the file's root node alone")
+
       # The marker an activation contributes when it may put any refinement in effect: a non-constant `using`, a
       # `using` whose include expansion is unknown, or a `refine` block whose module this walk cannot name. A list
       # that carries it answers "any refinement may be in effect"; its position carries no meaning.

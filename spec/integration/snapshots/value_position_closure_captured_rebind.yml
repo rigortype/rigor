@@ -1,0 +1,9 @@
+---
+locals:
+  cb: '1'
+  co: "{ x: 1 }"
+  cr: '1'
+  cs: '1'
+assertions:
+  '1': Dynamic[top]
+  '2': '1'

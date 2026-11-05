@@ -11908,6 +11908,12 @@ module Rigor
 
       # Issue #1717 — a `def` / `class` / `module` body opens its own `self`, so an enclosing unentered block's
       # unknown-`self` mark ({Scope#block_self_unknown?}) stops at it, as the evaluator's fresh body scope does.
+      # Issue #1246 — it opens its own local table too, so a name in it (a `def`'s parameter, a body local) is a new
+      # variable, never the enclosing statement's local of that name: `show(Class.new { def call(o) = o + 1 })` after
+      # `o = { x: 1 }` read the parameter as the Hash. Such a name reads `Dynamic[top]` ({#shadow_local}), as in an
+      # unentered closure ({#closure_scope}); a body the evaluator entered is recorded and keeps its own scopes. Only
+      # the parameters and the body take that table: a `def`'s receiver, a `class`'s name and superclass and a
+      # `class << …`'s expression run in the enclosing scope (`class K < base.nope; base = 2; end`).
       # A `case` narrows its clauses ({#propagate_subjectless_case}, {#propagate_subject_case}). Every other node
       # hands its children the scope as is.
       def propagate_children(node, table, current_scope)
@@ -11916,10 +11922,19 @@ module Rigor
 
           return propagate_subject_case(node, table, current_scope)
         end
+        return propagate_code_body(node, table, current_scope) if SELF_OPENING_BODIES.include?(node.class)
 
-        child_scope =
-          SELF_OPENING_BODIES.include?(node.class) ? current_scope.with_block_self_unknown(false) : current_scope
-        node.rigor_each_child { |child| propagate(child, table, child_scope) }
+        node.rigor_each_child { |child| propagate(child, table, current_scope) }
+      end
+
+      def propagate_code_body(node, table, current_scope)
+        outer_scope = current_scope.with_block_self_unknown(false)
+        inner = [node.body]
+        inner << node.parameters if node.is_a?(Prism::DefNode)
+        inner_scope = node.locals.reduce(outer_scope) { |acc, name| shadow_local(acc, name) }
+        node.rigor_each_child do |child|
+          propagate(child, table, inner.any? { |part| part.equal?(child) } ? inner_scope : outer_scope)
+        end
       end
 
       # Issue #1361 — the block of `Thread.new`, `Fiber.new`, `define_method` and the other calls
@@ -12101,14 +12116,17 @@ module Rigor
       # `it` as the outer block's). An enclosing binding of such a name is replaced with `Dynamic[top]`. Not the
       # signature's parameter type: this walk evaluates nothing, and a body write to the name is never threaded,
       # so any narrower claim could be stale. A name the enclosing scope does not bind is left unbound, which
-      # reads the same `Dynamic[top]`. Captured names — outer locals the body reads or rebinds without
-      # redeclaring them — keep the enclosing binding. Issue #1360 — a `->` body and its parameter defaults run
-      # whenever the lambda is called, so they read `$!`, `$@` and `$?` unbound ({FreshFrameBlocks.closure_entry}).
+      # reads the same `Dynamic[top]`. Issue #1246 — for the same reason a captured name the body (or a closure
+      # nested in it) writes reads `Dynamic[top]` too ({#widen_condition_writes}): `x = 1; show([1].map { x = "s";
+      # x.upcase })` read `x` as `1` after the write. A captured name the body only reads keeps the enclosing
+      # binding. Issue #1360 — a `->` body and its parameter defaults run whenever the lambda is called, so they read
+      # `$!`, `$@` and `$?` unbound ({FreshFrameBlocks.closure_entry}).
       def closure_scope(closure, scope)
         scope = GuardRebinding.block_entry(scope, closure, nil)
         scope = FreshFrameBlocks.closure_entry(scope, closure, nil)
         scope = shadow_local(scope, :it) if closure.parameters.is_a?(Prism::ItParametersNode)
-        closure.locals.reduce(scope) { |acc, name| shadow_local(acc, name) }
+        scope = closure.locals.reduce(scope) { |acc, name| shadow_local(acc, name) }
+        widen_condition_writes(closure, scope)
       end
 
       def shadow_local(scope, name)

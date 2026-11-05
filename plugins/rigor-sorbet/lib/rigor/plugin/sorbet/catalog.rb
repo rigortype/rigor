@@ -36,6 +36,8 @@ module Rigor
           @struct_prop_types = {}
           @struct_nesting = {}
           @namespaces = {}
+          @constants = {}
+          @struct_includes = {}
           @superclasses = {}
           @defined_methods = {}
           @frozen_after_build = false
@@ -87,6 +89,43 @@ module Rigor
 
         def namespace?(name)
           @namespaces.key?(name)
+        end
+
+        # A constant the walk saw assigned (`Thing = Other`) rather than declared as a class or module.
+        def record_constant(name)
+          raise "Catalog already finalised" if @frozen_after_build
+
+          @constants[name] = true
+        end
+
+        def constant?(name)
+          @constants.key?(name)
+        end
+
+        def record_struct_include(class_name, module_name)
+          raise "Catalog already finalised" if @frozen_after_build
+
+          list = (@struct_includes[class_name] ||= [])
+          list << module_name unless list.include?(module_name)
+        end
+
+        # Every walked class and module name and every assigned constant name, for the plugin's check that
+        # no other `*::<name>` could shadow a top-level constant.
+        def declared_constant_names
+          @namespaces.keys + @constants.keys
+        end
+
+        # Issue #2541 — the classes whose constants a struct body's relative constant could reach through
+        # ancestry: the class itself, its walked superclasses below the struct root, and the modules each of
+        # them `include`s (as written).
+        def constant_ancestry(class_name)
+          chain = []
+          current = class_name.to_s.delete_prefix("::")
+          until current.nil? || chain.include?(current) || STRUCT_ROOTS.include?(current)
+            chain << current
+            current = resolve_superclass(current)
+          end
+          chain + chain.flat_map { |name| @struct_includes.fetch(name, []).map { |mod| mod.delete_prefix("::") } }
         end
 
         # @return the type source and the nesting for the accessor `signature` names, or nil when it has no type
@@ -143,6 +182,9 @@ module Rigor
           @struct_prop_types.freeze
           @struct_nesting.freeze
           @namespaces.freeze
+          @constants.freeze
+          @struct_includes.each_value(&:freeze)
+          @struct_includes.freeze
           @superclasses.freeze
           @defined_methods.each_value(&:freeze)
           @defined_methods.freeze

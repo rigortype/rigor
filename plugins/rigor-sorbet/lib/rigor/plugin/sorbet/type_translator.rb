@@ -55,8 +55,8 @@ module Rigor
         # @param resolve — optional callable mapping an unrooted constant name as written (`"Thing"`,
         #   `"Foo::Bar"`) to the class it names, or to nil when that is not certain, in which case the
         #   constant degrades to `Dynamic[top]`. Issue #2541 passes it for `T::Struct` accessor types; without
-        #   it (every sig) a constant becomes `Nominal[<as written>]`, as before. A rooted `::Foo` and the
-        #   `T::` vocabulary are never handed to it.
+        #   it (every sig) a constant becomes `Nominal[<as written>]`, as before. The `T::` vocabulary is
+        #   never handed to it.
         # @return never `nil`; unrecognised forms degrade to `Type::Combinator.untyped`.
         def translate(node, resolve = nil)
           return Rigor::Type::Combinator.untyped if node.nil?
@@ -92,10 +92,10 @@ module Rigor
           Rigor::Type::Combinator.nominal_of(name)
         end
 
-        # The constant `name` as `resolve` reads it; `name` itself when there is no resolver or the name
-        # is rooted (`::Foo`).
+        # The constant `name` as `resolve` reads it (a rooted `::Foo` included); `name` itself when there is
+        # no resolver.
         def resolved_name(name, resolve)
-          return name if resolve.nil? || name.start_with?("::")
+          return name if resolve.nil?
 
           resolve.call(name)
         end

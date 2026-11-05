@@ -65,6 +65,11 @@ module Rigor
           when Prism::DefNode
             # A `def` not preceded by a `sig` is fine; we just don't record anything for it. The
             # interesting case is in `walk_statements`, which pairs sig+def.
+          when Prism::ConstantWriteNode
+            # Issue #2541 — `Thing = Other` makes `Thing` a constant that is not a class declaration, so a
+            # struct accessor's type naming it is not read as any class.
+            state.struct_catalog.record_constant((lexical_path + [node.name.to_s]).join("::"))
+            walk_node(node.value, state, lexical_path: lexical_path, in_singleton_class: in_singleton_class)
           else
             node.rigor_each_child do |child|
               walk_node(child, state, lexical_path: lexical_path, in_singleton_class: in_singleton_class)
@@ -179,6 +184,8 @@ module Rigor
             state.catalog.record_mixin(
               class_name: class_name, kind: kind, module_name: module_name
             )
+            # Issue #2541 — an included module's constants shadow a top-level one for the class body.
+            state.struct_catalog.record_struct_include(class_name, module_name) if kind == :include
           end
         end
 

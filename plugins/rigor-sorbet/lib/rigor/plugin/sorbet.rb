@@ -364,25 +364,54 @@ module Rigor
         source, nesting = @catalog.struct_prop_type(signature)
         return signature if source.nil?
 
-        signature.with(return_type: struct_prop_type(source, nesting, scope&.environment))
+        signature.with(return_type: struct_prop_type(source, nesting, signature.class_name, scope&.environment))
       end
 
-      def struct_prop_type(source, nesting, environment)
+      def struct_prop_type(source, nesting, class_name, environment)
         @struct_prop_types ||= {}
-        @struct_prop_types[[source, nesting]] ||= begin
+        @struct_prop_types[[source, nesting, class_name, environment.nil?]] ||= begin
           node = Prism.parse(source).value.statements&.body&.first
-          resolve = ->(name) { resolve_struct_constant(name, nesting, environment) }
+          resolve = ->(name) { resolve_struct_constant(name, nesting, class_name, environment) }
           TypeTranslator.translate(node, resolve)
         end
       end
 
-      def resolve_struct_constant(name, nesting, environment)
-        known = ->(candidate) { @catalog.namespace?(candidate) || !environment&.nominal_for_name(candidate).nil? }
+      # Ruby's lookup for a relative constant in the class body: the lexical nesting, innermost first; then
+      # the class's ancestors; then the top level. The nesting step answers a class it finds, and declines
+      # (nil, so the constant reads `Dynamic[top]`) when it meets a constant that is not a declared class.
+      # Ancestry is not modelled precisely: a class or constant of that name under any ancestor declines.
+      # The top level answers only when no other walked `*::<name>` exists that it might be shadowed by.
+      def resolve_struct_constant(name, nesting, class_name, environment)
+        return name.delete_prefix("::") if name.start_with?("::")
+
         nesting.size.downto(1) do |depth|
           candidate = "#{nesting.first(depth).join('::')}::#{name}"
-          return candidate if known.call(candidate)
+          return candidate if struct_constant_class?(candidate, environment)
+          return nil if struct_constant_bound?(candidate, environment)
         end
-        known.call(name) ? name : nil
+        @catalog.constant_ancestry(class_name).each do |ancestor|
+          candidate = "#{ancestor}::#{name}"
+          return nil if struct_constant_class?(candidate, environment) || struct_constant_bound?(candidate, environment)
+        end
+        return nil if struct_constant_elsewhere?(name)
+
+        struct_constant_class?(name, environment) ? name : nil
+      end
+
+      def struct_constant_class?(name, environment)
+        return false if @catalog.constant?(name)
+
+        @catalog.namespace?(name) || !environment&.nominal_for_name(name).nil?
+      end
+
+      def struct_constant_bound?(name, environment)
+        @catalog.constant?(name) || !environment&.constant_for_name(name).nil?
+      end
+
+      def struct_constant_elsewhere?(name)
+        @struct_constant_names ||= @catalog.declared_constant_names
+        suffix = "::#{name}"
+        @struct_constant_names.any? { |declared| declared.end_with?(suffix) }
       end
 
       def instance_chain_lookup(receiver_node, method_name, scope)

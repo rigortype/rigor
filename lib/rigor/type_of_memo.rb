@@ -125,8 +125,9 @@ module Rigor
 
       # A file's analysis starts: a fresh table, in the main pass. A no-op when off. With
       # `RIGOR_TYPE_OF_SHADOW_ELIDE=1` (ADR-129 WD2's ELIDE, measured in stage 3), the table keys on the thread's ELIDE
-      # id, restarted here: every Frame open now stays open until the file ends, so the id names the frames installed
-      # within the file.
+      # id, restarted here. The state is extended at the first file's start: every frame open then closes after that
+      # file ends (the per-file analysis is nested in it), so none exits through the plain `State#with`, which would
+      # not restore the ELIDE id.
       def begin_file
         return unless @enabled && Ractor.main?
 

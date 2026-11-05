@@ -238,6 +238,13 @@ both answers must name the same class or module, or the claim is `unknown`:
   finds a project constant the RBS answer does not name, the claim is `ambiguous_name`: a Ruby-only
   `App::Data < Hash` is not the core `::Data`.
 
+An alias uses the original method body's lexical context, including through alias chains and reopens,
+not the alias statement's nesting. If that body cannot be located, relative class names are
+`ambiguous_name`. Revision 1 also declines relative class names in a method defined inside
+`class << self`: its anonymous singleton-class lexical context is not modelled as an ordinary named
+namespace. This does not apply to `def self.method` in an ordinary class body. Absolute names remain
+checkable in both cases.
+
 Agreement is enough for `compatible`. It is not enough for `conflict`, because the index does not see every
 constant a namespace may hold: a file outside `paths:` or matched by `exclude:`, a gem without RBS that reopens a
 project namespace, `const_set` with a computed name, a `class_eval` string. `rbs.contradicting-signature`

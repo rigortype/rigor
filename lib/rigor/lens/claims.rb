@@ -185,8 +185,8 @@ module Rigor
 
       def compare_types(parsed, contract, site, target, answer, reasons)
         scope = @run.claim_contexts.fetch(target.absolute)
-        nesting = site.data.fetch("lexical_nesting", [])
-        reader = TypeReader.new(scope: scope, nesting: nesting)
+        nesting = site.data.fetch("lexical_nesting")
+        reader = TypeReader.new(scope: scope, nesting: nesting, singleton_nesting: site.data["singleton_nesting"])
         claim_arms = reader.read(parsed, claim: true)
         contract_arms = reader.read(contract)
         reasons.concat(reader.reasons.to_a)
@@ -198,7 +198,7 @@ module Rigor
                         [contract_arms, claim_arms]
                       end
         comparator = Comparison.new(scope.environment.rbs_loader,
-                                    relative_conflict: nesting.empty? && site.data["owner"] == "Object")
+                                    relative_conflict: nesting == [] && site.data["owner"] == "Object")
         verdict, reason, evidence = comparator.call(left, right)
         answer.merge!("verdict" => verdict, "reason" => reason, "evidence" => evidence)
       end

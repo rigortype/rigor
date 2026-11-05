@@ -540,7 +540,7 @@ module Rigor
                  "attribute" => nil, "members" => [node.name.to_s], "module_function" => module_function,
                  "visibility" => module_function ? "private" : visibility(node, nesting, scope),
                  "params" => shape_params, "block" => shape_block, "body_return" => returns,
-                 "lexical_nesting" => nesting }
+                 "lexical_nesting" => nesting, "singleton_nesting" => scope == :singleton && node.receiver.nil? }
         return data unless module_function
 
         # Internal to the member pass: the singleton copy is public until `private_class_method` says otherwise,
@@ -629,13 +629,15 @@ module Rigor
       def alias_site(names, owner)
         new_name, old_name = names
         last, copy = alias_original(owner, old_name)
+        copied = copy&.data || {}
         visibility = FORCED_PRIVATE.include?(new_name) ? "private" : last&.data&.fetch("visibility")
         # `initialize` reads `void` by its name, which neither side of an alias across it keeps.
         returns = copy && ![new_name, old_name].include?("initialize") ? copy.data["body_return"] : nil
         { "kind" => "method", "name" => new_name, "owner" => owner, "scope" => "instance", "attribute" => nil,
           "members" => [new_name], "module_function" => false, "visibility" => visibility,
-          "params" => copy&.data&.fetch("params"), "block" => copy&.data&.fetch("block"),
+          "params" => copied["params"], "block" => copied["block"],
           "body_return" => returns || Slot.unavailable("not_computed"),
+          "lexical_nesting" => copied["lexical_nesting"], "singleton_nesting" => copied["singleton_nesting"],
           "alias_of" => old_name, "aliased_node" => copy && aliased_node(copy) }
       end
 

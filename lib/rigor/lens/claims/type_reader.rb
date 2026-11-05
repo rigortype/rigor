@@ -31,12 +31,13 @@ module Rigor
           [nil, extended ? "unsupported_grammar_feature" : "syntax_error"]
         end
 
-        def initialize(scope:, nesting:)
+        def initialize(scope:, nesting:, singleton_nesting: false)
           @scope = scope
           @loader = scope.environment.rbs_loader
           @resolver = @loader.type_name_resolver
           @nesting = nesting
-          @context = nesting.reduce(nil) do |outer, name|
+          @singleton_nesting = singleton_nesting
+          @context = Array(nesting).reduce(nil) do |outer, name|
             type_name = ::RBS::TypeName.parse("::#{name}")
             @loader.class_known?(name) ? [outer, type_name] : outer
           end
@@ -73,10 +74,21 @@ module Rigor
           if resolved.nil?
             @reasons << "unresolved_name"
           elsif claim && !name.absolute? && name.class?
-            ruby = ruby_name(name.to_s)
-            @reasons << "ambiguous_name" if ruby && ruby != resolved.to_s.delete_prefix("::")
+            compare_ruby_name(name, resolved)
           end
           resolved
+        end
+
+        def compare_ruby_name(name, resolved)
+          # An unlocated alias body has no known cref. A singleton class's anonymous cref is not a
+          # named namespace either; its constant table and ancestry cannot be read as the owner's.
+          if @nesting.nil? || @singleton_nesting
+            @reasons << "ambiguous_name"
+            return
+          end
+
+          ruby = ruby_name(name.to_s)
+          @reasons << "ambiguous_name" if ruby && ruby != resolved.to_s.delete_prefix("::")
         end
 
         def read_class(type, claim, aliases)

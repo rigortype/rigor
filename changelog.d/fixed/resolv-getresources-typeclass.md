@@ -1,0 +1,2 @@
+- **[inference]** `Resolv::DNS#getresources`, `#getresource` and `#each_resource` now answer records of the typeclass passed, so `dns.getresources(d, Resolv::DNS::Resource::IN::MX).map { |mx| mx.exchange }` no longer reports a false `undefined method`. ([#2845](https://github.com/rigortype/rigor/pull/2845))
+  - A method type variable a parameter declares as `singleton(T)` now binds to the class the call passes, within the variable's declared upper bound, in the return type and in block parameters alike.

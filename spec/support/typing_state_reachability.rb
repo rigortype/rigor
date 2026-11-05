@@ -4,8 +4,9 @@ module TypingStateReachability
   # Analyses `paths` in one sequential run with no cache and walks a sample of its `ExpressionTyper#type_of` calls.
   # The calls are counted per analysed file (the typed scope's `source_path`), and a file's call is sampled when its
   # count is `offset` modulo `stride`, so one file's sample does not shift when another file types more or less. Every
-  # memo holder seen is checked once more when the run ends ({Walker#finish}).
-  def self.sample(paths, stride:, offset: 0, &run)
+  # memo holder seen is checked once more when the run ends ({Walker#finish}). The block runs the runner it is given,
+  # through the harness's guard.
+  def self.sample(paths, stride:, offset: 0)
     walker = Walker.new
     counts = Hash.new(0)
     trace = TracePoint.new(:call) do |point|
@@ -16,7 +17,7 @@ module TypingStateReachability
     configuration = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS.merge("paths" => paths, "workers" => 0))
     runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil)
     trace.enable(target: Rigor::Inference::ExpressionTyper.instance_method(:type_of)) do
-      run ? run.call(runner) : runner.run(paths)
+      yield runner
     end
     walker.finish
   end

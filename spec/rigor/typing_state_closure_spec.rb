@@ -166,7 +166,7 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
   def sink_rows
     boundary = "lib/rigor/plugin/io_boundary.rb"
     credit = "lib/rigor/analysis/run_disclosure_credit.rb"
-    shape = "WD5 shape 2, a per-thread output sink typing never reads (stage 2 treats it as a Resource, #2814)"
+    shape = "WD5 shape 2, a per-thread output sink typing never reads whose appends touch a Resource slot (#2814)"
     {
       [boundary, :thread_state, "Thread.current"] => [4, "#{shape}: IoBoundary.attributing's ATTRIBUTION_KEY"],
       [boundary, :thread_state, "thread_variable_get"] => [2, "#{shape}: IoBoundary's ATTRIBUTION_KEY"],

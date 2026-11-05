@@ -2676,13 +2676,21 @@ module Rigor
         cache = (by_singleton[scope.discovered_singleton_def_nodes] ||= {})
         table = (cache[class_name.to_s] ||= {})
         key = method_name.to_sym
-        return table[key] if table.key?(key)
+        if table.key?(key)
+          return MemoAudit.check("class graph singleton def", table[key], class_name, key) do
+            compute_singleton_def_with_owner(class_name, method_name)
+          end
+        end
 
+        table[key] = compute_singleton_def_with_owner(class_name, method_name)
+      end
+
+      def compute_singleton_def_with_owner(class_name, method_name)
         found = scope.singleton_def_through_ancestors(class_name, method_name)
         owner = found.last
         found = [nil, nil] if owner && SingletonExternalAhead.withhold?(scope, class_name, method_name, owner)
         found = [nil, nil] if found.last && dynamic_singleton_definer_ahead?(class_name, method_name, found.last)
-        table[key] = found
+        found
       end
 
       SINGLETON_WILDCARD_SLOT = %i[singleton *].freeze
@@ -2775,7 +2783,10 @@ module Rigor
 
       CLASS_GRAPH_CACHE = TypingState.memo(
         :class_graph_cache,
-        run_scoped: true, reason: "pure functions of the frozen discovery index it keys on"
+        run_scoped: true,
+        audit: ["class graph user def", "class graph typing def", "class graph singleton def", "class graph yields",
+                "class graph self pure"],
+        reason: "pure functions of the frozen discovery index it keys on"
       )
       private_constant :CLASS_GRAPH_CACHE
 
@@ -2809,7 +2820,12 @@ module Rigor
       # allocated once per index. (Pool mode forks per worker, so the per-thread slot is
       # process-local and never crosses a project boundary — and note that the parent's reported
       # `Memory peak` therefore does not see a worker's share of this at all.)
+      #
+      # ADR-129 WD1 — every bucket's hit goes through `MemoAudit.check`; an audit recomputation gets fresh buckets that
+      # nothing stores, so it reads no entry and leaves none.
       def class_graph_buckets
+        return fresh_class_graph_buckets if MemoAudit.enabled? && MemoAudit.suspended?
+
         discovery = scope.discovery
         state = typing_state
         slot = state[CLASS_GRAPH_CACHE]
@@ -2817,11 +2833,14 @@ module Rigor
           # `self_pure` is issue #525's grant scan (identity-keyed by def node); it belongs here because it
           # is a pure function of the same frozen index — the sibling resolver it walks reads nothing else.
           # `singleton_def` is added lazily by {#singleton_def_through_ancestors}'s caller.
-          slot = [discovery,
-                  { user_def: {}, typing_def: {}, self_pure: {}.compare_by_identity, yields: {}.compare_by_identity }]
+          slot = [discovery, fresh_class_graph_buckets]
           state[CLASS_GRAPH_CACHE] = slot
         end
         slot[1]
+      end
+
+      def fresh_class_graph_buckets
+        { user_def: {}, typing_def: {}, self_pure: {}.compare_by_identity, yields: {}.compare_by_identity }
       end
 
       # ADR-119 C2-b1 — the TYPING read of {#resolve_user_def_with_owner}: the same `[def_node, owner]` pair, but
@@ -2838,17 +2857,24 @@ module Rigor
         cache = class_graph_buckets[:typing_def]
         table = (cache[class_name.to_s] ||= {})
         key = method_name.to_sym
-        return table[key] if table.key?(key)
-
-        table[key] =
-          case DefinerResolution.resolve(scope, class_name, method_name, :instance, question: :definer)
-          in DefinerResolution::Known(answer: [node, owner])
-            [node, owner]
-          in DefinerResolution::UNKNOWN
-            [nil, nil, every_project_definer(class_name, method_name)]
-          in DefinerResolution::ABSENT
-            [nil, nil]
+        if table.key?(key)
+          return MemoAudit.check("class graph typing def", table[key], class_name, key) do
+            compute_typing_def_with_owner(class_name, method_name)
           end
+        end
+
+        table[key] = compute_typing_def_with_owner(class_name, method_name)
+      end
+
+      def compute_typing_def_with_owner(class_name, method_name)
+        case DefinerResolution.resolve(scope, class_name, method_name, :instance, question: :definer)
+        in DefinerResolution::Known(answer: [node, owner])
+          [node, owner]
+        in DefinerResolution::UNKNOWN
+          [nil, nil, every_project_definer(class_name, method_name)]
+        in DefinerResolution::ABSENT
+          [nil, nil]
+        end
       end
 
       # ADR-119 C2-b1 errata (the `bot` exception) — an UNKNOWN chain does not say WHICH definer Ruby calls, but
@@ -2939,7 +2965,11 @@ module Rigor
         cache = class_graph_buckets[:user_def]
         table = (cache[class_name.to_s] ||= {})
         key = method_name.to_sym
-        return table[key] if table.key?(key)
+        if table.key?(key)
+          return MemoAudit.check("class graph user def", table[key], class_name, key) do
+            compute_user_def_with_owner(class_name, method_name)
+          end
+        end
 
         table[key] = compute_user_def_with_owner(class_name, method_name)
       end
@@ -2980,7 +3010,8 @@ module Rigor
 
       OVERRIDE_GATE_CACHE = TypingState.memo(
         :overridable_method_gate,
-        run_scoped: true, reason: "pure functions of the frozen discovery index it keys on"
+        run_scoped: true, audit: "overridable method gate",
+        reason: "pure functions of the frozen discovery index it keys on"
       )
       private_constant :OVERRIDE_GATE_CACHE
 
@@ -3027,8 +3058,14 @@ module Rigor
       # reopen of `owner` itself is NOT an override (monkey-patch reopen shares the owner identity). Memoized
       # per `(owner, method_name, kind)`.
       def overridden_in_project?(owner, method_name, kind)
+        return compute_overridden_in_project?(owner, method_name, kind) if MemoAudit.enabled? && MemoAudit.suspended?
+
         by_owner = (override_gate_buckets[kind][owner] ||= {})
-        return by_owner[method_name] if by_owner.key?(method_name)
+        if by_owner.key?(method_name)
+          return MemoAudit.check("overridable method gate", by_owner[method_name], owner, method_name) do
+            compute_overridden_in_project?(owner, method_name, kind)
+          end
+        end
 
         by_owner[method_name] = compute_overridden_in_project?(owner, method_name, kind)
       end
@@ -3057,7 +3094,8 @@ module Rigor
 
       METHOD_DEFINERS_INDEX = TypingState.memo(
         :method_definers_index,
-        run_scoped: true, reason: "pure functions of the def tables it keys on"
+        run_scoped: true, audit: "method definers index",
+        reason: "pure functions of the def tables it keys on"
       )
       private_constant :METHOD_DEFINERS_INDEX
 
@@ -3067,7 +3105,8 @@ module Rigor
       # very file). Two slots read as two plain reads and keep the guards analysable.
       METHOD_DEFINERS_INDEX_ALT = TypingState.memo(
         :method_definers_index_alt,
-        run_scoped: true, reason: "pure functions of the def tables it keys on"
+        run_scoped: true, audit: "method definers index alt",
+        reason: "pure functions of the def tables it keys on"
       )
       private_constant :METHOD_DEFINERS_INDEX_ALT
 
@@ -3110,20 +3149,52 @@ module Rigor
       # def-table-keyed one misses 201 — it would rebuild the seed's 934-entry table once per file and hand
       # back the +22.6 % this bound exists to avoid. Check that number before widening this key to match
       # its siblings.
+      #
+      # ADR-129 WD1 — a hit in either way is audited against an index built with every memo bypassed, compared in
+      # {DefinersIndex.canonical} form (a `Layered` index and a whole one hold the same owners, in any order).
       def method_definers_index(kind)
-        def_nodes = scope.discovered_def_nodes
-        singleton_def_nodes = scope.discovered_singleton_def_nodes
-        state = typing_state
-        way = state[METHOD_DEFINERS_INDEX]
-        unless way && way[0].equal?(def_nodes) && way[1].equal?(singleton_def_nodes)
-          alt = state[METHOD_DEFINERS_INDEX_ALT]
-          alt = nil unless alt && alt[0].equal?(def_nodes) && alt[1].equal?(singleton_def_nodes)
-          state[METHOD_DEFINERS_INDEX_ALT] = way
-          way = alt || [def_nodes, singleton_def_nodes, nil, nil]
-          state[METHOD_DEFINERS_INDEX] = way
-        end
         singleton = kind == :singleton
-        way[singleton ? 3 : 2] ||= DefinersIndex.for(singleton ? singleton_def_nodes : def_nodes)
+        table = singleton ? scope.discovered_singleton_def_nodes : scope.discovered_def_nodes
+        return DefinersIndex.for(table) if MemoAudit.enabled? && MemoAudit.suspended?
+
+        state = typing_state
+        primary = current_definers_way?(state[METHOD_DEFINERS_INDEX])
+        way = primary ? state[METHOD_DEFINERS_INDEX] : rotate_definers_ways(state)
+        position = singleton ? 3 : 2
+        index = way[position]
+        return way[position] = DefinersIndex.for(table) if index.nil?
+
+        audit_definers_index(primary, index, kind, table) if MemoAudit.enabled?
+        index
+      end
+
+      # Whether `way` was built over this scope's two def tables.
+      def current_definers_way?(way)
+        !way.nil? && way[0].equal?(scope.discovered_def_nodes) && way[1].equal?(scope.discovered_singleton_def_nodes)
+      end
+
+      # Makes the alternate way current when it was built over this scope's def tables, or a fresh way otherwise; the
+      # way it replaces becomes the alternate.
+      def rotate_definers_ways(state)
+        alt = state[METHOD_DEFINERS_INDEX_ALT]
+        alt = nil unless current_definers_way?(alt)
+        state[METHOD_DEFINERS_INDEX_ALT] = state[METHOD_DEFINERS_INDEX]
+        state[METHOD_DEFINERS_INDEX] =
+          alt || [scope.discovered_def_nodes, scope.discovered_singleton_def_nodes, nil, nil]
+      end
+
+      # A hit in the current way (`primary`) or the alternate one, checked in {DefinersIndex.canonical} form.
+      def audit_definers_index(primary, index, kind, table)
+        canonical = DefinersIndex.canonical(index)
+        if primary
+          MemoAudit.check("method definers index", canonical, kind) do
+            DefinersIndex.canonical(DefinersIndex.for(table))
+          end
+        else
+          MemoAudit.check("method definers index alt", canonical, kind) do
+            DefinersIndex.canonical(DefinersIndex.for(table))
+          end
+        end
       end
 
       # True when `candidate`'s ancestor chain (superclasses + included/prepended modules) reaches `owner` —
@@ -3446,7 +3517,11 @@ module Rigor
       # replaced with the analysis generation cannot outlive the nodes it holds.
       def body_yields?(def_node)
         cache = class_graph_buckets[:yields]
-        return cache[def_node] if cache.key?(def_node)
+        if cache.key?(def_node)
+          return MemoAudit.check("class graph yields", cache[def_node], def_node.name) do
+            yield_reachable?(def_node.body, def_node.parameters&.block&.name)
+          end
+        end
 
         cache[def_node] = yield_reachable?(def_node.body, def_node.parameters&.block&.name)
       end
@@ -4198,7 +4273,11 @@ module Rigor
       def self_fold_safe_grant?(def_node, receiver)
         per_def = (class_graph_buckets[:self_pure][def_node] ||= {})
         key = [receiver.class_name, receiver.member_names]
-        return per_def[key] if per_def.key?(key)
+        if per_def.key?(key)
+          return MemoAudit.check("class graph self pure", per_def[key], def_node.name, key) do
+            self_fold_safe_body?(def_node.body, receiver, [def_node])
+          end
+        end
 
         per_def[key] = self_fold_safe_body?(def_node.body, receiver, [def_node])
       end

@@ -85,8 +85,9 @@ module Rigor
         # ADR-129 WD1 — a run-scoped Memo: the names are a pure function of the environment the entry is keyed on.
         RBS_COMPLETE_MEMBER_NAMES = TypingState.memo(
           :rbs_complete_member_names,
-          run_scoped: true, reason: "a WeakKeyMap keyed on the environment; the names are read from its loader " \
-                                    "and plugin registry alone"
+          run_scoped: true, audit: "rbs complete member names",
+          reason: "a WeakKeyMap keyed on the environment; the names are read from its loader " \
+                  "and plugin registry alone"
         )
         private_constant :RBS_COMPLETE_MEMBER_NAMES
 
@@ -314,9 +315,19 @@ module Rigor
           # in a project with no plugin class, on the cost it had before #2681. Read from the declarations, so a
           # gem signature that fails to build reports nothing more than it did.
           def rbs_complete_member_name?(environment, method_name)
+            rbs_complete_member_names(environment).include?(method_name)
+          end
+
+          def rbs_complete_member_names(environment)
+            return collect_rbs_complete_member_names(environment) if MemoAudit.enabled? && MemoAudit.suspended?
+
             table = TypingState.current.weak_key_map(RBS_COMPLETE_MEMBER_NAMES)
-            names = (table[environment] ||= collect_rbs_complete_member_names(environment))
-            names.include?(method_name)
+            names = table[environment]
+            return table[environment] = collect_rbs_complete_member_names(environment) if names.nil?
+
+            MemoAudit.check("rbs complete member names", names, :environment) do
+              collect_rbs_complete_member_names(environment)
+            end
           end
 
           def collect_rbs_complete_member_names(environment)
@@ -761,9 +772,17 @@ module Rigor
             return nil if scope.nil? || kind != :instance
             return nil if environment.nil?
 
+            if MemoAudit.enabled? && MemoAudit.suspended?
+              return compute_core_stdlib_ancestor_method(environment, class_name, method_name, scope)
+            end
+
             memo = core_stdlib_memo(environment, scope)
             key = [class_name.to_s, method_name.to_sym]
-            return memo[key] if memo.key?(key)
+            if memo.key?(key)
+              return MemoAudit.check("core stdlib ancestor dispatch", memo[key], key[0], key[1]) do
+                compute_core_stdlib_ancestor_method(environment, class_name, method_name, scope)
+              end
+            end
 
             store_unless_recorded(memo, key) do
               compute_core_stdlib_ancestor_method(environment, class_name, method_name, scope)
@@ -793,9 +812,18 @@ module Rigor
             return nil if scope.nil? || kind != :instance
             return nil if environment.nil?
 
+            if MemoAudit.enabled? && MemoAudit.suspended?
+              return compute_included_module_method(environment, class_name, method_name,
+                                                    scope)
+            end
+
             memo = mixin_ancestor_memo(environment, scope)
             key = [class_name.to_s, method_name.to_sym]
-            return memo[key] if memo.key?(key)
+            if memo.key?(key)
+              return MemoAudit.check("mixin ancestor dispatch", memo[key], key[0], key[1]) do
+                compute_included_module_method(environment, class_name, method_name, scope)
+              end
+            end
 
             store_unless_recorded(memo, key) do
               compute_included_module_method(environment, class_name, method_name, scope)
@@ -830,8 +858,9 @@ module Rigor
           # ADR-129 WD1 — a run-scoped Memo, keyed as {#ancestor_memo_slot} says.
           MIXIN_ANCESTOR_MEMO = TypingState.memo(
             :mixin_ancestor_dispatch,
-            run_scoped: true, reason: "one slot keyed on the identities of the discovery index and environment, and " \
-                                      "on whether the thread is recording; the answers read nothing else"
+            run_scoped: true, audit: "mixin ancestor dispatch",
+            reason: "one slot keyed on the identities of the discovery index and environment, and " \
+                    "on whether the thread is recording; the answers read nothing else"
           )
           private_constant :MIXIN_ANCESTOR_MEMO
 
@@ -1010,8 +1039,9 @@ module Rigor
           # ADR-129 WD1 — a run-scoped Memo, keyed as {#ancestor_memo_slot} says.
           CORE_STDLIB_ANCESTOR_MEMO = TypingState.memo(
             :core_stdlib_ancestor_dispatch,
-            run_scoped: true, reason: "one slot keyed on the identities of the discovery index and environment, and " \
-                                      "on whether the thread is recording; the answers read nothing else"
+            run_scoped: true, audit: "core stdlib ancestor dispatch",
+            reason: "one slot keyed on the identities of the discovery index and environment, and " \
+                    "on whether the thread is recording; the answers read nothing else"
           )
           private_constant :CORE_STDLIB_ANCESTOR_MEMO
 

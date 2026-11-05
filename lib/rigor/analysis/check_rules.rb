@@ -3242,8 +3242,9 @@ module Rigor
         # only input the name set reads.
         PRIVATE_NAMES_MEMO = TypingState.memo(
           :check_rules_private_singleton_names,
-          run_scoped: true, reason: "one [discovery, names] slot keyed on the discovery index's identity; the name " \
-                                    "set reads only its method-visibility tables"
+          run_scoped: true, audit: "private singleton names",
+          reason: "one [discovery, names] slot keyed on the discovery index's identity; the name " \
+                  "set reads only its method-visibility tables"
         )
         private_constant :PRIVATE_NAMES_MEMO
 
@@ -3255,13 +3256,20 @@ module Rigor
         def private_singleton_candidate?(scope, name)
           DependencyRecorder.read_visibility("*", name) if DependencyRecorder.active?
           discovery = scope.discovery
+          if Inference::MemoAudit.enabled? && Inference::MemoAudit.suspended?
+            return private_recorded_names(discovery.discovered_method_visibilities).include?(name.to_sym)
+          end
+
           state = TypingState.current
           slot = state[PRIVATE_NAMES_MEMO]
           unless slot && slot[0].equal?(discovery)
             slot = [discovery, private_recorded_names(discovery.discovered_method_visibilities)]
             state[PRIVATE_NAMES_MEMO] = slot
+            return slot[1].include?(name.to_sym)
           end
-          slot[1].include?(name.to_sym)
+          Inference::MemoAudit.check("private singleton names", slot[1], name) do
+            private_recorded_names(discovery.discovered_method_visibilities)
+          end.include?(name.to_sym)
         end
 
         def private_recorded_names(tables)

@@ -10,7 +10,7 @@ require_relative "guard_rebinding"
 require_relative "project_method_ownership"
 require_relative "refined_dispatch/own_method"
 require_relative "../typing_state"
-require_relative "memo_audit"
+require_relative "../memo_audit"
 
 module Rigor
   module Inference

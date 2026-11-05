@@ -6,7 +6,7 @@ require_relative "../type"
 require_relative "mutation_widening"
 require_relative "key_presence_guard/scan"
 require_relative "../typing_state"
-require_relative "memo_audit"
+require_relative "../memo_audit"
 
 module Rigor
   module Inference

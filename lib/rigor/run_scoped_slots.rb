@@ -2,7 +2,7 @@
 
 require "English"
 require_relative "typing_state"
-require_relative "inference/memo_audit"
+require_relative "memo_audit"
 
 module Rigor
   # Issues #2412 and #2399 — the run-end hook for per-thread state whose contents belong to one analysis run. An

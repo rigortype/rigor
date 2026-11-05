@@ -4,6 +4,7 @@ require_relative "type"
 require_relative "environment"
 require_relative "scope/discovery_index"
 require_relative "typing_state"
+require_relative "memo_audit"
 require_relative "scope/resolution_chain"
 require_relative "inference/definer_resolution"
 require_relative "inference/in_effect_refinements"
@@ -1331,11 +1332,28 @@ module Rigor
     # a file that starts or stops defining it re-analyses the reader (issue #1459's `defines:` edge).
     def project_method_name?(method_name)
       Analysis::DependencyRecorder.read_name(:defines, method_name) if Analysis::DependencyRecorder.active?
-      table = TypingState.current.weak_key_map(PROJECT_METHOD_NAMES)
-      return true if (table[@discovery] ||= collect_project_method_names).include?(method_name.to_sym)
+      return true if project_method_names.include?(method_name.to_sym)
 
       false
     end
+
+    # The name set {#project_method_name?} reads, held per discovery index. ADR-129 G2: a hit is checked against a
+    # fresh collection under `RIGOR_MEMO_AUDIT=1`, and an audit recomputation bypasses the table.
+    def project_method_names
+      return collect_project_method_names if memo_audit_bypass?
+
+      table = TypingState.current.weak_key_map(PROJECT_METHOD_NAMES)
+      names = table[@discovery]
+      return table[@discovery] = collect_project_method_names if names.nil?
+
+      Inference::MemoAudit.check("project method names", names, :discovery) { collect_project_method_names }
+    end
+    private :project_method_names
+
+    # ADR-129 G2 — true while a MemoAudit recomputation runs: the memos wired here are then bypassed, neither read
+    # nor written. One boolean check when the audit is off.
+    def memo_audit_bypass? = Inference::MemoAudit.enabled? && Inference::MemoAudit.suspended?
+    private :memo_audit_bypass?
 
     def collect_project_method_names
       names = Set.new
@@ -1350,7 +1368,8 @@ module Rigor
     # ADR-129 WD1 — a run-scoped Memo ({TypingState}): emptied when a run ends, so an edited project is read afresh.
     PROJECT_METHOD_NAMES = TypingState.memo(
       :project_method_names,
-      run_scoped: true, reason: "a WeakKeyMap keyed on the discovery index; the name set reads only its tables"
+      run_scoped: true, audit: "project method names",
+      reason: "a WeakKeyMap keyed on the discovery index; the name set reads only its tables"
     )
     private_constant :PROJECT_METHOD_NAMES
 
@@ -1594,19 +1613,31 @@ module Rigor
     # call's literal name and a def in a block. Held by the table's identity, as {#toplevel_definition_rows} is.
     def deferred_definition_names
       ranges = @discovery.discovered_deferred_ranges
+      return collect_deferred_definition_names(ranges) if memo_audit_bypass?
+
       state = TypingState.current
       slots = (state[DEFERRED_NAMES] ||= [])
       slot = slots.find { |entry| entry[0].equal?(ranges) }
-      return slot[1] if slot
+      if slot
+        return Inference::MemoAudit.check("deferred definition names", slot[1], :ranges) do
+          collect_deferred_definition_names(ranges)
+        end
+      end
 
+      names = collect_deferred_definition_names(ranges)
+      slots.unshift([ranges, names]).slice!(2..)
+      names
+    end
+    private :deferred_definition_names
+
+    def collect_deferred_definition_names(ranges)
       names = Set.new
       ranges.each_value do |entries|
         entries.each { |(_start, _finish, name, kind, owner)| names << name if name && kind.nil? && owner.nil? }
       end
-      slots.unshift([ranges, names.freeze]).slice!(2..)
-      names
+      names.freeze
     end
-    private :deferred_definition_names
+    private :collect_deferred_definition_names
 
     # Issue #2336 — {#module_function_def?}'s `:both` reading for a def in any file: whether `def_node`, an instance
     # def of `owner`, is a module function by a deferred-range row over it (`module_function def x`, or a bare
@@ -1626,11 +1657,24 @@ module Rigor
     # a singleton row. Held by the table's identity (a file's merged copy and the seed), released with the run.
     def toplevel_definition_rows
       ranges = @discovery.discovered_deferred_ranges
+      return collect_toplevel_definition_rows(ranges) if memo_audit_bypass?
+
       state = TypingState.current
       slots = (state[TOPLEVEL_ROWS] ||= [])
       slot = slots.find { |entry| entry[0].equal?(ranges) }
-      return slot[1] if slot
+      if slot
+        return Inference::MemoAudit.check("toplevel definition rows", slot[1], :ranges) do
+          collect_toplevel_definition_rows(ranges)
+        end
+      end
 
+      rows = collect_toplevel_definition_rows(ranges)
+      slots.unshift([ranges, rows]).slice!(2..)
+      rows
+    end
+    private :toplevel_definition_rows
+
+    def collect_toplevel_definition_rows(ranges)
       rows = Hash.new(0)
       ranges.each_value do |entries|
         entries.each do |(_start, _finish, name, kind, owner)|
@@ -1639,43 +1683,53 @@ module Rigor
           rows[name] = kind == :singleton || rows[name] == MAIN_SINGLETON_ROWS ? MAIN_SINGLETON_ROWS : rows[name] + 1
         end
       end
-      slots.unshift([ranges, rows.freeze]).slice!(2..)
-      rows
+      rows.freeze
     end
-    private :toplevel_definition_rows
+    private :collect_toplevel_definition_rows
 
     # The names an `alias` statement or `alias_method` call introduces, from the global write census; held by the
     # census's identity as {#toplevel_definition_rows} is.
     def method_alias_names
       census = @discovery.discovered_global_write_census
+      return collect_method_alias_names(census) if memo_audit_bypass?
+
       state = TypingState.current
       slots = (state[METHOD_ALIASES] ||= [])
       slot = slots.find { |entry| entry[0].equal?(census) }
-      return slot[1] if slot
+      if slot
+        return Inference::MemoAudit.check("method alias names", slot[1], :census) { collect_method_alias_names(census) }
+      end
 
-      names = census.each_with_object(Set.new) { |entry, acc| acc << entry[1] if entry[0] == :method_alias }.freeze
+      names = collect_method_alias_names(census)
       slots.unshift([census, names]).slice!(2..)
       names
     end
     private :method_alias_names
+
+    def collect_method_alias_names(census)
+      census.each_with_object(Set.new) { |entry, acc| acc << entry[1] if entry[0] == :method_alias }.freeze
+    end
+    private :collect_method_alias_names
 
     MAIN_SINGLETON_ROWS = -1
     # ADR-129 WD1 — three run-scoped Memos, each a two-entry list of `[table, derived]` held by the identity of the
     # table the derived value reads (the deferred ranges, or the global write census).
     TOPLEVEL_ROWS = TypingState.memo(
       :toplevel_definition_rows,
-      run_scoped: true, reason: "[deferred ranges, rows] entries keyed on the identity of the ranges table, the only " \
-                                "input the rows read"
+      run_scoped: true, audit: "toplevel definition rows",
+      reason: "[deferred ranges, rows] entries keyed on the identity of the ranges table, the only input the rows read"
     )
     METHOD_ALIASES = TypingState.memo(
       :method_alias_names,
-      run_scoped: true, reason: "[census, names] entries keyed on the identity of the global write census, the only " \
-                                "input the names read"
+      run_scoped: true, audit: "method alias names",
+      reason: "[census, names] entries keyed on the identity of the global write census, the only input the names " \
+              "read"
     )
     DEFERRED_NAMES = TypingState.memo(
       :deferred_definition_names,
-      run_scoped: true, reason: "[deferred ranges, names] entries keyed on the identity of the ranges table, the " \
-                                "only input the names read"
+      run_scoped: true, audit: "deferred definition names",
+      reason: "[deferred ranges, names] entries keyed on the identity of the ranges table, the only input the names " \
+              "read"
     )
     private_constant :MAIN_SINGLETON_ROWS, :TOPLEVEL_ROWS, :METHOD_ALIASES, :DEFERRED_NAMES
 

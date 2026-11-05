@@ -3,7 +3,7 @@
 require_relative "../builtins/cruby_definers"
 require_relative "constructed_class"
 require_relative "../../typing_state"
-require_relative "../memo_audit"
+require_relative "../../memo_audit"
 
 module Rigor
   module Inference

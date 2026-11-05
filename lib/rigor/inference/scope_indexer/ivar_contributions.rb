@@ -2,7 +2,7 @@
 
 require_relative "../../analysis/dependency_recorder"
 require_relative "../../typing_state"
-require_relative "../memo_audit"
+require_relative "../../memo_audit"
 require_relative "../../type"
 require_relative "../refined_dispatch/own_method"
 

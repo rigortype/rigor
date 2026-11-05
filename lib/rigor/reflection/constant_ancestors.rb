@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../typing_state"
+require_relative "../memo_audit"
 
 module Rigor
   # {Reflection}'s constant-ancestor walk ([#354](https://github.com/rigortype/rigor/issues/354)), split out for
@@ -21,8 +22,9 @@ module Rigor
     # The recording run's slot. See {.recorded_ancestor_constant_scopes}. ADR-129 WD1 — a run-scoped Memo.
     RECORDED_ANCESTOR_SCOPES = TypingState.memo(
       :recorded_ancestor_constant_scopes,
-      run_scoped: true, reason: "one [discovery, scopes by class name] slot keyed on the discovery index's identity; " \
-                                "a hit replays the chain's edges, so the key is exact"
+      run_scoped: true, audit: "recorded ancestor constant scopes",
+      reason: "one [discovery, scopes by class name] slot keyed on the discovery index's identity; a hit replays " \
+              "the chain's edges, so the key is exact"
     )
     private_constant :RECORDED_ANCESTOR_SCOPES
 
@@ -108,11 +110,28 @@ module Rigor
     end
     private_class_method :ancestor_constant_worlds
 
+    # `[scopes, chain]` compared by content: a recomputation builds a new chain object, equal to the stored one
+    # entry for entry when the key holds every input.
+    def audit_view(worlds) = [worlds[0], worlds[1].audit_signature]
+    private_class_method :audit_view
+
+    # A recomputation for the audit, its dependency reads withheld: the hit it checks files its own edges, so the
+    # recorded set stays what an unaudited run records.
+    def fresh_ancestor_constant_scopes(class_name, scope)
+      Analysis::DependencyRecorder.withhold { compute_ancestor_constant_scopes(class_name, scope) }.first
+    end
+    private_class_method :fresh_ancestor_constant_scopes
+
     # The recording run's memo. The answer is every project entry of the chain, so its edges are the
     # root's and every entry's — what `Scope::ResolutionChain#record` files, which a computation does and a
     # hit replays, in the same order. One slot keyed on the discovery index: the answer and the edges are
     # both read from it, so the key is exact, and the slot never pins more than the index it serves.
     def recorded_ancestor_constant_scopes(class_name, scope)
+      # ADR-129 G2 — an audit recomputation bypasses the memo (neither read nor written).
+      if Inference::MemoAudit.enabled? && Inference::MemoAudit.suspended?
+        return compute_ancestor_constant_scopes(class_name, scope)
+      end
+
       discovery = scope.discovery
       state = TypingState.current
       slot = state[RECORDED_ANCESTOR_SCOPES]
@@ -124,6 +143,11 @@ module Rigor
       worlds = bucket[class_name]
       return bucket[class_name] = compute_ancestor_constant_scopes(class_name, scope) if worlds.nil?
 
+      if Inference::MemoAudit.enabled?
+        Inference::MemoAudit.check("recorded ancestor constant scopes", audit_view(worlds), class_name) do
+          audit_view(fresh_ancestor_constant_scopes(class_name, scope))
+        end
+      end
       chain = Scope::ResolutionChain.for(scope, class_name.to_s, :instance, :constants)
       chain.record(scope)
       record_external_owner_edges(chain)

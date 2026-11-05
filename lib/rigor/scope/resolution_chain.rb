@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../typing_state"
-require_relative "../inference/memo_audit"
+require_relative "../memo_audit"
 
 module Rigor
   class Scope
@@ -133,6 +133,13 @@ module Rigor
       # True when the chain was cut at {LIMIT} project entries: a reader that found nothing on it cannot tell
       # "no definer" from "a definer past the cut", which is budget uncertainty, not absence.
       def truncated? = @truncated
+
+      # ADR-129 G2 — the chain's content, for the memo audit: a recomputation builds a new chain object, which
+      # equals the stored one field for field (its retro world included) when the memo's key holds every input.
+      def audit_signature
+        [@root, @side, @entries, @level_starts, @level_classes, @levels_end, @truncated, @forks, @marks, @flavor,
+         @retro&.audit_signature]
+      end
 
       # How many forks the replay met while this chain was built, counted across every module sub-chain it drew
       # on (a memoised sub-chain hands its own count up): each entry that reached the chain by a second route.
@@ -546,10 +553,17 @@ module Rigor
 
       # ADR-129 WD1 — a run-scoped Memo: one `[discovery, flavors]` slot keyed on the discovery index's identity, the
       # only input a chain reads.
+      #
+      # ADR-129 G2 — every table of the slot's flavor buckets is audited on a hit under `RIGOR_MEMO_AUDIT=1`, and an
+      # audit recomputation reads a fresh, unstored bucket ({.flavor_bucket}), so it reads nothing stored.
       MEMO = TypingState.memo(
         :resolution_chain,
-        run_scoped: true, reason: "one slot keyed on the discovery index's identity; a chain is a pure function of " \
-                                  "that frozen index and the flavor"
+        run_scoped: true,
+        audit: ["resolution chain", "resolution chain name", "resolution chain relevance",
+                "resolution chain master order", "resolution chain linearisation", "resolution chain mark",
+                "resolution chain entry", "resolution chain external entry", "singleton hook verdict"],
+        reason: "one slot keyed on the discovery index's identity; a chain is a pure function of that frozen index " \
+                "and the flavor"
       )
       private_constant :MEMO
 
@@ -563,18 +577,36 @@ module Rigor
 
         bucket = flavor_bucket(scope.discovery, flavor)
         chains = bucket[side]
-        chains[class_name] || (chains[class_name] = Builder.new(scope, flavor, bucket).chain(class_name, side))
+        cached = chains[class_name]
+        return chains[class_name] = Builder.new(scope, flavor, bucket).chain(class_name, side) if cached.nil?
+        return cached unless Inference::MemoAudit.enabled?
+
+        Inference::MemoAudit.check("resolution chain", cached.audit_signature, class_name, side) do
+          fresh = Analysis::DependencyRecorder.withhold do
+            Builder.new(scope, flavor, flavor_bucket(scope.discovery, flavor)).chain(class_name, side)
+          end
+          fresh.first.audit_signature
+        end
+        cached
       end
 
+      # The flavor's bucket of memo tables. While an audit recomputation runs ({Inference::MemoAudit.suspended?})
+      # every call answers a fresh bucket that is never stored, so the recomputation neither reads nor writes the
+      # slot.
       def self.flavor_bucket(discovery, flavor)
+        return new_bucket if Inference::MemoAudit.enabled? && Inference::MemoAudit.suspended?
+
         state = TypingState.current
         slot = state[MEMO]
         unless slot && slot[0].equal?(discovery)
           slot = [discovery, {}]
           state[MEMO] = slot
         end
-        slot[1][flavor] ||= { instance: {}, singleton: {}, names: {}, interned: {}, externals: {}, master: {},
-                              marks: {} }
+        slot[1][flavor] ||= new_bucket
+      end
+
+      def self.new_bucket
+        { instance: {}, singleton: {}, names: {}, interned: {}, externals: {}, master: {}, marks: {} }
       end
 
       # Which project class an as-written ancestor name denotes, under one flavor — shared by the chain and
@@ -591,9 +623,11 @@ module Rigor
         # ambiguous spelling names (`:arity` only), or nil.
         def resolve(owner, raw)
           by_owner = (@names[owner] ||= {})
-          return by_owner[raw] if by_owner.key?(raw)
+          return by_owner[raw] = compute(owner, raw) unless by_owner.key?(raw)
 
-          by_owner[raw] = compute(owner, raw)
+          Inference::MemoAudit.check("resolution chain name", by_owner[raw], owner, raw) do
+            Analysis::DependencyRecorder.withhold { compute(owner, raw) }.first
+          end
         end
 
         # {#resolve}, with an ambiguous spelling read as unresolved.
@@ -629,7 +663,7 @@ module Rigor
       end
       private_constant :Resolver
 
-      private_class_method :flavor_bucket
+      private_class_method :flavor_bucket, :new_bucket
 
       # {Relevance}'s verdict memo, one table per flavor bucket.
       def self.relevance_memo(scope, flavor)
@@ -773,9 +807,12 @@ module Rigor
       def self.master_memo(scope, flavor, key)
         bucket = flavor_bucket(scope.discovery, flavor)
         memo = bucket[:master]
-        return memo[key] if memo.key?(key)
+        return memo[key] = yield(Resolver.new(scope, flavor, bucket)) unless memo.key?(key)
 
-        memo[key] = yield(Resolver.new(scope, flavor, bucket))
+        Inference::MemoAudit.check("resolution chain master order", memo[key], flavor, key) do
+          fresh = flavor_bucket(scope.discovery, flavor)
+          Analysis::DependencyRecorder.withhold { yield(Resolver.new(scope, flavor, fresh)) }.first
+        end
       end
 
       # The linearisation itself, in one world: Ruby's skip rule (`retro: false`), or every skipped insertion
@@ -887,11 +924,7 @@ module Rigor
         def memoised(table, name, depth)
           memo = (@bucket[table] ||= {})
           cached = memo[name]
-          if cached
-            # A memoised chain's forks are the asker's too.
-            @frames.last&.absorb(cached[3], cached[4], cached[5])
-            return cached
-          end
+          return absorb_cached(audited_lin(cached, table, name)) if cached
 
           # A cycle (`class Foo < Foo` resolved inside its own namespace) or a hierarchy deeper than the budget
           # contributes nothing past that point, and the chains computed while it did are not memoised: they
@@ -913,6 +946,29 @@ module Rigor
           memo[name] = lin unless frame.incomplete
           hand_up(frame)
           lin
+        end
+
+        # A memoised linearisation rebuilt for the audit by a Builder over a fresh bucket. A memoised one met no
+        # cycle and stayed inside the depth budget, so its depth does not change it; a retro world that fit
+        # {LIMIT} once fits it again.
+        # A memoised chain's forks are the asker's too.
+        def absorb_cached(cached)
+          @frames.last&.absorb(cached[3], cached[4], cached[5])
+          cached
+        end
+
+        def audited_lin(cached, table, name)
+          Inference::MemoAudit.check("resolution chain linearisation", cached, table, name) { fresh_lin(table, name) }
+        end
+
+        SINGLETON_LIN_TABLES = %i[lin_singleton lin_singleton_retro].freeze
+        private_constant :SINGLETON_LIN_TABLES
+
+        def fresh_lin(table, name)
+          side = SINGLETON_LIN_TABLES.include?(table) ? :singleton : :instance
+          builder = Builder.new(@scope, @flavor, ResolutionChain.send(:flavor_bucket, @discovery, @flavor),
+                                retro: @retro)
+          Analysis::DependencyRecorder.withhold { builder.send(:lin_for, name, side) }.first
         end
 
         def hand_up(frame)
@@ -965,8 +1021,18 @@ module Rigor
         # The one-element frozen array carrying the {Mark} of `[name, kind]`, interned in the bucket.
         def mark_for(name, kind, listed, multi)
           by_node = (@bucket[:marks][kind] ||= {})
-          by_node[name] ||= [ResolutionChain::Mark.new(name, kind, listed.nil? ? EMPTY : listed.to_a.freeze,
-                                                       multi)].freeze
+          cached = by_node[name]
+          return by_node[name] = new_mark(name, kind, listed, multi) if cached.nil?
+          return cached unless Inference::MemoAudit.enabled?
+
+          # The failure names the whole key: the bucket's flavor, the mark's kind, the node.
+          Inference::MemoAudit.check("resolution chain mark", cached, [@flavor, kind], name) do
+            new_mark(name, kind, listed, multi)
+          end
+        end
+
+        def new_mark(name, kind, listed, multi)
+          [ResolutionChain::Mark.new(name, kind, listed.nil? ? EMPTY : listed.to_a.freeze, multi)].freeze
         end
 
         WILDCARD_LIST = ["*"].freeze # Relevance::WILDCARD, which loads after this file
@@ -1106,14 +1172,35 @@ module Rigor
 
         def project_entry(name, side)
           by_side = (@bucket[:interned][side] ||= {})
-          by_side[name] ||= Entry.new(name, side, nil, nil, false, name.to_s.split("::").last.freeze, nil)
+          cached = by_side[name]
+          return by_side[name] = new_project_entry(name, side) if cached.nil?
+          return cached unless Inference::MemoAudit.enabled?
+
+          Inference::MemoAudit.check("resolution chain entry", cached, [@flavor, side], name) do
+            new_project_entry(name, side)
+          end
+        end
+
+        def new_project_entry(name, side)
+          Entry.new(name, side, nil, nil, false, name.to_s.split("::").last.freeze, nil)
         end
 
         def external_entry(owner, raw, side, superclass_edge)
           by_edge = ((@bucket[:externals][side] ||= {})[superclass_edge] ||= {})
           by_owner = (by_edge[owner] ||= {})
-          by_owner[raw] ||= Entry.new(nil, side, raw, @scope.ancestor_name_candidates(owner, raw).freeze,
-                                      superclass_edge, nil, owner)
+          cached = by_owner[raw]
+          return by_owner[raw] = new_external_entry(owner, raw, side, superclass_edge) if cached.nil?
+          return cached unless Inference::MemoAudit.enabled?
+
+          # The failure names the whole key: flavor, side, superclass edge, owner and spelling.
+          Inference::MemoAudit.check("resolution chain external entry", cached, [@flavor, side, superclass_edge],
+                                     [owner, raw]) do
+            Analysis::DependencyRecorder.withhold { new_external_entry(owner, raw, side, superclass_edge) }.first
+          end
+        end
+
+        def new_external_entry(owner, raw, side, superclass_edge)
+          Entry.new(nil, side, raw, @scope.ancestor_name_candidates(owner, raw).freeze, superclass_edge, nil, owner)
         end
       end
       private_constant :Builder

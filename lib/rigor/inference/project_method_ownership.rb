@@ -3,7 +3,7 @@
 require_relative "../type"
 require_relative "external_ancestor_resolution"
 require_relative "../typing_state"
-require_relative "memo_audit"
+require_relative "../memo_audit"
 
 module Rigor
   module Inference

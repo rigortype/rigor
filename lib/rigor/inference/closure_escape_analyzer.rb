@@ -3,7 +3,7 @@
 require_relative "../type"
 require_relative "../reflection"
 require_relative "external_ancestor_resolution"
-require_relative "memo_audit"
+require_relative "../memo_audit"
 require_relative "project_method_ownership"
 
 module Rigor

@@ -1,6 +1,6 @@
 # WD1's Memo-miss rule is enforced at MemoAudit.key_audit and the two read-through records' misses
 
-- **PR:** [#PRNUM](https://github.com/rigortype/rigor/pull/PRNUM)
+- **PR:** [#2878](https://github.com/rigortype/rigor/pull/2878)
 - **Issue:** [#2709](https://github.com/rigortype/rigor/issues/2709)
 - **Class:** open-choice
 - **Precedent:** [#2868](https://github.com/rigortype/rigor/pull/2868)

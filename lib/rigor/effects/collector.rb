@@ -167,7 +167,7 @@ module Rigor
           resolved: true
         )
         accumulator.record(node, call_record)
-        state.log_bound_write(CALLS, calls, node, call_record)
+        state.log_bound_write(CALLS, calls, node, call_record, TypingState::ABSENT)
       end
 
       # The typer's fallback verdict: no tier resolved this call.
@@ -180,7 +180,7 @@ module Rigor
         existing = calls.fetch(node, TypingState::ABSENT)
         state.log_bound_read(CALLS, calls, node, existing)
         accumulator.mark_unresolved(node)
-        state.log_bound_write(CALLS, calls, node, calls[node]) unless TypingState::ABSENT.equal?(existing)
+        state.log_bound_write(CALLS, calls, node, calls[node], existing) unless TypingState::ABSENT.equal?(existing)
       end
 
       # The class a receiver type projects to, as `[class_name, kind]`. A deliberately small mirror of the

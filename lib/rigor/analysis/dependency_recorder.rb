@@ -32,9 +32,36 @@ module Rigor
       # of `true`, while a capture is open, so a later `type_of` memo can validate the reads and replay the writes.
       # The keys are built only then: a run with no journal capture open allocates nothing for the journal, whether
       # or not an ADR-84 capture is open.
+      # ADR-129 WD3 — {READS}'s entry protocol over an {Accumulator} or a {Capture}: a positive edge's
+      # `[path, symbol_or_nil]` pair is held in the accumulator's symbol or ancestry table (a capture's `reads`), a
+      # name-keyed `"kind:name"` String in `missing`. Every entry is `true`; a replayed write files the edge the way the
+      # event that logged it did.
+      module Entries
+        module_function
+
+        def entry(store, key)
+          held = if key.is_a?(String) then store.missing.include?(key)
+                 elsif store.is_a?(Capture) then store.reads.include?(key)
+                 else store.holds_read?(key[0], key[1])
+                 end
+          held ? true : TypingState::ABSENT
+        end
+
+        def put(store, key, _value)
+          if key.is_a?(String) then store.missing.add(key)
+          elsif store.is_a?(Capture) then store.reads.add(key)
+          else store.add_read(key[0], key[1])
+          end
+        end
+
+        def container(_state, _slot)
+          raise ArgumentError, "dependency reads are a bound table: a store is an accumulator or a capture"
+        end
+      end
+
       READS = TypingState.table(
         :dependency_reads,
-        bound: true,
+        bound: true, entries: Entries,
         reason: "event tuple => true per accumulator and per open capture; set-only, in first-filing order"
       )
       private_constant :READS
@@ -121,6 +148,24 @@ module Rigor
         # when a capture window stops seeing only this consumer's events.
         def suspend!
           @suspensions += 1
+        end
+
+        # The positive-edge aggregation shared by {DependencyRecorder.read_site}, {DependencyRecorder.replay} and a
+        # replayed {READS} write. `sources` is the union of the other two tables' paths, and this is the only writer of
+        # all three, so a read the finer table already holds is already in `sources` and costs one Set probe instead
+        # of two. Answers whether the read was new (truthy) or already held (nil), which is its {READS} filing.
+        def add_read(path, symbol)
+          added = symbol ? @symbol_sources[path].add?(symbol) : @ancestry_sources.add?(path)
+          @sources << path if added
+          added
+        end
+
+        # Whether the edge {#add_read} files for `path` and `symbol` is held. Reads `symbol_sources` without its
+        # default block, so asking adds no empty set.
+        def holds_read?(path, symbol)
+          return @ancestry_sources.include?(path) unless symbol
+
+          @symbol_sources.key?(path) && @symbol_sources[path].include?(symbol)
         end
 
         def snapshot
@@ -389,9 +434,13 @@ module Rigor
       # unless the filing `added` it, and the write when it did. Callers log only while a capture is open.
       def log_filing(state, store, key, added)
         state.log_bound_read(READS, store, key, added ? TypingState::ABSENT : true)
-        state.log_bound_write(READS, store, key, true) if added
+        state.log_bound_write(READS, store, key, true, TypingState::ABSENT) if added
       end
       private_class_method :log_filing
+
+      # A positive edge filed into the consumer's accumulator ({Accumulator#add_read}): truthy when it was new.
+      def accumulate_read(accumulator, path, symbol) = accumulator.add_read(path, symbol)
+      private_class_method :accumulate_read
 
       # Files a name-keyed entry into an accumulator's `missing` set, logging the filing while a capture is open.
       def file_missing(state, accumulator, missing, entry)
@@ -518,17 +567,6 @@ module Rigor
       def read_missing(kind, name)
         read_name(kind, name)
       end
-
-      # The positive-edge aggregation shared by {read_site} and {replay}. `sources` is the union of the other
-      # two tables' paths, and this is the only writer of all three, so a read the finer table already holds is
-      # already in `sources` and costs one Set probe instead of two. Answers whether the read was new to the
-      # accumulator (truthy) or already held (nil), which is its {READS} filing.
-      def accumulate_read(accumulator, path, symbol)
-        added = symbol ? accumulator.symbol_sources[path].add?(symbol) : accumulator.ancestry_sources.add?(path)
-        accumulator.sources << path if added
-        added
-      end
-      private_class_method :accumulate_read
     end
   end
 end

@@ -323,8 +323,8 @@ module Rigor
     end
 
     def record_dynamic_origin(node, cause)
-      @dynamic_origins[node] = cause
       TypingState.current.log_bound_write(DYNAMIC_ORIGINS, @dynamic_origins, node, cause)
+      @dynamic_origins[node] = cause
       self
     end
 
@@ -349,8 +349,8 @@ module Rigor
     # exactly: identity-keyed advisory metadata, mutated in place on the shared table (threaded by reference
     # through `#join` / `#rebuild`), excluded from `==` / `hash`, so it never forks a flow-dedup or cache key.
     def record_void_origin(node, origin)
-      @void_origins[node] = origin
       TypingState.current.log_bound_write(VOID_ORIGINS, @void_origins, node, origin)
+      @void_origins[node] = origin
       self
     end
 
@@ -362,8 +362,8 @@ module Rigor
     # identity-keyed advisory metadata on a table threaded by reference through `#join` / `#rebuild`,
     # excluded from `==` / `hash`, so it never forks a flow-dedup or cache key.
     def record_plugin_typed_call(node)
-      @plugin_typed_calls[node] = true
       TypingState.current.log_bound_write(PLUGIN_TYPED_CALLS, @plugin_typed_calls, node, true)
+      @plugin_typed_calls[node] = true
       self
     end
 
@@ -449,8 +449,8 @@ module Rigor
     # nil-freeness is a property of its class. Mirrors {#dynamic_origins} / {#void_origins}: advisory
     # metadata, ignored by `==` / `hash`, and never varying a flow decision on its own.
     def record_optimistic_origin(node, cause)
-      @optimistic_origins[node] = cause
       TypingState.current.log_bound_write(OPTIMISTIC_ORIGINS, @optimistic_origins, node, cause)
+      @optimistic_origins[node] = cause
       self
     end
 

@@ -52,8 +52,9 @@ module Rigor
     # - `memos`: a Frame's members or keys that hold Memos its owner fills in place (G4 accepts them).
     # - `computed`: a Table filled by a computation (the ADR-84 return memo), the `MemoAudit.key_audit` label of its
     #   miss (WD1's key audit, G2).
+    # - `entries`: a Table's entry protocol ({StoreEntries}), how the journal reads and writes one of its entries.
     Slot = Data.define(:name, :kind, :index, :reason, :run_scoped, :read_exemption, :contents, :read_through, :bound,
-                       :audit, :memos, :computed)
+                       :audit, :memos, :computed, :entries)
 
     # A field declared outside the slots: `kind` is `:memo` ({.memo_field}) or `:store` ({.store_field}, whose `slot`
     # names the bound Table).
@@ -61,6 +62,52 @@ module Rigor
 
     # A Table read of a key the table does not hold logs this rather than nil, so a stored nil and a miss differ.
     ABSENT = Object.new.freeze
+
+    # ADR-129 WD3 — a Table's entry protocol: how the journal reaches one entry of a store, to validate a logged read
+    # ({State#stale_read}), replay a logged write ({State#replay}) and note the value a write replaces
+    # ({State#open_priors}). A Table names its protocol as `entries:`; this one is the default, for a store that answers
+    # `fetch(key, default)` and `[]=` (a Hash, or a recorder's accumulator built to that shape). A protocol module
+    # answers:
+    # - `entry(store, key)`: the value at `key`, or {ABSENT}, for a nil store too (an unbound table not created yet);
+    # - `put(store, key, value)`: stores `value` at `key` the way the table's own writer does;
+    # - `container(state, slot)`: the store an unbound table's replay writes into, the one `state` holds in `slot` or
+    #   one it creates there the way the table's writer does.
+    #
+    # Records index their stores by identity and their keys by `eql?`, which is identity for the Prism nodes most
+    # tables key on (`Prism::Node` defines neither `==` nor `hash`) and what each store's own lookup uses for the rest.
+    module StoreEntries
+      module_function
+
+      def entry(store, key) = store.nil? ? ABSENT : store.fetch(key, ABSENT)
+
+      def put(store, key, value)
+        store[key] = value
+      end
+
+      def container(state, slot) = state[slot] || (state[slot] = {})
+    end
+
+    # The entry protocol of a Table whose slot holds an `ObjectSpace::WeakKeyMap` ({State#weak_key_map}), which has no
+    # `fetch`.
+    module WeakKeyMapEntries
+      module_function
+
+      def entry(store, key) = store&.key?(key) ? store[key] : ABSENT
+
+      def put(store, key, value)
+        store[key] = value
+      end
+
+      def container(state, slot) = state.weak_key_map(slot)
+    end
+
+    # The read and write slices of a computation that logged nothing.
+    EMPTY_SLICES = [[].freeze, [].freeze].freeze
+
+    # A read slice's fourth element when the read is not a read-through cache's ABSENT read of a key the computation
+    # then wrote; a write's prior when the writer did not pass one ({State#log_write}).
+    NONE = Object.new.freeze
+    private_constant :NONE
 
     STATE_KEY = :__rigor_typing_state__
     private_constant :STATE_KEY
@@ -90,12 +137,16 @@ module Rigor
 
       # Declares a Table slot and returns its index. A `bound` table's stores live with their owners, so the slot holds
       # nothing a run could release. A table a computation fills on a miss names the miss's `MemoAudit.key_audit` label
-      # as `computed`.
-      def table(name, reason:, run_scoped: false, read_through: false, bound: false, computed: nil)
+      # as `computed`. `entries` names the table's entry protocol ({StoreEntries}, the default).
+      def table(name, reason:, run_scoped: false, read_through: false, bound: false, computed: nil,
+                entries: StoreEntries)
         raise ArgumentError, "#{name}: a bound table holds no run-scoped value" if bound && run_scoped
+        unless %i[entry put container].all? { |method| entries.respond_to?(method) }
+          raise ArgumentError, "#{name}: entries must answer entry, put and container"
+        end
 
         declare(name, :table, reason, run_scoped: run_scoped, read_through: read_through, bound: bound,
-                                      computed: computed)
+                                      computed: computed, entries: entries)
       end
 
       # Declares a Resource slot and returns its index.
@@ -179,7 +230,7 @@ module Rigor
       end
 
       def declare(name, kind, reason, run_scoped: false, read_exemption: nil, contents: nil, read_through: false, # rubocop:disable Metrics/ParameterLists
-                  bound: false, audit: nil, memos: nil, computed: nil)
+                  bound: false, audit: nil, memos: nil, computed: nil, entries: nil)
         if @slots.any? { |slot| slot.name == name }
           raise ArgumentError, "typing-state slot #{name.inspect} is already declared"
         end
@@ -188,10 +239,153 @@ module Rigor
         index = @slots.size
         slot = Slot.new(name: name, kind: kind, index: index, reason: reason.dup.freeze, run_scoped: run_scoped,
                         read_exemption: read_exemption, contents: contents, read_through: read_through, bound: bound,
-                        audit: audit, memos: memos, computed: computed)
+                        audit: audit, memos: memos, computed: computed, entries: entries)
         @slots = Ractor.make_shareable([*@slots, slot])
         @run_scoped = [*@run_scoped, index].freeze if run_scoped
         index
+      end
+    end
+
+    # ADR-129 WD3 — a {State}'s reach into the Table entries its journal names: reading one ({#entry}), splitting a
+    # capture's records into the slices an entry keeps ({#slices}), validating a read slice ({#stale_read}), replaying a
+    # write slice ({#replay}), and the priors windows that note what each write replaced ({#open_priors}).
+    module Slices
+      # The value the Table `slot` holds at `key`, a journal record's key (`[store, key]` for a bound table), or
+      # {ABSENT}.
+      def entry(slot, key)
+        declared = TypingState.slots[slot]
+        return declared.entries.entry(key[0], key[1]) if declared.bound
+
+        declared.entries.entry(@values[slot], key)
+      end
+
+      # Splits a capture's records ({#close_capture}) into the slices a stored entry keeps (WD3), as a frozen pair:
+      # - the read slice, four entries per read `(slot, key, observed, own)`: every read of a key the computation had
+      #   not written yet (a read of its own write is internal). `own` is the value the computation last wrote at that
+      #   key when the table is a read-through cache and the read observed {ABSENT}, else an internal marker;
+      # - the write slice, three entries per write `(slot, key, value)`, in order.
+      def slices(records)
+        return EMPTY_SLICES if records.empty?
+
+        reads = []
+        writes = []
+        written = nil
+        index = 0
+        while index < records.size
+          slot = records[index + 1]
+          key = records[index + 2]
+          value = records[index + 3]
+          if records[index] == :write
+            writes.push(slot, key, value)
+            (written ||= KeyIndex.new).store(slot, key, value)
+          elsif written.nil? || !written.key?(slot, key)
+            reads.push(slot, key, value, NONE)
+          end
+          index += 4
+        end
+        attach_own_writes(reads, written) if written
+        [reads.freeze, writes.freeze].freeze
+      end
+
+      # The slot of the first read in `reads` (a read slice, {#slices}) that no longer holds: the table holds a value
+      # other than the one observed, by identity, {ABSENT} included, unless the table is a read-through cache, the
+      # read observed {ABSENT} and the table now holds what the computation itself wrote there. nil when all hold.
+      def stale_read(reads)
+        index = 0
+        while index < reads.size
+          return reads[index] unless read_holds?(reads, index)
+
+          index += 4
+        end
+        nil
+      end
+
+      # Every slot with a read in `reads` that no longer holds ({#stale_read}), each once, in first-failure order.
+      def stale_slots(reads)
+        slots = []
+        index = 0
+        while index < reads.size
+          slot = reads[index]
+          slots << slot unless slots.include?(slot) || read_holds?(reads, index)
+          index += 4
+        end
+        slots
+      end
+
+      # Replays `writes` (a write slice, {#slices}) in order, through each table's entry protocol, journaling each write
+      # as its writer would (WD3: the replay is itself journaled).
+      def replay(writes)
+        index = 0
+        while index < writes.size
+          slot = writes[index]
+          key = writes[index + 1]
+          value = writes[index + 2]
+          note_prior(slot, key, NONE) if @priors
+          put(slot, key, value)
+          @journal.push(:write, slot, key, value) unless @marks.empty?
+          index += 3
+        end
+        nil
+      end
+
+      # Opens a priors window: until {#close_priors}, the first write of each Table entry notes the value it replaced.
+      # Windows nest, and a write is noted in every open window that has not seen its key. Open one inside a capture:
+      # some writers log only while a capture is open.
+      def open_priors
+        (@priors ||= []) << [KeyIndex.new, []]
+        nil
+      end
+
+      # Closes the innermost priors window and answers what it noted, three entries per entry `(slot, key, prior)` in
+      # first-write order, {ABSENT} for an entry the table did not hold.
+      def close_priors
+        _, noted = @priors.pop
+        @priors = nil if @priors.empty?
+        noted.freeze
+      end
+
+      private
+
+      # Stores `value` at `key` (a journal record's key) in the Table `slot`, creating an unbound table's store.
+      def put(slot, key, value)
+        declared = TypingState.slots[slot]
+        return declared.entries.put(key[0], key[1], value) if declared.bound
+
+        entries = declared.entries
+        entries.put(entries.container(self, slot), key, value)
+      end
+
+      def read_holds?(reads, index)
+        current = entry(reads[index], reads[index + 1])
+        return true if current.equal?(reads[index + 2])
+
+        own = reads[index + 3]
+        !NONE.equal?(own) && current.equal?(own)
+      end
+
+      # Gives each read-through table's ABSENT read in `reads` the value the computation last wrote at its key.
+      def attach_own_writes(reads, written)
+        index = 0
+        while index < reads.size
+          slot = reads[index]
+          key = reads[index + 1]
+          if ABSENT.equal?(reads[index + 2]) && TypingState.slots[slot].read_through && written.key?(slot, key)
+            reads[index + 3] = written.fetch(slot, key)
+          end
+          index += 4
+        end
+      end
+
+      # Notes in every open priors window that has not seen `key` the value `slot` holds there now, or `prior` when the
+      # writer passed it.
+      def note_prior(slot, key, prior)
+        @priors.each do |seen, noted|
+          next if seen.key?(slot, key)
+
+          prior = entry(slot, key) if NONE.equal?(prior)
+          seen.store(slot, key, true)
+          noted.push(slot, key, prior)
+        end
       end
     end
 
@@ -207,6 +401,8 @@ module Rigor
     # slot, the key, the value or {ABSENT}). A capture is a start mark in it plus a refusal flag. Records are kept
     # only while a capture is open, and the journal empties when the outermost capture closes.
     class State
+      include Slices
+
       attr_reader :id
 
       def initialize
@@ -217,6 +413,7 @@ module Rigor
         @journal = []
         @marks = []
         @refused = []
+        @priors = nil
       end
 
       # A Frame or Memo read, or a Table's container.
@@ -368,8 +565,11 @@ module Rigor
         nil
       end
 
-      # Logs a Table write of `value` at `key` in `slot`, while a capture is open.
-      def log_write(slot, key, value)
+      # Logs a Table write of `value` at `key` in `slot`, while a capture is open. A writer logs before it stores, so
+      # while a priors window is open ({#open_priors}) the value the write replaces is still there to note; a writer
+      # that knows it (a set-only add, whose prior is {ABSENT}) passes it as `prior` and may log after.
+      def log_write(slot, key, value, prior = NONE)
+        note_prior(slot, key, prior) if @priors
         @journal.push(:write, slot, key, value) unless @marks.empty?
         nil
       end
@@ -382,9 +582,14 @@ module Rigor
         nil
       end
 
-      # Logs a write of `value` at `key` in `store`, one of the bound Table `slot`'s stores, while a capture is open.
-      def log_bound_write(slot, store, key, value)
-        @journal.push(:write, slot, [store, key].freeze, value) unless @marks.empty?
+      # Logs a write of `value` at `key` in `store`, one of the bound Table `slot`'s stores, while a capture is open,
+      # before the store changes or with the replaced value as `prior` ({#log_write}).
+      def log_bound_write(slot, store, key, value, prior = NONE)
+        return if @marks.empty? && @priors.nil?
+
+        pair = [store, key].freeze
+        note_prior(slot, pair, prior) if @priors
+        @journal.push(:write, slot, pair, value) unless @marks.empty?
         nil
       end
 
@@ -408,6 +613,10 @@ module Rigor
       # Whether a capture is open.
       def capturing? = !@marks.empty?
 
+      # Whether a priors window is open ({#open_priors}): a writer that builds its record key only while journaling
+      # builds it then too.
+      def noting_priors? = !@priors.nil?
+
       # Empties the slots at `indices` ({TypingState.release_run_scoped}).
       def release(indices)
         values = @values
@@ -421,6 +630,42 @@ module Rigor
         TypingState.slots.filter_map do |slot|
           value = @values[slot.index]
           slot.name unless value.nil? || (value.respond_to?(:empty?) && value.empty?)
+        end
+      end
+    end
+
+    # A set of Table entries named by journal record keys, with a value each: the stores of a bound table by
+    # identity (`[store, key]` pairs are never hashed whole, since `Array#hash` would hash a Hash store by its
+    # contents), the keys by `eql?` ({StoreEntries}).
+    class KeyIndex
+      def initialize
+        @tables = {}
+      end
+
+      def key?(slot, key)
+        keys = keys_for(slot, key, false)
+        !keys.nil? && keys.key?(entry_key(slot, key))
+      end
+
+      def fetch(slot, key) = keys_for(slot, key, false).fetch(entry_key(slot, key))
+
+      def store(slot, key, value)
+        keys_for(slot, key, true)[entry_key(slot, key)] = value
+      end
+
+      private
+
+      def entry_key(slot, key) = TypingState.slots[slot].bound ? key[1] : key
+
+      def keys_for(slot, key, create)
+        tables = @tables
+        if TypingState.slots[slot].bound
+          stores = tables[slot] || (create ? (tables[slot] = {}.compare_by_identity) : nil)
+          return nil if stores.nil?
+
+          stores[key[0]] || (create ? (stores[key[0]] = {}) : nil)
+        else
+          tables[slot] || (create ? (tables[slot] = {}) : nil)
         end
       end
     end

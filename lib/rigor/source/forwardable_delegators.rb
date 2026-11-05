@@ -20,8 +20,8 @@ module Rigor
     #
     # A name the syntax does not spell (`def_delegators :@x, *NAMES`, `delegate names => :@x`) makes the delegation
     # {Delegation#open?}: the macro defines methods no reader can enumerate. `delegate` takes Forwardable's
-    # single-hash form only, so ActiveSupport's `delegate :a, to: :b` (positional names and a `to:` key) is not read
-    # here.
+    # single-hash form only, so ActiveSupport's `delegate :a, to: :b` (positional names before a `to:` key) is
+    # not read here.
     module ForwardableDelegators
       AMBIGUOUS = :ambiguous
 
@@ -42,10 +42,7 @@ module Rigor
 
       # `def_instance_delegators` skips these two (`methods - [:__send__, :__id__]` in forwardable.rb).
       LIST_SKIPPED = %i[__send__ __id__].freeze
-      # ActiveSupport's `Module#delegate` takes its target as `to:`, a key Forwardable's hash form has no reason to
-      # delegate: a hash carrying it is ActiveSupport's, and read as nothing.
-      ACTIVE_SUPPORT_TARGET_KEY = :to
-      private_constant :MACROS, :LIST_SKIPPED, :ACTIVE_SUPPORT_TARGET_KEY
+      private_constant :MACROS, :LIST_SKIPPED
 
       module_function
 
@@ -98,8 +95,6 @@ module Rigor
           keys = key_names(element.key)
           keys.nil? ? (open = true) : names.concat(keys)
         end
-        return nil if names.include?(ACTIVE_SUPPORT_TARGET_KEY)
-
         [names, open]
       end
 

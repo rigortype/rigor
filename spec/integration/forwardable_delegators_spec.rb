@@ -55,8 +55,9 @@ RSpec.describe "Forwardable delegators and call.undefined-method (#2793)" do
 
   it "records delegate's and instance_delegate's hash keys, a name or an array of them" do
     write_project("delegate [:min, :max] => :@x\n  instance_delegate %i[sum] => :@x\n  delegate count: :@x",
-                  %w[Box.new.min Box.new.max Box.new.sum Box.new.count])
-    expect(undefined_messages).to be_empty
+                  %w[Box.new.min Box.new.max Box.new.sum Box.new.count Box.new.nope])
+    # The must-still-fire arm: a key the walk failed to read would mark the class open and silence `nope` too.
+    expect(undefined_messages).to eq(["undefined method `nope' for Box"])
   end
 
   it "records the def_instance_delegator(s) spellings" do
@@ -72,6 +73,12 @@ RSpec.describe "Forwardable delegators and call.undefined-method (#2793)" do
                "class Includer\n  include Box\nend\ndef run\n  Box.size\n  Box.head\n  Includer.new.size\nend\n")
     File.write(File.join("sig", "includer.rbs"), "class Includer\n  include Box\nend\n")
     expect(undefined_messages).to eq(["undefined method `size' for Includer"])
+  end
+
+  it "records a delegator in a class << self body on the singleton side" do
+    write_project("class << self\n    extend Forwardable\n    def_delegators :@z, :length\n  end",
+                  %w[Box.length Box.new.length])
+    expect(undefined_messages).to eq(["undefined method `length' for Box"])
   end
 
   it "keeps the delegated methods' return types unknown" do
@@ -109,6 +116,8 @@ RSpec.describe "Forwardable delegators and call.undefined-method (#2793)" do
     expect(undefined_messages).to be_empty
   end
 
+  # Guard: ActiveSupport's `delegate :fetch, to: :@x` has a positional argument, so the single-hash reading of
+  # `delegate` already declines it; this pins that its `to:` key is not taken for a delegated name.
   it "does not read ActiveSupport's delegate form as Forwardable's" do
     write_project("delegate :fetch, to: :@x", %w[Box.new.to])
     expect(undefined_messages).to eq(["undefined method `to' for Box"])

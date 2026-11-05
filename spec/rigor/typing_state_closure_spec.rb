@@ -103,15 +103,15 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
     state = "lib/rigor/typing_state.rb"
     typer = "lib/rigor/inference/expression_typer.rb"
     evaluator = "lib/rigor/inference/statement_evaluator.rb"
-    stage2 = "ADR-129 stage 2 puts the four advisory tables behind journaled Table slots"
+    hand_off = "hands the store to a new body scope, not an entry read: entries go through Scope's logged readers " \
+               "(the bound Table slots, ADR-129 WD1)"
     {
       [state, :thread_state, "Thread.current"] => [3, "the one per-thread anchor every slot lives in"],
       [state, :weak_map, "WeakKeyMap"] => [1, "State#weak_key_map makes the store a run-scoped Table or Memo holds"],
       [state, :module_ivar_write, "@slots"] => [2, "the slot registry, written only while files load"],
       [state, :module_ivar_write, "@run_scoped"] => [2, "the run-scoped slot indices, written only while files load"],
-      [typer, :table_access, "optimistic_origins"] => [1, stage2],
-      [typer, :table_access, "dynamic_origins"] => [1, stage2],
-      [evaluator, :table_access, "dynamic_origins"] => [2, stage2]
+      [typer, :table_access, "dynamic_origins"] => [1, hand_off],
+      [evaluator, :table_access, "dynamic_origins"] => [1, hand_off]
     }
   end
 
@@ -686,6 +686,23 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
     stale = expected.reject { |key, count| counts[key] == count }
     expect(unlisted.map { |file, rule, name, line| "#{file}:#{line} #{rule} #{name}" }).to be_empty
     expect(stale).to be_empty
+  end
+
+  # ADR-129 stage 2 — the advisory tables are bound Table slots whose entry reads and writes go through Scope, which
+  # logs them. G3's `table_access` rule covers only its covered files, so the rule alone runs here over every Ruby file
+  # under `lib/`, `plugins/` and `examples/`: outside `scope.rb`, only the allow-listed hand-offs of a store to a new
+  # body scope may name a table.
+  it "reads no advisory table outside Scope anywhere in lib, plugins or examples" do
+    root = project_path("")
+    files = Dir.glob(%w[lib/**/*.rb plugins/**/*.rb examples/**/*.rb], base: root).reject do |path|
+      path == "lib/rigor/scope.rb" || path.include?("/spec/")
+    end
+    found = files.flat_map do |path|
+      findings_in(File.read(File.join(root, path)), path).select { |finding| finding[1] == :table_access }
+    end
+    counts = found.group_by { |finding| finding.first(3) }.transform_values(&:size)
+    expected = allow_list.select { |(_, rule, _), _| rule == :table_access }.transform_values(&:first)
+    expect(counts).to eq(expected)
   end
 
   # The ADR-129 stage 1 ratchet: the `Thread.current` / `thread_variable_*` call sites that no conversion has reached

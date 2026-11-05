@@ -100,6 +100,12 @@ module Rigor
     def run_generation: () -> Object?
     def record_dynamic_origin: (untyped node, Symbol cause) -> Scope
     def record_optimistic_origin: (untyped node, Symbol cause) -> Scope
+    # sig-gen gap: #2840 — the reader returns through a sentinel `equal?` guard over `Hash#fetch`; sig-gen emits nothing.
+    def dynamic_origin: (untyped node) -> Symbol?
+    # sig-gen gap: #2840 — the reader returns through a sentinel `equal?` guard over `Hash#fetch`; sig-gen emits nothing.
+    def optimistic_origin: (untyped node) -> Symbol?
+    # sig-gen gap: #2840 — the reader returns through a sentinel `equal?` guard over `Hash#fetch`; sig-gen emits nothing.
+    def void_origin: (untyped node) -> Inference::VoidOrigin?
 
     def record_void_origin: (untyped node, Inference::VoidOrigin origin) -> Scope
 

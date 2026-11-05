@@ -16,7 +16,9 @@ module Rigor
   #   extensional caches its owner fills in place: those are Memos by kind and take no touch.
   # - **Table** ({.table}): a keyed store typing writes and may read back. Its reads and writes are logged to the
   #   journal ({State#log_read}, {State#log_write}) while a capture is open. A table that answers what reading
-  #   ABSENT would have computed declares `read_through: true` (WD1).
+  #   ABSENT would have computed declares `read_through: true` (WD1). A table whose stores are held elsewhere, one per
+  #   owner (the advisory tables each file's scopes share, an installed recorder), declares `bound: true` and logs
+  #   through {State#log_bound_read} / {State#log_bound_write}, which name the store beside the key.
   # - **Resource** ({.resource}): state consumed or rewritten in place, or read as a delta. A write refuses every
   #   open capture (the `any` rule, WD3); so does a read, unless the slot declares one of WD3's two read exemptions
   #   (`:id_determined`, `:delta_internal`).
@@ -38,7 +40,9 @@ module Rigor
     # - `read_exemption`: a Resource, or a `contents: :resource` Frame's contents, whose reads do not refuse (WD3).
     # - `contents`: `:resource` for a Frame whose installed container is mutated in place.
     # - `read_through`: a Table that is a read-through cache of the computation's own value (WD1).
-    Slot = Data.define(:name, :kind, :index, :reason, :run_scoped, :read_exemption, :contents, :read_through)
+    # - `bound`: a Table whose stores are not the slot's value but objects its owner holds, several at once (a store
+    #   per file's scopes, per installed recorder); its journal records key on `[store, key]`.
+    Slot = Data.define(:name, :kind, :index, :reason, :run_scoped, :read_exemption, :contents, :read_through, :bound)
 
     # A Table read of a key the table does not hold logs this rather than nil, so a stored nil and a miss differ.
     ABSENT = Object.new.freeze
@@ -64,9 +68,12 @@ module Rigor
         declare(name, :frame, reason, contents: contents, read_exemption: read_exemption)
       end
 
-      # Declares a Table slot and returns its index.
-      def table(name, reason:, run_scoped: false, read_through: false)
-        declare(name, :table, reason, run_scoped: run_scoped, read_through: read_through)
+      # Declares a Table slot and returns its index. A `bound` table's stores live with their owners, so the slot holds
+      # nothing a run could release.
+      def table(name, reason:, run_scoped: false, read_through: false, bound: false)
+        raise ArgumentError, "#{name}: a bound table holds no run-scoped value" if bound && run_scoped
+
+        declare(name, :table, reason, run_scoped: run_scoped, read_through: read_through, bound: bound)
       end
 
       # Declares a Resource slot and returns its index.
@@ -112,7 +119,8 @@ module Rigor
         raise ArgumentError, "#{name}: read_exemption must be one of #{READ_EXEMPTIONS.inspect} or nil"
       end
 
-      def declare(name, kind, reason, run_scoped: false, read_exemption: nil, contents: nil, read_through: false)
+      def declare(name, kind, reason, run_scoped: false, read_exemption: nil, contents: nil, read_through: false, # rubocop:disable Metrics/ParameterLists
+                  bound: false)
         if @slots.any? { |slot| slot.name == name }
           raise ArgumentError, "typing-state slot #{name.inspect} is already declared"
         end
@@ -120,7 +128,7 @@ module Rigor
 
         index = @slots.size
         slot = Slot.new(name: name, kind: kind, index: index, reason: reason.dup.freeze, run_scoped: run_scoped,
-                        read_exemption: read_exemption, contents: contents, read_through: read_through)
+                        read_exemption: read_exemption, contents: contents, read_through: read_through, bound: bound)
         @slots = Ractor.make_shareable([*@slots, slot])
         @run_scoped = [*@run_scoped, index].freeze if run_scoped
         index
@@ -290,6 +298,20 @@ module Rigor
       # Logs a Table write of `value` at `key` in `slot`, while a capture is open.
       def log_write(slot, key, value)
         @journal.push(:write, slot, key, value) unless @marks.empty?
+        nil
+      end
+
+      # Logs a read of `key` in `store`, one of the bound Table `slot`'s stores, that observed `value` ({ABSENT} for a
+      # miss), while a capture is open. The record's key is the frozen pair `[store, key]`, built only then, so a run
+      # with no capture open allocates nothing.
+      def log_bound_read(slot, store, key, value)
+        @journal.push(:read, slot, [store, key].freeze, value) unless @marks.empty?
+        nil
+      end
+
+      # Logs a write of `value` at `key` in `store`, one of the bound Table `slot`'s stores, while a capture is open.
+      def log_bound_write(slot, store, key, value)
+        @journal.push(:write, slot, [store, key].freeze, value) unless @marks.empty?
         nil
       end
 

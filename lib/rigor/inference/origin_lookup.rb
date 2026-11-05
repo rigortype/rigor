@@ -23,7 +23,7 @@ module Rigor
       def origin_for(scope, node)
         return nil if node.nil?
 
-        scope.dynamic_origins[node] || propagated(scope, node)
+        scope.dynamic_origin(node) || propagated(scope, node)
       end
 
       def propagated(scope, node)

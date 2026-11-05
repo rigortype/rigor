@@ -126,7 +126,7 @@ module Rigor
       end
 
       def optimistic_call?(node, scope, context)
-        if scope.optimistic_origins[node]
+        if scope.optimistic_origin(node)
           return false if guarded_lookup?(node, context) || non_empty_end?(node, scope)
 
           return true

@@ -288,6 +288,28 @@ module Rigor
                      :EMPTY_PUBLISHED_CONSTANT_IVARS, :EMPTY_REPEATED_OR_WRITES,
                      :EMPTY_CONSTANT_NARROWINGS, :EMPTY_GUARD_RECORDS, :EMPTY_BOT_GUARD_CLASSES
 
+    # ADR-129 WD1 — the four advisory tables are bound Tables: each is an identity Hash one file's scopes share by
+    # reference (a fresh body scope may start its own; {#with_isolated_side_tables} copies them), so a journal record
+    # names the store beside the node. Every entry read and write goes through the methods below, which log it while a
+    # capture is open; handing a store to a new Scope is not an entry read.
+    DYNAMIC_ORIGINS = TypingState.table(
+      :dynamic_origins,
+      bound: true,
+      reason: "node => DynamicOrigin cause; typing records it and reads it back for receiver provenance"
+    )
+    VOID_ORIGINS = TypingState.table(
+      :void_origins, bound: true, reason: "node => VoidOrigin site; recorded by dispatch, read by the value-use rule"
+    )
+    PLUGIN_TYPED_CALLS = TypingState.table(
+      :plugin_typed_calls, bound: true, reason: "node => true where a plugin's dynamic_return answered the call"
+    )
+    OPTIMISTIC_ORIGINS = TypingState.table(
+      :optimistic_origins,
+      bound: true,
+      reason: "node => OptimisticOrigin cause; typing records it and reads it back to keep a value nil-free"
+    )
+    private_constant :DYNAMIC_ORIGINS, :VOID_ORIGINS, :PLUGIN_TYPED_CALLS, :OPTIMISTIC_ORIGINS
+
     class << self
       def empty(environment: Environment.default, source_path: nil)
         new(environment: environment, locals: {}.freeze,
@@ -297,7 +319,23 @@ module Rigor
 
     def record_dynamic_origin(node, cause)
       @dynamic_origins[node] = cause
+      TypingState.current.log_bound_write(DYNAMIC_ORIGINS, @dynamic_origins, node, cause)
       self
+    end
+
+    # The {Inference::DynamicOrigin} cause recorded at `node`, or nil (ADR-129: a logged Table read).
+    def dynamic_origin(node)
+      log_advisory_read(DYNAMIC_ORIGINS, @dynamic_origins, node)
+    end
+
+    # The {Inference::VoidOrigin} recorded at `node`, or nil (ADR-129: a logged Table read).
+    def void_origin(node)
+      log_advisory_read(VOID_ORIGINS, @void_origins, node)
+    end
+
+    # The {Inference::OptimisticOrigin} cause recorded at `node`, or nil (ADR-129: a logged Table read).
+    def optimistic_origin(node)
+      log_advisory_read(OPTIMISTIC_ORIGINS, @optimistic_origins, node)
     end
 
     # ADR-100 WD3 — records that the value introduced at `node` (a call node) is a `top` recovered from an
@@ -307,6 +345,7 @@ module Rigor
     # through `#join` / `#rebuild`), excluded from `==` / `hash`, so it never forks a flow-dedup or cache key.
     def record_void_origin(node, origin)
       @void_origins[node] = origin
+      TypingState.current.log_bound_write(VOID_ORIGINS, @void_origins, node, origin)
       self
     end
 
@@ -319,12 +358,13 @@ module Rigor
     # excluded from `==` / `hash`, so it never forks a flow-dedup or cache key.
     def record_plugin_typed_call(node)
       @plugin_typed_calls[node] = true
+      TypingState.current.log_bound_write(PLUGIN_TYPED_CALLS, @plugin_typed_calls, node, true)
       self
     end
 
     # Issue #653 — whether a plugin answered the return type for `node` on this run.
     def plugin_typed_call?(node)
-      @plugin_typed_calls.key?(node)
+      !log_advisory_read(PLUGIN_TYPED_CALLS, @plugin_typed_calls, node).nil?
     end
 
     # Every keyword past the 31st takes CRuby's allocating unspecified-keywords path when omitted with a non-literal
@@ -405,8 +445,18 @@ module Rigor
     # metadata, ignored by `==` / `hash`, and never varying a flow decision on its own.
     def record_optimistic_origin(node, cause)
       @optimistic_origins[node] = cause
+      TypingState.current.log_bound_write(OPTIMISTIC_ORIGINS, @optimistic_origins, node, cause)
       self
     end
+
+    # The entry of the advisory table `store` (the bound Table `slot`'s) at `node`, or nil, logged as a Table read: a
+    # key the store does not hold logs {TypingState::ABSENT}, so a recorded nil and a miss differ.
+    def log_advisory_read(slot, store, node)
+      value = store.fetch(node, TypingState::ABSENT)
+      TypingState.current.log_bound_read(slot, store, node, value)
+      TypingState::ABSENT.equal?(value) ? nil : value
+    end
+    private :log_advisory_read
 
     # Issue #1703 — this scope with private copies of the identity-keyed side tables (dynamic, void and optimistic
     # origins, plugin-typed calls), so a second walk from it — the `key?`-guarded re-walk — records into its own

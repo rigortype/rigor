@@ -1,0 +1,2 @@
+- **[engine]** Reads and writes of the advisory provenance tables now go through `Scope` and are recorded in the typing-state journal. ([#2841](https://github.com/rigortype/rigor/pull/2841))
+  - Groundwork for ADR-129's result memo; no output changes.

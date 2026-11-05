@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../typing_state"
+require_relative "../inference/memo_audit"
 
 module Rigor
   class Scope
@@ -360,27 +361,41 @@ module Rigor
       INSTANCE_EXTEND_HOOKS = %i[included append_features prepended prepend_features inherited].freeze
 
       # ADR-129 WD1 — three interning Memos, not run-scoped: a value is a frozen Array of frozen Strings built from the
-      # name and frozen constants alone, so an entry is fixed once written and holds nothing of a run.
+      # name and frozen constants alone, so an entry is fixed once written and holds nothing of a run. Each hit goes
+      # through `MemoAudit.check`, and an audit recomputation bypasses the table.
       EXTEND_HOOK_KEYS = TypingState.memo(
         :resolution_chain_extend_hook_keys,
+        audit: "extend hook keys",
         reason: "keyed on the module name; a frozen Array of frozen Strings built from the name and the extend-hook " \
                 "constants alone"
       )
       HOOK_KEYS = TypingState.memo(
         :resolution_chain_hook_keys,
+        audit: "hook keys",
         reason: "keyed on the class name; a frozen Array of frozen Strings built from the name and " \
                 "Relevance::HOOKS alone"
       )
       EXTERNAL_KEYS = TypingState.memo(
         :resolution_chain_external_keys,
+        audit: "external keys",
         reason: "keyed on the class name; HOOK_KEYS' answer plus one frozen String built from the name"
       )
       private_constant :EXTEND_HOOK_KEYS, :HOOK_KEYS, :EXTERNAL_KEYS
 
       # The frozen negative method keys of `name`'s {SINGLETON_EXTEND_HOOKS} and {INSTANCE_EXTEND_HOOKS}.
       def self.extend_hook_keys(name)
+        return build_extend_hook_keys(name) if Inference::MemoAudit.enabled? && Inference::MemoAudit.suspended?
+
         state = TypingState.current
-        (state[EXTEND_HOOK_KEYS] ||= {})[name] ||= (
+        table = (state[EXTEND_HOOK_KEYS] ||= {})
+        stored = table[name]
+        return table[name] = build_extend_hook_keys(name) if stored.nil?
+
+        Inference::MemoAudit.check("extend hook keys", stored, name) { build_extend_hook_keys(name) }
+      end
+
+      def self.build_extend_hook_keys(name)
+        (
           SINGLETON_EXTEND_HOOKS.map { |hook| "method:#{name}.#{hook}".freeze } +
           INSTANCE_EXTEND_HOOKS.map { |hook| "method:#{name}##{hook}".freeze }
         ).freeze
@@ -420,15 +435,32 @@ module Rigor
 
       # The frozen `method:Name.hook` negative keys of `name`'s {Relevance::HOOKS}, built once per name.
       def self.hook_keys(name)
+        return build_hook_keys(name) if Inference::MemoAudit.enabled? && Inference::MemoAudit.suspended?
+
         state = TypingState.current
-        (state[HOOK_KEYS] ||= {})[name] ||= Relevance::HOOKS.map { |hook| "method:#{name}.#{hook}".freeze }.freeze
+        table = (state[HOOK_KEYS] ||= {})
+        stored = table[name]
+        return table[name] = build_hook_keys(name) if stored.nil?
+
+        Inference::MemoAudit.check("hook keys", stored, name) { build_hook_keys(name) }
       end
+
+      def self.build_hook_keys(name) = Relevance::HOOKS.map { |hook| "method:#{name}.#{hook}".freeze }.freeze
 
       # {hook_keys} plus the `mixin:<name>` key an external entry files for its unpositioned mixins (#1661).
       def self.external_keys(name)
+        return build_external_keys(name) if Inference::MemoAudit.enabled? && Inference::MemoAudit.suspended?
+
         state = TypingState.current
-        (state[EXTERNAL_KEYS] ||= {})[name] ||= (hook_keys(name) + ["mixin:#{name}".freeze]).freeze
+        table = (state[EXTERNAL_KEYS] ||= {})
+        stored = table[name]
+        return table[name] = build_external_keys(name) if stored.nil?
+
+        Inference::MemoAudit.check("external keys", stored, name) { build_external_keys(name) }
       end
+
+      def self.build_external_keys(name) = (hook_keys(name) + ["mixin:#{name}".freeze]).freeze
+      private_class_method :build_extend_hook_keys, :build_hook_keys, :build_external_keys
 
       def record_head(scope, start, side)
         ResolutionChain.record_class(scope, @root) unless start.zero? && @entries.first&.name == @root

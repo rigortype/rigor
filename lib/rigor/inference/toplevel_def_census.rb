@@ -27,7 +27,7 @@ module Rigor
       # `MemoAudit` checks it on a hit.
       RELIABLE = TypingState.memo(
         :toplevel_def_reliable,
-        run_scoped: true,
+        run_scoped: true, audit: "top-level def census",
         reason: "keyed by discovery index, then name; the environment is the run's; audited by MemoAudit"
       )
       private_constant :OBJECT_OWNERS, :RELIABLE

@@ -1,6 +1,6 @@
 # ELIDE is measured through a second id that only the stage-3 shadow keys on
 
-- **PR:** [#PRNUM](https://github.com/rigortype/rigor/pull/PRNUM)
+- **PR:** [#2876](https://github.com/rigortype/rigor/pull/2876)
 - **Issue:** [#2709](https://github.com/rigortype/rigor/issues/2709)
 - **Class:** open-choice
 - **Precedent:** [#2868](https://github.com/rigortype/rigor/pull/2868)

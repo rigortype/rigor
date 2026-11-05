@@ -267,6 +267,24 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # Issue #1246 — the captured-name remainder of #1245. A value-position closure's body is walked, not
+  # evaluated, so a captured outer local it rebinds read at its pre-statement binding after the write
+  # (`x = 1; show([1].map { x = "s"; x.upcase })`), and a `def` written in such a closure read its own
+  # parameter as the enclosing local (`show(Class.new { def call(o) = o + 1 })` after `o = { x: 1 }`).
+  describe "fixtures/value_position_closure_captured_rebind.rb — a rebound capture and a def's own locals" do
+    let(:harness) { harness_for("value_position_closure_captured_rebind") }
+
+    it "reads a rebound capture and a def's own names as unknown, and still fires on the controls" do
+      undefined = harness.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(undefined.map(&:line)).to eq(marked_lines(harness, "# GENUINE-UNDEFINED"))
+    end
+
+    it "produces no assert_type mismatches" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   # Issue #645 — the straight-line seam's UNION half. `widen_for_mutator` declined a `Union`
   # receiver outright, so a literal member kept the arity a mutation had just falsified.
   describe "fixtures/mutation_widening_union_receiver.rb — a Union receiver widens memberwise" do

@@ -112,7 +112,7 @@ RSpec.describe "ADR-129 G4: what a type_of call can reach" do
   def scope_rows
     first_ask = "a first-ask cache keyed on the frame alone, whose computation is handed the asking scope (constant " \
                 "resolution, and MatchRebinding.may_match?, which #memo keys on the scope's locals and ivars); " \
-                "extensional only if the answer is the same for every scope the frame runs, which is unproven"
+                "extensional only if the answer is the same for every scope the frame runs, which is unproven (#2864)"
     {
       'Rigor::Inference::MatchRebinding::Frame#@matching_closure' => [%w[reassigned], first_ask],
       'Rigor::Inference::MatchRebinding::Frame#@last_line_closure' => [%w[reassigned], first_ask],

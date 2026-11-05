@@ -64,16 +64,28 @@ def def_in_class_new
   show(Class.new { def call(o) = o + 1 })
 end
 
+# A parameter default reads a sibling parameter, not the enclosing local of that name.
+def def_parameter_default_in_class_new
+  o = { x: 1 }
+  show(Class.new { def m(o, b = o + 1) = b })
+end
+
 def def_in_plain_block
   o = { x: 1 }
   show([1].each { def zz(o) = o + 1 })
 end
 
-# A `class` / `module` / `class << …` body is rejected inside a method body, so these sit at the top level.
+# A `class` / `module` body is rejected inside a method body, so these sit at the top level.
 co = { x: 1 }
 show([1].each { class CapturedRebindInner; co = 1; co + 1; end })
 show([1].each { module CapturedRebindInnerModule; co = 1; co + 1; end })
 show([1].each { class << self; co = 1; co + 1; end })
+
+# A `class << …` body is legal inside one.
+def singleton_class_body_in_block
+  o = { x: 1 }
+  show([1].each { class << o; o = 1; o + 1; end })
+end
 
 # A `def`'s receiver, a `class`'s superclass and a `class << …`'s expression run in the enclosing scope, so they still
 # read the enclosing local the body redeclares.

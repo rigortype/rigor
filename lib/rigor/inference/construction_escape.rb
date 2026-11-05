@@ -128,7 +128,7 @@ module Rigor
 
       # {.scan} of `body`, memoised for the run.
       def escape_scan(body)
-        return scan(body) if MemoAudit.suspended?
+        return scan(body) if MemoAudit.enabled? && MemoAudit.suspended?
 
         table = TypingState.current.weak_key_map(CACHE)
         stored = table[body]

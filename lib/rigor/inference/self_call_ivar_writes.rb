@@ -133,7 +133,7 @@ module Rigor
       # table held the whole project. The slot holds one table and its counts, the next table replaces them, and the
       # run that filled it releases it when it ends (run-scoped, #2399).
       def definition_counts(deferred_ranges)
-        return count_definitions(deferred_ranges) if MemoAudit.suspended?
+        return count_definitions(deferred_ranges) if MemoAudit.enabled? && MemoAudit.suspended?
 
         state = TypingState.current
         slot = state[DEFINITION_COUNTS]

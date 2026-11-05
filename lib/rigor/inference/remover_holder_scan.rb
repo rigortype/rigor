@@ -84,7 +84,7 @@ module Rigor
 
       # {.unsafe_names} of `body`, memoised for the run.
       def memoised_unsafe_names(body, parameters)
-        return unsafe_names(body, parameters) if MemoAudit.suspended?
+        return unsafe_names(body, parameters) if MemoAudit.enabled? && MemoAudit.suspended?
 
         table = TypingState.current.weak_key_map(UNSAFE_CACHE)
         stored = table[body]

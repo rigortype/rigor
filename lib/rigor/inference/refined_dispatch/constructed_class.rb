@@ -126,7 +126,7 @@ module Rigor
         # `discovered_def_nodes`, as `ExpressionTyper` falls back) and the environment: every table read here is
         # fixed for a run, so each answer is computed once a run, and a new run replaces the slot.
         def memo(scope)
-          return new_table if MemoAudit.suspended?
+          return new_table if MemoAudit.enabled? && MemoAudit.suspended?
 
           state = TypingState.current
           slot = state[MEMO]

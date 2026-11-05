@@ -135,7 +135,7 @@ module Rigor
       # The guarded scope index of `root`, built once per file (the cache holds the last file only), or nil when the
       # file holds no guard-shaped call.
       def rewalk(root, scope_index)
-        return guarded_index(root, scope_index) if MemoAudit.suspended?
+        return guarded_index(root, scope_index) if MemoAudit.enabled? && MemoAudit.suspended?
 
         state = TypingState.current
         cached = state[REWALK]

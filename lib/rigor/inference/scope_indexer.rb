@@ -5539,7 +5539,7 @@ module Rigor
 
       def eval_file_declared_names(node)
         source = node.location.send(:source)
-        return scan_declared_names(source) if MemoAudit.suspended?
+        return scan_declared_names(source) if MemoAudit.enabled? && MemoAudit.suspended?
 
         table = TypingState.current.weak_key_map(DECLARED_NAMES)
         stored = table[source]

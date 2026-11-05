@@ -37,7 +37,7 @@ module Rigor
 
         # The facts of `body`. A hit is audited without the facts' per-read memos, which fill as reads are answered.
         def facts(body)
-          return yield if MemoAudit.suspended?
+          return yield if MemoAudit.enabled? && MemoAudit.suspended?
 
           table = TypingState.current.weak_key_map(FACTS)
           facts = table[body]
@@ -48,7 +48,7 @@ module Rigor
         end
 
         def ivar_mutator(def_node, &)
-          return yield if MemoAudit.suspended?
+          return yield if MemoAudit.enabled? && MemoAudit.suspended?
 
           table = TypingState.current.weak_key_map(IVAR)
           cached = table[def_node]
@@ -58,7 +58,7 @@ module Rigor
         end
 
         def callee_floor(type, &)
-          return yield if MemoAudit.suspended?
+          return yield if MemoAudit.enabled? && MemoAudit.suspended?
 
           state = TypingState.current
           table = (state[FLOOR] ||= {})
@@ -68,7 +68,7 @@ module Rigor
         end
 
         def unknown_store(call_node, removed_keys, type, &)
-          return yield if MemoAudit.suspended?
+          return yield if MemoAudit.enabled? && MemoAudit.suspended?
 
           state = TypingState.current
           table = (state[STORE] ||= {}.compare_by_identity)

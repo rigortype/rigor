@@ -343,7 +343,7 @@ module Rigor
         # inputs `children_by_parent` and the unknown-superclass list read; neither files a dependency edge
         # (`each_subclass` files its own `subclass_of:` edges on every call), so a hit drops none.
         def subclass_memo(scope)
-          return {} if MemoAudit.suspended?
+          return {} if MemoAudit.enabled? && MemoAudit.suspended?
 
           state = TypingState.current
           slot = state[SUBCLASS_MEMO]

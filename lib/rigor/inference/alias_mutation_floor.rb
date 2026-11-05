@@ -75,6 +75,7 @@ module Rigor
       ELEMENT_READS = %i[[] first last fetch dig].to_set.freeze
       private_constant :FULL, :PART, :NO_KEYS, :NO_LINKS, :SELF_RETURNERS, :ALL, :NUMBERED_PARAMETER,
                        :SEND_NAMES, :ELEMENT_READS
+      private_constant :Memos
 
       module_function
 

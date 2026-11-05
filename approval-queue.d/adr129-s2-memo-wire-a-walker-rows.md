@@ -8,7 +8,7 @@
 
 ## Background
 
-ADR-129 stage 2 wires every Memo slot to `MemoAudit.check`, whose block recomputes the stored value on an audited hit. In `RefinedDispatch::OwnMethod#all_unknown_superclass_classes` and `#children_by_parent` that block iterates over the discovery tables, and `spec/rigor/scope/ancestry_walker_detection_spec.rb` counts any block over those tables as an ancestry walker. Neither method walks an ancestor chain: each rebuilds a table-wide value (a filter over the unknown-superclass table, the inverted parent table) once per audited hit.
+ADR-129 stage 2 wires every Memo slot to `MemoAudit.check`, whose block recomputes the stored value on an audited hit. In `RefinedDispatch::OwnMethod#all_unknown_superclass_classes` and `#children_by_parent` that block calls a helper in the same file (`compute_unknown_superclass_classes`, `compute_children_by_parent`) that reads `discovered_superclasses`, and `spec/rigor/scope/ancestry_walker_detection_spec.rb`'s looped-helper-call rule counts such a call inside a block as an ancestry walker. Neither method walks an ancestor chain: each rebuilds a table-wide value (a filter over the unknown-superclass table, the inverted parent table) once per audited hit.
 
 ## Options and trade-offs
 

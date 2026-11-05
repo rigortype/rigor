@@ -222,7 +222,7 @@ module Rigor
       end
 
       def memo_bucket
-        return {}.compare_by_identity if MemoAudit.suspended?
+        return {}.compare_by_identity if MemoAudit.enabled? && MemoAudit.suspended?
 
         generation = scope.run_generation || scope.discovered_def_nodes
         state = TypingState.current

@@ -120,7 +120,7 @@ module Rigor
         # `{ owner => { ivar => { path => [value, ...] } } }` over `census`'s path-tagged `:own_write_type` entries,
         # built once per census and kept in one run-scoped slot keyed by its identity.
         def table(census)
-          return build_table(census) if MemoAudit.suspended?
+          return build_table(census) if MemoAudit.enabled? && MemoAudit.suspended?
 
           state = TypingState.current
           slot = state[TABLE]

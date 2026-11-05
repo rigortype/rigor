@@ -87,7 +87,7 @@ module Rigor
       # belongs to {ClosureEscapeAnalyzer}'s ancestry step. The `:block_runs` bucket belongs to
       # {BlockRunCount}.
       def memo(scope)
-        return new_buckets if MemoAudit.suspended?
+        return new_buckets if MemoAudit.enabled? && MemoAudit.suspended?
 
         discovery = scope.discovery
         environment = scope.environment

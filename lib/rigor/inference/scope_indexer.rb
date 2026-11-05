@@ -11911,7 +11911,9 @@ module Rigor
       # Issue #1246 — it opens its own local table too, so a name in it (a `def`'s parameter, a body local) is a new
       # variable, never the enclosing statement's local of that name: `show(Class.new { def call(o) = o + 1 })` after
       # `o = { x: 1 }` read the parameter as the Hash. Such a name reads `Dynamic[top]` ({#shadow_local}), as in an
-      # unentered closure ({#closure_scope}); a body the evaluator entered is recorded and keeps its own scopes.
+      # unentered closure ({#closure_scope}); a body the evaluator entered is recorded and keeps its own scopes. Only
+      # the parameters and the body take that table: a `def`'s receiver, a `class`'s name and superclass and a
+      # `class << …`'s expression run in the enclosing scope (`class K < base.nope; base = 2; end`).
       # A `case` narrows its clauses ({#propagate_subjectless_case}, {#propagate_subject_case}). Every other node
       # hands its children the scope as is.
       def propagate_children(node, table, current_scope)
@@ -11920,13 +11922,19 @@ module Rigor
 
           return propagate_subject_case(node, table, current_scope)
         end
+        return propagate_code_body(node, table, current_scope) if SELF_OPENING_BODIES.include?(node.class)
 
-        child_scope = SELF_OPENING_BODIES.include?(node.class) ? body_scope(node, current_scope) : current_scope
-        node.rigor_each_child { |child| propagate(child, table, child_scope) }
+        node.rigor_each_child { |child| propagate(child, table, current_scope) }
       end
 
-      def body_scope(body, scope)
-        body.locals.reduce(scope.with_block_self_unknown(false)) { |acc, name| shadow_local(acc, name) }
+      def propagate_code_body(node, table, current_scope)
+        outer_scope = current_scope.with_block_self_unknown(false)
+        inner = [node.body]
+        inner << node.parameters if node.is_a?(Prism::DefNode)
+        inner_scope = node.locals.reduce(outer_scope) { |acc, name| shadow_local(acc, name) }
+        node.rigor_each_child do |child|
+          propagate(child, table, inner.any? { |part| part.equal?(child) } ? inner_scope : outer_scope)
+        end
       end
 
       # Issue #1361 — the block of `Thread.new`, `Fiber.new`, `define_method` and the other calls

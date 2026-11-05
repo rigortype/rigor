@@ -69,10 +69,21 @@ def def_in_plain_block
   show([1].each { def zz(o) = o + 1 })
 end
 
-def class_body_local_in_block
-  o = { x: 1 }
-  show([1].each { class CapturedRebindInner; o = 1; o + 1; end })
-end
+# A `class` / `module` / `class << …` body is rejected inside a method body, so these sit at the top level.
+co = { x: 1 }
+show([1].each { class CapturedRebindInner; co = 1; co + 1; end })
+show([1].each { module CapturedRebindInnerModule; co = 1; co + 1; end })
+show([1].each { class << self; co = 1; co + 1; end })
+
+# A `def`'s receiver, a `class`'s superclass and a `class << …`'s expression run in the enclosing scope, so they still
+# read the enclosing local the body redeclares.
+cb = 1
+class CapturedRebindOuterSuper < cb.nope_superclass; cb = 2; end # GENUINE-UNDEFINED
+cs = 1
+class << cs.nope_singleton_expression; cs = 2; end # GENUINE-UNDEFINED
+cr = 1
+def (cr.nope_def_receiver).captured_rebind_m(cr) = cr # GENUINE-UNDEFINED
+show([1].each { class CapturedRebindInnerSuper < cb.nope_inner_superclass; cb = 2; end }) # GENUINE-UNDEFINED
 
 # --- Statement positions: the evaluator enters these already; the controls. ---
 def statement_control
@@ -89,6 +100,20 @@ end
 def captured_read_only
   r = 1
   show([1].map { r.upcase }) # GENUINE-UNDEFINED
+end
+
+# --- Known gaps. The walk does not thread the body's write, so a rebound capture reads `Dynamic[top]` everywhere
+# in the closure, a read BEFORE the write included, and the misuse below (which Ruby raises on) is no longer
+# reported. Flip both to GENUINE-UNDEFINED when value-position blocks are evaluated (#1246's second stage). ---
+def read_before_rebind
+  z = nil
+  show([1, 2].map { z.upcase; z = "s" }) # KNOWN-GAP: reported before #1246 widened the rebound capture
+end
+
+def lambda_default_before_rebind
+  x = 1
+  f = ->(a = x.upcase) { x = "s"; a } # KNOWN-GAP: reported before #1246 widened the rebound capture
+  f
 end
 
 # --- What the reads bind to. A rebound captured local reads `Dynamic[top]`: the walk does not thread the write.

@@ -89,7 +89,7 @@ module Rigor
           @namespaces.key?(name)
         end
 
-        # @return [type_source, nesting] for the accessor `signature` names, or nil when it has no type
+        # @return the type source and the nesting for the accessor `signature` names, or nil when it has no type
         #   source (a conditional or type-less macro).
         def struct_prop_type(signature)
           source = @struct_prop_types[[signature.class_name, signature.method_name]]

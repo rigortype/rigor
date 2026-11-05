@@ -1659,6 +1659,9 @@ module Rigor
 
       def probe_return_types(specs)
         build_runner.evaluate_return_types(@paths, specs)
+      rescue Inference::MemoAudit::Mismatch
+        # ADR-129 WD5 (#2785) — the audit's mismatch (raised by the run's release) fails the session, not the probe.
+        raise
       rescue StandardError
         {}
       end

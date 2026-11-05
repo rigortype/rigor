@@ -103,6 +103,34 @@ RSpec.describe "a MemoAudit mismatch swallowed by a rescue on the typing path (#
     expect { analyze(source) }.to raise_error(Rigor::Inference::MemoAudit::Mismatch, /left over/)
   end
 
+  it "fails the return summaries on a mismatch their effects computation swallowed" do
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, "a.rb"), "class A\n  def self.f(x) = x\nend\n")
+      File.write(File.join(dir, "b.rb"), "A.f(1)\n")
+      runner = Rigor::Analysis::Runner.new(
+        configuration: Rigor::Configuration.new("paths" => [dir]), cache_store: nil
+      )
+      Dir.chdir(dir) { guarded_run(runner) }
+      allow_any_instance_of(Rigor::Inference::StatementEvaluator) # rubocop:disable RSpec/AnyInstance
+        .to receive(:content_mutated_parameter_positions)
+        .and_wrap_original do |original, *args|
+          Rigor::Inference::MemoAudit.check("in summaries", :stored, :key) { :fresh }
+          original.call(*args)
+        end
+      expect { runner.return_summaries }.to raise_error(Rigor::Inference::MemoAudit::Mismatch, /in summaries/)
+    end
+  end
+
+  it "lets the incremental return-type probe raise the audit's mismatch rather than fall back" do
+    session = Rigor::Analysis::IncrementalSession.allocate
+    runner = instance_double(Rigor::Analysis::Runner)
+    allow(session).to receive(:build_runner).and_return(runner)
+    allow(runner).to receive(:evaluate_return_types).and_raise(Rigor::Inference::MemoAudit::Mismatch, "probed")
+    expect { session.send(:probe_return_types, []) }.to raise_error(Rigor::Inference::MemoAudit::Mismatch, /probed/)
+    allow(runner).to receive(:evaluate_return_types).and_raise(ArgumentError)
+    expect(session.send(:probe_return_types, [])).to eq({})
+  end
+
   it "fails the run on a mismatch raised outside every file's analysis" do
     allow(Rigor::Inference::DefNodeResolver).to receive(:with_run).and_wrap_original do |original, &block|
       original.call do

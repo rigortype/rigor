@@ -39,7 +39,16 @@ module Rigor
         def discharged?(scope, chain, mark, name)
           name = name.to_sym
           memo = ResolutionChain.relevance_memo(scope, chain.flavor)
-          verdict, edges = memo[[mark, name]] ||= compute(scope, chain.flavor, mark, name)
+          key = [mark, name]
+          entry = memo[key]
+          verdict, edges =
+            if entry.nil?
+              memo[key] = compute(scope, chain.flavor, mark, name)
+            else
+              Inference::MemoAudit.check("resolution chain relevance", entry, mark, name) do
+                Analysis::DependencyRecorder.withhold { compute(scope, chain.flavor, mark, name) }.first
+              end
+            end
           replay(scope, edges) if Analysis::DependencyRecorder.active?
           verdict
         end

@@ -170,14 +170,39 @@ module Rigor
 
         # The memoised `[verdict, edges]` of one test, its edges replayed while a recording is active.
         def verdict(kind, key)
-          verdict, edges = @memo[[kind, key]] ||= begin
+          memo_key = [kind, key]
+          entry = @memo[memo_key]
+          if entry.nil?
             edges = []
             value = yield(edges)
-            [value ? true : false, edges.concat(own_edges(kind, key)).uniq.freeze].freeze
+            entry = @memo[memo_key] = [value ? true : false, edges.concat(own_edges(kind, key)).uniq.freeze].freeze
+          else
+            entry = MemoAudit.check("singleton hook verdict", entry, kind, key) { fresh_verdict(kind, key) }
           end
+          verdict, edges = entry
           replay(edges) if @recording
           verdict
         end
+
+        # ADR-129 G2 — a memoised verdict rebuilt for the audit by a new Context, whose memo is a fresh bucket's
+        # while the recomputation runs ({Scope::ResolutionChain.hook_memo}), its dependency reads withheld.
+        def fresh_verdict(kind, key)
+          Analysis::DependencyRecorder.withhold { Context.new(@scope, @flavor).verdict_entry(kind, key) }.first
+        end
+
+        protected
+
+        # The `[verdict, edges]` entry of one test, computed through {#verdict} on this Context's memo.
+        def verdict_entry(kind, key)
+          case kind
+          when :project then verdict(:project, key) { project_capable?(key) }
+          when :external then verdict(:external, key) { external_capable?(key) }
+          else instance_level_capable?(key)
+          end
+          @memo[[kind, key]]
+        end
+
+        private
 
         def own_edges(kind, key)
           return entry_edges(key) if kind == :external

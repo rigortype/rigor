@@ -11,8 +11,7 @@ RSpec.describe "ADR-129 Memo slots and MemoAudit" do
   # The Memo slots stage 2 has not wired yet. A wiring PR removes its slots here; a new Memo never joins.
   def unaudited
     %i[
-      ancestor_constant_scopes deferred_definition_names method_alias_names project_method_names
-      recorded_ancestor_constant_scopes resolution_chain toplevel_definition_rows
+      ancestor_constant_scopes
     ]
   end
 

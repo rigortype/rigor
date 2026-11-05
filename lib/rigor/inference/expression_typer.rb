@@ -12,6 +12,7 @@ require_relative "../source/node_walker"
 require_relative "../analysis/self_call_resolution_recorder"
 require_relative "../run_scoped_slots"
 require_relative "../typing_state"
+require_relative "../type_of_memo"
 require_relative "block_call_timing"
 require_relative "block_repetition"
 require_relative "project_yielder"
@@ -275,6 +276,12 @@ module Rigor
         @typing_node = node
         result = if FlowTracer.active?
                    FlowTracer.trace_node(node) { untraced_type_of(node) }
+                 elsif TypeOfMemo.enabled? && @tracer.nil? && @operand_types.nil?
+                   # ADR-129 stage 3 — the shadow memo (G1); shut under a tracer and for a typer with instance state.
+                   state = typing_state
+                   TypeOfMemo.shadow(state, scope, node, callee: !state.stack(INFERENCE_GUARD).empty?) do
+                     untraced_type_of(node)
+                   end
                  else
                    untraced_type_of(node)
                  end

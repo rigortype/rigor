@@ -124,17 +124,18 @@ RSpec.describe Rigor::Inference::Acceptance do
     end
   end
 
-  describe ".class_object_supertype?" do
-    it "answers true for the unparameterised nominals the class objects are instances of" do
-      %w[Class Module Object BasicObject Kernel].each do |name|
-        expect(described_class.class_object_supertype?(Rigor::Type::Combinator.nominal_of(name))).to be(true), name
+  describe ".class_or_module_nominal?" do
+    it "answers true for an unparameterised Class or Module nominal" do
+      %w[Class Module].each do |name|
+        expect(described_class.class_or_module_nominal?(Rigor::Type::Combinator.nominal_of(name))).to be(true), name
       end
     end
 
-    it "answers false for an unrelated nominal, a parameterised Class and a Singleton" do
+    it "answers false for the any-value nominals, an unrelated nominal, a parameterised Class and a Singleton" do
       class_of_int = Rigor::Type::Combinator.nominal_of("Class", type_args: [int_nominal])
-      [int_nominal, class_of_int, int_singleton].each do |type|
-        expect(described_class.class_object_supertype?(type)).to be(false), type.describe
+      any_values = %w[Object BasicObject Kernel].map { |name| Rigor::Type::Combinator.nominal_of(name) }
+      [*any_values, int_nominal, class_of_int, int_singleton].each do |type|
+        expect(described_class.class_or_module_nominal?(type)).to be(false), type.describe
       end
     end
   end

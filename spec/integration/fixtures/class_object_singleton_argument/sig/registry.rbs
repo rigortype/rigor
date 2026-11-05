@@ -11,6 +11,7 @@ class Registry
                  | (String name) -> Symbol
 
   def self.optional_fields_for: (singleton(Shape)? klass) -> Array[Symbol]
+  def self.name_or_shape: (String | singleton(Shape) key) -> Symbol
 
   def self.a_class: () -> Class
   def self.a_module: () -> Module

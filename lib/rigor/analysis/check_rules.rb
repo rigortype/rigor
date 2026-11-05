@@ -4144,18 +4144,18 @@ module Rigor
           !declaration_sourced_nil_only_mismatch?(arg, arg_type, param_type, scope)
         end
 
-        # Issue #2855 — the parameter rejects the argument, and not only for its class-object supertype members.
-        # A `Class` / `Module` / `Object` / `BasicObject` / `Kernel` nominal ({Acceptance.class_object_supertype?})
-        # against a parameter that admits class objects (`singleton(X)`, alone or in a union) is a class object
-        # whose identity inference lost — a `const_get` result kept by `is_a?(Class)`, an `is_a?(Module)` guard —
-        # so it is withheld. The rest of the argument is still judged: `Class | Integer` against `singleton(X)`
-        # reports for its `Integer`. Acceptance itself keeps answering `no`, so overload selection is unchanged.
+        # Issue #2855 — the parameter rejects the argument, and not only for its `Class` / `Module` members. An
+        # unparameterised `Class` or `Module` nominal ({Acceptance.class_or_module_nominal?}) against a parameter
+        # that admits class objects (`singleton(X)`, alone or in a union) is a class object whose identity inference
+        # lost — a `const_get` result kept by `is_a?(Class)`, an `is_a?(Module)` guard — so it is withheld. The rest
+        # of the argument is still judged: `Class | Integer` against `singleton(X)` reports for its `Integer`.
+        # Acceptance itself keeps answering `no`, so overload selection is unchanged.
         def rejects_beyond_class_objects?(param_type, arg_type)
           return false unless Inference::Acceptance.accepts(param_type, arg_type, mode: :gradual).no?
           return true unless admits_class_objects?(param_type)
 
           members = arg_type.is_a?(Type::Union) ? arg_type.members : [arg_type]
-          rest = members.reject { |member| Inference::Acceptance.class_object_supertype?(member) }
+          rest = members.reject { |member| Inference::Acceptance.class_or_module_nominal?(member) }
           return true if rest.size == members.size
 
           Inference::Acceptance.accepts(param_type, Type::Combinator.union(*rest), mode: :gradual).no?
@@ -4184,7 +4184,9 @@ module Rigor
           non_nil = Type::Combinator.union(*arg_type.members.reject { |m| nil_member?(m) })
           return false if non_nil.is_a?(Type::Bot)
 
-          Inference::Acceptance.accepts(param_type, non_nil, mode: :gradual).yes?
+          result = Inference::Acceptance.accepts(param_type, non_nil, mode: :gradual)
+          # Issue #2855 — a `Class?` ivar against `singleton(X)` is withheld as its `Class` alone would be.
+          result.yes? || (result.no? && !rejects_beyond_class_objects?(param_type, non_nil))
         end
 
         # What this rule needs is that argument N binds to positional

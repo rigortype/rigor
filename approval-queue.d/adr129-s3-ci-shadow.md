@@ -1,6 +1,6 @@
 # The type_of shadow runs in CI as an advisory step over lib and the fixtures
 
-- **PR:** [#PRNUM](https://github.com/rigortype/rigor/pull/PRNUM)
+- **PR:** [#2880](https://github.com/rigortype/rigor/pull/2880)
 - **Issue:** [#2709](https://github.com/rigortype/rigor/issues/2709)
 - **Class:** gate-row
 - **Precedent:** [#2830](https://github.com/rigortype/rigor/pull/2830)

@@ -12050,6 +12050,10 @@ module Rigor
       # argument one scope and threads none, so arguments that write keep the call's: an earlier one may rebind the
       # receiver a later one reads (`return y&.concat((y = nil).to_s, y.upcase)`, where the evaluator threads no
       # operand).
+      #
+      # Issue #1246 — the block of a value-position call is evaluated before this walk reaches it
+      # ({#evaluate_unentered_block}), so it arrives recorded and keeps the evaluator's entry. The block entries
+      # above therefore reach only a block that evaluation declines: a class-creating or `refine` block.
       def propagate_call(node, table, current_scope, recorded: false)
         block = node.block
         operands =

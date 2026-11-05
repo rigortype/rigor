@@ -59,8 +59,10 @@ RSpec.describe "the callee floor follows instance receivers, chained hand-offs a
       expect(rules(program(defs, in_block("Opts.new.add_format(opts, options)")))).to eq(always)
     end
 
+    # Issue #1246 — the receiver is the untyped `argv`: the block is a receiver chain's, so the index now types its
+    # parameter, and `opts.add_format` is a genuine `undefined method` on `OptionParser`.
     it "keeps the literal when the receiver type is unknown" do
-      call = in_block("opts.add_format(opts, options)")
+      call = in_block("argv.add_format(opts, options)")
       expect(rules(program(klass, call))).to eq(always)
     end
 

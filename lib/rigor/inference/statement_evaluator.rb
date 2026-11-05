@@ -413,8 +413,15 @@ module Rigor
       # Issue #1246 — enters only `call`'s block, from the receiver scope, as the statement form enters it
       # ({#evaluate_block_if_present}): the per-node scope index's evaluation of a block a value-position call holds
       # ({ScopeIndexer#evaluate_unentered_block}). The call's receiver and arguments are left to the index walk.
+      #
+      # Such a block enters with the unknown-`self` mark only ({Scope#with_block_self_unknown}), as the walk entered
+      # it, not with the statement form's opaque-`self` mark ({Scope#entering_opaque_block}): issue #1717 keeps the
+      # latter, which gates binding a call to a cross-file top-level `def`, away from value-position blocks.
       def evaluate_block_of(call)
+        @value_position_block = call.block
         evaluate_block_if_present(call)
+      ensure
+        @value_position_block = nil
       end
 
       # Evaluate `node` under the receiver scope. Returns `[type, scope']` where `type` is the value the node produces
@@ -5226,8 +5233,9 @@ module Rigor
         narrowed = Narrowing.safe_navigation_block_scope(node, scope)
         return enter_call_block(node, block) if narrowed.equal?(scope)
 
-        evaluator_at(narrowed, operand_scope: operand_scope, operand_types: @operand_types)
-          .send(:enter_call_block, node, block)
+        narrowed_evaluator = evaluator_at(narrowed, operand_scope: operand_scope, operand_types: @operand_types)
+        narrowed_evaluator.instance_variable_set(:@value_position_block, @value_position_block)
+        narrowed_evaluator.send(:enter_call_block, node, block)
       end
 
       def enter_call_block(node, block)
@@ -8531,13 +8539,21 @@ module Rigor
       # Ruby's semantics — at runtime the block-local is a fresh nil-valued variable on every block invocation. Without
       # this shadow, an inner `x.even?` before the first write would type-check against the OUTER `x` (e.g. `Integer`)
       # when the runtime would actually `NoMethodError` on `nil`.
+      # The scope a block body's `self` marks start from: the statement form's opaque `self` (issue #316), or, for
+      # the value-position block {#evaluate_block_of} enters, the walk's unknown-`self` mark alone (issue #1717).
+      def block_self_entry(block_node)
+        return scope.entering_opaque_block unless block_node.equal?(@value_position_block)
+
+        scope.with_block_self_unknown(true)
+      end
+
       def build_block_entry_scope(call_node, block_node)
         expected = expected_block_param_types_for(call_node)
         # Issue #316 — every block body enters with `self` unmodelled (`Scope#entering_opaque_block`); the
         # yielding method, not the lexical context, decides what `self` is, and Rigor does not track it.
         # Issue #1358 — a body that may run a match reads the match globals an earlier iteration may have rebound
         # ({MatchRebinding.block_entry}).
-        entry = MatchRebinding.block_entry(scope.entering_opaque_block, block_node, call_node)
+        entry = MatchRebinding.block_entry(block_self_entry(block_node), block_node, call_node)
         scope_with_params = BlockParameterBinder.new(expected_param_types: expected).bind_onto(block_node, entry)
         # ADR-16 Tier A — a plugin `block_as_methods:` entry that matches `(receiver, name)` narrows the
         # body's `self` to the object the DSL `instance_eval`s the block on (`params` on

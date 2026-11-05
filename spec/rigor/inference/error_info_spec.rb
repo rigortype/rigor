@@ -171,10 +171,14 @@ RSpec.describe Rigor::Inference::ErrorInfo do
     let(:outer) { "begin; raise ArgumentError; rescue ArgumentError\n%s\nend" }
 
     it "reads `$!` unbound in a modifier's fallback and a value-position `begin`'s clause and `ensure`" do
-      ["h.fetch(:a) rescue $!", "warn(begin; x; rescue KeyError; $!; end)", "warn(begin; x; ensure; $!; end)",
-       "warn(xs.map do |x| x; rescue KeyError; $! end)"].each do |inner|
+      ["h.fetch(:a) rescue $!", "warn(begin; x; rescue KeyError; $!; end)",
+       "warn(begin; x; ensure; $!; end)"].each do |inner|
         expect(last_read(format(outer, inner), :$!)).to be_nil, inner
       end
+      # Issue #1246 — a value-position call's block is entered by the scope index, so its own `rescue` clause binds
+      # `$!` as the statement form's does.
+      block_rescue = format(outer, "warn(xs.map do |x| x; rescue KeyError; $! end)")
+      expect(last_read(block_rescue, :$!)).to eq(Rigor::Type::Combinator.nominal_of("KeyError"))
       expect(last_read(format(outer, "warn($!)"), :$!)).to eq(Rigor::Type::Combinator.nominal_of("ArgumentError"))
     end
 

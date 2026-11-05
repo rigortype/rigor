@@ -25,6 +25,13 @@ ADR does not say where the rule hooks in.
 - **A Memo declaration naming its miss method**, wrapped by metaprogramming: no site edits, but a hidden wrapper on hot
   paths.
 
+**The read-through form's reach.** WD1 words it as "a read-through-cache Table's miss whose computation writes another
+Table", and grounds it in the read-through rule: a hit reads back the miss's own write as valid while the other write
+may be stale. A miss that did not fill its own table has no such leniency: its ABSENT read validates only while the key
+stays ABSENT, so its other writes replay only when nothing changed. Refusing it as well over-refused every value-position
+conditional with no loop (its `fetch` always misses and its branches write `dynamic_origins`). The rule refuses a
+read-through miss that filled its own table and wrote another.
+
 ## Decision
 
 The `key_audit` hook and the two read-through sites (`LoopValueRecord.miss`, the inject fold), through

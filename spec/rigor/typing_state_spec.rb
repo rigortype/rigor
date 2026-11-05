@@ -419,11 +419,26 @@ RSpec.describe Rigor::TypingState do
       expect([writing, quiet]).to eq([true, false])
     end
 
-    it "lets a read-through Table's miss write its own table, and touches when it writes another" do
-      own = refused_by { state.memo_miss(through) { state.log_write(through, Object.new, :record) } }
-      other = refused_by { state.memo_miss(through) { state.log_bound_write(origins, store, :node, :cause) } }
+    it "touches for a read-through Table's miss only when it fills its own table and writes another" do
+      key = Object.new
+      fill = -> { state.log_write(through, key, :record) }
+      other = -> { state.log_bound_write(origins, store, :node, :cause) }
+      refused = {
+        own_only: refused_by { state.memo_miss(through) { fill.call } },
+        other_only: refused_by { state.memo_miss(through) { other.call } },
+        both: refused_by { state.memo_miss(through) { other.call || fill.call } }
+      }
 
-      expect([own, other]).to eq([false, true])
+      expect(refused).to eq(own_only: false, other_only: false, both: true)
+    end
+
+    it "judges a miss by its own writes, not by writes logged earlier in the capture" do
+      refused = refused_by do
+        state.log_bound_write(origins, store, :earlier, :cause)
+        state.memo_miss { state.log_bound_read(origins, store, :node, :cause) }
+      end
+
+      expect(refused).to be(false)
     end
 
     it "touches on the way out of a miss that raised after writing" do
@@ -450,8 +465,27 @@ RSpec.describe Rigor::TypingState do
       end
       write = -> { current.log_bound_write(origins, store, :node, :cause) }
 
+      fill = -> { current.log_write(index(:loop_value_record), Object.new, :record) }
+
       expect(refused.call { Rigor::MemoAudit.key_audit("probe") { write.call } }).to be(true)
-      expect(refused.call { Rigor::Inference::LoopValueRecord.miss { write.call } }).to be(true)
+      expect(refused.call { Rigor::Inference::LoopValueRecord.miss { write.call || fill.call } }).to be(true)
+      expect(refused.call { Rigor::Inference::LoopValueRecord.miss { write.call } }).to be(false)
+      Rigor::MemoAudit.enable!
+      begin
+        expect(refused.call { Rigor::MemoAudit.key_audit("probe") { write.call } }).to be(true)
+      ensure
+        Rigor::MemoAudit.disable!
+      end
+    end
+
+    # The typer's read-through miss sites: the loop record's two fetch fallbacks and the inject fold.
+    it "wraps each read-through Table's miss in the typer with its own table exempt" do
+      source = File.read(File.expand_path("../../lib/rigor/inference/expression_typer.rb", __dir__))
+
+      expect(source.scan("LoopValueRecord.fetch(node, scope) || LoopValueRecord.miss {").size).to eq(2)
+      expect(source).to include("typing_state.memo_miss(INJECT_ACCUMULATOR) { try_block_inject_fold(")
+      expect(File.read(File.expand_path("../../lib/rigor/inference/loop_value_record.rb", __dir__)))
+        .to include("def miss(&) = TypingState.current.memo_miss(RECORD, &)")
     end
   end
 

@@ -23,11 +23,6 @@ module Rigor
       module SingletonTypeParams
         module_function
 
-        MODULE_TYPE = RBS::Types::ClassInstance.new(
-          name: RBS::TypeName.new(name: :Module, namespace: RBS::Namespace.root), args: [], location: nil
-        )
-        private_constant :MODULE_TYPE
-
         # Yields the overloads to select among and answers the block's selection, with each rewrite mapped back to
         # its declaration. Nearly every method needs no rewrite, and then `declared` is yielded as is.
         def selecting(declared)
@@ -88,10 +83,18 @@ module Rigor
                               location: method_type.location)
         end
 
+        # Built per rewrite rather than held in a constant: an RBS type is not `Ractor.shareable?` (#1064), and a
+        # rewrite happens only for the few overloads that spell `singleton(T)`.
+        def module_type
+          RBS::Types::ClassInstance.new(
+            name: RBS::TypeName.new(name: :Module, namespace: RBS::Namespace.root), args: [], location: nil
+          )
+        end
+
         def class_object_type(name, type_params)
           type_param = type_params.find { |tp| tp.name == name }
           bound = type_param.upper_bound
-          return MODULE_TYPE unless bound.is_a?(RBS::Types::ClassInstance)
+          return module_type unless bound.is_a?(RBS::Types::ClassInstance)
 
           RBS::Types::ClassSingleton.new(name: bound.name, location: nil)
         end

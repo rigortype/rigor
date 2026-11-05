@@ -1958,7 +1958,7 @@ module Rigor
             arguments.any? { |argument| class_factory_call?(argument) }
           end
 
-          CLASS_FACTORIES = { new: %w[Class Struct], define: %w[Data] }.freeze
+          CLASS_FACTORIES = { new: %w[Class Struct].freeze, define: %w[Data].freeze }.freeze
           private_constant :CLASS_FACTORIES
 
           def class_factory_call?(node)

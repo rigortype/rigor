@@ -331,5 +331,20 @@ RSpec.describe "Rigor::Analysis::Runner with fork pool (ADR-15 Amendment)" do
         expect(Rigor::Runtime::Jit).to have_received(:rearm_after_fork)
       end
     end
+
+    # ADR-129 stage 3 — `exit!` skips `at_exit`, so the worker writes the type_of shadow's report itself, its
+    # inherited counts reset first.
+    it "resets and writes the type_of shadow's report before its exit!" do
+      Dir.mktmpdir do |dir|
+        allow(coordinator).to receive(:exit!)
+        allow(Rigor::TypeOfMemo).to receive_messages(forked: nil, write_report: nil)
+
+        coordinator.send(:run_fork_worker, session, ["a.rb"], File.join(dir, "payload"))
+
+        expect(Rigor::TypeOfMemo).to have_received(:forked).ordered
+        expect(Rigor::TypeOfMemo).to have_received(:write_report).ordered
+        expect(coordinator).to have_received(:exit!).with(0)
+      end
+    end
   end
 end

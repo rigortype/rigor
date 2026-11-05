@@ -261,8 +261,8 @@ list kept beside the memo. State without a kind fails the gate.
       - a module-level ivar mutated through an index (`@x[k] ||=`);
       - unfrozen constant collections;
       - any direct table access outside `Scope`.
-    - Its allow-list names `TypingState` and the process counters (`BudgetTrace`, `MemoAudit`), each with a reason.
-      Growing the allow-list needs an ADR line.
+    - Its allow-list names `TypingState` and the process counters (`BudgetTrace`, `MemoAudit`, and stage 3's
+      `TypeOfMemo` shadow switch and counters), each with a reason. Growing the allow-list needs an ADR line.
     - During stage 1, G3 covers the files converted so far, and each conversion PR adds its own. Until stage 2 puts
       the advisory tables behind slots, the allow-list also names each table read in a covered file.
     - The tracer, effects and recorder switches (`FlowTracer`, `Effects::Collector`, `DependencyRecorder`,

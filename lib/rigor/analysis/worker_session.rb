@@ -236,6 +236,20 @@ module Rigor
       end
       private :effect_envelope_index
 
+      # The scope a file's analysis starts from: the project seed, with its template units.
+      def seeded_scope(path)
+        @template_units.seed(seed_project_scope(Scope.empty(environment: @environment, source_path: path)), path)
+      end
+
+      # The main pass over `root`, which the ADR-129 stage-3 shadow ({TypeOfMemo}) counts apart from the rule walk
+      # that follows it.
+      def index_main_pass(root, scope)
+        TypeOfMemo.begin_file
+        index = Inference::ScopeIndexer.index(root, default_scope: scope, widen_clauses: true)
+        TypeOfMemo.phase!(:rule)
+        index
+      end
+
       def analyze_body(path)
         parse_result = parse_source(path)
         unless parse_result.errors.empty?
@@ -246,10 +260,8 @@ module Rigor
 
         root = parse_result.value
         Effects::Collector.record_root(root)
-        scope = @template_units.seed(
-          seed_project_scope(Scope.empty(environment: @environment, source_path: path)), path
-        )
-        index = Inference::ScopeIndexer.index(root, default_scope: scope, widen_clauses: true)
+        scope = seeded_scope(path)
+        index = index_main_pass(root, scope)
         # ADR-53 B4 — built-in collectors + plugin node rules share one walk.
         node_collectors = built_in_collectors(path, index, root)
         node_results = node_rule_results_by_plugin(path, root, scope, node_collectors, index)
@@ -269,6 +281,8 @@ module Rigor
         [analyzer_error(path, e.message)]
       rescue StandardError => e
         [analyzer_error(path, CrashSignature.check_rule_message(e))]
+      ensure
+        TypeOfMemo.end_file
       end
       private :analyze_body
 

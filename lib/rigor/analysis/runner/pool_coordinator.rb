@@ -10,6 +10,7 @@ require_relative "../run_stats"
 require_relative "../../effects/signature_sources"
 require_relative "../../rbs_extended/conformance_checker"
 require_relative "../../runtime/jit"
+require_relative "../../type_of_memo"
 require_relative "../../cache/engine_source"
 require_relative "run_level_facts"
 require_relative "worker_payload"
@@ -949,12 +950,15 @@ module Rigor
           # mode is opted into for large projects, so a slice reliably outlasts the remainder; a small-project
           # worker finishes first and stays at no-YJIT parity, exactly as the sequential path would.
           Runtime::Jit.rearm_after_fork
+          TypeOfMemo.forked
           results = slice.to_h { |path| [path, session.analyze(path)] }
           # ADR-103 WD13 — the effects slot is filled only on a collecting run.
           payload = WorkerPayload.harvest(session, results: results, record_effects: @record_effects)
           File.binwrite(out_path, Marshal.dump(payload))
+          TypeOfMemo.write_report
           exit!(0)
         rescue StandardError
+          TypeOfMemo.write_report
           exit!(1)
         end
 

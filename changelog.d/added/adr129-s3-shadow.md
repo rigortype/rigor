@@ -1,0 +1,1 @@
+- **[engine]** `RIGOR_TYPE_OF_SHADOW=1` runs a shadow of ADR-129's `type_of` result memo that checks every would-be hit against a fresh computation; nothing is served from it. ([#2875](https://github.com/rigortype/rigor/pull/2875))

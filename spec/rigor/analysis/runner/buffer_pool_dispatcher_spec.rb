@@ -299,5 +299,19 @@ RSpec.describe Rigor::Analysis::Runner::BufferPoolDispatcher do
         expect(Rigor::Runtime::Jit).to have_received(:rearm_after_fork)
       end
     end
+
+    it "resets and writes the type_of shadow's report before its exit!" do
+      Dir.mktmpdir do |dir|
+        dispatcher = described_class.allocate
+        allow(dispatcher).to receive_messages(exit!: nil, run_one: [])
+        allow(Rigor::TypeOfMemo).to receive_messages(forked: nil, write_report: nil)
+
+        dispatcher.send(:run_fork_worker, [[Object.new, 0]], File.join(dir, "payload"))
+
+        expect(Rigor::TypeOfMemo).to have_received(:forked).ordered
+        expect(Rigor::TypeOfMemo).to have_received(:write_report).ordered
+        expect(dispatcher).to have_received(:exit!).with(0)
+      end
+    end
   end
 end

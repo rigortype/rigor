@@ -33,8 +33,12 @@ RSpec.describe "ADR-129 Memo slots and MemoAudit" do
 
   def computed_tables = Rigor::TypingState.slots.select(&:computed)
 
+  # ADR-129 WD5 — the type_of memo's would-be hits are checked by G1 (`TypeOfMemo`), which recomputes each in
+  # production already, not by `MemoAudit.check`.
+  def checked_by_g1 = %i[type_of_memo]
+
   it "holds every Memo slot to audit labels" do
-    unwired = memos.reject(&:audit).map(&:name).sort
+    unwired = memos.reject(&:audit).map(&:name).sort - checked_by_g1
     expect(unwired).to be_empty, <<~MESSAGE
       ADR-129 WD1/G2: a Memo slot declares `audit:`, the MemoAudit.check labels its hits go through. Wire a new Memo
       before it lands.

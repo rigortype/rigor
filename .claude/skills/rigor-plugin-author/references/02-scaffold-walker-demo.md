@@ -126,12 +126,12 @@ When the DSL's analysis needs a *fact* the target library computes — an inflec
 
 ## Template-specific reference points
 
-These bundled plugins are all migrated onto `node_rule` — read one as a worked example of the shape you need:
+These plugins are all migrated onto `node_rule` — read one as a worked example of the shape you need:
 
-- **rigor-deprecations** — `node_rule(Prism::CallNode)` matching against config rules; the simplest single-rule plugin. See `lib/rigor/plugin/deprecations.rb`.
-- **rigor-statesman** — two-pass via `node_file_context` (collect declared states once) + `node_rule` (validate transitions against them). See `lib/rigor/plugin/statesman.rb`.
-- **rigor-shoulda-matchers** / **rigor-actionpack** — context-dependent rules that read the enclosing `describe <Model>` / controller from the `NodeContext` ancestors. See `lib/rigor/plugin/shoulda_matchers.rb` and `plugins/rigor-actionpack/lib/rigor/plugin/actionpack.rb` (its `Analyzer.*_violations_for` split + `enclosing_controller_name`).
-- **rigor-rails-routes** — `node_file_context` (same-file shadowing set) + `node_rule` + a `produces:` fact (`:helper_table`) published in `#prepare`. See `lib/rigor/plugin/rails_routes.rb`.
+- **rigor-deprecations** — `node_rule(Prism::CallNode)` matching against config rules; the simplest single-rule plugin (examples/). See `examples/rigor-deprecations/lib/rigor/plugin/deprecations.rb`.
+- **rigor-statesman** — two-pass via `node_file_context` (collect declared states once) + `node_rule` (validate transitions against them). See `plugins/rigor-statesman/lib/rigor/plugin/statesman.rb`.
+- **rigor-shoulda-matchers** / **rigor-actionpack** — context-dependent rules that read the enclosing `describe <Model>` / controller from the `NodeContext` ancestors. See `plugins/rigor-shoulda-matchers/lib/rigor/plugin/shoulda_matchers.rb` and `plugins/rigor-actionpack/lib/rigor/plugin/actionpack.rb` (its `Analyzer.*_violations_for` split + `enclosing_controller_name`).
+- **rigor-rails-routes** — `node_file_context` (same-file shadowing set) + `node_rule` + a `produces:` fact (`:helper_table`) published in `#prepare`. See `plugins/rigor-rails-routes/lib/rigor/plugin/rails_routes.rb`.
 - **rigor-lisp-eval** / **rigor-units** (examples/) — recursive evaluation of a literal AST argument inside the rule; `rigor-units` threads `@bindings` and consults `scope.type_of`. See their `analyzer.rb` / `interpreter.rb`.
 - **rigor-routes** (examples/) — `node_rule` for `*_path` / `*_url` calls, with the route table loaded via `cache_for(:route_table)` (see Phase 4.5 below).
 

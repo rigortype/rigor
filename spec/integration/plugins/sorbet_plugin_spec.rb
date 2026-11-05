@@ -1436,6 +1436,10 @@ RSpec.describe "plugins/rigor-sorbet" do
           end
           class Leaf < Base
           end
+          class Rooted < ::T::Struct
+          end
+        end
+        class Unsigiled < ::T::Struct
         end
       RBS
     end
@@ -1484,15 +1488,18 @@ RSpec.describe "plugins/rigor-sorbet" do
           end
           class Leaf < Base
           end
+          class Rooted < ::T::Struct
+            const :code, String
+          end
         end
       RUBY
     end
 
-    def struct_run(calls, extra_source: "")
+    def struct_run(calls, extra_source: "", extra_files: {})
       run_plugin(
         source: "# typed: true\n#{calls}",
-        files: { "structs.rb" => struct_source + extra_source, "sig/structs.rbs" => struct_rbs },
-        paths: ["demo.rb", "structs.rb"],
+        files: { "structs.rb" => struct_source + extra_source, "sig/structs.rbs" => struct_rbs, **extra_files },
+        paths: ["demo.rb", "structs.rb", *extra_files.keys],
         signature_paths: ["sig"]
       )
     end
@@ -1558,6 +1565,26 @@ RSpec.describe "plugins/rigor-sorbet" do
 
       expect(undefined_methods(result)).to be_empty
       expect(reveals(result)).to eq(%w[Symbol Integer Integer])
+    end
+
+    it "reads a rooted `::T::Struct` superclass as the struct root" do
+      result = struct_run("T.reveal_type(Outer::Rooted.new(code: \"c\").code)\n")
+
+      expect(undefined_methods(result)).to be_empty
+      expect(reveals(result)).to eq(["String"])
+    end
+
+    it "answers the accessors of a struct whose file Sorbet does not enforce (`# typed: false`)" do
+      unsigiled = <<~RUBY
+        # typed: false
+        class Unsigiled < T::Struct
+          const :level, Integer
+        end
+      RUBY
+      result = struct_run("T.reveal_type(Unsigiled.new(level: 1).level)\n", extra_files: { "unsigiled.rb" => unsigiled })
+
+      expect(undefined_methods(result)).to be_empty
+      expect(reveals(result)).to eq(["Integer"])
     end
 
     it "lets a `def` in the struct body win over the `prop` of the same name" do

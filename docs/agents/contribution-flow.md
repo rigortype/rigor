@@ -135,7 +135,7 @@ Once the change is implemented and `make verify-changed` passes:
    later push re-runs CI anyway, and the merge queue runs it once more on the merged result. The
    reviewer is a fresh agent that did not write the change, on the
    strongest model the harness offers — Claude Opus 5.5 under Claude Code; elsewhere a model of that
-   class, such as Claude Opus 4.6 at high effort. A harness that offers neither uses its strongest
+   class at high effort. A harness that offers neither uses its strongest
    model at its highest effort; one that cannot start a separate agent says so in the PR and leaves
    it Draft — the review is never skipped silently. Give the reviewer the base commit, the PR and its
    issue, and this repository's rules (the Flake, read-only `references/`, no local full gates, the

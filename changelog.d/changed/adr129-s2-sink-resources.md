@@ -1,0 +1,2 @@
+- **[engine]** Plugin boundary reads and run-scoped plugin registrations now count as typing-state Resources. ([#2831](https://github.com/rigortype/rigor/pull/2831))
+  - Each append refuses every open `type_of` capture, on the reading fiber and on the fiber that installed the sink, ahead of ADR-129's result memo.

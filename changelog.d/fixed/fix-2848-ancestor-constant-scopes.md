@@ -1,0 +1,2 @@
+- **[engine]** The constant ladder's ancestor-scope memo is keyed on the analysing file's discovery index, so a class reopened in two files with different `include`s no longer serves one file's ancestor order to the other, and the memo is checked under `RIGOR_MEMO_AUDIT=1`. ([#2872](https://github.com/rigortype/rigor/pull/2872))
+  - No output changes measured.

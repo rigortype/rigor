@@ -251,6 +251,16 @@ RSpec.describe Rigor::TypingState do
       expect(state.stale_slots(reads)).to eq([origins])
     end
 
+    it "compares a read's observed value by identity, so an equal but distinct value is stale" do
+      observed = [:scope, :type, 0]
+      store[node] = observed
+      reads, = capture { state.log_bound_read(origins, store, node, observed) }
+      store[node] = [:scope, :type, 0]
+
+      expect(store[node]).to eq(observed)
+      expect(state.stale_read(reads)).to eq(origins)
+    end
+
     it "holds a read-through cache's ABSENT read once the computation's own write is there, and only that write" do
       own = [:scope, :type, 0].freeze
       reads, = capture do
@@ -322,10 +332,25 @@ RSpec.describe Rigor::TypingState do
       expect(state.noting_priors?).to be(false)
     end
 
-    # Each Table's entry protocol reads back what a replayed write stored, in a store of the shape its writer fills.
-    it "reads back through every Table's entry protocol what a replay stored" do
-      key_object = Object.new
-      stores = {
+    it "notes an unbound table's priors, and a replay's, and opens a window only inside a capture" do
+      record = [:scope, :type, 0].freeze
+      state.weak_key_map(through)[node] = record
+      expect { state.open_priors }.to raise_error(ArgumentError, /inside a capture/)
+
+      state.open_capture
+      state.open_priors
+      state.log_write(through, node, :new)
+      state.replay([origins, [store, node].freeze, :cause])
+      noted = state.close_priors
+      state.close_capture
+
+      expect(noted).to eq([through, node, record, origins, [store, node], absent])
+      expect(noted[2]).to equal(record)
+    end
+
+    # Per Table: a store of the shape its writer fills (nil for an unbound table's slot), a key and a value.
+    def table_stores(key_object)
+      {
         dynamic_origins: -> { [{}.compare_by_identity, key_object, :cause] },
         void_origins: -> { [{}.compare_by_identity, key_object, :origin] },
         plugin_typed_calls: -> { [{}.compare_by_identity, key_object, true] },
@@ -337,8 +362,18 @@ RSpec.describe Rigor::TypingState do
         },
         inject_accumulator: -> { [nil, key_object, :record] },
         loop_value_record: -> { [nil, key_object, :record] },
-        user_method_return_memo: -> { [[:generation, {}.compare_by_identity], [key_object, [:k]].freeze, :entry] }
+        user_method_return_memo: lambda {
+          bucket = {}.compare_by_identity
+          bucket[Object.new] = { [:k] => :other_def }
+          [[:generation, bucket], [key_object, [:k]].freeze, :entry]
+        }
       }
+    end
+
+    # Each Table's entry protocol reads back what a replayed write stored, in a store of the shape its writer fills.
+    it "reads back through every Table's entry protocol what a replay stored" do
+      key_object = Object.new
+      stores = table_stores(key_object)
       tables = described_class.slots.select { |slot| slot.kind == :table }
 
       expect(tables.map(&:name)).to match_array(stores.keys)
@@ -360,6 +395,116 @@ RSpec.describe Rigor::TypingState do
 
       expect(capture_store.missing.to_a).to eq(["const:X"])
       expect(capture_store.reads.to_a).to eq([["b.rb", nil]])
+    end
+  end
+
+  # Each Table writer, through its real entry point, logs before it stores or passes the value it replaced, so a
+  # priors window notes what was there: an earlier value, or ABSENT for a first write. G1 builds the pre-computation
+  # state from these priors, so a wrong one would let a dropped write go unseen.
+  describe "the value each Table writer replaced" do
+    let(:current) { described_class.current }
+    let(:scope) { Rigor::Scope.empty(source_path: "/app/a.rb") }
+    let(:call) { Prism.parse("x.y").value.statements.body.first }
+
+    def absent = described_class::ABSENT
+
+    def priors_of
+      current.open_capture
+      current.open_priors
+      begin
+        yield
+      ensure
+        noted = current.close_priors
+        current.close_capture
+      end
+      noted.each_slice(3).map { |slot, key, prior| [described_class.slots[slot].name, key, prior] }
+    end
+
+    def prior_for(noted, name) = noted.find { |slot, _, _| slot == name }&.last
+
+    it "notes the cause each Scope advisory writer replaced, and ABSENT for a first record" do
+      scope.record_dynamic_origin(call, :old)
+      scope.record_void_origin(call, :old_void)
+      noted = priors_of do
+        scope.record_dynamic_origin(call, :new)
+        scope.record_void_origin(call, :new_void)
+        scope.record_plugin_typed_call(call)
+        scope.record_optimistic_origin(call, :cause)
+      end
+
+      expect(noted.map { |name, _, prior| [name, prior] }).to eq(
+        [%i[dynamic_origins old], %i[void_origins old_void], [:plugin_typed_calls, absent],
+         [:optimistic_origins, absent]]
+      )
+    end
+
+    it "notes the record the inject and loop records replaced" do
+      typer = Rigor::Inference::ExpressionTyper.new(scope: scope)
+      int = Rigor::Type::Combinator.nominal_of("Integer")
+      typer.send(:record_inject_accumulator, call, int)
+      Rigor::Inference::LoopValueRecord.conditional(call, scope, int)
+      inject_before = current[index(:inject_accumulator)][call]
+      loop_before = current[index(:loop_value_record)][call]
+      noted = priors_of do
+        typer.send(:record_inject_accumulator, call, int)
+        Rigor::Inference::LoopValueRecord.conditional(call, scope, int)
+      end
+
+      expect(prior_for(noted, :inject_accumulator)).to equal(inject_before)
+      expect(prior_for(noted, :loop_value_record)).to equal(loop_before)
+    ensure
+      described_class.release_run_scoped
+    end
+
+    it "notes the entry a return-memo store replaced" do
+      typer = Rigor::Inference::ExpressionTyper.new(scope: scope)
+      per_def = (typer.send(:return_memo_bucket)[call] ||= {})
+      typer.send(:store_return_memo, per_def, call, [:key], :old_entry)
+      noted = priors_of { typer.send(:store_return_memo, per_def, call, [:key], :new_entry) }
+
+      expect(noted).to eq([[:user_method_return_memo, [call, [:key]], :old_entry]])
+    ensure
+      described_class.release_run_scoped
+    end
+
+    it "notes ABSENT for a new effects record, and the record an unresolved verdict replaced" do
+      other = Prism.parse("p.q").value.statements.body.first
+      noted = nil
+      Rigor::Effects::Collector.collect_for(scope.source_path) do
+        Rigor::Effects::Collector.record_call(call, Rigor::Type::Combinator.nominal_of("Integer"), scope)
+        recorded = current[index(:effects_collector)].calls[call]
+        noted = priors_of do
+          Rigor::Effects::Collector.record_unresolved(call, scope.source_path)
+          Rigor::Effects::Collector.record_call(other, Rigor::Type::Combinator.nominal_of("Integer"), scope)
+        end
+        expect(noted.first.last).to equal(recorded)
+      end
+
+      expect(noted.map(&:last).drop(1)).to eq([absent])
+    end
+
+    it "notes ABSENT for a self-call miss and a dependency filing, which only add" do
+      self_calls = nil
+      Rigor::Analysis::SelfCallResolutionRecorder.record_for("/app/a.rb") do
+        self_calls = priors_of do
+          2.times do
+            Rigor::Analysis::SelfCallResolutionRecorder.record(class_name: "A", method_name: :m, node: call,
+                                                               path: "/app/a.rb", line: 1, column: 1)
+          end
+        end
+      end
+      dependencies = nil
+      Rigor::Analysis::DependencyRecorder.record_for("/app/a.rb") do
+        Rigor::Analysis::DependencyRecorder.read_site("/app/b.rb:3", "B#m")
+        dependencies = priors_of do
+          Rigor::Analysis::DependencyRecorder.read_site("/app/b.rb:3", "B#m")
+          Rigor::Analysis::DependencyRecorder.read_site("/app/c.rb:3", "C#m")
+        end
+      end
+
+      expect(self_calls.map { |name, _, prior| [name, prior] }).to eq([[:self_call_misses, absent]])
+      expect(dependencies.map { |name, key, prior| [name, key[1], prior] })
+        .to eq([[:dependency_reads, ["/app/c.rb", "C#m"], absent]])
     end
   end
 

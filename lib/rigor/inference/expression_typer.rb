@@ -3700,10 +3700,10 @@ module Rigor
       end
 
       # ADR-129 WD3 — journals a return-memo read or store under `[def_node, memo_key]`. The composite key is built
-      # only while a capture or a priors window is open, so a run with the `type_of` memo off allocates nothing here.
+      # only while a capture is open, so a run with the `type_of` memo off allocates nothing here.
       def log_return_memo(kind, def_node, memo_key, value)
         state = typing_state
-        return unless state.capturing? || state.noting_priors?
+        return unless state.capturing?
 
         key = [def_node, memo_key].freeze
         kind == :read ? state.log_read(RETURN_MEMO, key, value) : state.log_write(RETURN_MEMO, key, value)

@@ -121,7 +121,7 @@ module Rigor
 
       # A file's analysis starts: a fresh table, in the main pass. A no-op when off.
       def begin_file
-        return unless @enabled
+        return unless @enabled && Ractor.main?
 
         table = Table.new
         table.phase = :main
@@ -148,12 +148,16 @@ module Rigor
         nil
       end
 
-      # The block's value, the type `node` has in `scope`, computed by production under G1's shadow.
+      # The block's value, the type `node` has in `scope`, computed by production under G1's shadow. Typing outside a
+      # file's analysis ({begin_file} .. {end_file}: a pre-pass, a language-server query, a non-main Ractor) has no
+      # table and is not shadowed.
       # `callee` is whether the typing runs in a callee body (the ADR-84 guard stack is not empty).
       def shadow(state, scope, node, callee: false, &)
         return yield if LEAVES[node.class]
 
-        table = state[TABLE] || (state[TABLE] = Table.new)
+        table = state[TABLE]
+        return yield if table.nil?
+
         phase = callee ? :callee : table.phase
         by_id = (table.entries[scope] ||= {}.compare_by_identity)[node] ||= {}
         id = state.id
@@ -220,9 +224,19 @@ module Rigor
       EMPTY = [].freeze
       private_constant :EMPTY
 
+      # G1's verdict on one would-be hit. An error in the comparison itself is counted as a mismatch rather than raised:
+      # the typing path's rescues would turn a raise into a different answer.
       def judge(state, phase, scope, node, stored, fresh, writes, priors, refused) # rubocop:disable Metrics/ParameterLists
+        compare(state, phase, scope, node, stored, fresh, writes, priors, refused)
+      rescue StandardError => e
+        count(phase, :mismatch)
+        count(phase, :mismatch_judge_error)
+        sample(phase, scope, node, [:judge_error, "#{e.class}: #{e.message[0, 120]}"], stored, fresh, [])
+      end
+
+      def compare(state, phase, scope, node, stored, fresh, writes, priors, refused) # rubocop:disable Metrics/ParameterLists
         kinds = []
-        kinds << :type unless fresh == stored
+        kinds << :type unless same?(fresh, stored)
         kinds << :resource if refused
         diffs = table_diffs(state, writes, priors)
         kinds << :table unless diffs.empty?
@@ -258,14 +272,21 @@ module Rigor
 
       # Entry values compare by identity, or by `==` element-wise, a scope (which the one-slot caches record) by
       # identity alone: `Scope#==` ignores fields typing reads.
+      #
+      # `==` ignores a Hash's order, which output shows: a type also compares its rendering
+      # (`HashShape#==` compares its pairs as a Hash), and a Hash its entries in order.
       def same?(left, right)
         return true if left.equal?(right)
         return false if left.is_a?(Scope) || right.is_a?(Scope)
-        if left.is_a?(Array) && right.is_a?(Array)
-          return left.size == right.size && left.each_index.all? { |index| same?(left[index], right[index]) }
-        end
+        return ordered_same?(left.to_a, right.to_a) if left.is_a?(Hash) && right.is_a?(Hash)
+        return ordered_same?(left, right) if left.is_a?(Array) && right.is_a?(Array)
+        return false unless left == right
 
-        left == right
+        !left.respond_to?(:describe) || !right.respond_to?(:describe) || left.describe(:short) == right.describe(:short)
+      end
+
+      def ordered_same?(left, right)
+        left.size == right.size && left.each_index.all? { |index| same?(left[index], right[index]) }
       end
 
       def count(phase, counter) = @stats.count(phase, counter)
@@ -292,7 +313,16 @@ module Rigor
         "<describe failed: #{e.class}>"
       end
 
-      # Appends this process's report to `RIGOR_TYPE_OF_SHADOW_REPORT`, when set (one JSON line).
+      public
+
+      # A forked child starts: the counters it inherited are the parent's, which the parent reports.
+      def forked
+        reset if @enabled
+        nil
+      end
+
+      # Appends this process's report to `RIGOR_TYPE_OF_SHADOW_REPORT`, when set (one JSON line). Runs at exit, and a
+      # forked worker calls it before its `exit!`, which skips `at_exit`.
       def write_report
         path = ENV.fetch("RIGOR_TYPE_OF_SHADOW_REPORT", nil)
         return unless @enabled && path

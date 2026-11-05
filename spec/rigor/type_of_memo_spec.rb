@@ -22,7 +22,7 @@ RSpec.describe Rigor::TypeOfMemo do
 
   before do
     described_class.reset
-    state[Rigor::TypingState.slot(:type_of_memo).index] = nil
+    state[Rigor::TypingState.slot(:type_of_memo).index] = described_class::Table.new
   end
 
   after { described_class.reset }
@@ -98,6 +98,105 @@ RSpec.describe Rigor::TypeOfMemo do
     expect(state.capturing?).to be(false)
   end
 
+  it "compares the live table with the entry's last write of a key, not its first" do
+    write = lambda do |*values|
+      values.each do |value|
+        state.log_bound_write(origins, store, node, value)
+        store[node] = value
+      end
+      int
+    end
+    shadow { write.call(:first, :last) }
+    shadow { write.call(:last, :first) }
+
+    expect(counts).to include(mismatch: 1, mismatch_table: 1)
+  end
+
+  it "compares a recorded scope by identity, not by Scope#==" do
+    other = Rigor::Scope.empty
+    record = ->(recorded) { [recorded, int, 0].freeze }
+    write = lambda do |recorded|
+      state.log_bound_write(origins, store, node, record.call(recorded))
+      store[node] = record.call(recorded)
+      int
+    end
+    shadow { write.call(scope) }
+    shadow { write.call(other) }
+
+    expect(other).to eq(scope)
+    expect(counts).to include(mismatch: 1, mismatch_table: 1)
+  end
+
+  it "compares types by their rendering too, which shows a hash shape's order that == ignores" do
+    shape = ->(pairs) { Rigor::Type::Combinator.hash_shape_of(pairs) }
+    forward = shape.call(a: int, b: str)
+    backward = shape.call(b: str, a: int)
+    shadow { forward }
+    shadow { backward }
+
+    expect(forward).to eq(backward)
+    expect(counts).to include(mismatch: 1, mismatch_type: 1)
+  end
+
+  it "counts an error in the comparison as a mismatch and still answers the computation's value" do
+    broken = Array.new(2) do
+      Object.new.tap { |object| def object.==(_other) = raise(ArgumentError, "boom") }
+    end
+    shadow { broken[0] }
+
+    expect(shadow { broken[1] }).to equal(broken[1])
+    expect(counts).to include(mismatch: 1, mismatch_judge_error: 1)
+  end
+
+  it "shadows nothing outside a file's analysis, where no table is open" do
+    state[Rigor::TypingState.slot(:type_of_memo).index] = nil
+    2.times { shadow { int } }
+
+    expect(described_class.counts).to be_empty
+  end
+
+  it "shadows a plain typer and bypasses one that carries operand types (WD1's instance state)" do
+    current = Rigor::TypingState.current
+    table = Rigor::TypingState.slot(:type_of_memo).index
+    typed = lambda do |operand_types|
+      described_class.reset
+      Rigor::Inference::ExpressionTyper.new(scope: scope, operand_types: operand_types).type_of(node)
+      described_class.counts.sum { |_, counters| counters[:lookups] }
+    end
+    described_class.enable!
+    current[table] = described_class::Table.new
+    begin
+      expect(typed.call(nil)).to be_positive
+      expect(typed.call({}.compare_by_identity)).to eq(0)
+    ensure
+      current[table] = nil
+      described_class.disable!
+    end
+  end
+
+  it "reports a forked child's own counts, not those it inherited, before the child's exit!" do
+    shadow { int }
+    report = Dir.mktmpdir do |dir|
+      path = File.join(dir, "report.jsonl")
+      write_child_report(path)
+      JSON.parse(File.read(path))
+    end
+
+    expect(report.dig("counts", "other")).to eq("lookups" => 1, "checked" => 1)
+  end
+
+  def write_child_report(path)
+    previous = ENV.fetch("RIGOR_TYPE_OF_SHADOW_REPORT", nil)
+    ENV["RIGOR_TYPE_OF_SHADOW_REPORT"] = path
+    described_class.enable!
+    described_class.forked
+    shadow { int }
+    described_class.write_report
+  ensure
+    ENV["RIGOR_TYPE_OF_SHADOW_REPORT"] = previous
+    described_class.disable!
+  end
+
   it "counts a read slice that no longer holds as a stale miss by slot, not as a mismatch" do
     shadow do
       state.log_bound_read(origins, store, node, Rigor::TypingState::ABSENT)
@@ -142,6 +241,8 @@ RSpec.describe Rigor::TypeOfMemo do
 
     expect(on).to eq(off)
     expect(checked).to be_positive
+    expect(described_class.counts.keys).to include(:main, :rule, :callee)
+    expect(described_class.counts.keys).not_to include(:other)
     expect(described_class.mismatches).to eq(0), described_class.samples.first(3).inspect
   end
 end

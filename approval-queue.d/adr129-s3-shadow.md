@@ -23,7 +23,8 @@ WD6's stage-3 row does not name the phases, the table's kind, the switch, or how
   refuse every enclosing capture on each lookup; a new kind would change WD1.
 - **Switch and report:** `RIGOR_TYPE_OF_SHADOW=1`, a process switch read once at load like `RIGOR_MEMO_AUDIT`, and
   `RIGOR_TYPE_OF_SHADOW_REPORT=path`, to which each process appends one JSON line of counters per phase, stale-miss
-  slots and up to 50 mismatch samples at exit, so `--workers` runs aggregate by concatenation.
+  slots and up to 50 mismatch samples at exit; a forked worker resets the counters it inherited and writes its
+  line before its `exit!`, so `--workers` runs aggregate by concatenation.
 - **Comparing table values:** identity, or `==` element-wise, with a `Scope` compared by identity alone, since
   `Scope#==` ignores fields typing reads.
 

@@ -3,6 +3,7 @@
 require "tmpdir"
 
 require_relative "../runtime/jit"
+require_relative "../type_of_memo"
 
 module Rigor
   module Inference
@@ -95,6 +96,7 @@ module Rigor
           # what is left of the parent's window rather than a fresh one; {Runtime::Jit.rearm_after_fork}
           # carries the mechanism.
           Runtime::Jit.rearm_after_fork
+          TypeOfMemo.forked
           # Published before the block runs, so anything it lazily creates for this process alone lands in the
           # parent's tmpdir and dies with it. See {.child_scratch_dir}.
           @child_scratch_dir = File.dirname(out_path)
@@ -105,6 +107,7 @@ module Rigor
         ensure
           @child_scratch_dir = nil
         end
+        TypeOfMemo.write_report
         exit!(status)
       end
 

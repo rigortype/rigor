@@ -49,8 +49,12 @@ module Rigor
       # ADR-129 WD1 — the two per-file inputs of the walk, each a Frame {.walk_file} installs for the file's walk and
       # restores on the way out: the `def`s on the undefined side of a definedness guard, and each `def`'s visibility.
       # Both are frozen once built and read only by {.walk_node}'s callees.
-      GUARDED_DEFS = TypingState.frame(:patched_scanner_guarded_defs, reason: "installed per scanned file's walk")
-      DEF_VISIBILITIES = TypingState.frame(:patched_scanner_def_visibilities, reason: "installed per scanned file")
+      #
+      # G1′: the walk is a Prism traversal that never types, so no `type_of` runs while either is installed.
+      GUARDED_DEFS = TypingState.frame(:patched_scanner_guarded_defs, reason: "installed per scanned file's walk",
+                                                                      typing_unreachable: true)
+      DEF_VISIBILITIES = TypingState.frame(:patched_scanner_def_visibilities, reason: "installed per scanned file",
+                                                                              typing_unreachable: true)
       private_constant :GUARDED_DEFS, :DEF_VISIBILITIES
 
       module_function

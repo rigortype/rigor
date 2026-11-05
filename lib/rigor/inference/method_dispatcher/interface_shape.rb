@@ -25,7 +25,8 @@ module Rigor
       module InterfaceShape
         # ADR-130 WD5 — the dispatch-off flag {.without_dispatch} installs (`RbsDispatch.without_interface_dispatch`).
         DISPATCH_OFF = TypingState.frame(
-          :interface_dispatch_off, reason: "a flag installed around a dispatch-off run (sig-gen, the parity harness)"
+          :interface_dispatch_off, reason: "a flag installed around a dispatch-off run (sig-gen, the parity harness)",
+                                   witness: "spec/fixtures/typing_state_witnesses/interface_erasure.rb"
         )
         private_constant :DISPATCH_OFF
 

@@ -44,7 +44,10 @@ RSpec.describe Rigor::TypingState do
     end
 
     it "refuses a duplicate name, an empty reason and an option the kind cannot carry" do
-      expect { described_class.frame(:yield_value_type, reason: "x") }.to raise_error(ArgumentError, /already declared/)
+      expect do
+        described_class.frame(:yield_value_type, reason: "x",
+                                                 witness: "w.rb")
+      end.to raise_error(ArgumentError, /already declared/)
       expect { described_class.memo(:typing_state_spec_probe, reason: " ") }.to raise_error(ArgumentError, /why/)
       expect { described_class.resource(:typing_state_spec_probe, reason: "x", read_exemption: :maybe) }
         .to raise_error(ArgumentError, /read_exemption/)

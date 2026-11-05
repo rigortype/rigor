@@ -199,13 +199,17 @@ module Rigor
       # ADR-129 WD1 — the installation is a Frame and each record is a Resource touch.
       RETURN_SINK = TypingState.frame(
         :return_sink,
-        contents: :resource, reason: "installed per method body; each `return` records into it"
+        contents: :resource, reason: "installed per method body; each `return` records into it",
+        witness: "spec/fixtures/typing_state_witnesses/return_sink.rb"
       )
       private_constant :RETURN_SINK
 
       # Thread-local flag: set while a side pass ({.provisional_returns}) re-types part of a body from a scope other
       # than the one the statement walk holds, so the `return`s it reaches are filed as provisional ({ReturnSink}).
-      PROVISIONAL_RETURNS = TypingState.frame(:provisional_returns, reason: "a flag installed around a side pass")
+      PROVISIONAL_RETURNS = TypingState.frame(
+        :provisional_returns, reason: "a flag installed around a side pass",
+                              witness: "spec/fixtures/typing_state_witnesses/provisional_returns.rb"
+      )
       private_constant :PROVISIONAL_RETURNS
 
       # The `return` sink {.with_return_sink} installs. Issue #2299 — a `return` the statement walk records is typed
@@ -249,7 +253,8 @@ module Rigor
       # directly-targeting set, exactly as the break sink does. nil means "not collecting".
       NEXT_SINK = TypingState.frame(
         :next_sink,
-        contents: :resource, reason: "installed per block body; each `next` records into it"
+        contents: :resource, reason: "installed per block body; each `next` records into it",
+        witness: "spec/fixtures/typing_state_witnesses/jump_sinks.rb"
       )
       private_constant :NEXT_SINK
 
@@ -265,7 +270,8 @@ module Rigor
       BREAK_SINK = TypingState.frame(
         :break_sink,
         contents: :resource, read_exemption: :delta_internal,
-        reason: "installed per loop body; each `break` records into it, and an enclosing `ensure` rewrites them"
+        reason: "installed per loop body; each `break` records into it, and an enclosing `ensure` rewrites them",
+        witness: "spec/fixtures/typing_state_witnesses/jump_sinks.rb"
       )
       private_constant :BREAK_SINK
 
@@ -281,7 +287,8 @@ module Rigor
       # that belongs to an inner loop or block never reaches the wrong consumer. nil means "not collecting".
       BREAK_VALUE_SINK = TypingState.frame(
         :break_value_sink,
-        contents: :resource, reason: "installed per yielding call; each `break` records into it"
+        contents: :resource, reason: "installed per yielding call; each `break` records into it",
+        witness: "spec/fixtures/typing_state_witnesses/jump_sinks.rb"
       )
       private_constant :BREAK_VALUE_SINK
 
@@ -2959,7 +2966,8 @@ module Rigor
       # ({#record_raise_points}).
       RETRY_FRAMES = TypingState.frame(
         :retry_frames,
-        contents: :resource, reason: "installed per retrying body; each raise point records into it"
+        contents: :resource, reason: "installed per retrying body; each raise point records into it",
+        witness: "spec/fixtures/typing_state_witnesses/retry_frames.rb"
       )
       private_constant :RETRY_FRAMES
 

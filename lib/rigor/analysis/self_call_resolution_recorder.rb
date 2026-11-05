@@ -31,7 +31,9 @@ module Rigor
       # count below is a process switch, outside the typing state (WD5).
       RECORDER = TypingState.frame(
         :self_call_resolution_recorder,
-        contents: :table, reason: "the accumulator a recording installs; each unresolved call records into it"
+        contents: :table, reason: "the accumulator a recording installs; each unresolved call records into it",
+        # G1′ witness: the memo journals and replays the records, so it is not a shut switch (unlike the tracers).
+        witness: "spec/fixtures/typing_state_witnesses/self_call_resolution_recorder.rb"
       )
       private_constant :RECORDER
 

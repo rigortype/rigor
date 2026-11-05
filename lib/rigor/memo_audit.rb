@@ -42,9 +42,10 @@ module Rigor
     KeyDeclaration = Data.define(:forced, :gaps, :carried)
 
     # ADR-129 WD1 — a Frame, installed around a recomputation. `@enabled` is a process switch, outside the typing
-    # state (WD5).
+    # state (WD5). G1′ witness: a recomputation types a callee body, and the memo hits inside it read the flag.
     SUSPENDED = TypingState.frame(
-      :memo_audit_suspended, reason: "set around an audit recomputation, which bypasses every memo"
+      :memo_audit_suspended, reason: "set around an audit recomputation, which bypasses every memo",
+                             witness: "spec/fixtures/typing_state_witnesses/memo_audit_suspended.rb"
     )
     private_constant :SUSPENDED
 
@@ -112,6 +113,31 @@ module Rigor
       state = TypingState.current
       state.append(MISMATCHES, mismatch)
       raise mismatch
+    end
+
+    # ADR-129 G1′ — a `type_of` begins on this thread, for the matching {leave_type_of}; the caller guards on
+    # {enabled?}, so an audit that is off costs one boolean check. Fails (as a {Mismatch} on the list, not raised) on an
+    # installed `typing_unreachable` Frame ({TypingState::FrameAudit}).
+    def enter_type_of
+      state = TypingState.current
+      state.extend(TypingState::FrameAudit) unless state.is_a?(TypingState::FrameAudit)
+      state.enter_type_of
+    end
+
+    # ADR-129 G1′ — the `type_of` {enter_type_of} tracked ends.
+    def leave_type_of
+      TypingState.current.leave_type_of
+    end
+
+    # Keeps one {Mismatch} per message on the list until it is drained: a Frame declaration that does not hold is
+    # reported at every `type_of` it meets.
+    def report_frame_declaration(state, message)
+      pending = state.read(MISMATCHES)
+      return if pending&.any? { |mismatch| mismatch.message == message }
+
+      mismatch = Mismatch.new(message)
+      mismatch.set_backtrace(caller.drop_while { |frame| frame.include?("/typing_state.rb:") })
+      state.append(MISMATCHES, mismatch)
     end
 
     # The mismatches raised on this thread since the last drain, oldest first, and an empty list for the next file.

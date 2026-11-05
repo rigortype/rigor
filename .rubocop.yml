@@ -5,6 +5,8 @@ AllCops:
     - "references/**/*"
     - "vendor/**/*"
     - "spec/integration/fixtures/**/*"
+    # ADR-129 G1' witnesses: programs typed as written, not style-checked.
+    - "spec/fixtures/typing_state_witnesses/**/*"
     - "tool/**/*"
     - "examples/*/demo/.rigor/**/*"
     - "plugins/*/demo/.rigor/**/*"

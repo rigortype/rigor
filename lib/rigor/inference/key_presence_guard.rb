@@ -66,7 +66,8 @@ module Rigor
       WALK = TypingState.frame(
         :key_presence_walk,
         contents: :resource, read_exemption: :id_determined,
-        reason: "installed per guarded re-walk; each recorded guard rewrites its `guard_ends`"
+        reason: "installed per guarded re-walk; each recorded guard rewrites its `guard_ends`",
+        witness: "spec/fixtures/typing_state_witnesses/key_presence_walk.rb"
       )
       REWALK = TypingState.memo(
         :key_presence_rewalk,

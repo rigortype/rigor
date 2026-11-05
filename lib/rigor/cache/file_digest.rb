@@ -48,7 +48,10 @@ module Rigor
         memos: %i[digests stats],
         reason: "installed per run by with_run; the digest and stat tables are extensional caches keyed on the path, " \
                 "filled in place, both reading the filesystem under the run's stable-filesystem premise, and the " \
-                "recording instant and strict flag are fixed at install"
+                "recording instant and strict flag are fixed at install",
+        # G1′ witness: the run wraps the typing of every file, and the first `type_of` that needs the RBS environment
+        # fetches it from the cache, whose descriptor digests the signature files through {.hexdigest}.
+        witness: "spec/fixtures/typing_state_witnesses/lazy_rbs_environment.rb"
       )
       private_constant :RUN
 

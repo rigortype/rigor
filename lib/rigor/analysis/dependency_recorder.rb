@@ -21,7 +21,9 @@ module Rigor
       # switch, outside the typing state (WD5).
       RECORDER = TypingState.frame(
         :dependency_recorder,
-        contents: :resource, reason: "the consumer's accumulator a recording installs; each read files into it"
+        contents: :resource, reason: "the consumer's accumulator a recording installs; each read files into it",
+        # G1′: a tracer switch, under which the `type_of` memo stays shut (WD4).
+        memo_shut_while_installed: true
       )
       private_constant :RECORDER
 

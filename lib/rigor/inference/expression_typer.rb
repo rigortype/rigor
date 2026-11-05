@@ -273,6 +273,9 @@ module Rigor
       def type_of(node)
         previous = @typing_node
         @typing_node = node
+        # ADR-129 G1′: under the audit, the Frame declarations are asserted around every `type_of`.
+        audited = MemoAudit.enabled?
+        MemoAudit.enter_type_of if audited
         result = if FlowTracer.active?
                    FlowTracer.trace_node(node) { untraced_type_of(node) }
                  else
@@ -281,6 +284,7 @@ module Rigor
         result
       ensure
         @typing_node = previous
+        MemoAudit.leave_type_of if audited
       end
 
       def untraced_type_of(node)
@@ -399,7 +403,10 @@ module Rigor
       # inference rebuilds freely. It is installed unconditionally — with `nil` — at every user-method
       # inference frame, so a callee reached WITHOUT a block from inside a yielding body cannot read its
       # caller's block.
-      YIELD_VALUE = TypingState.frame(:yield_value_type, reason: "the caller's block value, installed per frame")
+      YIELD_VALUE = TypingState.frame(
+        :yield_value_type, reason: "the caller's block value, installed per frame",
+                           witness: "spec/fixtures/typing_state_witnesses/yield_value_type.rb"
+      )
       private_constant :YIELD_VALUE
 
       def self.current_yield_value_type
@@ -424,7 +431,8 @@ module Rigor
       # `c`'s holds `b`'s. The list is the callee's call-site `arg_types`, which is what keeps the ADR-84
       # return memo's `(def_node, receiver, arg_types)` key complete for a forwarding def.
       FORWARDED_ARGS = TypingState.frame(:forwarded_call_arg_types,
-                                         reason: "the caller's frozen argument list, installed per frame")
+                                         reason: "the caller's frozen argument list, installed per frame",
+                                         witness: "spec/fixtures/typing_state_witnesses/forwarded_call_arg_types.rb")
       private_constant :FORWARDED_ARGS
 
       def self.current_forwarded_arg_types
@@ -5055,7 +5063,10 @@ module Rigor
       # Suppression flag for {#threaded_block_body_type} — set while a fold is running (so a fold never nests)
       # and while the per-element Tuple fold is over its arity cap. Thread-local because block typing is
       # re-entrant within one thread and the fork-pool workers each own their own.
-      THREADED_BLOCK_BODY = TypingState.frame(:threaded_block_body, reason: "a suppression flag installed per fold")
+      THREADED_BLOCK_BODY = TypingState.frame(
+        :threaded_block_body, reason: "a suppression flag installed per fold",
+                              witness: "spec/fixtures/typing_state_witnesses/threaded_block_body.rb"
+      )
       private_constant :THREADED_BLOCK_BODY
 
       def block_body_threading_suppressed?

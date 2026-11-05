@@ -1,0 +1,2 @@
+- **[engine]** Every typing-state Frame now declares how typing meets it (a witness fixture, or that typing never reaches or never reads it, or that the result memo stays shut under it), and the memo audit checks the declarations that can be checked. ([#PRNUM](https://github.com/rigortype/rigor/pull/PRNUM))
+  - Groundwork for ADR-129's result memo; no output changes.

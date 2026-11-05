@@ -84,7 +84,10 @@ module Rigor
       CORE_ROOT = TypingState.frame(
         :rbs_core_root,
         reason: "installed per environment build by with_core_root; selects the core/ directory every loader of the " \
-                "build reads (a validated absolute path, or nil for the rbs gem's own)"
+                "build reads (a validated absolute path, or nil for the rbs gem's own)",
+        # G1′ witness: the environment builds lazily, from inside the first `type_of` that needs it, under the core
+        # root the build installs.
+        witness: "spec/fixtures/typing_state_witnesses/lazy_rbs_environment.rb"
       )
       private_constant :CORE_ROOT
 

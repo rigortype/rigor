@@ -70,6 +70,7 @@ module Rigor
     # answers:
     # - `entry(store, key)`: the value at `key`, or {ABSENT}, for a nil store too (an unbound table not created yet);
     # - `put(store, key, value)`: stores `value` at `key` the way the table's own writer does;
+    # - `delete(store, key)`: removes the entry at `key`, undoing a first write (G1's stage-4 form);
     # - `container(state, slot)`: the store an unbound table's replay writes into, the one `state` holds in `slot` or
     #   one it creates there the way the table's writer does.
     #
@@ -84,6 +85,10 @@ module Rigor
         store[key] = value
       end
 
+      def delete(store, key)
+        store.delete(key)
+      end
+
       def container(state, slot) = state[slot] || (state[slot] = {})
     end
 
@@ -96,6 +101,10 @@ module Rigor
 
       def put(store, key, value)
         store[key] = value
+      end
+
+      def delete(store, key)
+        store&.delete(key)
       end
 
       def container(state, slot) = state.weak_key_map(slot)
@@ -141,8 +150,8 @@ module Rigor
       def table(name, reason:, run_scoped: false, read_through: false, bound: false, computed: nil,
                 entries: StoreEntries)
         raise ArgumentError, "#{name}: a bound table holds no run-scoped value" if bound && run_scoped
-        unless %i[entry put container].all? { |method| entries.respond_to?(method) }
-          raise ArgumentError, "#{name}: entries must answer entry, put and container"
+        unless %i[entry put delete container].all? { |method| entries.respond_to?(method) }
+          raise ArgumentError, "#{name}: entries must answer entry, put, delete and container"
         end
 
         declare(name, :table, reason, run_scoped: run_scoped, read_through: read_through, bound: bound,
@@ -346,6 +355,43 @@ module Rigor
         noted.freeze
       end
 
+      # The journal's length now, a mark for {#truncate_journal}.
+      def journal_size = @journal.size
+
+      # Drops the journal's records past `mark`, which no capture opened since `mark` is still open to own (G1's
+      # stage-4 form drops a recomputation's records, which the served entry's replace).
+      def truncate_journal(mark)
+        @journal.slice!(mark..)
+        nil
+      end
+
+      # Appends `reads` (a read slice, {#slices}) to the journal as the reads they record, so every open capture
+      # inherits them: a served hit's upward merge (WD3 step 2).
+      def merge_reads(reads)
+        return if @marks.empty?
+
+        index = 0
+        while index < reads.size
+          @journal.push(:read, reads[index], reads[index + 1], reads[index + 2])
+          index += 4
+        end
+        nil
+      end
+
+      # Puts back, last first, the values `priors` ({#close_priors}) noted, removing an entry noted {ABSENT}: undoes
+      # the writes of the computation the window was open around.
+      def undo(priors)
+        index = priors.size - 3
+        while index >= 0
+          slot = priors[index]
+          key = priors[index + 1]
+          prior = priors[index + 2]
+          ABSENT.equal?(prior) ? remove(slot, key) : put(slot, key, prior)
+          index -= 3
+        end
+        nil
+      end
+
       private
 
       # Stores `value` at `key` (a journal record's key) in the Table `slot`, creating an unbound table's store.
@@ -355,6 +401,14 @@ module Rigor
 
         entries = declared.entries
         entries.put(entries.container(self, slot), key, value)
+      end
+
+      # Removes the entry at `key` (a journal record's key) from the Table `slot`.
+      def remove(slot, key)
+        declared = TypingState.slots[slot]
+        return declared.entries.delete(key[0], key[1]) if declared.bound
+
+        declared.entries.delete(@values[slot], key)
       end
 
       def read_holds?(reads, index)

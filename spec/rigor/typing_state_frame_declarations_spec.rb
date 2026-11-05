@@ -145,6 +145,7 @@ RSpec.describe "ADR-129 G1' Frame declarations", type: :runner do
             run_source(source, signature_dir: dir)
           end
         when :self_call_resolution_recorder then run_source(source, signature_dir: dir, record_self_calls: true)
+        when :dependency_recorder then run_source(source, signature_dir: dir, record_dependencies: true)
         when :effects_collector then run_source(source, signature_dir: dir, config: { "effects" => {} })
         when :file_digest_run then analyze(source)
         when :rbs_core_root

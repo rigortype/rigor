@@ -43,7 +43,11 @@ Classification judgment calls, each decided by reading the code that reads the s
   and only the index walk and the writer gates read them.
 - `patched_scanner_guarded_defs` and `patched_scanner_def_visibilities` are `typing_unreachable`: the scan is a Prism
   traversal that never types.
-- `flow_tracer` and `dependency_recorder` are `memo_shut_while_installed` (WD4). `self_call_resolution_recorder` and
+- `flow_tracer` is `memo_shut_while_installed`: the stage-3 shadow skips under `FlowTracer.active?` (WD4).
+  `dependency_recorder` is a witness, not a shut switch: WD4 shuts the memo under ADR-46 recording only until the
+  dependency reads are a journaled Table (done in #2852), the shadow runs under `--incremental` with the recorder
+  installed, and `read_site` and `read_name` read it inside `type_of`. The witness harness runs with
+  `record_dependencies: true`. `self_call_resolution_recorder` and
   `effects_collector` are witnesses: their records are journaled Tables the memo replays, and the ADR names the effects
   switch a witness.
 - `key_presence_walk`'s witness run is reported by the key audit as a `KeyMismatch` (the rewalk miss reads `retry_frames` without a

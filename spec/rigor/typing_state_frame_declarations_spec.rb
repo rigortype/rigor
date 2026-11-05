@@ -51,6 +51,10 @@ RSpec.describe "ADR-129 G1' Frame declarations", type: :runner do
 
   def frames = state_module.slots.select { |slot| slot.kind == :frame }
 
+  # Fixtures an audited run exercises whatever its slot is declared (the incremental path through
+  # `def_node_resolver_run`'s project), so a wrong `typing_never_reads` there fails on the run, not on a witness.
+  def incremental_fixtures = ["spec/fixtures/typing_state_witnesses/def_node_resolver_run.rb"].to_set
+
   def declared(kind) = frames.select { |slot| slot.declaration.first == kind }
 
   describe "the registry" do
@@ -68,7 +72,7 @@ RSpec.describe "ADR-129 G1' Frame declarations", type: :runner do
     end
 
     it "leaves no fixture in the witness directory that no Frame names" do
-      named = declared(:witness).to_set { |slot| slot.declaration.last }
+      named = declared(:witness).to_set { |slot| slot.declaration.last } | incremental_fixtures
       on_disk = Dir.glob(File.join(repo_root, "spec/fixtures/typing_state_witnesses/*.rb"))
                    .map { |path| path.delete_prefix("#{repo_root}/") }
 
@@ -205,6 +209,13 @@ RSpec.describe "ADR-129 G1' Frame declarations", type: :runner do
         else run_source(source, signature_dir: dir)
         end
       end
+    end
+
+    it "reports no frame-audit finding on an incremental recheck, whichever way def_node_resolver_run is declared",
+       :fresh_rbs_env do
+      rows = crash_rows_of { run_incremental_witness(File.join(repo_root, incremental_fixtures.first)) }
+
+      expect(unexpected_findings(rows)).to be_empty
     end
 
     # A witness whose Frame typing reads only while it holds nil, and why. The environment builds eagerly, outside any

@@ -22,6 +22,9 @@ def declared_supertypes
   Registry.fields_for(Registry.a_kernel)
 end
 
+# A parameter whose union admits class objects (`singleton(Shape)?`).
+def optional_parameter = Registry.optional_fields_for(Registry.a_class)
+
 # The multi-overload path admitted a `Class` before the fix and still does.
 def overloaded_class_argument = Registry.lookup(Registry.a_class)
 

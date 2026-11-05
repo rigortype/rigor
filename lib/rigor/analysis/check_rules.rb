@@ -4157,7 +4157,6 @@ module Rigor
           members = arg_type.is_a?(Type::Union) ? arg_type.members : [arg_type]
           rest = members.reject { |member| Inference::Acceptance.class_object_supertype?(member) }
           return true if rest.size == members.size
-          return false if rest.empty?
 
           Inference::Acceptance.accepts(param_type, Type::Combinator.union(*rest), mode: :gradual).no?
         end

@@ -73,8 +73,23 @@ RSpec.describe "Scope's advisory tables as bound journaled Tables (ADR-129 stage
   end
 
   it "logs nothing while no capture is open" do
+    journal = state.instance_variable_get(:@journal)
+    before = journal.size
     scope.record_dynamic_origin(node, :cause)
     scope.dynamic_origin(node)
-    expect(captured { nil }).to eq([])
+    expect(journal.size).to eq(before)
+  end
+
+  it "keys a record on a frozen pair naming the very store, compared by identity" do
+    store = scope.dynamic_origins
+    records = captured { scope.record_dynamic_origin(node, :cause) }
+    key = records.first[2]
+    expect(key).to be_frozen
+    expect(key[0]).to equal(store)
+  end
+
+  it "refuses a bound Table declared run-scoped" do
+    expect { Rigor::TypingState.table(:scope_advisory_spec_probe, reason: "x", bound: true, run_scoped: true) }
+      .to raise_error(ArgumentError, /bound/)
   end
 end

@@ -688,6 +688,23 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
     expect(stale).to be_empty
   end
 
+  # ADR-129 stage 2 — the advisory tables are bound Table slots whose entry reads and writes go through Scope, which
+  # logs them. G3's `table_access` rule covers only its covered files, so the rule alone runs here over every Ruby file
+  # under `lib/`, `plugins/` and `examples/`: outside `scope.rb`, only the allow-listed hand-offs of a store to a new
+  # body scope may name a table.
+  it "reads no advisory table outside Scope anywhere in lib, plugins or examples" do
+    root = project_path("")
+    files = Dir.glob(%w[lib/**/*.rb plugins/**/*.rb examples/**/*.rb], base: root).reject do |path|
+      path == "lib/rigor/scope.rb" || path.include?("/spec/")
+    end
+    found = files.flat_map do |path|
+      findings_in(File.read(File.join(root, path)), path).select { |finding| finding[1] == :table_access }
+    end
+    counts = found.group_by { |finding| finding.first(3) }.transform_values(&:size)
+    expected = allow_list.select { |(_, rule, _), _| rule == :table_access }.transform_values(&:first)
+    expect(counts).to eq(expected)
+  end
+
   # The ADR-129 stage 1 ratchet: the `Thread.current` / `thread_variable_*` call sites that no conversion has reached
   # yet, per file, under the directories stage 1 covers. A site is one call: `Thread.current[:k]` is one, and
   # `Thread.current.thread_variable_get(:k)` is one (the `thread_variable_*` call, not also its receiver). Compared for

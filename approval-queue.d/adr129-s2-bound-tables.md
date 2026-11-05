@@ -18,7 +18,7 @@ ADR-129 stage 2 puts the four advisory tables (`dynamic_origins`, `void_origins`
 
 ## Decision
 
-The first option. It keeps WD3's record, follows the return memo's composite-key precedent, and costs nothing while the memo is off. A bound Table cannot be `run_scoped`, since its slot holds no store a run could release. Replaying a write slice (`store[key] = value`) is left to stage 3, where hits first exist and G2's perturbation specs can check it.
+The first option. It keeps WD3's record, follows the return memo's composite-key precedent, and costs nothing while the memo is off. A bound Table cannot be `run_scoped`, since its slot holds no store a run could release. The store in a record's key is compared by identity (`equal?`): Ruby's `Array#==` and `#hash` compare a Hash by content, so two empty stores would otherwise match, and stage 3's validation and replay must not put these keys in a Hash or Set or compare them with `==`. Replaying a write slice (`store[key] = value`) is left to stage 3, where hits first exist and G2's perturbation specs can check it.
 
 ## To undo
 

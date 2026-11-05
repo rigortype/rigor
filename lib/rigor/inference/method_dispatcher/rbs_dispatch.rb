@@ -319,7 +319,7 @@ module Rigor
           end
 
           def rbs_complete_member_names(environment)
-            return collect_rbs_complete_member_names(environment) if MemoAudit.suspended?
+            return collect_rbs_complete_member_names(environment) if MemoAudit.enabled? && MemoAudit.suspended?
 
             table = TypingState.current.weak_key_map(RBS_COMPLETE_MEMBER_NAMES)
             names = table[environment]
@@ -772,7 +772,7 @@ module Rigor
             return nil if scope.nil? || kind != :instance
             return nil if environment.nil?
 
-            if MemoAudit.suspended?
+            if MemoAudit.enabled? && MemoAudit.suspended?
               return compute_core_stdlib_ancestor_method(environment, class_name, method_name, scope)
             end
 
@@ -812,7 +812,10 @@ module Rigor
             return nil if scope.nil? || kind != :instance
             return nil if environment.nil?
 
-            return compute_included_module_method(environment, class_name, method_name, scope) if MemoAudit.suspended?
+            if MemoAudit.enabled? && MemoAudit.suspended?
+              return compute_included_module_method(environment, class_name, method_name,
+                                                    scope)
+            end
 
             memo = mixin_ancestor_memo(environment, scope)
             key = [class_name.to_s, method_name.to_sym]

@@ -77,7 +77,7 @@ module Rigor
       # Records that the final `merged` table was built over `seed`. The last two are kept (a file merges an
       # instance and a singleton table), replaced rather than accumulated.
       def record_layers(merged, seed)
-        return if MemoAudit.suspended?
+        return if MemoAudit.enabled? && MemoAudit.suspended?
 
         state = TypingState.current
         previous = state[LAYERS]

@@ -44,7 +44,11 @@ RSpec.describe Rigor::Inference::DefinersIndex do
 
   def as_sets(index, names) = names.to_h { |name| [name, index[name]&.sort] }
 
+  # Counts seed builds, which an enabled MemoAudit adds to (each audited hit rebuilds to compare), so it runs with the
+  # audit off whatever the environment says.
   it "inverts the seed once for every file merged over it, answering what a whole inversion answers" do
+    was = Rigor::Inference::MemoAudit.enabled?
+    Rigor::Inference::MemoAudit.disable!
     builds = []
     allow(described_class).to receive(:build).and_wrap_original do |original, table|
       builds << table
@@ -69,6 +73,8 @@ RSpec.describe Rigor::Inference::DefinersIndex do
     # child.rb. The seed's other owners are read from the seed's index.
     expect(per_file_builds.map { |built| built.map(&:keys) })
       .to eq([[["Base"]], [["Child", Rigor::Inference::ScopeIndexer::TOP_LEVEL_DEF_KEY]]])
+  ensure
+    Rigor::Inference::MemoAudit.enable! if was
   end
 
   it "inverts a table whole when the seed is frozen but one of its inner tables is not" do

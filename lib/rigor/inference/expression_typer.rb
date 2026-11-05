@@ -2824,7 +2824,7 @@ module Rigor
       # ADR-129 WD1 — every bucket's hit goes through `MemoAudit.check`; an audit recomputation gets fresh buckets that
       # nothing stores, so it reads no entry and leaves none.
       def class_graph_buckets
-        return fresh_class_graph_buckets if MemoAudit.suspended?
+        return fresh_class_graph_buckets if MemoAudit.enabled? && MemoAudit.suspended?
 
         discovery = scope.discovery
         state = typing_state
@@ -3058,7 +3058,7 @@ module Rigor
       # reopen of `owner` itself is NOT an override (monkey-patch reopen shares the owner identity). Memoized
       # per `(owner, method_name, kind)`.
       def overridden_in_project?(owner, method_name, kind)
-        return compute_overridden_in_project?(owner, method_name, kind) if MemoAudit.suspended?
+        return compute_overridden_in_project?(owner, method_name, kind) if MemoAudit.enabled? && MemoAudit.suspended?
 
         by_owner = (override_gate_buckets[kind][owner] ||= {})
         if by_owner.key?(method_name)
@@ -3155,7 +3155,7 @@ module Rigor
       def method_definers_index(kind)
         singleton = kind == :singleton
         table = singleton ? scope.discovered_singleton_def_nodes : scope.discovered_def_nodes
-        return DefinersIndex.for(table) if MemoAudit.suspended?
+        return DefinersIndex.for(table) if MemoAudit.enabled? && MemoAudit.suspended?
 
         state = typing_state
         primary = current_definers_way?(state[METHOD_DEFINERS_INDEX])

@@ -1073,7 +1073,10 @@ module Rigor
 
         class_name = receiver_type.class_name
         method_name = context.method_name
-        return external_ancestor_declares?(class_name, method_name, scope, environment) if MemoAudit.suspended?
+        if MemoAudit.enabled? && MemoAudit.suspended?
+          return external_ancestor_declares?(class_name, method_name, scope,
+                                             environment)
+        end
 
         memo = external_ancestor_memo(scope, environment)
         key = [class_name, method_name]
@@ -1113,7 +1116,10 @@ module Rigor
       end
 
       def project_defines_name?(scope, method_name)
-        return BlockCallTiming.project_defines_anywhere?(method_name, scope) if MemoAudit.suspended?
+        if MemoAudit.enabled? && MemoAudit.suspended?
+          return BlockCallTiming.project_defines_anywhere?(method_name,
+                                                           scope)
+        end
 
         memo = defines_name_memo(scope)
         if memo.key?(method_name)

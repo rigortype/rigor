@@ -3256,7 +3256,7 @@ module Rigor
         def private_singleton_candidate?(scope, name)
           DependencyRecorder.read_visibility("*", name) if DependencyRecorder.active?
           discovery = scope.discovery
-          if Inference::MemoAudit.suspended?
+          if Inference::MemoAudit.enabled? && Inference::MemoAudit.suspended?
             return private_recorded_names(discovery.discovered_method_visibilities).include?(name.to_sym)
           end
 

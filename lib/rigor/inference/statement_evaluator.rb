@@ -5234,8 +5234,14 @@ module Rigor
         return enter_call_block(node, block) if narrowed.equal?(scope)
 
         narrowed_evaluator = evaluator_at(narrowed, operand_scope: operand_scope, operand_types: @operand_types)
-        narrowed_evaluator.instance_variable_set(:@value_position_block, @value_position_block)
-        narrowed_evaluator.send(:enter_call_block, node, block)
+        narrowed_evaluator.send(:enter_call_block_carrying, node, block, @value_position_block)
+      end
+
+      # The safe-navigation arm of {#evaluate_block_if_present}: the narrowed evaluator enters the block carrying the
+      # value-position mark {#evaluate_block_of} set on this one, which {#block_self_entry} reads.
+      def enter_call_block_carrying(node, block, value_position_block)
+        @value_position_block = value_position_block
+        enter_call_block(node, block)
       end
 
       def enter_call_block(node, block)

@@ -2804,6 +2804,11 @@ RSpec.describe "Rigor type construction (integration)" do
       expect(undefined.map(&:line)).to eq(marked_lines(harness, "# GENUINE-UNDEFINED"))
     end
 
+    it "still reports a typeclass outside every overload's class bound" do
+      mismatches = harness.diagnostics.select { |d| d.rule == "call.argument-type-mismatch" }
+      expect(mismatches.map(&:line)).to eq(marked_lines(harness, "# GENUINE-MISMATCH"))
+    end
+
     it "produces no assert_type mismatches" do
       mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
       expect(mismatches).to be_empty

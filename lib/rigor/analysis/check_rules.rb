@@ -3743,10 +3743,34 @@ module Rigor
         # The non-nil channel (ADR-64 WD2/WD3): a single-concrete-class
         # argument no overload admits, on a non-coerce method.
         def non_nil_arg_overload_mismatch(arg, arg_type, params, param_overrides, scope)
+          return class_object_overload_mismatch(arg, arg_type, params, param_overrides, scope) if
+            arg_type.is_a?(Type::Singleton)
           return nil unless single_concrete_arg_class?(arg_type, scope)
           return nil if params.any? { |param| param_accepts_arg_class?(param, arg_type, param_overrides, scope) }
 
           { node: arg, name: nil, expected: overload_param_expected_label(params), actual: arg_type }
+        end
+
+        # Issue #2828 — the class-object twin of the non-nil channel. A `singleton(T)` overload the `resolv` overlay
+        # prepends turned `getresources(d, String)`'s one-overload check (`expected singleton(Resolv::DNS::Query)`)
+        # into this multi-overload one, which declined every class object. It fires only when every overload's
+        # parameter at the position is a `singleton(...)` (a `singleton(T)` read through its class bound, see
+        # `SingletonTypeParams.selection_param`) that provably refuses the argument's class; any other parameter
+        # shape admits.
+        def class_object_overload_mismatch(arg, arg_type, params, param_overrides, scope)
+          return nil unless Rigor::Reflection.rbs_class_known?(arg_type.class_name, scope: scope)
+          return nil unless params.all? do |param|
+            !param_overrides[param.name] && param.type.is_a?(RBS::Types::ClassSingleton)
+          end
+          return nil unless params.all? { |param| class_singleton_refuses?(param.type, arg_type, scope) }
+
+          expected = params.map { |param| param.type.to_s.sub("singleton(::", "singleton(") }.uniq.join(" | ")
+          { node: arg, name: nil, expected: expected, actual: arg_type }
+        end
+
+        def class_singleton_refuses?(rbs_type, arg_type, scope)
+          translated = translate_param_type(rbs_type, scope.environment)
+          translated.is_a?(Type::Singleton) && Inference::Acceptance.accepts(translated, arg_type, mode: :gradual).no?
         end
 
         # The matching positional RBS param across every overload, or nil when
@@ -3769,6 +3793,7 @@ module Rigor
         # Load-bearing since rbs 4.1 rewrote core signatures into this form
         # (`Array#fetch`'s block overload is `[I < _ToInt, T] (I index) { … }`).
         def resolve_param_bounds(param, method_type)
+          param = Inference::MethodDispatcher::SingletonTypeParams.selection_param(param, method_type)
           bounded = method_type.type_params.select(&:upper_bound)
           return param if bounded.empty?
 

@@ -74,3 +74,26 @@ def resolver_untyped_domain(domain)
   dns = Resolv::DNS.new
   dns.getresources(domain, Resolv::DNS::Resource::IN::MX).map { |mx| mx.exchange.to_s }
 end
+
+# A wrong typeclass still reports against every overload's class bound.
+def resolver_wrong_typeclass
+  dns = Resolv::DNS.new
+  dns.getresources("example.com", String) # GENUINE-MISMATCH
+end
+
+# Selection reads `singleton(T)` as a class object, so an instance takes the
+# overload that declares it.
+def project_instance_overloads
+  factory = Factory.new
+  factory.kind(1).even?
+  factory.kind_widget(1).even?
+  assert_type("Integer", factory.pick("s"))
+  assert_type("Symbol", factory.kind(Widget))
+end
+
+# The engine types a class built with a block as its superclass's singleton;
+# binding T from it would hide the block's methods.
+def project_class_built_with_block
+  factory = Factory.new
+  factory.build(Class.new(Widget) { def extra = 1 }).extra
+end

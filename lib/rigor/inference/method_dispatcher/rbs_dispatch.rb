@@ -1849,7 +1849,7 @@ module Rigor
           #
           # See {#arg_binding_permitted?} for why the contribution is gated on the call site.
           def compose_arg_type_vars(method_type, type_vars, args, scope:, call_node:, call_site:)
-            bindings = arg_type_var_bindings(method_type, type_vars, args, scope&.environment)
+            bindings = arg_type_var_bindings(method_type, type_vars, args, scope&.environment, call_node)
             return type_vars if bindings.empty?
             return type_vars unless arg_binding_permitted?(scope, call_node, call_site)
 
@@ -1858,7 +1858,7 @@ module Rigor
 
           # The candidate bindings, computed before the guard so a non-generic overload (the overwhelming
           # majority) never pays for the `scope` probes.
-          def arg_type_var_bindings(method_type, type_vars, args, environment = nil)
+          def arg_type_var_bindings(method_type, type_vars, args, environment = nil, call_node = nil)
             declared = declared_type_param_names(method_type)
             return EMPTY_TYPE_VARS if declared.empty? || args.empty?
 
@@ -1873,6 +1873,7 @@ module Rigor
               if name.nil?
                 name, bound = singleton_param_binding(method_type, param, arg, declared, type_vars,
                                                       environment)
+                next if name && class_factory_argument?(call_node)
               end
               next if name.nil?
 
@@ -1944,6 +1945,34 @@ module Rigor
             return nil if type_vars.key?(name)
 
             name
+          end
+
+          # Whether the call passes, as any positional argument, a class built by `Class.new`, `Struct.new` or
+          # `Data.define` with a block. The engine types `Class.new(Widget) { def extra = 1 }` as `singleton(Widget)`,
+          # so binding `T` from it would read the instance as a plain `Widget` and report `extra` as undefined. The
+          # argument node is visible here; a local the class was assigned to is not, and still binds.
+          def class_factory_argument?(call_node)
+            arguments = call_node.respond_to?(:arguments) ? call_node.arguments&.arguments : nil
+            return false if arguments.nil?
+
+            arguments.any? { |argument| class_factory_call?(argument) }
+          end
+
+          CLASS_FACTORIES = { new: %w[Class Struct], define: %w[Data] }.freeze
+          private_constant :CLASS_FACTORIES
+
+          def class_factory_call?(node)
+            return false unless node.is_a?(Prism::CallNode) && node.block.is_a?(Prism::BlockNode)
+
+            receivers = CLASS_FACTORIES[node.name]
+            return false if receivers.nil?
+
+            receiver = node.receiver
+            name = case receiver
+                   when Prism::ConstantReadNode then receiver.name.to_s
+                   when Prism::ConstantPathNode then receiver.parent.nil? ? receiver.name.to_s : nil
+                   end
+            receivers.include?(name)
           end
 
           def within_upper_bound?(method_type, name, singleton, environment)
@@ -2283,7 +2312,7 @@ module Rigor
             return type_vars unless fun.respond_to?(:required_positionals)
 
             bindings = singleton_bindings(method_type, fun, args, declared, type_vars, environment)
-            return type_vars if bindings.empty?
+            return type_vars if bindings.empty? || class_factory_argument?(call_node)
             return type_vars unless arg_binding_permitted?(scope, call_node, call_site)
 
             type_vars.merge(bindings)

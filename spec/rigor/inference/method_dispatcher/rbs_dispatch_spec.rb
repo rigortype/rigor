@@ -291,6 +291,12 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RbsDispatch do
             def self.each_wrapped: [T] (T obj) { (T) -> void } -> void
             def self.make: [T] (singleton(T) klass) -> T
                          | (singleton(::Object) klass) -> ::Object
+            def self.kind: [T] (singleton(T) klass) -> ::Symbol
+                         | (::Integer n) -> ::Integer
+            def self.kind_numeric: [T < ::Numeric] (singleton(T) klass) -> ::Symbol
+                                 | (::Integer n) -> ::Integer
+            def self.pick: [T] (singleton(T) klass) -> T
+                         | (::String s) -> ::Integer
           end
 
           class RigorSpecCrate[T]
@@ -453,6 +459,38 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RbsDispatch do
           expect(bind(box, :make, [integer_class])).to eq(Rigor::Type::Combinator.nominal_of(Integer))
         end
 
+        # Selection reads an unbound `singleton(T)` as a class object, never as `untyped`: an instance argument
+        # takes the overload that declares it.
+        it "selects the instance overload for an Integer argument" do
+          expect(bind(box, :kind, [Rigor::Type::Combinator.constant_of(1)]))
+            .to eq(Rigor::Type::Combinator.nominal_of(Integer))
+        end
+
+        it "selects the instance overload for an Integer argument under a class bound" do
+          expect(bind(box, :kind_numeric, [Rigor::Type::Combinator.constant_of(1)]))
+            .to eq(Rigor::Type::Combinator.nominal_of(Integer))
+        end
+
+        it "selects the String overload for a String argument" do
+          expect(bind(box, :pick, [Rigor::Type::Combinator.constant_of("s")]))
+            .to eq(Rigor::Type::Combinator.nominal_of(Integer))
+        end
+
+        it "selects the `singleton(T)` overload for a class object under a class bound" do
+          expect(bind(box, :kind_numeric, [integer_class])).to eq(Rigor::Type::Combinator.nominal_of(Symbol))
+        end
+
+        # `Class.new(Widget) { def extra = 1 }` types as `singleton(Widget)`; binding T would hide `extra`.
+        it "leaves T unbound when an argument is a class built with a block" do
+          factory_call = Prism.parse("RigorSpecBox.build(Class.new(Integer) { def extra = 1 })")
+                              .value.statements.body.first
+          type = described_class.try_dispatch(cc(receiver: box, method_name: :build, args: [integer_class],
+                                                 environment: generic_environment,
+                                                 scope: Rigor::Scope.empty(environment: generic_environment),
+                                                 call_node: factory_call))
+          expect(type).to equal(Rigor::Type::Combinator.untyped)
+        end
+
         it "binds a class inside the declared upper bound" do
           expect(bind(box, :build_numeric, [integer_class])).to eq(Rigor::Type::Combinator.nominal_of(Integer))
         end
@@ -482,6 +520,18 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RbsDispatch do
 
           it "yields the class object's instance type" do
             expect(probe(:each_built, [integer_class])).to eq([Rigor::Type::Combinator.nominal_of(Integer)])
+          end
+
+          it "leaves the block parameter unbound when the scope discovered a same-named method" do
+            shadowed = Rigor::Scope.empty(environment: generic_environment).with_discovery(
+              Rigor::Scope::DiscoveryIndex::EMPTY.with(
+                discovered_methods: { "RigorSpecBox" => { each_built: :singleton } }, possible_discovered_methods: {}
+              )
+            )
+            params = described_class.block_param_types(cc(receiver: box, method_name: :each_built,
+                                                          args: [integer_class], environment: generic_environment,
+                                                          scope: shadowed, call_node: call_node))
+            expect(params).to eq([Rigor::Type::Combinator.untyped])
           end
 
           # A bare `T` stays out of the block path: `each_with_object([])` would yield an empty tuple.

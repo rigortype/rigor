@@ -8,3 +8,5 @@ assertions:
   '5': Widget
   '6': Gadget
   '7': Dynamic[top]
+  '8': Integer
+  '9': Symbol

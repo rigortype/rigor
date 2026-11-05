@@ -189,32 +189,6 @@ RSpec.describe Rigor::Inference::RbsTypeTranslator do
         expect(type).to be_a(Rigor::Type::Singleton)
         expect(type.class_name).to eq("Integer")
       end
-
-      # Issue #2828 — `singleton(T)` over a method type variable parses as a class singleton named the bare,
-      # relative `T`, which no class answers.
-      describe "singleton(T) over a type variable" do
-        let(:loader) { Rigor::Environment::RbsLoader.new(virtual_rbs: [["(spec: issue #2828)", "class Known\nend\n"]]) }
-
-        it "reads the singleton of the class a bound T names" do
-          type = described_class.translate(parse_rbs("singleton(T)"),
-                                           type_vars: { T: Rigor::Type::Combinator.nominal_of("Integer") })
-          expect(type).to eq(Rigor::Type::Combinator.singleton_of("Integer"))
-        end
-
-        it "reads an unbound T no class answers as Dynamic[top]" do
-          type = described_class.translate(parse_rbs("singleton(T)"), alias_expander: loader)
-          expect(type).to equal(Rigor::Type::Combinator.untyped)
-        end
-
-        it "keeps a relative name a class answers as that class's singleton" do
-          type = described_class.translate(parse_rbs("singleton(Known)"), alias_expander: loader)
-          expect(type).to eq(Rigor::Type::Combinator.singleton_of("Known"))
-        end
-
-        it "keeps an unbound relative name as a class singleton without a loader to ask" do
-          expect(described_class.translate(parse_rbs("singleton(T)"))).to eq(Rigor::Type::Combinator.singleton_of("T"))
-        end
-      end
     end
 
     describe "alias and intersection types (issue #529)" do

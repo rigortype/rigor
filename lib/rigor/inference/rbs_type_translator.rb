@@ -269,33 +269,8 @@ module Rigor
 
         # `singleton(Foo)` is the type of the constant `Foo` itself (the class object). With the
         # dedicated Singleton type, we map directly to `Singleton[Foo]`.
-        def translate_class_singleton(rbs_type, context)
-          name = rbs_type.name
-          return singleton_variable(name, context) if singleton_variable_name?(name, context)
-
-          Type::Combinator.singleton_of(relative_name(name))
-        end
-
-        # Issue #2828 — RBS parses `singleton(T)` over a type variable as a class singleton whose name is the bare,
-        # relative `T`, which environment resolution leaves relative because no class answers it. Such a name
-        # reads as the variable does: the singleton of the class a bound `T` names, and `Dynamic[top]` otherwise.
-        # Read as a class named `T`, it refused every class object the analyzer process has loaded (`Acceptance`
-        # rules a loaded class out of an unloaded target's subtypes), so the overload was never selected. A
-        # bound variable is read whatever the environment; an unbound one only when the environment's
-        # `RbsLoader` is at hand to say no class has the name.
-        def singleton_variable_name?(name, context)
-          return false if name.absolute? || !name.namespace.empty?
-          return true if context.type_vars.key?(name.name)
-
-          loader = context.alias_expander
-          loader.respond_to?(:class_known?) && !loader.class_known?(name.name.to_s)
-        end
-
-        def singleton_variable(name, context)
-          bound = context.type_vars[name.name]
-          return Type::Combinator.untyped unless bound.is_a?(Type::Nominal)
-
-          Type::Combinator.singleton_of(bound.class_name)
+        def translate_class_singleton(rbs_type, _context)
+          Type::Combinator.singleton_of(relative_name(rbs_type.name))
         end
 
         # #529 — sees through a type alias instead of reading `untyped`. `expand_type_alias` resolves

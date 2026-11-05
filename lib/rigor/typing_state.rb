@@ -671,6 +671,72 @@ module Rigor
       end
     end
 
+    # ADR-129 WD2's ELIDE, measured by stage 3's shadow only: a second id that, unlike the state id, stays put when an
+    # install puts back the value the slot already holds (`equal?`), so two frames that differ only by such an install
+    # share it. Every other install, every id-determined Resource change and every rewrite moves it exactly as the
+    # state id moves, so equal ELIDE ids still name equal Frame values. `TypeOfMemo` extends a thread's state with this
+    # module when the measurement is on and keys on {#elide_id}; the state id, which other memos key on, is unchanged.
+    module ElideId
+      attr_reader :elide_id
+
+      def self.extended(state) = state.restart_elide_id
+
+      # A fresh ELIDE id, naming the Frame values installed now.
+      def restart_elide_id
+        @last_elide_id = (@last_elide_id || 0) + 1
+        @elide_id = @last_elide_id
+        nil
+      end
+
+      def with(slot, value)
+        values = @values
+        elide_install(values[slot].equal?(value)) { super }
+      end
+
+      def with_pair(slot, value, other, other_value)
+        values = @values
+        elide_install(values[slot].equal?(value) && values[other].equal?(other_value)) { super }
+      end
+
+      def without(slots)
+        values = @values
+        elide_install(slots.all? { |slot| values[slot].nil? }) { super }
+      end
+
+      def push(slot, value)
+        result = super
+        @elide_id = (@last_elide_id += 1)
+        result
+      end
+
+      def pop(slot)
+        result = super
+        @elide_id = (@last_elide_id += 1)
+        result
+      end
+
+      def rewrite(slot)
+        super
+        @elide_id = (@last_elide_id += 1)
+        nil
+      end
+
+      private
+
+      # Runs the block, an install, under a fresh ELIDE id unless the install puts back what the slots hold, and
+      # restores the id on the way out unless an id-determined Resource was rewritten inside it.
+      def elide_install(same)
+        saved = @elide_id
+        saved_epoch = @epoch
+        @elide_id = (@last_elide_id += 1) unless same
+        begin
+          yield
+        ensure
+          @elide_id = @epoch == saved_epoch ? saved : (@last_elide_id += 1)
+        end
+      end
+    end
+
     # ADR-129 WD1's key audit, on one {State}: `MemoAudit` extends a thread's state with this module the first time an
     # audited run reaches a memo miss, so a run with the audit off reads a slot through the plain {State#[]}.
     #

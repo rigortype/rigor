@@ -242,6 +242,93 @@ RSpec.describe Rigor::TypeOfMemo do
     expect(counts[:checked]).to eq(0)
   end
 
+  describe "ELIDE (ADR-129 WD2, measured in stage 3)" do
+    let(:frame) { Rigor::TypingState.slot(:yield_value_type).index }
+    let(:walk) { Rigor::TypingState.slot(:key_presence_walk).index }
+
+    before { state.extend(Rigor::TypingState::ElideId) }
+
+    it "keeps the ELIDE id across an install of the value the slot holds, and moves it for any other" do
+      state.with(frame, int) do
+        outer = state.elide_id
+        state.with(frame, state[frame]) { expect(state.elide_id).to eq(outer) }
+        state.with(frame, str) { expect(state.elide_id).not_to eq(outer) }
+        state.without([walk]) { expect(state.elide_id).to eq(outer) }
+        expect(state.elide_id).to eq(outer)
+      end
+    end
+
+    it "moves the ELIDE id on a rewrite, and exits a frame open at one to a fresh id" do
+      before = state.elide_id
+      state.with(frame, int) { state.rewrite(walk) }
+
+      expect(state.elide_id).not_to eq(before)
+    end
+
+    it "moves the ELIDE id on a push, a pop and a rewrite inside an open frame" do
+      guard = Rigor::TypingState.slot(:user_method_inference_stack).index
+      state.with(frame, int) do
+        ids = [state.elide_id]
+        state.push(guard, :entry)
+        ids << state.elide_id
+        state.pop(guard)
+        ids << state.elide_id
+        state.rewrite(walk)
+        ids << state.elide_id
+        expect(ids.uniq.size).to eq(4)
+      end
+    end
+
+    it "keeps the ELIDE id across a pair install only when both values are the ones held" do
+      other = Rigor::TypingState.slot(:forwarded_call_arg_types).index
+      state.with_pair(frame, int, other, [int].freeze) do
+        outer = state.elide_id
+        state.with_pair(frame, state[frame], other, state[other]) { expect(state.elide_id).to eq(outer) }
+        state.with_pair(frame, state[frame], other, [str].freeze) { expect(state.elide_id).not_to eq(outer) }
+        state.without([frame]) { expect(state.elide_id).not_to eq(outer) }
+      end
+    end
+
+    it "keys a table that elides on the ELIDE id, so an identical install looks the entry up" do
+      table = described_class::Table.new(elide: true)
+      state[Rigor::TypingState.slot(:type_of_memo).index] = table
+      state.with(frame, int) do
+        shadow { int }
+        state.with(frame, state[frame]) { shadow { int } }
+      end
+
+      expect(counts).to include(stored: 1, checked: 1)
+      expect(counts[:mismatch]).to eq(0)
+    end
+  end
+
+  # ELIDE on a real run: the environment switch extends the state at the file's start, and the run's diagnostics and
+  # G1's verdict are those of the plain shadow.
+  it "leaves a real run's diagnostics unchanged with ELIDE on" do
+    paths = Dir[File.expand_path("../integration/fixtures/*.rb", __dir__)].min_by(6) { |path| -File.size(path) }
+    run = lambda do
+      configuration = Rigor::Configuration.new(
+        Rigor::Configuration::DEFAULTS.merge("paths" => paths, "parallel" => { "workers" => 0 })
+      )
+      guarded_run(Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil)).diagnostics.map(&:to_h)
+    end
+    off = run.call
+    previous = ENV.fetch("RIGOR_TYPE_OF_SHADOW_ELIDE", nil)
+    ENV["RIGOR_TYPE_OF_SHADOW_ELIDE"] = "1"
+    described_class.enable!
+    on = begin
+      run.call
+    ensure
+      described_class.disable!
+      ENV["RIGOR_TYPE_OF_SHADOW_ELIDE"] = previous
+    end
+
+    expect(on).to eq(off)
+    expect(Rigor::TypingState.current).to be_a(Rigor::TypingState::ElideId)
+    expect(described_class.counts.sum { |_, counters| counters[:checked] }).to be_positive
+    expect(described_class.mismatches).to eq(0), described_class.samples.first(3).inspect
+  end
+
   # A real run: the shadow over fixtures finds would-be hits, compares them all equal, and leaves the run's output
   # byte-identical with the memo off.
   it "leaves a real run's diagnostics unchanged and finds no mismatch over a fixture" do

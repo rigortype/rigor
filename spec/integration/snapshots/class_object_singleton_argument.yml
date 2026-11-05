@@ -1,0 +1,5 @@
+---
+locals: {}
+assertions:
+  '1': Array[Symbol]
+  '2': Symbol

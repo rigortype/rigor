@@ -2824,6 +2824,11 @@ RSpec.describe "Rigor type construction (integration)" do
       mismatches = harness.diagnostics.select { |d| d.rule == "call.argument-type-mismatch" }
       expect(mismatches.map(&:line)).to eq(marked_lines(harness, "# GENUINE-MISMATCH"))
     end
+
+    it "produces no assert_type mismatches" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
   end
 
   describe "fixtures/complex_catalog.rb — Complex catalog-driven folding" do

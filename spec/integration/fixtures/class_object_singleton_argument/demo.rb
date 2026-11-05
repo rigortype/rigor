@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require "rigor/testing"
+include Rigor::Testing
+
 # Issue #2855 — a class-object supertype nominal (`Class`, `Module`, and the
 # ancestors of `Class`: `Object`, `BasicObject`, `Kernel`) against a
 # `singleton(X)` parameter is a class object whose identity inference lost,
@@ -15,7 +18,7 @@ def module_guarded(x) = (x.is_a?(Module) ? Registry.fields_for(x) : nil)
 
 # Each class-object supertype, read from a declared return.
 def declared_supertypes
-  Registry.fields_for(Registry.a_class)
+  assert_type("Array[Symbol]", Registry.fields_for(Registry.a_class))
   Registry.fields_for(Registry.a_module)
   Registry.fields_for(Registry.an_object)
   Registry.fields_for(Registry.a_basic_object)
@@ -26,7 +29,7 @@ end
 def optional_parameter = Registry.optional_fields_for(Registry.a_class)
 
 # The multi-overload path admitted a `Class` before the fix and still does.
-def overloaded_class_argument = Registry.lookup(Registry.a_class)
+def overloaded_class_argument = assert_type("Symbol", Registry.lookup(Registry.a_class))
 
 # Controls: an instance of an unrelated class, and an unrelated class object.
 def unrelated_instances

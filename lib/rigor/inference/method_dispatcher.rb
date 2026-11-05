@@ -1071,13 +1071,24 @@ module Rigor
         scope = context.scope
         return false if scope.nil?
 
-        memo = external_ancestor_memo(scope, environment)
-        key = [receiver_type.class_name, context.method_name]
-        return memo[key] if memo.key?(key)
+        class_name = receiver_type.class_name
+        method_name = context.method_name
+        return external_ancestor_declares?(class_name, method_name, scope, environment) if MemoAudit.suspended?
 
-        memo[key] = !ExternalAncestorResolution.resolve(receiver_type.class_name, context.method_name, :instance,
-                                                        scope: scope, environment: environment,
-                                                        record_dependencies: false).nil?
+        memo = external_ancestor_memo(scope, environment)
+        key = [class_name, method_name]
+        if memo.key?(key)
+          return MemoAudit.check("user class fallback external ancestor", memo[key], class_name, method_name) do
+            external_ancestor_declares?(class_name, method_name, scope, environment)
+          end
+        end
+
+        memo[key] = external_ancestor_declares?(class_name, method_name, scope, environment)
+      end
+
+      def external_ancestor_declares?(class_name, method_name, scope, environment)
+        !ExternalAncestorResolution.resolve(class_name, method_name, :instance,
+                                            scope: scope, environment: environment, record_dependencies: false).nil?
       end
 
       # Issue #2284 — a class object whose singleton chain holds a project definer of the name (its own `def
@@ -1102,10 +1113,14 @@ module Rigor
       end
 
       def project_defines_name?(scope, method_name)
+        return BlockCallTiming.project_defines_anywhere?(method_name, scope) if MemoAudit.suspended?
+
         memo = defines_name_memo(scope)
         if memo.key?(method_name)
           Analysis::DependencyRecorder.read_missing(:defines, method_name) if Analysis::DependencyRecorder.active?
-          return memo[method_name]
+          return MemoAudit.check("user class fallback defines name", memo[method_name], method_name) do
+            BlockCallTiming.project_defines_anywhere?(method_name, scope)
+          end
         end
 
         memo[method_name] = BlockCallTiming.project_defines_anywhere?(method_name, scope)
@@ -1115,8 +1130,9 @@ module Rigor
       # the only inputs the name table's answers read.
       DEFINES_NAME_MEMO = TypingState.memo(
         :user_class_fallback_defines_name,
-        run_scoped: true, reason: "one [discovery, environment, names] slot keyed on the identities of the discovery " \
-                                  "index and the environment; each name's answer reads only them"
+        run_scoped: true, audit: "user class fallback defines name",
+        reason: "one [discovery, environment, names] slot keyed on the identities of the discovery " \
+                "index and the environment; each name's answer reads only them"
       )
       private_constant :DEFINES_NAME_MEMO
 
@@ -1137,8 +1153,9 @@ module Rigor
       # ADR-129 WD1 — a run-scoped Memo, keyed as {DEFINES_NAME_MEMO} is.
       EXTERNAL_ANCESTOR_MEMO = TypingState.memo(
         :user_class_fallback_external_ancestor,
-        run_scoped: true, reason: "one [discovery, environment, answers] slot keyed on the identities of the " \
-                                  "discovery index and the RBS environment, the only inputs the walk reads"
+        run_scoped: true, audit: "user class fallback external ancestor",
+        reason: "one [discovery, environment, answers] slot keyed on the identities of the " \
+                "discovery index and the RBS environment, the only inputs the walk reads"
       )
       private_constant :EXTERNAL_ANCESTOR_MEMO
 

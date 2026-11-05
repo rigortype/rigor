@@ -2741,7 +2741,13 @@ module Rigor
         environment = env
         return nil if environment.nil?
 
-        ::RBS::Resolver::TypeNameResolver.build(environment)
+        klass = ::RBS::Resolver::TypeNameResolver
+        if klass.respond_to?(:build)
+          klass.build(environment)
+        else
+          # Older RBS 3.x takes the environment instead of the current constructor's name tables.
+          klass.new(environment) # rigor:disable call.wrong-arity
+        end
       end
 
       # The resolved alias declaration, without substituting type arguments or translating its AST.

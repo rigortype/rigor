@@ -110,4 +110,22 @@ RSpec.describe Rigor::Lens::Claims::TypeReader do
     expect(reader.read(RBS::Parser.parse_type("String"), claim: true)).to be_empty
     expect(reader.reasons).to include("unresolved_name")
   end
+
+  it "constructs an independent resolver on RBS versions without the build factory" do
+    loader = Rigor::Environment::RbsLoader.new
+    environment = Object.new
+    allow(loader).to receive(:env).and_return(environment)
+    resolver_class = Class.new do
+      attr_reader :environment
+
+      def initialize(environment)
+        @environment = environment
+      end
+    end
+    stub_const("RBS::Resolver::TypeNameResolver", resolver_class)
+
+    first = loader.type_name_resolver
+    expect(first.environment).to equal(environment)
+    expect(loader.type_name_resolver).not_to equal(first)
+  end
 end

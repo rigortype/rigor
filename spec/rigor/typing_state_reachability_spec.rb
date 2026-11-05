@@ -146,7 +146,9 @@ RSpec.describe "ADR-129 G4: what a type_of call can reach" do
   end
 
   # The rows whose field holds something mutable at only some of the sampled calls: the fields the 58-run union over
-  # every offset of stride 50 (and strides 25, 37, 150 and 1000) found at fewer than all phases.
+  # every offset of stride 50 (and strides 25, 37, 150 and 1000) found at fewer than all phases. Every sample visits
+  # these fields, so the stale check can never fire for them: a row here that a later change freezes for good stays
+  # until someone removes it by hand.
   def sparse_rows
     lazy = "set lazily by the first ask in a frame; a frame whose first ask falls before a sample and after the " \
            "frame was first reached is not met at every phase"

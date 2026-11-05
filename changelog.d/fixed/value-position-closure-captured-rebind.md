@@ -1,2 +1,2 @@
 - **[inference]** A closure passed as an argument or chained as a receiver no longer reports a false `undefined method` on an outer local it reassigns, or on a parameter of a `def` written inside it. ([#2826](https://github.com/rigortype/rigor/pull/2826))
-  - `x = 1; show([1].map { x = "s"; x.upcase })` and `show(Class.new { def call(o) = o + 1 })` after `o = { x: 1 }` are now silent; such a read is untyped until value-position blocks are evaluated in full.
+  - `x = 1; show([1].map { x = "s"; x.upcase })` and `show(Class.new { def call(o) = o + 1 })` after `o = { x: 1 }` are now silent; such a read in a `->` or a class-creating block stays untyped.

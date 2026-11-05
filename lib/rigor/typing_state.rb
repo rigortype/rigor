@@ -496,7 +496,10 @@ module Rigor
 
       # A Resource write, a read the slot does not exempt, or a write to a `contents: :resource` Frame's container:
       # refuses every open capture (the `any` rule, WD3).
-      def touch(_slot)
+      def touch(_slot) = refuse_captures
+
+      # Refuses every open capture: a touch, or a miss that wrote a Table ({#memo_miss}).
+      def refuse_captures
         refused = @refused
         refused.fill(true) unless refused.empty?
         nil
@@ -615,8 +618,38 @@ module Rigor
       # Whether a capture is open.
       def capturing? = !@marks.empty?
 
+      # ADR-129 WD1's two Memo rules: runs a miss computation, of a Memo or (`own`, its slot) of a read-through
+      # Table, and touches when, while a capture was open, it wrote an entry of a Table other than `own`. A later hit
+      # of an enclosing entry would replay those writes although the Memo, now filled, no longer makes them, and a
+      # newer typing may have overwritten them (the inject record's miss writes `dynamic_origins` causes). The
+      # touch is made on the way out, a raise included, since the journal keeps what a raising computation wrote.
+      def memo_miss(own = nil)
+        return yield if @marks.empty?
+
+        mark = @journal.size
+        begin
+          yield
+        ensure
+          refuse_captures if wrote_since?(mark, own)
+        end
+      end
+
       # Whether a priors window is open ({#open_priors}).
       def noting_priors? = !@priors.nil?
+
+      # Whether the journal holds, past `mark`, a write to a Table other than `own`. The journal empties when the
+      # outermost capture closes, which a miss computation cannot do to a capture open at its start.
+      def wrote_since?(mark, own)
+        journal = @journal
+        index = mark
+        while index < journal.size
+          return true if journal[index] == :write && !journal[index + 1].equal?(own)
+
+          index += 4
+        end
+        false
+      end
+      private :wrote_since?
 
       # Empties the slots at `indices` ({TypingState.release_run_scoped}).
       def release(indices)

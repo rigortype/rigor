@@ -395,6 +395,66 @@ RSpec.describe Rigor::TypingState do
     end
   end
 
+  # ADR-129 WD1's two Memo rules (G2's Memo row): a Memo miss that writes a Table touches, and so does a read-through
+  # Table's miss that writes another Table; a miss that writes nothing, or only its own read-through Table, does not.
+  describe "a miss that writes a Table (WD1)" do
+    let(:origins) { index(:dynamic_origins) }
+    let(:through) { index(:inject_accumulator) }
+    let(:store) { {}.compare_by_identity }
+
+    def refused_by
+      state.open_capture
+      begin
+        yield
+      ensure
+        refused, = state.close_capture
+      end
+      refused
+    end
+
+    it "touches for a Memo miss that writes a Table, and not for one that writes nothing" do
+      writing = refused_by { state.memo_miss { state.log_bound_write(origins, store, :node, :cause) } }
+      quiet = refused_by { state.memo_miss { state.log_bound_read(origins, store, :node, :cause) } }
+
+      expect([writing, quiet]).to eq([true, false])
+    end
+
+    it "lets a read-through Table's miss write its own table, and touches when it writes another" do
+      own = refused_by { state.memo_miss(through) { state.log_write(through, Object.new, :record) } }
+      other = refused_by { state.memo_miss(through) { state.log_bound_write(origins, store, :node, :cause) } }
+
+      expect([own, other]).to eq([false, true])
+    end
+
+    it "touches on the way out of a miss that raised after writing" do
+      refused = refused_by do
+        state.memo_miss { state.log_bound_write(origins, store, :node, :cause) || raise(ArgumentError) }
+      rescue ArgumentError
+        nil
+      end
+
+      expect(refused).to be(true)
+    end
+
+    it "runs a miss with no capture open and answers its value" do
+      expect(state.memo_miss { :value }).to eq(:value)
+    end
+
+    # The miss sites: MemoAudit.key_audit wraps every Memo miss, and the loop and inject records wrap theirs.
+    it "routes MemoAudit.key_audit's miss and the read-through records' misses through the rule" do
+      current = described_class.current
+      refused = lambda do |&miss|
+        current.open_capture
+        miss.call
+        current.close_capture.first
+      end
+      write = -> { current.log_bound_write(origins, store, :node, :cause) }
+
+      expect(refused.call { Rigor::MemoAudit.key_audit("probe") { write.call } }).to be(true)
+      expect(refused.call { Rigor::Inference::LoopValueRecord.miss { write.call } }).to be(true)
+    end
+  end
+
   # Each Table writer, through its real entry point, logs before it stores or passes the value it replaced, so a
   # priors window notes what was there: an earlier value, or ABSENT for a first write. G1 builds the pre-computation
   # state from these priors, so a wrong one would let a dropped write go unseen.

@@ -86,6 +86,10 @@ module Rigor
         type
       end
 
+      # Runs the evaluation a {fetch} that answered nil falls back to: the read-through Table's miss (ADR-129 WD1),
+      # which touches when it writes another Table while a capture is open.
+      def miss(&) = TypingState.current.memo_miss(RECORD, &)
+
       # The recorded value of `node` evaluated from `scope` itself in the current summary generation, or nil.
       def fetch(node, scope)
         state = TypingState.current

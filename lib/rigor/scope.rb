@@ -376,8 +376,8 @@ module Rigor
     # that index with a non-literal default makes a call that omits it allocate CRuby's unspecified-keywords record
     # during argument setup, and on CRuby 4.0 a GC started by that allocation frees the values already moved into the
     # keyword locals (ruby/ruby Bug #22500, issue #2850): `Scope.new` stored a freed `match_frame`.
-    # `spec/rigor/keyword_gc_safety_spec.rb` holds every method under `lib/` to this. See the note at {#rebuild}
-    # before adding a field.
+    # `spec/rigor/keyword_gc_safety_spec.rb` holds every method under `lib/` and `plugins/*/lib` to this. See the note
+    # at {#rebuild} before adding a field.
     def initialize( # rubocop:disable Metrics/AbcSize, Metrics/MethodLength -- one keyword and assignment per field
       environment:, locals:,
       fact_store: Analysis::FactStore.empty,

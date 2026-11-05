@@ -38,7 +38,8 @@ module Rigor
     # - `run_scoped`: a Table, Memo or Resource whose contents belong to one analysis run, emptied by
     #   {.release_run_scoped} when the run ends ({RunScopedSlots.release}).
     # - `read_exemption`: a Resource, or a `contents: :resource` Frame's contents, whose reads do not refuse (WD3).
-    # - `contents`: `:resource` for a Frame whose installed container is mutated in place.
+    # - `contents`: `:resource` for a Frame whose installed container is mutated in place, `:table` for one whose
+    #   installed container is a store of a bound Table, whose entries are journaled rather than touched.
     # - `read_through`: a Table that is a read-through cache of the computation's own value (WD1).
     # - `bound`: a Table whose stores are not the slot's value but objects its owner holds, several at once (a store
     #   per file's scopes, per installed recorder); its journal records key on `[store, key]`.
@@ -59,8 +60,10 @@ module Rigor
       # Declares a Frame slot and returns its index. A `contents: :resource` frame may declare a read exemption for
       # reads of its contents.
       def frame(name, reason:, contents: nil, read_exemption: nil)
-        raise ArgumentError, "#{name}: contents must be :resource or nil" unless [nil, :resource].include?(contents)
-        if read_exemption && contents.nil?
+        unless [nil, :resource, :table].include?(contents)
+          raise ArgumentError, "#{name}: contents must be :resource, :table or nil"
+        end
+        if read_exemption && contents != :resource
           raise ArgumentError, "#{name}: only a contents: :resource frame declares a read exemption"
         end
 

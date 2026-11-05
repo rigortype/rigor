@@ -27,13 +27,23 @@ module Rigor
     # Modelled on {DependencyRecorder}: process-thread-local accumulator, a cheap disabled fast path, and a
     # frozen snapshot for consumers.
     module SelfCallResolutionRecorder
-      # ADR-129 WD1 — the installed accumulator is a Frame whose contents are a Resource: each record into it touches.
-      # The activation count below is a process switch, outside the typing state (WD5).
+      # ADR-129 WD1 — the installed accumulator is a Frame; its contents are the bound Table {CALLS}. The activation
+      # count below is a process switch, outside the typing state (WD5).
       RECORDER = TypingState.frame(
         :self_call_resolution_recorder,
-        contents: :resource, reason: "the consumer's accumulator a recording installs; each unresolved call records"
+        contents: :table, reason: "the accumulator a recording installs; each unresolved call records into it"
       )
       private_constant :RECORDER
+
+      # ADR-129 WD1 — the recorded misses are a bound Table: each installed accumulator is one of its stores, keyed by
+      # the call tuple (deduplicated, so the first record of a tuple is its only write), journaled while a capture is
+      # open so a later `type_of` memo can validate the reads and replay the writes in order.
+      CALLS = TypingState.table(
+        :self_call_misses,
+        bound: true,
+        reason: "UnresolvedSelfCall => true per consumer accumulator, appended in first-record order"
+      )
+      private_constant :CALLS
 
       # One unresolved implicit-self call. `class_name` is the receiver's statically known class (the
       # enclosing `self` type); `method_name` the called name; `node` the Prism `CallNode` (held in-memory so
@@ -52,11 +62,15 @@ module Rigor
           @seen = Set.new
         end
 
-        def add(call)
-          return unless @seen.add?(call)
+        def add?(call)
+          return false unless @seen.add?(call)
 
           @calls << call
+          true
         end
+
+        # Whether `call` is already recorded.
+        def recorded?(call) = @seen.include?(call)
 
         def snapshot
           Record.new(consumer: consumer, calls: calls.dup.freeze)
@@ -100,17 +114,16 @@ module Rigor
         accumulator = state[RECORDER]
         return if accumulator.nil?
 
-        state.touch(RECORDER)
-        accumulator.add(
-          UnresolvedSelfCall.new(
-            class_name: class_name.to_s,
-            method_name: method_name.to_sym,
-            node: node,
-            path: path,
-            line: line,
-            column: column
-          )
+        call = UnresolvedSelfCall.new(
+          class_name: class_name.to_s,
+          method_name: method_name.to_sym,
+          node: node,
+          path: path,
+          line: line,
+          column: column
         )
+        state.log_bound_read(CALLS, accumulator, call, accumulator.recorded?(call) || TypingState::ABSENT)
+        state.log_bound_write(CALLS, accumulator, call, true) if accumulator.add?(call)
       end
     end
   end

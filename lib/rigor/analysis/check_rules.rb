@@ -4122,13 +4122,13 @@ module Rigor
           return false if param_type.is_a?(Type::Dynamic) || param_type.is_a?(Type::Top)
           return false if type.is_a?(Type::Dynamic) || type.is_a?(Type::Top)
 
-          Inference::Acceptance.accepts(param_type, type, mode: :gradual).no?
+          rejects_beyond_class_objects?(param_type, type)
         end
 
         # The parameter rejects the argument AND the rejection is not a
         # withheld declaration-sourced-nil case.
         def argument_genuinely_mismatches?(arg, arg_type, param_type, scope)
-          return false unless Inference::Acceptance.accepts(param_type, arg_type, mode: :gradual).no?
+          return false unless rejects_beyond_class_objects?(param_type, arg_type)
 
           # ADR-58 (N2 extension) — the same declaration-sourced-nil-is-not-
           # diagnostic-fuel criterion that governs `possible-nil-receiver`
@@ -4142,6 +4142,32 @@ module Rigor
           # fires. The argument's type is unchanged — only the firing
           # decision is gated.
           !declaration_sourced_nil_only_mismatch?(arg, arg_type, param_type, scope)
+        end
+
+        # Issue #2855 — the parameter rejects the argument, and not only for its class-object supertype members.
+        # A `Class` / `Module` / `Object` / `BasicObject` / `Kernel` nominal ({Acceptance.class_object_supertype?})
+        # against a parameter that admits class objects (`singleton(X)`, alone or in a union) is a class object
+        # whose identity inference lost — a `const_get` result kept by `is_a?(Class)`, an `is_a?(Module)` guard —
+        # so it is withheld. The rest of the argument is still judged: `Class | Integer` against `singleton(X)`
+        # reports for its `Integer`. Acceptance itself keeps answering `no`, so overload selection is unchanged.
+        def rejects_beyond_class_objects?(param_type, arg_type)
+          return false unless Inference::Acceptance.accepts(param_type, arg_type, mode: :gradual).no?
+          return true unless admits_class_objects?(param_type)
+
+          members = arg_type.is_a?(Type::Union) ? arg_type.members : [arg_type]
+          rest = members.reject { |member| Inference::Acceptance.class_object_supertype?(member) }
+          return true if rest.size == members.size
+          return false if rest.empty?
+
+          Inference::Acceptance.accepts(param_type, Type::Combinator.union(*rest), mode: :gradual).no?
+        end
+
+        def admits_class_objects?(param_type)
+          case param_type
+          when Type::Singleton then true
+          when Type::Union then param_type.members.any?(Type::Singleton)
+          else false
+          end
         end
 
         # True when `arg` is a declaration-sourced read whose rejection is

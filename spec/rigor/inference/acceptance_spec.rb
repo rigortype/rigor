@@ -117,6 +117,26 @@ RSpec.describe Rigor::Inference::Acceptance do
     it "rejects a Constant" do
       expect(accepts(int_singleton, int_constant)).to be_no
     end
+
+    # Issue #2855 — the call-site rule withholds this `no`; acceptance keeps it so overload selection is unchanged.
+    it "rejects a Class nominal (a supertype of the class objects, not a subtype)" do
+      expect(accepts(int_singleton, Rigor::Type::Combinator.nominal_of("Class"))).to be_no
+    end
+  end
+
+  describe ".class_object_supertype?" do
+    it "answers true for the unparameterised nominals the class objects are instances of" do
+      %w[Class Module Object BasicObject Kernel].each do |name|
+        expect(described_class.class_object_supertype?(Rigor::Type::Combinator.nominal_of(name))).to be(true), name
+      end
+    end
+
+    it "answers false for an unrelated nominal, a parameterised Class and a Singleton" do
+      class_of_int = Rigor::Type::Combinator.nominal_of("Class", type_args: [int_nominal])
+      [int_nominal, class_of_int, int_singleton].each do |type|
+        expect(described_class.class_object_supertype?(type)).to be(false), type.describe
+      end
+    end
   end
 
   describe "Nominal acceptance of Constant with an unloadable target" do

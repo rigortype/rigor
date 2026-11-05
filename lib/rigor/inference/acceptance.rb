@@ -431,6 +431,14 @@ module Rigor
         CLASS_OBJECT_NOMINALS = %w[Module Class Object Kernel BasicObject].freeze
         private_constant :CLASS_OBJECT_NOMINALS
 
+        # Issue #2855 — whether `type` is one of those nominals, unparameterised: a value whose class objects it
+        # is a supertype of. `Acceptance` still answers `no` for it against a `Singleton` (it is not a subtype);
+        # `call.argument-type-mismatch` reads it to withhold that verdict, since such a value is usually a class
+        # object whose identity inference lost.
+        public def class_object_supertype?(type)
+          type.is_a?(Type::Nominal) && type.type_args.empty? && CLASS_OBJECT_NOMINALS.include?(type.class_name)
+        end
+
         def accepts_nominal_from_singleton(self_type, other_type, mode)
           if CLASS_OBJECT_NOMINALS.include?(self_type.class_name)
             return Type::AcceptsResult.yes(

@@ -2815,6 +2815,17 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # Issue #2855 — a `Class` / `Module` / `Object` / `BasicObject` / `Kernel` argument against a `singleton(X)`
+  # parameter is a class object whose identity inference lost, so it does not report.
+  describe "fixtures/class_object_singleton_argument/ — a class-object supertype against singleton(X)" do
+    let(:harness) { harness_for("class_object_singleton_argument") }
+
+    it "reports only the unrelated instances, the unrelated class object and a union's rejected rest" do
+      mismatches = harness.diagnostics.select { |d| d.rule == "call.argument-type-mismatch" }
+      expect(mismatches.map(&:line)).to eq(marked_lines(harness, "# GENUINE-MISMATCH"))
+    end
+  end
+
   describe "fixtures/complex_catalog.rb — Complex catalog-driven folding" do
     let(:harness) { harness_for("complex_catalog") }
 

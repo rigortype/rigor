@@ -1,0 +1,20 @@
+class Shape
+end
+
+class Circle < Shape
+end
+
+class Registry
+  def self.fields_for: (singleton(Shape) klass) -> Array[Symbol]
+
+  def self.lookup: (singleton(Shape) klass) -> Symbol
+                 | (String name) -> Symbol
+
+  def self.a_class: () -> Class
+  def self.a_module: () -> Module
+  def self.an_object: () -> Object
+  def self.a_basic_object: () -> BasicObject
+  def self.a_kernel: () -> Kernel
+  def self.an_integer: () -> Integer
+  def self.class_or_integer: () -> (Class | Integer)
+end

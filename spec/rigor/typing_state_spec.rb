@@ -387,6 +387,27 @@ RSpec.describe Rigor::TypingState do
       end
     end
 
+    it "undoes an overwrite by putting the value it replaced back" do
+      store[node] = :first
+      state.replay([origins, [store, node].freeze, :second])
+      state.undo([origins, [store, node].freeze, :first])
+
+      expect(store[node]).to eq(:first)
+    end
+
+    it "undoes a capture's filings and a self-call miss, leaving the records their consumers read as before" do
+      reads = index(:dependency_reads)
+      capture = Rigor::Analysis::DependencyRecorder::Capture.new
+      calls = Rigor::Analysis::SelfCallResolutionRecorder::Accumulator.new("c")
+      misses = index(:self_call_misses)
+      pair = [capture, ["b.rb", nil].freeze].freeze
+      name = [capture, "const:X"].freeze
+      state.replay([reads, pair, true, reads, name, true, misses, [calls, :call].freeze, true])
+      state.undo([reads, pair, absent, reads, name, absent, misses, [calls, :call].freeze, absent])
+
+      expect([capture.reads.to_a, capture.missing.to_a, calls.calls]).to eq([[], [], []])
+    end
+
     it "undoes a dependency filing so the accumulator's tables hold what they held before" do
       accumulator = Rigor::Analysis::DependencyRecorder::Accumulator.new("a.rb")
       accumulator.add_read("b.rb", nil)

@@ -242,6 +242,28 @@ RSpec.describe TypeOfMemoFaults do
     end
   end
 
+  # A replay that raises while an entry is served (a store the entry outlived) is a counted mismatch, and the
+  # recomputation's type is answered instead of a raise into the typing path.
+  it "counts an error while serving as a mismatch and answers the recomputation's type" do
+    state = Rigor::TypingState::State.new
+    state[Rigor::TypingState.slot(:type_of_memo).index] = Rigor::TypeOfMemo::Table.new
+    origins = Rigor::TypingState.slot(:dynamic_origins).index
+    node = Prism.parse("a.b").value.statements.body.first
+    scope = Rigor::Scope.empty
+    store = {}.compare_by_identity
+    type = Rigor::Type::Combinator.nominal_of("Integer")
+    compute = lambda do
+      state.log_bound_write(origins, store, node, :cause)
+      store[node] = :cause
+      type
+    end
+    def state.replay(_writes) = raise(ArgumentError, "store outlived")
+    answers, result = serving(nil) { Array.new(2) { Rigor::TypeOfMemo.shadow(state, scope, node, &compute) } }
+
+    expect(answers).to eq([type, type])
+    expect(result[:kinds]).to include(:serve_error)
+  end
+
   it "covers every fault with a source or a synthetic fixture" do
     expect((self.class.source_cases.keys + TypeOfMemoFaultScenarios::KINDS.keys).uniq)
       .to match_array(described_class::FAULTS)

@@ -33,7 +33,8 @@ module Rigor
       end
 
       # Steps 2 and 3 of {#serve_hit}. An error in them (a replay into a store the entry outlived) is a mismatch,
-      # counted rather than raised into the typing path's rescues, and the recomputation's answer stands.
+      # counted rather than raised into the typing path's rescues. The recomputation's type is answered; the tables may
+      # hold a partial replay by then, which the counted mismatch already fails.
       def serve(state, phase, scope, node, stored, fresh, slices)
         reads, writes, priors, mark = slices
         live = touched(writes, priors).map { |slot, key| [slot, key, state.entry(slot, key)] }

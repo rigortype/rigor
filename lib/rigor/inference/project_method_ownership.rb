@@ -3,6 +3,7 @@
 require_relative "../type"
 require_relative "external_ancestor_resolution"
 require_relative "../typing_state"
+require_relative "memo_audit"
 
 module Rigor
   module Inference
@@ -24,7 +25,8 @@ module Rigor
       # inputs the buckets' answers read.
       MEMO = TypingState.memo(
         :project_method_ownership,
-        run_scoped: true, reason: "answer buckets keyed on the discovery index and environment identities"
+        run_scoped: true, audit: ["project method defines", "block runs", "ancestry non-escaping"],
+        reason: "answer buckets keyed on the discovery index and environment identities"
       )
       private_constant :MEMO
 
@@ -67,7 +69,11 @@ module Rigor
         return false if scope.nil?
 
         by_method = (memo(scope)[kind][class_name] ||= {})
-        return by_method[method_sym] if by_method.key?(method_sym)
+        if by_method.key?(method_sym)
+          return MemoAudit.check("project method defines", by_method[method_sym], class_name, method_sym) do
+            compute_defines?(class_name, method_sym, kind, scope)
+          end
+        end
 
         by_method[method_sym] = compute_defines?(class_name, method_sym, kind, scope)
       end
@@ -81,13 +87,14 @@ module Rigor
       # belongs to {ClosureEscapeAnalyzer}'s ancestry step. The `:block_runs` bucket belongs to
       # {BlockRunCount}.
       def memo(scope)
+        return new_buckets if MemoAudit.suspended?
+
         discovery = scope.discovery
         environment = scope.environment
         state = TypingState.current
         slot = state[MEMO]
         unless slot && slot[0].equal?(discovery) && slot[1].equal?(environment)
-          buckets = { instance: {}, singleton: {}, ancestry: {}, block_runs: {}.compare_by_identity }
-          slot = [discovery, environment, buckets]
+          slot = [discovery, environment, new_buckets]
           state[MEMO] = slot
         end
         slot[2]
@@ -95,6 +102,9 @@ module Rigor
 
       class << self
         private
+
+        # Empty buckets: a new slot's, and a throwaway set while an audit recomputation bypasses the memo.
+        def new_buckets = { instance: {}, singleton: {}, ancestry: {}, block_runs: {}.compare_by_identity }
 
         def class_target(class_name, kind)
           class_name.nil? ? nil : [[class_name.to_s, kind]]

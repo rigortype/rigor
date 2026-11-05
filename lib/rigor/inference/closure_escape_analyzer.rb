@@ -3,6 +3,7 @@
 require_relative "../type"
 require_relative "../reflection"
 require_relative "external_ancestor_resolution"
+require_relative "memo_audit"
 require_relative "project_method_ownership"
 
 module Rigor
@@ -185,7 +186,11 @@ module Rigor
           return false unless scope.known_user_class?(class_name)
 
           by_method = (ProjectMethodOwnership.memo(scope)[:ancestry][class_name] ||= {})
-          return by_method[method_sym] if by_method.key?(method_sym)
+          if by_method.key?(method_sym)
+            return MemoAudit.check("ancestry non-escaping", by_method[method_sym], class_name, method_sym) do
+              compute_ancestry_non_escaping?(class_name, method_sym, scope)
+            end
+          end
 
           by_method[method_sym] = compute_ancestry_non_escaping?(class_name, method_sym, scope)
         end

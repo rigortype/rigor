@@ -6,6 +6,7 @@ require_relative "../type"
 require_relative "mutation_widening"
 require_relative "key_presence_guard/scan"
 require_relative "../typing_state"
+require_relative "memo_audit"
 
 module Rigor
   module Inference
@@ -69,7 +70,8 @@ module Rigor
       )
       REWALK = TypingState.memo(
         :key_presence_rewalk,
-        run_scoped: true, reason: "the last file's guarded index, keyed by the file's root"
+        run_scoped: true, audit: "key presence rewalk",
+        reason: "the last file's guarded index, keyed by the file's root"
       )
       private_constant :WALK, :REWALK
 
@@ -133,20 +135,33 @@ module Rigor
       # The guarded scope index of `root`, built once per file (the cache holds the last file only), or nil when the
       # file holds no guard-shaped call.
       def rewalk(root, scope_index)
+        return guarded_index(root, scope_index) if MemoAudit.suspended?
+
         state = TypingState.current
         cached = state[REWALK]
-        return cached.last if cached&.first.equal?(root)
+        if cached&.first.equal?(root)
+          # A re-walk that raised is stored as nil, and its audit recomputation answers nil the same way.
+          return MemoAudit.check("key presence rewalk", cached.last, root) do
+            guarded_index(root, scope_index)
+          rescue StandardError
+            nil
+          end
+        end
 
         # Cached before the walk, so a re-walk that raises is attempted once per file and then answers nil.
         state[REWALK] = [root, nil]
+        index = guarded_index(root, scope_index)
+        state[REWALK] = [root, index]
+        index
+      end
+
+      def guarded_index(root, scope_index)
         return nil unless guard_shaped_call?(root)
 
         base = scope_index[root]
-        index = base && with_guards(root) do
+        base && with_guards(root) do
           ScopeIndexer.index(root, default_scope: base.with_isolated_side_tables)
         end
-        state[REWALK] = [root, index]
-        index
       end
 
       def guard_shaped_call?(node)

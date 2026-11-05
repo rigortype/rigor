@@ -4,6 +4,7 @@ require "prism"
 require_relative "../source/node_walker"
 require_relative "../source/node_children"
 require_relative "../typing_state"
+require_relative "memo_audit"
 
 module Rigor
   module Inference
@@ -77,7 +78,8 @@ module Rigor
       # a body an earlier run parsed: keyed by body node, the only input of the scan.
       CACHE = TypingState.memo(
         :construction_escape,
-        run_scoped: true, reason: "keyed by the body node; the escape scan is a pure function of the body"
+        run_scoped: true, audit: "construction escape",
+        reason: "keyed by the body node; the escape scan is a pure function of the body"
       )
       private_constant :CLOSURES, :LOCAL_REFERENCES, :LOCAL_WRITES, :ALL, :EMPTY_CALLS, :CACHE,
                        :STRING_EVAL_CALLS
@@ -94,8 +96,7 @@ module Rigor
       def escaped?(body, name, class_name, scope)
         return true if body.nil? || class_name.nil?
 
-        table = TypingState.current.weak_key_map(CACHE)
-        result = table[body] ||= scan(body)
+        result = escape_scan(body)
         return true if result.equal?(ALL)
 
         reason = result.escapes[name]
@@ -123,6 +124,17 @@ module Rigor
         when "Hash" then MutationWidening::HASH_MUTATORS | HashLookupMutation::MUTATORS
         else SetMutation::MUTATORS
         end
+      end
+
+      # {.scan} of `body`, memoised for the run.
+      def escape_scan(body)
+        return scan(body) if MemoAudit.suspended?
+
+        table = TypingState.current.weak_key_map(CACHE)
+        stored = table[body]
+        return table[body] = scan(body) if stored.nil?
+
+        MemoAudit.check("construction escape", stored, body) { scan(body) }
       end
 
       def scan(body)

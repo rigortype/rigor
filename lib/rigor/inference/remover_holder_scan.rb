@@ -6,6 +6,7 @@ require_relative "../typing_state"
 require_relative "../source/node_children"
 require_relative "closure_escape_analyzer"
 require_relative "construction_escape"
+require_relative "memo_audit"
 
 module Rigor
   module Inference
@@ -61,7 +62,8 @@ module Rigor
       # body node, and the unsafe names are a pure function of the body and its frame's parameters.
       UNSAFE_CACHE = TypingState.memo(
         :remover_narrowing_unsafe,
-        run_scoped: true, reason: "keyed by the body node; the unsafe local names are a pure function of the body"
+        run_scoped: true, audit: "remover narrowing unsafe",
+        reason: "keyed by the body node; the unsafe local names are a pure function of the body"
       )
       private_constant :REFLECTIVE_CALLS, :SELF_CONVERSIONS, :PURE_READERS, :IMMEDIATE_BLOCK_CALLS, :FRAME_CALLS,
                        :ANY_RECEIVER_FRAME_CALLS, :NON_WRITER_OPERATORS, :CORE_COLLECTIONS,
@@ -76,9 +78,19 @@ module Rigor
         body = frame&.body
         return true if body.nil?
 
-        table = TypingState.current.weak_key_map(UNSAFE_CACHE)
-        names = table[body] ||= unsafe_names(body, frame.parameters)
+        names = memoised_unsafe_names(body, frame.parameters)
         names.equal?(ALL) || names.include?(name.to_sym)
+      end
+
+      # {.unsafe_names} of `body`, memoised for the run.
+      def memoised_unsafe_names(body, parameters)
+        return unsafe_names(body, parameters) if MemoAudit.suspended?
+
+        table = TypingState.current.weak_key_map(UNSAFE_CACHE)
+        stored = table[body]
+        return table[body] = unsafe_names(body, parameters) if stored.nil?
+
+        MemoAudit.check("remover narrowing unsafe", stored, body) { unsafe_names(body, parameters) }
       end
 
       # `names` collects the locals; a collector that answers `site=` ({AliasMutationFloor}) is told, before each name

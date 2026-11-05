@@ -3,6 +3,7 @@
 require_relative "../builtins/cruby_definers"
 require_relative "constructed_class"
 require_relative "../../typing_state"
+require_relative "../memo_audit"
 
 module Rigor
   module Inference
@@ -307,22 +308,34 @@ module Rigor
 
         def unknown_superclass_classes(scope, class_name)
           Analysis::DependencyRecorder.read_name(:subclass_of, "*") if Analysis::DependencyRecorder.active?
-          table = subclass_memo(scope)
-          all = table[:unknown] ||= begin
-            mark = Scope::DiscoveryIndex::ENVELOPE_META_SUPERCLASS_MARK
-            computed = scope.discovered_superclasses.filter_map { |child, parent| child if parent.nil? }
-            meta = scope.discovered_parameter_envelopes.filter_map { |name, bucket| name if bucket.key?(mark) }
-            (computed + meta).uniq.freeze
-          end
+          all = all_unknown_superclass_classes(scope)
           name = class_name.to_s
           all.include?(name) ? all - [name] : all
+        end
+
+        def all_unknown_superclass_classes(scope)
+          table = subclass_memo(scope)
+          stored = table[:unknown]
+          return table[:unknown] = compute_unknown_superclass_classes(scope) if stored.nil?
+
+          MemoAudit.check("own method unknown superclasses", stored, :unknown) do
+            compute_unknown_superclass_classes(scope)
+          end
+        end
+
+        def compute_unknown_superclass_classes(scope)
+          mark = Scope::DiscoveryIndex::ENVELOPE_META_SUPERCLASS_MARK
+          computed = scope.discovered_superclasses.filter_map { |child, parent| child if parent.nil? }
+          meta = scope.discovered_parameter_envelopes.filter_map { |name, bucket| name if bucket.key?(mark) }
+          (computed + meta).uniq.freeze
         end
 
         # ADR-129 WD1 — a run-scoped Memo keyed on the identities of the discovery index and environment, the only
         # inputs of the buckets it holds.
         SUBCLASS_MEMO = TypingState.memo(
           :own_method_subclasses,
-          run_scoped: true, reason: "subclass buckets keyed on the discovery index and environment identities"
+          run_scoped: true, audit: ["own method unknown superclasses", "own method children"],
+          reason: "subclass buckets keyed on the discovery index and environment identities"
         )
         private_constant :SUBCLASS_MEMO
 
@@ -330,6 +343,8 @@ module Rigor
         # inputs `children_by_parent` and the unknown-superclass list read; neither files a dependency edge
         # (`each_subclass` files its own `subclass_of:` edges on every call), so a hit drops none.
         def subclass_memo(scope)
+          return {} if MemoAudit.suspended?
+
           state = TypingState.current
           slot = state[SUBCLASS_MEMO]
           discovery = scope.discovery
@@ -348,11 +363,18 @@ module Rigor
         end
 
         def children_by_parent(scope)
-          subclass_memo(scope)[:children] ||=
-            scope.discovered_superclasses.each_with_object({}) do |(child, raw_parent), children|
-              parent = scope.ancestor_name_candidates(child, raw_parent).find { |name| known_class?(scope, name) }
-              (children[parent] ||= []) << child if parent
-            end.each_value(&:freeze).freeze
+          table = subclass_memo(scope)
+          stored = table[:children]
+          return table[:children] = compute_children_by_parent(scope) if stored.nil?
+
+          MemoAudit.check("own method children", stored, :children) { compute_children_by_parent(scope) }
+        end
+
+        def compute_children_by_parent(scope)
+          scope.discovered_superclasses.each_with_object({}) do |(child, raw_parent), children|
+            parent = scope.ancestor_name_candidates(child, raw_parent).find { |name| known_class?(scope, name) }
+            (children[parent] ||= []) << child if parent
+          end.each_value(&:freeze).freeze
         end
 
         def known_class?(scope, name)

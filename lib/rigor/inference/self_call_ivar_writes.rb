@@ -10,6 +10,7 @@ require_relative "guard_rebinding"
 require_relative "project_method_ownership"
 require_relative "refined_dispatch/own_method"
 require_relative "../typing_state"
+require_relative "memo_audit"
 
 module Rigor
   module Inference
@@ -120,7 +121,8 @@ module Rigor
       # from it alone, so the counts are a function of the table identity the pair is keyed on.
       DEFINITION_COUNTS = TypingState.memo(
         :self_call_ivar_writes_definition_counts,
-        run_scoped: true, reason: "the instance-def counts of one deferred-ranges table; keyed on its identity"
+        run_scoped: true, audit: "self-call ivar definition counts",
+        reason: "the instance-def counts of one deferred-ranges table; keyed on its identity"
       )
       private_constant :DEFINITION_COUNTS
 
@@ -131,10 +133,22 @@ module Rigor
       # table held the whole project. The slot holds one table and its counts, the next table replaces them, and the
       # run that filled it releases it when it ends (run-scoped, #2399).
       def definition_counts(deferred_ranges)
+        return count_definitions(deferred_ranges) if MemoAudit.suspended?
+
         state = TypingState.current
         slot = state[DEFINITION_COUNTS]
-        return slot[1] if slot && slot[0].equal?(deferred_ranges)
+        if slot && slot[0].equal?(deferred_ranges)
+          return MemoAudit.check("self-call ivar definition counts", slot[1], deferred_ranges.size) do
+            count_definitions(deferred_ranges)
+          end
+        end
 
+        counts = count_definitions(deferred_ranges)
+        state[DEFINITION_COUNTS] = [deferred_ranges, counts]
+        counts
+      end
+
+      def count_definitions(deferred_ranges)
         counts = {}
         deferred_ranges.each_value do |rows|
           rows.each do |row|
@@ -144,7 +158,6 @@ module Rigor
             counts[key] = counts.fetch(key, 0) + 1
           end
         end
-        state[DEFINITION_COUNTS] = [deferred_ranges, counts]
         counts
       end
 

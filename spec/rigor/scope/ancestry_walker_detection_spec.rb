@@ -90,6 +90,12 @@ ALLOWED_ANCESTRY_WALKERS = {
   "lib/rigor/inference/refined_dispatch/constructed_class.rb#project_name?" =>
     "tests only whether the bare constant name is a key of these tables, to give the #1979 " \
     "constructor-superclass skip up; walks no ancestor chain",
+  "lib/rigor/inference/refined_dispatch/own_method.rb#all_unknown_superclass_classes" =>
+    "the block is `MemoAudit.check`'s recomputation, run once per audited memo hit, not per element: it rebuilds " \
+    "the unknown-superclass list (a filter over the table taken whole) to compare with the stored one; walks no chain",
+  "lib/rigor/inference/refined_dispatch/own_method.rb#children_by_parent" =>
+    "the block is `MemoAudit.check`'s recomputation, run once per audited memo hit, not per element: it rebuilds " \
+    "the descendant table (an iteration over the table whole) to compare with the stored one; walks no chain",
   "plugins/rigor-alba/lib/rigor/plugin/alba/resource_index.rb#resource_chain?" =>
     "existential over the project's own superclass chain (does any ancestor `include Alba::Resource`), read " \
     "from the plugin's cached file scan, which has no Scope or discovery tables to build a chain from; " \

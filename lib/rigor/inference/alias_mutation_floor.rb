@@ -13,6 +13,7 @@ require_relative "set_mutation"
 require_relative "string_mutation"
 require_relative "unknown_store_widening"
 require_relative "alias_mutation_floor/foreign_locals"
+require_relative "alias_mutation_floor/memos"
 require_relative "alias_mutation_floor/site_collector"
 require_relative "alias_mutation_floor/reach"
 
@@ -72,26 +73,8 @@ module Rigor
       NUMBERED_PARAMETER = /\A_[1-9]\z/
       SEND_NAMES = %i[send public_send __send__].to_set.freeze
       ELEMENT_READS = %i[[] first last fetch dig].to_set.freeze
-      # ADR-129 WD1 — four run-scoped Memos, each a pure function of the key it holds.
-      FACTS_CACHE = TypingState.memo(
-        :alias_mutation_floor_facts,
-        run_scoped: true, reason: "keyed by the body node; the facts are a pure function of the body and its parameters"
-      )
-      IVAR_CACHE = TypingState.memo(
-        :alias_mutation_floor_ivar_mutators,
-        run_scoped: true, reason: "keyed by def node; whether its body mutates an ivar is a pure function of the body"
-      )
-      FLOOR_CACHE = TypingState.memo(
-        :alias_mutation_floor_callee_floors,
-        run_scoped: true, reason: "keyed by the literal shape; the callee block floor is a pure function of it"
-      )
-      STORE_CACHE = TypingState.memo(
-        :alias_mutation_floor_unknown_stores,
-        run_scoped: true, reason: "keyed by call node, removed-keys mode and type, every input of the widened store"
-      )
       private_constant :FULL, :PART, :NO_KEYS, :NO_LINKS, :SELF_RETURNERS, :ALL, :NUMBERED_PARAMETER,
-                       :SEND_NAMES, :ELEMENT_READS, :FACTS_CACHE, :IVAR_CACHE, :FLOOR_CACHE,
-                       :STORE_CACHE
+                       :SEND_NAMES, :ELEMENT_READS
 
       module_function
 
@@ -141,13 +124,10 @@ module Rigor
       # `type` after `call_node`'s unknown store ({UnknownStoreWidening.widen_store}), memoised per call site for the
       # run as {.callee_floor} is.
       def unknown_store(call_node, type, removed_keys:)
-        state = TypingState.current
-        table = (state[STORE_CACHE] ||= {}.compare_by_identity)
-        per_mode = ((table[call_node] ||= {})[removed_keys] ||= {})
-        per_mode.fetch(type) do
+        Memos.unknown_store(call_node, removed_keys, type) do
           method_name, arg_types = UnknownStoreWidening.unknown_store(call_node)
-          per_mode[type] = (removed_keys && removed_keys_shape(type, method_name)) ||
-                           UnknownStoreWidening.widen_store(type, method_name, arg_types)
+          (removed_keys && removed_keys_shape(type, method_name)) ||
+            UnknownStoreWidening.widen_store(type, method_name, arg_types)
         end
       end
 
@@ -169,9 +149,7 @@ module Rigor
       def callee_floor(type)
         return nil unless literal_shape?(type)
 
-        state = TypingState.current
-        table = (state[FLOOR_CACHE] ||= {})
-        table.fetch(type) { table[type] = UnknownStoreWidening.callee_block_floor(type) }
+        Memos.callee_floor(type) { UnknownStoreWidening.callee_block_floor(type) }
       end
 
       # Whether {.floor_after_written_local} may floor anything for the local `read` reads at `call_node`: a target
@@ -241,11 +219,7 @@ module Rigor
       def mutates_ivar?(def_node)
         return false if def_node.nil?
 
-        table = TypingState.current.weak_key_map(IVAR_CACHE)
-        cached = table[def_node]
-        return cached unless cached.nil?
-
-        table[def_node] = ivar_mutation?(def_node.body)
+        Memos.ivar_mutator(def_node) { ivar_mutation?(def_node.body) }
       end
 
       def ivar_mutation?(node)
@@ -283,8 +257,7 @@ module Rigor
         body = frame&.body
         return nil if body.nil?
 
-        table = TypingState.current.weak_key_map(FACTS_CACHE)
-        facts = (table[body] ||= scan(body, frame.parameters))
+        facts = Memos.facts(body) { scan(body, frame.parameters) }
         facts.held.empty? && facts.held_part.empty? && facts.links.empty? ? nil : facts
       end
 

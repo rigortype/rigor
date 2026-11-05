@@ -829,6 +829,24 @@ jobs:
       - name: Run the callee-floor memo audit
         run: RIGOR_MEMO_AUDIT=1 bundle exec exe/rigor check --no-cache --workers 0 lib
 
+      # ADR-129 stage 3 — G1's shadow over Rigor's own source and the integration fixtures: every would-be hit of the
+      # type_of memo is recomputed and compared, and nothing is served, so the diagnostics are not read here. Advisory
+      # until the stage-3 corpus runs show zero mismatches; a later PR makes it a gate. The report check fails on a
+      # missing or empty report and on a run that checked nothing, so an unwritable path cannot pass as clean.
+      - name: Run the type_of shadow (advisory)
+        continue-on-error: true
+        run: |
+          report="$RUNNER_TEMP/type-of-shadow.jsonl"
+          rm -f "$report"
+          RIGOR_TYPE_OF_SHADOW=1 RIGOR_TYPE_OF_SHADOW_REPORT="$report" \
+            bundle exec exe/rigor check --no-cache --workers 0 --format json lib > /dev/null || true
+          RIGOR_TYPE_OF_SHADOW=1 RIGOR_TYPE_OF_SHADOW_REPORT="$report" \
+            bundle exec exe/rigor check --no-cache --workers 0 --format json spec/integration/fixtures > /dev/null || true
+          if ! ruby tool/type_of_shadow_report.rb "$report"; then
+            echo "::warning title=type_of shadow (ADR-129 G1)::The advisory type_of shadow failed. See the job summary."
+            exit 1
+          fi
+
   # ── 5. Warm-vs-cold diagnostic diff ─────────────────────────────
   # The two self-check variants must agree on every diagnostic.  Any
   # difference means the cache is altering analysis results — a bug.

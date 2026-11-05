@@ -43,7 +43,9 @@ module Rigor
     # - `read_through`: a Table that is a read-through cache of the computation's own value (WD1).
     # - `bound`: a Table whose stores are not the slot's value but objects its owner holds, several at once (a store
     #   per file's scopes, per installed recorder); its journal records key on `[store, key]`.
-    Slot = Data.define(:name, :kind, :index, :reason, :run_scoped, :read_exemption, :contents, :read_through, :bound)
+    # - `audit`: a Memo's `MemoAudit.check` labels, the hit sites that recompute and compare (WD1, G2).
+    Slot = Data.define(:name, :kind, :index, :reason, :run_scoped, :read_exemption, :contents, :read_through, :bound,
+                       :audit)
 
     # A Table read of a key the table does not hold logs this rather than nil, so a stored nil and a miss differ.
     ABSENT = Object.new.freeze
@@ -85,9 +87,11 @@ module Rigor
         declare(name, :resource, reason, read_exemption: read_exemption, run_scoped: run_scoped)
       end
 
-      # Declares a Memo slot and returns its index.
-      def memo(name, reason:, run_scoped: false)
-        declare(name, :memo, reason, run_scoped: run_scoped)
+      # Declares a Memo slot and returns its index. `audit` names the `MemoAudit.check` labels its hits go through;
+      # a spec (`spec/rigor/typing_state_memo_audit_spec.rb`) holds every Memo to them, or to its stage-2 ratchet.
+      def memo(name, reason:, run_scoped: false, audit: nil)
+        labels = Array(audit)
+        declare(name, :memo, reason, run_scoped: run_scoped, audit: labels.empty? ? nil : labels)
       end
 
       # Every declared slot, in declaration order (a slot's index is its position).
@@ -123,7 +127,7 @@ module Rigor
       end
 
       def declare(name, kind, reason, run_scoped: false, read_exemption: nil, contents: nil, read_through: false, # rubocop:disable Metrics/ParameterLists
-                  bound: false)
+                  bound: false, audit: nil)
         if @slots.any? { |slot| slot.name == name }
           raise ArgumentError, "typing-state slot #{name.inspect} is already declared"
         end
@@ -131,7 +135,8 @@ module Rigor
 
         index = @slots.size
         slot = Slot.new(name: name, kind: kind, index: index, reason: reason.dup.freeze, run_scoped: run_scoped,
-                        read_exemption: read_exemption, contents: contents, read_through: read_through, bound: bound)
+                        read_exemption: read_exemption, contents: contents, read_through: read_through, bound: bound,
+                        audit: audit)
         @slots = Ractor.make_shareable([*@slots, slot])
         @run_scoped = [*@run_scoped, index].freeze if run_scoped
         index

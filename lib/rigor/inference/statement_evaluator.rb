@@ -833,7 +833,7 @@ module Rigor
 
       UNRECORDED_HAND_OFFS = TypingState.memo(
         :callee_unrecorded_hand_offs,
-        run_scoped: true,
+        run_scoped: true, audit: "unrecorded hand-off",
         reason: "keyed by discovery, side, class and spelling, all its answer reads"
       )
       private_constant :UNRECORDED_HAND_OFFS
@@ -1158,7 +1158,8 @@ module Rigor
 
       INSTANCE_DEF_INDEX = TypingState.memo(
         :callee_instance_def_index,
-        run_scoped: true, reason: "keyed by discovery and name, all its answer reads"
+        run_scoped: true, audit: ["instance def owners", "subclassing opacity"],
+        reason: "keyed by discovery and name, all its answer reads"
       )
       private_constant :INSTANCE_DEF_INDEX
 
@@ -5882,7 +5883,7 @@ module Rigor
 
       CHAIN_STORE = TypingState.memo(
         :callee_chain_successors,
-        run_scoped: true,
+        run_scoped: true, audit: "successor",
         reason: "graph facts keyed by discovery, the same whichever census reads them"
       )
       NO_CHAIN_STORE = {}.freeze
@@ -5938,7 +5939,7 @@ module Rigor
 
       RESOLVED_CENSUS = TypingState.memo(
         :callee_resolved_census,
-        run_scoped: true,
+        run_scoped: true, audit: "resolved census",
         reason: "keyed by discovery, side, kind, class and def, all its answer reads; audited by MemoAudit"
       )
       private_constant :RESOLVED_CENSUS
@@ -6205,7 +6206,8 @@ module Rigor
 
       DEF_CENSUS = TypingState.memo(
         :callee_def_census,
-        run_scoped: true, reason: "keyed by def node, the only input it reads; audited by MemoAudit"
+        run_scoped: true, audit: "def census",
+        reason: "keyed by def node, the only input it reads; audited by MemoAudit"
       )
       private_constant :DEF_CENSUS
 

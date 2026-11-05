@@ -254,8 +254,15 @@ RSpec.describe Rigor::TypingState do
 
         %i[log_read log_write].each do |name|
           define_method(name) do |slot, key, value|
-            check(slot, name) { |s| s.kind == :table }
+            check(slot, name) { |s| s.kind == :table && !s.bound }
             super(slot, key, value)
+          end
+        end
+
+        %i[log_bound_read log_bound_write].each do |name|
+          define_method(name) do |slot, store, key, value|
+            check(slot, name) { |s| s.kind == :table && s.bound }
+            super(slot, store, key, value)
           end
         end
 
@@ -587,7 +594,8 @@ RSpec.describe Rigor::TypingState do
       expect(run.fetch(:refused)).to be(true)
       expect(journaled(run.fetch(:records))).to include(
         %i[read inject_accumulator], %i[write inject_accumulator], %i[read user_method_return_memo],
-        %i[write user_method_return_memo], %i[read loop_value_record], %i[write loop_value_record]
+        %i[write user_method_return_memo], %i[read loop_value_record], %i[write loop_value_record],
+        %i[read dynamic_origins], %i[write dynamic_origins]
       )
     end
 

@@ -6,6 +6,7 @@ require_relative "void_origin"
 require_relative "../reflection"
 require_relative "../source/node_children"
 require_relative "../typing_state"
+require_relative "memo_audit"
 
 module Rigor
   module Inference
@@ -68,7 +69,8 @@ module Rigor
       # functions of the def node they key on within one run.
       MEMO = TypingState.memo(
         :void_tail_summary,
-        run_scoped: true, reason: "a bucket of per-def-node summaries, keyed on the run-generation token's identity"
+        run_scoped: true, audit: ["void tail origin", "void tail walk"],
+        reason: "a bucket of per-def-node summaries, keyed on the run-generation token's identity"
       )
       private_constant :MEMO
 
@@ -88,7 +90,11 @@ module Rigor
         return nil if def_node.nil?
 
         memo = memo_bucket
-        return memo[def_node] if memo.key?(def_node)
+        if memo.key?(def_node)
+          return MemoAudit.check("void tail origin", memo[def_node], def_node) do
+            walk(def_node, owner, kind, {}.compare_by_identity)
+          end
+        end
 
         walk(def_node, owner, kind, {}.compare_by_identity)
       end
@@ -104,7 +110,11 @@ module Rigor
         return nil if visited.key?(def_node)
 
         memo = memo_bucket
-        return memo[def_node] if memo.key?(def_node)
+        if memo.key?(def_node)
+          return MemoAudit.check("void tail walk", memo[def_node], def_node) do
+            walk(def_node, owner, kind, {}.compare_by_identity)
+          end
+        end
 
         visited[def_node] = true
         memo[def_node] = compute(def_node, owner, kind, visited)
@@ -212,6 +222,8 @@ module Rigor
       end
 
       def memo_bucket
+        return {}.compare_by_identity if MemoAudit.enabled? && MemoAudit.suspended?
+
         generation = scope.run_generation || scope.discovered_def_nodes
         state = TypingState.current
         slot = state[MEMO]

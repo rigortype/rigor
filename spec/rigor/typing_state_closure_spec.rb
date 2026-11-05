@@ -56,7 +56,7 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
   def inference_files
     %w[
       lib/rigor/inference/acceptance.rb
-      lib/rigor/inference/alias_mutation_floor.rb
+      lib/rigor/inference/alias_mutation_floor.rb lib/rigor/inference/alias_mutation_floor/memos.rb
       lib/rigor/inference/budget_trace.rb
       lib/rigor/inference/construction_escape.rb
       lib/rigor/inference/def_node_resolver.rb

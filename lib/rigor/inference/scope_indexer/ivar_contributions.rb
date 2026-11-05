@@ -2,6 +2,7 @@
 
 require_relative "../../analysis/dependency_recorder"
 require_relative "../../typing_state"
+require_relative "../memo_audit"
 require_relative "../../type"
 require_relative "../refined_dispatch/own_method"
 
@@ -32,7 +33,8 @@ module Rigor
         # ADR-129 WD1 — a run-scoped Memo: the table is a pure function of the census it is keyed on by identity.
         TABLE = TypingState.memo(
           :ivar_contributions_table,
-          run_scoped: true, reason: "the contribution table of one census; keyed on the census's identity"
+          run_scoped: true, audit: "ivar contributions table",
+          reason: "the contribution table of one census; keyed on the census's identity"
         )
         EMPTY = {}.freeze
         private_constant :TABLE, :EMPTY
@@ -118,10 +120,20 @@ module Rigor
         # `{ owner => { ivar => { path => [value, ...] } } }` over `census`'s path-tagged `:own_write_type` entries,
         # built once per census and kept in one run-scoped slot keyed by its identity.
         def table(census)
+          return build_table(census) if MemoAudit.enabled? && MemoAudit.suspended?
+
           state = TypingState.current
           slot = state[TABLE]
-          return slot[1] if slot && slot[0].equal?(census)
+          if slot && slot[0].equal?(census)
+            return MemoAudit.check("ivar contributions table", slot[1], census.size) { build_table(census) }
+          end
 
+          table = build_table(census)
+          state[TABLE] = [census, table]
+          table
+        end
+
+        def build_table(census)
           table = {}
           canonical_paths = {}
           census.each do |entry|
@@ -130,10 +142,9 @@ module Rigor
             by_path = ((table[entry[1]] ||= {})[entry[2]] ||= {})
             (by_path[canonical_paths[entry[4]] ||= canonical(entry[4])] ||= []) << entry[3]
           end
-          state[TABLE] = [census, table]
           table
         end
-        private_class_method :chain_owners, :contributed, :value_type, :canonical, :table
+        private_class_method :chain_owners, :contributed, :value_type, :canonical, :table, :build_table
       end
     end
   end

@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "block_call_timing"
 require_relative "closure_escape_analyzer"
+require_relative "memo_audit"
 require_relative "project_method_ownership"
 
 module Rigor
@@ -50,7 +51,11 @@ module Rigor
       # one, asks the same callee.
       def may_repeat?(def_node, scope)
         memo = ProjectMethodOwnership.memo(scope)[:block_runs]
-        return memo[def_node] if memo.key?(def_node)
+        if memo.key?(def_node)
+          return MemoAudit.check("block runs", memo[def_node], def_node) do
+            runs(def_node.body, def_node.parameters&.block&.name)[1] >= MANY
+          end
+        end
 
         memo[def_node] = runs(def_node.body, def_node.parameters&.block&.name)[1] >= MANY
       end

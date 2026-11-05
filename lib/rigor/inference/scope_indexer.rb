@@ -14,6 +14,7 @@ require_relative "../source/node_walker"
 require_relative "../source/parameter_envelope"
 require_relative "../cache/file_digest"
 require_relative "../typing_state"
+require_relative "memo_audit"
 require_relative "../analysis/check_rules/published_constant_guard"
 require_relative "anonymous_meta_class"
 require_relative "def_handle"
@@ -5531,18 +5532,26 @@ module Rigor
       # and its own set. Not run-scoped: an entry holds no run's tables.
       DECLARED_NAMES = TypingState.memo(
         :scope_index_declared_names,
+        audit: "scope index declared names",
         reason: "a WeakKeyMap keyed on the Prism::Source; the frozen set is a pure function of the source's text"
       )
       private_constant :DECLARED_NAMES
 
       def eval_file_declared_names(node)
         source = node.location.send(:source)
+        return scan_declared_names(source) if MemoAudit.enabled? && MemoAudit.suspended?
+
         table = TypingState.current.weak_key_map(DECLARED_NAMES)
-        table[source] ||= begin
-          names = Set.new
-          collect_declared_constant_names(Prism.parse(source.source).value, [], names)
-          names.freeze
-        end
+        stored = table[source]
+        return table[source] = scan_declared_names(source) if stored.nil?
+
+        MemoAudit.check("scope index declared names", stored, source.source.bytesize) { scan_declared_names(source) }
+      end
+
+      def scan_declared_names(source)
+        names = Set.new
+        collect_declared_constant_names(Prism.parse(source.source).value, [], names)
+        names.freeze
       end
 
       # The walk behind {eval_file_declared_names}: every qualified constant

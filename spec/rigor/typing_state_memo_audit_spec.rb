@@ -11,16 +11,11 @@ RSpec.describe "ADR-129 Memo slots and MemoAudit" do
   # The Memo slots stage 2 has not wired yet. A wiring PR removes its slots here; a new Memo never joins.
   def unaudited
     %i[
-      alias_mutation_floor_callee_floors alias_mutation_floor_facts alias_mutation_floor_ivar_mutators
-      alias_mutation_floor_unknown_stores ancestor_constant_scopes check_rules_private_singleton_names
-      class_graph_cache construction_escape constructed_class core_stdlib_ancestor_dispatch
+      ancestor_constant_scopes check_rules_private_singleton_names class_graph_cache core_stdlib_ancestor_dispatch
       definers_index_layers definers_index_seed definers_index_seed_alt deferred_definition_names
-      ivar_contributions_table key_presence_rewalk method_alias_names method_definers_index
-      method_definers_index_alt mixin_ancestor_dispatch overridable_method_gate own_method_subclasses
-      project_method_names project_method_ownership rbs_complete_member_names recorded_ancestor_constant_scopes
-      remover_narrowing_unsafe resolution_chain scope_index_declared_names self_call_ivar_writes_definition_counts
-      toplevel_definition_rows user_class_fallback_defines_name user_class_fallback_external_ancestor
-      void_tail_summary
+      method_alias_names method_definers_index method_definers_index_alt mixin_ancestor_dispatch
+      overridable_method_gate project_method_names rbs_complete_member_names recorded_ancestor_constant_scopes
+      resolution_chain toplevel_definition_rows user_class_fallback_defines_name user_class_fallback_external_ancestor
     ]
   end
 

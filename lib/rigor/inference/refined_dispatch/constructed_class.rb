@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../../typing_state"
+require_relative "../memo_audit"
 
 module Rigor
   module Inference
@@ -22,7 +23,9 @@ module Rigor
         # answer reads and which are fixed for a run.
         MEMO = TypingState.memo(
           :constructed_class,
-          run_scoped: true, reason: "verdicts keyed on the run-generation token and environment identities"
+          run_scoped: true,
+          audit: ["constructed class verdict", "constructed class segments", "constructed class names"],
+          reason: "verdicts keyed on the run-generation token and environment identities"
         )
         EMPTY = [].freeze
         private_constant :MEMO, :EMPTY
@@ -41,9 +44,17 @@ module Rigor
           return false if named.empty?
 
           by_class = (table[:verdicts][class_name] ||= {})
-          return by_class[named] if by_class.key?(named)
+          if by_class.key?(named)
+            return MemoAudit.check("constructed class verdict", by_class[named], class_name, named) do
+              apart_verdict(scope, named, class_name, memo(scope))
+            end
+          end
 
-          by_class[named] = named.all? { |constant| core_class_apart?(scope, constant, class_name.to_s, table) }
+          by_class[named] = apart_verdict(scope, named, class_name, table)
+        end
+
+        def apart_verdict(scope, named, class_name, table)
+          named.all? { |constant| core_class_apart?(scope, constant, class_name.to_s, table) }
         end
 
         def core_class_apart?(scope, constant, class_name, table)
@@ -73,7 +84,14 @@ module Rigor
 
         # The last segment of every class or module the project declares, reopenings included.
         def declared_segments(scope, table)
-          table[:segments] ||= declared_names(scope).each_key.to_set { |key| key.to_s.split("::").last }.freeze
+          segments = table[:segments]
+          return table[:segments] = compute_declared_segments(scope) if segments.nil?
+
+          MemoAudit.check("constructed class segments", segments, :segments) { compute_declared_segments(scope) }
+        end
+
+        def compute_declared_segments(scope)
+          declared_names(scope).each_key.to_set { |key| key.to_s.split("::").last }.freeze
         end
 
         # The constants `name`'s superclass expression names, or an empty Array; memoised per envelope bucket,
@@ -83,15 +101,18 @@ module Rigor
           return EMPTY if bucket.nil?
 
           names = table[:names]
-          return names[bucket] if names.key?(bucket)
+          if names.key?(bucket)
+            return MemoAudit.check("constructed class names", names[bucket], name) { bucket_constructed_names(bucket) }
+          end
 
-          names[bucket] =
-            if bucket.key?(Scope::DiscoveryIndex::ENVELOPE_META_SUPERCLASS_MARK)
-              EMPTY
-            else
-              kind = Scope::DiscoveryIndex::ENVELOPE_CONSTRUCTED_KIND
-              bucket.each_key.filter_map { |key| key[1] if key.is_a?(Array) && key[0] == kind }.freeze
-            end
+          names[bucket] = bucket_constructed_names(bucket)
+        end
+
+        def bucket_constructed_names(bucket)
+          return EMPTY if bucket.key?(Scope::DiscoveryIndex::ENVELOPE_META_SUPERCLASS_MARK)
+
+          kind = Scope::DiscoveryIndex::ENVELOPE_CONSTRUCTED_KIND
+          bucket.each_key.filter_map { |key| key[1] if key.is_a?(Array) && key[0] == kind }.freeze
         end
 
         # The run-wide table of declared classes: the seeded `discovered_class_sources`, or a single-file run's
@@ -105,16 +126,21 @@ module Rigor
         # `discovered_def_nodes`, as `ExpressionTyper` falls back) and the environment: every table read here is
         # fixed for a run, so each answer is computed once a run, and a new run replaces the slot.
         def memo(scope)
+          return new_table if MemoAudit.enabled? && MemoAudit.suspended?
+
           state = TypingState.current
           slot = state[MEMO]
           generation = scope.run_generation || scope.discovered_def_nodes
           environment = scope.environment
           unless slot && slot[0].equal?(generation) && slot[1].equal?(environment)
-            slot = [generation, environment, { names: {}.compare_by_identity, verdicts: {} }]
+            slot = [generation, environment, new_table]
             state[MEMO] = slot
           end
           slot[2]
         end
+
+        # Empty tables: a new slot's, and a throwaway set while an audit recomputation bypasses the memo.
+        def new_table = { names: {}.compare_by_identity, verdicts: {} }
       end
     end
   end

@@ -98,6 +98,11 @@ RSpec.describe "Forwardable delegators and call.undefined-method (#2793)" do
     expect(undefined_messages).to be_empty
   end
 
+  it "treats a class whose delegate hash has a computed key as open" do
+    write_project("NAMES = %i[fetch]\n  delegate NAMES => :@x", %w[Box.new.fetch Box.new.anything])
+    expect(undefined_messages).to be_empty
+  end
+
   it "treats a subclass of a class with non-literal delegated names as open" do
     write_project("NAMES = %i[fetch]\n  def_delegators :@x, *NAMES", %w[Sub.new.fetch])
     File.write(File.join("lib", "sub.rb"), "class Sub < Box\nend\n")

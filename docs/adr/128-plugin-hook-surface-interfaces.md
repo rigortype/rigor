@@ -4,7 +4,7 @@ Status: **Accepted, 2026-11-03.** Implemented:
 
 - slice 1 (WD7) landed in #2714;
 - slice 2 landed in #2694;
-- slice 3 landed in #PR_NUMBER. #2681 (#2768) and ADR-130's half of #929 (#2808, #2815) made the hook types
+- slice 3 landed in #2822. #2681 (#2768) and ADR-130's half of #929 (#2808, #2815) made the hook types
   live, and the `plugin.api-surface` rule (WD6) ships in the bleeding-edge overlay. WD5's seam was settled by
   ADR-130's untyped parity rather than by assignability (WD5 note).
 
@@ -190,7 +190,7 @@ where the interface's backing class is expected, or `call.argument-type-mismatch
 plugins. Slice 3 decides how, and measures it: a declared backing class for each plugin-facing
 interface, or an exemption confined to those interfaces.
 
-> **Settled in slice 3 (#PR_NUMBER) by [ADR-130](130-interface-typed-values-dispatch-under-untyped-parity.md).**
+> **Settled in slice 3 (#2822) by [ADR-130](130-interface-typed-values-dispatch-under-untyped-parity.md).**
 > ADR-130 carries a plugin-interface value as `Dynamic[Rigor::Plugin::_Scope]`, which is `untyped` to every rule
 > but member dispatch, assignability included. The value passes `scope: Scope` as `Dynamic[top]` does, so the
 > seam does not arise; a fixture pins a plugin handing its hook scope to `Reflection` with no
@@ -227,7 +227,7 @@ in 0.3.0, where it raises at class-definition time.
 (`plugin.api-surface`), whose receiver is typed by a plugin-facing interface. The rule applies only
 to plugin source, meaning classes that inherit `Plugin::Base` outside `lib/`.
 
-> **Amended in slice 3 (#PR_NUMBER).** Plugin source is read from the class declarations, not a path: code
+> **Amended in slice 3 (#2822).** Plugin source is read from the class declarations, not a path: code
 > lexically inside a class whose superclass chain reaches `Plugin::Base`, and in no `Plugin::Base` body. A
 > third-party plugin gem keeps its plugin under its own `lib/`, so a path test would exempt every one of them. `Plugin::Base`'s own
 hook implementations in `lib/rigor/plugin/base.rb` take interface-typed parameters and hand them to

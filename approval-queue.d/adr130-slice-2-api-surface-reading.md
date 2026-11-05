@@ -1,6 +1,6 @@
 # `plugin.api-surface` judges plugin source by its class declarations, and exempts every object's own members
 
-- **PR:** [#PR_NUMBER](https://github.com/rigortype/rigor/pull/PR_NUMBER)
+- **PR:** [#2822](https://github.com/rigortype/rigor/pull/2822)
 - **Issue:** [#2686](https://github.com/rigortype/rigor/issues/2686)
 - **Class:** open-choice
 - **Precedent:** [ADR-128](../docs/adr/128-plugin-hook-surface-interfaces.md)

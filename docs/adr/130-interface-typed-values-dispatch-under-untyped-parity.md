@@ -4,7 +4,7 @@ Status: **Accepted, 2026-11-04, ratified by the maintainer.** Partly implemented
 
 - slice 1a landed in #2808;
 - slice 1b landed in #2815;
-- slice 2 (#2686) landed in #PR_NUMBER.
+- slice 2 (#2686) landed in #2822.
 
 The ADR covers only part of #929's value half: values typed by the plugin-facing interfaces under
 `Rigor::Plugin`. Three things are deferred, each with a re-entry condition:

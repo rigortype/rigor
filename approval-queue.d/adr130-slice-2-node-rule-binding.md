@@ -1,6 +1,6 @@
 # `node_rule`'s block binds `node` from its class argument in the engine, not from a generated overload set
 
-- **PR:** [#PR_NUMBER](https://github.com/rigortype/rigor/pull/PR_NUMBER)
+- **PR:** [#2822](https://github.com/rigortype/rigor/pull/2822)
 - **Issue:** [#2686](https://github.com/rigortype/rigor/issues/2686)
 - **Class:** open-choice
 - **Precedent:** [#1783](https://github.com/rigortype/rigor/issues/1783)

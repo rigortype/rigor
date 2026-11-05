@@ -1,6 +1,6 @@
 # Each Frame declares one of four G1' statements, as a [kind, argument] pair on its Slot
 
-- **PR:** [#PRNUM](https://github.com/rigortype/rigor/pull/PRNUM)
+- **PR:** [#2881](https://github.com/rigortype/rigor/pull/2881)
 - **Issue:** [#2709](https://github.com/rigortype/rigor/issues/2709)
 - **Class:** open-choice
 - **Precedent:** [#2841](https://github.com/rigortype/rigor/pull/2841)

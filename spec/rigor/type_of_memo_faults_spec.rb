@@ -8,8 +8,8 @@ require "spec_helper"
 class TypeOfMemoFaultScenarios
   # Fault => the mismatch kind the stage-4 form reports. Each scenario's comment says why no source fixture is used.
   KINDS = {
-    skip_absent_logging: :type, skip_upward_merge: :type, skip_replay_journal: :table, skip_memo_miss: :table,
-    skip_read_through_memo_miss: :table, store_raised: :raised
+    skip_validation: :type, skip_absent_logging: :type, skip_upward_merge: :type, skip_replay_journal: :table,
+    skip_memo_miss: :table, skip_read_through_memo_miss: :table, store_raised: :raised
   }.freeze
 
   ABSENT = Rigor::TypingState::ABSENT
@@ -21,6 +21,18 @@ class TypeOfMemoFaultScenarios
     @scope = Rigor::Scope.empty
     @outer, @inner = Prism.parse("a.b; c.d").value.statements.body
     @key = Prism.parse("e.f").value.statements.body.first
+  end
+
+  # A typing reads an origin; a later typing changes it, so the stored entry's read slice goes stale and serving it
+  # would answer the old type. The source fixture for this fault (`dependency_read.rb`) shows only the stage-4 form's
+  # own revalidation, since its stale reads are set-only; this one shows the wrong answer itself.
+  def skip_validation
+    typed = -> { shadow { read_origin == :first ? int : str } }
+    @store[@key] = :first
+    answers = [typed.call]
+    @store[@key] = :second
+    answers << typed.call
+    [answers, entries]
   end
 
   # A typing reads an origin as absent; a later typing records one. No source fixture: over the 145 integration
@@ -231,7 +243,8 @@ RSpec.describe TypeOfMemoFaults do
   end
 
   it "covers every fault with a source or a synthetic fixture" do
-    expect(self.class.source_cases.keys + TypeOfMemoFaultScenarios::KINDS.keys).to match_array(described_class::FAULTS)
+    expect((self.class.source_cases.keys + TypeOfMemoFaultScenarios::KINDS.keys).uniq)
+      .to match_array(described_class::FAULTS)
   end
 
   it "serves hits over real fixtures with no fault, reporting no mismatch and leaving diagnostics as the memo off" do

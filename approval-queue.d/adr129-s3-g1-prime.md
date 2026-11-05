@@ -36,6 +36,13 @@ never goes stale between two typings of one key, the return memo's and the loop 
 Resource, and the engine is fail-soft, so nothing raises out of `type_of`. A source fixture that triggers one replaces
 its synthetic one. Each fixture also asserts no mismatch with no fault.
 
+Two consequences of the touch reading and the real journal depart from WD5's wording. A touching recomputation's
+refusal reaches the real enclosing captures (WD5: "refusals do not reach the real captures"): output is production's
+then, but the enclosing entries are not stored, so later hit counts differ from real serving. And an error while
+serving (an undo or a replay into a store the entry outlived) is a counted mismatch, and the recomputation's answer
+stands. skip_validation also has a synthetic fixture, where serving the stale entry answers the wrong type; its source
+fixture shows only the stage-4 form's own revalidation.
+
 ## To undo
 
 Snapshot the Resources instead of the touch reading, or move a fault to a production switch; each is local to

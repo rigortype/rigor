@@ -382,7 +382,22 @@ RSpec.describe Rigor::TypingState do
         expect(state.entry(slot.index, record_key)).to equal(absent), slot.name.to_s
         state.replay([slot.index, record_key, value])
         expect(state.entry(slot.index, record_key)).to eq(value), slot.name.to_s
+        state.undo([slot.index, record_key, absent])
+        expect(state.entry(slot.index, record_key)).to equal(absent), "#{slot.name} after undo"
       end
+    end
+
+    it "undoes a dependency filing so the accumulator's tables hold what they held before" do
+      accumulator = Rigor::Analysis::DependencyRecorder::Accumulator.new("a.rb")
+      accumulator.add_read("b.rb", nil)
+      reads = index(:dependency_reads)
+      state.replay([reads, [accumulator, %w[b.rb B#m].freeze].freeze, true, reads,
+                    [accumulator, %w[c.rb C#m].freeze].freeze, true])
+      state.undo([reads, [accumulator, %w[b.rb B#m].freeze].freeze, absent, reads,
+                  [accumulator, %w[c.rb C#m].freeze].freeze, absent])
+
+      expect([accumulator.sources.to_a, accumulator.symbol_sources.keys, accumulator.ancestry_sources.to_a])
+        .to eq([["b.rb"], [], ["b.rb"]])
     end
 
     it "replays a dependency filing into an ADR-84 capture's own sets" do

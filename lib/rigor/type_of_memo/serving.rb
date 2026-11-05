@@ -29,6 +29,13 @@ module Rigor
           return fresh
         end
 
+        serve(state, phase, scope, node, stored, fresh, [reads, writes, priors, mark])
+      end
+
+      # Steps 2 and 3 of {#serve_hit}. An error in them (a replay into a store the entry outlived) is a mismatch, counted
+      # rather than raised into the typing path's rescues, and the recomputation's answer stands.
+      def serve(state, phase, scope, node, stored, fresh, slices)
+        reads, writes, priors, mark = slices
         live = touched(writes, priors).map { |slot, key| [slot, key, state.entry(slot, key)] }
         state.undo(priors)
         state.truncate_journal(mark)
@@ -38,6 +45,9 @@ module Rigor
         state.replay(writes)
         served(state, phase, scope, node, kinds, stored, fresh, live)
         stored
+      rescue StandardError => e
+        report(phase, scope, node, [:serve_error, "#{e.class}: #{e.message[0, 120]}"], stored, fresh, [])
+        fresh
       end
 
       def recompute(state, table, phase, scope, node, stored)

@@ -29,10 +29,11 @@ module TypeOfMemoFaults
 
     # Runs the block with `fault` injected.
     def with(fault)
+      previous = @active
       inject(fault)
       yield
     ensure
-      inject(nil)
+      inject(previous)
     end
   end
 

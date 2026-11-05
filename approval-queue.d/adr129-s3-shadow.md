@@ -1,6 +1,6 @@
 # The stage-3 shadow opens in every phase, its table is a Memo checked by G1, and it reports through two switches
 
-- **PR:** [#PRNUM](https://github.com/rigortype/rigor/pull/PRNUM)
+- **PR:** [#2875](https://github.com/rigortype/rigor/pull/2875)
 - **Issue:** [#2709](https://github.com/rigortype/rigor/issues/2709)
 - **Class:** open-choice
 - **Precedent:** [#2830](https://github.com/rigortype/rigor/pull/2830)

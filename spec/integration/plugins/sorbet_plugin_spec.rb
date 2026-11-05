@@ -1407,6 +1407,516 @@ RSpec.describe "plugins/rigor-sorbet" do
     end
   end
 
+  # Issue #2541 — sorbet-runtime's `prop` / `const` (`T::Props::ClassMethods`, through
+  # `T::Props::Decorator#add_prop_definition`) define a reader for both and a writer for `prop` only on a
+  # `T::Struct` / `T::InexactStruct` / `T::ImmutableStruct` subclass. A class the project's RBS declares
+  # without those accessors (sig-gen's output, as on dependabot-core) answered `call.undefined-method`
+  # for every one of them. Each example declares the structs in `sig/` so the class is RBS-known and a
+  # missing accessor would fire.
+  describe "T::Struct prop / const accessors (issue #2541)" do
+    let(:struct_rbs) do
+      <<~RBS
+        class Doc < ::T::Struct
+        end
+        class SubDoc < Doc
+        end
+        class Frozen < ::T::ImmutableStruct
+        end
+        class Frail < ::T::ImmutableStruct
+        end
+        class Loose < ::T::InexactStruct
+        end
+        class Cond < ::T::Struct
+        end
+        class Plain
+          def self.prop: (*untyped) -> nil
+        end
+        module Outer
+          class Base < ::T::Struct
+          end
+          class Leaf < Base
+          end
+          class Rooted < ::T::Struct
+          end
+        end
+        class Unsigiled < ::T::Struct
+        end
+      RBS
+    end
+
+    let(:struct_source) do
+      <<~RUBY
+        # typed: true
+        class Doc < T::Struct
+          prop :count, Integer
+          const :title, String
+          prop :note, T.nilable(String)
+          const :tag, String, default: "a"
+          const :made, String, factory: -> { "b" }
+          const :callback, T.proc.returns(Integer)
+          prop :label, String
+          def label = 42
+        end
+        class SubDoc < Doc
+          const :extra, Symbol
+        end
+        class Frozen < T::ImmutableStruct
+          const :size, Integer
+        end
+        class Loose < T::InexactStruct
+          prop :width, Float
+        end
+        class Cond < T::Struct
+          if ENV["RIGOR_FIXTURE_PROP"]
+            prop :maybe, Integer
+          end
+          prop :both, Integer
+          if ENV["RIGOR_FIXTURE_PROP"]
+            prop :both, String
+          end
+        end
+        class Frail < T::ImmutableStruct
+          prop :weight, Integer
+        end
+        class Plain
+          def self.prop(*) = nil
+          prop :ghost, Integer
+        end
+        module Outer
+          class Base < T::Struct
+            const :id, Integer
+          end
+          class Leaf < Base
+          end
+          class Rooted < ::T::Struct
+            const :code, String
+          end
+        end
+      RUBY
+    end
+
+    def struct_run(calls, extra_source: "", extra_files: {}, extra_rbs: "")
+      run_plugin(
+        source: "# typed: true\n#{calls}",
+        files: { "structs.rb" => struct_source + extra_source, "sig/structs.rbs" => struct_rbs + extra_rbs,
+                 **extra_files },
+        paths: ["demo.rb", "structs.rb", *extra_files.keys],
+        signature_paths: ["sig"]
+      )
+    end
+
+    def reveals(result)
+      result.diagnostics.select { |d| d.rule == "reveal-type" }.map { |d| d.message[/inferred type: (.*)\z/, 1] }
+    end
+
+    def undefined_methods(result)
+      result.diagnostics.select { |d| d.rule == "call.undefined-method" }.map(&:message)
+    end
+
+    it "types `prop` and `const` readers declared in another file by their Sorbet type" do
+      result = struct_run(<<~RUBY)
+        doc = Doc.new(count: 1, title: "t")
+        T.reveal_type(doc.count)
+        T.reveal_type(doc.title)
+        T.reveal_type(doc.note)
+        T.reveal_type(doc.tag)
+        T.reveal_type(doc.made)
+      RUBY
+
+      expect(undefined_methods(result)).to be_empty
+      expect(reveals(result)).to eq(%w[Integer String String? String String])
+    end
+
+    it "answers a reader whose Sorbet type the translator cannot read as Dynamic[top]" do
+      result = struct_run("T.reveal_type(Doc.new(count: 1, title: \"t\").callback)\n")
+
+      expect(undefined_methods(result)).to be_empty
+      expect(reveals(result)).to eq(["Dynamic[top]"])
+    end
+
+    it "knows the `prop` writer and still reports a `const` writer" do
+      result = struct_run(<<~RUBY)
+        doc = Doc.new(count: 1, title: "t")
+        doc.count = 2
+        doc.title = "u"
+      RUBY
+
+      expect(undefined_methods(result)).to eq(["undefined method `title=' for Doc"])
+    end
+
+    it "answers `const` readers on T::ImmutableStruct and `prop` accessors on T::InexactStruct" do
+      result = struct_run(<<~RUBY)
+        T.reveal_type(Frozen.new(size: 1).size)
+        loose = Loose.new(width: 1.0)
+        T.reveal_type(loose.width)
+        loose.width = 2.0
+      RUBY
+
+      expect(undefined_methods(result)).to be_empty
+      expect(reveals(result)).to eq(%w[Integer Float])
+    end
+
+    it "inherits a struct parent's accessors, resolving a relative superclass lexically" do
+      result = struct_run(<<~RUBY)
+        sub = SubDoc.new(count: 1, title: "t", extra: :x)
+        T.reveal_type(sub.extra)
+        T.reveal_type(sub.count)
+        T.reveal_type(Outer::Leaf.new(id: 1).id)
+      RUBY
+
+      expect(undefined_methods(result)).to be_empty
+      expect(reveals(result)).to eq(%w[Symbol Integer Integer])
+    end
+
+    it "reads a rooted `::T::Struct` superclass as the struct root" do
+      result = struct_run("T.reveal_type(Outer::Rooted.new(code: \"c\").code)\n")
+
+      expect(undefined_methods(result)).to be_empty
+      expect(reveals(result)).to eq(["String"])
+    end
+
+    it "answers the accessors of a struct whose file Sorbet does not enforce (`# typed: false`)" do
+      unsigiled = <<~RUBY
+        # typed: false
+        class Unsigiled < T::Struct
+          const :level, Integer
+        end
+      RUBY
+      result = struct_run("T.reveal_type(Unsigiled.new(level: 1).level)\n",
+                          extra_files: { "unsigiled.rb" => unsigiled })
+
+      expect(undefined_methods(result)).to be_empty
+      expect(reveals(result)).to eq(["Integer"])
+    end
+
+    describe "a relative constant in the accessor's type" do
+      let(:shadow_rbs) do
+        <<~RBS
+          module Outer
+            class Thing
+              def thing_only: () -> Integer
+            end
+            class Holder < ::T::Struct
+            end
+          end
+          class Thing
+            def top_only: () -> Integer
+          end
+        RBS
+      end
+
+      let(:shadow_source) do
+        <<~RUBY
+          module Outer
+            class Thing
+              def thing_only = 1
+            end
+            class Holder < T::Struct
+              const :t, Thing
+              const :maybe_t, T.nilable(Thing)
+              const :ts, T::Array[Thing]
+              const :ghost, NoSuchThing
+            end
+          end
+          class Thing
+            def top_only = 2
+          end
+        RUBY
+      end
+
+      let(:holder) { "Outer::Holder.new(t: Outer::Thing.new, maybe_t: nil, ts: [], ghost: nil)" }
+
+      def shadow_run(calls)
+        struct_run(calls, extra_source: shadow_source, extra_rbs: shadow_rbs)
+      end
+
+      it "resolves to the class the enclosing namespace declares, not the top-level one" do
+        result = shadow_run(<<~RUBY)
+          h = #{holder}
+          h.t.thing_only
+          T.must(h.maybe_t).thing_only
+          h.ts.first&.thing_only
+          T.reveal_type(h.t)
+          T.reveal_type(h.maybe_t)
+          T.reveal_type(h.ts)
+        RUBY
+
+        expect(undefined_methods(result)).to be_empty
+        expect(reveals(result)).to eq(["Outer::Thing", "Outer::Thing?", "Array[Outer::Thing]"])
+      end
+
+      it "still checks calls against the resolved class" do
+        result = shadow_run("#{holder}.t.top_only\n")
+
+        expect(undefined_methods(result)).to eq(["undefined method `top_only' for Outer::Thing"])
+      end
+
+      it "resolves to a class only the walked sources declare" do
+        extra = <<~RUBY
+          module Solo
+            class Gadget
+            end
+            class Box < T::Struct
+              const :g, Gadget
+            end
+          end
+        RUBY
+        result = struct_run("T.reveal_type(Solo::Box.new(g: Solo::Gadget.new).g)\n", extra_source: extra)
+
+        expect(reveals(result)).to eq(["Solo::Gadget"])
+      end
+
+      it "reads a rooted constant without its leading `::`" do
+        extra = <<~RUBY
+          module Outer
+            class Holder
+              const :rooted, ::Thing
+            end
+          end
+        RUBY
+        result = struct_run("T.reveal_type(#{holder}.rooted)\n", extra_source: shadow_source + extra,
+                                                                 extra_rbs: shadow_rbs)
+
+        expect(reveals(result)).to eq(["Thing"])
+      end
+
+      it "reads a constant no namespace declares as Dynamic[top]" do
+        result = shadow_run("T.reveal_type(#{holder}.ghost)\n")
+
+        expect(reveals(result)).to eq(["Dynamic[top]"])
+      end
+    end
+
+    # Round-2 review shapes: a top-level `Thing` exists, but Ruby would find another `Thing` first —
+    # through the superclass, an included module, or a constant alias in the nesting. Each reads
+    # `Dynamic[top]` rather than the top-level class.
+    describe "a relative constant a top-level class does not answer" do
+      let(:ancestry_rbs) do
+        <<~RBS
+          class Thing
+            def top_only: () -> Integer
+          end
+          class Base < ::T::Struct
+            class Thing
+              def base_thing: () -> Integer
+            end
+          end
+          class Kid < Base
+          end
+          module Mix
+            class Thing
+              def mix_thing: () -> Integer
+            end
+          end
+          class WithMix < ::T::Struct
+            include Mix
+          end
+          module Ns
+            class Other
+              def other_only: () -> Integer
+            end
+            class Al < ::T::Struct
+            end
+          end
+          module GemMix
+            class Thing
+              def gem_thing: () -> Integer
+            end
+          end
+          class WithGem < ::T::Struct
+            include GemMix
+          end
+          module RbsNs
+            Thing: Integer
+            class Al2 < ::T::Struct
+            end
+          end
+          module Lib
+            module Inner
+              class Thing
+                def inner_thing: () -> Integer
+              end
+            end
+          end
+          module Outer
+            module Helpers
+              class Thing
+                def helper_thing: () -> Integer
+              end
+            end
+          end
+        RBS
+      end
+
+      # Each shape runs with only the top-level `Thing` beside it, so the check that declines it is the
+      # one under test rather than another shape's walked `*::Thing`.
+      def ancestry_run(shape, call)
+        struct_run("T.reveal_type(#{call})\n", extra_source: "class Thing; def top_only = 2; end\n#{shape}",
+                                               extra_rbs: ancestry_rbs)
+      end
+
+      {
+        "a superclass's nested class" => [
+          "class Base < T::Struct; class Thing; def base_thing = 3; end; end\n" \
+          "class Kid < Base; const :via_super, Thing; end",
+          "Kid.new(via_super: Base::Thing.new).via_super"
+        ],
+        "an included module's nested class" => [
+          "module Mix; class Thing; def mix_thing = 4; end; end\n" \
+          "class WithMix < T::Struct; include Mix; const :via_mix, Thing; end",
+          "WithMix.new(via_mix: Mix::Thing.new).via_mix"
+        ],
+        "a constant alias in the nesting" => [
+          "module Ns\n  class Other; def other_only = 5; end\n  Thing = Other\n  " \
+          "class Al < T::Struct; const :aliased, Thing; end\nend",
+          "Ns::Al.new(aliased: Ns::Other.new).aliased"
+        ],
+        "an RBS-only included module's nested class" => [
+          "class WithGem < T::Struct; include GemMix; const :via_gem, Thing; end",
+          "WithGem.new(via_gem: GemMix::Thing.new).via_gem"
+        ],
+        "an RBS-only constant in the nesting" => [
+          "module RbsNs\n  class Al2 < T::Struct; const :aliased, Thing; end\nend",
+          "RbsNs::Al2.new(aliased: 1).aliased"
+        ],
+        "a transitive include of an RBS-only module" => [
+          "module Wrapper; include Lib::Inner; end\n" \
+          "class Trans < T::Struct; include Wrapper; const :via_trans, Thing; end",
+          "Trans.new(via_trans: Lib::Inner::Thing.new).via_trans"
+        ],
+        "a namespace-relative include of an RBS-only module" => [
+          "module Outer\n  class S < T::Struct; include Helpers; const :x, Thing; end\nend",
+          "Outer::S.new(x: Outer::Helpers::Thing.new).x"
+        ],
+        "a direct include of a module declaring no such class" => [
+          "module Bare; end\nclass Direct < T::Struct; include Bare; const :d, Thing; end",
+          "Direct.new(d: Thing.new).d"
+        ],
+        "a prepend" => [
+          "module Bare; end\nclass Pre < T::Struct; prepend Bare; const :p, Thing; end",
+          "Pre.new(p: Thing.new).p"
+        ],
+        "an include on a walked superclass" => [
+          "module Bare; end\nclass Mid < T::Struct; include Bare; end\nclass Low < Mid; const :l, Thing; end",
+          "Low.new(l: Thing.new).l"
+        ],
+        "an unrelated walked class of the same name" => [
+          "module Elsewhere; class Thing; end; end\n" \
+          "class Plainer < T::Struct; const :plain, Thing; end",
+          "Plainer.new(plain: Thing.new).plain"
+        ]
+      }.each do |label, (shape, call)|
+        it "declines the top-level class when #{label} may answer instead" do
+          result = ancestry_run(shape, call)
+
+          expect(undefined_methods(result)).to be_empty
+          expect(reveals(result)).to eq(["Dynamic[top]"])
+        end
+      end
+
+      it "answers the top-level class when nothing else could" do
+        result = ancestry_run("class Lone < T::Struct; const :lone, Thing; end", "Lone.new(lone: Thing.new).lone")
+
+        expect(reveals(result)).to eq(["Thing"])
+      end
+    end
+
+    it "answers no writer for `prop` with `immutable: true`" do
+      extra = <<~RUBY
+        class Doc
+          prop :locked, Integer, immutable: true
+        end
+      RUBY
+      result = struct_run("Doc.new(count: 1, title: \"t\").locked = 1\n", extra_source: extra)
+
+      expect(undefined_methods(result)).to eq(["undefined method `locked=' for Doc"])
+    end
+
+    it "lets an `attr_reader` of the same name win over the `prop`" do
+      extra = <<~RUBY
+        class Loose
+          attr_reader :width
+        end
+      RUBY
+      result = struct_run("T.reveal_type(Loose.new(width: 1.0).width)\n", extra_source: extra)
+
+      expect(reveals(result)).to eq(["Dynamic[top]"])
+    end
+
+    it "lets a visibility-wrapped `def` of the same name win over the `prop`" do
+      extra = <<~RUBY
+        class Loose
+          private def width = "w"
+        end
+      RUBY
+      result = struct_run("T.reveal_type(Loose.new(width: 1.0).width)\n", extra_source: extra)
+
+      expect(reveals(result)).to eq(['"w"'])
+    end
+
+    it "lets a `def` in the struct body win over the `prop` of the same name" do
+      result = struct_run("T.reveal_type(Doc.new(count: 1, title: \"t\").label)\n")
+
+      expect(reveals(result)).to eq(["42"])
+    end
+
+    it "synthesises nothing for a `prop` call outside the T::Struct family" do
+      result = struct_run("Plain.new.ghost\n")
+
+      expect(undefined_methods(result)).to eq(["undefined method `ghost' for Plain"])
+    end
+
+    it "keeps a conditional `prop` quiet without claiming its type" do
+      result = struct_run("T.reveal_type(Cond.new.maybe)\n")
+
+      expect(undefined_methods(result)).to be_empty
+      expect(reveals(result)).to eq(["Dynamic[top]"])
+    end
+
+    it "keeps the unconditional `prop`'s type when a conditional one repeats the name" do
+      result = struct_run("T.reveal_type(Cond.new.both)\n")
+
+      expect(reveals(result)).to eq(["Integer"])
+    end
+
+    it "answers no writer under T::ImmutableStruct, whose `prop` raises at runtime" do
+      result = struct_run("Frail.new.weight = 1\n")
+
+      expect(undefined_methods(result)).to eq(["undefined method `weight=' for Frail"])
+    end
+
+    it "types an implicit-self accessor call inside the struct's own method" do
+      extra = <<~RUBY
+        class Doc
+          def shout = title.no_such_string_method
+        end
+      RUBY
+      result = struct_run("", extra_source: extra)
+
+      expect(undefined_methods(result)).to eq(["undefined method `no_such_string_method' for String"])
+    end
+
+    it "still reports a name no accessor declares" do
+      result = struct_run("Doc.new(count: 1, title: \"t\").missing\n")
+
+      expect(undefined_methods(result)).to eq(["undefined method `missing' for Doc"])
+    end
+
+    it "raises no argument diagnostic on the keyword constructor" do
+      result = struct_run("Doc.new(count: 1, title: \"t\", note: nil)\nSubDoc.new(count: 1, title: \"t\", extra: :x)\n")
+
+      expect(result.diagnostics.map(&:rule).grep(/\Acall\./)).to be_empty
+    end
+
+    it "answers an accessor read inside a block in value position" do
+      result = struct_run(<<~RUBY)
+        [Frozen.new(size: 1)].map { |f| { "size" => f.size } }
+      RUBY
+
+      expect(undefined_methods(result)).to be_empty
+    end
+  end
+
   describe "mixin chain resolution (ADR-11 slice 8)" do
     # Tapioca's standard DSL RBI shape. Slice 8 lifts sigs declared on a `Generated*` module up to the host
     # class via the recorded `include` / `extend` chain.

@@ -1,0 +1,3 @@
+- **[rigor-sorbet]** `prop` and `const` accessors on a `T::Struct`, `T::InexactStruct` or `T::ImmutableStruct` subclass now resolve with their Sorbet type instead of reporting `call.undefined-method` when the project's RBS declares the class. ([#2832](https://github.com/rigortype/rigor/pull/2832))
+  - `prop` also answers its writer, while a `const` writer and any writer under `T::ImmutableStruct` still report.
+  - Subclasses inherit the accessors, a `def` of the same name in the class wins, and a `prop` nested under a conditional or a block reads `Dynamic[top]`.

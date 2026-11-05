@@ -845,11 +845,11 @@ plugins/rigor-sorbet/lib/rigor/plugin/sorbet.rb:
     Rigor::Plugin::Sorbet#instance_chain_lookup: grandfathered
     Rigor::Plugin::Sorbet#lookup_signature: grandfathered
 plugins/rigor-sorbet/lib/rigor/plugin/sorbet/catalog.rb:
-  computes: the mixins the Sorbet catalog records per class
+  computes: the mixins the Sorbet catalog records per class, and the lexical superclass chain it walks to a T::Struct-family root to answer a prop / const accessor
   producers:
     Rigor::Plugin::Sorbet::Catalog#mixins_for: grandfathered
 plugins/rigor-sorbet/lib/rigor/plugin/sorbet/catalog_walker.rb:
-  computes: the Sorbet sig catalog per class and side
+  computes: the Sorbet sig catalog per class and side, and per class its superclass as written, its declared namespaces, its own defs, and its T::Struct prop / const accessors
   producers:
     Rigor::Plugin::Sorbet::CatalogWalker: grandfathered
     Rigor::Plugin::Sorbet::CatalogWalker#mixin_call?: grandfathered

@@ -344,10 +344,86 @@ module Rigor
         when Rigor::Type::Singleton
           chain_lookup(self_type.class_name, method_name, anchor_kind: :singleton, mixin_kind: :extend)
         when Rigor::Type::Nominal
-          chain_lookup(self_type.class_name, method_name, anchor_kind: :instance, mixin_kind: :include)
+          chain_lookup(self_type.class_name, method_name, anchor_kind: :instance, mixin_kind: :include) ||
+            struct_prop_lookup(self_type.class_name, method_name, scope)
         end
       rescue StandardError
         nil
+      end
+
+      # Issue #2541 — after the sig catalog (the class and its mixins) declines an instance-side call, a
+      # `prop` / `const` accessor the class or a superclass declares under a `T::Struct`-family root.
+      # The accessor's type is translated here rather than at harvest: a relative constant in it resolves the
+      # way Ruby's lexical lookup would from the declaring class body — under each enclosing namespace,
+      # innermost first, then at the top level — against the classes the walk declared and the RBS
+      # environment. A constant that resolves nowhere reads `Dynamic[top]`, never a guessed class.
+      def struct_prop_lookup(class_name, method_name, scope)
+        signature = @catalog.lookup_struct_prop(class_name: class_name, method_name: method_name)
+        return signature if signature.nil?
+
+        source, nesting = @catalog.struct_prop_type(signature)
+        return signature if source.nil?
+
+        signature.with(return_type: struct_prop_type(source, nesting, signature.class_name, scope))
+      end
+
+      def struct_prop_type(source, nesting, class_name, scope)
+        @struct_prop_types ||= {}
+        @struct_prop_types[[source, nesting, class_name, scope.nil?]] ||= begin
+          node = Prism.parse(source).value.statements&.body&.first
+          resolve = ->(name) { resolve_struct_constant(name, nesting, class_name, scope) }
+          TypeTranslator.translate(node, resolve)
+        end
+      end
+
+      # Ruby's lookup for a relative constant in the class body: the lexical nesting, innermost first; then
+      # the class's ancestors; then the top level. The nesting step answers a class it finds, and declines
+      # (nil, so the constant reads `Dynamic[top]`) when it meets a constant that is not a declared class.
+      # Ancestry is not modelled precisely: a class or constant of that name under any ancestor declines.
+      # The top level answers only when the struct's ancestry is closed — no class on its walked superclass
+      # chain `include`s or `prepend`s anything, whose constants could shadow it — and no other walked
+      # `*::<name>` exists.
+      def resolve_struct_constant(name, nesting, class_name, scope)
+        environment = scope&.environment
+        return name.delete_prefix("::") if name.start_with?("::")
+
+        nesting.size.downto(1) do |depth|
+          candidate = "#{nesting.first(depth).join('::')}::#{name}"
+          return candidate if struct_constant_class?(candidate, environment)
+          return nil if struct_constant_bound?(candidate, scope)
+        end
+        @catalog.constant_ancestry(class_name).each do |ancestor|
+          candidate = "#{ancestor}::#{name}"
+          return nil if struct_constant_class?(candidate, environment) || struct_constant_bound?(candidate, scope)
+        end
+        return nil if struct_constant_elsewhere?(name)
+        return nil if @catalog.mixes_in_ancestry?(class_name)
+
+        struct_constant_class?(name, environment) ? name : nil
+      end
+
+      def struct_constant_class?(name, environment)
+        @catalog.namespace?(name) || !environment&.nominal_for_name(name).nil?
+      end
+
+      # A walked constant write, or any constant the engine types at the rooted path `::<name>` — an RBS
+      # constant declaration included. The probe goes through the plugin-facing `Scope#type_of` on a parsed
+      # constant-path node; a name nothing declares types as `Dynamic[top]` and is not bound.
+      def struct_constant_bound?(name, scope)
+        return true if @catalog.constant?(name)
+        return false if scope.nil?
+
+        node = Prism.parse("::#{name}").value.statements&.body&.first
+        type = scope.type_of(node)
+        !(type.nil? || type.is_a?(Rigor::Type::Dynamic))
+      rescue StandardError
+        true
+      end
+
+      def struct_constant_elsewhere?(name)
+        @struct_constant_names ||= @catalog.declared_constant_names
+        suffix = "::#{name}"
+        @struct_constant_names.any? { |declared| declared.end_with?(suffix) }
       end
 
       def instance_chain_lookup(receiver_node, method_name, scope)
@@ -356,7 +432,8 @@ module Rigor
         receiver_type = scope.type_of(receiver_node)
         return nil unless receiver_type.is_a?(Rigor::Type::Nominal)
 
-        chain_lookup(receiver_type.class_name, method_name, anchor_kind: :instance, mixin_kind: :include)
+        chain_lookup(receiver_type.class_name, method_name, anchor_kind: :instance, mixin_kind: :include) ||
+          struct_prop_lookup(receiver_type.class_name, method_name, scope)
       rescue StandardError
         # `scope.type_of` can raise on unrecognised synthetic nodes; degrade to "no contribution" rather
         # than bubbling the failure into the dispatcher.
@@ -548,7 +625,7 @@ module Rigor
                         catalog
                       end
 
-        errors = CatalogWalker.walk(root: result.value, catalog: sig_catalog, path: path)
+        errors = CatalogWalker.walk(root: result.value, catalog: sig_catalog, path: path, struct_catalog: catalog)
         # ADR-88 WD2 — store Marshal-clean `{kind:, line:, column:}` tuples, not the `ParseError` (it holds a
         # live Prism node the producer bundle could not serialise). `diagnostics_for_file` rebuilds the
         # diagnostic from the tuple, at the same 1-based line / `start_column + 1` position `from_node` gave.

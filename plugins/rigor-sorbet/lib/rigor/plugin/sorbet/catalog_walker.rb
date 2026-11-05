@@ -29,16 +29,20 @@ module Rigor
         # @param root — the file's program node.
         # @param catalog — mutable; signatures are recorded into it.
         # @param path — file path used for diagnostic provenance.
+        # @param struct_catalog — where the `T::Struct`-family accessors, superclasses, and own `def`s are
+        #   recorded (issue #2541). Defaults to `catalog`; the plugin passes the per-run catalog here even
+        #   when `catalog` is the discard catalog of an unenforced-sigil file, because sorbet-runtime defines
+        #   a struct's accessors whatever the file's `# typed:` level.
         # @return errors observed during the walk; empty when the file is sig-clean.
-        def walk(root:, catalog:, path:)
-          state = State.new(catalog: catalog, path: path)
+        def walk(root:, catalog:, path:, struct_catalog: catalog)
+          state = State.new(catalog: catalog, path: path, struct_catalog: struct_catalog)
           walk_node(root, state, lexical_path: [], in_singleton_class: false)
           state.errors
         end
 
-        State = Struct.new(:catalog, :path, :errors, keyword_init: true) do
-          def initialize(catalog:, path:)
-            super(catalog: catalog, path: path, errors: [])
+        State = Struct.new(:catalog, :path, :errors, :struct_catalog, keyword_init: true) do
+          def initialize(catalog:, path:, struct_catalog: catalog)
+            super(catalog: catalog, path: path, errors: [], struct_catalog: struct_catalog)
           end
 
           def record_error(kind, node)
@@ -50,7 +54,9 @@ module Rigor
           return unless node.is_a?(Prism::Node)
 
           case node
-          when Prism::ClassNode, Prism::ModuleNode
+          when Prism::ClassNode
+            descend_class(node, state, lexical_path)
+          when Prism::ModuleNode
             descend_class_or_module(node, state, lexical_path)
           when Prism::SingletonClassNode
             descend_singleton_class(node, state, lexical_path)
@@ -59,6 +65,20 @@ module Rigor
           when Prism::DefNode
             # A `def` not preceded by a `sig` is fine; we just don't record anything for it. The
             # interesting case is in `walk_statements`, which pairs sig+def.
+          when Prism::CallNode
+            # Issue #2541 — any `include` / `prepend` in a class (whatever its arguments) opens the class's
+            # ancestry, so a struct accessor's constant is no longer answered from the top level.
+            if node.receiver.nil? && %i[include prepend].include?(node.name) && !lexical_path.empty?
+              state.struct_catalog.record_mixes_in(lexical_path.join("::"))
+            end
+            node.rigor_each_child do |child|
+              walk_node(child, state, lexical_path: lexical_path, in_singleton_class: in_singleton_class)
+            end
+          when Prism::ConstantWriteNode
+            # Issue #2541 — `Thing = Other` makes `Thing` a constant that is not a class declaration, so a
+            # struct accessor's type naming it is not read as any class.
+            state.struct_catalog.record_constant((lexical_path + [node.name.to_s]).join("::"))
+            walk_node(node.value, state, lexical_path: lexical_path, in_singleton_class: in_singleton_class)
           else
             node.rigor_each_child do |child|
               walk_node(child, state, lexical_path: lexical_path, in_singleton_class: in_singleton_class)
@@ -66,8 +86,25 @@ module Rigor
           end
         end
 
+        # Issue #2541 — a `class` records its superclass, and only its body's own top-level statements,
+        # which certainly run at class definition, may declare `prop` / `const` accessors.
+        def descend_class(node, state, lexical_path)
+          name = qualified_name_for(node.constant_path)
+          return descend_class_or_module(node, state, lexical_path) unless name
+
+          record_superclass(node, name, state, lexical_path)
+          state.struct_catalog.record_namespace((lexical_path + [name]).join("::"))
+          if node.body.is_a?(Prism::StatementsNode)
+            walk_statements(node.body, state, lexical_path: lexical_path + [name], in_singleton_class: false,
+                                              class_body: true)
+          else
+            descend_class_or_module(node, state, lexical_path)
+          end
+        end
+
         def descend_class_or_module(node, state, lexical_path)
           name = qualified_name_for(node.constant_path)
+          state.struct_catalog.record_namespace((lexical_path + [name]).join("::")) if name
           if name && node.body
             child_prefix = lexical_path + [name]
             walk_node(node.body, state, lexical_path: child_prefix, in_singleton_class: false)
@@ -88,10 +125,13 @@ module Rigor
         # `sig` call, it remembers it and consumes the very next `def` / `def self.foo` as the target.
         # Anything between a sig and its def (a comment is fine — comments aren't AST nodes — but a
         # method call would be a problem) leaves the sig dangling.
-        def walk_statements(statements, state, lexical_path:, in_singleton_class:)
+        def walk_statements(statements, state, lexical_path:, in_singleton_class:, class_body: false)
           pending_sig = nil
 
           statements.body.each do |child|
+            record_defined_method(child, state, lexical_path) unless in_singleton_class
+            record_struct_prop_call(child, state, lexical_path, certain: class_body) unless in_singleton_class
+
             if pending_sig && def_node?(child)
               record_def_with_sig(child, pending_sig, state, lexical_path, in_singleton_class)
               pending_sig = nil
@@ -153,7 +193,106 @@ module Rigor
             state.catalog.record_mixin(
               class_name: class_name, kind: kind, module_name: module_name
             )
+            # Issue #2541 — an included module's constants shadow a top-level one for the class body.
+            state.struct_catalog.record_struct_include(class_name, module_name) if kind == :include
           end
+        end
+
+        # Issue #2541 — `class X < Y`: the superclass as written plus the enclosing namespaces, so the
+        # catalog can follow `X`'s chain to a `T::Struct`-family root. `lexical_path` holds the enclosing
+        # names (a nested `class A::B` element counts as one namespace step, as Ruby's cref does).
+        def record_superclass(node, name, state, lexical_path)
+          written = qualified_name_for(node.superclass)
+          return if written.nil?
+
+          state.struct_catalog.record_superclass(
+            class_name: (lexical_path + [name]).join("::"), written: written, lexical_prefix: lexical_path
+          )
+        end
+
+        # The instance methods a class body defines itself — `def foo`, `private def foo`, `attr_reader :foo` /
+        # `attr_writer` / `attr_accessor` — so a struct accessor of the same name yields to them.
+        def record_defined_method(node, state, lexical_path)
+          return if lexical_path.empty?
+
+          class_name = lexical_path.join("::")
+          defined_method_names(node).each do |method_name|
+            state.struct_catalog.record_defined_method(class_name: class_name, method_name: method_name)
+          end
+        end
+
+        def defined_method_names(node)
+          target = visibility_wrapped_def(node) || node
+          if def_node?(target)
+            target.receiver.nil? ? [target.name] : []
+          elsif attr_macro_call?(target)
+            attr_method_names(target)
+          else
+            []
+          end
+        end
+
+        def attr_method_names(attr_node)
+          attr_node.arguments.arguments.flat_map do |arg|
+            name = arg.unescaped
+            case attr_node.name
+            when :attr_reader then [name.to_sym]
+            when :attr_writer then [:"#{name}="]
+            else [name.to_sym, :"#{name}="]
+            end
+          end
+        end
+
+        STRUCT_PROP_MACROS = %i[prop const].freeze
+
+        # Issue #2541 — `prop :name, Type, **rules` / `const :name, Type, **rules` in a class body. Records
+        # the reader (both macros) and the writer (`prop` only); the catalog decides at lookup whether the
+        # class is a `T::Struct`-family class at all. At the body's top level (`certain:`) the accessor is
+        # typed by the translated `Type`. Nested under an `if`, a `begin`, or a block in the body, the call
+        # may not run, so the accessor is recorded as possible: typed `Dynamic[top]`, which keeps a call
+        # to it quiet without claiming its type. A name that is not a literal Symbol records nothing
+        # (`T::Props` takes a Symbol).
+        def record_struct_prop_call(node, state, lexical_path, certain:)
+          return if lexical_path.empty?
+          return unless node.is_a?(Prism::CallNode) && node.receiver.nil?
+          return unless STRUCT_PROP_MACROS.include?(node.name)
+
+          args = node.arguments&.arguments
+          return if args.nil? || args.empty?
+
+          return unless args.first.is_a?(Prism::SymbolNode)
+
+          name = args.first.unescaped
+
+          type_node = args[1] unless args[1].is_a?(Prism::KeywordHashNode)
+          # The constants in the type resolve at lookup, against the classes every file declares, so only
+          # the source text is kept; the signature's own type is the placeholder until then.
+          type_source = type_node&.slice if certain
+          class_name = lexical_path.join("::")
+          record_struct_accessor(state, class_name, name.to_sym, type_source, lexical_path, certain)
+          return unless node.name == :prop && !immutable_rule?(args)
+
+          record_struct_accessor(state, class_name, :"#{name}=", type_source, lexical_path, certain)
+        end
+
+        # `prop :x, T, immutable: true` is the long form of `const`: no writer.
+        def immutable_rule?(args)
+          args.any? do |arg|
+            arg.is_a?(Prism::KeywordHashNode) && arg.elements.any? do |element|
+              element.is_a?(Prism::AssocNode) && element.key.is_a?(Prism::SymbolNode) &&
+                element.key.unescaped == "immutable" && element.value.is_a?(Prism::TrueNode)
+            end
+          end
+        end
+
+        def record_struct_accessor(state, class_name, method_name, type_source, nesting, certain)
+          state.struct_catalog.record_struct_prop(
+            MethodSignature.new(
+              class_name: class_name, method_name: method_name, kind: :instance,
+              params: {}, return_type: Rigor::Type::Combinator.untyped, modifiers: []
+            ),
+            certain: certain, type_source: type_source, nesting: nesting
+          )
         end
 
         def sig_call?(node)

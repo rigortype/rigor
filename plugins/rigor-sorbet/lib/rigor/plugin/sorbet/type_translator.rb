@@ -52,28 +52,33 @@ module Rigor
 
         module_function
 
+        # @param resolve — optional callable mapping an unrooted constant name as written (`"Thing"`,
+        #   `"Foo::Bar"`) to the class it names, or to nil when that is not certain, in which case the
+        #   constant degrades to `Dynamic[top]`. Issue #2541 passes it for `T::Struct` accessor types; without
+        #   it (every sig) a constant becomes `Nominal[<as written>]`, as before. The `T::` vocabulary is
+        #   never handed to it.
         # @return never `nil`; unrecognised forms degrade to `Type::Combinator.untyped`.
-        def translate(node)
+        def translate(node, resolve = nil)
           return Rigor::Type::Combinator.untyped if node.nil?
 
           case node
-          when Prism::ConstantReadNode then translate_constant_read(node)
-          when Prism::ConstantPathNode then translate_constant_path(node)
-          when Prism::CallNode then translate_call(node)
-          when Prism::ArrayNode then translate_tuple(node)
-          when Prism::HashNode then translate_shape(node)
+          when Prism::ConstantReadNode then translate_constant_read(node, resolve)
+          when Prism::ConstantPathNode then translate_constant_path(node, resolve)
+          when Prism::CallNode then translate_call(node, resolve)
+          when Prism::ArrayNode then translate_tuple(node, resolve)
+          when Prism::HashNode then translate_shape(node, resolve)
           else degraded
           end
         end
 
-        def translate_constant_read(node)
-          name = node.name.to_s
-          return Rigor::Type::Combinator.untyped if name.empty?
+        def translate_constant_read(node, resolve = nil)
+          name = resolved_name(node.name.to_s, resolve)
+          return Rigor::Type::Combinator.untyped if name.nil? || name.empty?
 
           Rigor::Type::Combinator.nominal_of(name)
         end
 
-        def translate_constant_path(node)
+        def translate_constant_path(node, resolve = nil)
           name = constant_path_name(node)
           return degraded if name.nil?
 
@@ -81,7 +86,18 @@ module Rigor
           # type alias.
           return boolean_type if name == "T::Boolean"
 
+          name = resolved_name(name, resolve)
+          return degraded if name.nil?
+
           Rigor::Type::Combinator.nominal_of(name)
+        end
+
+        # The constant `name` as `resolve` reads it (a rooted `::Foo` included); `name` itself when there is
+        # no resolver.
+        def resolved_name(name, resolve)
+          return name if resolve.nil?
+
+          resolve.call(name)
         end
 
         # `Prism::CallNode` covers three distinct surfaces:
@@ -96,58 +112,59 @@ module Rigor
         #    instantiation intact (the unwrap-site receiver a plugin like rigor-mangrove reads `type_args`
         #    from). Without this branch such forms degraded to `untyped`, silently dropping the
         #    receiver's generic arguments.
-        def translate_call(node)
-          return translate_t_method(node) if sorbet_t_namespaced?(node.receiver)
-          return translate_t_subscript(node) if sorbet_subscript?(node)
-          return translate_user_subscript(node) if user_generic_subscript?(node)
+        def translate_call(node, resolve = nil)
+          return translate_t_method(node, resolve) if sorbet_t_namespaced?(node.receiver)
+          return translate_t_subscript(node, resolve) if sorbet_subscript?(node)
+          return translate_user_subscript(node, resolve) if user_generic_subscript?(node)
 
           degraded
         end
 
         # Handles the `T.foo(...)` family.
-        def translate_t_method(node)
+        def translate_t_method(node, resolve = nil)
           case node.name
           when :untyped then Rigor::Type::Combinator.untyped
           when :anything then Rigor::Type::Combinator.top
           when :noreturn then Rigor::Type::Combinator.bot
-          when :nilable then translate_nilable(node)
-          when :any then translate_any(node)
-          when :all then translate_all(node)
-          when :class_of then translate_class_of(node)
+          when :nilable then translate_nilable(node, resolve)
+          when :any then translate_any(node, resolve)
+          when :all then translate_all(node, resolve)
+          when :class_of then translate_class_of(node, resolve)
           else degraded
           end
         end
 
-        def translate_nilable(node)
+        def translate_nilable(node, resolve = nil)
           inner = first_argument(node)
           return degraded if inner.nil?
 
           Rigor::Type::Combinator.union(
-            translate(inner), Rigor::Type::Combinator.constant_of(nil)
+            translate(inner, resolve), Rigor::Type::Combinator.constant_of(nil)
           )
         end
 
-        def translate_any(node)
+        def translate_any(node, resolve = nil)
           args = call_arguments(node)
           return degraded if args.empty?
 
-          Rigor::Type::Combinator.union(*args.map { |arg| translate(arg) })
+          Rigor::Type::Combinator.union(*args.map { |arg| translate(arg, resolve) })
         end
 
-        def translate_all(node)
+        def translate_all(node, resolve = nil)
           args = call_arguments(node)
           return degraded if args.empty?
 
-          Rigor::Type::Combinator.intersection(*args.map { |arg| translate(arg) })
+          Rigor::Type::Combinator.intersection(*args.map { |arg| translate(arg, resolve) })
         end
 
         # `T.class_of(C)` — singleton-class type for a single constant. Sorbet docs note
         # `T.class_of(MyInterface)` rarely means what users expect (it's the singleton class of
         # `MyInterface`, not "any class implementing the interface"); we honour the literal meaning here
         # and translate to `Singleton[C]`.
-        def translate_class_of(node)
+        def translate_class_of(node, resolve = nil)
           target = first_argument(node)
           name = constant_path_name(target)
+          name = resolved_name(name, resolve) unless name.nil?
           return degraded if name.nil?
 
           Rigor::Type::Combinator.singleton_of(name)
@@ -157,9 +174,9 @@ module Rigor
         # `CallNode` whose receiver is the `T::Array` `ConstantPathNode` and whose `name` is `:[]`.
         # `T::Class[T]` lands here too; we collapse it to `Singleton[name]` (a deliberate narrowing —
         # `T::Class` is structurally generic in Sorbet, but Rigor's `Singleton` carries class identity only).
-        def translate_t_subscript(node)
+        def translate_t_subscript(node, resolve = nil)
           base_name = sorbet_subscript_base(node.receiver)
-          args = call_arguments(node).map { |arg| translate(arg) }
+          args = call_arguments(node).map { |arg| translate(arg, resolve) }
           mapped = T_GENERIC_CLASSES[base_name]
 
           if mapped
@@ -188,13 +205,14 @@ module Rigor
           !sorbet_t_qualified?(receiver)
         end
 
-        def translate_user_subscript(node)
+        def translate_user_subscript(node, resolve = nil)
           # Parity with translate_constant_path: the constant's rendered name (carrying a leading `::` for
           # absolute paths) becomes the nominal class name.
           name = constant_path_name(node.receiver)
+          name = resolved_name(name, resolve) unless name.nil?
           return degraded if name.nil?
 
-          args = call_arguments(node).map { |arg| translate(arg) }
+          args = call_arguments(node).map { |arg| translate(arg, resolve) }
           Rigor::Type::Combinator.nominal_of(name, type_args: args)
         end
 
@@ -214,21 +232,21 @@ module Rigor
 
         # Tuple types in `sig` position appear as bare array literals: `sig { returns([String, Integer]) }`.
         # Each element is itself a type expression we translate recursively.
-        def translate_tuple(node)
-          elements = node.elements.map { |element| translate(element) }
+        def translate_tuple(node, resolve = nil)
+          elements = node.elements.map { |element| translate(element, resolve) }
           Rigor::Type::Combinator.tuple_of(*elements)
         end
 
         # Shape types in `sig` position appear as bare hash literals with symbol keys:
         # `sig { returns({a: Integer, b: String}) }`. Each value is a type expression; the resulting
         # `HashShape` is closed (no extra keys allowed).
-        def translate_shape(node)
+        def translate_shape(node, resolve = nil)
           pairs = []
           node.elements.each do |element|
             next unless element.is_a?(Prism::AssocNode)
             next unless element.key.is_a?(Prism::SymbolNode)
 
-            pairs << [element.key.unescaped.to_sym, translate(element.value)]
+            pairs << [element.key.unescaped.to_sym, translate(element.value, resolve)]
           end
           # `.to_h`: `hash_shape_of` validates its argument is a Hash and raises `ArgumentError` on the
           # array-of-pairs form, so `sig { returns({name: String}) }` degraded to `Dynamic[top]` through

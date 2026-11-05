@@ -1734,47 +1734,55 @@ RSpec.describe "plugins/rigor-sorbet" do
         RBS
       end
 
-      let(:ancestry_source) do
-        <<~RUBY
-          class Thing; def top_only = 2; end
-          class Base < T::Struct; class Thing; def base_thing = 3; end; end
-          class Kid < Base; const :via_super, Thing; end
-          module Mix; class Thing; def mix_thing = 4; end; end
-          class WithMix < T::Struct; include Mix; const :via_mix, Thing; end
-          module Ns
-            class Other; def other_only = 5; end
-            Thing = Other
-            class Al < T::Struct; const :aliased, Thing; end
-          end
-          class WithGem < T::Struct; include GemMix; const :via_gem, Thing; end
-          module RbsNs
-            class Al2 < T::Struct; const :aliased, Thing; end
-          end
-        RUBY
+      # Each shape runs with only the top-level `Thing` beside it, so the check that declines it is the
+      # one under test rather than another shape's walked `*::Thing`.
+      def ancestry_run(shape, call)
+        struct_run("T.reveal_type(#{call})\n", extra_source: "class Thing; def top_only = 2; end\n#{shape}",
+                                                extra_rbs: ancestry_rbs)
       end
 
-      it "declines through a superclass, an included module, and a constant alias" do
-        result = struct_run(<<~RUBY, extra_source: ancestry_source, extra_rbs: ancestry_rbs)
-          Kid.new(via_super: Base::Thing.new).via_super.base_thing
-          WithMix.new(via_mix: Mix::Thing.new).via_mix.mix_thing
-          Ns::Al.new(aliased: Ns::Other.new).aliased.other_only
-          T.reveal_type(Kid.new(via_super: Base::Thing.new).via_super)
-          T.reveal_type(WithMix.new(via_mix: Mix::Thing.new).via_mix)
-          T.reveal_type(Ns::Al.new(aliased: Ns::Other.new).aliased)
-        RUBY
+      {
+        "a superclass's nested class" => [
+          "class Base < T::Struct; class Thing; def base_thing = 3; end; end\n" \
+          "class Kid < Base; const :via_super, Thing; end",
+          "Kid.new(via_super: Base::Thing.new).via_super"
+        ],
+        "an included module's nested class" => [
+          "module Mix; class Thing; def mix_thing = 4; end; end\n" \
+          "class WithMix < T::Struct; include Mix; const :via_mix, Thing; end",
+          "WithMix.new(via_mix: Mix::Thing.new).via_mix"
+        ],
+        "a constant alias in the nesting" => [
+          "module Ns\n  class Other; def other_only = 5; end\n  Thing = Other\n" \
+          "  class Al < T::Struct; const :aliased, Thing; end\nend",
+          "Ns::Al.new(aliased: Ns::Other.new).aliased"
+        ],
+        "an RBS-only included module's nested class" => [
+          "class WithGem < T::Struct; include GemMix; const :via_gem, Thing; end",
+          "WithGem.new(via_gem: GemMix::Thing.new).via_gem"
+        ],
+        "an RBS-only constant in the nesting" => [
+          "module RbsNs\n  class Al2 < T::Struct; const :aliased, Thing; end\nend",
+          "RbsNs::Al2.new(aliased: 1).aliased"
+        ],
+        "an unrelated walked class of the same name" => [
+          "module Elsewhere; class Thing; end; end\n" \
+          "class Plainer < T::Struct; const :plain, Thing; end",
+          "Plainer.new(plain: Thing.new).plain"
+        ]
+      }.each do |label, (shape, call)|
+        it "declines the top-level class when #{label} may answer instead" do
+          result = ancestry_run(shape, call)
 
-        expect(undefined_methods(result)).to be_empty
-        expect(reveals(result)).to eq(["Dynamic[top]"] * 3)
+          expect(undefined_methods(result)).to be_empty
+          expect(reveals(result)).to eq(["Dynamic[top]"])
+        end
       end
 
-      # The two shadows below are declared only in RBS, so no walked `*::Thing` names them.
-      it "declines through an RBS-only included module and an RBS-only constant in the nesting" do
-        result = struct_run(<<~RUBY, extra_source: ancestry_source, extra_rbs: ancestry_rbs)
-          T.reveal_type(WithGem.new(via_gem: GemMix::Thing.new).via_gem)
-          T.reveal_type(RbsNs::Al2.new(aliased: 1).aliased)
-        RUBY
+      it "answers the top-level class when nothing else could" do
+        result = ancestry_run("class Lone < T::Struct; const :lone, Thing; end", "Lone.new(lone: Thing.new).lone")
 
-        expect(reveals(result)).to eq(["Dynamic[top]"] * 2)
+        expect(reveals(result)).to eq(["Thing"])
       end
     end
 

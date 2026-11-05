@@ -399,8 +399,6 @@ module Rigor
       end
 
       def struct_constant_class?(name, environment)
-        return false if @catalog.constant?(name)
-
         @catalog.namespace?(name) || !environment&.nominal_for_name(name).nil?
       end
 

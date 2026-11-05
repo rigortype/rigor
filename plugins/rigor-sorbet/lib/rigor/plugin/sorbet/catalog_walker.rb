@@ -65,6 +65,15 @@ module Rigor
           when Prism::DefNode
             # A `def` not preceded by a `sig` is fine; we just don't record anything for it. The
             # interesting case is in `walk_statements`, which pairs sig+def.
+          when Prism::CallNode
+            # Issue #2541 — any `include` / `prepend` in a class (whatever its arguments) opens the class's
+            # ancestry, so a struct accessor's constant is no longer answered from the top level.
+            if node.receiver.nil? && %i[include prepend].include?(node.name) && !lexical_path.empty?
+              state.struct_catalog.record_mixes_in(lexical_path.join("::"))
+            end
+            node.rigor_each_child do |child|
+              walk_node(child, state, lexical_path: lexical_path, in_singleton_class: in_singleton_class)
+            end
           when Prism::ConstantWriteNode
             # Issue #2541 — `Thing = Other` makes `Thing` a constant that is not a class declaration, so a
             # struct accessor's type naming it is not read as any class.

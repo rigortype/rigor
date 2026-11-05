@@ -38,6 +38,7 @@ module Rigor
           @namespaces = {}
           @constants = {}
           @struct_includes = {}
+          @mixes_in = {}
           @superclasses = {}
           @defined_methods = {}
           @frozen_after_build = false
@@ -107,6 +108,26 @@ module Rigor
 
           list = (@struct_includes[class_name] ||= [])
           list << module_name unless list.include?(module_name)
+        end
+
+        def record_mixes_in(class_name)
+          raise "Catalog already finalised" if @frozen_after_build
+
+          @mixes_in[class_name] = true
+        end
+
+        # Issue #2541 — whether any class on `class_name`'s walked superclass chain, itself included,
+        # `include`s or `prepend`s a module.
+        def mixes_in_ancestry?(class_name)
+          chain = []
+          current = class_name.to_s.delete_prefix("::")
+          until current.nil? || chain.include?(current) || STRUCT_ROOTS.include?(current)
+            return true if @mixes_in.key?(current)
+
+            chain << current
+            current = resolve_superclass(current)
+          end
+          false
         end
 
         # Every walked class and module name and every assigned constant name, for the plugin's check that
@@ -185,6 +206,7 @@ module Rigor
           @constants.freeze
           @struct_includes.each_value(&:freeze)
           @struct_includes.freeze
+          @mixes_in.freeze
           @superclasses.freeze
           @defined_methods.each_value(&:freeze)
           @defined_methods.freeze

@@ -1731,6 +1731,20 @@ RSpec.describe "plugins/rigor-sorbet" do
             class Al2 < ::T::Struct
             end
           end
+          module Lib
+            module Inner
+              class Thing
+                def inner_thing: () -> Integer
+              end
+            end
+          end
+          module Outer
+            module Helpers
+              class Thing
+                def helper_thing: () -> Integer
+              end
+            end
+          end
         RBS
       end
 
@@ -1764,6 +1778,27 @@ RSpec.describe "plugins/rigor-sorbet" do
         "an RBS-only constant in the nesting" => [
           "module RbsNs\n  class Al2 < T::Struct; const :aliased, Thing; end\nend",
           "RbsNs::Al2.new(aliased: 1).aliased"
+        ],
+        "a transitive include of an RBS-only module" => [
+          "module Wrapper; include Lib::Inner; end\n" \
+          "class Trans < T::Struct; include Wrapper; const :via_trans, Thing; end",
+          "Trans.new(via_trans: Lib::Inner::Thing.new).via_trans"
+        ],
+        "a namespace-relative include of an RBS-only module" => [
+          "module Outer\n  class S < T::Struct; include Helpers; const :x, Thing; end\nend",
+          "Outer::S.new(x: Outer::Helpers::Thing.new).x"
+        ],
+        "a direct include of a module declaring no such class" => [
+          "module Bare; end\nclass Direct < T::Struct; include Bare; const :d, Thing; end",
+          "Direct.new(d: Thing.new).d"
+        ],
+        "a prepend" => [
+          "module Bare; end\nclass Pre < T::Struct; prepend Bare; const :p, Thing; end",
+          "Pre.new(p: Thing.new).p"
+        ],
+        "an include on a walked superclass" => [
+          "module Bare; end\nclass Mid < T::Struct; include Bare; end\nclass Low < Mid; const :l, Thing; end",
+          "Low.new(l: Thing.new).l"
         ],
         "an unrelated walked class of the same name" => [
           "module Elsewhere; class Thing; end; end\n" \

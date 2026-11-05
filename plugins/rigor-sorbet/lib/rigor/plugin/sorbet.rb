@@ -380,7 +380,9 @@ module Rigor
       # the class's ancestors; then the top level. The nesting step answers a class it finds, and declines
       # (nil, so the constant reads `Dynamic[top]`) when it meets a constant that is not a declared class.
       # Ancestry is not modelled precisely: a class or constant of that name under any ancestor declines.
-      # The top level answers only when no other walked `*::<name>` exists that it might be shadowed by.
+      # The top level answers only when the struct's ancestry is closed — no class on its walked superclass
+      # chain `include`s or `prepend`s anything, whose constants could shadow it — and no other walked
+      # `*::<name>` exists.
       def resolve_struct_constant(name, nesting, class_name, environment)
         return name.delete_prefix("::") if name.start_with?("::")
 
@@ -394,6 +396,7 @@ module Rigor
           return nil if struct_constant_class?(candidate, environment) || struct_constant_bound?(candidate, environment)
         end
         return nil if struct_constant_elsewhere?(name)
+        return nil if @catalog.mixes_in_ancestry?(class_name)
 
         struct_constant_class?(name, environment) ? name : nil
       end

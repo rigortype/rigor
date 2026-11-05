@@ -1,0 +1,2 @@
+- **[engine]** ADR-46 dependency reads are now recorded in the typing-state journal instead of blocking it. ([#2852](https://github.com/rigortype/rigor/pull/2852))
+  - Groundwork for ADR-129's result memo; no output changes.

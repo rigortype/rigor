@@ -15,14 +15,29 @@ module Rigor
     # Modelled on {Inference::BudgetTrace}: process-thread-local state, a cheap disabled fast path, and a
     # frozen snapshot for consumers.
     module DependencyRecorder # rubocop:disable Metrics/ModuleLength
-      # ADR-129 WD1 — the installed accumulator is a Frame whose contents are a Resource: each read files into it and
-      # touches. The `type_of` memo stays shut while recording runs (WD4). The activation count below is a process
+      # ADR-129 WD1 — the installed accumulator is a Frame whose contents are a Resource for its suspension count, the
+      # one mutation that touches ({record_for}); its filings are entries of the bound Table {READS} and are journaled
+      # instead. The `type_of` memo stays shut while recording runs (WD4). The activation count below is a process
       # switch, outside the typing state (WD5).
       RECORDER = TypingState.frame(
         :dependency_recorder,
         contents: :resource, reason: "the consumer's accumulator a recording installs; each read files into it"
       )
       private_constant :RECORDER
+
+      # ADR-129 WD1 — the recorded dependency reads are a bound Table: the installed {Accumulator} and each open
+      # {Capture} are its stores, keyed on the event tuples they deduplicate on (a frozen `[path, symbol_or_nil]` pair
+      # for a positive edge, a `"kind:name"` String for a name-keyed one). Each event that files into a store logs a
+      # read of its key (`true` when the store already held it, else {TypingState::ABSENT}) and, when it adds, a write
+      # of `true`, while a capture is open, so a later `type_of` memo can validate the reads and replay the writes.
+      # The keys are built only then: a run with no journal capture open allocates nothing for the journal, whether
+      # or not an ADR-84 capture is open.
+      READS = TypingState.table(
+        :dependency_reads,
+        bound: true,
+        reason: "event tuple => true per accumulator and per open capture; set-only, in first-filing order"
+      )
+      private_constant :READS
 
       # ADR-84 WD2 — thread-local Array of active {Capture}s (nil when none). A capture observes-and-forwards:
       # every read recorded while it is active flows into the current consumer's accumulator exactly as before
@@ -35,8 +50,13 @@ module Rigor
       # each outer one's: the inner capture was pushed after the outer, and everything added since reached both.
       # {withhold} swaps in a fresh stack and restores this one untouched, so it keeps the property too.
       # {tee_read} and {tee_missing} rely on it to stop at the first capture that already holds an event.
+      #
+      # ADR-129 WD3 — the stack is an id-determined Resource: every change of it ({capture}'s push and pop,
+      # {withhold}'s swap and restore) takes a fresh state id, so reading it on the event paths is exempt.
       CAPTURES = TypingState.resource(
-        :dependency_capture_stack, reason: "the open capture windows, pushed per window and swapped by withhold"
+        :dependency_capture_stack,
+        read_exemption: :id_determined,
+        reason: "the open capture windows, pushed per window and swapped by withhold"
       )
       private_constant :CAPTURES
 
@@ -45,6 +65,9 @@ module Rigor
       # so replaying such a set into the same target again adds nothing. Recording replays the same stored
       # read set many times over: on Rigor's own `lib`, 71% of the replays into a consumer repeated one
       # already made into it, carrying 65% of the replayed events.
+      #
+      # ADR-129 — the held marks are an extensional dedupe cache over the store's own {READS} entries (every event of
+      # a held set is already in the store), so marking and probing them log nothing; {ChainMemory} likewise.
       module ReplayMemory
         def holds?(read_set)
           !@held.nil? && @held.key?(read_set)
@@ -201,17 +224,16 @@ module Rigor
       # {active?}; opening a capture with no accumulator active would collect reads no run is recording.
       def capture
         state = TypingState.current
-        captures = state.acquire(CAPTURES) { [] }
         accumulator = state[RECORDER]
         suspensions = accumulator&.suspensions
         capture = Capture.new
-        captures.push(capture)
+        state.push(CAPTURES, capture)
         begin
           result = yield
         ensure
-          state.touch(CAPTURES)
-          captures.pop
+          state.pop(CAPTURES)
         end
+        captures = state[CAPTURES]
         read_set = capture.snapshot
         note_captured(read_set, captures, accumulator, suspensions)
         [result, read_set]
@@ -226,13 +248,10 @@ module Rigor
       def note_captured(read_set, captures, accumulator, suspensions)
         return if read_set.equal?(EMPTY_READ_SET)
 
-        state = TypingState.current
-        state.touch(CAPTURES)
         captures.last&.hold!(read_set)
-        return unless accumulator && state[RECORDER].equal?(accumulator)
+        return unless accumulator && TypingState.current[RECORDER].equal?(accumulator)
         return unless accumulator.suspensions == suspensions
 
-        state.touch(RECORDER)
         accumulator.hold!(read_set)
       end
       private_class_method :note_captured
@@ -248,14 +267,17 @@ module Rigor
         previous = state[RECORDER]
         return [yield, nil] if previous.nil?
 
-        previous_captures = state.read(CAPTURES)
+        previous_captures = state[CAPTURES]
         capture = Capture.new
         result = state.with(RECORDER, Accumulator.new(previous.consumer)) do
+          # A swap of the whole stack: a write, then a rewrite, so the swapped-in stack is read under a fresh id.
           state.write(CAPTURES, [capture])
+          state.rewrite(CAPTURES)
           begin
             yield
           ensure
             state.write(CAPTURES, previous_captures)
+            state.rewrite(CAPTURES)
           end
         end
         [result, capture.snapshot]
@@ -269,9 +291,8 @@ module Rigor
         accumulator = state[RECORDER]
         return if accumulator.nil? || read_set.nil? || read_set.equal?(EMPTY_READ_SET)
 
-        state.touch(RECORDER)
-        captures = state.read(CAPTURES)
-        tee_read_set(captures, read_set) if captures && !captures.empty?
+        captures = state[CAPTURES]
+        tee_read_set(state, captures, read_set) if captures && !captures.empty?
         # Each set keeps its own insertion order whichever target is filled first, and a skipped replay is one
         # that could only have re-added what the target already holds.
         return if accumulator.holds?(read_set)
@@ -279,10 +300,13 @@ module Rigor
         consumer = accumulator.consumer
         read_set.reads.each do |pair|
           path, symbol = pair
-          accumulate_read(accumulator, path, symbol) unless path == consumer
+          next if path == consumer
+
+          added = accumulate_read(accumulator, path, symbol)
+          log_filing(state, accumulator, pair, added) if state.capturing?
         end
         missing = accumulator.missing
-        read_set.missing.each { |entry| missing << entry }
+        read_set.missing.each { |entry| file_missing(state, accumulator, missing, entry) }
         accumulator.hold!(read_set)
       end
 
@@ -298,8 +322,7 @@ module Rigor
         accumulator = state[RECORDER]
         return if accumulator.nil?
 
-        state.touch(RECORDER)
-        captures = state.read(CAPTURES)
+        captures = state[CAPTURES]
         open = captures && !captures.empty?
         if accumulator.chain_filed?(chain, start, discovery) &&
            (!open || captures.last.chain_filed?(chain, start, discovery))
@@ -313,31 +336,72 @@ module Rigor
 
       # {replay}'s share for the open captures. The innermost capture having seen `read_set` already means every
       # open capture holds all of it (see CAPTURES).
-      def tee_read_set(captures, read_set)
+      def tee_read_set(state, captures, read_set)
         innermost = captures.last
         return if innermost.holds?(read_set)
 
-        read_set.reads.each { |pair| tee_read(captures, pair) }
-        read_set.missing.each { |entry| tee_missing(captures, entry) }
+        read_set.reads.each { |pair| tee_read(state, captures, pair) }
+        read_set.missing.each { |entry| tee_missing(state, captures, entry) }
         innermost.hold!(read_set)
       end
       private_class_method :tee_read_set
 
       # Adds a read pair to the open captures, innermost first, and stops at the first capture that already holds
       # it: every capture outside that one holds it too (see CAPTURES). The capture sets end up exactly as
-      # adding it to every capture would leave them, in the same insertion order.
-      def tee_read(captures, pair)
-        index = captures.size - 1
-        index -= 1 while index >= 0 && captures[index].reads.add?(pair)
+      # adding it to every capture would leave them, in the same insertion order. Each capture probed logs its
+      # filing; the ones outside the first holder are not probed, and hold the key by the same property.
+      def tee_read(state, captures, pair)
+        if state.capturing?
+          tee_logged(state, captures, pair, :reads)
+        else
+          index = captures.size - 1
+          index -= 1 while index >= 0 && captures[index].reads.add?(pair)
+        end
       end
       private_class_method :tee_read
 
       # {tee_read} for a name-keyed `missing` entry.
-      def tee_missing(captures, entry)
-        index = captures.size - 1
-        index -= 1 while index >= 0 && captures[index].missing.add?(entry)
+      def tee_missing(state, captures, entry)
+        if state.capturing?
+          tee_logged(state, captures, entry, :missing)
+        else
+          index = captures.size - 1
+          index -= 1 while index >= 0 && captures[index].missing.add?(entry)
+        end
       end
       private_class_method :tee_missing
+
+      # {tee_read} / {tee_missing} while a capture is open: the same walk, logging each capture's filing.
+      def tee_logged(state, captures, key, set)
+        index = captures.size - 1
+        while index >= 0
+          capture = captures[index]
+          added = capture.public_send(set).add?(key)
+          log_filing(state, capture, key, added)
+          break unless added
+
+          index -= 1
+        end
+      end
+      private_class_method :tee_logged
+
+      # Logs one filing of `key` into `store` (an {Accumulator} or a {Capture}): a read of the key, which the store held
+      # unless the filing `added` it, and the write when it did. Callers log only while a capture is open.
+      def log_filing(state, store, key, added)
+        state.log_bound_read(READS, store, key, added ? TypingState::ABSENT : true)
+        state.log_bound_write(READS, store, key, true) if added
+      end
+      private_class_method :log_filing
+
+      # Files a name-keyed entry into an accumulator's `missing` set, logging the filing while a capture is open.
+      def file_missing(state, accumulator, missing, entry)
+        if state.capturing?
+          log_filing(state, accumulator, entry, missing.add?(entry))
+        else
+          missing << entry
+        end
+      end
+      private_class_method :file_missing
 
       # Records that the current consumer read a declaration / body whose definition site is `path_line` (a
       # `"path:line"` String, or nil). When `symbol` is given (a `"ClassName#method"` String), the read is a
@@ -354,12 +418,13 @@ module Rigor
         path = site_path(path_line)
         return unless path
 
-        state.touch(RECORDER)
-        captures = state.read(CAPTURES)
-        tee_read(captures, [path, symbol].freeze) if captures && !captures.empty?
+        captures = state[CAPTURES]
+        pair = [path, symbol].freeze if (captures && !captures.empty?) || state.capturing?
+        tee_read(state, captures, pair) if captures && !captures.empty?
         return if path == accumulator.consumer
 
-        accumulate_read(accumulator, path, symbol)
+        added = accumulate_read(accumulator, path, symbol)
+        log_filing(state, accumulator, pair, added) if state.capturing?
       end
 
       # The path part of a `"path:line"` site: what `path_line.split(":", 2).first` answers, without the Array
@@ -388,10 +453,9 @@ module Rigor
         return if accumulator.nil?
 
         entry = "#{kind}:#{name}"
-        state.touch(RECORDER)
-        captures = state.read(CAPTURES)
-        tee_missing(captures, entry) if captures && !captures.empty?
-        accumulator.missing.add(entry)
+        captures = state[CAPTURES]
+        tee_missing(state, captures, entry) if captures && !captures.empty?
+        file_missing(state, accumulator, accumulator.missing, entry)
       end
 
       # {read_name} keyed on the LAST SEGMENT of a constant path, `name.delete_prefix("::").split("::").last`,
@@ -428,13 +492,12 @@ module Rigor
         accumulator = state[RECORDER]
         return if accumulator.nil?
 
-        state.touch(RECORDER)
-        captures = state.read(CAPTURES)
+        captures = state[CAPTURES]
         open = captures && !captures.empty?
         missing = accumulator.missing
         keys.each do |entry|
-          tee_missing(captures, entry) if open
-          missing.add(entry)
+          tee_missing(state, captures, entry) if open
+          file_missing(state, accumulator, missing, entry)
         end
       end
 
@@ -458,13 +521,12 @@ module Rigor
 
       # The positive-edge aggregation shared by {read_site} and {replay}. `sources` is the union of the other
       # two tables' paths, and this is the only writer of all three, so a read the finer table already holds is
-      # already in `sources` and costs one Set probe instead of two.
+      # already in `sources` and costs one Set probe instead of two. Answers whether the read was new to the
+      # accumulator (truthy) or already held (nil), which is its {READS} filing.
       def accumulate_read(accumulator, path, symbol)
-        if symbol
-          accumulator.sources << path if accumulator.symbol_sources[path].add?(symbol)
-        elsif accumulator.ancestry_sources.add?(path)
-          accumulator.sources << path
-        end
+        added = symbol ? accumulator.symbol_sources[path].add?(symbol) : accumulator.ancestry_sources.add?(path)
+        accumulator.sources << path if added
+        added
       end
       private_class_method :accumulate_read
     end

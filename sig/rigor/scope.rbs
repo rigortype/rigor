@@ -100,6 +100,9 @@ module Rigor
     def run_generation: () -> Object?
     def record_dynamic_origin: (untyped node, Symbol cause) -> Scope
     def record_optimistic_origin: (untyped node, Symbol cause) -> Scope
+    def dynamic_origin: (untyped node) -> Symbol?
+    def optimistic_origin: (untyped node) -> Symbol?
+    def void_origin: (untyped node) -> Inference::VoidOrigin?
 
     def record_void_origin: (untyped node, Inference::VoidOrigin origin) -> Scope
 

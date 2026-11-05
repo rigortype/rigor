@@ -1738,7 +1738,7 @@ RSpec.describe "plugins/rigor-sorbet" do
       # one under test rather than another shape's walked `*::Thing`.
       def ancestry_run(shape, call)
         struct_run("T.reveal_type(#{call})\n", extra_source: "class Thing; def top_only = 2; end\n#{shape}",
-                                                extra_rbs: ancestry_rbs)
+                                               extra_rbs: ancestry_rbs)
       end
 
       {
@@ -1753,8 +1753,8 @@ RSpec.describe "plugins/rigor-sorbet" do
           "WithMix.new(via_mix: Mix::Thing.new).via_mix"
         ],
         "a constant alias in the nesting" => [
-          "module Ns\n  class Other; def other_only = 5; end\n  Thing = Other\n" \
-          "  class Al < T::Struct; const :aliased, Thing; end\nend",
+          "module Ns\n  class Other; def other_only = 5; end\n  Thing = Other\n  " \
+          "class Al < T::Struct; const :aliased, Thing; end\nend",
           "Ns::Al.new(aliased: Ns::Other.new).aliased"
         ],
         "an RBS-only included module's nested class" => [

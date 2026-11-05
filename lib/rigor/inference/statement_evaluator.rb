@@ -8531,6 +8531,16 @@ module Rigor
         InterveningIvarReset.foreign_self_block?(call_node, operand_scope)
       end
 
+      # The scope a block body's `self` marks start from: the statement form's opaque `self` (issue #316), or the
+      # walk's unknown-`self` mark alone (issue #1717) for the value-position block {#evaluate_block_of} enters and for
+      # every block entered beneath it. A scope carrying the unknown-`self` mark without the opaque one comes only from
+      # the index walk ({Scope#with_block_self_unknown}), so it is how a nested block knows it sits under one: the
+      # opaque mark, which declines a cross-file top-level `def`, stays off the whole value-position subtree.
+      def block_self_entry(block_node)
+        walked = block_node.equal?(@value_position_block) || (scope.block_self_unknown? && !scope.opaque_block_self?)
+        walked ? scope.with_block_self_unknown(true) : scope.entering_opaque_block
+      end
+
       # Builds the entry scope for a block body. The block sees the outer scope's locals (Ruby's lexical scoping rule)
       # and adds bindings for every named block parameter on top. Parameter types come from the receiving method's RBS
       # signature when one is available; the rest default to `Dynamic[Top]`.
@@ -8539,14 +8549,6 @@ module Rigor
       # Ruby's semantics — at runtime the block-local is a fresh nil-valued variable on every block invocation. Without
       # this shadow, an inner `x.even?` before the first write would type-check against the OUTER `x` (e.g. `Integer`)
       # when the runtime would actually `NoMethodError` on `nil`.
-      # The scope a block body's `self` marks start from: the statement form's opaque `self` (issue #316), or, for
-      # the value-position block {#evaluate_block_of} enters, the walk's unknown-`self` mark alone (issue #1717).
-      def block_self_entry(block_node)
-        return scope.entering_opaque_block unless block_node.equal?(@value_position_block)
-
-        scope.with_block_self_unknown(true)
-      end
-
       def build_block_entry_scope(call_node, block_node)
         expected = expected_block_param_types_for(call_node)
         # Issue #316 — every block body enters with `self` unmodelled (`Scope#entering_opaque_block`); the

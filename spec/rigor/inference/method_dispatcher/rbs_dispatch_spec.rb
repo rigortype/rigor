@@ -522,6 +522,16 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RbsDispatch do
             expect(probe(:each_built, [integer_class])).to eq([Rigor::Type::Combinator.nominal_of(Integer)])
           end
 
+          it "leaves the block parameter unbound when an argument is a class built with a block" do
+            factory_call = Prism.parse("RigorSpecBox.each_built(Class.new(Integer) { def extra = 1 }) { |x| x }")
+                                .value.statements.body.first
+            params = described_class.block_param_types(cc(receiver: box, method_name: :each_built,
+                                                          args: [integer_class], environment: generic_environment,
+                                                          scope: Rigor::Scope.empty(environment: generic_environment),
+                                                          call_node: factory_call))
+            expect(params).to eq([Rigor::Type::Combinator.untyped])
+          end
+
           it "leaves the block parameter unbound when the scope discovered a same-named method" do
             shadowed = Rigor::Scope.empty(environment: generic_environment).with_discovery(
               Rigor::Scope::DiscoveryIndex::EMPTY.with(

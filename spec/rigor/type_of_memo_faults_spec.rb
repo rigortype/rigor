@@ -251,16 +251,17 @@ RSpec.describe TypeOfMemoFaults do
     node = Prism.parse("a.b").value.statements.body.first
     scope = Rigor::Scope.empty
     store = {}.compare_by_identity
-    type = Rigor::Type::Combinator.nominal_of("Integer")
+    types = [Rigor::Type::Combinator.nominal_of("Integer"), Rigor::Type::Combinator.nominal_of("String")]
+    typings = types.each
     compute = lambda do
       state.log_bound_write(origins, store, node, :cause)
       store[node] = :cause
-      type
+      typings.next
     end
     def state.replay(_writes) = raise(ArgumentError, "store outlived")
     answers, result = serving(nil) { Array.new(2) { Rigor::TypeOfMemo.shadow(state, scope, node, &compute) } }
 
-    expect(answers).to eq([type, type])
+    expect(answers).to eq(types)
     expect(result[:kinds]).to include(:serve_error)
   end
 

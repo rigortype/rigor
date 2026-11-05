@@ -138,6 +138,28 @@ RSpec.describe Rigor::TypeOfMemo do
     expect(counts).to include(mismatch: 1, mismatch_type: 1)
   end
 
+  it "compares Hash table values in order, which Hash#== ignores" do
+    write = lambda do |value|
+      state.log_bound_write(origins, store, node, value)
+      store[node] = value
+      int
+    end
+    shadow { write.call({ a: 1, b: 2 }) }
+    shadow { write.call({ b: 2, a: 1 }) }
+
+    expect(counts).to include(mismatch: 1, mismatch_table: 1)
+  end
+
+  it "warns instead of raising when the report cannot be written" do
+    previous = ENV.fetch("RIGOR_TYPE_OF_SHADOW_REPORT", nil)
+    ENV["RIGOR_TYPE_OF_SHADOW_REPORT"] = File.join(Dir.tmpdir, "rigor-missing-#{Process.pid}", "r.jsonl")
+    described_class.enable!
+    expect { described_class.write_report }.to output(/not written/).to_stderr
+  ensure
+    ENV["RIGOR_TYPE_OF_SHADOW_REPORT"] = previous
+    described_class.disable!
+  end
+
   it "counts an error in the comparison as a mismatch and still answers the computation's value" do
     broken = Array.new(2) do
       Object.new.tap { |object| def object.==(_other) = raise(ArgumentError, "boom") }

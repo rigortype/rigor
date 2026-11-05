@@ -329,6 +329,9 @@ module Rigor
 
         line = JSON.generate(pid: Process.pid, counts: counts, stale: stale, samples: samples)
         File.open(path, "a") { |file| file.puts(line) }
+      rescue StandardError => e
+        # A report that cannot be written must not keep a forked worker from its `exit!`, nor change the exit status.
+        warn("rigor: RIGOR_TYPE_OF_SHADOW_REPORT not written: #{e.class}: #{e.message}")
       end
     end
 

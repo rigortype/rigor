@@ -1,0 +1,2 @@
+- **[engine]** A loop or `inject` value inside a recursive method no longer types as the fixpoint's first guess (`[bot]`) when the method is called with a non-constant argument. ([#2843](https://github.com/rigortype/rigor/pull/2843))
+  - The loop and inject records now answer only a read in the ADR-55 summary generation they were written in (#2767).

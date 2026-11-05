@@ -4,7 +4,7 @@ require "prism"
 require_relative "../source/node_walker"
 require_relative "../source/node_children"
 require_relative "../typing_state"
-require_relative "memo_audit"
+require_relative "../memo_audit"
 
 module Rigor
   module Inference

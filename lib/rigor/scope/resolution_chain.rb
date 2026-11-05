@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../typing_state"
-require_relative "../inference/memo_audit"
+require_relative "../memo_audit"
 
 module Rigor
   class Scope

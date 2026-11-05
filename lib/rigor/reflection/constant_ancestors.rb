@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../typing_state"
-require_relative "../inference/memo_audit"
+require_relative "../memo_audit"
 
 module Rigor
   # {Reflection}'s constant-ancestor walk ([#354](https://github.com/rigortype/rigor/issues/354)), split out for

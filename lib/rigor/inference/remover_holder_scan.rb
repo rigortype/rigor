@@ -6,7 +6,7 @@ require_relative "../typing_state"
 require_relative "../source/node_children"
 require_relative "closure_escape_analyzer"
 require_relative "construction_escape"
-require_relative "memo_audit"
+require_relative "../memo_audit"
 
 module Rigor
   module Inference

@@ -4,7 +4,7 @@ require "prism"
 
 require_relative "block_call_timing"
 require_relative "closure_escape_analyzer"
-require_relative "memo_audit"
+require_relative "../memo_audit"
 require_relative "project_method_ownership"
 
 module Rigor

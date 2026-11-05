@@ -66,7 +66,7 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
       lib/rigor/inference/key_presence_guard.rb
       lib/rigor/inference/loop_value_record.rb
       lib/rigor/inference/method_dispatcher/interface_shape.rb
-      lib/rigor/inference/memo_audit.rb
+      lib/rigor/memo_audit.rb
       lib/rigor/inference/method_dispatcher.rb
       lib/rigor/inference/method_dispatcher/rbs_dispatch.rb
       lib/rigor/inference/project_method_ownership.rb
@@ -128,7 +128,7 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
       [budget, :module_ivar_mutation, "@distributions"] => [3, counters],
       [budget, :module_ivar_write, "@distinct_seen"] => [1, counters],
       [budget, :module_ivar_mutation, "@distinct_seen"] => [1, counters],
-      ["lib/rigor/inference/memo_audit.rb", :module_ivar_write, "@enabled"] =>
+      ["lib/rigor/memo_audit.rb", :module_ivar_write, "@enabled"] =>
         [3, "MemoAudit's process switch (ADR-129 WD5)"]
     }.merge(activation_count_rows)
   end

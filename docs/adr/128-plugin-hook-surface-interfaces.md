@@ -1,12 +1,10 @@
 # ADR-128 — The plugin hook surface as structural interfaces, and how its breaking changes ship
 
-Status: **Accepted, 2026-11-03.** Implemented:
+Status: **Accepted, 2026-11-03.** Implemented: slice 1 landed in #2714, slice 2 in #2694 and slice 3 in #2822.
 
-- slice 1 (WD7) landed in #2714;
-- slice 2 landed in #2694;
-- slice 3 landed in #2822. #2681 (#2768) and ADR-130's half of #929 (#2808, #2815) made the hook types
-  live, and the `plugin.api-surface` rule (WD6) ships in the bleeding-edge overlay. WD5's seam was settled by
-  ADR-130's untyped parity rather than by assignability (WD5 note).
+Slice 3 rests on #2681 (#2768) and ADR-130's half of #929 (#2808, #2815), which made the hook types live. Its
+`plugin.api-surface` rule (WD6) ships in the bleeding-edge overlay. WD5's seam was settled by ADR-130's untyped
+parity rather than by assignability (WD5 note).
 
 Grounding: the measurement in #2681 (`make check-plugins`, 47 plugin classes, 2026-11-03).
 

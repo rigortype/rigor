@@ -1,0 +1,2 @@
+- **[inference]** A callee's `next` inside a recursive call no longer leaks into the caller's block value. ([#2868](https://github.com/rigortype/rigor/pull/2868))
+  - `def f(n) = [1].map { |y| next n if y > 0; f(:sym) }` typed `P.new.f(1)` as `[1 | :sym | Dynamic[top]]`, an arm Ruby never takes; it is now `[1 | Dynamic[top]]`.

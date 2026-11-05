@@ -109,7 +109,7 @@ module Rigor
           end
         end
 
-        by_name[name] = compute_successors(def_node, name, owner, edges)
+        by_name[name] = MemoAudit.key_audit("successor") { compute_successors(def_node, name, owner, edges) }
       end
 
       def compute_successors(def_node, name, owner, edges)

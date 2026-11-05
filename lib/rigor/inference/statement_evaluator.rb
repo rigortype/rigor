@@ -400,6 +400,16 @@ module Rigor
         [result, sink]
       end
 
+      # Runs `block` with none of {CALLER_SINKS} installed: a user-method body re-typed for its return starts outside
+      # its caller's constructs (ADR-129 WD1: the return memo forces these Frames at its entry). Installs only when one
+      # is set, read with `forcing_read`, so the common entry costs no frame.
+      def self.outside_caller_sinks(&)
+        state = TypingState.current
+        return yield if CALLER_SINKS.all? { |slot| state.forcing_read(slot).nil? }
+
+        state.without(CALLER_SINKS, &)
+      end
+
       # Runs `block` with a fresh `break`-value sink installed, then yields the collected `[BreakNode, Type]` pairs to
       # the caller. Stacks like the other sinks: a block body evaluated inside another block body's evaluation must not
       # spill its arms into the outer collection. Used by `ExpressionTyper#call_dispatch_type_for` to union the `break`
@@ -817,7 +827,9 @@ module Rigor
         memo = unrecorded_hand_off_memo(written)
         key = [constructed, call_node.name]
         unless memo.key?(key)
-          return memo[key] = compute_unrecorded_hand_off_callees(call_node, receiver, written, constructed)
+          return memo[key] = MemoAudit.key_audit("unrecorded hand-off") do
+            compute_unrecorded_hand_off_callees(call_node, receiver, written, constructed)
+          end
         end
 
         MemoAudit.check("unrecorded hand-off", memo[key], written, key) do
@@ -1144,7 +1156,9 @@ module Rigor
 
         table = typing_state.weak_key_map(INSTANCE_DEF_INDEX)
         by_name = (table[scope.discovery] ||= {})
-        return by_name[name] = scope.user_instance_def_owners(name) unless by_name.key?(name)
+        unless by_name.key?(name)
+          return by_name[name] = MemoAudit.key_audit("instance def owners") { scope.user_instance_def_owners(name) }
+        end
 
         record_instance_def_owner_reads(name, by_name[name]) if Analysis::DependencyRecorder.active?
         MemoAudit.check("instance def owners", by_name[name], name) { scope.user_instance_def_owners(name) }
@@ -1157,7 +1171,7 @@ module Rigor
 
         table = typing_state.weak_key_map(INSTANCE_DEF_INDEX)
         by_name = (table[scope.discovery] ||= {})
-        entry = by_name[OPACITY_ENTRY] ||= scope.subclassing_opacity
+        entry = by_name[OPACITY_ENTRY] ||= MemoAudit.key_audit("subclassing opacity") { scope.subclassing_opacity }
         Analysis::DependencyRecorder.read_keys(entry.last) if Analysis::DependencyRecorder.active?
         MemoAudit.check("subclassing opacity", entry, OPACITY_ENTRY) { scope.subclassing_opacity }.first
       end
@@ -2956,6 +2970,11 @@ module Rigor
       # The thread-local sinks a `return`, `next` or `break` is collected into.
       JUMP_SINKS = (CLAUSE_SINKS - [RETRY_FRAMES]).freeze
       private_constant :JUMP_SINKS
+
+      # The sinks a caller's construct installs and a callee's body must not record into: a `next`, `break` or raise
+      # point in the callee belongs to the callee's own constructs, never to the caller's block, loop or retrying body.
+      CALLER_SINKS = [NEXT_SINK, BREAK_SINK, BREAK_VALUE_SINK, RETRY_FRAMES].freeze
+      private_constant :CALLER_SINKS
 
       # The retry edge of `node`, or nil when no `retry` in its rescue chain targets it. Allocation-free for a `begin`
       # no `retry` targets.
@@ -5944,6 +5963,8 @@ module Rigor
       # survive `with_self_type` and change what a constant in the def's body types as, so the census is no longer
       # the def's alone, and the first caller's narrowing must not become every later caller's answer.
       def resolved_census(kind, def_node, &)
+        # An audit recomputation bypasses the memo but still opens the site's declaration (ADR-129 WD1).
+        return MemoAudit.key_audit("resolved census", RESOLVED_CENSUS_KEY_AUDIT, &) if MemoAudit.suspended?
         return yield if hand_off_memo_bypassed?
 
         discovery = scope.discovery
@@ -5953,9 +5974,13 @@ module Rigor
         by_class = (slot[self_type.is_a?(Type::Singleton) ? 1 : 0][kind] ||= {})
         class_name = enclosing_class_name_for(self_type)
         by_def = (by_class[class_name] ||= {}.compare_by_identity)
-        return by_def[def_node] = yield unless by_def.key?(def_node)
+        unless by_def.key?(def_node)
+          return by_def[def_node] = MemoAudit.key_audit("resolved census", RESOLVED_CENSUS_KEY_AUDIT, &)
+        end
 
-        MemoAudit.check("resolved census", by_def[def_node], kind, class_name, &)
+        MemoAudit.check("resolved census", by_def[def_node], kind, class_name) do
+          MemoAudit.key_audit("resolved census", RESOLVED_CENSUS_KEY_AUDIT, &)
+        end
       end
 
       RESOLVED_CENSUS = TypingState.memo(
@@ -5964,6 +5989,21 @@ module Rigor
         reason: "keyed by discovery, side, kind, class and def, all its answer reads; audited by MemoAudit"
       )
       private_constant :RESOLVED_CENSUS
+
+      # ADR-129 WD1's key audit of a resolved-census miss. A census types a callee's receivers ({#receiver_callees_in})
+      # under the frames its caller installed, and keys on none of them: a known gap, #2867.
+      CENSUS_CALLER_FRAMES = %i[
+        threaded_block_body key_presence_walk return_sink next_sink break_sink break_value_sink retry_frames
+        interface_erasure interface_dispatch_off
+      ].freeze
+      private_constant :CENSUS_CALLER_FRAMES
+      RESOLVED_CENSUS_KEY_AUDIT = MemoAudit.key_declaration(
+        gaps: CENSUS_CALLER_FRAMES.to_h do |name|
+          [name, "#2867: the census types a callee's receivers under the caller's frames, and its key carries " \
+                 "none of them"]
+        end
+      ).freeze
+      private_constant :RESOLVED_CENSUS_KEY_AUDIT
 
       # The parameters `def_node` mutates itself, from either channel: those escape-mutated inside a block (which may
       # run later / repeatedly) AND those mutated directly in the method body during the call itself
@@ -6220,7 +6260,7 @@ module Rigor
       def def_census(kind, def_node, &)
         table = typing_state.weak_key_map(DEF_CENSUS)
         entry = (table[def_node] ||= {})
-        return entry[kind] = yield unless entry.key?(kind)
+        return entry[kind] = MemoAudit.key_audit("def census", &) unless entry.key?(kind)
 
         MemoAudit.check("def census", entry[kind], kind, &)
       end

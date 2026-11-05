@@ -40,7 +40,9 @@ module Rigor
 
         table = TypingState.current.weak_key_map(RELIABLE)
         by_name = (table[scope.discovery] ||= {})
-        return by_name[name] = compute?(scope, name) unless by_name.key?(name)
+        unless by_name.key?(name)
+          return by_name[name] = MemoAudit.key_audit("top-level def census") { compute?(scope, name) }
+        end
 
         MemoAudit.check("top-level def census", by_name[name], name) { compute?(scope, name) }
       end

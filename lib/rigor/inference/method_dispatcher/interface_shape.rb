@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../../type"
 require_relative "../../typing_state"
+require_relative "../../memo_audit"
 require_relative "argument_nodes"
 
 module Rigor
@@ -31,7 +32,10 @@ module Rigor
         module_function
 
         # Runs the block with interface dispatch switched off.
-        def without_dispatch(&) = TypingState.current.with(DISPATCH_OFF, true, &)
+        def without_dispatch(&)
+          MemoAudit.check_run_level_install(:interface_dispatch_off)
+          TypingState.current.with(DISPATCH_OFF, true, &)
+        end
 
         # False inside {.without_dispatch}.
         def dispatch? = TypingState.current[DISPATCH_OFF] != true

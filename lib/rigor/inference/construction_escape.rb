@@ -132,7 +132,7 @@ module Rigor
 
         table = TypingState.current.weak_key_map(CACHE)
         stored = table[body]
-        return table[body] = scan(body) if stored.nil?
+        return table[body] = MemoAudit.key_audit("construction escape") { scan(body) } if stored.nil?
 
         MemoAudit.check("construction escape", stored, body) { scan(body) }
       end

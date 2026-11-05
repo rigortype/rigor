@@ -88,7 +88,9 @@ module Rigor
 
         table = TypingState.current.weak_key_map(UNSAFE_CACHE)
         stored = table[body]
-        return table[body] = unsafe_names(body, parameters) if stored.nil?
+        if stored.nil?
+          return table[body] = MemoAudit.key_audit("remover narrowing unsafe") { unsafe_names(body, parameters) }
+        end
 
         MemoAudit.check("remover narrowing unsafe", stored, body) { unsafe_names(body, parameters) }
       end

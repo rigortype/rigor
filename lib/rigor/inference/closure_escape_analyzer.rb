@@ -192,7 +192,9 @@ module Rigor
             end
           end
 
-          by_method[method_sym] = compute_ancestry_non_escaping?(class_name, method_sym, scope)
+          by_method[method_sym] = MemoAudit.key_audit("ancestry non-escaping") do
+            compute_ancestry_non_escaping?(class_name, method_sym, scope)
+          end
         end
 
         def compute_ancestry_non_escaping?(class_name, method_sym, scope)

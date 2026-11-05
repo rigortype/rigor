@@ -5544,7 +5544,9 @@ module Rigor
 
         table = TypingState.current.weak_key_map(DECLARED_NAMES)
         stored = table[source]
-        return table[source] = scan_declared_names(source) if stored.nil?
+        if stored.nil?
+          return table[source] = MemoAudit.key_audit("scope index declared names") { scan_declared_names(source) }
+        end
 
         MemoAudit.check("scope index declared names", stored, source.source.bytesize) { scan_declared_names(source) }
       end

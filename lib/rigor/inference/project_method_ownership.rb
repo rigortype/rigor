@@ -75,7 +75,9 @@ module Rigor
           end
         end
 
-        by_method[method_sym] = compute_defines?(class_name, method_sym, kind, scope)
+        by_method[method_sym] = MemoAudit.key_audit("project method defines") do
+          compute_defines?(class_name, method_sym, kind, scope)
+        end
       end
 
       # One slot per thread, keyed on the identity of the scope's frozen discovery index and its environment —

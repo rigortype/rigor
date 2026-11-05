@@ -29,6 +29,26 @@ RSpec.describe Rigor::SigGen::ObservationCollector do
     expect(collector(paths: []).collect).to eq({})
   end
 
+  # Issue #2869 — the collector releases its run-scoped slots, so the generator's later interface-dispatch install
+  # (checked under the memo audit, ADR-129 WD1) does not find the collector's return-memo entries.
+  it "leaves no run-scoped slot filled, so an audited run-level install after it passes" do
+    write_fixture("lib/calc.rb", "class Calc; def helper(x) = x + 1; def add(a, b) = helper(a) + b; end\n")
+    spec = write_fixture("spec/calc_spec.rb", <<~RUBY)
+      def build_calc = Calc.new
+      def three = 3
+      c = build_calc
+      c.add(three, 2)
+    RUBY
+
+    collector(paths: [spec]).collect
+    expect(Rigor::TypingState.current.holding).not_to include(:user_method_return_memo)
+    was = Rigor::MemoAudit.enabled?
+    Rigor::MemoAudit.enable!
+    expect { Rigor::Inference::MethodDispatcher::RbsDispatch.without_interface_dispatch { nil } }.not_to raise_error
+  ensure
+    Rigor::MemoAudit.disable! unless was
+  end
+
   it "records explicit-receiver call argument types keyed by [class, method]" do
     write_fixture("lib/calc.rb", "class Calc\n  def greet(n); n; end\nend\n")
     spec = write_fixture("spec/calc_spec.rb", <<~RUBY)

@@ -96,6 +96,8 @@ RSpec.describe Rigor::Inference::CalleeMutationChain do
     expect { chain.close(root, own: own, edges: edges, store: store, ctx: :ctx) }
       .to raise_error(Rigor::Inference::MemoAudit::Mismatch, /successor/)
   ensure
+    # The raised mismatch is also kept on the thread's list (#2785); a later example that drains it must not inherit it.
+    Rigor::Inference::MemoAudit.drain
     Rigor::Inference::MemoAudit.disable!
   end
 

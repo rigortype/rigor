@@ -3263,7 +3263,10 @@ module Rigor
           state = TypingState.current
           slot = state[PRIVATE_NAMES_MEMO]
           unless slot && slot[0].equal?(discovery)
-            slot = [discovery, private_recorded_names(discovery.discovered_method_visibilities)]
+            names = Inference::MemoAudit.key_audit("private singleton names") do
+              private_recorded_names(discovery.discovered_method_visibilities)
+            end
+            slot = [discovery, names]
             state[PRIVATE_NAMES_MEMO] = slot
             return slot[1].include?(name.to_sym)
           end

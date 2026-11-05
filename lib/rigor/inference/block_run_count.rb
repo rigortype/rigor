@@ -57,7 +57,9 @@ module Rigor
           end
         end
 
-        memo[def_node] = runs(def_node.body, def_node.parameters&.block&.name)[1] >= MANY
+        memo[def_node] = MemoAudit.key_audit("block runs") do
+          runs(def_node.body, def_node.parameters&.block&.name)[1] >= MANY
+        end
       end
 
       def runs(node, block_name)

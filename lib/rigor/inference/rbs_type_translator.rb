@@ -4,6 +4,7 @@ require "rbs"
 
 require_relative "../type"
 require_relative "../typing_state"
+require_relative "../memo_audit"
 
 module Rigor
   module Inference
@@ -136,7 +137,10 @@ module Rigor
         # closed-alias memo under it, so a translation made in one mode is never served in the other (ADR-130 WD4). The
         # switch lives in the calling thread's (and fiber's) `TypingState`, so a run under it is sequential: a pooled
         # run raises (`PoolCoordinator`).
-        def with_interface_erasure(&) = TypingState.current.with(INTERFACE_ERASURE, true, &)
+        def with_interface_erasure(&)
+          MemoAudit.check_run_level_install(:interface_erasure)
+          TypingState.current.with(INTERFACE_ERASURE, true, &)
+        end
 
         def interface_erasure? = TypingState.current[INTERFACE_ERASURE] == true
 

@@ -174,7 +174,7 @@ module Rigor
           entry = @memo[memo_key]
           if entry.nil?
             edges = []
-            value = yield(edges)
+            value = MemoAudit.key_audit("singleton hook verdict") { yield(edges) }
             entry = @memo[memo_key] = [value ? true : false, edges.concat(own_edges(kind, key)).uniq.freeze].freeze
           else
             entry = MemoAudit.check("singleton hook verdict", entry, kind, key) { fresh_verdict(kind, key) }

@@ -1086,7 +1086,9 @@ module Rigor
           end
         end
 
-        memo[key] = external_ancestor_declares?(class_name, method_name, scope, environment)
+        memo[key] = MemoAudit.key_audit("user class fallback external ancestor") do
+          external_ancestor_declares?(class_name, method_name, scope, environment)
+        end
       end
 
       def external_ancestor_declares?(class_name, method_name, scope, environment)
@@ -1129,7 +1131,9 @@ module Rigor
           end
         end
 
-        memo[method_name] = BlockCallTiming.project_defines_anywhere?(method_name, scope)
+        memo[method_name] = MemoAudit.key_audit("user class fallback defines name") do
+          BlockCallTiming.project_defines_anywhere?(method_name, scope)
+        end
       end
 
       # ADR-129 WD1 — a run-scoped Memo: one slot keyed on the identity of the discovery index and the environment,

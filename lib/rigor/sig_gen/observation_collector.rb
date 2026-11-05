@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../environment"
 require_relative "../project_environment"
+require_relative "../run_scoped_slots"
 require_relative "../scope"
 require_relative "../type"
 require_relative "../source/constant_path"
@@ -64,6 +65,10 @@ module Rigor
           end
         end
         observations.transform_values(&:freeze).freeze
+      ensure
+        # Issue #2869 — release this analysis's run-scoped slots, as every other entry point that runs one does, so
+        # a later run (the generator's, under its own interface-dispatch install) starts from none of them.
+        RunScopedSlots.release
       end
 
       # Whether `arg` names something {#collect} reads: a directory, or a `.rb` file. The CLI's

@@ -1,6 +1,6 @@
 # Each Table declares an entry protocol, and a writer logs before it stores or passes the value it replaced
 
-- **PR:** [#PRNUM](https://github.com/rigortype/rigor/pull/PRNUM)
+- **PR:** [#2873](https://github.com/rigortype/rigor/pull/2873)
 - **Issue:** [#2709](https://github.com/rigortype/rigor/issues/2709)
 - **Class:** open-choice
 - **Precedent:** [#2841](https://github.com/rigortype/rigor/pull/2841)

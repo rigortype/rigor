@@ -431,6 +431,19 @@ module Rigor
         CLASS_OBJECT_NOMINALS = %w[Module Class Object Kernel BasicObject].freeze
         private_constant :CLASS_OBJECT_NOMINALS
 
+        # Issue #2855 — whether `type` is an unparameterised `Class` or `Module` nominal: a class object whose
+        # identity inference lost (`const_get` kept by `is_a?(Class)`, an `is_a?(Module)` guard). `Acceptance` still
+        # answers `no` for it against a `Singleton` (it is a supertype, not a subtype); `call.argument-type-mismatch`
+        # reads it to withhold that verdict. `Object`, `BasicObject` and `Kernel` are left out: they mean "any value",
+        # and `Object.new` against `singleton(X)` is a real mismatch.
+        CLASS_OR_MODULE_NOMINALS = %w[Class Module].freeze
+        private_constant :CLASS_OR_MODULE_NOMINALS
+
+        def class_or_module_nominal?(type)
+          type.is_a?(Type::Nominal) && type.type_args.empty? && CLASS_OR_MODULE_NOMINALS.include?(type.class_name)
+        end
+        public :class_or_module_nominal?
+
         def accepts_nominal_from_singleton(self_type, other_type, mode)
           if CLASS_OBJECT_NOMINALS.include?(self_type.class_name)
             return Type::AcceptsResult.yes(

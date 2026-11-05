@@ -118,8 +118,8 @@ RSpec.describe "plugin.api-surface" do
                                            "bleeding_edge" => ["plugin-api-surface"])
     )
     diagnostics = Dir.chdir(fixture_dir) do
-      Rigor::Analysis::WorkerSession.new(configuration: configuration,
-                                         cache_store: nil).analyze("lib/surface_plugin.rb")
+      session = Rigor::Analysis::WorkerSession.new(configuration: configuration, cache_store: nil)
+      guarded_session_analyze(session, "lib/surface_plugin.rb")
     end
     expect(diagnostics.map(&:rule)).to include("plugin.api-surface")
   end

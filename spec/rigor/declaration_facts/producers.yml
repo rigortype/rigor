@@ -411,6 +411,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#mixin_effects: names which ancestry side of which owner a mixin call reshapes, from the call's receiver and the owner the walk already resolved; it computes no declaration context
     Rigor::Inference::ScopeIndexer#mixin_names_for: grandfathered
     Rigor::Inference::ScopeIndexer#mixin_tables: grandfathered
+    Rigor::Inference::ScopeIndexer#note_forwardable_extend: 'issue #2793, notes which of Forwardable and SingleForwardable a receiverless extend in the lexical body names, so an ambiguous delegator macro (def_delegators, delegate) records its names on the side Ruby defines them; it computes no declaration context'
     Rigor::Inference::ScopeIndexer#own_mixin_effects: names the ancestry side a receiverless mixin call reshapes on the owner the walk passes in; it computes no declaration context
     Rigor::Inference::ScopeIndexer#own_sibling_table: copy on write for one sibling table of the extends fold; it adds no entry, it only makes the table the fold writes into private to that fold
     Rigor::Inference::ScopeIndexer#path_mutation_candidates: grandfathered

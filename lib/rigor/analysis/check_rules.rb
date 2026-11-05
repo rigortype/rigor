@@ -998,8 +998,25 @@ module Rigor
           return true if unknown_mixin_includer?(class_name, scope)
           return true if object_mixin_may_define?(receiver_type, class_name, call_node.name, scope)
           return true if ancestry_declares_method?(scope, class_name, call_node.name, kind)
+          return true if open_names_through_ancestors?(scope, class_name, kind)
 
           rbs_ancestor_may_answer?(class_name, call_node.name, scope, kind)
+        end
+
+        # Issue #2793 — the class, or a project class or module on its chain, carries
+        # `Scope::DiscoveryIndex::ENVELOPE_OPEN_NAMES_MARK`: a macro there defines methods under names its syntax
+        # does not spell (`def_delegators :@x, *NAMES`), so no name is provably missing. A chain cut at its budget
+        # declines as {Scope#discovered_method_through_ancestors?} does.
+        def open_names_through_ancestors?(scope, class_name, kind)
+          mark = Scope::DiscoveryIndex::ENVELOPE_OPEN_NAMES_MARK
+          chain = Scope::ResolutionChain.for(scope, class_name.to_s, kind == :singleton ? :singleton : :instance, :methods)
+          # A project class with no `def` of its own is held as an external entry (#2094), so an external's
+          # candidate names are asked too.
+          found = chain.search(scope) do |entry|
+            names = entry.external? ? entry.candidates : [entry.name]
+            names.any? { |name| scope.parameter_envelopes_of(name).key?(mark) }
+          end
+          found || chain.truncated?
         end
 
         # Issue #1722 — a `method_missing`, or a project mixin, on one of the class's RBS ancestors

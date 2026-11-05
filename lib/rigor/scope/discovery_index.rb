@@ -247,6 +247,12 @@ module Rigor
       ENVELOPE_DYNAMIC_MARK = :"<dynamic>"
       ENVELOPE_OBJECT_EXTENDED_MARK = :"<object-extended>"
       ENVELOPE_REFINED_MARK = :"<refined>"
+      # Issue #2793 — a class-body macro defines methods under names its syntax does not spell
+      # (`def_delegators :@x, *NAMES`), so no table can enumerate the class's members: `call.undefined-method`
+      # treats the class, and every project class that inherits or mixes it in, as open, as it does a source
+      # `method_missing`. Not a {.rewritten_surface?} mark: the macro adds names and replaces no method body
+      # Rigor reads.
+      ENVELOPE_OPEN_NAMES_MARK = :"<open-names>"
 
       # Issue #1820 — whether an envelope bucket says the project declares, or rewrites, the name's method table: a
       # per-method entry, the {ENVELOPE_MODULE_MARK} a `module` declaration records, or the {ENVELOPE_DYNAMIC_MARK}

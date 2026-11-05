@@ -4304,7 +4304,7 @@ module Rigor
           anonymous = record_call_node_methods(node, owner_prefix, in_singleton_class, methods_acc.at(node),
                                                source_path)
           unless in_singleton_class
-            superseded = call_superseded_names(node)
+            superseded = call_superseded_names(node, owner_prefix, methods_acc)
             supersede_def_nodes(superseded, owner_prefix, def_nodes_acc, methods_acc.at(node))
             note_call_definers(node, superseded, owner_prefix, methods_acc.at(node))
           end
@@ -4966,8 +4966,9 @@ module Rigor
 
       # Issue #1989 — the instance method names a non-`def` definer written on the class body's self replaces:
       # each reader (and `x=` writer) an `attr_*` call declares, a literal `define_method(:x)`, and the new name of
-      # an `alias_method :x, :y` call. A non-literal name replaces nothing Rigor can name.
-      def call_superseded_names(call_node)
+      # an `alias_method :x, :y` call, and each instance-side name of a Forwardable delegator (#2793). A non-literal
+      # name replaces nothing Rigor can name.
+      def call_superseded_names(call_node, qualified_prefix, accumulator)
         if (macro = attr_macro(call_node))
           names = []
           each_attr_macro_name(call_node) do |base|
@@ -4977,7 +4978,7 @@ module Rigor
           names
         elsif call_node.name == :define_method
           define_method_superseded_name(call_node)
-        elsif (forwarded = forwardable_superseded_names(call_node)).any?
+        elsif (forwarded = forwardable_superseded_names(call_node, qualified_prefix, accumulator)).any?
           forwarded
         else
           Source::AliasNames.alias_method_call_names(call_node)&.first(1) || []
@@ -9417,12 +9418,14 @@ module Rigor
       end
 
       # The instance names a Forwardable macro defines, for {#call_superseded_names}: a delegator written after a
-      # `def` of the name replaces it.
-      def forwardable_superseded_names(call_node)
+      # `def` of the name replaces it. Asked only outside `class << self`, and a macro whose side settles to the
+      # singleton (`extend SingleForwardable; def_delegators :@x, :size`) leaves an instance `def size` standing.
+      def forwardable_superseded_names(call_node, qualified_prefix, accumulator)
         delegation = Source::ForwardableDelegators.of(call_node)
-        return [] if delegation.nil? || delegation.side == :singleton
+        return [] if delegation.nil? || qualified_prefix.empty?
 
-        delegation.names
+        side = forwardable_side(delegation, qualified_prefix.join("::"), false, accumulator)
+        side == :instance ? delegation.names : []
       end
 
       def record_both_kinds(accumulator, class_name, method_name)

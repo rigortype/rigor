@@ -1006,7 +1006,7 @@ module Rigor
         # Issue #2793 — the class, or a project class or module on its chain, carries
         # `Scope::DiscoveryIndex::ENVELOPE_OPEN_NAMES_MARK`: a macro there defines methods under names its syntax
         # does not spell (`def_delegators :@x, *NAMES`), so no name is provably missing. A chain cut at its budget
-        # declines as {Scope#discovered_method_through_ancestors?} does.
+        # never reaches here: {#ancestry_declares_method?} reads the same chain first and declines on the cut.
         def open_names_through_ancestors?(scope, class_name, kind)
           mark = Scope::DiscoveryIndex::ENVELOPE_OPEN_NAMES_MARK
           side = kind == :singleton ? :singleton : :instance
@@ -1017,7 +1017,7 @@ module Rigor
             names = entry.external? ? entry.candidates : [entry.name]
             names.any? { |name| scope.parameter_envelopes_of(name).key?(mark) }
           end
-          found || chain.truncated?
+          !found.nil?
         end
 
         # Issue #1722 — a `method_missing`, or a project mixin, on one of the class's RBS ancestors

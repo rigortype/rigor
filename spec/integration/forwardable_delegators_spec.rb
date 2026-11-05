@@ -93,6 +93,15 @@ RSpec.describe "Forwardable delegators and call.undefined-method (#2793)" do
     expect(dumped).to eq(["dump_type: Dynamic[top]"])
   end
 
+  it "leaves an instance def standing under a SingleForwardable delegator of the same name" do
+    # Ruby 4.0: `extend SingleForwardable; def size = 1; def_delegators :@x, :size` defines `Box.size`, and
+    # `Box.new.size` still answers 1.
+    write_project("def size = 1\n  def_delegators :@x, :size", ["dump_type(Box.new.size)"],
+                  extend_with: "SingleForwardable")
+    dumped = diagnostics.select { |d| d.message.start_with?("dump_type") }.map(&:message)
+    expect(dumped).to eq(["dump_type: 1"])
+  end
+
   it "treats a class with non-literal delegated names as open" do
     write_project("NAMES = %i[fetch]\n  def_delegators :@x, *NAMES", %w[Box.new.fetch Box.new.anything])
     expect(undefined_messages).to be_empty
@@ -100,6 +109,26 @@ RSpec.describe "Forwardable delegators and call.undefined-method (#2793)" do
 
   it "treats a class whose delegate hash has a computed key as open" do
     write_project("NAMES = %i[fetch]\n  delegate NAMES => :@x", %w[Box.new.fetch Box.new.anything])
+    expect(undefined_messages).to be_empty
+  end
+
+  it "treats a class whose def_delegator is handed a computed name as open" do
+    write_project("%i[aa bb].each { |m| def_delegator :@x, m }", %w[Box.new.aa Box.new.anything])
+    expect(undefined_messages).to be_empty
+  end
+
+  it "treats a class whose delegate hash is a double splat as open" do
+    write_project("OPTS = { aa: :@x }.freeze\n  delegate(**OPTS)", %w[Box.new.aa Box.new.anything])
+    expect(undefined_messages).to be_empty
+  end
+
+  it "treats a class whose def_delegator arguments are one splat as open" do
+    write_project("ARGS = %i[@x zz].freeze\n  def_delegator(*ARGS)", %w[Box.new.zz])
+    expect(undefined_messages).to be_empty
+  end
+
+  it "treats a class whose def_delegators arguments are one splat as open" do
+    write_project("ARGS = %i[@x zz].freeze\n  def_delegators(*ARGS)", %w[Box.new.zz])
     expect(undefined_messages).to be_empty
   end
 

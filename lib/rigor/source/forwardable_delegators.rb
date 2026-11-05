@@ -9,7 +9,8 @@ module Rigor
     # alone. Ruby 4.0's `forwardable.rb` is the oracle for each row:
     #
     # - `def_instance_delegator(acc, m, ali = m)` defines `ali` on the instance side;
-    # - `def_instance_delegators(acc, *ms)` defines each `m` but `__send__` and `__id__`, instance side;
+    # - `def_instance_delegators(acc, *ms)` defines each `m` but `__send__` and `__id__`, instance side (the two are
+    #   recorded anyway: `BasicObject` declares both, so a recorded entry changes no answer);
     # - `instance_delegate(ms => acc)` defines each key name (a name or an array of them), instance side;
     # - `def_single_delegator(s)` and `single_delegate` are the same on the singleton side;
     # - `def_delegator(s)` and `delegate` are the same on the side the `extend` decides.
@@ -42,9 +43,7 @@ module Rigor
         }
       )
 
-      # `def_instance_delegators` skips these two (`methods - [:__send__, :__id__]` in forwardable.rb).
-      LIST_SKIPPED = %i[__send__ __id__].freeze
-      private_constant :MACROS, :LIST_SKIPPED
+      private_constant :MACROS
 
       module_function
 
@@ -58,6 +57,8 @@ module Rigor
         return nil if side.nil?
 
         arguments = call_node.arguments&.arguments || []
+        return Delegation.new(side: side, names: [].freeze, open: true) if unplaceable_splat?(shape, arguments)
+
         names, open = case shape
                       when :alias then alias_names(arguments)
                       when :list then list_names(arguments)
@@ -66,6 +67,16 @@ module Rigor
         return nil if names.nil?
 
         Delegation.new(side: side, names: names.freeze, open: open)
+      end
+
+      # A splat (`def_delegator(*ARGS)`, `def_delegators(*ARGS)`, `delegate(*pairs)`) hides which argument is the
+      # accessor and which a name, so the macro may define any name. A splat after the accessor of the list form is
+      # only a hidden name, and {#list_names} reads the literal names beside it.
+      def unplaceable_splat?(shape, arguments)
+        splats = arguments.each_index.select { |index| arguments[index].is_a?(Prism::SplatNode) }
+        return false if splats.empty?
+
+        shape != :list || splats.include?(0)
       end
 
       def alias_names(arguments)
@@ -80,7 +91,7 @@ module Rigor
 
         rest = arguments.drop(1)
         names = rest.filter_map { |argument| Literals.symbol_or_string(argument) }
-        [names - LIST_SKIPPED, names.size != rest.size]
+        [names, names.size != rest.size]
       end
 
       def hash_names(arguments)

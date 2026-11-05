@@ -1,0 +1,20 @@
+class Widget
+end
+
+class Gadget < Widget
+end
+
+class Factory
+  def build: [T] (singleton(T) klass) -> T
+
+  def build_widget: [T < Widget] (singleton(T) klass) -> T
+
+  def kind: [T] (singleton(T) klass) -> Symbol
+          | (Integer n) -> Integer
+
+  def kind_widget: [T < Widget] (singleton(T) klass) -> Symbol
+                 | (Integer n) -> Integer
+
+  def pick: [T] (singleton(T) klass) -> T
+          | (String s) -> Integer
+end

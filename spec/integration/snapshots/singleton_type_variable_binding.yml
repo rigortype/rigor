@@ -1,0 +1,12 @@
+---
+locals: {}
+assertions:
+  '1': Array[Resolv::DNS::Resource::IN::MX]
+  '2': Resolv::DNS::Resource::IN::MX
+  '3': Resolv::DNS::Resource::IN::MX
+  '4': Array[Resolv::DNS::Resource::IN::A | Resolv::DNS::Resource::IN::AAAA]
+  '5': Widget
+  '6': Gadget
+  '7': Dynamic[top]
+  '8': Integer
+  '9': Symbol

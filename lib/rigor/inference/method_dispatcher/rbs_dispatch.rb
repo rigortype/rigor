@@ -53,9 +53,9 @@ module Rigor
       # * Method-level type parameters bind from the block return type (Slice 6 phase C) and from a
       #   positional parameter whose declared type is EXACTLY a type variable (issue #303 —
       #   `def foo[T]: (T) -> T` binds `T` from the first argument, and carries it into a generic return
-      #   such as `-> Array[T]`), plus a `Range[A]` element (#834). A variable reachable only through other
-      #   container positions (`Array[T] arg`), a rest positional (`*T`), or a keyword parameter is still
-      #   unbound and degrades to `Dynamic[Top]`.
+      #   such as `-> Array[T]`), plus a `Range[A]` element (#834) and a `singleton(T)` class object (#2828).
+      #   A variable reachable only through other container positions (`Array[T] arg`), a rest positional
+      #   (`*T`), or a keyword parameter is still unbound and degrades to `Dynamic[Top]`.
       #   A block-return variable that a parameter also names takes the value class the argument and the
       #   block share once the call passes an argument, or stays unbound when they share none (see
       #   {compose_block_type_vars}).
@@ -1839,7 +1839,8 @@ module Rigor
           #
           # * only a positional parameter (required or optional) whose declared type is EXACTLY
           #   `RBS::Types::Variable`, plus the one container shape issue #834 admits (see
-          #   {#range_element_binding}) — no general container walk, so `(Array[T]) -> T` still degrades;
+          #   {#range_element_binding}) and the class-object shape issue #2828 admits ({#singleton_param_binding}) —
+          #   no general container walk, so `(Array[T]) -> T` still degrades;
           # * only names the SELECTED overload declares in its own `type_params` (a class-level variable
           #   keeps its receiver-derived binding);
           # * an existing key wins, so the receiver and the block return type both outrank an argument;
@@ -1848,7 +1849,7 @@ module Rigor
           #
           # See {#arg_binding_permitted?} for why the contribution is gated on the call site.
           def compose_arg_type_vars(method_type, type_vars, args, scope:, call_node:, call_site:)
-            bindings = arg_type_var_bindings(method_type, type_vars, args)
+            bindings = arg_type_var_bindings(method_type, type_vars, args, scope&.environment, call_node)
             return type_vars if bindings.empty?
             return type_vars unless arg_binding_permitted?(scope, call_node, call_site)
 
@@ -1857,7 +1858,7 @@ module Rigor
 
           # The candidate bindings, computed before the guard so a non-generic overload (the overwhelming
           # majority) never pays for the `scope` probes.
-          def arg_type_var_bindings(method_type, type_vars, args)
+          def arg_type_var_bindings(method_type, type_vars, args, environment = nil, call_node = nil)
             declared = declared_type_param_names(method_type)
             return EMPTY_TYPE_VARS if declared.empty? || args.empty?
 
@@ -1869,6 +1870,11 @@ module Rigor
               next if arg.nil?
 
               name, bound = param_binding(param, arg, declared, type_vars)
+              if name.nil?
+                name, bound = singleton_param_binding(method_type, param, arg, declared, type_vars,
+                                                      environment)
+                next if name && class_factory_argument?(call_node)
+              end
               next if name.nil?
 
               bound = Type::Combinator.widen_value_pinned(bound) if upper_bounded?(method_type, name)
@@ -1902,6 +1908,80 @@ module Rigor
             end
 
             range_element_binding(param, arg, declared, type_vars)
+          end
+
+          # Issue #2828 — a positional parameter spelled `singleton(T)` for a method-level variable `T` binds `T`
+          # to the instance type of the class object the call passes: `Resolv::DNS#getresources: [T < Resource]
+          # (dns_name, singleton(T)) -> Array[T]` answers `Array[Resolv::DNS::Resource::IN::MX]` for an
+          # `IN::MX` argument. A union of class objects binds the union of their instances, as a bare `T` binds
+          # its argument union. Every other argument — `Dynamic`, an instance, a union with a non-class member —
+          # binds nothing, and neither does a class the declared upper bound does not provably admit: an
+          # interface, alias or other non-class bound, or a class the environment cannot order below the bound.
+          def singleton_param_binding(method_type, param, arg, declared, type_vars, environment)
+            name = singleton_variable_name(param, declared, type_vars)
+            return NO_BINDING if name.nil?
+
+            members = arg.is_a?(Type::Union) ? arg.members : [arg]
+            return NO_BINDING unless members.all?(Type::Singleton)
+
+            within = members.all? { |member| within_upper_bound?(method_type, name, member, environment) }
+            return NO_BINDING unless within
+
+            instances = members.map { |member| Type::Combinator.nominal_of(member.class_name) }
+            [name, instances.size == 1 ? instances.first : Type::Combinator.union(*instances)]
+          end
+
+          # RBS parses `singleton(T)` as a class singleton whose type name is the bare, unqualified `T`; the
+          # parameter names a variable when that name is one the overload declares and has not yet bound.
+          def singleton_variable_name(param, declared, type_vars)
+            declared_type = param.type
+            return nil unless declared_type.is_a?(RBS::Types::ClassSingleton)
+
+            type_name = declared_type.name
+            return nil unless type_name.namespace.empty?
+
+            name = type_name.name
+            return nil unless declared.include?(name)
+            return nil if type_vars.key?(name)
+
+            name
+          end
+
+          # Whether the call passes, as any positional argument, a class built by `Class.new`, `Struct.new` or
+          # `Data.define` with a block. The engine types `Class.new(Widget) { def extra = 1 }` as `singleton(Widget)`,
+          # so binding `T` from it would read the instance as a plain `Widget` and report `extra` as undefined. The
+          # argument node is visible here; a local the class was assigned to is not, and still binds.
+          def class_factory_argument?(call_node)
+            arguments = call_node.respond_to?(:arguments) ? call_node.arguments&.arguments : nil
+            return false if arguments.nil?
+
+            arguments.any? { |argument| class_factory_call?(argument) }
+          end
+
+          CLASS_FACTORIES = { new: %w[Class Struct].freeze, define: %w[Data].freeze }.freeze
+          private_constant :CLASS_FACTORIES
+
+          def class_factory_call?(node)
+            return false unless node.is_a?(Prism::CallNode) && node.block.is_a?(Prism::BlockNode)
+
+            receivers = CLASS_FACTORIES[node.name]
+            return false if receivers.nil?
+
+            receiver = node.receiver
+            name = case receiver
+                   when Prism::ConstantReadNode then receiver.name.to_s
+                   when Prism::ConstantPathNode then receiver.parent.nil? ? receiver.name.to_s : nil
+                   end
+            receivers.include?(name)
+          end
+
+          def within_upper_bound?(method_type, name, singleton, environment)
+            type_param = method_type.type_params.find { |tp| tp.name == name }
+            bound = type_param.respond_to?(:upper_bound_type) ? type_param.upper_bound_type : type_param.upper_bound
+            return true if bound.nil?
+            return false unless bound.is_a?(RBS::Types::ClassInstance) && environment
+
+            %i[equal subclass].include?(environment.class_ordering(singleton.class_name, bound.name.to_s))
           end
 
           def declared_type_param_names(method_type)
@@ -2147,7 +2227,7 @@ module Rigor
               class_name: class_name, kind: kind, args: args, type_vars: type_vars, environment: environment,
               receiver: receiver, receiver_args: receiver_args, method_name: method_name,
               keywords_last: ArgumentNodes.keyword_hash_last?(call_node, args),
-              positional_splat: splat_indices(call_node, args)
+              positional_splat: splat_indices(call_node, args), scope: scope, call_node: call_node
             )
             ClassKeyedBlockParams.rebind(method_definition, method_name, args, params)
           rescue StandardError
@@ -2167,7 +2247,8 @@ module Rigor
           # rubocop:disable Metrics/ParameterLists
           def extract_block_param_types(method_definition, class_name:, kind:, args:, type_vars:,
                                         environment: nil, receiver: nil, receiver_args: [],
-                                        method_name: nil, keywords_last: false, positional_splat: nil)
+                                        method_name: nil, keywords_last: false, positional_splat: nil,
+                                        scope: nil, call_node: nil)
             # rubocop:enable Metrics/ParameterLists
             instance_type = Type::Combinator.nominal_of(class_name)
             self_type = block_self_type(kind, class_name, instance_type, receiver)
@@ -2212,7 +2293,41 @@ module Rigor
             )
             return [] unless method_type
 
+            type_vars = compose_singleton_arg_type_vars(method_type, type_vars, args, environment,
+                                                        scope: scope, call_node: call_node,
+                                                        call_site: [class_name, method_name, kind])
             block_params_of(method_type, self_type, instance_type, type_vars, environment) || []
+          end
+
+          # Issue #2828 — the block-parameter twin of {#compose_arg_type_vars}, for the `singleton(T)` shape alone
+          # ({#singleton_param_binding}): `Resolv::DNS#each_resource: [T < Resource] (dns_name, singleton(T))
+          # { (T) -> void } -> void` yields the typeclass's instances. A bare `T` parameter stays out of the block
+          # path: it binds the argument's own (possibly value-pinned) type, and `each_with_object([])`'s memo
+          # would read as the empty tuple the block then appends to.
+          def compose_singleton_arg_type_vars(method_type, type_vars, args, environment, scope:, call_node:, call_site:)
+            declared = declared_type_param_names(method_type)
+            return type_vars if declared.empty? || args.empty?
+
+            fun = method_type.type
+            return type_vars unless fun.respond_to?(:required_positionals)
+
+            bindings = singleton_bindings(method_type, fun, args, declared, type_vars, environment)
+            return type_vars if bindings.empty? || class_factory_argument?(call_node)
+            return type_vars unless arg_binding_permitted?(scope, call_node, call_site)
+
+            type_vars.merge(bindings)
+          end
+
+          def singleton_bindings(method_type, fun, args, declared, type_vars, environment)
+            positionals = fun.required_positionals + fun.optional_positionals
+            positionals.zip(args).each_with_object({}) do |(param, arg), bindings|
+              next if arg.nil?
+
+              name, bound = singleton_param_binding(method_type, param, arg, declared, type_vars, environment)
+              next if name.nil?
+
+              bindings[name] = bindings.key?(name) ? Type::Combinator.union(bindings[name], bound) : bound
+            end
           end
 
           # What RBS `self` reads in a block parameter of the member: the class's instance or singleton, and inside an

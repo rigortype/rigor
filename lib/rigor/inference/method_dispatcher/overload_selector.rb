@@ -10,6 +10,7 @@ require_relative "imprecise_argument"
 require_relative "keyword_arguments"
 require_relative "no_match_fallback"
 require_relative "proven_overload"
+require_relative "singleton_type_params"
 require_relative "receiver_affinity"
 require_relative "splat_arity"
 
@@ -53,6 +54,7 @@ module Rigor
       # The selector is intentionally agnostic about the dispatch kind (instance vs singleton). Both kinds
       # share the same arity and acceptance shape; the difference is only in which `Definition` the caller
       # fetched.
+      # rubocop:disable-next Metrics/ModuleLength -- the selection passes plus the #2828 overload rewrite wrapper.
       module OverloadSelector
         module_function
 
@@ -124,6 +126,16 @@ module Rigor
           declared = method_definition.method_types
           return [] if declared.empty?
 
+          # Issue #2828 — `singleton(T)` over a method type variable reads as a class object (`SingletonTypeParams`).
+          SingletonTypeParams.selecting(declared) do |overloads|
+            select_among(overloads, method_definition, arg_types, self_type, instance_type, type_vars, block_required,
+                         environment, member, keywords_last, splats, block_fallback)
+          end
+        end
+
+        # rubocop:disable-next Metrics/ParameterLists -- {.select_declared}'s inputs plus the overloads it reads.
+        def select_among(declared, method_definition, arg_types, self_type, instance_type, type_vars, block_required,
+                         environment, member, keywords_last, splats, block_fallback)
           # A keyword hash only some overload takes as keywords is a plain positional `Hash` otherwise (#1737).
           keywords_last &&= KeywordArguments.any_declares?(declared)
 

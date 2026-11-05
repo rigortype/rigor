@@ -283,6 +283,20 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RbsDispatch do
             def self.both: [T] (T a, T b) -> T
             def self.boxed: [T] (::Array[T] objs) -> T
             def self.bracket: [A] (::Range[A] range) -> A
+            def self.build: [T] (singleton(T) klass) -> T
+            def self.build_all: [T] (singleton(T) klass) -> ::Array[T]
+            def self.build_numeric: [T < ::Numeric] (singleton(T) klass) -> T
+            def self.build_comparable: [T < ::_ToS] (singleton(T) klass) -> T
+            def self.each_built: [T] (singleton(T) klass) { (T) -> void } -> void
+            def self.each_wrapped: [T] (T obj) { (T) -> void } -> void
+            def self.make: [T] (singleton(T) klass) -> T
+                         | (singleton(::Object) klass) -> ::Object
+            def self.kind: [T] (singleton(T) klass) -> ::Symbol
+                         | (::Integer n) -> ::Integer
+            def self.kind_numeric: [T < ::Numeric] (singleton(T) klass) -> ::Symbol
+                                 | (::Integer n) -> ::Integer
+            def self.pick: [T] (singleton(T) klass) -> T
+                         | (::String s) -> ::Integer
           end
 
           class RigorSpecCrate[T]
@@ -397,6 +411,144 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RbsDispatch do
         it "leaves A unbound for a Constant that is not a Range" do
           expect(bind(box, :bracket, [Rigor::Type::Combinator.constant_of(1)]))
             .to equal(Rigor::Type::Combinator.untyped)
+        end
+      end
+
+      # Issue #2828 — a `singleton(T)` parameter binds `T` to the instance type of the class object passed.
+      describe "a `singleton(T)` parameter" do
+        let(:integer_class) { Rigor::Type::Combinator.singleton_of("Integer") }
+        let(:float_class) { Rigor::Type::Combinator.singleton_of("Float") }
+
+        it "binds T to the class object's instance type" do
+          expect(bind(box, :build, [integer_class])).to eq(Rigor::Type::Combinator.nominal_of(Integer))
+        end
+
+        it "carries the binding into a generic return type (`-> Array[T]`)" do
+          type = bind(box, :build_all, [integer_class])
+          expect(type).to eq(
+            Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.nominal_of(Integer)])
+          )
+        end
+
+        it "binds a union of class objects to the union of their instances" do
+          type = bind(box, :build, [Rigor::Type::Combinator.union(integer_class, float_class)])
+          expect(type).to eq(
+            Rigor::Type::Combinator.union(
+              Rigor::Type::Combinator.nominal_of(Integer), Rigor::Type::Combinator.nominal_of(Float)
+            )
+          )
+        end
+
+        it "leaves T unbound for a union with a member that is not a class object" do
+          arg = Rigor::Type::Combinator.union(integer_class, Rigor::Type::Combinator.constant_of(1))
+          expect(bind(box, :build, [arg])).to equal(Rigor::Type::Combinator.untyped)
+        end
+
+        it "leaves T unbound for an instance argument" do
+          expect(bind(box, :build, [Rigor::Type::Combinator.nominal_of(Integer)]))
+            .to equal(Rigor::Type::Combinator.untyped)
+        end
+
+        it "leaves T unbound for a Dynamic argument" do
+          expect(bind(box, :build, [Rigor::Type::Combinator.untyped])).to equal(Rigor::Type::Combinator.untyped)
+        end
+
+        # The class object's class is loaded in the analyzer process, which once made `singleton(T)` refuse it
+        # (read as a class named `T`) and the base overload win.
+        it "selects the `singleton(T)` overload ahead of a later `singleton(Object)` one" do
+          expect(bind(box, :make, [integer_class])).to eq(Rigor::Type::Combinator.nominal_of(Integer))
+        end
+
+        # Selection reads an unbound `singleton(T)` as a class object, never as `untyped`: an instance argument
+        # takes the overload that declares it.
+        it "selects the instance overload for an Integer argument" do
+          expect(bind(box, :kind, [Rigor::Type::Combinator.constant_of(1)]))
+            .to eq(Rigor::Type::Combinator.nominal_of(Integer))
+        end
+
+        it "selects the instance overload for an Integer argument under a class bound" do
+          expect(bind(box, :kind_numeric, [Rigor::Type::Combinator.constant_of(1)]))
+            .to eq(Rigor::Type::Combinator.nominal_of(Integer))
+        end
+
+        it "selects the String overload for a String argument" do
+          expect(bind(box, :pick, [Rigor::Type::Combinator.constant_of("s")]))
+            .to eq(Rigor::Type::Combinator.nominal_of(Integer))
+        end
+
+        it "selects the `singleton(T)` overload for a class object under a class bound" do
+          expect(bind(box, :kind_numeric, [integer_class])).to eq(Rigor::Type::Combinator.nominal_of(Symbol))
+        end
+
+        # `Class.new(Widget) { def extra = 1 }` types as `singleton(Widget)`; binding T would hide `extra`.
+        it "leaves T unbound when an argument is a class built with a block" do
+          factory_call = Prism.parse("RigorSpecBox.build(Class.new(Integer) { def extra = 1 })")
+                              .value.statements.body.first
+          type = described_class.try_dispatch(cc(receiver: box, method_name: :build, args: [integer_class],
+                                                 environment: generic_environment,
+                                                 scope: Rigor::Scope.empty(environment: generic_environment),
+                                                 call_node: factory_call))
+          expect(type).to equal(Rigor::Type::Combinator.untyped)
+        end
+
+        it "binds a class inside the declared upper bound" do
+          expect(bind(box, :build_numeric, [integer_class])).to eq(Rigor::Type::Combinator.nominal_of(Integer))
+        end
+
+        it "leaves T unbound for a class outside the declared upper bound" do
+          string_class = Rigor::Type::Combinator.singleton_of("String")
+          expect(bind(box, :build_numeric, [string_class])).to equal(Rigor::Type::Combinator.untyped)
+        end
+
+        it "leaves T unbound under a bound that is not a class" do
+          expect(bind(box, :build_comparable, [integer_class])).to equal(Rigor::Type::Combinator.untyped)
+        end
+
+        it "declines with no scope threaded (the ancestor-fallback dispatch path)" do
+          type = described_class.try_dispatch(cc(receiver: box, method_name: :build, args: [integer_class],
+                                                 environment: generic_environment))
+          expect(type).to equal(Rigor::Type::Combinator.untyped)
+        end
+
+        describe "in a block parameter" do
+          def probe(method_name, args)
+            described_class.block_param_types(cc(receiver: box, method_name: method_name, args: args,
+                                                 environment: generic_environment,
+                                                 scope: Rigor::Scope.empty(environment: generic_environment),
+                                                 call_node: call_node))
+          end
+
+          it "yields the class object's instance type" do
+            expect(probe(:each_built, [integer_class])).to eq([Rigor::Type::Combinator.nominal_of(Integer)])
+          end
+
+          it "leaves the block parameter unbound when an argument is a class built with a block" do
+            factory_call = Prism.parse("RigorSpecBox.each_built(Class.new(Integer) { def extra = 1 }) { |x| x }")
+                                .value.statements.body.first
+            params = described_class.block_param_types(cc(receiver: box, method_name: :each_built,
+                                                          args: [integer_class], environment: generic_environment,
+                                                          scope: Rigor::Scope.empty(environment: generic_environment),
+                                                          call_node: factory_call))
+            expect(params).to eq([Rigor::Type::Combinator.untyped])
+          end
+
+          it "leaves the block parameter unbound when the scope discovered a same-named method" do
+            shadowed = Rigor::Scope.empty(environment: generic_environment).with_discovery(
+              Rigor::Scope::DiscoveryIndex::EMPTY.with(
+                discovered_methods: { "RigorSpecBox" => { each_built: :singleton } }, possible_discovered_methods: {}
+              )
+            )
+            params = described_class.block_param_types(cc(receiver: box, method_name: :each_built,
+                                                          args: [integer_class], environment: generic_environment,
+                                                          scope: shadowed, call_node: call_node))
+            expect(params).to eq([Rigor::Type::Combinator.untyped])
+          end
+
+          # A bare `T` stays out of the block path: `each_with_object([])` would yield an empty tuple.
+          it "leaves a bare `T` block parameter unbound" do
+            expect(probe(:each_wrapped, [Rigor::Type::Combinator.constant_of("x")]))
+              .to eq([Rigor::Type::Combinator.untyped])
+          end
         end
       end
 

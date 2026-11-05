@@ -1,0 +1,2 @@
+- **[engine]** Effects call-site records and unresolved self-call records are now kept in the typing-state journal instead of blocking it. ([#2849](https://github.com/rigortype/rigor/pull/2849))
+  - Groundwork for ADR-129's result memo; no output changes.

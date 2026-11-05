@@ -265,8 +265,31 @@ RSpec.describe TypeOfMemoFaults do
     expect(result[:kinds]).to include(:serve_error)
   end
 
+  # ELIDE (ADR-129 WD2) keys the table on an id that ignores an install of the value a slot already holds. With the id
+  # kept across every install, the threaded block-body flag's two values share a key, and the stage-4 form serves the
+  # suppressed typing's answer to the threaded one. ELIDE enters stage 4 only once this fault is caught.
+  def eliding(&)
+    previous = ENV.fetch("RIGOR_TYPE_OF_SHADOW_ELIDE", nil)
+    ENV["RIGOR_TYPE_OF_SHADOW_ELIDE"] = "1"
+    yield
+  ensure
+    ENV["RIGOR_TYPE_OF_SHADOW_ELIDE"] = previous
+  end
+
+  it "reports a type mismatch with the ELIDE id kept across every install, and none with ELIDE sound" do
+    path = fixture("threaded_block_body.rb")
+    off = analyse([path])
+    on, clean = eliding { serving(nil) { analyse([path]) } }
+    _, faulted = eliding { serving(:elide_unsound) { analyse([path]) } }
+
+    expect(on).to eq(off)
+    expect(clean[:checked]).to be_positive
+    expect(clean[:mismatches]).to eq(0), clean[:samples].inspect
+    expect(faulted[:kinds]).to include(:type)
+  end
+
   it "covers every fault with a source or a synthetic fixture" do
-    expect((self.class.source_cases.keys + TypeOfMemoFaultScenarios::KINDS.keys).uniq)
+    expect((self.class.source_cases.keys + TypeOfMemoFaultScenarios::KINDS.keys + %i[elide_unsound]).uniq)
       .to match_array(described_class::FAULTS)
   end
 

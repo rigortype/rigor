@@ -8,7 +8,7 @@
 module TypeOfMemoFaults
   FAULTS = %i[
     ignore_frame skip_validation skip_absent_logging skip_upward_merge skip_replay_journal refuse_innermost
-    store_raised skip_restore skip_memo_miss skip_read_through_memo_miss
+    store_raised skip_restore skip_memo_miss skip_read_through_memo_miss elide_unsound
   ].freeze
 
   # The Frame `ignore_frame` installs without a fresh id: the threaded block-body flag, ADR-129's Context witness.
@@ -140,6 +140,18 @@ module TypeOfMemoFaults
     end
   end
 
+  # elide_unsound: the ELIDE id (ADR-129 WD2, `RIGOR_TYPE_OF_SHADOW_ELIDE=1`) stays put across every install, not only
+  # one that puts back the value the slot holds, so two different Frame values share an id. The gate ELIDE must clear
+  # before stage 4 enables it.
+  module ElideFaults
+    private
+
+    def elide_install(same, &)
+      super(TypeOfMemoFaults.on?(:elide_unsound) || same, &)
+    end
+  end
+
+  Rigor::TypingState::ElideId.prepend(ElideFaults)
   Rigor::TypingState::State.prepend(StateFaults)
   Rigor::TypeOfMemo.singleton_class.prepend(MemoFaults)
 end

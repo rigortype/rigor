@@ -43,6 +43,10 @@ serving (an undo or a replay into a store the entry outlived) is a counted misma
 stands. skip_validation also has a synthetic fixture, where serving the stale entry answers the wrong type; its source
 fixture shows only the stage-4 form's own revalidation.
 
+An eleventh fault, `elide_unsound`, keeps the ELIDE id across every install; the stage-4 form keyed on that id catches
+it on the threaded-block-body source fixture. The user ruled that ELIDE enters stage 4 only once such a fault is
+detected.
+
 ## To undo
 
 Snapshot the Resources instead of the touch reading, or move a fault to a production switch; each is local to

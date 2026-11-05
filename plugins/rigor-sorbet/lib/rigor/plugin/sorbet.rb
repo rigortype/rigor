@@ -345,7 +345,7 @@ module Rigor
           chain_lookup(self_type.class_name, method_name, anchor_kind: :singleton, mixin_kind: :extend)
         when Rigor::Type::Nominal
           chain_lookup(self_type.class_name, method_name, anchor_kind: :instance, mixin_kind: :include) ||
-            struct_prop_lookup(self_type.class_name, method_name)
+            struct_prop_lookup(self_type.class_name, method_name, scope)
         end
       rescue StandardError
         nil
@@ -353,8 +353,36 @@ module Rigor
 
       # Issue #2541 — after the sig catalog (the class and its mixins) declines an instance-side call, a
       # `prop` / `const` accessor the class or a superclass declares under a `T::Struct`-family root.
-      def struct_prop_lookup(class_name, method_name)
-        @catalog.lookup_struct_prop(class_name: class_name, method_name: method_name)
+      # The accessor's type is translated here rather than at harvest: a relative constant in it resolves the
+      # way Ruby's lexical lookup would from the declaring class body — under each enclosing namespace,
+      # innermost first, then at the top level — against the classes the walk declared and the RBS
+      # environment. A constant that resolves nowhere reads `Dynamic[top]`, never a guessed class.
+      def struct_prop_lookup(class_name, method_name, scope)
+        signature = @catalog.lookup_struct_prop(class_name: class_name, method_name: method_name)
+        return signature if signature.nil?
+
+        source, nesting = @catalog.struct_prop_type(signature)
+        return signature if source.nil?
+
+        signature.with(return_type: struct_prop_type(source, nesting, scope&.environment))
+      end
+
+      def struct_prop_type(source, nesting, environment)
+        @struct_prop_types ||= {}
+        @struct_prop_types[[source, nesting]] ||= begin
+          node = Prism.parse(source).value.statements&.body&.first
+          resolve = ->(name) { resolve_struct_constant(name, nesting, environment) }
+          TypeTranslator.translate(node, resolve)
+        end
+      end
+
+      def resolve_struct_constant(name, nesting, environment)
+        known = ->(candidate) { @catalog.namespace?(candidate) || !environment&.nominal_for_name(candidate).nil? }
+        nesting.size.downto(1) do |depth|
+          candidate = "#{nesting.first(depth).join('::')}::#{name}"
+          return candidate if known.call(candidate)
+        end
+        known.call(name) ? name : nil
       end
 
       def instance_chain_lookup(receiver_node, method_name, scope)
@@ -364,7 +392,7 @@ module Rigor
         return nil unless receiver_type.is_a?(Rigor::Type::Nominal)
 
         chain_lookup(receiver_type.class_name, method_name, anchor_kind: :instance, mixin_kind: :include) ||
-          struct_prop_lookup(receiver_type.class_name, method_name)
+          struct_prop_lookup(receiver_type.class_name, method_name, scope)
       rescue StandardError
         # `scope.type_of` can raise on unrecognised synthetic nodes; degrade to "no contribution" rather
         # than bubbling the failure into the dispatcher.

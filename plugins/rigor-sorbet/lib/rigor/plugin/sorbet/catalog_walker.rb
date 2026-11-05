@@ -6,7 +6,6 @@ require "prism"
 
 require_relative "method_signature"
 require_relative "sig_parser"
-require_relative "type_translator"
 
 module Rigor
   module Plugin
@@ -80,6 +79,7 @@ module Rigor
           return descend_class_or_module(node, state, lexical_path) unless name
 
           record_superclass(node, name, state, lexical_path)
+          state.struct_catalog.record_namespace((lexical_path + [name]).join("::"))
           if node.body.is_a?(Prism::StatementsNode)
             walk_statements(node.body, state, lexical_path: lexical_path + [name], in_singleton_class: false,
                                               class_body: true)
@@ -90,6 +90,7 @@ module Rigor
 
         def descend_class_or_module(node, state, lexical_path)
           name = qualified_name_for(node.constant_path)
+          state.struct_catalog.record_namespace((lexical_path + [name]).join("::")) if name
           if name && node.body
             child_prefix = lexical_path + [name]
             walk_node(node.body, state, lexical_path: child_prefix, in_singleton_class: false)
@@ -248,19 +249,33 @@ module Rigor
           name = args.first.unescaped
 
           type_node = args[1] unless args[1].is_a?(Prism::KeywordHashNode)
-          type = certain ? TypeTranslator.translate(type_node) : Rigor::Type::Combinator.untyped
+          # The constants in the type resolve at lookup, against the classes every file declares, so only
+          # the source text is kept; the signature's own type is the placeholder until then.
+          type_source = type_node&.slice if certain
           class_name = lexical_path.join("::")
-          record_struct_accessor(state, class_name, name.to_sym, type, certain)
-          record_struct_accessor(state, class_name, :"#{name}=", type, certain) if node.name == :prop
+          record_struct_accessor(state, class_name, name.to_sym, type_source, lexical_path, certain)
+          return unless node.name == :prop && !immutable_rule?(args)
+
+          record_struct_accessor(state, class_name, :"#{name}=", type_source, lexical_path, certain)
         end
 
-        def record_struct_accessor(state, class_name, method_name, type, certain)
+        # `prop :x, T, immutable: true` is the long form of `const`: no writer.
+        def immutable_rule?(args)
+          args.any? do |arg|
+            arg.is_a?(Prism::KeywordHashNode) && arg.elements.any? do |element|
+              element.is_a?(Prism::AssocNode) && element.key.is_a?(Prism::SymbolNode) &&
+                element.key.unescaped == "immutable" && element.value.is_a?(Prism::TrueNode)
+            end
+          end
+        end
+
+        def record_struct_accessor(state, class_name, method_name, type_source, nesting, certain)
           state.struct_catalog.record_struct_prop(
             MethodSignature.new(
               class_name: class_name, method_name: method_name, kind: :instance,
-              params: {}, return_type: type, modifiers: []
+              params: {}, return_type: Rigor::Type::Combinator.untyped, modifiers: []
             ),
-            certain: certain
+            certain: certain, type_source: type_source, nesting: nesting
           )
         end
 

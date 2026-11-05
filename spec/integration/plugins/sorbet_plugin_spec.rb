@@ -1495,10 +1495,11 @@ RSpec.describe "plugins/rigor-sorbet" do
       RUBY
     end
 
-    def struct_run(calls, extra_source: "", extra_files: {})
+    def struct_run(calls, extra_source: "", extra_files: {}, extra_rbs: "")
       run_plugin(
         source: "# typed: true\n#{calls}",
-        files: { "structs.rb" => struct_source + extra_source, "sig/structs.rbs" => struct_rbs, **extra_files },
+        files: { "structs.rb" => struct_source + extra_source, "sig/structs.rbs" => struct_rbs + extra_rbs,
+                 **extra_files },
         paths: ["demo.rb", "structs.rb", *extra_files.keys],
         signature_paths: ["sig"]
       )
@@ -1586,6 +1587,106 @@ RSpec.describe "plugins/rigor-sorbet" do
 
       expect(undefined_methods(result)).to be_empty
       expect(reveals(result)).to eq(["Integer"])
+    end
+
+    describe "a relative constant in the accessor's type" do
+      let(:shadow_rbs) do
+        <<~RBS
+          module Outer
+            class Thing
+              def thing_only: () -> Integer
+            end
+            class Holder < ::T::Struct
+            end
+          end
+          class Thing
+            def top_only: () -> Integer
+          end
+        RBS
+      end
+
+      let(:shadow_source) do
+        <<~RUBY
+          module Outer
+            class Thing
+              def thing_only = 1
+            end
+            class Holder < T::Struct
+              const :t, Thing
+              const :maybe_t, T.nilable(Thing)
+              const :ts, T::Array[Thing]
+              const :ghost, NoSuchThing
+            end
+          end
+          class Thing
+            def top_only = 2
+          end
+        RUBY
+      end
+
+      let(:holder) { "Outer::Holder.new(t: Outer::Thing.new, maybe_t: nil, ts: [], ghost: nil)" }
+
+      def shadow_run(calls)
+        struct_run(calls, extra_source: shadow_source, extra_rbs: shadow_rbs)
+      end
+
+      it "resolves to the class the enclosing namespace declares, not the top-level one" do
+        result = shadow_run(<<~RUBY)
+          h = #{holder}
+          h.t.thing_only
+          T.must(h.maybe_t).thing_only
+          h.ts.first&.thing_only
+          T.reveal_type(h.t)
+        RUBY
+
+        expect(undefined_methods(result)).to be_empty
+        expect(reveals(result)).to eq(["Outer::Thing"])
+      end
+
+      it "still checks calls against the resolved class" do
+        result = shadow_run("#{holder}.t.top_only\n")
+
+        expect(undefined_methods(result)).to eq(["undefined method `top_only' for Outer::Thing"])
+      end
+
+      it "reads a constant no namespace declares as Dynamic[top]" do
+        result = shadow_run("T.reveal_type(#{holder}.ghost)\n")
+
+        expect(reveals(result)).to eq(["Dynamic[top]"])
+      end
+    end
+
+    it "answers no writer for `prop` with `immutable: true`" do
+      extra = <<~RUBY
+        class Doc
+          prop :locked, Integer, immutable: true
+        end
+      RUBY
+      result = struct_run("Doc.new(count: 1, title: \"t\").locked = 1\n", extra_source: extra)
+
+      expect(undefined_methods(result)).to eq(["undefined method `locked=' for Doc"])
+    end
+
+    it "lets an `attr_reader` of the same name win over the `prop`" do
+      extra = <<~RUBY
+        class Loose
+          attr_reader :width
+        end
+      RUBY
+      result = struct_run("T.reveal_type(Loose.new(width: 1.0).width)\n", extra_source: extra)
+
+      expect(reveals(result)).to eq(["Dynamic[top]"])
+    end
+
+    it "lets a visibility-wrapped `def` of the same name win over the `prop`" do
+      extra = <<~RUBY
+        class Loose
+          private def width = "w"
+        end
+      RUBY
+      result = struct_run("T.reveal_type(Loose.new(width: 1.0).width)\n", extra_source: extra)
+
+      expect(reveals(result)).to eq(['"w"'])
     end
 
     it "lets a `def` in the struct body win over the `prop` of the same name" do

@@ -68,6 +68,9 @@ subclass, `prop :name, Type` and `const :name, Type` at the top
 level of the class body give `obj.name` the translated `Type`
 (`T.nilable(String)` reads `String?`; a form outside the table
 reads `Dynamic[top]`), and `prop` also answers `obj.name = v`.
+A relative constant in `Type` resolves from the class body's
+namespaces outward, and one that names no known class reads
+`Dynamic[top]`.
 A `const` has no writer, so `obj.name = v` still reports.
 Subclasses inherit the accessors, a `def` of the same name in
 the class body wins over the macro, and a `prop` nested under an

@@ -149,6 +149,14 @@ doc.title = "u"  # still call.undefined-method when Doc is RBS-known
   [type vocabulary](#type-vocabulary-slices-1--3); a form outside
   it reads `Dynamic[top]`. The `default:` / `factory:` rules do
   not change the type.
+- A relative constant in the type, at any depth (`Thing`,
+  `T.nilable(Thing)`, `T::Array[Thing]`), resolves as Ruby's
+  lexical lookup would from the class body: under each enclosing
+  namespace, innermost first, then at the top level. It must name
+  a class or module that the walked sources declare or that the
+  RBS environment knows. A constant that resolves nowhere reads
+  `Dynamic[top]`. Constants inherited from a superclass are not
+  searched. Sig types do not get this resolution yet.
 - Only a top-level statement of a `class` body declares a typed
   accessor. A `prop` nested under an `if`, a `begin` or a block
   in the body may not run, so its accessor reads `Dynamic[top]`.
@@ -162,7 +170,11 @@ doc.title = "u"  # still call.undefined-method when Doc is RBS-known
   way stops the lookup, so the user's method keeps its own
   typing.
 - Under `T::ImmutableStruct` no writer answers (the runtime's
-  `prop` raises there).
+  `prop` raises there), and neither does `prop :x, T, immutable: true`.
+- Like a sig's return type, the accessor's type wins over a
+  hand-written project RBS declaration of the same method,
+  because the plugin tier sits above RBS dispatch
+  ([Dispatcher tier ordering](#dispatcher-tier-ordering)).
 - A struct file's `# typed:` level does not gate its accessors:
   sorbet-runtime defines them either way.
 

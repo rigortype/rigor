@@ -33,6 +33,9 @@ module Rigor
           # `@superclasses`, and a class's own `def` of the same name shadows it (Ruby: the later `def`
           # replaces the generated accessor; a subclass `def` overrides it).
           @struct_props = {}
+          @struct_prop_types = {}
+          @struct_nesting = {}
+          @namespaces = {}
           @superclasses = {}
           @defined_methods = {}
           @frozen_after_build = false
@@ -60,11 +63,39 @@ module Rigor
         # @param signature — a {MethodSignature} for a `prop` / `const` reader or a `prop` writer.
         # @param certain — false for a call nested under a conditional or a block, which never displaces
         #   an accessor already recorded for the name; a certain one replaces whatever is there.
-        def record_struct_prop(signature, certain: true)
+        # @param type_source — the source text of the macro's type argument, re-translated at lookup with
+        #   its constants resolved against `nesting` ({#struct_prop_type}); nil when the accessor is untyped.
+        # @param nesting — the declaring class's lexical nesting, outermost first, its own name last.
+        def record_struct_prop(signature, certain: true, type_source: nil, nesting: [])
           raise "Catalog already finalised" if @frozen_after_build
 
           props = (@struct_props[signature.class_name] ||= {})
-          props[signature.method_name] = signature if certain || !props.key?(signature.method_name)
+          return unless certain || !props.key?(signature.method_name)
+
+          props[signature.method_name] = signature
+          @struct_prop_types[[signature.class_name, signature.method_name]] = type_source
+          @struct_nesting[signature.class_name] ||= nesting.dup.freeze
+        end
+
+        # Issue #2541 — every class and module name the walk declared, so a struct accessor's relative
+        # constant resolves to a project class the RBS environment may not know.
+        def record_namespace(name)
+          raise "Catalog already finalised" if @frozen_after_build
+
+          @namespaces[name] = true
+        end
+
+        def namespace?(name)
+          @namespaces.key?(name)
+        end
+
+        # @return [type_source, nesting] for the accessor `signature` names, or nil when it has no type
+        #   source (a conditional or type-less macro).
+        def struct_prop_type(signature)
+          source = @struct_prop_types[[signature.class_name, signature.method_name]]
+          return nil if source.nil?
+
+          [source, @struct_nesting.fetch(signature.class_name, [])]
         end
 
         # @param written — the superclass expression as written (`"T::Struct"`, `"Base"`, `"::Foo::Base"`).
@@ -109,6 +140,9 @@ module Rigor
           @frozen_after_build = true
           @struct_props.each_value(&:freeze)
           @struct_props.freeze
+          @struct_prop_types.freeze
+          @struct_nesting.freeze
+          @namespaces.freeze
           @superclasses.freeze
           @defined_methods.each_value(&:freeze)
           @defined_methods.freeze

@@ -14,10 +14,12 @@ require "rigor/configuration"
 #
 # The findings no declaration accounts for are listed in {#allow_list}, one row per field with the classes found there
 # and why the field is not yet a slot or a Memo. A field that is not listed and a class a row does not name fail, at any
-# sampling phase: the rows are the union of what every offset of the stride finds. A row fails as stale only when the
-# walk never passes through its field at all, since whether a field holds a given class at the sampled calls is sparse
-# evidence; the list only shrinks, and growing it needs a reason a reviewer accepts. `RIGOR_G4_STRIDE` and
-# `RIGOR_G4_OFFSET` move the sample, to check that the rows hold at another phase.
+# sampling phase: the rows are the union of what every offset of the stride finds. In the default run (stride 50,
+# offset 0) the rows are strict, so the list only shrinks: a row whose field has no finding, and a listed class not
+# found, fail as stale. The few fields that hold something mutable at only some calls are named in {#sparse_rows}, each
+# with why; such a row is stale only when the walk never passes through its field, and its classes need only cover
+# what is found. Growing either list needs a reason a reviewer accepts. `RIGOR_G4_STRIDE` and `RIGOR_G4_OFFSET` move
+# the sample, to check that the rows hold at another phase; a moved sample holds every row to the sparse rule.
 RSpec.describe "ADR-129 G4: what a type_of call can reach" do
   # Every top-level `.rb` fixture, analysed in one sequential run with no cache. The stride keeps the walk to about
   # 1,200 samples.
@@ -143,6 +145,30 @@ RSpec.describe "ADR-129 G4: what a type_of call can reach" do
     }
   end
 
+  # The rows whose field holds something mutable at only some of the sampled calls: the fields the 58-run union over
+  # every offset of stride 50 (and strides 25, 37, 150 and 1000) found at fewer than all phases.
+  def sparse_rows
+    lazy = "set lazily by the first ask in a frame; a frame whose first ask falls before a sample and after the " \
+           "frame was first reached is not met at every phase"
+    transient = "holds an unfrozen object only while a narrowing or a declaration of that kind is in effect at the " \
+                "sampled call; otherwise the shared frozen empty default"
+    {
+      'Rigor::Inference::MatchRebinding::Frame#@last_line_closure' => lazy,
+      'Rigor::Inference::MatchRebinding::Frame#@last_line_fallback' => lazy,
+      'Rigor::Scope#@bot_guard_classes' => transient,
+      'Rigor::Scope#@declaration_sourced' => transient,
+      'Rigor::Scope#@lexical_nesting' => transient,
+      'Rigor::Scope#@struct_fold_safe_locals' => transient
+    }
+  end
+
+  def default_phase? = stride == 50 && offset.zero?
+
+  it "names only listed rows as sparse, each with a reason" do
+    expect(sparse_rows.keys - allow_list.keys).to be_empty
+    expect(sparse_rows.values.map(&:strip)).to all(satisfy { |reason| !reason.empty? })
+  end
+
   it "reaches no mutable state outside a slot, a store or a declared Memo, beyond the ratchet" do
     walker = sample_fixtures
     expect(walker.samples).to be > 20_000 / stride
@@ -150,14 +176,20 @@ RSpec.describe "ADR-129 G4: what a type_of call can reach" do
     allowed = allow_list.transform_values(&:first)
     unlisted = found.reject { |field, classes| allowed.key?(field) && (classes - allowed[field]).empty? }
                     .map { |field, classes| "#{field} #{classes.inspect} via #{walker.findings[field].path}" }
-    stale = allowed.keys.reject { |field| walker.observed.include?(field) }
+    stale = allowed.filter_map do |field, classes|
+      if !default_phase? || sparse_rows.key?(field)
+        "#{field} (never reached)" unless walker.observed.include?(field)
+      elsif found[field] != classes.sort
+        "#{field} #{classes.sort.inspect}, found #{found.fetch(field, []).inspect}"
+      end
+    end
     expect(unlisted).to be_empty, <<~MESSAGE
       ADR-129 G4: reached a mutable object no declaration accounts for. Freeze it, put it behind a TypingState slot,
       declare the extensional cache with TypingState.memo_field, or add a row with its reason:
         #{unlisted.join("\n  ")}
     MESSAGE
     expect(stale).to be_empty,
-                     "ADR-129 G4: rows whose field the walk never reaches; remove them:\n  #{stale.join("\n  ")}"
+                     "ADR-129 G4: rows no longer found as listed; shrink them:\n  #{stale.join("\n  ")}"
   end
 
   it "gives every ratchet row its classes and a reason" do

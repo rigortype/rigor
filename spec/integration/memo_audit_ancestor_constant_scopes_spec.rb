@@ -46,7 +46,7 @@ RSpec.describe "MemoAudit on the ancestor constant scopes memo (#2848)" do
     guarded_run(Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil), %w[lib])
   end
 
-  it "audits a hit in each file without a mismatch" do
+  it "audits its hits across both files without a mismatch" do
     hits = Hash.new(0)
     allow(Rigor::Inference::MemoAudit).to receive(:check).and_wrap_original do |original, label, *rest, &block|
       hits[label] += 1 unless Rigor::Inference::MemoAudit.suspended?

@@ -528,6 +528,9 @@ module Rigor
       # errors. The Environment is built once at run start through `Environment.for_project` so all files
       # share the same RBS load.
       def run(paths = @configuration.paths)
+        # ADR-129 WD5 (#2785) — a mismatch left on the thread by typing after an earlier run (its return summaries, a
+        # language-server hover) fails here rather than reaching this run's first file as a crash row.
+        Inference::MemoAudit.raise_undrained!
         # One per-run file-digest memo spans the whole run, so a path is SHA-256'd at most once across the
         # run-diagnostics dependency descriptor, its `fresh?` validation, the RBS signature tree, and every
         # plugin producer's watched-glob validation (they overlap heavily on the warm path). The nested ADR-85
@@ -536,7 +539,7 @@ module Rigor
         # ADR-87 WD1 — `cache.validation` (or the RIGOR_STRICT_VALIDATION env, which wins) selects the
         # freshness path for this run; the `auto` default resolves strict in CI (#190), stat-first elsewhere.
         Cache::FileDigest.with_run(strict: @configuration.cache_validation_strict?) do
-          Inference::DefNodeResolver.with_run { run_analysis(paths) }.tap { Inference::MemoAudit.raise_undrained! }
+          Inference::DefNodeResolver.with_run { run_analysis(paths) }
         ensure
           # ADR-89 WD2 — {#return_summaries} reads the return memo after the run, so the runner keeps the bucket the
           # run filled before the thread's run-scoped slots are released (issues #2412, #2399).
@@ -806,6 +809,8 @@ module Rigor
                                  "#", memo, effects_evaluator)
         collect_return_summaries(result, @project_discovered_singleton_def_nodes,
                                  @project_discovered_singleton_def_sources, ".", memo, effects_evaluator)
+        # ADR-129 WD5 (#2785) — typing after the run, under `content_effects`' rescue.
+        Inference::MemoAudit.raise_undrained!
         result
       end
 

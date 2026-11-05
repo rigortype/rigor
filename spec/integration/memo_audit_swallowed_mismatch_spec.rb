@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+require "tmpdir"
 
 # ADR-129 WD5 / issue #2785 — a `MemoAudit` mismatch raised under one of the typing path's `rescue StandardError`
 # sites is still reported. `StatementEvaluator#resolve_call_method` types a receiver under `rescue StandardError → nil`;
@@ -67,6 +68,39 @@ RSpec.describe "a MemoAudit mismatch swallowed by a rescue on the typing path (#
     plant_mismatch_in_resolve_call_method
     allow(Rigor::Inference::MemoAudit).to receive(:drain).and_return([])
     expect { analyze(source) }.not_to raise_error
+  end
+
+  it "reports a swallowed mismatch from a pooled worker (--workers 2)" do
+    plant_mismatch_in_resolve_call_method
+    Dir.mktmpdir do |dir|
+      files = { "a.rb" => source, "b.rb" => source, "c.rb" => "z = 1\n" }
+      files.each { |name, text| File.write(File.join(dir, name), text) }
+      runner = Rigor::Analysis::Runner.new(
+        configuration: Rigor::Configuration.new("paths" => files.keys.map { |name| File.join(dir, name) }),
+        cache_store: Rigor::Cache::Store.new(root: File.join(dir, ".rigor")), workers: 2
+      )
+      expect { Dir.chdir(dir) { guarded_run(runner) } }
+        .to raise_error(InternalAnalyzerErrorGuard::AnalyzerCrashed, /MemoAudit::Mismatch/)
+    end
+  end
+
+  it "fails at the run's release on a mismatch typed after the run, and empties the list" do
+    begin
+      Rigor::Inference::MemoAudit.check("after", :stored, :key) { :fresh }
+    rescue Rigor::Inference::MemoAudit::Mismatch
+      nil
+    end
+    expect { Rigor::RunScopedSlots.release }.to raise_error(Rigor::Inference::MemoAudit::Mismatch, /after/)
+    expect(Rigor::Inference::MemoAudit.drain).to be_empty
+  end
+
+  it "fails a run that starts with a mismatch left on the thread, before any file is analysed" do
+    begin
+      Rigor::Inference::MemoAudit.check("left over", :stored, :key) { :fresh }
+    rescue Rigor::Inference::MemoAudit::Mismatch
+      nil
+    end
+    expect { analyze(source) }.to raise_error(Rigor::Inference::MemoAudit::Mismatch, /left over/)
   end
 
   it "fails the run on a mismatch raised outside every file's analysis" do

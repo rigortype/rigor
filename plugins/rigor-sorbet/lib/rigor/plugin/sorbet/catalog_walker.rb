@@ -55,7 +55,9 @@ module Rigor
           return unless node.is_a?(Prism::Node)
 
           case node
-          when Prism::ClassNode, Prism::ModuleNode
+          when Prism::ClassNode
+            descend_class(node, state, lexical_path)
+          when Prism::ModuleNode
             descend_class_or_module(node, state, lexical_path)
           when Prism::SingletonClassNode
             descend_singleton_class(node, state, lexical_path)
@@ -71,15 +73,24 @@ module Rigor
           end
         end
 
-        def descend_class_or_module(node, state, lexical_path)
+        # Issue #2541 — a `class` records its superclass, and only its body's own top-level statements,
+        # which certainly run at class definition, may declare `prop` / `const` accessors.
+        def descend_class(node, state, lexical_path)
           name = qualified_name_for(node.constant_path)
-          record_superclass(node, name, state, lexical_path) if name
-          if name && node.body.is_a?(Prism::StatementsNode) && node.is_a?(Prism::ClassNode)
-            # Issue #2541 — only the class body's own top-level statements certainly run at class
-            # definition, so only they may declare `prop` / `const` accessors.
+          return descend_class_or_module(node, state, lexical_path) unless name
+
+          record_superclass(node, name, state, lexical_path)
+          if node.body.is_a?(Prism::StatementsNode)
             walk_statements(node.body, state, lexical_path: lexical_path + [name], in_singleton_class: false,
                                               class_body: true)
-          elsif name && node.body
+          else
+            descend_class_or_module(node, state, lexical_path)
+          end
+        end
+
+        def descend_class_or_module(node, state, lexical_path)
+          name = qualified_name_for(node.constant_path)
+          if name && node.body
             child_prefix = lexical_path + [name]
             walk_node(node.body, state, lexical_path: child_prefix, in_singleton_class: false)
           elsif node.body
@@ -174,8 +185,6 @@ module Rigor
         # catalog can follow `X`'s chain to a `T::Struct`-family root. `lexical_path` holds the enclosing
         # names (a nested `class A::B` element counts as one namespace step, as Ruby's cref does).
         def record_superclass(node, name, state, lexical_path)
-          return unless node.is_a?(Prism::ClassNode)
-
           written = qualified_name_for(node.superclass)
           return if written.nil?
 

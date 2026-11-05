@@ -344,17 +344,17 @@ module Rigor
         when Rigor::Type::Singleton
           chain_lookup(self_type.class_name, method_name, anchor_kind: :singleton, mixin_kind: :extend)
         when Rigor::Type::Nominal
-          instance_lookup(self_type.class_name, method_name)
+          chain_lookup(self_type.class_name, method_name, anchor_kind: :instance, mixin_kind: :include) ||
+            struct_prop_lookup(self_type.class_name, method_name)
         end
       rescue StandardError
         nil
       end
 
-      # Instance-side lookup: the sig catalog (the class and its mixins), then — issue #2541 — a
+      # Issue #2541 — after the sig catalog (the class and its mixins) declines an instance-side call, a
       # `prop` / `const` accessor the class or a superclass declares under a `T::Struct`-family root.
-      def instance_lookup(class_name, method_name)
-        chain_lookup(class_name, method_name, anchor_kind: :instance, mixin_kind: :include) ||
-          @catalog.lookup_struct_prop(class_name: class_name, method_name: method_name)
+      def struct_prop_lookup(class_name, method_name)
+        @catalog.lookup_struct_prop(class_name: class_name, method_name: method_name)
       end
 
       def instance_chain_lookup(receiver_node, method_name, scope)
@@ -363,7 +363,8 @@ module Rigor
         receiver_type = scope.type_of(receiver_node)
         return nil unless receiver_type.is_a?(Rigor::Type::Nominal)
 
-        instance_lookup(receiver_type.class_name, method_name)
+        chain_lookup(receiver_type.class_name, method_name, anchor_kind: :instance, mixin_kind: :include) ||
+          struct_prop_lookup(receiver_type.class_name, method_name)
       rescue StandardError
         # `scope.type_of` can raise on unrecognised synthetic nodes; degrade to "no contribution" rather
         # than bubbling the failure into the dispatcher.

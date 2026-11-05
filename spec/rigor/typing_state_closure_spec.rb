@@ -103,15 +103,15 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
     state = "lib/rigor/typing_state.rb"
     typer = "lib/rigor/inference/expression_typer.rb"
     evaluator = "lib/rigor/inference/statement_evaluator.rb"
-    stage2 = "ADR-129 stage 2 puts the four advisory tables behind journaled Table slots"
+    hand_off = "hands the store to a new body scope, not an entry read: entries go through Scope's logged readers " \
+               "(the bound Table slots, ADR-129 WD1)"
     {
       [state, :thread_state, "Thread.current"] => [3, "the one per-thread anchor every slot lives in"],
       [state, :weak_map, "WeakKeyMap"] => [1, "State#weak_key_map makes the store a run-scoped Table or Memo holds"],
       [state, :module_ivar_write, "@slots"] => [2, "the slot registry, written only while files load"],
       [state, :module_ivar_write, "@run_scoped"] => [2, "the run-scoped slot indices, written only while files load"],
-      [typer, :table_access, "optimistic_origins"] => [1, stage2],
-      [typer, :table_access, "dynamic_origins"] => [1, stage2],
-      [evaluator, :table_access, "dynamic_origins"] => [2, stage2]
+      [typer, :table_access, "dynamic_origins"] => [1, hand_off],
+      [evaluator, :table_access, "dynamic_origins"] => [1, hand_off]
     }
   end
 

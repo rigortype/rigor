@@ -1463,7 +1463,7 @@ module Rigor
       def rhs_origin(value_node, scope_after_rhs, rhs_type)
         return nil unless rhs_type.is_a?(Type::Dynamic)
 
-        scope_after_rhs.dynamic_origins[value_node]
+        scope_after_rhs.dynamic_origin(value_node)
       end
 
       # The scope binding the written local with ADR-58's `:local` mark when the write copies a declaration-sourced

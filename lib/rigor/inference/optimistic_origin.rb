@@ -108,7 +108,7 @@ module Rigor
       def resolve(node, scope)
         return nil if node.nil? || scope.nil?
 
-        recorded = scope.optimistic_origins[node]
+        recorded = scope.optimistic_origin(node)
         return recorded if recorded
 
         case node
@@ -169,7 +169,7 @@ module Rigor
       # predicate's folded boolean only when the miss answers the other boolean (or cannot be told), so
       # `!recv&.empty?` — `!false` on a hit, `!nil` on a miss — stays `true`, and so does `x = recv&.empty?; !x`.
       def miss_answer(node, scope)
-        return nil if scope.optimistic_origins[node]
+        return nil if scope.optimistic_origin(node)
 
         case node
         when Prism::LocalVariableReadNode then scope.optimistic_local_miss(node.name)

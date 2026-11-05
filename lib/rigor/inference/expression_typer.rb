@@ -1955,7 +1955,7 @@ module Rigor
         return type unless type.is_a?(Type::Constant) && [true, false].include?(type.value)
         # The carrier read itself keeps its declared answer even when that is a literal `true` /
         # `false` — the mark says its nil-freeness is a bet, not that the value's class widened.
-        return type if scope.optimistic_origins[node]
+        return type if scope.optimistic_origin(node)
         return type if OptimisticOrigin.resolve(node, scope).nil?
 
         # Widen only toward what a miss really answers: a safe-navigation call answers `nil`, and

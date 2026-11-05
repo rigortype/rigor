@@ -100,7 +100,7 @@ module Rigor
           return unless value_node.is_a?(Prism::CallNode)
 
           scope = @scope_index[value_node]
-          origin = scope&.void_origins&.[](value_node)
+          origin = scope&.void_origin(value_node)
           return if origin.nil?
 
           @results << Result.new(void_node: value_node, origin: origin)

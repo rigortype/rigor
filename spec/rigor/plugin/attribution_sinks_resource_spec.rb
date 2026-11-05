@@ -81,6 +81,10 @@ RSpec.describe "plugin attribution sinks as typing-state Resources (#2814)" do
       expect(records.size).to eq(1)
     end
 
+    it "refuses a capture for a registration with no sink installed" do
+      expect(refused_around { described_class.attribute(plugin, record) }).to be(true)
+    end
+
     it "leaves a capture with no registration unrefused (control)" do
       refused = nil
       described_class.collect { refused = refused_around { nil } }

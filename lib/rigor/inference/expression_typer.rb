@@ -3335,6 +3335,11 @@ module Rigor
           (slot_value[1][key[0]] ||= {})[key[1]] = value
         end
 
+        def delete(slot_value, key)
+          per_def = slot_value && slot_value[1][key[0]]
+          per_def&.delete(key[1])
+        end
+
         def container(state, slot)
           state[slot] || raise(ArgumentError, "no return memo bucket to replay into: its entry outlived its run")
         end

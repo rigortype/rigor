@@ -75,6 +75,11 @@ module Rigor
         # The bound Table's store protocol ({CALLS}): `true` for a recorded call, else `default`.
         def fetch(call, default) = @seen.include?(call) || default
 
+        # The bound Table's store protocol: an undone write (G1's stage-4 form) forgets `call`.
+        def delete(call)
+          @calls.delete(call) if @seen.delete?(call)
+        end
+
         # The bound Table's store protocol: a replayed write records `call` as {#add?} does, so the replay order of a
         # write slice is the order of {#calls}.
         def []=(call, _value)

@@ -610,10 +610,8 @@ RSpec.describe Rigor::TypingState do
       expect(audited.violations).to be_empty
       expect(run.fetch(:refused)).to be(true)
       touchers = audited.touchers
-      expect(touchers[:dependency_recorder]).to include("read_site", "read_name", "read_keys", "file_chain_once",
-                                                        "note_captured", "replay", "record_for")
-      expect(touchers[:dependency_capture_stack]).to include("capture", "withhold", "replay", "read_site", "read_name",
-                                                             "read_keys")
+      expect(touchers[:dependency_recorder]).to include("record_for")
+      expect(touchers[:dependency_capture_stack]).to include("capture", "withhold")
       expect(touchers[:effects_collector]).to include("record_root")
       expect(touchers[:flow_tracer]).to include("recording")
     end
@@ -630,6 +628,23 @@ RSpec.describe Rigor::TypingState do
       expect(journaled(run.fetch(:records))).to include(
         %i[read effects_calls], %i[write effects_calls], %i[read self_call_misses], %i[write self_call_misses]
       )
+    end
+
+    # ADR-129 stage 2 — the ADR-46 dependency reads are a bound Table: every event path journals its filings and none
+    # touches. The recorder's only touch left is a nested window's suspension; the capture stack is read exempt and
+    # changed only by a push, a pop or a write-and-rewrite, each under a fresh id.
+    it "journals the dependency reads and reaches the capture stack only by exempt reads and fresh-id changes" do
+      run = audited_recording_run
+      audited = run.fetch(:state)
+      event_paths = %w[read_site read_name read_keys file_chain_once note_captured replay tee_read tee_missing]
+
+      expect(audited.violations).to be_empty
+      expect(audited.touchers[:dependency_recorder].to_a).to eq(["record_for"])
+      expect(audited.touchers[:dependency_capture_stack].to_a).to contain_exactly("capture", "withhold")
+      expect(audited.touchers.values.flat_map(&:to_a) & event_paths).to be_empty
+      expect(audited.accesses.keys.filter_map { |name, access| access if name == :dependency_capture_stack })
+        .to contain_exactly(:read, :push, :pop, :write, :rewrite, :touch)
+      expect(journaled(run.fetch(:records))).to include(%i[read dependency_reads], %i[write dependency_reads])
     end
 
     # The memos only a recording run fills: the user-class fallback's name table, the recording run's ancestor scopes

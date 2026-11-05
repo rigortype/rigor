@@ -1,0 +1,3 @@
+class ScopeTaker
+  def self.take: (Rigor::Scope scope) -> nil
+end

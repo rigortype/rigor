@@ -18,7 +18,7 @@ ADR-128 WD6 confines `plugin.api-surface` to "classes that inherit `Plugin::Base
 
 ## Decision
 
-All three as listed. Each reports less than a looser reading would, which is the false-positive direction ADR-0 / ADR-5 ask for. The rule id stays `plugin.api-surface`, as ADR-128 names it, although `plugin.` is otherwise the prefix of a plugin's own rows (`plugin.<id>.<rule>`): the id is in `CheckRules::ALL_RULES`, so `disable:`, markers and `severity_overrides:` resolve it as a catalogue id before any plugin-id reading. A plugin whose manifest id is `api-surface` would share the prefix; none exists.
+All three as listed. Each reports less than a looser reading would, which is the false-positive direction ADR-0 / ADR-5 ask for. The rule id stays `plugin.api-surface`, as ADR-128 names it, although `plugin.` is otherwise the prefix of a plugin's own rows (`plugin.<id>.<rule>`): the id is in `CheckRules::ALL_RULES`, so `disable:`, markers and `severity_overrides:` resolve it as a catalogue id before any plugin-id reading. A plugin whose manifest id is `api-surface` would share the prefix; none exists. For the same reason a dot-free `plugin` key in `severity_overrides:` does not reach the rule (`SeverityProfile::FAMILY_FALLBACK_EXEMPT`), as `disable: [plugin]` does not; only the bleeding-edge feature or a key naming `plugin.api-surface` turns it on. `ConfigAudit` raises no warning for a `plugin` key, since it treats `plugin` as a non-check family, so such a key is now inert without a warning.
 
 ## To undo
 

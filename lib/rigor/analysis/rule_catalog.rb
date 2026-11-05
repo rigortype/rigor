@@ -1097,11 +1097,12 @@ module Rigor
             "The interface does not declare the called method, and neither does `Object` (with `Kernel` and " \
             "`BasicObject`).",
             "The call sits inside a class whose superclass chain reaches `Rigor::Plugin::Base`.",
-            "The `plugin-api-surface` bleeding-edge feature is enabled (the rule resolves `:off` otherwise)."
+            "The `plugin-api-surface` bleeding-edge feature is enabled, or a `severity_overrides:` key names " \
+            "`plugin.api-surface` (the rule resolves `:off` otherwise; a dot-free `plugin` key does not reach it)."
           ],
           does_not_fire_when: [
             "The interface declares the method (`scope.type_of(node)`), or every object answers it " \
-            "(`scope.nil?`, `scope.respond_to?(...)`).",
+            "(`scope.nil?`, `scope.respond_to?(...)`). A call that a `respond_to?` guard protects still fires.",
             "The value lost its interface type: a join with an untyped value, a helper parameter with no " \
             "signature, or the result of a `&.` call on a value that may be nil. It reads as `untyped` there.",
             "The call is outside a `Rigor::Plugin::Base` subclass, or inside `Rigor::Plugin::Base` itself.",
@@ -1117,7 +1118,7 @@ module Rigor
           # behind `bleeding_edge:` because it is a new discipline (ADR-50 Decision 3), not for lack of
           # confidence.
           evidence_tier: :high,
-          since: "0.4.8"
+          since: "0.5.0"
         ),
 
         CheckRules::RULE_SUPPRESSION_UNKNOWN_MARKER => Entry.new(

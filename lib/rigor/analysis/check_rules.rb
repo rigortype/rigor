@@ -112,7 +112,8 @@ module Rigor
         diagnostics = collectors[:main_pass].results.dup
         diagnostics.concat(self_undefined_method_diagnostics(path, self_call_misses, root, scope_index))
         COLLECTOR_DIAGNOSTIC_BUILDERS.each do |role, builder|
-          diagnostics.concat(send(builder, path, collectors[role].results))
+          collector = collectors[role]
+          diagnostics.concat(send(builder, path, collector.results)) if collector
         end
         # ADR-47 WD5 — the dead arm of a decidable version guard (#627) reports nothing: it cannot run on
         # the Ruby being checked with, so a diagnostic there is a false positive. Applied before
@@ -143,7 +144,9 @@ module Rigor
         ivar_writes: :ivar_write_mismatch_diagnostics,
         dead_assignments: :dead_assignment_diagnostics,
         duplicate_hash_keys: :duplicate_hash_key_diagnostics,
-        return_in_ensure: :return_in_ensure_diagnostics
+        return_in_ensure: :return_in_ensure_diagnostics,
+        # Built only when the rule is active ({PluginApiSurface.active?}); an absent role is skipped.
+        plugin_api_surface: :plugin_api_surface_diagnostics
       }.freeze
       private_constant :COLLECTOR_DIAGNOSTIC_BUILDERS
 
@@ -189,11 +192,14 @@ module Rigor
       # traversal, and hand the populated set back to {.diagnose} as
       # `node_collectors:`. The main pass needs `path` because its per-node
       # diagnostics carry it (ADR-53 B3c hosts it on the same walk).
-      def build_node_collectors(path, scope_index, root = nil)
+      #
+      # `plugin_api_surface:` adds the `plugin.api-surface` collector, which the runner asks for only when the rule
+      # resolves to a reporting severity ({PluginApiSurface.active?}).
+      def build_node_collectors(path, scope_index, root = nil, plugin_api_surface: false)
         eval_ranges = receiver_eval_block_ranges(root)
         lexical_sites = LexicalMethodSites.new(root, stamped_refinements(scope_index, root))
         main_pass = ->(node) { main_pass_node_diagnostics(path, node, scope_index, eval_ranges, lexical_sites) }
-        {
+        collectors = {
           main_pass: MainPassCollector.new(main_pass),
           void_value_use: VoidValueUseCollector.new(scope_index),
           always_truthy: AlwaysTruthyConditionCollector.new(scope_index),
@@ -204,6 +210,8 @@ module Rigor
           duplicate_hash_keys: DuplicateHashKeyCollector.new(scope_index),
           return_in_ensure: ReturnInEnsureCollector.new(scope_index)
         }
+        collectors[:plugin_api_surface] = PluginApiSurface::Collector.new(scope_index) if plugin_api_surface
+        collectors
       end
 
       # A {RuleWalk::CollectorDriver} over a built-in collector set, for a
@@ -316,8 +324,7 @@ module Rigor
           assert_type_diagnostic(path, node, scope_index),
           always_raises_diagnostic(path, node, facts, lexical_sites),
           raise_non_exception_diagnostic(path, node, scope_index),
-          visibility_mismatch_diagnostic(path, node, facts, lexical_sites),
-          PluginApiSurface.diagnostic(path, node, facts)
+          visibility_mismatch_diagnostic(path, node, facts, lexical_sites)
         ].compact
       end
 
@@ -411,6 +418,11 @@ module Rigor
         results.map do |result|
           build_unreachable_clause_diagnostic(path, result)
         end
+      end
+
+      # ADR-128 WD6 / ADR-130 slice 2 — `plugin.api-surface`, from its collector's results.
+      def plugin_api_surface_diagnostics(path, results)
+        PluginApiSurface.diagnostics(path, results)
       end
 
       # ADR-100 WD2 — `static.value-use.void`. Its value-context slot inspection rides the shared per-node

@@ -100,7 +100,8 @@ that works at runtime but is outside what Rigor promises plugins. It fires on a 
 
 - the receiver is `Dynamic[<Rigor::Plugin interface>]`, or a union of such values with `nil`;
 - no interface the receiver carries declares the method, and `Object` (with `Kernel` and `BasicObject`) does not
-  declare it either, so `scope.nil?` and `scope.respond_to?(:x)` stay silent;
+  declare it either, so `scope.nil?` and `scope.respond_to?(:x)` stay silent. A call that such a guard protects
+  (`scope.x if scope.respond_to?(:x)`) still reports: ADR-128 replaces the guard with a promised member;
 - the call is plugin source: lexically inside a class whose discovered superclass chain reaches
   `Rigor::Plugin::Base`, and not inside a `Rigor::Plugin::Base` body. The test reads class declarations, never a
   path, because a third-party plugin keeps its plugin under `lib/` as Rigor's engine does. `Base`'s own hooks pass
@@ -108,17 +109,22 @@ that works at runtime but is outside what Rigor promises plugins. It fires on a 
   engine signature that names one) is not judged.
 
 The rule reads the facet only where it survives. Where a join with an untyped value, a clause widening, a helper
-parameter with no signature or a `&.` call drops it, the value reads `Dynamic[top]` and the call is silent.
+parameter with no signature, or the result of a `&.` call on a value that may be nil drops it, the value reads
+`Dynamic[top]` and the call is silent.
 
-The rule is authored `:warning`, resolves `:off` in every profile, and is promoted to `:warning` only by the
+The rule is authored `:warning`, resolves `:off` in every profile, and is promoted to `:warning` by the
 `plugin-api-surface` bleeding-edge feature ([ADR-50](../adr/50-release-engineering-and-stability-strategy.md)
-Decision 3, WD2). It graduates at the next hard break.
+Decision 3, WD2). A `severity_overrides:` key naming `plugin.api-surface` itself also sets it. A dot-free `plugin`
+key does not reach it, as `disable: [plugin]` does not: `plugin.` is otherwise the prefix of plugin rows. A run in
+which the rule resolves `:off` does not evaluate it. It graduates at the next hard break.
 
 ### Interface values at engine parameters
 
-A plugin passes its hook `scope` (`Dynamic[Rigor::Plugin::_Scope]`) to `Rigor::Reflection`, whose RBS takes
-`scope: Scope`. The value is `untyped` to assignability, so no `call.argument-type-mismatch` fires
-([ADR-128](../adr/128-plugin-hook-surface-interfaces.md) WD5). The question of an interface value meeting its
+A plugin passes its hook `scope` (`Dynamic[Rigor::Plugin::_Scope]`) where an engine signature takes the backing
+class, `Rigor::Scope`. The value is `untyped` to assignability, so a positional `Rigor::Scope` parameter draws no
+`call.argument-type-mismatch` ([ADR-128](../adr/128-plugin-hook-surface-interfaces.md) WD5). `Rigor::Reflection`
+takes the scope as the keyword `scope: Scope`, a position `call.argument-type-mismatch` does not check today; once
+it does, the same untyped reading keeps those calls passing. The question of an interface value meeting its
 backing class returns with structural assignability, which ADR-130 defers.
 
 ## Assignability rules

@@ -2,7 +2,7 @@ module Rigor
   module Analysis
     module CheckRules
       def self?.diagnose: (path: String, root: untyped, scope_index: Hash[untyped, Scope]) -> Array[Diagnostic]
-      def self?.build_node_collectors: (String path, untyped scope_index, ?untyped root) -> Hash[Symbol, untyped]
+      def self?.build_node_collectors: (String path, untyped scope_index, ?untyped root, ?plugin_api_surface: bool) -> Hash[Symbol, untyped]
       # authored: returns Rigor::Analysis::CheckRules::RuleWalk::CollectorDriver, which has no RBS declaration yet (#2404); stays `untyped` until it is declared
       def self?.node_collector_driver: (Hash[Symbol, untyped] collectors) -> untyped
       def self?.shadow_verify_converged_collectors: (String path, untyped root, untyped scope_index, Hash[Symbol, untyped]? collectors) -> void

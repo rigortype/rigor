@@ -190,10 +190,12 @@ interface, or an exemption confined to those interfaces.
 
 > **Settled in slice 3 (#2822) by [ADR-130](130-interface-typed-values-dispatch-under-untyped-parity.md).**
 > ADR-130 carries a plugin-interface value as `Dynamic[Rigor::Plugin::_Scope]`, which is `untyped` to every rule
-> but member dispatch, assignability included. The value passes `scope: Scope` as `Dynamic[top]` does, so the
-> seam does not arise; a fixture pins a plugin handing its hook scope to `Reflection` with no
-> `call.argument-type-mismatch`. No backing-class mechanism is built. The seam re-arises with structural
-> assignability (ADR-130's deferred half B), which must decide it then.
+> but member dispatch, assignability included. The value passes a `Scope` parameter as `Dynamic[top]` does, so
+> the seam does not arise. A fixture pins a plugin handing its hook scope to a positional `Rigor::Scope`
+> parameter with no `call.argument-type-mismatch`, beside a control the rule does report. `Reflection`'s
+> `scope:` is a keyword position, which `call.argument-type-mismatch` does not check today; once it does,
+> ADR-130's untyped parity is what keeps those calls passing. No backing-class mechanism is built. The seam
+> re-arises with structural assignability (ADR-130's deferred half B), which must decide it then.
 
 **WD6 — How a breaking plugin-API change ships.** Classify the change first; the class decides the
 release vehicle. ADR-50 WD5's tiers apply unchanged: a patch carries no behaviour surprise, and a
@@ -223,15 +225,16 @@ in 0.3.0, where it raises at class-definition time.
 **The check slice 3 turns on is a new discipline.** A call outside an interface works at runtime, so
 `call.undefined-method` must not fire on it. Slice 3 reports such a call under a dedicated rule
 (`plugin.api-surface`), whose receiver is typed by a plugin-facing interface. The rule applies only
-to plugin source, meaning classes that inherit `Plugin::Base` outside `lib/`.
-
-> **Amended in slice 3 (#2822).** Plugin source is read from the class declarations, not a path: code
-> lexically inside a class whose superclass chain reaches `Plugin::Base`, and in no `Plugin::Base` body. A
-> third-party plugin gem keeps its plugin under its own `lib/`, so a path test would exempt every one of them. `Plugin::Base`'s own
+to plugin source, meaning classes that inherit `Plugin::Base` outside `lib/`. `Plugin::Base`'s own
 hook implementations in `lib/rigor/plugin/base.rb` take interface-typed parameters and hand them to
 engine helpers. For example, `dynamic_return_type` reaches `environment.class_ordering`, which
 `_Environment` does not carry. They are engine code, so the rule must not judge them. The rule sits in
 the bleeding-edge overlay until the next hard break (ADR-50 Decision 3, WD2, WD7).
+
+> **Amended in slice 3 (#2822).** Plugin source is read from the class declarations, not a path: code
+> lexically inside a class whose superclass chain reaches `Plugin::Base`. `Plugin::Base`'s own body is not,
+> since `Base` does not inherit itself. A third-party plugin gem keeps its plugin under its own `lib/`, so a
+> path test would exempt every one of them.
 
 **WD7 — Sequencing.**
 

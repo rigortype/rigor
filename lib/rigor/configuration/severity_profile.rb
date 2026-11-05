@@ -237,11 +237,17 @@ module Rigor
 
       private_class_method :row_override
 
+      # Rule ids a dot-free family key does not reach. `plugin.api-surface` is the one built-in id under `plugin.`,
+      # the prefix of plugin rows, so a `plugin` key must not turn the bleeding-edge rule on (#2822); `disable:
+      # [plugin]` does not reach it either. A key naming the id itself still does, in either direction.
+      FAMILY_FALLBACK_EXEMPT = ["plugin.api-surface"].freeze
+
       # A family name has no `.` in it, so only a dot-free key can match one. `resolve` runs for every
       # diagnostic in a run's stream, and most configurations carry no such key (usually no overrides at all),
       # so the split below is skipped for them rather than allocating a name that nothing can match.
       def family_override(rule, overrides)
         return nil unless overrides.any? { |key, _| !key.to_s.include?(".") }
+        return nil if FAMILY_FALLBACK_EXEMPT.include?(rule)
 
         family = rule.split(".").first
         return nil if family.nil?

@@ -1,4 +1,4 @@
-# `node_rule`'s block binds `node` from its class argument in the engine, not from a generated overload set
+# `node_rule`'s block binds `node` from its class argument in the engine, and the release that ships it is a minor
 
 - **PR:** [#2822](https://github.com/rigortype/rigor/pull/2822)
 - **Issue:** [#2686](https://github.com/rigortype/rigor/issues/2686)
@@ -19,6 +19,8 @@
 ## Decision
 
 The third. It covers every node class, including ones a later Prism adds, it needs no Prism version guard, and it changes no binding outside `Base.node_rule`. The existing overloads stay, because they state the contract correctly for the classes they name and they are what an RBS-only tool reads. The engine-wide probe bug is left for its own issue.
+
+**The release that ships #2822 must be a minor (0.5.0), not a patch.** ADR-128 WD6 lets a signature-precision change ship in a patch only while slice 3 has not made it observable. This PR's default-on `node_rule` binding makes `base.rbs` precision observable in plugin source, and #2714 and #2768, which carry the rest of that precision, are unreleased too. `RuleCatalog` gives `plugin.api-surface` `since: "0.5.0"` on that reading.
 
 ## To undo
 

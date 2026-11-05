@@ -22,10 +22,10 @@ RSpec.describe "plugin.api-surface" do
   end
 
   # `{ mark name => ["rule: message", ...] }` for every diagnostic on a marked line.
-  def run_check(bleeding_edge: false, paths: %w[lib])
+  def run_check(bleeding_edge: false, paths: %w[lib], severity_overrides: {})
     settings = Rigor::Configuration::DEFAULTS.merge(
       "paths" => paths, "signature_paths" => [sig_root, "sig"], "parallel" => { "workers" => 0 },
-      "bleeding_edge" => bleeding_edge
+      "bleeding_edge" => bleeding_edge, "severity_overrides" => severity_overrides
     )
     runner = Rigor::Analysis::Runner.new(configuration: Rigor::Configuration.new(settings), cache_store: nil,
                                          workers: 0)
@@ -66,6 +66,11 @@ RSpec.describe "plugin.api-surface" do
       expect(surface_rows(rows.fetch("indirect")).size).to eq(1)
     end
 
+    # ADR-128 replaces such guards with promised members, so a guard does not exempt the call it guards.
+    it "reports a call a respond_to? guard protects" do
+      expect(surface_rows(rows.fetch("guarded")).size).to eq(1)
+    end
+
     it "is silent on a declared member and on every object's own surface" do
       expect(rows.fetch("declared")).to be_empty
       expect(rows.fetch("object-member")).to be_empty
@@ -90,12 +95,32 @@ RSpec.describe "plugin.api-surface" do
     expect(rows.fetch("undeclared")).to be_empty
   end
 
-  # ADR-128 WD5: the seam does not arise while the value is untyped to assignability (ADR-130).
-  it "accepts the hook scope where Rigor::Reflection takes `scope: Scope`" do
+  # A dot-free `plugin` key reads as the plugin rows' family; it does not turn the rule on (#2822).
+  it "stays silent under a `plugin` family severity override" do
+    rows = run_check(severity_overrides: { "plugin" => "error" })
+    expect(rows.values.flatten.grep(/\Aplugin\.api-surface/)).to be_empty
+  end
+
+  it "reports under a severity override naming the rule itself" do
+    rows = run_check(severity_overrides: { "plugin.api-surface" => "error" })
+    expect(surface_rows(rows.fetch("undeclared")).size).to eq(1)
+  end
+
+  # ADR-128 WD5: the seam does not arise while the value is untyped to assignability (ADR-130). The control shows the
+  # argument rule checks that position.
+  it "accepts the hook scope at a positional `Rigor::Scope` parameter" do
     rows = run_check(bleeding_edge: true)
 
     expect(rows.fetch("seam")).to be_empty
-    expect(rows.fetch("seam-optional")).to be_empty
+    expect(rows.fetch("seam-control").grep(/\Acall\.argument-type-mismatch: /).size).to eq(1)
+  end
+
+  # A keyword position: `call.argument-type-mismatch` does not check it today, so this pins the call shape only.
+  it "draws nothing where the hook scope reaches Rigor::Reflection's `scope:` keyword" do
+    rows = run_check(bleeding_edge: true)
+
+    expect(rows.fetch("seam-reflection")).to be_empty
+    expect(rows.fetch("seam-reflection-optional")).to be_empty
   end
 
   describe "node_rule's block binding" do

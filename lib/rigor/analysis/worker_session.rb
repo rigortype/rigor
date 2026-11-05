@@ -242,7 +242,7 @@ module Rigor
         )
         index = Inference::ScopeIndexer.index(root, default_scope: scope, widen_clauses: true)
         # ADR-53 B4 — built-in collectors + plugin node rules share one walk.
-        node_collectors = CheckRules.build_node_collectors(path, index, root)
+        node_collectors = built_in_collectors(path, index, root)
         node_results = node_rule_results_by_plugin(path, root, scope, node_collectors, index)
         diagnostics = CheckRules.diagnose(
           path: path,
@@ -262,6 +262,14 @@ module Rigor
         [analyzer_error(path, CrashSignature.check_rule_message(e))]
       end
       private :analyze_body
+
+      # The built-in collectors for one file; `plugin.api-surface`'s joins only when the rule can report.
+      def built_in_collectors(path, index, root)
+        CheckRules.build_node_collectors(
+          path, index, root, plugin_api_surface: CheckRules::PluginApiSurface.active?(@configuration)
+        )
+      end
+      private :built_in_collectors
 
       # Read-once snapshot of the per-worker reporters so the caller (or the eventual Phase 4b pool
       # aggregator) can merge into a single coordinator-side reporter. Both reporters dedupe at write time,

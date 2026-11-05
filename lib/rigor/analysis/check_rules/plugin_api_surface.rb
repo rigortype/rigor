@@ -1,6 +1,10 @@
 # frozen_string_literal: true
 
+require "prism"
+
+require_relative "../../configuration/severity_profile"
 require_relative "../../reflection"
+require_relative "../../source/node_walker"
 require_relative "../../scope/resolution_chain"
 require_relative "../../type"
 require_relative "../diagnostic"
@@ -29,18 +33,62 @@ module Rigor
       #
       # The plugin-source test reads the class declarations, not a path: a third-party plugin gem keeps its plugin
       # under `lib/` as Rigor's own engine does.
+      #
+      # The rule runs only when its resolved severity is not `:off` ({.active?}): the runner then adds its
+      # {Collector} to the shared {RuleWalk}. A default run builds no collector, so it types no extra receiver and
+      # files no ADR-46 dependency for the rule.
       module PluginApiSurface
         PLUGIN_BASE = "Rigor::Plugin::Base"
 
+        # One call the rule reports: the call and the first interface its receiver carries.
+        Result = Data.define(:call_node, :interface)
+
+        # The {RuleWalk} collector: one {Result} per reported call, in walk order.
+        class Collector
+          NODE_CLASSES = [Prism::CallNode].freeze
+
+          def initialize(scope_index)
+            @scope_index = scope_index
+            @results = []
+          end
+
+          # The legacy single-collector walk, the oracle the ADR-53 equivalence harness compares {RuleWalk} with.
+          def collect(root)
+            Source::NodeWalker.each(root) { |node| visit(node) if node.is_a?(Prism::CallNode) }
+            @results.freeze
+          end
+
+          def visit(node, _context = nil)
+            interface = PluginApiSurface.outside_interface(node, @scope_index[node])
+            @results << Result.new(call_node: node, interface: interface) if interface
+          end
+
+          def results
+            @results.freeze
+          end
+        end
+
         module_function
 
-        def diagnostic(path, call_node, facts)
-          return nil if call_node.receiver.nil?
+        # Whether the rule can report in a run under `configuration`: it is not in `disable:`, and its resolved
+        # severity is not `:off`. Default profiles resolve it `:off`; the `plugin-api-surface` bleeding-edge feature
+        # or an explicit `severity_overrides:` entry for the id turns it on.
+        def active?(configuration)
+          disabled = configuration.disabled_rules
+          return false if disabled.include?(RULE_PLUGIN_API_SURFACE) || disabled.include?("all")
 
-          scope = facts.scope
-          return nil if scope.nil?
+          Configuration::SeverityProfile.resolve(
+            rule: RULE_PLUGIN_API_SURFACE, authored_severity: :warning,
+            profile: configuration.severity_profile, overrides: configuration.severity_overrides,
+            bleeding_edge_overrides: configuration.bleeding_edge_severity_overrides
+          ) != :off
+        end
 
-          interfaces = receiver_interfaces(facts.receiver_type)
+        # The interface the call's receiver carries when the call is outside it, or nil.
+        def outside_interface(call_node, scope)
+          return nil if call_node.receiver.nil? || scope.nil?
+
+          interfaces = receiver_interfaces(scope.type_of(call_node.receiver))
           return nil if interfaces.nil?
 
           environment = scope.environment
@@ -49,7 +97,11 @@ module Rigor
           return nil if object_member?(environment, method_name)
           return nil unless plugin_source?(scope)
 
-          build(path, call_node, interfaces.first, method_name)
+          interfaces.first
+        end
+
+        def diagnostics(path, results)
+          results.map { |result| build(path, result.call_node, result.interface, result.call_node.name) }
         end
 
         # The interface facets the receiver carries, or nil when it is anything but `Dynamic[Interface]` arms and

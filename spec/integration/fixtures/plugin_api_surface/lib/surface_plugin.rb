@@ -6,6 +6,7 @@ class SurfacePlugin < Rigor::Plugin::Base
     scope.environment.class_ordering("A", "B") # surface: undeclared-environment
     scope.type_of(node) # surface: declared
     scope.respond_to?(:type_of) # surface: object-member
+    scope.discovered_method?("Foo", :bar, :instance) if scope.respond_to?(:discovered_method?) # surface: guarded
     joined = node.receiver ? scope : file_context
     joined.discovered_method?("Foo", :bar, :instance) # surface: lost-at-join
     maybe = node.receiver && scope

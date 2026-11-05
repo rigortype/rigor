@@ -5,6 +5,7 @@ require "prism"
 require_relative "../scope"
 require_relative "../type"
 require_relative "../source/alias_names"
+require_relative "../source/forwardable_delegators"
 require_relative "../source/literals"
 require_relative "../source/constant_path"
 require_relative "object_mixins"
@@ -3528,7 +3529,7 @@ module Rigor
       MethodTables = Struct.new(:existence, :envelopes, :refinements, :certainty, :certain, :possible,
                                 :contested_envelopes, :contested_def_nodes, :root, :in_effect, :census,
                                 :refine_text, :literal_seen, :source_bytes, :loose_constants, :block_spans,
-                                :definer_history) do
+                                :definer_history, :forwardable_extends) do
         # Issue #2006 — records, in walk order, that a definer other than an alias wrote the instance method `name`
         # of `class_name` at `node`: `def_node` for a `def`, nil for a `define_method(:x)` or an `attr_*` reader or
         # writer, and whether the write is {#certain}. {ScopeIndexer#apply_alias_def_nodes} reads the history to copy
@@ -4303,7 +4304,7 @@ module Rigor
           anonymous = record_call_node_methods(node, owner_prefix, in_singleton_class, methods_acc.at(node),
                                                source_path)
           unless in_singleton_class
-            superseded = call_superseded_names(node)
+            superseded = call_superseded_names(node, owner_prefix, methods_acc)
             supersede_def_nodes(superseded, owner_prefix, def_nodes_acc, methods_acc.at(node))
             note_call_definers(node, superseded, owner_prefix, methods_acc.at(node))
           end
@@ -4450,6 +4451,7 @@ module Rigor
         record_define_method(node, qualified_prefix, in_singleton_class, methods_acc) if node.name == :define_method
         record_attr_methods(node, qualified_prefix, in_singleton_class, methods_acc) if attr_macro(node)
         record_module_attr_methods(node, qualified_prefix, methods_acc) if MODULE_ATTR_MACROS.key?(node.name)
+        record_forwardable_methods(node, qualified_prefix, in_singleton_class, methods_acc)
         record_alias_method_call(node, qualified_prefix, in_singleton_class, methods_acc)
         record_surface_evidence(node, qualified_prefix, methods_acc)
         AnonymousMetaClass.name_for(node, source_path)
@@ -4964,8 +4966,9 @@ module Rigor
 
       # Issue #1989 — the instance method names a non-`def` definer written on the class body's self replaces:
       # each reader (and `x=` writer) an `attr_*` call declares, a literal `define_method(:x)`, and the new name of
-      # an `alias_method :x, :y` call. A non-literal name replaces nothing Rigor can name.
-      def call_superseded_names(call_node)
+      # an `alias_method :x, :y` call, and each instance-side name of a Forwardable delegator (#2793). A non-literal
+      # name replaces nothing Rigor can name.
+      def call_superseded_names(call_node, qualified_prefix, accumulator)
         if (macro = attr_macro(call_node))
           names = []
           each_attr_macro_name(call_node) do |base|
@@ -4975,6 +4978,8 @@ module Rigor
           names
         elsif call_node.name == :define_method
           define_method_superseded_name(call_node)
+        elsif (forwarded = forwardable_superseded_names(call_node, qualified_prefix, accumulator)).any?
+          forwarded
         else
           Source::AliasNames.alias_method_call_names(call_node)&.first(1) || []
         end
@@ -9357,6 +9362,70 @@ module Rigor
           record_both_kinds(accumulator, class_name, :"#{base}=") if writer
           record_both_kinds(accumulator, class_name, :"#{base}?") if predicate
         end
+      end
+
+      # Issue #2793 — the `extend` that decides the side of an {Source::ForwardableDelegators::AMBIGUOUS} macro
+      # (`def_delegators`, `def_delegator`, `delegate`): `Forwardable` makes them instance methods,
+      # `SingleForwardable` singleton methods.
+      FORWARDABLE_MODULES = { Forwardable: :instance, SingleForwardable: :singleton }.freeze
+
+      # Issue #2793 — a Forwardable delegator macro defines its literal names as methods, which join the existence
+      # table so `call.undefined-method` stops firing on them (their return types stay unknown: the envelope is
+      # opaque and no `def` node backs them). The side is the macro's own, or, for an ambiguous macro, the side
+      # of the `extend` this walk met earlier in the body: singleton under a lone `extend SingleForwardable`,
+      # instance otherwise (a class extended in another file or by a superclass is far likelier `Forwardable`).
+      # Inside `class << self` the macro defines on the singleton class. A name the syntax hides
+      # (`def_delegators :@x, *NAMES`) marks the class {Scope::DiscoveryIndex::ENVELOPE_OPEN_NAMES_MARK}.
+      def record_forwardable_methods(call_node, qualified_prefix, in_singleton_class, accumulator)
+        return if qualified_prefix.empty?
+
+        class_name = qualified_prefix.join("::")
+        note_forwardable_extend(call_node, class_name, accumulator) unless in_singleton_class
+        delegation = Source::ForwardableDelegators.of(call_node)
+        return if delegation.nil?
+
+        kind = forwardable_side(delegation, class_name, in_singleton_class, accumulator)
+        delegation.names.each { |name| record_method(accumulator, class_name, name, kind) }
+        return unless delegation.open?
+
+        record_surface_mark(accumulator, class_name, Scope::DiscoveryIndex::ENVELOPE_OPEN_NAMES_MARK)
+      end
+
+      def note_forwardable_extend(call_node, class_name, accumulator)
+        return unless call_node.name == :extend && call_node.receiver.nil?
+
+        (call_node.arguments&.arguments || []).each do |argument|
+          side = FORWARDABLE_MODULES[forwardable_module_name(argument)]
+          next if side.nil?
+
+          ((accumulator.forwardable_extends ||= {})[class_name] ||= Set.new) << side
+        end
+      end
+
+      def forwardable_module_name(node)
+        case node
+        when Prism::ConstantReadNode then node.name
+        when Prism::ConstantPathNode then node.parent.nil? ? node.name : nil
+        end
+      end
+
+      def forwardable_side(delegation, class_name, in_singleton_class, accumulator)
+        return :singleton if in_singleton_class
+        return delegation.side unless delegation.side == Source::ForwardableDelegators::AMBIGUOUS
+
+        extended = accumulator.forwardable_extends&.[](class_name)
+        extended == Set[:singleton] ? :singleton : :instance
+      end
+
+      # The instance names a Forwardable macro defines, for {#call_superseded_names}: a delegator written after a
+      # `def` of the name replaces it. Asked only outside `class << self`, and a macro whose side settles to the
+      # singleton (`extend SingleForwardable; def_delegators :@x, :size`) leaves an instance `def size` standing.
+      def forwardable_superseded_names(call_node, qualified_prefix, accumulator)
+        delegation = Source::ForwardableDelegators.of(call_node)
+        return [] if delegation.nil? || qualified_prefix.empty?
+
+        side = forwardable_side(delegation, qualified_prefix.join("::"), false, accumulator)
+        side == :instance ? delegation.names : []
       end
 
       def record_both_kinds(accumulator, class_name, method_name)

@@ -36,9 +36,11 @@ Classification judgment calls, each decided by reading the code that reads the s
   the environment eagerly, outside any `type_of`, so no fixture makes typing read a non-nil core root. The witness spec
   records that exception by name. G1 cannot fail it, so the slot is a candidate for a fifth statement or for a
   `type_of`-time build to be forbidden.
-- `def_node_resolver_run` is `typing_never_reads` on evidence: no non-nil read inside `type_of` over the incremental
-  session specs and `rigor check lib`. A warm incremental run resolving a handle inside typing would be reported by the
-  audit.
+- `def_node_resolver_run` was first `typing_never_reads`, on negative evidence (no non-nil read inside `type_of` in the
+  specs I ran). #2874's `unsettled_chain_incremental_spec` refutes it: under the audit an incremental recheck types a
+  file against handles of unchanged files, and `DefNodeResolver.resolve` reads the slot inside `type_of`. It is a
+  witness; the harness runs an `IncrementalSession` baseline, edits a file and rechecks (the fixture's project is the
+  sibling directory `def_node_resolver_run/`). The key audit's own #2874 findings are tolerated there.
 - `scope_index_unentered_evaluator` and `declared_param_writer_scope` are `typing_never_reads`: typing runs under both,
   and only the index walk and the writer gates read them.
 - `patched_scanner_guarded_defs` and `patched_scanner_def_visibilities` are `typing_unreachable`: the scan is a Prism

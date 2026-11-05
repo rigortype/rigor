@@ -130,6 +130,29 @@ RSpec.describe "ADR-129 G1' Frame declarations", type: :runner do
       raise unless e.message.include?("key audit:")
     end
 
+    # An `IncrementalSession` over the fixture's project (the sibling directory of the witness) with the witness as its
+    # consumer: after the baseline a file is edited and the recheck types the consumer against handles of the unchanged
+    # files. The key audit's own findings (#2874) are not this spec's subject.
+    def run_incremental_witness(path)
+      Dir.mktmpdir do |dir|
+        FileUtils.cp(Dir.glob(path.sub(/\.rb\z/, "/*.rb")), dir)
+        FileUtils.cp(path, File.join(dir, "b.rb"))
+        configuration = Rigor::Configuration.new("paths" => [dir])
+        environment = Rigor::Environment.for_project
+        session = Rigor::Analysis::IncrementalSession.new(configuration: configuration, paths: [dir],
+                                                          environment: environment)
+        tolerating_key_audit { guarded_baseline(session) }
+        File.write(File.join(dir, "q.rb"), "module R\nend\n\nmodule Q\n  def tweak = 1\nend\n")
+        tolerating_key_audit { guarded_recheck(session) }
+      end
+    end
+
+    def tolerating_key_audit
+      yield
+    rescue InternalAnalyzerErrorGuard::AnalyzerCrashed => e
+      raise unless e.message.include?("key audit:")
+    end
+
     # How a witness's slot is installed, where a plain run does not: the harnesses the engine's own entry points use.
     # A diagnostic of the run is not asserted: the examples ask only whether typing read the Frame.
     def run_witness(name, path)
@@ -145,6 +168,7 @@ RSpec.describe "ADR-129 G1' Frame declarations", type: :runner do
             run_source(source, signature_dir: dir)
           end
         when :self_call_resolution_recorder then run_source(source, signature_dir: dir, record_self_calls: true)
+        when :def_node_resolver_run then run_incremental_witness(path)
         when :dependency_recorder then run_source(source, signature_dir: dir, record_dependencies: true)
         when :effects_collector then run_source(source, signature_dir: dir, config: { "effects" => {} })
         when :file_digest_run then analyze(source)

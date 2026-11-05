@@ -37,9 +37,9 @@ module Rigor
         memos: %i[nodes indexes nestings refinement_queries],
         reason: "installed per run by with_run; its tables are extensional caches, keyed on (path, node_id), on the " \
                 "path, and (nestings) on the minted node's identity, filled in place",
-        # G1′: the run wraps the typing of every file; handles resolve and nestings rehydrate in the index and census
-        # code that builds the scopes typing starts from, outside `type_of`.
-        typing_never_reads: true
+        # G1′ witness: an incremental recheck types a file against handles of the unchanged files, and
+        # {.resolve} reads the run's tables from inside `type_of` (#2874).
+        witness: "spec/fixtures/typing_state_witnesses/def_node_resolver_run.rb"
       )
       private_constant :RUN_MEMO
 

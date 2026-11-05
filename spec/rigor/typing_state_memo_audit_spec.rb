@@ -13,9 +13,7 @@ RSpec.describe "ADR-129 Memo slots and MemoAudit" do
 
   # The Memo slots stage 2 has not wired yet. A wiring PR removes its slots here; a new Memo never joins.
   def unaudited
-    %i[
-      ancestor_constant_scopes
-    ]
+    %i[]
   end
 
   def audit_labels_in_lib = labels_in_lib(/MemoAudit\.check\(\s*"([^"]+)"/)

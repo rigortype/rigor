@@ -1422,6 +1422,8 @@ RSpec.describe "plugins/rigor-sorbet" do
         end
         class Frozen < ::T::ImmutableStruct
         end
+        class Frail < ::T::ImmutableStruct
+        end
         class Loose < ::T::InexactStruct
         end
         class Cond < ::T::Struct
@@ -1464,6 +1466,13 @@ RSpec.describe "plugins/rigor-sorbet" do
           if ENV["RIGOR_FIXTURE_PROP"]
             prop :maybe, Integer
           end
+          prop :both, Integer
+          if ENV["RIGOR_FIXTURE_PROP"]
+            prop :both, String
+          end
+        end
+        class Frail < T::ImmutableStruct
+          prop :weight, Integer
         end
         class Plain
           def self.prop(*) = nil
@@ -1479,10 +1488,10 @@ RSpec.describe "plugins/rigor-sorbet" do
       RUBY
     end
 
-    def struct_run(calls)
+    def struct_run(calls, extra_source: "")
       run_plugin(
         source: "# typed: true\n#{calls}",
-        files: { "structs.rb" => struct_source, "sig/structs.rbs" => struct_rbs },
+        files: { "structs.rb" => struct_source + extra_source, "sig/structs.rbs" => struct_rbs },
         paths: ["demo.rb", "structs.rb"],
         signature_paths: ["sig"]
       )
@@ -1568,6 +1577,29 @@ RSpec.describe "plugins/rigor-sorbet" do
 
       expect(undefined_methods(result)).to be_empty
       expect(reveals(result)).to eq(["Dynamic[top]"])
+    end
+
+    it "keeps the unconditional `prop`'s type when a conditional one repeats the name" do
+      result = struct_run("T.reveal_type(Cond.new.both)\n")
+
+      expect(reveals(result)).to eq(["Integer"])
+    end
+
+    it "answers no writer under T::ImmutableStruct, whose `prop` raises at runtime" do
+      result = struct_run("Frail.new.weight = 1\n")
+
+      expect(undefined_methods(result)).to eq(["undefined method `weight=' for Frail"])
+    end
+
+    it "types an implicit-self accessor call inside the struct's own method" do
+      extra = <<~RUBY
+        class Doc
+          def shout = title.no_such_string_method
+        end
+      RUBY
+      result = struct_run("", extra_source: extra)
+
+      expect(undefined_methods(result)).to eq(["undefined method `no_such_string_method' for String"])
     end
 
     it "still reports a name no accessor declares" do

@@ -33,7 +33,6 @@ module Rigor
           # `@superclasses`, and a class's own `def` of the same name shadows it (Ruby: the later `def`
           # replaces the generated accessor; a subclass `def` overrides it).
           @struct_props = {}
-          @certain_struct_props = {}
           @superclasses = {}
           @defined_methods = {}
           @frozen_after_build = false
@@ -60,17 +59,12 @@ module Rigor
 
         # @param signature — a {MethodSignature} for a `prop` / `const` reader or a `prop` writer.
         # @param certain — false for a call nested under a conditional or a block, which never displaces
-        #   an accessor the class body declares unconditionally.
+        #   an accessor already recorded for the name; a certain one replaces whatever is there.
         def record_struct_prop(signature, certain: true)
           raise "Catalog already finalised" if @frozen_after_build
 
           props = (@struct_props[signature.class_name] ||= {})
-          if certain
-            @certain_struct_props[[signature.class_name, signature.method_name]] = true
-            props[signature.method_name] = signature
-          elsif !@certain_struct_props.key?([signature.class_name, signature.method_name])
-            props[signature.method_name] = signature
-          end
+          props[signature.method_name] = signature if certain || !props.key?(signature.method_name)
         end
 
         # @param written — the superclass expression as written (`"T::Struct"`, `"Base"`, `"::Foo::Base"`).
@@ -115,7 +109,6 @@ module Rigor
           @frozen_after_build = true
           @struct_props.each_value(&:freeze)
           @struct_props.freeze
-          @certain_struct_props.freeze
           @superclasses.freeze
           @defined_methods.each_value(&:freeze)
           @defined_methods.freeze

@@ -38,11 +38,36 @@ module Rigor
       )
       private_constant :LOOPS_EVALUATED
 
+      # Issue #2767 — the ADR-55 fixpoint summaries are an ambient input of a loop's value: an ADR-55 fixpoint
+      # evaluates a recursive method's body several times from the same body scope object, each time under a wider
+      # assumption, so a value recorded in one iteration would answer an identity-matching read in the next one with
+      # the narrower iterate, and the fixpoint would converge on it (`[(while …; break(n.zero? ? 1 : q(n - 1)); end)]`
+      # typed `[bot]`). The generation moves whenever a summary's assumption is seeded or changed
+      # ({advance_generation}), and a record answers only a read in the generation it was written in.
+      #
+      # ADR-129 WD3 — a Resource whose value is fixed while the state id is: every advance is a {TypingState::State#rewrite}.
+      GENERATION = TypingState.resource(
+        :summary_generation,
+        read_exemption: :id_determined, run_scoped: true,
+        reason: "a count of the ADR-55 summary assumption changes on this thread; a record keys on it"
+      )
+      private_constant :GENERATION
+
       module_function
 
       def record(node, scope, type)
         TypingState.current.write(LOOPS_EVALUATED, loops_evaluated + 1)
         conditional(node, scope, type)
+      end
+
+      # The current ADR-55 summary generation (#2767), which a record made now carries and a read must match.
+      def generation = TypingState.current[GENERATION] || 0
+
+      # A summary assumption was seeded or changed: no record written before answers a read from now on (#2767).
+      def advance_generation
+        state = TypingState.current
+        state.write(GENERATION, (state[GENERATION] || 0) + 1)
+        state.rewrite(GENERATION)
       end
 
       # How many loops this thread has evaluated, so a conditional can tell whether its evaluation held one.
@@ -52,22 +77,22 @@ module Rigor
       # conditional again from the scope it was evaluated from, and each typing evaluated the loop again from a
       # branch scope of its own, which multiplied the passes of every loop nested in it (issue #2262).
       def conditional(node, scope, type)
-        record = [scope, type]
+        record = [scope, type, generation]
         state = TypingState.current
         state.weak_key_map(RECORD)[node] = record
         state.log_write(RECORD, node, record)
         type
       end
 
-      # The recorded value of `node` evaluated from `scope` itself, or nil.
+      # The recorded value of `node` evaluated from `scope` itself in the current summary generation, or nil.
       def fetch(node, scope)
         state = TypingState.current
         slot = state[RECORD]&.[](node)
         state.log_read(RECORD, node, slot || TypingState::ABSENT)
         return nil if slot.nil?
 
-        recorded, type = slot
-        recorded.equal?(scope) ? type : nil
+        recorded, type, recorded_generation = slot
+        recorded.equal?(scope) && recorded_generation == generation ? type : nil
       end
     end
   end

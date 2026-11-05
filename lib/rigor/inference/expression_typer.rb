@@ -366,12 +366,12 @@ module Rigor
       private_constant :INJECT_ACCUMULATOR
 
       # The accumulator type {#record_inject_accumulator} stored for `block` when the call was typed from `scope`
-      # itself (by identity), else nil.
+      # itself (by identity) in the current ADR-55 summary generation (#2767, {LoopValueRecord.generation}), else nil.
       def self.recorded_inject_accumulator(block, scope)
         state = TypingState.current
         slot = state[INJECT_ACCUMULATOR]&.[](block)
         state.log_read(INJECT_ACCUMULATOR, block, slot || TypingState::ABSENT)
-        slot && slot[0].equal?(scope) ? slot[1] : nil
+        slot && slot[0].equal?(scope) && slot[2] == LoopValueRecord.generation ? slot[1] : nil
       end
 
       # ADR-89 WD2 — the current run's return memo bucket as `{ def_node => [MemoEntry, …] }` (only entries
@@ -3886,6 +3886,7 @@ module Rigor
         summaries[plain_signature] = {
           assumption: Type::Combinator.bot, consulted: false, depth: depth
         }
+        LoopValueRecord.advance_generation
         depth
       end
 
@@ -3898,6 +3899,7 @@ module Rigor
         note_transient_fallback(BudgetTrace::RECURSION_GUARD, own_guard_frame_position)
         scope.record_dynamic_origin(@typing_node, DynamicOrigin::ANALYZER_BUDGET_CUTOFF) if @typing_node
         summaries[plain_signature][:assumption] = Type::Combinator.untyped
+        LoopValueRecord.advance_generation
         Type::Combinator.untyped
       end
 
@@ -3925,6 +3927,7 @@ module Rigor
         return candidate if joined == assumption
 
         summaries[plain_signature][:assumption] = joined
+        LoopValueRecord.advance_generation
         nil
       end
 
@@ -3936,6 +3939,7 @@ module Rigor
         note_transient_fallback(BudgetTrace::RECURSION_FIXPOINT_CAP, own_guard_frame_position)
         scope.record_dynamic_origin(@typing_node, DynamicOrigin::ANALYZER_BUDGET_CUTOFF) if @typing_node
         summaries[plain_signature][:assumption] = Type::Combinator.untyped
+        LoopValueRecord.advance_generation
         Type::Combinator.untyped
       end
 
@@ -5717,7 +5721,7 @@ module Rigor
       # #2412): the map is a run-scoped slot ({TypingState.release_run_scoped}), emptied when the run that filled it
       # ends.
       def record_inject_accumulator(block, type)
-        record = [scope, type].freeze
+        record = [scope, type, LoopValueRecord.generation].freeze
         state = typing_state
         state.weak_key_map(INJECT_ACCUMULATOR)[block] = record
         state.log_write(INJECT_ACCUMULATOR, block, record)

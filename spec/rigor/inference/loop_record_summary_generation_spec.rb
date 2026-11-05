@@ -7,7 +7,8 @@ require "prism"
 # each time under a wider summary assumption. A loop value (`LoopValueRecord`) or an inject accumulator recorded in one
 # iteration matched the next iteration's read by scope identity and answered it with the narrower iterate, so the
 # fixpoint converged on it: `q` below typed `[bot]`. A record now answers only a read in the summary generation it was
-# written in, so the answer is the one typing gives with the records off.
+# written in, so the answer is the one typing gives with the records off. No inject witness is known; the inject record
+# is keyed the same way as a precaution.
 RSpec.describe "loop and inject records across ADR-55 fixpoint iterations (#2767)" do
   programs = {
     "a loop in an array literal" =>

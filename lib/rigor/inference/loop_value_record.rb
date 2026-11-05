@@ -43,7 +43,9 @@ module Rigor
       # assumption, so a value recorded in one iteration would answer an identity-matching read in the next one with
       # the narrower iterate, and the fixpoint would converge on it (`[(while …; break(n.zero? ? 1 : q(n - 1)); end)]`
       # typed `[bot]`). The generation moves whenever a summary's assumption is seeded or changed
-      # ({advance_generation}), and a record answers only a read in the generation it was written in.
+      # ({advance_generation}), and a record answers only a read in the generation it was written in. The advance in
+      # `fixpoint_step` is the one a witness needs (the spec above); the advances at the seed, the entangled degrade
+      # and the cap collapse are precautions, since each leaves no in-flight evaluation of that body scope behind.
       #
       # ADR-129 WD3 — a Resource whose value is fixed while the state id is: every advance is a {TypingState::State#rewrite}.
       GENERATION = TypingState.resource(

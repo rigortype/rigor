@@ -72,6 +72,15 @@ module Rigor
         # Whether `call` is already recorded.
         def recorded?(call) = @seen.include?(call)
 
+        # The bound Table's store protocol ({CALLS}): `true` for a recorded call, else `default`.
+        def fetch(call, default) = @seen.include?(call) || default
+
+        # The bound Table's store protocol: a replayed write records `call` as {#add?} does, so the replay order of a
+        # write slice is the order of {#calls}.
+        def []=(call, _value)
+          add?(call)
+        end
+
         def snapshot
           Record.new(consumer: consumer, calls: calls.dup.freeze)
         end
@@ -122,7 +131,7 @@ module Rigor
           line: line,
           column: column
         )
-        state.log_bound_read(CALLS, accumulator, call, accumulator.recorded?(call) || TypingState::ABSENT)
+        state.log_bound_read(CALLS, accumulator, call, accumulator.fetch(call, TypingState::ABSENT)) if state.capturing?
         state.log_bound_write(CALLS, accumulator, call, true) if accumulator.add?(call)
       end
     end

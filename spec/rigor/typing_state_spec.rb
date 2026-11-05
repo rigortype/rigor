@@ -226,7 +226,7 @@ RSpec.describe Rigor::TypingState do
         end
 
         def touch(slot)
-          check(slot, :touch) { |s| s.kind == :resource || s.contents }
+          check(slot, :touch) { |s| s.kind == :resource || s.contents == :resource }
           @touchers[Rigor::TypingState.slots[slot].name] << toucher
           super
         end

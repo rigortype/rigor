@@ -56,6 +56,33 @@ RSpec.describe "the effects and self-call records as journaled bound Tables (ADR
     expect(records.last[3].resolved).to be(false)
   end
 
+  it "journals an unresolved verdict on a site never recorded as a read of ABSENT and no write" do
+    result = nil
+    Rigor::Effects::Collector.collect_for("probe.rb") do
+      result = captured { Rigor::Effects::Collector.record_unresolved(node, "probe.rb") }
+    end
+    refused, records = result
+    expect(refused).to be(false)
+    expect(records).to eq([[:read, slot(:effects_calls), [records.first[2][0], node], absent]])
+  end
+
+  it "declares the self-call recorder's Frame as holding a bound Table's store" do
+    expect(Rigor::TypingState.slot(:self_call_resolution_recorder).contents).to eq(:table)
+  end
+
+  it "replays a self-call write through the accumulator, in record order" do
+    accumulator = Rigor::Analysis::SelfCallResolutionRecorder::Accumulator.new("probe.rb")
+    calls = %i[a b].map do |name|
+      Rigor::Analysis::SelfCallResolutionRecorder::UnresolvedSelfCall.new(
+        class_name: "Foo", method_name: name, node: node, path: "probe.rb", line: 1, column: 1
+      )
+    end
+    calls.each { |call| accumulator[call] = true }
+    accumulator[calls.first] = true
+    expect(accumulator.calls).to eq(calls)
+    expect(accumulator.fetch(calls.last, absent)).to be(true)
+  end
+
   it "journals a self-call miss's first record as a write, and a repeat of the tuple as a read only" do
     miss = { class_name: "Foo", method_name: :bar, node: node, path: "probe.rb", line: 1, column: 1 }
     result = nil

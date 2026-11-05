@@ -2754,9 +2754,11 @@ module Rigor
         # `self_call_misses` feeds the `call.self-undefined-method` collector; the recorder is inert unless
         # the rule is active or `record_self_calls:` opted in.
         index = nil
+        TypeOfMemo.begin_file
         self_call_record = with_self_call_recording(path) do
           index = Inference::ScopeIndexer.index(parse_result.value, default_scope: scope, widen_clauses: true)
         end
+        TypeOfMemo.phase!(:rule)
         self_call_misses = self_call_record ? self_call_record.calls : []
         diagnostics = rule_and_plugin_diagnostics(path, parse_result, scope, index, self_call_misses)
         notify_file_indexed(path, parse_result, scope, index)
@@ -2781,6 +2783,8 @@ module Rigor
             severity: :error
           )
         ]
+      ensure
+        TypeOfMemo.end_file
       end
 
       # ADR-113 WD2 — the `on_file_indexed` observer. It reads; an error inside it never changes this file's

@@ -330,7 +330,7 @@ module Rigor
 
       # Opens a priors window: until {#close_priors}, the first write of each Table entry notes the value it replaced.
       # Windows nest, and a write is noted in every open window that has not seen its key. A window opens only inside
-      # a capture, since some writers log only while one is open.
+      # a capture, since some writers log only while one is open, and closes before that capture does.
       def open_priors
         raise ArgumentError, "a priors window opens inside a capture" unless capturing?
 

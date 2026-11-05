@@ -4,6 +4,7 @@ require "tmpdir"
 
 require_relative "../../environment"
 require_relative "../../runtime/jit"
+require_relative "../../type_of_memo"
 
 module Rigor
   module Analysis
@@ -164,10 +165,13 @@ module Rigor
         # `exit!` skips `at_exit` / stdio flush; the payload is already durable on disk by then.
         def run_fork_worker(slice, out_path)
           Runtime::Jit.rearm_after_fork
+          TypeOfMemo.forked
           results = slice.to_h { |binding, index| [index, run_one(binding)] }
           File.binwrite(out_path, Marshal.dump(results))
+          TypeOfMemo.write_report
           exit!(0)
         rescue StandardError
+          TypeOfMemo.write_report
           exit!(1)
         end
 

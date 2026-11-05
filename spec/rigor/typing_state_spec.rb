@@ -395,6 +395,100 @@ RSpec.describe Rigor::TypingState do
     end
   end
 
+  # ADR-129 WD1's two Memo rules (G2's Memo row): a Memo miss that writes a Table touches, and so does a read-through
+  # Table's miss that writes another Table; a miss that writes nothing, or only its own read-through Table, does not.
+  describe "a miss that writes a Table (WD1)" do
+    let(:origins) { index(:dynamic_origins) }
+    let(:through) { index(:inject_accumulator) }
+    let(:store) { {}.compare_by_identity }
+
+    def refused_by
+      state.open_capture
+      begin
+        yield
+      ensure
+        refused, = state.close_capture
+      end
+      refused
+    end
+
+    it "touches for a Memo miss that writes a Table, and not for one that writes nothing" do
+      writing = refused_by { state.memo_miss { state.log_bound_write(origins, store, :node, :cause) } }
+      quiet = refused_by { state.memo_miss { state.log_bound_read(origins, store, :node, :cause) } }
+
+      expect([writing, quiet]).to eq([true, false])
+    end
+
+    it "touches for a read-through Table's miss only when it fills its own table and writes another" do
+      key = Object.new
+      fill = -> { state.log_write(through, key, :record) }
+      other = -> { state.log_bound_write(origins, store, :node, :cause) }
+      refused = {
+        own_only: refused_by { state.memo_miss(through) { fill.call } },
+        other_only: refused_by { state.memo_miss(through) { other.call } },
+        both: refused_by { state.memo_miss(through) { other.call || fill.call } }
+      }
+
+      expect(refused).to eq(own_only: false, other_only: false, both: true)
+    end
+
+    it "judges a miss by its own writes, not by writes logged earlier in the capture" do
+      refused = refused_by do
+        state.log_bound_write(origins, store, :earlier, :cause)
+        state.memo_miss { state.log_bound_read(origins, store, :node, :cause) }
+      end
+
+      expect(refused).to be(false)
+    end
+
+    it "touches on the way out of a miss that raised after writing" do
+      refused = refused_by do
+        state.memo_miss { state.log_bound_write(origins, store, :node, :cause) || raise(ArgumentError) }
+      rescue ArgumentError
+        nil
+      end
+
+      expect(refused).to be(true)
+    end
+
+    it "runs a miss with no capture open and answers its value" do
+      expect(state.memo_miss { :value }).to eq(:value)
+    end
+
+    # The miss sites: MemoAudit.key_audit wraps every Memo miss, and the loop and inject records wrap theirs.
+    it "routes MemoAudit.key_audit's miss and the read-through records' misses through the rule" do
+      current = described_class.current
+      refused = lambda do |&miss|
+        current.open_capture
+        miss.call
+        current.close_capture.first
+      end
+      write = -> { current.log_bound_write(origins, store, :node, :cause) }
+
+      fill = -> { current.log_write(index(:loop_value_record), Object.new, :record) }
+
+      expect(refused.call { Rigor::MemoAudit.key_audit("probe") { write.call } }).to be(true)
+      expect(refused.call { Rigor::Inference::LoopValueRecord.miss { write.call || fill.call } }).to be(true)
+      expect(refused.call { Rigor::Inference::LoopValueRecord.miss { write.call } }).to be(false)
+      Rigor::MemoAudit.enable!
+      begin
+        expect(refused.call { Rigor::MemoAudit.key_audit("probe") { write.call } }).to be(true)
+      ensure
+        Rigor::MemoAudit.disable!
+      end
+    end
+
+    # The typer's read-through miss sites: the loop record's two fetch fallbacks and the inject fold.
+    it "wraps each read-through Table's miss in the typer with its own table exempt" do
+      source = File.read(File.expand_path("../../lib/rigor/inference/expression_typer.rb", __dir__))
+
+      expect(source.scan("LoopValueRecord.fetch(node, scope) || LoopValueRecord.miss {").size).to eq(2)
+      expect(source).to include("typing_state.memo_miss(INJECT_ACCUMULATOR) { try_block_inject_fold(")
+      expect(File.read(File.expand_path("../../lib/rigor/inference/loop_value_record.rb", __dir__)))
+        .to include("def miss(&) = TypingState.current.memo_miss(RECORD, &)")
+    end
+  end
+
   # Each Table writer, through its real entry point, logs before it stores or passes the value it replaced, so a
   # priors window notes what was there: an earlier value, or ABSENT for a first write. G1 builds the pre-computation
   # state from these priors, so a wrong one would let a dropped write go unseen.

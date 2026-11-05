@@ -167,18 +167,20 @@ module Rigor
       auditing_state.collect_key_terms(&)
     end
 
-    # The block's value: a memo's miss computation, keyed by `key` ({key}, or nil for a key that reads no Frame) and
-    # declared by `declaration` ({key_declaration}). When the audit is on, a Frame the computation reads that the key
-    # does not carry is a {KeyMismatch} on this thread's list, named by `label` (the slot's `audit:` or `computed:`
-    # label), unless it is internal, forced, carried, a declared gap or a {KEY_AUDIT_SWITCHES} switch.
+    # The block's value: a memo's miss computation, run under ADR-129 WD1's Memo rule
+    # ({TypingState::State#memo_miss}: a miss that writes a Table while a capture is open touches), keyed by `key`
+    # ({key}, or nil for a key that reads no Frame) and declared by `declaration` ({key_declaration}). When the audit
+    # is on, a Frame the computation reads that the key does not carry is a {KeyMismatch} on this thread's list, named
+    # by `label` (the slot's `audit:` or `computed:` label), unless it is internal, forced, carried, a declared gap or
+    # a {KEY_AUDIT_SWITCHES} switch.
     #
     # A computation that raises or throws is not judged, and its audit is closed on the way out. A computation that
     # returns is judged whether or not its memo then stores it (the return memo's WD3 bracket may refuse it), which
     # only reports more. An audit recomputation ({suspended?}) is not judged either, but it still opens the site's
     # declaration, so a gap it declares reaches the audits around it as it does on a miss: the verdict of an enclosing
     # miss does not depend on whether this memo hit.
-    def key_audit(label, declaration = nil, key = nil)
-      return yield unless @enabled
+    def key_audit(label, declaration = nil, key = nil, &)
+      return TypingState.current.memo_miss(&) unless @enabled
 
       state = auditing_state
       declaration ||= NO_DECLARATION
@@ -186,7 +188,7 @@ module Rigor
       terms = state.key_terms_for(key) if judged
       state.open_key_audit(label, declaration.gaps)
       begin
-        value = yield
+        value = state.memo_miss(&)
       ensure
         reads = state.close_key_audit
       end

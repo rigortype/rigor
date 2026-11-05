@@ -496,7 +496,10 @@ module Rigor
 
       # A Resource write, a read the slot does not exempt, or a write to a `contents: :resource` Frame's container:
       # refuses every open capture (the `any` rule, WD3).
-      def touch(_slot)
+      def touch(_slot) = refuse_captures
+
+      # Refuses every open capture: a touch, or a miss that wrote a Table ({#memo_miss}).
+      def refuse_captures
         refused = @refused
         refused.fill(true) unless refused.empty?
         nil
@@ -615,8 +618,47 @@ module Rigor
       # Whether a capture is open.
       def capturing? = !@marks.empty?
 
+      # ADR-129 WD1's two Memo rules: runs a miss computation and refuses every open capture when, while a capture was
+      # open, it wrote what a later hit of an enclosing entry would replay stale:
+      # - a Memo's miss (`own` nil) that wrote an entry of any Table: the Memo, now filled, no longer makes the write,
+      #   and a newer typing may have overwritten it;
+      # - a read-through Table's miss (`own`, its slot) that wrote its own table and another one: reading back its
+      #   own write validates (WD1's read-through rule) while the other write may have been overwritten (the inject
+      #   record's miss writes `dynamic_origins` causes). A miss that did not fill its own table leaves its ABSENT
+      #   read to validate strictly, so its other writes replay only while nothing has changed.
+      # The refusal is made on the way out, a raise included, since the journal keeps what a raising computation wrote.
+      def memo_miss(own = nil)
+        return yield if @marks.empty?
+
+        mark = @journal.size
+        begin
+          yield
+        ensure
+          refuse_captures if wrote_since?(mark, own)
+        end
+      end
+
       # Whether a priors window is open ({#open_priors}).
       def noting_priors? = !@priors.nil?
+
+      # Whether the journal holds, past `mark`, a write to a Table other than `own` and, when `own` is a slot, a write
+      # to `own` too. The journal empties when the outermost capture closes, which a miss computation cannot do to a
+      # capture open at its start.
+      def wrote_since?(mark, own)
+        journal = @journal
+        other = false
+        filled = own.nil?
+        index = mark
+        while index < journal.size
+          if journal[index] == :write
+            journal[index + 1].equal?(own) ? (filled = true) : (other = true)
+            return true if other && filled
+          end
+          index += 4
+        end
+        false
+      end
+      private :wrote_since?
 
       # Empties the slots at `indices` ({TypingState.release_run_scoped}).
       def release(indices)

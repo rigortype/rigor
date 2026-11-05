@@ -3,6 +3,7 @@
 require "json"
 require "prism"
 require_relative "typing_state"
+require_relative "memo_audit"
 
 module Rigor
   # ADR-129 stage 3 — the `ExpressionTyper#type_of` result memo in **shadow** form (WD5's G1, stage-3 form). It keys a
@@ -170,6 +171,9 @@ module Rigor
 
         table = state[TABLE]
         return yield if table.nil?
+
+        # G1′: the memo must not run while a `memo_shut_while_installed` Frame is installed.
+        MemoAudit.note_memo_lookup(state) if MemoAudit.enabled?
 
         phase = callee ? :callee : table.phase
         by_id = (table.entries[scope] ||= {}.compare_by_identity)[node] ||= {}

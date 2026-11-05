@@ -124,6 +124,13 @@ module Rigor
       state.enter_type_of
     end
 
+    # ADR-129 G1′ — the `type_of` memo's shadow reached its table on `state`; the caller guards on {enabled?}. Fails (as
+    # a {Mismatch} on the list, not raised) on an installed `memo_shut_while_installed` Frame.
+    def note_memo_lookup(state)
+      state.extend(TypingState::FrameAudit) unless state.is_a?(TypingState::FrameAudit)
+      state.note_memo_lookup
+    end
+
     # ADR-129 G1′ — the `type_of` {enter_type_of} tracked ends.
     def leave_type_of
       TypingState.current.leave_type_of

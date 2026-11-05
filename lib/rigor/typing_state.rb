@@ -139,6 +139,7 @@ module Rigor
       #   switches).
       def frame(name, reason:, contents: nil, read_exemption: nil, memos: nil, witness: nil, # rubocop:disable Metrics/ParameterLists
                 typing_unreachable: false, typing_never_reads: false, memo_shut_while_installed: false)
+        check_unclaimed(name)
         unless [nil, :resource, :table].include?(contents)
           raise ArgumentError, "#{name}: contents must be :resource, :table or nil"
         end
@@ -232,6 +233,12 @@ module Rigor
 
       private
 
+      def check_unclaimed(name)
+        return unless @slots.any? { |slot| slot.name == name }
+
+        raise ArgumentError, "typing-state slot #{name.inspect} is already declared"
+      end
+
       def g1_declaration(name, witness, typing_unreachable, typing_never_reads, memo_shut_while_installed)
         declared = []
         declared << [:witness, witness] unless witness.nil?
@@ -269,9 +276,7 @@ module Rigor
 
       def declare(name, kind, reason, run_scoped: false, read_exemption: nil, contents: nil, read_through: false, # rubocop:disable Metrics/ParameterLists
                   bound: false, audit: nil, memos: nil, computed: nil, entries: nil, declaration: nil)
-        if @slots.any? { |slot| slot.name == name }
-          raise ArgumentError, "typing-state slot #{name.inspect} is already declared"
-        end
+        check_unclaimed(name)
         raise ArgumentError, "#{name}: a slot names why it is its kind" if reason.to_s.strip.empty?
 
         index = @slots.size
@@ -711,11 +716,19 @@ module Rigor
 
     # ADR-129 G1′'s audit of the Frame declarations, on one {State}: `MemoAudit` extends a thread's state with this
     # module the first time an audited run enters `ExpressionTyper#type_of` ({MemoAudit.enter_type_of}), so a run with
-    # the audit off reads a slot through the plain {State#[]}. It asserts two of the four declarations, each as a
+    # the audit off reads a slot through the plain {State#[]}. It asserts three of the four declarations, each as a
     # {MemoAudit::Mismatch} on the thread's list (not raised):
     # - `typing_unreachable`: a `type_of` entered while such a Frame holds a value;
     # - `typing_never_reads`: a read of such a Frame ({State#[]}, {State#key_frame}, {State#forcing_read}) while a
-    #   `type_of` is running.
+    #   `type_of` is running;
+    # - `memo_shut_while_installed`: the `type_of` memo's shadow ({TypeOfMemo.shadow}) reaching its table while such a
+    #   Frame holds a value ({MemoAudit.note_memo_lookup}).
+    #
+    # **What this module hooks.** The three Frame accessors are the reads a typed answer can come through: {State#[]},
+    # {State#key_frame} and {State#forcing_read}. A new accessor that reads `@values` of a Frame must hook here too, or
+    # a `typing_never_reads` Frame can be read past the audit. The declared slot lists are a snapshot taken when the
+    # state is extended: every Frame is declared at require time, before any audited `type_of`, so a Frame declared
+    # later (a spec's probe) is not asserted.
     module FrameAudit
       # How many `type_of`s are running on this thread, for specs that observe the reads inside them.
       attr_reader :type_of_depth
@@ -751,6 +764,19 @@ module Rigor
         @type_of_depth += 1
       end
 
+      # The `type_of` memo's shadow reached its table: fails on an installed `memo_shut_while_installed` Frame.
+      def note_memo_lookup
+        @memo_shut.each do |slot|
+          next if @values[slot].nil?
+
+          MemoAudit.report_frame_declaration(
+            self, "frame audit: the type_of memo ran while the memo_shut_while_installed Frame " \
+                  "#{TypingState.slots[slot].name} is installed"
+          )
+        end
+        nil
+      end
+
       # The matching `type_of` ends.
       def leave_type_of
         @type_of_depth -= 1
@@ -762,6 +788,7 @@ module Rigor
         @type_of_depth = 0
         @unreachable = TypingState.g1_slots(:typing_unreachable)
         @never_reads = TypingState.g1_slots(:typing_never_reads)
+        @memo_shut = TypingState.g1_slots(:memo_shut_while_installed)
       end
 
       def note_typing_read(slot)

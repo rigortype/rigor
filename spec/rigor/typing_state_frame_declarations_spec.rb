@@ -90,6 +90,10 @@ RSpec.describe "ADR-129 G1' Frame declarations", type: :runner do
       expect(state_module.slots.map(&:name)).not_to include(:g1_probe)
     end
 
+    it "raises a duplicate name before it asks for a declaration" do
+      expect { state_module.frame(:yield_value_type, reason: "x") }.to raise_error(ArgumentError, /already declared/)
+    end
+
     it "records each kind as a frozen [kind, argument] pair" do
       expect(state_module.slot(:threaded_block_body).declaration)
         .to eq([:witness, "spec/fixtures/typing_state_witnesses/threaded_block_body.rb"])
@@ -124,15 +128,44 @@ RSpec.describe "ADR-129 G1' Frame declarations", type: :runner do
       runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: cache_store, workers: 0,
                                            **options)
       guarded_run_source(runner, source: source, path: "code.rb")
-    rescue InternalAnalyzerErrorGuard::AnalyzerCrashed => e
-      # The key audit's own findings on a witness run are not this spec's subject (key_presence_walk's rewalk miss
-      # reads a Frame its key does not carry); any other crash is.
-      raise unless e.message.include?("key audit:")
+    end
+
+    # The key audit's findings a witness run is known to carry, each by its exact message and the issue that tracks it.
+    # Any other crash row of a run, a frame-audit report above all, fails the example.
+    def known_key_audit_findings
+      {
+        "key audit: the key presence rewalk miss read the Frame retry_frames, which its key does not carry" => "#2877",
+        "key audit: the class graph typing def miss read the Frame def_node_resolver_run, which its key does not " \
+        "carry" => "#2874",
+        "key audit: the class graph singleton def miss read the Frame def_node_resolver_run, which its key does not " \
+        "carry" => "#2874"
+      }
+    end
+
+    # Runs the block with the spec guard recording every crash row it is handed instead of raising on the first, and
+    # answers the rows the block's runs produced.
+    def crash_rows_of
+      rows = []
+      allow(InternalAnalyzerErrorGuard).to receive(:check_diagnostics!) do |diagnostics, **|
+        rows.concat(diagnostics.select { |diagnostic| InternalAnalyzerErrorGuard.crash?(diagnostic) })
+        diagnostics
+      end
+      yield
+      rows
+    end
+
+    def known_finding?(row)
+      known_key_audit_findings.keys.any? { |message| row.message.include?("Rigor::MemoAudit::KeyMismatch: #{message}") }
+    end
+
+    # The crash rows of a run that are not a known key-audit finding, and the audit's mismatches no file drained.
+    def unexpected_findings(rows)
+      rows.reject { |row| known_finding?(row) }.map(&:message) + audit.drain.map(&:message)
     end
 
     # An `IncrementalSession` over the fixture's project (the sibling directory of the witness) with the witness as its
     # consumer: after the baseline a file is edited and the recheck types the consumer against handles of the unchanged
-    # files. The key audit's own findings (#2874) are not this spec's subject.
+    # files.
     def run_incremental_witness(path)
       Dir.mktmpdir do |dir|
         FileUtils.cp(Dir.glob(path.sub(/\.rb\z/, "/*.rb")), dir)
@@ -141,20 +174,13 @@ RSpec.describe "ADR-129 G1' Frame declarations", type: :runner do
         environment = Rigor::Environment.for_project
         session = Rigor::Analysis::IncrementalSession.new(configuration: configuration, paths: [dir],
                                                           environment: environment)
-        tolerating_key_audit { guarded_baseline(session) }
+        guarded_baseline(session)
         File.write(File.join(dir, "q.rb"), "module R\nend\n\nmodule Q\n  def tweak = 1\nend\n")
-        tolerating_key_audit { guarded_recheck(session) }
+        guarded_recheck(session)
       end
     end
 
-    def tolerating_key_audit
-      yield
-    rescue InternalAnalyzerErrorGuard::AnalyzerCrashed => e
-      raise unless e.message.include?("key audit:")
-    end
-
     # How a witness's slot is installed, where a plain run does not: the harnesses the engine's own entry points use.
-    # A diagnostic of the run is not asserted: the examples ask only whether typing read the Frame.
     def run_witness(name, path)
       Dir.mktmpdir do |dir|
         sibling = path.sub(/\.rb\z/, ".rbs")
@@ -182,17 +208,55 @@ RSpec.describe "ADR-129 G1' Frame declarations", type: :runner do
     end
 
     # A witness whose Frame typing reads only while it holds nil, and why. The environment builds eagerly, outside any
-    # `type_of`, whenever `core_root:` is configured, so the lazy build that runs inside one has no core root to read.
+    # `type_of`, whenever `core_root:` is configured, so the lazy build that runs inside one has no core root to read
+    # (#2883).
     def nil_only = { rbs_core_root: "a configured core root builds the environment eagerly, outside type_of" }
 
     declared_slots = Rigor::TypingState.slots.select { |slot| slot.kind == :frame && slot.declaration.first == :witness }
     declared_slots.each do |slot|
       it "types #{slot.name} installed and reads it inside type_of", :fresh_rbs_env do
-        run_witness(slot.name, File.join(repo_root, slot.declaration.last))
+        rows = crash_rows_of { run_witness(slot.name, File.join(repo_root, slot.declaration.last)) }
 
+        expect(unexpected_findings(rows)).to be_empty
         observer = TypingStateFrameDeclarationsSpec::ReadObserver
         expect(observer::READ).to include(slot.name)
         expect(observer::SEEN).to include(slot.name) unless nil_only.key?(slot.name)
+      end
+    end
+  end
+
+  describe "an audited sig-gen run" do
+    around do |example|
+      audit.enable!
+      audit.drain
+      example.run
+    ensure
+      audit.drain
+      audit.disable!
+      Rigor::TypingState.release_run_scoped
+    end
+
+    # `rigor sig-gen` indexes each file with the project-wide writer scope installed
+    # ({Rigor::Inference::ScopeIndexer::DeclaredParamWrites.with_writer_scope}), and the census types a declared
+    # parameter's write under it, so a `typing_never_reads` writer scope is read or not read for real here.
+    it "reports no frame-audit finding, with the writer scope installed around the census" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "sig"))
+        FileUtils.mkdir_p(File.join(dir, "lib"))
+        File.write(File.join(dir, "sig", "k.rbs"), "class K\n  def initialize: (String x) -> void\nend\n")
+        File.write(File.join(dir, "lib", "k.rb"),
+                   "class K\n  def initialize(x)\n    @x = x\n  end\n\n  def x = @x\nend\n")
+        configuration = Rigor::Configuration.new(
+          Rigor::Configuration::DEFAULTS.merge("paths" => [File.join(dir, "lib")],
+                                               "signature_paths" => [File.join(dir, "sig")])
+        )
+        census = Rigor::Inference::ScopeIndexer::DeclaredParamWrites
+        allow(census).to receive(:writer_scope).and_call_original
+
+        Rigor::SigGen::Generator.new(configuration: configuration, paths: [File.join(dir, "lib")]).run
+
+        expect(census).to have_received(:writer_scope).at_least(:once)
+        expect(audit.drain.map(&:message).grep(/frame audit:/)).to be_empty
       end
     end
   end
@@ -241,6 +305,42 @@ RSpec.describe "ADR-129 G1' Frame declarations", type: :runner do
       end
     end
 
+    context "with memo_shut_while_installed" do
+      let(:tracer) { slot_index(:flow_tracer) }
+      let(:table) { slot_index(:type_of_memo) }
+      let(:node) { Prism.parse("a.b").value.statements.body.first }
+
+      around do |example|
+        Rigor::TypeOfMemo.enable!
+        state[table] = Rigor::TypeOfMemo::Table.new
+        example.run
+      ensure
+        state[table] = nil
+        Rigor::TypeOfMemo.disable!
+        Rigor::TypeOfMemo.reset
+      end
+
+      def shadow = Rigor::TypeOfMemo.shadow(state, Rigor::Scope.empty, node) { :computed }
+
+      it "reports the memo reaching its table while the Frame is installed" do
+        answer = state.with(tracer, Object.new.freeze) { shadow }
+
+        expect(answer).to eq(:computed)
+        expect(mismatches.map(&:message))
+          .to eq(["frame audit: the type_of memo ran while the memo_shut_while_installed Frame flow_tracer " \
+                  "is installed"])
+      end
+
+      it "reports nothing without the Frame, with it installed as nil, or without a table" do
+        shadow
+        state.with(tracer, nil) { shadow }
+        state[table] = nil
+        state.with(tracer, Object.new.freeze) { shadow }
+
+        expect(mismatches).to be_empty
+      end
+    end
+
     context "with typing_never_reads" do
       let(:slot) { slot_index(:declared_param_writer_scope) }
 
@@ -256,10 +356,20 @@ RSpec.describe "ADR-129 G1' Frame declarations", type: :runner do
           .to eq(["frame audit: the typing_never_reads Frame declared_param_writer_scope was read inside type_of"])
       end
 
-      it "reports a key_frame read and a forcing_read inside a type_of alike" do
+      it "reports a key_frame read inside a type_of" do
         audit.enter_type_of
         begin
           state.key_frame(slot)
+        ensure
+          audit.leave_type_of
+        end
+
+        expect(mismatches.size).to eq(1)
+      end
+
+      it "reports a forcing_read inside a type_of" do
+        audit.enter_type_of
+        begin
           state.forcing_read(slot)
         ensure
           audit.leave_type_of

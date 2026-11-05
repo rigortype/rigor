@@ -9,12 +9,12 @@
 ## Background
 
 ADR-129 WD5's G1' requires every Frame slot to declare a witness fixture, `typing_unreachable`, `typing_never_reads` or
-`memo_shut_while_installed`, with audit mode asserting the middle two. The ADR names the four but not how a slot
+`memo_shut_while_installed`, with audit mode asserting the last three. The ADR names the four but not how a slot
 records one, nor which of the 26 existing Frames is which.
 
 ## Options and trade-offs
 
-- **One `g1` member on `Slot`, a frozen `[kind, argument]` pair** (`[:witness, "path"]`, `[:typing_unreachable, true]`),
+- **One `declaration` member on `Slot`, a frozen `[kind, argument]` pair** (`[:witness, "path"]`, `[:typing_unreachable, true]`),
   set from four mutually exclusive keywords of `TypingState.frame`. A Frame declaring none or two raises at
   declaration. A Table, Resource or Memo carries `nil`. Cost: one more `Slot` member.
 - **Four boolean/String members on `Slot`:** each read is direct, but "exactly one" becomes a cross-field invariant
@@ -22,9 +22,9 @@ records one, nor which of the 26 existing Frames is which.
 - **A separate registry of declarations beside `TypingState`:** keeps `Slot` small, but a Frame could then be declared
   without one, which is the failure this feature exists to prevent.
 
-Where the audit hangs: `ExpressionTyper#type_of` reads `MemoAudit.enabled?` once per call and, when on, enters and
+Where the audit hangs: `ExpressionTyper#type_of` makes one `MemoAudit.enabled?` call per `type_of` and, when on, enters and
 leaves a depth counter on the thread's state (`TypingState::FrameAudit`, extended on first use as `KeyAudit` is), so the
-plain `State#[]` is untouched. A `typing_never_reads` read counts whatever value it answers, nil included.
+plain `State#[]` is untouched. A `typing_never_reads` read counts whatever value it answers, nil included. A `memo_shut_while_installed` Frame is asserted at `TypeOfMemo.shadow`, past its table check, behind the same `MemoAudit.enabled?` test. The witness spec fails a run on any crash row that is not one of three named key-audit findings (#2877's rewalk `retry_frames` read, #2874's two class-graph reads of `def_node_resolver_run`), and runs an audited `sig-gen` so `declared_param_writer_scope` is exercised.
 
 Classification judgment calls, each decided by reading the code that reads the slot and by running the audit over
 `lib`, the memo-audit integration specs and the witness fixtures:
@@ -34,7 +34,7 @@ Classification judgment calls, each decided by reading the code that reads the s
   known class names, which it fetches lazily from the cache, digesting signature files and, on a miss, building the
   environment. Both are witnesses. `rbs_core_root` is a witness that reads only nil: a configured `core_root:` builds
   the environment eagerly, outside any `type_of`, so no fixture makes typing read a non-nil core root. The witness spec
-  records that exception by name. G1 cannot fail it, so the slot is a candidate for a fifth statement or for a
+  records that exception by name and cites [#2883](https://github.com/rigortype/rigor/issues/2883). G1 cannot fail it, so the slot is a candidate for a fifth statement or for a
   `type_of`-time build to be forbidden.
 - `def_node_resolver_run` was first `typing_never_reads`, on negative evidence (no non-nil read inside `type_of` in the
   specs I ran). #2874's `unsettled_chain_incremental_spec` refutes it: under the audit an incremental recheck types a
@@ -52,8 +52,9 @@ Classification judgment calls, each decided by reading the code that reads the s
   `record_dependencies: true`. `self_call_resolution_recorder` and
   `effects_collector` are witnesses: their records are journaled Tables the memo replays, and the ADR names the effects
   switch a witness.
-- `key_presence_walk`'s witness run is reported by the key audit as a `KeyMismatch` (the rewalk miss reads `retry_frames` without a
-  key term) under the audit; the witness spec ignores diagnostics and asks only whether typing read the Frame.
+- `key_presence_walk`'s witness run is reported by the key audit as a `KeyMismatch` (the rewalk miss reads
+  `retry_frames` without a key term, [#2877](https://github.com/rigortype/rigor/issues/2877)); the witness spec names
+  that message exactly and fails on any other crash row.
 
 ## Decision
 
@@ -62,5 +63,5 @@ shape for the slot declarations (a keyword per fact, checked at declaration).
 
 ## To undo
 
-Drop the `g1` member and the four keywords, `TypingState::FrameAudit` with its two calls in `ExpressionTyper#type_of`,
+Drop the `declaration` member and the four keywords, `TypingState::FrameAudit` with its two calls in `ExpressionTyper#type_of`,
 the witness fixtures and their spec. A declaration that proves wrong is changed where its Frame is declared.

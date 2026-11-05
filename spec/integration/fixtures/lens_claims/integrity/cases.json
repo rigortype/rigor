@@ -1,0 +1,62 @@
+[
+  {
+    "request": "unsupported-schema.json",
+    "reason": "unsupported claims schema"
+  },
+  {
+    "request": "unsupported-revision.json",
+    "reason": "unsupported claims revision"
+  },
+  {
+    "request": "unsupported-grammar.json",
+    "reason": "unsupported claims grammar"
+  },
+  {
+    "request": "missing-field.json",
+    "reason": "claim must be a string"
+  },
+  {
+    "request": "duplicate-id.json",
+    "reason": "duplicate claim id"
+  },
+  {
+    "request": "duplicate-file.json",
+    "reason": "duplicate claims file"
+  },
+  {
+    "request": "unlisted-file.json",
+    "reason": "claim file is missing from files"
+  },
+  {
+    "request": "not-target.json",
+    "reason": "claims file is not a target"
+  },
+  {
+    "request": "stale-digest.json",
+    "reason": "stale claims digest"
+  },
+  {
+    "request": "stale-non-ok.json",
+    "reason": "stale claims digest"
+  },
+  {
+    "request": "outside-declaration.json",
+    "reason": "declaration span outside"
+  },
+  {
+    "request": "outside-tag.json",
+    "reason": "tag span outside"
+  },
+  {
+    "request": "invalid-utf8.json",
+    "reason": "claims request is not UTF-8"
+  },
+  {
+    "request": "invalid-json.json",
+    "reason": "cannot read claims request"
+  },
+  {
+    "request": "missing-request.json",
+    "reason": "cannot read claims request"
+  }
+]

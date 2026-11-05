@@ -23,6 +23,12 @@ module Rigor
       Target = Data.define(:argument, :path, :absolute, :status, :reason, :reader, :diagnostics, :inputs)
       Outcome = Data.define(:targets, :member_rows, :plugins, :warm)
 
+      attr_reader :claim_contexts
+
+      def raw_contracts
+        @contract_reader&.raw_contracts || {}
+      end
+
       # @param root — the project root (absolute); every path in the answer is relative to it
       def initialize(configuration:, root:, arguments:, workers:)
         @configuration = configuration
@@ -80,6 +86,7 @@ module Rigor
         @contracts = {}
         @defaulted_blocks = {}
         @site_paths = {}
+        @claim_contexts = {}
       end
 
       # A file requested again, in any spelling, is answered once: the later entries read `duplicate`, naming the
@@ -134,6 +141,7 @@ module Rigor
           end
         end
         @captured[absolute] = reader
+        @claim_contexts[absolute] = scope
       end
 
       # The constant's type as `check` reads it ({Reflection.constant_type_for}): the value the project's source

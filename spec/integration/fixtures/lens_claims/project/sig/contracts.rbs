@@ -1,0 +1,66 @@
+type text = ::String
+type generic_text[T] = ::Array[T]
+
+class Formatter
+  def format: (::String input, mode: ::String) -> ::String
+  def integer: (::Integer) -> ::Integer
+  def union: (::String | ::Integer) -> (::String | ::Integer)
+  def generic: (::Array[::String | ::Integer]) -> ::Array[::Integer | ::String]
+  def response: (::Faraday::Response) -> ::Faraday::Response
+  def project: (::Project::A) -> ::Project::B
+  def unrelated: (::Project::A | ::Project::B) -> (::Project::A | ::Project::B)
+  def dynamic: (::Array[untyped]) -> ::Array[untyped]
+  def unsupported: ([::String]) -> [::String]
+  def optional: (?::String, *::String, ?flag: bool) -> ::String
+  def unmatched: (?::String) -> ::String
+  def keyword: (?value: ::String) -> ::String
+  def overloaded: (::String) -> ::String
+                | (::Integer) -> ::String
+  def forwarding: (?) -> ::String
+  def extended: () -> ::String
+  %a{rigor:v1:return: non-empty-string}
+  %a{rigor:v1:param: value non-empty-string}
+  def refined: (::String value) -> ::String
+  %a{rigor:v1:param: value non-empty-string}
+  def refined_keyword: (value: ::String) -> ::String
+  def boolean: (::TrueClass) -> ::TrueClass
+  def pair: (::String, ::String) -> ::String
+end
+
+module Utilities
+  def self?.callable: () -> ::String
+end
+
+module Project
+  class A
+  end
+  class B < A
+  end
+  class C
+  end
+end
+
+module App
+  class API
+    def shadow: () -> ::String
+  end
+end
+
+module Hidden
+  class API
+    def shadow: () -> ::String
+  end
+end
+
+class Integer
+  def documented: () -> ::String
+end
+
+class Object
+  def top_level: () -> ::String
+end
+
+module Faraday
+  class Response
+  end
+end

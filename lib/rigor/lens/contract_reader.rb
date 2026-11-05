@@ -16,9 +16,13 @@ module Rigor
       # `overloads` hold `{rbs, params, block, return}`; a return the contract leaves to inference is nil there,
       # with `return_inferred` set. `buffers` are the declaring buffer names.
       Contract = Data.define(:overloads, :provenance, :path, :return_inferred, :buffers)
+      RawContract = Data.define(:types, :annotations)
+
+      attr_reader :raw_contracts
 
       def initialize(provenance)
         @provenance = provenance
+        @raw_contracts = {}
       end
 
       # The member's contract, or nil when it has none of its own. `name` is the Ruby method name.
@@ -28,6 +32,7 @@ module Rigor
         return nil if defs.empty?
 
         annotations = annotations_of(method, defs)
+        @raw_contracts[[owner, scope.to_s, name]] = RawContract.new(types: defs.map(&:type), annotations: annotations)
         return nil if annotations.include?(INFERRED_SIGNATURE)
 
         contract(defs, annotations)

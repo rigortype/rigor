@@ -74,9 +74,10 @@ rigor lens [--format text|json] [--config FILE] [--workers N] FILE...
   "revision": 1,
   "producer": { "name": "rigor", "version": "0.4.3", "engine_source": null },
   "context": { "...": "§ Context" },
-  "capabilities": ["class", "module", "method", "attribute", "constant", "module_function", "builder", "alias", "body_return", "diagnostics", "inputs"],
+  "capabilities": ["class", "module", "method", "attribute", "constant", "module_function", "builder", "alias", "body_return", "diagnostics", "inputs", "claims"],
   "files": [ { "...": "§ Files" } ],
-  "members": [ { "...": "§ Members" } ]
+  "members": [ { "...": "§ Members" } ],
+  "claims": null
 }
 ```
 
@@ -86,6 +87,8 @@ rigor lens [--format text|json] [--config FILE] [--workers N] FILE...
   `"unknown"`, may have used different engines.
 - `capabilities` lists the row kinds and optional fields this revision emits. A consumer MUST NOT read
   a missing capability as an empty answer.
+- `claims` is `null` unless `--claims` is passed; its request and response are defined in
+  [`lens-claims.md`](lens-claims.md).
 
 ## Context
 

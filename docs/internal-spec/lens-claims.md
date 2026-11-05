@@ -1,6 +1,6 @@
 # `rigor lens --claims`: documentation claim checking, revision 1
 
-Status: **Accepted contract, not implemented.** This is the binding description of what `rigor lens
+Status: **Implemented, unreleased.** This is the binding description of what `rigor lens
 --claims` will compute and emit. [ADR-113](../adr/113-rigor-lens.md) § "Amendment 2026-11-04" records
 why; the boundary was agreed with ZARD, the first consumer, in
 [#2737](https://github.com/rigortype/rigor/issues/2737). No Rigor release carries it yet. ZARD enables its

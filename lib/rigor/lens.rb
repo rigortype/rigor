@@ -10,7 +10,7 @@ module Rigor
     # Bumped on every breaking change to the `lens/v0` document (docs/internal-spec/lens.md § Status).
     REVISION = 1
     CAPABILITIES = %w[class module method attribute constant module_function builder alias body_return
-                      diagnostics inputs].freeze
+                      diagnostics inputs claims].freeze
 
     module_function
 

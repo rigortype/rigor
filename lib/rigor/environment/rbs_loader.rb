@@ -2736,6 +2736,17 @@ module Rigor
         @state[:closed_alias_translations] ||= {}
       end
 
+      # An independent resolver for a read-only consumer. Its memo belongs to the caller, never the loader cache.
+      def type_name_resolver
+        ::RBS::Resolver::TypeNameResolver.build(env)
+      end
+
+      # The resolved alias declaration, without substituting type arguments or translating its AST.
+      def type_alias_declaration(name)
+        declarations = env&.type_alias_decls
+        declarations&.[](name)&.decl
+      end
+
       # @return the resolved singleton (class object) definition for `class_name`. The
       #   methods on this definition are the *class methods* of `class_name`, including those inherited from
       #   `Class` and `Module` for class types. Returns nil for unknown names and on RBS build errors

@@ -1,0 +1,5 @@
+{
+  "stdout": "",
+  "stderr": "rigor lens: claims file is not a target: extra.rb\nUsage: rigor lens [--format=text|json] [--claims=REQUEST] [--config=PATH] [--workers=N] FILE...\n",
+  "exit_status": 64
+}

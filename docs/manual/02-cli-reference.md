@@ -254,7 +254,7 @@ type provenance (experimental). See
 [Inspecting inferred types](05-inspecting-types.md).
 
 ```sh
-rigor lens [--format=text|json] [--config=PATH] [--workers=N] FILE...
+rigor lens [--format=text|json] [--claims=REQUEST] [--config=PATH] [--workers=N] FILE...
 ```
 
 A lens runs the same incremental analysis as
@@ -264,6 +264,14 @@ A lens runs the same incremental analysis as
 Exit `0` when at least one file has a result, `1` when none
 does, `64` on a usage error; diagnostics in the code never
 change the exit status.
+
+`--claims=REQUEST` checks documentation type claims against authored
+contracts in the same run (unreleased). It requires `--format=json`
+and a UTF-8 JSON request following the
+[claims contract](../internal-spec/lens-claims.md). The `claims`
+section reports each claim's verdict; a conflict does not change
+the exit status. An invalid or stale request exits `64` without a
+document. Claims do not alter analysis, diagnostics or cached types.
 
 ## `rigor trace`
 

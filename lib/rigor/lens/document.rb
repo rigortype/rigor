@@ -24,7 +24,7 @@ module Rigor
       def to_h
         { "schema" => SCHEMA, "revision" => REVISION, "producer" => producer, "context" => context,
           "capabilities" => CAPABILITIES, "files" => @outcome.targets.map { |target| file(target) },
-          "members" => @outcome.member_rows }
+          "members" => @outcome.member_rows, "claims" => nil }
       end
 
       private

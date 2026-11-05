@@ -34,7 +34,8 @@
     "alias",
     "body_return",
     "diagnostics",
-    "inputs"
+    "inputs",
+    "claims"
   ],
   "files": [
     {
@@ -2120,5 +2121,6 @@
         }
       ]
     }
-  ]
+  ],
+  "claims": null
 }

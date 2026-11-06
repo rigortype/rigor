@@ -334,8 +334,11 @@ module Rigor
     def def_node_slot: (untyped class_name, untyped method_name, ?Symbol kind) -> untyped
     def user_def_for: (String | Symbol class_name, String | Symbol method_name) -> ::Prism::DefNode?
     def user_def_through_ancestors: (String | Symbol class_name, String | Symbol method_name, ?name_memo: Hash[untyped, untyped]) -> ([::Prism::DefNode, String] | [nil, nil])
+    # Returns `[opaque_flag, recorder_keys]`. Steep cannot verify the tuple through the `Array#freeze`
+    # on the returned literal and reports a MethodBodyTypeMismatch warning; the declaration keeps the
+    # precise shape because `rigor sig-gen` proves it (#2718).
     def subclassing_opacity: () -> [false | true, Array[untyped]]
-    def user_instance_def_owners: (untyped) -> Array[untyped]
+    def user_instance_def_owners: (untyped) -> Array[Array[untyped]]
     def discovered_method_through_ancestors?: (String | Symbol? class_name, String | Symbol method_name, Symbol kind, ?name_memo: Hash[untyped, untyped]) -> bool
     def external_ancestor_name_candidates: (String | Symbol class_name, ?name_memo: Hash[untyped, untyped]) -> Array[Array[String]]
     def enqueue_ancestors: (String current, Array[String] queue, Hash[untyped, untyped] name_memo, ?mixins: bool) -> void

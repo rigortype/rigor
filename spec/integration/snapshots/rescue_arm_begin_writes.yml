@@ -12,3 +12,4 @@ assertions:
   '9': Integer
   '10': '"s"?'
   '11': Dynamic[top]
+  '12': '"s"?'

@@ -189,7 +189,9 @@ RSpec.describe "a declared `def self.new` types `X.new` (#2884)" do
   it "stops at an `extend`ed module whose RBS declares `def new`, which Ruby runs ahead of the superclass's" do
     expect(dumps(run_check("t.rb" => <<~RUBY))).to eq(%w[Z1 Z2])
       class X; end
-      module SourcedNewMixin; end
+      module SourcedNewMixin
+        def helper = 1
+      end
       class Z1 < X
         extend NewMixin
       end

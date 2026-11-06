@@ -2191,6 +2191,96 @@ module Rigor
         core_stdlib_classes.include?(class_name.to_s.delete_prefix("::"))
       end
 
+      # Issue #2884 — true when every declaration of `method_definition` (an `RBS::Definition::Method`) is in a named
+      # buffer outside the `rbs` gem's `core/` and `stdlib/` trees: a project, gem or collection signature wrote it.
+      # Attributed by buffer name, as {#core_or_stdlib_class?} is; a declaration whose buffer name is lost (an old
+      # environment blob's `<cached>` sentinel) answers false, which switches the caller's feature off.
+      def declared_outside_core_stdlib?(method_definition)
+        roots = core_stdlib_roots
+        type_defs = method_definition.defs
+        return false if roots.empty? || type_defs.empty?
+
+        type_defs.all? do |type_def|
+          name = self.class.declaration_buffer_name(type_def.member)
+          !name.nil? && roots.none? { |root| name.start_with?(root) }
+        end
+      end
+
+      # Issue #2884 — true when `method_definition`, a class's singleton `new`, is one `X.new` answers through: every
+      # definition is an explicit `def self.new` (not the `new` `RBS::DefinitionBuilder` derives from `initialize`,
+      # which returns the declaring class), written outside core / stdlib ({#declared_outside_core_stdlib?}), on a
+      # class core / stdlib does not declare (a project signature reopening `String` does not change `String.new`).
+      def honoured_singleton_new?(method_definition)
+        method_definition.defs.all? { |type_def| explicit_singleton_new_member?(type_def.member) } &&
+          declared_outside_core_stdlib?(method_definition) &&
+          !core_or_stdlib_class?(method_definition.defined_in.to_s)
+      end
+
+      def explicit_singleton_new_member?(member)
+        member.is_a?(::RBS::AST::Members::MethodDefinition) && member.name == :new && member.kind != :instance
+      end
+      private :explicit_singleton_new_member?
+
+      # Issue #2884 — true when `method_definition`, a singleton `new`, answers what `Nominal[receiver]` answers for
+      # every receiver that inherits it: each overload returns `instance`, untyped, `top`, `bot` or `void`, or the
+      # declaring class itself, compared by its resolved full name. `self` is the receiver's class object, not its
+      # instance, so it does not count. The dispatcher answers `Nominal[receiver]` for an inherited declaration this
+      # holds of, and {#singleton_new_departs_from_instance?} is built from the same test, so the two cannot drift.
+      def answers_instance_for_subclass?(method_definition)
+        owner = method_definition.defined_in.to_s.delete_prefix("::")
+        method_definition.method_types.all? do |method_type|
+          returned = method_type.type.return_type
+          INSTANCE_LIKE_RETURNS.any? { |base| returned.is_a?(base) } ||
+            (returned.is_a?(::RBS::Types::ClassInstance) && returned.name.to_s.delete_prefix("::") == owner)
+        end
+      end
+
+      INSTANCE_LIKE_RETURNS = [
+        ::RBS::Types::Bases::Instance, ::RBS::Types::Bases::Any, ::RBS::Types::Bases::Top,
+        ::RBS::Types::Bases::Bottom, ::RBS::Types::Bases::Void
+      ].freeze
+      private_constant :INSTANCE_LIKE_RETURNS
+
+      # Issue #2884 — true when some class declares a {#honoured_singleton_new?} `new` that is not
+      # {#answers_instance_for_subclass?}: only such a declaration answers a Ruby subclass with something other than
+      # the `Nominal[subclass]` the dispatcher gives without one, so the dispatcher walks a subclass's ancestry, and
+      # files that walk's dependency edges, only when this holds. Memoised per loader: one pass over `class_decls` for
+      # the classes whose own non-core declaration writes `def self.new`, then their definitions.
+      def singleton_new_departs_from_instance?
+        return @state[:singleton_new_departs] if @state.key?(:singleton_new_departs)
+
+        @state[:singleton_new_departs] = scan_singleton_new_departs
+      end
+
+      def scan_singleton_new_departs
+        during_internal_demand do
+          singleton_new_declarers.any? do |class_name|
+            definition = singleton_method(class_name: class_name, method_name: :new)
+            definition && honoured_singleton_new?(definition) && !answers_instance_for_subclass?(definition)
+          end
+        end
+      rescue ::RBS::BaseError
+        true
+      end
+      private :scan_singleton_new_departs
+
+      def singleton_new_declarers
+        environment = env
+        roots = core_stdlib_roots
+        return [] if environment.nil? || roots.empty?
+
+        environment.class_decls.filter_map do |type_name, entry|
+          declares = self.class.entry_declarations(entry).any? do |decl|
+            name = self.class.declaration_buffer_name(decl)
+            next false if name.nil? || roots.any? { |root| name.start_with?(root) }
+
+            decl.members.any? { |member| explicit_singleton_new_member?(member) }
+          end
+          type_name.to_s if declares
+        end
+      end
+      private :singleton_new_declarers
+
       # True when `class_name`'s RBS declaration is one the project wrote (see {#project_declared_classes}).
       def project_declared_class?(class_name)
         project_declared_classes.include?(class_name.to_s.delete_prefix("::"))

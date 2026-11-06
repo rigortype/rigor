@@ -19,6 +19,7 @@ require_relative "method_dispatcher/shape_dispatch"
 require_relative "method_dispatcher/data_folding"
 require_relative "method_dispatcher/struct_folding"
 require_relative "method_dispatcher/rbs_dispatch"
+require_relative "method_dispatcher/declared_constructor"
 require_relative "method_dispatcher/iterator_dispatch"
 require_relative "method_dispatcher/arithmetic_sequence_elements"
 require_relative "method_dispatcher/reduce_folding"
@@ -1405,7 +1406,13 @@ module Rigor
         class_new_lift = class_new_lift(receiver_type.class_name, arg_types, context)
         return class_new_lift if class_new_lift
 
-        Type::Combinator.nominal_of(receiver_type.class_name)
+        declared_or_nominal(receiver_type.class_name, context)
+      end
+
+      # Issue #2884 — the `meta_new` tail: a declared `def self.new` ({DeclaredConstructor}), else `Nominal[X]`.
+      def declared_or_nominal(class_name, context)
+        declared = context && DeclaredConstructor.try_dispatch(class_name, context)
+        declared || Type::Combinator.nominal_of(class_name)
       end
 
       # `Struct.new(:a, :b)` synthesises an anonymous Struct *subclass* (a class object), not a

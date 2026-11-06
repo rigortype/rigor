@@ -306,6 +306,25 @@ module Rigor
           OBJECT_SURFACE_OWNERS.include?(method_definition.defined_in.to_s.delete_prefix("::"))
         end
 
+        # A class object carries no type arguments, so a singleton declaration binds none from the receiver.
+        NO_RECEIVER_TYPE_VARS = {}.freeze
+        private_constant :NO_RECEIVER_TYPE_VARS
+
+        # Issue #2884 — the return of a call on `Singleton[class_name]` through `method_definition`, a singleton
+        # declaration {DeclaredConstructor} found on `class_name` or an ancestor, so `instance` and `self` read
+        # `class_name` whichever class wrote it. Nil when the declaration states no return
+        # (`%a{rigor:v1:inferred-return}`).
+        def declared_singleton_return(context, method_definition, class_name)
+          return nil if RbsExtended.inferred_return?(method_definition)
+
+          translate_return_type(
+            method_definition,
+            class_name: class_name, kind: :singleton, method_name: context.method_name, args: context.args || [],
+            type_vars: NO_RECEIVER_TYPE_VARS, block_type: context.block_type, environment: context.environment,
+            scope: context.scope, call_node: context.call_node
+          )
+        end
+
         # rubocop:disable-next Metrics/ClassLength
         class << self
           private

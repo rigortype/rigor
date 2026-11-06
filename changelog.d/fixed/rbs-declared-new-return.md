@@ -1,0 +1,3 @@
+- **[inference]** `X.new` now takes its type from a `def self.new` that a project or gem signature declares. ([#2899](https://github.com/rigortype/rigor/pull/2899))
+  - `class X; def self.new: () -> Y; end` typed `X.new` as `X`, so `X.new.hello` reported `call.undefined-method` on code Ruby runs; it is now `Y`. A Ruby subclass with no signature of its own inherits the declaration, and `instance` in it names the subclass.
+  - A `self.new` from Ruby's own core or stdlib signatures (`Ractor.new`, `Tempfile.new`) is not applied to a subclass, and a declaration with an untyped return, or whose overloads do not take the arguments, keeps the old `X` answer.

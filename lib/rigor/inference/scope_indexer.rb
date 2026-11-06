@@ -9914,7 +9914,7 @@ module Rigor
       # @return `{ classes:, def_index:, bundles: }`.
       # @param uncertain — issue #2021: as {#discovered_project_index_for_paths}. Such a file is always re-walked and
       #   keeps no bundle, since a bundle does not record that its contributions were all possible.
-      def discovered_project_index_incremental(paths, seed_bundles:, buffer: nil, uncertain: EMPTY_PATH_SET) # rubocop:disable Metrics/AbcSize
+      def discovered_project_index_incremental(paths, seed_bundles:, buffer: nil, uncertain: EMPTY_PATH_SET) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
         classes = {}
         acc = new_def_index_accumulator
         bundles = {}

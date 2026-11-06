@@ -2779,15 +2779,12 @@ module Rigor
           )
         ]
       rescue StandardError, SystemStackError => e
-        # A C-level overflow (no backtrace) is not contained: see {Inference::ScopeIndexer.uncontainable_overflow?}.
-        raise if e.is_a?(SystemStackError) && e.backtrace.nil?
-
         [
           Diagnostic.new(
             path: path,
             line: 1,
             column: 1,
-            message: CrashSignature.check_rule_message(e, parse_result&.value),
+            message: CrashSignature.contained_message!(e, parse_result),
             severity: :error
           )
         ]

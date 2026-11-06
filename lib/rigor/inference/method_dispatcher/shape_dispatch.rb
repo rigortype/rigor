@@ -327,12 +327,22 @@ module Rigor
           # {ConstantFolding}): the receiver's members and the argument's elements, typed as #2290 types a
           # `Set[...]` literal over non-constant members ({SetFolding.typed_set}).
           def dispatch_constant_set(constant, method_name, args)
+            return constant_set_first(constant) if method_name == :first && args.empty? && Inference::SetMutation.constant?(constant)
             return nil unless SET_UNION_ALGEBRA.include?(method_name) && args.size == 1
             return nil unless Inference::SetMutation.constant?(constant)
 
             members = constant.value.map { |v| Type::Combinator.constant_of(v) }
             SetFolding.typed_set(members + Inference::SetMutation.element_types(args.first)) ||
               Type::Combinator.nominal_of("Set", type_args: [Type::Combinator.untyped])
+          end
+
+          # Issue #2657 — `Set#first` (no argument) on a constant-folded Set. The carrier is the literal's members in
+          # insertion order, and every mutator (`clear`, `delete`, `<<`, ...) widens it to a typed Set through
+          # {Inference::SetMutation}, aliases and callee escapes included, so a `Constant[Set]` still seen at the call is
+          # the set as built: its first member is the answer, `nil` only for the empty set. RBS alone answers
+          # `E?` over a constant receiver whose `E` is unbound, so `Set["r"].first` read `Dynamic[top]?`.
+          def constant_set_first(constant)
+            Type::Combinator.constant_of(constant.value.first)
           end
 
           # `Integer#to_s` / `Integer#inspect` (#993) on a bare `Nominal[Integer]` receiver, ahead of the

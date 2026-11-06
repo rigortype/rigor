@@ -1,2 +1,2 @@
-- **[inference]** `Set#first` on a literal Set no longer reads `Dynamic[top]?`. ([#2912](https://github.com/rigortype/rigor/pull/2912))
-  - `s = Set["r"]; Sink.new.mode(s.first)` against `mode: ("r" | "w") -> void` reported `call.argument-type-mismatch`; `first` is now `"r"` while the set is as built, and still `nil`-bearing after `clear` or `delete`.
+- **[inference]** `Set#first` on a literal Set held in a local no longer reads `Dynamic[top]?`. ([#2912](https://github.com/rigortype/rigor/pull/2912))
+  - `s = Set["r"]; Sink.new.mode(s.first)` against `mode: ("r" | "w") -> void` reported `call.argument-type-mismatch`; `first` is now `"r"` while nothing else can reach the local, and keeps the old answer once the local is captured by a block, passed on, or mutated.

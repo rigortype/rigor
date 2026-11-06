@@ -25,11 +25,11 @@ RSpec.describe "a class-test block narrows only a core finder (#2719)", type: :r
       require "rigor/testing"
       include Rigor::Testing
       class Repo
-        def find = yield(1) ? 1.5 : nil
+        def find = yield(1) ? [1.5, 2].sample : nil
       end
       r = Repo.new.find { |x| x.is_a?(Integer) }
-      assert_type("1.5?", r)
-      r.nan? if r
+      assert_type("1.5 | 2 | nil", r)
+      r.to_f if r
     RUBY
     expect(diagnostics(source)).to eq([])
   end
@@ -42,7 +42,7 @@ RSpec.describe "a class-test block narrows only a core finder (#2719)", type: :r
       class Repo
         def find = yield("s") ? 1.5 : nil
       end
-      assert_type("Numeric?", Repo.new.find { |x| x.is_a?(String) })
+      assert_type("Numeric?", Repo.new.find { |x| x.is_a?(Integer) })
     RUBY
     expect(diagnostics(source, sig: sig)).to eq([])
   end

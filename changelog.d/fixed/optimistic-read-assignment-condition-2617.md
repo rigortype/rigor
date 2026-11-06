@@ -1,0 +1,1 @@
+- **[inference]** `if (v = h[k])` no longer reports a false `flow.always-truthy-condition` when the read is an optimistic nil-free lookup that can miss. ([#2917](https://github.com/rigortype/rigor/pull/2917))

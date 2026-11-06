@@ -83,6 +83,11 @@ RSpec.describe "A non-literal define_method and call.undefined-method (#2793)" d
     expect(undefined_messages).to eq(["undefined method `h' for IE"])
   end
 
+  it "opens the class for a define_method written with an explicit self receiver" do
+    write_project("class SelfDm\n  [:sd].each { |m| self.define_method(m) { 1 } }\nend\n", %w[SelfDm.new.sd])
+    expect(undefined_messages).to be_empty
+  end
+
   it "does not open the class for a define_method on another receiver" do
     write_project("class Other\nend\nclass Host\n  m = :x\n  Other.define_method(m) { 1 }\nend\n", %w[Host.new.x])
     expect(undefined_messages).to eq(["undefined method `x' for Host"])

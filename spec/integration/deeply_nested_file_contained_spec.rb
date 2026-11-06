@@ -57,8 +57,8 @@ RSpec.describe "a file nested too deeply to analyse is contained to that file (#
     out = StringIO.new
     argv = ["--no-ci-detect", "--no-stats", "--no-baseline", "--no-cache", "--format", "json", *flags]
     Rigor::CLI::CheckCommand.new(argv: argv, out: out, err: StringIO.new).run
-    JSON.parse(out.string).fetch("diagnostics").map { |d| d.fetch("message") }
-      .select { |m| m.start_with?("internal analyzer error") }.sort
+    messages = JSON.parse(out.string).fetch("diagnostics").map { |d| d.fetch("message") }
+    messages.select { |m| m.start_with?("internal analyzer error") }.sort
   end
 
   it "says the file is nested too deeply, with no overflow frame, the same in every mode" do
@@ -86,7 +86,8 @@ RSpec.describe "a file nested too deeply to analyse is contained to that file (#
     out = StringIO.new
     argv = ["check", "--verify-incremental", "--no-stats", "--no-ci-detect", "--no-baseline", "."]
     status = Rigor::CLI.new(argv, out: out, err: StringIO.new).run
-    expect([status, out.string]).to satisfy { |(code, text)| code.zero? && text.include?("--verify-incremental OK") }
+    expect(status).to eq(0)
+    expect(out.string).to include("--verify-incremental OK")
   end
 
   it "folds a file that overflows into no discovery table, in the full and the incremental pass alike" do
@@ -117,7 +118,8 @@ RSpec.describe "a file nested too deeply to analyse is contained to that file (#
     File.write("deep.rb", "x = #{'[' * 10_000}1#{']' * 10_000}\n")
     _, err, status = Open3.capture3(RbConfig.ruby, File.expand_path("../../exe/rigor", __dir__), "check", "--no-cache",
                                     "--no-ci-detect", "deep.rb", stdin_data: "")
-    expect([status.exitstatus, err]).to satisfy { |(code, text)| code == 70 && text.include?("could not finish this run") }
+    expect(status.exitstatus).to eq(70)
+    expect(err).to include("could not finish this run")
   end
 
   it "analyses a file just below the threshold normally (control)" do

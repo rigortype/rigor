@@ -113,8 +113,8 @@ module Rigor
       end
 
       # #2455 — the AST depth above which a `SystemStackError` is read as the file's own nesting rather than a Rigor
-      # recursion defect. The recursive walkers overflow from about 700 nested `if`s (twice as many AST levels) and 1,300
-      # nested array literals or chained calls, so a file past this bound is one they cannot be expected to walk.
+      # recursion defect. The recursive walkers overflow from about 700 nested `if`s (twice as many AST levels) and
+      # 1,300 nested array literals or chained calls, so a file past this bound is one they cannot be expected to walk.
       DEEP_NESTING_BOUND = 500
 
       DEEP_NESTING_DETAIL = "this file is nested too deeply to analyse (stack level too deep); " \

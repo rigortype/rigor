@@ -9849,11 +9849,11 @@ module Rigor
           # once the whole file walked, so a file that overflows the stack contributes none of either (#2455).
           file_classes = {}
           collect_class_decls(root, [], file_classes)
-          if uncertain.include?(path)
-            file_index = without_written_slots(build_file_index(path, root, uncertain: true), acc)
-          else
-            file_index = build_file_index(path, root)
-          end
+          file_index = if uncertain.include?(path)
+                         without_written_slots(build_file_index(path, root, uncertain: true), acc)
+                       else
+                         build_file_index(path, root)
+                       end
           fold_file_index(acc, file_index)
           classes.merge!(file_classes)
         rescue DeclarationWalk::ContractError
@@ -9867,8 +9867,9 @@ module Rigor
         finalize_project_index(classes, acc)
       end
 
-      # #2455 — a `SystemStackError` raised from C (`Prism.parse` of a source nested near its own cap) has no backtrace and
-      # leaves the process unable to survive a second one, so it is not contained: it keeps the run-level abort.
+      # #2455 — a `SystemStackError` raised from C (`Prism.parse` of a source nested near its own cap) has no
+      # backtrace and leaves the process unable to survive a second one, so it is not contained: it keeps the
+      # run-level abort.
       def uncontainable_overflow?(error)
         error.is_a?(SystemStackError) && error.backtrace.nil?
       end

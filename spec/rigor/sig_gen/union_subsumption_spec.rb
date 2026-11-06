@@ -47,7 +47,8 @@ RSpec.describe "sig-gen union subsumption" do
     sig = File.join(tmpdir, "sig")
     FileUtils.mkdir_p([lib, sig])
     File.write(File.join(sig, "sub.rbs"), "class Sub\n  def m: (untyped f) -> Exception\nend\n")
-    File.write(File.join(lib, "sub.rb"), body_returning("f ? StandardError.new : ArgumentError.new").sub("(f, g)", "(f)"))
+    File.write(File.join(lib, "sub.rb"),
+               "class Sub\n  def m(f) = f ? StandardError.new : ArgumentError.new\nend\n")
     configuration = Rigor::Configuration.new(
       Rigor::Configuration::DEFAULTS.merge("paths" => [lib], "signature_paths" => [sig])
     )

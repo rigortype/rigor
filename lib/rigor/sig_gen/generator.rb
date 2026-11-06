@@ -2244,7 +2244,9 @@ module Rigor
         return type if plain.size < 2
 
         kept = type.members.reject do |m|
-          plain.include?(m) && plain.any? { |o| !o.equal?(m) && @environment.class_ordering(m.class_name, o.class_name) == :subclass }
+          plain.include?(m) && plain.any? do |o|
+            !o.equal?(m) && @environment.class_ordering(m.class_name, o.class_name) == :subclass
+          end
         end
         kept.size == type.members.size ? type : Type::Combinator.union(*kept)
       end

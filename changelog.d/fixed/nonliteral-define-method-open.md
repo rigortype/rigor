@@ -1,0 +1,3 @@
+- **[check]** `call.undefined-method` no longer fires on a class whose body calls `define_method` with a computed name. ([#2897](https://github.com/rigortype/rigor/pull/2897))
+  - `%i[a b].each { |m| define_method(m) { } }` in a class with a `sig/` declaration reported `undefined method 'a'`. The class's instance side now reads as open, as it does for a source `method_missing`, and so does a subclass or another file that reopens the class.
+  - A `define_method` in a `class << self` body opens the class object only. One in a `Class.new { }` or `Struct.new { }` body, or in another receiver's `instance_eval`, opens that class rather than the enclosing one.

@@ -33,3 +33,13 @@ class RQ
 end
 
 RB.attr_writer :q
+
+# A class-body `@x = nil` writes the class object's ivar, so it does not exempt `@x` from the read-before-write `nil`
+# when only an explicit-receiver `define_method` block writes it: Ruby 4.0.5 gives `K.new.instance_variable_get(:@x)`
+# as `nil` before `set`, and "a" after.
+class RK
+  @x = nil
+  def get = assert_type("\"a\"?", @x)
+end
+
+RK.define_method(:set) { @x = "a" }

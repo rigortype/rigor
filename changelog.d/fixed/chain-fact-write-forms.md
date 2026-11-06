@@ -1,0 +1,2 @@
+- **[inference]** A compound, multiple-assignment or `for` write through a receiver now ends an `is_a?` narrowing of its reader. ([#2911](https://github.com/rigortype/rigor/pull/2911))
+  - After `return unless x.r.is_a?(Integer)`, the writes `x.r &&= nil`, `x.r ||= v`, `x.r += 1`, `x.r, y = nil, 1` and `for x.r in list` left `x.r` read as `Integer`; it now reads its declared type again, as after a plain `x.r = nil`.

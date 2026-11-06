@@ -1,0 +1,1 @@
+- **[internal]** The Steepfile now declares `library "prism"`, so `::Prism::*` types in `sig/` no longer report `UnknownTypeName` under `make steep-check`; the two `scope.rb` warnings it surfaced are fixed and one known Steep limitation is recorded. ([#2895](https://github.com/rigortype/rigor/pull/2895))

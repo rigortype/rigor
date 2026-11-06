@@ -57,6 +57,10 @@ RSpec.describe "a declared `def self.new` types `X.new` (#2884)" do
     class SigOnly
       def self.new: () -> Y
     end
+
+    module SigMixin
+      def helper: () -> Integer
+    end
   RBS
 
   def run_check(lib)
@@ -139,6 +143,24 @@ RSpec.describe "a declared `def self.new` types `X.new` (#2884)" do
     expect(dumps(run_check("t.rb" => "class Q < SigOnly; end\ndump_type(Q.new)\n"))).to eq(%w[Y])
   end
 
+  it "passes an `extend`ed module that does not define `new`, RBS-known or external" do
+    expect(dumps(run_check("t.rb" => <<~RUBY))).to eq(%w[Y Y])
+      require "forwardable"
+      class X; end
+      module SigMixin
+        def helper = 1
+      end
+      class Z1 < X
+        extend Forwardable
+      end
+      class Z2 < X
+        extend SigMixin
+      end
+      dump_type(Z1.new)
+      dump_type(Z2.new)
+    RUBY
+  end
+
   it "selects an overload by argument, and answers `Nominal[X]` when no overload takes the arguments" do
     expect(dumps(run_check("t.rb" => <<~RUBY))).to eq(%w[Y O2 O])
       class O; end
@@ -190,6 +212,32 @@ RSpec.describe "a declared `def self.new` types `X.new` (#2884)" do
         dump_type(P.new(x: 1))
         dump_type(S.new(1))
       RUBY
+    end
+  end
+
+  describe "the ADR-46 edges of the answer" do
+    def ancestry_sources(lib)
+      FileUtils.mkdir_p("lib")
+      FileUtils.mkdir_p("sig")
+      File.write(File.join("sig", "x.rbs"), "class X\n  def self.new: () -> Y\nend\nclass Y\nend\n")
+      lib.each { |name, source| File.write(File.join("lib", name), source) }
+      configuration = Rigor::Configuration.new(
+        Rigor::Configuration::DEFAULTS.merge("paths" => %w[lib], "signature_paths" => %w[sig], "workers" => 0)
+      )
+      runner = Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil, record_dependencies: true)
+      guarded_run(runner, %w[lib])
+      record = runner.file_dependencies.find { |path, _| File.basename(path) == "caller.rb" }&.last
+      record ? record.ancestry_sources.map { |path| File.basename(path) } : []
+    end
+
+    it "files the walked chain when the declaration answers, so an edit to the subclass re-checks the call" do
+      expect(ancestry_sources("model.rb" => "class X; end\nclass Z < X; end\n", "caller.rb" => "Z.new\n"))
+        .to include("model.rb")
+    end
+
+    it "files nothing for a class whose `new` stays `Nominal[X]`, as before" do
+      expect(ancestry_sources("model.rb" => "class Widget; end\n", "caller.rb" => "Widget.new\n"))
+        .not_to include("model.rb")
     end
   end
 end

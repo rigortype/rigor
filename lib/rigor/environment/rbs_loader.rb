@@ -2206,36 +2206,6 @@ module Rigor
         end
       end
 
-      # Issue #2884 — true when some class or module the environment loads declares `def self.new` in a signature
-      # outside core / stdlib ({#declared_outside_core_stdlib?}'s attribution). Gates the dispatcher's walk of a
-      # Ruby-source class's superclasses, so a project with no such declaration files no ancestry edge for every
-      # `Widget.new`. Memoised per loader; one pass over `class_decls`.
-      def declares_singleton_new_outside_core_stdlib?
-        return @state[:singleton_new_outside_core_stdlib] if @state.key?(:singleton_new_outside_core_stdlib)
-
-        @state[:singleton_new_outside_core_stdlib] = scan_singleton_new_outside_core_stdlib
-      end
-
-      def scan_singleton_new_outside_core_stdlib
-        environment = env
-        roots = core_stdlib_roots
-        return false if environment.nil? || roots.empty?
-
-        environment.class_decls.each_value.any? do |entry|
-          self.class.entry_declarations(entry).any? do |decl|
-            name = self.class.declaration_buffer_name(decl)
-            next false if name.nil? || roots.any? { |root| name.start_with?(root) }
-
-            decl.members.any? do |member|
-              member.is_a?(::RBS::AST::Members::MethodDefinition) && member.name == :new && member.kind != :instance
-            end
-          end
-        end
-      rescue ::RBS::BaseError
-        false
-      end
-      private :scan_singleton_new_outside_core_stdlib
-
       # True when `class_name`'s RBS declaration is one the project wrote (see {#project_declared_classes}).
       def project_declared_class?(class_name)
         project_declared_classes.include?(class_name.to_s.delete_prefix("::"))

@@ -22,13 +22,18 @@ module Rigor
       # keeps the `Nominal` answer the curated tiers were written around.
       #
       # The declaration is found on `X`'s own RBS (which carries its RBS ancestors' singleton methods), or, for a
-      # Ruby-source class with no RBS of its own, on the first RBS-known class of its discovered superclass chain. A
-      # source class on that chain that writes its own `def self.new` ends the walk with no answer: that method is
-      # the one Ruby runs. `instance` and `self` in the declared return read the receiver class.
+      # Ruby-source class with no RBS of its own, on the first RBS-known class of its singleton
+      # {Scope::ResolutionChain}. A project entry ahead of it that defines `new` ends the walk with no answer: that
+      # method is the one Ruby runs. `instance` and `self` in the declared return read the receiver class.
       #
       # Nil (so `Nominal[X]`) when no overload takes the arguments (argument checking of `.new` is not this tier's
       # job), and when the return translates to an untyped, `top` or `bot` answer, which would lose the precision
       # `Nominal[X]` already has.
+      #
+      # The chain walk's ADR-46 reads are withheld and replayed only when this tier answers, as `call.wrong-arity`
+      # does (#992): the walk runs for every `Widget.new` on a project class, and filing its class edges for the
+      # `Nominal[X]` answer `meta_new` gave without reading anything would make each such call an ancestry
+      # dependent of the class's files.
       module DeclaredConstructor
         # A project entry of the singleton chain defines `new` in Ruby source, so that method is the one Ruby runs.
         DEFINED_IN_SOURCE = :defined_in_source
@@ -41,18 +46,23 @@ module Rigor
           loader = environment&.rbs_loader
           return nil if loader.nil? || !loader.respond_to?(:declared_outside_core_stdlib?)
 
-          definition = declared_new(class_name, environment, loader, context.scope)
+          definition, reads = Analysis::DependencyRecorder.withhold do
+            declared_new(class_name, environment, loader, context.scope)
+          end
           return nil if definition.nil? || !overload_matches?(definition, class_name, context)
 
           answer = RbsDispatch.declared_singleton_return(context, definition, class_name)
-          answer if usable?(answer)
+          return nil unless usable?(answer)
+
+          Analysis::DependencyRecorder.replay(reads)
+          answer
         end
 
         class << self
           private
 
           def declared_new(class_name, environment, loader, scope)
-            owner = declaring_class(class_name, environment, loader, scope)
+            owner = declaring_class(class_name, environment, scope)
             return nil if owner.nil?
 
             definition = Rigor::Reflection.singleton_method_definition(owner, :new, environment: environment)
@@ -63,9 +73,9 @@ module Rigor
           # {Scope::ResolutionChain}, read in Ruby's order. Nil when a project entry ahead of it defines `new` (a
           # `def self.new`, or an `extend`ed module's `def new`), when the chain reaches none, and when the chain does
           # not stand (a fork or an unplaced mixin edge, where the tables cannot say which world ran).
-          def declaring_class(class_name, environment, loader, scope)
+          def declaring_class(class_name, environment, scope)
             return class_name if Rigor::Reflection.rbs_class_known?(class_name, environment: environment)
-            return nil if scope.nil? || !loader.declares_singleton_new_outside_core_stdlib?
+            return nil if scope.nil?
 
             chain = Scope::ResolutionChain.for(scope, class_name.to_s, :singleton, :methods)
             return nil if chain.truncated?

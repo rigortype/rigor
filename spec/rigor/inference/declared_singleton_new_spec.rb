@@ -74,6 +74,17 @@ RSpec.describe "a declared `def self.new` types `X.new` (#2884)" do
     class Mix
       def self.new: (Integer) -> Mix | (String) -> Y
     end
+
+    class Zed
+    end
+
+    module NewMixin
+      def new: () -> Zed
+    end
+
+    module SourcedNewMixin
+      def new: () -> Zed
+    end
   RBS
 
   def run_check(lib, extra_sig = nil)
@@ -169,6 +180,21 @@ RSpec.describe "a declared `def self.new` types `X.new` (#2884)" do
       end
       class Z2 < X
         extend SigMixin
+      end
+      dump_type(Z1.new)
+      dump_type(Z2.new)
+    RUBY
+  end
+
+  it "stops at an `extend`ed module whose RBS declares `def new`, which Ruby runs ahead of the superclass's" do
+    expect(dumps(run_check("t.rb" => <<~RUBY))).to eq(%w[Z1 Z2])
+      class X; end
+      module SourcedNewMixin; end
+      class Z1 < X
+        extend NewMixin
+      end
+      class Z2 < X
+        extend SourcedNewMixin
       end
       dump_type(Z1.new)
       dump_type(Z2.new)

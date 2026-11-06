@@ -33,9 +33,10 @@ module Rigor
       # job), and when the return translates to an untyped, `top` or `bot` answer, which would lose the precision
       # `Nominal[X]` already has.
       module DeclaredConstructor
-        # A project entry of the singleton chain defines `new` in Ruby source, so that method is the one Ruby runs.
-        DEFINED_IN_SOURCE = :defined_in_source
-        private_constant :DEFINED_IN_SOURCE
+        # An entry of the singleton chain ahead of any declaring class defines `new` itself (in Ruby source, or as an
+        # `extend`ed module's RBS instance method), so that method is the one Ruby runs and the walk answers nothing.
+        OTHER_NEW = :other_new
+        private_constant :OTHER_NEW
 
         module_function
 
@@ -86,24 +87,32 @@ module Rigor
             chain = Scope::ResolutionChain.for(scope, class_name.to_s, :singleton, :methods)
             found = first_new_owner(chain, scope, environment)
             verdict = chain.settle(scope, found, owner: nil) { |retro| first_new_owner(retro, scope, environment) }
-            found unless found.nil? || found == DEFINED_IN_SOURCE || verdict != :chain
+            found unless found.nil? || found == OTHER_NEW || verdict != :chain
           end
 
-          # The first entry on `chain` that answers `new`: an RBS-known class's name, or {DEFINED_IN_SOURCE} for a
-          # project entry that defines it.
+          # The first entry on `chain` that answers `new`: an RBS-known class's name, or {OTHER_NEW} for an entry that
+          # defines it otherwise. An `extend`ed module is not a class object `new` is declared on, but one whose
+          # instance side declares `new` (in Ruby source or in RBS) puts that method ahead of the superclass's, so it
+          # stops the walk.
           def first_new_owner(chain, scope, environment)
             chain.search(scope) do |entry|
               if entry.external?
-                # An external `extend`ed module is not a class object `new` is declared on; the walk passes it.
+                extended_rbs_new = !entry.superclass_edge && rbs_instance_new?(entry.candidates, environment)
+                next OTHER_NEW if extended_rbs_new
                 next unless entry.superclass_edge
 
                 entry.candidates.find { |name| Rigor::Reflection.rbs_class_known?(name, environment: environment) }
               elsif entry.side == :singleton && Rigor::Reflection.rbs_class_known?(entry.name, environment: environment)
                 entry.name
-              elsif scope.discovered_method?(entry.name, :new, entry.side)
-                DEFINED_IN_SOURCE
+              elsif scope.discovered_method?(entry.name, :new, entry.side) ||
+                    (entry.side == :instance && rbs_instance_new?([entry.name], environment))
+                OTHER_NEW
               end
             end
+          end
+
+          def rbs_instance_new?(names, environment)
+            names.any? { |name| Rigor::Reflection.instance_method_definition(name, :new, environment: environment) }
           end
 
           # A genuine match only: the selector's first-overload fallback would answer a declaration the call does

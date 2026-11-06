@@ -2561,8 +2561,7 @@ module Rigor
           truthy = narrow_class(slot.current, class_name, exact: exact, environment: environment, scope: scope)
           falsey = narrow_not_class(slot.current, class_name, exact: exact, environment: environment, scope: scope)
           truthy_scope = record_bot_guard(narrow_guarded_slot(scope, slot, truthy), slot, truthy, [class_name])
-          marked = slot.kind == :local && scope.gradual_narrowing?(slot.name)
-          [mark_gradual_narrowing(truthy_scope, slot, truthy, marked: marked), narrow_guarded_slot(scope, slot, falsey)]
+          [mark_gradual_narrowing(truthy_scope, slot, truthy), narrow_guarded_slot(scope, slot, falsey)]
         end
 
         # Issue #2656 — a class guard's truthy edge over a local that held a `Dynamic` value marks the narrowed binding
@@ -2578,7 +2577,8 @@ module Rigor
 
         # {#mark_gradual_narrowing} for the local `name`, which held `current` before the guard and `narrowed` after.
         # `current` is gradual when it is `Dynamic` or a union with a `Dynamic` member (`h[:m] || "r"`, `c ? h[:m] :
-        # nil`); `marked` says the local already carried the mark, so a second class guard keeps it.
+        # nil`); `marked` says the local already carried the mark, so a `case` or a capture over it keeps it (a
+        # predicate keeps it through {.keep_gradual_marks}).
         def mark_gradual_local(scope, name, current, narrowed, marked: false)
           return scope unless marked || gradual_bearing?(current)
           return scope if narrowed.nil? || narrowed.is_a?(Type::Dynamic) || narrowed.is_a?(Type::Bot)

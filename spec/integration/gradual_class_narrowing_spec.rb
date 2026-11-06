@@ -132,11 +132,22 @@ RSpec.describe "a class guard keeps a gradual value gradual (#2656)", type: :run
   end
 
   it "fires after a join with an arm that wrote the local (the mark intersects at a join)" do
-    source = "def f(x, c)\n  return unless x.is_a?(String)\n  x = \"zz\".dup if c\n  Sink.new.mode(x)\nend\n"
+    source = "def f(x, c)\n  return unless x.is_a?(String)\n  x = x.upcase if c\n  Sink.new.mode(x)\nend\n"
     expect(mismatches(source)).to eq(["call.argument-type-mismatch"])
   end
 
   it "stays silent for an alternation capture" do
     expect(mismatches("def f(x)\n  case x\n  in String | Symbol => s then Sink.new.sym(s)\n  end\nend\n")).to eq([])
+  end
+
+  {
+    "a `when` clause" => "case x\n  when String then Sink.new.mode(x)\n  end",
+    "a `case` else arm" => "case x\n  when Integer then 1\n  else Sink.new.mode(x)\n  end",
+    "a class capture" => "case x\n  in String => s then Sink.new.mode(s)\n  end"
+  }.each do |shape, body|
+    it "stays silent for #{shape} over a local an earlier guard marked" do
+      source = "def f(x)\n  return unless x.is_a?(String)\n  #{body}\nend\n"
+      expect(mismatches(source)).to eq([])
+    end
   end
 end

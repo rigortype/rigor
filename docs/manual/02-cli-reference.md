@@ -558,38 +558,107 @@ reviewer's judgment, which is what makes it a review artefact.
 
 ## `rigor explain`
 
-Print the catalogue entry for a diagnostic rule, or list every
-rule when called with no argument.
+Print the catalogue entry for a diagnostic rule, or list every rule when called with no argument.
 
 ```sh
-rigor explain [options] [rule]
+rigor explain [options] [<rule>]
 ```
 
-`rule` is a rule ID (`call.undefined-method`), a legacy alias,
-or a family wildcard (`call`, `flow`, `def`, `assert`, `dump`, `global`,
-`suppression`, `static`, `effect`).
-`--format=text|json` selects the output format. Exit `64` for an unknown rule.
+| Flag | Purpose |
+| --- | --- |
+| `--format=FORMAT` | Output format (`text` or `json`). Default: `text`. |
 
-It also answers the `sig.skipped.*` identifiers `rigor sig-gen`
-prints when it declines to write a signature — `rigor explain
-sig.skipped.untyped-return` says what the skip means and what to do
-instead. Those are not diagnostic rules, so they are rendered without
-a severity or a suppression line.
+### Invocation modes
+
+| Form | Purpose |
+| --- | --- |
+| (none) | Print the complete rule catalogue index (rule ID and one-line summary) followed by every `rigor sig-gen` skip reason. |
+| `<rule>` | Print the full catalogue entry for a canonical rule ID (e.g. `call.undefined-method`) or a legacy alias (e.g. `undefined-method`). |
+| `<family>` | Family wildcard (`call`, `flow`, `def`, `assert`, `dump`, `global`, `suppression`, `static`, `effect`). Prints every rule under that prefix. |
+| `<skip-reason>` | Print the explanation and recommended next action for an exact `rigor sig-gen` skip reason token (e.g. `sig.skipped.untyped-return`). Does not accept wildcards. |
+
+A rule entry includes its summary, legacy aliases, authored severity, severity mapped across configuration profiles (`lenient`, `balanced`, `strict`), evidence tier, `Fires when:` conditions, `Does not fire when:` exceptions, inline suppression syntax (`# rigor:disable <rule>`), documentation link, and the Rigor release where the rule was introduced.
+
+A `<skip-reason>` token explains why `rigor sig-gen` declined to write a signature (such as dynamic returns or unbounded blocks) and suggests what to address instead. Because skip reasons report signatures that were not written rather than code findings, they carry no severity and nothing to suppress.
+
+In `--format=json`, diagnostic rules (whether requested by a single rule ID, legacy alias, family wildcard, or with no arguments) always emit a JSON array of catalogue entry objects. In contrast, querying an individual `<skip-reason>` emits a single JSON object. In the index mode with no arguments, `--format=json` outputs only the diagnostic rule array; individual skip reasons must be queried by token. Top-level JSON shapes currently print a stderr deprecation notice regarding the future envelope migration (see [JSON documents](#json-documents)).
+
+Exit `0` on success, `64` on an unknown rule name or invalid options.
 
 ## `rigor diff`
 
-Compare the current diagnostics against a saved
-`rigor check --format=json` result and report only what is new.
+Compare current diagnostics against a saved `rigor check --format=json` result and report the delta.
 
 ```sh
 rigor diff [options] <rigor-check.json> [paths...]
 ```
 
-`--current=PATH` compares against a saved diagnostics JSON
-instead of running a fresh check. `--format=text|json` selects the
-output format (default `text`), and `--config=PATH` passes a custom
-configuration to the implicit check. Exit `1` when new
-diagnostics appear.
+| Flag | Purpose |
+| --- | --- |
+| `--current=PATH` | Compare against a saved diagnostics JSON file instead of executing a fresh `rigor check` run. |
+| `--config=PATH` | Custom `.rigor.yml` configuration forwarded to the implicit `rigor check` run. Ignored when `--current` is supplied. |
+| `--format=FORMAT` | Output format (`text` or `json`). Default: `text`. |
+
+The positional `<rigor-check.json>` file is required. Per ADR-126 § WD1, this file is a saved `rigor check --format=json` result or JSON snapshot, distinct from the rule-bucket `.rigor-baseline.yml` managed by `rigor baseline`.
+
+When `[paths...]` are given, only those source paths are evaluated by the implicit check. Note that if `<rigor-check.json>` covers the entire repository, restricting the implicit check to a subset of paths causes all diagnostics in omitted files to be reported as `- FIXED`. When `--current=PATH` is provided, `[paths...]` are ignored.
+
+### Identity matching
+
+Diagnostic identity is determined by the 6-element tuple:
+
+```
+(path, line, column, rule, source_family, message)
+```
+
+Diagnostics matching a saved tuple are considered pre-existing. Current diagnostics missing from the saved snapshot are classified as `+ NEW` (regressions). Saved diagnostics missing from the current run are classified as `- FIXED` (progress). Moving code to another line or changing a message produces one fixed and one new entry. Severity is not part of the identity tuple; changing a diagnostic's severity without moving its location does not register as a diff.
+
+### Output format
+
+Text output reports the diff header, line-by-line additions and removals, and summary counts:
+
+```text
+# diff against rigor-check.json (10 baseline / 9 current)
++ NEW   lib/user.rb:14:5 [call.undefined-method] Method `full_name` does not exist on `User`
+- FIXED lib/auth.rb:22:9 [call.argument-type-mismatch] Expected `String`, got `Integer`
+
+1 new, 1 fixed
+```
+
+With `--format=json`, the output conforms to schema version 1:
+
+```json
+{
+  "schema_version": 1,
+  "baseline": "rigor-check.json",
+  "baseline_count": 10,
+  "current_count": 9,
+  "new": [ ... ],
+  "fixed": [ ... ]
+}
+```
+
+### CI integration
+
+`rigor diff` enables regression gating in repositories adopting Rigor incrementally by catching newly introduced diagnostics without requiring all legacy diagnostics to be fixed first.
+
+In standard CI workflows, commit a saved snapshot in-tree (e.g. `rigor-check.json`) generated by `rigor check --format=json > rigor-check.json`. In CI, run:
+
+```sh
+rigor diff rigor-check.json
+```
+
+When comparing against a dynamic base branch in a multi-step job (where `rigor check` on the base branch may exit non-zero due to pre-existing diagnostics), guard the exit code under `set -e`:
+
+```sh
+# On base branch (or via git show / artifact)
+rigor check --format=json > /tmp/base-check.json || true
+
+# On PR branch
+rigor diff /tmp/base-check.json
+```
+
+Exit `0` when no new diagnostics appear (`new` is empty, even if `fixed` contains entries). Exit `1` when any new diagnostic of any severity (`error`, `warning`, or `info`) appears. Exit `64` if either JSON file is missing, contains invalid JSON, or command usage is incorrect.
 
 ## `rigor sig-gen`
 

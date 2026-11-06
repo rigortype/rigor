@@ -9485,8 +9485,12 @@ module Rigor
           physical = buffer ? buffer.resolve(path) : path
           source = File.read(physical)
           root = Prism.parse(source, filepath: path).value
-          collect_class_decls(root, [], accumulator)
-        rescue StandardError, SystemStackError
+          file_classes = {}
+          collect_class_decls(root, [], file_classes)
+          accumulator.merge!(file_classes) # all or nothing: an overflow above contributes none of this file (#2455)
+        rescue StandardError, SystemStackError => e
+          raise if uncontainable_overflow?(e)
+
           # Skip files that fail to parse or read; the per-file analyzer surfaces the parse error separately.
           next
         end
@@ -9513,10 +9517,12 @@ module Rigor
         paths.each do |path|
           physical = buffer ? buffer.resolve(path) : path
           root = Prism.parse(File.read(physical), filepath: path).value
-          accumulate_project_index(acc, path, root)
+          fold_file_index(acc, build_file_index(path, root)) # all or nothing per file (#2455)
         rescue DeclarationWalk::ContractError
           raise # a broken walk contract, not an unreadable file: skipping it would hide the failure
-        rescue StandardError, SystemStackError
+        rescue StandardError, SystemStackError => e
+          raise if uncontainable_overflow?(e)
+
           # Skip files that fail to parse or read; the per-file analyzer surfaces the parse error separately.
           next
         end
@@ -9553,7 +9559,9 @@ module Rigor
           file_summary(file_index).each { |key, table| per_file[key][path] = table unless table.nil? }
         rescue DeclarationWalk::ContractError
           raise # a broken walk contract, not an unreadable file: skipping it would hide the failure
-        rescue StandardError
+        rescue StandardError, SystemStackError => e
+          raise if uncontainable_overflow?(e)
+
           next
         end
         { def_index: finalize_def_index(acc), code_fingerprints: code_fingerprints,
@@ -9837,19 +9845,32 @@ module Rigor
         paths.each do |path|
           physical = buffer ? buffer.resolve(path) : path
           root = Prism.parse(File.read(physical), filepath: path).value
-          collect_class_decls(root, [], classes)
+          # All or nothing per file, as the incremental loop below: both tables are built in isolation and folded only
+          # once the whole file walked, so a file that overflows the stack contributes none of either (#2455).
+          file_classes = {}
+          collect_class_decls(root, [], file_classes)
           if uncertain.include?(path)
-            fold_file_index(acc, without_written_slots(build_file_index(path, root, uncertain: true), acc))
+            file_index = without_written_slots(build_file_index(path, root, uncertain: true), acc)
           else
-            accumulate_project_index(acc, path, root)
+            file_index = build_file_index(path, root)
           end
+          fold_file_index(acc, file_index)
+          classes.merge!(file_classes)
         rescue DeclarationWalk::ContractError
           raise # a broken walk contract, not an unreadable file: skipping it would hide the failure
-        rescue StandardError, SystemStackError
+        rescue StandardError, SystemStackError => e
+          raise if uncontainable_overflow?(e)
+
           # Skip files that fail to parse or read; the per-file analyzer surfaces the parse error separately.
           next
         end
         finalize_project_index(classes, acc)
+      end
+
+      # #2455 — a `SystemStackError` raised from C (`Prism.parse` of a source nested near its own cap) has no backtrace and
+      # leaves the process unable to survive a second one, so it is not contained: it keeps the run-level abort.
+      def uncontainable_overflow?(error)
+        error.is_a?(SystemStackError) && error.backtrace.nil?
       end
 
       # The shared tail of the two whole-project discovery walks: settles the def-index and re-anchors the
@@ -9921,7 +9942,9 @@ module Rigor
           end
         rescue DeclarationWalk::ContractError
           raise # a broken walk contract, not an unreadable file: skipping it would hide the failure
-        rescue StandardError, SystemStackError
+        rescue StandardError, SystemStackError => e
+          raise if uncontainable_overflow?(e)
+
           # Skip files that fail to parse / read; the per-file analyzer surfaces the parse error separately.
           next
         end

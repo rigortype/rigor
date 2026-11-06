@@ -40,6 +40,8 @@ module Rigor
             begin
               block.call
             rescue StandardError, SystemStackError => e
+              raise if e.is_a?(SystemStackError) && e.backtrace.nil? # C-level overflow: not contained
+
               warn "Debouncer task #{key.inspect}: #{e.class}: #{e.message}"
             end
           end

@@ -5,6 +5,8 @@
 # `internal analyzer error` row, and every other file is reported as usual, sequentially and under `--workers`.
 require "spec_helper"
 require "json"
+require "open3"
+require "rbconfig"
 require "stringio"
 require "tmpdir"
 require "rigor/cli/check_command"
@@ -51,13 +53,59 @@ RSpec.describe "a file nested too deeply to analyse is contained to that file (#
     expect(status).to eq(1)
   end
 
-  it "says the file is nested too deeply" do
-    write_project(1400)
+  def crash_messages(*flags)
     out = StringIO.new
-    argv = ["--no-ci-detect", "--no-stats", "--no-baseline", "--no-cache", "--format", "json", "deep_array.rb"]
+    argv = ["--no-ci-detect", "--no-stats", "--no-baseline", "--no-cache", "--format", "json", *flags]
     Rigor::CLI::CheckCommand.new(argv: argv, out: out, err: StringIO.new).run
-    message = JSON.parse(out.string).fetch("diagnostics").fetch(0).fetch("message")
-    expect(message).to include("nested too deeply to analyse")
+    JSON.parse(out.string).fetch("diagnostics").map { |d| d.fetch("message") }
+      .select { |m| m.start_with?("internal analyzer error") }.sort
+  end
+
+  it "says the file is nested too deeply, with no overflow frame, the same in every mode" do
+    write_project(1400)
+    sequential = crash_messages
+    expect(sequential.size).to eq(3)
+    expect(sequential).to all(include("nested too deeply to analyse").and(satisfy { |m| !m.include?("(lib/") }))
+    expect(crash_messages("--workers=2")).to eq(sequential)
+  end
+
+  it "uses the defect wording for an overflow in a file that is not deeply nested" do
+    message = Rigor::Analysis::CrashSignature.check_rule_message(SystemStackError.new("stack level too deep"))
+    expect(message).to include("defect in Rigor").and(satisfy { |m| !m.include?("nested too deeply") })
+  end
+
+  # A file that overflows contributes nothing to discovery, whichever way the run discovers, so a sibling's findings do
+  # not depend on the mode (#2455). The deep file declares `A` before the overflow.
+  it "gives a sibling the same findings in a full run, cold and warm --incremental, and --verify-incremental" do
+    File.write(".rigor.yml", "paths:\n  - .\n")
+    File.write("deep_decl.rb", "class A\n  def a_method = 1\nend\nx = #{'[' * 1400}1#{']' * 1400}\n")
+    File.write("b_user.rb", "A.new.a_method\nA.new.nope_zz\n")
+    full = check
+    expect(check("--incremental")).to eq(full)
+    expect(check("--incremental")).to eq(full)
+    out = StringIO.new
+    argv = ["check", "--verify-incremental", "--no-stats", "--no-ci-detect", "--no-baseline", "."]
+    status = Rigor::CLI.new(argv, out: out, err: StringIO.new).run
+    expect([status, out.string]).to satisfy { |(code, text)| code.zero? && text.include?("--verify-incremental OK") }
+  end
+
+  it "contains a depth-3000 file in the discovery loops and in --incremental" do
+    File.write(".rigor.yml", "paths:\n  - .\n")
+    File.write("ordinary.rb", "class Fine\n  def ok = 1\nend\n")
+    File.write("deep.rb", "x = #{'[' * 3000}1#{']' * 3000}\n")
+    paths = %w[ordinary.rb deep.rb]
+    expect(Rigor::Inference::ScopeIndexer.discovered_classes_for_paths(paths).keys).to eq(["Fine"])
+    expect(Rigor::Inference::ScopeIndexer.discovered_def_index_for_paths(paths).fetch(:def_nodes).keys).to eq(["Fine"])
+    expect(check("--incremental").first).to eq(1)
+  end
+
+  # Prism's own parse of a source nested near its cap overflows in C: no backtrace, and no stack to recover on. That
+  # keeps the run-level abort (exit 70), since a second C overflow in the same process kills it with a signal.
+  it "keeps the exit-70 abort for an overflow raised from C" do
+    File.write("deep.rb", "x = #{'[' * 10_000}1#{']' * 10_000}\n")
+    _, err, status = Open3.capture3(RbConfig.ruby, File.expand_path("../../exe/rigor", __dir__), "check", "--no-cache",
+                                    "--no-ci-detect", "deep.rb", stdin_data: "")
+    expect([status.exitstatus, err]).to satisfy { |(code, text)| code == 70 && text.include?("could not finish this run") }
   end
 
   it "analyses a file just below the threshold normally (control)" do

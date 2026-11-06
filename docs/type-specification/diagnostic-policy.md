@@ -82,13 +82,20 @@ If an internal-demand episode records a definition-build failure and then raises
 The engine's walkers are recursive, so a file whose source nests deeply enough (about 700 nested `if`s, 1,300 nested
 array literals or chained calls, measured on the default VM stack, and dropping as the walkers grow) exhausts the
 stack although Prism parses it ([#2455](https://github.com/rigortype/rigor/issues/2455)). A `SystemStackError` raised
-while one file is indexed, typed or checked MUST be contained to that file: it is reported as that file's one
-`internal analyzer error` row (`error` severity, no rule id, line 1), whose message says the file is nested too deeply
-to analyse, and it discards that file's other diagnostics exactly as any other analyzer crash does. Every other file in
-the run MUST be analysed and reported normally, in the sequential run and under `--workers`, and the exit status MUST
-follow that row's severity (`1`), not `70`. The cross-file discovery pass skips such a file's remaining contribution
-and keeps going. The language server answers a request on such a document with an internal error and keeps running.
-A `SystemStackError` outside the per-file phases is still the run-level abort (`CLI::FATAL_ERRORS`, exit `70`).
+from Ruby code while one file is indexed, typed or checked MUST be contained to that file: it is that file's one
+`internal analyzer error` row (`error` severity, no rule id, line 1), which discards that file's other diagnostics
+exactly as any other analyzer crash does. The row names no stack frame, so it is the same in every mode. Its message
+says the file is nested too deeply to analyse when the file's AST is deeper than 500 levels, and otherwise reads as a
+defect in Rigor. Every other file in the run MUST be analysed and reported normally, in the sequential run and under
+`--workers`, and the exit status MUST follow that row's severity (`1`), not `70`.
+
+The cross-file discovery pass is all or nothing per file: a file that overflows contributes nothing to any discovery
+table, in a full run and in an incremental one alike, so the findings in other files do not depend on the mode. The
+language server answers a request on such a document with an internal error and keeps running.
+
+A `SystemStackError` raised from C (`Prism.parse` of a source nested near Prism's own cap has no backtrace, and the
+process cannot survive a second such overflow), or outside the per-file phases, is NOT contained: it stays the
+run-level abort (`CLI::FATAL_ERRORS`, exit `70`).
 
 ## `Dynamic[T]` display rules
 

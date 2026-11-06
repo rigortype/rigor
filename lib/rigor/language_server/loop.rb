@@ -54,7 +54,9 @@ module Rigor
       # no response to carry the error, so it is dropped.
       def dispatch_contained(method, params)
         @server.dispatch(method, params)
-      rescue SystemStackError
+      rescue SystemStackError => e
+        raise if e.backtrace.nil? # C-level overflow: not contained, as in `Runner`
+
         { error: { code: Server::ERROR_INTERNAL_ERROR,
                    message: "#{method}: this document is nested too deeply to analyse" } }
       end

@@ -280,7 +280,9 @@ module Rigor
       rescue Errno::ENOENT => e
         [analyzer_error(path, e.message)]
       rescue StandardError, SystemStackError => e
-        [analyzer_error(path, CrashSignature.check_rule_message(e))]
+        raise if e.is_a?(SystemStackError) && e.backtrace.nil? # C-level overflow: not contained, as in `Runner`
+
+        [analyzer_error(path, CrashSignature.check_rule_message(e, parse_result&.value))]
       ensure
         TypeOfMemo.end_file
       end

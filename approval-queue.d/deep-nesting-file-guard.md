@@ -23,7 +23,9 @@ the limit but bounds its blast radius to the one file.
 Contain it per file. The existing per-file crash row (`internal analyzer error`, `error` severity, which discards
 that file's diagnostics) is reused, with a message saying the file is nested too deeply; the discovery pass skips such
 a file and the language server answers the request with an internal error. The exit status follows the row's severity
-(1).
+(1). A `SystemStackError` raised from C (no backtrace) is not contained, because the process cannot survive a second one;
+it keeps the exit-70 abort. Discovery is all or nothing per file, so a deep file contributes nothing in any mode. The
+row carries no overflow frame, and reads "nested too deeply" only above an AST depth of 500, else as a Rigor defect.
 
 ## To undo
 

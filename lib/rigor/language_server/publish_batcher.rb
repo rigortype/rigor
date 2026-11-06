@@ -55,6 +55,8 @@ module Rigor
           break unless more_pending?
         end
       rescue StandardError, SystemStackError => e
+        raise if e.is_a?(SystemStackError) && e.backtrace.nil? # C-level overflow: not contained
+
         @lock.synchronize { @running = false }
         @on_error&.call(e)
       end

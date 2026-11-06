@@ -190,6 +190,8 @@ SIG_PROVENANCE_LISTING_CAP = 200
 # at the pins). The new `Scope` guard rows are sig-gen output or carry the #1154 marker, so they add none.
 # 566 since #2321. The class-ivar census types an ivar assigned an expression over declared parameters, so 18
 # unmarked rows render the declared type (`environment.rbs` -1, `type.rbs` -17; the reasons are at the pins).
+# 554 since #2719. `enclosing_def`'s body now proves `Prism::DefNode?`, which sig-gen declines to propose
+# (`node_context.rbs` +1; the reason is at its pin, #2914).
 SIG_PROVENANCE_RESIDUE = {
   "sig/prism_node_children.rbs" => 1,
   # +1 (#1181 bound-side slice): `effect_envelopes` is a newly-declared public reader that stays
@@ -327,6 +329,10 @@ SIG_PROVENANCE_RESIDUE = {
   # `effect_owner` earned (the reader bound once into a local narrows, so sig-gen proves
   # `String`); `effect_discharge_allowed?` is unrenderable.
   "sig/rigor/plugin/manifest.rbs" => 21,
+  # New pin, +1 (#2719): `ancestors.rfind { |n| n.is_a?(Prism::DefNode) }` now infers `Prism::DefNode?`, so
+  # `enclosing_def`'s declared `::Prism::Node?` is wider than the body. sig-gen declines to propose the narrower
+  # return because its union-lenience guard reads `Prism::Node` as a lost member (#2914), so the row is residue.
+  "sig/rigor/plugin/node_context.rbs" => 1,
   # New file (#1181 slice): `to_h` is declared-divergent (sig-gen infers a string-literal-keyed
   # union; `Hash[String, untyped]` matches the manifest `to_h` convention) and `eql?` is an alias
   # row with no sig-gen shape.

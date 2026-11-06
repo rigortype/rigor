@@ -3530,4 +3530,14 @@ RSpec.describe "Rigor type construction (integration)" do
       end
     end
   end
+
+  # Issue #2719 — a find-family block that is one class test on its parameter narrows the found element.
+  describe "fixtures/find_class_test_narrowing.rb — find narrows through a class-test block" do
+    let(:harness) { harness_for("find_class_test_narrowing") }
+
+    it "types each find by the class its block tests, and keeps the element type for any other block" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches.map { |d| "#{d.line}: #{d.message}" }).to be_empty
+    end
+  end
 end

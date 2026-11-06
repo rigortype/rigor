@@ -1,0 +1,24 @@
+---
+locals:
+  errs: Array[ArgumentError | KeyError]
+  pets: Array[Dynamic[top]]
+  reals: Array[Numeric]
+assertions:
+  '1': Integer?
+  '2': Integer?
+  '3': Float?
+  '4': ArgumentError?
+  '5': KeyError?
+  '6': Numeric?
+  '7': Numeric?
+  '8': Numeric?
+  '9': Dynamic[top] | Numeric
+  '10': Numeric?
+  '11': Numeric?
+  '12': Numeric?
+  '13': String?
+  '14': Numeric?
+  '15': Dynamic[top] | Numeric
+  '16': Numeric?
+  '17': Dynamic[top]
+  '18': FindCat | FindDog | nil

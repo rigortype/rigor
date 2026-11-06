@@ -259,6 +259,13 @@ RSpec.describe Rigor::Type::Combinator do
       expect(described_class.union(int, described_class.top)).to equal(described_class.top)
     end
 
+    # Issue #2939 — a nominal subclass is not absorbed by its superclass, as `1 | Integer` is not: the narrower
+    # arm is a reading a caller-side check uses (normalization.md § "Member absorption").
+    it "keeps both members of a nominal subclass pair" do
+      arms = [described_class.nominal_of("ArgumentError"), described_class.nominal_of("StandardError")]
+      expect(described_class.union(*arms).members).to match_array(arms)
+    end
+
     # Issue #1794 — the Rigor-private element of `Enumerator::ArithmeticSequence`.
     describe "arithmetic sequences" do
       def seq(*args) = described_class.nominal_of("Enumerator::ArithmeticSequence", type_args: args)

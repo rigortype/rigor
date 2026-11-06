@@ -36,6 +36,8 @@ A union drops any member that another member already contains, so the join after
 
 Differing arity and differing spine are never absorbed: `[A]` and `[A, B]`, or two hash shapes that disagree on a key or on openness, describe differently-shaped values, so neither is a reading of the other.
 
+A nominal subclass or includer beside its superclass or module is not absorbed either, so `ArgumentError | StandardError` keeps both members: the narrower member is evidence a caller-side reading uses, and Rigor reads a union member by member.
+
 The element-wise clause grants no absorption of its own. It asks this list again one level down, so it fires for exactly the elements a direct union member would collapse for, at any nesting depth. `[Float, String] | [Float[0.0..], String]` collapses to `[Float, String]`, and so does `[[Float, String], Integer] | [[Float[0.0..], String], Integer]`. `[1, String] | [Integer, String]` keeps both arms, because a value-pinned member is not absorbed by its nominal base and the element-wise clause cannot outrun the direct rule; `[Integer, String] | [Integer[0..5], String]` and `[String, Integer] | [lowercase-string, Integer]` keep both arms for the same reason, as do a `Tuple` and a `Nominal[Array]` member, which are different carriers rather than two readings of one spine.
 
 A member is removed only when some **other** member absorbs it, so two members neither of which absorbs the other both survive: the join of two disjointly guarded arms stays `[Float[...0.0], String] | [Float[0.0..], String]`. The relation MUST be a strict partial order over distinct members, so no pair can absorb each other and vanish together.

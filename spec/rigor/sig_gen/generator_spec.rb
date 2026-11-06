@@ -1740,6 +1740,21 @@ RSpec.describe Rigor::SigGen::Generator do
     end
   end
 
+  # Issue #2939. An inferred union keeps a nominal subclass member beside its superclass: the narrower arm is
+  # evidence a caller-side reading uses (`E.new.err(false).errno` is silent only while `SystemCallError` stays).
+  # Collapsing it to `StandardError` is the false positive this pins against.
+  describe "an inferred union of a nominal subclass pair" do
+    it "keeps both members of the union, neither absorbed by its superclass" do
+      path = write_fixture(
+        "lib/e.rb",
+        "class E\n  def err(f) = f ? StandardError.new : SystemCallError.new(\"x\", 2)\nend\n"
+      )
+      method = generator(paths: [path]).run.find { it.method_name == :err }
+
+      expect(method.rbs).to eq("def err: (untyped) -> (StandardError | SystemCallError)")
+    end
+  end
+
   # Issue #2914. A proposed member that is a subclass of a declared one keeps that member: declared
   # `Prism::Node?` against an inferred `Prism::DefNode?` (`NodeContext#enclosing_def`) narrows the nominal arm
   # and keeps the declared `nil`. Every other row is a case the lenience guard above exists for.

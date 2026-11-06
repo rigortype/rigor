@@ -524,6 +524,18 @@ ADR-12 is reserved for dry-rb packaging per the existing
 roadmap. ADR-14 takes the next free slot and stays
 independent of the packaging discussion.
 
+**2026-11-07 — why sig-gen does not subsumption-collapse unions.** An inferred union such as
+`StandardError | SystemCallError` keeps a nominal subclass member beside its superclass, and `Combinator.union`
+does not absorb one into the other, as `1 | Integer` is kept. A "normalise by inheritance" pass was tried in
+[#2936](https://github.com/rigortype/rigor/issues/2936) and [#2937](https://github.com/rigortype/rigor/pull/2937)
+(closed unmerged). Under Rigor's member-by-member reading of a union, the narrower arm is information: a call
+on `E.new.err(false).errno` is silent while `SystemCallError` is a member, and reports `undefined method 'errno'`
+once the return is collapsed to `StandardError`, which is a false positive on correct code. sig-gen output is
+engine input, so the collapse would move the cost onto every caller. The decision is pinned by the
+`Combinator.union` and sig-gen rows in the specs and by the end-to-end pair in
+`spec/integration/union_subclass_members_undefined_method_spec.rb`
+([#2939](https://github.com/rigortype/rigor/issues/2939)); the normal form is normalization.md § "Member absorption".
+
 ## Alternatives considered
 
 - **Generator as a `rigor-sig-gen` plugin.** Rejected:
@@ -784,3 +796,5 @@ a union.
   and stopped clause 3 from counting a literal member the declaration itself
   spells. See the fourth dated paragraph in § "The inference-vs-RBS
   contradiction rule".
+- 2026-11-07 — #2939 pinned the no-collapse decision for subclass union members
+  as a working decision (§ "Working decisions"). No behaviour change.

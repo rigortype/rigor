@@ -363,7 +363,8 @@ module Rigor
         recorded = self.class.recorded_inject_accumulator(block, scope)
         return recorded if recorded
 
-        try_block_inject_fold(call_node, receiver, arg_types)
+        # ADR-129 WD1 — a read-through Table's miss: writing another Table from it touches.
+        typing_state.memo_miss(INJECT_ACCUMULATOR) { try_block_inject_fold(call_node, receiver, arg_types) }
         self.class.recorded_inject_accumulator(block, scope)
       end
 
@@ -1095,7 +1096,7 @@ module Rigor
       # optimistic-carrier decline) and one terminating-arm rule, and cannot drift apart again. Only the
       # value is read; the post-scope belongs to whichever walk owns the statement.
       def type_of_conditional(node)
-        LoopValueRecord.fetch(node, scope) || scope.evaluate(node, tracer: tracer).first
+        LoopValueRecord.fetch(node, scope) || LoopValueRecord.miss { scope.evaluate(node, tracer: tracer).first }
       end
 
       def type_of_else(node)
@@ -1326,7 +1327,7 @@ module Rigor
       def type_of_loop(node)
         return Type::Combinator.constant_of(nil) if break_free_condition_loop?(node)
 
-        LoopValueRecord.fetch(node, scope) || scope.evaluate(node, tracer: tracer).first
+        LoopValueRecord.fetch(node, scope) || LoopValueRecord.miss { scope.evaluate(node, tracer: tracer).first }
       end
 
       def break_free_condition_loop?(node)
@@ -3340,6 +3341,11 @@ module Rigor
 
         def put(slot_value, key, value)
           (slot_value[1][key[0]] ||= {})[key[1]] = value
+        end
+
+        def delete(slot_value, key)
+          per_def = slot_value && slot_value[1][key[0]]
+          per_def&.delete(key[1])
         end
 
         def container(state, slot)

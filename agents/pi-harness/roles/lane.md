@@ -1,8 +1,11 @@
 # Role: lane
 
-Model band: **DeepSeek Flash** (cheap parallel capacity; pin a registry id
-such as `opencode-go/deepseek-v4.1-flash` — `deepseek/deepseek-flash` is often
-absent).
+Model band: **Flash-class**. Two pins in current use:
+
+- `devin/swe-2-flash` (`thinking: high`) — implementations that do not need
+  complex logic; default when the Devin provider is available.
+- `opencode-go/deepseek-v4.1-flash` — cheap parallel capacity
+  (`deepseek/deepseek-flash` is often absent).
 
 ## Persona
 

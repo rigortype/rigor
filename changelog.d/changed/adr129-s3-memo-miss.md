@@ -1,0 +1,2 @@
+- **[engine]** A memo miss that writes a typing-state Table now refuses the enclosing `type_of` shadow capture, as ADR-129 WD1 requires. ([#2878](https://github.com/rigortype/rigor/pull/2878))
+  - No output changes.

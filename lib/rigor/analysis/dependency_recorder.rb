@@ -57,6 +57,13 @@ module Rigor
           end
         end
 
+        def delete(store, key)
+          if key.is_a?(String) then store.missing.delete(key)
+          elsif store.is_a?(Capture) then store.reads.delete(key)
+          else store.remove_read(key[0], key[1])
+          end
+        end
+
         def container(_state, _slot)
           raise ArgumentError, "dependency reads are a bound table: a store is an accumulator or a capture"
         end
@@ -161,6 +168,21 @@ module Rigor
           added = symbol ? @symbol_sources[path].add?(symbol) : @ancestry_sources.add?(path)
           @sources << path if added
           added
+        end
+
+        # Undoes an {#add_read} that filed a new edge (G1's stage-4 form): `sources` keeps `path` while another table
+        # still holds it, and a `symbol_sources` set left empty goes, as no read had made it.
+        def remove_read(path, symbol)
+          if symbol
+            symbols = @symbol_sources.key?(path) ? @symbol_sources[path] : nil
+            if symbols
+              symbols.delete(symbol)
+              @symbol_sources.delete(path) if symbols.empty?
+            end
+          else
+            @ancestry_sources.delete(path)
+          end
+          @sources.delete(path) unless @ancestry_sources.include?(path) || @symbol_sources.key?(path)
         end
 
         # Whether the edge {#add_read} files for `path` and `symbol` is held. Reads `symbol_sources` without its

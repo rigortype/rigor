@@ -118,10 +118,12 @@ list kept beside the memo. State without a kind fails the gate.
     computation that hits it logs the entry it read. Entries are never removed or rewritten within a run, so that
     read validates. A computation that misses it pushes the guard stack, which is a Resource touch, so it is refused.
   - **Two Memo rules:**
-    - A Memo miss that writes a Table counts as a Resource touch, and so does a read-through-cache Table's miss whose
-      computation writes another Table. The inject record's miss folds the block body, and that typing writes
-      `dynamic_origins` causes; a later hit would validate its own value and replay causes that a newer typing has
-      overwritten.
+    - A Memo miss that writes a Table counts as a Resource touch, and so does a read-through-cache Table's miss that
+      filled its own table and also wrote another Table. The inject record's miss folds the block body, and that typing
+      writes `dynamic_origins` causes; a later hit would validate its own value and replay causes that a newer typing
+      has overwritten. A read-through miss that did not fill its own table leaves its ABSENT read to validate strictly,
+      so its other writes replay only while nothing has changed; it does not refuse. (Clarified 2026-11-06, with the
+      user's approval, in stage 3's #2878.)
     - **The key audit.** A Memo, or a Table filled by a computation (the ADR-84 return memo), whose computation
       reads a Frame must key on the state id or on that Frame's value.
       - Audit mode records the Frame slots each miss computation reads, with the `type_of` memo suspended so that

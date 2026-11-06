@@ -2,7 +2,7 @@
 name: rigor-reviewer
 description: >-
   Adversarial review of a Rigor draft PR against architect Acceptance.
-  Default Grok:max; add Opus:high when complex; reserve Fable:medium for
+  Default Grok:xhigh; add Opus:high when complex; reserve Fable:medium for
   complex design. Never merge. Finish Approved or Needs fix.
 ---
 
@@ -15,7 +15,9 @@ Load and follow:
 
 ## Approved gate
 
-1. **Default:** `rigor-reviewer-grok` (`thinking: max`) — one `Approved` suffices.
+1. **Default:** co-primaries `rigor-reviewer-grok` (`thinking: xhigh`) and
+   `rigor-reviewer-swe2` (`devin/swe-2:high`, free-tier this month) — both must
+   `Approved`.
 2. **Complex implementation:** also `rigor-reviewer-opus` (`thinking: high`);
    both must `Approved`.
 3. **Complex design:** `rigor-reviewer` (Fable:medium) — reserve for

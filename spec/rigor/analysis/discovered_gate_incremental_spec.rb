@@ -73,6 +73,8 @@ RSpec.describe Rigor::Analysis::IncrementalSession, "discovery-walk gate (#2689)
 
   let(:gated) { "dump_type: PluginRecords" }
 
+  # A guard: the consumer's own `Model` constant read already files `class:Model`, which the new declaring file fires,
+  # so this held before #2689 too. It pins the scenario the issue names.
   it "re-checks the consumer when a new file reopens the class with the method" do
     Dir.mktmpdir do |dir|
       File.write(File.join(dir, "model.rb"), "class Model\nend\n")
@@ -90,6 +92,7 @@ RSpec.describe Rigor::Analysis::IncrementalSession, "discovery-walk gate (#2689)
     end
   end
 
+  # A guard: a hit reads the definer's file as a positive edge, so removal held before #2689 too.
   it "re-checks the consumer when the method is removed again" do
     Dir.mktmpdir do |dir|
       File.write(File.join(dir, "model.rb"), "class Model\nend\n")
@@ -108,6 +111,7 @@ RSpec.describe Rigor::Analysis::IncrementalSession, "discovery-walk gate (#2689)
     end
   end
 
+  # The case #2689 broke: nothing but the walk's miss on `Base` names `Base`, so only its `class:Base` edge re-checks.
   it "re-checks the consumer when a superclass in another file gains the method" do
     Dir.mktmpdir do |dir|
       File.write(File.join(dir, "base.rb"), "class Base\n  def self.where = 1\nend\n")

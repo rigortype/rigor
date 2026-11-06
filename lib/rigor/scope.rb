@@ -2123,6 +2123,7 @@ module Rigor
       end
       return found if found
 
+      chain.record_external_absence
       chain.truncated? ? ancestor_walk_gave_up : [nil, nil]
     end
 
@@ -2162,6 +2163,7 @@ module Rigor
       end
       return found if found
 
+      chain.record_external_absence
       chain.truncated? ? ancestor_walk_gave_up : [nil, nil]
     end
 
@@ -2245,6 +2247,8 @@ module Rigor
         discovered_method?(entry.name, method_name, entry.side == :singleton ? :singleton : kind_for(kind))
       end
       return true if found
+
+      record_discovered_miss(chain, method_name) if Analysis::DependencyRecorder.active?
       # Budget exhaustion is uncertainty, not absence: answering "not declared" here would hand a
       # `call.undefined-method` a fired verdict it has no evidence for. Suppress and record the hit.
       return false unless chain.truncated?
@@ -2252,6 +2256,28 @@ module Rigor
       Inference::BudgetTrace.hit(Inference::BudgetTrace::ANCESTOR_WALK_LIMIT)
       true
     end
+
+    # Issue #2689 — the ADR-46 negative edges of a discovery-walk miss: the answer is "no project entry on the chain
+    # defines it", so a later edit that defines it on any of them, or a new file that reopens one of them (and may
+    # change the chain, `include` a module that defines it), turns it. Each project entry files the `method:` key
+    # `Incremental.appeared_symbols` emits for that definition (`Name.method` for a class object's own side,
+    # `Name#method` for an instance-chain entry and for a module on the singleton chain, which answers with its
+    # instance methods) and the `class:` key a declaring file appearing fires — the edges the def walk files for the
+    # same miss (`#user_def_for` per entry, `ResolutionChain#settle` for the classes). A hit files none: existence is
+    # a union, so no other entry gaining the method can turn a found answer.
+    # An external entry (an ancestor declared with no methods, or not yet) files its `class:` key
+    # ({ResolutionChain#record_external_absence}), as the def walks do on a miss.
+    def record_discovered_miss(chain, method_name)
+      chain.record_external_absence
+      chain.entries.each do |entry|
+        next if entry.external?
+
+        separator = entry.side == :singleton ? "." : "#"
+        Analysis::DependencyRecorder.read_missing(:method, "#{entry.name}#{separator}#{method_name}")
+        Analysis::DependencyRecorder.read_missing(:class, entry.last_segment)
+      end
+    end
+    private :record_discovered_miss
 
     # A module entry on the singleton chain answers with its INSTANCE methods; on the instance chain, the
     # caller's kind stands.

@@ -29,17 +29,36 @@ RSpec.describe Rigor::Inference::ScopeIndexer::IvarContributions do
     expect(census_of(seeded(nil))).to eq("1")
   end
 
-  # Guard: `rigor sig-gen` indexes each file under a scope that names none and carries no project census, so its
-  # proposals read the file's own writes whether or not the no-path check stands.
-  it "leaves rigor sig-gen's proposal to the file's own writes" do
-    Dir.mktmpdir do |dir|
+  # Issue #2489 — `rigor sig-gen` indexes each file under a scope that names it, so its proposal reads the same join
+  # `rigor check` does, and check stays quiet on the committed signature. Ruby 4.0.5 returns "a" from `get` after
+  # `set`, so `nil` alone was not the method's return type.
+  describe "rigor sig-gen (#2489)", type: :runner do
+    def files(dir)
       lib = File.join(dir, "lib")
       FileUtils.mkdir_p(lib)
       File.write(File.join(lib, "a.rb"), "class E\n  def initialize = (@x = nil)\n  def get = @x\nend\n")
-      File.write(File.join(lib, "b.rb"), "class E\n  def set(v) = (@x = v)\nend\n")
+      File.write(File.join(lib, "b.rb"), "class E\n  def set = (@x = \"a\")\nend\n")
+      lib
+    end
+
+    def proposal(lib)
       configuration = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS.merge("paths" => [lib]))
       candidates = Rigor::SigGen::Generator.new(configuration: configuration, paths: [lib]).run
-      expect(candidates.find { |c| c.method_name == :get }&.rbs).to eq("def get: () -> nil")
+      candidates.find { |c| c.method_name == :get }&.rbs
+    end
+
+    it "proposes the joined type for a reader of an ivar another file writes" do
+      Dir.mktmpdir { |dir| expect(proposal(files(dir))).to eq("def get: () -> (String | nil)") }
+    end
+
+    it "leaves rigor check quiet on the committed proposal" do
+      rbs = Dir.mktmpdir { |dir| proposal(files(dir)) }
+      result = analyze(
+        files: { "a.rb" => "class E\n  def initialize = (@x = nil)\n  def get = @x\nend\n",
+                 "b.rb" => "class E\n  def set = (@x = \"a\")\nend\n" },
+        sig: { "e.rbs" => "class E\n  #{rbs}\nend\n" }
+      )
+      expect(result.diagnostics.map { |d| d.rule.to_s }).not_to include("def.return-type-mismatch")
     end
   end
 end

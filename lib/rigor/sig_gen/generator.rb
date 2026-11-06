@@ -688,6 +688,8 @@ module Rigor
       end
 
       # #1406 — sig-gen keeps the census's own answer: a declared ivar type read back would echo the declaration.
+      # #2489 — `base_scope` names the file, so the class-ivar census joins the writes another file's reopening and
+      # the class's ancestors make ({Inference::ScopeIndexer::IvarContributions}), as `rigor check`'s does.
       def index_file(root, base_scope)
         Inference::ScopeIndexer.index(
           root, default_scope: base_scope, ivar_writer_scope: ivar_writer_scope(base_scope), declared_ivar_types: false
@@ -711,7 +713,7 @@ module Rigor
         parse_result = Prism.parse(source, filepath: path, version: @configuration.target_ruby)
         return [] if parse_result.errors.any?
 
-        scope_index = index_file(parse_result.value, file_base_scope(environment))
+        scope_index = index_file(parse_result.value, file_base_scope(environment).with_source_path(path))
 
         reset_file_maps
         @meta_layouts = collect_meta_layouts(scope_index)

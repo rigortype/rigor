@@ -157,6 +157,62 @@ class SingletonBodyDefine
   end
 end
 
+# Review round 2: the reentry covers a `class_eval`-family block on `singleton_class`, a `define_method` through
+# `send` / `public_send` / `__send__`, and a `class << o` body on an untyped `o` (`k.poke(k)`).
+class SingletonEvalDefine
+  def initialize = (@x = nil)
+  def get = @x.upcase
+  def poke = singleton_class.class_eval { define_method(:set) { @x = "a" } }
+end
+
+class SingletonExecDefine
+  def initialize = (@x = nil)
+  def get = @x.upcase
+  def poke = singleton_class.class_exec { define_method(:set) { @x = "a" } }
+end
+
+class SingletonModuleEvalDefine
+  def initialize = (@x = nil)
+  def get = @x.upcase
+  def poke = singleton_class.module_eval { define_method(:set) { @x = "a" } }
+end
+
+class SendDefine
+  def initialize = (@x = nil)
+  def get = @x.upcase
+  def poke = self.class.class_eval { send(:define_method, :set) { @x = "a" } }
+end
+
+class PublicSendDefine
+  def initialize = (@x = nil)
+  def get = @x.upcase
+  def poke = self.class.class_eval { public_send(:define_method, :set) { @x = "a" } }
+end
+
+class UnderscoreSendDefine
+  def initialize = (@x = nil)
+  def get = @x.upcase
+  def poke = self.class.class_eval { __send__(:define_method, :set) { @x = "a" } }
+end
+
+class OtherSingletonBodyDefine
+  def initialize = (@x = nil)
+  def get = @x.upcase
+  def poke(o)
+    class << o
+      define_method(:set) { @x = "a" }
+    end
+  end
+end
+
+# A `define_method` in a `class_eval` on another class's constant runs on that class's instances: Ruby 4.0.5 raises
+# on `get` after `poke`.
+class OtherEvalDefine
+  def initialize = (@x = nil)
+  def get = @x.upcase # FIRES call.undefined-method
+  def poke = Other.class_eval { define_method(:set) { @x = "a" } }
+end
+
 # An ordinary block keeps the method's `self`.
 class EachBlock
   def initialize = (@x = nil)
@@ -209,6 +265,16 @@ class CrossSingletonDefine
 end
 
 class CrossSingletonBodyDefine
+  def initialize = (@x = nil)
+  def get = @x.upcase
+end
+
+class CrossSingletonEvalDefine
+  def initialize = (@x = nil)
+  def get = @x.upcase
+end
+
+class CrossSendDefine
   def initialize = (@x = nil)
   def get = @x.upcase
 end

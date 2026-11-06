@@ -21,13 +21,14 @@ module Rigor
     # - a `Class.new` / `Module.new` / `Struct.new` / `Data.define` block: `self` is the new class.
     #
     # `class << obj` inside an instance body is one more barred body; the callers bar it themselves, since it is no
-    # call. Only a barred body's own statements are dropped: a `define_method` block on the implicit or `self` receiver
-    # nested in a `class_eval` on `self.class` or `K`, or in a `class << self` body, runs on a `K` instance and still
+    # call. Only a barred body's own statements are dropped: a `define_method` block nested in a `class_eval` or
+    # `class << obj` body whose module may be `K` or an instance's singleton class runs on a `K` instance and still
     # counts ({.reentry_blocks}).
     module CensusForeignBlock
       INSTANCE_EVALS = %i[instance_eval instance_exec].to_set.freeze
       MODULE_EVALS = %i[class_eval module_eval class_exec module_exec].to_set.freeze
       DEFINERS = %i[define_method define_singleton_method].to_set.freeze
+      SEND_CALLS = %i[send public_send __send__].to_set.freeze
       # The constructors whose receiver names the class of the object they answer.
       CONSTRUCTORS = %i[new allocate].to_set.freeze
       # The literal receivers, none of them an instance of a project class.
@@ -76,16 +77,20 @@ module Rigor
         (node.is_a?(Prism::ConstantReadNode) || node.is_a?(Prism::ConstantPathNode)) && !own_class?(node, class_name)
       end
 
-      # The `define_method` blocks inside barred code whose `self` is again an instance of `class_name`: a
-      # `define_method` on the implicit or `self` receiver in a `class_eval`-family block on `self.class` or a
-      # constant spelling `class_name`, or in a `class << self` body. Ruby runs each on a `K` instance (a `K` method,
-      # or a singleton method of the instance), so its writes are `K`'s.
+      # The `define_method` blocks inside barred code whose `self` may again be an instance of `class_name`: a
+      # `define_method` on the implicit or `self` receiver, called directly or through `send` / `public_send` /
+      # `__send__` with the literal name, in a `class_eval`-family block or a `class << obj` body whose module may be
+      # `class_name` or the singleton class of one of its instances. Only a module provably not one of those bars
+      # them: a `class_eval` on a constant not spelling `class_name`, and a `class << X` on a constant or a literal,
+      # whose `define_method` defines methods of `X` itself. Ruby runs every other one on a `K` instance (a `K` method,
+      # or a singleton method of the instance), so its writes are `K`'s; an untyped receiver keeps the credit, as
+      # {.foreign?} keeps it for `instance_eval`.
       def reentry_blocks(node, class_name)
         body =
           case node
-          when Prism::SingletonClassNode then node.body if node.expression.is_a?(Prism::SelfNode)
+          when Prism::SingletonClassNode then node.body unless singleton_of_other?(node.expression)
           when Prism::CallNode
-            node.block.body if MODULE_EVALS.include?(node.name) && own_class?(node.receiver, class_name)
+            node.block.body if MODULE_EVALS.include?(node.name) && !foreign_constant?(node.receiver, class_name)
           end
         return NONE if body.nil?
 
@@ -94,17 +99,32 @@ module Rigor
         found
       end
 
+      # A `class << X` operand whose singleton's methods run on `X` itself, never on an instance: a constant (a class
+      # object or a constant value) or a literal.
+      def singleton_of_other?(expression)
+        expression.is_a?(Prism::ConstantReadNode) || expression.is_a?(Prism::ConstantPathNode) ||
+          LITERALS.any? { |klass| expression.is_a?(klass) }
+      end
+
       def collect_define_method_blocks(node, found)
         return unless node.is_a?(Prism::Node)
         return if BARRIERS.any? { |klass| node.is_a?(klass) }
-
-        if node.is_a?(Prism::CallNode) && node.name == :define_method && self_node?(node.receiver) &&
-           node.block.is_a?(Prism::BlockNode)
-          return found << node.block
-        end
+        return found << node.block if define_method_call?(node)
         return if node.is_a?(Prism::CallNode) && node.block.is_a?(Prism::BlockNode) && CALLS.include?(node.name)
 
         node.rigor_each_child { |child| collect_define_method_blocks(child, found) }
+      end
+
+      # A `define_method` with a literal block on the implicit or `self` receiver, called directly or through a `send`
+      # whose first argument is the literal name.
+      def define_method_call?(node)
+        return false unless node.is_a?(Prism::CallNode) && self_node?(node.receiver)
+        return false unless node.block.is_a?(Prism::BlockNode)
+        return true if node.name == :define_method
+        return false unless SEND_CALLS.include?(node.name)
+
+        first = node.arguments&.arguments&.first
+        (first.is_a?(Prism::SymbolNode) || first.is_a?(Prism::StringNode)) && first.unescaped == "define_method"
       end
 
       # `self.class`, or a constant spelling `class_name`.

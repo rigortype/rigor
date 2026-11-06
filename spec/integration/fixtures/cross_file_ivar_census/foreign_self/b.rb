@@ -43,3 +43,11 @@ class CrossSingleton
     end
   end
 end
+
+class CrossSingletonEvalDefine
+  def poke = singleton_class.class_eval { define_method(:set) { @x = "a" } }
+end
+
+class CrossSendDefine
+  def poke = self.class.class_eval { send(:define_method, :set) { @x = "a" } }
+end

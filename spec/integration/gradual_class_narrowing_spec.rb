@@ -131,7 +131,7 @@ RSpec.describe "a class guard keeps a gradual value gradual (#2656)", type: :run
     expect(mismatches(source)).to eq([])
   end
 
-  it "fires when the predicate itself writes the marked local" do
+  it "fires when the predicate itself writes the marked local (guard: the write rebinds it before the edges)" do
     source = "def f(x)\n  return unless x.is_a?(String)\n  Sink.new.mode(x) if (x = [x].join)\nend\n"
     expect(mismatches(source)).to eq(["call.argument-type-mismatch"])
   end

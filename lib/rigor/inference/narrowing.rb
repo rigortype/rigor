@@ -536,7 +536,7 @@ module Rigor
         # A marked subject keeps its mark under any `when` (`when "r"` narrows it without writing it); an unmarked one
         # is stamped only under class conditions.
         if marked || classes.none?(&:nil?)
-          static = gradual_static_part(slot.current)
+          static = gradual_union_slot?(slot) ? gradual_static_part(slot.current) : nil
           static &&= case_when_types(scope, static, conditions).first
           body_scope = mark_gradual_narrowing(body_scope, slot, truthy_type, marked: marked, narrowed_static: static)
         end
@@ -2569,7 +2569,7 @@ module Rigor
           truthy = narrow_class(slot.current, class_name, exact: exact, environment: environment, scope: scope)
           falsey = narrow_not_class(slot.current, class_name, exact: exact, environment: environment, scope: scope)
           truthy_scope = record_bot_guard(narrow_guarded_slot(scope, slot, truthy), slot, truthy, [class_name])
-          static = gradual_static_part(slot.current)
+          static = gradual_union_slot?(slot) ? gradual_static_part(slot.current) : nil
           static &&= narrow_class(static, class_name, exact: exact, environment: environment, scope: scope)
           [mark_gradual_narrowing(truthy_scope, slot, truthy, narrowed_static: static),
            narrow_guarded_slot(scope, slot, falsey)]
@@ -2612,6 +2612,12 @@ module Rigor
           return nil unless current.is_a?(Type::Union)
 
           Type::Combinator.union(*current.members.grep_v(Type::Dynamic))
+        end
+
+        # Whether `slot` is a local holding a union with a `Dynamic` member, the one case {.gradual_static_part}
+        # answers for; checked first so a class guard on any other slot builds nothing.
+        def gradual_union_slot?(slot)
+          slot.kind == :local && slot.current.is_a?(Type::Union) && slot.current.members.any?(Type::Dynamic)
         end
 
         def literal_or_empty?(type)

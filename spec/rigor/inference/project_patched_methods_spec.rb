@@ -99,4 +99,125 @@ RSpec.describe Rigor::Inference::ProjectPatchedMethods do
                      &.class_name).to eq("B")
     end
   end
+
+  # Issue #2108 — `module_function :x` on a name the module inherits records no entry; the singleton-side walk
+  # resolves Ruby's public singleton copy through the owner's instance ancestors instead. Each entry's shape is
+  # the bound-name copy's ({ProjectPatchedScanner::Visibility.applied}): the inherited def's return type, the
+  # owner as class_name, `:singleton` kind and `:public` visibility.
+  describe "#lookup_through_ancestors singleton copy (#2108)" do
+    let(:entry) do
+      entry_klass.new(class_name: "KHelp", method_name: :kx, kind: :instance, source_path: "k.rb",
+                      source_line: 1, return_type: :int_tag)
+    end
+    let(:registry) do
+      described_class.new(
+        entries: [entry],
+        mixins: [described_class::Mixin.new(owner: "Kernel", module_name: "KHelp", kind: :include)],
+        overrides: { ["Kernel", :kx, :instance] => :module_function },
+        singleton_copies: [["Kernel", :kx]]
+      )
+    end
+
+    it "answers a singleton call with the inherited instance entry, public and re-kinded" do
+      # Kernel.kx => 1 in Ruby.
+      found = registry.lookup_through_ancestors(class_name: "Kernel", method_name: :kx, kind: :singleton,
+                                                rbs_loader: nil)
+
+      expect(found&.class_name).to eq("Kernel")
+      expect(found&.kind).to eq(:singleton)
+      expect(found&.visibility).to eq(:public)
+      expect(found&.return_type).to eq(:int_tag)
+      expect(registry.callable?(found, explicit: true)).to be(true)
+    end
+
+    it "keeps the instance side private for an explicit call" do
+      # 1.kx raises NoMethodError (private method 'kx') in Ruby.
+      found = registry.lookup_through_ancestors(class_name: "Kernel", method_name: :kx, kind: :instance,
+                                                rbs_loader: nil)
+
+      expect(found&.visibility).to eq(:module_function)
+      expect(registry.callable?(found, explicit: true)).to be(false)
+    end
+
+    it "answers nothing for a singleton call on a module with no recorded copy" do
+      # Without `module_function :kx` Comparable's instance methods are not the module object's.
+      found = registry.lookup_through_ancestors(class_name: "Comparable", method_name: :kx, kind: :singleton,
+                                                rbs_loader: nil)
+
+      expect(found).to be_nil
+    end
+
+    # Both `private_class_method :kx` and `private :kx` in `class << self` record the same
+    # `overrides[["Kernel", :kx, :singleton]]`, which the copy must take: Ruby refuses `Kernel.kx`
+    # (NoMethodError, private method 'kx') once either runs after `module_function :kx`.
+    it "takes the singleton-side override a later private call on the inherited copy records" do
+      registry = described_class.new(
+        entries: [entry],
+        mixins: [described_class::Mixin.new(owner: "Kernel", module_name: "KHelp", kind: :include)],
+        overrides: { ["Kernel", :kx, :instance] => :module_function,
+                     ["Kernel", :kx, :singleton] => :private },
+        singleton_copies: [["Kernel", :kx]]
+      )
+
+      found = registry.lookup_through_ancestors(class_name: "Kernel", method_name: :kx, kind: :singleton,
+                                                rbs_loader: nil)
+
+      expect(found&.visibility).to eq(:private)
+      expect(registry.callable?(found, explicit: true)).to be(false)
+    end
+
+    # `Kernel.kx`'s singleton walk reaches KHelp's public instance `kx` AFTER `#<Class:Kernel>`'s copy.
+    # Ruby ends the lookup at the copy — private means refuse — so the farther definer must not make
+    # {#callable?} decline to untyped.
+    it "ends the lookup at the copy: a definer farther on the singleton walk cannot make it decline" do
+      registry = described_class.new(
+        entries: [entry],
+        mixins: [described_class::Mixin.new(owner: "Kernel", module_name: "KHelp", kind: :include)],
+        overrides: { ["Kernel", :kx, :instance] => :module_function,
+                     ["Kernel", :kx, :singleton] => :private },
+        singleton_copies: [["Kernel", :kx]]
+      )
+      loader = Object.new
+      def loader.singleton_ancestors_for(_name)
+        [[:singleton, "Kernel"], [:instance, "Module"], [:instance, "Object"],
+         [:instance, "Kernel"], [:instance, "KHelp"], [:instance, "BasicObject"]]
+      end
+
+      def loader.ancestor_names_for(_name) = []
+
+      found = registry.lookup_through_ancestors(class_name: "Kernel", method_name: :kx, kind: :singleton,
+                                                rbs_loader: loader)
+
+      expect(found&.visibility).to eq(:private)
+      expect(found&.farther).to be_nil
+      expect(registry.callable?(found, explicit: true, rbs_loader: loader)).to be(false)
+    end
+
+    # `module KInner; def kx = 2; end; module KHelp; include KInner; def kx = 1; end` then
+    # `include KHelp; module_function :kx; private_class_method :kx` on the owner: the instance walk finds
+    # KHelp's `kx` first and records KInner's as `farther`. Once the singleton copy exists no instance-chain
+    # definer can answer `owner.x` — Ruby raises NoMethodError on the private copy — so the copy MUST drop
+    # `farther` and {#callable?} MUST refuse (false), not decline (nil) to untyped.
+    it "drops the instance walk's farther definers: none can answer the singleton call" do
+      inner = entry_klass.new(class_name: "KInner", method_name: :kx, kind: :instance,
+                              source_path: "k.rb", source_line: 2)
+      help = entry_klass.new(class_name: "KHelp", method_name: :kx, kind: :instance,
+                             source_path: "k.rb", source_line: 1)
+      registry = described_class.new(
+        entries: [inner, help],
+        mixins: [described_class::Mixin.new(owner: "KHelp", module_name: "KInner", kind: :include),
+                 described_class::Mixin.new(owner: "KOwner", module_name: "KHelp", kind: :include)],
+        overrides: { ["KOwner", :kx, :instance] => :module_function,
+                     ["KOwner", :kx, :singleton] => :private },
+        singleton_copies: [["KOwner", :kx]]
+      )
+
+      found = registry.lookup_through_ancestors(class_name: "KOwner", method_name: :kx, kind: :singleton,
+                                                rbs_loader: nil)
+
+      expect(found&.visibility).to eq(:private)
+      expect(found&.farther).to be_nil
+      expect(registry.callable?(found, explicit: true)).to be(false)
+    end
+  end
 end

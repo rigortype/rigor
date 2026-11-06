@@ -679,6 +679,7 @@ RSpec.describe Rigor::Analysis::Runner do
               class Registry
                 def self.fields_for: (singleton(Shape) klass) -> Array[Symbol]
                 def self.take_int: (Integer n) -> Integer
+                def self.shape_of: (Shape s) -> Integer
               end
             RBS
           end
@@ -686,9 +687,11 @@ RSpec.describe Rigor::Analysis::Runner do
             <<~RUBY
               class Shape; end
               class Circle < Shape; end
+              class Unrelated; end
               class Registry
                 def self.fields_for(klass) = []
                 def self.take_int(n) = n
+                def self.shape_of(s) = 1
               end
             RUBY
           end
@@ -738,6 +741,16 @@ RSpec.describe Rigor::Analysis::Runner do
               end
             RUBY
             expect(mismatches(source)).not_to be_empty
+          end
+
+          it "withholds an instance of an unloaded project subclass (`Circle?` against `Shape`)" do
+            expect(mismatches(holder("Circle.new", "Registry.shape_of(@v)"))).to be_empty
+          end
+
+          # Known limit: both classes are project classes the host has not loaded, so the subclass question is
+          # `maybe` and an unrelated class is withheld exactly as a subclass is. Set to the observed behaviour.
+          it "also withholds an instance of an unrelated unloaded project class (`maybe`, not `no`)" do
+            expect(mismatches(holder("Unrelated.new", "Registry.shape_of(@v)"))).to be_empty
           end
 
           it "STILL fires on a `Module` value against a non-class-object parameter" do

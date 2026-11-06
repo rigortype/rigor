@@ -99,6 +99,6 @@ QueueTurnOutput:
 
 ## Shared non-goals (encode in every lane/orchestrator prompt)
 
-- No parallel full-suite `make verify` on the host
+- No full-suite `make verify` / `make check` on the host (`make verify-changed` only; AGENTS.md § Validation)
 - Lanes do not own long CI watchers
 - Issues are the backlog (ADR-98)

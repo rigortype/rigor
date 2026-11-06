@@ -649,6 +649,10 @@ new tree against the old tree's numbers, and
 `spec/tool/bench_sampling_spec.rb` fails CI if it is ever committed as the
 head state.
 
+## File the next dev-loop post-mortem
+
+The development-loop post-mortem recurs after every release ([#2333](https://github.com/rigortype/rigor/issues/2333) was the first, after v0.4.7). Once the release is out, open an issue "Post-mortem the development loop after the vX.Y.Z release" in the following milestone, and compare against the previous window with the same metrics collected the same way. Use two read-only agents: a GitHub-side one (PR open-to-merge median and p90, issue-to-merge, force-push rounds, "Engine allocations" check-run annotations, PRs closed unmerged, merge-queue requeues) and a transcript-side one (compactions, reviewer reports per PR, severe findings and their clusters, lanes without a PR, coordinator edits against `SendMessage` resumes, fresh fixers, API errors). The previous numbers are in #2333's post-mortem comment; the maintainer's rulings from it are in `docs/agents/parallel-lanes.md`.
+
 ## Quick Checklist
 
 - The approval queue was reported to the user in their language first, every
@@ -675,6 +679,7 @@ head state.
 - `gem build rigortype.gemspec` succeeded and the produced `.gem` is not
   committed.
 - The final commit message follows `Bump up version to x.y.z`.
+- The next dev-loop post-mortem issue is filed ("File the next dev-loop post-mortem").
 - Release work happened on a `release/x.y.z` branch (not directly on
   `master`).
 - Before merge: `ci.yml` base gate is green; `release-gate.yml` (advisory) was

@@ -721,7 +721,7 @@ module Rigor
     # ({#with_block_self_unknown}) rather than a block entry: the mark is set, the #316 one is not, and it is not
     # a {PRESERVED_BLOCK_SELF} entry's. A block nested in such a scope keeps the #316 mark off (issue #1717).
     def walked_block_self_unknown?
-      @block_self_unknown && !@opaque_block_self && @block_self_unknown != PRESERVED_BLOCK_SELF ? true : false
+      !!@block_self_unknown && !@opaque_block_self && @block_self_unknown != PRESERVED_BLOCK_SELF
     end
 
     # Issue #1717 — true when this scope sits in a block whose `self` the engine does not know, so an explicit

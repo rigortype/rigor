@@ -60,18 +60,22 @@ RSpec.describe "a cross-file top-level def called from a block (#2861)", type: :
         "rows = [1, 2]",
         "rows.map { |r| format(r).bit_length }",
         "rows.map { |r| myhelper(r).upcase }",
-        "rows.map { |r| myhelper(r).bit_length }"
+        "rows.map { |r| myhelper(r).bit_length }",
+        "rows.map { |r| myhelper(r) }.first.upcase"
       )
     end
 
     # File order is not load order: the def sorts after the caller in one run and before it in the other.
     it "binds the def in a core iterator block whichever file sorts first" do
-      expect_reports({ "a_helpers.rb" => helpers, "b_script.rb" => use }, [["b_script.rb", 3, "for 42"]])
-      expect_reports({ "z_helpers.rb" => helpers, "b_script.rb" => use }, [["b_script.rb", 3, "for 42"]])
+      expect_reports({ "a_helpers.rb" => helpers, "b_script.rb" => use },
+                     [["b_script.rb", 3, "for 42"], ["b_script.rb", 5, "for 42"]])
+      expect_reports({ "z_helpers.rb" => helpers, "b_script.rb" => use },
+                     [["b_script.rb", 3, "for 42"], ["b_script.rb", 5, "for 42"]])
     end
 
     it "binds the same way across Ractor workers" do
-      expect_reports({ "helpers.rb" => helpers, "script.rb" => use }, [["script.rb", 3, "for 42"]], "workers" => 2)
+      expect_reports({ "helpers.rb" => helpers, "script.rb" => use },
+                     [["script.rb", 3, "for 42"], ["script.rb", 5, "for 42"]], "workers" => 2)
     end
 
     # The must-fire sibling of the silenced row: without a helpers file, `format` is Kernel's and the chain reports.
@@ -81,7 +85,7 @@ RSpec.describe "a cross-file top-level def called from a block (#2861)", type: :
     end
   end
 
-  context "where the block's self is not provably the caller's" do
+  context "without proof that the block keeps the caller's self" do
     # `runit` hands the block to `instance_exec`, so the mark declines the bind; the shadowing name answers
     # `Dynamic[Top]` instead of `Kernel#format`'s `String`, and the non-shadowing one stays untyped as before.
     it "answers Dynamic, not the Kernel method, for a receiverless DSL block" do
@@ -89,6 +93,32 @@ RSpec.describe "a cross-file top-level def called from a block (#2861)", type: :
         "def runit(&b) = instance_exec(&b)",
         "runit { format(1).bit_length }",
         "runit { myhelper(1).upcase }"
+      )
+
+      expect(undefined("helpers.rb" => helpers, "script.rb" => use)).to eq([])
+    end
+
+    # A core iterator keeps the `self` it is called under, so nested in a DSL block it keeps that block's mark, and a
+    # DSL block nested in a core iterator takes the mark afresh.
+    it "keeps the mark across nesting in either order" do
+      use = script(
+        "def runit(&b) = instance_exec(&b)",
+        "runit { [1].map { |r| format(r).bit_length } }",
+        "runit { [1].map { |r| myhelper(r).upcase } }",
+        "[1].map { runit { format(1).bit_length } }",
+        "[1].map { runit { myhelper(1).upcase } }"
+      )
+
+      expect(undefined("helpers.rb" => helpers, "script.rb" => use)).to eq([])
+    end
+
+    # A project reopening of a catalogued iterator may run the block on another object.
+    it "keeps the mark where the project redefines the iterator" do
+      use = script(
+        "class Integer",
+        "  def times(&b) = instance_exec(&b)",
+        "end",
+        "3.times { myhelper(1).upcase }"
       )
 
       expect(undefined("helpers.rb" => helpers, "script.rb" => use)).to eq([])

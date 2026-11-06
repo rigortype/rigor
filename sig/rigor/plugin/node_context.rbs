@@ -8,11 +8,10 @@ module Rigor
 
       def initialize: (Array[::Prism::Node] ancestors) -> void
       # The three finders return the innermost ancestor of a given kind: a `DefNode`, a `ClassNode` or
-      # `ModuleNode`, and a `CallNode` respectively. They are declared `Prism::Node?`: `enclosing_def`'s body infers
-      # `Prism::DefNode?` since #2719, but sig-gen does not propose a narrower return over a nil-able union (#2914),
-      # and the other two blocks (`||`, `&&`) are not a single class test, so their bodies still infer
-      # `Prism::Node?`. A narrower declaration would be an unmarked sig-gen divergence (ADR-107).
-      def enclosing_def: () -> ::Prism::Node?
+      # `ModuleNode`, and a `CallNode` respectively. `enclosing_def` is sig-gen's proposal (#2719, #2914); the other
+      # two blocks (`||`, `&&`) are not a single class test, so their bodies still infer `Prism::Node?`. A narrower
+      # declaration would be an unmarked sig-gen divergence (ADR-107).
+      def enclosing_def: () -> (Prism::DefNode | nil)
       def enclosing_module: () -> ::Prism::Node?
       def enclosing_block: (Symbol method_name) -> ::Prism::Node?
     end

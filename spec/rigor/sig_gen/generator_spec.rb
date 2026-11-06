@@ -1740,6 +1740,136 @@ RSpec.describe Rigor::SigGen::Generator do
     end
   end
 
+  # Issue #2914. A proposed member that is a subclass of a declared one keeps that member: declared
+  # `Prism::Node?` against an inferred `Prism::DefNode?` (`NodeContext#enclosing_def`) narrows the nominal arm
+  # and keeps the declared `nil`. Every other row is a case the lenience guard above exists for.
+  describe "lenience-preserving guard against a member narrowed to a subclass" do
+    def classify(sig, body, name = :fetch)
+      write_fixture("sig/box.rbs", "class Box\n  #{sig}\nend\n")
+      path = write_fixture("lib/box.rb", "class Box\n#{body}\nend\n")
+      generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")]).run.find { |c| c.method_name == name }
+    end
+
+    it "proposes a subclass narrowing of a nil-able union, keeping its nil" do
+      method = classify(
+        "def fetch: (untyped flag) -> Exception?",
+        "  def fetch(flag)\n    flag ? StandardError.new(\"x\") : nil\n  end"
+      )
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::TIGHTER_RETURN)
+      expect(method.rbs).to eq("def fetch: (untyped flag) -> (StandardError | nil)")
+    end
+
+    it "proposes a subclass narrowing of a non-nil declaration (guard: no union, so the member guard never ran)" do
+      method = classify(
+        "def fetch: () -> Exception",
+        "  def fetch\n    StandardError.new(\"x\")\n  end"
+      )
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::TIGHTER_RETURN)
+      expect(method.rbs).to eq("def fetch: () -> StandardError")
+    end
+
+    it "narrows one member and keeps another unchanged" do
+      method = classify(
+        "def fetch: (untyped flag, String text) -> (Exception | String)",
+        "  def fetch(flag, text)\n    flag ? StandardError.new(text) : text\n  end"
+      )
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::TIGHTER_RETURN)
+      expect(method.rbs).to eq("def fetch: (untyped flag, String text) -> (StandardError | String)")
+    end
+
+    it "keeps a non-nil literal member the declaration spells while narrowing another" do
+      method = classify(
+        "def fetch: (untyped flag, Integer count) -> (Numeric | :none)",
+        "  def fetch(flag, count)\n    flag ? count : :none\n  end"
+      )
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::TIGHTER_RETURN)
+      expect(method.rbs).to eq("def fetch: (untyped flag, Integer count) -> (:none | Integer)")
+    end
+
+    it "narrows a declared module member to a class that includes it" do
+      method = classify(
+        "def fetch: (untyped flag, String text) -> Comparable?",
+        "  def fetch(flag, text)\n    flag ? text : nil\n  end"
+      )
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::TIGHTER_RETURN)
+      expect(method.rbs).to eq("def fetch: (untyped flag, String text) -> (String | nil)")
+    end
+
+    it "narrows a declared `Kernel?` to `Object`, which includes it" do
+      method = classify(
+        "def fetch: (untyped flag) -> Kernel?",
+        "  def fetch(flag)\n    flag ? Object.new : nil\n  end"
+      )
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::TIGHTER_RETURN)
+      expect(method.rbs).to eq("def fetch: (untyped flag) -> (Object | nil)")
+    end
+
+    it "declines a subclass narrowing that drops the declared nil" do
+      method = classify(
+        "def fetch: () -> Exception?",
+        "  def fetch\n    StandardError.new(\"x\")\n  end"
+      )
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+    end
+
+    it "declines a subclass narrowing that drops another declared member" do
+      method = classify(
+        "def fetch: (untyped flag) -> (Exception | String | nil)",
+        "  def fetch(flag)\n    flag ? StandardError.new(\"x\") : nil\n  end"
+      )
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+    end
+
+    it "declines a narrowing between generic members, whose type arguments the subclass reading does not weigh" do
+      method = classify(
+        "def fetch: (untyped flag, Array[Integer] xs) -> Enumerable[Integer]?",
+        "  def fetch(flag, xs)\n    flag ? xs : nil\n  end"
+      )
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+    end
+
+    it "declines a widening to a superclass (guard: forward acceptance refuses it)" do
+      method = classify(
+        "def fetch: (untyped flag) -> StandardError?",
+        "  def fetch(flag)\n    flag ? Exception.new(\"x\") : nil\n  end"
+      )
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+    end
+
+    it "declines when no class data decides the ordering (guard: acceptance is also undecided)" do
+      # `Sub` is declared in neither `sig/` nor the host process, so `class_ordering` answers `:unknown`. The
+      # forward acceptance check reads the host hierarchy and answers `maybe` here too, so the row is a guard.
+      write_fixture("sig/hierarchy.rbs", "class Base\nend\n")
+      write_fixture("lib/hierarchy.rb", "class Base\nend\nclass Sub < Base\nend\n")
+      method = classify(
+        "def fetch: (untyped flag) -> Base?",
+        "  def fetch(flag)\n    flag ? Sub.new : nil\n  end"
+      )
+
+      expect(method.classification).not_to eq(Rigor::SigGen::Classification::TIGHTER_RETURN)
+    end
+
+    it "still declines a literal the declaration does not spell next to the nil it does" do
+      # The `Configuration.discover` shape: the shared `nil` is exempt, the `"a"` arm is not.
+      method = classify(
+        "def fetch: (untyped flag) -> String?",
+        "  def fetch(flag)\n    flag ? \"a\" : nil\n  end"
+      )
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+    end
+  end
+
   describe "#run when RBS already declares the method" do
     it "classifies an exact-match declaration as equivalent" do
       write_fixture("sig/widget.rbs", "class Widget\n  def n: () -> 42\nend\n")

@@ -87,8 +87,9 @@ module Rigor
       #   can still wrap a nested declaration — a `Query::QueryError` shell rides on a surviving sibling's
       #   candidate — so without this its container header was written `class Query < ::BaseRecord` and the next
       #   `rigor check` failed the build with `RBS::NoSuperclassFoundError` (#2715). Dropping the entry writes
-      #   the bare `class Query` shell instead: the nested declaration still lands, and the class itself stays
-      #   off RBS's member surface exactly as #735's demotion intends.
+      #   the bare `class Query` shell instead: the nested declaration still lands, and the shell itself is
+      #   memberless — declared, but carrying none of the demoted class's methods — exactly as #735's demotion
+      #   intends.
       # @return one per target sig file.
       def write_all(candidates, header_spelling: nil, unresolvable_class_names: [])
         emittable = candidates.select { |c| EMITTABLE.include?(c.classification) }

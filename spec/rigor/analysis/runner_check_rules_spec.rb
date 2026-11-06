@@ -680,6 +680,7 @@ RSpec.describe Rigor::Analysis::Runner do
                 def self.fields_for: (singleton(Shape) klass) -> Array[Symbol]
                 def self.take_int: (Integer n) -> Integer
                 def self.shape_of: (Shape s) -> Integer
+                def self.shapes_of: (Array[Shape] a) -> Integer
               end
             RBS
           end
@@ -692,6 +693,7 @@ RSpec.describe Rigor::Analysis::Runner do
                 def self.fields_for(klass) = []
                 def self.take_int(n) = n
                 def self.shape_of(s) = 1
+                def self.shapes_of(a) = 1
               end
             RUBY
           end
@@ -747,9 +749,15 @@ RSpec.describe Rigor::Analysis::Runner do
             expect(mismatches(holder("Circle.new", "Registry.shape_of(@v)"))).to be_empty
           end
 
-          # Known limit: both classes are project classes the host has not loaded, so the subclass question is
-          # `maybe` and an unrelated class is withheld exactly as a subclass is. Set to the observed behaviour.
-          it "also withholds an instance of an unrelated unloaded project class (`maybe`, not `no`)" do
+          it "withholds a generic container of an unloaded project subclass (`Array[Circle]?` against `Array[Shape]`)" do
+            expect(mismatches(holder("[Circle.new]", "Registry.shapes_of(@v)"))).to be_empty
+          end
+
+          # Known limit (#2844): `class_subtype_result` resolves classes only through `Object.const_get`, so any two
+          # unloaded project classes answer `maybe` and an unrelated class is withheld like a subclass. The bare
+          # `Registry.shape_of(Unrelated.new)` is already silent, so the ivar spelling matches it. Flip this when
+          # #2844 is fixed: it will then report.
+          it "withholds an instance of an unrelated unloaded project class (`maybe`, not `no`)" do
             expect(mismatches(holder("Unrelated.new", "Registry.shape_of(@v)"))).to be_empty
           end
 

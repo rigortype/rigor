@@ -18,7 +18,9 @@ module Rigor
     # with its own `self`. The project must not define the method anywhere the receiver looks it up
     # ({ProjectMethodOwnership.defines?}): a project reopening of `Array#each` could `instance_exec` the block.
     #
-    # A receiverless or `self.` call is the DSL shape and never answers true, nor does a receiver Rigor cannot see.
+    # The project must not define it on `Object`, `Kernel` or another owner every receiver reaches either
+    # ({.universally_defined?}). A receiverless call is the DSL shape and never answers true, nor does a receiver Rigor
+    # cannot see. A `self.` receiver is read like any other explicit one, through its type.
     module SelfPreservingBlock
       module_function
 
@@ -26,8 +28,7 @@ module Rigor
       def call?(call_node, receiver_type, scope, classification: nil)
         return false unless call_node.is_a?(Prism::CallNode) && call_node.block.is_a?(Prism::BlockNode)
 
-        receiver = call_node.receiver
-        return false if receiver.nil? || receiver.is_a?(Prism::SelfNode) || receiver_type.nil?
+        return false if call_node.receiver.nil? || receiver_type.nil?
 
         method_name = call_node.name
         classification ||= ClosureEscapeAnalyzer.classify(receiver_type: receiver_type, method_name: method_name,
@@ -36,10 +37,26 @@ module Rigor
 
         targets = ProjectMethodOwnership.targets(receiver_type)
         return false if targets.nil? || targets.empty?
+        return false if universally_defined?(method_name, scope)
 
         targets.none? { |class_name, kind| ProjectMethodOwnership.defines?(class_name, method_name, kind, scope) }
       rescue StandardError
         false
+      end
+
+      # The classes and modules every receiver's lookup reaches: an instance of any class is an `Object` (a class
+      # object is also a `Module` and a `Class`), so a project method of the name on one of them may be the one the
+      # call runs, whatever class the receiver names. `ClosureEscapeAnalyzer` answers `tap` / `then` / `yield_self`
+      # for every class without asking who defines them.
+      UNIVERSAL_OWNERS = %w[BasicObject Kernel Object Module Class].freeze
+      private_constant :UNIVERSAL_OWNERS
+
+      # Whether the project defines `method_name` on a {UNIVERSAL_OWNERS} entry or as a top-level `def` (a private
+      # `Object` method, which precedes `Kernel`).
+      def universally_defined?(method_name, scope)
+        return true unless scope.top_level_def_for(method_name).nil?
+
+        UNIVERSAL_OWNERS.any? { |owner| ProjectMethodOwnership.defines?(owner, method_name, :instance, scope) }
       end
     end
   end

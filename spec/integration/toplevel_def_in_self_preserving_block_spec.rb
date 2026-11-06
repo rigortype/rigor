@@ -125,6 +125,20 @@ RSpec.describe "a cross-file top-level def called from a block (#2861)", type: :
       expect_reports({ "helpers.rb" => helpers, "script.rb" => use }, [["script.rb", 2, "for 42"]])
     end
 
+    # The must-fire sibling of the Object / Kernel reopening row: with no reopening, `tap` / `then` keep the caller's
+    # `self` (main), which reaches the top-level def.
+    it "binds through tap and then when nothing reopens them" do
+      use = script(
+        "class Foo",
+        "end",
+        "Foo.new.tap { myhelper(1).upcase }",
+        "Foo.new.then { myhelper(1).upcase }"
+      )
+
+      expect_reports({ "helpers.rb" => helpers, "script.rb" => use },
+                     [["script.rb", 3, "for 42"], ["script.rb", 4, "for 42"]])
+    end
+
     # A project reopening of a catalogued iterator may run the block on another object.
     it "keeps the mark where the project redefines the iterator" do
       use = script(
@@ -138,6 +152,29 @@ RSpec.describe "a cross-file top-level def called from a block (#2861)", type: :
     end
 
     # The class's own `myhelper` returns a String, which Ruby runs; the top-level def must not capture it.
+    # `ClosureEscapeAnalyzer` answers `tap` / `then` for every class, so a project reopening on `Object` or `Kernel`
+    # must count for every receiver. Ruby runs `Foo#format` here ("FOO").
+    it "keeps the mark where the project redefines tap on Object or then on Kernel" do
+      use = script(
+        "class Object",
+        "  def tap(&b) = (instance_exec(&b); self)",
+        "end",
+        "module Kernel",
+        "  def then(&b) = instance_exec(&b)",
+        "end",
+        "class Foo",
+        "  def format(x) = \"foo\"",
+        "  def myhelper(x) = \"foo\"",
+        "end",
+        "Foo.new.tap { format(1).upcase }",
+        "Foo.new.then { format(1).upcase }",
+        "Foo.new.tap { myhelper(1).upcase }",
+        "Foo.new.then { myhelper(1).upcase }"
+      )
+
+      expect(undefined("helpers.rb" => helpers, "script.rb" => use)).to eq([])
+    end
+
     it "answers Dynamic for instance_exec on an object whose class defines the name" do
       use = script(
         "class Fmt",

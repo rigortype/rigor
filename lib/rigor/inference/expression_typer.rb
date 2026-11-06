@@ -1610,7 +1610,7 @@ module Rigor
         return nil unless node.receiver.nil?
 
         local_def = scope.bindable_top_level_def_for(node.name)
-        return declined_top_level_def_answer(node, receiver) if local_def.nil?
+        return declined_top_level_def_answer(node) if local_def.nil?
         return nil if self_type_answers?(node.name)
         return nil if plugin_member_answers?(node, receiver)
 
@@ -1627,12 +1627,11 @@ module Rigor
       end
 
       # Issue #2861 — the answer for an implicit-self call whose top-level `def` the #316 gate declined: nil (dispatch
-      # as before) when the project defines no top-level `def` of the name or a member of `self` answers it, else
-      # `Dynamic[Top]`.
-      def declined_top_level_def_answer(node, receiver)
+      # as before) when the project defines no top-level `def` of the name, else `Dynamic[Top]`. The gate declines only
+      # where `self_type` is nil, so no member of `self` ({#self_type_answers?}, {#plugin_member_answers?}) can answer.
+      def declined_top_level_def_answer(node)
         return nil unless scope.opaque_block_self? && scope.self_type.nil?
         return nil if scope.top_level_def_for(node.name).nil?
-        return nil if plugin_member_answers?(node, receiver)
 
         dynamic_top
       end

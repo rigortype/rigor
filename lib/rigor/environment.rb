@@ -118,6 +118,13 @@ module Rigor
     # stage that failed and the other stage still runs, so this getter never raises into its callers —
     # neither into a file's `analyze_body` rescue nor out of the run-owned demands, which have no rescue
     # above them at all.
+    # Issue #2883 — builds the RBS environment now, if it is not built yet, so typing never builds it. A no-op for an
+    # environment with no loader. Answers the environment.
+    def prepare_for_typing!
+      rbs_loader&.prepare_for_typing!
+      self
+    end
+
     def hkt_registry
       @hkt_registry_holder.fetch do
         pre_scan = pre_scan_hkt_registry
@@ -247,11 +254,14 @@ module Rigor
     end
 
     class << self
+      # Issue #2883 — the shared default environment is built here too, not on the first `type_of` that needs it, so
+      # code that types against it (`Scope.empty`, the narrowing defaults, the incremental session's summary
+      # evaluator) never builds it from inside typing. A non-main Ractor keeps the lazy build.
       def default
         @default ||= new(
           rbs_loader: RbsLoader.default,
           hkt_registry: Builtins::HktBuiltins.registry
-        ).freeze
+        ).freeze.tap { |environment| environment.prepare_for_typing! if Ractor.main? }
       end
 
       # Builds an Environment that consults the project's local signatures and any opt-in stdlib libraries on
@@ -270,6 +280,10 @@ module Rigor
       #   caching for this environment.
       # @param core_root — issue #2517 — a core signature directory loaded in place of the `rbs` gem's `core/`
       #   ({Configuration#core_root}); nil (the default) loads the gem's core.
+      # @param eager — issue #2883 — whether the RBS environment is built here, before anything types. Typing then
+      #   never builds it, so the core-root Frame the build reads (ADR-129 G1') is never read inside a `type_of`. The
+      #   one caller that passes `false` is the runner's pre-cache build, which a warm result-cache hit must not pay
+      #   for; it calls {#prepare_for_typing!} on the analysis path.
       # rubocop:disable-next Metrics/MethodLength, Metrics/ParameterLists
       def for_project(root: Dir.pwd, libraries: [], signature_paths: nil, cache_store: nil, # rubocop:disable Metrics/AbcSize
                       plugin_registry: nil, dependency_source_index: nil,
@@ -280,7 +294,7 @@ module Rigor
                       rbs_collection_lockfile: nil, rbs_collection_auto_detect: false,
                       synthetic_method_index: nil, project_patched_methods: nil,
                       source_files: [], locked_gems: nil, required_features: nil, core_root: nil,
-                      paths: nil, exclude_patterns: nil, exclude_base: nil)
+                      paths: nil, exclude_patterns: nil, exclude_base: nil, eager: true)
         resolved_paths = project_signature_roots(signature_paths, root: root)
         # O4 MVP — append per-gem `sig/` directories discovered under the target project's bundler install
         # root. Empty array when neither an explicit path nor auto-detection finds a bundle. Order: user
@@ -390,7 +404,9 @@ module Rigor
         # Issue #2517 — a selected core is built here, not lazily. The env is first demanded from inside a file's
         # analysis, under rescues that turn any raise into one `internal analyzer error` row per file; building it
         # now raises the {CoreRootError} once, before analysis, where the CLI reports it as a configuration error.
-        loader.verify_core_root!
+        # Issue #2883 — the default core is built here too (`eager:`), so no `type_of` builds the environment.
+        # A non-main Ractor worker keeps the lazy build: the `rbs` gem's unshareable constants are unreadable there.
+        eager && Ractor.main? ? loader.prepare_for_typing! : loader.verify_core_root!
         # ADR-20 slice 2c + 2e — seed hkt_registry with the bundled builtins. The Environment's
         # `#hkt_registry` getter then LAZILY merges in the RBS env scan on first call so fast paths that
         # don't consult HKT (e.g. `rigor check --cache-stats --no-stats`) don't pay the eager env-build cost

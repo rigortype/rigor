@@ -32,10 +32,12 @@ Classification judgment calls, each decided by reading the code that reads the s
 - `file_digest_run` and `rbs_core_root` first looked like `typing_never_reads` (a run-wide install, read by the cache
   layer). The audit reported both read inside `type_of`: the first `type_of` that names a constant demands the loader's
   known class names, which it fetches lazily from the cache, digesting signature files and, on a miss, building the
-  environment. Both are witnesses. `rbs_core_root` is a witness that reads only nil: a configured `core_root:` builds
-  the environment eagerly, outside any `type_of`, so no fixture makes typing read a non-nil core root. The witness spec
-  records that exception by name and cites [#2883](https://github.com/rigortype/rigor/issues/2883). G1 cannot fail it, so the slot is a candidate for a fifth statement or for a
-  `type_of`-time build to be forbidden.
+  environment. `file_digest_run` was a witness; `rbs_core_root` a witness that read only nil (a configured `core_root:`
+  builds the environment eagerly, outside any `type_of`), which G1 cannot fail
+  ([#2883](https://github.com/rigortype/rigor/issues/2883)). The user ruled that every analysing entry point builds the
+  RBS environment before typing starts (`Environment.for_project` builds it, `Environment.default` builds it on the main Ractor, and the runner builds it on the analysis
+  path after its result-cache probe). With that, neither Frame is read inside `type_of` on any audited path, so both
+  are `typing_never_reads` and the audit asserts them.
 - `def_node_resolver_run` was first `typing_never_reads`, on negative evidence (no non-nil read inside `type_of` in the
   specs I ran). #2874's `unsettled_chain_incremental_spec` refutes it: under the audit an incremental recheck types a
   file against handles of unchanged files, and `DefNodeResolver.resolve` reads the slot inside `type_of`. It is a

@@ -201,11 +201,6 @@ RSpec.describe "ADR-129 G1' Frame declarations", type: :runner do
         when :def_node_resolver_run then run_incremental_witness(path)
         when :dependency_recorder then run_source(source, signature_dir: dir, record_dependencies: true)
         when :effects_collector then run_source(source, signature_dir: dir, config: { "effects" => {} })
-        when :file_digest_run then analyze(source)
-        when :rbs_core_root
-          # A cold cache store and an unmemoised build, so the lazy build runs inside the `type_of`. A configured
-          # `core_root` builds the environment eagerly, outside it, so only the default (nil) core root is read there.
-          analyze(source, cache_store: Rigor::Cache::Store.new(root: File.join(dir, "cache")))
         else run_source(source, signature_dir: dir)
         end
       end
@@ -218,11 +213,6 @@ RSpec.describe "ADR-129 G1' Frame declarations", type: :runner do
       expect(unexpected_findings(rows)).to be_empty
     end
 
-    # A witness whose Frame typing reads only while it holds nil, and why. The environment builds eagerly, outside any
-    # `type_of`, whenever `core_root:` is configured, so the lazy build that runs inside one has no core root to read
-    # (#2883).
-    def nil_only = { rbs_core_root: "a configured core root builds the environment eagerly, outside type_of" }
-
     declared_slots = Rigor::TypingState.slots.select { |slot| slot.kind == :frame && slot.declaration.first == :witness }
     declared_slots.each do |slot|
       it "types #{slot.name} installed and reads it inside type_of", :fresh_rbs_env do
@@ -231,8 +221,27 @@ RSpec.describe "ADR-129 G1' Frame declarations", type: :runner do
         expect(unexpected_findings(rows)).to be_empty
         observer = TypingStateFrameDeclarationsSpec::ReadObserver
         expect(observer::READ).to include(slot.name)
-        expect(observer::SEEN).to include(slot.name) unless nil_only.key?(slot.name)
+        expect(observer::SEEN).to include(slot.name)
       end
+    end
+  end
+
+  describe "a cold Environment.default under the audit" do
+    # The suite pre-builds environments (`spec/support/rbs_env_memo.rb`), so the cold build is reached in a subprocess.
+    # `Scope.empty` types against `Environment.default`, which the incremental session's summary evaluator and the
+    # narrowing defaults use (#2886): building it from inside the first `type_of` read `rbs_core_root` there.
+    it "reports no frame-audit finding when the first type_of names a constant" do
+      script = <<~RUBY
+        require "rigor"
+        Rigor::MemoAudit.enable!
+        node = Prism.parse("Integer.sqrt(4)").value.statements.body.first
+        Rigor::Scope.empty.type_of(node)
+        puts Rigor::MemoAudit.drain.map(&:message)
+      RUBY
+
+      output = IO.popen([RbConfig.ruby, "-I", File.join(repo_root, "lib"), "-e", script], err: File::NULL, &:read)
+
+      expect(output).to be_empty
     end
   end
 

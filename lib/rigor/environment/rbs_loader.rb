@@ -85,9 +85,9 @@ module Rigor
         :rbs_core_root,
         reason: "installed per environment build by with_core_root; selects the core/ directory every loader of the " \
                 "build reads (a validated absolute path, or nil for the rbs gem's own)",
-        # G1′ witness: the environment builds lazily, from inside the first `type_of` that needs it, under the core
-        # root the build installs.
-        witness: "spec/fixtures/typing_state_witnesses/lazy_rbs_environment.rb"
+        # G1′: the build installs the core root and reads it, and every analysing entry point builds the environment
+        # before anything types ({Environment.for_project}, `eager:`; #2883), so no `type_of` reads it.
+        typing_never_reads: true
       )
       private_constant :CORE_ROOT
 
@@ -2255,6 +2255,13 @@ module Rigor
       # its {CoreRootError} at the caller rather than at the first query inside analysis. No-op for the default core.
       def verify_core_root!
         env if @core_root
+        nil
+      end
+
+      # Issue #2883 — builds the environment now, for the default core as {#verify_core_root!} does for a selected one,
+      # so no `type_of` builds it lazily (ADR-129 G1': the core-root Frame the build reads is never read inside typing).
+      def prepare_for_typing!
+        env
         nil
       end
 

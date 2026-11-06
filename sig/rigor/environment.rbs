@@ -19,7 +19,7 @@ module Rigor
     def hkt_scan_failure: () -> [String, String, String?, Symbol]?
 
     def self.default: () -> Environment
-    def self.for_project: (?root: String, ?libraries: Array[String], ?signature_paths: Array[String | _ToPath]?, ?cache_store: untyped?, ?plugin_registry: untyped?, ?dependency_source_index: untyped?, ?rbs_extended_reporter: untyped?, ?boundary_cross_reporter: untyped?, ?source_rbs_synthesis_reporter: untyped?, ?bundler_bundle_path: String?, ?bundler_auto_detect: bool, ?synthetic_method_index: untyped?, ?project_patched_methods: untyped?) -> Environment
+    def self.for_project: (?root: String, ?libraries: Array[String], ?signature_paths: Array[String | _ToPath]?, ?cache_store: untyped?, ?plugin_registry: untyped?, ?dependency_source_index: untyped?, ?rbs_extended_reporter: untyped?, ?boundary_cross_reporter: untyped?, ?source_rbs_synthesis_reporter: untyped?, ?bundler_bundle_path: String?, ?bundler_auto_detect: bool, ?synthetic_method_index: untyped?, ?project_patched_methods: untyped?, ?eager: bool) -> Environment
     # authored: the return is the `signature_paths:` argument's type (authored intent) or the default [Pathname]; sig-gen types the `||` fallback untyped.
     def self.project_signature_roots: (Array[String | _ToPath]? signature_paths, ?root: String) -> Array[String | _ToPath]
 
@@ -36,6 +36,7 @@ module Rigor
     def rbs_module?: (String | Symbol name) -> bool
     def singleton_extended_modules: (String | Symbol name) -> Array[String]
     def class_ordering: (String | Symbol lhs, String | Symbol rhs) -> ordering
+    def prepare_for_typing!: () -> Environment
     def reflection: () -> untyped?
     def missing_rbs_gem_owner: (String | Symbol root_constant_name) -> String?
 

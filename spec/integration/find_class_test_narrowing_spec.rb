@@ -46,4 +46,28 @@ RSpec.describe "a class-test block narrows only a core finder (#2719)", type: :r
     RUBY
     expect(diagnostics(source, sig: sig)).to eq([])
   end
+
+  it "keeps the answer of a find only RBS declares (a gem class with no source in the project)" do
+    sig = { "repo.rbs" => "class Repo\n  def initialize: () -> void\n  " \
+                           "def find: () { (String) -> bool } -> Numeric?\nend\n" }
+    source = <<~RUBY
+      require "rigor/testing"
+      include Rigor::Testing
+      assert_type("Numeric?", Repo.new.find { |x| x.is_a?(Integer) })
+    RUBY
+    expect(diagnostics(source, sig: sig)).to eq([])
+  end
+
+  it "keeps the answer of a core finder the project redefines" do
+    source = <<~RUBY
+      require "rigor/testing"
+      include Rigor::Testing
+      class Array
+        def rfind = last
+      end
+      nums = ARGV.map { |a| a.to_c.real }
+      assert_type("Numeric?", nums.rfind { |n| n.is_a?(Integer) })
+    RUBY
+    expect(diagnostics(source)).to eq([])
+  end
 end

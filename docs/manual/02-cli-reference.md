@@ -1287,14 +1287,27 @@ caveat for container / cross-filesystem setups).
 
 ## `rigor playground`
 
-Start the browser playground (a CodeMirror editor with
-real-time diagnostics). Requires the separate `rigor-playground`
-gem; if it is not installed the command prints an install hint
-and exits `64`.
+Start a local browser playground (a CodeMirror editor with real-time Rigor diagnostics and type inspection).
 
 ```sh
-rigor playground
+rigor playground [options]
 ```
+
+| Flag | Purpose |
+| --- | --- |
+| `--port=PORT` | Port to bind the playground HTTP server to (default: `9393`). |
+| `--no-open` | Do not automatically open the playground URL in the default browser on launch. |
+
+The playground requires the separate `rigor-playground` companion gem. When the gem is not installed in the active Ruby environment, the command prints an installation hint on stderr and exits `64` (`CLI::EXIT_USAGE`):
+
+```text
+rigor playground requires the rigor-playground gem.
+Install it with: gem install rigor-playground
+```
+
+When installed, the command boots the local web server and opens an interactive browser playground where Ruby code can be written, edited, and analyzed with immediate feedback.
+
+Exit `0` on clean shutdown, `1` if server startup fails (e.g. port already in use), and `64` if `rigor-playground` is missing or on usage errors.
 
 ## `rigor skill`
 
@@ -1353,24 +1366,27 @@ they now read as an unknown skill. Use the forms above.
 
 ## `rigor describe`
 
-Top-level alias for [`rigor skill describe`](#rigor-skill) — the
-onboarding entry point that recommends the next skill for this project.
-A bare `rigor describe` is the intuitive guess most users reach for
-first, so it is surfaced as its own command ([ADR-73](../adr/73-skill-driven-user-experience.md)
-§ WD2).
+Top-level alias for [`rigor skill describe`](#rigor-skill) — the onboarding entry point that assesses the project's state and recommends the next skill to run ([ADR-73](../adr/73-skill-driven-user-experience.md) § WD2).
 
 ```sh
-rigor describe
+rigor describe [--deep]
 ```
 
-It reports a presence-only project-state probe (does a `.rigor.yml`,
-`.rigor-baseline.yml`, `sig/` directory, or CI integration exist?) and a
-recommended next skill. It is read-only and side-effect-free — it never
-runs `rigor check`. Identical output to `rigor skill describe`.
+| Flag | Purpose |
+| --- | --- |
+| `--deep` | Run `rigor check` first and route the headline recommendation on the diagnostic results. |
 
-`rigor describe --deep` forwards to
-[`rigor skill describe --deep`](#rigor-skill), which opts into running the
-check first — slow, and it writes the cache.
+### Audit modes
+
+By default, `rigor describe` performs a presence-only probe checking for the existence of `.rigor.yml`, `.rigor-baseline.yml`, a `sig/` directory, and CI configurations. This default mode is read-only, fast, and side-effect-free — it never executes `rigor check` and never reads or writes `.rigor/cache`.
+
+Passing `--deep` opts into running `rigor check` before generating recommendations, routing based on analysis health:
+- **`rigor-doctor`**: Selected if the RBS environment builds with 0 classes or any `configuration-error` diagnostic is raised.
+- **`rigor-monkeypatch-resolve`**: Selected if at least one third of remaining error diagnostics stem from calls resolving to project-side reopened core or gem definitions (addressable via `pre_eval:`).
+- **`rigor-baseline-reduce`**: Selected when remaining error diagnostics exist.
+- **Presence-only recommendation**: Retained when the analysis is completely clean or when no configuration exists yet.
+
+Output is identical to `rigor skill describe`. Exit `0` on completion, or `64` on invalid options.
 
 ## `rigor docs`
 
@@ -1524,18 +1540,29 @@ Exits `1` when any check fails, `0` when all pass.
 
 ## `rigor upgrade`
 
-Migration command skeleton ([ADR-50](../adr/50-release-engineering-and-stability-strategy.md)
-WD7). The real body lands when a concrete backwards-compatibility
-break gives it a target (e.g. re-running `baseline regenerate`
-against a strengthened default profile, surfacing renamed
-suppression ids, reporting `bleeding_edge:` graduations).
+Migration command skeleton for major version transitions and breaking changes ([ADR-50](../adr/50-release-engineering-and-stability-strategy.md) § WD7).
 
 ```sh
 rigor upgrade
 ```
 
-Until then it prints the current version and notes that upgrade is
-queued. Exits `0`.
+### Design and future role
+
+The upgrade command is designed to automate project migrations when major version transitions or breaking changes occur:
+- **Baseline regeneration**: Re-running `rigor baseline regenerate` against strengthened default rules or profiles.
+- **Suppression updates**: Surfacing and updating renamed or deprecated inline `# rigor:disable` rules.
+- **Bleeding-edge consolidation**: Reporting and removing graduated features from `bleeding_edge:` configurations.
+
+### Current status
+
+Until a backward-incompatible release provides an active migration target, the command serves as a placeholder. It prints the current Rigor version and reports that migrations are queued:
+
+```text
+rigor upgrade: No migration target available yet (ADR-50 WD7, queued).
+Current version: <version>
+```
+
+Exit `0` on completion.
 
 ## `rigor help`
 

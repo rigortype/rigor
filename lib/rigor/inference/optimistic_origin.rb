@@ -102,9 +102,9 @@ module Rigor
       # `StatementEvaluator` and `AlwaysTruthyConditionCollector` all route here, so the three consumers the
       # spec binds cannot drift apart.
       #
-      # Resolution order — the mark recorded on the node itself, then the binding a bare local / ivar read (or
-      # a write in value position, `if (x = MAP[k])`) resolves through, then a safe-navigation call and the
-      # predicate-fold derivation issue #313 added.
+      # Resolution order — the mark recorded on the node itself, then the binding a bare local / ivar read resolves
+      # through, then a write in value position and a safe-navigation call and the predicate-fold derivation issue
+      # #313 added.
       def resolve(node, scope)
         return nil if node.nil? || scope.nil?
 
@@ -112,12 +112,27 @@ module Rigor
         return recorded if recorded
 
         case node
-        when Prism::LocalVariableReadNode, Prism::LocalVariableWriteNode then scope.optimistic_local(node.name)
-        when Prism::InstanceVariableReadNode, Prism::InstanceVariableWriteNode then scope.optimistic_ivar(node.name)
+        when Prism::LocalVariableReadNode then scope.optimistic_local(node.name)
+        when Prism::InstanceVariableReadNode then scope.optimistic_ivar(node.name)
+        when Prism::LocalVariableWriteNode, Prism::InstanceVariableWriteNode then resolve_write(node, scope)
         when Prism::AndNode, Prism::OrNode then resolve(node.left, scope) || resolve(node.right, scope)
         when Prism::CallNode then resolve_through_safe_navigation(node, scope) || resolve_through_predicate(node, scope)
         when Prism::ParenthesesNode then resolve_through_parentheses(node, scope)
         end
+      end
+
+      # Issue #2617 — a write in value position (`if (v = h[k])`) yields its right-hand side, so the write's own
+      # optimism is the RHS's. The binding lookup alone could not see it from the scope a certainty consumer
+      # reads: the `if`'s entry scope predates the predicate's evaluation, so `if (v = h[k])` found no mark for
+      # `v` there and `flow.always-truthy-condition` fired on the optimistic read. Resolving `node.value` reaches
+      # the mark recorded on the read itself, which lives in the side table every scope shares; the binding lookup
+      # stays as the fallback for the post-write scope `branch_certainty` passes.
+      def resolve_write(node, scope)
+        resolve(node.value, scope) || optimistic_write_binding(node, scope)
+      end
+
+      def optimistic_write_binding(node, scope)
+        node.is_a?(Prism::LocalVariableWriteNode) ? scope.optimistic_local(node.name) : scope.optimistic_ivar(node.name)
       end
 
       # `recv&.m` is `nil` exactly when `recv` is (or when `m` answers `nil`), so it restates `recv`'s presence

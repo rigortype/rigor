@@ -1240,6 +1240,109 @@ RSpec.describe Rigor::Analysis::Runner do
         end
       end
 
+      # Issue #2617 — `if (v = h[k])` reads the same optimistic value as the bare `if h[k]`: a write in
+      # value position yields its right-hand side, so the mark resolves through it. The rule read the
+      # `if`'s entry scope, where the predicate's write has not run and `v` carries no binding yet, so
+      # the assignment form fired on every receiver kind the bare form stayed silent on.
+      describe "an assignment in the condition over an optimistic read (#2617)" do
+        it "does not fire on `if (v = h[k])` for a literal hash with a dynamic key" do
+          result = analyze(<<~RUBY)
+            def lookup(k, s)
+              h = { s => "x" }
+              if h[k]
+                "bare"
+              end
+              if (v = h[k])
+                v.upcase
+              end
+            end
+          RUBY
+          expect(truthy_diags(result)).to be_empty
+        end
+
+        it "does not fire on `if (v = h[k])` for a parameter-typed receiver" do
+          result = analyze(<<~RUBY, sig: { "lookup.rbs" => <<~RBS })
+            class Lookup
+              def fetch(h, k)
+                if h[k]
+                  "bare"
+                end
+                if (v = h[k])
+                  v
+                end
+              end
+            end
+          RUBY
+            class Lookup
+              def fetch: (Hash[Symbol, 1], Symbol) -> untyped
+            end
+          RBS
+          expect(truthy_diags(result)).to be_empty
+        end
+
+        it "does not fire on `if (v = store[k])` when the receiver's `[]` is project-declared" do
+          # `Store#[]` carries the same `%a{implicitly-returns-nil}` spelling core RBS gives `Hash#[]`,
+          # so `store[k]` is optimistic rather than proof — the bare form is already silent on it.
+          result = analyze(<<~RUBY, sig: { "store.rbs" => <<~RBS })
+            class ViaProject
+              def go(store, k)
+                if store[k]
+                  "bare"
+                end
+                if (v = store[k])
+                  v
+                end
+              end
+            end
+          RUBY
+            class Store
+              def []: %a{implicitly-returns-nil} (Symbol) -> 1
+            end
+            class ViaProject
+              def go: (Store, Symbol) -> untyped
+            end
+          RBS
+          expect(truthy_diags(result)).to be_empty
+        end
+
+        it "does not fire on `if (v = @h[k])` — an ivar-read right-hand side marks the same way" do
+          result = analyze(<<~RUBY)
+            class Holder
+              def lookup(k, s)
+                @h = { s => "x" }
+                if (@v = @h[k])
+                  @v.upcase
+                end
+              end
+            end
+          RUBY
+          expect(truthy_diags(result)).to be_empty
+        end
+
+        it "still fires on `if (v = \"literal\")` — the write's certainty is real (the control)" do
+          result = analyze(<<~RUBY)
+            def pick
+              if (v = "literal")
+                v.upcase
+              end
+            end
+          RUBY
+          expect(truthy_diags(result).map(&:message)).to include(a_string_including("always truthy"))
+        end
+
+        it "still fires on `if (v = h[:a])` for a key the shape proves present (the control)" do
+          result = analyze(<<~RUBY)
+            def fixed
+              h = { a: 1 }
+              if (v = h[:a])
+                v + 1
+              end
+            end
+          RUBY
+          expect(truthy_diags(result).map(&:message)).to include(a_string_including("always truthy"))
+        end
+      end
+
       # A literal hash read with a computed key misses for every key it does not declare, and reads nil there.
       # The shape tier used to decline such a key, so the projection answered the nil-free value union and a
       # comparison against the only value folded.

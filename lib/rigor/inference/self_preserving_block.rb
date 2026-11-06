@@ -44,11 +44,12 @@ module Rigor
         false
       end
 
-      # The classes and modules every receiver's lookup reaches: an instance of any class is an `Object` (a class
-      # object is also a `Module` and a `Class`), so a project method of the name on one of them may be the one the
-      # call runs, whatever class the receiver names. `ClosureEscapeAnalyzer` answers `tap` / `then` / `yield_self`
-      # for every class without asking who defines them.
-      UNIVERSAL_OWNERS = %w[BasicObject Kernel Object Module Class].freeze
+      # The classes every receiver's lookup reaches: an instance of any class is an `Object` (a class object is also
+      # a `Module` and a `Class`), so a project method of the name on one of them, or on `Kernel`, which
+      # {ProjectMethodOwnership.defines?} reaches through `Object`'s ancestry, may be the one the call runs, whatever
+      # class the receiver names. `ClosureEscapeAnalyzer` answers `tap` / `then` / `yield_self` for every class
+      # without asking who defines them.
+      UNIVERSAL_OWNERS = %w[Object Module Class].freeze
       private_constant :UNIVERSAL_OWNERS
 
       # Whether the project defines `method_name` on a {UNIVERSAL_OWNERS} entry. A top-level `def` of the name is

@@ -2778,13 +2778,13 @@ module Rigor
             severity: :error
           )
         ]
-      rescue StandardError => e
+      rescue StandardError, SystemStackError => e
         [
           Diagnostic.new(
             path: path,
             line: 1,
             column: 1,
-            message: CrashSignature.check_rule_message(e),
+            message: CrashSignature.contained_message!(e, parse_result),
             severity: :error
           )
         ]

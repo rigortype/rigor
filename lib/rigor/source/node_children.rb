@@ -109,6 +109,19 @@ module Rigor
       def each_child(node, &)
         node.rigor_each_child(&) if node.is_a?(Prism::Node)
       end
+
+      # #2455 — whether `root` nests deeper than `bound` levels, measured without recursion (the question is asked after
+      # the recursive walkers ran out of stack). Stops as soon as one path passes the bound.
+      def self.nested_deeper_than?(root, bound)
+        stack = [[root, 1]]
+        until stack.empty?
+          node, depth = stack.pop
+          return true if depth > bound
+
+          node.rigor_each_child { |child| stack << [child, depth + 1] }
+        end
+        false
+      end
     end
   end
 end

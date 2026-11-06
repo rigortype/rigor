@@ -100,15 +100,15 @@ RSpec.describe "Rigor::Source helper require hygiene" do
   # short-circuits on every file, and `offenders` comes back empty for the same reason it would if every
   # file were correct. That is not a defect to repair here — the example exists for the moment a lib file
   # DOES reference the helper — but which examples are currently examining nothing should be visible
-  # rather than silent, so the set is pinned. `Source::NodeChildren` is defined in lib and exercised by
-  # its own spec, but no lib file names it today. Shrinking this list is the good direction; growing it
-  # means an example quietly stopped covering anything.
+  # rather than silent, so the set is pinned. Every helper is referenced by some lib file today
+  # (`Source::NodeChildren` since `CrashSignature` measures a file's nesting depth, #2455). Shrinking this list is the
+  # good direction; growing it means an example quietly stopped covering anything.
   it "records which Source helpers no lib file references, so a check that examines nothing is visible" do
     names = SourceRequireHygiene::HELPERS.keys
     referenced = lib_files.flat_map do |path|
       source_helpers_referenced(Prism.parse(File.read(path, encoding: Encoding::UTF_8)).value, names)
     end.uniq
 
-    expect(names - referenced).to eq(%i[NodeChildren])
+    expect(names - referenced).to eq([])
   end
 end

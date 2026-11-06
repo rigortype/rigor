@@ -33,8 +33,11 @@ module Rigor
     # actionable": `SystemStackError` from an ancestry walk that never terminates, `NoMemoryError` from a
     # runaway allocation. Neither is a `StandardError`, so every rescue between here and the raise site
     # declines them by design — the whole point of those rescues is to convert a per-file or per-plugin
-    # failure into a diagnostic, and a process running out of stack is not per-file. Left uncaught they
-    # abort with Ruby's own ~40-frame dump, which is non-zero (so a CI gate does catch it) but says
+    # failure into a diagnostic. Since #2455 the per-file phases (`Runner#analyze_file_body`, the worker session,
+    # the discovery loops) do contain a `SystemStackError` raised from Ruby code, as that file's own crash row;
+    # what still reaches here is one raised from C (`Prism.parse` of a source nested near Prism's cap, which has
+    # no backtrace and leaves no stack to recover on), one outside a per-file phase, and `NoMemoryError`. Left
+    # uncaught they abort with Ruby's own ~40-frame dump, which is non-zero (so a CI gate does catch it) but says
     # neither that Rigor is at fault nor that the report on disk is empty. `Interrupt`, `SignalException`
     # and `SystemExit` stay out: those are the user's answer, not a failure.
     FATAL_ERRORS = [SystemStackError, NoMemoryError].freeze

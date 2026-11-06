@@ -77,6 +77,29 @@ The `rbs.coverage.definition-build-failed` diagnostic and the RBS definition-bui
 
 If an internal-demand episode records a definition-build failure and then raises before the run can assemble its diagnostic, Rigor MUST emit the detailed stderr warning for the first newly encountered failure in that episode, even if an earlier episode already emitted the loader-instance summary. This abort-time fallback is one warning for the episode and does not create a second `rbs.coverage.definition-build-failed` diagnostic.
 
+### A file nested too deeply to analyse
+
+The engine's walkers are recursive, so a file whose source nests deeply enough (about 700 nested `if`s, 1,300 nested
+array literals or chained calls, measured on the default VM stack, and dropping as the walkers grow) exhausts the
+stack although Prism parses it ([#2455](https://github.com/rigortype/rigor/issues/2455)). A `SystemStackError` raised
+from Ruby code while one file is indexed, typed or checked MUST be contained to that file: it is that file's one
+`internal analyzer error` row (`error` severity, no rule id, line 1), which discards that file's other diagnostics
+exactly as any other analyzer crash does. The row names no stack frame, so it is the same in every mode. Its message
+says the file is nested too deeply to analyse when the file's AST is deeper than 500 levels, and otherwise reads as a
+defect in Rigor. Every other file in the run MUST be analysed and reported normally, in the sequential run and under
+`--workers`, and the exit status MUST follow that row's severity (`1`), not `70`.
+
+The cross-file discovery pass is all or nothing per file: a file that overflows contributes nothing to any discovery
+table, in a full run and in an incremental one alike, so the findings in other files do not depend on the mode.
+
+A `SystemStackError` raised from C (`Prism.parse` of a source nested near Prism's own cap has no backtrace; a second
+deep `Prism.parse` after rescuing one aborts the main-thread process with a signal), or outside the per-file phases, is
+NOT contained there: it stays the run-level abort (`CLI::FATAL_ERRORS`, exit `70`).
+
+This containment is the `rigor check` path. The language server does not contain a deeply nested document: its
+threads keep their pre-existing behaviour, and containing it per document is tracked in
+[#2932](https://github.com/rigortype/rigor/issues/2932).
+
 ## `Dynamic[T]` display rules
 
 `Dynamic[T]` provenance is rendered by the diagnostic prefix family rather than by branch:

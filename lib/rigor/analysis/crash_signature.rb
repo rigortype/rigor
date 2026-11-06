@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "../source/node_children"
+
 module Rigor
   module Analysis
     # Issues #665 / #674 / #683 / #686 / #696 — the ONE definition of "an internal failure made this run
@@ -104,10 +106,39 @@ module Rigor
       # into. Built here, not at either rescue site, so the two twins cannot drift (issue #665) — and so
       # the appended crash frame is derived identically on the sequential and pooled paths. Keeps the
       # {CHECK_RULE_MESSAGE_PREFIX} prefix every consumer matches on; the frame is a trailing hint.
-      def check_rule_message(error)
+      def check_rule_message(error, root = nil)
+        return stack_overflow_message(error, root) if error.is_a?(SystemStackError)
+
         base = "#{CHECK_RULE_MESSAGE_PREFIX}: #{error.class}: #{error.message}"
         frame = crash_frame(error)
         frame ? "#{base} (#{frame})" : base
+      end
+
+      # The crash-row message for a rescued error, for the per-file rescues of `Runner` and `WorkerSession`. Re-raises a
+      # `SystemStackError` raised from C (no backtrace): that one leaves no stack to recover on and a second would kill
+      # the process with a signal, so it keeps the run-level abort ({CLI::FATAL_ERRORS}, exit 70). `parse_result` may be
+      # nil when the error predates the parse.
+      def contained_message!(error, parse_result)
+        raise error if error.is_a?(SystemStackError) && error.backtrace.nil?
+
+        check_rule_message(error, parse_result&.value)
+      end
+
+      # #2455 — the AST depth above which a `SystemStackError` is read as the file's own nesting rather than a Rigor
+      # recursion defect. The recursive walkers overflow from about 700 nested `if`s (twice as many AST levels) and
+      # 1,300 nested array literals or chained calls, so a file past this bound is one they cannot be expected to walk.
+      DEEP_NESTING_BOUND = 500
+
+      DEEP_NESTING_DETAIL = "this file is nested too deeply to analyse (stack level too deep); " \
+                            "split the deeply nested expression"
+      STACK_DEFECT_DETAIL = "stack level too deep; this is a defect in Rigor, please report it at " \
+                            "https://github.com/rigortype/rigor/issues"
+
+      # No crash frame: the frame that overflowed is whichever the stack ran out in, which differs by mode and cache and
+      # would make the row unstable. `root` is nil when the file never parsed, which reads as the defect wording.
+      def stack_overflow_message(error, root)
+        deep = !root.nil? && Source::NodeChildren.nested_deeper_than?(root, DEEP_NESTING_BOUND)
+        "#{CHECK_RULE_MESSAGE_PREFIX}: #{error.class}: #{deep ? DEEP_NESTING_DETAIL : STACK_DEFECT_DETAIL}"
       end
 
       # ADR-129 WD5 (#2785) — `diagnostics` (one file's) with a crash row for each of `errors`, raised errors the

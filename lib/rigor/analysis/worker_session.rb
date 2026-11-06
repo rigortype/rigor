@@ -279,8 +279,8 @@ module Rigor
         diagnostics + explain_diagnostics(path, parse_result.value, scope)
       rescue Errno::ENOENT => e
         [analyzer_error(path, e.message)]
-      rescue StandardError => e
-        [analyzer_error(path, CrashSignature.check_rule_message(e))]
+      rescue StandardError, SystemStackError => e
+        [analyzer_error(path, CrashSignature.contained_message!(e, parse_result))]
       ensure
         TypeOfMemo.end_file
       end

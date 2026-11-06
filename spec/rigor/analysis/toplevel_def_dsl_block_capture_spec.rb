@@ -130,8 +130,10 @@ RSpec.describe "toplevel def captured by a DSL block" do
 
   describe Rigor::Scope do
     it "marks a block body as carrying an unmodelled self" do
+      # Issue #2861 — a receiverless block call: `[1, 2].each` provably keeps the caller's `self` and no longer
+      # takes the mark (`toplevel_def_in_self_preserving_block_spec.rb`).
       program = Prism.parse(<<~RUBY).value
-        [1, 2].each do |n|
+        each_item do |n|
           p n
         end
       RUBY

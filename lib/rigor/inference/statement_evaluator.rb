@@ -28,6 +28,7 @@ require_relative "../analysis/check_rules/inferred_param_guard"
 require_relative "../analysis/check_rules/published_constant_guard"
 require_relative "struct_fold_safety"
 require_relative "closure_escape_analyzer"
+require_relative "self_preserving_block"
 require_relative "content_join"
 require_relative "construction_escape"
 require_relative "define_method_block_self"
@@ -8590,9 +8591,23 @@ module Rigor
       # every block entered beneath it. A scope carrying the unknown-`self` mark without the opaque one comes only from
       # the index walk ({Scope#with_block_self_unknown}), so it is how a nested block knows it sits under one: the
       # opaque mark, which declines a cross-file top-level `def`, stays off the whole value-position subtree.
-      def block_self_entry(block_node)
-        walked = block_node.equal?(@value_position_block) || (scope.block_self_unknown? && !scope.opaque_block_self?)
-        walked ? scope.with_block_self_unknown(true) : scope.entering_opaque_block
+      #
+      # Issue #2861 — a block whose call provably runs it under the caller's `self` ({SelfPreservingBlock}:
+      # `rows.map { … }`) enters with no opaque mark the caller's scope does not already carry
+      # ({Scope#entering_self_preserving_block}).
+      def block_self_entry(block_node, call_node = nil)
+        walked = block_node.equal?(@value_position_block) || scope.walked_block_self_unknown?
+        return scope.with_block_self_unknown(true) if walked
+        return scope.entering_self_preserving_block if self_preserving_block?(call_node)
+
+        scope.entering_opaque_block
+      end
+
+      def self_preserving_block?(call_node)
+        return false if call_node.nil? || call_node.receiver.nil?
+
+        SelfPreservingBlock.call?(call_node, explicit_receiver_type(call_node), scope,
+                                  classification: classify_closure_escape(call_node))
       end
 
       # Builds the entry scope for a block body. The block sees the outer scope's locals (Ruby's lexical scoping rule)
@@ -8609,7 +8624,7 @@ module Rigor
         # yielding method, not the lexical context, decides what `self` is, and Rigor does not track it.
         # Issue #1358 — a body that may run a match reads the match globals an earlier iteration may have rebound
         # ({MatchRebinding.block_entry}).
-        entry = MatchRebinding.block_entry(block_self_entry(block_node), block_node, call_node)
+        entry = MatchRebinding.block_entry(block_self_entry(block_node, call_node), block_node, call_node)
         scope_with_params = BlockParameterBinder.new(expected_param_types: expected).bind_onto(block_node, entry)
         # ADR-16 Tier A — a plugin `block_as_methods:` entry that matches `(receiver, name)` narrows the
         # body's `self` to the object the DSL `instance_eval`s the block on (`params` on

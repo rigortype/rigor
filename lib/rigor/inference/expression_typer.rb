@@ -22,6 +22,7 @@ require_relative "body_fixpoint"
 require_relative "budget_trace"
 require_relative "captured_locals"
 require_relative "closure_escape_analyzer"
+require_relative "self_preserving_block"
 require_relative "receiver_blind_block"
 require_relative "def_node_resolver"
 require_relative "dynamic_origin"
@@ -1600,9 +1601,16 @@ module Rigor
       # engine walks can enumerate: a plugin's `dynamic_return` answer and the ADR-16 synthetic-method
       # index. They are members of `self` exactly as an `attr_reader` is, so a top-level `def` must not
       # bind ahead of them either.
+      #
+      # Issue #2861 — a bind the #316 gate declines answers `Dynamic[Top]`, never the RBS method of the same name: the
+      # block's real `self` reaches either a same-named method of its own or the top-level `def`, which shadows
+      # `Kernel#format` and every other `Object` / `Kernel` method on the way. Falling through typed
+      # `format(r).bit_length` against `Kernel#format`'s `String` on code that runs the project's `def format`.
       def try_local_def_dispatch(node, receiver, arg_types, block_type = nil)
-        local_def = node.receiver.nil? ? scope.bindable_top_level_def_for(node.name) : nil
-        return nil unless local_def
+        return nil unless node.receiver.nil?
+
+        local_def = scope.bindable_top_level_def_for(node.name)
+        return declined_top_level_def_answer(node) if local_def.nil?
         return nil if self_type_answers?(node.name)
         return nil if plugin_member_answers?(node, receiver)
 
@@ -1615,6 +1623,16 @@ module Rigor
         # user-defined and shadows whatever ancestor method the dispatch would find), and `Dynamic[Top]`
         # propagates correctly through downstream call chains without surfacing misleading false-positive
         # diagnostics.
+        dynamic_top
+      end
+
+      # Issue #2861 — the answer for an implicit-self call whose top-level `def` the #316 gate declined: nil (dispatch
+      # as before) when the project defines no top-level `def` of the name, else `Dynamic[Top]`. The gate declines only
+      # where `self_type` is nil, so no member of `self` ({#self_type_answers?}, {#plugin_member_answers?}) can answer.
+      def declined_top_level_def_answer(node)
+        return nil unless scope.opaque_block_self? && scope.self_type.nil?
+        return nil if scope.top_level_def_for(node.name).nil?
+
         dynamic_top
       end
 
@@ -4656,7 +4674,7 @@ module Rigor
         )
         block_return_for(
           block_arg, expected,
-          call_node: call_node,
+          call_node: call_node, receiver_type: receiver_type,
           narrowing: block_body_self_narrowing(call_node, receiver_type),
           repeats: !BLOCK_VALUE_DISCARDING.include?(call_node.name) && block_may_repeat?(call_node, receiver_type)
         )
@@ -4729,7 +4747,7 @@ module Rigor
         param_types = break_arm_param_types(call_node, receiver)
         block_scope = block_entry_scope(
           block_node, param_types,
-          call_node: call_node,
+          call_node: call_node, receiver_type: receiver,
           narrowing: block_body_self_narrowing(call_node, receiver),
           captured: repeating_captured_bindings(block_node, param_types, block_may_repeat?(call_node, receiver))
         )
@@ -4772,12 +4790,13 @@ module Rigor
         )
       end
 
-      def block_return_for(block_arg, expected, call_node: nil, narrowing: nil, repeats: false)
+      def block_return_for(block_arg, expected, call_node: nil, narrowing: nil, repeats: false, receiver_type: nil)
         case block_arg
         when Prism::BlockNode
           captured = repeating_captured_bindings(block_arg, expected, repeats)
           entry = block_entry_scope(
-            block_arg, expected, call_node: call_node, narrowing: narrowing, captured: captured
+            block_arg, expected,
+            call_node: call_node, narrowing: narrowing, captured: captured, receiver_type: receiver_type
           )
           type_block_body(block_arg, entry, captured: captured)
         when Prism::BlockArgumentNode
@@ -4805,8 +4824,15 @@ module Rigor
       # Issue #316 — mirrors `StatementEvaluator#build_block_entry_scope`: the block body's `self` is the
       # yielding method's business, so the return-typing pass must see the same unmodelled-self mark. Issue #1358
       # — and the same match-global view ({MatchRebinding.block_entry}), which reads the owning `call_node`.
-      def block_entry_scope(block_node, expected, call_node: nil, narrowing: nil, captured: nil)
-        entry = MatchRebinding.block_entry(scope.entering_opaque_block, block_node, call_node)
+      #
+      # Issue #2861 — and the same self-preserving entry ({SelfPreservingBlock}), read off `receiver_type`.
+      def block_entry_scope(block_node, expected, call_node: nil, narrowing: nil, captured: nil, receiver_type: nil)
+        self_entry = if SelfPreservingBlock.call?(call_node, receiver_type, scope)
+                       scope.entering_self_preserving_block
+                     else
+                       scope.entering_opaque_block
+                     end
+        entry = MatchRebinding.block_entry(self_entry, block_node, call_node)
         entry = captured.lay(entry) if captured
         block_scope = BlockParameterBinder.new(expected_param_types: expected).bind_onto(block_node, entry)
         return block_scope unless narrowing

@@ -30,7 +30,7 @@ module Rigor
     attr_reader struct_fold_safe_locals: Set[Symbol]
     attr_reader opaque_block_self: bool
     # Issue #1759 — `:refinement` (REFINEMENT_BLOCK_SELF) directly in a `refine X do … end` block body.
-    attr_reader block_self_unknown: bool | :refinement
+    attr_reader block_self_unknown: bool | :refinement | :preserved
     attr_reader singleton_class_body: bool
     attr_reader lexical_nesting: Array[String]?
     # Issue #1429 — a guard's narrowing of a constant reference, keyed by its spelling.
@@ -225,12 +225,15 @@ module Rigor
 
     def self.empty: (?environment: Environment, ?source_path: String?) -> Scope
 
-    def initialize: (environment: Environment, locals: Hash[Symbol, Type::t], ?fact_store: Analysis::FactStore, ?self_type: Type::t?, ?ivars: Hash[Symbol, Type::t], ?cvars: Hash[Symbol, Type::t], ?globals: Hash[Symbol, Type::t], ?discovery: DiscoveryIndex, ?source_path: String?, ?opaque_block_self: bool, ?block_self_unknown: bool | :refinement, ?singleton_class_body: bool, ?dynamic_origins: Hash[untyped, Symbol], ?indexed_narrowings: Hash[IndexedKey, Type::t], ?method_chain_narrowings: Hash[ChainKey, Type::t], ?declaration_sourced: Set[[Symbol, Symbol] | [Symbol, Symbol, Symbol]], ?published_constant_sourced: Set[[Symbol, Symbol]], ?struct_fold_safe_locals: Set[Symbol], ?lexical_nesting: Array[String]?, ?local_origins: Hash[Symbol, Symbol], ?ivar_origins: Hash[Symbol, Symbol], ?void_origins: Hash[untyped, Inference::VoidOrigin], ?plugin_typed_calls: Hash[untyped, bool], ?optimistic_origins: Hash[untyped, Symbol], ?optimistic_locals: Hash[Symbol, Symbol | Inference::OptimisticOrigin::BoundMark], ?optimistic_ivars: Hash[Symbol, Symbol | Inference::OptimisticOrigin::BoundMark], ?construction_facts: Hash[Symbol, Set[Symbol]], ?repeated_or_writes: Hash[untyped, bool], ?match_frame: untyped, ?constant_narrowings: Hash[String, Type::t], ?guard_records: Hash[[Symbol, Symbol | String], Type::t], ?bot_guard_classes: Hash[[Symbol, Symbol | String], Array[String]], ?declared_refinements: Array[String | Symbol]) -> void
+    def initialize: (environment: Environment, locals: Hash[Symbol, Type::t], ?fact_store: Analysis::FactStore, ?self_type: Type::t?, ?ivars: Hash[Symbol, Type::t], ?cvars: Hash[Symbol, Type::t], ?globals: Hash[Symbol, Type::t], ?discovery: DiscoveryIndex, ?source_path: String?, ?opaque_block_self: bool, ?block_self_unknown: bool | :refinement | :preserved, ?singleton_class_body: bool, ?dynamic_origins: Hash[untyped, Symbol], ?indexed_narrowings: Hash[IndexedKey, Type::t], ?method_chain_narrowings: Hash[ChainKey, Type::t], ?declaration_sourced: Set[[Symbol, Symbol] | [Symbol, Symbol, Symbol]], ?published_constant_sourced: Set[[Symbol, Symbol]], ?struct_fold_safe_locals: Set[Symbol], ?lexical_nesting: Array[String]?, ?local_origins: Hash[Symbol, Symbol], ?ivar_origins: Hash[Symbol, Symbol], ?void_origins: Hash[untyped, Inference::VoidOrigin], ?plugin_typed_calls: Hash[untyped, bool], ?optimistic_origins: Hash[untyped, Symbol], ?optimistic_locals: Hash[Symbol, Symbol | Inference::OptimisticOrigin::BoundMark], ?optimistic_ivars: Hash[Symbol, Symbol | Inference::OptimisticOrigin::BoundMark], ?construction_facts: Hash[Symbol, Set[Symbol]], ?repeated_or_writes: Hash[untyped, bool], ?match_frame: untyped, ?constant_narrowings: Hash[String, Type::t], ?guard_records: Hash[[Symbol, Symbol | String], Type::t], ?bot_guard_classes: Hash[[Symbol, Symbol | String], Array[String]], ?declared_refinements: Array[String | Symbol]) -> void
     def with_source_path: (String? path) -> Scope
     def with_struct_fold_safe: (Set[Symbol] locals) -> Scope
     def with_lexical_nesting: (Array[String]? chain) -> Scope
     def struct_fold_safe?: (String | Symbol name) -> bool
     def entering_opaque_block: () -> Scope
+    PRESERVED_BLOCK_SELF: :preserved
+    def entering_self_preserving_block: () -> Scope
+    def walked_block_self_unknown?: () -> bool
     def block_self_unknown?: () -> bool
     REFINEMENT_BLOCK_SELF: :refinement
     def refinement_block_self?: () -> bool

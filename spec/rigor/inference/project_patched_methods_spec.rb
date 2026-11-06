@@ -146,5 +146,51 @@ RSpec.describe Rigor::Inference::ProjectPatchedMethods do
 
       expect(found).to be_nil
     end
+
+    # Both `private_class_method :kx` and `private :kx` in `class << self` record the same
+    # `overrides[["Kernel", :kx, :singleton]]`, which the copy must take: Ruby refuses `Kernel.kx`
+    # (NoMethodError, private method 'kx') once either runs after `module_function :kx`.
+    it "takes the singleton-side override a later private call on the inherited copy records" do
+      registry = described_class.new(
+        entries: [entry],
+        mixins: [described_class::Mixin.new(owner: "Kernel", module_name: "KHelp", kind: :include)],
+        overrides: { ["Kernel", :kx, :instance] => :module_function,
+                     ["Kernel", :kx, :singleton] => :private },
+        singleton_copies: [["Kernel", :kx]]
+      )
+
+      found = registry.lookup_through_ancestors(class_name: "Kernel", method_name: :kx, kind: :singleton,
+                                                rbs_loader: nil)
+
+      expect(found&.visibility).to eq(:private)
+      expect(registry.callable?(found, explicit: true)).to be(false)
+    end
+
+    # `Kernel.kx`'s singleton walk reaches KHelp's public instance `kx` AFTER `#<Class:Kernel>`'s copy.
+    # Ruby ends the lookup at the copy — private means refuse — so the farther definer must not make
+    # {#callable?} decline to untyped.
+    it "ends the lookup at the copy: a definer farther on the singleton walk cannot make it decline" do
+      registry = described_class.new(
+        entries: [entry],
+        mixins: [described_class::Mixin.new(owner: "Kernel", module_name: "KHelp", kind: :include)],
+        overrides: { ["Kernel", :kx, :instance] => :module_function,
+                     ["Kernel", :kx, :singleton] => :private },
+        singleton_copies: [["Kernel", :kx]]
+      )
+      loader = Object.new
+      def loader.singleton_ancestors_for(_name)
+        [[:singleton, "Kernel"], [:instance, "Module"], [:instance, "Object"],
+         [:instance, "Kernel"], [:instance, "KHelp"], [:instance, "BasicObject"]]
+      end
+
+      def loader.ancestor_names_for(_name) = []
+
+      found = registry.lookup_through_ancestors(class_name: "Kernel", method_name: :kx, kind: :singleton,
+                                                rbs_loader: loader)
+
+      expect(found&.visibility).to eq(:private)
+      expect(found&.farther).to be_nil
+      expect(registry.callable?(found, explicit: true, rbs_loader: loader)).to be(false)
+    end
   end
 end

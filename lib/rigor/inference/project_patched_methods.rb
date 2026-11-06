@@ -131,12 +131,17 @@ module Rigor
 
           entry = @by_key[[owner, method_name, side]]
           if entry.nil? && found.nil? && side == :singleton
-            entry = singleton_copy_entry(owner, method_name, rbs_loader, source_defines)
+            copy = singleton_copy_entry(owner, method_name, rbs_loader, source_defines)
+            # Issue #2108 — a singleton copy is a real method on `#<Class:owner>` at this exact ancestor
+            # position: Ruby's lookup ends there, so nothing farther on the walk can answer `owner.x`.
+            # Return it now — collecting `farther` would only make {#callable?} decline the refusal Ruby
+            # makes of a private or protected copy.
+            return apply_override(copy, override) if copy
           end
           if found
             farther << entry if entry
           elsif entry
-            found = override ? entry.with(class_name: override.first, visibility: override.last) : entry
+            found = apply_override(entry, override)
           elsif (visibility = @overrides[[owner, method_name, side]])
             override ||= [owner, visibility]
           end
@@ -197,18 +202,28 @@ module Rigor
         keys == [[name, kind]] || keys.include?([owner, :instance])
       end
 
+      # `entry` as the walk's recorded `override` ([owner, visibility], from a nearer row's named
+      # visibility call) leaves it: the override's owner as `class_name` and its visibility — or `entry`
+      # itself when the walk passed no override on the way.
+      def apply_override(entry, override)
+        override ? entry.with(class_name: override.first, visibility: override.last) : entry
+      end
+
       # Issue #2108 — the entry a `module_function :x` on a name `owner` inherits answers `owner.x` with. Ruby
       # copies the instance method the name resolves to onto the owner's singleton as a public method, so the
       # copy is the entry this walk finds for the name on the owner's INSTANCE ancestors, re-attributed to the
-      # owner, re-kinded `:singleton` and made public. nil when no copy is recorded for `[owner, method_name]`,
-      # or when the instance walk finds no patch entry — an RBS or project-source method the registry does not
-      # hold, where the singleton walk then answers whatever else it reaches, as before.
+      # owner, re-kinded `:singleton` and made public — unless a later named visibility call (`private_class_method
+      # :x`, or `private :x` in `class << self`) recorded the pair's singleton-side override, which Ruby applies to
+      # the copy. nil when no copy is recorded for `[owner, method_name]`, or when the instance walk finds no
+      # patch entry — an RBS or project-source method the registry does not hold, where the singleton walk then
+      # answers whatever else it reaches, as before.
       def singleton_copy_entry(owner, method_name, rbs_loader, source_defines)
         return nil unless @singleton_copies.include?([owner, method_name])
 
         copy = lookup_through_ancestors(class_name: owner, method_name: method_name, kind: :instance,
                                         rbs_loader: rbs_loader, source_defines: source_defines)
-        copy&.with(class_name: owner, kind: :singleton, visibility: :public)
+        copy&.with(class_name: owner, kind: :singleton,
+                   visibility: @overrides[[owner, method_name, :singleton]] || :public)
       end
 
       def ancestor_keys(class_name, kind, rbs_loader)

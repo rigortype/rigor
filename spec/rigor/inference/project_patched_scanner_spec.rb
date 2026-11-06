@@ -596,5 +596,45 @@ end
         expect(outcome.registry.singleton_copies).to be_empty
       end
     end
+
+    # Both shapes record the same `overrides` key
+    # (`["Kernel", :kx, :singleton] => :private`), which
+    # {ProjectPatchedMethods#singleton_copy_entry} applies to the copy: Ruby refuses `Kernel.kx`
+    # (NoMethodError, private method 'kx') once either runs after `module_function :kx`.
+    it "records the singleton-side override a `private_class_method` on the inherited copy makes" do
+      scan_sources([<<~RUBY]) do |outcome|
+        module KHelp
+          def kx = 1
+        end
+        module Kernel
+          include KHelp
+          module_function :kx
+          private_class_method :kx
+        end
+      RUBY
+        expect(outcome.registry.overrides).to eq(
+          { ["Kernel", :kx, :instance] => :module_function, ["Kernel", :kx, :singleton] => :private }
+        )
+      end
+    end
+
+    it "records the singleton-side override a `private` in `class << self` on the inherited copy makes" do
+      scan_sources([<<~RUBY]) do |outcome|
+        module KHelp
+          def kx = 1
+        end
+        module Kernel
+          include KHelp
+          module_function :kx
+          class << self
+            private :kx
+          end
+        end
+      RUBY
+        expect(outcome.registry.overrides).to eq(
+          { ["Kernel", :kx, :instance] => :module_function, ["Kernel", :kx, :singleton] => :private }
+        )
+      end
+    end
   end
 end

@@ -49,7 +49,7 @@ RSpec.describe "a class-test block narrows only a core finder (#2719)", type: :r
 
   it "keeps the answer of a find only RBS declares (a gem class with no source in the project)" do
     sig = { "repo.rbs" => "class Repo\n  def initialize: () -> void\n  " \
-                           "def find: () { (String) -> bool } -> Numeric?\nend\n" }
+                          "def find: () { (String) -> bool } -> Numeric?\nend\n" }
     source = <<~RUBY
       require "rigor/testing"
       include Rigor::Testing

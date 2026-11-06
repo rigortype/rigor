@@ -1,0 +1,1 @@
+- **[sig-gen]** A class `sig-gen` skips for an unresolvable superclass no longer writes that superclass on the container header of a nested declaration it still wraps, so the generated `sig/` builds cleanly instead of failing with `RBS::NoSuperclassFoundError`. ([#2900](https://github.com/rigortype/rigor/pull/2900))

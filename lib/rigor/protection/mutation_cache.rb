@@ -215,7 +215,10 @@ module Rigor
             end,
             "patched_overrides" => project_scan.project_patched_methods.overrides.map do |key, visibility|
               [*key, visibility].map(&:to_s)
-            end
+            end,
+            "patched_singleton_copies" => project_scan.project_patched_methods.singleton_copies.map do |owner, name|
+              [owner.to_s, name.to_s]
+            end.sort
           }
           Digest::SHA256.hexdigest(JSON.generate(payload))
         rescue StandardError

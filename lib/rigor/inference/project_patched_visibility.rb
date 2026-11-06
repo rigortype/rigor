@@ -98,13 +98,23 @@ module Rigor
         # second declaration. A name the class does not bind is one it inherits (`public :kp` in `class Integer` over
         # `module Kernel; private def kp`), which Ruby copies onto the class with the new visibility: `overrides` gets
         # `key => visibility` for {ProjectPatchedMethods#lookup_through_ancestors} to apply to the body it finds farther
-        # on. Yields each copy that binds (`module_function :x`'s singleton), at the call's line, for the caller to
+        # on. `module_function :x` also binds the public singleton copy: for a name the class binds, {.applied} yields
+        # it to bind here; for an inherited one (issue #2108) `singleton_copies` records `[class_name, name]`, which
+        # {ProjectPatchedMethods#singleton_copy_entry} resolves through the owner's instance ancestors at call time —
+        # the copy's body is whichever method the name reaches there, which the scan cannot name.
+        # Yields each copy that binds (`module_function :x`'s singleton), at the call's line, for the caller to
         # bind.
-        def apply(pending, bound, homes, overrides)
+        def apply(pending, bound, homes, overrides, singleton_copies)
           pending.names.each do |name|
             key = [pending.class_name, name, pending.kind]
             entry = bound[key]
-            next overrides[key] = pending.visibility if entry.nil?
+            if entry.nil?
+              overrides[key] = pending.visibility
+              if pending.visibility == :module_function && pending.kind == :instance
+                singleton_copies << [pending.class_name, name]
+              end
+              next
+            end
 
             changed, *copies = applied(entry, pending.visibility)
             bound[key] = homes[key][key] = changed

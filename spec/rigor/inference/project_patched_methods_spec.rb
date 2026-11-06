@@ -99,4 +99,52 @@ RSpec.describe Rigor::Inference::ProjectPatchedMethods do
                      &.class_name).to eq("B")
     end
   end
+
+  # Issue #2108 — `module_function :x` on a name the module inherits records no entry; the singleton-side walk
+  # resolves Ruby's public singleton copy through the owner's instance ancestors instead. Each entry's shape is
+  # the bound-name copy's ({ProjectPatchedScanner::Visibility.applied}): the inherited def's return type, the
+  # owner as class_name, `:singleton` kind and `:public` visibility.
+  describe "#lookup_through_ancestors singleton copy (#2108)" do
+    let(:entry) do
+      entry_klass.new(class_name: "KHelp", method_name: :kx, kind: :instance, source_path: "k.rb",
+                      source_line: 1, return_type: :int_tag)
+    end
+    let(:registry) do
+      described_class.new(
+        entries: [entry],
+        mixins: [described_class::Mixin.new(owner: "Kernel", module_name: "KHelp", kind: :include)],
+        overrides: { ["Kernel", :kx, :instance] => :module_function },
+        singleton_copies: [["Kernel", :kx]]
+      )
+    end
+
+    it "answers a singleton call with the inherited instance entry, public and re-kinded" do
+      # Kernel.kx => 1 in Ruby.
+      found = registry.lookup_through_ancestors(class_name: "Kernel", method_name: :kx, kind: :singleton,
+                                                rbs_loader: nil)
+
+      expect(found&.class_name).to eq("Kernel")
+      expect(found&.kind).to eq(:singleton)
+      expect(found&.visibility).to eq(:public)
+      expect(found&.return_type).to eq(:int_tag)
+      expect(registry.callable?(found, explicit: true)).to be(true)
+    end
+
+    it "keeps the instance side private for an explicit call" do
+      # 1.kx raises NoMethodError (private method 'kx') in Ruby.
+      found = registry.lookup_through_ancestors(class_name: "Kernel", method_name: :kx, kind: :instance,
+                                                rbs_loader: nil)
+
+      expect(found&.visibility).to eq(:module_function)
+      expect(registry.callable?(found, explicit: true)).to be(false)
+    end
+
+    it "answers nothing for a singleton call on a module with no recorded copy" do
+      # Without `module_function :kx` Comparable's instance methods are not the module object's.
+      found = registry.lookup_through_ancestors(class_name: "Comparable", method_name: :kx, kind: :singleton,
+                                                rbs_loader: nil)
+
+      expect(found).to be_nil
+    end
+  end
 end

@@ -980,6 +980,56 @@ module Rigor
       @declaration_sourced.include?([:inferred_param, name.to_sym])
     end
 
+    # Issue #2656 — stamp the gradual-narrowing mark on the local `name`: a class guard narrowed it from a `Dynamic`
+    # value, so its `Nominal` reading is the guard's, not a contract the value was checked against. Rides the ADR-58
+    # side-mark machinery under a distinct `:gradual_narrowing` kind, as `:inferred_param` does: the displayed type
+    # stays the narrowed `Nominal` (dispatch, `call.undefined-method` and `call.wrong-arity` read it), and only
+    # `call.argument-type-mismatch` consults the mark ({Analysis::CheckRules::DeclarationSourcedGuard.gradual_narrowed?}).
+    # Like the `:local` mark it is dropped by `with_local` and intersected by `join`. Applied after the binding.
+    def with_gradual_narrowing_mark(name)
+      marks = add_declaration_sourced(:gradual_narrowing, name)
+      return self if marks.equal?(@declaration_sourced)
+
+      marks = (marks.dup << GRADUAL_HINT).freeze unless marks.include?(GRADUAL_HINT)
+      rebuild(declaration_sourced: marks)
+    end
+
+    # Issue #2656 — a ref stamped beside every gradual-narrowing mark, so {#gradual_narrowing_names} can answer "none"
+    # with one hash lookup instead of a walk of the set, which the ADR-67 marks keep non-empty in most bodies. It is a
+    # hint: a drop leaves it, and the walk then finds no mark; a join keeps it only where both arms carry it.
+    GRADUAL_HINT = [:gradual_narrowing_hint].freeze
+    private_constant :GRADUAL_HINT
+
+    # Issue #2656 — this scope without the gradual-narrowing mark of every local `block_node` writes: a block may run
+    # again after its own write (`loop do mode(x); x = "zz".dup; end`), and its entry does not see that back edge, so
+    # a mark from before the block must not reach a read the write may precede. Zero-alloc when no local is marked.
+    def entering_block_without_gradual_marks(block_node)
+      names = gradual_narrowing_names
+      return self if names.empty?
+
+      written = Inference::OperandEffects.written_variables(block_node).map(&:to_sym)
+      dropped = names.reduce(@declaration_sourced) do |marks, name|
+        written.include?(name) ? drop_gradual_narrowing_mark(marks, name) : marks
+      end
+      dropped.equal?(@declaration_sourced) ? self : rebuild(declaration_sourced: dropped)
+    end
+
+    # Issue #2656 — the locals carrying the gradual-narrowing mark, empty when none does.
+    def gradual_narrowing_names
+      return EMPTY_GRADUAL_NAMES unless @declaration_sourced.include?(GRADUAL_HINT)
+
+      @declaration_sourced.filter_map { |ref| ref[1] if ref[0] == :gradual_narrowing }
+    end
+    EMPTY_GRADUAL_NAMES = [].freeze
+    private_constant :EMPTY_GRADUAL_NAMES
+
+    # Issue #2656 — true when the local `name`'s binding is a class guard's narrowing of a `Dynamic` value.
+    def gradual_narrowing?(name)
+      return false if @declaration_sourced.empty?
+
+      @declaration_sourced.include?([:gradual_narrowing, name.to_sym])
+    end
+
     def with_cvar(name, type)
       rebuild(cvars: @cvars.merge(name.to_sym => type).freeze)
     end
@@ -3052,12 +3102,25 @@ module Rigor
     # beside it ({#with_global_copy_marks}).
     def drop_local_declaration_marks(name)
       dropped = drop_declaration_sourced_for(:local, name)
+      dropped = drop_gradual_narrowing_mark(dropped, name)
       return dropped if dropped.equal?(@declaration_sourced)
 
       name = name.to_sym
       return dropped unless dropped.any? { |ref| ref[0] == :global_copy && ref[1] == name }
 
       dropped.dup.delete_if { |ref| ref[0] == :global_copy && ref[1] == name }.freeze
+    end
+
+    # `marks` without the local `name`'s `:gradual_narrowing` mark (issue #2656); `marks` itself when it has none.
+    def drop_gradual_narrowing_mark(marks, name)
+      return marks if marks.empty?
+
+      ref = [:gradual_narrowing, name.to_sym]
+      return marks unless marks.include?(ref)
+
+      dropped = marks.dup
+      dropped.delete(ref)
+      dropped.freeze
     end
 
     def add_guard_record(key, pre_guard)

@@ -4107,6 +4107,7 @@ module Rigor
           param_type = param_overrides[param.name] || translate_param_type(param.type, scope.environment)
           return nil if param_type.is_a?(Type::Dynamic) || param_type.is_a?(Type::Top)
           return nil if arg_type.is_a?(Type::Dynamic) || arg_type.is_a?(Type::Top)
+          return nil if gradual_narrowing_accepted?(arg, arg_type, param_type, scope)
           return nil unless argument_genuinely_mismatches?(arg, arg_type, param_type, scope)
           # Issue #1362 — a value that mixes such a global with something else (`c ? $stdout : StringIO.new`) is judged
           # without the declared members the file never writes, as it was before the join.
@@ -4142,6 +4143,30 @@ module Rigor
           return false if type.is_a?(Type::Dynamic) || type.is_a?(Type::Top)
 
           Inference::Acceptance.accepts(param_type, type, mode: :gradual).no?
+        end
+
+        # Issue #2656 — a local a class guard narrowed from a `Dynamic` value
+        # ({DeclarationSourcedGuard.gradual_narrowed?}) is judged by its class, not by the literals the parameter
+        # names: `mode(x) if x.is_a?(String)` with `mode: ("r" | "w")` is accepted, as the gradual value was, while
+        # `num(x) if x.is_a?(String)` with `num: (1 | 2)` still reports, since no String is ever `1` or `2`. The
+        # parameter's value-pinned members are widened to their classes ({Type::Combinator.widen_value_pinned}) and
+        # the narrowed type is judged against that. The overload path ({#non_nil_arg_overload_mismatch}) already
+        # judges by class, so it needs no such reading.
+        #
+        # A literal member of the narrowed type did not come from the gradual value (`x = h[:m] || "r"` narrows to
+        # `"r" | String`), so it is judged against the parameter as written.
+        def gradual_narrowing_accepted?(arg, arg_type, param_type, scope)
+          return false unless DeclarationSourcedGuard.gradual_narrowed?(arg, scope)
+
+          members = arg_type.is_a?(Type::Union) ? arg_type.members : [arg_type]
+          literals, rest = members.partition { |member| member.is_a?(Type::Constant) }
+          if literals.any? { |member| Inference::Acceptance.accepts(param_type, member, mode: :gradual).no? }
+            return false
+          end
+          return true if rest.empty?
+
+          widened = Type::Combinator.widen_value_pinned(param_type)
+          !Inference::Acceptance.accepts(widened, Type::Combinator.union(*rest), mode: :gradual).no?
         end
 
         # The parameter rejects the argument AND the rejection is not a

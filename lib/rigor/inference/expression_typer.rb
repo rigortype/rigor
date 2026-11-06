@@ -4833,6 +4833,7 @@ module Rigor
                        scope.entering_opaque_block
                      end
         entry = MatchRebinding.block_entry(self_entry, block_node, call_node)
+        entry = entry.entering_block_without_gradual_marks(block_node)
         entry = captured.lay(entry) if captured
         block_scope = BlockParameterBinder.new(expected_param_types: expected).bind_onto(block_node, entry)
         return block_scope unless narrowing

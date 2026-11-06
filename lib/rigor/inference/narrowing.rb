@@ -532,7 +532,17 @@ module Rigor
           lexical_class_name(condition, scope) || case_equality_target_class(condition)
         end
         body_scope = record_bot_guard(narrow_guarded_slot(body_scope, slot, truthy_type), slot, truthy_type, classes)
-        [body_scope, narrow_guarded_slot(scope, slot, falsey_type)]
+        marked = unwrap_case_subject(subject).is_a?(Prism::LocalVariableReadNode) && scope.gradual_narrowing?(slot.name)
+        # A marked subject keeps its mark under any `when` (`when "r"` narrows it without writing it); an unmarked one
+        # is stamped only under class conditions.
+        if marked || classes.none?(&:nil?)
+          static = gradual_union_slot?(slot) ? gradual_static_part(slot.current) : nil
+          static &&= case_when_types(scope, static, conditions).first
+          body_scope = mark_gradual_narrowing(body_scope, slot, truthy_type, marked: marked, narrowed_static: static)
+        end
+        falsey_scope = narrow_guarded_slot(scope, slot, falsey_type)
+        falsey_scope = falsey_scope.with_gradual_narrowing_mark(slot.name) if marked
+        [body_scope, falsey_scope]
       end
 
       CASE_SUBJECT_KINDS = %i[local ivar global constant].freeze
@@ -636,7 +646,30 @@ module Rigor
       def analyse(node, scope)
         edges = analyse_shape(node, scope)
         reader = last_line_condition(node)
-        reader ? LastLine.predicate_scopes(reader, scope, edges) : edges
+        edges = LastLine.predicate_scopes(reader, scope, edges) if reader
+        keep_gradual_marks(node, scope, edges)
+      end
+
+      # Issue #2656 — a guard edge narrows a local; it does not write it. So a local a class guard marked as a gradual
+      # narrowing ({Scope#with_gradual_narrowing_mark}) keeps the mark on both edges of every later predicate
+      # (`return if x.nil?`, `x != ""`, a second class guard), which bind the narrowed type through `with_local` and
+      # drop it. A local the predicate itself writes (`if (x = v)`) loses it, as any write does.
+      def keep_gradual_marks(node, scope, edges)
+        return edges if edges.nil? || (edges[0].equal?(scope) && edges[1].equal?(scope))
+
+        names = scope.gradual_narrowing_names
+        return edges if names.empty?
+
+        # Defensive: the statement walk binds a predicate's own write (`if (x = v)`) before its edges are read, so the
+        # mark is already gone there; the exclusion keeps a write that reached here from carrying it.
+        names -= OperandEffects.written_variables(node).map(&:to_sym)
+        return edges if names.empty?
+
+        edges.map do |edge|
+          names.reduce(edge) do |acc, name|
+            acc.gradual_narrowing?(name) || acc.local(name).nil? ? acc : acc.with_gradual_narrowing_mark(name)
+          end
+        end
       end
 
       # The reader call a condition's value is, or nil.
@@ -2536,7 +2569,62 @@ module Rigor
           truthy = narrow_class(slot.current, class_name, exact: exact, environment: environment, scope: scope)
           falsey = narrow_not_class(slot.current, class_name, exact: exact, environment: environment, scope: scope)
           truthy_scope = record_bot_guard(narrow_guarded_slot(scope, slot, truthy), slot, truthy, [class_name])
-          [truthy_scope, narrow_guarded_slot(scope, slot, falsey)]
+          static = gradual_union_slot?(slot) ? gradual_static_part(slot.current) : nil
+          static &&= narrow_class(static, class_name, exact: exact, environment: environment, scope: scope)
+          [mark_gradual_narrowing(truthy_scope, slot, truthy, narrowed_static: static),
+           narrow_guarded_slot(scope, slot, falsey)]
+        end
+
+        # Issue #2656 — a class guard's truthy edge over a local that held a `Dynamic` value marks the narrowed binding
+        # ({Scope#with_gradual_narrowing_mark}): the binding keeps the asked class's `Nominal`, which dispatch and the
+        # method rules read, while `call.argument-type-mismatch` judges it as the gradual value it came from, which a
+        # literal-typed parameter (`("r" | "w")`) accepts. Only a local is marked, and only when the edge left it
+        # something other than `Dynamic` or `bot`.
+        def mark_gradual_narrowing(scope, slot, narrowed, marked: false, narrowed_static: nil)
+          return scope unless slot.kind == :local
+
+          mark_gradual_local(scope, slot.name, slot.current, narrowed, marked: marked, narrowed_static: narrowed_static)
+        end
+
+        # {#mark_gradual_narrowing} for the local `name`, which held `current` before the guard and `narrowed` after.
+        # `current` is gradual when it is `Dynamic` or a union with a `Dynamic` member (`h[:m] || "r"`, `c ? h[:m] :
+        # nil`); `marked` says the local already carried the mark, so a `case` or a capture over it keeps it (a
+        # predicate keeps it through {.keep_gradual_marks}).
+        def mark_gradual_local(scope, name, current, narrowed, marked: false, narrowed_static: nil)
+          return scope unless marked || gradual_bearing?(current)
+          return scope if narrowed.nil? || narrowed.is_a?(Type::Dynamic) || narrowed.is_a?(Type::Bot)
+          return scope unless marked || literal_or_empty?(narrowed_static || gradual_static_part(current))
+
+          scope.with_gradual_narrowing_mark(name)
+        end
+        public :mark_gradual_local
+
+        def gradual_bearing?(type)
+          type.is_a?(Type::Dynamic) || (type.is_a?(Type::Union) && type.members.any?(Type::Dynamic))
+        end
+
+        # Issue #2656 — the non-`Dynamic` members of a union `current` (nil for any other type). A union is stamped
+        # only when that part, narrowed by the guard (`narrowed_static`, or the part itself where the caller cannot
+        # narrow it), is literals or nothing: the rule judges a literal member as written, so the mark then withholds
+        # only for what came from the gradual member. A static member that narrows to a class (`d = "a" + s.to_s;
+        # x = h[:m] || d`) would be read past as if it were gradual, so such a union is not stamped.
+        def gradual_static_part(current)
+          return nil unless current.is_a?(Type::Union)
+
+          Type::Combinator.union(*current.members.grep_v(Type::Dynamic))
+        end
+
+        # Whether `slot` is a local holding a union with a `Dynamic` member, the one case {.gradual_static_part}
+        # answers for; checked first so a class guard on any other slot builds nothing.
+        def gradual_union_slot?(slot)
+          slot.kind == :local && slot.current.is_a?(Type::Union) && slot.current.members.any?(Type::Dynamic)
+        end
+
+        def literal_or_empty?(type)
+          return true if type.nil?
+
+          members = type.is_a?(Type::Union) ? type.members : [type]
+          members.all? { |member| member.is_a?(Type::Bot) || member.is_a?(Type::Constant) }
         end
 
         # The class name a `is_a?` / `kind_of?` / `instance_of?` argument denotes: the top-level

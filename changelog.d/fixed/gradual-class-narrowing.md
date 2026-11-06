@@ -1,0 +1,3 @@
+- **[check]** A class guard on an untyped value no longer makes the guarded value fail a literal-typed parameter. ([#2920](https://github.com/rigortype/rigor/pull/2920))
+  - `def f(x) = (Sink.new.mode(x) if x.is_a?(String))` with `Sink#mode: ("r" | "w") -> void` reported `call.argument-type-mismatch ... got String`; it is now silent, and so are `kind_of?`, `instance_of?`, `String === x`, `case x when String`, `case x in String` and `in String => s`.
+  - The guarded value still reads as the class it was tested against, so `x.upcase if x.is_a?(Integer)` still reports `call.undefined-method`.

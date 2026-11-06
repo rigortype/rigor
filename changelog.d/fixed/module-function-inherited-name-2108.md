@@ -1,0 +1,1 @@
+- **[inference]** A named `module_function :x` on a name the module inherits (for example `module Kernel; include KHelp; module_function :kx` in a `pre_eval` file) now records the public singleton copy Ruby makes, so `Kernel.kx` no longer reports `call.undefined-method`; the private instance side is unchanged. ([#2908](https://github.com/rigortype/rigor/pull/2908))

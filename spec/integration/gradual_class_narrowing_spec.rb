@@ -131,6 +131,11 @@ RSpec.describe "a class guard keeps a gradual value gradual (#2656)", type: :run
     expect(mismatches(source)).to eq([])
   end
 
+  it "fires when the predicate itself writes the marked local" do
+    source = "def f(x)\n  return unless x.is_a?(String)\n  Sink.new.mode(x) if (x = [x].join)\nend\n"
+    expect(mismatches(source)).to eq(["call.argument-type-mismatch"])
+  end
+
   it "fires after a join with an arm that wrote the local (the mark intersects at a join)" do
     source = "def f(x, c)\n  return unless x.is_a?(String)\n  x = x.upcase if c\n  Sink.new.mode(x)\nend\n"
     expect(mismatches(source)).to eq(["call.argument-type-mismatch"])

@@ -7,13 +7,14 @@ require "language_server-protocol"
 RSpec.describe Rigor::LanguageServer::Loop do
   # Wraps one full `initialize → shutdown → exit` round-trip through the Loop, using IO.pipe pairs for the client →
   # server and server → client streams. Returns the parsed server-side responses in order.
-  def run_loop(messages, server: Rigor::LanguageServer::Server.new)
+  def run_loop(messages)
     server_in_r, server_in_w = IO.pipe   # client writes here; server reads.
     server_out_r, server_out_w = IO.pipe # server writes here; client reads.
 
     messages.each { |msg| write_frame(server_in_w, msg) }
     server_in_w.close
 
+    server = Rigor::LanguageServer::Server.new
     described_class.new(
       reader: LanguageServer::Protocol::Transport::Io::Reader.new(server_in_r),
       writer: LanguageServer::Protocol::Transport::Io::Writer.new(server_out_w),
@@ -40,23 +41,6 @@ RSpec.describe Rigor::LanguageServer::Loop do
       offset = header_end + length
     end
     frames
-  end
-
-  describe "a request that exhausts the stack (#2455)" do
-    it "answers it with an internal error and keeps serving" do
-      server = Rigor::LanguageServer::Server.new
-      allow(server).to receive(:dispatch).and_wrap_original do |original, *args|
-        raise SystemStackError if args.first == "textDocument/hover"
-
-        original.call(*args)
-      end
-      init = { jsonrpc: "2.0", id: 1, method: "initialize", params: { processId: 0, capabilities: {} } }
-      _, frames = run_loop([init,
-                            { jsonrpc: "2.0", id: 2, method: "textDocument/hover", params: {} },
-                            { jsonrpc: "2.0", id: 3, method: "shutdown" }], server: server)
-      expect(frames.map { |f| f[:id] }).to eq([1, 2, 3])
-      expect(frames[1].dig(:error, :code)).to eq(Rigor::LanguageServer::Server::ERROR_INTERNAL_ERROR)
-    end
   end
 
   describe "happy path — initialize → shutdown → exit" do

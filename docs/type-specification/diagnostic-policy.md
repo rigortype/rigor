@@ -90,14 +90,15 @@ defect in Rigor. Every other file in the run MUST be analysed and reported norma
 `--workers`, and the exit status MUST follow that row's severity (`1`), not `70`.
 
 The cross-file discovery pass is all or nothing per file: a file that overflows contributes nothing to any discovery
-table, in a full run and in an incremental one alike, so the findings in other files do not depend on the mode. The
-language server answers a request on such a document with an internal error and keeps running.
+table, in a full run and in an incremental one alike, so the findings in other files do not depend on the mode.
 
 A `SystemStackError` raised from C (`Prism.parse` of a source nested near Prism's own cap has no backtrace; a second
 deep `Prism.parse` after rescuing one aborts the main-thread process with a signal), or outside the per-file phases, is
-NOT contained there: it stays the run-level abort (`CLI::FATAL_ERRORS`, exit `70`). The language server's debouncer and
-publish-batcher threads do contain it per document: the batcher drops that document from the round and publishes the
-others, and releases its round either way.
+NOT contained there: it stays the run-level abort (`CLI::FATAL_ERRORS`, exit `70`).
+
+This containment is the `rigor check` path. The language server does not contain a deeply nested document: its
+threads keep their pre-existing behaviour, and containing it per document is tracked in
+[#2932](https://github.com/rigortype/rigor/issues/2932).
 
 ## `Dynamic[T]` display rules
 

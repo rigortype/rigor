@@ -2,7 +2,7 @@
 description: Bind architect role — load rigor-architect skill and emit Plan ready
 argument-hint: "[issue URL or number]"
 ---
-You are running as **architect** (Opus/Grok-class; do not demote via `/model`).
+You are running as **architect** (`devin/swe-2` default, Opus/Grok-class fallback; do not demote via `/model`).
 
 1. Load and follow skill `/skill:rigor-architect` (read its SKILL.md if not already loaded).
 2. Scope: ${@:-the current issue / user request}.

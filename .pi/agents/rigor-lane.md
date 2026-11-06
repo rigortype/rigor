@@ -6,7 +6,7 @@ description: >-
 advertise: true
 aliases: lane, rigor-worker
 acceptanceRole: writer
-model: opencode-go/deepseek-v4.1-flash
+model: devin/swe-2-flash
 thinking: high
 systemPromptMode: replace
 inheritProjectContext: true

@@ -649,7 +649,7 @@ module Rigor
       # (`return if x.nil?`, `x != ""`, a second class guard), which bind the narrowed type through `with_local` and
       # drop it. A local the predicate itself writes (`if (x = v)`) loses it, as any write does.
       def keep_gradual_marks(node, scope, edges)
-        return edges if edges.nil?
+        return edges if edges.nil? || (edges[0].equal?(scope) && edges[1].equal?(scope))
 
         names = scope.gradual_narrowing_names
         return edges if names.empty?

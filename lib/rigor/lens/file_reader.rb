@@ -543,7 +543,8 @@ module Rigor
                  "attribute" => nil, "members" => [node.name.to_s], "module_function" => module_function,
                  "visibility" => module_function ? "private" : visibility(node, nesting, scope),
                  "params" => shape_params, "block" => shape_block, "body_return" => returns,
-                 "lexical_nesting" => lexical_nesting(nesting), "singleton_nesting" => scope == :singleton && node.receiver.nil? }
+                 "lexical_nesting" => lexical_nesting(nesting),
+                 "singleton_nesting" => scope == :singleton && node.receiver.nil? }
         return data unless module_function
 
         # Internal to the member pass: the singleton copy is public until `private_class_method` says otherwise,

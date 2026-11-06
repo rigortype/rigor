@@ -118,7 +118,8 @@ RSpec.describe "rigor lens claim contexts in builder blocks" do
     results = rows
     builder_methods.each do |owner, names|
       names.each do |name|
-        expect(results.fetch("#{owner}.#{name}:String")).to include("verdict" => "unknown", "reason" => "ambiguous_name")
+        expect(results.fetch("#{owner}.#{name}:String"))
+          .to include("verdict" => "unknown", "reason" => "ambiguous_name")
         expect(results.fetch("#{owner}.#{name}:::#{owner}::String")).to include("verdict" => "compatible")
       end
     end

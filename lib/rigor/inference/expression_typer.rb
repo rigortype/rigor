@@ -1831,7 +1831,83 @@ module Rigor
       def call_type_for(node)
         return safe_navigation_call_type(node) if node.safe_navigation?
 
-        memo_object_value(node, attribute_write_value(node, call_dispatch_type_for(node)))
+        memo_object_value(node, class_test_find_value(node, attribute_write_value(node, call_dispatch_type_for(node))))
+      end
+
+      CLASS_TEST_FINDERS = Set[:find, :detect, :rfind].freeze
+      CLASS_TEST_PREDICATES = Set[:is_a?, :kind_of?, :instance_of?].freeze
+      private_constant :CLASS_TEST_FINDERS, :CLASS_TEST_PREDICATES
+
+      # Issue #2719 — `find` / `detect` / `rfind` whose block is one class test on its one parameter
+      # (`ancestors.rfind { |n| n.is_a?(Prism::DefNode) }`) returns an element that passed the test, or `nil`. The
+      # dispatched `E?` is narrowed by that test, through the same {Narrowing} rule an `if n.is_a?(C)` edge takes, and
+      # keeps its `nil`. Only an answer that already carries `nil` is narrowed, so an untyped receiver's `Dynamic`
+      # stays as it was; a test that leaves no element (`Bot`, a class the element type is disjoint from) keeps the
+      # dispatched answer too, since `nil` alone would be a verdict that the guard never matches. Any other block
+      # shape, an `ifnone` argument, and a block with more than one parameter or statement keep today's answer.
+      def class_test_find_value(node, result)
+        param = class_test_find_parameter(node)
+        return result if param.nil?
+        return result unless result.is_a?(Type::Union) && result.members.any? { |m| nil_constant?(m) }
+
+        truthy, = Narrowing.predicate_scopes(node.block.body.body.first, scope.with_local(param, result))
+        non_nil = Narrowing.narrow_non_nil(truthy.local(param))
+        return result if non_nil.is_a?(Type::Bot) || introduces_dynamic?(non_nil, result)
+
+        Type::Combinator.union(non_nil, Type::Combinator.constant_of(nil))
+      end
+
+      def nil_constant?(type) = type.is_a?(Type::Constant) && type.value.nil?
+
+      # A narrowing that cannot order an element's class against the tested one answers `Dynamic[top]` for it (a
+      # project class with no RBS, typically); that is the test's "cannot tell", not a narrower element, so the
+      # dispatched answer stands.
+      def introduces_dynamic?(narrowed, result)
+        members = narrowed.is_a?(Type::Union) ? narrowed.members : [narrowed]
+        members.any? { |member| member.is_a?(Type::Dynamic) && !result.members.include?(member) }
+      end
+
+      # The block parameter's name when `node` is a block-only `find` / `detect` / `rfind` whose block takes exactly
+      # one plain parameter and whose body is one `is_a?` / `kind_of?` / `instance_of?` call on that parameter with a
+      # single constant argument; nil otherwise.
+      def class_test_find_parameter(node)
+        return nil unless CLASS_TEST_FINDERS.include?(node.name) && node.arguments.nil?
+
+        block = node.block
+        return nil unless block.is_a?(Prism::BlockNode)
+
+        name = single_block_parameter(block)
+        return nil if name.nil?
+
+        body = block.body
+        return nil unless body.is_a?(Prism::StatementsNode) && body.body.size == 1
+
+        class_test_on?(body.body.first, name) ? name : nil
+      end
+
+      def single_block_parameter(block)
+        params = block.parameters
+        return nil unless params.is_a?(Prism::BlockParametersNode) && params.locals.empty?
+
+        list = params.parameters
+        return nil if list.nil? || list.requireds.size != 1
+        return nil unless list.optionals.empty? && list.rest.nil? && list.posts.empty? &&
+                          list.keywords.empty? && list.keyword_rest.nil? && list.block.nil?
+
+        required = list.requireds.first
+        required.is_a?(Prism::RequiredParameterNode) ? required.name : nil
+      end
+
+      def class_test_on?(test, name)
+        return false unless test.is_a?(Prism::CallNode) && CLASS_TEST_PREDICATES.include?(test.name)
+        return false if test.block || test.safe_navigation?
+
+        receiver = test.receiver
+        return false unless receiver.is_a?(Prism::LocalVariableReadNode) && receiver.name == name && receiver.depth.zero?
+
+        args = test.arguments&.arguments
+        !args.nil? && args.size == 1 &&
+          (args.first.is_a?(Prism::ConstantReadNode) || args.first.is_a?(Prism::ConstantPathNode))
       end
 
       # Issue #2411 — `recv.each_with_object(memo) { |x, acc| acc[k] = v }` returns the memo as the block's

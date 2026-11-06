@@ -3081,6 +3081,8 @@ module Rigor
 
     # `marks` without the local `name`'s `:gradual_narrowing` mark (issue #2656); `marks` itself when it has none.
     def drop_gradual_narrowing_mark(marks, name)
+      return marks if marks.empty?
+
       ref = [:gradual_narrowing, name.to_sym]
       return marks unless marks.include?(ref)
 

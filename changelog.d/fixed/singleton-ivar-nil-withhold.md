@@ -1,0 +1,2 @@
+- **[diagnostics]** `call.argument-type-mismatch` no longer reports a class object held in an ivar the constructor seeds with `nil`. ([#2902](https://github.com/rigortype/rigor/pull/2902))
+  - `@klass = nil` in `initialize`, `@klass = Circle` in another method and `Registry.fields_for(@klass)` against `(singleton(Shape))` is now withheld like the `Integer` instance case, under ADR-58's lazy-initialisation reading; a non-nil part that is itself rejected still reports.

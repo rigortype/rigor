@@ -497,8 +497,8 @@ module Rigor
         # runner's fresh per-run reporter pair attached so dispatcher events route to THIS runner's
         # diagnostics) when present; otherwise builds a fresh Environment per-call via
         # {#build_runner_environment} — preserving the pre-override behaviour bit-for-bit.
-        def resolve_sequential_environment(source_files: [])
-          return build_runner_environment(source_files: source_files) unless @environment_override
+        def resolve_sequential_environment(source_files: [], eager: true)
+          return build_runner_environment(source_files: source_files, eager: eager) unless @environment_override
 
           @environment_override.attach_reporters!(
             rbs_extended_reporter: @rbs_extended_reporter,
@@ -560,8 +560,9 @@ module Rigor
         # loaded plugin's `source_rbs_synthesizer` callable per project source file at env-build time.
         # Defaults to `[]` for callers that don't have a file list yet (e.g. pre-pass-only build paths); in
         # that case no synthesised RBS is contributed.
-        def build_runner_environment(source_files: [])
+        def build_runner_environment(source_files: [], eager: true)
           Environment.for_project(
+            eager: eager,
             libraries: @configuration.libraries,
             signature_paths: @configuration.signature_paths,
             cache_store: @cache_store,

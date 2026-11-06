@@ -925,7 +925,10 @@ module Rigor
         # #392 — `source_files:` is what a plugin's `source_rbs_synthesizer` is offered at env-build time,
         # and a template unit is not Ruby the synthesiser can read (rbs-inline would be handed `.rbx`
         # bytes). The `.rb` expansion is the right set here; the units join the ANALYSED set only.
-        environment = @pool_coordinator.resolve_sequential_environment(source_files: expansion.fetch(:files))
+        # Issue #2883 — not eager: a warm result-cache HIT never types, so it must not build the RBS environment;
+        # {#assemble_run_diagnostics} builds it on the analysis path.
+        environment = @pool_coordinator.resolve_sequential_environment(source_files: expansion.fetch(:files),
+                                                                       eager: false)
         # Lazy-files descriptor: the cache KEY reads only `gems` + `configs`; the RBS signature-tree `files`
         # are digested solely by `run_dependency_descriptor` on a MISS, so a warm HIT never walks the tree.
         rbs_descriptor = if environment&.rbs_loader
@@ -1199,6 +1202,8 @@ module Rigor
       end
 
       def assemble_run_diagnostics(expansion, environment: nil)
+        # Issue #2883 — the analysis path builds the RBS environment before anything types (ADR-129 G1').
+        environment&.prepare_for_typing!
         # Force the deferred cross-file discovery pre-pass on the analysis (miss) path. Memoised, so the
         # eager force in `#run` (recording / subset modes) makes this a no-op. A warm cache HIT never calls
         # `assemble_run_diagnostics`, so it never runs the two whole-project parse passes. Runs over the FULL

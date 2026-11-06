@@ -5,12 +5,31 @@ require "rigor/language_server/debouncer"
 RSpec.describe Rigor::LanguageServer::Debouncer do
   let(:debouncer) { described_class.new }
 
+  def silence_warnings
+    original = $stderr
+    $stderr = StringIO.new
+    yield
+    debouncer.flush!
+  ensure
+    $stderr = original
+  end
+
   describe "#schedule" do
     it "runs the block asynchronously when delay is 0" do
       calls = []
       debouncer.schedule(:k, delay: 0) { calls << :run }
       debouncer.flush!
 
+      expect(calls).to eq([:run])
+    end
+
+    it "contains a SystemStackError raised by the block, as it does a StandardError (#2455)" do
+      calls = []
+      expect do
+        silence_warnings { debouncer.schedule(:bad, delay: 0) { raise SystemStackError } }
+        debouncer.schedule(:good, delay: 0) { calls << :run }
+        debouncer.flush!
+      end.not_to raise_error
       expect(calls).to eq([:run])
     end
 

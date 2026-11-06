@@ -1,12 +1,13 @@
 # ADR-129 — Remember `type_of` results under a closed typing state
 
-Status: **Accepted, 2026-11-04.** A design for [#2709](https://github.com/rigortype/rigor/issues/2709), accepted by the
-maintainer after three adversarial review rounds. Stage 0 (the harness ceiling) is done. Stage 1 is under way:
-`Rigor::TypingState` (WD1's working name was `Rigor::Inference::TypingState`; it sits beside `RunScopedSlots`, since
-recorders and effects outside `inference/` hold typing state too) and G3 have landed with the typer, the statement evaluator and the key-presence guard converted
-([#2796](https://github.com/rigortype/rigor/pull/2796)), and the remaining sites convert in later PRs. WD6 says what lands in each stage and what can stop it. This is the third design: the first two each
-had a key that missed an input. Sharing call facts across the rules ("option 2", § Alternatives) lands independently
-as [#2786](https://github.com/rigortype/rigor/issues/2786).
+Status: **Accepted, 2026-11-04; stopped at stage 4, 2026-11-06.** A design for
+[#2709](https://github.com/rigortype/rigor/issues/2709), accepted by the maintainer after three adversarial review
+rounds. Stage 0 measured the ceiling. Stages 1–3 landed: `Rigor::TypingState` (WD1's working name was
+`Rigor::Inference::TypingState`) with the four kinds, the journal, G1–G4, and the `type_of` memo as a shadow and audit
+tool (`RIGOR_TYPE_OF_SHADOW`). Stage 4 stopped at WD6's trigger: `engine-warm` on Mastodon did not separate, so
+nothing is live (WD6, "Stage 4 outcome"). This is the third design: the first two each had a key that
+missed an input. Sharing call facts across the rules ("option 2", § Alternatives) landed independently as
+[#2786](https://github.com/rigortype/rigor/issues/2786).
 
 Grounding:
 - [`20261104-work-multiplier-census.md`](../notes/20261104-work-multiplier-census.md): where `rigor check` repeats
@@ -310,6 +311,14 @@ list kept beside the memo. State without a kind fails the gate.
   | 4 | Live in the rule walk | G5, G6; the `engine-warm` `default`-mode leaf and hub rows separate on Mastodon, and `engine-wall` on `lib` does not regress |
   | 5 | Live in the main pass and callee bodies; the recording evaluator's configuration becomes a Frame | as stage 4, plus at least half of stage 0's Mastodon allocation gain beyond the rule walk; RSS within +10% of stage 4 |
 
+  - **Stage 4 outcome (2026-11-06, [#2889](https://github.com/rigortype/rigor/pull/2889), held as Draft).** The memo
+    served rule-walk hits behind a switch. Output was byte-identical, and G1's stage-4 form found no mismatch on the live
+    store. Allocations fell 5.37% on Mastodon, 2.56% on Redmine and 0.03% on `lib`. `engine-warm` on Mastodon moved
+    the `default` leaf by −1.25% and the hub by −1.89%, and neither separated, so WD6's rule stopped the stage.
+    Option 2 had already taken the receiver repeats, so stage 4's own gain is below half of stage 0's −18.9%
+    projection. Measured from the pre-option-2 base (97.5M to 81.0M allocations on Mastodon), the two together cut
+    about 17%, near that projection, but it barely moved wall time. In the rule walk alone ELIDE added no hit. The memo
+    stays a shadow and audit tool.
   - Stages 1 and 2 pay for themselves without the memo. They make every new piece of typing state reviewable by kind,
     and they settle #2767.
   - Stage 3 is the smallest step that proves the key complete before any output depends on it.
@@ -339,7 +348,8 @@ list kept beside the memo. State without a kind fails the gate.
 
 ## Consequences
 
-- **Gains,** projected from stage 0. Stage 4 must reproduce them on CI.
+- **Gains,** projected from stage 0. They did not ship: stage 4 stopped (WD6, "Stage 4 outcome"), so they, the
+  memo's RSS cost and its fewer plugin calls below apply only if the memo goes live.
 
   | Corpus | Allocations | CPU beyond the rule walk (gross count-mode projection) |
   | --- | ---: | ---: |
@@ -354,8 +364,8 @@ list kept beside the memo. State without a kind fails the gate.
     PRs, paid on purpose: together with the key audit, it turns the class of defect behind #2773 and #2782
     from "found in review" into "fails a gate".
   - Instrumenting the frames cost +0.5% to +0.8% allocations in the harness.
-  - RSS rises by +1.6% (Mastodon) to +9.6% (`lib`) with every phase open, close to stage 5's +10% bound on `lib`.
-  - Plugin `dynamic_return` and `narrowing_facts` blocks run fewer times.
+  - Once live: RSS rises by +1.6% (Mastodon) to +9.6% (`lib`) with every phase open, close to stage 5's +10% bound on
+    `lib`, and plugin `dynamic_return` and `narrowing_facts` blocks run fewer times.
 - **Unchanged:**
   - `lib`-shaped code gains little. #1228 (one shared block entry scope) and #2711 stay the levers there.
   - #2782 is not fixed by this ADR. Stage 2's key audit makes it a named exception instead of a hidden one.
@@ -368,8 +378,12 @@ list kept beside the memo. State without a kind fails the gate.
 
 - **Stage 3 finds mismatches that classification cannot close:** stop at stage 2, which still pays for itself.
 - **Stage 4's live rule-walk gain on CI is below half of its projection:** re-evaluate before stage 5, because stage
-  5's case rests on the same projection.
-- **Stage 4's `engine-warm` does not separate on Mastodon:** stop.
+  5's case rests on the same projection. This happened, measured locally against option 2 (WD6, "Stage 4 outcome").
+- **Stage 4's `engine-warm` does not separate on Mastodon:** stop. This happened (WD6, "Stage 4 outcome").
+- **Resuming after that stop:** reopen the memo when there is a target in whose wall time allocation or GC time
+  dominates, or when a measurement shows that the rule walk served from main-pass entries (which needs main-pass
+  stores, stage 5's ground) projects a separable `engine-warm` gain. Branch `adr129-s4-live-rule` holds the live form
+  and the G1′ faults over the live store.
 - **ELIDE:** enable it only once G1 shows zero table mismatches with it on, under `any`.
 - **Leaves:** revisit if a Rails corpus is the deciding target and `lib`'s RSS is not.
 - **A plugin found impure by G1:** fix the plugin, or declare its answers a Resource.

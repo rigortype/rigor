@@ -1,6 +1,6 @@
 # The live type_of memo opens in the rule walk at an empty guard stack, behind RIGOR_TYPE_OF_MEMO, on the exact id
 
-- **PR:** PR_LINK
+- **PR:** [#2889](https://github.com/rigortype/rigor/pull/2889)
 - **Issue:** [#2709](https://github.com/rigortype/rigor/issues/2709)
 - **Class:** open-choice
 - **Precedent:** [ADR-129](../docs/adr/129-type-of-result-memo.md) WD4 and WD6 (stage 4: live in the rule walk; stage 5: the main pass and callee bodies)

@@ -28,20 +28,23 @@ RSpec.describe "the runner's RBS environment preparation" do
     Dir.chdir(project) { guarded_run(runner) }
   end
 
-  # The order of `RbsLoader#prepare_for_typing!` calls and `ExpressionTyper#type_of` calls across one run.
-  def events_of_run
+  # The calls of `RbsLoader#prepare_for_typing!` and `ExpressionTyper#type_of` made by the block, in order, as
+  # `:prepare` and `:type_of`.
+  def traced_calls
     events = []
-    allow_any_instance_of(Rigor::Environment::RbsLoader).to receive(:prepare_for_typing!).and_wrap_original do |m|
-      events << :prepare
-      m.call
+    traces = {
+      prepare: Rigor::Environment::RbsLoader.instance_method(:prepare_for_typing!),
+      type_of: Rigor::Inference::ExpressionTyper.instance_method(:type_of)
+    }.map do |event, method|
+      TracePoint.new(:call) { events << event }.tap { |trace| trace.enable(target: method) }
     end
-    allow_any_instance_of(Rigor::Inference::ExpressionTyper).to receive(:type_of).and_wrap_original do |m, *args|
-      events << :type_of
-      m.call(*args)
-    end
-    run_once
+    yield
     events
+  ensure
+    traces&.each(&:disable)
   end
+
+  def events_of_run = traced_calls { run_once }
 
   it "builds the environment before the first type_of of a cold run" do
     events = events_of_run
@@ -52,14 +55,7 @@ RSpec.describe "the runner's RBS environment preparation" do
 
   it "builds no environment on a warm result-cache hit" do
     run_once
-    prepared = 0
-    allow_any_instance_of(Rigor::Environment::RbsLoader).to receive(:prepare_for_typing!).and_wrap_original do |m|
-      prepared += 1
-      m.call
-    end
 
-    run_once
-
-    expect(prepared).to eq(0)
+    expect(traced_calls { run_once }).to eq([])
   end
 end

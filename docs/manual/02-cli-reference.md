@@ -148,22 +148,38 @@ when a lockfile is present.
 
 ## `rigor annotate`
 
-Reprint a file with every line tagged by the type of the
-expression it evaluates to, as a trailing `#=>` comment. See
-[Inspecting inferred types](05-inspecting-types.md).
+Reprint a source file with every line tagged by the inferred type of the expression it evaluates to, as a trailing `#=>` comment (following the xmpfilter / seeing_is_believing convention). See [Inspecting inferred types](05-inspecting-types.md).
 
 ```sh
-rigor annotate [--[no-]color] [--[no-]bat] [--format=text|json] [--config=PATH] FILE
+rigor annotate [options] FILE
 ```
 
-`FILE` is required. Colour is auto-detected for a tty and
-honours `NO_COLOR`; `--color` / `--no-color` override. When
-colour is on and [`bat`](https://github.com/sharkdp/bat) is on
-`PATH`, highlighting goes through bat (`--no-bat` opts out;
-`--bat` warns if bat is missing and falls back to the built-in
-colorizer). `--format=json` emits an `{ "schema_version": 1, "annotations": { line => type } }`
-document instead of the annotated source. Exit `1` on a parse error or a
-missing file.
+| Flag | Purpose |
+| --- | --- |
+| `--config=PATH` | Path to `.rigor.yml`. Overrides auto-discovery. |
+| `--format=FORMAT` | Output format (`text` or `json`). Default: `text`. |
+| `--[no-]color` | Force or disable ANSI color (default: auto-detected for a tty; honors `NO_COLOR`). |
+| `--[no-]bat` | Force or disable syntax highlighting through [`bat`](https://github.com/sharkdp/bat) (default: enabled when color is on and `bat` is found on `PATH`). |
+
+The positional `FILE` argument is required. For each line, the command locates the last expression evaluated on that line (e.g. the last statement in `1; 2; 3` reports `3`, and a conditional header `if nil` reports its condition) and annotates it with `#=> <type>`. On method definition headers (`def`), the line is annotated with the method's inferred return type rather than the header expression.
+
+Annotations are idempotent: re-running `rigor annotate` matches existing `#=>` comments (as well as legacy `#=> dump_type:` comments) and replaces them in-place instead of stacking comments.
+
+When color is enabled and `bat` is installed, output is syntax-highlighted via `bat --language=ruby --style=plain --paging=never`. Passing `--no-bat` disables `bat` integration in favor of Rigor's built-in Prism colorizer. `--bat` warns on stderr and falls back to the built-in colorizer if `bat` is not found on `PATH`.
+
+In `--format=json`, the command emits a JSON object mapping line numbers to type strings conforming to schema version 1:
+
+```json
+{
+  "schema_version": 1,
+  "annotations": {
+    "1": "Integer",
+    "2": "String | nil"
+  }
+}
+```
+
+Exit `0` on success, `1` if the file does not exist or contains a Prism syntax error, and `64` on usage errors (such as a missing `FILE` argument).
 
 ## JSON documents
 
@@ -249,66 +265,144 @@ against `rigor check --no-cache` removes that variable.
 
 ## `rigor lens`
 
-Map the declarations of one or more files with their types and
-type provenance (experimental). See
-[Inspecting inferred types](05-inspecting-types.md).
+Map the declarations of one or more files with their types and type provenance (experimental). See [Inspecting inferred types](05-inspecting-types.md).
 
 ```sh
-rigor lens [--format=text|json] [--claims=REQUEST] [--config=PATH] [--workers=N] FILE...
+rigor lens [options] FILE...
 ```
 
-A lens runs the same incremental analysis as
-`rigor check --incremental` and reads and writes its cache.
-`--workers` applies to a cold run. `--format=json` writes one
-`lens/v0` document ([specification](../internal-spec/lens.md)).
-Exit `0` when at least one file has a result, `1` when none
-does, `64` on a usage error; diagnostics in the code never
-change the exit status.
+| Flag | Purpose |
+| --- | --- |
+| `--config=PATH` | Path to `.rigor.yml`. Overrides auto-discovery. |
+| `--format=FORMAT` | Output format (`text` or `json`). Default: `text`. |
+| `--workers=N` | Worker process count for a cold run. |
+| `--claims=REQUEST` | Check documentation type claims against authored contracts (unreleased). Requires `--format=json`. |
 
-`--claims=REQUEST` checks documentation type claims against authored
-contracts in the same run (unreleased). It requires `--format=json`
-and a UTF-8 JSON request following the
-[claims contract](../internal-spec/lens-claims.md). The `claims`
-section reports each claim's verdict; a conflict does not change
-the exit status. An invalid or stale request exits `64` without a
-document. Claims do not alter analysis, diagnostics or cached types.
+`rigor lens` performs the same incremental analysis as `rigor check --incremental` and shares its cache (`.rigor/cache`). The first execution on a file costs a full check, while subsequent runs reuse the recorded cache.
+
+`--claims=REQUEST` checks documentation type claims against authored contracts in the same run (unreleased). It requires `--format=json` and a UTF-8 JSON request following the [claims contract](../internal-spec/lens-claims.md). The `claims` section reports each claim's verdict; a conflict does not change the exit status. An invalid or stale request exits `64` without a document. Claims do not alter analysis, diagnostics or cached types.
+
+### Text representation
+
+Text output lists each declaration preceded by an anchor identifier:
+
+```text
+lib/shop.rb  xxh3-64:845f7426b6acfe12  (2 omitted)
+  4:7c90  class Shop
+  8:e37e  Shop#label: (::Integer n) -> ::String  [contract inline]
+  14:ce93  Shop#total: () -> Integer  [single_site inferred]
+  16:182b  Shop#fetch  [contested; also lib/legacy_shop.rb:2]
+  omitted constant Shop::LIMIT (line 5)
+```
+
+- **`LINE:HASH`**: Stable anchor hash identifying the declaration. It changes when the declaration signature or preceding type comments change, but remains unchanged across prose comment edits.
+- **`provenance`**: The origin of the type in square brackets (e.g. `[contract sig]`, `[contract inline]`, `[single_site inferred]`, `[plugin <name>]`).
+- **`contested`**: Denotes methods where multiple definitions exist in the project (e.g. reopened classes across files); Rigor prints no signature rather than guessing runtime dispatch.
+- **`omitted`**: Constructs not yet modeled by the lens (constants, `alias`, `define_method`) are explicitly recorded as omitted rather than discarded.
+
+In `--format=json`, the command outputs a `lens/v0` JSON document (specified in [the lens output contract](../internal-spec/lens.md)).
+
+Exit `0` when at least one input file is successfully analysed (`status: "ok"`), `1` when no target achieves `status: "ok"` (the JSON document is still written to stdout), and `64` on usage errors (such as missing `FILE` arguments or an unreadable `--config` path). Diagnostics present in the analysed files do not affect the exit code.
 
 ## `rigor trace`
 
-Replay HOW the engine typed a file, step by step, as a
-terminal animation. It is a teaching probe over the same
-inference `rigor check` runs.
+Replay how the engine typed a file step-by-step as an interactive terminal animation. It is a teaching and debugging probe operating over the inference engine. See [Inspecting inferred types](05-inspecting-types.md).
 
 ```sh
-rigor trace [--delay=SECONDS] [--line=N] [--verbose] [--format=json] FILE
+rigor trace [options] FILE
 ```
 
-Each frame highlights the source range being evaluated next to
-the scope's locals and describes one inference moment: a local
-binding entering the scope (`bind`), branch types merging
-(`union`), or a method call resolving — or fail-softening to
-`Dynamic[top]` (`dispatch`). On a tty the replay steps on a key
-press (`q` quits); `--delay` autoplays. `--verbose` adds every
-expression enter/result frame, `--line=N` keeps only events on
-one line, and `--format=json` dumps the raw event stream for
-tooling or course material. See
-[Inspecting inferred types](05-inspecting-types.md).
+| Flag | Purpose |
+| --- | --- |
+| `--config=PATH` | Path to `.rigor.yml`. Overrides auto-discovery. |
+| `--delay=SECONDS` | Autoplay frames with `SECONDS` delay between steps (default: step manually on key press). |
+| `--line=N` | Replay only inference events whose source range starts on line `N`. |
+| `--verbose` | Include every expression `enter` and `result` frame (default: only teachable inference milestones). |
+| `--format=FORMAT` | Output format: `text` (interactive terminal animation) or `json` (raw event stream). Default: `text`. |
+
+### Inference events
+
+By default, the replay highlights the AST expression being evaluated alongside the current local variable environment, presenting three core inference event kinds:
+- **`bind`**: A local variable binding enters the active scope.
+- **`union`**: Types from distinct control-flow branches merge into a union type.
+- **`dispatch`**: A method call resolves against its receiver or falls back to `Dynamic[top]`.
+
+With `--verbose`, every AST node entry and evaluated type result is captured as a frame.
+
+### Interactive navigation
+
+On a terminal TTY, the animation advances one frame per key press. Press `q` to exit playback early. Specifying `--delay=SECONDS` enables hands-free autoplay.
+
+In `--format=json`, the raw stream of event objects is emitted as a top-level JSON array for external tooling or courseware integration. Like `rigor explain`, it prints a deprecation notice on stderr noting the upcoming `schema_version: 1` envelope migration (see [JSON documents](#json-documents)).
+
+Exit `0` on successful playback or stream emission, `1` if the file does not exist or contains syntax errors (Prism parse errors), and `64` on usage errors (such as missing `FILE`, passing multiple files, or invalid flags).
 
 ## `rigor type-scan`
 
-Report `type_of` inference coverage across paths — a
-diagnostic-of-the-diagnoser, useful when investigating why a
-class infers poorly.
+Report `Scope#type_of` inference coverage across paths — an engine diagnostic measuring how much of the target source is directly typed without falling back to `Dynamic[top]`.
 
 ```sh
-rigor type-scan PATH...
+rigor type-scan [options] PATH...
 ```
 
-`--limit=N` caps the printed examples (default 10),
-`--show-recognized` includes fully-covered classes,
-`--threshold=RATIO` makes the command exit non-zero when the
-unrecognized-node ratio exceeds `RATIO`, and `--format=text|json`
-selects the output format. `--config=PATH` overrides config discovery.
+| Flag | Purpose |
+| --- | --- |
+| `--config=PATH` | Path to `.rigor.yml`. Overrides auto-discovery. |
+| `--format=FORMAT` | Output format (`text` or `json`). Default: `text`. |
+| `--limit=N` | Maximum unrecognized example events to display in text mode. Default: `10`. |
+| `--show-recognized` | Include AST node classes with 0 unrecognized visits in the summary table. |
+| `--threshold=RATIO` | Exit non-zero (`1`) when the ratio of unrecognized nodes (`unrecognized / visits`) exceeds `RATIO` (float). |
+
+At least one `PATH` argument is required. The command traverses every Prism node across the specified paths and queries `Scope#type_of` against a discovery-seeded project environment (matching `rigor coverage`).
+
+### Output format
+
+In text mode, `rigor type-scan` prints a summary block, class breakdown, and unrecognized examples:
+
+```text
+Type-of scan: 1 file
+  - lib/user.rb
+
+Summary:
+  files processed:   1
+  parse errors:      0
+  AST nodes visited: 165
+  unrecognized:      14 ( 8.5%)
+
+Coverage by node class (unrecognized/visits):
+  Prism::CallNode              12/120 ( 10.0%)
+  Prism::ConstantReadNode       2/ 45 (  4.4%)
+
+Unrecognized examples (showing 10 of 14):
+  Prism::CallNode  @  lib/user.rb:14:5
+```
+
+Passing `--show-recognized` includes node classes with 0 unrecognized visits in the class breakdown. `--limit=N` caps the total number of examples shown in the unrecognized events section.
+
+In `--format=json`, the command emits a JSON document conforming to schema version 1:
+
+```json
+{
+  "schema_version": 1,
+  "files": [ "lib/user.rb" ],
+  "summary": {
+    "files_processed": 1,
+    "parse_errors": 0,
+    "visited": 165,
+    "unrecognized": 14,
+    "unrecognized_ratio": 0.0848
+  },
+  "by_class": {
+    "Prism::CallNode": { "visits": 120, "unrecognized": 12 }
+  },
+  "events": [
+    { "file": "lib/user.rb", "node_class": "Prism::CallNode", "family": "call", "line": 14, "column": 5 }
+  ],
+  "parse_errors": []
+}
+```
+
+Exit `0` if the unrecognized ratio is within `--threshold` (or when no threshold is set) and no parse errors occurred. Exit `1` if the ratio exceeds `--threshold` or if any scanned file contains parse errors. Exit `64` if no paths are provided, a specified path does not exist, or flags are invalid.
 
 ## `rigor effects`
 

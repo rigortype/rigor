@@ -253,6 +253,12 @@ module Rigor
       # `method_missing`. Not a {.rewritten_surface?} mark: the macro adds names and replaces no method body
       # Rigor reads.
       ENVELOPE_OPEN_NAMES_MARK = :"<open-names>"
+      # Issue #2793 — the sided twins of {ENVELOPE_OPEN_NAMES_MARK}: a `define_method` whose name is not a literal
+      # (`%i[a b].each { |m| define_method(m) { } }`) where `self` is the class defines instance methods no table can
+      # name, and one in a `class << self` body singleton methods. `call.undefined-method` reads the instance mark
+      # for an instance receiver and the singleton mark for the class object, each beside the sideless mark.
+      ENVELOPE_OPEN_INSTANCE_NAMES_MARK = :"<open-instance-names>"
+      ENVELOPE_OPEN_SINGLETON_NAMES_MARK = :"<open-singleton-names>"
 
       # Issue #1820 — whether an envelope bucket says the project declares, or rewrites, the name's method table: a
       # per-method entry, the {ENVELOPE_MODULE_MARK} a `module` declaration records, or the {ENVELOPE_DYNAMIC_MARK}

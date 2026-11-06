@@ -9275,10 +9275,25 @@ module Rigor
 
         first_arg = call_node.arguments.arguments.first
         method_name = literal_method_name(first_arg)
-        return if method_name.nil?
-
         class_name = qualified_prefix.join("::")
+        return record_open_define_method(call_node, class_name, in_singleton_class, accumulator) if method_name.nil?
+
         record_method(accumulator, class_name, method_name, in_singleton_class ? :singleton : :instance)
+      end
+
+      # Issue #2793 — a `define_method` on `self` whose name is not a literal defines a method this walk cannot name,
+      # on the side and owner a literal one would record under (the walk's placement: a `Class.new { }` or
+      # `Struct.new { }` body is its own class's, an eval body its receiver's, a `class << self` body the singleton
+      # side), so that side reads as open to `call.undefined-method`.
+      def record_open_define_method(call_node, class_name, in_singleton_class, accumulator)
+        return unless call_node.receiver.nil? || call_node.receiver.is_a?(Prism::SelfNode)
+
+        mark = if in_singleton_class
+                 Scope::DiscoveryIndex::ENVELOPE_OPEN_SINGLETON_NAMES_MARK
+               else
+                 Scope::DiscoveryIndex::ENVELOPE_OPEN_INSTANCE_NAMES_MARK
+               end
+        record_surface_mark(accumulator, class_name, mark)
       end
 
       # The `attr_*` accessor macros that introduce methods Rigor must treat as source-declared. Without this, a class

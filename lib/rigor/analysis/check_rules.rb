@@ -1007,15 +1007,27 @@ module Rigor
         # `Scope::DiscoveryIndex::ENVELOPE_OPEN_NAMES_MARK`: a macro there defines methods under names its syntax
         # does not spell (`def_delegators :@x, *NAMES`), so no name is provably missing. A chain cut at its budget
         # never reaches here: {#ancestry_declares_method?} reads the same chain first and declines on the cut.
+        # A non-literal `define_method` records its own side's twin of the mark instead, read beside it here.
+        OPEN_NAMES_MARKS = {
+          instance: [Scope::DiscoveryIndex::ENVELOPE_OPEN_NAMES_MARK,
+                     Scope::DiscoveryIndex::ENVELOPE_OPEN_INSTANCE_NAMES_MARK].freeze,
+          singleton: [Scope::DiscoveryIndex::ENVELOPE_OPEN_NAMES_MARK,
+                      Scope::DiscoveryIndex::ENVELOPE_OPEN_SINGLETON_NAMES_MARK].freeze
+        }.freeze
+        private_constant :OPEN_NAMES_MARKS
+
         def open_names_through_ancestors?(scope, class_name, kind)
-          mark = Scope::DiscoveryIndex::ENVELOPE_OPEN_NAMES_MARK
           side = kind == :singleton ? :singleton : :instance
+          marks = OPEN_NAMES_MARKS.fetch(side)
           chain = Scope::ResolutionChain.for(scope, class_name.to_s, side, :methods)
           # A project class with no `def` of its own is held as an external entry (#2094), so an external's
           # candidate names are asked too.
           found = chain.search(scope) do |entry|
             names = entry.external? ? entry.candidates : [entry.name]
-            names.any? { |name| scope.parameter_envelopes_of(name).key?(mark) }
+            names.any? do |name|
+              bucket = scope.parameter_envelopes_of(name)
+              marks.any? { |mark| bucket.key?(mark) }
+            end
           end
           !found.nil?
         end

@@ -1,0 +1,2 @@
+- **[inference]** A module's ivar census now joins the writes of the modules it includes or prepends, so `@m.upcase` in a module no longer reports a call on `nil` when an included module sets `@m`. ([#2919](https://github.com/rigortype/rigor/pull/2919))
+  - The included module is on the chain of every class that includes the module, so the join stays closed-world; `extend` still contributes nothing.

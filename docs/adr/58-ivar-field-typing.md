@@ -653,6 +653,12 @@ Decision:
   Singleton-side writes, `extend`, the `self.included(base)` hook
   (#1958) and `include(Module.new { … })` (no chain entry) contribute
   nothing.
+
+  > **Partially superseded by
+  > [`docs/internal-spec/inference-engine.md`](../internal-spec/inference-engine.md)
+  > § Slice 7 phase 2 (#2487).** A module's own census now takes the
+  > modules it includes or prepends: each is on the chain of every class
+  > that includes the module, so the join stays closed-world.
 - **Declaration-sourced.** The joined types are part of the seed, so
   a `nil` they bring is WD1 declaration-sourced and is not fuel for
   `call.possible-nil-receiver`; #2039 keeps the statement-position

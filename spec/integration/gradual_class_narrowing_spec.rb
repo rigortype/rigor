@@ -8,7 +8,8 @@ require "spec_helper"
 
 RSpec.describe "a class guard keeps a gradual value gradual (#2656)", type: :runner do
   let(:signature) do
-    { "sink.rbs" => "class Sink\n  def mode: (\"r\" | \"w\") -> void\n  def num: (1 | 2) -> void\nend\n" }
+    { "sink.rbs" => "class Sink\n  def mode: (\"r\" | \"w\") -> void\n  def num: (1 | 2) -> void\n  " \
+                    "def pick: (\"r\" | \"w\") -> void | (1 | 2) -> void\nend\n" }
   end
 
   def mismatches(source)
@@ -41,6 +42,15 @@ RSpec.describe "a class guard keeps a gradual value gradual (#2656)", type: :run
   it "fires for a narrowed value copied to another local (the mark is not transitive)" do
     expect(mismatches("def f(x)\n  return unless x.is_a?(String)\n  y = x\n  Sink.new.mode(y)\nend\n"))
       .to eq(["call.argument-type-mismatch"])
+  end
+
+  it "stays silent for an overloaded parameter" do
+    expect(mismatches("def f(x) = (Sink.new.pick(x) if x.is_a?(String))\n")).to eq([])
+  end
+
+  it "fires for a String-typed local narrowed by is_a? (only a gradual value is marked)" do
+    source = "def f(s)\n  x = [s].join\n  Sink.new.mode(x) if x.is_a?(String)\nend\n"
+    expect(mismatches(source)).to eq(["call.argument-type-mismatch"])
   end
 
   it "fires once the narrowed local is rebound (a write drops the mark)" do

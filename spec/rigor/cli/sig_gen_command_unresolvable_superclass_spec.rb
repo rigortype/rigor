@@ -7,6 +7,8 @@ require "tmpdir"
 
 require "rigor/cli"
 require "rigor/cli/sig_gen_command"
+require "rigor/analysis/runner"
+require "rigor/configuration"
 
 # #2437 — the skipped-class warning tells a superclass the project declares in source, but this run wrote nothing
 # for, apart from one no source or RBS declares: only the second is fixed by providing a gem's RBS.
@@ -166,6 +168,61 @@ RSpec.describe Rigor::CLI::SigGenCommand do
 
       expect(rows.first).to include(["Sub2", "y", "new_method", nil])
       expect(rows).to all(eq(rows.first))
+    end
+  end
+
+  # #2715 — a class demoted for an unresolvable superclass can still wrap a nested declaration: the nested
+  # class's shell rides on a surviving sibling's candidate, so the container header kept the superclass and
+  # the next `check` failed the build with `RBS::NoSuperclassFoundError`. The container is written bare
+  # instead — `class Query` with no `< BaseRecord` — while `QueryError` keeps its own resolvable header.
+  describe "a demoted class wrapping a nested declaration" do
+    before do
+      write("lib/base_record.rb", <<~RUBY)
+        class BaseRecord
+          def call(thing)
+            thing.frobnicate
+          end
+        end
+      RUBY
+      write("lib/query.rb", <<~RUBY)
+        class QueryColumn
+          def initialize(name)
+            @name = name
+          end
+        end
+
+        class Query < BaseRecord
+          class QueryError < StandardError
+          end
+
+          def run(thing)
+            thing.go
+          end
+        end
+      RUBY
+    end
+
+    def sig_gen_write
+      described_class.new(argv: ["--write", "lib", "--config=#{File.join(root, '.rigor.yml')}"],
+                          out: StringIO.new, err: StringIO.new).run
+    end
+
+    it "writes the demoted class's container without its superclass" do
+      sig_gen_write
+
+      content = File.read(File.join(root, "sig/query.rbs"))
+      expect(content).to include("class QueryError < ::StandardError")
+      expect(content).to match(/^class Query$/)
+      expect(content).not_to include("BaseRecord")
+    end
+
+    it "leaves `rigor check` free of rbs.coverage.definition-build-failed" do
+      sig_gen_write
+
+      configuration = Rigor::Configuration.load(File.join(root, ".rigor.yml"))
+      result = guarded_run(Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil), %w[lib])
+
+      expect(result.diagnostics.map(&:rule)).not_to include("rbs.coverage.definition-build-failed")
     end
   end
 end

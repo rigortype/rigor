@@ -532,6 +532,7 @@ module Rigor
           lexical_class_name(condition, scope) || case_equality_target_class(condition)
         end
         body_scope = record_bot_guard(narrow_guarded_slot(body_scope, slot, truthy_type), slot, truthy_type, classes)
+        body_scope = mark_gradual_narrowing(body_scope, slot, truthy_type) if classes.none?(&:nil?)
         [body_scope, narrow_guarded_slot(scope, slot, falsey_type)]
       end
 
@@ -2536,8 +2537,28 @@ module Rigor
           truthy = narrow_class(slot.current, class_name, exact: exact, environment: environment, scope: scope)
           falsey = narrow_not_class(slot.current, class_name, exact: exact, environment: environment, scope: scope)
           truthy_scope = record_bot_guard(narrow_guarded_slot(scope, slot, truthy), slot, truthy, [class_name])
-          [truthy_scope, narrow_guarded_slot(scope, slot, falsey)]
+          [mark_gradual_narrowing(truthy_scope, slot, truthy), narrow_guarded_slot(scope, slot, falsey)]
         end
+
+        # Issue #2656 — a class guard's truthy edge over a local that held a `Dynamic` value marks the narrowed binding
+        # ({Scope#with_gradual_narrowing_mark}): the binding keeps the asked class's `Nominal`, which dispatch and the
+        # method rules read, while `call.argument-type-mismatch` judges it as the gradual value it came from, which a
+        # literal-typed parameter (`("r" | "w")`) accepts. Only a local is marked, and only when the edge left it
+        # something other than `Dynamic` or `bot`.
+        def mark_gradual_narrowing(scope, slot, narrowed)
+          return scope unless slot.kind == :local
+
+          mark_gradual_local(scope, slot.name, slot.current, narrowed)
+        end
+
+        # {#mark_gradual_narrowing} for the local `name`, which held `current` before the guard and `narrowed` after.
+        def mark_gradual_local(scope, name, current, narrowed)
+          return scope unless current.is_a?(Type::Dynamic)
+          return scope if narrowed.nil? || narrowed.is_a?(Type::Dynamic) || narrowed.is_a?(Type::Bot)
+
+          scope.with_gradual_narrowing_mark(name)
+        end
+        public :mark_gradual_local
 
         # The class name a `is_a?` / `kind_of?` / `instance_of?` argument denotes: the top-level
         # `bare_name` when the reference is written `::Foo` (nil when nothing declares it there),

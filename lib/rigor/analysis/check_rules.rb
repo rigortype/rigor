@@ -3736,6 +3736,8 @@ module Rigor
         # The mismatch (or nil) for one argument against the parameter every overload has at its position. Issue
         # #1362 — a builtin global's seed, or its copy, is judged by the file's writes to the global.
         def overload_argument_mismatch(arg, params, param_overrides, arg_scope, coerce_method)
+          return nil if DeclarationSourcedGuard.gradual_narrowed?(arg, arg_scope)
+
           written = DeclarationSourcedGuard.written_type(arg, arg_scope)
           arg_type = written || arg_scope.type_of(arg)
           if nil_member?(arg_type) # pure nil only — not a `T | nil` union
@@ -4095,6 +4097,8 @@ module Rigor
 
         # {#single_argument_mismatch} for an argument that reads no builtin global's seed directly.
         def read_argument_mismatch(param, arg, scope, param_overrides)
+          return nil if DeclarationSourcedGuard.gradual_narrowed?(arg, scope)
+
           arg_type = scope.type_of(arg)
 
           if nil_member?(arg_type)

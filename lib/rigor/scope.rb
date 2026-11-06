@@ -980,6 +980,23 @@ module Rigor
       @declaration_sourced.include?([:inferred_param, name.to_sym])
     end
 
+    # Issue #2656 — stamp the gradual-narrowing mark on the local `name`: a class guard narrowed it from a `Dynamic`
+    # value, so its `Nominal` reading is the guard's, not a contract the value was checked against. Rides the ADR-58
+    # side-mark machinery under a distinct `:gradual_narrowing` kind, as `:inferred_param` does: the displayed type
+    # stays the narrowed `Nominal` (dispatch, `call.undefined-method` and `call.wrong-arity` read it), and only
+    # `call.argument-type-mismatch` consults the mark ({Analysis::CheckRules::DeclarationSourcedGuard.gradual_narrowed?}).
+    # Like the `:local` mark it is dropped by `with_local` and intersected by `join`. Applied after the binding.
+    def with_gradual_narrowing_mark(name)
+      rebuild(declaration_sourced: add_declaration_sourced(:gradual_narrowing, name))
+    end
+
+    # Issue #2656 — true when the local `name`'s binding is a class guard's narrowing of a `Dynamic` value.
+    def gradual_narrowing?(name)
+      return false if @declaration_sourced.empty?
+
+      @declaration_sourced.include?([:gradual_narrowing, name.to_sym])
+    end
+
     def with_cvar(name, type)
       rebuild(cvars: @cvars.merge(name.to_sym => type).freeze)
     end
@@ -3052,12 +3069,23 @@ module Rigor
     # beside it ({#with_global_copy_marks}).
     def drop_local_declaration_marks(name)
       dropped = drop_declaration_sourced_for(:local, name)
+      dropped = drop_gradual_narrowing_mark(dropped, name)
       return dropped if dropped.equal?(@declaration_sourced)
 
       name = name.to_sym
       return dropped unless dropped.any? { |ref| ref[0] == :global_copy && ref[1] == name }
 
       dropped.dup.delete_if { |ref| ref[0] == :global_copy && ref[1] == name }.freeze
+    end
+
+    # `marks` without the local `name`'s `:gradual_narrowing` mark (issue #2656); `marks` itself when it has none.
+    def drop_gradual_narrowing_mark(marks, name)
+      ref = [:gradual_narrowing, name.to_sym]
+      return marks unless marks.include?(ref)
+
+      dropped = marks.dup
+      dropped.delete(ref)
+      dropped.freeze
     end
 
     def add_guard_record(key, pre_guard)

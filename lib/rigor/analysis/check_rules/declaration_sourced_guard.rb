@@ -59,6 +59,14 @@ module Rigor
           end
         end
 
+        # Issue #2656 — true when `node` reads a local a class guard narrowed from a `Dynamic` value
+        # ({Scope#with_gradual_narrowing_mark}). `call.argument-type-mismatch` judges such an argument as the gradual
+        # value it came from, which every parameter accepts, so it withholds; the other rules read the narrowed
+        # `Nominal` as before.
+        def gradual_narrowed?(node, scope)
+          node.is_a?(Prism::LocalVariableReadNode) && scope.gradual_narrowing?(node.name)
+        end
+
         # The globals whose declared seeds `node` still reads, empty for none: a read of a marked global, or of a
         # local copied from one or more (`sep = $/`, `Scope#declaration_sourced_global_copies`), bare or in
         # parentheses (`($stdout)`).

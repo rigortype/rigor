@@ -1,0 +1,2 @@
+- **[engine]** A warm `--incremental` run now re-checks a file whose answer turned on the project *not* defining a method along a class's ancestors, once a superclass or mixin gains that method in a new file. ([#2924](https://github.com/rigortype/rigor/pull/2924))
+  - A plugin gate asking `Rigor::Reflection.project_method_defined(..., source: :discovered)` (as rigor-activerecord and rigor-rspec do) kept serving its cached answer after, for example, a new file reopened `ApplicationRecord` with the method.

@@ -2,6 +2,8 @@
 
 require "prism"
 
+require_relative "receiver_writer_call"
+
 module Rigor
   module Inference
     # Issue #1154 — the instance-variable writers {GlobalWriteCensus} records for the declared-parameter credit
@@ -24,9 +26,11 @@ module Rigor
     #   file writes the same ivar of the same class.
     # - `[:own_write_type, class_name, name, value]` — issues #2079 / #2170: the same write with its coarse value, a
     #   literal's as `[:lit, value]` and anything else as {DYNAMIC}, and a class-body `attr_writer` /
-    #   `attr_accessor` of the name as {DYNAMIC}. The path is appended as for `:own_write`. The class-ivar census
-    #   of a file joins another file's entries, and those of the modules and superclasses on the class's chain,
-    #   into the ivars it already holds ({ScopeIndexer::IvarContributions}).
+    #   `attr_accessor` of the name as {DYNAMIC}. The path is appended as for `:own_write`. Issue #2488: an
+    #   explicit-receiver `E.attr_writer` / `E.attr_accessor` (or one through `send`) records the same {DYNAMIC}
+    #   entry under `E`, and an `E.define_method` block is an instance body of `E` ({ReceiverWriterCall}). The
+    #   class-ivar census of a file joins another file's entries, and those of the modules and superclasses on the
+    #   class's chain, into the ivars it already holds ({ScopeIndexer::IvarContributions}).
     class IvarWriterCensus
       SEND_CALLS = %i[send __send__ public_send].to_set.freeze
       # The methods a `send` reaching which is an open-world writer.
@@ -58,12 +62,15 @@ module Rigor
 
       # Fed each node of a pre-order descent. `owner` is the class whose body the node sits in, as its qualified name
       # or as the host walk's prefix Array (joined here only when an entry needs it), or nil where no class owns an
-      # instance (`class << self`, the top level, an opaque block).
-      def visit(node, owner)
+      # instance (`class << self`, the top level, an opaque block). `receiver_owner` is the class an explicit-receiver
+      # writer call ({ReceiverWriterCall}) names, resolved by the host walk as it resolves a `class_eval` receiver.
+      def visit(node, owner, receiver_owner = nil)
         case node
         when Prism::DefNode then remember(node.location, owner) if owner && node.receiver.nil?
         when Prism::SingletonClassNode then visit_singleton_class(node)
-        when Prism::CallNode then visit_call(node, owner) if WATCHED_CALLS.include?(node.name)
+        when Prism::CallNode
+          visit_call(node, owner) if WATCHED_CALLS.include?(node.name)
+          record_receiver_writers(node, receiver_owner) if receiver_owner
         when Prism::InstanceVariableWriteNode, Prism::InstanceVariableOrWriteNode, Prism::InstanceVariableAndWriteNode,
              Prism::InstanceVariableOperatorWriteNode, Prism::InstanceVariableTargetNode
           record_own_write(node) unless @instance_ranges.empty?
@@ -109,6 +116,14 @@ module Rigor
         return DYNAMIC unless text.valid_encoding?
 
         [:lit, node.is_a?(Prism::SymbolNode) ? text.to_sym : text.dup.freeze].freeze
+      end
+
+      # Issue #2488 — `E.attr_writer :w` declares a writer of `@w` on `E`, and `E.define_method(:m) { … }` installs an
+      # instance body of `E`, wherever the call sits.
+      def record_receiver_writers(node, class_name)
+        ReceiverWriterCall.writer_ivars(node).each { |ivar| record_typed_write(class_name, ivar, DYNAMIC) }
+        block = ReceiverWriterCall.define_method_block(node)
+        remember(block.location, class_name) if block
       end
 
       # Issue #2079 — `attr_writer :x` / `attr_accessor :x` in a class body writes `@x` with whatever the caller hands.

@@ -29,6 +29,7 @@ require_relative "hash_lookup_mutation"
 require_relative "in_effect_refinements"
 require_relative "refine_census"
 require_relative "refine_self"
+require_relative "receiver_writer_call"
 require_relative "reflective_ivar_write"
 require_relative "index_write_widening"
 require_relative "module_function_state"
@@ -953,6 +954,7 @@ module Rigor
           collect_initializer_block_ivars(node, owner, default_scope, accumulator, mutated_ivars, init_writes)
           record_attr_writer_ivars(node, owner, accumulator) if ATTR_WRITER_MACROS.include?(attr_macro(node))
           collect_define_method_block_ivars(node, owner, default_scope, accumulator, mutated_ivars)
+          collect_receiver_writer_ivars(node, owner, qualified_prefix, default_scope, accumulator, mutated_ivars)
           false
         else
           walk_ivars_meta_new?(node, qualified_prefix, default_scope, accumulator,
@@ -1194,6 +1196,29 @@ module Rigor
         gather_ivar_writes(block.body, body_scope, class_name, accumulator, EMPTY_GUARDED_IVARS, mutated_ivars)
         written = (accumulator[DEFINE_METHOD_WRITES] ||= {})[class_name] ||= Set.new
         define_method_written_ivars(block.body, written)
+      end
+
+      # Issue #2488 — the explicit-receiver arm of {#walk_class_ivars}: `E.attr_writer :w` (or through `send`) records
+      # `@w` as `Dynamic[top]` on `E`, as an `attr_writer` in `E`'s body does ({#record_attr_writer_ivars}), and an
+      # `E.define_method(:m) { … }` block is walked as an instance body of `E`, as one in `E`'s body is
+      # ({#collect_define_method_block_ivars}). `E` resolves as a `class_eval` receiver does; an unnameable one
+      # contributes nothing. A call inside a `def` is that body's to walk.
+      def collect_receiver_writer_ivars(node, owner, qualified_prefix, default_scope, accumulator, mutated_ivars)
+        return if ReceiverWriterCall.receiver(node).nil?
+
+        target = eval_receiver_prefix(node, owner, qualified_prefix, unnameable_self: owner.empty?)
+        return if target.nil? || target.empty?
+
+        class_name = target.join("::")
+        ReceiverWriterCall.writer_ivars(node).each do |ivar|
+          accumulate_ivar_type(accumulator, class_name, ivar, Type::Combinator.untyped)
+        end
+        body = ReceiverWriterCall.define_method_block(node)&.body
+        return if body.nil?
+
+        body_scope = census_body_scope(default_scope, target, Type::Combinator.nominal_of(class_name))
+        gather_ivar_writes(body, body_scope, class_name, accumulator, EMPTY_GUARDED_IVARS, mutated_ivars)
+        define_method_written_ivars(body, (accumulator[DEFINE_METHOD_WRITES] ||= {})[class_name] ||= Set.new)
       end
 
       # The ivars a `define_method` block body writes, in any write form, outside a nested `def` / `class` / `module`.
@@ -10782,7 +10807,8 @@ module Rigor
                                          singleton_cref)
         else
           census_constant_write(node, qualified_prefix, tables, self_owner, singleton_cref: singleton_cref)
-          tables.write_census.visit(node, top_level: qualified_prefix.empty?, owner: ivar_owner)
+          tables.write_census.visit(node, top_level: qualified_prefix.empty?, owner: ivar_owner,
+                                          receiver_owner: census_receiver_owner(node, qualified_prefix, self_owner))
         end
 
         rebound = rebound_block_self(node, qualified_prefix, nil, meta_owner, self_owner)
@@ -10822,6 +10848,16 @@ module Rigor
         return nil if self_owner || singleton_cref || qualified_prefix.empty?
 
         qualified_prefix
+      end
+
+      # Issue #2488 — the class an explicit-receiver writer call (`E.attr_writer :w`, `E.define_method(:m) { … }`)
+      # names, resolved as a `class_eval` receiver is in this census (keyed as written), or nil.
+      def census_receiver_owner(node, qualified_prefix, self_owner)
+        receiver = ReceiverWriterCall.receiver(node)
+        return nil if receiver.nil?
+
+        name = eval_receiver_self(receiver, qualified_prefix, nil, rebound_self_base(self_owner))
+        name if name.is_a?(String)
       end
 
       # Under an unnameable cref a bare/`self::` header pushes `#<singleton>::Name` — still

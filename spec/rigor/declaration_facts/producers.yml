@@ -354,6 +354,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#collect_mixin_names: grandfathered
     Rigor::Inference::ScopeIndexer#collect_nil_test_ivars: grandfathered
     Rigor::Inference::ScopeIndexer#collect_read_before_write_evidence: grandfathered
+    Rigor::Inference::ScopeIndexer#collect_receiver_writer_ivars: the explicit-receiver arm of the ivar census walk (#2488); it resolves the receiver through eval_receiver_prefix, the resolution walk_ivars_eval_call? already gives a class_eval receiver, and records only the receiver class's attr_writer names and define_method block writes, deriving no declaration context of its own
     Rigor::Inference::ScopeIndexer#collect_rvalue_declared_names: grandfathered
     Rigor::Inference::ScopeIndexer#collect_singleton_class_targets: names the constants a `class << Const` body opens, for the incremental class-declaration diff alone (#1752); it registers no declaration, so it reads no declaration context
     Rigor::Inference::ScopeIndexer#collect_singleton_method_defs: grandfathered

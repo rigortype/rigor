@@ -1,0 +1,2 @@
+- **[inference]** An `attr_writer`, `attr_accessor` or `define_method` called on an explicit class receiver outside the class body (`E.attr_writer :w`, `E.send(:attr_writer, :y)`, `E.define_method(:set) { @v = "a" }`) now counts as a write of the class's ivar, so a read of that ivar no longer reports a call on `nil`. ([#2933](https://github.com/rigortype/rigor/pull/2933))
+  - This holds in the file that makes the call and in every other file, as `E.class_eval { attr_writer :x }` already did.

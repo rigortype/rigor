@@ -70,4 +70,59 @@ RSpec.describe "a class-test block narrows only a core finder (#2719)", type: :r
     RUBY
     expect(diagnostics(source)).to eq([])
   end
+
+  it "keeps the answer of a finder a refinement in effect replaces" do
+    source = <<~RUBY
+      require "rigor/testing"
+      include Rigor::Testing
+      module R
+        refine Array do
+          def find = [2.5, 1, nil].sample
+        end
+      end
+      using R
+      xs = [1, 2.5].map(&:itself)
+      r = xs.find { |n| n.is_a?(Integer) }
+      assert_type("1 | 2.5 | nil", r)
+      case r
+      when Float then r.floor
+      end
+    RUBY
+    expect(diagnostics(source)).to eq([])
+  end
+
+  it "keeps the answer of a finder a reopened Enumerable replaces" do
+    source = <<~RUBY
+      require "rigor/testing"
+      include Rigor::Testing
+      module Enumerable
+        def find = 2.5
+      end
+      assert_type("Dynamic[top]?", (1..3).each.find { |n| n.is_a?(Integer) })
+    RUBY
+    expect(diagnostics(source)).to eq([])
+  end
+
+  it "keeps the answer when one member of a union receiver has a project finder" do
+    source = <<~RUBY
+      require "rigor/testing"
+      include Rigor::Testing
+      class Hash
+        def find = first
+      end
+      ary = ARGV.map(&:size)
+      hsh = ARGV.to_h { |a| [a, a.size] }
+      assert_type("[String, Integer] | nil | non-negative-int", [ary, hsh].sample.find { |x| x.is_a?(Integer) })
+    RUBY
+    expect(diagnostics(source)).to eq([])
+  end
+
+  it "narrows a tuple receiver" do
+    source = <<~RUBY
+      require "rigor/testing"
+      include Rigor::Testing
+      assert_type(%q("a"?), [1, "a"].find { |x| x.is_a?(String) })
+    RUBY
+    expect(diagnostics(source)).to eq([])
+  end
 end

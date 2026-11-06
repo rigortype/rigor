@@ -1849,6 +1849,10 @@ module Rigor
         param = class_test_find_parameter(node)
         return result if param.nil?
         return result unless result.is_a?(Type::Union) && result.members.any? { |m| nil_constant?(m) }
+        return result unless element_or_nil?(node, result)
+        # A refinement in effect may replace the finder with a body whose answer only happens to read as an element
+        # or nil (`refine(Array) { def find = [2.5, 1, nil].sample }`), so the call keeps its answer.
+        return result unless scope.in_effect_refinements(node).empty?
 
         truthy, = Narrowing.predicate_scopes(node.block.body.body.first, scope.with_local(param, result))
         narrowed = truthy.local(param)
@@ -1861,6 +1865,19 @@ module Rigor
       end
 
       def nil_constant?(type) = type.is_a?(Type::Constant) && type.value.nil?
+
+      # True when the dispatched answer is exactly the receiver's element type or nil: the call really answers "an
+      # element the block accepted, or nil". Whatever else wins the dispatch (a refinement, a reopened `Array` or
+      # `Enumerable`, a gem's override) and answers anything else keeps its answer, and so does a receiver whose
+      # element type cannot be read.
+      def element_or_nil?(node, result)
+        type = type_of(node.receiver)
+        members = type.is_a?(Type::Union) ? type.members : [type]
+        elements = members.map { |member| MethodDispatcher::IteratorDispatch.element_type_of(member) }
+        return false if elements.include?(nil)
+
+        result == Type::Combinator.union(*elements, Type::Combinator.constant_of(nil))
+      end
 
       # A narrowing that cannot order an element's class against the tested one answers `Dynamic[top]` for it (a
       # project class with no RBS, typically); that is the test's "cannot tell", not a narrower element, so the
@@ -1901,7 +1918,8 @@ module Rigor
       # True when every member of the call's receiver dispatches `node.name` to core `Array` or `Enumerable`: the
       # method's RBS owner is one of {CORE_FINDER_OWNERS} and the project defines no method by that name on the
       # class or an ancestor. A project or gem `find` may return anything its block did not test
-      # (`def find = yield(1) ? 2.0 : nil`), so the name alone is not enough.
+      # (`def find = yield(1) ? 2.0 : nil`), so the name alone is not enough. {#element_or_nil?} closes the spellings
+      # this cannot see (a refinement, a reopened module the discovery walk does not reach).
       def core_finder_call?(node)
         receiver = node.receiver
         return false if receiver.nil?

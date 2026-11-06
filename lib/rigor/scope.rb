@@ -988,8 +988,17 @@ module Rigor
     # Like the `:local` mark it is dropped by `with_local` and intersected by `join`. Applied after the binding.
     def with_gradual_narrowing_mark(name)
       marks = add_declaration_sourced(:gradual_narrowing, name)
-      marks.equal?(@declaration_sourced) ? self : rebuild(declaration_sourced: marks)
+      return self if marks.equal?(@declaration_sourced)
+
+      marks = (marks.dup << GRADUAL_HINT).freeze unless marks.include?(GRADUAL_HINT)
+      rebuild(declaration_sourced: marks)
     end
+
+    # Issue #2656 — a ref stamped beside every gradual-narrowing mark, so {#gradual_narrowing_names} can answer "none"
+    # with one hash lookup instead of a walk of the set, which the ADR-67 marks keep non-empty in most bodies. It is a
+    # hint: a drop leaves it, and the walk then finds no mark; a join keeps it only where both arms carry it.
+    GRADUAL_HINT = [:gradual_narrowing_hint].freeze
+    private_constant :GRADUAL_HINT
 
     # Issue #2656 — this scope without the gradual-narrowing mark of every local `block_node` writes: a block may run
     # again after its own write (`loop do mode(x); x = "zz".dup; end`), and its entry does not see that back edge, so
@@ -1007,7 +1016,7 @@ module Rigor
 
     # Issue #2656 — the locals carrying the gradual-narrowing mark, empty when none does.
     def gradual_narrowing_names
-      return EMPTY_GRADUAL_NAMES if @declaration_sourced.empty?
+      return EMPTY_GRADUAL_NAMES unless @declaration_sourced.include?(GRADUAL_HINT)
 
       @declaration_sourced.filter_map { |ref| ref[1] if ref[0] == :gradual_narrowing }
     end

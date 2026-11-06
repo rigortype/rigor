@@ -40,7 +40,7 @@ end
 
 # The warm re-check of a consumer whose plugin answer turned on a discovery-walk MISS. Before #2689 the walk filed no
 # negative `method:` / `class:` edge, so defining the method in a new file left the consumer served from cache.
-RSpec.describe Rigor::Analysis::IncrementalSession, "discovery-walk gate (#2689)" do
+RSpec.describe "a plugin gate on the discovery walk across a warm recheck (#2689)" do
   def requirer
     lambda do |_name|
       Rigor::Plugin.register(Rigor::Plugin::DiscoveredGateProbe)
@@ -54,7 +54,7 @@ RSpec.describe Rigor::Analysis::IncrementalSession, "discovery-walk gate (#2689)
 
   def session(dir)
     Rigor::Plugin.unregister!
-    described_class.new(configuration: config(dir), paths: [dir], plugin_requirer: requirer)
+    Rigor::Analysis::IncrementalSession.new(configuration: config(dir), paths: [dir], plugin_requirer: requirer)
   end
 
   # The oracle: a cold (`--no-cache`) run of the edited tree under the same plugin.

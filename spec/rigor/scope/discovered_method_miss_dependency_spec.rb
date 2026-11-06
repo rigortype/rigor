@@ -8,11 +8,11 @@ require "rigor/protection/discovery_seed"
 # Issue #2689 — `Scope#discovered_method_through_ancestors?` read while a dependency recording is active files the
 # ADR-46 negative edges of a miss: `method:<entry><sep><name>` and `class:<entry>` for each project entry on the walked
 # chain, the edges the def walk files for the same miss. A hit files neither.
-RSpec.describe Rigor::Scope, "#discovered_method_through_ancestors? negative edges (#2689)" do
+RSpec.describe "a discovery-walk miss read while recording — negative edges (#2689)" do
   let(:dir) { Dir.mktmpdir("rigor-discovered-miss-") }
   let(:scope) do
     tables = Rigor::Protection::DiscoverySeed.discovery_tables(Dir[File.join(dir, "*.rb")])
-    base = described_class.empty
+    base = Rigor::Scope.empty
     base.with_discovery(base.discovery.with(**tables))
   end
 

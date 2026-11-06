@@ -1,0 +1,113 @@
+# frozen_string_literal: true
+
+require_relative "../../reflection"
+require_relative "../../type"
+require_relative "argument_nodes"
+require_relative "overload_selector"
+require_relative "rbs_dispatch"
+
+module Rigor
+  module Inference
+    module MethodDispatcher
+      # Issue #2884 — `X.new` through a `def self.new` that a project, gem or collection signature declares on `X` or
+      # on an ancestor of `X`. RBS models a constructor that answers another class this way (`email_address` declares
+      # `def self.new: (...) -> Address` on `EmailAddress`), and `MethodDispatcher#meta_new` answered `Nominal[X]` for
+      # every `Singleton[X].new` before any RBS tier ran. `meta_new` asks this module only after its curated lifts
+      # (`Array`, `Set`, `Hash`, `Struct`, `Class.new`, …) have declined, and keeps its `Nominal[X]` answer whenever
+      # this one is nil.
+      #
+      # The declaration counts only when every one of its definitions sits outside the `rbs` gem's core and stdlib
+      # trees ({Environment::RbsLoader#declared_outside_core_stdlib?}). Core declares `Data.new: () -> bot`, a
+      # `Struct.new` that answers a class, and stdlib declares `Tempfile.new`; a project class inheriting one of those
+      # keeps the `Nominal` answer the curated tiers were written around.
+      #
+      # The declaration is found on `X`'s own RBS (which carries its RBS ancestors' singleton methods), or, for a
+      # Ruby-source class with no RBS of its own, on the first RBS-known class of its discovered superclass chain. A
+      # source class on that chain that writes its own `def self.new` ends the walk with no answer: that method is
+      # the one Ruby runs. `instance` and `self` in the declared return read the receiver class.
+      #
+      # Nil (so `Nominal[X]`) when no overload takes the arguments (argument checking of `.new` is not this tier's
+      # job), and when the return translates to an untyped, `top` or `bot` answer, which would lose the precision
+      # `Nominal[X]` already has.
+      module DeclaredConstructor
+        # A project entry of the singleton chain defines `new` in Ruby source, so that method is the one Ruby runs.
+        DEFINED_IN_SOURCE = :defined_in_source
+        private_constant :DEFINED_IN_SOURCE
+
+        module_function
+
+        def try_dispatch(class_name, context)
+          environment = context.environment
+          loader = environment&.rbs_loader
+          return nil if loader.nil? || !loader.respond_to?(:declared_outside_core_stdlib?)
+
+          definition = declared_new(class_name, environment, loader, context.scope)
+          return nil if definition.nil? || !overload_matches?(definition, class_name, context)
+
+          answer = RbsDispatch.declared_singleton_return(context, definition, class_name)
+          answer if usable?(answer)
+        end
+
+        class << self
+          private
+
+          def declared_new(class_name, environment, loader, scope)
+            owner = declaring_class(class_name, environment, loader, scope)
+            return nil if owner.nil?
+
+            definition = Rigor::Reflection.singleton_method_definition(owner, :new, environment: environment)
+            definition if definition && loader.declared_outside_core_stdlib?(definition)
+          end
+
+          # `class_name` itself when RBS knows it; else the first RBS-known class on its singleton
+          # {Scope::ResolutionChain}, read in Ruby's order. Nil when a project entry ahead of it defines `new` (a
+          # `def self.new`, or an `extend`ed module's `def new`), when the chain reaches none, and when the chain does
+          # not stand (a fork or an unplaced mixin edge, where the tables cannot say which world ran).
+          def declaring_class(class_name, environment, loader, scope)
+            return class_name if Rigor::Reflection.rbs_class_known?(class_name, environment: environment)
+            return nil if scope.nil? || !loader.declares_singleton_new_outside_core_stdlib?
+
+            chain = Scope::ResolutionChain.for(scope, class_name.to_s, :singleton, :methods)
+            return nil if chain.truncated?
+
+            found = first_new_owner(chain, scope, environment)
+            verdict = chain.settle(scope, found, owner: nil) { |retro| first_new_owner(retro, scope, environment) }
+            found unless found.nil? || found == DEFINED_IN_SOURCE || verdict != :chain
+          end
+
+          # The first entry on `chain` that answers `new`: an RBS-known class's name, or {DEFINED_IN_SOURCE} for a
+          # project entry that defines it.
+          def first_new_owner(chain, scope, environment)
+            chain.search(scope) do |entry|
+              if entry.external?
+                # An external `extend`ed module is not a class object `new` is declared on; the walk passes it.
+                next unless entry.superclass_edge
+
+                entry.candidates.find { |name| Rigor::Reflection.rbs_class_known?(name, environment: environment) }
+              elsif entry.side == :singleton && Rigor::Reflection.rbs_class_known?(entry.name, environment: environment)
+                entry.name
+              elsif scope.discovered_method?(entry.name, :new, entry.side)
+                DEFINED_IN_SOURCE
+              end
+            end
+          end
+
+          # A genuine match only: the selector's first-overload fallback would answer a declaration the call does
+          # not take.
+          def overload_matches?(definition, class_name, context)
+            args = context.args || []
+            !OverloadSelector.select_declared(
+              definition, args, Type::Combinator.singleton_of(class_name), Type::Combinator.nominal_of(class_name),
+              {}, !context.block_type.nil?, context.environment, true,
+              ArgumentNodes.keyword_hash_last?(context.call_node, args), nil, true
+            ).empty?
+          end
+
+          def usable?(answer)
+            !(answer.nil? || answer.is_a?(Type::Dynamic) || answer.is_a?(Type::Top) || answer.is_a?(Type::Bot))
+          end
+        end
+      end
+    end
+  end
+end

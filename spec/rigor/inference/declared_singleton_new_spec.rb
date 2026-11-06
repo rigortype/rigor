@@ -1,0 +1,195 @@
+# frozen_string_literal: true
+
+# Issue #2884 — an explicit `def self.new` in a project or gem signature decides the type of `X.new`.
+#
+# `MethodDispatcher#meta_new` answers every `Singleton[X].new` before the RBS tier runs, and answered `Nominal[X]`
+# once its curated lifts declined, so `class X; def self.new: () -> Y; end` still typed `X.new` as `X` and fired
+# `call.undefined-method` on the `Y` it returns (`email_address` declares `def self.new: (...) -> Address`).
+# `MethodDispatcher::DeclaredConstructor` now answers before that fallback, for a declaration outside the `rbs`
+# gem's core and stdlib trees only: core's `Data.new: () -> bot`, `Ractor.new: … -> Ractor` and stdlib's
+# `Tempfile.new` must not reach a project subclass.
+
+require "spec_helper"
+require "fileutils"
+require "tmpdir"
+
+require "rigor/analysis/runner"
+require "rigor/configuration"
+
+RSpec.describe "a declared `def self.new` types `X.new` (#2884)" do
+  def signature = <<~RBS
+    class X
+      def self.new: () -> Y
+    end
+
+    class Y
+      def hello: () -> String
+    end
+
+    class W
+      def self.new: () -> instance
+    end
+
+    class O
+      def self.new: (String) -> Y | (Integer) -> O2
+    end
+
+    class O2
+    end
+
+    module EmailAddress
+      def self.new: (?) -> Address
+
+      class Address
+        def normal: () -> String
+      end
+    end
+
+    class Box[T]
+      def self.new: [T] (T) -> Box[T]
+      def self.make: [T] (T) -> Box[T]
+    end
+
+    class U
+      def self.new: () -> untyped
+    end
+
+    class SigOnly
+      def self.new: () -> Y
+    end
+  RBS
+
+  def run_check(lib)
+    FileUtils.mkdir_p("lib")
+    FileUtils.mkdir_p("sig")
+    File.write(File.join("sig", "x.rbs"), signature)
+    lib.each { |name, source| File.write(File.join("lib", name), %(require "rigor/testing"\ninclude Rigor::Testing\n#{source})) }
+    configuration = Rigor::Configuration.new(
+      Rigor::Configuration::DEFAULTS.merge("paths" => %w[lib], "signature_paths" => %w[sig], "workers" => 0)
+    )
+    guarded_run(Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil), %w[lib])
+  end
+
+  def dumps(result)
+    result.diagnostics.select { |d| d.qualified_rule == "dump.type" }.map { |d| d.message.delete_prefix("dump_type: ") }
+  end
+
+  def errors(result)
+    result.diagnostics.reject { |d| d.qualified_rule == "dump.type" }.map(&:qualified_rule)
+  end
+
+  around do |example|
+    Dir.mktmpdir("rigor-declared-new-") { |dir| Dir.chdir(dir) { example.run } }
+  end
+
+  it "answers the declared return, so a method of that class resolves (the issue's reproduction)" do
+    result = run_check("t.rb" => <<~RUBY)
+      class X; end
+      class Y; def hello = "s"; end
+      y = X.new
+      dump_type(y)
+      y.hello
+    RUBY
+    expect([dumps(result), errors(result)]).to eq([%w[Y], []])
+  end
+
+  it "answers the declaration from a signature file for a call in another lib file" do
+    result = run_check("x.rb" => "class X; end\nclass Y; def hello = 's'; end\n",
+                       "use.rb" => "dump_type(X.new.hello)\n")
+    expect([dumps(result), errors(result)]).to eq([%w[String], []])
+  end
+
+  it "keeps `Nominal[X]` for a class that declares no `self.new` (control)" do
+    expect(dumps(run_check("t.rb" => "class Plain; end\ndump_type(Plain.new)\n"))).to eq(%w[Plain])
+  end
+
+  it "answers the declaration a Ruby-source subclass inherits, as Ruby runs the inherited `self.new`" do
+    expect(dumps(run_check("t.rb" => "class X; end\nclass Z < X; end\ndump_type(Z.new)\n"))).to eq(%w[Y])
+  end
+
+  it "reads `instance` as the receiver class, so a subclass inheriting `-> instance` gets the subclass" do
+    expect(dumps(run_check("t.rb" => "class W; end\nclass V < W; end\ndump_type(W.new)\ndump_type(V.new)\n")))
+      .to eq(%w[W V])
+  end
+
+  it "stops the walk at a source class that writes its own `def self.new`" do
+    expect(dumps(run_check("t.rb" => <<~RUBY))).to eq(%w[Z])
+      class X; end
+      class Z < X
+        def self.new = super
+      end
+      dump_type(Z.new)
+    RUBY
+  end
+
+  it "stops the walk at an `extend`ed project module that defines `new`, which Ruby calls first" do
+    expect(dumps(run_check("t.rb" => <<~RUBY))).to eq(%w[Z])
+      class X; end
+      module Maker
+        def new = :made
+      end
+      class Z < X
+        extend Maker
+      end
+      dump_type(Z.new)
+    RUBY
+  end
+
+  it "answers the declaration of a superclass only a signature declares" do
+    expect(dumps(run_check("t.rb" => "class Q < SigOnly; end\ndump_type(Q.new)\n"))).to eq(%w[Y])
+  end
+
+  it "selects an overload by argument, and answers `Nominal[X]` when no overload takes the arguments" do
+    expect(dumps(run_check("t.rb" => <<~RUBY))).to eq(%w[Y O2 O])
+      class O; end
+      dump_type(O.new("s"))
+      dump_type(O.new(1))
+      dump_type(O.new(:sym))
+    RUBY
+  end
+
+  it "answers an untyped-parameter declaration on a module (the email_address gem shape)" do
+    result = run_check("t.rb" => <<~RUBY)
+      email = EmailAddress.new("a@example.com", host_validation: :syntax)
+      dump_type(email)
+      email.normal
+    RUBY
+    expect([dumps(result), errors(result)]).to eq([%w[EmailAddress::Address], []])
+  end
+
+  it "keeps `Nominal[X]` when the declared return is untyped" do
+    expect(dumps(run_check("t.rb" => "class U; end\ndump_type(U.new)\n"))).to eq(%w[U])
+  end
+
+  it "binds a generic declaration's method type variable as any other singleton method does" do
+    expect(dumps(run_check("t.rb" => "dump_type(Box.new(1))\ndump_type(Box.make(1))\n")))
+      .to eq(["Box[1]", "Box[1]"])
+  end
+
+  it "answers `self.new` in a singleton method and `self.class.new` in an instance method the same way" do
+    expect(dumps(run_check("t.rb" => <<~RUBY))).to eq(%w[Y Y])
+      class X
+        def self.make = dump_type(self.new)
+        def remake = dump_type(self.class.new)
+      end
+    RUBY
+  end
+
+  describe "a core or stdlib declaration is not inherited" do
+    it "keeps a project subclass of a core class whose `self.new` names the core class" do
+      expect(dumps(run_check("t.rb" => "class R < Ractor; end\ndump_type(R.new { 1 })\n"))).to eq(%w[R])
+    end
+
+    it "keeps a stdlib subclass, and leaves `Data.define` / `Struct.new` classes to their own tiers" do
+      expect(dumps(run_check("t.rb" => <<~RUBY))).to eq(["T", "P(x: 1)", "S(a: 1)"])
+        require "tempfile"
+        class T < Tempfile; end
+        P = Data.define(:x)
+        S = Struct.new(:a)
+        dump_type(T.new("x"))
+        dump_type(P.new(x: 1))
+        dump_type(S.new(1))
+      RUBY
+    end
+  end
+end

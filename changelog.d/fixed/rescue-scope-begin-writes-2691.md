@@ -1,0 +1,1 @@
+- **[inference]** A `rescue` clause no longer reads an indexed (`h[:k]`) or method-chain (`x.r`) narrowing the `begin` body had already invalidated, so `x.r = nil` before a `raise` reads `x.r` at its declared type in the arm. ([#2910](https://github.com/rigortype/rigor/pull/2910))

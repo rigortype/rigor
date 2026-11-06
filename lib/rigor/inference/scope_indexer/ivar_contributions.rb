@@ -4,7 +4,6 @@ require_relative "../../analysis/dependency_recorder"
 require_relative "../../typing_state"
 require_relative "../../memo_audit"
 require_relative "../../type"
-require_relative "../refined_dispatch/own_method"
 
 module Rigor
   module Inference
@@ -14,10 +13,10 @@ module Rigor
       #
       # - the writes another file's reopening of `K` makes;
       # - the writes of every project module and superclass on `K`'s instance resolution chain (`include`,
-      #   `prepend`, transitively, and `<`), from this file's own census of that ancestor where it declares one
-      #   (`writes`, taken before the read-before-write `nil` is added, so an ancestor's `initialize` exempts nothing
-      #   and its read-before-write adds nothing, and only for an ivar an instance body of the ancestor writes in this
-      #   file) and from every other file's entries for it.
+      #   `prepend`, transitively, and `<`; for a module `K`, the modules it includes or prepends), from this file's
+      #   own census of that ancestor where it declares one (`writes`, taken before the read-before-write `nil` is
+      #   added, so an ancestor's `initialize` exempts nothing and its read-before-write adds nothing, and only for an
+      #   ivar an instance body of the ancestor writes in this file) and from every other file's entries for it.
       #
       # Another file's write comes from its `[:own_write_type, owner, ivar, value, path]` census entry
       # ({IvarWriterCensus}): a literal joins as its `Constant`, anything else as `Dynamic[top]`. An ivar the census
@@ -60,10 +59,10 @@ module Rigor
         end
 
         # `K` and the project classes and modules on its instance chain, in chain order, with their class edges filed.
-        # A module's own census takes no chain: its ancestors' writes land on whatever includes it.
+        # A module's chain holds the modules it includes or prepends (#2487): each is on the chain of every class that
+        # includes the module, so its writes land on every object a read in the module's own methods sees. `extend`
+        # is no instance chain entry, for a module as for a class.
         def chain_owners(scope, class_name)
-          return [class_name] if RefinedDispatch::OwnMethod.module_name?(scope, class_name)
-
           chain = Scope::ResolutionChain.for(scope, class_name, :instance, :methods)
           # A guard: the class body's own `include` / `<` resolution already files these edges; kept so the read
           # states its own dependency.

@@ -91,8 +91,8 @@ class SingletonIncluder
   def get = @s.upcase # FIRES call.undefined-method
 end
 
-# A module's own census takes no chain: `Outer2`'s reads see its own writes, not `Inner2`'s. The pinned `nil` is
-# not the type Ruby gives `@m` on an includer that called `set`: flip it when #2487 is fixed.
+# Issue #2487 — a module's own census takes the modules it includes or prepends: `Inner2` is on the chain of every
+# class that includes `Outer2`, so after `reset; set` on any includer Ruby 4.0.5 returns "A" from `get`.
 module Inner2
   def set = (@m = "a")
 end
@@ -100,7 +100,47 @@ end
 module Outer2
   include Inner2
   def reset = (@m = nil)
-  def peek = assert_type("nil", @m)
+  def get = @m.upcase
+  def peek = assert_type("\"a\"?", @m)
+end
+
+# One module included by a class and by another module joins both censuses.
+module Shared
+  def set = (@sh = "a")
+end
+
+module SharedOuter
+  include Shared
+  def reset = (@sh = nil)
+  def get = @sh.upcase
+end
+
+class SharedBox
+  include Shared
+  def initialize = (@sh = nil)
+  def get = @sh.upcase
+end
+
+module PreInner
+  def set = (@pm = "a")
+end
+
+module PreOuter
+  prepend PreInner
+  def reset = (@pm = nil)
+  def get = @pm.upcase
+end
+
+# `extend` puts `ExtInner#set` on the module object, not on its includers' instances: Ruby 4.0.5 raises
+# NoMethodError on `get` after `reset` on any includer.
+module ExtInner
+  def set = (@em = "a")
+end
+
+module ExtOuter
+  extend ExtInner
+  def reset = (@em = nil)
+  def get = @em.upcase # FIRES call.undefined-method
 end
 
 # Review m5 — an ancestor joins its writes as they stand before its read-before-write `nil`: `RbwM#peek` reads `@w`

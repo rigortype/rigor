@@ -14,3 +14,11 @@ class ReopenedIncluder
   def initialize = (@r = nil)
   def get = @r.upcase
 end
+
+# Issue #2487 — a module including a module declared in a later file: Ruby 4.0.5 returns "A" on any includer after
+# `reset; set`.
+module CrossOuter
+  include CrossInner
+  def reset = (@ci = nil)
+  def get = @ci.upcase
+end

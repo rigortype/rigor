@@ -201,7 +201,6 @@ RSpec.describe "ADR-129 G1' Frame declarations", type: :runner do
         when :def_node_resolver_run then run_incremental_witness(path)
         when :dependency_recorder then run_source(source, signature_dir: dir, record_dependencies: true)
         when :effects_collector then run_source(source, signature_dir: dir, config: { "effects" => {} })
-        when :file_digest_run then analyze(source)
         else run_source(source, signature_dir: dir)
         end
       end
@@ -224,6 +223,25 @@ RSpec.describe "ADR-129 G1' Frame declarations", type: :runner do
         expect(observer::READ).to include(slot.name)
         expect(observer::SEEN).to include(slot.name)
       end
+    end
+  end
+
+  describe "a cold Environment.default under the audit" do
+    # The suite pre-builds environments (`spec/support/rbs_env_memo.rb`), so the cold build is reached in a subprocess.
+    # `Scope.empty` types against `Environment.default`, which the incremental session's summary evaluator and the
+    # narrowing defaults use (#2886): building it from inside the first `type_of` read `rbs_core_root` there.
+    it "reports no frame-audit finding when the first type_of names a constant" do
+      script = <<~RUBY
+        require "rigor"
+        Rigor::MemoAudit.enable!
+        node = Prism.parse("Integer.sqrt(4)").value.statements.body.first
+        Rigor::Scope.empty.type_of(node)
+        puts Rigor::MemoAudit.drain.map(&:message)
+      RUBY
+
+      output = IO.popen([RbConfig.ruby, "-I", File.join(repo_root, "lib"), "-e", script], err: File::NULL, &:read)
+
+      expect(output).to be_empty
     end
   end
 

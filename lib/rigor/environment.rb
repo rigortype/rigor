@@ -254,11 +254,14 @@ module Rigor
     end
 
     class << self
+      # Issue #2883 — the shared default environment is built here too, not on the first `type_of` that needs it, so
+      # code that types against it (`Scope.empty`, the narrowing defaults, the incremental session's summary
+      # evaluator) never builds it from inside typing. A non-main Ractor keeps the lazy build.
       def default
         @default ||= new(
           rbs_loader: RbsLoader.default,
           hkt_registry: Builtins::HktBuiltins.registry
-        ).freeze
+        ).freeze.tap { |environment| environment.prepare_for_typing! if Ractor.main? }
       end
 
       # Builds an Environment that consults the project's local signatures and any opt-in stdlib libraries on

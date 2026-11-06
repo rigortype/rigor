@@ -105,9 +105,18 @@ module Rigor
       # the appended crash frame is derived identically on the sequential and pooled paths. Keeps the
       # {CHECK_RULE_MESSAGE_PREFIX} prefix every consumer matches on; the frame is a trailing hint.
       def check_rule_message(error)
-        base = "#{CHECK_RULE_MESSAGE_PREFIX}: #{error.class}: #{error.message}"
+        base = "#{CHECK_RULE_MESSAGE_PREFIX}: #{error.class}: #{error_detail(error)}"
         frame = crash_frame(error)
         frame ? "#{base} (#{frame})" : base
+      end
+
+      # #2455 — a `SystemStackError` is the file's own nesting running the recursive walkers out of stack, so the row
+      # says that, instead of Ruby's bare "stack level too deep" which reads as a Rigor defect with no remedy.
+      DEEP_NESTING_DETAIL = "this file is nested too deeply to analyse (stack level too deep); " \
+                            "split the deeply nested expression, and no other file is affected"
+
+      def error_detail(error)
+        error.is_a?(SystemStackError) ? DEEP_NESTING_DETAIL : error.message
       end
 
       # ADR-129 WD5 (#2785) — `diagnostics` (one file's) with a crash row for each of `errors`, raised errors the

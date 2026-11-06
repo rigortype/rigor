@@ -1,0 +1,3 @@
+- **[rigor check]** A file nested too deeply for the recursive walkers no longer aborts the whole run with `SystemStackError` and exit 70; it gets one `internal analyzer error` row and every other file is reported normally. ([#2455](https://github.com/rigortype/rigor/issues/2455))
+  - The limit is about 700 nested `if`s, or 1,300 nested array literals or chained calls, and holds under `--workers`.
+  - The language server answers a request on such a document with an internal error and keeps running.

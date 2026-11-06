@@ -1,0 +1,31 @@
+# A file nested too deeply to analyse is contained to that file instead of making every walker iterative
+
+- **PR:** [#2455](https://github.com/rigortype/rigor/pull/2455)
+- **Issue:** [#2455](https://github.com/rigortype/rigor/issues/2455)
+- **Class:** open-choice
+- **Precedent:** [ADR-5](../docs/adr/5-robustness-principle.md)
+- **Decided:** 2026-11-06
+
+## Background
+
+Several recursive walkers (`ScopeIndexer`, `ExpressionTyper`, the flow tracer) each overflow the VM stack at their own
+nesting depth, and `SystemStackError` is not a `StandardError`, so it escaped every per-file rescue and aborted the
+whole run with exit 70 and no report for any file.
+
+## Options and trade-offs
+
+Make every walker iterative: removes the limit, but touches dozens of walkers and costs allocations on the hot path.
+Raise the VM stack or run on big-stack threads: moves the limit, leaves the abort. Contain the failure per file: keeps
+the limit but bounds its blast radius to the one file.
+
+## Decision
+
+Contain it per file. The existing per-file crash row (`internal analyzer error`, `error` severity, which discards
+that file's diagnostics) is reused, with a message saying the file is nested too deeply; the discovery pass skips such
+a file and the language server answers the request with an internal error. The exit status follows the row's severity
+(1). The PR number above is the issue's number until the PR exists and is corrected in the next push.
+
+## To undo
+
+Drop `SystemStackError` from the four rescues (`Runner#analyze_file_body`, `WorkerSession#analyze_body`, the two
+`ScopeIndexer` discovery loops) and the `Loop#dispatch_contained` guard. Deep files then abort the run again.

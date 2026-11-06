@@ -39,7 +39,7 @@ module Rigor
           unless task.cancelled
             begin
               block.call
-            rescue StandardError => e
+            rescue StandardError, SystemStackError => e
               warn "Debouncer task #{key.inspect}: #{e.class}: #{e.message}"
             end
           end

@@ -9486,7 +9486,7 @@ module Rigor
           source = File.read(physical)
           root = Prism.parse(source, filepath: path).value
           collect_class_decls(root, [], accumulator)
-        rescue StandardError
+        rescue StandardError, SystemStackError
           # Skip files that fail to parse or read; the per-file analyzer surfaces the parse error separately.
           next
         end
@@ -9516,7 +9516,7 @@ module Rigor
           accumulate_project_index(acc, path, root)
         rescue DeclarationWalk::ContractError
           raise # a broken walk contract, not an unreadable file: skipping it would hide the failure
-        rescue StandardError
+        rescue StandardError, SystemStackError
           # Skip files that fail to parse or read; the per-file analyzer surfaces the parse error separately.
           next
         end
@@ -9845,7 +9845,7 @@ module Rigor
           end
         rescue DeclarationWalk::ContractError
           raise # a broken walk contract, not an unreadable file: skipping it would hide the failure
-        rescue StandardError
+        rescue StandardError, SystemStackError
           # Skip files that fail to parse or read; the per-file analyzer surfaces the parse error separately.
           next
         end
@@ -9921,7 +9921,7 @@ module Rigor
           end
         rescue DeclarationWalk::ContractError
           raise # a broken walk contract, not an unreadable file: skipping it would hide the failure
-        rescue StandardError
+        rescue StandardError, SystemStackError
           # Skip files that fail to parse / read; the per-file analyzer surfaces the parse error separately.
           next
         end

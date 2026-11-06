@@ -42,10 +42,21 @@ module Rigor
         params = request[:params]
         id = request[:id]
 
-        result = @server.dispatch(method, params)
+        result = dispatch_contained(method, params)
         return if id.nil? # notification — no response.
 
         write_response(id, result)
+      end
+
+      # #2455 — a document nested deeply enough to run the recursive walkers out of stack answers its request with an
+      # internal error instead of unwinding the loop: `SystemStackError` is not a `StandardError`, so nothing between
+      # here and the raise site declines it, and the session would end for every open document. A notification has
+      # no response to carry the error, so it is dropped.
+      def dispatch_contained(method, params)
+        @server.dispatch(method, params)
+      rescue SystemStackError
+        { error: { code: Server::ERROR_INTERNAL_ERROR,
+                   message: "#{method}: this document is nested too deeply to analyse" } }
       end
 
       # Maps the dispatcher's return value to a JSON-RPC response envelope. `Server#dispatch` returns one of

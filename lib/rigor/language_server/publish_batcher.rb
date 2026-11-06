@@ -54,7 +54,7 @@ module Rigor
           run_batch
           break unless more_pending?
         end
-      rescue StandardError => e
+      rescue StandardError, SystemStackError => e
         @lock.synchronize { @running = false }
         @on_error&.call(e)
       end

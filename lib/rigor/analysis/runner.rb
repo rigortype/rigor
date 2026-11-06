@@ -2778,7 +2778,7 @@ module Rigor
             severity: :error
           )
         ]
-      rescue StandardError => e
+      rescue StandardError, SystemStackError => e
         [
           Diagnostic.new(
             path: path,

@@ -92,6 +92,20 @@ RSpec.describe "cross-file ivar census — incremental" do
     )
   end
 
+  # Issue #2487 — a module's own census joins the modules it includes, so a module reader is re-checked when the
+  # included module, in another file, stops or starts writing the ivar.
+  it "re-checks a module reader when its included module stops and starts writing the ivar" do
+    module_reader = "module Outer\n  include Inner\n  def reset = (@x = nil)\n  def get = @x.upcase\nend\n"
+    expect_steps(
+      { "a.rb" => module_reader, "b.rb" => "module Inner\n  def set = (@x = \"a\")\nend\n" },
+      [
+        [{ "b.rb" => "module Inner\n  def set = (@y = \"a\")\nend\n" }, true, [["a.rb", 4]]],
+        [{ "b.rb" => "module Inner\n  def set = (@x = \"a\")\nend\n" }, true, []]
+      ],
+      baseline: []
+    )
+  end
+
   it "re-checks the reader when another file removes the include" do
     expect_steps(
       { "b.rb" => "module M\n  def set = (@x = \"a\")\nend\n",

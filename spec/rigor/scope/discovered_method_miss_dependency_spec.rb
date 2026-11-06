@@ -45,7 +45,7 @@ RSpec.describe "a discovery-walk miss read while recording — negative edges (#
 
     expect(answer).to be(false)
     expect(missing).to eq(Set["method:Child#foo", "method:Helper#foo", "method:Base#foo",
-                              "class:Child", "class:Helper", "class:Base"])
+                              "class:Child", "class:Helper", "class:Base", "class:StandardError"])
   end
 
   it "files the class objects' singleton edges and the extended module's instance edge on a :singleton miss" do
@@ -53,14 +53,43 @@ RSpec.describe "a discovery-walk miss read while recording — negative edges (#
 
     expect(answer).to be(false)
     expect(missing).to eq(Set["method:Child.foo", "method:Helper#foo", "method:Base.foo",
-                              "class:Child", "class:Helper", "class:Base"])
+                              "class:Child", "class:Helper", "class:Base", "class:StandardError"])
   end
 
-  it "files the same method and class edges as the def walk for the same miss" do
+  it "files the same method and class edges as the def walk for the same miss, either kind" do
     _, discovered = read { scope.discovered_method_through_ancestors?("Child", :foo, :singleton) }
     _, by_def = read { scope.singleton_def_through_ancestors("Child", :foo) }
-
     expect(discovered).to eq(by_def)
+
+    _, discovered = read { scope.discovered_method_through_ancestors?("Child", :foo, :instance) }
+    _, by_def = read { scope.user_def_through_ancestors("Child", :foo) }
+    expect(discovered).to eq(by_def)
+  end
+
+  # An external entry (here the core superclass, and below an ancestor the project declares with no methods, or
+  # nowhere) gets the `class:` edge a file declaring that name fires, from both walks.
+  it "files the class edge of each external entry on a miss, from both walks" do
+    File.write(File.join(dir, "b.rb"), <<~RUBY)
+      class Empty
+      end
+      class Leaf < Empty
+        extend Undeclared
+      end
+    RUBY
+    [
+      -> { scope.discovered_method_through_ancestors?("Leaf", :foo, :singleton) },
+      -> { scope.singleton_def_through_ancestors("Leaf", :foo) }
+    ].each do |walk|
+      _, missing = read(&walk)
+      expect(missing).to include("class:Empty", "class:Undeclared")
+    end
+    [
+      -> { scope.discovered_method_through_ancestors?("Leaf", :foo, :instance) },
+      -> { scope.user_def_through_ancestors("Leaf", :foo) }
+    ].each do |walk|
+      _, missing = read(&walk)
+      expect(missing).to include("class:Empty")
+    end
   end
 
   it "files no negative edge for the name on a hit, either kind" do
@@ -69,7 +98,7 @@ RSpec.describe "a discovery-walk miss read while recording — negative edges (#
 
       expect(answer).to be(true), [name, kind].inspect
       expect(missing.grep(/\Amethod:.*#{name}\z/)).to be_empty, [name, kind].inspect
-      expect(missing).not_to include("class:Child", "class:Base"), [name, kind].inspect
+      expect(missing).not_to include("class:Child", "class:Base", "class:StandardError"), [name, kind].inspect
     end
   end
 

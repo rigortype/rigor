@@ -261,6 +261,20 @@ module Rigor
         record_extend_hooks(scope)
       end
 
+      # Issue #2689 — the negative edge a method-walk MISS owes each EXTERNAL entry: `class:<last segment>` of the name
+      # as written. An external entry is an ancestor the project declares with no methods (the usual empty
+      # `ApplicationRecord`) or not at all yet, so the walk looked nothing up there; a later file that declares it
+      # with the method turns the miss, and the declaration appearing is the one event that file fires. A core or gem
+      # ancestor (`StandardError`, `Comparable`) files its key too, which fires only on a file that declares a
+      # constant of that name. Recorded only on a miss: a hit's answer cannot be turned by an entry gaining a method.
+      def record_external_absence
+        return unless Analysis::DependencyRecorder.active?
+
+        @entries.each do |entry|
+          Analysis::DependencyRecorder.read_last_segment(:class, entry.raw.to_s) if entry.external?
+        end
+      end
+
       # What a {#settle} verdict adds to what the search already filed. The search files the root and every entry
       # AHEAD of the answer; entries strictly after it matter only through the verdict (a fork or an unpositioned
       # edge there sends the reader to master's answer), so they are filed here, and only where master's answer

@@ -2073,6 +2073,7 @@ module Rigor
       end
       return found if found
 
+      chain.record_external_absence
       chain.truncated? ? ancestor_walk_gave_up : [nil, nil]
     end
 
@@ -2112,6 +2113,7 @@ module Rigor
       end
       return found if found
 
+      chain.record_external_absence
       chain.truncated? ? ancestor_walk_gave_up : [nil, nil]
     end
 
@@ -2213,7 +2215,10 @@ module Rigor
     # instance methods) and the `class:` key a declaring file appearing fires — the edges the def walk files for the
     # same miss (`#user_def_for` per entry, `ResolutionChain#settle` for the classes). A hit files none: existence is
     # a union, so no other entry gaining the method can turn a found answer.
+    # An external entry (an ancestor declared with no methods, or not yet) files its `class:` key
+    # ({ResolutionChain#record_external_absence}), as the def walks do on a miss.
     def record_discovered_miss(chain, method_name)
+      chain.record_external_absence
       chain.entries.each do |entry|
         next if entry.external?
 

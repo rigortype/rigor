@@ -1,0 +1,3 @@
+- **[inference]** An ivar write inside a block whose `self` is provably another object no longer counts as a write of the enclosing class's ivar, so a read of an ivar only such a block sets keeps reporting a call on `nil`. ([#2938](https://github.com/rigortype/rigor/pull/2938))
+  - The blocks are those of `Other.new.instance_eval`, `"s".instance_eval`, `Class.new`, `Struct.new`, `Data.define`, `X.class_eval` and `Other.define_method`, and a `class << obj` body.
+  - A receiver that may hold an instance of the class (a parameter, a local, `dup`, `itself`) keeps counting, and so does a `define_method` block that runs on an instance of the class again, even inside `self.class.class_eval` or `class << self`.

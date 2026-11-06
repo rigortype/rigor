@@ -1022,7 +1022,11 @@ module Rigor
 
         # Issue #1722 — a `method_missing`, or a project mixin, on one of the class's RBS ancestors
         # ({RbsReceiverSurface}). Last for {#ancestry_declares_method?}'s reason: it walks the class graph.
+        # Issue #2792 — a `method_missing` RBS declares on the class or an ancestor, other than the universal one.
         def rbs_ancestor_may_answer?(class_name, method_name, scope, kind)
+          side = kind == :singleton ? :singleton : :instance
+          return true if RbsReceiverSurface.rbs_missing_hook?(scope, class_name, side)
+
           if kind == :singleton
             RbsReceiverSurface.singleton_hook?(scope, class_name) ||
               RbsReceiverSurface.singleton_mixin_may_answer?(scope, class_name, method_name)
@@ -1534,8 +1538,8 @@ module Rigor
         # as a per-instance singleton method and answers the rest through a private `method_missing` (ostruct 0.6), so
         # no signature can enumerate its surface. The only other declaration in the environment is json's add-on
         # reopening (`json_create` / `as_json` / `to_json`), which made the class read as fully declared and every
-        # field access a `call.undefined-method`. `data/core_overlay/ostruct.rbs` declares that `method_missing`, and
-        # an RBS-declared `method_missing` does not by itself open a receiver here, so the class is named. No load
+        # field access a `call.undefined-method`. `data/core_overlay/ostruct.rbs` declares that `method_missing`; since
+        # #2792 that alone keeps `call.undefined-method` silent, but the rules below still need the class named. No load
         # gate is needed: the core overlay loads into every environment that has RBS at all, so the list is active
         # whenever the declaration it protects is. Both sides of the class are open, as with
         # {GEM_OVERLAY_OPEN_RECEIVERS}, and an inherited Object / Kernel signature stops deciding `call.wrong-arity`

@@ -73,11 +73,13 @@ module Rigor
         paths.each { |path| scan_file(path, collected, diagnostics, buffer, census) }
         pending_mixins, collected = collected.partition { |item| item.is_a?(Mixins::Pending) }
         overrides = {}
-        entries = resolve_aliases(collected, overrides)
+        singleton_copies = Set.new
+        entries = resolve_aliases(collected, overrides, singleton_copies)
         diagnostics.concat(duplicate_declaration_diagnostics(entries))
         Result.new(
           registry: ProjectPatchedMethods.new(entries: entries, write_census: census.freeze, overrides: overrides,
-                                              mixins: Mixins.resolve(pending_mixins, entries)),
+                                              mixins: Mixins.resolve(pending_mixins, entries),
+                                              singleton_copies: singleton_copies),
           diagnostics: diagnostics
         )
       end
@@ -126,15 +128,18 @@ module Rigor
       # A {Visibility::Pending} (issue #1708) changes the visibility of the binding its name has when it runs, in the
       # file that bound it, so it is not a second declaration; a name no earlier patch binds on the class is one it
       # inherits, recorded in `overrides` ({Visibility.apply}). `module_function :x` also binds the public singleton
-      # copy.
-      def resolve_aliases(collected, overrides = {})
+      # copy: an entry {.applied} yields for a bound name, or a `[class_name, name]` pair in `singleton_copies`
+      # (issue #2108) for an inherited one, whose body the scan cannot name.
+      def resolve_aliases(collected, overrides = {}, singleton_copies = Set.new)
         bound = {}
         homes = {}
         per_file = collected.group_by(&:source_path).values.map do |items|
           final = {}
           items.each do |item|
             if item.is_a?(Visibility::Pending)
-              next Visibility.apply(item, bound, homes, overrides) { |copy| bind(copy, bound, homes, final) }
+              next Visibility.apply(item, bound, homes, overrides, singleton_copies) do |copy|
+                bind(copy, bound, homes, final)
+              end
             end
 
             entry = item.is_a?(PendingAlias) ? alias_entry(item, bound) : item

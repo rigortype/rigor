@@ -477,4 +477,46 @@ RSpec.describe "a pre_eval: patch on an ancestor reaches its descendants (#1708)
       expect(rules(result)).to eq([])
     end
   end
+
+  # Issue #2108 — `module_function :x` on a name the module inherits rather than binds makes Ruby's public
+  # singleton copy on the module as well as the private instance one: `module Kernel; include KHelp;
+  # module_function :kx` gives `Kernel.kx` => 1 and leaves `1.kx` a private call. Each Ruby 4.0.5 witness is
+  # the comment beside its line; the `Comparable`/`mh` pair is the same shape on another module.
+  describe "a module_function :x on an inherited name (#2108)" do
+    let(:inherited_patch) { <<~RUBY }
+      module KHelp
+        def kx = 1
+      end
+      module Kernel
+        include KHelp
+        module_function :kx
+      end
+      module MH
+        def mh = "s"
+      end
+      module Comparable
+        include MH
+        module_function :mh
+      end
+    RUBY
+
+    it "does not report the public singleton copies Kernel.kx and Comparable.mh" do
+      result = run_project("ext/core.rb" => inherited_patch, "lib/a.rb" => "Kernel.kx\nComparable.mh\n")
+
+      expect(rules(result)).to eq([])
+    end
+
+    it "still reports the private instance copies on explicit receivers" do
+      result = run_project("ext/core.rb" => inherited_patch, "lib/a.rb" => "1.kx\n1.mh\n")
+
+      expect(rules(result)).to eq([["a.rb", 1, "call.undefined-method"], ["a.rb", 2, "call.undefined-method"]])
+    end
+
+    it "does not report the singleton copies under the fork pool" do
+      result = run_project({ "ext/core.rb" => inherited_patch, "lib/a.rb" => "Kernel.kx\nComparable.mh\n1.kx\n" },
+                           { "workers" => 2 })
+
+      expect(rules(result)).to eq([["a.rb", 3, "call.undefined-method"]])
+    end
+  end
 end

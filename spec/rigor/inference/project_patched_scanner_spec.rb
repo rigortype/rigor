@@ -548,4 +548,53 @@ end
       end
     end
   end
+
+  # Issue #2108 — `module_function :x` on a name the module inherits rather than binds makes Ruby's public
+  # singleton copy on the module as well as the private instance one. The copy's body is whichever method the
+  # name reaches through the module's instance ancestors — a `pre_eval:` module here, an RBS or project method
+  # elsewhere — which the scan cannot name, so the registry records the `[class_name, name]` pair for
+  # {ProjectPatchedMethods#lookup_through_ancestors} to resolve, beside the instance-side override.
+  describe ".scan singleton copies (#2108)" do
+    def scan_sources(sources)
+      Dir.mktmpdir do |dir|
+        paths = sources.each_with_index.map do |source, index|
+          File.join(dir, "ext#{index}.rb").tap { |path| File.write(path, source) }
+        end
+        yield described_class.scan(paths)
+      end
+    end
+
+    it "records the singleton copy of a module_function on an inherited name, with the instance override" do
+      # Kernel.kx => 1; 1.kx: NoMethodError (private method 'kx').
+      scan_sources([<<~RUBY]) do |outcome|
+        module KHelp
+          def kx = 1
+        end
+        module Kernel
+          include KHelp
+          module_function :kx
+        end
+      RUBY
+        registry = outcome.registry
+        expect(registry.singleton_copies.to_a).to eq([["Kernel", :kx]])
+        expect(registry.overrides).to eq({ ["Kernel", :kx, :instance] => :module_function })
+        expect(registry.lookup(class_name: "Kernel", method_name: :kx, kind: :singleton)).to be_nil
+      end
+    end
+
+    it "records no singleton copy for a module_function on a name the module binds" do
+      # The bound case yields a real singleton entry through {.applied}, as before.
+      scan_sources(["module Mf; def y = 1; module_function :y; end\n"]) do |outcome|
+        registry = outcome.registry
+        expect(registry.singleton_copies).to be_empty
+        expect(registry.lookup(class_name: "Mf", method_name: :y, kind: :singleton)).not_to be_nil
+      end
+    end
+
+    it "records no singleton copy for a named private, protected or public call on an inherited name" do
+      scan_sources(["class Integer; public :kp; private :kq; end\n"]) do |outcome|
+        expect(outcome.registry.singleton_copies).to be_empty
+      end
+    end
+  end
 end

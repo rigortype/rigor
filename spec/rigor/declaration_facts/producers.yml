@@ -124,6 +124,12 @@ lib/rigor/inference/captured_locals.rb:
   computes: the outer locals a block body can rebind
   producers:
     Rigor::Inference::CapturedLocals#hard_scope_entered?: grandfathered
+lib/rigor/inference/census_foreign_block.rb:
+  computes: whether a block or class << body inside an instance body runs with a self that is provably not an instance of the class, for the class-ivar census (#2490)
+  producers:
+    Rigor::Inference::CensusForeignBlock: the barrier of the ivar census's foreign-self rule (#2490); it stops the walk for nested define_method blocks at a def, class, module or class << body, whose ivars are another body's, and decides no declaration context
+    Rigor::Inference::CensusForeignBlock#collect_define_method_blocks: the barrier of the ivar census's foreign-self rule (#2490); it stops the walk for nested define_method blocks at a def, class, module or class << body, whose ivars are another body's, and decides no declaration context
+    Rigor::Inference::CensusForeignBlock#reentry_blocks: 'issue #2490, the define_method blocks a barred class_eval on self.class or the class, or a class << self body, holds; it reads the receiver spelling and the singleton expression, and derives no declaration context'
 lib/rigor/inference/clause_widening.rb:
   computes: the local and instance variable names a begin body writes that a rescue or ensure clause reads as untyped
   producers:

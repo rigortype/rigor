@@ -154,6 +154,20 @@ RSpec.describe "a cross-file top-level def called from a block (#2861)", type: :
     # The class's own `myhelper` returns a String, which Ruby runs; the top-level def must not capture it.
     # `ClosureEscapeAnalyzer` answers `tap` / `then` for every class, so a project definition every receiver reaches
     # (`Object`, `Kernel`) must count for every receiver. Ruby runs `Foo#format` here ("FOO").
+    it "keeps the mark where the project defines tap on Module, for a class-object receiver" do
+      use = script(
+        "class Module",
+        "  def tap(&b) = (instance_exec(&b); self)",
+        "end",
+        "class Foo",
+        "  def self.myhelper(x) = \"foo\"",
+        "end",
+        "Foo.tap { myhelper(1).upcase }"
+      )
+
+      expect(undefined("helpers.rb" => helpers, "script.rb" => use)).to eq([])
+    end
+
     {
       "tap on Object" => ["class Object", "  def tap(&b) = (instance_exec(&b); self)", "end"],
       "then on Kernel" => ["module Kernel", "  def then(&b) = instance_exec(&b)", "end"]

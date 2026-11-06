@@ -1,0 +1,3 @@
+- **[check]** `call.undefined-method` no longer fires on a receiver whose class or an ancestor declares `method_missing` in RBS. ([#2894](https://github.com/rigortype/rigor/pull/2894))
+  - `SimpleDelegator.new("x").to_str` and a call on a `DelegateClass(String)` instance were reported, although `Delegator` forwards them. The same holds for a project subclass of either, or a class that includes a module declaring `method_missing`.
+  - Core's `BasicObject#method_missing` does not count, so a plain class still reports, and a `respond_to_missing?` alone opens nothing.

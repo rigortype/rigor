@@ -17,11 +17,14 @@ module Rigor
     module DependencyRecorder # rubocop:disable Metrics/ModuleLength
       # ADR-129 WD1 — the installed accumulator is a Frame whose contents are a Resource for its suspension count, the
       # one mutation that touches ({record_for}); its filings are entries of the bound Table {READS} and are journaled
-      # instead. The `type_of` memo stays shut while recording runs (WD4). The activation count below is a process
-      # switch, outside the typing state (WD5).
+      # instead. WD4 shuts the `type_of` memo under recording only until these reads are journaled, which they now are.
+      # The activation count below is a process switch, outside the typing state (WD5).
       RECORDER = TypingState.frame(
         :dependency_recorder,
-        contents: :resource, reason: "the consumer's accumulator a recording installs; each read files into it"
+        contents: :resource, reason: "the consumer's accumulator a recording installs; each read files into it",
+        # G1′ witness: the dependency reads are a journaled Table (WD4), so the memo may run under recording, and typing
+        # reads the accumulator (`read_site`, `read_name`) inside `type_of`.
+        witness: "spec/fixtures/typing_state_witnesses/dependency_recorder.rb"
       )
       private_constant :RECORDER
 

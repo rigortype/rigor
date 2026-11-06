@@ -1,0 +1,11 @@
+module Rigor
+  module Plugin
+    interface _WitnessReader
+      def read: () -> String
+    end
+  end
+end
+class Probe
+  def take: (Rigor::Plugin::_WitnessReader reader) -> String
+  def run: () -> String
+end

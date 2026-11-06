@@ -30,7 +30,8 @@ module Rigor
       # ADR-129 WD1 — a Frame: the depth is installed for a region and restored on the way out.
       REPEATING = TypingState.frame(
         :reflective_ivar_write_repeating,
-        reason: "the repeat depth of `for` bodies and loop predicates, installed per region"
+        reason: "the repeat depth of `for` bodies and loop predicates, installed per region",
+        witness: "spec/fixtures/typing_state_witnesses/reflective_ivar_write_repeating.rb"
       )
       private_constant :REPEATING
 

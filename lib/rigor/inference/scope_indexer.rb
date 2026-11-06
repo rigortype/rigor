@@ -11922,7 +11922,9 @@ module Rigor
         :scope_index_unentered_evaluator,
         reason: "installed around the index walk that evaluates its unentered constructs; the lambda writes the " \
                 "walk's own table (the walk's state, not typing state) and reads its converged-loop recording and " \
-                "clause widening, and is frozen while installed"
+                "clause widening, and is frozen while installed",
+        # G1′: the evaluation types under the Frame, but only the index walk, outside `type_of`, reads it.
+        typing_never_reads: true
       )
       private_constant :UNENTERED_EVALUATOR
 

@@ -17,9 +17,10 @@ module Rigor
     module FlowTracer
       # ADR-129 WD1 — the installed recorder is a Frame whose contents are a Resource: each emit into it touches. It is
       # an output the engine never reads back, and the activation count below is a process switch, outside the typing
-      # state (WD5).
+      # state (WD5). G1′: a tracer switch, under which the `type_of` memo stays shut (WD4).
       RECORDER = TypingState.frame(
-        :flow_tracer, contents: :resource, reason: "the recorder a trace installs; each emit records into it"
+        :flow_tracer, contents: :resource, reason: "the recorder a trace installs; each emit records into it",
+                      memo_shut_while_installed: true
       )
       private_constant :RECORDER
 

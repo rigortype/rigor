@@ -38,6 +38,8 @@ module Rigor
   module TypingState
     KINDS = %i[frame table resource memo].freeze
     READ_EXEMPTIONS = %i[id_determined delta_internal].freeze
+    # ADR-129 G1′ — the four things a Frame declares about how typing meets it, exactly one each ({.frame}).
+    G1_KINDS = %i[witness typing_unreachable typing_never_reads memo_shut_while_installed].freeze
 
     # One declared slot: its name, kind and index, why it is the kind it is, and its kind's options.
     # - `run_scoped`: a Table, Memo or Resource whose contents belong to one analysis run, emptied by
@@ -53,8 +55,12 @@ module Rigor
     # - `computed`: a Table filled by a computation (the ADR-84 return memo), the `MemoAudit.key_audit` label of its
     #   miss (WD1's key audit, G2).
     # - `entries`: a Table's entry protocol ({StoreEntries}), how the journal reads and writes one of its entries.
+    # - `declaration`: a Frame's G1′ declaration (ADR-129 WD5), a frozen `[kind, argument]` pair: `[:witness, path]` (a
+    #   repo-relative fixture on which G1 must fail with the slot ignored), or `[:typing_unreachable, true]`,
+    #   `[:typing_never_reads, true]` or `[:memo_shut_while_installed, true]` ({FrameAudit} asserts the first two under
+    #   `RIGOR_MEMO_AUDIT`).
     Slot = Data.define(:name, :kind, :index, :reason, :run_scoped, :read_exemption, :contents, :read_through, :bound,
-                       :audit, :memos, :computed, :entries)
+                       :audit, :memos, :computed, :entries, :declaration)
 
     # A field declared outside the slots: `kind` is `:memo` ({.memo_field}) or `:store` ({.store_field}, whose `slot`
     # names the bound Table).
@@ -131,7 +137,18 @@ module Rigor
       # Declares a Frame slot and returns its index. A `contents: :resource` frame may declare a read exemption for
       # reads of its contents. `memos` names the members (a Data or Struct value) or keys (a Hash value) of the
       # installed value that hold extensional caches its owner fills in place, Memos by kind, which `reason` explains.
-      def frame(name, reason:, contents: nil, read_exemption: nil, memos: nil)
+      #
+      # A Frame declares exactly one of ADR-129 G1′'s four things about how typing meets it (WD5):
+      # - `witness:` a repo-relative fixture path, a program whose typing installs the Frame and reads it inside
+      #   `type_of`, and on which G1 must fail with the slot ignored;
+      # - `typing_unreachable: true`: no `type_of` runs while the Frame is installed, which audit mode asserts;
+      # - `typing_never_reads: true`: typing wraps no read of the Frame, only code outside `type_of` reads it, which
+      #   audit mode asserts;
+      # - `memo_shut_while_installed: true`: the `type_of` memo never runs while the Frame is installed (the tracer
+      #   switches).
+      def frame(name, reason:, contents: nil, read_exemption: nil, memos: nil, witness: nil, # rubocop:disable Metrics/ParameterLists
+                typing_unreachable: false, typing_never_reads: false, memo_shut_while_installed: false)
+        check_unclaimed(name)
         unless [nil, :resource, :table].include?(contents)
           raise ArgumentError, "#{name}: contents must be :resource, :table or nil"
         end
@@ -141,7 +158,9 @@ module Rigor
 
         check_read_exemption(name, read_exemption)
         declare(name, :frame, reason, contents: contents, read_exemption: read_exemption,
-                                      memos: memos && Array(memos).freeze)
+                                      memos: memos && Array(memos).freeze,
+                                      declaration: g1_declaration(name, witness, typing_unreachable, typing_never_reads,
+                                                                  memo_shut_while_installed))
       end
 
       # Declares a Table slot and returns its index. A `bound` table's stores live with their owners, so the slot holds
@@ -194,6 +213,9 @@ module Rigor
       # Every declared slot, in declaration order (a slot's index is its position).
       attr_reader :slots
 
+      # The indices of the Frames that declare the G1′ kind `kind` ({G1_KINDS}), for {FrameAudit}.
+      def g1_slots(kind) = @slots.filter_map { |slot| slot.index if slot.declaration&.first == kind }.freeze
+
       # Every field declared with {.memo_field} or {.store_field}, as `Field` values.
       attr_reader :fields
 
@@ -220,6 +242,29 @@ module Rigor
 
       private
 
+      def check_unclaimed(name)
+        return unless @slots.any? { |slot| slot.name == name }
+
+        raise ArgumentError, "typing-state slot #{name.inspect} is already declared"
+      end
+
+      def g1_declaration(name, witness, typing_unreachable, typing_never_reads, memo_shut_while_installed)
+        declared = []
+        declared << [:witness, witness] unless witness.nil?
+        declared << [:typing_unreachable, true] if typing_unreachable
+        declared << [:typing_never_reads, true] if typing_never_reads
+        declared << [:memo_shut_while_installed, true] if memo_shut_while_installed
+        unless declared.size == 1
+          raise ArgumentError, "#{name}: a Frame declares exactly one of #{G1_KINDS.inspect} (ADR-129 G1′), " \
+                               "not #{declared.map(&:first).inspect}"
+        end
+        if witness && !(witness.is_a?(String) && witness.end_with?(".rb") && !witness.start_with?("/"))
+          raise ArgumentError, "#{name}: witness is a repo-relative path to a .rb fixture"
+        end
+
+        declared.first.freeze
+      end
+
       def check_read_exemption(name, read_exemption)
         return if read_exemption.nil? || READ_EXEMPTIONS.include?(read_exemption)
 
@@ -239,16 +284,14 @@ module Rigor
       end
 
       def declare(name, kind, reason, run_scoped: false, read_exemption: nil, contents: nil, read_through: false, # rubocop:disable Metrics/ParameterLists
-                  bound: false, audit: nil, memos: nil, computed: nil, entries: nil)
-        if @slots.any? { |slot| slot.name == name }
-          raise ArgumentError, "typing-state slot #{name.inspect} is already declared"
-        end
+                  bound: false, audit: nil, memos: nil, computed: nil, entries: nil, declaration: nil)
+        check_unclaimed(name)
         raise ArgumentError, "#{name}: a slot names why it is its kind" if reason.to_s.strip.empty?
 
         index = @slots.size
         slot = Slot.new(name: name, kind: kind, index: index, reason: reason.dup.freeze, run_scoped: run_scoped,
                         read_exemption: read_exemption, contents: contents, read_through: read_through, bound: bound,
-                        audit: audit, memos: memos, computed: computed, entries: entries)
+                        audit: audit, memos: memos, computed: computed, entries: entries, declaration: declaration)
         @slots = Ractor.make_shareable([*@slots, slot])
         @run_scoped = [*@run_scoped, index].freeze if run_scoped
         index
@@ -764,6 +807,92 @@ module Rigor
         else
           tables[slot] || (create ? (tables[slot] = {}) : nil)
         end
+      end
+    end
+
+    # ADR-129 G1′'s audit of the Frame declarations, on one {State}: `MemoAudit` extends a thread's state with this
+    # module the first time an audited run enters `ExpressionTyper#type_of` ({MemoAudit.enter_type_of}), so a run with
+    # the audit off reads a slot through the plain {State#[]}. It asserts three of the four declarations, each as a
+    # {MemoAudit::Mismatch} on the thread's list (not raised):
+    # - `typing_unreachable`: a `type_of` entered while such a Frame holds a value;
+    # - `typing_never_reads`: a read of such a Frame ({State#[]}, {State#key_frame}, {State#forcing_read}) while a
+    #   `type_of` is running;
+    # - `memo_shut_while_installed`: the `type_of` memo's shadow ({TypeOfMemo.shadow}) reaching its table while such a
+    #   Frame holds a value ({MemoAudit.note_memo_lookup}).
+    #
+    # **What this module hooks.** The three Frame accessors are the reads a typed answer can come through: {State#[]},
+    # {State#key_frame} and {State#forcing_read}. A new accessor that reads `@values` of a Frame must hook here too, or
+    # a `typing_never_reads` Frame can be read past the audit. The declared slot lists are a snapshot taken when the
+    # state is extended: every Frame is declared at require time, before any audited `type_of`, so a Frame declared
+    # later (a spec's probe) is not asserted.
+    module FrameAudit
+      # How many `type_of`s are running on this thread, for specs that observe the reads inside them.
+      attr_reader :type_of_depth
+
+      def self.extended(state) = state.send(:start_frame_audit)
+
+      def [](slot)
+        note_typing_read(slot) if @type_of_depth.positive?
+        super
+      end
+
+      def key_frame(slot)
+        note_typing_read(slot) if @type_of_depth.positive?
+        super
+      end
+
+      def forcing_read(slot)
+        note_typing_read(slot) if @type_of_depth.positive?
+        super
+      end
+
+      # A `type_of` begins: fails on an installed `typing_unreachable` Frame, and opens the extent in which reads of a
+      # `typing_never_reads` Frame fail.
+      def enter_type_of
+        @unreachable.each do |slot|
+          next if @values[slot].nil?
+
+          MemoAudit.report_frame_declaration(
+            self, "frame audit: type_of ran while the typing_unreachable Frame #{TypingState.slots[slot].name} " \
+                  "is installed"
+          )
+        end
+        @type_of_depth += 1
+      end
+
+      # The `type_of` memo's shadow reached its table: fails on an installed `memo_shut_while_installed` Frame.
+      def note_memo_lookup
+        @memo_shut.each do |slot|
+          next if @values[slot].nil?
+
+          MemoAudit.report_frame_declaration(
+            self, "frame audit: the type_of memo ran while the memo_shut_while_installed Frame " \
+                  "#{TypingState.slots[slot].name} is installed"
+          )
+        end
+        nil
+      end
+
+      # The matching `type_of` ends.
+      def leave_type_of
+        @type_of_depth -= 1
+      end
+
+      private
+
+      def start_frame_audit
+        @type_of_depth = 0
+        @unreachable = TypingState.g1_slots(:typing_unreachable)
+        @never_reads = TypingState.g1_slots(:typing_never_reads)
+        @memo_shut = TypingState.g1_slots(:memo_shut_while_installed)
+      end
+
+      def note_typing_read(slot)
+        return unless @never_reads.include?(slot)
+
+        MemoAudit.report_frame_declaration(
+          self, "frame audit: the typing_never_reads Frame #{TypingState.slots[slot].name} was read inside type_of"
+        )
       end
     end
 

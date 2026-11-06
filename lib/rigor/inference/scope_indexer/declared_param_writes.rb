@@ -62,7 +62,9 @@ module Rigor
         # ADR-129 WD1 — a Frame: the scope is installed around a census and restored on the way out.
         WRITER_SCOPE = TypingState.frame(
           :declared_param_writer_scope,
-          reason: "the scope whose project tables the writer gates read, installed per census"
+          reason: "the scope whose project tables the writer gates read, installed per census",
+          # G1′: the census types its defaults under the Frame, but only the writer gates, outside `type_of`, read it.
+          typing_never_reads: true
         )
         private_constant :WRITER_SCOPE
 

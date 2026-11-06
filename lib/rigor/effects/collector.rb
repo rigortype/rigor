@@ -30,7 +30,9 @@ module Rigor
       # outside the typing state (WD5).
       ACCUMULATOR = TypingState.frame(
         :effects_collector,
-        contents: :resource, reason: "the accumulator a file's collection installs; each call site records into it"
+        contents: :resource, reason: "the accumulator a file's collection installs; each call site records into it",
+        # G1′ witness: `Collector.record_call` reads it during typing, so it is not a never-reads switch.
+        witness: "spec/fixtures/typing_state_witnesses/effects_collector.rb"
       )
       private_constant :ACCUMULATOR
 

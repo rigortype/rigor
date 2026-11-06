@@ -1,0 +1,8 @@
+interface _MyEach[T]
+  def each: () { (T) -> void } -> void
+end
+class G
+  def self.i: ([String, String]) -> Symbol
+            | (_MyEach[String]) -> String
+  def self.probe: (Array[String]) -> untyped
+end

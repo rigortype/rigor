@@ -3,6 +3,7 @@
 require "json"
 require "prism"
 require_relative "typing_state"
+require_relative "memo_audit"
 require_relative "type_of_memo/stats"
 require_relative "type_of_memo/serving"
 
@@ -58,9 +59,9 @@ module Rigor
       # memo is suspended.
       attr_accessor :suspended
 
-      def initialize(elide: false)
+      def initialize(elide: false, phase: :other)
         @entries = {}.compare_by_identity
-        @phase = :other
+        @phase = phase
         @elide = elide
         @suspended = 0
       end
@@ -104,8 +105,7 @@ module Rigor
         return unless @enabled && Ractor.main?
 
         elide = %w[1 true].include?(ENV["RIGOR_TYPE_OF_SHADOW_ELIDE"].to_s.downcase)
-        table = Table.new(elide: elide)
-        table.phase = :main
+        table = Table.new(elide: elide, phase: :main)
         state = TypingState.current
         if elide
           state.extend(TypingState::ElideId) unless state.is_a?(TypingState::ElideId)
@@ -142,6 +142,9 @@ module Rigor
 
         table = state[TABLE]
         return yield if table.nil? || table.suspended.positive?
+
+        # G1′: the memo must not run while a `memo_shut_while_installed` Frame is installed.
+        MemoAudit.note_memo_lookup(state) if MemoAudit.enabled?
 
         phase = callee ? :callee : table.phase
         by_id = (table.entries[scope] ||= {}.compare_by_identity)[node] ||= {}

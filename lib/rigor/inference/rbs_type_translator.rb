@@ -111,7 +111,8 @@ module Rigor
 
       # ADR-130 WD2 — the erasure baseline's flag, installed by {.with_interface_erasure}.
       INTERFACE_ERASURE = TypingState.frame(
-        :interface_erasure, reason: "a flag installed around an erasure-baseline run (the parity harness)"
+        :interface_erasure, reason: "a flag installed around an erasure-baseline run (the parity harness)",
+                            witness: "spec/fixtures/typing_state_witnesses/interface_erasure.rb"
       )
       private_constant :INTERFACE_ERASURE
 

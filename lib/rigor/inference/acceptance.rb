@@ -82,7 +82,8 @@ module Rigor
       UNREAD_SHAPE_REFUSED = TypingState.frame(
         :acceptance_unread_shape_refused,
         reason: "installed around a block by refusing_unread; read by unread_shape_maybe, which answers no for " \
-                "the refused kind of unread shape instead of maybe"
+                "the refused kind of unread shape instead of maybe",
+        witness: "spec/fixtures/typing_state_witnesses/acceptance_unread_shape_refused.rb"
       )
       private_constant :UNREAD_SHAPE_REFUSED
 

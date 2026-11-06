@@ -210,6 +210,104 @@ RSpec.describe "Stable single-hop method-chain narrowing" do
     end
   end
 
+  # Issue #2691 — a rescue clause runs after any prefix of the `begin` body
+  # raised, so the indexed and method-chain facts the pre-begin scope holds
+  # survive into it only where the body's own evaluation left them standing:
+  # a call on the fact's root receiver, a `[]=` or mutator on its collection,
+  # or an index-target store invalidates them exactly as it does on the
+  # straight-line path.
+  describe "rescue clause entry" do
+    let(:string_nominal) { Rigor::Type::Combinator.nominal_of("String") }
+    let(:array_nominal) { Rigor::Type::Combinator.nominal_of("Array") }
+
+    # The scope recorded at the `@x.r` read inside the rescue clause — the
+    # last `@x.r` call the source holds. An ivar root needs no assignment in
+    # the source, so `@x` reads as `InstanceVariableReadNode` throughout.
+    def rescue_chain_read_scope(source, base_scope: default_scope)
+      program = Prism.parse(source).value
+      reads = {}
+      on_enter = lambda do |node, s|
+        next unless node.is_a?(Prism::CallNode) && node.name == :r &&
+                    node.receiver.is_a?(Prism::InstanceVariableReadNode) && node.receiver.name == :@x
+
+        reads[node] = s
+      end
+      Rigor::Inference::StatementEvaluator.new(scope: base_scope, on_enter: on_enter,
+                                               widen_clauses: true).evaluate(program)
+      reads.max_by { |node, _| node.location.start_offset }.last
+    end
+
+    it "drops an `is_a?` chain fact the body's `@x.r = nil` call invalidated" do
+      scope = rescue_chain_read_scope(<<~RUBY)
+        def f
+          return unless @x.r.is_a?(String)
+          begin
+            @x.r = nil
+            raise "x"
+          rescue
+            probe = @x.r
+          end
+        end
+      RUBY
+      expect(scope.method_chain_narrowing(:ivar, :@x, :r)).to be_nil
+    end
+
+    it "keeps the chain fact when the body calls nothing on its root" do
+      scope = rescue_chain_read_scope(<<~RUBY)
+        def f
+          return unless @x.r.is_a?(String)
+          begin
+            y = 1
+            raise "x"
+          rescue
+            probe = @x.r
+          end
+        end
+      RUBY
+      expect(scope.method_chain_narrowing(:ivar, :@x, :r)).to eq(string_nominal)
+    end
+
+    # Issue #2691's truthiness chain fact: #2692's truthiness and `nil?`
+    # guards record into the same `method_chain_narrowings` table the
+    # `is_a?` guard above does, so the clause-entry rule cannot tell the
+    # producers apart. The fact is installed directly — no truthiness
+    # producer exists on master yet — and pinned the same way.
+    it "drops a truthiness chain fact the body's call invalidated" do
+      base = default_scope.with_ivar(:@x, Rigor::Type::Combinator.untyped)
+                          .with_method_chain_narrowing(:ivar, :@x, :r, string_nominal)
+      scope = rescue_chain_read_scope(<<~RUBY, base_scope: base)
+        begin
+          @x.r = nil
+          raise "x"
+        rescue
+          probe = @x.r
+        end
+      RUBY
+      expect(scope.method_chain_narrowing(:ivar, :@x, :r)).to be_nil
+    end
+
+    it "drops an indexed narrowing the body's `[]=` write invalidated" do
+      program = Prism.parse(<<~RUBY).value
+        begin
+          @h[:k] = nil
+          raise "x"
+        rescue
+          probe = @h[:k]
+        end
+      RUBY
+      reads = {}
+      on_enter = lambda do |node, s|
+        reads[node] = s if node.is_a?(Prism::CallNode) && node.name == :[]
+      end
+      base = default_scope.with_ivar(:@h, Rigor::Type::Combinator.untyped)
+                          .with_indexed_narrowing(:ivar, :@h, :k, array_nominal)
+      Rigor::Inference::StatementEvaluator.new(scope: base, on_enter: on_enter,
+                                               widen_clauses: true).evaluate(program)
+      read = reads.keys.max_by { |node| node.location.start_offset }
+      expect(reads[read].indexed_narrowing(:ivar, :@h, :k)).to be_nil
+    end
+  end
+
   describe "join semantics" do
     it "keeps only chains present in both join inputs" do
       scope = Rigor::Scope.empty

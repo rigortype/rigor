@@ -4193,7 +4193,10 @@ module Rigor
 
           result = Inference::Acceptance.accepts(param_type, non_nil, mode: :gradual)
           # Issue #2855 — a `Class?` ivar against `singleton(X)` is withheld as its `Class` alone would be.
-          result.yes? || (result.no? && !rejects_beyond_class_objects?(param_type, non_nil))
+          # Issue #2863 — a `maybe` (a project class the host process has not loaded, so its ancestry is unresolved:
+          # `singleton(Circle)` against `singleton(Shape)`) is not a rejection either: the non-nil part alone would not
+          # fire, so the nil is the only reason and it is withheld.
+          !result.no? || !rejects_beyond_class_objects?(param_type, non_nil)
         end
 
         # What this rule needs is that argument N binds to positional

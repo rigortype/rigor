@@ -668,6 +668,81 @@ RSpec.describe Rigor::Analysis::Runner do
             expect(arg_mismatch_diags(result)).not_to be_empty
           end
         end
+
+        # Issue #2863 — the same withholding when the ivar holds a class object. A project class the host process has
+        # not loaded answers `maybe` to the subclass question, and the nil-only check used to require a `yes`.
+        context "when the declaration-sourced ivar holds a class object (issue #2863)" do
+          let(:shape_sig) do
+            <<~RBS
+              class Shape end
+              class Circle < Shape end
+              class Registry
+                def self.fields_for: (singleton(Shape) klass) -> Array[Symbol]
+                def self.take_int: (Integer n) -> Integer
+              end
+            RBS
+          end
+          let(:classes) do
+            <<~RUBY
+              class Shape; end
+              class Circle < Shape; end
+              class Registry
+                def self.fields_for(klass) = []
+                def self.take_int(n) = n
+              end
+            RUBY
+          end
+
+          def holder(write, call)
+            <<~RUBY
+              #{classes}
+              class Holder
+                def initialize
+                  @v = nil
+                end
+
+                def load
+                  @v = #{write}
+                end
+
+                def use
+                  #{call}
+                end
+              end
+            RUBY
+          end
+
+          def mismatches(source)
+            analyze(source, sig: shape_sig).diagnostics.select { |d| d.message.start_with?("argument type mismatch") }
+          end
+
+          it "withholds `singleton(Circle)?` against `singleton(Shape)`" do
+            expect(mismatches(holder("Circle", "Registry.fields_for(@v)"))).to be_empty
+          end
+
+          it "withholds an instance ivar against `Integer` (control)" do
+            expect(mismatches(holder("1", "Registry.take_int(@v)"))).to be_empty
+          end
+
+          it "STILL fires when the non-nil part is itself rejected (`singleton(String)`)" do
+            expect(mismatches(holder("String", "Registry.fields_for(@v)"))).not_to be_empty
+          end
+
+          it "STILL fires on a nil that is not declaration-sourced (a local ternary)" do
+            source = <<~RUBY
+              #{classes}
+              def go(cond)
+                k = cond ? Circle : nil
+                Registry.fields_for(k)
+              end
+            RUBY
+            expect(mismatches(source)).not_to be_empty
+          end
+
+          it "STILL fires on a `Module` value against a non-class-object parameter" do
+            expect(mismatches(holder("Module.new", "Registry.take_int(@v)"))).not_to be_empty
+          end
+        end
       end
 
       describe "dump_type / assert_type rules (Slice 7 phase 19)" do

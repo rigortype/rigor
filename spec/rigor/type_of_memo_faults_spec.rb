@@ -9,14 +9,17 @@ class TypeOfMemoFaultScenarios
   # Fault => the mismatch kind the stage-4 form reports. Each scenario's comment says why no source fixture is used.
   KINDS = {
     skip_validation: :type, skip_absent_logging: :type, skip_upward_merge: :type, skip_replay_journal: :table,
-    skip_memo_miss: :table, skip_read_through_memo_miss: :table, store_raised: :raised
+    skip_memo_miss: :table, skip_read_through_memo_miss: :table, store_raised: :raised,
+    ignore_frame: :type, skip_restore: :type, refuse_innermost: :resource
   }.freeze
 
   ABSENT = Rigor::TypingState::ABSENT
 
-  def initialize(memo:)
+  # `live`: drive the live entry point ({Rigor::TypeOfMemo.live}) over a rule-walk table instead of the shadow's.
+  def initialize(memo:, live: false)
+    @live = live
     @state = Rigor::TypingState::State.new
-    @state[slot(:type_of_memo)] = Rigor::TypeOfMemo::Table.new if memo
+    @state[slot(:type_of_memo)] = Rigor::TypeOfMemo::Table.new(phase: live ? :rule : :other) if memo
     @store = {}.compare_by_identity
     @scope = Rigor::Scope.empty
     @outer, @inner = Prism.parse("a.b; c.d").value.statements.body
@@ -106,7 +109,41 @@ class TypeOfMemoFaultScenarios
     [answers, entries]
   end
 
+  # A typing reads the threaded block-body flag, typed with the flag off and then installed. The source fixture
+  # (`threaded_block_body.rb`) reaches the flag in the main pass only, so the live form, open in the rule walk alone,
+  # needs this one.
+  def ignore_frame
+    answers = [threaded_typing]
+    answers << @state.with(slot(:threaded_block_body), true) { threaded_typing }
+    [answers, entries]
+  end
+
+  # The same typing inside the flag's install and after it: with the restore skipped, the second runs at the
+  # install's id. Synthetic for the live form, as {#ignore_frame}.
+  def skip_restore
+    answers = [@state.with(slot(:threaded_block_body), true) { threaded_typing }]
+    answers << threaded_typing
+    [answers, entries]
+  end
+
+  # A Resource touch in an inner computation refuses the outer one too. The source fixture (`nested_next_sink.rb`)
+  # reaches it in the main pass only; synthetic for the live form.
+  def refuse_innermost
+    typed = lambda do
+      shadow do
+        shadow(@inner) do
+          @state.touch(slot(:user_method_unroll_fuel))
+          int
+        end
+      end
+    end
+    answers = Array.new(2) { typed.call }
+    [answers, entries]
+  end
+
   private
+
+  def threaded_typing = shadow { @state[slot(:threaded_block_body)] ? int : str }
 
   # The store's entries, each key by its source, since every scenario parses its own nodes.
   def entries = @store.map { |node, value| [node.slice, value] }
@@ -116,7 +153,11 @@ class TypeOfMemoFaultScenarios
   def int = Rigor::Type::Combinator.nominal_of("Integer")
   def str = Rigor::Type::Combinator.nominal_of("String")
 
-  def shadow(node = @outer, &) = Rigor::TypeOfMemo.shadow(@state, @scope, node, &)
+  def shadow(node = @outer, &)
+    return Rigor::TypeOfMemo.live(@state, @scope, node, slot(:user_method_inference_stack), &) if @live
+
+    Rigor::TypeOfMemo.shadow(@state, @scope, node, &)
+  end
 
   # A `dynamic_origins` read and write over the store, logged the way `Scope#dynamic_origin` and
   # `Scope#record_dynamic_origin` log them.
@@ -184,14 +225,14 @@ RSpec.describe TypeOfMemoFaults do
       end
     end
     { checked: counts.sum { |_, counters| counters[:checked] }, mismatches: Rigor::TypeOfMemo.mismatches,
-      kinds: kinds.uniq.sort, samples: Rigor::TypeOfMemo.samples.first(3) }
+      kinds: kinds.uniq.sort, samples: Rigor::TypeOfMemo.samples.first(3), phases: counts.keys }
   end
 
   # Runs the block with the stage-4 form on and `fault` injected (nil for none), and answers the block's value and
-  # G1's verdict.
-  def serving(fault, &)
+  # G1's verdict. `live`: the stage-4 form over the live configuration (rule walk, empty guard stack, the live store).
+  def serving(fault, live: false, &)
     Rigor::TypeOfMemo.reset
-    Rigor::TypeOfMemo.enable!(serve: true)
+    Rigor::TypeOfMemo.enable!(serve: true, live: live)
     value = described_class.with(fault, &)
     [value, verdict]
   ensure
@@ -229,16 +270,21 @@ RSpec.describe TypeOfMemoFaults do
     end
   end
 
-  TypeOfMemoFaultScenarios::KINDS.each do |fault, kind|
-    it "reports a #{kind} mismatch on the synthetic #{fault} fixture, and none with no fault" do
-      off = TypeOfMemoFaultScenarios.new(memo: false).public_send(fault)
-      on, clean = serving(nil) { TypeOfMemoFaultScenarios.new(memo: true).public_send(fault) }
-      _, faulted = serving(fault) { TypeOfMemoFaultScenarios.new(memo: true).public_send(fault) }
+  [false, true].each do |live|
+    TypeOfMemoFaultScenarios::KINDS.each do |fault, kind|
+      form = live ? "the live store" : "the shadow store"
+      it "reports a #{kind} mismatch on the synthetic #{fault} fixture over #{form}, and none with no fault" do
+        off = TypeOfMemoFaultScenarios.new(memo: false).public_send(fault)
+        on, clean = serving(nil, live: live) { TypeOfMemoFaultScenarios.new(memo: true, live: live).public_send(fault) }
+        _, faulted = serving(fault, live: live) do
+          TypeOfMemoFaultScenarios.new(memo: true, live: live).public_send(fault)
+        end
 
-      expect(on).to eq(off)
-      expect(clean[:mismatches]).to eq(0), clean[:samples].inspect
-      expect(faulted[:mismatches]).to be_positive
-      expect(faulted[:kinds]).to include(kind)
+        expect(on).to eq(off)
+        expect(clean[:mismatches]).to eq(0), clean[:samples].inspect
+        expect(faulted[:mismatches]).to be_positive
+        expect(faulted[:kinds]).to include(kind)
+      end
     end
   end
 
@@ -293,13 +339,17 @@ RSpec.describe TypeOfMemoFaults do
       .to match_array(described_class::FAULTS)
   end
 
-  it "serves hits over real fixtures with no fault, reporting no mismatch and leaving diagnostics as the memo off" do
-    paths = Dir[File.expand_path("../integration/fixtures/*.rb", __dir__)].min_by(6) { |path| -File.size(path) }
-    off = analyse(paths)
-    on, result = serving(nil) { analyse(paths) }
+  [false, true].each do |live|
+    form = live ? "over the live configuration" : "in every phase"
+    it "serves hits over real fixtures #{form} with no fault, reporting no mismatch and leaving diagnostics as off" do
+      paths = Dir[File.expand_path("../integration/fixtures/*.rb", __dir__)].min_by(6) { |path| -File.size(path) }
+      off = analyse(paths)
+      on, result = serving(nil, live: live) { analyse(paths) }
 
-    expect(on).to eq(off)
-    expect(result[:checked]).to be_positive
-    expect(result[:mismatches]).to eq(0), result[:samples].inspect
+      expect(on).to eq(off)
+      expect(result[:checked]).to be_positive
+      expect(result[:mismatches]).to eq(0), result[:samples].inspect
+      expect(result[:phases]).to eq([:rule]) if live
+    end
   end
 end

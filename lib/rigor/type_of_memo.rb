@@ -11,20 +11,23 @@ require_relative "type_of_memo/serving"
 require_relative "type_of_memo/live"
 
 module Rigor
-  # ADR-129 stage 3 — the `ExpressionTyper#type_of` result memo in **shadow** form (WD5's G1, stage-3 form). It keys a
-  # computation on `(scope identity, node identity, state id)` (WD2), opens a journal capture around it, and stores
-  # what an unrefused computation read and wrote (WD3). It never serves anything: on a would-be hit, an entry whose read
-  # slice still holds, production computes as usual inside a priors window, and G1 checks afterwards that
+  # ADR-129 — the `ExpressionTyper#type_of` result memo. It keys a computation on `(scope identity, node identity, state
+  # id)` (WD2), opens a journal capture around it, and stores what an unrefused computation read and wrote (WD3).
+  #
+  # Live (stage 4, {Live}), it serves its hits in the rule walk. In **shadow** form (stage 3, WD5's G1 stage-3 form),
+  # it serves nothing: on a would-be hit, an entry whose read slice still holds, production computes as usual inside a
+  # priors window, and G1 checks afterwards that
   # - the type equals the entry's;
   # - the live tables equal their pre-computation state with the entry's write slice replayed;
   # - the live computation touched no Resource.
   # A read slice that no longer holds is a miss, not a mismatch, counted by the slots whose reads went stale, which
   # measures what the journal costs in hits (#2853 for the set-only Tables). Output is production's by construction.
   #
-  # Like {MemoAudit}, a process switch (`RIGOR_TYPE_OF_SHADOW=1`, read once at load, or {enable!}), a single boolean
-  # check when off. With `RIGOR_TYPE_OF_SHADOW_REPORT=path`, each process appends one JSON line of its counters and
-  # mismatch samples to `path` when it exits. The memo is shut while a tracer is attached or a typer carries
-  # instance state (`@tracer`, `@operand_types`: WD1's bypass), and leaf nodes are never stored (WD3).
+  # Like {MemoAudit}, a process switch (`RIGOR_TYPE_OF_MEMO=rule` or `RIGOR_TYPE_OF_SHADOW=1|serve|serve-live`, read
+  # once at load, or {enable!}), a single boolean check when off. With `RIGOR_TYPE_OF_SHADOW_REPORT=path`, each process
+  # appends one JSON line of its counters and mismatch samples to `path` when it exits. The memo is shut while a tracer
+  # is attached or a typer carries instance state (`@tracer`, `@operand_types`: WD1's bypass), and leaf nodes are never
+  # stored (WD3).
   module TypeOfMemo
     # ADR-129 WD4 — the per-file table, a Memo by kind: entries keyed on the state id, which carries every Frame
     # (WD2), and checked by G1 rather than by `MemoAudit.check` (its hits recompute in production already).
@@ -50,13 +53,15 @@ module Rigor
     SAMPLE_LIMIT = 50
     private_constant :SAMPLE_LIMIT
 
-    # The mode: false (off), true (the stage-3 shadow), `:serve` (G1's stage-4 form), or live (stage 4: the memo
-    # serves in the rule walk), `:live` without counters, so the live path takes no lock, and `:live_counted` with
-    # them, when a report is asked for. The shadow is the audit, so it wins over `RIGOR_TYPE_OF_MEMO`.
+    # The mode: false (off), true (the stage-3 shadow), `:serve` (G1's stage-4 form, every phase), `:live_serve` (G1's
+    # stage-4 form over the live configuration), or live (stage 4: the memo serves in the rule walk), `:live` without
+    # counters, so the live path takes no lock, and `:live_counted` with them, when a report is asked for. The shadow
+    # switch, the audit, wins over `RIGOR_TYPE_OF_MEMO`.
     @enabled =
       case ENV["RIGOR_TYPE_OF_SHADOW"].to_s.downcase
       when "1", "true" then true
       when "serve" then :serve
+      when "serve-live" then :live_serve
       else
         if ENV["RIGOR_TYPE_OF_MEMO"].to_s.downcase == "rule"
           ENV.fetch("RIGOR_TYPE_OF_SHADOW_REPORT", "").empty? ? :live : :live_counted
@@ -74,14 +79,16 @@ module Rigor
       def enabled? = @enabled
 
       # Whether the memo is live (ADR-129 stage 4): it serves its rule-walk hits.
-      def live? = @enabled == :live || @enabled == :live_counted
+      def live? = @enabled == :live || @enabled == :live_counted || @enabled == :live_serve
 
-      # Turns the shadow on. `serve: true` is G1's stage-4 form (ADR-129 WD5), for specs and audit tools only: a
-      # would-be hit is recomputed with the memo suspended, the recomputation's Table writes are undone, and the entry
-      # is served (validated, its reads merged upward, its writes replayed), so output depends on the memo. `live:
-      # true` is stage 4's production form ({live}); `count: true` makes it keep its counters.
+      # Turns the memo on: the stage-3 shadow by default. `serve: true` is G1's stage-4 form (ADR-129 WD5), for specs
+      # and audit tools only: a would-be hit is recomputed with the memo suspended, the recomputation's Table writes are
+      # undone, and the entry is served (validated, its reads merged upward, its writes replayed), so output depends on
+      # the memo. `live: true` is stage 4's production form ({live}), `count: true` keeping its counters; with `serve:
+      # true` too, G1's stage-4 form runs over the live store, table and closure.
       def enable!(serve: false, live: false, count: false)
-        @enabled = if live then count ? :live_counted : :live
+        @enabled = if live && serve then :live_serve
+                   elsif live then count ? :live_counted : :live
                    elsif serve then :serve
                    else true
                    end

@@ -36,8 +36,10 @@ module Rigor
         MISSING_HOOK = :method_missing
         # The roots whose project mixins `Inference::ObjectMixins` answers for.
         OBJECT_ROOTS = %w[Object Kernel BasicObject].to_set.freeze
-        # Issue #2792 — the owners of the `method_missing` every object (and every class object) reaches. Core's
-        # `BasicObject#method_missing` raises `NoMethodError`, so a declaration there opens nothing.
+        # Issue #2792 — the owners of a `method_missing` every object (and every class object) reaches. Core's
+        # `BasicObject#method_missing` raises `NoMethodError`, so it opens nothing; core declares none on the others,
+        # which are here so that a project or gem RBS reopening `Object`, `Kernel`, `Module` or `Class` with one cannot
+        # silence the rule for every receiver.
         UNIVERSAL_HOOK_OWNERS = {
           instance: OBJECT_ROOTS,
           singleton: (OBJECT_ROOTS | %w[Module Class]).freeze

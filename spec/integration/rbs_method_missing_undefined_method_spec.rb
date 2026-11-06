@@ -36,8 +36,9 @@ RSpec.describe "An RBS-declared method_missing and call.undefined-method (#2792)
     Dir.mktmpdir("rigor-rbs-method-missing-") { |dir| Dir.chdir(dir) { example.run } }
   end
 
-  it "opens a SimpleDelegator and a DelegateClass instance, whose Delegator RBS declares method_missing" do
-    write_project("", ['SimpleDelegator.new("x").to_str', 'DelegateClass(String).new("x").upcase'])
+  it "opens a SimpleDelegator, built here or returned by a signature, whose Delegator RBS declares method_missing" do
+    write_project("class Factory\n  def self.make: () -> SimpleDelegator\nend\n",
+                  ['SimpleDelegator.new("x").to_str', "Factory.make.zork"])
     expect(undefined_messages).to be_empty
   end
 
@@ -76,6 +77,17 @@ RSpec.describe "An RBS-declared method_missing and call.undefined-method (#2792)
     sig = "class Base0 < BasicObject\nend\nclass Plain\nend\n"
     write_project(sig, %w[Base0.new.nothing Plain.new.nothing])
     expect(undefined_messages).to eq(["undefined method `nothing' for Base0", "undefined method `nothing' for Plain"])
+  end
+
+  it "does not open receivers through a project RBS reopening of Object, Kernel, Module or Class" do
+    sig = %w[Object Kernel Module Class].map do |name|
+      keyword = name == "Kernel" ? "module" : "class"
+      "#{keyword} #{name}\n  def method_missing: (Symbol, *untyped) -> untyped\nend\n"
+    end.join
+    write_project("#{sig}class Plain\nend\n", %w[Plain.new.nothing Plain.nothing], source: "class Plain\nend\n")
+    expect(undefined_messages).to eq(
+      ["undefined method `nothing' for Plain", "undefined method `nothing' for singleton(Plain)"]
+    )
   end
 
   it "does not open a class whose RBS declares respond_to_missing? alone" do

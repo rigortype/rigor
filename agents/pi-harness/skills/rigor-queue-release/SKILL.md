@@ -114,7 +114,8 @@ Every turn:
 
 From `docs/notes/20260921-queue-release-lane-experience.md`:
 
-- Pin Flash registry id on spawn (`opencode-go/deepseek-v4.1-flash` or current).
+- Pin Flash registry id on spawn (`devin/swe-2-flash` for non-complex work,
+  `opencode-go/deepseek-v4.1-flash` or current).
 - Child ~30m is enough for code, **not** for dual-project corpus `check` twice —
   tell lanes to skip full corpus; collect counts in PR body / residual, or run
   measurement out-of-band.
@@ -126,7 +127,8 @@ From `docs/notes/20260921-queue-release-lane-experience.md`:
 
 After CI is green on a draft PR:
 
-1. **Default:** spawn `rigor-reviewer-grok` (`thinking: max`). One `Approved` is enough.
+1. **Default:** spawn co-primaries `rigor-reviewer-grok` (`thinking: xhigh`) and
+   `rigor-reviewer-swe2` (`devin/swe-2:high`). Both must `Approved`.
 2. **Complex implementation:** also spawn `rigor-reviewer-opus` (`thinking: high`);
    both must `Approved`.
 3. **Complex design:** spawn `rigor-reviewer` (Fable:medium) — reserve for
@@ -144,7 +146,7 @@ Never merge from this queue skill; human or a later ship step owns merge.
 | Ranking, triage, evidence, proposing next unit | Architect: only if a unit needs a fresh LaneInput |
 | Waiting on next/skip/stop / spawn | Lane: prefer `subagent` → `rigor-lane` + managed worktree; fallback `run-role.sh lane` |
 | Sparse CI verdict after a lane push | — |
-| CI green on a draft PR | Default `rigor-reviewer-grok`; +Opus if complex; Fable only for complex design |
+| CI green on a draft PR | Co-primary `rigor-reviewer-grok` + `rigor-reviewer-swe2`; +Opus if complex; Fable only for complex design |
 
 ## Finish phrases
 

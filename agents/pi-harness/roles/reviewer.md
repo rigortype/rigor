@@ -4,20 +4,23 @@ Model bands for the **Approved** gate:
 
 | Band | Prefer | Thinking | When |
 | --- | --- | --- | --- |
-| Grok | `xai/grok-4.6` | `max` | **Default** adversarial pass (PR review / scoped judgment) |
+| Grok | `xai/grok-4.6` | `xhigh` | **Co-primary** adversarial pass (PR review / scoped judgment) |
+| swe-2 | `devin/swe-2` | `high` | **Co-primary** independent pass — free-tier this month, run on every review |
 | Grok 4.7 | `xai/grok-4.7` | `max` | **Deep RCA / long investigation only** — not default review |
-| Opus | `claude-bridge/claude-opus-5` | `high` | Added when the change is judged complex |
-| Fable | `claude-bridge/claude-fable-5` | `medium` | **Reserved** for complex design / architecture-shaped review |
+| Opus | `claude-bridge/claude-opus-5-5` | `high` | Added when the change is judged complex |
+| Fable | `claude-bridge/claude-fable-5-1` | `medium` | **Reserved** for complex design / architecture-shaped review |
 
-Agents: `rigor-reviewer-grok`, `rigor-reviewer-opus`, `rigor-reviewer`.
+Agents: `rigor-reviewer-grok`, `rigor-reviewer-swe2`, `rigor-reviewer-opus`, `rigor-reviewer`.
 
 ## Selection rule (orchestrator)
 
-1. **Default:** always run `rigor-reviewer-grok` on **`xai/grok-4.6:max`**. One
-   `Approved` is enough for ordinary / tidy / local fixes. Do **not** default
+1. **Default:** run **two co-primary passes** — `rigor-reviewer-grok` on
+   **`xai/grok-4.6:xhigh`** and `rigor-reviewer-swe2` on **`devin/swe-2:high`**
+   (free-tier this month). Both must `Approved` for ordinary / tidy / local
+   fixes; either `Needs fix` → fix loop. Do **not** default
    review to 4.7 (over-scope tax on merge-quality reviews).
 2. **Complex (implementation-heavy, multi-file engine, subtle contracts):**
-   after Grok, also run `rigor-reviewer-opus` (Opus:high). Both must `Approved`
+   after the co-primaries, also run `rigor-reviewer-opus` (Opus:high). All must `Approved`
    (either `Needs fix` → fix loop).
 3. **Complex design** (new architecture, API surface, inference-engine shape
    changes, ADR-level judgment): use `rigor-reviewer` (Fable:medium) — alone or

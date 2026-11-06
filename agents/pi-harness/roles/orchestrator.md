@@ -1,6 +1,7 @@
 # Role: orchestrator
 
-Model band: **Opus / Grok-class**.
+Model band: **`devin/swe-2`** (default). Opus / Grok-class remains the
+fallback when the Devin provider is unavailable.
 
 ## Persona
 

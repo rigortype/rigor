@@ -25,15 +25,16 @@ Environment:
 
 Model defaults (patterns; first match from `pi --list-models` wins):
   architect / orchestrator
-    patterns: claude-bridge/*opus*  anthropic/*opus*  xai/grok*  *opus*  grok*
-    preferred ids: claude-bridge/claude-opus-5 , anthropic/claude-opus-5 , xai/grok-4.7 (deep RCA; review default is 4.6)
+    patterns: devin/swe-2  claude-bridge/*opus*  xai/grok*  grok*
+    preferred ids: devin/swe-2 , claude-bridge/claude-opus-5-5 , xai/grok-4.7 (deep RCA; review default is 4.6)
+    note: Claude via claude-bridge only; devin/ limited to swe-2 / swe-2-flash
   lane
-    patterns: opencode-go/deepseek-v4.1-flash  opencode-go/*deepseek*flash*  opencode/*deepseek*flash*  *deepseek*flash*
-    preferred ids: opencode-go/deepseek-v4.1-flash
+    patterns: devin/swe-2-flash  opencode-go/deepseek-v4.1-flash  opencode-go/*deepseek*flash*  opencode/*deepseek*flash*  *deepseek*flash*
+    preferred ids: devin/swe-2-flash (non-complex implementation), opencode-go/deepseek-v4.1-flash
   reviewer
-    patterns: xai/grok-4.6  xai/grok  grok  claude-bridge/claude-opus-5  anthropic/claude-opus-5
-    preferred: xai/grok-4.6 (default pass; xai/grok-4.7 only for deep RCA);
-      Opus/Fable only via MODEL= per roles/reviewer.md
+    patterns: xai/grok-4.6  xai/grok  grok  devin/swe-2  claude-bridge/claude-opus-5-5  claude-bridge/claude-fable-5-1
+    preferred: xai/grok-4.6:xhigh + devin/swe-2:high (co-primary; xai/grok-4.7 only for deep RCA);
+      Opus/Fable only via MODEL= per roles/reviewer.md; Claude via claude-bridge only
   docs
     patterns: antigravity/gemini*flash*  opencode/gemini*flash*  google/gemini*flash*  *gemini*flash*
     preferred ids: antigravity/gemini-3.8-flash
@@ -81,26 +82,26 @@ declare -a PATTERNS=()
 PREFERRED=""
 case "$ROLE" in
   architect|orchestrator)
-    # Prefer Claude Max via pi-claude-bridge (subscription), then API Anthropic, then Grok.
-    PREFERRED="claude-bridge/claude-opus-5"
+    # Default: devin/swe-2. Then Claude Max via pi-claude-bridge (subscription),
+    # API Anthropic, then Grok.
+    PREFERRED="devin/swe-2"
     PATTERNS=(
-      "claude-bridge/claude-opus-5"
+      "devin/swe-2"
+      "claude-bridge/claude-opus-5-5"
       "claude-bridge/claude-opus"
-      "anthropic/claude-opus-5"
-      "anthropic/claude-opus"
       "xai/grok-4.7"
       "xai/grok-4.6"
-      "xai/grok-4.5"
       "xai/grok"
-      "opus"
       "grok"
     )
-    CYCLE="claude-bridge/*opus*,*opus*,grok*,anthropic/claude-opus*,xai/grok*"
+    CYCLE="devin/swe-2,claude-bridge/*opus*,xai/grok*,grok*"
     ;;
   lane)
-    # OpenCode Go Flash-class (subscription). Prefer latest v4.1; deepseek/deepseek-flash is not listed.
-    PREFERRED="opencode-go/deepseek-v4.1-flash"
+    # Flash-class. devin/swe-2-flash for non-complex implementation; OpenCode
+    # Go DeepSeek Flash for cheap parallel capacity (deepseek/deepseek-flash is not listed).
+    PREFERRED="devin/swe-2-flash"
     PATTERNS=(
+      "devin/swe-2-flash"
       "opencode-go/deepseek-v4.1-flash"
       "opencode-go/deepseek-v4-flash"
       "opencode/deepseek-v4.1-flash"
@@ -112,7 +113,7 @@ case "$ROLE" in
       "deepseek/*flash*"
       "deepseek-flash"
     )
-    CYCLE="opencode-go/*deepseek*flash*,opencode/*deepseek*flash*,*deepseek*flash*"
+    CYCLE="devin/swe-2-flash,opencode-go/*deepseek*flash*,opencode/*deepseek*flash*,*deepseek*flash*"
     ;;
   reviewer)
     # Default adversarial pass (roles/reviewer.md). Opus / Fable passes: pin MODEL= explicitly.
@@ -121,10 +122,11 @@ case "$ROLE" in
       "xai/grok-4.6"
       "xai/grok"
       "grok"
-      "claude-bridge/claude-opus-5"
-      "anthropic/claude-opus-5"
+      "devin/swe-2"
+      "claude-bridge/claude-opus-5-5"
+      "claude-bridge/claude-fable-5-1"
     )
-    CYCLE="xai/grok*,grok*,claude-bridge/*opus*,anthropic/claude-opus*,claude-bridge/*fable*,anthropic/claude-fable*"
+    CYCLE="xai/grok*,grok*,devin/swe-2,claude-bridge/*opus*,claude-bridge/*fable*"
     ;;
   docs)
     # Prefer Google AI Pro via pi-antigravity (subscription), then OpenCode Gemini, then google API.
@@ -154,7 +156,7 @@ Authenticate a provider, then re-run:
 
   pi          # interactive: /login
   # or set an API key, e.g.:
-  #   export ANTHROPIC_API_KEY=...    # architect / reviewer / orchestrator
+  #   pi install npm:pi-claude-bridge   # Claude route (only) for architect / reviewer / orchestrator
   #   export XAI_API_KEY=...          # grok-class architect alternative
   #   export DEEPSEEK_API_KEY=...     # lane
   #   export GEMINI_API_KEY=...       # docs
@@ -169,7 +171,7 @@ Inspect what pi can see:
 
 Override explicitly when you know an id:
 
-  MODEL=claude-bridge/claude-opus-5 ./agents/pi-harness/scripts/run-role.sh architect
+  MODEL=claude-bridge/claude-opus-5-5 ./agents/pi-harness/scripts/run-role.sh architect
 
 This harness refuses to silently fall back to an unbound default (e.g. google).
 HELP

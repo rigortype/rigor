@@ -1,0 +1,3 @@
+- **[inference]** `find`, `detect` and `rfind` whose block is a single `is_a?`, `kind_of?` or `instance_of?` test on its parameter now return the tested class, or nil. ([#2918](https://github.com/rigortype/rigor/pull/2918))
+  - `nodes.rfind { |n| n.is_a?(Prism::DefNode) }` over `Array[Prism::Node]` reads `Prism::DefNode?` where it read `Prism::Node?`.
+  - Any other block, an `ifnone` argument, and a class the element type cannot be ordered against keep the element type.

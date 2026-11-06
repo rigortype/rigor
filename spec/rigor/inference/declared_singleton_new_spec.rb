@@ -70,6 +70,10 @@ RSpec.describe "a declared `def self.new` types `X.new` (#2884)" do
     class Gen[T]
       def initialize: (T) -> void
     end
+
+    class Mix
+      def self.new: (Integer) -> Mix | (String) -> Y
+    end
   RBS
 
   def run_check(lib, extra_sig = nil)
@@ -218,6 +222,15 @@ RSpec.describe "a declared `def self.new` types `X.new` (#2884)" do
     RUBY
   end
 
+  it "re-points the own-class overload of a declaration that also has a foreign one" do
+    expect(dumps(run_check("t.rb" => <<~RUBY))).to eq(%w[SubMix Y])
+      class Mix; end
+      class SubMix < Mix; end
+      dump_type(SubMix.new(1))
+      dump_type(SubMix.new("s"))
+    RUBY
+  end
+
   describe "a `new` RBS builds from `initialize` is not a declaration" do
     it "keeps master's answers for the class, a Ruby subclass of it and a generic one" do
       result = run_check("t.rb" => <<~RUBY)
@@ -250,6 +263,35 @@ RSpec.describe "a declared `def self.new` types `X.new` (#2884)" do
       "t.rb" => "dump_type(Z.new)\n"
     )
     expect(dumps(result)).to eq(%w[Z])
+  end
+
+  describe "an inherited declaration answers the same whether or not an unrelated departing one is loaded" do
+    def dumps_with(sig, source)
+      FileUtils.rm_rf(%w[lib sig])
+      FileUtils.mkdir_p("lib")
+      FileUtils.mkdir_p("sig")
+      File.write(File.join("sig", "x.rbs"), sig)
+      File.write(File.join("lib", "t.rb"), %(require "rigor/testing"\ninclude Rigor::Testing\n#{source}))
+      configuration = Rigor::Configuration.new(
+        Rigor::Configuration::DEFAULTS.merge("paths" => %w[lib], "signature_paths" => %w[sig], "workers" => 0)
+      )
+      dumps(guarded_run(Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil), %w[lib]))
+    end
+
+    let(:unrelated) { "class Unrelated\n  def self.new: () -> Integer\nend\n" }
+
+    it "answers the class object for an inherited `-> self`, which is not the instance" do
+      sig = "class SelfRet\n  def self.new: () -> self\nend\n"
+      source = "class SelfRet; end\nclass SR2 < SelfRet; end\ndump_type(SelfRet.new)\ndump_type(SR2.new)\n"
+      expect([dumps_with(sig, source), dumps_with(sig + unrelated, source)])
+        .to eq([%w[singleton(SelfRet) singleton(SR2)]] * 2)
+    end
+
+    it "compares the declaring class by full name, so `::Foo` from inside `A::Foo` is a foreign return" do
+      sig = "module A\n  class Foo\n    def self.new: () -> ::Foo\n  end\nend\nclass Foo\nend\n"
+      source = "module A; class Foo; end; end\nclass Foo; end\nclass Sub < A::Foo; end\ndump_type(Sub.new)\n"
+      expect([dumps_with(sig, source), dumps_with(sig + unrelated, source)]).to eq([%w[Foo]] * 2)
+    end
   end
 
   describe "a core or stdlib declaration is not inherited" do

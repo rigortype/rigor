@@ -2206,13 +2206,46 @@ module Rigor
         end
       end
 
-      # Issue #2884 — true when some class outside core / stdlib explicitly declares `def self.new` with an overload
-      # whose return is not the instance: neither `instance` / `self`, nor untyped, `top`, `bot` or `void`, nor the
-      # declaring class itself. Only such a declaration answers a Ruby subclass with something other than the
-      # `Nominal[subclass]` the dispatcher already gives, so the dispatcher walks a subclass's ancestry, and files that
-      # walk's dependency edges, only when this holds. The own-class test compares names as written, so a return
-      # spelled with another namespace counts as foreign, the direction that walks. Memoised per loader; one pass
-      # over `class_decls`.
+      # Issue #2884 — true when `method_definition`, a class's singleton `new`, is one `X.new` answers through: every
+      # definition is an explicit `def self.new` (not the `new` `RBS::DefinitionBuilder` derives from `initialize`,
+      # which returns the declaring class), written outside core / stdlib ({#declared_outside_core_stdlib?}), on a
+      # class core / stdlib does not declare (a project signature reopening `String` does not change `String.new`).
+      def honoured_singleton_new?(method_definition)
+        method_definition.defs.all? { |type_def| explicit_singleton_new_member?(type_def.member) } &&
+          declared_outside_core_stdlib?(method_definition) &&
+          !core_or_stdlib_class?(method_definition.defined_in.to_s)
+      end
+
+      def explicit_singleton_new_member?(member)
+        member.is_a?(::RBS::AST::Members::MethodDefinition) && member.name == :new && member.kind != :instance
+      end
+      private :explicit_singleton_new_member?
+
+      # Issue #2884 — true when `method_definition`, a singleton `new`, answers what `Nominal[receiver]` answers for
+      # every receiver that inherits it: each overload returns `instance`, untyped, `top`, `bot` or `void`, or the
+      # declaring class itself, compared by its resolved full name. `self` is the receiver's class object, not its
+      # instance, so it does not count. The dispatcher answers `Nominal[receiver]` for an inherited declaration this
+      # holds of, and {#singleton_new_departs_from_instance?} is built from the same test, so the two cannot drift.
+      def answers_instance_for_subclass?(method_definition)
+        owner = method_definition.defined_in.to_s.delete_prefix("::")
+        method_definition.method_types.all? do |method_type|
+          returned = method_type.type.return_type
+          INSTANCE_LIKE_RETURNS.any? { |base| returned.is_a?(base) } ||
+            (returned.is_a?(::RBS::Types::ClassInstance) && returned.name.to_s.delete_prefix("::") == owner)
+        end
+      end
+
+      INSTANCE_LIKE_RETURNS = [
+        ::RBS::Types::Bases::Instance, ::RBS::Types::Bases::Any, ::RBS::Types::Bases::Top,
+        ::RBS::Types::Bases::Bottom, ::RBS::Types::Bases::Void
+      ].freeze
+      private_constant :INSTANCE_LIKE_RETURNS
+
+      # Issue #2884 — true when some class declares a {#honoured_singleton_new?} `new` that is not
+      # {#answers_instance_for_subclass?}: only such a declaration answers a Ruby subclass with something other than
+      # the `Nominal[subclass]` the dispatcher gives without one, so the dispatcher walks a subclass's ancestry, and
+      # files that walk's dependency edges, only when this holds. Memoised per loader: one pass over `class_decls` for
+      # the classes whose own non-core declaration writes `def self.new`, then their definitions.
       def singleton_new_departs_from_instance?
         return @state[:singleton_new_departs] if @state.key?(:singleton_new_departs)
 
@@ -2220,16 +2253,10 @@ module Rigor
       end
 
       def scan_singleton_new_departs
-        environment = env
-        roots = core_stdlib_roots
-        return true if environment.nil? || roots.empty?
-
-        environment.class_decls.each_value.any? do |entry|
-          self.class.entry_declarations(entry).any? do |decl|
-            name = self.class.declaration_buffer_name(decl)
-            next false if name && roots.any? { |root| name.start_with?(root) }
-
-            decl.members.any? { |member| departing_singleton_new?(member, decl.name) }
+        during_internal_demand do
+          singleton_new_declarers.any? do |class_name|
+            definition = singleton_method(class_name: class_name, method_name: :new)
+            definition && honoured_singleton_new?(definition) && !answers_instance_for_subclass?(definition)
           end
         end
       rescue ::RBS::BaseError
@@ -2237,30 +2264,22 @@ module Rigor
       end
       private :scan_singleton_new_departs
 
-      INSTANCE_LIKE_RETURNS = [
-        ::RBS::Types::Bases::Instance, ::RBS::Types::Bases::Self, ::RBS::Types::Bases::Any,
-        ::RBS::Types::Bases::Top, ::RBS::Types::Bases::Bottom, ::RBS::Types::Bases::Void
-      ].freeze
-      private_constant :INSTANCE_LIKE_RETURNS
+      def singleton_new_declarers
+        environment = env
+        roots = core_stdlib_roots
+        return [] if environment.nil? || roots.empty?
 
-      def departing_singleton_new?(member, owner)
-        return false unless member.is_a?(::RBS::AST::Members::MethodDefinition)
-        return false unless member.name == :new && member.kind != :instance
+        environment.class_decls.filter_map do |type_name, entry|
+          declares = self.class.entry_declarations(entry).any? do |decl|
+            name = self.class.declaration_buffer_name(decl)
+            next false if name.nil? || roots.any? { |root| name.start_with?(root) }
 
-        member.overloads.any? do |overload|
-          returned = overload.method_type.type.return_type
-          next false if INSTANCE_LIKE_RETURNS.any? { |base| returned.is_a?(base) }
-
-          !(returned.is_a?(::RBS::Types::ClassInstance) && own_class_name?(returned.name, owner))
+            decl.members.any? { |member| explicit_singleton_new_member?(member) }
+          end
+          type_name.to_s if declares
         end
       end
-      private :departing_singleton_new?
-
-      def own_class_name?(returned, owner)
-        returned.to_s.delete_prefix("::") == owner.to_s.delete_prefix("::") ||
-          (returned.namespace.empty? && returned.name == owner.name)
-      end
-      private :own_class_name?
+      private :singleton_new_declarers
 
       # True when `class_name`'s RBS declaration is one the project wrote (see {#project_declared_classes}).
       def project_declared_class?(class_name)

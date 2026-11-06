@@ -25,8 +25,9 @@ module Rigor
       # The declaration is found on `X`'s own RBS (which carries its RBS ancestors' singleton methods), or, for a
       # Ruby-source class with no RBS of its own, on the first RBS-known class of its singleton
       # {Scope::ResolutionChain}. A project entry ahead of it that defines `new` ends the walk with no answer: that
-      # method is the one Ruby runs. `instance` in the declared return, and a return naming the declaring class itself,
-      # read the receiver class, and `self` reads its class object.
+      # method is the one Ruby runs. An inherited declaration that answers the instance
+      # ({Environment::RbsLoader#answers_instance_for_subclass?}) answers `Nominal[X]`; otherwise `instance`, and an
+      # overload returning the declaring class itself, read the receiver class, and `self` reads its class object.
       #
       # Nil (so `Nominal[X]`) when no overload takes the arguments (argument checking of `.new` is not this tier's
       # job), and when the return translates to an untyped, `top` or `bot` answer, which would lose the precision
@@ -41,13 +42,19 @@ module Rigor
         def try_dispatch(class_name, context)
           environment = context.environment
           loader = environment&.rbs_loader
-          return nil if loader.nil? || !loader.respond_to?(:declared_outside_core_stdlib?)
+          return nil if loader.nil? || !loader.respond_to?(:honoured_singleton_new?)
 
           definition = declared_new(class_name, environment, loader, context.scope)
           return nil if definition.nil? || !overload_matches?(definition, class_name, context)
 
+          owner = definition.defined_in.to_s.delete_prefix("::")
+          # The same test the walk's gate reads ({Environment::RbsLoader#singleton_new_departs_from_instance?}), so
+          # an inherited declaration that answers the instance answers `Nominal[receiver]` whether or not the gate let
+          # the walk run.
+          return nil if owner != class_name && loader.answers_instance_for_subclass?(definition)
+
           answer = RbsDispatch.declared_singleton_return(context, definition, class_name)
-          answer = repoint_owner(answer, definition.defined_in.to_s.delete_prefix("::"), class_name)
+          answer = repoint_owner(answer, owner, class_name)
           answer if usable?(answer)
         end
 
@@ -59,21 +66,7 @@ module Rigor
             return nil if owner.nil?
 
             definition = Rigor::Reflection.singleton_method_definition(owner, :new, environment: environment)
-            definition if definition && honoured?(definition, loader)
-          end
-
-          # Only an explicit `def self.new` counts: `RBS::DefinitionBuilder` also builds a singleton `new` from a
-          # class's `initialize`, returning the declaring class, and a Ruby subclass inheriting that would read as its
-          # parent. Every definition must sit outside core / stdlib, and so must the class that carries it: a project
-          # signature reopening `String` to declare `self.new` does not change what `String.new` returns.
-          def honoured?(definition, loader)
-            definition.defs.all? { |type_def| explicit_singleton_new?(type_def.member) } &&
-              loader.declared_outside_core_stdlib?(definition) &&
-              !loader.core_or_stdlib_class?(definition.defined_in.to_s)
-          end
-
-          def explicit_singleton_new?(member)
-            member.is_a?(::RBS::AST::Members::MethodDefinition) && member.name == :new && member.kind != :instance
+            definition if definition && loader.honoured_singleton_new?(definition)
           end
 
           # `class_name` itself when RBS knows it; else the first RBS-known class on its singleton
@@ -81,9 +74,9 @@ module Rigor
           # `def self.new`, or an `extend`ed module's `def new`), when the chain reaches none, and when the chain does
           # not stand (a fork or an unplaced mixin edge, where the tables cannot say which world ran).
           #
-          # The walk runs only when some loaded signature declares a `new` whose answer for a subclass is not the
-          # subclass itself ({Environment::RbsLoader#singleton_new_departs_from_instance?}); every other declaration
-          # answers what `meta_new`'s `Nominal[X]` does, so without one the walk could change nothing. When it runs
+          # The walk runs only when some loaded declaration fails {Environment::RbsLoader#answers_instance_for_subclass?}
+          # ({Environment::RbsLoader#singleton_new_departs_from_instance?}); `try_dispatch` answers `Nominal[X]` for an
+          # inherited declaration that passes it, so without one the walk could change nothing. When it runs
           # it files its reads whatever it answers: a later edit that puts such a declaration on the chain changes
           # the answer, and the caller must be re-checked then.
           def declaring_class(class_name, environment, loader, scope)

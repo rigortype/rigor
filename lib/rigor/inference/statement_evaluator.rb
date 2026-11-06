@@ -2895,6 +2895,10 @@ module Rigor
       # re-established. No producer reaches that today — a rebind or a clause widening answers `Dynamic[top]`,
       # never the fact's type ({ClauseWidening}), and a widened slot read floors to `Dynamic` rather than
       # reinstalling the recorded object.
+      #
+      # The filter covers rescue entries only: an `ensure` clause enters from the scope past the `begin` — the
+      # join of the fall-through exits — so it keeps a fact a terminating-branch write voided, the pre-#2691
+      # hole left open because collecting raise points for every `ensure`-only `begin` costs a frame walk.
       def clause_fact_scope(entry_scope, raise_scopes)
         return entry_scope if entry_scope.indexed_narrowings.empty? && entry_scope.method_chain_narrowings.empty?
 

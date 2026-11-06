@@ -2206,6 +2206,62 @@ module Rigor
         end
       end
 
+      # Issue #2884 — true when some class outside core / stdlib explicitly declares `def self.new` with an overload
+      # whose return is not the instance: neither `instance` / `self`, nor untyped, `top`, `bot` or `void`, nor the
+      # declaring class itself. Only such a declaration answers a Ruby subclass with something other than the
+      # `Nominal[subclass]` the dispatcher already gives, so the dispatcher walks a subclass's ancestry, and files that
+      # walk's dependency edges, only when this holds. The own-class test compares names as written, so a return
+      # spelled with another namespace counts as foreign, the direction that walks. Memoised per loader; one pass
+      # over `class_decls`.
+      def singleton_new_departs_from_instance?
+        return @state[:singleton_new_departs] if @state.key?(:singleton_new_departs)
+
+        @state[:singleton_new_departs] = scan_singleton_new_departs
+      end
+
+      def scan_singleton_new_departs
+        environment = env
+        roots = core_stdlib_roots
+        return true if environment.nil? || roots.empty?
+
+        environment.class_decls.each_value.any? do |entry|
+          self.class.entry_declarations(entry).any? do |decl|
+            name = self.class.declaration_buffer_name(decl)
+            next false if name && roots.any? { |root| name.start_with?(root) }
+
+            decl.members.any? { |member| departing_singleton_new?(member, decl.name) }
+          end
+        end
+      rescue ::RBS::BaseError
+        true
+      end
+      private :scan_singleton_new_departs
+
+      INSTANCE_LIKE_RETURNS = [
+        ::RBS::Types::Bases::Instance, ::RBS::Types::Bases::Self, ::RBS::Types::Bases::Any,
+        ::RBS::Types::Bases::Top, ::RBS::Types::Bases::Bottom, ::RBS::Types::Bases::Void
+      ].freeze
+      private_constant :INSTANCE_LIKE_RETURNS
+
+      def departing_singleton_new?(member, owner)
+        return false unless member.is_a?(::RBS::AST::Members::MethodDefinition)
+        return false unless member.name == :new && member.kind != :instance
+
+        member.overloads.any? do |overload|
+          returned = overload.method_type.type.return_type
+          next false if INSTANCE_LIKE_RETURNS.any? { |base| returned.is_a?(base) }
+
+          !(returned.is_a?(::RBS::Types::ClassInstance) && own_class_name?(returned.name, owner))
+        end
+      end
+      private :departing_singleton_new?
+
+      def own_class_name?(returned, owner)
+        returned.to_s.delete_prefix("::") == owner.to_s.delete_prefix("::") ||
+          (returned.namespace.empty? && returned.name == owner.name)
+      end
+      private :own_class_name?
+
       # True when `class_name`'s RBS declaration is one the project wrote (see {#project_declared_classes}).
       def project_declared_class?(class_name)
         project_declared_classes.include?(class_name.to_s.delete_prefix("::"))

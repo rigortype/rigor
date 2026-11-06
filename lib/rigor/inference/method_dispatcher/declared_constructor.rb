@@ -16,24 +16,21 @@ module Rigor
       # (`Array`, `Set`, `Hash`, `Struct`, `Class.new`, …) have declined, and keeps its `Nominal[X]` answer whenever
       # this one is nil.
       #
-      # The declaration counts only when every one of its definitions sits outside the `rbs` gem's core and stdlib
-      # trees ({Environment::RbsLoader#declared_outside_core_stdlib?}). Core declares `Data.new: () -> bot`, a
-      # `Struct.new` that answers a class, and stdlib declares `Tempfile.new`; a project class inheriting one of those
-      # keeps the `Nominal` answer the curated tiers were written around.
+      # The declaration counts only when it is an explicit `def self.new` (not the `new` RBS builds from `initialize`),
+      # every one of its definitions sits outside the `rbs` gem's core and stdlib trees
+      # ({Environment::RbsLoader#declared_outside_core_stdlib?}), and the class carrying it is not one core or stdlib
+      # declares. Core declares `Data.new: () -> bot` and `Ractor.new: … -> Ractor`, stdlib `Tempfile.new`; a project
+      # class inheriting one of those keeps the `Nominal` answer the curated tiers were written around.
       #
       # The declaration is found on `X`'s own RBS (which carries its RBS ancestors' singleton methods), or, for a
       # Ruby-source class with no RBS of its own, on the first RBS-known class of its singleton
       # {Scope::ResolutionChain}. A project entry ahead of it that defines `new` ends the walk with no answer: that
-      # method is the one Ruby runs. `instance` and `self` in the declared return read the receiver class.
+      # method is the one Ruby runs. `instance` in the declared return, and a return naming the declaring class itself,
+      # read the receiver class, and `self` reads its class object.
       #
       # Nil (so `Nominal[X]`) when no overload takes the arguments (argument checking of `.new` is not this tier's
       # job), and when the return translates to an untyped, `top` or `bot` answer, which would lose the precision
       # `Nominal[X]` already has.
-      #
-      # The chain walk's ADR-46 reads are withheld and replayed only when this tier answers, as `call.wrong-arity`
-      # does (#992): the walk runs for every `Widget.new` on a project class, and filing its class edges for the
-      # `Nominal[X]` answer `meta_new` gave without reading anything would make each such call an ancestry
-      # dependent of the class's files.
       module DeclaredConstructor
         # A project entry of the singleton chain defines `new` in Ruby source, so that method is the one Ruby runs.
         DEFINED_IN_SOURCE = :defined_in_source
@@ -46,40 +43,54 @@ module Rigor
           loader = environment&.rbs_loader
           return nil if loader.nil? || !loader.respond_to?(:declared_outside_core_stdlib?)
 
-          definition, reads = Analysis::DependencyRecorder.withhold do
-            declared_new(class_name, environment, loader, context.scope)
-          end
+          definition = declared_new(class_name, environment, loader, context.scope)
           return nil if definition.nil? || !overload_matches?(definition, class_name, context)
 
           answer = RbsDispatch.declared_singleton_return(context, definition, class_name)
-          return nil unless usable?(answer)
-
-          Analysis::DependencyRecorder.replay(reads)
-          answer
+          answer = repoint_owner(answer, definition.defined_in.to_s.delete_prefix("::"), class_name)
+          answer if usable?(answer)
         end
 
         class << self
           private
 
           def declared_new(class_name, environment, loader, scope)
-            owner = declaring_class(class_name, environment, scope)
+            owner = declaring_class(class_name, environment, loader, scope)
             return nil if owner.nil?
 
             definition = Rigor::Reflection.singleton_method_definition(owner, :new, environment: environment)
-            definition if definition && loader.declared_outside_core_stdlib?(definition)
+            definition if definition && honoured?(definition, loader)
+          end
+
+          # Only an explicit `def self.new` counts: `RBS::DefinitionBuilder` also builds a singleton `new` from a
+          # class's `initialize`, returning the declaring class, and a Ruby subclass inheriting that would read as its
+          # parent. Every definition must sit outside core / stdlib, and so must the class that carries it: a project
+          # signature reopening `String` to declare `self.new` does not change what `String.new` returns.
+          def honoured?(definition, loader)
+            definition.defs.all? { |type_def| explicit_singleton_new?(type_def.member) } &&
+              loader.declared_outside_core_stdlib?(definition) &&
+              !loader.core_or_stdlib_class?(definition.defined_in.to_s)
+          end
+
+          def explicit_singleton_new?(member)
+            member.is_a?(::RBS::AST::Members::MethodDefinition) && member.name == :new && member.kind != :instance
           end
 
           # `class_name` itself when RBS knows it; else the first RBS-known class on its singleton
           # {Scope::ResolutionChain}, read in Ruby's order. Nil when a project entry ahead of it defines `new` (a
           # `def self.new`, or an `extend`ed module's `def new`), when the chain reaches none, and when the chain does
           # not stand (a fork or an unplaced mixin edge, where the tables cannot say which world ran).
-          def declaring_class(class_name, environment, scope)
+          #
+          # The walk runs only when some loaded signature declares a `new` whose answer for a subclass is not the
+          # subclass itself ({Environment::RbsLoader#singleton_new_departs_from_instance?}); every other declaration
+          # answers what `meta_new`'s `Nominal[X]` does, so without one the walk could change nothing. When it runs
+          # it files its reads whatever it answers: a later edit that puts such a declaration on the chain changes
+          # the answer, and the caller must be re-checked then.
+          def declaring_class(class_name, environment, loader, scope)
             return class_name if Rigor::Reflection.rbs_class_known?(class_name, environment: environment)
-            return nil if scope.nil?
+            return nil if scope.nil? || !loader.singleton_new_departs_from_instance?
 
             chain = Scope::ResolutionChain.for(scope, class_name.to_s, :singleton, :methods)
-            return nil if chain.truncated?
-
             found = first_new_owner(chain, scope, environment)
             verdict = chain.settle(scope, found, owner: nil) { |retro| first_new_owner(retro, scope, environment) }
             found unless found.nil? || found == DEFINED_IN_SOURCE || verdict != :chain
@@ -111,6 +122,21 @@ module Rigor
               {}, !context.block_type.nil?, context.environment, true,
               ArgumentNodes.keyword_hash_last?(context.call_node, args), nil, true
             ).empty?
+          end
+
+          # A return naming the declaring class itself (`def self.new: [T] (T) -> Box[T]`) is the constructor's own
+          # class, so a subclass inheriting it answers the subclass, as `instance` does; generic arguments name the
+          # owner's parameters and are dropped with it. A foreign return (`EmailAddress` -> `Address`) stays.
+          def repoint_owner(answer, owner, class_name)
+            return answer if owner == class_name
+
+            case answer
+            when Type::Nominal
+              answer.class_name == owner ? Type::Combinator.nominal_of(class_name) : answer
+            when Type::Union
+              Type::Combinator.union(*answer.members.map { |member| repoint_owner(member, owner, class_name) })
+            else answer
+            end
           end
 
           def usable?(answer)

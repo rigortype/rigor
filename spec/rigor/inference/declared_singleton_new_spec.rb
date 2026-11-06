@@ -18,55 +18,65 @@ require "rigor/configuration"
 
 RSpec.describe "a declared `def self.new` types `X.new` (#2884)" do
   def signature = <<~RBS
-    class X
-      def self.new: () -> Y
-    end
-
-    class Y
-      def hello: () -> String
-    end
-
-    class W
-      def self.new: () -> instance
-    end
-
-    class O
-      def self.new: (String) -> Y | (Integer) -> O2
-    end
-
-    class O2
-    end
-
-    module EmailAddress
-      def self.new: (?) -> Address
-
-      class Address
-        def normal: () -> String
+      class X
+        def self.new: () -> Y
       end
-    end
 
-    class Box[T]
-      def self.new: [T] (T) -> Box[T]
-      def self.make: [T] (T) -> Box[T]
-    end
+      class Y
+        def hello: () -> String
+      end
 
-    class U
-      def self.new: () -> untyped
-    end
+      class W
+        def self.new: () -> instance
+      end
 
-    class SigOnly
-      def self.new: () -> Y
-    end
+      class O
+        def self.new: (String) -> Y | (Integer) -> O2
+      end
+
+      class O2
+      end
+
+      module EmailAddress
+        def self.new: (?) -> Address
+
+        class Address
+          def normal: () -> String
+        end
+      end
+
+      class Box[T]
+        def self.new: [T] (T) -> Box[T]
+        def self.make: [T] (T) -> Box[T]
+      end
+
+      class U
+        def self.new: () -> untyped
+      end
+
+      class SigOnly
+        def self.new: () -> Y
+      end
 
     module SigMixin
       def helper: () -> Integer
     end
+
+    class GemBase
+      def initialize: (Integer) -> void
+      def name: () -> Integer
+    end
+
+    class Gen[T]
+      def initialize: (T) -> void
+    end
   RBS
 
-  def run_check(lib)
+  def run_check(lib, extra_sig = nil)
     FileUtils.mkdir_p("lib")
     FileUtils.mkdir_p("sig")
     File.write(File.join("sig", "x.rbs"), signature)
+    File.write(File.join("sig", "extra.rbs"), extra_sig) if extra_sig
     lib.each { |name, source| File.write(File.join("lib", name), %(require "rigor/testing"\ninclude Rigor::Testing\n#{source})) }
     configuration = Rigor::Configuration.new(
       Rigor::Configuration::DEFAULTS.merge("paths" => %w[lib], "signature_paths" => %w[sig], "workers" => 0)
@@ -197,9 +207,60 @@ RSpec.describe "a declared `def self.new` types `X.new` (#2884)" do
     RUBY
   end
 
+  it "re-points a return naming the declaring class to a subclass inheriting it, and keeps a foreign return" do
+    expect(dumps(run_check("t.rb" => <<~RUBY))).to eq(%w[Box[1] SubBox Y])
+      class SubBox < Box; end
+      class X; end
+      class Z < X; end
+      dump_type(Box.new(1))
+      dump_type(SubBox.new(1))
+      dump_type(Z.new)
+    RUBY
+  end
+
+  describe "a `new` RBS builds from `initialize` is not a declaration" do
+    it "keeps master's answers for the class, a Ruby subclass of it and a generic one" do
+      result = run_check("t.rb" => <<~RUBY)
+        class GemBase
+          def initialize(x) = nil
+          def name = 1
+        end
+        class MyThing < GemBase
+          def name = "s"
+        end
+        class Gen
+          def initialize(x) = nil
+        end
+        class SubGen < Gen; end
+        dump_type(GemBase.new(1))
+        dump_type(MyThing.new(1))
+        dump_type(Gen.new(1))
+        dump_type(SubGen.new(1))
+        MyThing.new(1).name.upcase
+      RUBY
+      expect([dumps(result), errors(result)]).to eq([%w[GemBase MyThing Gen SubGen], []])
+    end
+  end
+
+  it "declines where the singleton chain does not stand, as an unplaced `extend` across files leaves it" do
+    result = run_check(
+      "x.rb" => "class X; end\nmodule M1; end\nmodule M2; end\n",
+      "z1.rb" => "class Z < X\n  extend M1\n  extend M2\nend\n",
+      "z2.rb" => "class Z < X\n  extend M2\n  extend M1\nend\n",
+      "t.rb" => "dump_type(Z.new)\n"
+    )
+    expect(dumps(result)).to eq(%w[Z])
+  end
+
   describe "a core or stdlib declaration is not inherited" do
     it "keeps a project subclass of a core class whose `self.new` names the core class" do
       expect(dumps(run_check("t.rb" => "class R < Ractor; end\ndump_type(R.new { 1 })\n"))).to eq(%w[R])
+    end
+
+    it "ignores a `self.new` a project signature adds to a core class by reopening it" do
+      expect(dumps(run_check({ "t.rb" => "class MyStr < String; end\ndump_type(String.new)\ndump_type(MyStr.new)\n" },
+                             "class String\n  def self.new: () -> Integer\nend\n")))
+        .to eq(%w[String MyStr])
     end
 
     it "keeps a stdlib subclass, and leaves `Data.define` / `Struct.new` classes to their own tiers" do
@@ -215,11 +276,11 @@ RSpec.describe "a declared `def self.new` types `X.new` (#2884)" do
     end
   end
 
-  describe "the ADR-46 edges of the answer" do
-    def ancestry_sources(lib)
+  describe "the ADR-46 edges of the walk" do
+    def ancestry_sources(lib, sig)
       FileUtils.mkdir_p("lib")
       FileUtils.mkdir_p("sig")
-      File.write(File.join("sig", "x.rbs"), "class X\n  def self.new: () -> Y\nend\nclass Y\nend\n")
+      File.write(File.join("sig", "x.rbs"), sig)
       lib.each { |name, source| File.write(File.join("lib", name), source) }
       configuration = Rigor::Configuration.new(
         Rigor::Configuration::DEFAULTS.merge("paths" => %w[lib], "signature_paths" => %w[sig], "workers" => 0)
@@ -230,13 +291,21 @@ RSpec.describe "a declared `def self.new` types `X.new` (#2884)" do
       record ? record.ancestry_sources.map { |path| File.basename(path) } : []
     end
 
+    let(:departing) { "class X\n  def self.new: () -> Y\nend\nclass Y\nend\n" }
+
     it "files the walked chain when the declaration answers, so an edit to the subclass re-checks the call" do
-      expect(ancestry_sources("model.rb" => "class X; end\nclass Z < X; end\n", "caller.rb" => "Z.new\n"))
+      expect(ancestry_sources({ "model.rb" => "class X; end\nclass Z < X; end\n", "caller.rb" => "Z.new\n" },
+                              departing)).to include("model.rb")
+    end
+
+    it "files the chain of a `Nominal[X]` answer too once some declaration could answer a subclass otherwise" do
+      expect(ancestry_sources({ "model.rb" => "class Widget; end\n", "caller.rb" => "Widget.new\n" }, departing))
         .to include("model.rb")
     end
 
-    it "files nothing for a class whose `new` stays `Nominal[X]`, as before" do
-      expect(ancestry_sources("model.rb" => "class Widget; end\n", "caller.rb" => "Widget.new\n"))
+    it "walks and files nothing when every declaration answers the instance, as before this tier" do
+      expect(ancestry_sources({ "model.rb" => "class Widget; end\n", "caller.rb" => "Widget.new\n" },
+                              "class X\n  def self.new: () -> instance\nend\n"))
         .not_to include("model.rb")
     end
   end

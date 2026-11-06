@@ -1780,6 +1780,36 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(method.rbs).to eq("def fetch: (untyped flag, String text) -> (StandardError | String)")
     end
 
+    it "keeps a non-nil literal member the declaration spells while narrowing another" do
+      method = classify(
+        "def fetch: (untyped flag, Integer count) -> (Numeric | :none)",
+        "  def fetch(flag, count)\n    flag ? count : :none\n  end"
+      )
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::TIGHTER_RETURN)
+      expect(method.rbs).to eq("def fetch: (untyped flag, Integer count) -> (:none | Integer)")
+    end
+
+    it "narrows a declared module member to a class that includes it" do
+      method = classify(
+        "def fetch: (untyped flag, String text) -> Comparable?",
+        "  def fetch(flag, text)\n    flag ? text : nil\n  end"
+      )
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::TIGHTER_RETURN)
+      expect(method.rbs).to eq("def fetch: (untyped flag, String text) -> (String | nil)")
+    end
+
+    it "narrows a declared `Kernel?` to `Object`, which includes it" do
+      method = classify(
+        "def fetch: (untyped flag) -> Kernel?",
+        "  def fetch(flag)\n    flag ? Object.new : nil\n  end"
+      )
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::TIGHTER_RETURN)
+      expect(method.rbs).to eq("def fetch: (untyped flag) -> (Object | nil)")
+    end
+
     it "declines a subclass narrowing that drops the declared nil" do
       method = classify(
         "def fetch: () -> Exception?",

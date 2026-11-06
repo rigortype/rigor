@@ -23,7 +23,7 @@ RSpec.describe Rigor::Scope, "#discovered_method_through_ancestors? negative edg
       module Helper
         attr_reader :helped
       end
-      class Base
+      class Base < StandardError
         def self.where = 1
       end
       class Child < Base

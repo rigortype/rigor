@@ -111,7 +111,8 @@ RSpec.describe Rigor::Analysis::IncrementalSession, "discovery-walk gate (#2689)
     end
   end
 
-  # The case #2689 broke: nothing but the walk's miss on `Base` names `Base`, so only its `class:Base` edge re-checks.
+  # The case #2689 broke: only the walk's miss on `Base` names it (`method:Base.default_scope` and `class:Base`, either
+  # of which the new file fires).
   it "re-checks the consumer when a superclass in another file gains the method" do
     Dir.mktmpdir do |dir|
       File.write(File.join(dir, "base.rb"), "class Base\n  def self.where = 1\nend\n")

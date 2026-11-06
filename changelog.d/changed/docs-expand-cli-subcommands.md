@@ -1,0 +1,1 @@
+- **[cli manual]** Expand manual reference for under-documented subcommands (`explain`, `diff`, `annotate`, `lens`, `trace`, `type-scan`, `playground`, `describe`, `upgrade`) with option tables, invocation forms, output schemas, and exit code contracts. ([#2896](https://github.com/rigortype/rigor/pull/2896))

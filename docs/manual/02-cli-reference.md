@@ -148,22 +148,38 @@ when a lockfile is present.
 
 ## `rigor annotate`
 
-Reprint a file with every line tagged by the type of the
-expression it evaluates to, as a trailing `#=>` comment. See
-[Inspecting inferred types](05-inspecting-types.md).
+Reprint a source file with every line tagged by the inferred type of the expression it evaluates to, as a trailing `#=>` comment (following the xmpfilter / seeing_is_believing convention). See [Inspecting inferred types](05-inspecting-types.md).
 
 ```sh
-rigor annotate [--[no-]color] [--[no-]bat] [--format=text|json] [--config=PATH] FILE
+rigor annotate [options] FILE
 ```
 
-`FILE` is required. Colour is auto-detected for a tty and
-honours `NO_COLOR`; `--color` / `--no-color` override. When
-colour is on and [`bat`](https://github.com/sharkdp/bat) is on
-`PATH`, highlighting goes through bat (`--no-bat` opts out;
-`--bat` warns if bat is missing and falls back to the built-in
-colorizer). `--format=json` emits an `{ "schema_version": 1, "annotations": { line => type } }`
-document instead of the annotated source. Exit `1` on a parse error or a
-missing file.
+| Flag | Purpose |
+| --- | --- |
+| `--config=PATH` | Path to `.rigor.yml`. Overrides auto-discovery. |
+| `--format=FORMAT` | Output format (`text` or `json`). Default: `text`. |
+| `--[no-]color` | Force or disable ANSI color (default: auto-detected for a tty; honors `NO_COLOR`). |
+| `--[no-]bat` | Force or disable syntax highlighting through [`bat`](https://github.com/sharkdp/bat) (default: enabled when color is on and `bat` is found on `PATH`). |
+
+The positional `FILE` argument is required. For each line, the command locates the last expression evaluated on that line (e.g. the last statement in `1; 2; 3` reports `3`, and a conditional header `if nil` reports its condition) and annotates it with `#=> <type>`. On method definition headers (`def`), the line is annotated with the method's inferred return type rather than the header expression.
+
+Annotations are idempotent: re-running `rigor annotate` matches existing `#=>` comments (as well as legacy `#=> dump_type:` comments) and replaces them in-place instead of stacking comments.
+
+When color is enabled and `bat` is installed, output is syntax-highlighted via `bat --language=ruby --style=plain --paging=never`. Passing `--no-bat` disables `bat` integration in favor of Rigor's built-in Prism colorizer. `--bat` warns on stderr and falls back to the built-in colorizer if `bat` is not found on `PATH`.
+
+In `--format=json`, the command emits a JSON object mapping line numbers to type strings conforming to schema version 1:
+
+```json
+{
+  "schema_version": 1,
+  "annotations": {
+    "1": "Integer",
+    "2": "String | nil"
+  }
+}
+```
+
+Exit `0` on success, `1` if the file does not exist or contains a Prism syntax error, and `64` on usage errors (such as a missing `FILE` argument).
 
 ## JSON documents
 
@@ -249,66 +265,144 @@ against `rigor check --no-cache` removes that variable.
 
 ## `rigor lens`
 
-Map the declarations of one or more files with their types and
-type provenance (experimental). See
-[Inspecting inferred types](05-inspecting-types.md).
+Map the declarations of one or more files with their types and type provenance (experimental). See [Inspecting inferred types](05-inspecting-types.md).
 
 ```sh
-rigor lens [--format=text|json] [--claims=REQUEST] [--config=PATH] [--workers=N] FILE...
+rigor lens [options] FILE...
 ```
 
-A lens runs the same incremental analysis as
-`rigor check --incremental` and reads and writes its cache.
-`--workers` applies to a cold run. `--format=json` writes one
-`lens/v0` document ([specification](../internal-spec/lens.md)).
-Exit `0` when at least one file has a result, `1` when none
-does, `64` on a usage error; diagnostics in the code never
-change the exit status.
+| Flag | Purpose |
+| --- | --- |
+| `--config=PATH` | Path to `.rigor.yml`. Overrides auto-discovery. |
+| `--format=FORMAT` | Output format (`text` or `json`). Default: `text`. |
+| `--workers=N` | Worker process count for a cold run. |
+| `--claims=REQUEST` | Check documentation type claims against authored contracts (unreleased). Requires `--format=json`. |
 
-`--claims=REQUEST` checks documentation type claims against authored
-contracts in the same run (unreleased). It requires `--format=json`
-and a UTF-8 JSON request following the
-[claims contract](../internal-spec/lens-claims.md). The `claims`
-section reports each claim's verdict; a conflict does not change
-the exit status. An invalid or stale request exits `64` without a
-document. Claims do not alter analysis, diagnostics or cached types.
+`rigor lens` performs the same incremental analysis as `rigor check --incremental` and shares its cache (`.rigor/cache`). The first execution on a file costs a full check, while subsequent runs reuse the recorded cache.
+
+`--claims=REQUEST` checks documentation type claims against authored contracts in the same run (unreleased). It requires `--format=json` and a UTF-8 JSON request following the [claims contract](../internal-spec/lens-claims.md). The `claims` section reports each claim's verdict; a conflict does not change the exit status. An invalid or stale request exits `64` without a document. Claims do not alter analysis, diagnostics or cached types.
+
+### Text representation
+
+Text output lists each declaration preceded by an anchor identifier:
+
+```text
+lib/shop.rb  xxh3-64:845f7426b6acfe12  (2 omitted)
+  4:7c90  class Shop
+  8:e37e  Shop#label: (::Integer n) -> ::String  [contract inline]
+  14:ce93  Shop#total: () -> Integer  [single_site inferred]
+  16:182b  Shop#fetch  [contested; also lib/legacy_shop.rb:2]
+  omitted constant Shop::LIMIT (line 5)
+```
+
+- **`LINE:HASH`**: Stable anchor hash identifying the declaration. It changes when the declaration signature or preceding type comments change, but remains unchanged across prose comment edits.
+- **`provenance`**: The origin of the type in square brackets (e.g. `[contract sig]`, `[contract inline]`, `[single_site inferred]`, `[plugin <name>]`).
+- **`contested`**: Denotes methods where multiple definitions exist in the project (e.g. reopened classes across files); Rigor prints no signature rather than guessing runtime dispatch.
+- **`omitted`**: Constructs not yet modeled by the lens (constants, `alias`, `define_method`) are explicitly recorded as omitted rather than discarded.
+
+In `--format=json`, the command outputs a `lens/v0` JSON document (specified in [the lens output contract](../internal-spec/lens.md)).
+
+Exit `0` when at least one input file is successfully analysed (`status: "ok"`), `1` when no target achieves `status: "ok"` (the JSON document is still written to stdout), and `64` on usage errors (such as missing `FILE` arguments or an unreadable `--config` path). Diagnostics present in the analysed files do not affect the exit code.
 
 ## `rigor trace`
 
-Replay HOW the engine typed a file, step by step, as a
-terminal animation. It is a teaching probe over the same
-inference `rigor check` runs.
+Replay how the engine typed a file step-by-step as an interactive terminal animation. It is a teaching and debugging probe operating over the inference engine. See [Inspecting inferred types](05-inspecting-types.md).
 
 ```sh
-rigor trace [--delay=SECONDS] [--line=N] [--verbose] [--format=json] FILE
+rigor trace [options] FILE
 ```
 
-Each frame highlights the source range being evaluated next to
-the scope's locals and describes one inference moment: a local
-binding entering the scope (`bind`), branch types merging
-(`union`), or a method call resolving — or fail-softening to
-`Dynamic[top]` (`dispatch`). On a tty the replay steps on a key
-press (`q` quits); `--delay` autoplays. `--verbose` adds every
-expression enter/result frame, `--line=N` keeps only events on
-one line, and `--format=json` dumps the raw event stream for
-tooling or course material. See
-[Inspecting inferred types](05-inspecting-types.md).
+| Flag | Purpose |
+| --- | --- |
+| `--config=PATH` | Path to `.rigor.yml`. Overrides auto-discovery. |
+| `--delay=SECONDS` | Autoplay frames with `SECONDS` delay between steps (default: step manually on key press). |
+| `--line=N` | Replay only inference events whose source range starts on line `N`. |
+| `--verbose` | Include every expression `enter` and `result` frame (default: only teachable inference milestones). |
+| `--format=FORMAT` | Output format: `text` (interactive terminal animation) or `json` (raw event stream). Default: `text`. |
+
+### Inference events
+
+By default, the replay highlights the AST expression being evaluated alongside the current local variable environment, presenting three core inference event kinds:
+- **`bind`**: A local variable binding enters the active scope.
+- **`union`**: Types from distinct control-flow branches merge into a union type.
+- **`dispatch`**: A method call resolves against its receiver or falls back to `Dynamic[top]`.
+
+With `--verbose`, every AST node entry and evaluated type result is captured as a frame.
+
+### Interactive navigation
+
+On a terminal TTY, the animation advances one frame per key press. Press `q` to exit playback early. Specifying `--delay=SECONDS` enables hands-free autoplay.
+
+In `--format=json`, the raw stream of event objects is emitted as a top-level JSON array for external tooling or courseware integration. Like `rigor explain`, it prints a deprecation notice on stderr noting the upcoming `schema_version: 1` envelope migration (see [JSON documents](#json-documents)).
+
+Exit `0` on successful playback or stream emission, `1` if the file does not exist or contains syntax errors (Prism parse errors), and `64` on usage errors (such as missing `FILE`, passing multiple files, or invalid flags).
 
 ## `rigor type-scan`
 
-Report `type_of` inference coverage across paths — a
-diagnostic-of-the-diagnoser, useful when investigating why a
-class infers poorly.
+Report `Scope#type_of` inference coverage across paths — an engine diagnostic measuring how much of the target source is directly typed without falling back to `Dynamic[top]`.
 
 ```sh
-rigor type-scan PATH...
+rigor type-scan [options] PATH...
 ```
 
-`--limit=N` caps the printed examples (default 10),
-`--show-recognized` includes fully-covered classes,
-`--threshold=RATIO` makes the command exit non-zero when the
-unrecognized-node ratio exceeds `RATIO`, and `--format=text|json`
-selects the output format. `--config=PATH` overrides config discovery.
+| Flag | Purpose |
+| --- | --- |
+| `--config=PATH` | Path to `.rigor.yml`. Overrides auto-discovery. |
+| `--format=FORMAT` | Output format (`text` or `json`). Default: `text`. |
+| `--limit=N` | Maximum unrecognized example events to display in text mode. Default: `10`. |
+| `--show-recognized` | Include AST node classes with 0 unrecognized visits in the summary table. |
+| `--threshold=RATIO` | Exit non-zero (`1`) when the ratio of unrecognized nodes (`unrecognized / visits`) exceeds `RATIO` (float). |
+
+At least one `PATH` argument is required. The command traverses every Prism node across the specified paths and queries `Scope#type_of` against a discovery-seeded project environment (matching `rigor coverage`).
+
+### Output format
+
+In text mode, `rigor type-scan` prints a summary block, class breakdown, and unrecognized examples:
+
+```text
+Type-of scan: 1 file
+  - lib/user.rb
+
+Summary:
+  files processed:   1
+  parse errors:      0
+  AST nodes visited: 165
+  unrecognized:      14 ( 8.5%)
+
+Coverage by node class (unrecognized/visits):
+  Prism::CallNode              12/120 ( 10.0%)
+  Prism::ConstantReadNode       2/ 45 (  4.4%)
+
+Unrecognized examples (showing 10 of 14):
+  Prism::CallNode  @  lib/user.rb:14:5
+```
+
+Passing `--show-recognized` includes node classes with 0 unrecognized visits in the class breakdown. `--limit=N` caps the total number of examples shown in the unrecognized events section.
+
+In `--format=json`, the command emits a JSON document conforming to schema version 1:
+
+```json
+{
+  "schema_version": 1,
+  "files": [ "lib/user.rb" ],
+  "summary": {
+    "files_processed": 1,
+    "parse_errors": 0,
+    "visited": 165,
+    "unrecognized": 14,
+    "unrecognized_ratio": 0.0848
+  },
+  "by_class": {
+    "Prism::CallNode": { "visits": 120, "unrecognized": 12 }
+  },
+  "events": [
+    { "file": "lib/user.rb", "node_class": "Prism::CallNode", "family": "call", "line": 14, "column": 5 }
+  ],
+  "parse_errors": []
+}
+```
+
+Exit `0` if the unrecognized ratio is within `--threshold` (or when no threshold is set) and no parse errors occurred. Exit `1` if the ratio exceeds `--threshold` or if any scanned file contains parse errors. Exit `64` if no paths are provided, a specified path does not exist, or flags are invalid.
 
 ## `rigor effects`
 
@@ -558,38 +652,107 @@ reviewer's judgment, which is what makes it a review artefact.
 
 ## `rigor explain`
 
-Print the catalogue entry for a diagnostic rule, or list every
-rule when called with no argument.
+Print the catalogue entry for a diagnostic rule, or list every rule when called with no argument.
 
 ```sh
-rigor explain [options] [rule]
+rigor explain [options] [<rule>]
 ```
 
-`rule` is a rule ID (`call.undefined-method`), a legacy alias,
-or a family wildcard (`call`, `flow`, `def`, `assert`, `dump`, `global`,
-`suppression`, `static`, `effect`).
-`--format=text|json` selects the output format. Exit `64` for an unknown rule.
+| Flag | Purpose |
+| --- | --- |
+| `--format=FORMAT` | Output format (`text` or `json`). Default: `text`. |
 
-It also answers the `sig.skipped.*` identifiers `rigor sig-gen`
-prints when it declines to write a signature — `rigor explain
-sig.skipped.untyped-return` says what the skip means and what to do
-instead. Those are not diagnostic rules, so they are rendered without
-a severity or a suppression line.
+### Invocation modes
+
+| Form | Purpose |
+| --- | --- |
+| (none) | Print the complete rule catalogue index (rule ID and one-line summary) followed by every `rigor sig-gen` skip reason. |
+| `<rule>` | Print the full catalogue entry for a canonical rule ID (e.g. `call.undefined-method`) or a legacy alias (e.g. `undefined-method`). |
+| `<family>` | Family wildcard (`call`, `flow`, `def`, `assert`, `dump`, `global`, `suppression`, `static`, `effect`). Prints every rule under that prefix. |
+| `<skip-reason>` | Print the explanation and recommended next action for an exact `rigor sig-gen` skip reason token (e.g. `sig.skipped.untyped-return`). Does not accept wildcards. |
+
+A rule entry includes its summary, legacy aliases, authored severity, severity mapped across configuration profiles (`lenient`, `balanced`, `strict`), evidence tier, `Fires when:` conditions, `Does not fire when:` exceptions, inline suppression syntax (`# rigor:disable <rule>`), documentation link, and the Rigor release where the rule was introduced.
+
+A `<skip-reason>` token explains why `rigor sig-gen` declined to write a signature (such as dynamic returns or unbounded blocks) and suggests what to address instead. Because skip reasons report signatures that were not written rather than code findings, they carry no severity and nothing to suppress.
+
+In `--format=json`, diagnostic rules (whether requested by a single rule ID, legacy alias, family wildcard, or with no arguments) always emit a JSON array of catalogue entry objects. In contrast, querying an individual `<skip-reason>` emits a single JSON object. In the index mode with no arguments, `--format=json` outputs only the diagnostic rule array; individual skip reasons must be queried by token. Top-level JSON shapes currently print a stderr deprecation notice regarding the future envelope migration (see [JSON documents](#json-documents)).
+
+Exit `0` on success, `64` on an unknown rule name or invalid options.
 
 ## `rigor diff`
 
-Compare the current diagnostics against a saved
-`rigor check --format=json` result and report only what is new.
+Compare current diagnostics against a saved `rigor check --format=json` result and report the delta.
 
 ```sh
 rigor diff [options] <rigor-check.json> [paths...]
 ```
 
-`--current=PATH` compares against a saved diagnostics JSON
-instead of running a fresh check. `--format=text|json` selects the
-output format (default `text`), and `--config=PATH` passes a custom
-configuration to the implicit check. Exit `1` when new
-diagnostics appear.
+| Flag | Purpose |
+| --- | --- |
+| `--current=PATH` | Compare against a saved diagnostics JSON file instead of executing a fresh `rigor check` run. |
+| `--config=PATH` | Custom `.rigor.yml` configuration forwarded to the implicit `rigor check` run. Ignored when `--current` is supplied. |
+| `--format=FORMAT` | Output format (`text` or `json`). Default: `text`. |
+
+The positional `<rigor-check.json>` file is required. Per ADR-126 § WD1, this file is a saved `rigor check --format=json` result or JSON snapshot, distinct from the rule-bucket `.rigor-baseline.yml` managed by `rigor baseline`.
+
+When `[paths...]` are given, only those source paths are evaluated by the implicit check. Note that if `<rigor-check.json>` covers the entire repository, restricting the implicit check to a subset of paths causes all diagnostics in omitted files to be reported as `- FIXED`. When `--current=PATH` is provided, `[paths...]` are ignored.
+
+### Identity matching
+
+Diagnostic identity is determined by the 6-element tuple:
+
+```
+(path, line, column, rule, source_family, message)
+```
+
+Diagnostics matching a saved tuple are considered pre-existing. Current diagnostics missing from the saved snapshot are classified as `+ NEW` (regressions). Saved diagnostics missing from the current run are classified as `- FIXED` (progress). Moving code to another line or changing a message produces one fixed and one new entry. Severity is not part of the identity tuple; changing a diagnostic's severity without moving its location does not register as a diff.
+
+### Output format
+
+Text output reports the diff header, line-by-line additions and removals, and summary counts:
+
+```text
+# diff against rigor-check.json (10 baseline / 9 current)
++ NEW   lib/user.rb:14:5 [call.undefined-method] Method `full_name` does not exist on `User`
+- FIXED lib/auth.rb:22:9 [call.argument-type-mismatch] Expected `String`, got `Integer`
+
+1 new, 1 fixed
+```
+
+With `--format=json`, the output conforms to schema version 1:
+
+```json
+{
+  "schema_version": 1,
+  "baseline": "rigor-check.json",
+  "baseline_count": 10,
+  "current_count": 9,
+  "new": [ ... ],
+  "fixed": [ ... ]
+}
+```
+
+### CI integration
+
+`rigor diff` enables regression gating in repositories adopting Rigor incrementally by catching newly introduced diagnostics without requiring all legacy diagnostics to be fixed first.
+
+In standard CI workflows, commit a saved snapshot in-tree (e.g. `rigor-check.json`) generated by `rigor check --format=json > rigor-check.json`. In CI, run:
+
+```sh
+rigor diff rigor-check.json
+```
+
+When comparing against a dynamic base branch in a multi-step job (where `rigor check` on the base branch may exit non-zero due to pre-existing diagnostics), guard the exit code under `set -e`:
+
+```sh
+# On base branch (or via git show / artifact)
+rigor check --format=json > /tmp/base-check.json || true
+
+# On PR branch
+rigor diff /tmp/base-check.json
+```
+
+Exit `0` when no new diagnostics appear (`new` is empty, even if `fixed` contains entries). Exit `1` when any new diagnostic of any severity (`error`, `warning`, or `info`) appears. Exit `64` if either JSON file is missing, contains invalid JSON, or command usage is incorrect.
 
 ## `rigor sig-gen`
 
@@ -1124,14 +1287,27 @@ caveat for container / cross-filesystem setups).
 
 ## `rigor playground`
 
-Start the browser playground (a CodeMirror editor with
-real-time diagnostics). Requires the separate `rigor-playground`
-gem; if it is not installed the command prints an install hint
-and exits `64`.
+Start a local browser playground (a CodeMirror editor with real-time Rigor diagnostics and type inspection).
 
 ```sh
-rigor playground
+rigor playground [options]
 ```
+
+| Flag | Purpose |
+| --- | --- |
+| `--port=PORT` | Port to bind the playground HTTP server to (default: `9393`). |
+| `--no-open` | Do not automatically open the playground URL in the default browser on launch. |
+
+The playground requires the separate `rigor-playground` companion gem. When the gem is not installed in the active Ruby environment, the command prints an installation hint on stderr and exits `64` (`CLI::EXIT_USAGE`):
+
+```text
+rigor playground requires the rigor-playground gem.
+Install it with: gem install rigor-playground
+```
+
+When installed, the command boots the local web server and opens an interactive browser playground where Ruby code can be written, edited, and analyzed with immediate feedback.
+
+Exit `0` on clean shutdown, `1` if server startup fails (e.g. port already in use), and `64` if `rigor-playground` is missing or on usage errors.
 
 ## `rigor skill`
 
@@ -1190,24 +1366,27 @@ they now read as an unknown skill. Use the forms above.
 
 ## `rigor describe`
 
-Top-level alias for [`rigor skill describe`](#rigor-skill) — the
-onboarding entry point that recommends the next skill for this project.
-A bare `rigor describe` is the intuitive guess most users reach for
-first, so it is surfaced as its own command ([ADR-73](../adr/73-skill-driven-user-experience.md)
-§ WD2).
+Top-level alias for [`rigor skill describe`](#rigor-skill) — the onboarding entry point that assesses the project's state and recommends the next skill to run ([ADR-73](../adr/73-skill-driven-user-experience.md) § WD2).
 
 ```sh
-rigor describe
+rigor describe [--deep]
 ```
 
-It reports a presence-only project-state probe (does a `.rigor.yml`,
-`.rigor-baseline.yml`, `sig/` directory, or CI integration exist?) and a
-recommended next skill. It is read-only and side-effect-free — it never
-runs `rigor check`. Identical output to `rigor skill describe`.
+| Flag | Purpose |
+| --- | --- |
+| `--deep` | Run `rigor check` first and route the headline recommendation on the diagnostic results. |
 
-`rigor describe --deep` forwards to
-[`rigor skill describe --deep`](#rigor-skill), which opts into running the
-check first — slow, and it writes the cache.
+### Audit modes
+
+By default, `rigor describe` performs a presence-only probe checking for the existence of `.rigor.yml`, `.rigor-baseline.yml`, a `sig/` directory, and CI configurations. This default mode is read-only, fast, and side-effect-free — it never executes `rigor check` and never reads or writes `.rigor/cache`.
+
+Passing `--deep` opts into running `rigor check` before generating recommendations, routing based on analysis health:
+- **`rigor-doctor`**: Selected if the RBS environment builds with 0 classes or any `configuration-error` diagnostic is raised.
+- **`rigor-monkeypatch-resolve`**: Selected if at least one third of remaining error diagnostics stem from calls resolving to project-side reopened core or gem definitions (addressable via `pre_eval:`).
+- **`rigor-baseline-reduce`**: Selected when remaining error diagnostics exist.
+- **Presence-only recommendation**: Retained when the analysis is completely clean or when no configuration exists yet.
+
+Output is identical to `rigor skill describe`. Exit `0` on completion, or `64` on invalid options.
 
 ## `rigor docs`
 
@@ -1361,18 +1540,29 @@ Exits `1` when any check fails, `0` when all pass.
 
 ## `rigor upgrade`
 
-Migration command skeleton ([ADR-50](../adr/50-release-engineering-and-stability-strategy.md)
-WD7). The real body lands when a concrete backwards-compatibility
-break gives it a target (e.g. re-running `baseline regenerate`
-against a strengthened default profile, surfacing renamed
-suppression ids, reporting `bleeding_edge:` graduations).
+Migration command skeleton for major version transitions and breaking changes ([ADR-50](../adr/50-release-engineering-and-stability-strategy.md) § WD7).
 
 ```sh
 rigor upgrade
 ```
 
-Until then it prints the current version and notes that upgrade is
-queued. Exits `0`.
+### Design and future role
+
+The upgrade command is designed to automate project migrations when major version transitions or breaking changes occur:
+- **Baseline regeneration**: Re-running `rigor baseline regenerate` against strengthened default rules or profiles.
+- **Suppression updates**: Surfacing and updating renamed or deprecated inline `# rigor:disable` rules.
+- **Bleeding-edge consolidation**: Reporting and removing graduated features from `bleeding_edge:` configurations.
+
+### Current status
+
+Until a backward-incompatible release provides an active migration target, the command serves as a placeholder. It prints the current Rigor version and reports that migrations are queued:
+
+```text
+rigor upgrade: No migration target available yet (ADR-50 WD7, queued).
+Current version: <version>
+```
+
+Exit `0` on completion.
 
 ## `rigor help`
 

@@ -3736,8 +3736,6 @@ module Rigor
         # The mismatch (or nil) for one argument against the parameter every overload has at its position. Issue
         # #1362 — a builtin global's seed, or its copy, is judged by the file's writes to the global.
         def overload_argument_mismatch(arg, params, param_overrides, arg_scope, coerce_method)
-          return nil if DeclarationSourcedGuard.gradual_narrowed?(arg, arg_scope)
-
           written = DeclarationSourcedGuard.written_type(arg, arg_scope)
           arg_type = written || arg_scope.type_of(arg)
           if nil_member?(arg_type) # pure nil only — not a `T | nil` union
@@ -4097,8 +4095,6 @@ module Rigor
 
         # {#single_argument_mismatch} for an argument that reads no builtin global's seed directly.
         def read_argument_mismatch(param, arg, scope, param_overrides)
-          return nil if DeclarationSourcedGuard.gradual_narrowed?(arg, scope)
-
           arg_type = scope.type_of(arg)
 
           if nil_member?(arg_type)
@@ -4111,6 +4107,7 @@ module Rigor
           param_type = param_overrides[param.name] || translate_param_type(param.type, scope.environment)
           return nil if param_type.is_a?(Type::Dynamic) || param_type.is_a?(Type::Top)
           return nil if arg_type.is_a?(Type::Dynamic) || arg_type.is_a?(Type::Top)
+          return nil if gradual_narrowing_accepted?(arg, arg_type, param_type, scope)
           return nil unless argument_genuinely_mismatches?(arg, arg_type, param_type, scope)
           # Issue #1362 — a value that mixes such a global with something else (`c ? $stdout : StringIO.new`) is judged
           # without the declared members the file never writes, as it was before the join.
@@ -4146,6 +4143,19 @@ module Rigor
           return false if type.is_a?(Type::Dynamic) || type.is_a?(Type::Top)
 
           Inference::Acceptance.accepts(param_type, type, mode: :gradual).no?
+        end
+
+        # Issue #2656 — a local a class guard narrowed from a `Dynamic` value
+        # ({DeclarationSourcedGuard.gradual_narrowed?}) is judged by its class, not by the literals the parameter
+        # names: `mode(x) if x.is_a?(String)` with `mode: ("r" | "w")` is accepted, as the gradual value was, while
+        # `num(x) if x.is_a?(String)` with `num: (1 | 2)` still reports, since no String is ever `1` or `2`. The
+        # parameter's value-pinned members are widened to their classes ({Type::Combinator.widen_value_pinned}) and
+        # the narrowed type is judged against that. The overload path ({#non_nil_arg_overload_mismatch}) already
+        # judges by class, so it needs no such reading.
+        def gradual_narrowing_accepted?(arg, arg_type, param_type, scope)
+          return false unless DeclarationSourcedGuard.gradual_narrowed?(arg, scope)
+
+          !Inference::Acceptance.accepts(Type::Combinator.widen_value_pinned(param_type), arg_type, mode: :gradual).no?
         end
 
         # The parameter rejects the argument AND the rejection is not a

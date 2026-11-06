@@ -3,7 +3,8 @@
 # Issue #2656 — a class guard on a gradual value narrows it to the nominal class, so the narrowed value failed a
 # literal-typed parameter on correct code (`def f(x) = (Sink.new.mode(x) if x.is_a?(String))` reported `got String`).
 # The binding keeps the `Nominal` (dispatch, `call.undefined-method` and `call.wrong-arity` still read it) and carries a
-# gradual-narrowing mark, under which `call.argument-type-mismatch` judges it as the gradual value it came from.
+# gradual-narrowing mark, under which `call.argument-type-mismatch` judges it by its class rather than against the
+# parameter's literals.
 require "spec_helper"
 
 RSpec.describe "a class guard keeps a gradual value gradual (#2656)", type: :runner do
@@ -44,12 +45,12 @@ RSpec.describe "a class guard keeps a gradual value gradual (#2656)", type: :run
       .to eq(["call.argument-type-mismatch"])
   end
 
-  it "stays silent for a parameter every overload declares" do
-    # A known limit: `pick` raises on a String at run time, and before #2656 this reported. The mark withholds
-    # whatever the parameter, as the gradual value it came from would be accepted. The control below shows the rule
-    # is live on this signature.
-    expect(mismatches("def f(x) = (Sink.new.pick(x) if x.is_a?(String))\n")).to eq([])
-    expect(mismatches("def f(x) = Sink.new.pick([x].join)\n")).to eq(["call.argument-type-mismatch"])
+  it "fires for a class no overload accepts (only the literals are read past)" do
+    expect(mismatches("def f(x) = (Sink.new.pick(x) if x.is_a?(String))\n")).to eq(["call.argument-type-mismatch"])
+  end
+
+  it "fires for a class the literal-typed parameter can never hold" do
+    expect(mismatches("def f(x) = (Sink.new.num(x) if x.is_a?(String))\n")).to eq(["call.argument-type-mismatch"])
   end
 
   it "fires for a String-typed local narrowed by is_a? (only a gradual value is marked)" do

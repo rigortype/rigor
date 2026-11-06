@@ -60,9 +60,9 @@ module Rigor
         end
 
         # Issue #2656 — true when `node` reads a local a class guard narrowed from a `Dynamic` value
-        # ({Scope#with_gradual_narrowing_mark}). `call.argument-type-mismatch` judges such an argument as the gradual
-        # value it came from, which every parameter accepts, so it withholds; the other rules read the narrowed
-        # `Nominal` as before.
+        # ({Scope#with_gradual_narrowing_mark}). `call.argument-type-mismatch` judges such an argument by its class
+        # rather than against the parameter's literals (`CheckRules#gradual_narrowing_accepted?`); the other rules
+        # read the narrowed `Nominal` as before.
         def gradual_narrowed?(node, scope)
           node.is_a?(Prism::LocalVariableReadNode) && scope.gradual_narrowing?(node.name)
         end

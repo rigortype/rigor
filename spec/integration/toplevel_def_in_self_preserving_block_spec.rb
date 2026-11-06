@@ -152,27 +152,26 @@ RSpec.describe "a cross-file top-level def called from a block (#2861)", type: :
     end
 
     # The class's own `myhelper` returns a String, which Ruby runs; the top-level def must not capture it.
-    # `ClosureEscapeAnalyzer` answers `tap` / `then` for every class, so a project reopening on `Object` or `Kernel`
-    # must count for every receiver. Ruby runs `Foo#format` here ("FOO").
-    it "keeps the mark where the project redefines tap on Object or then on Kernel" do
-      use = script(
-        "class Object",
-        "  def tap(&b) = (instance_exec(&b); self)",
-        "end",
-        "module Kernel",
-        "  def then(&b) = instance_exec(&b)",
-        "end",
-        "class Foo",
-        "  def format(x) = \"foo\"",
-        "  def myhelper(x) = \"foo\"",
-        "end",
-        "Foo.new.tap { format(1).upcase }",
-        "Foo.new.then { format(1).upcase }",
-        "Foo.new.tap { myhelper(1).upcase }",
-        "Foo.new.then { myhelper(1).upcase }"
-      )
+    # `ClosureEscapeAnalyzer` answers `tap` / `then` for every class, so a project definition every receiver reaches
+    # (`Object`, `Kernel`) must count for every receiver. Ruby runs `Foo#format` here ("FOO").
+    {
+      "tap on Object" => ["class Object", "  def tap(&b) = (instance_exec(&b); self)", "end"],
+      "then on Kernel" => ["module Kernel", "  def then(&b) = instance_exec(&b)", "end"]
+    }.each do |label, reopening|
+      it "keeps the mark where the project defines #{label}" do
+        name = reopening.join[/def (\w+)/, 1]
+        use = script(
+          *reopening,
+          "class Foo",
+          "  def format(x) = \"foo\"",
+          "  def myhelper(x) = \"foo\"",
+          "end",
+          "Foo.new.#{name} { format(1).upcase }",
+          "Foo.new.#{name} { myhelper(1).upcase }"
+        )
 
-      expect(undefined("helpers.rb" => helpers, "script.rb" => use)).to eq([])
+        expect(undefined("helpers.rb" => helpers, "script.rb" => use)).to eq([])
+      end
     end
 
     it "answers Dynamic for instance_exec on an object whose class defines the name" do

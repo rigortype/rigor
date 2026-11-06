@@ -51,11 +51,9 @@ module Rigor
       UNIVERSAL_OWNERS = %w[BasicObject Kernel Object Module Class].freeze
       private_constant :UNIVERSAL_OWNERS
 
-      # Whether the project defines `method_name` on a {UNIVERSAL_OWNERS} entry or as a top-level `def` (a private
-      # `Object` method, which precedes `Kernel`).
+      # Whether the project defines `method_name` on a {UNIVERSAL_OWNERS} entry. A top-level `def` of the name is
+      # private, so an explicit-receiver call raises NoMethodError before any block runs, and is not counted.
       def universally_defined?(method_name, scope)
-        return true unless scope.top_level_def_for(method_name).nil?
-
         UNIVERSAL_OWNERS.any? { |owner| ProjectMethodOwnership.defines?(owner, method_name, :instance, scope) }
       end
     end

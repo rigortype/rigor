@@ -42,6 +42,11 @@ RSpec.describe "a class guard keeps a gradual value gradual (#2656)", type: :run
       .to eq(["call.argument-type-mismatch"])
   end
 
+  it "fires once the narrowed local is rebound (a write drops the mark)" do
+    source = "def f(x)\n  return unless x.is_a?(String)\n  x = x.upcase\n  Sink.new.mode(x)\nend\n"
+    expect(mismatches(source)).to eq(["call.argument-type-mismatch"])
+  end
+
   it "keeps call.undefined-method on the narrowed value (the true-positive control)" do
     rules = analyze("def f(x) = (x.upcase if x.is_a?(Integer))\n", sig: signature).diagnostics.map(&:qualified_rule)
     expect(rules).to include("call.undefined-method")

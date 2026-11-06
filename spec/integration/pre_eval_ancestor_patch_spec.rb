@@ -512,6 +512,34 @@ RSpec.describe "a pre_eval: patch on an ancestor reaches its descendants (#1708)
       expect(rules(result)).to eq([["a.rb", 1, "call.undefined-method"], ["a.rb", 2, "call.undefined-method"]])
     end
 
+    # `Integer.kx` reaches Kernel's instance side (`instance Kernel` in Integer's singleton ancestors)
+    # and meets the same `:module_function` override — the private copy must not leak onto Integer's
+    # class object either. Ruby 4.0.5: NoMethodError (private method 'kx').
+    it "still reports Integer.kx through Kernel's instance side on the singleton walk" do
+      result = run_project("ext/core.rb" => inherited_patch, "lib/a.rb" => "Integer.kx\n")
+
+      expect(rules(result)).to eq([["a.rb", 1, "call.undefined-method"]])
+    end
+
+    # `private_class_method :kx` (or `private :kx` in `class << self`) after `module_function :kx`
+    # makes Ruby refuse `Kernel.kx` — NoMethodError (private method 'kx') — so the inherited-name
+    # singleton copy must take the override the scanner records, not keep answering public.
+    it "reports Kernel.kx when a private_class_method makes the inherited copy private" do
+      patch = <<~RUBY
+        module KHelp
+          def kx = 1
+        end
+        module Kernel
+          include KHelp
+          module_function :kx
+          private_class_method :kx
+        end
+      RUBY
+      result = run_project("ext/core.rb" => patch, "lib/a.rb" => "Kernel.kx\n")
+
+      expect(rules(result)).to eq([["a.rb", 1, "call.undefined-method"]])
+    end
+
     it "does not report the singleton copies under the fork pool" do
       result = run_project({ "ext/core.rb" => inherited_patch, "lib/a.rb" => "Kernel.kx\nComparable.mh\n1.kx\n" },
                            { "workers" => 2 })

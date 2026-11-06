@@ -1776,7 +1776,7 @@ module Rigor
           return equivalent(path, def_node, class_name, kind, inferred, declared_rbs)
         end
 
-        unless tighter?(declared, inferred) && !literal_decline?(inferred, def_node)
+        unless tighter?(declared, inferred) && !literal_decline?(inferred, def_node, declared)
           return equivalent(path, def_node, class_name, kind, inferred, declared_rbs)
         end
 
@@ -2065,9 +2065,22 @@ module Rigor
 
       def structurally_covers?(inferred_member, declared_member)
         return true if inferred_member == declared_member
+        return true if nominal_subclass_of?(inferred_member, declared_member)
 
         result = inferred_member.accepts(declared_member)
         result.respond_to?(:yes?) && result.yes?
+      end
+
+      # Issue #2914 — a proposed member that is a subclass of the declared one keeps that member: declared
+      # `Prism::Node?` against an inferred `Prism::DefNode?` narrows what a caller receives without dropping a
+      # branch the caller could observe, unlike a lost `nil` or a lost alternate. Only a bare nominal pair whose
+      # ordering the analyzer's class data decides (`Environment#class_ordering`, RBS hierarchy included) is
+      # read this way; a generic pair or an `:unknown` ordering stays uncovered, so the guard still declines.
+      def nominal_subclass_of?(inferred_member, declared_member)
+        return false unless inferred_member.is_a?(Type::Nominal) && declared_member.is_a?(Type::Nominal)
+        return false unless inferred_member.type_args.empty? && declared_member.type_args.empty?
+
+        @environment&.class_ordering(inferred_member.class_name, declared_member.class_name) == :subclass
       end
 
       GENERIC_COLLECTION_CLASSES = %w[
@@ -2085,8 +2098,8 @@ module Rigor
       # The two reasons a `Type::Constant` the body proves is not the method's contract. Both say the same
       # thing from opposite ends: the precision is real about this body and says nothing about the promise
       # the method makes to its callers.
-      def literal_decline?(inferred, def_node)
-        computed_literal_tightening?(inferred, def_node) || pins_literal_over_declaration?(inferred)
+      def literal_decline?(inferred, def_node, declared)
+        computed_literal_tightening?(inferred, def_node) || pins_literal_over_declaration?(inferred, declared)
       end
 
       # Issue #837 — a proposal that erases to an RBS LITERAL type never tightens an existing declaration.
@@ -2111,9 +2124,14 @@ module Rigor
       # is refused when ANY member is a literal: a mixed `("a" | Float)` pins `"a"` just as a bare one does.
       # A literal nested inside a shape carrier (`[1, 2]`, a `HashShape` value) is a different question,
       # already answered for the collection declarations that matter by {#narrows_collection_to_shape?}.
-      def pins_literal_over_declaration?(inferred)
+      #
+      # A literal the declaration itself spells is not pinned over it (#2914): declared `Prism::Node?` against
+      # a proposed `Prism::DefNode?` carries the same `nil` member the author wrote, so only the narrowed
+      # nominal arm is new. A literal the declaration does not spell is refused as before.
+      def pins_literal_over_declaration?(inferred, declared)
         members = inferred.is_a?(Type::Union) ? inferred.members : [inferred]
-        members.any? { |member| rbs_literal?(member) }
+        declared_members = declared.is_a?(Type::Union) ? declared.members : [declared]
+        members.any? { |member| rbs_literal?(member) && !declared_members.include?(member) }
       end
 
       # `Type::Constant#erase_to_rbs` spells the values RBS writes as literal types (`true` / `false` /

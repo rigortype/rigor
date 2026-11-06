@@ -284,6 +284,9 @@ existing RBS-declared return when:
    `Type::Constant` RBS cannot spell as a literal erases
    to its class name, so a body of `3.14` still proposes
    `Float`.
+   A literal member the declaration itself spells is not
+   new, so a `nil` the declared `T?` already carries does
+   not trip this clause (#2914).
 
 The strict-mode acceptance check is the same predicate
 the analyzer uses for return-type-mismatch
@@ -723,6 +726,21 @@ and could not carry it: `Type::Top` and `Type::Bot` share no ancestor, so
 and `Cache::RbsCacheProducer.generation_cap` — declared `Integer`, body `2`, no
 override anywhere — has no wider declaration to find.
 
+**2026-11-07 — a member narrowed to a subclass is not a lost member.** Declared
+`Prism::Node?` against a body proving `Prism::DefNode?` (`NodeContext#enclosing_def`)
+keeps the declared `nil` and narrows the one nominal arm. No branch a caller could
+observe is dropped, so `loses_declared_union_member?` reads a declared nominal member
+as covered by a proposed member that is a subclass of it. Only a pair of bare nominals
+(no type arguments) whose ordering `Environment#class_ordering` decides as `:subclass`
+counts. A generic pair, an ordering the analyzer cannot decide, a dropped `nil`, a
+dropped alternate and a widening all decline as before. The literal clause above stops
+counting a literal member the declaration itself spells, so the shared `nil` no longer
+reads as pinned ([#2914](https://github.com/rigortype/rigor/issues/2914)). The
+narrowing is still proposed only when clause 2's acceptance check says yes, and that
+check orders classes by the host process's Ruby hierarchy: a project class sig-gen has
+not loaded answers `maybe`, so its subclass narrowing stays declined, with or without
+a union.
+
 ## Revision history
 
 - 2026-05-12 — initial draft.
@@ -762,3 +780,7 @@ override anywhere — has no wider declaration to find.
   `Nominal` / `Singleton` member, and bound `before`-block ivars for RSpec
   observations. See the dated entries in § "How caller-side observations are
   collected".
+- 2026-11-07 — #2914 accepted a subclass narrowing of a declared union member,
+  and stopped clause 3 from counting a literal member the declaration itself
+  spells. See the fourth dated paragraph in § "The inference-vs-RBS
+  contradiction rule".

@@ -1851,7 +1851,10 @@ module Rigor
         return result unless result.is_a?(Type::Union) && result.members.any? { |m| nil_constant?(m) }
 
         truthy, = Narrowing.predicate_scopes(node.block.body.body.first, scope.with_local(param, result))
-        non_nil = Narrowing.narrow_non_nil(truthy.local(param))
+        narrowed = truthy.local(param)
+        return result if narrowed.nil?
+
+        non_nil = Narrowing.narrow_non_nil(narrowed)
         return result if non_nil.is_a?(Type::Bot) || introduces_dynamic?(non_nil, result)
 
         Type::Combinator.union(non_nil, Type::Combinator.constant_of(nil))
@@ -1903,7 +1906,7 @@ module Rigor
         return false if test.block || test.safe_navigation?
 
         receiver = test.receiver
-        return false unless receiver.is_a?(Prism::LocalVariableReadNode) && receiver.name == name && receiver.depth.zero?
+        return false unless receiver.is_a?(Prism::LocalVariableReadNode) && receiver.name == name
 
         args = test.arguments&.arguments
         !args.nil? && args.size == 1 &&

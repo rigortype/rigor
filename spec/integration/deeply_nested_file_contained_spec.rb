@@ -115,6 +115,9 @@ RSpec.describe "a file nested too deeply to analyse is contained to that file (#
   # Prism's own parse of a source nested near its cap overflows in C: no backtrace, and no stack to recover on. That
   # keeps the run-level abort (exit 70), since a second C overflow in the same process kills it with a signal.
   it "keeps the exit-70 abort for an overflow raised from C" do
+    # The `.rigor.yml` makes discovery parse (and rescue) the file first; without it an earlier unrescued parse aborts
+    # and the examples passes with every re-raise stripped.
+    File.write(".rigor.yml", "paths:\n  - .\n")
     File.write("deep.rb", "x = #{'[' * 10_000}1#{']' * 10_000}\n")
     _, err, status = Open3.capture3(RbConfig.ruby, File.expand_path("../../exe/rigor", __dir__), "check", "--no-cache",
                                     "--no-ci-detect", "deep.rb", stdin_data: "")

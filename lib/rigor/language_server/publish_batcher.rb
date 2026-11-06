@@ -50,15 +50,33 @@ module Rigor
       private
 
       def run_owned_round
+        finished = false
         loop do
           run_batch
-          break unless more_pending?
+          next if more_pending?
+
+          finished = true
+          break
         end
       rescue StandardError, SystemStackError => e
-        raise if e.is_a?(SystemStackError) && e.backtrace.nil? # C-level overflow: not contained
-
-        @lock.synchronize { @running = false }
         @on_error&.call(e)
+      ensure
+        # A round that ends any other way than `more_pending?` releasing ownership must release it itself, or no
+        # later key ever starts a round and no document is published again (#2455).
+        @lock.synchronize { @running = false } unless finished
+      end
+
+      # Publishes the round's keys through one `on_batch` call. A `SystemStackError` raised from C (no backtrace: a
+      # document nested deeply enough to overflow `Prism.parse` on this thread's smaller stack) is not attributable to a
+      # key, so a batch is retried key by key and a key that overflows again is dropped; the others publish normally.
+      def run_batch
+        keys = @lock.synchronize { @pending.uniq.tap { @pending.clear } }
+        @on_batch.call(keys)
+      rescue SystemStackError => e
+        raise unless e.backtrace.nil?
+
+        # A lone key that overflows is dropped; the round goes on to the keys that joined while it ran.
+        keys.each { |key| run_single(key) } if keys.size > 1
       end
 
       # True when another key joined `@pending` while this round was running — the caller's loop should run
@@ -74,9 +92,10 @@ module Rigor
         end
       end
 
-      def run_batch
-        keys = @lock.synchronize { @pending.uniq.tap { @pending.clear } }
-        @on_batch.call(keys)
+      def run_single(key)
+        @on_batch.call([key])
+      rescue SystemStackError => e
+        raise unless e.backtrace.nil?
       end
     end
   end

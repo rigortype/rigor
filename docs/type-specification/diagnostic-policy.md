@@ -93,9 +93,11 @@ The cross-file discovery pass is all or nothing per file: a file that overflows 
 table, in a full run and in an incremental one alike, so the findings in other files do not depend on the mode. The
 language server answers a request on such a document with an internal error and keeps running.
 
-A `SystemStackError` raised from C (`Prism.parse` of a source nested near Prism's own cap has no backtrace, and the
-process cannot survive a second such overflow), or outside the per-file phases, is NOT contained: it stays the
-run-level abort (`CLI::FATAL_ERRORS`, exit `70`).
+A `SystemStackError` raised from C (`Prism.parse` of a source nested near Prism's own cap has no backtrace; a second
+deep `Prism.parse` after rescuing one aborts the main-thread process with a signal), or outside the per-file phases, is
+NOT contained there: it stays the run-level abort (`CLI::FATAL_ERRORS`, exit `70`). The language server's debouncer and
+publish-batcher threads do contain it per document: the batcher drops that document from the round and publishes the
+others, and releases its round either way.
 
 ## `Dynamic[T]` display rules
 

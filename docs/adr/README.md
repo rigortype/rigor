@@ -142,7 +142,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-126 | [One CLI grammar, versioned JSON documents, and a gated command catalogue](126-cli-grammar-and-catalogue.md) | Accepted (not yet implemented; work filed as #2502–#2505) |
 | ADR-127 | [The callee mutation floor answers a graph property, not a walk](127-callee-floor-graph-budget.md) | Accepted (K = 64; implemented in #2564) |
 | ADR-128 | [The plugin hook surface as structural interfaces, and how its breaking changes ship](128-plugin-hook-surface-interfaces.md) | Accepted (slice 1 landed in #2714, slice 2 in #2694, slice 3 in #2822) |
-| ADR-129 | [Remember `type_of` results under a closed typing state](129-type-of-result-memo.md) | Accepted; stages 1–3 landed; stage 4 stopped at its re-evaluation trigger (engine-warm on Mastodon did not separate: leaf −1.25%, hub −1.89%); nothing live, the memo stays a shadow/audit tool |
+| ADR-129 | [Remember `type_of` results under a closed typing state](129-type-of-result-memo.md) | Accepted (stages 1–3 landed; stage 4 stopped at its engine-warm re-evaluation trigger; nothing live, the memo is a shadow/audit tool) |
 | ADR-130 | [Plugin-interface values: member dispatch, and `untyped` everywhere else](130-interface-typed-values-dispatch-under-untyped-parity.md) | Accepted (slice 1a landed in #2808; slice 1b landed in #2815; slice 2 landed in #2822) |
 
 ## Adding a New ADR

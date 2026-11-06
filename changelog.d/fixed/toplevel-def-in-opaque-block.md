@@ -1,0 +1,3 @@
+- **[inference]** A project's top-level `def` called from an iterator block in another file now binds instead of falling through to the `Kernel` method of the same name. ([#2907](https://github.com/rigortype/rigor/pull/2907))
+  - With `def format(x) = 42` in one file, `rows.map { |r| format(r).bit_length }` in another no longer reports `undefined method 'bit_length' for String`, and `rows.map { |r| myhelper(r).upcase }` now reports on the helper's `42`.
+  - A block whose callee may run it on another object (a receiverless DSL call, `instance_exec`) still declines the bind, and the call now answers `Dynamic` there instead of the `Kernel` / `Object` method.

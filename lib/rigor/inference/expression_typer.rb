@@ -1939,8 +1939,15 @@ module Rigor
         return false if class_name.nil?
         return false if scope.discovered_method_through_ancestors?(class_name, method_name, :instance)
 
-        owner = safe_rbs_method_definition(class_name, method_name, :instance)&.defined_in
-        !owner.nil? && CORE_FINDER_OWNERS.include?(owner.to_s.delete_prefix("::"))
+        defined_in = safe_rbs_method_definition(class_name, method_name, :instance)&.defined_in
+        return false if defined_in.nil?
+
+        owner = defined_in.to_s.delete_prefix("::")
+        return false unless CORE_FINDER_OWNERS.include?(owner)
+
+        # A reopened core owner (`module Enumerable; def find = 2.5; end`) replaces the method for every includer,
+        # which the ancestor walk above does not reach for a class whose ancestry RBS alone records (`Set`).
+        !scope.discovered_method?(owner, method_name, :instance)
       end
 
       def single_block_parameter(block)

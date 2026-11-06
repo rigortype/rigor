@@ -125,4 +125,17 @@ RSpec.describe "a class-test block narrows only a core finder (#2719)", type: :r
     RUBY
     expect(diagnostics(source)).to eq([])
   end
+
+  it "keeps the answer of a finder a reopened core owner replaces for an RBS-only includer" do
+    source = <<~RUBY
+      require "set"
+      module Enumerable
+        def find = 2.5
+      end
+      xs = ARGV.map { |a| a.empty? ? 1 : 2.5 }
+      r = Set.new(xs).find { |n| n.is_a?(Integer) }
+      puts r.nan? if r
+    RUBY
+    expect(diagnostics(source)).to eq([])
+  end
 end

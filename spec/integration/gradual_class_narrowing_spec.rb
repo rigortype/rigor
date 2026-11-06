@@ -9,7 +9,7 @@ require "spec_helper"
 RSpec.describe "a class guard keeps a gradual value gradual (#2656)", type: :runner do
   let(:signature) do
     { "sink.rbs" => "class Sink\n  def mode: (\"r\" | \"w\") -> void\n  def num: (1 | 2) -> void\n  " \
-                    "def pick: (\"r\" | \"w\") -> void | (1 | 2) -> void\nend\n" }
+                    "def pick: (Integer) -> void | (Symbol) -> void\nend\n" }
   end
 
   def mismatches(source)
@@ -44,8 +44,12 @@ RSpec.describe "a class guard keeps a gradual value gradual (#2656)", type: :run
       .to eq(["call.argument-type-mismatch"])
   end
 
-  it "stays silent for an overloaded parameter" do
+  it "stays silent for a parameter every overload declares" do
+    # A known limit: `pick` raises on a String at run time, and before #2656 this reported. The mark withholds
+    # whatever the parameter, as the gradual value it came from would be accepted. The control below shows the rule
+    # is live on this signature.
     expect(mismatches("def f(x) = (Sink.new.pick(x) if x.is_a?(String))\n")).to eq([])
+    expect(mismatches("def f(x) = Sink.new.pick([x].join)\n")).to eq(["call.argument-type-mismatch"])
   end
 
   it "fires for a String-typed local narrowed by is_a? (only a gradual value is marked)" do

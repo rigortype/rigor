@@ -1,0 +1,3 @@
+- **[sig-gen]** `rigor sig-gen` now proposes a return that narrows a declared member to a subclass of it while keeping every other declared member, such as `Prism::DefNode?` over a declared `Prism::Node?` ([#2934](https://github.com/rigortype/rigor/pull/2934)).
+  - Dropping `nil` or another member, widening, a generic pair, and a class whose ordering the analyzer cannot decide still decline.
+  - A `nil` the declaration already spells no longer counts as a pinned literal, so it does not block the narrowing.

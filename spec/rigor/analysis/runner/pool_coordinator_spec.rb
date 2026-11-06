@@ -595,7 +595,8 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
     it "builds a fresh Environment via #build_runner_environment when no override was configured" do
       coordinator = build_coordinator(environment_override: nil)
       built = instance_double(Rigor::Environment)
-      allow(coordinator).to receive(:build_runner_environment).with(source_files: ["a.rb"]).and_return(built)
+      allow(coordinator).to receive(:build_runner_environment).with(source_files: ["a.rb"],
+                                                                    eager: true).and_return(built)
 
       expect(coordinator.resolve_sequential_environment(source_files: ["a.rb"])).to equal(built)
     end
@@ -1334,7 +1335,7 @@ RSpec.describe Rigor::Analysis::Runner::PoolCoordinator do
 
       expect(result).to equal(built)
       expect(Rigor::Environment).to have_received(:for_project).with(
-        libraries: ["set"], signature_paths: ["sig"], cache_store: cache_store,
+        eager: true, libraries: ["set"], signature_paths: ["sig"], cache_store: cache_store,
         plugin_registry: plugin_registry, dependency_source_index: dependency_source_index,
         rbs_extended_reporter: rbs_reporter, boundary_cross_reporter: boundary_reporter,
         source_rbs_synthesis_reporter: synthesis_reporter,

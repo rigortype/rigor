@@ -33,6 +33,7 @@ RSpec.describe Rigor::ProjectEnvironment do
       source_files
       locked_gems
       required_features
+      eager
     ].freeze
   end
 

@@ -402,7 +402,8 @@ module Rigor
         # analysis, under rescues that turn any raise into one `internal analyzer error` row per file; building it
         # now raises the {CoreRootError} once, before analysis, where the CLI reports it as a configuration error.
         # Issue #2883 — the default core is built here too (`eager:`), so no `type_of` builds the environment.
-        eager ? loader.prepare_for_typing! : loader.verify_core_root!
+        # A non-main Ractor worker keeps the lazy build: the `rbs` gem's unshareable constants are unreadable there.
+        eager && Ractor.main? ? loader.prepare_for_typing! : loader.verify_core_root!
         # ADR-20 slice 2c + 2e — seed hkt_registry with the bundled builtins. The Environment's
         # `#hkt_registry` getter then LAZILY merges in the RBS env scan on first call so fast paths that
         # don't consult HKT (e.g. `rigor check --cache-stats --no-stats`) don't pay the eager env-build cost

@@ -695,8 +695,34 @@ module Rigor
       rebuild(opaque_block_self: true, block_self_unknown: true)
     end
 
+    # Issue #2861 — the {#block_self_unknown?} value a block whose yielding call provably runs it under the
+    # caller's own `self` ({Inference::SelfPreservingBlock}) is entered with, when the caller's `self` is not
+    # already unmodelled. It reads as unknown everywhere `true` does, so issue #1717's explicit-`self` exemption is
+    # unchanged; what it withholds is the #316 opaque mark, and it tells a block nested beneath it that it does
+    # not sit under an index walk ({#walked_block_self_unknown?}).
+    PRESERVED_BLOCK_SELF = :preserved
+
+    # Issue #2861 — the entry for a block {Inference::SelfPreservingBlock} proves runs under the caller's `self`
+    # (`rows.map { … }`, `5.times { … }`). Ruby gives the block the `self` the call site has, so the block is as
+    # opaque as the scope around it and no more: under an opaque mark it enters as {#entering_opaque_block} does,
+    # and elsewhere it keeps the #316 mark off, so a cross-file top-level `def` binds there as it does beside the
+    # call ({#bindable_top_level_def_for}).
+    def entering_self_preserving_block
+      return entering_opaque_block if @opaque_block_self
+      return self if @block_self_unknown == true || @block_self_unknown == PRESERVED_BLOCK_SELF
+
+      rebuild(block_self_unknown: PRESERVED_BLOCK_SELF)
+    end
+
     # True when this scope sits inside a block whose `self` is unmodelled ({#entering_opaque_block}).
     def opaque_block_self? = @opaque_block_self
+
+    # Issue #2861 — true where the unknown-`self` mark came from the index walk or a value-position block
+    # ({#with_block_self_unknown}) rather than a block entry: the mark is set, the #316 one is not, and it is not
+    # a {PRESERVED_BLOCK_SELF} entry's. A block nested in such a scope keeps the #316 mark off (issue #1717).
+    def walked_block_self_unknown?
+      @block_self_unknown && !@opaque_block_self && @block_self_unknown != PRESERVED_BLOCK_SELF ? true : false
+    end
 
     # Issue #1717 — true when this scope sits in a block whose `self` the engine does not know, so an explicit
     # `self.m` there is no evidence `m` is missing: the yielding method may `instance_exec` the block on another

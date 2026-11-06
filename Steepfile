@@ -17,6 +17,7 @@ target :lib do
   library "json"
   library "optparse"
   library "logger"
+  library "prism"
 
   configure_code_diagnostics(D::Ruby.lenient)
 end

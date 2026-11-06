@@ -1433,13 +1433,12 @@ module Rigor
     def user_instance_def_owners(method_name)
       Analysis::DependencyRecorder.read_name(:defines, method_name) if Analysis::DependencyRecorder.active?
       name = method_name.to_sym
-      owners = nil
-      @discovery.discovered_def_nodes.each do |class_name, defs|
+      owners = @discovery.discovered_def_nodes.filter_map do |class_name, defs|
         next unless defs.key?(name) && class_name != Inference::ScopeIndexer::TOP_LEVEL_DEF_KEY
 
-        (owners ||= []) << [class_name, open_to_override?(class_name)].freeze
+        [class_name, open_to_override?(class_name)].freeze
       end
-      owners.nil? ? EMPTY_OWNERS : owners.freeze
+      owners.empty? ? EMPTY_OWNERS : owners.freeze
     end
 
     EMPTY_OWNERS = [].freeze

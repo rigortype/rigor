@@ -1798,6 +1798,15 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(method.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
     end
 
+    it "declines a narrowing between generic members, whose type arguments the subclass reading does not weigh" do
+      method = classify(
+        "def fetch: (untyped flag, Array[Integer] xs) -> Enumerable[Integer]?",
+        "  def fetch(flag, xs)\n    flag ? xs : nil\n  end"
+      )
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+    end
+
     it "declines a widening to a superclass (guard: forward acceptance refuses it)" do
       method = classify(
         "def fetch: (untyped flag) -> StandardError?",

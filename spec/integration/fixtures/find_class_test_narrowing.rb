@@ -25,12 +25,21 @@ assert_type("KeyError?", errs.find { |e| e.is_a?(IndexError) })
 assert_type("Numeric?", reals.find { |n| n.is_a?(Integer) || n.is_a?(Float) })
 # => 10
 assert_type("Numeric?", reals.find { |n| n.inspect; n.is_a?(Integer) })
+# => 10; the block's value is its last statement, so the test decides nothing
+assert_type("Numeric?", reals.find { |n| n.is_a?(Float); true })
 # => 10
 assert_type("Dynamic[top] | Numeric", reals.detect(-> { 0 }) { |n| n.is_a?(Integer) })
 # => 10
 assert_type("Numeric?", reals.find { _1.is_a?(Integer) })
 # => 10
 assert_type("Numeric?", reals.find { |n| errs.is_a?(Array) })
+
+# A method outside the find family keeps its own answer: `pop` ignores the block.
+# => 2.5
+assert_type("Numeric?", reals.dup.pop { |n| n.is_a?(Integer) })
+PREFIX = "1"
+# => "10"
+assert_type("String?", ARGV.find { |s| s.start_with?(PREFIX) })
 
 # A class no element can be keeps the element type: a nil-only answer would read the test as never matching.
 # => nil

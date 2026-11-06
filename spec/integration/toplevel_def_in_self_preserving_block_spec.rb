@@ -61,21 +61,23 @@ RSpec.describe "a cross-file top-level def called from a block (#2861)", type: :
         "rows.map { |r| format(r).bit_length }",
         "rows.map { |r| myhelper(r).upcase }",
         "rows.map { |r| myhelper(r).bit_length }",
-        "rows.map { |r| myhelper(r) }.first.upcase"
+        "rows.map { |r| myhelper(r) }.first.upcase",
+        "rows.each_slice(1).map { |r| myhelper(r) }.each { |v| v.upcase }"
       )
     end
 
     # File order is not load order: the def sorts after the caller in one run and before it in the other.
     it "binds the def in a core iterator block whichever file sorts first" do
       expect_reports({ "a_helpers.rb" => helpers, "b_script.rb" => use },
-                     [["b_script.rb", 3, "for 42"], ["b_script.rb", 5, "for 42"]])
+                     [["b_script.rb", 3, "for 42"], ["b_script.rb", 5, "for 42"], ["b_script.rb", 6, "for 42"]])
       expect_reports({ "z_helpers.rb" => helpers, "b_script.rb" => use },
-                     [["b_script.rb", 3, "for 42"], ["b_script.rb", 5, "for 42"]])
+                     [["b_script.rb", 3, "for 42"], ["b_script.rb", 5, "for 42"], ["b_script.rb", 6, "for 42"]])
     end
 
     it "binds the same way across Ractor workers" do
       expect_reports({ "helpers.rb" => helpers, "script.rb" => use },
-                     [["script.rb", 3, "for 42"], ["script.rb", 5, "for 42"]], "workers" => 2)
+                     [["script.rb", 3, "for 42"], ["script.rb", 5, "for 42"], ["script.rb", 6, "for 42"]],
+                     "workers" => 2)
     end
 
     # The must-fire sibling of the silenced row: without a helpers file, `format` is Kernel's and the chain reports.
@@ -112,6 +114,17 @@ RSpec.describe "a cross-file top-level def called from a block (#2861)", type: :
       expect(undefined("helpers.rb" => helpers, "script.rb" => use)).to eq([])
     end
 
+    # Issue #2829's value-position subtree keeps the #316 mark off through a core iterator to the DSL block below it,
+    # as it did before: the walk's unknown-`self` mark passes through the iterator unchanged.
+    it "keeps a value-position block's subtree unmarked through a core iterator" do
+      use = script(
+        "def runit(&b) = instance_exec(&b)",
+        "puts([1].map { [2].each { runit { myhelper(1).upcase } } })"
+      )
+
+      expect_reports({ "helpers.rb" => helpers, "script.rb" => use }, [["script.rb", 2, "for 42"]])
+    end
+
     # A project reopening of a catalogued iterator may run the block on another object.
     it "keeps the mark where the project redefines the iterator" do
       use = script(
@@ -124,12 +137,15 @@ RSpec.describe "a cross-file top-level def called from a block (#2861)", type: :
       expect(undefined("helpers.rb" => helpers, "script.rb" => use)).to eq([])
     end
 
+    # The class's own `myhelper` returns a String, which Ruby runs; the top-level def must not capture it.
     it "answers Dynamic for instance_exec on an object whose class defines the name" do
       use = script(
         "class Fmt",
         "  def format(x) = :sym",
+        "  def myhelper(x) = \"s\"",
         "end",
-        "Fmt.new.instance_exec { format(1).bit_length }"
+        "Fmt.new.instance_exec { format(1).bit_length }",
+        "Fmt.new.instance_exec { myhelper(1).upcase }"
       )
 
       expect(undefined("helpers.rb" => helpers, "script.rb" => use)).to eq([])

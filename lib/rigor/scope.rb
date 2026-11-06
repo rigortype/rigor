@@ -704,11 +704,10 @@ module Rigor
 
     # Issue #2861 — the entry for a block {Inference::SelfPreservingBlock} proves runs under the caller's `self`
     # (`rows.map { … }`, `5.times { … }`). Ruby gives the block the `self` the call site has, so the block is as
-    # opaque as the scope around it and no more: under an opaque mark it enters as {#entering_opaque_block} does,
-    # and elsewhere it keeps the #316 mark off, so a cross-file top-level `def` binds there as it does beside the
-    # call ({#bindable_top_level_def_for}).
+    # opaque as the scope around it and no more: it keeps whatever #316 mark the caller's scope carries and adds
+    # none, so a cross-file top-level `def` binds there exactly where it binds beside the call
+    # ({#bindable_top_level_def_for}). A caller's unknown-`self` mark of `true` (the walk's) is kept as it is.
     def entering_self_preserving_block
-      return entering_opaque_block if @opaque_block_self
       return self if @block_self_unknown == true || @block_self_unknown == PRESERVED_BLOCK_SELF
 
       rebuild(block_self_unknown: PRESERVED_BLOCK_SELF)

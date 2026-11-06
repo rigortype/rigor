@@ -987,7 +987,8 @@ module Rigor
     # `call.argument-type-mismatch` consults the mark ({Analysis::CheckRules::DeclarationSourcedGuard.gradual_narrowed?}).
     # Like the `:local` mark it is dropped by `with_local` and intersected by `join`. Applied after the binding.
     def with_gradual_narrowing_mark(name)
-      rebuild(declaration_sourced: add_declaration_sourced(:gradual_narrowing, name))
+      marks = add_declaration_sourced(:gradual_narrowing, name)
+      marks.equal?(@declaration_sourced) ? self : rebuild(declaration_sourced: marks)
     end
 
     # Issue #2656 — true when the local `name`'s binding is a class guard's narrowing of a `Dynamic` value.

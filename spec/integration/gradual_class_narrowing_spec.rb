@@ -45,7 +45,7 @@ RSpec.describe "a class guard keeps a gradual value gradual (#2656)", type: :run
       .to eq(["call.argument-type-mismatch"])
   end
 
-  it "fires for a class no overload accepts (only the literals are read past)" do
+  it "fires for a class no overload accepts (guard: the overload path judges by class already)" do
     expect(mismatches("def f(x) = (Sink.new.pick(x) if x.is_a?(String))\n")).to eq(["call.argument-type-mismatch"])
   end
 

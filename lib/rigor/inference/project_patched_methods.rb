@@ -214,15 +214,18 @@ module Rigor
       # copy is the entry this walk finds for the name on the owner's INSTANCE ancestors, re-attributed to the
       # owner, re-kinded `:singleton` and made public — unless a later named visibility call (`private_class_method
       # :x`, or `private :x` in `class << self`) recorded the pair's singleton-side override, which Ruby applies to
-      # the copy. nil when no copy is recorded for `[owner, method_name]`, or when the instance walk finds no
-      # patch entry — an RBS or project-source method the registry does not hold, where the singleton walk then
-      # answers whatever else it reaches, as before.
+      # the copy. The instance walk's `farther` definers are dropped: the copy is a real method on
+      # `#<Class:owner>` that ends the singleton-side lookup, so no instance-chain definer can answer `owner.x`,
+      # and keeping them would only make {#callable?} decline a refusal Ruby makes. nil when no copy is
+      # recorded for `[owner, method_name]`, or when the instance walk finds no patch entry — an RBS or
+      # project-source method the registry does not hold, where the singleton walk then answers whatever else
+      # it reaches, as before.
       def singleton_copy_entry(owner, method_name, rbs_loader, source_defines)
         return nil unless @singleton_copies.include?([owner, method_name])
 
         copy = lookup_through_ancestors(class_name: owner, method_name: method_name, kind: :instance,
                                         rbs_loader: rbs_loader, source_defines: source_defines)
-        copy&.with(class_name: owner, kind: :singleton,
+        copy&.with(class_name: owner, kind: :singleton, farther: nil,
                    visibility: @overrides[[owner, method_name, :singleton]] || :public)
       end
 

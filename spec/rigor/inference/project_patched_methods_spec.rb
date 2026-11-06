@@ -192,5 +192,32 @@ RSpec.describe Rigor::Inference::ProjectPatchedMethods do
       expect(found&.farther).to be_nil
       expect(registry.callable?(found, explicit: true, rbs_loader: loader)).to be(false)
     end
+
+    # `module KInner; def kx = 2; end; module KHelp; include KInner; def kx = 1; end` then
+    # `include KHelp; module_function :kx; private_class_method :kx` on the owner: the instance walk finds
+    # KHelp's `kx` first and records KInner's as `farther`. Once the singleton copy exists no instance-chain
+    # definer can answer `owner.x` — Ruby raises NoMethodError on the private copy — so the copy MUST drop
+    # `farther` and {#callable?} MUST refuse (false), not decline (nil) to untyped.
+    it "drops the instance walk's farther definers: none can answer the singleton call" do
+      inner = entry_klass.new(class_name: "KInner", method_name: :kx, kind: :instance,
+                              source_path: "k.rb", source_line: 2)
+      help = entry_klass.new(class_name: "KHelp", method_name: :kx, kind: :instance,
+                             source_path: "k.rb", source_line: 1)
+      registry = described_class.new(
+        entries: [inner, help],
+        mixins: [described_class::Mixin.new(owner: "KHelp", module_name: "KInner", kind: :include),
+                 described_class::Mixin.new(owner: "KOwner", module_name: "KHelp", kind: :include)],
+        overrides: { ["KOwner", :kx, :instance] => :module_function,
+                     ["KOwner", :kx, :singleton] => :private },
+        singleton_copies: [["KOwner", :kx]]
+      )
+
+      found = registry.lookup_through_ancestors(class_name: "KOwner", method_name: :kx, kind: :singleton,
+                                                rbs_loader: nil)
+
+      expect(found&.visibility).to eq(:private)
+      expect(found&.farther).to be_nil
+      expect(registry.callable?(found, explicit: true)).to be(false)
+    end
   end
 end

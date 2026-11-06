@@ -1,0 +1,1 @@
+- **[Lens]** Check documentation type claims against authored method contracts in the same JSON lens run with `--claims=REQUEST`. ([#2854](https://github.com/rigortype/rigor/pull/2854))

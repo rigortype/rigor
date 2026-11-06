@@ -1,0 +1,330 @@
+{
+  "return-equal-relative": [
+    "compatible",
+    "proven_inclusion"
+  ],
+  "return-equal-absolute": [
+    "compatible",
+    "proven_inclusion"
+  ],
+  "return-alias": [
+    "compatible",
+    "proven_inclusion"
+  ],
+  "literal-equal": [
+    "compatible",
+    "proven_inclusion"
+  ],
+  "literal-distinct": [
+    "conflict",
+    "proven_disjoint_arm"
+  ],
+  "literal-ancestor": [
+    "compatible",
+    "proven_inclusion"
+  ],
+  "second-identical-param": [
+    "compatible",
+    "proven_inclusion"
+  ],
+  "module-function-instance": [
+    "compatible",
+    "proven_inclusion"
+  ],
+  "module-function-singleton": [
+    "compatible",
+    "proven_inclusion"
+  ],
+  "singleton-relative-true": [
+    "unknown",
+    "unproven"
+  ],
+  "singleton-absolute-true": [
+    "conflict",
+    "proven_disjoint_arm"
+  ],
+  "singleton-literal-true": [
+    "conflict",
+    "proven_disjoint_arm"
+  ],
+  "singleton-param-relative-true": [
+    "unknown",
+    "unproven"
+  ],
+  "singleton-param-literal-true": [
+    "conflict",
+    "proven_disjoint_arm"
+  ],
+  "singleton-toplevel-true": [
+    "conflict",
+    "proven_disjoint_arm"
+  ],
+  "singleton-relative-false": [
+    "unknown",
+    "unproven"
+  ],
+  "singleton-absolute-false": [
+    "conflict",
+    "proven_disjoint_arm"
+  ],
+  "singleton-literal-false": [
+    "conflict",
+    "proven_disjoint_arm"
+  ],
+  "singleton-param-relative-false": [
+    "unknown",
+    "unproven"
+  ],
+  "singleton-param-literal-false": [
+    "conflict",
+    "proven_disjoint_arm"
+  ],
+  "singleton-toplevel-false": [
+    "conflict",
+    "proven_disjoint_arm"
+  ],
+  "singleton-relative-nil": [
+    "unknown",
+    "unproven"
+  ],
+  "singleton-absolute-nil": [
+    "conflict",
+    "proven_disjoint_arm"
+  ],
+  "singleton-literal-nil": [
+    "conflict",
+    "proven_disjoint_arm"
+  ],
+  "singleton-param-relative-nil": [
+    "unknown",
+    "unproven"
+  ],
+  "singleton-param-literal-nil": [
+    "conflict",
+    "proven_disjoint_arm"
+  ],
+  "singleton-toplevel-nil": [
+    "conflict",
+    "proven_disjoint_arm"
+  ],
+  "return-conflict": [
+    "conflict",
+    "proven_disjoint_arm"
+  ],
+  "return-relative-unproven": [
+    "unknown",
+    "unproven"
+  ],
+  "return-broad": [
+    "compatible",
+    "proven_inclusion"
+  ],
+  "return-overlap": [
+    "unknown",
+    "unproven"
+  ],
+  "param-equal": [
+    "compatible",
+    "proven_inclusion"
+  ],
+  "param-narrow": [
+    "compatible",
+    "proven_inclusion"
+  ],
+  "param-conflict": [
+    "conflict",
+    "proven_disjoint_arm"
+  ],
+  "param-relative-unproven": [
+    "unknown",
+    "unproven"
+  ],
+  "param-union-conflict": [
+    "conflict",
+    "proven_disjoint_arm"
+  ],
+  "keyword-equal": [
+    "compatible",
+    "proven_inclusion"
+  ],
+  "generic-union-set": [
+    "compatible",
+    "proven_inclusion"
+  ],
+  "project-inclusion-return": [
+    "compatible",
+    "proven_inclusion"
+  ],
+  "project-inclusion-param": [
+    "compatible",
+    "proven_inclusion"
+  ],
+  "project-unproven": [
+    "unknown",
+    "unproven"
+  ],
+  "gem-relative": [
+    "compatible",
+    "proven_inclusion"
+  ],
+  "dynamic-contract": [
+    "unknown",
+    "dynamic_type"
+  ],
+  "dynamic-claim": [
+    "unknown",
+    "dynamic_type"
+  ],
+  "dynamic-precedes-unsupported": [
+    "unknown",
+    "dynamic_type"
+  ],
+  "unsupported-contract": [
+    "unknown",
+    "unsupported_type"
+  ],
+  "unsupported-claim": [
+    "unknown",
+    "unsupported_type"
+  ],
+  "generic-alias": [
+    "unknown",
+    "unsupported_type"
+  ],
+  "wrong-arity": [
+    "unknown",
+    "unsupported_type"
+  ],
+  "unresolved": [
+    "unknown",
+    "unresolved_name"
+  ],
+  "unknown-subject": [
+    "unknown",
+    "unsupported_subject"
+  ],
+  "missing-subject": [
+    "unknown",
+    "unsupported_subject"
+  ],
+  "missing-param": [
+    "unknown",
+    "no_such_parameter"
+  ],
+  "optional-param": [
+    "unknown",
+    "unsupported_parameter_kind"
+  ],
+  "rest-param": [
+    "unknown",
+    "unsupported_parameter_kind"
+  ],
+  "unmatched-positional": [
+    "unknown",
+    "unmatched_parameter"
+  ],
+  "unmatched-keyword": [
+    "unknown",
+    "unmatched_parameter"
+  ],
+  "overloads": [
+    "unknown",
+    "unsupported_overloads"
+  ],
+  "forwarding": [
+    "unknown",
+    "unsupported_overloads"
+  ],
+  "inferred": [
+    "unknown",
+    "no_authored_contract"
+  ],
+  "inferred-return": [
+    "unknown",
+    "no_authored_contract"
+  ],
+  "extended-contract": [
+    "unknown",
+    "extrbs_contract"
+  ],
+  "refined-return": [
+    "unknown",
+    "refined_contract"
+  ],
+  "refined-param": [
+    "unknown",
+    "refined_contract"
+  ],
+  "refined-keyword": [
+    "unknown",
+    "refined_contract"
+  ],
+  "inline-return": [
+    "compatible",
+    "proven_inclusion"
+  ],
+  "invalid-claim": [
+    "invalid_claim",
+    "syntax_error"
+  ],
+  "extended-claim": [
+    "unknown",
+    "unsupported_grammar_feature"
+  ],
+  "library-source": [
+    "unknown",
+    "unsupported_contract_source"
+  ],
+  "namespace-shadow": [
+    "unknown",
+    "ambiguous_name"
+  ],
+  "hidden-shadow": [
+    "unknown",
+    "unproven"
+  ],
+  "reopened-core-relative": [
+    "unknown",
+    "unproven"
+  ],
+  "reopened-core-absolute": [
+    "conflict",
+    "proven_disjoint_arm"
+  ],
+  "toplevel-relative": [
+    "conflict",
+    "proven_disjoint_arm"
+  ],
+  "identity-mismatch": [
+    "unknown",
+    "declaration_mismatch"
+  ],
+  "no-declaration": [
+    "unknown",
+    "no_such_declaration"
+  ],
+  "attr_reader": [
+    "unknown",
+    "unsupported_declaration"
+  ],
+  "define_method": [
+    "unknown",
+    "unsupported_declaration"
+  ],
+  "parse_error": [
+    "unavailable",
+    "parse_error"
+  ],
+  "not_found": [
+    "unavailable",
+    "not_found"
+  ],
+  "not_ruby": [
+    "unavailable",
+    "not_ruby"
+  ],
+  "outside_project": [
+    "unavailable",
+    "outside_project"
+  ]
+}

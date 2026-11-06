@@ -26,7 +26,10 @@ module Rigor
       # `kind` is :module, :class or :singleton. `module_function` is :off, :on (a bare `module_function` written
       # directly in a module body covers the later direct defs) or :unknown (the reading Ruby gives and the one
       # `check`'s tables give could differ, so the later defs are omissions).
-      Body = Struct.new(:current, :uncertain, :detached, :kind, :module_function)
+      # `lexical` is the named part of the body's Ruby cref chain, which a builder block does not extend (Ruby
+      # `class_eval`s the block on the new class, but its constants resolve in the scope that wrote it) and a
+      # `class << self` body extends only with its anonymous singleton class, left out here.
+      Body = Struct.new(:current, :uncertain, :detached, :kind, :module_function, :lexical)
 
       ATTRIBUTE_CALLS = { attr_reader: "reader", attr_writer: "writer", attr_accessor: "accessor" }.freeze
       OMITTED_CALLS = {
@@ -92,7 +95,7 @@ module Rigor
       end
 
       def detached
-        @bodies.push(Body.new("public", false, true, :detached, :off))
+        @bodies.push(Body.new("public", false, true, :detached, :off, @bodies.last&.lexical))
         yield
       ensure
         @bodies.pop
@@ -124,14 +127,14 @@ module Rigor
           return detached { walk(node.body, nesting, singleton: singleton, in_block: true) } if node.body
         end
 
-        walk_body(node.body, nesting, singleton: true, kind: :singleton)
+        walk_body(node.body, nesting, singleton: true, kind: :singleton, lexical: lexical_nesting(nesting))
       end
 
       # A class body's statements, tracking the running visibility and `module_function`.
-      def walk_body(body, nesting, singleton:, kind:)
+      def walk_body(body, nesting, singleton:, kind:, lexical: nesting)
         return if body.nil?
 
-        @bodies.push(Body.new("public", false, false, kind, :off))
+        @bodies.push(Body.new("public", false, false, kind, :off, lexical))
         statements = body.is_a?(Prism::StatementsNode) ? body.body : [body]
         statements.each { |child| walk_body_statement(child, nesting, singleton) }
       ensure
@@ -425,7 +428,7 @@ module Rigor
                                  "block" => nil, "body_return" => nil }, contracts: trailing ? :trailing : false)
         end
         block = node.value.block
-        walk_body(block.body, nesting + [name], singleton: false, kind: :builder) if block&.body
+        walk_body(block.body, nesting + [name], singleton: false, kind: :builder, lexical: nesting) if block&.body
       end
 
       # Ruby forces a field reader named `initialize_copy` (say) private, but not its `Struct` writer: a `Data`
@@ -539,7 +542,9 @@ module Rigor
         data = { "kind" => "method", "name" => node.name.to_s, "owner" => owner, "scope" => scope.to_s,
                  "attribute" => nil, "members" => [node.name.to_s], "module_function" => module_function,
                  "visibility" => module_function ? "private" : visibility(node, nesting, scope),
-                 "params" => shape_params, "block" => shape_block, "body_return" => returns }
+                 "params" => shape_params, "block" => shape_block, "body_return" => returns,
+                 "lexical_nesting" => lexical_nesting(nesting),
+                 "singleton_nesting" => scope == :singleton && node.receiver.nil? }
         return data unless module_function
 
         # Internal to the member pass: the singleton copy is public until `private_class_method` says otherwise,
@@ -547,6 +552,12 @@ module Rigor
         # owner, so a return that may depend on `self` is not the copy's.
         copy = self_dependent?(node.body, returns, owner) ? Slot.unavailable("not_computed") : returns
         data.merge("singleton_visibility" => "public", "singleton_body_return" => copy)
+      end
+
+      # The Ruby cref chain a def written here reads its constants through: the enclosing body's, which differs
+      # from the owner nesting under a builder block.
+      def lexical_nesting(nesting)
+        @bodies.last&.lexical || nesting
       end
 
       # Whether the instance-scope return may differ from the singleton copy's: the body reads `self`, instance or
@@ -628,13 +639,15 @@ module Rigor
       def alias_site(names, owner)
         new_name, old_name = names
         last, copy = alias_original(owner, old_name)
+        copied = copy&.data || {}
         visibility = FORCED_PRIVATE.include?(new_name) ? "private" : last&.data&.fetch("visibility")
         # `initialize` reads `void` by its name, which neither side of an alias across it keeps.
         returns = copy && ![new_name, old_name].include?("initialize") ? copy.data["body_return"] : nil
         { "kind" => "method", "name" => new_name, "owner" => owner, "scope" => "instance", "attribute" => nil,
           "members" => [new_name], "module_function" => false, "visibility" => visibility,
-          "params" => copy&.data&.fetch("params"), "block" => copy&.data&.fetch("block"),
+          "params" => copied["params"], "block" => copied["block"],
           "body_return" => returns || Slot.unavailable("not_computed"),
+          "lexical_nesting" => copied["lexical_nesting"], "singleton_nesting" => copied["singleton_nesting"],
           "alias_of" => old_name, "aliased_node" => copy && aliased_node(copy) }
       end
 

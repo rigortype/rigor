@@ -1,0 +1,4817 @@
+{
+  "schema": "lens/v0",
+  "revision": 1,
+  "producer": {
+    "name": "rigor",
+    "version": "<version>",
+    "engine_source": "<engine>"
+  },
+  "context": {
+    "config": ".rigor.yml",
+    "target_ruby": "3.4",
+    "rbs_version": "<rbs>",
+    "signature_roots": [
+      "sig"
+    ],
+    "signature_digest": "xxh3-64:c4376b19ec0e3fe7",
+    "plugins": [
+      {
+        "id": "rbs-inline",
+        "version": "<version>"
+      }
+    ],
+    "lockfiles": [],
+    "digest": "<digest>"
+  },
+  "capabilities": [
+    "class",
+    "module",
+    "method",
+    "attribute",
+    "constant",
+    "module_function",
+    "builder",
+    "alias",
+    "body_return",
+    "diagnostics",
+    "inputs",
+    "claims"
+  ],
+  "files": [
+    {
+      "argument": "lib/formatter.rb",
+      "path": "lib/formatter.rb",
+      "status": "ok",
+      "reason": null,
+      "digest": "xxh3-64:3cfd601726f2f5fd",
+      "complete": false,
+      "omissions": [
+        {
+          "kind": "define_method",
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "omitted",
+          "span": {
+            "start_line": 24,
+            "start_column": 2,
+            "end_line": 24,
+            "end_column": 32,
+            "start_offset": 696,
+            "end_offset": 726
+          },
+          "reason": "unsupported_kind"
+        }
+      ],
+      "sites": [
+        {
+          "key": "lib/formatter.rb:0-730:0",
+          "kind": "class",
+          "name": "Formatter",
+          "owner": null,
+          "scope": null,
+          "attribute": null,
+          "members": [],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 1,
+            "start_column": 0,
+            "end_line": 25,
+            "end_column": 3,
+            "start_offset": 0,
+            "end_offset": 730
+          },
+          "contract_span": null,
+          "anchor": "1:8400",
+          "visibility": null,
+          "contract": null,
+          "params": null,
+          "block": null,
+          "body_return": null,
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/formatter.rb:18-50:0",
+          "kind": "method",
+          "name": "format",
+          "owner": "Formatter",
+          "scope": "instance",
+          "attribute": null,
+          "members": [
+            "format"
+          ],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 2,
+            "start_column": 2,
+            "end_line": 2,
+            "end_column": 34,
+            "start_offset": 18,
+            "end_offset": 50
+          },
+          "contract_span": null,
+          "anchor": "2:1dbc",
+          "visibility": "public",
+          "contract": null,
+          "params": [
+            {
+              "name": "value",
+              "kind": "required",
+              "type": null
+            },
+            {
+              "name": "mode",
+              "kind": "keyreq",
+              "type": null
+            }
+          ],
+          "block": null,
+          "body_return": {
+            "state": "typed",
+            "type": "String",
+            "provenance": "inferred",
+            "path": null,
+            "from_site": null
+          },
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/formatter.rb:53-79:0",
+          "kind": "method",
+          "name": "integer",
+          "owner": "Formatter",
+          "scope": "instance",
+          "attribute": null,
+          "members": [
+            "integer"
+          ],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 3,
+            "start_column": 2,
+            "end_line": 3,
+            "end_column": 28,
+            "start_offset": 53,
+            "end_offset": 79
+          },
+          "contract_span": null,
+          "anchor": "3:88e9",
+          "visibility": "public",
+          "contract": null,
+          "params": [
+            {
+              "name": "value",
+              "kind": "required",
+              "type": null
+            }
+          ],
+          "block": null,
+          "body_return": {
+            "state": "typed",
+            "type": "Integer",
+            "provenance": "inferred",
+            "path": null,
+            "from_site": null
+          },
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/formatter.rb:82-106:0",
+          "kind": "method",
+          "name": "union",
+          "owner": "Formatter",
+          "scope": "instance",
+          "attribute": null,
+          "members": [
+            "union"
+          ],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 4,
+            "start_column": 2,
+            "end_line": 4,
+            "end_column": 26,
+            "start_offset": 82,
+            "end_offset": 106
+          },
+          "contract_span": null,
+          "anchor": "4:2762",
+          "visibility": "public",
+          "contract": null,
+          "params": [
+            {
+              "name": "value",
+              "kind": "required",
+              "type": null
+            }
+          ],
+          "block": null,
+          "body_return": {
+            "state": "typed",
+            "type": "Integer | String",
+            "provenance": "inferred",
+            "path": null,
+            "from_site": null
+          },
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/formatter.rb:109-135:0",
+          "kind": "method",
+          "name": "generic",
+          "owner": "Formatter",
+          "scope": "instance",
+          "attribute": null,
+          "members": [
+            "generic"
+          ],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 5,
+            "start_column": 2,
+            "end_line": 5,
+            "end_column": 28,
+            "start_offset": 109,
+            "end_offset": 135
+          },
+          "contract_span": null,
+          "anchor": "5:2527",
+          "visibility": "public",
+          "contract": null,
+          "params": [
+            {
+              "name": "value",
+              "kind": "required",
+              "type": null
+            }
+          ],
+          "block": null,
+          "body_return": {
+            "state": "typed",
+            "type": "Array[Integer | String]",
+            "provenance": "inferred",
+            "path": null,
+            "from_site": null
+          },
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/formatter.rb:138-165:0",
+          "kind": "method",
+          "name": "response",
+          "owner": "Formatter",
+          "scope": "instance",
+          "attribute": null,
+          "members": [
+            "response"
+          ],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 6,
+            "start_column": 2,
+            "end_line": 6,
+            "end_column": 29,
+            "start_offset": 138,
+            "end_offset": 165
+          },
+          "contract_span": null,
+          "anchor": "6:aea9",
+          "visibility": "public",
+          "contract": null,
+          "params": [
+            {
+              "name": "value",
+              "kind": "required",
+              "type": null
+            }
+          ],
+          "block": null,
+          "body_return": {
+            "state": "typed",
+            "type": "Faraday::Response",
+            "provenance": "inferred",
+            "path": null,
+            "from_site": null
+          },
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/formatter.rb:168-194:0",
+          "kind": "method",
+          "name": "project",
+          "owner": "Formatter",
+          "scope": "instance",
+          "attribute": null,
+          "members": [
+            "project"
+          ],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 7,
+            "start_column": 2,
+            "end_line": 7,
+            "end_column": 28,
+            "start_offset": 168,
+            "end_offset": 194
+          },
+          "contract_span": null,
+          "anchor": "7:af4d",
+          "visibility": "public",
+          "contract": null,
+          "params": [
+            {
+              "name": "value",
+              "kind": "required",
+              "type": null
+            }
+          ],
+          "block": null,
+          "body_return": {
+            "state": "typed",
+            "type": "Project::A",
+            "provenance": "inferred",
+            "path": null,
+            "from_site": null
+          },
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/formatter.rb:197-225:0",
+          "kind": "method",
+          "name": "unrelated",
+          "owner": "Formatter",
+          "scope": "instance",
+          "attribute": null,
+          "members": [
+            "unrelated"
+          ],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 8,
+            "start_column": 2,
+            "end_line": 8,
+            "end_column": 30,
+            "start_offset": 197,
+            "end_offset": 225
+          },
+          "contract_span": null,
+          "anchor": "8:2e73",
+          "visibility": "public",
+          "contract": null,
+          "params": [
+            {
+              "name": "value",
+              "kind": "required",
+              "type": null
+            }
+          ],
+          "block": null,
+          "body_return": {
+            "state": "typed",
+            "type": "Project::A | Project::B",
+            "provenance": "inferred",
+            "path": null,
+            "from_site": null
+          },
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/formatter.rb:228-254:0",
+          "kind": "method",
+          "name": "dynamic",
+          "owner": "Formatter",
+          "scope": "instance",
+          "attribute": null,
+          "members": [
+            "dynamic"
+          ],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 9,
+            "start_column": 2,
+            "end_line": 9,
+            "end_column": 28,
+            "start_offset": 228,
+            "end_offset": 254
+          },
+          "contract_span": null,
+          "anchor": "9:c4bf",
+          "visibility": "public",
+          "contract": null,
+          "params": [
+            {
+              "name": "value",
+              "kind": "required",
+              "type": null
+            }
+          ],
+          "block": null,
+          "body_return": {
+            "state": "typed",
+            "type": "Array[untyped]",
+            "provenance": "inferred",
+            "path": null,
+            "from_site": null
+          },
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/formatter.rb:257-287:0",
+          "kind": "method",
+          "name": "unsupported",
+          "owner": "Formatter",
+          "scope": "instance",
+          "attribute": null,
+          "members": [
+            "unsupported"
+          ],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 10,
+            "start_column": 2,
+            "end_line": 10,
+            "end_column": 32,
+            "start_offset": 257,
+            "end_offset": 287
+          },
+          "contract_span": null,
+          "anchor": "10:617c",
+          "visibility": "public",
+          "contract": null,
+          "params": [
+            {
+              "name": "value",
+              "kind": "required",
+              "type": null
+            }
+          ],
+          "block": null,
+          "body_return": {
+            "state": "typed",
+            "type": "[String]",
+            "provenance": "inferred",
+            "path": null,
+            "from_site": null
+          },
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/formatter.rb:290-342:0",
+          "kind": "method",
+          "name": "optional",
+          "owner": "Formatter",
+          "scope": "instance",
+          "attribute": null,
+          "members": [
+            "optional"
+          ],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 11,
+            "start_column": 2,
+            "end_line": 11,
+            "end_column": 54,
+            "start_offset": 290,
+            "end_offset": 342
+          },
+          "contract_span": null,
+          "anchor": "11:4357",
+          "visibility": "public",
+          "contract": null,
+          "params": [
+            {
+              "name": "value",
+              "kind": "optional",
+              "type": null
+            },
+            {
+              "name": "rest",
+              "kind": "rest",
+              "type": null
+            },
+            {
+              "name": "flag",
+              "kind": "key",
+              "type": null
+            }
+          ],
+          "block": null,
+          "body_return": {
+            "state": "typed",
+            "type": "String",
+            "provenance": "inferred",
+            "path": null,
+            "from_site": null
+          },
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/formatter.rb:345-373:0",
+          "kind": "method",
+          "name": "unmatched",
+          "owner": "Formatter",
+          "scope": "instance",
+          "attribute": null,
+          "members": [
+            "unmatched"
+          ],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 12,
+            "start_column": 2,
+            "end_line": 12,
+            "end_column": 30,
+            "start_offset": 345,
+            "end_offset": 373
+          },
+          "contract_span": null,
+          "anchor": "12:ebd8",
+          "visibility": "public",
+          "contract": null,
+          "params": [
+            {
+              "name": "value",
+              "kind": "required",
+              "type": null
+            }
+          ],
+          "block": null,
+          "body_return": {
+            "state": "typed",
+            "type": "String",
+            "provenance": "inferred",
+            "path": null,
+            "from_site": null
+          },
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/formatter.rb:376-403:0",
+          "kind": "method",
+          "name": "keyword",
+          "owner": "Formatter",
+          "scope": "instance",
+          "attribute": null,
+          "members": [
+            "keyword"
+          ],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 13,
+            "start_column": 2,
+            "end_line": 13,
+            "end_column": 29,
+            "start_offset": 376,
+            "end_offset": 403
+          },
+          "contract_span": null,
+          "anchor": "13:26d0",
+          "visibility": "public",
+          "contract": null,
+          "params": [
+            {
+              "name": "value",
+              "kind": "keyreq",
+              "type": null
+            }
+          ],
+          "block": null,
+          "body_return": {
+            "state": "typed",
+            "type": "String",
+            "provenance": "inferred",
+            "path": null,
+            "from_site": null
+          },
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/formatter.rb:406-435:0",
+          "kind": "method",
+          "name": "overloaded",
+          "owner": "Formatter",
+          "scope": "instance",
+          "attribute": null,
+          "members": [
+            "overloaded"
+          ],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 14,
+            "start_column": 2,
+            "end_line": 14,
+            "end_column": 31,
+            "start_offset": 406,
+            "end_offset": 435
+          },
+          "contract_span": null,
+          "anchor": "14:2da7",
+          "visibility": "public",
+          "contract": null,
+          "params": [
+            {
+              "name": "value",
+              "kind": "required",
+              "type": null
+            }
+          ],
+          "block": null,
+          "body_return": {
+            "state": "typed",
+            "type": "Integer | String",
+            "provenance": "inferred",
+            "path": null,
+            "from_site": null
+          },
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/formatter.rb:438-462:0",
+          "kind": "method",
+          "name": "forwarding",
+          "owner": "Formatter",
+          "scope": "instance",
+          "attribute": null,
+          "members": [
+            "forwarding"
+          ],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 15,
+            "start_column": 2,
+            "end_line": 15,
+            "end_column": 26,
+            "start_offset": 438,
+            "end_offset": 462
+          },
+          "contract_span": null,
+          "anchor": "15:c029",
+          "visibility": "public",
+          "contract": null,
+          "params": null,
+          "block": null,
+          "body_return": {
+            "state": "typed",
+            "type": "\"\"",
+            "provenance": "inferred",
+            "path": null,
+            "from_site": null
+          },
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/formatter.rb:465-482:0",
+          "kind": "method",
+          "name": "inferred",
+          "owner": "Formatter",
+          "scope": "instance",
+          "attribute": null,
+          "members": [
+            "inferred"
+          ],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 16,
+            "start_column": 2,
+            "end_line": 16,
+            "end_column": 19,
+            "start_offset": 465,
+            "end_offset": 482
+          },
+          "contract_span": null,
+          "anchor": "16:7508",
+          "visibility": "public",
+          "contract": null,
+          "params": [],
+          "block": null,
+          "body_return": {
+            "state": "typed",
+            "type": "\"\"",
+            "provenance": "inferred",
+            "path": null,
+            "from_site": null
+          },
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/formatter.rb:520-537:0",
+          "kind": "method",
+          "name": "extended",
+          "owner": "Formatter",
+          "scope": "instance",
+          "attribute": null,
+          "members": [
+            "extended"
+          ],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 18,
+            "start_column": 2,
+            "end_line": 18,
+            "end_column": 19,
+            "start_offset": 520,
+            "end_offset": 537
+          },
+          "contract_span": {
+            "start_line": 17,
+            "start_column": 2,
+            "end_line": 17,
+            "end_column": 34,
+            "start_offset": 485,
+            "end_offset": 517
+          },
+          "anchor": "17:5a63",
+          "visibility": "public",
+          "contract": null,
+          "params": [],
+          "block": null,
+          "body_return": {
+            "state": "typed",
+            "type": "\"\"",
+            "provenance": "inferred",
+            "path": null,
+            "from_site": null
+          },
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/formatter.rb:540-566:0",
+          "kind": "method",
+          "name": "refined",
+          "owner": "Formatter",
+          "scope": "instance",
+          "attribute": null,
+          "members": [
+            "refined"
+          ],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 19,
+            "start_column": 2,
+            "end_line": 19,
+            "end_column": 28,
+            "start_offset": 540,
+            "end_offset": 566
+          },
+          "contract_span": null,
+          "anchor": "19:4a33",
+          "visibility": "public",
+          "contract": null,
+          "params": [
+            {
+              "name": "value",
+              "kind": "required",
+              "type": null
+            }
+          ],
+          "block": null,
+          "body_return": {
+            "state": "typed",
+            "type": "String",
+            "provenance": "inferred",
+            "path": null,
+            "from_site": null
+          },
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/formatter.rb:569-604:0",
+          "kind": "method",
+          "name": "refined_keyword",
+          "owner": "Formatter",
+          "scope": "instance",
+          "attribute": null,
+          "members": [
+            "refined_keyword"
+          ],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 20,
+            "start_column": 2,
+            "end_line": 20,
+            "end_column": 37,
+            "start_offset": 569,
+            "end_offset": 604
+          },
+          "contract_span": null,
+          "anchor": "20:432e",
+          "visibility": "public",
+          "contract": null,
+          "params": [
+            {
+              "name": "value",
+              "kind": "keyreq",
+              "type": null
+            }
+          ],
+          "block": null,
+          "body_return": {
+            "state": "typed",
+            "type": "String",
+            "provenance": "inferred",
+            "path": null,
+            "from_site": null
+          },
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/formatter.rb:607-633:0",
+          "kind": "method",
+          "name": "boolean",
+          "owner": "Formatter",
+          "scope": "instance",
+          "attribute": null,
+          "members": [
+            "boolean"
+          ],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 21,
+            "start_column": 2,
+            "end_line": 21,
+            "end_column": 28,
+            "start_offset": 607,
+            "end_offset": 633
+          },
+          "contract_span": null,
+          "anchor": "21:e664",
+          "visibility": "public",
+          "contract": null,
+          "params": [
+            {
+              "name": "value",
+              "kind": "required",
+              "type": null
+            }
+          ],
+          "block": null,
+          "body_return": {
+            "state": "typed",
+            "type": "TrueClass",
+            "provenance": "inferred",
+            "path": null,
+            "from_site": null
+          },
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/formatter.rb:636-668:0",
+          "kind": "method",
+          "name": "pair",
+          "owner": "Formatter",
+          "scope": "instance",
+          "attribute": null,
+          "members": [
+            "pair"
+          ],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 22,
+            "start_column": 2,
+            "end_line": 22,
+            "end_column": 34,
+            "start_offset": 636,
+            "end_offset": 668
+          },
+          "contract_span": null,
+          "anchor": "22:2ea7",
+          "visibility": "public",
+          "contract": null,
+          "params": [
+            {
+              "name": "first",
+              "kind": "required",
+              "type": null
+            },
+            {
+              "name": "second",
+              "kind": "required",
+              "type": null
+            }
+          ],
+          "block": null,
+          "body_return": {
+            "state": "typed",
+            "type": "String",
+            "provenance": "inferred",
+            "path": null,
+            "from_site": null
+          },
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/formatter.rb:671-693:0",
+          "kind": "attribute",
+          "name": "attribute",
+          "owner": "Formatter",
+          "scope": "instance",
+          "attribute": "reader",
+          "members": [
+            "attribute"
+          ],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 23,
+            "start_column": 2,
+            "end_line": 23,
+            "end_column": 24,
+            "start_offset": 671,
+            "end_offset": 693
+          },
+          "contract_span": null,
+          "anchor": "23:6bf6",
+          "visibility": "public",
+          "contract": null,
+          "params": null,
+          "block": null,
+          "body_return": null,
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/formatter.rb:732-790:0",
+          "kind": "module",
+          "name": "Utilities",
+          "owner": null,
+          "scope": null,
+          "attribute": null,
+          "members": [],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 27,
+            "start_column": 0,
+            "end_line": 30,
+            "end_column": 3,
+            "start_offset": 732,
+            "end_offset": 790
+          },
+          "contract_span": null,
+          "anchor": "27:1193",
+          "visibility": null,
+          "contract": null,
+          "params": null,
+          "block": null,
+          "body_return": null,
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/formatter.rb:769-786:0",
+          "kind": "method",
+          "name": "callable",
+          "owner": "Utilities",
+          "scope": "instance",
+          "attribute": null,
+          "members": [
+            "callable"
+          ],
+          "module_function": true,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 29,
+            "start_column": 2,
+            "end_line": 29,
+            "end_column": 19,
+            "start_offset": 769,
+            "end_offset": 786
+          },
+          "contract_span": null,
+          "anchor": "29:12a5",
+          "visibility": "private",
+          "contract": null,
+          "params": [],
+          "block": null,
+          "body_return": {
+            "state": "typed",
+            "type": "\"\"",
+            "provenance": "inferred",
+            "path": null,
+            "from_site": null
+          },
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/formatter.rb:792-859:0",
+          "kind": "module",
+          "name": "Project",
+          "owner": null,
+          "scope": null,
+          "attribute": null,
+          "members": [],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 32,
+            "start_column": 0,
+            "end_line": 36,
+            "end_column": 3,
+            "start_offset": 792,
+            "end_offset": 859
+          },
+          "contract_span": null,
+          "anchor": "32:7aeb",
+          "visibility": null,
+          "contract": null,
+          "params": null,
+          "block": null,
+          "body_return": null,
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/formatter.rb:809-821:0",
+          "kind": "class",
+          "name": "Project::A",
+          "owner": null,
+          "scope": null,
+          "attribute": null,
+          "members": [],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 33,
+            "start_column": 2,
+            "end_line": 33,
+            "end_column": 14,
+            "start_offset": 809,
+            "end_offset": 821
+          },
+          "contract_span": null,
+          "anchor": "33:b9ab",
+          "visibility": null,
+          "contract": null,
+          "params": null,
+          "block": null,
+          "body_return": null,
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/formatter.rb:824-840:0",
+          "kind": "class",
+          "name": "Project::B",
+          "owner": null,
+          "scope": null,
+          "attribute": null,
+          "members": [],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 34,
+            "start_column": 2,
+            "end_line": 34,
+            "end_column": 18,
+            "start_offset": 824,
+            "end_offset": 840
+          },
+          "contract_span": null,
+          "anchor": "34:47b4",
+          "visibility": null,
+          "contract": null,
+          "params": null,
+          "block": null,
+          "body_return": null,
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/formatter.rb:843-855:0",
+          "kind": "class",
+          "name": "Project::C",
+          "owner": null,
+          "scope": null,
+          "attribute": null,
+          "members": [],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 35,
+            "start_column": 2,
+            "end_line": 35,
+            "end_column": 14,
+            "start_offset": 843,
+            "end_offset": 855
+          },
+          "contract_span": null,
+          "anchor": "35:3d62",
+          "visibility": null,
+          "contract": null,
+          "params": null,
+          "block": null,
+          "body_return": null,
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/formatter.rb:861-938:0",
+          "kind": "module",
+          "name": "App",
+          "owner": null,
+          "scope": null,
+          "attribute": null,
+          "members": [],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 38,
+            "start_column": 0,
+            "end_line": 43,
+            "end_column": 3,
+            "start_offset": 861,
+            "end_offset": 938
+          },
+          "contract_span": null,
+          "anchor": "38:d566",
+          "visibility": null,
+          "contract": null,
+          "params": null,
+          "block": null,
+          "body_return": null,
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/formatter.rb:874-896:0",
+          "kind": "class",
+          "name": "App::Data",
+          "owner": null,
+          "scope": null,
+          "attribute": null,
+          "members": [],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 39,
+            "start_column": 2,
+            "end_line": 39,
+            "end_column": 24,
+            "start_offset": 874,
+            "end_offset": 896
+          },
+          "contract_span": null,
+          "anchor": "39:8936",
+          "visibility": null,
+          "contract": null,
+          "params": null,
+          "block": null,
+          "body_return": null,
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/formatter.rb:899-934:0",
+          "kind": "class",
+          "name": "App::API",
+          "owner": null,
+          "scope": null,
+          "attribute": null,
+          "members": [],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 40,
+            "start_column": 2,
+            "end_line": 42,
+            "end_column": 5,
+            "start_offset": 899,
+            "end_offset": 934
+          },
+          "contract_span": null,
+          "anchor": "40:bd8d",
+          "visibility": null,
+          "contract": null,
+          "params": null,
+          "block": null,
+          "body_return": null,
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/formatter.rb:913-928:0",
+          "kind": "method",
+          "name": "shadow",
+          "owner": "App::API",
+          "scope": "instance",
+          "attribute": null,
+          "members": [
+            "shadow"
+          ],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 41,
+            "start_column": 4,
+            "end_line": 41,
+            "end_column": 19,
+            "start_offset": 913,
+            "end_offset": 928
+          },
+          "contract_span": null,
+          "anchor": "41:786b",
+          "visibility": "public",
+          "contract": null,
+          "params": [],
+          "block": null,
+          "body_return": {
+            "state": "typed",
+            "type": "\"\"",
+            "provenance": "inferred",
+            "path": null,
+            "from_site": null
+          },
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/formatter.rb:940-995:0",
+          "kind": "module",
+          "name": "Hidden",
+          "owner": null,
+          "scope": null,
+          "attribute": null,
+          "members": [],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 45,
+            "start_column": 0,
+            "end_line": 49,
+            "end_column": 3,
+            "start_offset": 940,
+            "end_offset": 995
+          },
+          "contract_span": null,
+          "anchor": "45:5b50",
+          "visibility": null,
+          "contract": null,
+          "params": null,
+          "block": null,
+          "body_return": null,
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/formatter.rb:956-991:0",
+          "kind": "class",
+          "name": "Hidden::API",
+          "owner": null,
+          "scope": null,
+          "attribute": null,
+          "members": [],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 46,
+            "start_column": 2,
+            "end_line": 48,
+            "end_column": 5,
+            "start_offset": 956,
+            "end_offset": 991
+          },
+          "contract_span": null,
+          "anchor": "46:bd8d",
+          "visibility": null,
+          "contract": null,
+          "params": null,
+          "block": null,
+          "body_return": null,
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/formatter.rb:970-985:0",
+          "kind": "method",
+          "name": "shadow",
+          "owner": "Hidden::API",
+          "scope": "instance",
+          "attribute": null,
+          "members": [
+            "shadow"
+          ],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 47,
+            "start_column": 4,
+            "end_line": 47,
+            "end_column": 19,
+            "start_offset": 970,
+            "end_offset": 985
+          },
+          "contract_span": null,
+          "anchor": "47:786b",
+          "visibility": "public",
+          "contract": null,
+          "params": [],
+          "block": null,
+          "body_return": {
+            "state": "typed",
+            "type": "\"\"",
+            "provenance": "inferred",
+            "path": null,
+            "from_site": null
+          },
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/formatter.rb:997-1036:0",
+          "kind": "class",
+          "name": "Integer",
+          "owner": null,
+          "scope": null,
+          "attribute": null,
+          "members": [],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 51,
+            "start_column": 0,
+            "end_line": 53,
+            "end_column": 3,
+            "start_offset": 997,
+            "end_offset": 1036
+          },
+          "contract_span": null,
+          "anchor": "51:4c25",
+          "visibility": null,
+          "contract": null,
+          "params": null,
+          "block": null,
+          "body_return": null,
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/formatter.rb:1013-1032:0",
+          "kind": "method",
+          "name": "documented",
+          "owner": "Integer",
+          "scope": "instance",
+          "attribute": null,
+          "members": [
+            "documented"
+          ],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 52,
+            "start_column": 2,
+            "end_line": 52,
+            "end_column": 21,
+            "start_offset": 1013,
+            "end_offset": 1032
+          },
+          "contract_span": null,
+          "anchor": "52:c793",
+          "visibility": "public",
+          "contract": null,
+          "params": [],
+          "block": null,
+          "body_return": {
+            "state": "typed",
+            "type": "\"\"",
+            "provenance": "inferred",
+            "path": null,
+            "from_site": null
+          },
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/formatter.rb:1038-1056:0",
+          "kind": "method",
+          "name": "top_level",
+          "owner": "Object",
+          "scope": "instance",
+          "attribute": null,
+          "members": [
+            "top_level"
+          ],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 55,
+            "start_column": 0,
+            "end_line": 55,
+            "end_column": 18,
+            "start_offset": 1038,
+            "end_offset": 1056
+          },
+          "contract_span": null,
+          "anchor": "55:322d",
+          "visibility": "private",
+          "contract": null,
+          "params": [],
+          "block": null,
+          "body_return": {
+            "state": "typed",
+            "type": "\"\"",
+            "provenance": "inferred",
+            "path": null,
+            "from_site": null
+          },
+          "value": null,
+          "alias_of": null
+        }
+      ],
+      "diagnostics": [
+        {
+          "rule": "def.return-type-mismatch",
+          "severity": "warning",
+          "message": "return-type mismatch on `overloaded': declared String, inferred Integer | String",
+          "line": 14,
+          "column": 7
+        }
+      ],
+      "inputs": [
+        {
+          "path": "lib/inline.rb",
+          "digest": "xxh3-64:3a740969a17bee4d"
+        }
+      ]
+    },
+    {
+      "argument": "lib/library.rb",
+      "path": "lib/library.rb",
+      "status": "ok",
+      "reason": null,
+      "digest": "xxh3-64:5284fa37e71257cc",
+      "complete": true,
+      "omissions": [],
+      "sites": [
+        {
+          "key": "lib/library.rb:0-42:0",
+          "kind": "class",
+          "name": "String",
+          "owner": null,
+          "scope": null,
+          "attribute": null,
+          "members": [],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 1,
+            "start_column": 0,
+            "end_line": 3,
+            "end_column": 3,
+            "start_offset": 0,
+            "end_offset": 42
+          },
+          "contract_span": null,
+          "anchor": "1:69bb",
+          "visibility": null,
+          "contract": null,
+          "params": null,
+          "block": null,
+          "body_return": null,
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/library.rb:15-38:0",
+          "kind": "method",
+          "name": "to_i",
+          "owner": "String",
+          "scope": "instance",
+          "attribute": null,
+          "members": [
+            "to_i"
+          ],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 2,
+            "start_column": 2,
+            "end_line": 2,
+            "end_column": 25,
+            "start_offset": 15,
+            "end_offset": 38
+          },
+          "contract_span": null,
+          "anchor": "2:694b",
+          "visibility": "public",
+          "contract": null,
+          "params": [
+            {
+              "name": "base",
+              "kind": "optional",
+              "type": null
+            }
+          ],
+          "block": null,
+          "body_return": {
+            "state": "typed",
+            "type": "1",
+            "provenance": "inferred",
+            "path": null,
+            "from_site": null
+          },
+          "value": null,
+          "alias_of": null
+        }
+      ],
+      "diagnostics": [],
+      "inputs": []
+    },
+    {
+      "argument": "lib/inline.rb",
+      "path": "lib/inline.rb",
+      "status": "ok",
+      "reason": null,
+      "digest": "xxh3-64:3a740969a17bee4d",
+      "complete": true,
+      "omissions": [],
+      "sites": [
+        {
+          "key": "lib/inline.rb:0-119:0",
+          "kind": "class",
+          "name": "Formatter",
+          "owner": null,
+          "scope": null,
+          "attribute": null,
+          "members": [],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 1,
+            "start_column": 0,
+            "end_line": 6,
+            "end_column": 3,
+            "start_offset": 0,
+            "end_offset": 119
+          },
+          "contract_span": null,
+          "anchor": "1:d16e",
+          "visibility": null,
+          "contract": null,
+          "params": null,
+          "block": null,
+          "body_return": null,
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/inline.rb:41-75:0",
+          "kind": "method",
+          "name": "inferred_return",
+          "owner": "Formatter",
+          "scope": "instance",
+          "attribute": null,
+          "members": [
+            "inferred_return"
+          ],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 3,
+            "start_column": 2,
+            "end_line": 3,
+            "end_column": 36,
+            "start_offset": 41,
+            "end_offset": 75
+          },
+          "contract_span": {
+            "start_line": 2,
+            "start_column": 2,
+            "end_line": 2,
+            "end_column": 22,
+            "start_offset": 18,
+            "end_offset": 38
+          },
+          "anchor": "2:2fd2",
+          "visibility": "public",
+          "contract": "inline",
+          "params": [
+            {
+              "name": "value",
+              "kind": "required",
+              "type": null
+            }
+          ],
+          "block": null,
+          "body_return": {
+            "state": "typed",
+            "type": "String",
+            "provenance": "inferred",
+            "path": null,
+            "from_site": null
+          },
+          "value": null,
+          "alias_of": null
+        },
+        {
+          "key": "lib/inline.rb:100-115:0",
+          "kind": "method",
+          "name": "inline",
+          "owner": "Formatter",
+          "scope": "instance",
+          "attribute": null,
+          "members": [
+            "inline"
+          ],
+          "module_function": false,
+          "builder": null,
+          "ordinal": 0,
+          "span": {
+            "start_line": 5,
+            "start_column": 2,
+            "end_line": 5,
+            "end_column": 17,
+            "start_offset": 100,
+            "end_offset": 115
+          },
+          "contract_span": {
+            "start_line": 4,
+            "start_column": 2,
+            "end_line": 4,
+            "end_column": 21,
+            "start_offset": 78,
+            "end_offset": 97
+          },
+          "anchor": "4:187a",
+          "visibility": "public",
+          "contract": "inline",
+          "params": [],
+          "block": null,
+          "body_return": {
+            "state": "typed",
+            "type": "\"\"",
+            "provenance": "inferred",
+            "path": null,
+            "from_site": null
+          },
+          "value": null,
+          "alias_of": null
+        }
+      ],
+      "diagnostics": [],
+      "inputs": [
+        {
+          "path": "lib/formatter.rb",
+          "digest": "xxh3-64:3cfd601726f2f5fd"
+        }
+      ]
+    },
+    {
+      "argument": "lib/broken.rb",
+      "path": "lib/broken.rb",
+      "status": "parse_error",
+      "reason": "the file does not parse",
+      "digest": "xxh3-64:d51549dca35d92ed",
+      "complete": null,
+      "omissions": null,
+      "sites": null,
+      "diagnostics": [
+        {
+          "rule": null,
+          "severity": "error",
+          "message": "unexpected end-of-input; expected a `)` to close the parameters",
+          "line": 1,
+          "column": 12
+        },
+        {
+          "rule": null,
+          "severity": "error",
+          "message": "unexpected end-of-input, assuming it is closing the parent top level context",
+          "line": 1,
+          "column": 12
+        },
+        {
+          "rule": null,
+          "severity": "error",
+          "message": "expected an `end` to close the `def` statement",
+          "line": 1,
+          "column": 1
+        }
+      ],
+      "inputs": null
+    },
+    {
+      "argument": "lib/missing.rb",
+      "path": null,
+      "status": "not_found",
+      "reason": "no such file",
+      "digest": null,
+      "complete": null,
+      "omissions": null,
+      "sites": null,
+      "diagnostics": null,
+      "inputs": null
+    },
+    {
+      "argument": "README.txt",
+      "path": "README.txt",
+      "status": "not_ruby",
+      "reason": "not a Ruby source file",
+      "digest": null,
+      "complete": null,
+      "omissions": null,
+      "sites": null,
+      "diagnostics": null,
+      "inputs": null
+    },
+    {
+      "argument": "outside.rb",
+      "path": "outside.rb",
+      "status": "outside_project",
+      "reason": "not under the configured paths:",
+      "digest": null,
+      "complete": null,
+      "omissions": null,
+      "sites": null,
+      "diagnostics": null,
+      "inputs": null
+    }
+  ],
+  "members": [
+    {
+      "owner": "App::API",
+      "scope": "instance",
+      "name": "shadow",
+      "kind": "method",
+      "visibility": "public",
+      "sites": [
+        "lib/formatter.rb:913-928:0"
+      ],
+      "also_defined_at": [],
+      "basis": "contract",
+      "overloads": [
+        {
+          "rbs": "() -> ::String",
+          "params": [],
+          "block": null,
+          "return": {
+            "state": "typed",
+            "type": "::String",
+            "provenance": "sig",
+            "path": "sig/contracts.rbs",
+            "from_site": null
+          }
+        }
+      ]
+    },
+    {
+      "owner": "Formatter",
+      "scope": "instance",
+      "name": "attribute",
+      "kind": "attribute",
+      "visibility": "public",
+      "sites": [
+        "lib/formatter.rb:671-693:0"
+      ],
+      "also_defined_at": [],
+      "basis": "single_site",
+      "overloads": [
+        {
+          "rbs": null,
+          "params": [],
+          "block": null,
+          "return": {
+            "state": "unavailable",
+            "reason": "not_computed"
+          }
+        }
+      ]
+    },
+    {
+      "owner": "Formatter",
+      "scope": "instance",
+      "name": "boolean",
+      "kind": "method",
+      "visibility": "public",
+      "sites": [
+        "lib/formatter.rb:607-633:0"
+      ],
+      "also_defined_at": [],
+      "basis": "contract",
+      "overloads": [
+        {
+          "rbs": "(::TrueClass) -> ::TrueClass",
+          "params": [
+            {
+              "name": null,
+              "kind": "required",
+              "type": {
+                "state": "typed",
+                "type": "::TrueClass",
+                "provenance": "sig",
+                "path": "sig/contracts.rbs",
+                "from_site": null
+              }
+            }
+          ],
+          "block": null,
+          "return": {
+            "state": "typed",
+            "type": "::TrueClass",
+            "provenance": "sig",
+            "path": "sig/contracts.rbs",
+            "from_site": null
+          }
+        }
+      ]
+    },
+    {
+      "owner": "Formatter",
+      "scope": "instance",
+      "name": "dynamic",
+      "kind": "method",
+      "visibility": "public",
+      "sites": [
+        "lib/formatter.rb:228-254:0"
+      ],
+      "also_defined_at": [],
+      "basis": "contract",
+      "overloads": [
+        {
+          "rbs": "(::Array[untyped]) -> ::Array[untyped]",
+          "params": [
+            {
+              "name": null,
+              "kind": "required",
+              "type": {
+                "state": "typed",
+                "type": "::Array[untyped]",
+                "provenance": "sig",
+                "path": "sig/contracts.rbs",
+                "from_site": null
+              }
+            }
+          ],
+          "block": null,
+          "return": {
+            "state": "typed",
+            "type": "::Array[untyped]",
+            "provenance": "sig",
+            "path": "sig/contracts.rbs",
+            "from_site": null
+          }
+        }
+      ]
+    },
+    {
+      "owner": "Formatter",
+      "scope": "instance",
+      "name": "extended",
+      "kind": "method",
+      "visibility": "public",
+      "sites": [
+        "lib/formatter.rb:520-537:0"
+      ],
+      "also_defined_at": [],
+      "basis": "contract",
+      "overloads": [
+        {
+          "rbs": "() -> ::String",
+          "params": [],
+          "block": null,
+          "return": {
+            "state": "typed",
+            "type": "::String",
+            "provenance": "sig",
+            "path": "sig/contracts.rbs",
+            "from_site": null
+          }
+        }
+      ]
+    },
+    {
+      "owner": "Formatter",
+      "scope": "instance",
+      "name": "format",
+      "kind": "method",
+      "visibility": "public",
+      "sites": [
+        "lib/formatter.rb:18-50:0"
+      ],
+      "also_defined_at": [],
+      "basis": "contract",
+      "overloads": [
+        {
+          "rbs": "(::String input, mode: ::String) -> ::String",
+          "params": [
+            {
+              "name": "input",
+              "kind": "required",
+              "type": {
+                "state": "typed",
+                "type": "::String",
+                "provenance": "sig",
+                "path": "sig/contracts.rbs",
+                "from_site": null
+              }
+            },
+            {
+              "name": "mode",
+              "kind": "keyreq",
+              "type": {
+                "state": "typed",
+                "type": "::String",
+                "provenance": "sig",
+                "path": "sig/contracts.rbs",
+                "from_site": null
+              }
+            }
+          ],
+          "block": null,
+          "return": {
+            "state": "typed",
+            "type": "::String",
+            "provenance": "sig",
+            "path": "sig/contracts.rbs",
+            "from_site": null
+          }
+        }
+      ]
+    },
+    {
+      "owner": "Formatter",
+      "scope": "instance",
+      "name": "forwarding",
+      "kind": "method",
+      "visibility": "public",
+      "sites": [
+        "lib/formatter.rb:438-462:0"
+      ],
+      "also_defined_at": [],
+      "basis": "contract",
+      "overloads": [
+        {
+          "rbs": "(?) -> ::String",
+          "params": null,
+          "block": null,
+          "return": {
+            "state": "typed",
+            "type": "::String",
+            "provenance": "sig",
+            "path": "sig/contracts.rbs",
+            "from_site": null
+          }
+        }
+      ]
+    },
+    {
+      "owner": "Formatter",
+      "scope": "instance",
+      "name": "generic",
+      "kind": "method",
+      "visibility": "public",
+      "sites": [
+        "lib/formatter.rb:109-135:0"
+      ],
+      "also_defined_at": [],
+      "basis": "contract",
+      "overloads": [
+        {
+          "rbs": "(::Array[::String | ::Integer]) -> ::Array[::Integer | ::String]",
+          "params": [
+            {
+              "name": null,
+              "kind": "required",
+              "type": {
+                "state": "typed",
+                "type": "::Array[::String | ::Integer]",
+                "provenance": "sig",
+                "path": "sig/contracts.rbs",
+                "from_site": null
+              }
+            }
+          ],
+          "block": null,
+          "return": {
+            "state": "typed",
+            "type": "::Array[::Integer | ::String]",
+            "provenance": "sig",
+            "path": "sig/contracts.rbs",
+            "from_site": null
+          }
+        }
+      ]
+    },
+    {
+      "owner": "Formatter",
+      "scope": "instance",
+      "name": "inferred",
+      "kind": "method",
+      "visibility": "public",
+      "sites": [
+        "lib/formatter.rb:465-482:0"
+      ],
+      "also_defined_at": [],
+      "basis": "single_site",
+      "overloads": [
+        {
+          "rbs": "() -> \"\"",
+          "params": [],
+          "block": null,
+          "return": {
+            "state": "typed",
+            "type": "\"\"",
+            "provenance": "inferred",
+            "path": null,
+            "from_site": "lib/formatter.rb:465-482:0"
+          }
+        }
+      ]
+    },
+    {
+      "owner": "Formatter",
+      "scope": "instance",
+      "name": "inferred_return",
+      "kind": "method",
+      "visibility": "public",
+      "sites": [
+        "lib/inline.rb:41-75:0"
+      ],
+      "also_defined_at": [],
+      "basis": "contract",
+      "overloads": [
+        {
+          "rbs": "(::String value) -> String",
+          "params": [
+            {
+              "name": "value",
+              "kind": "required",
+              "type": {
+                "state": "typed",
+                "type": "::String",
+                "provenance": "inline",
+                "path": null,
+                "from_site": null
+              }
+            }
+          ],
+          "block": null,
+          "return": {
+            "state": "typed",
+            "type": "String",
+            "provenance": "inferred",
+            "path": null,
+            "from_site": "lib/inline.rb:41-75:0"
+          }
+        }
+      ]
+    },
+    {
+      "owner": "Formatter",
+      "scope": "instance",
+      "name": "inline",
+      "kind": "method",
+      "visibility": "public",
+      "sites": [
+        "lib/inline.rb:100-115:0"
+      ],
+      "also_defined_at": [],
+      "basis": "contract",
+      "overloads": [
+        {
+          "rbs": "() -> ::String",
+          "params": [],
+          "block": null,
+          "return": {
+            "state": "typed",
+            "type": "::String",
+            "provenance": "inline",
+            "path": null,
+            "from_site": null
+          }
+        }
+      ]
+    },
+    {
+      "owner": "Formatter",
+      "scope": "instance",
+      "name": "integer",
+      "kind": "method",
+      "visibility": "public",
+      "sites": [
+        "lib/formatter.rb:53-79:0"
+      ],
+      "also_defined_at": [],
+      "basis": "contract",
+      "overloads": [
+        {
+          "rbs": "(::Integer) -> ::Integer",
+          "params": [
+            {
+              "name": null,
+              "kind": "required",
+              "type": {
+                "state": "typed",
+                "type": "::Integer",
+                "provenance": "sig",
+                "path": "sig/contracts.rbs",
+                "from_site": null
+              }
+            }
+          ],
+          "block": null,
+          "return": {
+            "state": "typed",
+            "type": "::Integer",
+            "provenance": "sig",
+            "path": "sig/contracts.rbs",
+            "from_site": null
+          }
+        }
+      ]
+    },
+    {
+      "owner": "Formatter",
+      "scope": "instance",
+      "name": "keyword",
+      "kind": "method",
+      "visibility": "public",
+      "sites": [
+        "lib/formatter.rb:376-403:0"
+      ],
+      "also_defined_at": [],
+      "basis": "contract",
+      "overloads": [
+        {
+          "rbs": "(?value: ::String) -> ::String",
+          "params": [
+            {
+              "name": "value",
+              "kind": "key",
+              "type": {
+                "state": "typed",
+                "type": "::String",
+                "provenance": "sig",
+                "path": "sig/contracts.rbs",
+                "from_site": null
+              }
+            }
+          ],
+          "block": null,
+          "return": {
+            "state": "typed",
+            "type": "::String",
+            "provenance": "sig",
+            "path": "sig/contracts.rbs",
+            "from_site": null
+          }
+        }
+      ]
+    },
+    {
+      "owner": "Formatter",
+      "scope": "instance",
+      "name": "optional",
+      "kind": "method",
+      "visibility": "public",
+      "sites": [
+        "lib/formatter.rb:290-342:0"
+      ],
+      "also_defined_at": [],
+      "basis": "contract",
+      "overloads": [
+        {
+          "rbs": "(?::String, *::String, ?flag: bool) -> ::String",
+          "params": [
+            {
+              "name": null,
+              "kind": "optional",
+              "type": {
+                "state": "typed",
+                "type": "::String",
+                "provenance": "sig",
+                "path": "sig/contracts.rbs",
+                "from_site": null
+              }
+            },
+            {
+              "name": null,
+              "kind": "rest",
+              "type": {
+                "state": "typed",
+                "type": "::String",
+                "provenance": "sig",
+                "path": "sig/contracts.rbs",
+                "from_site": null
+              }
+            },
+            {
+              "name": "flag",
+              "kind": "key",
+              "type": {
+                "state": "typed",
+                "type": "bool",
+                "provenance": "sig",
+                "path": "sig/contracts.rbs",
+                "from_site": null
+              }
+            }
+          ],
+          "block": null,
+          "return": {
+            "state": "typed",
+            "type": "::String",
+            "provenance": "sig",
+            "path": "sig/contracts.rbs",
+            "from_site": null
+          }
+        }
+      ]
+    },
+    {
+      "owner": "Formatter",
+      "scope": "instance",
+      "name": "overloaded",
+      "kind": "method",
+      "visibility": "public",
+      "sites": [
+        "lib/formatter.rb:406-435:0"
+      ],
+      "also_defined_at": [],
+      "basis": "contract",
+      "overloads": [
+        {
+          "rbs": "(::String) -> ::String",
+          "params": [
+            {
+              "name": null,
+              "kind": "required",
+              "type": {
+                "state": "typed",
+                "type": "::String",
+                "provenance": "sig",
+                "path": "sig/contracts.rbs",
+                "from_site": null
+              }
+            }
+          ],
+          "block": null,
+          "return": {
+            "state": "typed",
+            "type": "::String",
+            "provenance": "sig",
+            "path": "sig/contracts.rbs",
+            "from_site": null
+          }
+        },
+        {
+          "rbs": "(::Integer) -> ::String",
+          "params": [
+            {
+              "name": null,
+              "kind": "required",
+              "type": {
+                "state": "typed",
+                "type": "::Integer",
+                "provenance": "sig",
+                "path": "sig/contracts.rbs",
+                "from_site": null
+              }
+            }
+          ],
+          "block": null,
+          "return": {
+            "state": "typed",
+            "type": "::String",
+            "provenance": "sig",
+            "path": "sig/contracts.rbs",
+            "from_site": null
+          }
+        }
+      ]
+    },
+    {
+      "owner": "Formatter",
+      "scope": "instance",
+      "name": "pair",
+      "kind": "method",
+      "visibility": "public",
+      "sites": [
+        "lib/formatter.rb:636-668:0"
+      ],
+      "also_defined_at": [],
+      "basis": "contract",
+      "overloads": [
+        {
+          "rbs": "(::String, ::String) -> ::String",
+          "params": [
+            {
+              "name": null,
+              "kind": "required",
+              "type": {
+                "state": "typed",
+                "type": "::String",
+                "provenance": "sig",
+                "path": "sig/contracts.rbs",
+                "from_site": null
+              }
+            },
+            {
+              "name": null,
+              "kind": "required",
+              "type": {
+                "state": "typed",
+                "type": "::String",
+                "provenance": "sig",
+                "path": "sig/contracts.rbs",
+                "from_site": null
+              }
+            }
+          ],
+          "block": null,
+          "return": {
+            "state": "typed",
+            "type": "::String",
+            "provenance": "sig",
+            "path": "sig/contracts.rbs",
+            "from_site": null
+          }
+        }
+      ]
+    },
+    {
+      "owner": "Formatter",
+      "scope": "instance",
+      "name": "project",
+      "kind": "method",
+      "visibility": "public",
+      "sites": [
+        "lib/formatter.rb:168-194:0"
+      ],
+      "also_defined_at": [],
+      "basis": "contract",
+      "overloads": [
+        {
+          "rbs": "(::Project::A) -> ::Project::B",
+          "params": [
+            {
+              "name": null,
+              "kind": "required",
+              "type": {
+                "state": "typed",
+                "type": "::Project::A",
+                "provenance": "sig",
+                "path": "sig/contracts.rbs",
+                "from_site": null
+              }
+            }
+          ],
+          "block": null,
+          "return": {
+            "state": "typed",
+            "type": "::Project::B",
+            "provenance": "sig",
+            "path": "sig/contracts.rbs",
+            "from_site": null
+          }
+        }
+      ]
+    },
+    {
+      "owner": "Formatter",
+      "scope": "instance",
+      "name": "refined",
+      "kind": "method",
+      "visibility": "public",
+      "sites": [
+        "lib/formatter.rb:540-566:0"
+      ],
+      "also_defined_at": [],
+      "basis": "contract",
+      "overloads": [
+        {
+          "rbs": "%a{rigor:v1:return: non-empty-string} %a{rigor:v1:param: value non-empty-string} (::String value) -> ::String",
+          "params": [
+            {
+              "name": "value",
+              "kind": "required",
+              "type": {
+                "state": "typed",
+                "type": "::String",
+                "provenance": "sig",
+                "path": "sig/contracts.rbs",
+                "from_site": null
+              }
+            }
+          ],
+          "block": null,
+          "return": {
+            "state": "typed",
+            "type": "::String",
+            "provenance": "sig",
+            "path": "sig/contracts.rbs",
+            "from_site": null
+          }
+        }
+      ]
+    },
+    {
+      "owner": "Formatter",
+      "scope": "instance",
+      "name": "refined_keyword",
+      "kind": "method",
+      "visibility": "public",
+      "sites": [
+        "lib/formatter.rb:569-604:0"
+      ],
+      "also_defined_at": [],
+      "basis": "contract",
+      "overloads": [
+        {
+          "rbs": "%a{rigor:v1:param: value non-empty-string} (value: ::String) -> ::String",
+          "params": [
+            {
+              "name": "value",
+              "kind": "keyreq",
+              "type": {
+                "state": "typed",
+                "type": "::String",
+                "provenance": "sig",
+                "path": "sig/contracts.rbs",
+                "from_site": null
+              }
+            }
+          ],
+          "block": null,
+          "return": {
+            "state": "typed",
+            "type": "::String",
+            "provenance": "sig",
+            "path": "sig/contracts.rbs",
+            "from_site": null
+          }
+        }
+      ]
+    },
+    {
+      "owner": "Formatter",
+      "scope": "instance",
+      "name": "response",
+      "kind": "method",
+      "visibility": "public",
+      "sites": [
+        "lib/formatter.rb:138-165:0"
+      ],
+      "also_defined_at": [],
+      "basis": "contract",
+      "overloads": [
+        {
+          "rbs": "(::Faraday::Response) -> ::Faraday::Response",
+          "params": [
+            {
+              "name": null,
+              "kind": "required",
+              "type": {
+                "state": "typed",
+                "type": "::Faraday::Response",
+                "provenance": "sig",
+                "path": "sig/contracts.rbs",
+                "from_site": null
+              }
+            }
+          ],
+          "block": null,
+          "return": {
+            "state": "typed",
+            "type": "::Faraday::Response",
+            "provenance": "sig",
+            "path": "sig/contracts.rbs",
+            "from_site": null
+          }
+        }
+      ]
+    },
+    {
+      "owner": "Formatter",
+      "scope": "instance",
+      "name": "union",
+      "kind": "method",
+      "visibility": "public",
+      "sites": [
+        "lib/formatter.rb:82-106:0"
+      ],
+      "also_defined_at": [],
+      "basis": "contract",
+      "overloads": [
+        {
+          "rbs": "(::String | ::Integer) -> (::String | ::Integer)",
+          "params": [
+            {
+              "name": null,
+              "kind": "required",
+              "type": {
+                "state": "typed",
+                "type": "::String | ::Integer",
+                "provenance": "sig",
+                "path": "sig/contracts.rbs",
+                "from_site": null
+              }
+            }
+          ],
+          "block": null,
+          "return": {
+            "state": "typed",
+            "type": "::String | ::Integer",
+            "provenance": "sig",
+            "path": "sig/contracts.rbs",
+            "from_site": null
+          }
+        }
+      ]
+    },
+    {
+      "owner": "Formatter",
+      "scope": "instance",
+      "name": "unmatched",
+      "kind": "method",
+      "visibility": "public",
+      "sites": [
+        "lib/formatter.rb:345-373:0"
+      ],
+      "also_defined_at": [],
+      "basis": "contract",
+      "overloads": [
+        {
+          "rbs": "(?::String) -> ::String",
+          "params": [
+            {
+              "name": null,
+              "kind": "optional",
+              "type": {
+                "state": "typed",
+                "type": "::String",
+                "provenance": "sig",
+                "path": "sig/contracts.rbs",
+                "from_site": null
+              }
+            }
+          ],
+          "block": null,
+          "return": {
+            "state": "typed",
+            "type": "::String",
+            "provenance": "sig",
+            "path": "sig/contracts.rbs",
+            "from_site": null
+          }
+        }
+      ]
+    },
+    {
+      "owner": "Formatter",
+      "scope": "instance",
+      "name": "unrelated",
+      "kind": "method",
+      "visibility": "public",
+      "sites": [
+        "lib/formatter.rb:197-225:0"
+      ],
+      "also_defined_at": [],
+      "basis": "contract",
+      "overloads": [
+        {
+          "rbs": "(::Project::A | ::Project::B) -> (::Project::A | ::Project::B)",
+          "params": [
+            {
+              "name": null,
+              "kind": "required",
+              "type": {
+                "state": "typed",
+                "type": "::Project::A | ::Project::B",
+                "provenance": "sig",
+                "path": "sig/contracts.rbs",
+                "from_site": null
+              }
+            }
+          ],
+          "block": null,
+          "return": {
+            "state": "typed",
+            "type": "::Project::A | ::Project::B",
+            "provenance": "sig",
+            "path": "sig/contracts.rbs",
+            "from_site": null
+          }
+        }
+      ]
+    },
+    {
+      "owner": "Formatter",
+      "scope": "instance",
+      "name": "unsupported",
+      "kind": "method",
+      "visibility": "public",
+      "sites": [
+        "lib/formatter.rb:257-287:0"
+      ],
+      "also_defined_at": [],
+      "basis": "contract",
+      "overloads": [
+        {
+          "rbs": "([ ::String ]) -> [ ::String ]",
+          "params": [
+            {
+              "name": null,
+              "kind": "required",
+              "type": {
+                "state": "typed",
+                "type": "[ ::String ]",
+                "provenance": "sig",
+                "path": "sig/contracts.rbs",
+                "from_site": null
+              }
+            }
+          ],
+          "block": null,
+          "return": {
+            "state": "typed",
+            "type": "[ ::String ]",
+            "provenance": "sig",
+            "path": "sig/contracts.rbs",
+            "from_site": null
+          }
+        }
+      ]
+    },
+    {
+      "owner": "Hidden::API",
+      "scope": "instance",
+      "name": "shadow",
+      "kind": "method",
+      "visibility": "public",
+      "sites": [
+        "lib/formatter.rb:970-985:0"
+      ],
+      "also_defined_at": [],
+      "basis": "contract",
+      "overloads": [
+        {
+          "rbs": "() -> ::String",
+          "params": [],
+          "block": null,
+          "return": {
+            "state": "typed",
+            "type": "::String",
+            "provenance": "sig",
+            "path": "sig/contracts.rbs",
+            "from_site": null
+          }
+        }
+      ]
+    },
+    {
+      "owner": "Integer",
+      "scope": "instance",
+      "name": "documented",
+      "kind": "method",
+      "visibility": "public",
+      "sites": [
+        "lib/formatter.rb:1013-1032:0"
+      ],
+      "also_defined_at": [],
+      "basis": "contract",
+      "overloads": [
+        {
+          "rbs": "() -> ::String",
+          "params": [],
+          "block": null,
+          "return": {
+            "state": "typed",
+            "type": "::String",
+            "provenance": "sig",
+            "path": "sig/contracts.rbs",
+            "from_site": null
+          }
+        }
+      ]
+    },
+    {
+      "owner": "Object",
+      "scope": "instance",
+      "name": "top_level",
+      "kind": "method",
+      "visibility": "private",
+      "sites": [
+        "lib/formatter.rb:1038-1056:0"
+      ],
+      "also_defined_at": [],
+      "basis": "contract",
+      "overloads": [
+        {
+          "rbs": "() -> ::String",
+          "params": [],
+          "block": null,
+          "return": {
+            "state": "typed",
+            "type": "::String",
+            "provenance": "sig",
+            "path": "sig/contracts.rbs",
+            "from_site": null
+          }
+        }
+      ]
+    },
+    {
+      "owner": "String",
+      "scope": "instance",
+      "name": "to_i",
+      "kind": "method",
+      "visibility": "public",
+      "sites": [
+        "lib/library.rb:15-38:0"
+      ],
+      "also_defined_at": [],
+      "basis": "contract",
+      "overloads": [
+        {
+          "rbs": "(?::int radix) -> ::Integer",
+          "params": [
+            {
+              "name": "radix",
+              "kind": "optional",
+              "type": {
+                "state": "typed",
+                "type": "::int",
+                "provenance": "library",
+                "path": null,
+                "from_site": null
+              }
+            }
+          ],
+          "block": null,
+          "return": {
+            "state": "typed",
+            "type": "::Integer",
+            "provenance": "library",
+            "path": null,
+            "from_site": null
+          }
+        }
+      ]
+    },
+    {
+      "owner": "Utilities",
+      "scope": "instance",
+      "name": "callable",
+      "kind": "method",
+      "visibility": "private",
+      "sites": [
+        "lib/formatter.rb:769-786:0"
+      ],
+      "also_defined_at": [],
+      "basis": "contract",
+      "overloads": [
+        {
+          "rbs": "() -> ::String",
+          "params": [],
+          "block": null,
+          "return": {
+            "state": "typed",
+            "type": "::String",
+            "provenance": "sig",
+            "path": "sig/contracts.rbs",
+            "from_site": null
+          }
+        }
+      ]
+    },
+    {
+      "owner": "Utilities",
+      "scope": "singleton",
+      "name": "callable",
+      "kind": "method",
+      "visibility": "public",
+      "sites": [
+        "lib/formatter.rb:769-786:0"
+      ],
+      "also_defined_at": [],
+      "basis": "contract",
+      "overloads": [
+        {
+          "rbs": "() -> ::String",
+          "params": [],
+          "block": null,
+          "return": {
+            "state": "typed",
+            "type": "::String",
+            "provenance": "sig",
+            "path": "sig/contracts.rbs",
+            "from_site": null
+          }
+        }
+      ]
+    }
+  ],
+  "claims": {
+    "schema": "lens-claims/v0",
+    "revision": 1,
+    "request_digest": "xxh3-64:5af76ef8e9e6ac7a",
+    "grammar": "rbs",
+    "capabilities": [
+      "return",
+      "required_param",
+      "required_keyword"
+    ],
+    "results": [
+      {
+        "id": "return-equal-relative",
+        "verdict": "compatible",
+        "reason": "proven_inclusion",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:18-50:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "format"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": [
+          {
+            "rule": "equal",
+            "arm": "::String",
+            "against": "::String"
+          }
+        ]
+      },
+      {
+        "id": "return-equal-absolute",
+        "verdict": "compatible",
+        "reason": "proven_inclusion",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:18-50:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "format"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": [
+          {
+            "rule": "equal",
+            "arm": "::String",
+            "against": "::String"
+          }
+        ]
+      },
+      {
+        "id": "return-alias",
+        "verdict": "compatible",
+        "reason": "proven_inclusion",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:18-50:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "format"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": [
+          {
+            "rule": "equal",
+            "arm": "::String",
+            "against": "::String"
+          }
+        ]
+      },
+      {
+        "id": "literal-equal",
+        "verdict": "compatible",
+        "reason": "proven_inclusion",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:607-633:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "boolean"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::TrueClass",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": [
+          {
+            "rule": "equal",
+            "arm": "true",
+            "against": "true"
+          }
+        ]
+      },
+      {
+        "id": "literal-distinct",
+        "verdict": "conflict",
+        "reason": "proven_disjoint_arm",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:607-633:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "boolean"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::TrueClass",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": [
+          {
+            "rule": "distinct_literals",
+            "arm": "true",
+            "against": "false"
+          }
+        ]
+      },
+      {
+        "id": "literal-ancestor",
+        "verdict": "compatible",
+        "reason": "proven_inclusion",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:607-633:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "boolean"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::TrueClass",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": [
+          {
+            "rule": "literal_class_ancestor",
+            "arm": "true",
+            "against": "::Object"
+          }
+        ]
+      },
+      {
+        "id": "second-identical-param",
+        "verdict": "compatible",
+        "reason": "proven_inclusion",
+        "relation": "documentation_coverage",
+        "direction": "claim_within_contract",
+        "site": "lib/formatter.rb:636-668:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "pair"
+        },
+        "slot": {
+          "kind": "param",
+          "name": "second",
+          "param_kind": "required",
+          "index": 1
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": [
+          {
+            "rule": "equal",
+            "arm": "::String",
+            "against": "::String"
+          }
+        ]
+      },
+      {
+        "id": "module-function-instance",
+        "verdict": "compatible",
+        "reason": "proven_inclusion",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:769-786:0",
+        "member": {
+          "owner": "Utilities",
+          "scope": "instance",
+          "name": "callable"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": [
+          {
+            "rule": "equal",
+            "arm": "::String",
+            "against": "::String"
+          }
+        ]
+      },
+      {
+        "id": "module-function-singleton",
+        "verdict": "compatible",
+        "reason": "proven_inclusion",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:769-786:0",
+        "member": {
+          "owner": "Utilities",
+          "scope": "singleton",
+          "name": "callable"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": [
+          {
+            "rule": "equal",
+            "arm": "::String",
+            "against": "::String"
+          }
+        ]
+      },
+      {
+        "id": "singleton-relative-true",
+        "verdict": "unknown",
+        "reason": "unproven",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:18-50:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "format"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": []
+      },
+      {
+        "id": "singleton-absolute-true",
+        "verdict": "conflict",
+        "reason": "proven_disjoint_arm",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:18-50:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "format"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": [
+          {
+            "rule": "literal_outside_class",
+            "arm": "::String",
+            "against": "true"
+          }
+        ]
+      },
+      {
+        "id": "singleton-literal-true",
+        "verdict": "conflict",
+        "reason": "proven_disjoint_arm",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:18-50:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "format"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": [
+          {
+            "rule": "literal_outside_class",
+            "arm": "::String",
+            "against": "true"
+          }
+        ]
+      },
+      {
+        "id": "singleton-param-relative-true",
+        "verdict": "unknown",
+        "reason": "unproven",
+        "relation": "documentation_coverage",
+        "direction": "claim_within_contract",
+        "site": "lib/formatter.rb:18-50:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "format"
+        },
+        "slot": {
+          "kind": "param",
+          "name": "value",
+          "param_kind": "required",
+          "index": 0
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": []
+      },
+      {
+        "id": "singleton-param-literal-true",
+        "verdict": "conflict",
+        "reason": "proven_disjoint_arm",
+        "relation": "documentation_coverage",
+        "direction": "claim_within_contract",
+        "site": "lib/formatter.rb:18-50:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "format"
+        },
+        "slot": {
+          "kind": "param",
+          "name": "value",
+          "param_kind": "required",
+          "index": 0
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": [
+          {
+            "rule": "literal_outside_class",
+            "arm": "true",
+            "against": "::String"
+          }
+        ]
+      },
+      {
+        "id": "singleton-toplevel-true",
+        "verdict": "conflict",
+        "reason": "proven_disjoint_arm",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:1038-1056:0",
+        "member": {
+          "owner": "Object",
+          "scope": "instance",
+          "name": "top_level"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": [
+          {
+            "rule": "literal_outside_class",
+            "arm": "::String",
+            "against": "true"
+          }
+        ]
+      },
+      {
+        "id": "singleton-relative-false",
+        "verdict": "unknown",
+        "reason": "unproven",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:18-50:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "format"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": []
+      },
+      {
+        "id": "singleton-absolute-false",
+        "verdict": "conflict",
+        "reason": "proven_disjoint_arm",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:18-50:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "format"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": [
+          {
+            "rule": "literal_outside_class",
+            "arm": "::String",
+            "against": "false"
+          }
+        ]
+      },
+      {
+        "id": "singleton-literal-false",
+        "verdict": "conflict",
+        "reason": "proven_disjoint_arm",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:18-50:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "format"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": [
+          {
+            "rule": "literal_outside_class",
+            "arm": "::String",
+            "against": "false"
+          }
+        ]
+      },
+      {
+        "id": "singleton-param-relative-false",
+        "verdict": "unknown",
+        "reason": "unproven",
+        "relation": "documentation_coverage",
+        "direction": "claim_within_contract",
+        "site": "lib/formatter.rb:18-50:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "format"
+        },
+        "slot": {
+          "kind": "param",
+          "name": "value",
+          "param_kind": "required",
+          "index": 0
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": []
+      },
+      {
+        "id": "singleton-param-literal-false",
+        "verdict": "conflict",
+        "reason": "proven_disjoint_arm",
+        "relation": "documentation_coverage",
+        "direction": "claim_within_contract",
+        "site": "lib/formatter.rb:18-50:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "format"
+        },
+        "slot": {
+          "kind": "param",
+          "name": "value",
+          "param_kind": "required",
+          "index": 0
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": [
+          {
+            "rule": "literal_outside_class",
+            "arm": "false",
+            "against": "::String"
+          }
+        ]
+      },
+      {
+        "id": "singleton-toplevel-false",
+        "verdict": "conflict",
+        "reason": "proven_disjoint_arm",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:1038-1056:0",
+        "member": {
+          "owner": "Object",
+          "scope": "instance",
+          "name": "top_level"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": [
+          {
+            "rule": "literal_outside_class",
+            "arm": "::String",
+            "against": "false"
+          }
+        ]
+      },
+      {
+        "id": "singleton-relative-nil",
+        "verdict": "unknown",
+        "reason": "unproven",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:18-50:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "format"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": []
+      },
+      {
+        "id": "singleton-absolute-nil",
+        "verdict": "conflict",
+        "reason": "proven_disjoint_arm",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:18-50:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "format"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": [
+          {
+            "rule": "literal_outside_class",
+            "arm": "::String",
+            "against": "nil"
+          }
+        ]
+      },
+      {
+        "id": "singleton-literal-nil",
+        "verdict": "conflict",
+        "reason": "proven_disjoint_arm",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:18-50:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "format"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": [
+          {
+            "rule": "literal_outside_class",
+            "arm": "::String",
+            "against": "nil"
+          }
+        ]
+      },
+      {
+        "id": "singleton-param-relative-nil",
+        "verdict": "unknown",
+        "reason": "unproven",
+        "relation": "documentation_coverage",
+        "direction": "claim_within_contract",
+        "site": "lib/formatter.rb:18-50:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "format"
+        },
+        "slot": {
+          "kind": "param",
+          "name": "value",
+          "param_kind": "required",
+          "index": 0
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": []
+      },
+      {
+        "id": "singleton-param-literal-nil",
+        "verdict": "conflict",
+        "reason": "proven_disjoint_arm",
+        "relation": "documentation_coverage",
+        "direction": "claim_within_contract",
+        "site": "lib/formatter.rb:18-50:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "format"
+        },
+        "slot": {
+          "kind": "param",
+          "name": "value",
+          "param_kind": "required",
+          "index": 0
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": [
+          {
+            "rule": "literal_outside_class",
+            "arm": "nil",
+            "against": "::String"
+          }
+        ]
+      },
+      {
+        "id": "singleton-toplevel-nil",
+        "verdict": "conflict",
+        "reason": "proven_disjoint_arm",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:1038-1056:0",
+        "member": {
+          "owner": "Object",
+          "scope": "instance",
+          "name": "top_level"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": [
+          {
+            "rule": "literal_outside_class",
+            "arm": "::String",
+            "against": "nil"
+          }
+        ]
+      },
+      {
+        "id": "return-conflict",
+        "verdict": "conflict",
+        "reason": "proven_disjoint_arm",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:18-50:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "format"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": [
+          {
+            "rule": "unrelated_classes",
+            "arm": "::String",
+            "against": "::Integer"
+          }
+        ]
+      },
+      {
+        "id": "return-relative-unproven",
+        "verdict": "unknown",
+        "reason": "unproven",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:18-50:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "format"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": []
+      },
+      {
+        "id": "return-broad",
+        "verdict": "compatible",
+        "reason": "proven_inclusion",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:18-50:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "format"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": [
+          {
+            "rule": "equal",
+            "arm": "::String",
+            "against": "::String"
+          }
+        ]
+      },
+      {
+        "id": "return-overlap",
+        "verdict": "unknown",
+        "reason": "unproven",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:18-50:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "format"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": []
+      },
+      {
+        "id": "param-equal",
+        "verdict": "compatible",
+        "reason": "proven_inclusion",
+        "relation": "documentation_coverage",
+        "direction": "claim_within_contract",
+        "site": "lib/formatter.rb:18-50:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "format"
+        },
+        "slot": {
+          "kind": "param",
+          "name": "value",
+          "param_kind": "required",
+          "index": 0
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": [
+          {
+            "rule": "equal",
+            "arm": "::String",
+            "against": "::String"
+          }
+        ]
+      },
+      {
+        "id": "param-narrow",
+        "verdict": "compatible",
+        "reason": "proven_inclusion",
+        "relation": "documentation_coverage",
+        "direction": "claim_within_contract",
+        "site": "lib/formatter.rb:18-50:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "format"
+        },
+        "slot": {
+          "kind": "param",
+          "name": "value",
+          "param_kind": "required",
+          "index": 0
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": [
+          {
+            "rule": "literal_class_ancestor",
+            "arm": "\"hello\"",
+            "against": "::String"
+          }
+        ]
+      },
+      {
+        "id": "param-conflict",
+        "verdict": "conflict",
+        "reason": "proven_disjoint_arm",
+        "relation": "documentation_coverage",
+        "direction": "claim_within_contract",
+        "site": "lib/formatter.rb:18-50:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "format"
+        },
+        "slot": {
+          "kind": "param",
+          "name": "value",
+          "param_kind": "required",
+          "index": 0
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": [
+          {
+            "rule": "unrelated_classes",
+            "arm": "::Integer",
+            "against": "::String"
+          }
+        ]
+      },
+      {
+        "id": "param-relative-unproven",
+        "verdict": "unknown",
+        "reason": "unproven",
+        "relation": "documentation_coverage",
+        "direction": "claim_within_contract",
+        "site": "lib/formatter.rb:18-50:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "format"
+        },
+        "slot": {
+          "kind": "param",
+          "name": "value",
+          "param_kind": "required",
+          "index": 0
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": []
+      },
+      {
+        "id": "param-union-conflict",
+        "verdict": "conflict",
+        "reason": "proven_disjoint_arm",
+        "relation": "documentation_coverage",
+        "direction": "claim_within_contract",
+        "site": "lib/formatter.rb:18-50:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "format"
+        },
+        "slot": {
+          "kind": "param",
+          "name": "value",
+          "param_kind": "required",
+          "index": 0
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": [
+          {
+            "rule": "unrelated_classes",
+            "arm": "::Integer",
+            "against": "::String"
+          }
+        ]
+      },
+      {
+        "id": "keyword-equal",
+        "verdict": "compatible",
+        "reason": "proven_inclusion",
+        "relation": "documentation_coverage",
+        "direction": "claim_within_contract",
+        "site": "lib/formatter.rb:18-50:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "format"
+        },
+        "slot": {
+          "kind": "param",
+          "name": "mode",
+          "param_kind": "keyreq",
+          "index": 1
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": [
+          {
+            "rule": "equal",
+            "arm": "::String",
+            "against": "::String"
+          }
+        ]
+      },
+      {
+        "id": "generic-union-set",
+        "verdict": "compatible",
+        "reason": "proven_inclusion",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:109-135:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "generic"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::Array[::Integer | ::String]",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": [
+          {
+            "rule": "equal",
+            "arm": "::Array[::Integer | ::String]",
+            "against": "::Array[::String | ::Integer]"
+          }
+        ]
+      },
+      {
+        "id": "project-inclusion-return",
+        "verdict": "compatible",
+        "reason": "proven_inclusion",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:168-194:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "project"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::Project::B",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": [
+          {
+            "rule": "class_ancestor",
+            "arm": "::Project::B",
+            "against": "::Project::A"
+          }
+        ]
+      },
+      {
+        "id": "project-inclusion-param",
+        "verdict": "compatible",
+        "reason": "proven_inclusion",
+        "relation": "documentation_coverage",
+        "direction": "claim_within_contract",
+        "site": "lib/formatter.rb:168-194:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "project"
+        },
+        "slot": {
+          "kind": "param",
+          "name": "value",
+          "param_kind": "required",
+          "index": 0
+        },
+        "contract": {
+          "type": "::Project::A",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": [
+          {
+            "rule": "class_ancestor",
+            "arm": "::Project::B",
+            "against": "::Project::A"
+          }
+        ]
+      },
+      {
+        "id": "project-unproven",
+        "verdict": "unknown",
+        "reason": "unproven",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:197-225:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "unrelated"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::Project::A | ::Project::B",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": []
+      },
+      {
+        "id": "gem-relative",
+        "verdict": "compatible",
+        "reason": "proven_inclusion",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:138-165:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "response"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::Faraday::Response",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": [
+          {
+            "rule": "equal",
+            "arm": "::Faraday::Response",
+            "against": "::Faraday::Response"
+          }
+        ]
+      },
+      {
+        "id": "dynamic-contract",
+        "verdict": "unknown",
+        "reason": "dynamic_type",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:228-254:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "dynamic"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::Array[untyped]",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": []
+      },
+      {
+        "id": "dynamic-claim",
+        "verdict": "unknown",
+        "reason": "dynamic_type",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:18-50:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "format"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": []
+      },
+      {
+        "id": "dynamic-precedes-unsupported",
+        "verdict": "unknown",
+        "reason": "dynamic_type",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:18-50:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "format"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": []
+      },
+      {
+        "id": "unsupported-contract",
+        "verdict": "unknown",
+        "reason": "unsupported_type",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:257-287:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "unsupported"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "[ ::String ]",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": []
+      },
+      {
+        "id": "unsupported-claim",
+        "verdict": "unknown",
+        "reason": "unsupported_type",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:18-50:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "format"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": []
+      },
+      {
+        "id": "generic-alias",
+        "verdict": "unknown",
+        "reason": "unsupported_type",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:18-50:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "format"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": []
+      },
+      {
+        "id": "wrong-arity",
+        "verdict": "unknown",
+        "reason": "unsupported_type",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:18-50:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "format"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": []
+      },
+      {
+        "id": "unresolved",
+        "verdict": "unknown",
+        "reason": "unresolved_name",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:18-50:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "format"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": []
+      },
+      {
+        "id": "unknown-subject",
+        "verdict": "unknown",
+        "reason": "unsupported_subject",
+        "relation": null,
+        "direction": null,
+        "site": "lib/formatter.rb:18-50:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "format"
+        },
+        "slot": null,
+        "contract": null,
+        "evidence": []
+      },
+      {
+        "id": "missing-subject",
+        "verdict": "unknown",
+        "reason": "unsupported_subject",
+        "relation": null,
+        "direction": null,
+        "site": "lib/formatter.rb:18-50:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "format"
+        },
+        "slot": null,
+        "contract": null,
+        "evidence": []
+      },
+      {
+        "id": "missing-param",
+        "verdict": "unknown",
+        "reason": "no_such_parameter",
+        "relation": null,
+        "direction": null,
+        "site": "lib/formatter.rb:18-50:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "format"
+        },
+        "slot": null,
+        "contract": null,
+        "evidence": []
+      },
+      {
+        "id": "optional-param",
+        "verdict": "unknown",
+        "reason": "unsupported_parameter_kind",
+        "relation": null,
+        "direction": null,
+        "site": "lib/formatter.rb:290-342:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "optional"
+        },
+        "slot": null,
+        "contract": null,
+        "evidence": []
+      },
+      {
+        "id": "rest-param",
+        "verdict": "unknown",
+        "reason": "unsupported_parameter_kind",
+        "relation": null,
+        "direction": null,
+        "site": "lib/formatter.rb:290-342:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "optional"
+        },
+        "slot": null,
+        "contract": null,
+        "evidence": []
+      },
+      {
+        "id": "unmatched-positional",
+        "verdict": "unknown",
+        "reason": "unmatched_parameter",
+        "relation": null,
+        "direction": null,
+        "site": "lib/formatter.rb:345-373:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "unmatched"
+        },
+        "slot": null,
+        "contract": null,
+        "evidence": []
+      },
+      {
+        "id": "unmatched-keyword",
+        "verdict": "unknown",
+        "reason": "unmatched_parameter",
+        "relation": null,
+        "direction": null,
+        "site": "lib/formatter.rb:376-403:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "keyword"
+        },
+        "slot": null,
+        "contract": null,
+        "evidence": []
+      },
+      {
+        "id": "overloads",
+        "verdict": "unknown",
+        "reason": "unsupported_overloads",
+        "relation": null,
+        "direction": null,
+        "site": "lib/formatter.rb:406-435:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "overloaded"
+        },
+        "slot": null,
+        "contract": null,
+        "evidence": []
+      },
+      {
+        "id": "forwarding",
+        "verdict": "unknown",
+        "reason": "unsupported_overloads",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:438-462:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "forwarding"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": []
+      },
+      {
+        "id": "inferred",
+        "verdict": "unknown",
+        "reason": "no_authored_contract",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:465-482:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "inferred"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": null,
+        "evidence": []
+      },
+      {
+        "id": "inferred-return",
+        "verdict": "unknown",
+        "reason": "no_authored_contract",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/inline.rb:41-75:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "inferred_return"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": null,
+        "evidence": []
+      },
+      {
+        "id": "extended-contract",
+        "verdict": "unknown",
+        "reason": "extrbs_contract",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:520-537:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "extended"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": []
+      },
+      {
+        "id": "refined-return",
+        "verdict": "unknown",
+        "reason": "refined_contract",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:540-566:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "refined"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": []
+      },
+      {
+        "id": "refined-param",
+        "verdict": "unknown",
+        "reason": "refined_contract",
+        "relation": "documentation_coverage",
+        "direction": "claim_within_contract",
+        "site": "lib/formatter.rb:540-566:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "refined"
+        },
+        "slot": {
+          "kind": "param",
+          "name": "value",
+          "param_kind": "required",
+          "index": 0
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": []
+      },
+      {
+        "id": "refined-keyword",
+        "verdict": "unknown",
+        "reason": "refined_contract",
+        "relation": "documentation_coverage",
+        "direction": "claim_within_contract",
+        "site": "lib/formatter.rb:569-604:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "refined_keyword"
+        },
+        "slot": {
+          "kind": "param",
+          "name": "value",
+          "param_kind": "keyreq",
+          "index": 0
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": []
+      },
+      {
+        "id": "inline-return",
+        "verdict": "compatible",
+        "reason": "proven_inclusion",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/inline.rb:100-115:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "inline"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "inline",
+          "path": null
+        },
+        "evidence": [
+          {
+            "rule": "equal",
+            "arm": "::String",
+            "against": "::String"
+          }
+        ]
+      },
+      {
+        "id": "invalid-claim",
+        "verdict": "invalid_claim",
+        "reason": "syntax_error",
+        "relation": null,
+        "direction": null,
+        "site": null,
+        "member": null,
+        "slot": null,
+        "contract": null,
+        "evidence": []
+      },
+      {
+        "id": "extended-claim",
+        "verdict": "unknown",
+        "reason": "unsupported_grammar_feature",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:18-50:0",
+        "member": {
+          "owner": "Formatter",
+          "scope": "instance",
+          "name": "format"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": []
+      },
+      {
+        "id": "library-source",
+        "verdict": "unknown",
+        "reason": "unsupported_contract_source",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/library.rb:15-38:0",
+        "member": {
+          "owner": "String",
+          "scope": "instance",
+          "name": "to_i"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::Integer",
+          "provenance": "library",
+          "path": null
+        },
+        "evidence": []
+      },
+      {
+        "id": "namespace-shadow",
+        "verdict": "unknown",
+        "reason": "ambiguous_name",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:913-928:0",
+        "member": {
+          "owner": "App::API",
+          "scope": "instance",
+          "name": "shadow"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": []
+      },
+      {
+        "id": "hidden-shadow",
+        "verdict": "unknown",
+        "reason": "unproven",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:970-985:0",
+        "member": {
+          "owner": "Hidden::API",
+          "scope": "instance",
+          "name": "shadow"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": []
+      },
+      {
+        "id": "reopened-core-relative",
+        "verdict": "unknown",
+        "reason": "unproven",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:1013-1032:0",
+        "member": {
+          "owner": "Integer",
+          "scope": "instance",
+          "name": "documented"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": []
+      },
+      {
+        "id": "reopened-core-absolute",
+        "verdict": "conflict",
+        "reason": "proven_disjoint_arm",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:1013-1032:0",
+        "member": {
+          "owner": "Integer",
+          "scope": "instance",
+          "name": "documented"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": [
+          {
+            "rule": "unrelated_classes",
+            "arm": "::String",
+            "against": "::Integer"
+          }
+        ]
+      },
+      {
+        "id": "toplevel-relative",
+        "verdict": "conflict",
+        "reason": "proven_disjoint_arm",
+        "relation": "documentation_coverage",
+        "direction": "contract_within_claim",
+        "site": "lib/formatter.rb:1038-1056:0",
+        "member": {
+          "owner": "Object",
+          "scope": "instance",
+          "name": "top_level"
+        },
+        "slot": {
+          "kind": "return"
+        },
+        "contract": {
+          "type": "::String",
+          "provenance": "sig",
+          "path": "sig/contracts.rbs"
+        },
+        "evidence": [
+          {
+            "rule": "unrelated_classes",
+            "arm": "::String",
+            "against": "::Integer"
+          }
+        ]
+      },
+      {
+        "id": "identity-mismatch",
+        "verdict": "unknown",
+        "reason": "declaration_mismatch",
+        "relation": null,
+        "direction": null,
+        "site": null,
+        "member": null,
+        "slot": null,
+        "contract": null,
+        "evidence": []
+      },
+      {
+        "id": "no-declaration",
+        "verdict": "unknown",
+        "reason": "no_such_declaration",
+        "relation": null,
+        "direction": null,
+        "site": null,
+        "member": null,
+        "slot": null,
+        "contract": null,
+        "evidence": []
+      },
+      {
+        "id": "attr_reader",
+        "verdict": "unknown",
+        "reason": "unsupported_declaration",
+        "relation": null,
+        "direction": null,
+        "site": null,
+        "member": null,
+        "slot": null,
+        "contract": null,
+        "evidence": []
+      },
+      {
+        "id": "define_method",
+        "verdict": "unknown",
+        "reason": "unsupported_declaration",
+        "relation": null,
+        "direction": null,
+        "site": null,
+        "member": null,
+        "slot": null,
+        "contract": null,
+        "evidence": []
+      },
+      {
+        "id": "parse_error",
+        "verdict": "unavailable",
+        "reason": "parse_error",
+        "relation": null,
+        "direction": null,
+        "site": null,
+        "member": null,
+        "slot": null,
+        "contract": null,
+        "evidence": []
+      },
+      {
+        "id": "not_found",
+        "verdict": "unavailable",
+        "reason": "not_found",
+        "relation": null,
+        "direction": null,
+        "site": null,
+        "member": null,
+        "slot": null,
+        "contract": null,
+        "evidence": []
+      },
+      {
+        "id": "not_ruby",
+        "verdict": "unavailable",
+        "reason": "not_ruby",
+        "relation": null,
+        "direction": null,
+        "site": null,
+        "member": null,
+        "slot": null,
+        "contract": null,
+        "evidence": []
+      },
+      {
+        "id": "outside_project",
+        "verdict": "unavailable",
+        "reason": "outside_project",
+        "relation": null,
+        "direction": null,
+        "site": null,
+        "member": null,
+        "slot": null,
+        "contract": null,
+        "evidence": []
+      }
+    ]
+  }
+}

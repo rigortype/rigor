@@ -1,6 +1,6 @@
 # `rigor lens --claims`: documentation claim checking, revision 1
 
-Status: **Accepted contract, not implemented.** This is the binding description of what `rigor lens
+Status: **Implemented, unreleased.** This is the binding description of what `rigor lens
 --claims` will compute and emit. [ADR-113](../adr/113-rigor-lens.md) § "Amendment 2026-11-04" records
 why; the boundary was agreed with ZARD, the first consumer, in
 [#2737](https://github.com/rigortype/rigor/issues/2737). No Rigor release carries it yet. ZARD enables its
@@ -236,7 +236,24 @@ both answers must name the same class or module, or the claim is `unknown`:
   requested. When no constant the index records on that path has the name, the Ruby answer is the RBS answer:
   the index holds project Ruby only, and core, stdlib and gem classes are known through RBS. When the index
   finds a project constant the RBS answer does not name, the claim is `ambiguous_name`: a Ruby-only
-  `App::Data < Hash` is not the core `::Data`.
+  `App::Data < Hash` is not the core `::Data`. When a class on that ancestor path has a superclass the
+  index cannot name (`K = Class.new(Base)`, `class K < pick_base`, `class K < SomeConstantAlias`, or the
+  `Struct`/`Data` parent of a builder class), or an ancestor no RBS declares, the constants it holds are not
+  on the path, and a relative class name is `ambiguous_name`.
+
+A relative type alias name has no Ruby reading. It is resolved in the claim's lexical context and in the
+namespace of the bound member's owner, and both must name the same alias, or the claim is `ambiguous_name`.
+Arms expanded from it count as relative names for a `conflict` (below).
+
+A method written in a `Struct.new` or `Data.define` block belongs to the new class, but its lexical
+nesting is the scope that wrote the block: Ruby `class_eval`s the block without adding the new class to
+`Module.nesting`, so a relative name there is read in that enclosing scope, in both answers, and never in
+the builder class (a type alias name is still cross-checked against the builder class's namespace, above). An alias uses the original method body's lexical context, including through alias
+chains and reopens, not the alias statement's nesting. If that body cannot be located, relative class and alias names are
+`ambiguous_name`. Revision 1 also declines relative class and alias names in a method defined inside
+`class << self`: its anonymous singleton-class lexical context is not modelled as an ordinary named
+namespace. This does not apply to `def self.method` in an ordinary class body. Absolute names remain
+checkable in both cases.
 
 Agreement is enough for `compatible`. It is not enough for `conflict`, because the index does not see every
 constant a namespace may hold: a file outside `paths:` or matched by `exclude:`, a gem without RBS that reopens a

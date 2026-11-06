@@ -8,13 +8,14 @@ require_relative "options"
 require_relative "check_runner_factory"
 require_relative "../configuration"
 require_relative "../lens"
+require_relative "../lens/claims"
 
 module Rigor
   class CLI
     # `rigor lens FILE...` — a declaration map of the files with type provenance, computed as `rigor check`
     # computes them (ADR-113; output contract docs/internal-spec/lens.md). Experimental until `lens/v1`.
     class LensCommand < Command
-      USAGE = "Usage: rigor lens [--format=text|json] [--config=PATH] [--workers=N] FILE..."
+      USAGE = "Usage: rigor lens [--format=text|json] [--claims=REQUEST] [--config=PATH] [--workers=N] FILE..."
 
       def run
         options = parse_options
@@ -25,13 +26,19 @@ module Rigor
         config_path = options.fetch(:config) || Configuration.discover
         # The working directory: Rigor auto-detects sig/ and the lockfiles there (lens.md § Serialization).
         root = Dir.pwd
+        request = options[:claims] && Lens::Claims::Request.read(options[:claims], root: root, arguments: @argv)
         workers = CheckRunnerFactory.resolve_workers(options, configuration)
-        outcome = Lens::Run.new(configuration: configuration, root: root, arguments: @argv, workers: workers).call
+        run = Lens::Run.new(configuration: configuration, root: root, arguments: @argv, workers: workers)
+        outcome = run.call
         document = Lens::Document.new(outcome: outcome, configuration: configuration, root: root,
                                       config_path: config_path).to_h
+        attach_claims(document, request, outcome, run)
         @err.puts("rigor lens: #{outcome.warm ? 'warm' : 'cold'} — #{@argv.size} target(s)")
         render(document, options.fetch(:format))
         outcome.targets.any? { |target| target.status == "ok" } ? 0 : 1
+      rescue Lens::Claims::IntegrityError => e
+        usage_error(e.message)
+        CLI::EXIT_USAGE
       end
 
       # The parser this command parses with, built without parsing anything: the catalogue reads the
@@ -42,15 +49,23 @@ module Rigor
           Options.add_format(opts, options, "Output format: text (default) or json")
           opts.on("--workers=N", Integer, "Worker processes for a cold run") { |value| options[:workers] = value }
           Options.add_config(opts, options)
+          opts.on("--claims=REQUEST", "Check documentation claims (requires --format=json)") do |value|
+            options[:claims] = value
+          end
         end
       end
 
       private
 
+      def attach_claims(document, request, outcome, run)
+        document["claims"] = Lens::Claims.new(request: request, outcome: outcome, run: run).call if request
+      end
+
       def parse_options
         options = { format: "text", config: nil, workers: nil }
         option_parser(options).parse!(@argv)
         return usage_error("no FILE given") if @argv.empty?
+        return usage_error("--claims requires --format=json") if options[:claims] && options[:format] != "json"
 
         options
       rescue OptionParser::ParseError => e

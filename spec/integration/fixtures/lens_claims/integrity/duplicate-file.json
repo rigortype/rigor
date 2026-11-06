@@ -1,0 +1,40 @@
+{
+  "schema": "lens-claims-request/v0",
+  "revision": 1,
+  "grammar": "rbs",
+  "files": [
+    {
+      "path": "lib/formatter.rb",
+      "digest": "xxh3-64:3cfd601726f2f5fd"
+    },
+    {
+      "path": "lib/formatter.rb",
+      "digest": "xxh3-64:3cfd601726f2f5fd"
+    }
+  ],
+  "claims": [
+    {
+      "id": "return-equal-relative",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "String"
+    }
+  ]
+}

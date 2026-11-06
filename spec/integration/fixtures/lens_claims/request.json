@@ -1,0 +1,1923 @@
+{
+  "schema": "lens-claims-request/v0",
+  "revision": 1,
+  "grammar": "rbs",
+  "files": [
+    {
+      "path": "lib/formatter.rb",
+      "digest": "xxh3-64:3cfd601726f2f5fd"
+    },
+    {
+      "path": "lib/library.rb",
+      "digest": "xxh3-64:5284fa37e71257cc"
+    },
+    {
+      "path": "lib/inline.rb",
+      "digest": "xxh3-64:3a740969a17bee4d"
+    },
+    {
+      "path": "lib/broken.rb",
+      "digest": "xxh3-64:d51549dca35d92ed"
+    },
+    {
+      "path": "lib/missing.rb",
+      "digest": "xxh3-64:2d06800538d394c2"
+    },
+    {
+      "path": "README.txt",
+      "digest": "xxh3-64:36536e865d85ab57"
+    },
+    {
+      "path": "outside.rb",
+      "digest": "xxh3-64:cf29eacd764b0ae6"
+    }
+  ],
+  "claims": [
+    {
+      "id": "return-equal-relative",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "String"
+    },
+    {
+      "id": "return-equal-absolute",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "::String"
+    },
+    {
+      "id": "return-alias",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "text"
+    },
+    {
+      "id": "literal-equal",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "boolean",
+        "span": {
+          "start_offset": 607,
+          "end_offset": 633
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "true"
+    },
+    {
+      "id": "literal-distinct",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "boolean",
+        "span": {
+          "start_offset": 607,
+          "end_offset": 633
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "false"
+    },
+    {
+      "id": "literal-ancestor",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "boolean",
+        "span": {
+          "start_offset": 607,
+          "end_offset": 633
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "::Object"
+    },
+    {
+      "id": "second-identical-param",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "pair",
+        "span": {
+          "start_offset": 636,
+          "end_offset": 668
+        }
+      },
+      "tag": {
+        "name": "param",
+        "subject": "second",
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "String"
+    },
+    {
+      "id": "module-function-instance",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Utilities",
+        "scope": "instance",
+        "name": "callable",
+        "span": {
+          "start_offset": 769,
+          "end_offset": 786
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "String"
+    },
+    {
+      "id": "module-function-singleton",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Utilities",
+        "scope": "singleton",
+        "name": "callable",
+        "span": {
+          "start_offset": 769,
+          "end_offset": 786
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "String"
+    },
+    {
+      "id": "singleton-relative-true",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "TrueClass"
+    },
+    {
+      "id": "singleton-absolute-true",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "::TrueClass"
+    },
+    {
+      "id": "singleton-literal-true",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "true"
+    },
+    {
+      "id": "singleton-param-relative-true",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "param",
+        "subject": "value",
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "TrueClass"
+    },
+    {
+      "id": "singleton-param-literal-true",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "param",
+        "subject": "value",
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "true"
+    },
+    {
+      "id": "singleton-toplevel-true",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Object",
+        "scope": "instance",
+        "name": "top_level",
+        "span": {
+          "start_offset": 1038,
+          "end_offset": 1056
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "TrueClass"
+    },
+    {
+      "id": "singleton-relative-false",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "FalseClass"
+    },
+    {
+      "id": "singleton-absolute-false",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "::FalseClass"
+    },
+    {
+      "id": "singleton-literal-false",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "false"
+    },
+    {
+      "id": "singleton-param-relative-false",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "param",
+        "subject": "value",
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "FalseClass"
+    },
+    {
+      "id": "singleton-param-literal-false",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "param",
+        "subject": "value",
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "false"
+    },
+    {
+      "id": "singleton-toplevel-false",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Object",
+        "scope": "instance",
+        "name": "top_level",
+        "span": {
+          "start_offset": 1038,
+          "end_offset": 1056
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "FalseClass"
+    },
+    {
+      "id": "singleton-relative-nil",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "NilClass"
+    },
+    {
+      "id": "singleton-absolute-nil",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "::NilClass"
+    },
+    {
+      "id": "singleton-literal-nil",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "nil"
+    },
+    {
+      "id": "singleton-param-relative-nil",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "param",
+        "subject": "value",
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "NilClass"
+    },
+    {
+      "id": "singleton-param-literal-nil",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "param",
+        "subject": "value",
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "nil"
+    },
+    {
+      "id": "singleton-toplevel-nil",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Object",
+        "scope": "instance",
+        "name": "top_level",
+        "span": {
+          "start_offset": 1038,
+          "end_offset": 1056
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "NilClass"
+    },
+    {
+      "id": "return-conflict",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "::Integer"
+    },
+    {
+      "id": "return-relative-unproven",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "Integer"
+    },
+    {
+      "id": "return-broad",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "::String | ::Integer"
+    },
+    {
+      "id": "return-overlap",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "\"hello\""
+    },
+    {
+      "id": "param-equal",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "param",
+        "subject": "value",
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "String"
+    },
+    {
+      "id": "param-narrow",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "param",
+        "subject": "value",
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "\"hello\""
+    },
+    {
+      "id": "param-conflict",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "param",
+        "subject": "value",
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "::Integer"
+    },
+    {
+      "id": "param-relative-unproven",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "param",
+        "subject": "value",
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "Integer"
+    },
+    {
+      "id": "param-union-conflict",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "param",
+        "subject": "value",
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "::String | ::Integer"
+    },
+    {
+      "id": "keyword-equal",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "param",
+        "subject": "mode",
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "String"
+    },
+    {
+      "id": "generic-union-set",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "generic",
+        "span": {
+          "start_offset": 109,
+          "end_offset": 135
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "Array[String | Integer]"
+    },
+    {
+      "id": "project-inclusion-return",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "project",
+        "span": {
+          "start_offset": 168,
+          "end_offset": 194
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "Project::A"
+    },
+    {
+      "id": "project-inclusion-param",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "project",
+        "span": {
+          "start_offset": 168,
+          "end_offset": 194
+        }
+      },
+      "tag": {
+        "name": "param",
+        "subject": "value",
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "Project::B"
+    },
+    {
+      "id": "project-unproven",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "unrelated",
+        "span": {
+          "start_offset": 197,
+          "end_offset": 225
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "::Project::B | ::Project::C"
+    },
+    {
+      "id": "gem-relative",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "response",
+        "span": {
+          "start_offset": 138,
+          "end_offset": 165
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "Faraday::Response"
+    },
+    {
+      "id": "dynamic-contract",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "dynamic",
+        "span": {
+          "start_offset": 228,
+          "end_offset": 254
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "Array[String]"
+    },
+    {
+      "id": "dynamic-claim",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "String | untyped"
+    },
+    {
+      "id": "dynamic-precedes-unsupported",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "[untyped]"
+    },
+    {
+      "id": "unsupported-contract",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "unsupported",
+        "span": {
+          "start_offset": 257,
+          "end_offset": 287
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "[String]"
+    },
+    {
+      "id": "unsupported-claim",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "top"
+    },
+    {
+      "id": "generic-alias",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "generic_text[String]"
+    },
+    {
+      "id": "wrong-arity",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "String[Integer]"
+    },
+    {
+      "id": "unresolved",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "NoSuchType"
+    },
+    {
+      "id": "unknown-subject",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "raise",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "String"
+    },
+    {
+      "id": "missing-subject",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "param",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "String"
+    },
+    {
+      "id": "missing-param",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "param",
+        "subject": "missing",
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "String"
+    },
+    {
+      "id": "optional-param",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "optional",
+        "span": {
+          "start_offset": 290,
+          "end_offset": 342
+        }
+      },
+      "tag": {
+        "name": "param",
+        "subject": "value",
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "String"
+    },
+    {
+      "id": "rest-param",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "optional",
+        "span": {
+          "start_offset": 290,
+          "end_offset": 342
+        }
+      },
+      "tag": {
+        "name": "param",
+        "subject": "rest",
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "String"
+    },
+    {
+      "id": "unmatched-positional",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "unmatched",
+        "span": {
+          "start_offset": 345,
+          "end_offset": 373
+        }
+      },
+      "tag": {
+        "name": "param",
+        "subject": "value",
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "String"
+    },
+    {
+      "id": "unmatched-keyword",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "keyword",
+        "span": {
+          "start_offset": 376,
+          "end_offset": 403
+        }
+      },
+      "tag": {
+        "name": "param",
+        "subject": "value",
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "String"
+    },
+    {
+      "id": "overloads",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "overloaded",
+        "span": {
+          "start_offset": 406,
+          "end_offset": 435
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "String"
+    },
+    {
+      "id": "forwarding",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "forwarding",
+        "span": {
+          "start_offset": 438,
+          "end_offset": 462
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "String"
+    },
+    {
+      "id": "inferred",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "inferred",
+        "span": {
+          "start_offset": 465,
+          "end_offset": 482
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "String"
+    },
+    {
+      "id": "inferred-return",
+      "file": "lib/inline.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "inferred_return",
+        "span": {
+          "start_offset": 41,
+          "end_offset": 75
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "String"
+    },
+    {
+      "id": "extended-contract",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "extended",
+        "span": {
+          "start_offset": 520,
+          "end_offset": 537
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "String"
+    },
+    {
+      "id": "refined-return",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "refined",
+        "span": {
+          "start_offset": 540,
+          "end_offset": 566
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "String"
+    },
+    {
+      "id": "refined-param",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "refined",
+        "span": {
+          "start_offset": 540,
+          "end_offset": 566
+        }
+      },
+      "tag": {
+        "name": "param",
+        "subject": "value",
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "String"
+    },
+    {
+      "id": "refined-keyword",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "refined_keyword",
+        "span": {
+          "start_offset": 569,
+          "end_offset": 604
+        }
+      },
+      "tag": {
+        "name": "param",
+        "subject": "value",
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "String"
+    },
+    {
+      "id": "inline-return",
+      "file": "lib/inline.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "inline",
+        "span": {
+          "start_offset": 100,
+          "end_offset": 115
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "String"
+    },
+    {
+      "id": "invalid-claim",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "inferred",
+        "span": {
+          "start_offset": 465,
+          "end_offset": 482
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "["
+    },
+    {
+      "id": "extended-claim",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "non-empty-string"
+    },
+    {
+      "id": "library-source",
+      "file": "lib/library.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "String",
+        "scope": "instance",
+        "name": "to_i",
+        "span": {
+          "start_offset": 15,
+          "end_offset": 38
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "Integer"
+    },
+    {
+      "id": "namespace-shadow",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "App::API",
+        "scope": "instance",
+        "name": "shadow",
+        "span": {
+          "start_offset": 913,
+          "end_offset": 928
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "Data"
+    },
+    {
+      "id": "hidden-shadow",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Hidden::API",
+        "scope": "instance",
+        "name": "shadow",
+        "span": {
+          "start_offset": 970,
+          "end_offset": 985
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "Data"
+    },
+    {
+      "id": "reopened-core-relative",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Integer",
+        "scope": "instance",
+        "name": "documented",
+        "span": {
+          "start_offset": 1013,
+          "end_offset": 1032
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "Integer"
+    },
+    {
+      "id": "reopened-core-absolute",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Integer",
+        "scope": "instance",
+        "name": "documented",
+        "span": {
+          "start_offset": 1013,
+          "end_offset": 1032
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "::Integer"
+    },
+    {
+      "id": "toplevel-relative",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Object",
+        "scope": "instance",
+        "name": "top_level",
+        "span": {
+          "start_offset": 1038,
+          "end_offset": 1056
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "Integer"
+    },
+    {
+      "id": "identity-mismatch",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Other",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 18,
+          "end_offset": 50
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "String"
+    },
+    {
+      "id": "no-declaration",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "String"
+    },
+    {
+      "id": "attr_reader",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 671,
+          "end_offset": 693
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "String"
+    },
+    {
+      "id": "define_method",
+      "file": "lib/formatter.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 696,
+          "end_offset": 726
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "String"
+    },
+    {
+      "id": "parse_error",
+      "file": "lib/broken.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "["
+    },
+    {
+      "id": "not_found",
+      "file": "lib/missing.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "["
+    },
+    {
+      "id": "not_ruby",
+      "file": "README.txt",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "["
+    },
+    {
+      "id": "outside_project",
+      "file": "outside.rb",
+      "declaration": {
+        "kind": "method",
+        "owner": "Formatter",
+        "scope": "instance",
+        "name": "format",
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "tag": {
+        "name": "return",
+        "subject": null,
+        "span": {
+          "start_offset": 0,
+          "end_offset": 0
+        }
+      },
+      "claim": "["
+    }
+  ]
+}

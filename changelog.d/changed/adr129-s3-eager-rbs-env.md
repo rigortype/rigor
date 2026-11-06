@@ -1,2 +1,2 @@
-- **[engine]** The RBS environment is now built before any file is typed, not on the first constant a file names. ([#9999](https://github.com/rigortype/rigor/pull/9999))
+- **[engine]** The RBS environment is now built before any file is typed, not on the first constant a file names. ([#PRNUM](https://github.com/rigortype/rigor/pull/PRNUM))
   - A warm result-cache hit still builds nothing. Groundwork for ADR-129's result memo; no output changes.

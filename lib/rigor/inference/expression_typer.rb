@@ -1874,6 +1874,9 @@ module Rigor
       # one plain parameter and whose body is one `is_a?` / `kind_of?` / `instance_of?` call on that parameter with a
       # single constant argument; nil otherwise.
       def class_test_find_parameter(node)
+        # `detect(ifnone)` answers `ifnone.call` when nothing matches, which is not an element. A guard: today the
+        # dispatched answer of an argument-bearing `detect` never carries the `nil` the narrowing needs, so the
+        # call would already keep its answer.
         return nil unless CLASS_TEST_FINDERS.include?(node.name) && node.arguments.nil?
 
         block = node.block
@@ -1885,7 +1888,41 @@ module Rigor
         body = block.body
         return nil unless body.is_a?(Prism::StatementsNode) && body.body.size == 1
 
-        class_test_on?(body.body.first, name) ? name : nil
+        return nil unless class_test_on?(body.body.first, name)
+
+        core_finder_call?(node) ? name : nil
+      end
+
+      # The owners whose `find` / `detect` / `rfind` return an element the block accepted: core `Array` and
+      # `Enumerable` (`Hash`, `Set` and `Range` take `Enumerable`'s).
+      CORE_FINDER_OWNERS = %w[Array Enumerable].freeze
+      private_constant :CORE_FINDER_OWNERS
+
+      # True when every member of the call's receiver dispatches `node.name` to core `Array` or `Enumerable`: the
+      # method's RBS owner is one of {CORE_FINDER_OWNERS} and the project defines no method by that name on the
+      # class or an ancestor. A project or gem `find` may return anything its block did not test
+      # (`def find = yield(1) ? 2.0 : nil`), so the name alone is not enough.
+      def core_finder_call?(node)
+        receiver = node.receiver
+        return false if receiver.nil?
+
+        type = type_of(receiver)
+        members = type.is_a?(Type::Union) ? type.members : [type]
+        members.all? { |member| core_finder_member?(member, node.name) }
+      end
+
+      def core_finder_member?(member, method_name)
+        class_name =
+          case member
+          when Type::Nominal then member.class_name
+          when Type::Tuple then "Array"
+          when Type::HashShape then "Hash"
+          end
+        return false if class_name.nil?
+        return false if scope.discovered_method_through_ancestors?(class_name, method_name, :instance)
+
+        owner = safe_rbs_method_definition(class_name, method_name, :instance)&.defined_in
+        !owner.nil? && CORE_FINDER_OWNERS.include?(owner.to_s.delete_prefix("::"))
       end
 
       def single_block_parameter(block)

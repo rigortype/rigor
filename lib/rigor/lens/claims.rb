@@ -186,7 +186,8 @@ module Rigor
       def compare_types(parsed, contract, site, target, answer, reasons)
         scope = @run.claim_contexts.fetch(target.absolute)
         nesting = site.data.fetch("lexical_nesting")
-        reader = TypeReader.new(scope: scope, nesting: nesting, singleton_nesting: site.data["singleton_nesting"])
+        reader = TypeReader.new(scope: scope, nesting: nesting, singleton_nesting: site.data["singleton_nesting"],
+                                owner: site.data["owner"])
         claim_arms = reader.read(parsed, claim: true)
         contract_arms = reader.read(contract)
         reasons.concat(reader.reasons.to_a)

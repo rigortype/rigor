@@ -128,4 +128,10 @@ RSpec.describe Rigor::Lens::Claims::TypeReader do
     expect(first.environment).to equal(environment)
     expect(loader.type_name_resolver).not_to equal(first)
   end
+
+  it "reads an empty, blank or comment-only claim as a syntax error" do
+    ["", "  ", "#x"].each do |text|
+      expect(described_class.parse(text)).to eq([nil, "syntax_error"])
+    end
+  end
 end

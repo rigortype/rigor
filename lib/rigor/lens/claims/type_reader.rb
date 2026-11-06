@@ -25,22 +25,24 @@ module Rigor
         attr_reader :reasons
 
         def self.parse(text)
-          [::RBS::Parser.parse_type(text, require_eof: true), nil]
+          # An empty, blank or comment-only text parses to nil rather than raising.
+          type = ::RBS::Parser.parse_type(text, require_eof: true)
+          type ? [type, nil] : [nil, "syntax_error"]
         rescue ::RBS::ParsingError
           extended = RbsExtended.parse_return_type_override("rigor:v1:return: #{text}")
           [nil, extended ? "unsupported_grammar_feature" : "syntax_error"]
         end
 
-        def initialize(scope:, nesting:, singleton_nesting: false)
+        # `owner` is the member's owner; an RBS declaration of the member sits in its namespace, which a builder
+        # block's lexical nesting does not name.
+        def initialize(scope:, nesting:, singleton_nesting: false, owner: nil)
           @scope = scope
           @loader = scope.environment.rbs_loader
           @resolver = @loader.type_name_resolver
           @nesting = nesting
           @singleton_nesting = singleton_nesting
-          @context = Array(nesting).reduce(nil) do |outer, name|
-            type_name = ::RBS::TypeName.parse("::#{name}")
-            @loader.class_known?(name) ? [outer, type_name] : outer
-          end
+          @context = rbs_context(Array(nesting))
+          @owner_context = owner && owner != "Object" ? rbs_context(owner_namespaces(owner)) : nil
           @reasons = Set.new
         end
 
@@ -64,6 +66,18 @@ module Rigor
         end
 
         private
+
+        def rbs_context(names)
+          names.reduce(nil) do |outer, name|
+            type_name = ::RBS::TypeName.parse("::#{name}")
+            @loader.class_known?(name) ? [outer, type_name] : outer
+          end
+        end
+
+        def owner_namespaces(owner)
+          segments = owner.split("::")
+          segments.each_index.map { |index| segments[0..index].join("::") }
+        end
 
         def literal(value, relative: false)
           Atom.new(kind: :literal, value: value, arguments: [], relative: relative)
@@ -113,13 +127,35 @@ module Rigor
           type.args.each { |arg| read(arg, claim: claim, aliases: aliases) }
           return [] unless name
 
+          relative = claim && !type.name.absolute?
+          return [] if relative && !alias_name_settled?(type.name, name)
+
           entry = @loader.type_alias_declaration(name)
           if entry.nil? || !entry.type_params.empty? || !type.args.empty? || aliases.include?(name)
             @reasons << "unsupported_type"
             return []
           end
-          # The resolved declaration binds names in the alias's namespace, not the claim's lexical scope.
-          read(entry.type, aliases: aliases | [name])
+          # The resolved declaration binds names in the alias's namespace, not the claim's lexical scope. Arms
+          # reached through a relatively written name stay relative, so the conflict guard still applies.
+          arms = read(entry.type, aliases: aliases | [name])
+          relative ? arms.map { |arm| arm.with(relative: true) } : arms
+        end
+
+        # A type alias has no Ruby meaning, so the only reading to cross-check is the RBS one: the claim's lexical
+        # context and the member's RBS namespace must resolve a relative alias name alike. An unlocated body or a
+        # singleton-class body has no context to read it in.
+        def alias_name_settled?(written, resolved)
+          if @nesting.nil? || @singleton_nesting
+            @reasons << "ambiguous_name"
+            return false
+          end
+          return true if @owner_context.nil? || @owner_context == @context
+
+          declared = @resolver&.resolve(written, context: @owner_context)
+          return true if declared == resolved
+
+          @reasons << "ambiguous_name"
+          false
         end
 
         # Project constants only: a missing entry falls back to RBS, which also knows libraries and gems.
@@ -148,11 +184,19 @@ module Rigor
           chain = Scope::ResolutionChain.for(@scope, @nesting.last || "Object", :instance, :constants)
           found = chain_constant(chain, name)
           settled = chain.settle(@scope, found) { |retro| chain_constant(retro, name) }
-          if chain.truncated? || chain.wildcard_mixin? || settled != :chain
+          if chain.truncated? || chain.wildcard_mixin? || settled != :chain || opaque_ancestry?(chain)
             @reasons << "ambiguous_name"
             return nil
           end
           found
+        end
+
+        # A superclass the tables cannot name (`Class.new(Base)`, `< pick`, a builder class's `Struct`/`Data`) or an
+        # external ancestor no RBS declares (`< SomeAlias`): the constants it holds are not on the chain.
+        def opaque_ancestry?(chain)
+          return true if chain.opaque_tail?(@scope)
+
+          chain.entries.any? { |entry| entry.external? && entry.candidates.none? { |name| @loader.class_known?(name) } }
         end
 
         def chain_constant(chain, name)

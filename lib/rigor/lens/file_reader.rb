@@ -26,8 +26,9 @@ module Rigor
       # `kind` is :module, :class or :singleton. `module_function` is :off, :on (a bare `module_function` written
       # directly in a module body covers the later direct defs) or :unknown (the reading Ruby gives and the one
       # `check`'s tables give could differ, so the later defs are omissions).
-      # `lexical` is the body's Ruby cref chain (`Module.nesting`), which a builder block does not extend: Ruby
-      # `class_eval`s the block on the new class, but its constants resolve in the scope that wrote it.
+      # `lexical` is the named part of the body's Ruby cref chain, which a builder block does not extend (Ruby
+      # `class_eval`s the block on the new class, but its constants resolve in the scope that wrote it) and a
+      # `class << self` body extends only with its anonymous singleton class, left out here.
       Body = Struct.new(:current, :uncertain, :detached, :kind, :module_function, :lexical)
 
       ATTRIBUTE_CALLS = { attr_reader: "reader", attr_writer: "writer", attr_accessor: "accessor" }.freeze

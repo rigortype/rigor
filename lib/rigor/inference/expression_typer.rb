@@ -280,10 +280,15 @@ module Rigor
         result = if FlowTracer.active?
                    FlowTracer.trace_node(node) { untraced_type_of(node) }
                  elsif TypeOfMemo.enabled? && @tracer.nil? && @operand_types.nil?
-                   # ADR-129 stage 3 — the shadow memo (G1); shut under a tracer and for a typer with instance state.
+                   # ADR-129 — the type_of memo, live in the rule walk (stage 4) or as G1's shadow (stage 3); shut
+                   # under a tracer and for a typer with instance state.
                    state = typing_state
-                   TypeOfMemo.shadow(state, scope, node, callee: !state.stack(INFERENCE_GUARD).empty?) do
-                     untraced_type_of(node)
+                   if TypeOfMemo.live?
+                     TypeOfMemo.live(state, scope, node, INFERENCE_GUARD) { untraced_type_of(node) }
+                   else
+                     TypeOfMemo.shadow(state, scope, node, callee: !state.stack(INFERENCE_GUARD).empty?) do
+                       untraced_type_of(node)
+                     end
                    end
                  else
                    untraced_type_of(node)

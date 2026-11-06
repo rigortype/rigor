@@ -321,22 +321,29 @@ module Rigor
 
         reads = []
         writes = []
-        written = nil
-        index = 0
-        while index < records.size
-          slot = records[index + 1]
-          key = records[index + 2]
-          value = records[index + 3]
-          if records[index] == :write
-            writes.push(slot, key, value)
-            (written ||= KeyIndex.new).store(slot, key, value)
-          elsif written.nil? || !written.key?(slot, key)
-            reads.push(slot, key, value, NONE)
-          end
-          index += 4
-        end
-        attach_own_writes(reads, written) if written
+        split_records(records, 0, reads, writes)
         [reads.freeze, writes.freeze].freeze
+      end
+
+      # Closes the innermost capture as the live memo stores it (WD3): nil when a touch refused it; `type` when it
+      # logged nothing; else the frozen entry `(type, read slice, write slice)` ({#slices}), split straight from the
+      # journal.
+      def close_capture_entry(type)
+        mark = @marks.pop
+        refused = @refused.pop
+        journal = @journal
+        entry = if refused
+                  nil
+                elsif mark == journal.size
+                  type
+                else
+                  reads = []
+                  writes = []
+                  split_records(journal, mark, reads, writes)
+                  [type, reads.freeze, writes.freeze].freeze
+                end
+        journal.clear if @marks.empty?
+        entry
       end
 
       # The slot of the first read in `reads` (a read slice, {#slices}) that no longer holds: the table holds a value
@@ -452,6 +459,26 @@ module Rigor
         return declared.entries.delete(key[0], key[1]) if declared.bound
 
         declared.entries.delete(@values[slot], key)
+      end
+
+      # Splits journal `records` from index `from` into a read slice and a write slice ({#slices}), filling `reads` and
+      # `writes`.
+      def split_records(records, from, reads, writes)
+        written = nil
+        index = from
+        while index < records.size
+          slot = records[index + 1]
+          key = records[index + 2]
+          value = records[index + 3]
+          if records[index] == :write
+            writes.push(slot, key, value)
+            (written ||= KeyIndex.new).store(slot, key, value)
+          elsif written.nil? || !written.key?(slot, key)
+            reads.push(slot, key, value, NONE)
+          end
+          index += 4
+        end
+        attach_own_writes(reads, written) if written
       end
 
       def read_holds?(reads, index)

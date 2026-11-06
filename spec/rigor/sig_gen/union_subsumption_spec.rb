@@ -75,6 +75,11 @@ RSpec.describe "sig-gen union subsumption" do
       expect(collapse(*pair).members).to match_array(pair)
     end
 
+    it "keeps a generic subclass beside its generic superclass" do
+      pair = [nominal("Array", nominal("Integer")), nominal("Enumerable", nominal("Integer"))]
+      expect(collapse(*pair).members).to match_array(pair)
+    end
+
     it "drops a class that includes a module member" do
       expect(collapse(nominal("String"), nominal("Comparable"))).to eq(nominal("Comparable"))
     end

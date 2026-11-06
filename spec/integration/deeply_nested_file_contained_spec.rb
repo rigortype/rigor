@@ -89,6 +89,18 @@ RSpec.describe "a file nested too deeply to analyse is contained to that file (#
     expect([status, out.string]).to satisfy { |(code, text)| code.zero? && text.include?("--verify-incremental OK") }
   end
 
+  it "folds a file that overflows into no discovery table, in the full and the incremental pass alike" do
+    File.write("deep_decl.rb", "class A\n  def a_method = 1\nend\nx = #{'[' * 1400}1#{']' * 1400}\n")
+    File.write("ordinary.rb", "class Fine\n  def ok = 1\nend\n")
+    paths = %w[deep_decl.rb ordinary.rb]
+    full = Rigor::Inference::ScopeIndexer.discovered_project_index_for_paths(paths)
+    incremental = Rigor::Inference::ScopeIndexer.discovered_project_index_incremental(paths, seed_bundles: {})
+    [full, incremental].each do |index|
+      expect(index.fetch(:classes).keys).to eq(["Fine"])
+      expect(index.fetch(:def_index).fetch(:def_nodes).keys).to eq(["Fine"])
+    end
+  end
+
   it "contains a depth-3000 file in the discovery loops and in --incremental" do
     File.write(".rigor.yml", "paths:\n  - .\n")
     File.write("ordinary.rb", "class Fine\n  def ok = 1\nend\n")

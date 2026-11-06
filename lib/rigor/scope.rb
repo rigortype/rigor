@@ -706,9 +706,9 @@ module Rigor
     # (`rows.map { … }`, `5.times { … }`). Ruby gives the block the `self` the call site has, so the block is as
     # opaque as the scope around it and no more: it keeps whatever #316 mark the caller's scope carries and adds
     # none, so a cross-file top-level `def` binds there exactly where it binds beside the call
-    # ({#bindable_top_level_def_for}). A caller's unknown-`self` mark of `true` (the walk's) is kept as it is.
+    # ({#bindable_top_level_def_for}). An unknown-`self` mark the caller already carries is kept as it is.
     def entering_self_preserving_block
-      return self if @block_self_unknown == true || @block_self_unknown == PRESERVED_BLOCK_SELF
+      return self if @block_self_unknown
 
       rebuild(block_self_unknown: PRESERVED_BLOCK_SELF)
     end

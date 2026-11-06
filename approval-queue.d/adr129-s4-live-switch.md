@@ -3,7 +3,7 @@
 - **PR:** [#2889](https://github.com/rigortype/rigor/pull/2889)
 - **Issue:** [#2709](https://github.com/rigortype/rigor/issues/2709)
 - **Class:** open-choice
-- **Precedent:** [ADR-129](../docs/adr/129-type-of-result-memo.md) WD4 and WD6 (stage 4: live in the rule walk; stage 5: the main pass and callee bodies)
+- **Precedent:** [ADR-129](../docs/adr/129-type-of-result-memo.md)
 - **Decided:** 2026-11-06
 
 ## Background
@@ -31,5 +31,10 @@ from the rule walk counts, the switch that turns the live form on, how a live en
 ## Decision
 
 Closed in callee bodies and the main pass; the two switches above; one slot per node; the exact id; counters only with
-a report. Undo: delete the `live` branch in `ExpressionTyper#type_of` and `TypeOfMemo::Live`; nothing else depends on
-them while the default is off.
+a report. The precedent is ADR-129's WD4 and WD6 (stage 4 live in the rule walk; stage 5 the main pass and callee
+bodies).
+
+## To undo
+
+Delete the `live` branch in `ExpressionTyper#type_of` and `TypeOfMemo::Live`; nothing else depends on them while the
+default is off.

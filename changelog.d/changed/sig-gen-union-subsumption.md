@@ -1,0 +1,1 @@
+- **[sig-gen]** `rigor sig-gen` no longer proposes a union where one class member already contains another: `ArgumentError | StandardError` is written `StandardError` ([#2936](https://github.com/rigortype/rigor/issues/2936)).

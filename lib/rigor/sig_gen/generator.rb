@@ -2225,9 +2225,28 @@ module Rigor
       # Issue #2230 — qualified last, after the alias fold has matched the unqualified spelling it keys on, so a core
       # name a namespace of the owner shadows (`Set` inside a `module Foo` that declares `Foo::Set`) is written `::Set`.
       def elaborated_rbs(type, owner: nil)
-        folded = alias_index.fold(TypeElaborator.elaborate(type, environment: @environment).erase_to_rbs, owner)
+        elaborated = collapse_subsumed_members(TypeElaborator.elaborate(type, environment: @environment))
+        folded = alias_index.fold(elaborated.erase_to_rbs, owner)
         captured = owner_type_param_names(owner)
         TypeNameQualification.qualify(folded, owner) { |name| captured.include?(name) || declared_constant?(name) }
+      end
+
+      # Issue #2936 — a rendered top-level union drops a plain nominal member that is a strict subclass of another
+      # plain nominal member (`ArgumentError | StandardError` is `StandardError`). The order is
+      # `Environment#class_ordering`, the same one the tighter-return checks trust; only `:subclass` drops, so an
+      # undecidable pair (`:unknown`) keeps both. Generic nominals (invariant arguments), literals, singletons,
+      # interfaces and every other carrier are left as written. It runs at render time only: the proposal the
+      # guards judged is unchanged, because the collapsed union is the same type.
+      def collapse_subsumed_members(type)
+        return type unless type.is_a?(Type::Union) && @environment
+
+        plain = type.members.select { |m| m.is_a?(Type::Nominal) && m.type_args.empty? }
+        return type if plain.size < 2
+
+        kept = type.members.reject do |m|
+          plain.include?(m) && plain.any? { |o| !o.equal?(m) && @environment.class_ordering(m.class_name, o.class_name) == :subclass }
+        end
+        kept.size == type.members.size ? type : Type::Combinator.union(*kept)
       end
 
       # Issue #2436 — inside `class Array[unchecked out E]` a bare `E` names the type variable, not a class `::E`,

@@ -119,6 +119,14 @@ RSpec.describe "a file nested too deeply to analyse is contained to that file (#
     # and the examples passes with every re-raise stripped.
     File.write(".rigor.yml", "paths:\n  - .\n")
     File.write("deep.rb", "x = #{'[' * 10_000}1#{']' * 10_000}\n")
+    # Whether this depth overflows inside Prism (C, no backtrace) depends on the platform's machine stack, so ask a
+    # subprocess launched the same way and skip where it does not.
+    probe = 'require "prism"; begin; Prism.parse(File.read("deep.rb")); exit 3; ' \
+            "rescue SystemStackError => e; exit(e.backtrace.nil? ? 0 : 2); end"
+    _, _, probed = Open3.capture3(RbConfig.ruby, "-e", probe, stdin_data: "")
+    skip "Prism.parse at depth 10000 does not overflow in C here (probe exit #{probed.exitstatus})" unless
+      probed.exitstatus.zero?
+
     _, err, status = Open3.capture3(RbConfig.ruby, File.expand_path("../../exe/rigor", __dir__), "check", "--no-cache",
                                     "--no-ci-detect", "deep.rb", stdin_data: "")
     expect(status.exitstatus).to eq(70)

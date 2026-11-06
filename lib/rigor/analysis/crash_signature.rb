@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "../source/node_children"
+
 module Rigor
   module Analysis
     # Issues #665 / #674 / #683 / #686 / #696 — the ONE definition of "an internal failure made this run

@@ -307,6 +307,23 @@ RSpec.describe "Stable single-hop method-chain narrowing" do
       expect(scope.indexed_narrowing(:ivar, :@h, :k)).to be_nil
     end
 
+    it "drops a chain fact written on an unless-branch that raises" do
+      scope = rescue_chain_read_scope(<<~RUBY)
+        def f
+          return unless @x.r.is_a?(String)
+          begin
+            unless rand > 0.5
+              @x.r = nil
+              raise "x"
+            end
+          rescue
+            probe = @x.r
+          end
+        end
+      RUBY
+      expect(scope.method_chain_narrowing(:ivar, :@x, :r)).to be_nil
+    end
+
     it "drops a chain fact written on an `or` operand that raises" do
       scope = rescue_chain_read_scope(<<~RUBY)
         def f(flag)

@@ -20,7 +20,8 @@ RSpec.describe "a class guard keeps a gradual value gradual (#2656)", type: :run
   end
 
   it "fires for a String the narrowed value computes (the control that dispatch reads the narrowed class)" do
-    expect(mismatches("def f(x) = (Sink.new.mode(x.to_s) if x.is_a?(Integer))\n")).to eq(["call.argument-type-mismatch"])
+    source = "def f(x) = (Sink.new.mode(x.to_s) if x.is_a?(Integer))\n"
+    expect(mismatches(source)).to eq(["call.argument-type-mismatch"])
   end
 
   {
@@ -53,8 +54,8 @@ RSpec.describe "a class guard keeps a gradual value gradual (#2656)", type: :run
   end
 
   it "keeps call.wrong-arity on the narrowed value (the true-positive control)" do
-    rules = analyze("def f(x) = (x.upcase(1, 2, 3) if x.is_a?(String))\n", sig: signature).diagnostics
-                                                                                       .map(&:qualified_rule)
+    source = "def f(x) = (x.upcase(1, 2, 3) if x.is_a?(String))\n"
+    rules = analyze(source, sig: signature).diagnostics.map(&:qualified_rule)
     expect(rules).to include("call.wrong-arity")
   end
 

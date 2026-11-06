@@ -171,7 +171,7 @@ RSpec.describe "a class guard keeps a gradual value gradual (#2656)", type: :run
   end
 
   it "stays silent for a union whose static member the guard rules out" do
-    source = "def f(h, s, c)\n  x = c ? h[:m] : s.to_s.size\n  Sink.new.mode(x) if x.is_a?(String)\nend\n"
+    source = "def f(h, s)\n  d = \"a\" + s.to_s\n  x = h[:m] || d\n  Sink.new.num(x) if x.is_a?(Integer)\nend\n"
     expect(mismatches(source)).to eq([])
   end
 

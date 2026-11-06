@@ -713,7 +713,7 @@ RSpec.describe Rigor::Analysis::Runner do
           end
 
           def mismatches(source)
-            analyze(source, sig: shape_sig).diagnostics.select { |d| d.message.start_with?("argument type mismatch") }
+            analyze(source, sig: { "shape.rbs" => shape_sig }).diagnostics.select { |d| d.message.start_with?("argument type mismatch") }
           end
 
           it "withholds `singleton(Circle)?` against `singleton(Shape)`" do

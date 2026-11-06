@@ -1,6 +1,6 @@
 # A file nested too deeply to analyse is contained to that file instead of making every walker iterative
 
-- **PR:** [#2455](https://github.com/rigortype/rigor/pull/2455)
+- **PR:** [#2927](https://github.com/rigortype/rigor/pull/2927)
 - **Issue:** [#2455](https://github.com/rigortype/rigor/issues/2455)
 - **Class:** open-choice
 - **Precedent:** [ADR-5](../docs/adr/5-robustness-principle.md)
@@ -23,7 +23,7 @@ the limit but bounds its blast radius to the one file.
 Contain it per file. The existing per-file crash row (`internal analyzer error`, `error` severity, which discards
 that file's diagnostics) is reused, with a message saying the file is nested too deeply; the discovery pass skips such
 a file and the language server answers the request with an internal error. The exit status follows the row's severity
-(1). The PR number above is the issue's number until the PR exists and is corrected in the next push.
+(1).
 
 ## To undo
 

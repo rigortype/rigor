@@ -12108,6 +12108,7 @@ module Rigor
         current_scope = Narrowing.safe_navigation_block_scope(node, current_scope)
         # Issue #1429 — nor a guard's narrowing of a global or constant the body may run after code rebinds.
         current_scope = GuardRebinding.block_entry(current_scope, block, node)
+        current_scope = current_scope.entering_block_without_gradual_marks(block)
         entry =
           if FreshFrameBlocks.fresh_entry?(node, current_scope)
             FreshFrameBlocks.entry(current_scope, node)

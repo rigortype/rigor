@@ -155,4 +155,28 @@ RSpec.describe "a class guard keeps a gradual value gradual (#2656)", type: :run
       expect(mismatches(source)).to eq([])
     end
   end
+
+  {
+    "a literal `when`" => "case x\n  when \"r\" then Sink.new.mode(x)\n  end",
+    "a `when` with several literals" => "case x\n  when \"r\", \"w\" then Sink.new.mode(x)\n  end"
+  }.each do |shape, body|
+    it "keeps the mark of a marked subject under #{shape}" do
+      expect(mismatches("def f(x)\n  return unless x.is_a?(String)\n  #{body}\nend\n")).to eq([])
+    end
+  end
+
+  it "fires for a union whose static member narrows to a class (only the gradual part is read past)" do
+    source = "def f(h, s)\n  d = \"a\" + s.to_s\n  x = h[:m] || d\n  Sink.new.mode(x) if x.is_a?(String)\nend\n"
+    expect(mismatches(source)).to eq(["call.argument-type-mismatch"])
+  end
+
+  it "stays silent for a union whose static member the guard rules out" do
+    expect(mismatches("def f(h)\n  x = h[:m] || 0\n  Sink.new.mode(x) if x.is_a?(String)\nend\n")).to eq([])
+  end
+
+  it "fires inside a block that writes the marked local (a later run reads the write)" do
+    source = "def f(x)\n  return unless x.is_a?(String)\n  loop do\n    Sink.new.mode(x)\n    " \
+             "x = \"zz\".dup\n  end\nend\n"
+    expect(mismatches(source)).to eq(["call.argument-type-mismatch"])
+  end
 end

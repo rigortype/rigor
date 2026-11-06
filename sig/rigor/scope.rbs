@@ -230,6 +230,7 @@ module Rigor
     def with_struct_fold_safe: (Set[Symbol] locals) -> Scope
     def with_lexical_nesting: (Array[String]? chain) -> Scope
     def struct_fold_safe?: (String | Symbol name) -> bool
+    def entering_block_without_gradual_marks: (Prism::Node block_node) -> Scope
     def entering_opaque_block: () -> Scope
     PRESERVED_BLOCK_SELF: :preserved
     def entering_self_preserving_block: () -> Scope

@@ -8625,6 +8625,7 @@ module Rigor
         # Issue #1358 — a body that may run a match reads the match globals an earlier iteration may have rebound
         # ({MatchRebinding.block_entry}).
         entry = MatchRebinding.block_entry(block_self_entry(block_node, call_node), block_node, call_node)
+        entry = entry.entering_block_without_gradual_marks(block_node)
         scope_with_params = BlockParameterBinder.new(expected_param_types: expected).bind_onto(block_node, entry)
         # ADR-16 Tier A — a plugin `block_as_methods:` entry that matches `(receiver, name)` narrows the
         # body's `self` to the object the DSL `instance_eval`s the block on (`params` on

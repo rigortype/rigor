@@ -96,6 +96,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     dynamic_origin(req:node)
     dynamic_origins()
     enqueue_ancestors(req:current,req:queue,req:name_memo,key:mixins)
+    entering_block_without_gradual_marks(req:block_node)
     entering_opaque_block()
     entering_self_preserving_block()
     environment()

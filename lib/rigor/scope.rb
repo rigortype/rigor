@@ -991,6 +991,20 @@ module Rigor
       marks.equal?(@declaration_sourced) ? self : rebuild(declaration_sourced: marks)
     end
 
+    # Issue #2656 — this scope without the gradual-narrowing mark of every local `block_node` writes: a block may run
+    # again after its own write (`loop do mode(x); x = "zz".dup; end`), and its entry does not see that back edge, so
+    # a mark from before the block must not reach a read the write may precede. Zero-alloc when no local is marked.
+    def entering_block_without_gradual_marks(block_node)
+      names = gradual_narrowing_names
+      return self if names.empty?
+
+      written = Inference::OperandEffects.written_variables(block_node).map(&:to_sym)
+      dropped = names.reduce(@declaration_sourced) do |marks, name|
+        written.include?(name) ? drop_gradual_narrowing_mark(marks, name) : marks
+      end
+      dropped.equal?(@declaration_sourced) ? self : rebuild(declaration_sourced: dropped)
+    end
+
     # Issue #2656 — the locals carrying the gradual-narrowing mark, empty when none does.
     def gradual_narrowing_names
       return EMPTY_GRADUAL_NAMES if @declaration_sourced.empty?

@@ -255,6 +255,38 @@ def rescue_widened_narrowing
   end
 end
 
+# Issue #2691 — the same holds for a fact keyed on a receiver the body
+# calls on without rebinding it: `x.r = nil` is a call on `x`, which
+# invalidates every chain fact rooted at `x` the way any call does, so
+# `x.r` reads its declared `"s" | nil`, not the guard's `"s"`.
+class ChainBox
+  def r = rand > 0.5 ? "s" : nil
+  def r=(v) = nil
+end
+
+def rescue_chain_fact(x)
+  return unless x.is_a?(ChainBox)
+  return unless x.r.is_a?(String)
+  begin
+    x.r = nil
+    raise "x"
+  rescue
+    assert_type("\"s\"?", x.r)
+  end
+end
+
+# The plain local from the issue: `v` is `nil` on the raise path, so the
+# arm reads it untyped rather than the entry `Constant[1]`.
+def rescue_local_before_raise
+  v = 1
+  begin
+    v = nil
+    raise "x"
+  rescue
+    assert_type("Dynamic[top]", v)
+  end
+end
+
 # --- Controls: an arm the body writes nothing for reads the entry
 # value, and still reports. ---
 

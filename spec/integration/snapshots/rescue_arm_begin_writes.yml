@@ -10,3 +10,5 @@ assertions:
   '7': '1'
   '8': Dynamic[top]
   '9': Integer
+  '10': '"s"?'
+  '11': Dynamic[top]

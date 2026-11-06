@@ -2706,9 +2706,10 @@ module Rigor
         # after it, or a rescue clause, may have set `$_` enters with it forgotten; a rescue clause runs after any
         # prefix of the body, and so reads it forgotten whenever the body may set it.
         entry = edge ? forget_guard_if_rebinds(LastLine.forget_if_set(scope, node), node) : scope
-        primary_type, primary_scope = eval_begin_primary_under(node, entry, edge: edge)
+        primary_type, primary_scope, body_scope = eval_begin_primary_under(node, entry, edge: edge)
         rescue_chain = collect_rescue_chain_results(node.rescue_clause, rescue_entry_scope(node, entry),
-                                                    edge: edge, writes: rescue_writes(node, edge))
+                                                    edge: edge, writes: rescue_writes(node, edge),
+                                                    body_exit: body_scope)
 
         # B2.1 — retry-edge widening. When a `retry` in the rescue chain targets this `begin`, control re-enters the
         # primary body carrying every rebind made before the retry: the arm's (`rescue; tries += 1; retry; end`), and
@@ -2873,6 +2874,32 @@ module Rigor
         forget_guard_if_rebinds(LastLine.forget_if_set(entry, node.statements), node.statements)
       end
 
+      # Issue #2691 — a rescue clause runs after any prefix of the `begin` body raised, so a fact the entry scope
+      # holds for an indexed read (`h[:k]`) or a single-hop chain (`x.r`) holds in the clause only where no prefix
+      # of the body invalidated it. `body_exit`, the scope the primary body's evaluation ended with, already
+      # carries every invalidation the body applied — a call on the fact's root receiver, a `[]=` or mutator on
+      # its collection, an index-target store — so the facts it still binds, object for object, are the ones every
+      # raise point honours. Each entry fact `body_exit` does not still bind verbatim drops: `equal?` keeps only
+      # an untouched fact, since a re-narrowed or re-joined one is a new object (the conservative side).
+      def clause_fact_scope(entry_scope, body_exit)
+        return entry_scope if entry_scope.indexed_narrowings.empty? && entry_scope.method_chain_narrowings.empty?
+
+        indexed = entry_scope.indexed_narrowings.reduce(entry_scope) do |acc, (key, type)|
+          if body_exit.indexed_narrowings[key].equal?(type)
+            acc
+          else
+            acc.without_indexed_narrowing(key.receiver_kind, key.receiver_name, key.key)
+          end
+        end
+        indexed.method_chain_narrowings.reduce(indexed) do |acc, (key, type)|
+          if body_exit.method_chain_narrowings[key].equal?(type)
+            acc
+          else
+            acc.without_method_chain_narrowing(key.receiver_kind, key.receiver_name, key.method_name)
+          end
+        end
+      end
+
       # Rescue arms that never fall through contribute neither a type fragment NOR a scope to the post-begin flow —
       # control left the `begin` via that arm. That is an arm ending in `return`, `next`, `break`, `raise`, `throw`,
       # `exit`, `abort` or `fail`, and one whose type is `bot` ({#branch_terminates?}): an arm ending in `retry`, or in
@@ -2923,6 +2950,10 @@ module Rigor
       # `edge`, when given, collects every scope the primary body could raise from: the scope after each statement of
       # its frame ({#record_raise_points}), and the scope it ends with. The else-clause is not among them: what it
       # raises is not rescued here.
+      #
+      # Returns `[type, scope, body_scope]`: the construct's value and exit scope (the else-clause's when present),
+      # and the scope the primary body alone ended with — the `else` runs only when nothing raised, so its effects
+      # are no raise point's ({#collect_rescue_chain_results}' `body_exit`).
       def eval_begin_primary_under(node, entry_scope, edge: nil)
         body_type, body_scope =
           if node.statements
@@ -2934,9 +2965,9 @@ module Rigor
 
         if node.else_clause
           else_type, else_scope = sub_eval(node.else_clause, body_scope)
-          [else_type, else_scope]
+          [else_type, else_scope, body_scope]
         else
-          [body_type, body_scope]
+          [body_type, body_scope, body_scope]
         end
       end
 
@@ -3060,8 +3091,9 @@ module Rigor
       end
 
       def eval_begin_paths(node, entry, edge)
-        primary = eval_begin_primary_under(node, entry, edge: edge)
-        [*primary, collect_rescue_chain_results(node.rescue_clause, entry, edge: edge)]
+        primary_type, primary_scope, body_scope = eval_begin_primary_under(node, entry, edge: edge)
+        [primary_type, primary_scope,
+         collect_rescue_chain_results(node.rescue_clause, entry, edge: edge, body_exit: body_scope)]
       end
 
       # B2.1 — the entry scope widened by what crosses the retry edge, or nil when nothing does. A local or ivar bound
@@ -3265,7 +3297,12 @@ module Rigor
       # Issue #1231 — `writes` widens the scope each clause enters with ({#widen_clause_entry}) before its
       # reference is bound, so `rescue => e` still binds `e` to the exception. It is nil under a retry edge, which
       # already carries every scope the primary body raises from ({#widen_entry_for_retry}).
-      def collect_rescue_chain_results(rescue_node, entry_scope, edge: nil, writes: nil)
+      # `body_exit`, when given, is the scope the primary body alone ended with ({#eval_begin_primary_under}): the
+      # rescue entry keeps only the indexed and method-chain facts it still binds verbatim ({#clause_fact_scope}).
+      def collect_rescue_chain_results(rescue_node, entry_scope, edge: nil, writes: nil, body_exit: nil)
+        return [] if rescue_node.nil?
+
+        entry_scope = clause_fact_scope(entry_scope, body_exit) if body_exit
         on_enter = edge ? retry_scope_recorder(edge) : @on_enter
         results = []
         current = rescue_node

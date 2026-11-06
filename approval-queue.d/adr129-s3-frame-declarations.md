@@ -35,7 +35,7 @@ Classification judgment calls, each decided by reading the code that reads the s
   environment. `file_digest_run` was a witness; `rbs_core_root` a witness that read only nil (a configured `core_root:`
   builds the environment eagerly, outside any `type_of`), which G1 cannot fail
   ([#2883](https://github.com/rigortype/rigor/issues/2883)). The user ruled that every analysing entry point builds the
-  RBS environment before typing starts (`Environment.for_project` builds it, and the runner builds it on the analysis
+  RBS environment before typing starts (`Environment.for_project` builds it, `Environment.default` builds it on the main Ractor, and the runner builds it on the analysis
   path after its result-cache probe). With that, neither Frame is read inside `type_of` on any audited path, so both
   are `typing_never_reads` and the audit asserts them.
 - `def_node_resolver_run` was first `typing_never_reads`, on negative evidence (no non-nil read inside `type_of` in the

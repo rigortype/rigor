@@ -1,6 +1,6 @@
 Adversarially review the draft PR diff against the issue Acceptance.
 
-**Band selection:** default **Grok:max**. If the change is judged complex
+**Band selection:** default **Grok:xhigh**. If the change is judged complex
 (implementation-heavy / subtle contracts), also run **Opus:high** (both must
 Approve). Reserve **Fable:medium** for complex design / architecture — do not
 spend it on routine tidies. No live Claude usage poll.

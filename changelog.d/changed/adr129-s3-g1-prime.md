@@ -1,0 +1,2 @@
+- **[engine]** ADR-129's G1′: each fault the stage-3 shadow guards against is injected in specs, and G1's serving form must report it. ([#2882](https://github.com/rigortype/rigor/pull/2882))
+  - Spec and audit tooling; no output changes.

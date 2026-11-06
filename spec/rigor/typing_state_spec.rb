@@ -385,7 +385,43 @@ RSpec.describe Rigor::TypingState do
         expect(state.entry(slot.index, record_key)).to equal(absent), slot.name.to_s
         state.replay([slot.index, record_key, value])
         expect(state.entry(slot.index, record_key)).to eq(value), slot.name.to_s
+        state.undo([slot.index, record_key, absent])
+        expect(state.entry(slot.index, record_key)).to equal(absent), "#{slot.name} after undo"
       end
+    end
+
+    it "undoes an overwrite by putting the value it replaced back" do
+      store[node] = :first
+      state.replay([origins, [store, node].freeze, :second])
+      state.undo([origins, [store, node].freeze, :first])
+
+      expect(store[node]).to eq(:first)
+    end
+
+    it "undoes a capture's filings and a self-call miss, leaving the records their consumers read as before" do
+      reads = index(:dependency_reads)
+      capture = Rigor::Analysis::DependencyRecorder::Capture.new
+      calls = Rigor::Analysis::SelfCallResolutionRecorder::Accumulator.new("c")
+      misses = index(:self_call_misses)
+      pair = [capture, ["b.rb", nil].freeze].freeze
+      name = [capture, "const:X"].freeze
+      state.replay([reads, pair, true, reads, name, true, misses, [calls, :call].freeze, true])
+      state.undo([reads, pair, absent, reads, name, absent, misses, [calls, :call].freeze, absent])
+
+      expect([capture.reads.to_a, capture.missing.to_a, calls.calls]).to eq([[], [], []])
+    end
+
+    it "undoes a dependency filing so the accumulator's tables hold what they held before" do
+      accumulator = Rigor::Analysis::DependencyRecorder::Accumulator.new("a.rb")
+      accumulator.add_read("b.rb", nil)
+      reads = index(:dependency_reads)
+      state.replay([reads, [accumulator, %w[b.rb B#m].freeze].freeze, true, reads,
+                    [accumulator, %w[c.rb C#m].freeze].freeze, true])
+      state.undo([reads, [accumulator, %w[b.rb B#m].freeze].freeze, absent, reads,
+                  [accumulator, %w[c.rb C#m].freeze].freeze, absent])
+
+      expect([accumulator.sources.to_a, accumulator.symbol_sources.keys, accumulator.ancestry_sources.to_a])
+        .to eq([["b.rb"], [], ["b.rb"]])
     end
 
     it "replays a dependency filing into an ADR-84 capture's own sets" do
@@ -395,6 +431,100 @@ RSpec.describe Rigor::TypingState do
 
       expect(capture_store.missing.to_a).to eq(["const:X"])
       expect(capture_store.reads.to_a).to eq([["b.rb", nil]])
+    end
+  end
+
+  # ADR-129 WD1's two Memo rules (G2's Memo row): a Memo miss that writes a Table touches, and so does a read-through
+  # Table's miss that writes another Table; a miss that writes nothing, or only its own read-through Table, does not.
+  describe "a miss that writes a Table (WD1)" do
+    let(:origins) { index(:dynamic_origins) }
+    let(:through) { index(:inject_accumulator) }
+    let(:store) { {}.compare_by_identity }
+
+    def refused_by
+      state.open_capture
+      begin
+        yield
+      ensure
+        refused, = state.close_capture
+      end
+      refused
+    end
+
+    it "touches for a Memo miss that writes a Table, and not for one that writes nothing" do
+      writing = refused_by { state.memo_miss { state.log_bound_write(origins, store, :node, :cause) } }
+      quiet = refused_by { state.memo_miss { state.log_bound_read(origins, store, :node, :cause) } }
+
+      expect([writing, quiet]).to eq([true, false])
+    end
+
+    it "touches for a read-through Table's miss only when it fills its own table and writes another" do
+      key = Object.new
+      fill = -> { state.log_write(through, key, :record) }
+      other = -> { state.log_bound_write(origins, store, :node, :cause) }
+      refused = {
+        own_only: refused_by { state.memo_miss(through) { fill.call } },
+        other_only: refused_by { state.memo_miss(through) { other.call } },
+        both: refused_by { state.memo_miss(through) { other.call || fill.call } }
+      }
+
+      expect(refused).to eq(own_only: false, other_only: false, both: true)
+    end
+
+    it "judges a miss by its own writes, not by writes logged earlier in the capture" do
+      refused = refused_by do
+        state.log_bound_write(origins, store, :earlier, :cause)
+        state.memo_miss { state.log_bound_read(origins, store, :node, :cause) }
+      end
+
+      expect(refused).to be(false)
+    end
+
+    it "touches on the way out of a miss that raised after writing" do
+      refused = refused_by do
+        state.memo_miss { state.log_bound_write(origins, store, :node, :cause) || raise(ArgumentError) }
+      rescue ArgumentError
+        nil
+      end
+
+      expect(refused).to be(true)
+    end
+
+    it "runs a miss with no capture open and answers its value" do
+      expect(state.memo_miss { :value }).to eq(:value)
+    end
+
+    # The miss sites: MemoAudit.key_audit wraps every Memo miss, and the loop and inject records wrap theirs.
+    it "routes MemoAudit.key_audit's miss and the read-through records' misses through the rule" do
+      current = described_class.current
+      refused = lambda do |&miss|
+        current.open_capture
+        miss.call
+        current.close_capture.first
+      end
+      write = -> { current.log_bound_write(origins, store, :node, :cause) }
+
+      fill = -> { current.log_write(index(:loop_value_record), Object.new, :record) }
+
+      expect(refused.call { Rigor::MemoAudit.key_audit("probe") { write.call } }).to be(true)
+      expect(refused.call { Rigor::Inference::LoopValueRecord.miss { write.call || fill.call } }).to be(true)
+      expect(refused.call { Rigor::Inference::LoopValueRecord.miss { write.call } }).to be(false)
+      Rigor::MemoAudit.enable!
+      begin
+        expect(refused.call { Rigor::MemoAudit.key_audit("probe") { write.call } }).to be(true)
+      ensure
+        Rigor::MemoAudit.disable!
+      end
+    end
+
+    # The typer's read-through miss sites: the loop record's two fetch fallbacks and the inject fold.
+    it "wraps each read-through Table's miss in the typer with its own table exempt" do
+      source = File.read(File.expand_path("../../lib/rigor/inference/expression_typer.rb", __dir__))
+
+      expect(source.scan("LoopValueRecord.fetch(node, scope) || LoopValueRecord.miss {").size).to eq(2)
+      expect(source).to include("typing_state.memo_miss(INJECT_ACCUMULATOR) { try_block_inject_fold(")
+      expect(File.read(File.expand_path("../../lib/rigor/inference/loop_value_record.rb", __dir__)))
+        .to include("def miss(&) = TypingState.current.memo_miss(RECORD, &)")
     end
   end
 

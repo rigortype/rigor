@@ -5,7 +5,7 @@ description: >-
 advertise: true
 aliases: reviewer-opus
 acceptanceRole: read-only
-model: claude-bridge/claude-opus-5
+model: claude-bridge/claude-opus-5-5
 thinking: high
 systemPromptMode: replace
 inheritProjectContext: true
@@ -25,7 +25,7 @@ Stay **read-focused**. Use bash only for inspection (`git diff`, `git log`,
 
 ## Gate position
 
-**Add-on for complex implementation** after Grok:max. Do not rubber-stamp a
+**Add-on for complex implementation** after the co-primary Grok:xhigh + devin/swe-2 passes. Do not rubber-stamp a
 prior Grok `Approved`. Fable stays reserved for complex design.
 
 Your `Needs fix` blocks advancement for this pass.

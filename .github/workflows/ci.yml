@@ -765,11 +765,12 @@ jobs:
   # 83% on this, serialised: 27s of check against 23s + 12s + 74s + 22s of
   # gates, for a 164-196s job while its warm sibling finished in 44s.
   #
-  # As their own job the four still run once, still against a fresh checkout
+  # As their own job they still run once, still against a fresh checkout
   # with no `.rigor/cache` to restore from (which is all "cold" ever meant
-  # here), and no longer sit behind the self-check. One job rather than four
-  # because ~137s already clears the Tests matrix's ~180s floor; split it
-  # further only if that floor moves.
+  # here), and no longer sit behind the self-check. One job rather than one per
+  # gate while it finishes before the Tests shards; with the memo audit and the
+  # advisory type_of shadow it runs about eleven minutes. Split it if it becomes
+  # the critical path.
   acceptance-gates:
     name: Acceptance gates (cold analysis)
     needs: changes
@@ -828,6 +829,28 @@ jobs:
       # `internal analyzer error` diagnostic, so the output is kept; the exit status is the gate.
       - name: Run the callee-floor memo audit
         run: RIGOR_MEMO_AUDIT=1 bundle exec exe/rigor check --no-cache --workers 0 lib
+
+      # ADR-129 stage 3 — G1's shadow over Rigor's own source and the integration fixtures: every would-be hit of the
+      # type_of memo is recomputed and compared, and nothing is served, so the diagnostics are not read here. Advisory
+      # until the stage-3 corpus runs show zero mismatches; a later PR makes it a gate. Each run writes its own report,
+      # and the report check fails a missing or empty report and a run that checked nothing, so neither run can drop out
+      # unseen. Each run's exit status goes to the check too: `lib` must exit clean, and the fixtures may exit 1 on
+      # their expected diagnostics.
+      - name: Run the type_of shadow (advisory)
+        continue-on-error: true
+        run: |
+          rm -f "$RUNNER_TEMP"/type-of-shadow-*.jsonl
+          RIGOR_TYPE_OF_SHADOW=1 RIGOR_TYPE_OF_SHADOW_REPORT="$RUNNER_TEMP/type-of-shadow-lib.jsonl" \
+            bundle exec exe/rigor check --no-cache --workers 0 --format json lib > /dev/null || lib_status=$?
+          RIGOR_TYPE_OF_SHADOW=1 RIGOR_TYPE_OF_SHADOW_REPORT="$RUNNER_TEMP/type-of-shadow-fixtures.jsonl" \
+            bundle exec exe/rigor check --no-cache --workers 0 --format json spec/integration/fixtures > /dev/null ||
+            fixtures_status=$?
+          if ! ruby tool/type_of_shadow_report.rb --status "lib=${lib_status:-0}:0" \
+            --status "fixtures=${fixtures_status:-0}:1" \
+            "$RUNNER_TEMP/type-of-shadow-lib.jsonl" "$RUNNER_TEMP/type-of-shadow-fixtures.jsonl"; then
+            echo "::warning title=type_of shadow (ADR-129 G1)::The advisory type_of shadow failed. See the job summary."
+            exit 1
+          fi
 
   # ── 5. Warm-vs-cold diagnostic diff ─────────────────────────────
   # The two self-check variants must agree on every diagnostic.  Any

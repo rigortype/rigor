@@ -76,6 +76,7 @@ module Rigor
     # answers:
     # - `entry(store, key)`: the value at `key`, or {ABSENT}, for a nil store too (an unbound table not created yet);
     # - `put(store, key, value)`: stores `value` at `key` the way the table's own writer does;
+    # - `delete(store, key)`: removes the entry at `key`, undoing a first write (G1's stage-4 form);
     # - `container(state, slot)`: the store an unbound table's replay writes into, the one `state` holds in `slot` or
     #   one it creates there the way the table's writer does.
     #
@@ -90,6 +91,10 @@ module Rigor
         store[key] = value
       end
 
+      def delete(store, key)
+        store.delete(key)
+      end
+
       def container(state, slot) = state[slot] || (state[slot] = {})
     end
 
@@ -102,6 +107,10 @@ module Rigor
 
       def put(store, key, value)
         store[key] = value
+      end
+
+      def delete(store, key)
+        store&.delete(key)
       end
 
       def container(state, slot) = state.weak_key_map(slot)
@@ -160,8 +169,8 @@ module Rigor
       def table(name, reason:, run_scoped: false, read_through: false, bound: false, computed: nil,
                 entries: StoreEntries)
         raise ArgumentError, "#{name}: a bound table holds no run-scoped value" if bound && run_scoped
-        unless %i[entry put container].all? { |method| entries.respond_to?(method) }
-          raise ArgumentError, "#{name}: entries must answer entry, put and container"
+        unless %i[entry put delete container].all? { |method| entries.respond_to?(method) }
+          raise ArgumentError, "#{name}: entries must answer entry, put, delete and container"
         end
 
         declare(name, :table, reason, run_scoped: run_scoped, read_through: read_through, bound: bound,
@@ -389,6 +398,43 @@ module Rigor
         noted.freeze
       end
 
+      # The journal's length now, a mark for {#truncate_journal}.
+      def journal_size = @journal.size
+
+      # Drops the journal's records past `mark`, which no capture opened since `mark` is still open to own (G1's
+      # stage-4 form drops a recomputation's records, which the served entry's replace).
+      def truncate_journal(mark)
+        @journal.slice!(mark..)
+        nil
+      end
+
+      # Appends `reads` (a read slice, {#slices}) to the journal as the reads they record, so every open capture
+      # inherits them: a served hit's upward merge (WD3 step 2).
+      def merge_reads(reads)
+        return if @marks.empty?
+
+        index = 0
+        while index < reads.size
+          @journal.push(:read, reads[index], reads[index + 1], reads[index + 2])
+          index += 4
+        end
+        nil
+      end
+
+      # Puts back, last first, the values `priors` ({#close_priors}) noted, removing an entry noted {ABSENT}: undoes
+      # the writes of the computation the window was open around.
+      def undo(priors)
+        index = priors.size - 3
+        while index >= 0
+          slot = priors[index]
+          key = priors[index + 1]
+          prior = priors[index + 2]
+          ABSENT.equal?(prior) ? remove(slot, key) : put(slot, key, prior)
+          index -= 3
+        end
+        nil
+      end
+
       private
 
       # Stores `value` at `key` (a journal record's key) in the Table `slot`, creating an unbound table's store.
@@ -398,6 +444,14 @@ module Rigor
 
         entries = declared.entries
         entries.put(entries.container(self, slot), key, value)
+      end
+
+      # Removes the entry at `key` (a journal record's key) from the Table `slot`.
+      def remove(slot, key)
+        declared = TypingState.slots[slot]
+        return declared.entries.delete(key[0], key[1]) if declared.bound
+
+        declared.entries.delete(@values[slot], key)
       end
 
       def read_holds?(reads, index)
@@ -539,7 +593,10 @@ module Rigor
 
       # A Resource write, a read the slot does not exempt, or a write to a `contents: :resource` Frame's container:
       # refuses every open capture (the `any` rule, WD3).
-      def touch(_slot)
+      def touch(_slot) = refuse_captures
+
+      # Refuses every open capture: a touch, or a miss that wrote a Table ({#memo_miss}).
+      def refuse_captures
         refused = @refused
         refused.fill(true) unless refused.empty?
         nil
@@ -658,8 +715,47 @@ module Rigor
       # Whether a capture is open.
       def capturing? = !@marks.empty?
 
+      # ADR-129 WD1's two Memo rules: runs a miss computation and refuses every open capture when, while a capture was
+      # open, it wrote what a later hit of an enclosing entry would replay stale:
+      # - a Memo's miss (`own` nil) that wrote an entry of any Table: the Memo, now filled, no longer makes the write,
+      #   and a newer typing may have overwritten it;
+      # - a read-through Table's miss (`own`, its slot) that wrote its own table and another one: reading back its
+      #   own write validates (WD1's read-through rule) while the other write may have been overwritten (the inject
+      #   record's miss writes `dynamic_origins` causes). A miss that did not fill its own table leaves its ABSENT
+      #   read to validate strictly, so its other writes replay only while nothing has changed.
+      # The refusal is made on the way out, a raise included, since the journal keeps what a raising computation wrote.
+      def memo_miss(own = nil)
+        return yield if @marks.empty?
+
+        mark = @journal.size
+        begin
+          yield
+        ensure
+          refuse_captures if wrote_since?(mark, own)
+        end
+      end
+
       # Whether a priors window is open ({#open_priors}).
       def noting_priors? = !@priors.nil?
+
+      # Whether the journal holds, past `mark`, a write to a Table other than `own` and, when `own` is a slot, a write
+      # to `own` too. The journal empties when the outermost capture closes, which a miss computation cannot do to a
+      # capture open at its start.
+      def wrote_since?(mark, own)
+        journal = @journal
+        other = false
+        filled = own.nil?
+        index = mark
+        while index < journal.size
+          if journal[index] == :write
+            journal[index + 1].equal?(own) ? (filled = true) : (other = true)
+            return true if other && filled
+          end
+          index += 4
+        end
+        false
+      end
+      private :wrote_since?
 
       # Empties the slots at `indices` ({TypingState.release_run_scoped}).
       def release(indices)

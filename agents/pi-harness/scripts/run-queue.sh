@@ -70,22 +70,19 @@ if [[ ! -f "$SKILL_DIR/SKILL.md" ]]; then
   exit 1
 fi
 
-# Orchestrator band: claude-bridge opus first, then anthropic opus, then grok.
-PREFERRED="claude-bridge/claude-opus-5"
+# Orchestrator band: devin/swe-2 first, then claude-bridge opus (the only
+# Claude route), then grok. devin/ is limited to swe-2 / swe-2-flash.
+PREFERRED="devin/swe-2"
 PATTERNS=(
+  "devin/swe-2"
   "claude-bridge/*opus*"
-  "claude-bridge/opus"
   "*claude-bridge*opus*"
-  "anthropic/claude-opus-5"
-  "anthropic/claude-opus"
   "xai/grok-4.7"
   "xai/grok-4.6"
-  "xai/grok-4.5"
   "xai/grok"
-  "opus"
   "grok"
 )
-CYCLE="*opus*,claude-bridge/*,grok*,anthropic/claude-opus*,xai/grok*"
+CYCLE="devin/swe-2,claude-bridge/*opus*,xai/grok*,grok*"
 
 glob_to_ere() {
   local g="$1" out="" i c
@@ -122,7 +119,7 @@ No usable orchestrator-band model matched.
 
   pi          # /login
   pi --list-models opus
-  MODEL=anthropic/claude-opus-5 ./agents/pi-harness/scripts/run-queue.sh release
+  MODEL=claude-bridge/claude-opus-5-5 ./agents/pi-harness/scripts/run-queue.sh release
 
 Prefer starting bare `pi` and using /queue-release or /queue-survey instead.
 HELP

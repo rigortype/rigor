@@ -258,14 +258,16 @@ RSpec.describe "ADR-129 G1' Frame declarations", type: :runner do
 
     # `rigor sig-gen` indexes each file with the project-wide writer scope installed
     # ({Rigor::Inference::ScopeIndexer::DeclaredParamWrites.with_writer_scope}), and the census types a declared
-    # parameter's write under it, so a `typing_never_reads` writer scope is read or not read for real here.
+    # parameter's write under it: the typed right-hand sides in `initialize` run `type_of` with it installed, so a
+    # `typing_never_reads` writer scope is read or not read for real here, and a `typing_unreachable` one fails.
     it "reports no frame-audit finding, with the writer scope installed around the census" do
       Dir.mktmpdir do |dir|
         FileUtils.mkdir_p(File.join(dir, "sig"))
         FileUtils.mkdir_p(File.join(dir, "lib"))
         File.write(File.join(dir, "sig", "k.rbs"), "class K\n  def initialize: (String x) -> void\nend\n")
         File.write(File.join(dir, "lib", "k.rb"),
-                   "class K\n  def initialize(x)\n    @x = x\n  end\n\n  def x = @x\nend\n")
+                   "class K\n  def initialize(x)\n    @x = x\n    @y = [1, 2].map { |i| i + 1 }\n    " \
+                   "@z = x.upcase\n  end\n\n  def x = @x\nend\n")
         configuration = Rigor::Configuration.new(
           Rigor::Configuration::DEFAULTS.merge("paths" => [File.join(dir, "lib")],
                                                "signature_paths" => [File.join(dir, "sig")])

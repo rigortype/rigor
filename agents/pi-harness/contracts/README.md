@@ -12,7 +12,7 @@ LaneInput:
   touch:           [path glob / file, ...]   # likely bounds
   must_not:        [constraint, ...]
   worktree:        path | branch name
-  model_band:      deepseek-flash-class
+  model_band:      flash-class   # devin/swe-2-flash | deepseek-v4.1-flash
 ```
 
 ```text

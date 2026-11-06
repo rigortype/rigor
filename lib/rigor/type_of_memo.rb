@@ -4,6 +4,8 @@ require "json"
 require "prism"
 require_relative "typing_state"
 require_relative "memo_audit"
+require_relative "type_of_memo/stats"
+require_relative "type_of_memo/serving"
 
 module Rigor
   # ADR-129 stage 3 — the `ExpressionTyper#type_of` result memo in **shadow** form (WD5's G1, stage-3 form). It keys a
@@ -39,8 +41,6 @@ module Rigor
     ].to_h { |name| [Prism.const_get(name), true] }.freeze
     private_constant :LEAVES
 
-    PHASES = %i[main rule callee other].freeze
-
     # The Tables whose reads only record a filing a later reader never consumes (#2853).
     SET_ONLY = %i[dependency_reads self_call_misses].freeze
 
@@ -55,58 +55,30 @@ module Rigor
       # Whether the table keys on the ELIDE id ({TypingState::ElideId}) rather than the state id.
       attr_reader :elide
 
-      def initialize(elide: false)
+      # Recomputations of G1's stage-4 form open on this table ({TypeOfMemo.enable!} with `:serve`), during which the
+      # memo is suspended.
+      attr_accessor :suspended
+
+      def initialize(elide: false, phase: :other)
         @entries = {}.compare_by_identity
-        @phase = :other
+        @phase = phase
         @elide = elide
+        @suspended = 0
       end
-    end
-
-    # The counters and mismatch samples of this process, behind a mutex: process counters like {MemoAudit}'s, never
-    # read back into a type (ADR-129 WD5).
-    class Stats
-      def initialize
-        @mutex = Mutex.new
-        @counts = Hash.new { |hash, phase| hash[phase] = Hash.new(0) }
-        @stale = Hash.new { |hash, phase| hash[phase] = Hash.new(0) }
-        @samples = []
-      end
-
-      def count(phase, counter) = @mutex.synchronize { @counts[phase][counter] += 1 }
-
-      def stale_miss(phase, names) = @mutex.synchronize { @stale[phase][names] += 1 }
-
-      def sample(limit)
-        @mutex.synchronize { @samples << yield if @samples.size < limit }
-      end
-
-      def counts = @mutex.synchronize { copy(@counts) }
-
-      def stale = @mutex.synchronize { copy(@stale) }
-
-      def samples = @mutex.synchronize { @samples.dup }
-
-      def reset
-        @mutex.synchronize do
-          @counts.clear
-          @stale.clear
-          @samples.clear
-        end
-        nil
-      end
-
-      private
-
-      def copy(by_phase) = by_phase.to_h { |phase, counters| [phase, counters.dup] }
     end
 
     @enabled = %w[1 true].include?(ENV["RIGOR_TYPE_OF_SHADOW"].to_s.downcase)
     @stats = Stats.new
 
     class << self
+      include Serving
+
       def enabled? = @enabled
 
-      def enable! = (@enabled = true)
+      # Turns the shadow on. `serve: true` is G1's stage-4 form (ADR-129 WD5), for specs and audit tools only: a
+      # would-be hit is recomputed with the memo suspended, the recomputation's Table writes are undone, and the entry
+      # is served (validated, its reads merged upward, its writes replayed), so output depends on the memo.
+      def enable!(serve: false) = (@enabled = serve ? :serve : true)
 
       def disable! = (@enabled = false)
 
@@ -133,8 +105,7 @@ module Rigor
         return unless @enabled && Ractor.main?
 
         elide = %w[1 true].include?(ENV["RIGOR_TYPE_OF_SHADOW_ELIDE"].to_s.downcase)
-        table = Table.new(elide: elide)
-        table.phase = :main
+        table = Table.new(elide: elide, phase: :main)
         state = TypingState.current
         if elide
           state.extend(TypingState::ElideId) unless state.is_a?(TypingState::ElideId)
@@ -170,7 +141,7 @@ module Rigor
         return yield if LEAVES[node.class]
 
         table = state[TABLE]
-        return yield if table.nil?
+        return yield if table.nil? || table.suspended.positive?
 
         # G1′: the memo must not run while a `memo_shut_while_installed` Frame is installed.
         MemoAudit.note_memo_lookup(state) if MemoAudit.enabled?
@@ -180,7 +151,11 @@ module Rigor
         id = table.elide ? state.elide_id : state.id
         entry = by_id[id]
         count(phase, :lookups)
-        return check_hit(state, phase, scope, node, entry, &) if entry && stale_names(state, phase, entry).nil?
+        if entry && stale_names(state, phase, entry).nil?
+          return serve_hit(state, table, phase, scope, node, entry, &) if @enabled == :serve
+
+          return check_hit(state, phase, scope, node, entry, &)
+        end
 
         compute_and_store(state, phase, by_id, id, &)
       end
@@ -259,9 +234,14 @@ module Rigor
         kinds << :table unless diffs.empty?
         return if kinds.empty?
 
+        report(phase, scope, node, kinds, stored, fresh, diffs)
+      end
+
+      def report(phase, scope, node, kinds, stored, fresh, diffs)
         count(phase, :mismatch)
-        kinds.each { |kind| count(phase, :"mismatch_#{kind}") }
+        kinds.each { |kind| count(phase, :"mismatch_#{kind}") if kind.is_a?(Symbol) }
         sample(phase, scope, node, kinds, stored, fresh, diffs)
+        nil
       end
 
       # The entries where the live tables differ from their pre-computation state with `writes` replayed: each key

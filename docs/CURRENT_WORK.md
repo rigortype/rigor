@@ -16,25 +16,24 @@ The session handoff (ADR-98). It answers ONE question: what should the next sess
 Transient; replaced wholesale. Backlog lives in GitHub Issues, release planning in Milestones.
 If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the one that is wrong.
 
-## State at 2026-10-25 (v0.4.6 released)
+## State at 2026-11-06 (v0.4.7 released)
 
-- **v0.4.6 shipped** (tag `v0.4.6` at 25e637732, RubyGems, GitHub Release). The perf-gate corpus is
-  advanced to v0.4.6 (#2331). The approval queue is empty.
-- **The development loop changed** in #2332. Premise checks and small post-review edits stay in the
-  coordinator's own loop. Lane briefs load the `rigor-lane` skill and carry the inline floor from
-  `docs/agents/parallel-lanes.md` step 5. Fix rounds return to the same lane. A per-PR allocation
-  delta above `pr_allocations_pct` holds the PR. Read parallel-lanes.md before fanning out.
-- **A post-mortem of that loop is due after v0.4.7 ships** (#2333), before any v0.4.8 triage. During
-  v0.4.7, record the metrics #2333 lists as work happens.
-- The approval queue may now be ratified in batches during a long window, and ratified entries are
-  deleted on `master` (`approval-queue.d/README.md`).
+- **v0.4.7 shipped** (tag `v0.4.7`, 2026-11-03). The perf-gate corpus is advanced to it
+  (`bench/baseline.json`, `bench-corpus-v0.4.7`). The v0.4.8 milestone holds the open follow-ups.
+- **The approval queue is not empty**: `approval-queue.d/` holds 23 entries (ADR-128/129/130,
+  typing-state, VS Code and others). The maintainer ratifies them at `/rigor-release-prep`, not before.
+- **ADR-129 (typing state) is the active engine campaign**: stage 3 slices are landing as `adr129-s3-*`
+  PRs. Its open follow-ups are the `ADR-129` issues (for example #2798, #2805, #2813, #2853).
+- **The Pi harness (ADR-115)** now routes reviews to a co-primary pair, Grok:xhigh and
+  `devin/swe-2`:high, both of which must Approve (PR #2885). `devin/swe-2` is a free tier "this month",
+  so re-check the binding when it ends.
+- **The dev-loop post-mortem recurs** after each release (`rigor-release-prep` § "File the next
+  dev-loop post-mortem"). The v0.4.7 one is #2333; the v0.4.8 one is filed in its milestone.
 
 ## Next
 
-1. Triage v0.4.7. The milestone holds the follow-ups filed during v0.4.6. The engine ones are
-   #2287 (loop aliases), #2289 (Tier C ordering), #2292 (value-position memo), #2294 (Set
-   mutation), #2296/#2297 (callee floor), #2299–#2306, #2310, #2312, #2314, and #2317–#2326. Also
-   #2300 (sig-gen per-file indexing: measure first) and #2305 (Devise RBS: not bundled for now).
-2. Optional cleanup the maintainer has not yet ruled on: about 14 worktrees under `rigor-wt/` whose
-   PRs merged but whose local branches still show commits not on `master`. They are probably
-   merge-queue rebases. Confirm with `git range-diff` before removing any.
+1. Triage the v0.4.8 milestone (`gh issue list --milestone v0.4.8`). Read
+   `docs/agents/parallel-lanes.md` before fanning out.
+2. Optional cleanup the maintainer has not ruled on: worktrees under `rigor-wt/` whose PRs merged but
+   whose local branches still show commits not on `master` (probably merge-queue rebases). Confirm with
+   `git range-diff` before removing any.

@@ -190,6 +190,10 @@ output looks right, but it acted on the wrong input or measured the wrong thing.
   through the environment.
 - **`timeout N` must wrap the command inside `--command`**; wrapping `nix develop` itself lets the
   shell setup eat the budget.
+- **Never run `mise` as a read-only probe** (`mise ls`, `where`, `current`). On the maintainer's machine any
+  mise command can auto-prune superseded tool versions from the global config; read mise's files and
+  install directories instead, or use a throwaway `MISE_DATA_DIR` and `MISE_CONFIG_DIR`. A lane or reviewer
+  brief that may touch mise says so.
 - Inside the Flake, `sed` is GNU sed: [`parallel-lanes.md`](parallel-lanes.md) § "Mutation table".
 
 `gh` traps are in [`contribution-flow.md`](contribution-flow.md) § "GitHub and git traps".

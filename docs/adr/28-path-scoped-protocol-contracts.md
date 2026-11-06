@@ -186,6 +186,11 @@ existing plugin or caller breaks; safe in v0.1.x.
   under `app/actions/` enforcing the `#handle(request) -> response`
   protocol).
 
+**Fit is narrow.** A protocol pays off only where *every* file in a
+conventional directory shares the *same* method signature: Hanami actions do,
+Sidekiq workers and ActiveJob jobs do not. A directory whose members vary in
+signature is not a candidate; do not propose a protocol for it.
+
 ## Rejected / deferred alternatives
 
 - **An RBS interface implicitly bound by directory.** RBS has no

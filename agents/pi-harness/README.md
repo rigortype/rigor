@@ -259,7 +259,7 @@ Do not leave `ANTHROPIC_API_KEY` exported when using claude-bridge (it overrides
 ## Non-goals (v1)
 
 - No full in-tree orchestrator yet; **takt is optional**.
-- No parallel full-suite `make verify` on the host.
+- No full-suite `make verify` / `make check` on the host: `make verify-changed` locally, CI decides the rest (AGENTS.md § Validation).
 - Lanes do not own long-lived CI watchers / sleep loops.
 - Lane preflight (bundle path, `--body-file`, change-named branch, no in-session
   full corpus): see `skills/rigor-lane/SKILL.md` and

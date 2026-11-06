@@ -58,7 +58,7 @@ status.
 
 ## Hard rules (ADR-115)
 
-- **No** parallel full-suite `make verify` on the host
+- **No** full-suite `make verify` / `make check` on the host (`make verify-changed` only; AGENTS.md § Validation)
 - **No** long-lived CI watchers / sleep-poll loops (`gh` CI polling belongs to the
   parent queue / orchestrator — sparse polls only)
 - After push: print head SHA and **stop**

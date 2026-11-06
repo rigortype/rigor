@@ -150,6 +150,14 @@ RSpec.describe "rigor lens claim name guards" do
     expect(rows.fetch("Outer#copied:::Outer::t")).to eq(compatible)
   end
 
+  # The owner's `::` prefixes agree with the lexical nesting here, so only the relative marking of the arms the
+  # alias expands to keeps the compact RBS declaration's `t` (`::t`) from proving a conflict with `A::t`.
+  it "never proves a conflict from a relative type alias against a compactly declared owner" do
+    source = "module A\n  class B\n    def m = 1\n  end\nend\n"
+    signature = "type t = ::String\nmodule A\n  type t = ::Integer\nend\nclass A::B\n  def m: () -> t\nend\n"
+    expect(results(source, signature, "t" => %w[A::B#m]).fetch("A::B#m:t")).not_to include("verdict" => "conflict")
+  end
+
   it "declines a relative class name when an ancestor's superclass is not one the tables name" do
     methods = %w[Made#m Picked#m ViaAlias#m]
     rows = results(opaque_source, opaque_signature, "Helper" => methods + %w[Plain#m], "::Helper" => methods)

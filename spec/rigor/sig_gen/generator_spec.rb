@@ -3062,6 +3062,32 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(skipped_for(candidates, :unresolvable_superclass)).to eq(["Widget", "Widget::Helper"])
     end
 
+    it "names every unresolvable class for the writer, including one with no candidates" do
+      # #2715 — `Query` declares no method of its own; the nested `QueryError` shell is what keeps it on
+      # disk. {#unresolvable_class_names} still names it so the writer drops `< Base` from the container
+      # header, while {#unresolvable_superclasses} stays empty because nothing was skipped.
+      path = write_fixture("lib/x.rb", <<~RUBY)
+        class Base
+          def base_m(x) = x.nope
+        end
+        class QueryColumn
+          def initialize(name)
+            @name = name
+          end
+        end
+        class Query < Base
+          class QueryError < StandardError
+          end
+        end
+      RUBY
+
+      gen = generator(paths: [path])
+      gen.run
+
+      expect(gen.unresolvable_class_names).to contain_exactly("Query")
+      expect(gen.unresolvable_superclasses).to eq({})
+    end
+
     it "keeps a class whose superclass this run emits" do
       # The chain terminates in `Record`, which has no superclass of its own and IS declared by this run —
       # so the next run will know it. Without the emitted-class set every project subclass was skipped.

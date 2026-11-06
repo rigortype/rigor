@@ -67,6 +67,9 @@ module Rigor
         @held_back = []
         @left_bare = []
         @repair_targets = []
+        # Issue #2715 — qualified names of classes the run demoted for an unresolvable superclass. {#write_all}
+        # sets it from the generator; {#write} (spec convenience, no run context) leaves it empty.
+        @unresolvable_class_names = Set.new
       end
 
       # Process the full candidate list by resolving each candidate's target sig file via the path mapper (which
@@ -79,13 +82,21 @@ module Rigor
       # @param header_spelling — called with a class name, returns the header spelling of a generic class the run
       #   does not stamp (#2603: a bare header in a file no candidate routes to); the generator's
       #   {Generator#generic_header_spelling}. Without it only the run's stamp counts.
+      # @param unresolvable_class_names — qualified names of classes the run demoted because their superclass
+      #   chain resolves nowhere ({Generator#unresolvable_class_names}). A demoted class is never declared, but it
+      #   can still wrap a nested declaration — a `Query::QueryError` shell rides on a surviving sibling's
+      #   candidate — so without this its container header was written `class Query < ::BaseRecord` and the next
+      #   `rigor check` failed the build with `RBS::NoSuperclassFoundError` (#2715). Dropping the entry writes
+      #   the bare `class Query` shell instead: the nested declaration still lands, and the class itself stays
+      #   off RBS's member surface exactly as #735's demotion intends.
       # @return one per target sig file.
-      def write_all(candidates, header_spelling: nil)
+      def write_all(candidates, header_spelling: nil, unresolvable_class_names: [])
         emittable = candidates.select { |c| EMITTABLE.include?(c.classification) }
         scan_generic_headers(candidates, header_spelling)
 
         @global_namespace_kinds = build_namespace_kinds(candidates)
         @global_superclasses = build_superclasses(candidates)
+        @unresolvable_class_names = unresolvable_class_names.to_set
         grouped = emittable.group_by { |c| target_of(c) }
         results = grouped.map { |target, group| write_target(target, group) }
         results + repair_only_results(candidates, grouped.keys.map { |target| target.expand_path.to_s })
@@ -137,6 +148,7 @@ module Rigor
         @scan_repairs = {}
         @held_back = []
         @left_bare = []
+        @unresolvable_class_names = Set.new
         target = @path_mapper.target_for(source_path, class_name: emittable.first.class_name)
         write_target(target, emittable, source_path: source_path)
       end
@@ -283,7 +295,9 @@ module Rigor
 
           (c.class_superclasses || {}).each { |name, sup| merged[name] = sup }
         end
-        merged
+        # #2715 — last, so it covers entries from BOTH the run-wide view and this target's candidates: a
+        # demoted class keeps no `< Super` on the container header the tree renders for it.
+        merged.except(*@unresolvable_class_names)
       end
 
       # #2436 — every candidate carries the run's map, so folding the target's candidates is the whole view.

@@ -297,7 +297,8 @@ module Rigor
       # @return exit status — non-zero when a file the user asked to write could not be written.
       def dispatch_write(candidates, configuration, options, generator)
         writer = build_writer(configuration, options)
-        results = writer.write_all(candidates, header_spelling: generator.method(:generic_header_spelling))
+        results = writer.write_all(candidates, header_spelling: generator.method(:generic_header_spelling),
+                                               unresolvable_class_names: generator.unresolvable_class_names)
 
         refused = refused_candidates(candidates)
         SigGen::Renderer.new(out: @out).render_write(results: results, format: options.fetch(:format), refused: refused,
@@ -328,7 +329,8 @@ module Rigor
       # cannot change it, and it was failing the project's env build before the run as well.
       def dispatch_check(candidates, configuration, options, generator)
         writer = build_writer(configuration, options, dry_run: true)
-        results = writer.write_all(candidates, header_spelling: generator.method(:generic_header_spelling))
+        results = writer.write_all(candidates, header_spelling: generator.method(:generic_header_spelling),
+                                               unresolvable_class_names: generator.unresolvable_class_names)
         refused = refused_candidates(candidates)
         SigGen::Renderer.new(out: @out).render_check(results: results, format: options.fetch(:format),
                                                      refused: refused, left_bare: writer.left_bare)

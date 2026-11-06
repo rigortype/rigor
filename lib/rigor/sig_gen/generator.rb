@@ -80,7 +80,7 @@ module Rigor
       UnrenderableMethod = Data.define(:path, :class_name, :method_name, :rbs, :error)
 
       # @return empty on a healthy run; read after {#run}.
-      attr_reader :unrenderable, :unresolvable_superclasses
+      attr_reader :unrenderable, :unresolvable_superclasses, :unresolvable_class_names
 
       # @param paths — files / directories to scan.
       # @param observations —
@@ -120,6 +120,11 @@ module Rigor
         @unrenderable = []
         # Issue #735 — whole-run too: `{ class name => the superclass token that resolves nowhere }`.
         @unresolvable_superclasses = {}
+        # Issue #2715 — whole-run: EVERY class whose recorded superclass chain resolves nowhere this run,
+        # candidate or not. {#unresolvable_superclasses} names only classes a skipped candidate carried;
+        # a demoted class with no methods of its own still wraps nested declarations, and the writer needs
+        # the whole set to keep the unresolvable `< Super` off those container headers.
+        @unresolvable_class_names = Set.new
         # Issue #722 — whole-run: `{ class name => the lexical nesting its header is written in }`.
         @superclass_nestings = {}
         # Issue #2437 — whole-run: every class a walked file declares with a `class` keyword or a `Data.define` /
@@ -674,6 +679,8 @@ module Rigor
         unresolvable = {}
         loop do
           found = unresolvable_superclass_roots(superclasses, declared_by_run(current))
+          # `found` only grows as the emitted set shrinks, so merging each pass leaves the final set.
+          @unresolvable_class_names.merge(found.keys)
           return current if found.size == unresolvable.size
 
           unresolvable = found

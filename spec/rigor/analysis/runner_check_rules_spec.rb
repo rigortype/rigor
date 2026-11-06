@@ -749,7 +749,7 @@ RSpec.describe Rigor::Analysis::Runner do
             expect(mismatches(holder("Circle.new", "Registry.shape_of(@v)"))).to be_empty
           end
 
-          it "withholds a generic container of an unloaded project subclass (`Array[Circle]?` against `Array[Shape]`)" do
+          it "withholds a generic of an unloaded project subclass (`Array[Circle]?` against `Array[Shape]`)" do
             expect(mismatches(holder("[Circle.new]", "Registry.shapes_of(@v)"))).to be_empty
           end
 

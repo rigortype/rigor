@@ -36,9 +36,35 @@ module Rigor
         MISSING_HOOK = :method_missing
         # The roots whose project mixins `Inference::ObjectMixins` answers for.
         OBJECT_ROOTS = %w[Object Kernel BasicObject].to_set.freeze
-        private_constant :MISSING_HOOK, :OBJECT_ROOTS
+        # Issue #2792 — the owners of a `method_missing` every object (and every class object) reaches. Core's
+        # `BasicObject#method_missing` raises `NoMethodError`, so it opens nothing; core declares none on the others,
+        # which are here so that a project or gem RBS reopening `Object`, `Kernel`, `Module` or `Class` with one cannot
+        # silence the rule for every receiver.
+        UNIVERSAL_HOOK_OWNERS = {
+          instance: OBJECT_ROOTS,
+          singleton: (OBJECT_ROOTS | %w[Module Class]).freeze
+        }.freeze
+        private_constant :MISSING_HOOK, :OBJECT_ROOTS, :UNIVERSAL_HOOK_OWNERS
 
         module_function
+
+        # Issue #2792 — whether RBS gives `class_name`'s `side` a `method_missing` from somewhere other than the
+        # universal roots: the class itself, an RBS ancestor or an included module (`Delegator` for a
+        # `SimpleDelegator`, `class W < SimpleDelegator`, `OpenStruct`). Ruby sends any name the receiver lacks there,
+        # private or public, so no name is provably missing. Only the absence verdict reads it: the call's type stays
+        # what an unresolved call answers.
+        def rbs_missing_hook?(scope, class_name, side)
+          definition =
+            if side == :singleton
+              Rigor::Reflection.singleton_method_definition(class_name, MISSING_HOOK, scope: scope)
+            else
+              Rigor::Reflection.instance_method_definition(class_name, MISSING_HOOK, scope: scope)
+            end
+          owner = definition&.defined_in
+          return false if owner.nil?
+
+          !UNIVERSAL_HOOK_OWNERS.fetch(side).include?(owner.to_s.delete_prefix("::"))
+        end
 
         # Whether the project may answer `method_name` on an instance of `class_name` through one of its RBS
         # ancestors.

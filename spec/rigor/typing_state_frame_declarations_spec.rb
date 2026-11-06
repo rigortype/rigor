@@ -257,8 +257,8 @@ RSpec.describe "ADR-129 G1' Frame declarations", type: :runner do
         FileUtils.mkdir_p(File.join(dir, "lib"))
         File.write(File.join(dir, "sig", "k.rbs"), "class K\n  def initialize: (String x) -> void\nend\n")
         File.write(File.join(dir, "lib", "k.rb"),
-                   "class K\n  def initialize(x)\n    @x = x\n    @y = [1, 2].map { |i| i + 1 }\n" \
-                   "    @z = x.upcase\n  end\n\n  def x = @x\nend\n")
+                   "class K\n  def initialize(x)\n    @x = x\n    @y = [1, 2].map { |i| i + 1 }\n    " \
+                   "@z = x.upcase\n  end\n\n  def x = @x\nend\n")
         configuration = Rigor::Configuration.new(
           Rigor::Configuration::DEFAULTS.merge("paths" => [File.join(dir, "lib")],
                                                "signature_paths" => [File.join(dir, "sig")])

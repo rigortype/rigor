@@ -310,8 +310,8 @@ list kept beside the memo. State without a kind fails the gate.
   | 4 | Live in the rule walk | G5, G6; the `engine-warm` `default`-mode leaf and hub rows separate on Mastodon, and `engine-wall` on `lib` does not regress |
   | 5 | Live in the main pass and callee bodies; the recording evaluator's configuration becomes a Frame | as stage 4, plus at least half of stage 0's Mastodon allocation gain beyond the rule walk; RSS within +10% of stage 4 |
 
-  - **Stage 4 outcome (2026-11-06, [#2889](https://github.com/rigortype/rigor/pull/2889), closed).** The memo served
-    rule-walk hits behind a switch. Output was byte-identical, and G1's stage-4 form found no mismatch on the live
+  - **Stage 4 outcome (2026-11-06, [#2889](https://github.com/rigortype/rigor/pull/2889), held as Draft).** The memo
+    served rule-walk hits behind a switch. Output was byte-identical, and G1's stage-4 form found no mismatch on the live
     store. Allocations fell 5.37% on Mastodon, 2.56% on Redmine and 0.03% on `lib`. `engine-warm` on Mastodon moved
     the `default` leaf by −1.25% and the hub by −1.89%, and neither separated, so WD6's rule stopped the stage.
     Option 2 had already taken the receiver repeats. Together with option 2 the cut is about −17%, near stage 0's

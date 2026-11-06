@@ -308,6 +308,7 @@ module Rigor
     def inferred_param?: (String | Symbol name) -> bool
     def with_gradual_narrowing_mark: (String | Symbol name) -> Scope
     def gradual_narrowing?: (String | Symbol name) -> bool
+    def gradual_narrowing_names: () -> Array[Symbol]
     def forget_match_globals: () -> Scope
     def untyped_match_globals: () -> Scope
     def match_globals_bound?: () -> bool

@@ -10,7 +10,7 @@ require "spec_helper"
 RSpec.describe "a class guard keeps a gradual value gradual (#2656)", type: :runner do
   let(:signature) do
     { "sink.rbs" => "class Sink\n  def mode: (\"r\" | \"w\") -> void\n  def num: (1 | 2) -> void\n  " \
-                    "def pick: (Integer) -> void | (Symbol) -> void\nend\n" }
+                    "def pick: (Integer) -> void | (Symbol) -> void\n  def sym: (\"r\" | :w) -> void\nend\n" }
   end
 
   def mismatches(source)
@@ -86,5 +86,57 @@ RSpec.describe "a class guard keeps a gradual value gradual (#2656)", type: :run
       end
     RUBY
     expect(mismatches(source)).to eq([])
+  end
+
+  # A later guard narrows the marked local; it does not write it, so the mark stays.
+  {
+    "a nil guard" => "return unless x.is_a?(String)\n  return if x.nil?\n  Sink.new.mode(x)",
+    "an equality guard" => "return unless x.is_a?(String)\n  return if x == \"\"\n  Sink.new.mode(x)",
+    "an `&&` operand" => "Sink.new.mode(x) if x.is_a?(String) && x != \"\"",
+    "a second class guard" => "return unless x.is_a?(String)\n  return unless x.is_a?(Comparable)\n  Sink.new.mode(x)",
+    "a nested class guard" => "if x.is_a?(Object)\n    Sink.new.mode(x) if x.is_a?(String)\n  end"
+  }.each do |guard, body|
+    it "stays silent after #{guard} on the marked local" do
+      expect(mismatches("def f(x)\n  #{body}\nend\n")).to eq([])
+    end
+  end
+
+  {
+    "a literal joined with a gradual value" => "x = h[:m] || \"r\"",
+    "a nil-able gradual value" => "x = c ? h[:m] : nil"
+  }.each do |shape, write|
+    it "stays silent for #{shape} narrowed by is_a?" do
+      expect(mismatches("def f(h, c)\n  #{write}\n  Sink.new.mode(x) if x.is_a?(String)\nend\n")).to eq([])
+    end
+  end
+
+  it "judges a literal member as itself (the static part is not read past)" do
+    source = "def f(h)\n  x = h[:m] || \"q\"\n  Sink.new.mode(x) if x.is_a?(String)\nend\n"
+    expect(mismatches(source)).to eq(["call.argument-type-mismatch"])
+  end
+
+  it "stays silent for a second case over an element a first case narrowed and rejoined" do
+    source = <<~RUBY
+      def f(list)
+        list.each do |v|
+          case v
+          when String then Sink.new.mode(v)
+          end
+          case v
+          when Integer then Sink.new.num(v)
+          end
+        end
+      end
+    RUBY
+    expect(mismatches(source)).to eq([])
+  end
+
+  it "fires after a join with an arm that wrote the local (the mark intersects at a join)" do
+    source = "def f(x, c)\n  return unless x.is_a?(String)\n  x = \"zz\".dup if c\n  Sink.new.mode(x)\nend\n"
+    expect(mismatches(source)).to eq(["call.argument-type-mismatch"])
+  end
+
+  it "stays silent for an alternation capture" do
+    expect(mismatches("def f(x)\n  case x\n  in String | Symbol => s then Sink.new.sym(s)\n  end\nend\n")).to eq([])
   end
 end

@@ -9313,17 +9313,18 @@ module Rigor
       def apply_in_pattern_bindings(subject_type, subject_node, pattern, scope)
         bindings = collect_in_pattern_bindings(subject_type, pattern, scope, subject_node: subject_node)
         bound = bindings.reduce(scope) { |s, (name, type)| s.with_local(name, type) }
-        mark_gradual_class_capture(subject_type, pattern, bound)
+        marked = subject_node.is_a?(Prism::LocalVariableReadNode) && scope.gradual_narrowing?(subject_node.name)
+        mark_gradual_class_capture(subject_type, pattern, bound, marked: marked)
       end
 
       # Issue #2656 — `in C => y` over a `Dynamic` subject binds `y` to `C`'s `Nominal`, as a class guard's edge binds
       # the subject, and marks it as that edge marks a local ({Narrowing.mark_gradual_local}). Only a capture of
       # the whole subject by a class or an alternation of classes is marked.
-      def mark_gradual_class_capture(subject_type, pattern, scope)
+      def mark_gradual_class_capture(subject_type, pattern, scope, marked: false)
         return scope unless pattern.is_a?(Prism::CapturePatternNode) && class_capture_value?(pattern.value)
 
         name = pattern.target.name
-        Narrowing.mark_gradual_local(scope, name, subject_type, scope.local(name))
+        Narrowing.mark_gradual_local(scope, name, subject_type, scope.local(name), marked: marked)
       end
 
       def class_capture_value?(value)

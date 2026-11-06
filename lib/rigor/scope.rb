@@ -991,6 +991,15 @@ module Rigor
       marks.equal?(@declaration_sourced) ? self : rebuild(declaration_sourced: marks)
     end
 
+    # Issue #2656 — the locals carrying the gradual-narrowing mark, empty when none does.
+    def gradual_narrowing_names
+      return EMPTY_GRADUAL_NAMES if @declaration_sourced.empty?
+
+      @declaration_sourced.filter_map { |ref| ref[1] if ref[0] == :gradual_narrowing }
+    end
+    EMPTY_GRADUAL_NAMES = [].freeze
+    private_constant :EMPTY_GRADUAL_NAMES
+
     # Issue #2656 — true when the local `name`'s binding is a class guard's narrowing of a `Dynamic` value.
     def gradual_narrowing?(name)
       return false if @declaration_sourced.empty?

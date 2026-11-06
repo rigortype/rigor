@@ -113,6 +113,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     global(req:name)
     globals()
     gradual_narrowing?(req:name)
+    gradual_narrowing_names()
     guard_narrowed?()
     guard_narrowed_ivar?(req:name)
     guard_records()

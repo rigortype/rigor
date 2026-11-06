@@ -691,6 +691,40 @@ RSpec.describe Rigor::SigGen::Writer do
     end
   end
 
+  # #2715 — a class the run demoted for an unresolvable superclass never gets a declaration of its own,
+  # but it can still wrap a nested one: the `Query::QueryError` shell rides on `QueryColumn`'s candidate,
+  # so the tree renders a `Query` node. Its recorded `< BaseRecord` must not reach the header — that is
+  # the `RBS::NoSuperclassFoundError` that failed the next `check`. The bare `class Query` shell keeps the
+  # nested declaration without exposing `Query`'s (empty) member surface to RBS.
+  describe "a demoted class's container header (#2715)" do
+    def container_candidate
+      Rigor::SigGen::MethodCandidate.new(
+        path: "lib/query.rb", class_name: "QueryColumn", method_name: :initialize, kind: :instance,
+        classification: Rigor::SigGen::Classification::NEW_METHOD,
+        rbs: "def initialize: (untyped) -> void",
+        namespace_kinds: { "Query" => :class, "QueryColumn" => :class, "Query::QueryError" => :class },
+        class_shells: ["Query::QueryError"],
+        class_superclasses: { "Query" => "BaseRecord", "Query::QueryError" => "StandardError" }
+      )
+    end
+
+    it "writes the container without the unresolvable superclass, keeping the nested shell" do
+      writer.write_all([container_candidate], unresolvable_class_names: ["Query"])
+
+      output = File.read(File.join(tmpdir, "sig/query.rbs"))
+      expect(output).to match(/^class Query$/)
+      expect(output).to include("class QueryError < ::StandardError")
+      expect(output).not_to include("BaseRecord")
+    end
+
+    it "keeps the superclass when the class is not demoted" do
+      writer.write_all([container_candidate])
+
+      output = File.read(File.join(tmpdir, "sig/query.rbs"))
+      expect(output).to match(/class Query < ::BaseRecord\b/)
+    end
+  end
+
   # The create path has folded a strict-prefix pair into one nested tree since gap-#3 (c); the update path
   # used to resolve every candidate independently and so kept (or produced) the flat sibling layout. These
   # lock the two paths to the same canonical shape — without letting the update path rewrite anything the

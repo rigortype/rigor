@@ -387,6 +387,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#fold_refinements: grandfathered
     Rigor::Inference::ScopeIndexer#follow_extend_siblings: ADR-119 WD1, the sibling half of one name the extends fold copies onto a singleton; it marks the slot contested and the name possible when the extend edge is unpositioned or the source is, and writes only the singleton side
     Rigor::Inference::ScopeIndexer#follow_slot_writer: ADR-119 WD3, a single-valued slot's contest follows the write that holds it (a certain write clears the key, a possible one sets it); the certainty comes from Certainty, it decides no declaration context
+    Rigor::Inference::ScopeIndexer#foreign_self_children: the foreign-self bar of the ivar census walk (#2490); it asks CensusForeignBlock whether a call's block runs on another object and keeps a class << obj body's expression only, reading the class gather_ivar_writes passes in and deriving no declaration context of its own
     Rigor::Inference::ScopeIndexer#freeze_mixin_lists: it freezes the mixin accumulator's per-class lists into the include and prepend tables; it is the one place the two are projected, and the include projection alone is a set (#1587)
     Rigor::Inference::ScopeIndexer#gather_aliased_mutations: grandfathered
     Rigor::Inference::ScopeIndexer#gather_cvar_writes: grandfathered

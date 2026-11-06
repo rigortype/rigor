@@ -19,14 +19,15 @@ RSpec.describe "Set#first on a constant-folded Set", type: :runner do
   end
 
   it "answers the first member of a mixed Set, and for Set.new over a literal Array" do
-    expect(dumped(%(dump_type(Set[1, "a"].first)\ndump_type(Set.new(["r"]).first)))).to eq(["1", %("r")])
+    source = %(a = Set[1, "a"]\ndump_type(a.first)\nb = Set.new(["r"])\ndump_type(b.first))
+    expect(dumped(source)).to eq(["1", %("r")])
   end
 
   it "answers nil for the empty Set" do
-    expect(dumped("dump_type(Set[].first)")).to eq(["nil"])
+    expect(dumped("e = Set[]\ndump_type(e.first)")).to eq(["nil"])
   end
 
-  it "keeps the nil arm after the set is emptied through a mutator, an alias or a callee" do
+  it "keeps the nil arm after the set is emptied through a modelled mutator, an alias or a callee" do
     source = <<~RUBY
       s = Set["r"]
       s.clear
@@ -43,9 +44,43 @@ RSpec.describe "Set#first on a constant-folded Set", type: :runner do
       d.delete("r")
       dump_type(d.first)
     RUBY
-    out = dumped(source)
-    expect(out.size).to eq(4)
-    expect(out).to all(satisfy { |t| t.end_with?("?") || t.include?("nil") })
+    expect(dumped(source)).to eq(["String?", "Dynamic[top] | String | nil", "Dynamic[top]?", "String?"])
+  end
+
+  # Each of these empties the set without a modelled mutator at the call, so the fold must decline and leave the RBS
+  # answer rather than claim a member Ruby no longer returns.
+  {
+    "a lambda called later" => "f = -> { s.clear }\nf.call",
+    "a container element" => "[s].each(&:clear)",
+    "a Method object" => "s.method(:clear).call",
+    "instance_eval" => "s.instance_eval { clear }",
+    "a proc called later" => ["pr = proc { s.clear }\npr.call", "Dynamic[top] | String | nil"]
+  }.each do |label, (emptier, answer)|
+    it "declines when the local escapes through #{label}" do
+      expect(dumped(%(s = Set["r"]\n#{emptier}\ndump_type(s.first)))).to eq([answer || "Dynamic[top]?"])
+    end
+  end
+
+  it "declines for a global mutated inside a def, and for a receiver that is not a local" do
+    source = <<~RUBY
+      $g = Set[1, 2]
+      def gdrain = $g.clear
+      gdrain
+      dump_type($g.first)
+      dump_type(Set["r"].first)
+    RUBY
+    expect(dumped(source)).to eq(["Dynamic[top]?", "Dynamic[top]?"])
+  end
+
+  it "reports nothing for a truthiness test on first after an escaping clear" do
+    source = <<~RUBY
+      s = Set["r"]
+      cleanup = -> { s.clear }
+      cleanup.call
+      v = s.first
+      puts(v ? v : "none")
+    RUBY
+    expect(analyze(source).diagnostics.map(&:qualified_rule)).to eq([])
   end
 
   it "leaves first(n) to RBS" do

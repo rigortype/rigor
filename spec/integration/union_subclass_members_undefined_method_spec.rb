@@ -62,6 +62,6 @@ RSpec.describe "a union of a nominal subclass pair keeps the narrower arm (#2939
   it "reports the one undefined call when the return is the superclass alone (guard)" do
     write_project("StandardError")
 
-    expect(undefined_messages).to contain_exactly(a_string_including("errno"))
+    expect(undefined_messages).to contain_exactly(a_string_including("undefined method `errno' for StandardError"))
   end
 end

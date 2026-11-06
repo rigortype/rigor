@@ -266,6 +266,11 @@ RSpec.describe Rigor::Type::Combinator do
       expect(described_class.union(*arms).members).to match_array(arms)
     end
 
+    it "keeps both members of a nominal includer pair" do
+      arms = [described_class.nominal_of("Integer"), described_class.nominal_of("Comparable")]
+      expect(described_class.union(*arms).members).to match_array(arms)
+    end
+
     # Issue #1794 — the Rigor-private element of `Enumerator::ArithmeticSequence`.
     describe "arithmetic sequences" do
       def seq(*args) = described_class.nominal_of("Enumerator::ArithmeticSequence", type_args: args)

@@ -287,6 +287,23 @@ def rescue_local_before_raise
   end
 end
 
+# Review of #2910 — the same invalidation on a branch that raises and so
+# never reaches the body's fall-through exit: `eval_if` discards a
+# terminating then-branch with no else, but the rescue still runs after
+# it, so `x.r` reads its declared `"s" | nil` here too.
+def rescue_chain_fact_terminating_branch(x, flag)
+  return unless x.is_a?(ChainBox)
+  return unless x.r.is_a?(String)
+  begin
+    if flag
+      x.r = nil
+      raise "x"
+    end
+  rescue
+    assert_type("\"s\"?", x.r)
+  end
+end
+
 # --- Controls: an arm the body writes nothing for reads the entry
 # value, and still reports. ---
 

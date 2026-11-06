@@ -156,9 +156,10 @@ module Rigor
         # A node the collector cannot read must not fail the analysis of its file, nor of every file the pre-pass
         # feeds: the census then counts it as a definition of every name, which only declines a report.
         # `owner` is the qualified name of the class whose body the node sits in, for {IvarWriterCensus} (nil where
-        # the host walk does not track it, or no class owns an instance there).
-        def visit(node, top_level:, owner: nil)
-          @ivar_writers.visit(node, owner)
+        # the host walk does not track it, or no class owns an instance there); `receiver_owner` the class an
+        # explicit-receiver writer call names (issue #2488).
+        def visit(node, top_level:, owner: nil, receiver_owner: nil)
+          @ivar_writers.visit(node, owner, receiver_owner)
           visit_global_writer(node)
           case node
           when Prism::AliasGlobalVariableNode then visit_global_alias(node)

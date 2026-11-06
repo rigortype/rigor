@@ -160,6 +160,56 @@ RSpec.describe "Stable single-hop method-chain narrowing" do
     end
   end
 
+  # Issue #2693 — a write through the root that is not a plain `CallNode` still calls the writer on it.
+  describe "invalidation by attribute-write forms" do
+    def chain_fact_after(write)
+      program, _scope, index = post_scope_for(<<~RUBY)
+        def f(x, w, xs)
+          if x.r.is_a?(::Array)
+            #{write}
+            probe_marker = x.r
+          end
+        end
+      RUBY
+      body = program.statements.body.first.body.body.first.statements.body
+      index[body.last].method_chain_narrowing(:local, :x, :r)
+    end
+
+    it "keeps the fact when nothing intervenes (guard: the probe reads the fact)" do
+      expect(chain_fact_after("nil")).not_to be_nil
+    end
+
+    {
+      "`&&=`" => "x.r &&= nil",
+      "`||=`" => "x.r ||= nil",
+      "an operator write" => "x.r += 1",
+      "a multiple-assignment target" => "x.r, _y = nil, 1",
+      "a nested multiple-assignment target" => "(_a, x.r), _y = [1, nil], 2",
+      "a splatted multiple-assignment target" => "_a, *x.r = 1, 2",
+      "a `for` target" => "for x.r in [nil]; end",
+      "a `for` target among several" => "for _a, x.r in [[1, nil]]; end",
+      "a splatted `for` target" => "for *x.r in [nil]; end"
+    }.each do |form, write|
+      it "drops the root's chain fact under #{form}" do
+        expect(chain_fact_after(write)).to be_nil
+      end
+    end
+
+    it "keeps the fact when the write goes through another root (guard)" do
+      expect(chain_fact_after("w.r, _y = nil, 1")).not_to be_nil
+    end
+
+    it "evaluates a multi-hop target without raising (guard)" do
+      # `x.nxt.r = …` calls `r=` on `x.nxt`, whose receiver is no stable root; the target walk must pass over it.
+      expect { chain_fact_after("x.nxt.r, _w = 1, 2") }.not_to raise_error
+    end
+
+    it "evaluates index targets in multiple-assignment and `for` without raising (guard)" do
+      expect { chain_fact_after("xs[0], _z = 1, 2") }.not_to raise_error
+      expect { chain_fact_after("for xs[1] in [1]; end") }.not_to raise_error
+    end
+  end
+
   describe "join semantics" do
     it "keeps only chains present in both join inputs" do
       scope = Rigor::Scope.empty

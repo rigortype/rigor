@@ -111,17 +111,23 @@ version, but do not edit global config without the user's consent.
 
 `gem:rigortype` also puts an `rbs` on `PATH`: mise wraps every
 executable the gem's dependencies install, and that wrapper runs with
-rigortype's private `GEM_HOME`. If the project's `Gemfile` lists `rbs`
-(Steep and `rbs_rails` setups, `bundle exec rbs collection install`)
-and `bundle config path` is unset, `bundle exec rbs` runs the wrapper
-instead of the project's `rbs`. A git-sourced gem then fails with
-`is not yet checked out` under rigortype's `GEM_HOME`. A bundle
+rigortype's private `GEM_HOME`. When `rbs` is in the project's bundle
+(`Gemfile.lock` lists it, directly or through Steep or `rbs_rails`)
+and the bundle uses the default path, `bundle exec rbs` runs the
+wrapper instead of the project's `rbs`. A git-sourced gem then fails
+with `is not yet checked out` under rigortype's `GEM_HOME`. A bundle
 installed under a configured path such as `vendor/bundle` is not
-affected, because `bundle exec` puts that path's `bin` first. Check
-`bundle exec which rbs`; if it prints a path under
-`installs/gem-rigortype/`, tell the user and offer `bundle config set
---local path vendor/bundle` followed by `bundle install`. Do not change
-the bundle path without their consent.
+affected, because `bundle exec` puts that path's `bin` first. Only
+when `Gemfile.lock` lists `rbs`, run `mise exec -- bundle exec which
+rbs` (the shell you are in has not picked up the new tool yet, so a
+bare `bundle exec which rbs` can miss it). If it prints a path under
+`installs/gem-rigortype/`, tell the user, and tell them the fix is
+local to this checkout: `bundle config set --local path vendor/bundle`
+followed by `bundle install` writes an untracked `.bundle/config`
+(teammates and CI keep the default path), puts the bundle in
+`vendor/`, and makes Rigor read each bundled gem's shipped `sig/`
+(ADR-27). Offer it; do not change the bundle path without their
+consent.
 
 Then verify:
 

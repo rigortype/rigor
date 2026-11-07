@@ -544,11 +544,18 @@ RSpec.describe "plugins/rigor-actionpack" do
       end
 
       it "still types `permit` and `slice` as the plain nominal" do
-        dump_source = "class C\n  def index\n    Rigor.dump_type(params.permit(:a))\n    Rigor.dump_type(params.slice(:a))\n  end\nend\n"
+        dump_source = <<~RUBY
+          class C
+            def index
+              Rigor.dump_type(params.permit(:a))
+              Rigor.dump_type(params.slice(:a))
+            end
+          end
+        RUBY
         with_demo(dump_source) do |result|
           dumps = result.diagnostics.select { |d| d.rule == "dump.type" }.map(&:message)
           expect(dumps.size).to eq(2)
-          dumps.each { |d| expect(d).to include("ActionController::Parameters").and(satisfy { |m| !m.include?("Dynamic[") }) }
+          expect(dumps).to all(include("ActionController::Parameters").and(satisfy { |m| !m.include?("Dynamic[") }))
         end
       end
     end

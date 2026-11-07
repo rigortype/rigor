@@ -237,10 +237,11 @@ RSpec.describe "plugins/rigor-actionpack" do
       end
     end
 
-    it "keeps `require` / `permit` chained off `params` typed as Parameters (Phase 5b)" do
+    it "keeps the chain off `params.require` / `params.permit` concrete (Phase 5b, #2947)" do
       # Pre-fix `params.require(:user)` returned Dynamic (Parameters ships no RBS), leaking the chained
-      # `.permit` and every downstream site to unprotected. The chain now stays a concrete Parameters
-      # receiver end-to-end.
+      # `.permit` and every downstream site to unprotected. `require` is now the gradual carrier (it may
+      # return a scalar, #2947), but a `PARAMS_ONLY_CHAIN_METHODS` hop off it answers the plain nominal, so
+      # the sites after it stay concrete receivers. `params.permit(:q)` is the plain nominal itself.
       source = <<~RUBY
         class C
           def create
@@ -254,12 +255,16 @@ RSpec.describe "plugins/rigor-actionpack" do
         dumps = result.diagnostics.select { |d| d.rule == "dump.type" }.map(&:message)
         expect(dumps.size).to eq(3)
         expect(dumps).to all(include("ActionController::Parameters"))
+        expect(dumps[0]).to include("Dynamic[ActionController::Parameters]")
+        expect(dumps[1]).not_to include("Dynamic[")
+        expect(dumps[2]).not_to include("Dynamic[")
       end
     end
 
-    it "keeps `expect` / `slice` chained off `params` typed as Parameters (#534)" do
-      # Both share `require`'s safety shape: they never return nil, so the non-nil lenient nominal
-      # cannot fold a flow rule wrong. `[]` is deliberately absent — see the control below.
+    it "keeps `expect` / `slice` chained off `params` typed as Parameters (#534, #2947)" do
+      # `expect` is the gradual carrier (it may return a scalar, #2947); `slice` always returns a
+      # Parameters, and so does the `slice` hop off the carrier. `[]` is deliberately absent — see the
+      # control below.
       source = <<~RUBY
         class C
           def create
@@ -273,6 +278,7 @@ RSpec.describe "plugins/rigor-actionpack" do
         dumps = result.diagnostics.select { |d| d.rule == "dump.type" }.map(&:message)
         expect(dumps.size).to eq(3)
         expect(dumps).to all(include("ActionController::Parameters"))
+        expect(dumps[1..]).to all(satisfy { |m| !m.include?("Dynamic[") })
       end
     end
 
@@ -296,7 +302,7 @@ RSpec.describe "plugins/rigor-actionpack" do
     end
 
     it "types every never-nil Parameters chain link, and keeps the chain through them (#534)" do
-      # The admission rule for `STRONG_PARAMS_CHAIN_METHODS`: the Rails implementation must return a
+      # The admission rule for `PARAMS_ONLY_CHAIN_METHODS`: the Rails implementation must return a
       # Parameters on EVERY path. Contracts read off rails v8.1.0.beta1's strong_parameters.rb.
       links = [
         "params.except(:page)", "params.without(:page)", "params.extract!(:a)", "params.slice!(:a)",
@@ -484,7 +490,10 @@ RSpec.describe "plugins/rigor-actionpack" do
       with_demo(source) do |result|
         dumps = result.diagnostics.select { |d| d.rule == "dump.type" }.map(&:message)
         expect(dumps.size).to eq(3)
-        expect(dumps[0]).to include("Dynamic[ActionController::Parameters]")
+        # `permit` off a carrier can only raise or return a real Parameters (#2947): the plain nominal.
+        expect(dumps[0]).to include("ActionController::Parameters")
+        expect(dumps[0]).not_to include("Dynamic[")
+        # `require` off a carrier may return a scalar: still the gradual carrier.
         expect(dumps[1]).to include("Dynamic[ActionController::Parameters]")
         expect(result.diagnostics.map(&:rule)).not_to include("call.undefined-method")
       end
@@ -531,15 +540,32 @@ RSpec.describe "plugins/rigor-actionpack" do
             def index
               Rigor.dump_type(params.expect(:sort))
               Rigor.dump_type(params.require(:id).permit(:name))
+              Rigor.dump_type(params.require(:a).require(:b))
             end
           end
         RUBY
         [{}, { "parameters.rbs" => PARAMETERS_EXPECT_SIG }].each do |signatures|
           with_demo(dump_source, signatures: signatures) do |result|
             dumps = result.diagnostics.select { |d| d.rule == "dump.type" }.map(&:message)
-            expect(dumps.size).to eq(2)
-            expect(dumps).to all(include("Dynamic[ActionController::Parameters]"))
+            expect(dumps.size).to eq(3)
+            expect(dumps[0]).to include("Dynamic[ActionController::Parameters]")
+            expect(dumps[1]).to include("ActionController::Parameters")
+            expect(dumps[2]).to include("Dynamic[ActionController::Parameters]")
           end
+        end
+      end
+
+      it "does not fold a `params.require(:flag)` condition: it may be a scalar or false" do
+        flag_source = <<~RUBY
+          class C
+            def index
+              Rigor.dump_type(params.require(:flag) ? 1 : 2)
+            end
+          end
+        RUBY
+        with_demo(flag_source) do |result|
+          dump = result.diagnostics.find { |d| d.rule == "dump.type" }
+          expect(dump.message).to include("1 | 2")
         end
       end
 

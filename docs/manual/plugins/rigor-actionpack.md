@@ -399,12 +399,16 @@ diff — not a policy scoped to `app/views/**/*`. See
   those producers widens what this plugin can check.
 - **`params[:key]` is a gradual carrier.** Inside a controller,
   `params` types as `ActionController::Parameters`, and so does the
-  result of every builder method that always returns one — `require`,
-  `permit`, `permit!`, `expect`, `slice`, `slice!`, `except`,
-  `without`, `extract!`, `merge`, `merge!`, `reverse_merge`,
-  `reverse_merge!`, `with_defaults`, `with_defaults!`, `compact`,
-  `compact_blank`, `deep_dup` — so a chain built from them keeps a
-  concrete receiver throughout. A subscript read answers
+  result of every builder method that always returns one — `permit`,
+  `permit!`, `slice`, `slice!`, `except`, `without`, `extract!`,
+  `merge`, `merge!`, `reverse_merge`, `reverse_merge!`,
+  `with_defaults`, `with_defaults!`, `compact`, `compact_blank`,
+  `deep_dup` — including when the receiver is a carrier. `require`
+  and `expect` are different: Rails returns the value itself, which
+  can be a scalar (`params.require(:id).to_sym`), so they answer the
+  same `Dynamic[ActionController::Parameters]` carrier (#2947). A
+  builder call after one (`params.require(:user).permit(:name)`)
+  still types as `Parameters`. A subscript read answers
   `Dynamic[ActionController::Parameters | nil]` (#2430): the static
   facet is the nilable `Parameters`, so `params[:user][:name]` and
   `params[:user].permit(:name)` keep dispatching on that facet, and

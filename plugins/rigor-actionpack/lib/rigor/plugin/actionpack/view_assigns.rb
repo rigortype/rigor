@@ -22,7 +22,7 @@ module Rigor
       # `last!`, `new`, `create`, `create!`. A seeded type is a claim the engine acts on, and a wrong one
       # is worse than none: seeding `@user` from `find_by` (which returns nil at runtime) would hand the
       # flow rules a non-nil nominal and license folds that draw diagnostics on correct templates — the
-      # trap `Actionpack::STRONG_PARAMS_CHAIN_METHODS` documents at length for `Parameters#[]`. Anything
+      # trap `Actionpack::PARAMS_ONLY_CHAIN_METHODS` documents at length for `Parameters#[]`. Anything
       # else assigns nothing, the ivar stays unseeded, and the template reads it as `Dynamic`, which
       # taints honestly (ADR-5). A call on that list that returns, or may return, SEVERAL records —
       # `find(a, b)`, `find([1, 2])`, `create([{…}, {…}])` — is excluded by the same rule; see
@@ -228,7 +228,7 @@ module Rigor
           # `case`, a `rescue`, a loop, or a block that may not run — does not contribute, because a seed
           # is a claim about what the template will FIND, and `@user = User.find(1) if params[:pick]`
           # leaves `@user` nil on the other path. A non-nil nominal standing in for a runtime nil is the
-          # `Parameters#[]` trap (`Actionpack::STRONG_PARAMS_CHAIN_METHODS`): the flow rules act on it and
+          # `Parameters#[]` trap (`Actionpack::PARAMS_ONLY_CHAIN_METHODS`): the flow rules act on it and
           # report live branches, which is exactly what a reader of a template would see with
           # `view_type_checks:` on. The unseeded ivar reads `Dynamic` instead and taints honestly (ADR-5).
           #

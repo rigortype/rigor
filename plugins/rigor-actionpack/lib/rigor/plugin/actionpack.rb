@@ -473,9 +473,11 @@ module Rigor
       # `ActionController::Parameters` (above), but the chained `params.require(:user).permit(:name)` /
       # `params.permit(...)` calls returned `Dynamic` at the first hop (Parameters ships no bundled RBS,
       # so a call on it resolves lenient-to-Dynamic), leaking every downstream site (`.permit`, `.to_h`,
-      # `.each`) to unprotected. These methods return another `Parameters`, so gate on a
-      # `Parameters` receiver and re-type the result as the same lenient nominal — the chain stays a
-      # concrete receiver end-to-end and `coverage --protection` counts the sites as protected.
+      # `.each`) to unprotected. The methods that return another `Parameters` (`PARAMS_ONLY_CHAIN_METHODS`)
+      # gate on a `Parameters` receiver, or on a carrier receiver, and re-type the result as the same
+      # lenient nominal — the sites after them stay concrete receivers and `coverage --protection` counts
+      # them as protected. `require` / `expect` are the exception below: the receiver of the call right
+      # after one is the carrier, which is not a concrete receiver.
       #
       # `require` and `expect` may return a scalar at runtime (`params.require(:id) → String`), so the
       # earlier "RBS-less nominal is FP-safe" reading of them (2026-07, #534) is withdrawn by #2947: it held
@@ -593,8 +595,12 @@ module Rigor
         Rigor::Type::Combinator.dynamic(Rigor::Type::Combinator.nominal_of(REQUEST_CONTEXT_READER_TYPES[:params]))
       end
 
-      # Issue #2430 — the chain on a `params[...]` carrier (`params[:user].permit(:name)`). The result stays
-      # a `Dynamic` of the same nominal, so it crosses a declared boundary as the carrier does.
+      # Issue #2430 / #2947 — the chain on a carrier receiver (`params[:user].permit(:name)`,
+      # `params.require(:user).permit(:name)`). A `PARAMS_ONLY_CHAIN_METHODS` call on a carrier can only
+      # raise NoMethodError (a scalar has no `permit`) or return a real Parameters, so the plain nominal is
+      # sound, and it keeps every downstream site (`attrs.to_h`) a concrete receiver for
+      # `coverage --protection`. `require` / `expect` on a carrier may still return a scalar, so they stay
+      # the gradual carrier.
       dynamic_return methods: STRONG_PARAMS_CHAIN_METHODS do |call_node, scope|
         next nil unless call_node.is_a?(Prism::CallNode)
 
@@ -603,7 +609,8 @@ module Rigor
         next nil unless controller_scope?(scope)
         next nil unless params_carrier_facet?(scope.type_of(receiver))
 
-        Rigor::Type::Combinator.dynamic(Rigor::Type::Combinator.nominal_of(REQUEST_CONTEXT_READER_TYPES[:params]))
+        nominal = Rigor::Type::Combinator.nominal_of(REQUEST_CONTEXT_READER_TYPES[:params])
+        PARAMS_ONLY_CHAIN_METHODS.include?(call_node.name) ? nominal : Rigor::Type::Combinator.dynamic(nominal)
       end
 
       # Issue #534 item 1, reopened by #574. `#[]` is the single largest named-receiver pair on both survey

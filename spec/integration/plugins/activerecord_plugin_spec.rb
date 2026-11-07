@@ -303,6 +303,12 @@ RSpec.describe "plugins/rigor-activerecord" do
         expect(unknown_columns(%(Setting.find_by(nme: "a")\n)).map(&:message))
           .to contain_exactly(a_string_including("unknown column `nme`"))
       end
+
+      it "types the primary key reader from the id: option" do
+        result = run_ar(%(Setting.find("a").name.no_such_method\n), schema: schema, models: models)
+        expect(result.diagnostics.map(&:message))
+          .to include(a_string_including("undefined method `no_such_method' for String"))
+      end
     end
   end
 

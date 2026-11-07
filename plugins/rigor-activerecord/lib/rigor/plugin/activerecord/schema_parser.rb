@@ -39,6 +39,7 @@ module Rigor
       class SchemaParser
         TIMESTAMPS_COLUMNS = %w[created_at updated_at].freeze
         DEFAULT_PRIMARY_KEY_TYPE = :bigint
+        UNKNOWN_PRIMARY_KEY_TYPE = :unknown
 
         # Structural `t.<method>` calls inside a `create_table` block that declare indexes / constraints
         # rather than columns. Everything NOT in this set that carries a literal column name is treated as
@@ -105,20 +106,34 @@ module Rigor
         # `create_table "settings", primary_key: "name", id: { type: :string }` creates the column `name`
         # without the block declaring it, so the option is the only place the schema names it.
         def named_primary_key_column(call_node)
-          return nil if id_disabled?(call_node)
+          id = keyword_value(call_node, :id)
+          return nil if id.is_a?(Prism::FalseNode) || id.is_a?(Prism::NilNode)
 
           name = literal_name(keyword_value(call_node, :primary_key))
           return nil if name.nil?
 
-          type = primary_key_type(call_node)
-          SchemaTable::Column.new(name: name, type: type, ruby_type: SchemaTable.ruby_type_for(type))
+          options = id.is_a?(Prism::HashNode) ? id.elements : []
+          type = primary_key_type(id, options)
+          SchemaTable::Column.new(
+            name: name,
+            type: type,
+            ruby_type: primary_key_ruby_type(type),
+            array: keyword_in(options, :array).is_a?(Prism::TrueNode)
+          )
         end
 
-        # `id: :string` or `id: { type: :string, ... }`. Rails creates a bigint key when neither names a type.
-        def primary_key_type(call_node)
-          id = keyword_value(call_node, :id)
-          type = id.is_a?(Prism::HashNode) ? keyword_in(id.elements, :type) : id
-          literal_name(type)&.to_sym || DEFAULT_PRIMARY_KEY_TYPE
+        # `id: :string` or `id: { type: :string, ... }`. Rails creates a bigint key when neither names a type,
+        # and a type this parser cannot read as a literal is left unknown rather than assumed to be bigint.
+        def primary_key_type(id, options)
+          declared = id.is_a?(Prism::HashNode) ? keyword_in(options, :type) : id
+          return DEFAULT_PRIMARY_KEY_TYPE if declared.nil?
+
+          literal_name(declared)&.to_sym || UNKNOWN_PRIMARY_KEY_TYPE
+        end
+
+        # A decimal key reads as Integer at scale 0 (`Type::DecimalWithoutScale`) and BigDecimal otherwise.
+        def primary_key_ruby_type(type)
+          type == :decimal ? "Object" : SchemaTable.ruby_type_for(type)
         end
 
         def literal_name(node)

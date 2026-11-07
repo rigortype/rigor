@@ -42,6 +42,46 @@ RSpec.describe "plugins/rigor-activerecord SchemaParser" do
       expect(table.column("items", "id")).not_to be_nil
     end
 
+    it "reads the dumped spelling of a uuid key with a default" do
+      table = parse(%(create_table "items", primary_key: "code", id: :uuid, default: -> { "gen()" } do |t|\nend\n))
+      expect(table.column("items", "code").ruby_type).to eq("String")
+    end
+
+    it "reads the dumped spelling of an integer key without a default" do
+      table = parse(%(create_table "items", primary_key: "num", id: :integer, default: nil do |t|\nend\n))
+      expect(table.column("items", "num").ruby_type).to eq("Integer")
+    end
+
+    it "registers an integer key when the id: hash names no type" do
+      table = parse(%(create_table "items", primary_key: "num", id: { comment: "x" } do |t|\nend\n))
+      expect(table.column("items", "num").ruby_type).to eq("Integer")
+    end
+
+    it "flags an array key" do
+      table = parse(%(create_table "items", primary_key: "tags", id: { type: :string, array: true } do |t|\nend\n))
+      expect(table.column("items", "tags").array?).to be(true)
+    end
+
+    it "leaves a decimal key untyped, because its Ruby class depends on the scale" do
+      table = parse(%(create_table "items", primary_key: "num", id: { type: :decimal, scale: 0 } do |t|\nend\n))
+      expect(table.column("items", "num").ruby_type).to eq("Object")
+    end
+
+    it "leaves the key untyped when id: is not a literal" do
+      table = parse(%(create_table "items", primary_key: "code", id: MY_TYPE do |t|\nend\n))
+      expect(table.column("items", "code").ruby_type).to eq("Object")
+    end
+
+    it "leaves the key untyped when the type in the id: hash is not a literal" do
+      table = parse(%(create_table "items", primary_key: "code", id: { type: MY_TYPE } do |t|\nend\n))
+      expect(table.column("items", "code").ruby_type).to eq("Object")
+    end
+
+    it "adds nothing when id: nil creates no primary key column" do
+      table = parse(%(create_table "items", primary_key: "code", id: nil do |t|\nend\n))
+      expect(table.column("items", "code")).to be_nil
+    end
+
     it "adds nothing for a composite primary key, whose columns the block declares" do
       table = parse(<<~RUBY)
         create_table "pairs", primary_key: ["x", "y"], force: :cascade do |t|

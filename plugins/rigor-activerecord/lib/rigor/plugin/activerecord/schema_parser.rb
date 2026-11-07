@@ -77,6 +77,8 @@ module Rigor
           block_node = call_node.block
           columns = { "id" => SchemaTable::Column.new(name: "id", type: :integer, ruby_type: "Integer") }
           columns.delete("id") if id_disabled?(call_node)
+          primary_key = named_primary_key_column(call_node)
+          columns[primary_key.name] = primary_key if primary_key
 
           if block_node.is_a?(Prism::BlockNode) && block_node.body
             collect_column_calls(block_node.body) do |column_call|
@@ -106,6 +108,41 @@ module Rigor
             end
           end
           false
+        end
+
+        # `create_table "settings", primary_key: "name", id: { type: :string }` creates the column `name`
+        # without the block declaring it, so the option is the only place the schema names it.
+        def named_primary_key_column(call_node)
+          name = keyword_value(call_node, :primary_key)
+          return nil unless name.is_a?(Prism::StringNode)
+
+          type = primary_key_type(call_node)
+          SchemaTable::Column.new(name: name.unescaped, type: type, ruby_type: SchemaTable.ruby_type_for(type))
+        end
+
+        def primary_key_type(call_node)
+          keyword_in(keyword_value(call_node, :id).elements, :type).unescaped.to_sym
+        end
+
+        def keyword_value(call_node, name)
+          return nil if call_node.arguments.nil?
+
+          call_node.arguments.arguments.each do |arg|
+            next unless arg.is_a?(Prism::KeywordHashNode)
+
+            value = keyword_in(arg.elements, name)
+            return value if value
+          end
+          nil
+        end
+
+        def keyword_in(elements, name)
+          elements.each do |pair|
+            next unless pair.is_a?(Prism::AssocNode)
+
+            return pair.value if symbol_key(pair.key) == name
+          end
+          nil
         end
 
         # Walks the block body collecting `t.<method>(...)` calls. It descends through nested constructs

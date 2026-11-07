@@ -10,8 +10,18 @@ $LOAD_PATH.unshift(ar_plugin_lib) unless $LOAD_PATH.include?(ar_plugin_lib)
 require "rigor-activerecord"
 
 RSpec.describe "plugins/rigor-activerecord SchemaParser" do
+  def parse(source) = Rigor::Plugin::Activerecord::SchemaParser.parse(source)
+
   describe "the primary_key: option of create_table" do
-    it "registers the named column with the type of an id: hash"
+    it "registers the named column with the type of an id: hash" do
+      table = parse(<<~RUBY)
+        create_table "settings", primary_key: "name", id: { type: :string, limit: 64 }, force: :cascade do |t|
+          t.text "value"
+        end
+      RUBY
+      expect(table.column("settings", "name").ruby_type).to eq("String")
+    end
+
     it "registers the named column with the type of an id: symbol"
     it "registers the named column as an integer when there is no id: option"
     it "reads a Symbol primary key name"

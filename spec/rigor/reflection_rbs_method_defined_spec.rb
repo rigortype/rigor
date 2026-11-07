@@ -4,7 +4,7 @@ require "spec_helper"
 
 # `Reflection.rbs_method_defined` and `Reflection.ancestry_reaches`: the RBS-through-project-ancestry readers. A
 # project class is not in RBS itself; its RBS-known ancestors are the external entries of its chain.
-RSpec.describe Rigor::Reflection, "RBS ancestry readers" do
+RSpec.describe Rigor::Reflection, ".rbs_method_defined" do
   def scope_for(source)
     root = Prism.parse(source).value
     Rigor::Inference::ScopeIndexer.index(root, default_scope: Rigor::Scope.empty)[root]

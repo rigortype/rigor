@@ -722,7 +722,8 @@ RSpec.describe "plugins/rigor-rails-routes" do
 
     def unknown_helpers(files, paths:, signature_paths: nil)
       result = run_plugin(source: "", files: routes.merge(files), paths: paths, signature_paths: signature_paths)
-      plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }.map { |d| d.message.sub(/ \(did you mean.*\)\z/, "") }
+      unknown = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      unknown.map { |d| d.message.sub(/ \(did you mean.*\)\z/, "") }
     end
 
     it "stays quiet on an `attr_reader` name, including the hash shorthand" do

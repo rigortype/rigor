@@ -1,0 +1,2 @@
+- **[rigor sig-gen]** `rigor sig-gen` now proposes a reader's return type from the same cross-file ivar writes `rigor check` joins, so committing its proposal no longer triggers `def.return-type-mismatch`. ([#2942](https://github.com/rigortype/rigor/pull/2942))
+  - With `@x = nil` in `initialize` and `@x = "a"` in another file's reopening, `def get = @x` is now proposed as `() -> (String | nil)` instead of `() -> nil`.

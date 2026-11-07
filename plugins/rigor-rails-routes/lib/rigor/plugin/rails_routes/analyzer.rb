@@ -113,8 +113,70 @@ module Rigor
           selves.any? do |class_name, kind|
             !Rigor::Reflection.project_method_defined(class_name, name, kind: kind, source: :either,
                                                                         scope: scope).no? ||
-              !Rigor::Reflection.external_method_defined(class_name, name, kind: kind, scope: scope).no?
+              rbs_ancestor_defines?(class_name, name, kind, scope) || framework_ancestor_defines?(class_name, name, kind, scope)
           end
+        end
+
+        # Rails' own `*_path` / `*_url` methods on a controller or mailer, read from the Rails source (rails/rails
+        # main, 1105756f42). They are instance methods (or class methods, for `controller_path` and the view-path
+        # writers) of the framework base classes, and a project without that framework's RBS cannot see them
+        # through the ancestry, so a class that reaches one of these bases declines for exactly these names:
+        #
+        # - `controller_path`: actionpack/lib/abstract_controller/base.rb:157 (instance), :117 (class).
+        # - `append_view_path` / `prepend_view_path`: actionview/lib/action_view/view_paths.rb:113, :124 (instance),
+        #   :46, :57 (class); mixed into `AbstractController::Base` through `ActionView::ViewPaths`.
+        # - `helpers_path`: actionpack/lib/action_controller/metal/helpers.rb:64 (class accessor).
+        # - `edit_` / `new_` `polymorphic_path` / `polymorphic_url`: actionpack/lib/action_dispatch/routing/
+        #   polymorphic_routes.rb:163-166 (`polymorphic_path` / `polymorphic_url` are in {BUILTIN_PASSTHROUGH}).
+        FRAMEWORK_METHOD_NAMES = %w[
+          controller_path append_view_path prepend_view_path helpers_path
+          edit_polymorphic_path edit_polymorphic_url new_polymorphic_path new_polymorphic_url
+        ].freeze
+
+        # The classes that define {FRAMEWORK_METHOD_NAMES}: `AbstractController::Base`
+        # (actionpack/lib/abstract_controller/base.rb:35) and what inherits from it, `ActionController::Metal`
+        # (actionpack/lib/action_controller/metal.rb:185), `::Base` (action_controller/base.rb:206), `::API`
+        # (action_controller/api.rb:91) and `ActionMailer::Base` (actionmailer/lib/action_mailer/base.rb:479).
+        FRAMEWORK_BASES = %w[
+          AbstractController::Base ActionController::Metal ActionController::Base ActionController::API
+          ActionMailer::Base
+        ].freeze
+
+        # RBS declares `name` on `class_name` or on an ancestor its project ancestry reaches. A project class is
+        # rarely in RBS itself, so this walks its `ResolutionChain` to the entries RBS knows (every candidate
+        # spelling of an external one) and asks RBS of each on the side the entry sits; RBS's definition of an
+        # ancestor already includes what it inherits. A truncated chain declines (true): a definer past the budget
+        # cannot be ruled out.
+        def rbs_ancestor_defines?(class_name, name, kind, scope)
+          chain = Rigor::Scope::ResolutionChain.for(scope, class_name.to_s, kind, :methods)
+          found = chain.search(scope) do |entry|
+            chain_entry_names(entry).any? { |candidate| !rbs_method_definition(candidate, name, entry.side, scope).nil? }
+          end
+          found ? true : chain.truncated?
+        end
+
+        # True when `class_name`'s ancestry reaches a Rails framework base and `name` is one of the methods the
+        # framework defines ({FRAMEWORK_METHOD_NAMES}), whether or not RBS for it is loaded.
+        def framework_ancestor_defines?(class_name, name, kind, scope)
+          return false unless FRAMEWORK_METHOD_NAMES.include?(name)
+
+          chain = Rigor::Scope::ResolutionChain.for(scope, class_name.to_s, kind, :methods)
+          hit = chain.search(scope) do |entry|
+            chain_entry_names(entry).any? { |candidate| FRAMEWORK_BASES.include?(candidate.to_s.delete_prefix("::")) }
+          end
+          !hit.nil?
+        end
+
+        def rbs_method_definition(class_name, name, side, scope)
+          if side == :singleton
+            Rigor::Reflection.singleton_method_definition(class_name, name, scope: scope)
+          else
+            Rigor::Reflection.instance_method_definition(class_name, name, scope: scope)
+          end
+        end
+
+        def chain_entry_names(entry)
+          entry.external? ? entry.candidates : [entry.name]
         end
 
         # Candidate `[class_name, kind]` selves for a node under `ancestors` (outermost first), `[]` when the

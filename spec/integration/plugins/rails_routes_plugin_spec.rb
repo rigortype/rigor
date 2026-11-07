@@ -816,6 +816,35 @@ RSpec.describe "plugins/rigor-rails-routes" do
                                     signature_paths: ["sig"])).to be_empty
     end
 
+    it "stays quiet on `controller_path` in a controller whose Rails framework has no RBS" do
+      files = {
+        "app/controllers/application_controller.rb" => "class ApplicationController < ActionController::Base\nend\n",
+        "app/controllers/articles_controller.rb" => <<~RUBY
+          class ArticlesController < ApplicationController
+            def cache_key
+              "\#{controller_path}:\#{action_name}"
+            end
+          end
+        RUBY
+      }
+      expect(unknown_helpers(files, paths: ["app/controllers/application_controller.rb",
+                                            "app/controllers/articles_controller.rb"])).to be_empty
+    end
+
+    it "still reports an unknown `_path` name in a controller whose Rails framework has no RBS" do
+      files = {
+        "app/controllers/articles_controller.rb" => <<~RUBY
+          class ArticlesController < ActionController::Base
+            def show
+              missing_thing_path
+            end
+          end
+        RUBY
+      }
+      expect(unknown_helpers(files, paths: ["app/controllers/articles_controller.rb"]))
+        .to eq(["no route helper `missing_thing_path`"])
+    end
+
     it "declines inside a class-body block, whose self the engine cannot name" do
       files = {
         "app/libs/message.rb" => <<~RUBY

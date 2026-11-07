@@ -268,9 +268,41 @@ RSpec.describe "plugins/rigor-activerecord" do
     end
 
     context "when create_table names its primary key with primary_key:" do
-      it "does not fire on the primary key column"
-      it "does not fire on an alias_attribute that targets the primary key"
-      it "still fires on a typo"
+      let(:schema) do
+        <<~SCHEMA
+          ActiveRecord::Schema[8.1].define(version: 1) do
+            create_table "settings", primary_key: "name", id: { type: :string, limit: 64 }, force: :cascade do |t|
+              t.text "value"
+            end
+          end
+        SCHEMA
+      end
+      let(:models) do
+        {
+          "app/models/setting.rb" => <<~RUBY
+            class Setting < ActiveRecord::Base
+              alias_attribute :key_name, :name
+            end
+          RUBY
+        }
+      end
+
+      def unknown_columns(source)
+        plugin_diagnostics(run_ar(source, schema: schema, models: models)).select { |d| d.rule == "unknown-column" }
+      end
+
+      it "does not fire on the primary key column" do
+        expect(unknown_columns(%(Setting.find_by(name: "a")\n))).to be_empty
+      end
+
+      it "does not fire on an alias_attribute that targets the primary key" do
+        expect(unknown_columns(%(Setting.where(key_name: "a")\n))).to be_empty
+      end
+
+      it "still fires on a typo" do
+        expect(unknown_columns(%(Setting.find_by(nme: "a")\n)).map(&:message))
+          .to contain_exactly(a_string_including("unknown column `nme`"))
+      end
     end
   end
 

@@ -266,6 +266,12 @@ RSpec.describe "plugins/rigor-activerecord" do
       diags = plugin_diagnostics(run_ar("User.where(rols: ['a', 'b'])\n"))
       expect(diags.find { |d| d.rule == "unknown-column" }).not_to be_nil
     end
+
+    context "when create_table names its primary key with primary_key:" do
+      it "does not fire on the primary key column"
+      it "does not fire on an alias_attribute that targets the primary key"
+      it "still fires on a typo"
+    end
   end
 
   describe "type-overridden columns (serialize / mount_uploader / custom attribute)" do

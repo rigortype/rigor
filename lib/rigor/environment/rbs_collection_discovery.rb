@@ -22,7 +22,7 @@ module Rigor
       # `stdlib`-typed entries (`source: { type: stdlib }`) name a library rbs ships under its own `stdlib/`, and
       # produce no directory under the collection root, so {.discover} never returns one. Issue #2946 — they are
       # loaded all the same, as the `rbs` CLI's `EnvironmentLoader#add_collection` loads them: as RBS LIBRARIES.
-      # {.stdlib_library_names} lists them, and `Environment.base_libraries` appends them to the library list,
+      # {.stdlib_library_names} lists them, and `Environment::BaseLibraries.resolve` appends them to the library list,
       # which is de-duplicated, so an entry `DEFAULT_LIBRARIES` already names is not loaded twice. A collection
       # gem that subclasses one (actionview's `NodeParser < ::Ripper`) then builds. An unknown name is dropped by
       # the loader's `has_library?` filter, as a `libraries:` name is, and `ConfigAudit` reports it. The other

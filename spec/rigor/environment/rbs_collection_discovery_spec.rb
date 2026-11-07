@@ -32,25 +32,11 @@ RSpec.describe Rigor::Environment::RbsCollectionDiscovery do
         ---
         path: ".gem_rbs_collection"
         gems:
-        - name: ripper
-          version: '0'
-          source:
-            type: stdlib
-        - name: activerecord
-          version: '7.1'
-          source:
-            type: git
-        - name: net-protocol
-          version: '0'
-          source:
-            type: stdlib
-        - name: ripper
-          version: '0'
-          source:
-            type: stdlib
-        - version: '0'
-          source:
-            type: stdlib
+        - { name: ripper, version: '0', source: { type: stdlib } }
+        - { name: activerecord, version: '7.1', source: { type: git } }
+        - { name: net-protocol, version: '0', source: { type: stdlib } }
+        - { name: ripper, version: '0', source: { type: stdlib } }
+        - { version: '0', source: { type: stdlib } }
       YAML
       path = write_lockfile(body)
 

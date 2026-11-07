@@ -117,7 +117,7 @@ RSpec.describe Rigor::ConfigAudit do
 
       flagged = audit({}).select { |w| w.kind == :rbs_collection_library }
       expect(flagged.map { |w| w.to_h.fetch("name") }).to eq(["this_stdlib_does_not_exist_xyz"])
-      expect(flagged.first.message).to include("rbs_collection.lock.yaml").and include("is not an available RBS library")
+      expect(flagged.first.message).to include("rbs_collection.lock.yaml").and include("not an available RBS library")
     end
 
     it "reads no lockfile when rbs_collection.auto_detect is off" do

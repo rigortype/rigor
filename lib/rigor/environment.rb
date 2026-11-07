@@ -334,10 +334,10 @@ module Rigor
         # both sets so the collection copy doesn't double-declare against rigor's bundled RBS (the
         # `RBS::DuplicatedDeclarationError` hazard).
         # Issue #1700 — plus the gated vendored directories this run's source activates ({#feature_tokens}).
-        # Issue #2946 — plus the lockfile's `source: { type: stdlib }` entries, loaded as libraries ({.base_libraries}).
-        merged_libraries = (base_libraries(libraries, rbs_collection_lockfile: rbs_collection_lockfile,
-                                                      rbs_collection_auto_detect: rbs_collection_auto_detect,
-                                                      root: root) +
+        # Issue #2946 — plus the lockfile's `source: { type: stdlib }` entries, as libraries ({BaseLibraries.resolve}).
+        merged_libraries = (BaseLibraries.resolve(libraries, rbs_collection_lockfile: rbs_collection_lockfile,
+                                                             rbs_collection_auto_detect: rbs_collection_auto_detect,
+                                                             root: root) +
                             feature_tokens(required_features, source_files, libraries)).uniq
         # Issue #2441 — plus the project's own path gems ({ProjectPathGems}), whose collection copy would
         # double-declare the project's `sig/`.

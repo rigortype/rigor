@@ -2211,7 +2211,7 @@ machine-local stat data (`.build`'s cache-KEY `files` stay
 `:digest`). `RbsDescriptor.rbs_gem_entry` is public for the same
 reason: the ADR-87 WD4 probe reconstructs the identical `gems` +
 `rbs.libraries` key slots without holding a loader. Both sides take the
-library list from `Environment.base_libraries`, which includes the
+library list from `Environment::BaseLibraries.resolve`, which includes the
 `rbs_collection.lock.yaml` stdlib entries
 ([#2946](https://github.com/rigortype/rigor/issues/2946)).
 

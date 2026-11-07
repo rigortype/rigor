@@ -38,8 +38,8 @@ module Rigor
   module ConfigAudit
     # One config-level finding. `kind` discriminates the source key (`:unknown_key`, `:signature_path`,
     # `:bundled_plugin_signature_path`, `:library`, `:disabled_rule`, `:severity_override`,
-    # `:bundler_bundle_path`, `:bundler_lockfile`, `:rbs_collection_lockfile`, `:rbs_collection_library`); `fields` carries the kind-specific
-    # structured data merged into {#to_h} for JSON consumers.
+    # `:bundler_bundle_path`, `:bundler_lockfile`, `:rbs_collection_lockfile`, `:rbs_collection_library`); `fields`
+    # carries the kind-specific structured data merged into {#to_h} for JSON consumers.
     Warning = Data.define(:kind, :message, :fields) do
       def to_h
         { "kind" => kind.to_s, "message" => message }.merge(fields)
@@ -52,8 +52,7 @@ module Rigor
       unknown_key_warnings(configuration) +
         signature_path_warnings(configuration) +
         bundled_plugin_signature_path_warnings(configuration) +
-        library_warnings(configuration) +
-        collection_stdlib_warnings(configuration, project_root) +
+        library_warnings(configuration, project_root) +
         rule_token_warnings(configuration) +
         explicit_path_warnings(configuration, project_root)
     end
@@ -131,45 +130,25 @@ module Rigor
       end
     end
 
-    # `libraries:` entries RBS does not recognise. Uses the same
-    # `RBS::EnvironmentLoader#has_library?` guard the loader filters through
+    # `libraries:` entries RBS does not recognise, and — issue #2946 — `source: { type: stdlib }` entries of
+    # the run's `rbs_collection.lock.yaml`, which load as libraries too ({Environment::BaseLibraries.resolve}). Uses the
+    # same `RBS::EnvironmentLoader#has_library?` guard the loader filters through
     # ({Environment::RbsLoader} `build_env_for`), so a flagged name is exactly one the loader
-    # skipped. Fails soft: if RBS itself raises, no warning rather than a crash.
-    def self.library_warnings(configuration)
-      configured = Array(configuration.libraries)
-      return [] if configured.empty?
-
-      loader = ::RBS::EnvironmentLoader.new
-      configured.reject { |lib| loader.has_library?(library: lib.to_s, version: nil) }.map do |lib|
-        Warning.new(
-          kind: :library,
-          message: "libraries: #{lib.to_s.inspect} is not an available RBS library (no signatures loaded from it)",
-          fields: { "name" => lib.to_s }
-        )
-      end
-    rescue StandardError
-      []
-    end
-
-    # Issue #2946 — `source: { type: stdlib }` entries of the run's `rbs_collection.lock.yaml` that RBS does not
-    # recognise. They load as libraries, through the same `has_library?` filter as `libraries:`
-    # ({.library_warnings}), so a flagged name is one the loader skipped; the `rbs` CLI warns on the same entry
-    # (`Collection::Sources::Stdlib#manifest_of`). Fails soft like {.library_warnings}.
-    def self.collection_stdlib_warnings(configuration, project_root)
-      names = Environment::RbsCollectionDiscovery.stdlib_library_names(
+    # skipped; the `rbs` CLI warns on the same lockfile entry (`Collection::Sources::Stdlib#manifest_of`).
+    # Fails soft: if RBS itself raises, no warning rather than a crash.
+    def self.library_warnings(configuration, project_root = Dir.pwd)
+      lockfile = Environment::RbsCollectionDiscovery.stdlib_library_names(
         lockfile_path: configuration.rbs_collection_lockfile, project_root: project_root,
         auto_detect: configuration.rbs_collection_auto_detect
       )
-      return [] if names.empty?
+      named = Array(configuration.libraries).map { |lib| [:library, "libraries:", lib.to_s] } +
+              lockfile.map { |name| [:rbs_collection_library, "rbs_collection.lock.yaml: stdlib entry", name] }
+      return [] if named.empty?
 
       loader = ::RBS::EnvironmentLoader.new
-      names.reject { |name| loader.has_library?(library: name, version: nil) }.map do |name|
-        Warning.new(
-          kind: :rbs_collection_library,
-          message: "rbs_collection.lock.yaml: stdlib entry #{name.inspect} is not an available RBS library " \
-                   "(no signatures loaded from it)",
-          fields: { "name" => name }
-        )
+      named.reject { |_, _, lib| loader.has_library?(library: lib, version: nil) }.map do |kind, source, lib|
+        message = "#{source} #{lib.inspect} is not an available RBS library (no signatures loaded from it)"
+        Warning.new(kind: kind, message: message, fields: { "name" => lib })
       end
     rescue StandardError
       []

@@ -55,8 +55,24 @@ module Rigor
           )
         end
 
+        # Ruby binds a trailing `k: v` / `**opts` group to keyword parameters, never to positional ones, so
+        # when `#perform` takes keywords the group is not counted (the message's "got N" is then the
+        # positional count too). A job without keyword parameters keeps counting the group as one positional
+        # argument — `NoArgsJob.perform_later(name: 1)` raises at runtime. A `Hash` literal / local stays
+        # positional either way (Ruby 3 does not convert it).
+        #
+        # The call is declined (no report) when its shape is unknown: a `*splat` or `...` argument may supply
+        # any number of positionals (or a trailing keyword group), and a keyword group made only of `**opts`
+        # arguments sent to a job without keywords may be empty — declined only when the verdict differs
+        # between "empty" and "one positional hash" (`NoArgsJob.perform_later(**opts)`).
         def arity_violation(call_node, entry)
-          actual = (call_node.arguments&.arguments || []).size
+          args = call_node.arguments&.arguments || []
+          return nil if args.any? { |arg| arg.is_a?(Prism::SplatNode) || arg.is_a?(Prism::ForwardingArgumentsNode) }
+
+          keyword_group = args.last.is_a?(Prism::KeywordHashNode) ? args.last : nil
+          return nil if keyword_group && !entry.accepts_keywords && empty_group_decides?(args, keyword_group, entry)
+
+          actual = entry.accepts_keywords && keyword_group ? args.size - 1 : args.size
           return nil if entry.accepts?(actual)
 
           Violation.new(
@@ -64,6 +80,14 @@ module Rigor
             rule: "wrong-arity",
             message: "`#{entry.class_name}.#{call_node.name}` expects #{entry.arity_label} argument(s), got #{actual}"
           )
+        end
+
+        # True when the group is only `**splat` arguments (so it may be empty) AND the entry's verdict changes
+        # between counting it and not counting it.
+        def empty_group_decides?(args, keyword_group, entry)
+          return false unless keyword_group.elements.all?(Prism::AssocSplatNode)
+
+          entry.accepts?(args.size - 1) != entry.accepts?(args.size)
         end
 
         # Renders a constant-path receiver as a String. Mirrors the helpers in rigor-activerecord /

@@ -111,7 +111,7 @@ pins instance and singleton method sets for:
   `difference`, `refined`, `key_of`, `value_of`, `indexed_access`, …).
 - `Rigor::Reflection` — every `class_declarations_in`, `class_known?`,
   `class_ordering`, `class_type_param_names`, `constant_type_for`,
-  `discovered_class?`, `discovered_method?`, `instance_definition`,
+  `ancestry_reaches`, `discovered_class?`, `discovered_method?`, `external_method_defined`, `instance_definition`,
   `instance_method_definition`, `nominal_for_name`, `project_method_defined`,
   `rbs_class_known?`, `singleton_definition`, `singleton_for_name`, `singleton_method_definition`.
   `project_method_defined(class_name, method_name, kind:, source:, scope:)`
@@ -119,6 +119,10 @@ pins instance and singleton method sets for:
   `Scope` walks: it answers a `Rigor::Trinary`, and `maybe` exactly where
   the walk's ancestor budget ran out before it found a definer. See
   [`reflection.md`](reflection.md) § "Source-side discoveries".
+  `external_method_defined(class_name, method_name, kind:, scope:)` asks the
+  same question of RBS through the project's ancestry, and
+  `ancestry_reaches(class_name, ancestor_names, kind:, scope:)` asks whether
+  that ancestry reaches a named class; both answer a `Trinary`.
   `class_declarations_in(root) { |declared_call| … }` (#2708) is the per-file
   declaration walk: the classes a parsed file declares as
   `Rigor::Reflection::ClassDeclaration` values (`name`, `nesting`, `node`),

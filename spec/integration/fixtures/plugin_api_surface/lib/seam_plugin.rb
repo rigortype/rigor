@@ -7,6 +7,8 @@ class SeamPlugin < Rigor::Plugin::Base
     # `Rigor::Reflection`'s `scope: Scope` is a keyword position, which `call.argument-type-mismatch` does not check
     # today, so these two lines are silent whatever `scope` is. They pin only that the real call shape draws nothing.
     Rigor::Reflection.project_method_defined("Foo", :bar, kind: :instance, source: :def, scope: scope) # surface: seam-reflection
+    Rigor::Reflection.external_method_defined("Foo", :bar, kind: :instance, scope: scope) # surface: seam-reflection
+    Rigor::Reflection.ancestry_reaches("Foo", ["Bar"], kind: :instance, scope: scope) # surface: seam-reflection
     Rigor::Reflection.nominal_for_name("Foo", scope: scope) # surface: seam-reflection-optional
     nil
   end

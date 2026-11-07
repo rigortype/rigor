@@ -304,6 +304,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
   ].freeze
 
   REFLECTION_SINGLETON = %w[
+    ancestry_reaches(req:class_name,req:ancestor_names,keyreq:kind,keyreq:scope)
     class_declarations_in(req:root,block:on_call)
     class_known?(req:class_name,key:scope)
     class_ordering(req:lhs,req:rhs,key:scope)
@@ -311,6 +312,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     constant_type_for(req:constant_name,key:scope)
     discovered_class?(req:class_name,key:scope)
     discovered_method?(req:class_name,req:method_name,key:kind,key:scope)
+    external_method_defined(req:class_name,req:method_name,keyreq:kind,keyreq:scope)
     instance_definition(req:class_name,key:scope,key:environment)
     instance_method_definition(req:class_name,req:method_name,key:scope,key:environment)
     lexical_nesting_chain(req:scope)

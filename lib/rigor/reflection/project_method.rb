@@ -38,6 +38,69 @@ module Rigor
       end
     end
 
+    # Does RBS declare `method_name` on `class_name` or on an ancestor the project's own ancestry reaches? A
+    # project class (`class ArticlesController < ActionController::Base`) is rarely in RBS itself; its RBS-known
+    # ancestors are the EXTERNAL entries of its `ResolutionChain`, which the RBS-only reads
+    # ({.instance_method_definition}) cannot reach from the project class's name. This walks the chain and asks RBS
+    # of each entry (every candidate spelling of an external one), on the side the entry sits.
+    #
+    # Answers a {Trinary}: `yes` when an entry's RBS declares the method, `no` when none does and the chain was
+    # not truncated, `maybe` when the chain was cut at its budget (ADR-41 WD4) before one did. `kind:` is
+    # `:instance` or `:singleton`; a `nil` `class_name` answers `no`.
+    def external_method_defined(class_name, method_name, kind:, scope:)
+      chain = ancestry_chain(class_name, kind, scope)
+      return Trinary.no if chain.nil?
+
+      found = chain.search(scope) do |entry|
+        chain_entry_names(entry).any? { |name| !rbs_method_on_side(name, method_name, entry.side, scope).nil? }
+      end
+      chain_answer(found, chain)
+    end
+
+    # Does the project ancestry of `class_name` reach any of `ancestor_names` (qualified names, a leading `::`
+    # ignored)? An external ancestor counts by any candidate spelling, so a superclass the project names but
+    # does not declare (`ActionController::Base`, with no RBS loaded) is found. Same `Trinary` and `kind:` as
+    # {.external_method_defined}.
+    def ancestry_reaches(class_name, ancestor_names, kind:, scope:)
+      chain = ancestry_chain(class_name, kind, scope)
+      return Trinary.no if chain.nil?
+
+      wanted = ancestor_names.map { |name| name.to_s.delete_prefix("::") }
+      found = chain.search(scope) do |entry|
+        chain_entry_names(entry).any? { |name| wanted.include?(name.to_s.delete_prefix("::")) }
+      end
+      chain_answer(found, chain)
+    end
+
+    def ancestry_chain(class_name, kind, scope)
+      raise ArgumentError, "unknown kind #{kind.inspect}" unless PROJECT_METHOD_KINDS.include?(kind)
+      return nil if class_name.nil?
+
+      Scope::ResolutionChain.for(scope, class_name.to_s, kind, :methods)
+    end
+    private_class_method :ancestry_chain
+
+    def chain_answer(found, chain)
+      return Trinary.yes if found
+
+      chain.truncated? ? Trinary.maybe : Trinary.no
+    end
+    private_class_method :chain_answer
+
+    def chain_entry_names(entry)
+      entry.external? ? entry.candidates : [entry.name]
+    end
+    private_class_method :chain_entry_names
+
+    def rbs_method_on_side(class_name, method_name, side, scope)
+      if side == :singleton
+        singleton_method_definition(class_name, method_name, scope: scope)
+      else
+        instance_method_definition(class_name, method_name, scope: scope)
+      end
+    end
+    private_class_method :rbs_method_on_side
+
     # `yes` wins, then `maybe`, then `no`. The early return is a short-circuit and carries no answer of its own:
     # `yes.or(x)` is `yes`, so removing it changes only which walks run, and so which dependencies they read.
     def project_either_defined(class_name, method_name, kind, scope)

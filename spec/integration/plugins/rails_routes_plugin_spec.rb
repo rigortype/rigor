@@ -845,17 +845,121 @@ RSpec.describe "plugins/rigor-rails-routes" do
         .to eq(["no route helper `missing_thing_path`"])
     end
 
-    it "declines inside a class-body block, whose self the engine cannot name" do
+    {
+      "before_action" => "before_action { redirect_to typo_path }",
+      "rescue_from" => "rescue_from(StandardError) do\n    redirect_to typo_path\n  end",
+      "define_method" => "define_method(:dm) { typo_path }",
+      "included" => "included do\n    before_action { typo_path }\n  end",
+      "lambda" => "scope_thing = -> { typo_path }"
+    }.each do |label, body|
+      it "still reports a typo inside a class-body #{label} block" do
+        files = { "app/libs/widget.rb" => "class Widget\n  #{body}\nend\n" }
+        expect(unknown_helpers(files, paths: ["app/libs/widget.rb"])).to eq(["no route helper `typo_path`"])
+      end
+    end
+
+    it "stays quiet on a real attr_reader name read inside a class-body block" do
+      files = {
+        "app/libs/widget.rb" => "class Widget\n  attr_reader :real_url\n  before_action { redirect_to real_url }\nend\n"
+      }
+      expect(unknown_helpers(files, paths: ["app/libs/widget.rb"])).to be_empty
+    end
+
+    it "stays quiet on a class method read inside a class-body block" do
+      files = {
+        "app/libs/widget.rb" => "class Widget\n  def self.real_url = 1\n  before_action { redirect_to real_url }\nend\n"
+      }
+      expect(unknown_helpers(files, paths: ["app/libs/widget.rb"])).to be_empty
+    end
+
+    it "stays quiet on `controller_path` in a controller concern module" do
+      files = {
+        "app/controllers/concerns/cacheable.rb" => <<~RUBY
+          module Cacheable
+            extend ActiveSupport::Concern
+
+            def cache_key = controller_path
+          end
+        RUBY
+      }
+      expect(unknown_helpers(files, paths: ["app/controllers/concerns/cacheable.rb"])).to be_empty
+    end
+
+    it "still reports an unknown `_path` name in a concern module" do
+      files = {
+        "app/controllers/concerns/cacheable.rb" => "module Cacheable\n  def go = missing_thing_path\nend\n"
+      }
+      expect(unknown_helpers(files, paths: ["app/controllers/concerns/cacheable.rb"]))
+        .to eq(["no route helper `missing_thing_path`"])
+    end
+
+    it "does not credit a bare nested class with the root class's method" do
+      files = {
+        "app/libs/other.rb" => <<~RUBY
+          class Other
+            attr_reader :shared_name_url
+          end
+
+          module Ns
+            class Other
+              def go = shared_name_url
+            end
+          end
+        RUBY
+      }
+      expect(unknown_helpers(files, paths: ["app/libs/other.rb"])).to eq(["no route helper `shared_name_url`"])
+    end
+
+    it "resolves a method defined in `class << self` from a method of the same body" do
       files = {
         "app/libs/message.rb" => <<~RUBY
           class Message
-            included do
-              missing_thing_url
+            class << self
+              def base_url = "x"
+
+              def go = base_url
             end
           end
         RUBY
       }
       expect(unknown_helpers(files, paths: ["app/libs/message.rb"])).to be_empty
+    end
+
+    it "asks both sides inside `def obj.m`, whose self is not nameable" do
+      files = {
+        "app/libs/message.rb" => <<~RUBY
+          class Message
+            attr_reader :inst_url
+
+            def self.other
+              obj = Object.new
+              def obj.m = inst_url
+            end
+          end
+        RUBY
+      }
+      expect(unknown_helpers(files, paths: ["app/libs/message.rb"])).to be_empty
+    end
+
+    it "declines when the ancestor chain is cut at its budget" do
+      src = "class Chain0 < Chain1\n  def go = missing_thing_path\nend\n"
+      src += (1..110).map { |i| "class Chain#{i} < Chain#{i + 1}\nend\n" }.join
+      src += "class Chain111\nend\n"
+      files = { "app/libs/chain.rb" => src }
+      expect(unknown_helpers(files, paths: ["app/libs/chain.rb"])).to be_empty
+    end
+
+    it "declines for a class whose name is dynamic" do
+      files = { "app/libs/dyn.rb" => "class some_call::Bar\n  def go = missing_thing_path\nend\n" }
+      expect(unknown_helpers(files, paths: ["app/libs/dyn.rb"])).to be_empty
+    end
+
+    it "stays quiet on a singleton method RBS declares on a superclass" do
+      files = {
+        "sig/base.rbs" => "class Base\n  def self.inherited_home_path: () -> String\nend\n",
+        "app/libs/child.rb" => "class Child < Base\n  def self.go = inherited_home_path\nend\n"
+      }
+      expect(unknown_helpers(files, paths: ["app/libs/child.rb"], signature_paths: ["sig"])).to be_empty
     end
 
     it "still reports a `_path` name with no route and no method in a class with attr_readers" do

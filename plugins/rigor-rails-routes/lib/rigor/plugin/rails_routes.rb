@@ -205,11 +205,12 @@ module Rigor
         Analyzer.collect_shadowing_names(root)
       end
 
-      node_rule Prism::CallNode do |node, _scope, path, shadowing|
+      node_rule Prism::CallNode do |node, scope, path, shadowing, context|
         table = helper_table_or_nil
         next [] if table.nil? || table.empty?
 
-        Analyzer.violations_for(call_node: node, helper_table: table, shadowing: shadowing, path: path).map do |violation|
+        Analyzer.violations_for(call_node: node, helper_table: table, shadowing: shadowing, path: path,
+                                scope: scope, context: context).map do |violation|
           diagnostic(node, path: path, message: violation.message, severity: violation.severity, rule: violation.rule)
         end
       end

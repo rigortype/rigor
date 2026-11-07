@@ -717,6 +717,139 @@ RSpec.describe "plugins/rigor-rails-routes" do
     end
   end
 
+  describe "receiverless names the engine already resolves to a method" do
+    let(:routes) { { "config/routes.rb" => DEFAULT_ROUTES_RB } }
+
+    def unknown_helpers(files, paths:, signature_paths: nil)
+      result = run_plugin(source: "", files: routes.merge(files), paths: paths, signature_paths: signature_paths)
+      plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }.map(&:message)
+    end
+
+    it "stays quiet on an `attr_reader` name, including the hash shorthand" do
+      files = {
+        "app/libs/message.rb" => <<~RUBY
+          class Message
+            attr_reader :destination_url
+
+            def to_h
+              { url: destination_url }
+            end
+
+            def shorthand
+              { destination_url: }
+            end
+          end
+        RUBY
+      }
+      expect(unknown_helpers(files, paths: ["app/libs/message.rb"])).to be_empty
+    end
+
+    it "stays quiet on an `attr_accessor` name" do
+      files = {
+        "app/libs/box.rb" => <<~RUBY
+          class Box
+            attr_accessor :return_url
+
+            def go
+              return_url
+            end
+          end
+        RUBY
+      }
+      expect(unknown_helpers(files, paths: ["app/libs/box.rb"])).to be_empty
+    end
+
+    it "stays quiet on an `attr_reader` declared by a parent class in another file" do
+      files = {
+        "app/libs/base_client.rb" => "class BaseClient\n  attr_reader :endpoint_url\nend\n",
+        "app/libs/child_client.rb" => <<~RUBY
+          class ChildClient < BaseClient
+            def call
+              endpoint_url
+            end
+          end
+        RUBY
+      }
+      expect(unknown_helpers(files, paths: ["app/libs/base_client.rb", "app/libs/child_client.rb"])).to be_empty
+    end
+
+    it "stays quiet on a singleton method called from a singleton method" do
+      files = {
+        "app/libs/message.rb" => <<~RUBY
+          class Message
+            def self.base_url
+              "https://example.com/"
+            end
+
+            def self.endpoint
+              "\#{base_url}api"
+            end
+          end
+        RUBY
+      }
+      expect(unknown_helpers(files, paths: ["app/libs/message.rb"])).to be_empty
+    end
+
+    it "stays quiet on a method the receiver's RBS ancestry declares" do
+      files = {
+        "sig/framework.rbs" => <<~RBS,
+          module AbstractController
+            class Base
+              def controller_path: () -> String
+            end
+          end
+
+          module ActionController
+            class Base < AbstractController::Base
+            end
+          end
+        RBS
+        "app/controllers/articles_controller.rb" => <<~RUBY
+          class ArticlesController < ActionController::Base
+            def cache_key
+              controller_path
+            end
+          end
+        RUBY
+      }
+      expect(unknown_helpers(files, paths: ["app/controllers/articles_controller.rb"],
+                             signature_paths: ["sig"])).to be_empty
+    end
+
+    it "still reports a `_path` name with no route and no method in a class with attr_readers" do
+      files = {
+        "app/libs/message.rb" => <<~RUBY
+          class Message
+            attr_reader :destination_url
+
+            def go
+              missing_thing_path
+            end
+          end
+        RUBY
+      }
+      expect(unknown_helpers(files, paths: ["app/libs/message.rb"]))
+        .to eq(["no route helper `missing_thing_path`"])
+    end
+
+    it "still reports a singleton-only name called from an instance method" do
+      files = {
+        "app/libs/message.rb" => <<~RUBY
+          class Message
+            def self.base_url
+              "x"
+            end
+
+            def go
+              base_url
+            end
+          end
+        RUBY
+      }
+      expect(unknown_helpers(files, paths: ["app/libs/message.rb"])).to eq(["no route helper `base_url`"])
+    end
+  end
+
   describe "devise_for route generation" do
     let(:routes_with_devise) do
       <<~RUBY

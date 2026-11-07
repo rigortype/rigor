@@ -65,7 +65,7 @@ module Rigor
         # implicit `*_path` / `*_url` helper call, is shadowed by a same-file binding, or is in a
         # suppressed directory. ADR-37: the engine owns the walk; the same-file `shadowing` set is built
         # once as the node-rule file context.
-        def violations_for(call_node:, helper_table:, shadowing:, path:)
+        def violations_for(call_node:, helper_table:, shadowing:, path:, scope: nil, context: nil)
           return [] unless call_node.is_a?(Prism::CallNode) && implicit_helper_call?(call_node)
 
           name = call_node.name.to_s
@@ -88,8 +88,100 @@ module Rigor
             # Recognised custom / dynamic helper (no arity to check), or a directory where helpers aren't
             # customarily resolved.
             []
+          elsif self_resolves_method?(name, scope, context)
+            []
           else
             [unknown_helper_violation(name, helper_table)]
+          end
+        end
+
+        # True when `name` is already a method on the call's `self`, asked of the engine rather than a
+        # plugin-side name list: the project's discovered methods (`def`, `attr_*`, the singleton side) through
+        # the project's own ancestry, then the RBS ancestry. A truncated project walk (`maybe`) declines too —
+        # a definer past the budget cannot be ruled out, and a false positive outranks a missed typo.
+        #
+        # `self` is read from the node's lexical ancestors (`NodeContext#ancestors`), because the scope a
+        # `node_rule` receives is the file's, not the call site's. {#call_site_selves} returns the candidate
+        # `[class_name, kind]` pairs, `:undetermined` where `self` cannot be named (a block in a class body, a
+        # `def obj.m`), and `[]` outside any class or module, which leaves the route-table verdict as it was.
+        def self_resolves_method?(name, scope, context)
+          return false if scope.nil? || context.nil?
+
+          selves = call_site_selves(context.ancestors)
+          return true if selves == :undetermined
+
+          selves.any? do |class_name, kind|
+            !Rigor::Reflection.project_method_defined(class_name, name, kind: kind, source: :either,
+                                                                        scope: scope).no? ||
+              !Rigor::Reflection.external_method_defined(class_name, name, kind: kind, scope: scope).no?
+          end
+        end
+
+        # Candidate `[class_name, kind]` selves for a node under `ancestors` (outermost first), `[]` when the
+        # node is in no class or module, `:undetermined` when its `self` cannot be named syntactically.
+        def call_site_selves(ancestors)
+          owner_index = ancestors.rindex { |n| n.is_a?(Prism::ClassNode) || n.is_a?(Prism::ModuleNode) }
+          return [] if owner_index.nil?
+
+          kind = self_kind(ancestors[(owner_index + 1)..])
+          return :undetermined if kind.nil?
+
+          names = owner_names(ancestors, owner_index)
+          return :undetermined if names.empty?
+
+          names.map { |class_name| [class_name, kind] }
+        end
+
+        # `:instance` / `:singleton` for the `self` of a node under the nodes between its class and itself, or
+        # nil when undeterminable. The nearest `def` decides (blocks inside a method keep its `self`); with no
+        # `def`, a block or lambda in the class body may run on another object (`included do`, `scope`,
+        # `Class.new`), and a bare body is the class object itself.
+        def self_kind(inner)
+          def_index = inner.rindex { |n| n.is_a?(Prism::DefNode) }
+          if def_index
+            node = inner[def_index]
+            return nil if node.receiver && !node.receiver.is_a?(Prism::SelfNode)
+            return :singleton if node.receiver
+
+            return inner[0...def_index].any?(Prism::SingletonClassNode) ? :singleton : :instance
+          end
+          return nil if inner.any? { |n| block_scope?(n) }
+          return nil if inner.any? { |n| n.is_a?(Prism::SingletonClassNode) && !n.expression.is_a?(Prism::SelfNode) }
+
+          :singleton
+        end
+
+        def block_scope?(node)
+          node.is_a?(Prism::BlockNode) || node.is_a?(Prism::LambdaNode)
+        end
+
+        # The names the enclosing class or module can be known by. A bare `class Foo` is nested under the
+        # enclosing modules; `class Foo::Bar` may name `Foo` lexically or at the root, so both are tried. A
+        # rooted declaration (`class ::Foo`) names the root constant alone.
+        def owner_names(ancestors, owner_index)
+          chain = ancestors[0..owner_index].select { |n| n.is_a?(Prism::ClassNode) || n.is_a?(Prism::ModuleNode) }
+          names = [""]
+          chain.each do |decl|
+            local = declared_name(decl.constant_path)
+            return [] if local.nil?
+
+            names = if local.start_with?("::")
+                      [local.delete_prefix("::")]
+                    else
+                      names.flat_map { |prefix| [prefix.empty? ? local : "#{prefix}::#{local}", local] }.uniq
+                    end
+          end
+          names
+        end
+
+        def declared_name(node)
+          case node
+          when Prism::ConstantReadNode then node.name.to_s
+          when Prism::ConstantPathNode
+            return "::#{node.name}" if node.parent.nil?
+
+            parent = declared_name(node.parent)
+            parent && "#{parent}::#{node.name}"
           end
         end
 

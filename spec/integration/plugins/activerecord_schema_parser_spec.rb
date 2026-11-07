@@ -22,10 +22,26 @@ RSpec.describe "plugins/rigor-activerecord SchemaParser" do
       expect(table.column("settings", "name").ruby_type).to eq("String")
     end
 
-    it "registers the named column with the type of an id: symbol"
-    it "registers the named column as an integer when there is no id: option"
-    it "reads a Symbol primary key name"
-    it "keeps the id column"
+    it "registers the named column with the type of an id: symbol" do
+      table = parse(%(create_table "items", primary_key: "code", id: :string do |t|\nend\n))
+      expect(table.column("items", "code").ruby_type).to eq("String")
+    end
+
+    it "registers the named column as an integer when there is no id: option" do
+      table = parse(%(create_table "items", primary_key: "num" do |t|\nend\n))
+      expect(table.column("items", "num").ruby_type).to eq("Integer")
+    end
+
+    it "reads a Symbol primary key name" do
+      table = parse(%(create_table :items, primary_key: :code, id: :string do |t|\nend\n))
+      expect(table.column("items", "code").ruby_type).to eq("String")
+    end
+
+    it "keeps the id column" do
+      table = parse(%(create_table "items", primary_key: "code", id: :string do |t|\nend\n))
+      expect(table.column("items", "id")).not_to be_nil
+    end
+
     it "adds nothing for a composite primary key, whose columns the block declares"
     it "adds nothing when id: false says the table has no primary key column"
     it "lets a column the block declares win over the option"

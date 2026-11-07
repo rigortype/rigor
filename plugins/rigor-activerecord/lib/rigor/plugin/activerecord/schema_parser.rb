@@ -35,6 +35,7 @@ module Rigor
       # no eval.
       class SchemaParser
         TIMESTAMPS_COLUMNS = %w[created_at updated_at].freeze
+        DEFAULT_PRIMARY_KEY_TYPE = :bigint
 
         # Structural `t.<method>` calls inside a `create_table` block that declare indexes / constraints
         # rather than columns. Everything NOT in this set that carries a literal column name is treated as
@@ -113,15 +114,24 @@ module Rigor
         # `create_table "settings", primary_key: "name", id: { type: :string }` creates the column `name`
         # without the block declaring it, so the option is the only place the schema names it.
         def named_primary_key_column(call_node)
-          name = keyword_value(call_node, :primary_key)
-          return nil unless name.is_a?(Prism::StringNode)
+          name = literal_name(keyword_value(call_node, :primary_key))
+          return nil if name.nil?
 
           type = primary_key_type(call_node)
-          SchemaTable::Column.new(name: name.unescaped, type: type, ruby_type: SchemaTable.ruby_type_for(type))
+          SchemaTable::Column.new(name: name, type: type, ruby_type: SchemaTable.ruby_type_for(type))
         end
 
+        # `id: :string` or `id: { type: :string, ... }`. Rails creates a bigint key when neither names a type.
         def primary_key_type(call_node)
-          keyword_in(keyword_value(call_node, :id).elements, :type).unescaped.to_sym
+          id = keyword_value(call_node, :id)
+          type = id.is_a?(Prism::HashNode) ? keyword_in(id.elements, :type) : id
+          literal_name(type)&.to_sym || DEFAULT_PRIMARY_KEY_TYPE
+        end
+
+        def literal_name(node)
+          case node
+          when Prism::StringNode, Prism::SymbolNode then node.unescaped
+          end
         end
 
         def keyword_value(call_node, name)

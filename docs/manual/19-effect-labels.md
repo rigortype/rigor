@@ -108,10 +108,9 @@ annotations and no block gets told so, once per run:
 sig/slug.rbs:2:1: info: Effect annotations (`%a{pure}` / `%a{rigor:v1:effect …}`) are present in your project's signatures, but `.rigor.yml` carries no `effects:` block, so effect collection never runs and nothing checks them — they are documentation, not a contract. Add `effects: {}` to have Rigor prove what your methods do and check these bounds against it (ADR-103); an annotation alone never turns collection on, because that would make one line in one signature file more expensive for every run of the project.
 ```
 
-From **v0.4.0** collection is the default: a config with no `effects:` key at
-all behaves as `effects: {}`, and `effects: false` is how you opt out. On the
-`0.3.x` line you can preview that with
-`bleeding_edge: [effects-on-by-default]`.
+From **v0.5.0** collection is the default: a config with no `effects:` key at
+all behaves as `effects: {}`, and `effects: false` is how you opt out. Until
+then you can preview that with `bleeding_edge: [effects-on-by-default]`.
 
 One exception to all of this: `rigor effects` — the bare report — runs under an
 implicit empty block whether or not you configured one, so you can look before

@@ -6,8 +6,9 @@ its § 13 lists the choices, this ADR fixes them as working decisions; WD13, coe
 `rigor check`, was added the same day; WD14, the pre-implementation decisions, and WD15, the
 v0.4.0 default-on ruling and its preconditions, both on 2026-08-17; WD16, which resolves five of
 those six preconditions, on 2026-08-22 — the sixth is the release-notes migration note, written at
-the release, so nothing about the default changes before v0.4.0; WD17, which rules that the declared
-lane is never judged and names the snapshot gate as what enforces it, on 2026-08-24). Two items remain open, both
+the release, so nothing about the default changes before the flip; WD17, which rules that the declared
+lane is never judged and names the snapshot gate as what enforces it, on 2026-08-24; WD18, which moves the
+flip from v0.4.0 to v0.5.0, on 2026-10-26). Two items remain open, both
 deferrable to the view slices. Implementation is sliced as GitHub issues under the umbrella
 [#376](https://github.com/rigortype/rigor/issues/376) (18 tracer-bullet slices, #377–#394; tracker
 convention: [ADR-98](98-development-flow-document-roles.md)).
@@ -287,6 +288,8 @@ design note left to the owner and now closes.
 
 ### WD15 — Default-on at v0.4.0 (owner ruling, 2026-08-17)
 
+*The version in this section is moved to v0.5.0 by WD18; the text below stays as it was ruled.*
+
 Collection and `effects.check` become **default-on at v0.4.0**: a `.rigor.yml` with no `effects:` key
 behaves as `effects: {}`, and `effects: false` opts out. `effects-on-by-default` — a `:behaviour`
 [bleeding-edge feature](50-release-engineering-and-stability-strategy.md) — is the preview: adopting it
@@ -433,6 +436,24 @@ label, it only makes an existing row *reachable*, and the row's lane is unchange
 collection and the envelope check, the envelope check cannot fail on a plugin-sourced label, and
 `rigor effects check` is where those are enforced. It still needs no lane caveat and no "clear your
 cache first".
+
+### WD18 — Default-on moves from v0.4.0 to v0.5.0 (owner ruling, 2026-10-26)
+
+WD15 pinned the flip to **v0.4.0**. The repository is at v0.4.6 and the flip has not happened. The owner
+rules that it lands at **v0.5.0** instead, because the user experience of default-on is not settled yet.
+
+What does not change: WD15's six preconditions and their WD16 resolutions, `effects: false` as the opt-out,
+and `effects-on-by-default` as the early-adoption preview.
+
+What is added: [#2339](https://github.com/rigortype/rigor/issues/2339) blocks the flip. The preview is the
+documented way to adopt the default early, and `Configuration#with_bleeding_edge` did not re-derive
+`@effects`, so the `--bleeding-edge` CLI selector reported the feature active while collection stayed off.
+
+Every "v0.4.0" that names this flip now reads "v0.5.0": the header of this ADR, `lib/rigor/bleeding_edge.rb`,
+`docs/manual/02-cli-reference.md`, `docs/manual/19-effect-labels.md`, the four comments in
+`docs/manual/ci-templates/`, and [#409](https://github.com/rigortype/rigor/issues/409)'s title. WD15's text
+stays as ruled, with a pointer to this section. Dated notes and released changelog sections keep the version
+they were written against.
 
 ## Rejected and deferred alternatives
 

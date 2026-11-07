@@ -94,6 +94,73 @@ RSpec.describe "plugins/rigor-activejob" do
     end
   end
 
+  describe "keyword arguments (#2944)" do
+    let(:keyword_jobs) do
+      {
+        "app/jobs/keyword_jobs.rb" => <<~RUBY
+          class ApplicationJob
+          end
+          class GreetJob < ApplicationJob
+            def perform(name:, greeting: "hello"); end
+          end
+          class MixedJob < ApplicationJob
+            def perform(id, force: false); end
+          end
+          class OptionsJob < ApplicationJob
+            def perform(**opts); end
+          end
+          class PositionalJob < ApplicationJob
+            def perform(name); end
+          end
+          class NoArgsJob < ApplicationJob
+            def perform; end
+          end
+        RUBY
+      }
+    end
+
+    def arity_errors(source)
+      plugin_diagnostics(run_plugin(source: source, files: keyword_jobs)).select { |d| d.rule == "wrong-arity" }
+    end
+
+    it "does not count keywords against a keyword-only `#perform`" do
+      expect(arity_errors("GreetJob.perform_later(name: 'alice')\nGreetJob.perform_now(name: 'a', greeting: 'hi')\n"))
+        .to be_empty
+    end
+
+    it "does not count trailing keywords against the positional parameters of a mixed `#perform`" do
+      expect(arity_errors("MixedJob.perform_later(1, force: true)\nMixedJob.perform_later(1)\n")).to be_empty
+    end
+
+    it "accepts a `**splat` argument for a `**opts` `#perform`" do
+      expect(arity_errors("def go(opts) = OptionsJob.perform_later(**opts)\n")).to be_empty
+    end
+
+    it "still counts the positional arguments next to keywords" do
+      err = arity_errors("MixedJob.perform_later(1, 2, force: true)\n").first
+      expect(err).not_to be_nil
+      expect(err.message).to include("got 3")
+    end
+
+    it "declines a call with a `*splat` argument when `#perform` takes keywords" do
+      expect(arity_errors("def go(a) = GreetJob.perform_later(*a)\n")).to be_empty
+    end
+
+    it "keeps counting a Hash literal as one positional argument (Ruby 3 does not convert it)" do
+      expect(arity_errors("GreetJob.perform_later({ name: 'alice' })\n")).not_to be_empty
+    end
+
+    it "still reports keywords passed to a `#perform` that takes none" do
+      err = arity_errors("NoArgsJob.perform_later(name: 'alice')\n").first
+      expect(err).not_to be_nil
+      expect(err.message).to include("expects 0 argument(s), got 1")
+    end
+
+    it "still reports a surplus keyword group on a positional-only `#perform`" do
+      expect(arity_errors("PositionalJob.perform_later('a', name: 'alice')\n")).not_to be_empty
+    end
+  end
+
   describe "edge cases" do
     it "ignores `Job.perform_later` calls when `Job` is not in `app/jobs/`" do
       # `UnrelatedKlass.perform_later(1)` doesn't trigger a diagnostic — the plugin only validates calls whose

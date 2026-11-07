@@ -10,9 +10,11 @@ module Rigor
       # `min_arity` / `max_arity` form a closed range (`Float::INFINITY` for the upper bound when
       # `*args` is present). `keyword_required` lists any required keyword arguments — Active Job
       # supports keyword args but they're rare in user code, so the analyzer validates positional arity
-      # only (keyword arity validation is deferred).
+      # only (keyword name validation is deferred). `accepts_keywords` records whether `#perform` binds
+      # keywords at all (`k:`, `k: 1` or `**opts`), so the analyzer can keep a call's keyword arguments out
+      # of the positional count.
       class JobIndex
-        Entry = Data.define(:class_name, :min_arity, :max_arity, :keyword_required) do
+        Entry = Data.define(:class_name, :min_arity, :max_arity, :keyword_required, :accepts_keywords) do
           # Flexible-friendly textual form of the arity for error messages: `1`, `1..2`, `2+`.
           def arity_label
             return "#{min_arity}+" if max_arity == Float::INFINITY

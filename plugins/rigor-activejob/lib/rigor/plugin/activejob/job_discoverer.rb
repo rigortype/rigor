@@ -76,7 +76,8 @@ module Rigor
           base.with(
             min_arity: [base.min_arity, addition.min_arity].min,
             max_arity: [base.max_arity, addition.max_arity].max,
-            keyword_required: base.keyword_required & addition.keyword_required
+            keyword_required: base.keyword_required & addition.keyword_required,
+            accepts_keywords: base.accepts_keywords || addition.accepts_keywords
           )
         end
 
@@ -187,7 +188,7 @@ module Rigor
           if perform_def.nil?
             return JobIndex::Entry.new(
               class_name: class_name, min_arity: 0,
-              max_arity: Float::INFINITY, keyword_required: []
+              max_arity: Float::INFINITY, keyword_required: [], accepts_keywords: true
             )
           end
 
@@ -195,7 +196,7 @@ module Rigor
           if parameters.nil?
             return JobIndex::Entry.new(
               class_name: class_name, min_arity: 0,
-              max_arity: 0, keyword_required: []
+              max_arity: 0, keyword_required: [], accepts_keywords: false
             )
           end
 
@@ -210,7 +211,8 @@ module Rigor
             class_name: class_name,
             min_arity: required_count,
             max_arity: rest_present ? Float::INFINITY : required_count + optional_count,
-            keyword_required: keyword_required.map(&:to_sym)
+            keyword_required: keyword_required.map(&:to_sym),
+            accepts_keywords: !(parameters.keywords || []).empty? || !parameters.keyword_rest.nil?
           )
         end
       end

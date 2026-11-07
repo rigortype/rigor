@@ -31,8 +31,9 @@ module Rigor
       # `Object` per `SchemaTable.ruby_type_for` rather than being dropped. Only the structural calls in
       # {NON_COLUMN_METHODS} (indexes, constraints, foreign keys) are skipped.
       #
-      # `create_table "x", primary_key: "name"` adds that column, typed from the `id:` option. The `id` column
-      # stays registered; `id: false` or `id: nil` removes it and adds neither.
+      # `create_table "x", primary_key: "name"` adds that column, typed from the `id:` option when the call is
+      # read completely and untyped otherwise. The `id` column stays registered; `id: false` or `id: nil` removes
+      # it and adds neither.
       #
       # Designed for the Prism interpretation pattern from rigor-lisp-eval — recursive descent on the AST,
       # no eval.
@@ -101,20 +102,20 @@ module Rigor
 
         def id_disabled?(call_node)
           id = keyword_value(call_node, :id)
-          id.is_a?(Prism::FalseNode) || id.is_a?(Prism::NilNode)
+          (id.is_a?(Prism::FalseNode) || id.is_a?(Prism::NilNode)) && keywords_read?(call_keywords(call_node))
         end
 
         # `create_table "settings", primary_key: "name", id: { type: :string }` creates the column `name`
         # without the block declaring it, so the option is the only place the schema names it.
         def named_primary_key_column(call_node)
-          return nil if id_disabled?(call_node) || keyword_value(call_node, :as)
+          return nil if id_disabled?(call_node)
 
           name = literal_name(keyword_value(call_node, :primary_key))
           return nil if name.nil?
 
           id = keyword_value(call_node, :id)
           options = id.is_a?(Prism::HashNode) ? id.elements : []
-          type = primary_key_options_read?(call_node, options) ? primary_key_type(id, options) : UNKNOWN_PRIMARY_KEY_TYPE
+          type = primary_key_type_stated?(call_node, options) ? primary_key_type(id, options) : UNKNOWN_PRIMARY_KEY_TYPE
           SchemaTable::Column.new(
             name: name,
             type: type,
@@ -132,13 +133,23 @@ module Rigor
           literal_name(declared)&.to_sym || UNKNOWN_PRIMARY_KEY_TYPE
         end
 
-        # A splat may hold `id:` or `type:`, and a non-literal `array:` decides the reader's shape, so a call
-        # that has either does not say what the key's type is.
-        def primary_key_options_read?(call_node, options)
-          keywords = call_node.arguments.arguments.grep(Prism::KeywordHashNode).flat_map(&:elements)
+        # The key is typed only from a call this parser reads completely. `as:` is excluded because the query
+        # may define the column, and a non-literal `array:` because it decides the reader's shape.
+        def primary_key_type_stated?(call_node, options)
           array = keyword_in(options, :array)
-          [*keywords, *options].all?(Prism::AssocNode) &&
+          keywords_read?(call_keywords(call_node)) && keywords_read?(options) &&
+            keyword_value(call_node, :as).nil? &&
             (array.nil? || array.is_a?(Prism::TrueNode) || array.is_a?(Prism::FalseNode))
+        end
+
+        def call_keywords(call_node)
+          call_node.arguments.arguments.grep(Prism::KeywordHashNode).flat_map(&:elements)
+        end
+
+        # Every element has a static Symbol key and no key repeats, so `keyword_in` sees what Ruby would pass.
+        def keywords_read?(elements)
+          keys = elements.map { |element| symbol_key(element.key) if element.is_a?(Prism::AssocNode) }
+          keys.none?(&:nil?) && keys.uniq.size == keys.size
         end
 
         # A decimal key reads as Integer at scale 0 (`Type::DecimalWithoutScale`) and BigDecimal otherwise.

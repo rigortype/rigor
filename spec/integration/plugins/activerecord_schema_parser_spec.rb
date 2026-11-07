@@ -57,9 +57,16 @@ RSpec.describe "plugins/rigor-activerecord SchemaParser" do
       expect(table.column("items", "num").ruby_type).to eq("Integer")
     end
 
-    it "flags an array key" do
+    it "flags an array key and keeps its element type" do
       table = parse(%(create_table "items", primary_key: "tags", id: { type: :string, array: true } do |t|\nend\n))
-      expect(table.column("items", "tags").array?).to be(true)
+      column = table.column("items", "tags")
+      expect([column.array?, column.ruby_type]).to eq([true, "String"])
+    end
+
+    it "reads array: false as a scalar key" do
+      table = parse(%(create_table "items", primary_key: "code", id: { type: :string, array: false } do |t|\nend\n))
+      column = table.column("items", "code")
+      expect([column.array?, column.ruby_type]).to eq([false, "String"])
     end
 
     it "leaves a decimal key untyped, because its Ruby class depends on the scale" do
@@ -97,9 +104,35 @@ RSpec.describe "plugins/rigor-activerecord SchemaParser" do
       expect(table.columns_for("items").map(&:name)).to eq(["value"])
     end
 
-    it "adds nothing when as: makes the query define the columns" do
-      table = parse(%(create_table "items", primary_key: "code", as: "SELECT 1 AS other"\n))
-      expect(table.column("items", "code")).to be_nil
+    it "keeps an as: table's key queryable but untyped, because the query may define it" do
+      table = parse(%(create_table "items", primary_key: "code", as: "SELECT 1 AS code"\n))
+      expect(table.column("items", "code").ruby_type).to eq("Object")
+    end
+
+    it "keeps the key queryable but untyped when as: is nil" do
+      table = parse(%(create_table "items", primary_key: "code", as: nil, id: :string do |t|\nend\n))
+      expect(table.column("items", "code").ruby_type).to eq("Object")
+    end
+
+    {
+      "a non-literal key in the id: hash" => "id: { KEY => :string }",
+      "an interpolated key in the id: hash" => %(id: { "\#{KEY}": :string }),
+      "a repeated key in the id: hash" => "id: { type: :integer, type: :string }",
+      "a non-literal key in the call" => "KEY => { type: :string }",
+      "an interpolated key in the call" => %("\#{KEY}": :string),
+      "a repeated id: in the call" => "id: :integer, id: :string",
+      "a splat after id: false" => "id: false, **TABLE_OPTIONS",
+      "a splat after id: nil" => "id: nil, **TABLE_OPTIONS"
+    }.each do |description, options|
+      it "leaves the key untyped with #{description}" do
+        table = parse(%(create_table "items", primary_key: "code", #{options} do |t|\nend\n))
+        expect(table.column("items", "code").ruby_type).to eq("Object")
+      end
+    end
+
+    it "keeps the id column when a splat may override id: false" do
+      table = parse(%(create_table "items", id: false, **TABLE_OPTIONS do |t|\nend\n))
+      expect(table.column("items", "id")).not_to be_nil
     end
 
     it "adds nothing for a composite primary key, whose columns the block declares" do

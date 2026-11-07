@@ -59,7 +59,7 @@ mise use gem:rigortype
 With mise activated in your shell, `rigor` is on your `PATH`. The
 gem is named `rigortype` (the name `rigor` was taken on RubyGems);
 the executable it installs is `rigor`. If you already have Ruby
-4.0, `gem install rigortype` works too.
+4.0, `gem install rigortype` works too. If the project's bundle lists `rbs`, the `rbs` that `gem:rigortype` puts on `PATH` can shadow it; see the [install guide's note on `rbs` shadowing](../install.md#case-a--mise-is-available-recommended).
 
 For shell activation and shims, `asdf`, and developing inside a
 container, see [Installing Rigor](../manual/01-installation.md);

@@ -56,6 +56,7 @@ bundle exec rbs collection install
 Use `bundle exec` when `rbs` appears in `Gemfile` or `Gemfile.lock`
 (the common case — Steep / rbs_rails workflows put it there). If `rbs`
 is not in the Gemfile, use the bare `rbs collection install` instead.
+If `bundle exec rbs` runs an `rbs` that `gem:rigortype` put on `PATH` instead of the project's, see the [install guide's note on `rbs` shadowing](https://github.com/rigortype/rigor/blob/master/docs/install.md#case-a--mise-is-available-recommended).
 
 Ask the user for permission before running, since this installs files
 into `.gem_rbs_collection/` (a generated directory that belongs in

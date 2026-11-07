@@ -1,3 +1,3 @@
 - **[plugin:actionpack]** `params.expect(:k)` and `params.require(:k)` no longer report `call.undefined-method` on a scalar's method (`.to_sym`, `.match?`) once RBS for `ActionController::Parameters` is loaded; thank you @takayamaki! ([#2947](https://github.com/rigortype/rigor/issues/2947))
   - Both return the value itself when it is a scalar, so they now answer the gradual `Dynamic[ActionController::Parameters]` carrier that `params[:key]` uses, with or without the RBS.
-  - `permit`, `slice` and the other chain methods that always return `Parameters` stay nominal, so `params.permit(:name).no_such_method` still reports.
+  - `permit`, `slice` and the other chain methods that always return `Parameters` stay the plain nominal, also off a carrier receiver, so `params.permit(:name).no_such_method` still reports.

@@ -1,0 +1,5 @@
+- **[plugin]** `rigor-rails-routes` no longer reports `unknown-helper` on a receiverless `*_url` / `*_path` name that is already a method on `self`. ([#2960](https://github.com/rigortype/rigor/pull/2960))
+  - The name can come from an `attr_reader` / `attr_accessor` in the class or a parent class in another file, a singleton method called from a singleton method, or a Rails framework method such as `controller_path`.
+  - It also covers the `{ destination_url: }` hash shorthand; a name with no route and no method still reports.
+  - The method is looked up through the project's ancestry and RBS; a controller or mailer without RBS declines for the handful of `*_path` methods Rails defines.
+  - thank you @takayamaki!

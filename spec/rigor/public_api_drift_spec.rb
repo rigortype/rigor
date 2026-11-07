@@ -304,6 +304,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
   ].freeze
 
   REFLECTION_SINGLETON = %w[
+    ancestry_reaches(req:class_name,req:ancestor_names,keyreq:kind,keyreq:scope)
     class_declarations_in(req:root,block:on_call)
     class_known?(req:class_name,key:scope)
     class_ordering(req:lhs,req:rhs,key:scope)
@@ -318,6 +319,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     project_declared_class?(req:class_name,key:scope,key:environment)
     project_method_defined(req:class_name,req:method_name,keyreq:kind,keyreq:source,keyreq:scope)
     rbs_class_known?(req:class_name,key:scope,key:environment)
+    rbs_method_defined(req:class_name,req:method_name,keyreq:kind,keyreq:scope)
     resolve_constant_path_name(req:name,req:scope,block:known)
     resolve_constant_type(req:name,key:scope,key:rooted,key:caller_derived)
     singleton_definition(req:class_name,key:scope,key:environment)

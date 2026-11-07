@@ -65,7 +65,7 @@ module Rigor
         # implicit `*_path` / `*_url` helper call, is shadowed by a same-file binding, or is in a
         # suppressed directory. ADR-37: the engine owns the walk; the same-file `shadowing` set is built
         # once as the node-rule file context.
-        def violations_for(call_node:, helper_table:, shadowing:, path:)
+        def violations_for(call_node:, helper_table:, shadowing:, path:, scope: nil, context: nil)
           return [] unless call_node.is_a?(Prism::CallNode) && implicit_helper_call?(call_node)
 
           name = call_node.name.to_s
@@ -88,8 +88,152 @@ module Rigor
             # Recognised custom / dynamic helper (no arity to check), or a directory where helpers aren't
             # customarily resolved.
             []
+          elsif self_resolves_method?(name, scope, context)
+            []
           else
             [unknown_helper_violation(name, helper_table)]
+          end
+        end
+
+        # True when `name` is already a method on the call's `self`, asked of the engine rather than a
+        # plugin-side name list: the project's discovered methods (`def`, `attr_*`, the singleton side) through
+        # the project's own ancestry, then the RBS ancestry. A truncated walk (`maybe`) declines too — a definer
+        # past the budget cannot be ruled out, and a false positive outranks a missed typo.
+        #
+        # `self` is read from the node's lexical ancestors (`NodeContext#ancestors`), because the scope a
+        # `node_rule` receives is the file's, not the call site's. {#call_site} names the enclosing class or
+        # module and the kinds `self` may be; where the kind is not decidable (a block in a class body, a
+        # `def obj.m`) both are asked, so a definer on either side declines and a typo on neither still reports.
+        def self_resolves_method?(name, scope, context)
+          return false if scope.nil? || context.nil?
+
+          site = call_site(context.ancestors)
+          return false if site.nil?
+          # An owner no constant spelling names (`class foo::Bar`) cannot be asked about.
+          return true if site.names.empty?
+          # A module is mixed into classes that cannot be seen from where it is defined (a controller concern).
+          return true if site.module_owner && FRAMEWORK_METHODS.key?(name)
+
+          site.names.product(site.kinds).any? { |class_name, kind| resolves_on?(class_name, name, kind, scope) }
+        end
+
+        def resolves_on?(class_name, name, kind, scope)
+          return true unless Rigor::Reflection.project_method_defined(class_name, name, kind: kind, source: :either,
+                                                                                        scope: scope).no?
+          return true unless Rigor::Reflection.rbs_method_defined(class_name, name, kind: kind, scope: scope).no?
+
+          bases = FRAMEWORK_METHODS[name]
+          !bases.nil? && !Rigor::Reflection.ancestry_reaches(class_name, bases, kind: kind, scope: scope).no?
+        end
+
+        # Rails' own `*_path` / `*_url` methods on a controller or mailer, read from the Rails source (rails/rails
+        # main, 1105756f42), each with the framework classes a project class names directly as its superclass. A
+        # project without that framework's RBS cannot see these through the ancestry, so a class whose ancestry
+        # reaches one of the listed bases declines for that name; a module declines for every name, being mixed
+        # into classes that cannot be seen.
+        #
+        # - `controller_path`: AbstractController::Base, actionpack/lib/abstract_controller/base.rb:157 (instance),
+        #   :117 (class); every framework base below inherits it (metal.rb:185, base.rb:206, api.rb:91,
+        #   actionmailer/lib/action_mailer/base.rb:479).
+        # - `append_view_path` / `prepend_view_path`: `ActionView::ViewPaths` (actionview/lib/action_view/
+        #   view_paths.rb:113, :124 instance, :46, :57 class), which `AbstractController::Rendering` includes
+        #   (abstract_controller/rendering.rb:18); `ActionController::Base` (base.rb:270), `::API` (api.rb:115) and
+        #   `ActionMailer::Base` (action_mailer/base.rb:489) include that.
+        # - `helpers_path`: a class attribute of `ActionController::Helpers` (metal/helpers.rb:68), included by
+        #   `ActionController::Base` (base.rb:273).
+        # - `edit_` / `new_` `polymorphic_path` / `polymorphic_url`: actionpack/lib/action_dispatch/routing/
+        #   polymorphic_routes.rb:163-166, through `UrlFor` in `ActionController::Base` (base.rb:274) and `::API`
+        #   (api.rb:117), and in `ActionMailer::Base`, which actionmailer/lib/action_mailer/railtie.rb:40
+        #   includes `AbstractController::UrlFor` into, whose `ActionDispatch::Routing::UrlFor` includes
+        #   `PolymorphicRoutes` (action_dispatch/routing/url_for.rb:92). (`polymorphic_path` / `polymorphic_url` are in {BUILTIN_PASSTHROUGH}.)
+        FRAMEWORK_CONTROLLERS = %w[
+          AbstractController::Base ActionController::Metal ActionController::Base ActionController::API
+          ActionMailer::Base
+        ].freeze
+        VIEW_PATH_BASES = %w[ActionController::Base ActionController::API ActionMailer::Base].freeze
+        URL_FOR_BASES = %w[ActionController::Base ActionController::API ActionMailer::Base].freeze
+        FRAMEWORK_METHODS = {
+          "controller_path" => FRAMEWORK_CONTROLLERS,
+          "append_view_path" => VIEW_PATH_BASES,
+          "prepend_view_path" => VIEW_PATH_BASES,
+          "helpers_path" => %w[ActionController::Base].freeze,
+          "edit_polymorphic_path" => URL_FOR_BASES,
+          "edit_polymorphic_url" => URL_FOR_BASES,
+          "new_polymorphic_path" => URL_FOR_BASES,
+          "new_polymorphic_url" => URL_FOR_BASES
+        }.freeze
+
+        # What a call site's lexical position says about `self`: the names the enclosing class or module can be
+        # known by, whether the owner is a module, and the kinds (`:instance`, `:singleton`) `self` may be.
+        CallSite = Struct.new(:names, :module_owner, :kinds, keyword_init: true)
+
+        # The {CallSite} of a node under `ancestors` (outermost first), or nil when it is in no class or module,
+        # which leaves the route-table verdict as it was.
+        def call_site(ancestors)
+          owner_index = ancestors.rindex { |n| n.is_a?(Prism::ClassNode) || n.is_a?(Prism::ModuleNode) }
+          return nil if owner_index.nil?
+
+          CallSite.new(names: owner_names(ancestors, owner_index),
+                       module_owner: ancestors[owner_index].is_a?(Prism::ModuleNode),
+                       kinds: self_kinds(ancestors[(owner_index + 1)..]))
+        end
+
+        BOTH_KINDS = %i[instance singleton].freeze
+
+        # The kinds `self` may be for a node under the nodes between its owner and itself. The nearest `def`
+        # decides (blocks inside a method keep its `self`); with no `def`, a bare class body is the class object
+        # itself, while a block or lambda there may run on another object (`before_action { }`, `included do`,
+        # `define_method`, `Class.new`), so both kinds are asked.
+        def self_kinds(inner)
+          def_index = inner.rindex { |n| n.is_a?(Prism::DefNode) }
+          if def_index
+            node = inner[def_index]
+            return BOTH_KINDS if node.receiver && !node.receiver.is_a?(Prism::SelfNode)
+            return [:singleton] if node.receiver
+
+            return inner[0...def_index].any?(Prism::SingletonClassNode) ? [:singleton] : [:instance]
+          end
+          return BOTH_KINDS if inner.any? { |n| block_scope?(n) }
+          if inner.any? { |n| n.is_a?(Prism::SingletonClassNode) && !n.expression.is_a?(Prism::SelfNode) }
+            return BOTH_KINDS
+          end
+
+          [:singleton]
+        end
+
+        def block_scope?(node)
+          node.is_a?(Prism::BlockNode) || node.is_a?(Prism::LambdaNode)
+        end
+
+        # The names the enclosing class or module can be known by, `[]` when a declaration's name is dynamic. A
+        # bare `class Foo` is exactly `Enclosing::Foo`. A compact `class Foo::Bar` may resolve `Foo` lexically or
+        # at the root, so both spellings are tried. A rooted declaration (`class ::Foo`) names the root constant
+        # alone.
+        def owner_names(ancestors, owner_index)
+          chain = ancestors[0..owner_index].select { |n| n.is_a?(Prism::ClassNode) || n.is_a?(Prism::ModuleNode) }
+          names = [""]
+          chain.each do |decl|
+            local = declared_name(decl.constant_path)
+            return [] if local.nil?
+
+            names = if local.start_with?("::")
+                      [local.delete_prefix("::")]
+                    else
+                      nested = names.map { |prefix| prefix.empty? ? local : "#{prefix}::#{local}" }
+                      decl.constant_path.is_a?(Prism::ConstantPathNode) ? (nested + [local]).uniq : nested
+                    end
+          end
+          names
+        end
+
+        def declared_name(node)
+          case node
+          when Prism::ConstantReadNode then node.name.to_s
+          when Prism::ConstantPathNode
+            return "::#{node.name}" if node.parent.nil?
+
+            parent = declared_name(node.parent)
+            parent && "#{parent}::#{node.name}"
           end
         end
 

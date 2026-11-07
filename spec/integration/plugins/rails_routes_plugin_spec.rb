@@ -717,6 +717,326 @@ RSpec.describe "plugins/rigor-rails-routes" do
     end
   end
 
+  describe "receiverless names the engine already resolves to a method" do
+    let(:routes) { { "config/routes.rb" => DEFAULT_ROUTES_RB } }
+
+    def unknown_helpers(files, paths:, signature_paths: nil)
+      result = run_plugin(source: "", files: routes.merge(files), paths: paths, signature_paths: signature_paths)
+      unknown = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      unknown.map { |d| d.message.sub(/ \(did you mean.*\)\z/, "") }
+    end
+
+    it "stays quiet on an `attr_reader` name, including the hash shorthand" do
+      files = {
+        "app/libs/message.rb" => <<~RUBY
+          class Message
+            attr_reader :destination_url
+
+            def to_h
+              { url: destination_url }
+            end
+
+            def shorthand
+              { destination_url: }
+            end
+          end
+        RUBY
+      }
+      expect(unknown_helpers(files, paths: ["app/libs/message.rb"])).to be_empty
+    end
+
+    it "stays quiet on an `attr_accessor` name" do
+      files = {
+        "app/libs/box.rb" => <<~RUBY
+          class Box
+            attr_accessor :return_url
+
+            def go
+              return_url
+            end
+          end
+        RUBY
+      }
+      expect(unknown_helpers(files, paths: ["app/libs/box.rb"])).to be_empty
+    end
+
+    it "stays quiet on an `attr_reader` declared by a parent class in another file" do
+      files = {
+        "app/libs/base_client.rb" => "class BaseClient\n  attr_reader :endpoint_url\nend\n",
+        "app/libs/child_client.rb" => <<~RUBY
+          class ChildClient < BaseClient
+            def call
+              endpoint_url
+            end
+          end
+        RUBY
+      }
+      expect(unknown_helpers(files, paths: ["app/libs/base_client.rb", "app/libs/child_client.rb"])).to be_empty
+    end
+
+    it "stays quiet on a singleton method called from a singleton method" do
+      files = {
+        "app/libs/message.rb" => <<~RUBY
+          class Message
+            def self.base_url
+              "https://example.com/"
+            end
+
+            def self.endpoint
+              "\#{base_url}api"
+            end
+          end
+        RUBY
+      }
+      expect(unknown_helpers(files, paths: ["app/libs/message.rb"])).to be_empty
+    end
+
+    it "stays quiet on a method the receiver's RBS ancestry declares" do
+      files = {
+        "sig/framework.rbs" => <<~RBS,
+          module AbstractController
+            class Base
+              def inherited_home_path: () -> String
+            end
+          end
+
+          module ActionController
+            class Base < AbstractController::Base
+            end
+          end
+        RBS
+        "app/controllers/articles_controller.rb" => <<~RUBY
+          class ArticlesController < ActionController::Base
+            def cache_key
+              inherited_home_path
+            end
+          end
+        RUBY
+      }
+      expect(unknown_helpers(files, paths: ["app/controllers/articles_controller.rb"],
+                                    signature_paths: ["sig"])).to be_empty
+    end
+
+    it "stays quiet on `controller_path` in a controller whose Rails framework has no RBS" do
+      files = {
+        "app/controllers/application_controller.rb" => "class ApplicationController < ActionController::Base\nend\n",
+        "app/controllers/articles_controller.rb" => <<~RUBY
+          class ArticlesController < ApplicationController
+            def cache_key
+              "\#{controller_path}:\#{action_name}"
+            end
+          end
+        RUBY
+      }
+      expect(unknown_helpers(files, paths: ["app/controllers/application_controller.rb",
+                                            "app/controllers/articles_controller.rb"])).to be_empty
+    end
+
+    it "still reports an unknown `_path` name in a controller whose Rails framework has no RBS" do
+      files = {
+        "app/controllers/articles_controller.rb" => <<~RUBY
+          class ArticlesController < ActionController::Base
+            def show
+              missing_thing_path
+            end
+          end
+        RUBY
+      }
+      expect(unknown_helpers(files, paths: ["app/controllers/articles_controller.rb"]))
+        .to eq(["no route helper `missing_thing_path`"])
+    end
+
+    {
+      "before_action" => "before_action { redirect_to typo_path }",
+      "rescue_from" => "rescue_from(StandardError) do\n    redirect_to typo_path\n  end",
+      "define_method" => "define_method(:dm) { typo_path }",
+      "included" => "included do\n    before_action { typo_path }\n  end",
+      "lambda" => "scope_thing = -> { typo_path }"
+    }.each do |label, body|
+      it "still reports a typo inside a class-body #{label} block" do
+        files = { "app/libs/widget.rb" => "class Widget\n  #{body}\nend\n" }
+        expect(unknown_helpers(files, paths: ["app/libs/widget.rb"])).to eq(["no route helper `typo_path`"])
+      end
+    end
+
+    it "stays quiet on a real attr_reader name read inside a class-body block" do
+      files = {
+        "app/libs/widget.rb" => "class Widget\n  attr_reader :real_url\n  before_action { redirect_to real_url }\nend\n"
+      }
+      expect(unknown_helpers(files, paths: ["app/libs/widget.rb"])).to be_empty
+    end
+
+    it "stays quiet on a class method read inside a class-body block" do
+      files = {
+        "app/libs/widget.rb" => "class Widget\n  def self.real_url = 1\n  before_action { redirect_to real_url }\nend\n"
+      }
+      expect(unknown_helpers(files, paths: ["app/libs/widget.rb"])).to be_empty
+    end
+
+    it "stays quiet on `controller_path` in a controller concern module" do
+      files = {
+        "app/controllers/concerns/cacheable.rb" => <<~RUBY
+          module Cacheable
+            extend ActiveSupport::Concern
+
+            def cache_key = controller_path
+          end
+        RUBY
+      }
+      expect(unknown_helpers(files, paths: ["app/controllers/concerns/cacheable.rb"])).to be_empty
+    end
+
+    it "still reports an unknown `_path` name in a concern module" do
+      files = {
+        "app/controllers/concerns/cacheable.rb" => "module Cacheable\n  def go = missing_thing_path\nend\n"
+      }
+      expect(unknown_helpers(files, paths: ["app/controllers/concerns/cacheable.rb"]))
+        .to eq(["no route helper `missing_thing_path`"])
+    end
+
+    it "does not credit a bare nested class with the root class's method" do
+      files = {
+        "app/libs/other.rb" => <<~RUBY
+          class Other
+            attr_reader :shared_name_url
+          end
+
+          module Ns
+            class Other
+              def go = shared_name_url
+            end
+          end
+        RUBY
+      }
+      expect(unknown_helpers(files, paths: ["app/libs/other.rb"])).to eq(["no route helper `shared_name_url`"])
+    end
+
+    it "resolves an attr_reader declared in `class << self` from a method of the same body" do
+      files = {
+        "app/libs/message.rb" => <<~RUBY
+          class Message
+            class << self
+              attr_reader :sbase_url
+
+              def go = sbase_url
+            end
+          end
+        RUBY
+      }
+      expect(unknown_helpers(files, paths: ["app/libs/message.rb"])).to be_empty
+    end
+
+    it "asks both sides inside `def obj.m`, whose self is not nameable" do
+      files = {
+        "app/libs/message.rb" => <<~RUBY
+          class Message
+            attr_reader :inst_url
+
+            def self.other
+              obj = Object.new
+              def obj.m = inst_url
+            end
+          end
+        RUBY
+      }
+      expect(unknown_helpers(files, paths: ["app/libs/message.rb"])).to be_empty
+    end
+
+    it "declines when the ancestor chain is cut at its budget" do
+      src = "class Chain0 < Chain1\n  def go = missing_thing_path\nend\n"
+      src += (1..110).map { |i| "class Chain#{i} < Chain#{i + 1}\nend\n" }.join
+      src += "class Chain111\nend\n"
+      files = { "app/libs/chain.rb" => src }
+      expect(unknown_helpers(files, paths: ["app/libs/chain.rb"])).to be_empty
+    end
+
+    it "declines for a class whose name is dynamic" do
+      files = { "app/libs/dyn.rb" => "class some_call::Bar\n  def go = missing_thing_path\nend\n" }
+      expect(unknown_helpers(files, paths: ["app/libs/dyn.rb"])).to be_empty
+    end
+
+    it "tries the root spelling of a compact `class A::B` declaration" do
+      files = {
+        "app/libs/a_b.rb" => <<~RUBY
+          module A
+            class B
+              attr_reader :root_b_url
+            end
+          end
+
+          module Outer
+            class A::B
+              def go = root_b_url
+            end
+          end
+        RUBY
+      }
+      expect(unknown_helpers(files, paths: ["app/libs/a_b.rb"])).to be_empty
+    end
+
+    it "stays quiet on edit_polymorphic_url in a mailer, whose UrlFor includes PolymorphicRoutes" do
+      files = { "app/mailers/user_mailer.rb" => "class UserMailer < ActionMailer::Base\n  def p = edit_polymorphic_url(1)\nend\n" }
+      expect(unknown_helpers(files, paths: ["app/mailers/user_mailer.rb"])).to be_empty
+    end
+
+    {
+      "ActionController::API" => "helpers_path",
+      "ActionController::Metal" => "append_view_path",
+      "ActionMailer::Base" => "helpers_path"
+    }.each do |base, name|
+      it "still reports `#{name}` in a class of #{base}, which does not define it" do
+        files = { "app/libs/thing.rb" => "class Thing < #{base}\n  def go = #{name}\nend\n" }
+        expect(unknown_helpers(files, paths: ["app/libs/thing.rb"])).to eq(["no route helper `#{name}`"])
+      end
+    end
+
+    it "still reports edit_polymorphic_url in a class of ActionController::Metal" do
+      files = { "app/libs/thing.rb" => "class Thing < ActionController::Metal\n  def go = edit_polymorphic_url(1)\nend\n" }
+      expect(unknown_helpers(files, paths: ["app/libs/thing.rb"])).to eq(["no route helper `edit_polymorphic_url`"])
+    end
+
+    it "stays quiet on a singleton method RBS declares on a superclass" do
+      files = {
+        "sig/base.rbs" => "class Base\n  def self.inherited_home_path: () -> String\nend\n",
+        "app/libs/child.rb" => "class Child < Base\n  def self.go = inherited_home_path\nend\n"
+      }
+      expect(unknown_helpers(files, paths: ["app/libs/child.rb"], signature_paths: ["sig"])).to be_empty
+    end
+
+    it "still reports a `_path` name with no route and no method in a class with attr_readers" do
+      files = {
+        "app/libs/message.rb" => <<~RUBY
+          class Message
+            attr_reader :destination_url
+
+            def go
+              missing_thing_path
+            end
+          end
+        RUBY
+      }
+      expect(unknown_helpers(files, paths: ["app/libs/message.rb"]))
+        .to eq(["no route helper `missing_thing_path`"])
+    end
+
+    it "still reports a singleton-only name called from an instance method" do
+      files = {
+        "app/libs/message.rb" => <<~RUBY
+          class Message
+            def self.base_url
+              "x"
+            end
+
+            def go
+              base_url
+            end
+          end
+        RUBY
+      }
+      expect(unknown_helpers(files, paths: ["app/libs/message.rb"])).to eq(["no route helper `base_url`"])
+    end
+  end
+
   describe "devise_for route generation" do
     let(:routes_with_devise) do
       <<~RUBY

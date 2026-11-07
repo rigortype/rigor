@@ -166,4 +166,13 @@ RSpec.describe "plugin project reads go through the IoBoundary" do
     expect(Dir.glob(PLUGIN_LIB_GLOB).size).to be > 50
     expect(direct_calls.size).to be > 20
   end
+
+  # ADR-128 WD1: a plugin asks the ancestry through `Rigor::Reflection`, whose `Trinary` answers carry the
+  # chain's budget; `Rigor::Scope::ResolutionChain` is internal. Lexical, like the check above.
+  it "keeps bundled plugins off Rigor::Scope::ResolutionChain" do
+    offenders = Dir.glob(PLUGIN_LIB_GLOB).select do |file|
+      File.readlines(file).any? { |line| line.lstrip.start_with?("#") ? false : line.include?("ResolutionChain") }
+    end
+    expect(offenders).to be_empty
+  end
 end

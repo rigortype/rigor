@@ -1,0 +1,4 @@
+- **[rbs]** A `source: { type: stdlib }` entry in `rbs_collection.lock.yaml` now loads that stdlib library, as the `rbs` CLI does, thank you @takayamaki! ([#2946](https://github.com/rigortype/rigor/issues/2946), [#2958](https://github.com/rigortype/rigor/pull/2958))
+  - `rbs collection install` writes these entries for a collection gem's stdlib dependencies (actionview and railties 8.1 depend on `ripper`), and Rigor used to skip them.
+  - A signature subclassing such a library (`class NodeParser < ::Ripper`) failed with `RBS::NoSuperclassFoundError` and read `Dynamic[top]`, so typos on it went unreported; it now builds.
+  - An entry naming a library rbs does not ship is skipped, like an unknown `libraries:` name.

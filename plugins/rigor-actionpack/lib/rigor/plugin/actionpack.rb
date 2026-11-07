@@ -473,21 +473,21 @@ module Rigor
       # `ActionController::Parameters` (above), but the chained `params.require(:user).permit(:name)` /
       # `params.permit(...)` calls returned `Dynamic` at the first hop (Parameters ships no bundled RBS,
       # so a call on it resolves lenient-to-Dynamic), leaking every downstream site (`.permit`, `.to_h`,
-      # `.each`) to unprotected. These methods return another `Parameters`, so gate on a
-      # `Parameters` receiver and re-type the result as the same lenient nominal — the chain stays a
-      # concrete receiver end-to-end and `coverage --protection` counts the sites as protected.
+      # `.each`) to unprotected. The methods that return another `Parameters` (`PARAMS_ONLY_CHAIN_METHODS`)
+      # gate on a `Parameters` receiver and re-type the result as the same
+      # lenient nominal — the sites after them stay concrete receivers and `coverage --protection` counts
+      # them as protected. `require` / `expect` are the exception below: the receiver of the call right
+      # after one is the carrier, which is not a concrete receiver.
       #
-      # `require` may return a scalar for a flat key at runtime (`params.require(:id) → String`), but
-      # typing it as the RBS-less `Parameters` is FP-safe by the same argument as the readers: every
-      # method on a Parameters value stays engine-lenient (no `undefined-method`), and this types the
-      # container only, never a caller's argument (ADR-5). The GitLab strong-params survey (108 leaked
-      # `.permit` sites) is the demand.
-      # Issue #534 — `expect` (Rails 8's require+permit) and `slice` joined 2026-09-01, from the corpus
-      # sweep's pair counts (63 and 38 sites on mastodon). Both share `require`'s safety shape: they
-      # never return nil (`expect` raises like `require`; `slice` always returns a Parameters), so the
-      # non-nil lenient nominal cannot fold a flow rule wrong.
+      # `require` and `expect` may return a scalar at runtime (`params.require(:id) → String`), so the
+      # earlier "RBS-less nominal is FP-safe" reading of them (2026-07, #534) is withdrawn by #2947: it held
+      # only while Parameters shipped no RBS. Once the collection's declaration is loaded, a nominal answer
+      # reports a scalar's method as `call.undefined-method`. They answer the gradual carrier
+      # `Dynamic[Parameters]` (`SCALAR_CAPABLE_CHAIN_METHODS`), which keeps the chain resolvable and is quiet
+      # with or without the RBS. The GitLab strong-params survey (108 leaked `.permit` sites) is the demand.
+      # Issue #534 — `expect` and `slice` joined 2026-09-01 (63 and 38 sites on mastodon).
       #
-      # ## The admission rule for this table
+      # ## The admission rule for the nominal table (`PARAMS_ONLY_CHAIN_METHODS`)
       #
       # A method belongs here **iff its Rails implementation returns an `ActionController::Parameters`
       # on every path** — either a fresh `new_instance_with_inherited_permitted_status(...)` or `self`.
@@ -564,21 +564,46 @@ module Rigor
       # hazard ever returns — and they now carry a positive assertion that `params[:k]` types
       # `Dynamic[ActionController::Parameters?]` (#2430), so a silent regression to bare `Dynamic[top]`
       # or to the non-nil nominal fails them too.
-      STRONG_PARAMS_CHAIN_METHODS = %i[
-        require permit permit! expect slice
+      # The links that return an `ActionController::Parameters` on every path (checked against Rails 8.x
+      # `strong_parameters.rb`). Only these may be typed as the nominal.
+      PARAMS_ONLY_CHAIN_METHODS = %i[
+        permit permit! slice
         except without extract! slice!
         merge merge! reverse_merge reverse_merge! with_defaults with_defaults!
         compact compact_blank deep_dup
       ].freeze
 
-      dynamic_return receivers: [REQUEST_CONTEXT_READER_TYPES[:params]], methods: STRONG_PARAMS_CHAIN_METHODS do |call_node, _scope|
+      # Issue #2947 — `require` and `expect` are NOT in the nominal table above. Rails returns the value itself:
+      # `require` is `self[key]` (a scalar, or an Array for an Array of keys) and `expect` is `values.first`
+      # for one key, else an Array. The "RBS-less nominal is lenient" argument holds only while Parameters
+      # ships no RBS; with the collection's declaration loaded, a nominal answer reports `.to_sym` on a
+      # scalar as `call.undefined-method`. They answer the gradual carrier `Dynamic[Parameters]` instead:
+      # quiet at every boundary, and the chain keeps resolving through the carrier-gated rule.
+      SCALAR_CAPABLE_CHAIN_METHODS = %i[require expect].freeze
+
+      STRONG_PARAMS_CHAIN_METHODS = (PARAMS_ONLY_CHAIN_METHODS + SCALAR_CAPABLE_CHAIN_METHODS).freeze
+
+      dynamic_return receivers: [REQUEST_CONTEXT_READER_TYPES[:params]], methods: PARAMS_ONLY_CHAIN_METHODS do |call_node, _scope|
         next nil unless call_node.is_a?(Prism::CallNode)
 
         Rigor::Type::Combinator.nominal_of(REQUEST_CONTEXT_READER_TYPES[:params])
       end
 
-      # Issue #2430 — the chain on a `params[...]` carrier (`params[:user].permit(:name)`). The result stays
-      # a `Dynamic` of the same nominal, so it crosses a declared boundary as the carrier does.
+      dynamic_return receivers: [REQUEST_CONTEXT_READER_TYPES[:params]], methods: SCALAR_CAPABLE_CHAIN_METHODS do |call_node, _scope|
+        next nil unless call_node.is_a?(Prism::CallNode)
+
+        Rigor::Type::Combinator.dynamic(Rigor::Type::Combinator.nominal_of(REQUEST_CONTEXT_READER_TYPES[:params]))
+      end
+
+      # Issue #2430 / #2947 — the chain on a carrier receiver (`params[:user].permit(:name)`,
+      # `params.require(:user).permit(:name)`). A carrier often holds an Array or a String at runtime, and
+      # those define many of the chain names with other returns (`compact`, `slice`, `without`, `deep_dup`,
+      # `extract!`, ...), so only `permit` / `permit!` — which no core or ActiveSupport class defines — can
+      # answer the plain nominal there: such a call raises NoMethodError or returns a real Parameters, and
+      # the plain nominal keeps the sites after it concrete receivers for `coverage --protection`. Every
+      # other chain method stays the gradual carrier.
+      CARRIER_NOMINAL_CHAIN_METHODS = %i[permit permit!].freeze
+
       dynamic_return methods: STRONG_PARAMS_CHAIN_METHODS do |call_node, scope|
         next nil unless call_node.is_a?(Prism::CallNode)
 
@@ -587,7 +612,8 @@ module Rigor
         next nil unless controller_scope?(scope)
         next nil unless params_carrier_facet?(scope.type_of(receiver))
 
-        Rigor::Type::Combinator.dynamic(Rigor::Type::Combinator.nominal_of(REQUEST_CONTEXT_READER_TYPES[:params]))
+        nominal = Rigor::Type::Combinator.nominal_of(REQUEST_CONTEXT_READER_TYPES[:params])
+        CARRIER_NOMINAL_CHAIN_METHODS.include?(call_node.name) ? nominal : Rigor::Type::Combinator.dynamic(nominal)
       end
 
       # Issue #534 item 1, reopened by #574. `#[]` is the single largest named-receiver pair on both survey

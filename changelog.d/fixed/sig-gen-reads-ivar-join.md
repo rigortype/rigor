@@ -1,0 +1,4 @@
+- **[rigor sig-gen]** `rigor sig-gen` now proposes a reader's return type from the ivar writes `rigor check` joins, so committing its proposal no longer triggers `def.return-type-mismatch`. ([#2942](https://github.com/rigortype/rigor/pull/2942))
+  - The join covers writes in other files and in the class's ancestors (superclass, `include`, `prepend`).
+  - With `@x = nil` in `initialize` and `@x = "a"` in another file's reopening, `def get = @x` is now proposed as `() -> (String | nil)` instead of `() -> nil`.
+  - A reader whose joined type is untyped is now skipped instead of being proposed too narrowly.

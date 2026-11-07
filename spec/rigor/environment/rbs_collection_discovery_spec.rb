@@ -25,6 +25,44 @@ RSpec.describe Rigor::Environment::RbsCollectionDiscovery do
     path
   end
 
+  # Issue #2946 — stdlib entries install nothing under the collection root; their names load as RBS libraries.
+  describe ".stdlib_library_names" do
+    it "lists the stdlib entries in lockfile order, de-duplicated, with no collection directory" do
+      body = <<~YAML
+        ---
+        path: ".gem_rbs_collection"
+        gems:
+        - name: ripper
+          version: '0'
+          source:
+            type: stdlib
+        - name: activerecord
+          version: '7.1'
+          source:
+            type: git
+        - name: net-protocol
+          version: '0'
+          source:
+            type: stdlib
+        - name: ripper
+          version: '0'
+          source:
+            type: stdlib
+        - version: '0'
+          source:
+            type: stdlib
+      YAML
+      path = write_lockfile(body)
+
+      names = described_class.stdlib_library_names(lockfile_path: path, project_root: tmpdir, auto_detect: false)
+      expect(names).to eq(%w[ripper net-protocol])
+    end
+
+    it "returns [] when no lockfile resolves" do
+      expect(described_class.stdlib_library_names(lockfile_path: nil, project_root: tmpdir)).to eq([])
+    end
+  end
+
   describe ".discover with explicit lockfile_path" do
     it "returns per-gem RBS directories listed in the lockfile" do # rubocop:disable RSpec/ExampleLength
       make_collection(File.join(tmpdir, ".gem_rbs_collection"), ["activerecord", "7.1"], ["rack", "3.0"])
@@ -57,7 +95,7 @@ RSpec.describe Rigor::Environment::RbsCollectionDiscovery do
       expect(gem_dirs).to eq([["activerecord", "7.1"], ["rack", "3.0"]])
     end
 
-    it "skips entries with source type stdlib (already covered by DEFAULT_LIBRARIES)" do
+    it "returns no directory for an entry with source type stdlib (it loads as a library)" do
       make_collection(File.join(tmpdir, ".gem_rbs_collection"), %w[logger 0], ["activerecord", "7.1"])
       body = <<~YAML
         ---

@@ -19,12 +19,16 @@ module Rigor
     # access. Failure modes (missing lockfile, malformed YAML, missing collection directory) silently
     # degrade to an empty list.
     module RbsCollectionDiscovery
-      # `stdlib`-typed entries in the lockfile are loaded into the RBS environment by the standard library
-      # mechanism (rigor's `Environment::DEFAULT_LIBRARIES` already covers this surface). Including them as
-      # `signature_paths:` entries would risk `RBS::DuplicatedDeclarationError` (the same hazard O7's
-      # failure-memo handles). The other documented source types — `git` (the gem_rbs_collection repo),
-      # `rubygems` (sigs lifted from a gem's bundled `sig/`), and `local` (a user-managed RBS dir) — all
-      # produce a directory under the collection root and are admitted.
+      # `stdlib`-typed entries (`source: { type: stdlib }`) name a library rbs ships under its own `stdlib/`, and
+      # produce no directory under the collection root, so {.discover} never returns one. Issue #2946 — they are
+      # loaded all the same, as the `rbs` CLI's `EnvironmentLoader#add_collection` loads them: as RBS LIBRARIES.
+      # {.stdlib_library_names} lists them, and `Environment.base_libraries` appends them to the library list,
+      # which is de-duplicated, so an entry `DEFAULT_LIBRARIES` already names is not loaded twice. A collection
+      # gem that subclasses one (actionview's `NodeParser < ::Ripper`) then builds. An unknown name is dropped by
+      # the loader's `has_library?` filter, as a `libraries:` name is, and `ConfigAudit` reports it. The other
+      # documented source types — `git` (the gem_rbs_collection repo), `rubygems` (sigs lifted from a gem's
+      # bundled `sig/`), and `local` (a user-managed RBS dir) — all produce a directory under the collection root
+      # and are admitted by {.discover}.
       #
       # The `source.type` filter alone is NOT sufficient: gems that were extracted from Ruby's stdlib into
       # standalone default gems (e.g. `cgi`, `logger`, `base64`, `csv`, `bigdecimal`) are published in
@@ -75,6 +79,27 @@ module Rigor
       # by `WriteGuard`, which must watch the very path the run reads.
       def self.configured_lockfile_path(lockfile_path, project_root = Dir.pwd)
         Rigor::ConfigPath.absolute(lockfile_path.to_s, project_root)
+      end
+
+      # Issue #2946 — the `name` of every `source: { type: stdlib }` entry in the lockfile, in lockfile order and
+      # de-duplicated, whether or not rbs ships that library: the caller loads them as RBS libraries, and the
+      # loader's `has_library?` filter drops an unknown one. Unlike {.discover}, the collection directory need not
+      # exist, since a stdlib entry installs nothing there. Returns `[]` when no lockfile resolves or its YAML is
+      # unreadable. A pure YAML read, so the ADR-87 boot-slimming probe can rebuild the library list from it.
+      def self.stdlib_library_names(lockfile_path:, project_root: Dir.pwd, auto_detect: true)
+        resolved = resolve_lockfile_path(lockfile_path: lockfile_path, project_root: project_root,
+                                         auto_detect: auto_detect)
+        return [] if resolved.nil?
+
+        data = read_lockfile_yaml(resolved)
+        return [] if data.nil?
+
+        Array(data["gems"]).filter_map do |entry|
+          next unless entry.is_a?(Hash) && SKIPPED_SOURCE_TYPES.include?(entry.dig("source", "type").to_s)
+
+          name = entry["name"]
+          name.to_s if name.is_a?(String) && !name.empty?
+        end.uniq
       end
 
       # Returns the resolved lockfile path (`Pathname`) or `nil` when neither explicit nor auto-detect

@@ -327,14 +327,17 @@ module Rigor
         )
         # O4 Layer 3 slice 2 — when `rbs collection install` has been run for the target project, parse the
         # resulting `rbs_collection.lock.yaml` and feed each gem's `<collection_path>/<name>/<version>/`
-        # directory into `signature_paths:`. Stdlib-typed entries are skipped (already covered by
-        # `DEFAULT_LIBRARIES`), as are gems whose RBS rigor already loads from another source —
+        # directory into `signature_paths:`. Stdlib-typed entries have no such directory; they load as libraries
+        # (issue #2946, below). Skipped too are gems whose RBS rigor already loads from another source —
         # stdlib-extracted default gems (`cgi`, `logger`, …, shipped by the collection under a `git` source)
         # and the `data/vendored_gem_sigs/` bundle (`redis`, `nokogiri`, `pg`, …). `skip_gem_names:` passes
         # both sets so the collection copy doesn't double-declare against rigor's bundled RBS (the
         # `RBS::DuplicatedDeclarationError` hazard).
         # Issue #1700 — plus the gated vendored directories this run's source activates ({#feature_tokens}).
-        merged_libraries = (DEFAULT_LIBRARIES + libraries.map(&:to_s) +
+        # Issue #2946 — plus the lockfile's `source: { type: stdlib }` entries, loaded as libraries ({.base_libraries}).
+        merged_libraries = (base_libraries(libraries, rbs_collection_lockfile: rbs_collection_lockfile,
+                                                      rbs_collection_auto_detect: rbs_collection_auto_detect,
+                                                      root: root) +
                             feature_tokens(required_features, source_files, libraries)).uniq
         # Issue #2441 — plus the project's own path gems ({ProjectPathGems}), whose collection copy would
         # double-declare the project's `sig/`.

@@ -255,7 +255,7 @@
       }
     },
     "rbs_collection": {
-      "description": "Open item O4 Layer 3 slice 2 — `rbs collection install` awareness. When the target project has been set up with `rbs collection install`, the resulting `rbs_collection.lock.yaml` records resolved (gem, version, source) triples and `.gem_rbs_collection/<name>/<version>/` carries the downloaded `.rbs` files. Rigor parses the lockfile and auto-feeds each gem's directory into the loader's `signature_paths`. `stdlib`-typed entries are skipped (rigor's bundled `DEFAULT_LIBRARIES` already covers them).",
+      "description": "Open item O4 Layer 3 slice 2 — `rbs collection install` awareness. When the target project has been set up with `rbs collection install`, the resulting `rbs_collection.lock.yaml` records resolved (gem, version, source) triples and `.gem_rbs_collection/<name>/<version>/` carries the downloaded `.rbs` files. Rigor parses the lockfile and auto-feeds each gem's directory into the loader's `signature_paths`. `stdlib`-typed entries install no directory and load as RBS libraries instead, as the `rbs` CLI loads them.",
       "type": "object",
       "additionalProperties": false,
       "properties": {

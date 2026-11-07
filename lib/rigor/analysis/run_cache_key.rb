@@ -216,12 +216,17 @@ module Rigor
 
       # The `rbs.libraries` config slot reconstructed from configuration alone — byte-identical to the
       # loader's `RbsDescriptor.libraries_entry(loader.libraries)` because `Environment.for_project` merges
-      # exactly `DEFAULT_LIBRARIES + config.libraries` (uniq) into `loader.libraries`, plus the
+      # exactly {Environment.base_libraries} — `DEFAULT_LIBRARIES + config.libraries` + the collection lockfile's
+      # stdlib entries (issue #2946), uniq — into `loader.libraries`, plus the
       # `Environment::RequiredFeatures` tokens the run's source activates (issue #1700). Those are left out
       # here: reading every source file would cost the boot-slimming probe the time it exists to save, and a
       # project that requires a gated feature then only misses this probe, never hits a wrong slot.
       def libraries_config_entries(configuration)
-        merged = (Environment::DEFAULT_LIBRARIES + configuration.libraries.map(&:to_s)).uniq
+        merged = Environment.base_libraries(
+          configuration.libraries,
+          rbs_collection_lockfile: configuration.rbs_collection_lockfile,
+          rbs_collection_auto_detect: configuration.rbs_collection_auto_detect
+        )
         [Cache::RbsDescriptor.libraries_entry(merged)]
       end
     end

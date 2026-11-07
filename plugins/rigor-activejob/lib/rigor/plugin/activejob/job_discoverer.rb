@@ -200,7 +200,8 @@ module Rigor
             )
           end
 
-          required_count = (parameters.requireds || []).size
+          # Parameters after an optional or rest one (`def perform(a, b = 1, c)`) are required too.
+          required_count = (parameters.requireds || []).size + (parameters.posts || []).size
           optional_count = (parameters.optionals || []).size
           rest_present = !parameters.rest.nil?
           keyword_required = (parameters.keywords || []).filter_map do |kw|

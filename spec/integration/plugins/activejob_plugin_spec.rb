@@ -127,6 +127,15 @@ RSpec.describe "plugins/rigor-activejob" do
           class TwoJob < ApplicationJob
             def perform(a, b); end
           end
+          class FwdJob < ApplicationJob
+            def perform(a, ...); end
+          end
+          class PostJob < ApplicationJob
+            def perform(a, b = 1, c); end
+          end
+          class PostRestJob < ApplicationJob
+            def perform(a, *rest, b); end
+          end
           class RangeKwJob < ApplicationJob
             def perform(a, b = 1, **kw); end
           end
@@ -204,8 +213,42 @@ RSpec.describe "plugins/rigor-activejob" do
       expect(arity_errors("def go(list) = TwoJob.perform_later(*list)\n")).to be_empty
     end
 
-    it "declines a `**opts` argument to a job without keywords (it may be empty)" do
+    it "declines a `**opts` argument to a job without keywords when emptiness decides the verdict" do
       expect(arity_errors("def go(opts) = NoArgsJob.perform_later(**opts)\n")).to be_empty
+    end
+
+    it "still reports a `**opts` group that cannot be empty or cannot change the verdict" do
+      source = "def go(opts)\n  NoArgsJob.perform_later(a: 1, **opts)\n  " \
+               "PositionalJob.perform_later('x', a: 1, **opts)\n  NoArgsJob.perform_later(1, **opts)\nend\n"
+      expect(arity_errors(source).size).to eq(3)
+    end
+
+    it "reports a missing positional next to a `**opts` argument for a keyword-taking job" do
+      err = arity_errors("def go(opts) = MixedJob.perform_later(**opts)\n").first
+      expect(err).not_to be_nil
+      expect(err.message).to include("expects 1 argument(s), got 0")
+    end
+
+    it "reports a missing positional next to keywords" do
+      expect(arity_errors("MixedJob.perform_later(force: true)\n")).not_to be_empty
+    end
+
+    it "treats `...` in `perform(a, ...)` as keyword-taking" do
+      expect(arity_errors("FwdJob.perform_later(k: 1)\n")).not_to be_empty
+      expect(arity_errors("FwdJob.perform_later(1, k: 1)\n")).to be_empty
+    end
+
+    it "counts parameters after an optional one as required positionals" do
+      expect(arity_errors("PostJob.perform_later(1, 2, 3)\nPostJob.perform_later(1, 2)\n")).to be_empty
+      expect(arity_errors("PostJob.perform_later(1)\n")).not_to be_empty
+    end
+
+    it "reports too few arguments for `perform(a, *rest, b)`" do
+      expect(arity_errors("PostRestJob.perform_later(1)\n")).not_to be_empty
+    end
+
+    it "declines a `...` forwarding argument" do
+      expect(arity_errors("def go(...) = TwoJob.perform_later(...)\n")).to be_empty
     end
   end
 

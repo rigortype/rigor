@@ -45,7 +45,7 @@ module Rigor
         }.freeze
 
         # Implicit columns that every Rails table has unless the schema explicitly opts out. The plugin
-        # assumes these exist; users who run `create_table id: false` get no implicit `id` column from
+        # assumes these exist; users who run `create_table id: false` or `id: nil` get no implicit `id` column from
         # the parser, but most apps never disable it.
         IMPLICIT_COLUMNS = [
           Column.new(name: "id", type: :integer, ruby_type: "Integer").freeze

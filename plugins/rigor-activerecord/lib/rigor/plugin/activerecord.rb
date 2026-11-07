@@ -65,6 +65,10 @@ module Rigor
       manifest(
         id: "activerecord",
         target_gems: ["activerecord"],
+        # 0.15.0, 2026-11-07 (#2945) — `create_table`'s `primary_key: "name"` registers that column, so a query
+        # on it, or on an `alias_attribute` targeting it, no longer reports `unknown-column`. The schema table
+        # payload changes, and the bump (part of the producer cache KEY) stops a warm run serving the old one.
+        #
         # 0.14.0, 2026-10-10 (#1721) — the plugin publishes `:reachability_roots`: the models ActiveRecord loads
         # by name from an association. The association rows gain `macro`, `class_name_option`, `through` and
         # `source_type_option`, so a cached 0.13.0 payload lacks the fields the roots are derived from and
@@ -124,7 +128,7 @@ module Rigor
         # a scope lambda body / class-method body now contributes `Relation[Model]` via `scope.self_type`
         # instead of falling through to `Kernel#select` (the IO multiplexer, `Array[String]` return). Plus
         # `:select` added to the relation-entry-point list.
-        version: "0.14.0",
+        version: "0.15.0",
         description: "Types ActiveRecord finders against the project's db/schema.rb and AR models.",
         config_schema: {
           "schema_file" => { kind: :string, default: "db/schema.rb" },

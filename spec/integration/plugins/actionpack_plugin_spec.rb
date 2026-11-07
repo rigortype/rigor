@@ -67,6 +67,19 @@ PARAMETERS_STANDIN_SIG = <<~RBS
   end
 RBS
 
+# Issue #2947 — the declaration as gem_rbs_collection's actionpack 8.1 entry gives it, reduced: `expect` and
+# `require` answer `untyped`, `permit` answers `Parameters`.
+PARAMETERS_EXPECT_SIG = <<~RBS
+  module ActionController
+    class Parameters
+      def expect: (*untyped filters) -> untyped
+      def require: (untyped key) -> untyped
+      def permit: (*untyped filters) -> Parameters
+      def []: (untyped key) -> untyped
+    end
+  end
+RBS
+
 RSpec.describe "plugins/rigor-actionpack" do
   before { Rigor::Plugin.unregister! }
   after { Rigor::Plugin.unregister! }
@@ -474,6 +487,69 @@ RSpec.describe "plugins/rigor-actionpack" do
         expect(dumps[0]).to include("Dynamic[ActionController::Parameters]")
         expect(dumps[1]).to include("Dynamic[ActionController::Parameters]")
         expect(result.diagnostics.map(&:rule)).not_to include("call.undefined-method")
+      end
+    end
+
+    # Issue #2947 — `expect` / `require` can return a scalar, so a scalar's method on the result is not an
+    # undefined method on Parameters. Run with and without the Parameters RBS; `permit` still answers
+    # Parameters, so a method Parameters lacks still reports once the RBS makes the class known.
+    describe "scalar use of `params.expect` / `params.require` (#2947)" do
+      let(:source) do
+        <<~RUBY
+          class C
+            def index
+              params.expect(:sort).to_sym
+              params.expect(:preview_time).match?(/\\A\\d/)
+              params.require(:id).to_sym
+              params.permit(:name).no_such_method
+            end
+          end
+        RUBY
+      end
+
+      def undefined_methods(result)
+        result.diagnostics.select { |d| d.rule == "call.undefined-method" }.map(&:message)
+      end
+
+      it "is silent on the scalar uses and reports `permit(...).no_such_method` with the RBS" do
+        with_demo(source, signatures: { "parameters.rbs" => PARAMETERS_EXPECT_SIG }) do |result|
+          messages = undefined_methods(result)
+          expect(messages.size).to eq(1)
+          expect(messages.first).to include("no_such_method")
+        end
+      end
+
+      it "is silent on the scalar uses with no Parameters RBS" do
+        with_demo(source) do |result|
+          expect(undefined_methods(result)).to be_empty
+        end
+      end
+
+      it "types the chain heads as the gradual carrier, which keeps `.permit` resolving" do
+        dump_source = <<~RUBY
+          class C
+            def index
+              Rigor.dump_type(params.expect(:sort))
+              Rigor.dump_type(params.require(:id).permit(:name))
+            end
+          end
+        RUBY
+        [{}, { "parameters.rbs" => PARAMETERS_EXPECT_SIG }].each do |signatures|
+          with_demo(dump_source, signatures: signatures) do |result|
+            dumps = result.diagnostics.select { |d| d.rule == "dump.type" }.map(&:message)
+            expect(dumps.size).to eq(2)
+            expect(dumps).to all(include("Dynamic[ActionController::Parameters]"))
+          end
+        end
+      end
+
+      it "still types `permit` and `slice` as the plain nominal" do
+        dump_source = "class C\n  def index\n    Rigor.dump_type(params.permit(:a))\n    Rigor.dump_type(params.slice(:a))\n  end\nend\n"
+        with_demo(dump_source) do |result|
+          dumps = result.diagnostics.select { |d| d.rule == "dump.type" }.map(&:message)
+          expect(dumps.size).to eq(2)
+          dumps.each { |d| expect(d).to include("ActionController::Parameters").and(satisfy { |m| !m.include?("Dynamic[") }) }
+        end
       end
     end
 

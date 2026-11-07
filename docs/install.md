@@ -109,6 +109,20 @@ A user-wide `~/.config/mise/config.toml` entry for `gem:rigortype`
 keeps applying outside this project. Mention it if it names an older
 version, but do not edit global config without the user's consent.
 
+`gem:rigortype` also puts an `rbs` on `PATH`: mise wraps every
+executable the gem's dependencies install, and that wrapper runs with
+rigortype's private `GEM_HOME`. If the project's `Gemfile` lists `rbs`
+(Steep and `rbs_rails` setups, `bundle exec rbs collection install`)
+and `bundle config path` is unset, `bundle exec rbs` runs the wrapper
+instead of the project's `rbs`. A git-sourced gem then fails with
+`is not yet checked out` under rigortype's `GEM_HOME`. A bundle
+installed under a configured path such as `vendor/bundle` is not
+affected, because `bundle exec` puts that path's `bin` first. Check
+`bundle exec which rbs`; if it prints a path under
+`installs/gem-rigortype/`, tell the user and offer `bundle config set
+--local path vendor/bundle` followed by `bundle install`. Do not change
+the bundle path without their consent.
+
 Then verify:
 
 ```sh

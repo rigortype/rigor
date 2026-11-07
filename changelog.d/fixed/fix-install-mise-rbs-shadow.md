@@ -1,0 +1,1 @@
+- **[docs]** The install guide now warns that `mise use gem:rigortype` can put its own `rbs` ahead of the project's `bundle exec rbs` when the bundle path is the default, thank you @takayamaki! ([#2952](https://github.com/rigortype/rigor/pull/2952))

@@ -1,0 +1,8 @@
+- **[plugin]** `rigor-activejob` no longer reports `plugin.activejob.wrong-arity` on `perform_later` / `perform_now` calls whose keyword arguments `#perform` accepts, thank you @takayamaki! ([#2944](https://github.com/rigortype/rigor/issues/2944), [#2954](https://github.com/rigortype/rigor/pull/2954))
+  - `perform(name:, greeting: "hello")`, `perform(id, force: false)` and `perform(**opts)` took the call's keywords as an extra positional argument; they are now matched to keyword parameters, and a `**splat` argument is accepted.
+  - A job whose `#perform` takes no keywords still reports `NoArgsJob.perform_later(name: "alice")`, which raises `ArgumentError` at runtime.
+  - A required positional missing next to keywords is now reported: `MixedJob.perform_later(force: true)` against `perform(id, force: false)`.
+  - Other false positives of the same check are gone: `perform(...)` accepts any arity, a parameter after an optional one (`perform(a, b = 1, c)`) counts as required, and a call with a `*splat` or `...` argument is not checked.
+  - A `**opts` argument to a job without keywords is declined only when it may be empty and that changes the verdict, so `NoArgsJob.perform_later(a: 1, **opts)` reports again.
+  - `perform(**nil)` counts as taking no keywords.
+  - Missing required keywords and unknown keywords are still not validated.

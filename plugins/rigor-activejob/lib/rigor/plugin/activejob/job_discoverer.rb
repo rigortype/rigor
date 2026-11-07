@@ -76,7 +76,8 @@ module Rigor
           base.with(
             min_arity: [base.min_arity, addition.min_arity].min,
             max_arity: [base.max_arity, addition.max_arity].max,
-            keyword_required: base.keyword_required & addition.keyword_required
+            keyword_required: base.keyword_required & addition.keyword_required,
+            accepts_keywords: base.accepts_keywords || addition.accepts_keywords
           )
         end
 
@@ -187,7 +188,7 @@ module Rigor
           if perform_def.nil?
             return JobIndex::Entry.new(
               class_name: class_name, min_arity: 0,
-              max_arity: Float::INFINITY, keyword_required: []
+              max_arity: Float::INFINITY, keyword_required: [], accepts_keywords: true
             )
           end
 
@@ -195,22 +196,31 @@ module Rigor
           if parameters.nil?
             return JobIndex::Entry.new(
               class_name: class_name, min_arity: 0,
-              max_arity: 0, keyword_required: []
+              max_arity: 0, keyword_required: [], accepts_keywords: false
             )
           end
 
-          required_count = (parameters.requireds || []).size
+          # Parameters after an optional or rest one (`def perform(a, b = 1, c)`) are required too.
+          required_count = (parameters.requireds || []).size + (parameters.posts || []).size
           optional_count = (parameters.optionals || []).size
           rest_present = !parameters.rest.nil?
           keyword_required = (parameters.keywords || []).filter_map do |kw|
             kw.name if kw.is_a?(Prism::RequiredKeywordParameterNode)
           end
 
+          keyword_rest = parameters.keyword_rest
+          # `...` lives in `keyword_rest` and forwards every argument, so it widens the envelope; `**nil`
+          # also lives there but declares that NO keywords are taken (ActiveJob then hands them over as a
+          # positional hash, exactly like a method with no keyword parameters).
+          forwards_all = keyword_rest.is_a?(Prism::ForwardingParameterNode)
+          takes_keywords = !(parameters.keywords || []).empty? || keyword_rest.is_a?(Prism::KeywordRestParameterNode)
+
           JobIndex::Entry.new(
             class_name: class_name,
             min_arity: required_count,
-            max_arity: rest_present ? Float::INFINITY : required_count + optional_count,
-            keyword_required: keyword_required.map(&:to_sym)
+            max_arity: rest_present || forwards_all ? Float::INFINITY : required_count + optional_count,
+            keyword_required: keyword_required.map(&:to_sym),
+            accepts_keywords: takes_keywords || forwards_all
           )
         end
       end

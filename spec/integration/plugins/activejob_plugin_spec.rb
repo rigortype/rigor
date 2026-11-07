@@ -94,6 +94,164 @@ RSpec.describe "plugins/rigor-activejob" do
     end
   end
 
+  describe "keyword arguments (#2944)" do
+    let(:keyword_jobs) do
+      {
+        "app/jobs/keyword_jobs.rb" => <<~RUBY,
+          class ApplicationJob
+          end
+          class GreetJob < ApplicationJob
+            def perform(name:, greeting: "hello"); end
+          end
+          class MixedJob < ApplicationJob
+            def perform(id, force: false); end
+          end
+          class OptionsJob < ApplicationJob
+            def perform(**opts); end
+          end
+          class PositionalJob < ApplicationJob
+            def perform(name); end
+          end
+          class NoArgsJob < ApplicationJob
+            def perform; end
+          end
+          class NilKwJob < ApplicationJob
+            def perform(**nil); end
+          end
+          class NilKwOptJob < ApplicationJob
+            def perform(h = nil, **nil); end
+          end
+          class ForwardJob < ApplicationJob
+            def perform(...); end
+          end
+          class TwoJob < ApplicationJob
+            def perform(a, b); end
+          end
+          class FwdJob < ApplicationJob
+            def perform(a, ...); end
+          end
+          class PostJob < ApplicationJob
+            def perform(a, b = 1, c); end
+          end
+          class PostRestJob < ApplicationJob
+            def perform(a, *rest, b); end
+          end
+          class RangeKwJob < ApplicationJob
+            def perform(a, b = 1, **kw); end
+          end
+        RUBY
+        # One job redeclared across two files (glob order is not load order): the envelopes widen.
+        "app/jobs/split_a.rb" => "class SplitJob < ApplicationJob\n  def perform(a); end\nend\n",
+        "app/jobs/split_b.rb" => "class SplitJob < ApplicationJob\n  def perform(**kw); end\nend\n"
+      }
+    end
+
+    def arity_errors(source)
+      plugin_diagnostics(run_plugin(source: source, files: keyword_jobs)).select { |d| d.rule == "wrong-arity" }
+    end
+
+    it "does not count keywords against a keyword-only `#perform`" do
+      expect(arity_errors("GreetJob.perform_later(name: 'alice')\nGreetJob.perform_now(name: 'a', greeting: 'hi')\n"))
+        .to be_empty
+    end
+
+    it "does not count trailing keywords against the positional parameters of a mixed `#perform`" do
+      expect(arity_errors("MixedJob.perform_later(1, force: true)\nMixedJob.perform_later(1)\n")).to be_empty
+    end
+
+    it "accepts a `**splat` argument for a `**opts` `#perform`" do
+      expect(arity_errors("def go(opts) = OptionsJob.perform_later(**opts)\n")).to be_empty
+    end
+
+    it "still counts the positional arguments next to keywords" do
+      err = arity_errors("MixedJob.perform_later(1, 2, force: true)\n").first
+      expect(err).not_to be_nil
+      expect(err.message).to include("expects 1 argument(s), got 2")
+    end
+
+    it "declines a call with a `*splat` argument when `#perform` takes keywords" do
+      expect(arity_errors("def go(a) = GreetJob.perform_later(*a)\n")).to be_empty
+    end
+
+    it "keeps counting a Hash literal as one positional argument (Ruby 3 does not convert it)" do
+      expect(arity_errors("GreetJob.perform_later({ name: 'alice' })\n")).not_to be_empty
+    end
+
+    it "still reports keywords passed to a `#perform` that takes none" do
+      err = arity_errors("NoArgsJob.perform_later(name: 'alice')\n").first
+      expect(err).not_to be_nil
+      expect(err.message).to include("expects 0 argument(s), got 1")
+    end
+
+    it "still reports a surplus keyword group on a positional-only `#perform`" do
+      expect(arity_errors("PositionalJob.perform_later('a', name: 'alice')\n")).not_to be_empty
+    end
+
+    it "treats `**nil` as taking no keywords, so the keyword group still counts as a positional argument" do
+      expect(arity_errors("NilKwJob.perform_later(k: 1)\n")).not_to be_empty
+    end
+
+    it "accepts the keyword group as the positional hash of `perform(h = nil, **nil)`" do
+      expect(arity_errors("NilKwOptJob.perform_later(k: 1)\n")).to be_empty
+    end
+
+    it "widens a redeclared job's keyword acceptance (`def perform(a)` + `def perform(**kw)`)" do
+      expect(arity_errors("SplitJob.perform_later(1, k: 1)\n")).to be_empty
+    end
+
+    it "counts only the positional arguments in the message of a keyword-taking job" do
+      err = arity_errors("RangeKwJob.perform_later(1, 2, 3, k: 3)\n").first
+      expect(err).not_to be_nil
+      expect(err.message).to include("expects 1..2 argument(s), got 3")
+    end
+
+    it "accepts any arity for `def perform(...)`" do
+      expect(arity_errors("ForwardJob.perform_later(1, 2, 3, k: 1)\nForwardJob.perform_later\n")).to be_empty
+    end
+
+    it "declines a `*splat` argument on a job without keywords" do
+      expect(arity_errors("def go(list) = TwoJob.perform_later(*list)\n")).to be_empty
+    end
+
+    it "declines a `**opts` argument to a job without keywords when emptiness decides the verdict" do
+      expect(arity_errors("def go(opts) = NoArgsJob.perform_later(**opts)\n")).to be_empty
+    end
+
+    it "still reports a `**opts` group that cannot be empty or cannot change the verdict" do
+      source = "def go(opts)\n  NoArgsJob.perform_later(a: 1, **opts)\n  " \
+               "PositionalJob.perform_later('x', a: 1, **opts)\n  NoArgsJob.perform_later(1, **opts)\nend\n"
+      expect(arity_errors(source).size).to eq(3)
+    end
+
+    it "reports a missing positional next to a `**opts` argument for a keyword-taking job" do
+      err = arity_errors("def go(opts) = MixedJob.perform_later(**opts)\n").first
+      expect(err).not_to be_nil
+      expect(err.message).to include("expects 1 argument(s), got 0")
+    end
+
+    it "reports a missing positional next to keywords" do
+      expect(arity_errors("MixedJob.perform_later(force: true)\n")).not_to be_empty
+    end
+
+    it "treats `...` in `perform(a, ...)` as keyword-taking" do
+      expect(arity_errors("FwdJob.perform_later(k: 1)\n")).not_to be_empty
+      expect(arity_errors("FwdJob.perform_later(1, k: 1)\n")).to be_empty
+    end
+
+    it "counts parameters after an optional one as required positionals" do
+      expect(arity_errors("PostJob.perform_later(1, 2, 3)\nPostJob.perform_later(1, 2)\n")).to be_empty
+      expect(arity_errors("PostJob.perform_later(1)\n")).not_to be_empty
+    end
+
+    it "reports too few arguments for `perform(a, *rest, b)`" do
+      expect(arity_errors("PostRestJob.perform_later(1)\n")).not_to be_empty
+    end
+
+    it "declines a `...` forwarding argument" do
+      expect(arity_errors("def go(...) = TwoJob.perform_later(...)\n")).to be_empty
+    end
+  end
+
   describe "edge cases" do
     it "ignores `Job.perform_later` calls when `Job` is not in `app/jobs/`" do
       # `UnrelatedKlass.perform_later(1)` doesn't trigger a diagnostic — the plugin only validates calls whose

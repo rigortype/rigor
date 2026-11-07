@@ -277,6 +277,8 @@ A few things worth knowing if you have not used mise before:
 The gem is `rigortype`; the executable it installs (and the only
 command you run) is `rigor`.
 
+If the project's bundle lists `rbs`, the `rbs` that `gem:rigortype` puts on `PATH` can shadow the project's own; see the [install guide's note on `rbs` shadowing](../install.md#case-a--mise-is-available-recommended).
+
 ### Putting `rigor` on your PATH
 
 Installing the tool is not enough on its own — `rigor` reaches your

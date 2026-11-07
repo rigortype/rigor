@@ -170,6 +170,8 @@ bundle exec rbs collection install   # if rbs is in Gemfile
 # or: rbs collection install
 ```
 
+If `bundle exec rbs` runs an `rbs` that `gem:rigortype` put on `PATH` instead of the project's, see the [install guide's note on `rbs` shadowing](https://github.com/rigortype/rigor/blob/master/docs/install.md#case-a--mise-is-available-recommended).
+
 Re-run `rigor triage`. If the `gem-without-rbs` count drops, carry
 the new, smaller count into Phase 7.
 
@@ -397,7 +399,9 @@ information and Rigor has no built-in coverage. In order:
 
 1. `bundle exec rbs collection install` (bare `rbs collection install`
    if `rbs` is not in the project's Gemfile) — pulls community RBS for
-   the gem if it exists. Re-run triage afterwards.
+   the gem if it exists. Re-run triage afterwards. If `bundle exec rbs`
+   runs a `gem:rigortype` `rbs` instead of the project's, see the
+   [install guide's note on `rbs` shadowing](https://github.com/rigortype/rigor/blob/master/docs/install.md#case-a--mise-is-available-recommended).
 2. `dependencies.source_inference:` in `.rigor.dist.yml` — opt the
    gem into Rigor inferring `Dynamic`-typed returns from its source.
 3. If the gem is widely used and genuinely warrants first-class

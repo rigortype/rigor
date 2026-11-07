@@ -61,7 +61,7 @@ mise use gem:rigortype
 ```
 
 `mise use` records the chosen versions in a `mise.toml` in the
-current directory and installs them in one step. Verify:
+current directory and installs them in one step. Rails projects with Steep or `rbs_rails` list `rbs` in the bundle, and the `rbs` that `gem:rigortype` puts on `PATH` can shadow it; see the [install guide's note on `rbs` shadowing](../install.md#case-a--mise-is-available-recommended) before running `bundle exec rbs`. Verify:
 
 ```sh
 rigor --version

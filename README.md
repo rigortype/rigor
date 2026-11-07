@@ -20,6 +20,8 @@ rigor check app lib                  # find bugs in the code you already have
 global `-g` install keeps it off your project's pins. See
 [Get started](#get-started-in-one-prompt).)
 
+If your project's bundle also lists `rbs` (directly, or through Steep or `rbs_rails`), the `rbs` that `gem:rigortype` puts on `PATH` can shadow it; see the [install guide's note on `rbs` shadowing](docs/install.md#case-a--mise-is-available-recommended).
+
 No annotations required, no runtime dependency, no changes to your
 code — and any RBS you do add, Rigor reads and uses. Rigor parses Ruby
 with

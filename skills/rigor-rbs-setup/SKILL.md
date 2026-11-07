@@ -82,7 +82,9 @@ rbs --version            # or: bundle exec rbs --version
 If it is missing, add it to the project's development group
 (`bundle add rbs --group development`) or install it standalone
 (`gem install rbs`). Prefer `bundle exec rbs …` when `rbs` is in the
-Gemfile so it matches the project's resolved versions.
+Gemfile so it matches the project's resolved versions. If `bundle exec rbs`
+runs an `rbs` that a mise-installed `gem:rigortype` put on `PATH`, see the
+[install guide's note on `rbs` shadowing](https://github.com/rigortype/rigor/blob/master/docs/install.md#case-a--mise-is-available-recommended).
 
 ### Phase 3 — initialise the collection config (first time only)
 

@@ -2,6 +2,7 @@
 
 require "prism"
 
+require_relative "census_foreign_block"
 require_relative "receiver_writer_call"
 
 module Rigor
@@ -69,6 +70,7 @@ module Rigor
         when Prism::DefNode then remember(node.location, owner) if owner && node.receiver.nil?
         when Prism::SingletonClassNode then visit_singleton_class(node)
         when Prism::CallNode
+          bar_foreign_block(node)
           visit_call(node, owner) if WATCHED_CALLS.include?(node.name)
           record_receiver_writers(node, receiver_owner) if receiver_owner
         when Prism::InstanceVariableWriteNode, Prism::InstanceVariableOrWriteNode, Prism::InstanceVariableAndWriteNode,
@@ -118,6 +120,27 @@ module Rigor
         [:lit, node.is_a?(Prism::SymbolNode) ? text.to_sym : text.dup.freeze].freeze
       end
 
+      # Issue #2490 — a block inside an instance body whose `self` is another object ({CensusForeignBlock}) is
+      # remembered with no owner, so its writes credit nothing. Pre-order, so an instance body nested in it (an
+      # `E.define_method` block, remembered after) still answers for its own class.
+      def bar_foreign_block(node)
+        return if @instance_ranges.empty? || !CensusForeignBlock::CALLS.include?(node.name)
+
+        instance = instance_owner(node)
+        return unless instance && CensusForeignBlock.foreign?(node, owner_name(instance))
+
+        remember(node.block.location, nil)
+        remember_reentry(node, instance)
+      end
+
+      # The `define_method` blocks in a barred body that run on the instance again, remembered after the bar so they
+      # answer for the instance's class ({CensusForeignBlock.reentry_blocks}).
+      def remember_reentry(node, instance)
+        CensusForeignBlock.reentry_blocks(node, owner_name(instance)).each do |block|
+          remember(block.location, instance)
+        end
+      end
+
       # Issue #2488 — `E.attr_writer :w` declares a writer of `@w` on `E`, and `E.define_method(:m) { … }` installs an
       # instance body of `E`, wherever the call sits.
       def record_receiver_writers(node, class_name)
@@ -154,12 +177,19 @@ module Rigor
         end
       end
 
-      # `class << self` inside an instance `def` opens the instance's singleton class.
+      # `class << self` inside an instance `def` opens the instance's singleton class. Its body's `self` is that
+      # singleton class, so an `@x` write there is the singleton's own ivar (#2490), whatever the expression.
       def visit_singleton_class(node)
-        return unless node.expression.is_a?(Prism::SelfNode) && !@instance_ranges.empty?
+        return if @instance_ranges.empty?
 
         instance = instance_owner(node)
-        record_class(instance) if instance
+        return unless instance
+
+        record_class(instance) if node.expression.is_a?(Prism::SelfNode)
+        return unless node.body
+
+        remember(node.body.location, nil)
+        remember_reentry(node, instance)
       end
 
       def record_class(owner) = @census << [:ivar_set_class, owner_name(owner)].freeze

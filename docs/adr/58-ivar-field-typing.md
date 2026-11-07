@@ -689,6 +689,14 @@ instance method is credited to `K` (#2490). A module's own census takes
 no chain (#2487). The coordinator accepted the `nil` and String losses
 under ADR-5; the maintainer ratified them on 2026-10-30.
 
+> **Partially superseded by
+> [`docs/internal-spec/inference-engine.md`](../internal-spec/inference-engine.md)
+> § Slice 7 phase 2 (#2490).** A write directly in code whose `self` is
+> provably another object (`Other.new.instance_eval { … }`, `Class.new { … }`,
+> `X.class_eval { … }`, `class << obj`) is no longer credited to `K`, in this
+> file's census or another file's. An untyped receiver
+> (`other.instance_eval`) keeps the credit.
+
 ### Amendment, 2026-10-29 — empty seeds are not proof of emptiness (#2499)
 
 **Status: accepted** (ratified 2026-10-30; recorded in [#2500](https://github.com/rigortype/rigor/pull/2500)).

@@ -129,16 +129,16 @@ RSpec.describe "the ADR-58 ivar census counts define_method block writes" do
       end
     end
 
-    # Ruby writes these on another object, so `@x` stays nil on Box's instance; the census still counts them, which
-    # widens the type and only misses a report (#2166). Flip this when #2166 is fixed.
+    # Ruby writes these on another object, so `@x` stays nil on Box's instance, and the census does not count them
+    # (#2166, #2490).
     {
       "an instance_exec on another object" => %(Object.new.instance_exec { @x = "a" }),
       "a Class.new body" => %(Class.new { @x = "a" }),
       "a Struct.new block" => %(Struct.new(:a) { @x = "a" }),
       "a Data.define block" => %(Data.define(:a) { @x = "a" })
     }.each do |shape, inner|
-      it "still counts a write in #{shape} inside a define_method block" do
-        expect(census(box(%(define_method(:set) { #{inner} })))).to eq(%("a"?))
+      it "does not count a write in #{shape} inside a define_method block" do
+        expect(census(box(%(define_method(:set) { #{inner} })))).to eq("nil")
       end
     end
 

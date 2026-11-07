@@ -17,6 +17,7 @@ require_relative "../typing_state"
 require_relative "../memo_audit"
 require_relative "../analysis/check_rules/published_constant_guard"
 require_relative "anonymous_meta_class"
+require_relative "census_foreign_block"
 require_relative "def_handle"
 require_relative "definers_index"
 require_relative "fresh_frame_blocks"
@@ -1135,7 +1136,7 @@ module Rigor
 
         seen_writes = Set.new
         read_first = Set.new
-        detect_read_before_write(block_node.body, seen_writes, read_first)
+        detect_read_before_write(block_node.body, seen_writes, read_first, class_name)
         init_set = (init_writes[class_name] ||= Set.new)
         seen_writes.each { |name| init_set << name }
       end
@@ -1266,7 +1267,7 @@ module Rigor
 
         seen_writes = Set.new
         read_first = Set.new
-        detect_read_before_write(def_node.body, seen_writes, read_first)
+        detect_read_before_write(def_node.body, seen_writes, read_first, class_name)
 
         # ADR-38 — `initialize` is the built-in initializer gate; a plugin may declare additional `def`-form initializer
         # methods (minitest `setup`, Rails `after_initialize`, DI setters) on a constrained class. Both fold their
@@ -1381,7 +1382,7 @@ module Rigor
         )
       end
 
-      def detect_read_before_write(node, seen_writes, read_first)
+      def detect_read_before_write(node, seen_writes, read_first, class_name = nil)
         return unless node.is_a?(Prism::Node)
         return if IVAR_BARRIER_NODES.any? { |klass| node.is_a?(klass) }
 
@@ -1395,16 +1396,17 @@ module Rigor
         # target is committed, so descend into `value` FIRST (an ivar read there is read-before-write), then mark every
         # ivar target as written.
         if node.is_a?(Prism::MultiWriteNode)
-          detect_read_before_write(node.value, seen_writes, read_first) if node.value
-          detect_multi_write_target_writes(node, seen_writes, read_first)
+          detect_read_before_write(node.value, seen_writes, read_first, class_name) if node.value
+          detect_multi_write_target_writes(node, seen_writes, read_first, class_name)
           return
         end
 
         # Descend BEFORE recording a write — `@x = @x + 1`'s RHS is an `InstanceVariableReadNode` that runs before the
         # write is committed; the read is therefore read-before-write semantically. `each_child` yields the value
         # child before the lvalue target (`compact_child_nodes` field order), matching this order.
-        node.rigor_each_child do |c|
-          detect_read_before_write(c, seen_writes, read_first)
+        # #2490 — what a block whose `self` is another object reads or writes is that object's.
+        each_census_child(node, class_name) do |c|
+          detect_read_before_write(c, seen_writes, read_first, class_name)
         end
 
         seen_writes << node.name if IVAR_WRITE_NODES.any? { |klass| node.is_a?(klass) }
@@ -1416,25 +1418,49 @@ module Rigor
       # Records each ivar target of a `MultiWriteNode` / nested `MultiTargetNode` into `seen_writes`, and descends into
       # any non-ivar target (a `CallTargetNode` / `IndexTargetNode` receiver such as `@obj.x, @y = …`) so an ivar read
       # inside a target receiver still counts as read-before-write.
-      def detect_multi_write_target_writes(node, seen_writes, read_first)
+      def detect_multi_write_target_writes(node, seen_writes, read_first, class_name = nil)
         targets = (node.lefts || []) + [node.rest].compact + (node.rights || [])
         targets.each do |target|
           case target
           when Prism::InstanceVariableTargetNode
             seen_writes << target.name
           when Prism::MultiTargetNode
-            detect_multi_write_target_writes(target, seen_writes, read_first)
+            detect_multi_write_target_writes(target, seen_writes, read_first, class_name)
           when Prism::SplatNode
             inner = target.expression
             seen_writes << inner.name if inner.is_a?(Prism::InstanceVariableTargetNode)
           else
-            detect_read_before_write(target, seen_writes, read_first)
+            detect_read_before_write(target, seen_writes, read_first, class_name)
           end
         end
       end
 
       IVAR_BARRIER_NODES = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode].freeze
       private_constant :IVAR_BARRIER_NODES
+
+      # Issue #2490 — yields the children of `node` a census walk for `class_name` descends into: all of them, or only
+      # those {#foreign_self_children} keeps. A nil `class_name` keeps them all.
+      def each_census_child(node, class_name, &)
+        outside = class_name && foreign_self_children(node, class_name)
+        return outside.each(&) if outside
+
+        node.rigor_each_child(&)
+      end
+
+      # Issue #2490 — the children of `node` still to walk for `class_name`'s census when `node` runs code whose
+      # `self` is another object, or nil for an ordinary node: a {CensusForeignBlock} call keeps its receiver and
+      # arguments, and a `class << obj` its expression; both keep the `define_method` blocks nested in them that run
+      # on a `class_name` instance again ({CensusForeignBlock.reentry_blocks}).
+      def foreign_self_children(node, class_name)
+        case node
+        when Prism::SingletonClassNode
+          [node.expression, *CensusForeignBlock.reentry_blocks(node, class_name)]
+        when Prism::CallNode
+          return nil unless CensusForeignBlock.foreign?(node, class_name)
+
+          [node.receiver, node.arguments, *CensusForeignBlock.reentry_blocks(node, class_name)].compact
+        end
+      end
 
       EMPTY_GUARDED_IVARS = Set.new.freeze
 
@@ -1481,7 +1507,8 @@ module Rigor
           return
         end
 
-        node.rigor_each_child do |c|
+        # #2490 — a block or `class <<` body whose `self` is another object writes that object's ivars.
+        each_census_child(node, class_name) do |c|
           gather_ivar_writes(c, scope, class_name, accumulator, guarded_ivars, mutated_ivars, dead_writes, declared)
         end
       end

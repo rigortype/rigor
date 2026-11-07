@@ -32,7 +32,7 @@ module Rigor
       # {NON_COLUMN_METHODS} (indexes, constraints, foreign keys) are skipped.
       #
       # `create_table "x", primary_key: "name"` adds that column, typed from the `id:` option. The `id` column
-      # stays registered; `id: false` removes it and adds neither.
+      # stays registered; `id: false` or `id: nil` removes it and adds neither.
       #
       # Designed for the Prism interpretation pattern from rigor-lisp-eval — recursive descent on the AST,
       # no eval.
@@ -100,20 +100,21 @@ module Rigor
         end
 
         def id_disabled?(call_node)
-          keyword_value(call_node, :id).is_a?(Prism::FalseNode)
+          id = keyword_value(call_node, :id)
+          id.is_a?(Prism::FalseNode) || id.is_a?(Prism::NilNode)
         end
 
         # `create_table "settings", primary_key: "name", id: { type: :string }` creates the column `name`
         # without the block declaring it, so the option is the only place the schema names it.
         def named_primary_key_column(call_node)
-          id = keyword_value(call_node, :id)
-          return nil if id.is_a?(Prism::FalseNode) || id.is_a?(Prism::NilNode)
+          return nil if id_disabled?(call_node) || keyword_value(call_node, :as)
 
           name = literal_name(keyword_value(call_node, :primary_key))
           return nil if name.nil?
 
+          id = keyword_value(call_node, :id)
           options = id.is_a?(Prism::HashNode) ? id.elements : []
-          type = primary_key_type(id, options)
+          type = primary_key_options_read?(call_node, options) ? primary_key_type(id, options) : UNKNOWN_PRIMARY_KEY_TYPE
           SchemaTable::Column.new(
             name: name,
             type: type,
@@ -129,6 +130,15 @@ module Rigor
           return DEFAULT_PRIMARY_KEY_TYPE if declared.nil?
 
           literal_name(declared)&.to_sym || UNKNOWN_PRIMARY_KEY_TYPE
+        end
+
+        # A splat may hold `id:` or `type:`, and a non-literal `array:` decides the reader's shape, so a call
+        # that has either does not say what the key's type is.
+        def primary_key_options_read?(call_node, options)
+          keywords = call_node.arguments.arguments.grep(Prism::KeywordHashNode).flat_map(&:elements)
+          array = keyword_in(options, :array)
+          [*keywords, *options].all?(Prism::AssocNode) &&
+            (array.nil? || array.is_a?(Prism::TrueNode) || array.is_a?(Prism::FalseNode))
         end
 
         # A decimal key reads as Integer at scale 0 (`Type::DecimalWithoutScale`) and BigDecimal otherwise.

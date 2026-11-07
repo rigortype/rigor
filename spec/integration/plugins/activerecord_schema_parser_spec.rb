@@ -77,8 +77,28 @@ RSpec.describe "plugins/rigor-activerecord SchemaParser" do
       expect(table.column("items", "code").ruby_type).to eq("Object")
     end
 
+    it "leaves the key untyped when the id: hash has a splat" do
+      table = parse(%(create_table "items", primary_key: "code", id: { **ID_OPTIONS } do |t|\nend\n))
+      expect(table.column("items", "code").ruby_type).to eq("Object")
+    end
+
+    it "leaves the key untyped when the call has a splat that may hold id:" do
+      table = parse(%(create_table "items", primary_key: "code", **TABLE_OPTIONS do |t|\nend\n))
+      expect(table.column("items", "code").ruby_type).to eq("Object")
+    end
+
+    it "leaves the key untyped when array: is not a literal" do
+      table = parse(%(create_table "items", primary_key: "tags", id: { type: :string, array: FLAG } do |t|\nend\n))
+      expect(table.column("items", "tags").ruby_type).to eq("Object")
+    end
+
     it "adds nothing when id: nil creates no primary key column" do
-      table = parse(%(create_table "items", primary_key: "code", id: nil do |t|\nend\n))
+      table = parse(%(create_table "items", primary_key: "code", id: nil do |t|\n  t.text "value"\nend\n))
+      expect(table.columns_for("items").map(&:name)).to eq(["value"])
+    end
+
+    it "adds nothing when as: makes the query define the columns" do
+      table = parse(%(create_table "items", primary_key: "code", as: "SELECT 1 AS other"\n))
       expect(table.column("items", "code")).to be_nil
     end
 

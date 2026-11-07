@@ -47,7 +47,7 @@ module Rigor
     # Answers a {Trinary}: `yes` when an entry's RBS declares the method, `no` when none does and the chain was
     # not truncated, `maybe` when the chain was cut at its budget (ADR-41 WD4) before one did. `kind:` is
     # `:instance` or `:singleton`; a `nil` `class_name` answers `no`.
-    def external_method_defined(class_name, method_name, kind:, scope:)
+    def rbs_method_defined(class_name, method_name, kind:, scope:)
       chain = ancestry_chain(class_name, kind, scope)
       return Trinary.no if chain.nil?
 
@@ -60,7 +60,7 @@ module Rigor
     # Does the project ancestry of `class_name` reach any of `ancestor_names` (qualified names, a leading `::`
     # ignored)? An external ancestor counts by any candidate spelling, so a superclass the project names but
     # does not declare (`ActionController::Base`, with no RBS loaded) is found. Same `Trinary` and `kind:` as
-    # {.external_method_defined}.
+    # {.rbs_method_defined}.
     def ancestry_reaches(class_name, ancestor_names, kind:, scope:)
       chain = ancestry_chain(class_name, kind, scope)
       return Trinary.no if chain.nil?

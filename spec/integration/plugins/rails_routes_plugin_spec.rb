@@ -722,7 +722,7 @@ RSpec.describe "plugins/rigor-rails-routes" do
 
     def unknown_helpers(files, paths:, signature_paths: nil)
       result = run_plugin(source: "", files: routes.merge(files), paths: paths, signature_paths: signature_paths)
-      plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }.map(&:message)
+      plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }.map { |d| d.message.sub(/ \(did you mean.*\)\z/, "") }
     end
 
     it "stays quiet on an `attr_reader` name, including the hash shorthand" do
@@ -910,14 +910,14 @@ RSpec.describe "plugins/rigor-rails-routes" do
       expect(unknown_helpers(files, paths: ["app/libs/other.rb"])).to eq(["no route helper `shared_name_url`"])
     end
 
-    it "resolves a method defined in `class << self` from a method of the same body" do
+    it "resolves an attr_reader declared in `class << self` from a method of the same body" do
       files = {
         "app/libs/message.rb" => <<~RUBY
           class Message
             class << self
-              def base_url = "x"
+              attr_reader :sbase_url
 
-              def go = base_url
+              def go = sbase_url
             end
           end
         RUBY
@@ -952,6 +952,46 @@ RSpec.describe "plugins/rigor-rails-routes" do
     it "declines for a class whose name is dynamic" do
       files = { "app/libs/dyn.rb" => "class some_call::Bar\n  def go = missing_thing_path\nend\n" }
       expect(unknown_helpers(files, paths: ["app/libs/dyn.rb"])).to be_empty
+    end
+
+    it "tries the root spelling of a compact `class A::B` declaration" do
+      files = {
+        "app/libs/a_b.rb" => <<~RUBY
+          module A
+            class B
+              attr_reader :root_b_url
+            end
+          end
+
+          module Outer
+            class A::B
+              def go = root_b_url
+            end
+          end
+        RUBY
+      }
+      expect(unknown_helpers(files, paths: ["app/libs/a_b.rb"])).to be_empty
+    end
+
+    it "stays quiet on edit_polymorphic_url in a mailer, whose UrlFor includes PolymorphicRoutes" do
+      files = { "app/mailers/user_mailer.rb" => "class UserMailer < ActionMailer::Base\n  def p = edit_polymorphic_url(1)\nend\n" }
+      expect(unknown_helpers(files, paths: ["app/mailers/user_mailer.rb"])).to be_empty
+    end
+
+    {
+      "ActionController::API" => "helpers_path",
+      "ActionController::Metal" => "append_view_path",
+      "ActionMailer::Base" => "helpers_path"
+    }.each do |base, name|
+      it "still reports `#{name}` in a class of #{base}, which does not define it" do
+        files = { "app/libs/thing.rb" => "class Thing < #{base}\n  def go = #{name}\nend\n" }
+        expect(unknown_helpers(files, paths: ["app/libs/thing.rb"])).to eq(["no route helper `#{name}`"])
+      end
+    end
+
+    it "still reports edit_polymorphic_url in a class of ActionController::Metal" do
+      files = { "app/libs/thing.rb" => "class Thing < ActionController::Metal\n  def go = edit_polymorphic_url(1)\nend\n" }
+      expect(unknown_helpers(files, paths: ["app/libs/thing.rb"])).to eq(["no route helper `edit_polymorphic_url`"])
     end
 
     it "stays quiet on a singleton method RBS declares on a superclass" do

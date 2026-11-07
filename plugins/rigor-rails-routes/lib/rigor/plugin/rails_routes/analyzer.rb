@@ -120,7 +120,7 @@ module Rigor
         def resolves_on?(class_name, name, kind, scope)
           return true unless Rigor::Reflection.project_method_defined(class_name, name, kind: kind, source: :either,
                                                                                         scope: scope).no?
-          return true unless Rigor::Reflection.external_method_defined(class_name, name, kind: kind, scope: scope).no?
+          return true unless Rigor::Reflection.rbs_method_defined(class_name, name, kind: kind, scope: scope).no?
 
           bases = FRAMEWORK_METHODS[name]
           !bases.nil? && !Rigor::Reflection.ancestry_reaches(class_name, bases, kind: kind, scope: scope).no?
@@ -143,13 +143,15 @@ module Rigor
         #   `ActionController::Base` (base.rb:273).
         # - `edit_` / `new_` `polymorphic_path` / `polymorphic_url`: actionpack/lib/action_dispatch/routing/
         #   polymorphic_routes.rb:163-166, through `UrlFor` in `ActionController::Base` (base.rb:274) and `::API`
-        #   (api.rb:117). (`polymorphic_path` / `polymorphic_url` are in {BUILTIN_PASSTHROUGH}.)
+        #   (api.rb:117), and in `ActionMailer::Base`, which actionmailer/lib/action_mailer/railtie.rb:40
+        #   includes `AbstractController::UrlFor` into, whose `ActionDispatch::Routing::UrlFor` includes
+        #   `PolymorphicRoutes` (action_dispatch/routing/url_for.rb:92). (`polymorphic_path` / `polymorphic_url` are in {BUILTIN_PASSTHROUGH}.)
         FRAMEWORK_CONTROLLERS = %w[
           AbstractController::Base ActionController::Metal ActionController::Base ActionController::API
           ActionMailer::Base
         ].freeze
         VIEW_PATH_BASES = %w[ActionController::Base ActionController::API ActionMailer::Base].freeze
-        URL_FOR_BASES = %w[ActionController::Base ActionController::API].freeze
+        URL_FOR_BASES = %w[ActionController::Base ActionController::API ActionMailer::Base].freeze
         FRAMEWORK_METHODS = {
           "controller_path" => FRAMEWORK_CONTROLLERS,
           "append_view_path" => VIEW_PATH_BASES,

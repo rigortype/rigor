@@ -20,7 +20,7 @@ module Rigor
     def self?.discovered_class?: (String | Symbol class_name, ?scope: Scope) -> bool
     def self?.discovered_method?: (String | Symbol class_name, String | Symbol method_name, ?kind: Symbol, ?scope: Scope) -> bool
     def self?.project_method_defined: (String | Symbol? class_name, String | Symbol method_name, kind: :instance | :singleton, source: :def | :discovered | :either, scope: Scope) -> Trinary
-    def self?.external_method_defined: (String | Symbol? class_name, String | Symbol method_name, kind: :instance | :singleton, scope: Scope) -> Trinary
+    def self?.rbs_method_defined: (String | Symbol? class_name, String | Symbol method_name, kind: :instance | :singleton, scope: Scope) -> Trinary
     def self?.ancestry_reaches: (String | Symbol? class_name, Array[String | Symbol] ancestor_names, kind: :instance | :singleton, scope: Scope) -> Trinary
     # sig-gen gap: #2302 — the collector's `@classes = []` is grown by `<<`, so sig-gen reads the array as `Array[untyped]`.
     def self?.class_declarations_in: (Prism::Node root) ?{ (DeclaredCall call) -> void } -> Array[ClassDeclaration]

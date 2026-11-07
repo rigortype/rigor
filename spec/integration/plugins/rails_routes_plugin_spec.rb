@@ -795,7 +795,7 @@ RSpec.describe "plugins/rigor-rails-routes" do
         "sig/framework.rbs" => <<~RBS,
           module AbstractController
             class Base
-              def controller_path: () -> String
+              def inherited_home_path: () -> String
             end
           end
 
@@ -807,7 +807,7 @@ RSpec.describe "plugins/rigor-rails-routes" do
         "app/controllers/articles_controller.rb" => <<~RUBY
           class ArticlesController < ActionController::Base
             def cache_key
-              controller_path
+              inherited_home_path
             end
           end
         RUBY

@@ -2,3 +2,4 @@
   - `rbs collection install` writes these entries for a collection gem's stdlib dependencies (actionview and railties 8.1 depend on `ripper`), and Rigor used to skip them.
   - A signature subclassing such a library (`class NodeParser < ::Ripper`) failed with `RBS::NoSuperclassFoundError` and read `Dynamic[top]`, so typos on it went unreported; it now builds.
   - An entry naming a library rbs does not ship is skipped, like an unknown `libraries:` name.
+  - A project that stubbed such a library by hand in its `sig/` must remove the stub when it declares a method the library also declares (`class Ripper` with `def parse: …`): the real library now loads beside it, and the duplicate method fails the class's build, as in `rbs validate`.

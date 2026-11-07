@@ -47,6 +47,26 @@ RSpec.describe Rigor::Environment::RbsCollectionDiscovery do
     it "returns [] when no lockfile resolves" do
       expect(described_class.stdlib_library_names(lockfile_path: nil, project_root: tmpdir)).to eq([])
     end
+
+    # ADR-5 — a malformed entry is skipped, never raised out of the run.
+    it "skips an entry whose source: is a scalar, keeping the rest" do
+      body = "gems:\n- { name: ripper, version: '0', source: stdlib }\n" \
+             "- { name: net-protocol, version: '0', source: { type: stdlib } }\n"
+      path = write_lockfile(body)
+
+      names = described_class.stdlib_library_names(lockfile_path: path, project_root: tmpdir, auto_detect: false)
+      expect(names).to eq(%w[net-protocol])
+    end
+  end
+
+  describe ".discover with a malformed source:" do
+    it "admits an entry whose source: is a scalar when its directory exists" do
+      make_collection(File.join(tmpdir, ".gem_rbs_collection"), ["rack", "3.0"])
+      path = write_lockfile("gems:\n- { name: rack, version: '3.0', source: git }\n")
+
+      result = described_class.discover(lockfile_path: path, project_root: tmpdir, auto_detect: false)
+      expect(result.map { |p| p.parent.basename.to_s }).to eq(["rack"])
+    end
   end
 
   describe ".discover with explicit lockfile_path" do

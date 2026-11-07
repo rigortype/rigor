@@ -59,6 +59,15 @@ RSpec.describe "rbs collection lockfile stdlib entries" do
     expect(inherited_parse(rbs_loader)).not_to be_nil
   end
 
+  it "reads the lockfile under root:, not the working directory" do
+    FileUtils.mkdir_p("proj")
+    FileUtils.cp_r("sig", "proj")
+    Dir.chdir("proj") { write_lockfile("ripper") }
+    rbs_loader = Rigor::Environment.for_project(root: File.expand_path("proj"), rbs_collection_auto_detect: true)
+                                   .rbs_loader
+    expect(rbs_loader.libraries).to include("ripper")
+  end
+
   it "skips an unknown stdlib entry without failing the build" do
     write_lockfile("this_stdlib_does_not_exist_xyz", "ripper")
     expect(inherited_parse(loader)).not_to be_nil

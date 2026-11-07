@@ -95,7 +95,7 @@ module Rigor
         return [] if data.nil?
 
         Array(data["gems"]).filter_map do |entry|
-          next unless entry.is_a?(Hash) && SKIPPED_SOURCE_TYPES.include?(entry.dig("source", "type").to_s)
+          next unless entry.is_a?(Hash) && SKIPPED_SOURCE_TYPES.include?(source_type(entry))
 
           name = entry["name"]
           name.to_s if name.is_a?(String) && !name.empty?
@@ -135,12 +135,19 @@ module Rigor
       end
       private_class_method :resolve_collection_root
 
+      # An entry's `source.type`, or "" when `source:` is absent or not a mapping (`source: stdlib`): a malformed
+      # entry fails soft (ADR-5) instead of raising out of the run.
+      def self.source_type(entry)
+        source = entry["source"]
+        source.is_a?(Hash) ? source["type"].to_s : ""
+      end
+      private_class_method :source_type
+
       def self.gem_paths_from(collection_root, data, skip_gem_names)
         Array(data["gems"]).filter_map do |entry|
           next unless entry.is_a?(Hash)
 
-          source_type = entry.dig("source", "type").to_s
-          next if SKIPPED_SOURCE_TYPES.include?(source_type)
+          next if SKIPPED_SOURCE_TYPES.include?(source_type(entry))
 
           name = entry["name"]
           version = entry["version"]

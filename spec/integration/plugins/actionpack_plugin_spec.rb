@@ -262,9 +262,9 @@ RSpec.describe "plugins/rigor-actionpack" do
     end
 
     it "keeps `expect` / `slice` chained off `params` typed as Parameters (#534, #2947)" do
-      # `expect` is the gradual carrier (it may return a scalar, #2947); `slice` always returns a
-      # Parameters, and so does the `slice` hop off the carrier. `[]` is deliberately absent — see the
-      # control below.
+      # `expect` is the gradual carrier (it may return a scalar, #2947); `slice` on `params` itself always
+      # returns a Parameters, but `slice` off a carrier may be String#slice or Array#slice, so it stays the
+      # carrier. `[]` is deliberately absent — see the control below.
       source = <<~RUBY
         class C
           def create
@@ -278,7 +278,8 @@ RSpec.describe "plugins/rigor-actionpack" do
         dumps = result.diagnostics.select { |d| d.rule == "dump.type" }.map(&:message)
         expect(dumps.size).to eq(3)
         expect(dumps).to all(include("ActionController::Parameters"))
-        expect(dumps[1..]).to all(satisfy { |m| !m.include?("Dynamic[") })
+        expect(dumps[1]).not_to include("Dynamic[")
+        expect(dumps[2]).to include("Dynamic[ActionController::Parameters]")
       end
     end
 
@@ -525,6 +526,28 @@ RSpec.describe "plugins/rigor-actionpack" do
           messages = undefined_methods(result)
           expect(messages.size).to eq(1)
           expect(messages.first).to include("no_such_method")
+        end
+      end
+
+      it "is silent on Array / String methods that share a chain name, called on a carrier" do
+        probe = <<~RUBY
+          class C
+            def index
+              params[:ids].compact.first
+              params[:name].slice(0, 3).upcase
+              params.require(:ids).compact.size
+              params.expect(ids: []).slice(0, 2).first
+              params[:tags].without("x").join(",")
+              params[:tags].compact_blank.join(",")
+              params[:tags].deep_dup.first
+              params[:tags].extract! { |t| t }.first
+            end
+          end
+        RUBY
+        [{ "parameters.rbs" => PARAMETERS_EXPECT_SIG }, {}].each do |signatures|
+          with_demo(probe, signatures: signatures) do |result|
+            expect(undefined_methods(result)).to be_empty
+          end
         end
       end
 

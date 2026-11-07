@@ -1,0 +1,1 @@
+- **[rigor-activerecord]** `create_table`'s `primary_key: "name"` now registers that column, so a query on it, or on an `alias_attribute` targeting it, no longer reports `unknown-column`. ([#2951](https://github.com/rigortype/rigor/pull/2951))

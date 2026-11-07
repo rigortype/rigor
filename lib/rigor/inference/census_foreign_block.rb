@@ -109,8 +109,11 @@ module Rigor
       def collect_define_method_blocks(node, found)
         return unless node.is_a?(Prism::Node)
         return if BARRIERS.any? { |klass| node.is_a?(klass) }
-        return found << node.block if define_method_call?(node)
-        return if node.is_a?(Prism::CallNode) && node.block.is_a?(Prism::BlockNode) && CALLS.include?(node.name)
+
+        if node.is_a?(Prism::CallNode)
+          return found << node.block if define_method_call?(node)
+          return if node.block.is_a?(Prism::BlockNode) && CALLS.include?(node.name)
+        end
 
         node.rigor_each_child { |child| collect_define_method_blocks(child, found) }
       end

@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
-# ADR-129 stage 3 — reads the reports `RIGOR_TYPE_OF_SHADOW_REPORT` collected, one file per analysis run and one JSON
-# line per process, and judges them as G1's stage-3 gate. It fails when a report file is missing or holds no line, when
-# a line does not parse, when a run checked no would-be hit (a run that shadowed nothing proves nothing, so each file is
-# held to this on its own), or when any mismatch was found. Prints the totals per phase, the stale misses by slot and
-# the first mismatch samples, and appends the same to `$GITHUB_STEP_SUMMARY` when CI sets it.
+# ADR-129 — reads the reports `RIGOR_TYPE_OF_SHADOW_REPORT` collected, one file per analysis run and one JSON line per
+# process, and judges them as G1's gate (stage-3 shadow or stage-4 serve form). It fails when a report file is missing
+# or holds no line, when a line does not parse, when a run checked no would-be hit (a run that shadowed nothing proves
+# nothing, so each file is held to this on its own), or when any mismatch was found. Prints the totals per phase, the
+# stale misses by slot and the first mismatch samples, and appends the same to `$GITHUB_STEP_SUMMARY` when CI sets it.
 #
 # `--status NAME=STATUS:MAX` records a run's exit status: above MAX (a crash, or `lib` not clean) is a failure, so a run
 # that died before writing its report still shows in the summary.
@@ -51,7 +51,7 @@ checked = counts.sum { |_, counters| counters["checked"] }
 mismatches = counts.sum { |_, counters| counters["mismatch"] }
 failures << "#{mismatches} mismatch(es)" if mismatches.positive?
 
-out = ["### ADR-129 type_of shadow (G1, stage 3)", ""]
+out = ["### ADR-129 type_of shadow (G1)", ""]
 counts.sort.each do |phase, counters|
   out << "- #{phase}: #{counters.sort.map { |name, n| "#{name}=#{n}" }.join(' ')}"
 end

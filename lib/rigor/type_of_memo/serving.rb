@@ -42,8 +42,7 @@ module Rigor
         state.truncate_journal(mark)
         kinds = []
         kinds << :revalidate if state.stale_read(reads)
-        state.merge_reads(reads)
-        state.replay(writes)
+        apply(state, reads, writes, stored)
         served(state, phase, scope, node, kinds, stored, fresh, live)
         stored
       rescue StandardError => e

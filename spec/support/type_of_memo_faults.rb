@@ -138,6 +138,18 @@ module TypeOfMemoFaults
         raise
       end
     end
+
+    # store_raised, on the live store.
+    def compute_live(state, table, scope, node, id)
+      return super unless TypeOfMemoFaults.on?(:store_raised)
+
+      begin
+        super
+      rescue StandardError
+        table.live_store(scope, node, id, [nil, [].freeze, [].freeze].freeze)
+        raise
+      end
+    end
   end
 
   # elide_unsound: the ELIDE id (ADR-129 WD2, `RIGOR_TYPE_OF_SHADOW_ELIDE=1`) stays put across every install, not only

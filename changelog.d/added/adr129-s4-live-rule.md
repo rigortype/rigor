@@ -1,0 +1,1 @@
+- **[engine]** `RIGOR_TYPE_OF_MEMO=rule` serves ADR-129's `type_of` result memo in the rule walk, and `RIGOR_TYPE_OF_SHADOW=serve` runs the memo's stage-4 audit from the CLI; both are off by default. ([#2889](https://github.com/rigortype/rigor/pull/2889))

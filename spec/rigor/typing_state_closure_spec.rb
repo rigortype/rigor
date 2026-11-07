@@ -93,6 +93,11 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
       lib/rigor/scope.rb
       lib/rigor/scope/resolution_chain.rb
       lib/rigor/type_of_memo.rb
+      lib/rigor/type_of_memo/checking.rb
+      lib/rigor/type_of_memo/live.rb
+      lib/rigor/type_of_memo/serving.rb
+      lib/rigor/type_of_memo/stats.rb
+      lib/rigor/type_of_memo/table.rb
       lib/rigor/typing_state.rb
     ]
   end
@@ -134,11 +139,11 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
       ["lib/rigor/memo_audit.rb", :module_ivar_write, "@enabled"] =>
         [3, "MemoAudit's process switch (ADR-129 WD5)"],
       ["lib/rigor/type_of_memo.rb", :module_ivar_write, "@enabled"] =>
-        [3, "the stage-3 type_of shadow's process switch (ADR-129 WD5, G1)"],
+        [3, "the type_of memo's process switch: off, live, G1's shadow or its stage-4 form (ADR-129 WD5, WD6)"],
       ["lib/rigor/type_of_memo.rb", :module_ivar_write, "@stats"] =>
-        [1, "the stage-3 type_of shadow's process counters and mismatch samples (ADR-129 WD5, G1), never read back"],
+        [1, "the type_of memo's process counters and mismatch samples (ADR-129 WD5, G1), never read back"],
       ["lib/rigor/type_of_memo.rb", :module_ivar_mutation, "@stats"] =>
-        [6, "the stage-3 type_of shadow's process counters, counted and read for its report, never read into a type"]
+        [6, "the type_of memo's process counters, counted and read for its report, never read into a type"]
     }.merge(activation_count_rows)
   end
 

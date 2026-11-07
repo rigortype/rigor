@@ -5,23 +5,29 @@ require "prism"
 require_relative "typing_state"
 require_relative "memo_audit"
 require_relative "type_of_memo/stats"
+require_relative "type_of_memo/table"
+require_relative "type_of_memo/checking"
 require_relative "type_of_memo/serving"
+require_relative "type_of_memo/live"
 
 module Rigor
-  # ADR-129 stage 3 — the `ExpressionTyper#type_of` result memo in **shadow** form (WD5's G1, stage-3 form). It keys a
-  # computation on `(scope identity, node identity, state id)` (WD2), opens a journal capture around it, and stores
-  # what an unrefused computation read and wrote (WD3). It never serves anything: on a would-be hit, an entry whose read
-  # slice still holds, production computes as usual inside a priors window, and G1 checks afterwards that
+  # ADR-129 — the `ExpressionTyper#type_of` result memo. It keys a computation on `(scope identity, node identity, state
+  # id)` (WD2), opens a journal capture around it, and stores what an unrefused computation read and wrote (WD3).
+  #
+  # Live (stage 4, {Live}), it serves its hits in the rule walk. In **shadow** form (stage 3, WD5's G1 stage-3 form),
+  # it serves nothing: on a would-be hit, an entry whose read slice still holds, production computes as usual inside a
+  # priors window, and G1 checks afterwards that
   # - the type equals the entry's;
   # - the live tables equal their pre-computation state with the entry's write slice replayed;
   # - the live computation touched no Resource.
   # A read slice that no longer holds is a miss, not a mismatch, counted by the slots whose reads went stale, which
   # measures what the journal costs in hits (#2853 for the set-only Tables). Output is production's by construction.
   #
-  # Like {MemoAudit}, a process switch (`RIGOR_TYPE_OF_SHADOW=1`, read once at load, or {enable!}), a single boolean
-  # check when off. With `RIGOR_TYPE_OF_SHADOW_REPORT=path`, each process appends one JSON line of its counters and
-  # mismatch samples to `path` when it exits. The memo is shut while a tracer is attached or a typer carries
-  # instance state (`@tracer`, `@operand_types`: WD1's bypass), and leaf nodes are never stored (WD3).
+  # Like {MemoAudit}, a process switch (`RIGOR_TYPE_OF_MEMO=rule` or `RIGOR_TYPE_OF_SHADOW=1|serve|serve-live`, read
+  # once at load, or {enable!}), a single boolean check when off. With `RIGOR_TYPE_OF_SHADOW_REPORT=path`, each process
+  # appends one JSON line of its counters and mismatch samples to `path` when it exits. The memo is shut while a tracer
+  # is attached or a typer carries instance state (`@tracer`, `@operand_types`: WD1's bypass), and leaf nodes are never
+  # stored (WD3).
   module TypeOfMemo
     # ADR-129 WD4 — the per-file table, a Memo by kind: entries keyed on the state id, which carries every Frame
     # (WD2), and checked by G1 rather than by `MemoAudit.check` (its hits recompute in production already).
@@ -47,38 +53,46 @@ module Rigor
     SAMPLE_LIMIT = 50
     private_constant :SAMPLE_LIMIT
 
-    # One file's entries, `scope => node => state id => entry`, and the phase its analysis is in.
-    class Table
-      attr_accessor :phase
-      attr_reader :entries
-
-      # Whether the table keys on the ELIDE id ({TypingState::ElideId}) rather than the state id.
-      attr_reader :elide
-
-      # Recomputations of G1's stage-4 form open on this table ({TypeOfMemo.enable!} with `:serve`), during which the
-      # memo is suspended.
-      attr_accessor :suspended
-
-      def initialize(elide: false, phase: :other)
-        @entries = {}.compare_by_identity
-        @phase = phase
-        @elide = elide
-        @suspended = 0
+    # The mode: false (off), true (the stage-3 shadow), `:serve` (G1's stage-4 form, every phase), `:live_serve` (G1's
+    # stage-4 form over the live configuration), or live (stage 4: the memo serves in the rule walk), `:live` without
+    # counters, so the live path takes no lock, and `:live_counted` with them, when a report is asked for. The shadow
+    # switch, the audit, wins over `RIGOR_TYPE_OF_MEMO`.
+    @enabled =
+      case ENV["RIGOR_TYPE_OF_SHADOW"].to_s.downcase
+      when "1", "true" then true
+      when "serve" then :serve
+      when "serve-live" then :live_serve
+      else
+        if ENV["RIGOR_TYPE_OF_MEMO"].to_s.downcase == "rule"
+          ENV.fetch("RIGOR_TYPE_OF_SHADOW_REPORT", "").empty? ? :live : :live_counted
+        else
+          false
+        end
       end
-    end
-
-    @enabled = %w[1 true].include?(ENV["RIGOR_TYPE_OF_SHADOW"].to_s.downcase)
     @stats = Stats.new
 
     class << self
+      include Checking
       include Serving
+      include Live
 
       def enabled? = @enabled
 
-      # Turns the shadow on. `serve: true` is G1's stage-4 form (ADR-129 WD5), for specs and audit tools only: a
-      # would-be hit is recomputed with the memo suspended, the recomputation's Table writes are undone, and the entry
-      # is served (validated, its reads merged upward, its writes replayed), so output depends on the memo.
-      def enable!(serve: false) = (@enabled = serve ? :serve : true)
+      # Whether the memo is live (ADR-129 stage 4): it serves its rule-walk hits.
+      def live? = @enabled == :live || @enabled == :live_counted || @enabled == :live_serve
+
+      # Turns the memo on: the stage-3 shadow by default. `serve: true` is G1's stage-4 form (ADR-129 WD5), for specs
+      # and audit tools only: a would-be hit is recomputed with the memo suspended, the recomputation's Table writes are
+      # undone, and the entry is served (validated, its reads merged upward, its writes replayed), so output depends on
+      # the memo. `live: true` is stage 4's production form ({live}), `count: true` keeping its counters; with `serve:
+      # true` too, G1's stage-4 form runs over the live store, table and closure.
+      def enable!(serve: false, live: false, count: false)
+        @enabled = if live && serve then :live_serve
+                   elsif live then count ? :live_counted : :live
+                   elsif serve then :serve
+                   else true
+                   end
+      end
 
       def disable! = (@enabled = false)
 
@@ -101,25 +115,29 @@ module Rigor
       # id, restarted here. The state is extended at the first file's start: every frame open then closes after that
       # file ends (the per-file analysis is nested in it), so none exits through the plain `State#with`, which would
       # not restore the ELIDE id.
+      #
+      # Live, the memo opens in the rule walk only (WD6's stage 4), so the table is installed by {phase!} instead and
+      # the main pass looks nothing up.
       def begin_file
         return unless @enabled && Ractor.main?
 
-        elide = %w[1 true].include?(ENV["RIGOR_TYPE_OF_SHADOW_ELIDE"].to_s.downcase)
-        table = Table.new(elide: elide, phase: :main)
         state = TypingState.current
-        if elide
-          state.extend(TypingState::ElideId) unless state.is_a?(TypingState::ElideId)
-          state.restart_elide_id
-        end
-        state[TABLE] = table
+        state[TABLE] = live? ? nil : new_table(state, :main)
         nil
       end
 
-      # The file's analysis moved on to `phase` (`:rule` once the main pass has indexed it).
+      # The file's analysis moved on to `phase` (`:rule` once the main pass has indexed it). Live, this opens the
+      # memo: the file's table starts here.
       def phase!(phase)
         return unless @enabled
 
-        table = TypingState.current[TABLE]
+        state = TypingState.current
+        if live?
+          state[TABLE] = new_table(state, phase) if phase == :rule && Ractor.main?
+          return nil
+        end
+
+        table = state[TABLE]
         table.phase = phase if table
         nil
       end
@@ -162,6 +180,17 @@ module Rigor
 
       private
 
+      def new_table(state, phase)
+        # Live, the memo keys on the exact id: in the rule walk alone ELIDE adds no hit (stage 4 measured it on
+        # Mastodon, where its rule-walk gain in stage 3 came from main-pass entries).
+        elide = !live? && %w[1 true].include?(ENV["RIGOR_TYPE_OF_SHADOW_ELIDE"].to_s.downcase)
+        if elide
+          state.extend(TypingState::ElideId) unless state.is_a?(TypingState::ElideId)
+          state.restart_elide_id
+        end
+        Table.new(elide: elide, phase: phase)
+      end
+
       # A miss: compute under a capture and store an unrefused, unraised result (WD3).
       def compute_and_store(state, phase, by_id, id)
         state.open_capture
@@ -183,12 +212,17 @@ module Rigor
         type
       end
 
+      EMPTY = [].freeze
+      private_constant :EMPTY
+
       # nil when the entry's read slice holds; else counts the stale slots and answers their names.
       def stale_names(state, phase, entry)
         return nil unless entry.is_a?(Array)
 
         reads = entry[1]
         return nil if state.stale_read(reads).nil?
+
+        return EMPTY if @enabled.equal?(:live)
 
         names = state.stale_slots(reads).map { |slot| TypingState.slots[slot].name }.sort.freeze
         count(phase, :stale)
@@ -197,96 +231,10 @@ module Rigor
         names
       end
 
-      # A would-be hit: production computes, and G1 compares it with what serving the entry would have done.
-      def check_hit(state, phase, scope, node, entry)
-        stored, writes = entry.is_a?(Array) ? [entry[0], entry[2]] : [entry, EMPTY]
-        count(phase, :checked)
-        state.open_capture
-        state.open_priors
-        begin
-          fresh = yield
-        ensure
-          priors = state.close_priors
-          refused, = state.close_capture
-        end
-        judge(state, phase, scope, node, stored, fresh, writes, priors, refused)
-        fresh
+      # Live without a report (`:live`), nothing is counted.
+      def count(phase, counter)
+        @stats.count(phase, counter) unless @enabled.equal?(:live)
       end
-
-      EMPTY = [].freeze
-      private_constant :EMPTY
-
-      # G1's verdict on one would-be hit. An error in the comparison itself is counted as a mismatch rather than raised:
-      # the typing path's rescues would turn a raise into a different answer.
-      def judge(state, phase, scope, node, stored, fresh, writes, priors, refused) # rubocop:disable Metrics/ParameterLists
-        compare(state, phase, scope, node, stored, fresh, writes, priors, refused)
-      rescue StandardError => e
-        count(phase, :mismatch)
-        count(phase, :mismatch_judge_error)
-        sample(phase, scope, node, [:judge_error, "#{e.class}: #{e.message[0, 120]}"], stored, fresh, [])
-      end
-
-      def compare(state, phase, scope, node, stored, fresh, writes, priors, refused) # rubocop:disable Metrics/ParameterLists
-        kinds = []
-        kinds << :type unless same?(fresh, stored)
-        kinds << :resource if refused
-        diffs = table_diffs(state, writes, priors)
-        kinds << :table unless diffs.empty?
-        return if kinds.empty?
-
-        report(phase, scope, node, kinds, stored, fresh, diffs)
-      end
-
-      def report(phase, scope, node, kinds, stored, fresh, diffs)
-        count(phase, :mismatch)
-        kinds.each { |kind| count(phase, :"mismatch_#{kind}") if kind.is_a?(Symbol) }
-        sample(phase, scope, node, kinds, stored, fresh, diffs)
-        nil
-      end
-
-      # The entries where the live tables differ from their pre-computation state with `writes` replayed: each key
-      # the entry wrote must hold its last written value, and each key only the live computation wrote must hold
-      # the value it replaced.
-      def table_diffs(state, writes, priors)
-        expected = TypingState::KeyIndex.new
-        diffs = []
-        # The last write of a key is what a replay leaves there: walk backwards and take each key once.
-        writes.each_slice(3).reverse_each do |slot, key, value|
-          next if expected.key?(slot, key)
-
-          expected.store(slot, key, value)
-          now = state.entry(slot, key)
-          diffs << [slot, key, value, now] unless same?(value, now)
-        end
-        priors.each_slice(3) do |slot, key, prior|
-          next if expected.key?(slot, key)
-
-          now = state.entry(slot, key)
-          diffs << [slot, key, prior, now] unless same?(prior, now)
-        end
-        diffs.uniq { |slot, key, _, _| [slot, key.is_a?(Array) ? key.map(&:__id__) : key.__id__] }
-      end
-
-      # Entry values compare by identity, or by `==` element-wise, a scope (which the one-slot caches record) by
-      # identity alone: `Scope#==` ignores fields typing reads.
-      #
-      # `==` ignores a Hash's order, which output shows: a type also compares its rendering
-      # (`HashShape#==` compares its pairs as a Hash), and a Hash its entries in order.
-      def same?(left, right)
-        return true if left.equal?(right)
-        return false if left.is_a?(Scope) || right.is_a?(Scope)
-        return ordered_same?(left.to_a, right.to_a) if left.is_a?(Hash) && right.is_a?(Hash)
-        return ordered_same?(left, right) if left.is_a?(Array) && right.is_a?(Array)
-        return false unless left == right
-
-        !left.respond_to?(:describe) || !right.respond_to?(:describe) || left.describe(:short) == right.describe(:short)
-      end
-
-      def ordered_same?(left, right)
-        left.size == right.size && left.each_index.all? { |index| same?(left[index], right[index]) }
-      end
-
-      def count(phase, counter) = @stats.count(phase, counter)
 
       def sample(phase, scope, node, kinds, stored, fresh, diffs)
         @stats.sample(SAMPLE_LIMIT) do

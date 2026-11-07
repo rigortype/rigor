@@ -114,6 +114,8 @@ module Rigor
         # `create_table "settings", primary_key: "name", id: { type: :string }` creates the column `name`
         # without the block declaring it, so the option is the only place the schema names it.
         def named_primary_key_column(call_node)
+          return nil if id_disabled?(call_node)
+
           name = literal_name(keyword_value(call_node, :primary_key))
           return nil if name.nil?
 

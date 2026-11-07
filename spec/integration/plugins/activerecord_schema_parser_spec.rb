@@ -42,8 +42,32 @@ RSpec.describe "plugins/rigor-activerecord SchemaParser" do
       expect(table.column("items", "id")).not_to be_nil
     end
 
-    it "adds nothing for a composite primary key, whose columns the block declares"
-    it "adds nothing when id: false says the table has no primary key column"
-    it "lets a column the block declares win over the option"
+    it "adds nothing for a composite primary key, whose columns the block declares" do
+      table = parse(<<~RUBY)
+        create_table "pairs", primary_key: ["x", "y"], force: :cascade do |t|
+          t.integer "x"
+          t.integer "y"
+        end
+      RUBY
+      expect(table.columns_for("pairs").map(&:name)).to contain_exactly("id", "x", "y")
+    end
+
+    it "adds nothing when id: false says the table has no primary key column" do
+      table = parse(<<~RUBY)
+        create_table "items", primary_key: "code", id: false do |t|
+          t.text "value"
+        end
+      RUBY
+      expect(table.columns_for("items").map(&:name)).to eq(["value"])
+    end
+
+    it "lets a column the block declares win over the option" do
+      table = parse(<<~RUBY)
+        create_table "items", primary_key: "code", id: :integer do |t|
+          t.string "code"
+        end
+      RUBY
+      expect(table.column("items", "code").ruby_type).to eq("String")
+    end
   end
 end

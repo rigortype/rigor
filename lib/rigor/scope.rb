@@ -372,8 +372,12 @@ module Rigor
       !log_advisory_read(PLUGIN_TYPED_CALLS, @plugin_typed_calls, node).nil?
     end
 
-    # Every keyword past the 31st takes CRuby's allocating unspecified-keywords path when omitted with a non-literal
-    # default; see the note at {#rebuild} before adding a field.
+    # Every keyword past the 31st (`opaque_block_self`, `block_self_unknown`) must keep a literal default. A keyword at
+    # that index with a non-literal default makes a call that omits it allocate CRuby's unspecified-keywords record
+    # during argument setup, and on CRuby 4.0 a GC started by that allocation frees the values already moved into the
+    # keyword locals (ruby/ruby Bug #22500, issue #2850): `Scope.new` stored a freed `match_frame`.
+    # `spec/rigor/keyword_gc_safety_spec.rb` holds every method under `lib/` and `plugins/*/lib` to this. See the note
+    # at {#rebuild} before adding a field.
     def initialize( # rubocop:disable Metrics/AbcSize, Metrics/MethodLength -- one keyword and assignment per field
       environment:, locals:,
       fact_store: Analysis::FactStore.empty,
@@ -388,8 +392,6 @@ module Rigor
       published_constant_sourced: EMPTY_PUBLISHED_CONSTANT_SOURCED,
       source_path: nil,
       struct_fold_safe_locals: EMPTY_FOLD_SAFE,
-      opaque_block_self: false,
-      block_self_unknown: false,
       singleton_class_body: false,
       lexical_nesting: nil,
       dynamic_origins: {}.compare_by_identity,
@@ -406,7 +408,10 @@ module Rigor
       constant_narrowings: EMPTY_CONSTANT_NARROWINGS,
       guard_records: EMPTY_GUARD_RECORDS,
       bot_guard_classes: EMPTY_BOT_GUARD_CLASSES,
-      declared_refinements: Inference::InEffectRefinements::EMPTY
+      declared_refinements: Inference::InEffectRefinements::EMPTY,
+      # Literal defaults only from here on; see the note above.
+      opaque_block_self: false,
+      block_self_unknown: false
     )
       @environment = environment
       @locals = locals
@@ -2701,9 +2706,10 @@ module Rigor
     # field indexed by each keyword's position among ALL the method's keywords, required and optional
     # (`VM_KW_SPECIFIED_BITS_MAX`, 31); a keyword past that index whose default is not a literal makes every call that
     # omits it allocate the record instead. A 32nd keyword here did that on every scope transition, about 1% of an
-    # analysis's allocations (issue #2555). `#initialize` is already past the index: `bot_guard_classes` and
-    # `declared_refinements` take the allocating path whenever a caller omits them. The next Scope field crosses it in
-    # this method again, so it needs a positional slot or a restructuring, not a 32nd keyword.
+    # analysis's allocations (issue #2555). On CRuby 4.0 that allocation is also unsafe: a GC it starts frees the
+    # values already moved into the keyword locals (ruby/ruby Bug #22500, issue #2850). `#initialize` is past the index
+    # and keeps literal defaults there for that reason. The next Scope field crosses it in this method again, so it
+    # needs a positional slot or a restructuring, not a 32nd keyword.
     def rebuild(
       construction_facts = @construction_facts,
       locals: @locals, fact_store: @fact_store, self_type: @self_type,

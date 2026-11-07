@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "rbs_collection_discovery"
+
 module Rigor
   class Environment
     # Stdlib libraries that `Environment.for_project` loads on top of RBS core
@@ -32,5 +34,20 @@ module Rigor
       strscan
       prism rbs
     ].freeze
+
+    # The library list a run loads before its `RequiredFeatures` tokens: {DEFAULT_LIBRARIES}, then the
+    # configured `libraries:`, then — issue #2946 — the `source: { type: stdlib }` entries of the run's
+    # `rbs_collection.lock.yaml` ({RbsCollectionDiscovery.stdlib_library_names}), de-duplicated in that order.
+    # `Environment.for_project` and the boot-slimming probe's `RunCacheKey.libraries_config_entries` both build
+    # it here, so the cache key's `rbs.libraries` slot names the lockfile's libraries on both paths. A module of
+    # its own, not an `Environment` class method, so the plugin-facing `Environment` surface does not grow.
+    module BaseLibraries
+      def self.resolve(libraries, rbs_collection_lockfile:, rbs_collection_auto_detect:, root: Dir.pwd)
+        collection_stdlib = RbsCollectionDiscovery.stdlib_library_names(
+          lockfile_path: rbs_collection_lockfile, project_root: root, auto_detect: rbs_collection_auto_detect
+        )
+        (DEFAULT_LIBRARIES + libraries.map(&:to_s) + collection_stdlib).uniq
+      end
+    end
   end
 end

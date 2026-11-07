@@ -105,6 +105,29 @@ RSpec.describe Rigor::ConfigAudit do
     end
   end
 
+  # Issue #2946 — a lockfile's stdlib entries load as libraries, so an unknown one is skipped like a `libraries:` name.
+  describe "rbs_collection.lock.yaml stdlib entries" do
+    def write_stdlib_lockfile(*names)
+      gems = names.map { |name| "- name: #{name}\n  version: '0'\n  source:\n    type: stdlib\n" }.join
+      File.write("rbs_collection.lock.yaml", "---\npath: .gem_rbs_collection\ngems:\n#{gems}")
+    end
+
+    it "flags a stdlib entry RBS does not recognise" do
+      write_stdlib_lockfile("ripper", "this_stdlib_does_not_exist_xyz")
+
+      flagged = audit({}).select { |w| w.kind == :rbs_collection_library }
+      expect(flagged.map { |w| w.to_h.fetch("name") }).to eq(["this_stdlib_does_not_exist_xyz"])
+      expect(flagged.first.message).to include("rbs_collection.lock.yaml").and include("not an available RBS library")
+    end
+
+    it "reads no lockfile when rbs_collection.auto_detect is off" do
+      write_stdlib_lockfile("this_stdlib_does_not_exist_xyz")
+
+      warnings = audit("rbs_collection" => { "auto_detect" => false })
+      expect(warnings.select { |w| w.kind == :rbs_collection_library }).to be_empty
+    end
+  end
+
   describe "disable: / severity_overrides: rule tokens" do
     it "flags a built-in-family token that names no rule" do
       warnings = audit("disable" => ["call.undefined-methdo"])

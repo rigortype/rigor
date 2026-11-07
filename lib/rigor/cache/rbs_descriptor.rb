@@ -208,7 +208,7 @@ module Rigor
       end
 
       # @param library_names — the loader's merged library list (or, on the WD4 probe
-      #   path, `Environment::DEFAULT_LIBRARIES + config.libraries` reconstructed without a loader).
+      #   path, `Environment::BaseLibraries.resolve` reconstructed without a loader).
       def self.libraries_entry(library_names)
         sorted = library_names.map(&:to_s).sort
         Descriptor::ConfigEntry.new(

@@ -212,8 +212,8 @@ module Rigor
         # set up with `rbs collection install`, the resulting `rbs_collection.lock.yaml` carries the resolved
         # (gem, version, source) triples and `.gem_rbs_collection/` holds the downloaded `.rbs` files. Rigor
         # parses the lockfile and auto-feeds each gem's `<collection_root>/<name>/<version>/` directory into
-        # `RbsLoader`'s `signature_paths:`. Sources of type `stdlib` are skipped because rigor's bundled
-        # `DEFAULT_LIBRARIES` already covers that surface.
+        # `RbsLoader`'s `signature_paths:`. Sources of type `stdlib` install no directory; issue #2946 — they
+        # load as RBS libraries, appended to `DEFAULT_LIBRARIES + libraries:`, as the `rbs` CLI loads them.
         #
         # `lockfile:` (String, optional): explicit path to `rbs_collection.lock.yaml`. Resolved relative to
         # the project root when relative.

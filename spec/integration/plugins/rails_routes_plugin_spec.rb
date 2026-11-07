@@ -813,7 +813,7 @@ RSpec.describe "plugins/rigor-rails-routes" do
         RUBY
       }
       expect(unknown_helpers(files, paths: ["app/controllers/articles_controller.rb"],
-                             signature_paths: ["sig"])).to be_empty
+                                    signature_paths: ["sig"])).to be_empty
     end
 
     it "still reports a `_path` name with no route and no method in a class with attr_readers" do

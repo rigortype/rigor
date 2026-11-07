@@ -31,6 +31,9 @@ module Rigor
       # `Object` per `SchemaTable.ruby_type_for` rather than being dropped. Only the structural calls in
       # {NON_COLUMN_METHODS} (indexes, constraints, foreign keys) are skipped.
       #
+      # `create_table "x", primary_key: "name"` adds that column, typed from the `id:` option. The `id` column
+      # stays registered; `id: false` removes it and adds neither.
+      #
       # Designed for the Prism interpretation pattern from rigor-lisp-eval — recursive descent on the AST,
       # no eval.
       class SchemaParser
@@ -96,19 +99,7 @@ module Rigor
         end
 
         def id_disabled?(call_node)
-          return false if call_node.arguments.nil?
-
-          call_node.arguments.arguments.each do |arg|
-            next unless arg.is_a?(Prism::KeywordHashNode)
-
-            arg.elements.each do |pair|
-              next unless pair.is_a?(Prism::AssocNode)
-
-              key = symbol_key(pair.key)
-              return true if key == :id && pair.value.is_a?(Prism::FalseNode)
-            end
-          end
-          false
+          keyword_value(call_node, :id).is_a?(Prism::FalseNode)
         end
 
         # `create_table "settings", primary_key: "name", id: { type: :string }` creates the column `name`
@@ -225,19 +216,7 @@ module Rigor
         # modifiers like `t.bigint "status_ids", array: true` (Postgres array column) and `t.references
         # "x", polymorphic: true`.
         def keyword_true?(call_node, name)
-          return false if call_node.arguments.nil?
-
-          call_node.arguments.arguments.each do |arg|
-            next unless arg.is_a?(Prism::KeywordHashNode)
-
-            arg.elements.each do |pair|
-              next unless pair.is_a?(Prism::AssocNode)
-              next unless symbol_key(pair.key) == name
-
-              return pair.value.is_a?(Prism::TrueNode)
-            end
-          end
-          false
+          keyword_value(call_node, name).is_a?(Prism::TrueNode)
         end
 
         # `t.column "name", "type"` / `t.column "name", :type` — the explicit generic column form. The
@@ -265,13 +244,7 @@ module Rigor
         def string_argument(call_node, index)
           return nil if call_node.arguments.nil?
 
-          arg = call_node.arguments.arguments[index]
-          return nil if arg.nil?
-
-          case arg
-          when Prism::StringNode then arg.unescaped
-          when Prism::SymbolNode then arg.unescaped
-          end
+          literal_name(call_node.arguments.arguments[index])
         end
 
         def symbol_key(node)

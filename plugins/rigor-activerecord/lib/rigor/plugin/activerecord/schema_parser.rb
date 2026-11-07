@@ -81,7 +81,7 @@ module Rigor
           return [nil, nil] if table_name.nil?
 
           block_node = call_node.block
-          columns = { "id" => SchemaTable::Column.new(name: "id", type: :integer, ruby_type: "Integer") }
+          columns = { "id" => implicit_id_column(call_node) }
           columns.delete("id") if id_disabled?(call_node)
           primary_key = named_primary_key_column(call_node)
           columns[primary_key.name] = primary_key if primary_key
@@ -98,6 +98,12 @@ module Rigor
           end
 
           [table_name, columns.freeze]
+        end
+
+        # A call this parser does not read completely may still say the key is not an integer.
+        def implicit_id_column(call_node)
+          read = keywords_read?(call_keywords(call_node))
+          SchemaTable::Column.new(name: "id", type: read ? :integer : UNKNOWN_PRIMARY_KEY_TYPE, ruby_type: read ? "Integer" : "Object")
         end
 
         def id_disabled?(call_node)

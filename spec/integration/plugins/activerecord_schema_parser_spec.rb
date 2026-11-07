@@ -121,6 +121,8 @@ RSpec.describe "plugins/rigor-activerecord SchemaParser" do
       "a non-literal key in the call" => "KEY => { type: :string }",
       "an interpolated key in the call" => %("\#{KEY}": :string),
       "a repeated id: in the call" => "id: :integer, id: :string",
+      "as: false" => "id: :string, as: false",
+      "a non-literal as:" => "id: :string, as: QUERY",
       "a splat after id: false" => "id: false, **TABLE_OPTIONS",
       "a splat after id: nil" => "id: nil, **TABLE_OPTIONS"
     }.each do |description, options|
@@ -130,9 +132,21 @@ RSpec.describe "plugins/rigor-activerecord SchemaParser" do
       end
     end
 
-    it "keeps the id column when a splat may override id: false" do
-      table = parse(%(create_table "items", id: false, **TABLE_OPTIONS do |t|\nend\n))
-      expect(table.column("items", "id")).not_to be_nil
+    {
+      "a splat may override id: false" => "id: false, **TABLE_OPTIONS",
+      "a splat may override id: nil" => "id: nil, **TABLE_OPTIONS",
+      "a splat may hold id:" => "**TABLE_OPTIONS",
+      "a repeated id: key ends in false" => "id: :string, id: false"
+    }.each do |description, options|
+      it "keeps the id column untyped when #{description}" do
+        table = parse(%(create_table "items", #{options} do |t|\nend\n))
+        expect(table.column("items", "id").ruby_type).to eq("Object")
+      end
+    end
+
+    it "types the id column as an integer when the call is read completely" do
+      table = parse(%(create_table "items", force: :cascade do |t|\nend\n))
+      expect(table.column("items", "id").ruby_type).to eq("Integer")
     end
 
     it "adds nothing for a composite primary key, whose columns the block declares" do

@@ -97,7 +97,7 @@ RSpec.describe "plugins/rigor-activejob" do
   describe "keyword arguments (#2944)" do
     let(:keyword_jobs) do
       {
-        "app/jobs/keyword_jobs.rb" => <<~RUBY
+        "app/jobs/keyword_jobs.rb" => <<~RUBY,
           class ApplicationJob
           end
           class GreetJob < ApplicationJob
@@ -115,7 +115,25 @@ RSpec.describe "plugins/rigor-activejob" do
           class NoArgsJob < ApplicationJob
             def perform; end
           end
+          class NilKwJob < ApplicationJob
+            def perform(**nil); end
+          end
+          class NilKwOptJob < ApplicationJob
+            def perform(h = nil, **nil); end
+          end
+          class ForwardJob < ApplicationJob
+            def perform(...); end
+          end
+          class TwoJob < ApplicationJob
+            def perform(a, b); end
+          end
+          class RangeKwJob < ApplicationJob
+            def perform(a, b = 1, **kw); end
+          end
         RUBY
+        # One job redeclared across two files (glob order is not load order): the envelopes widen.
+        "app/jobs/split_a.rb" => "class SplitJob < ApplicationJob\n  def perform(a); end\nend\n",
+        "app/jobs/split_b.rb" => "class SplitJob < ApplicationJob\n  def perform(**kw); end\nend\n"
       }
     end
 
@@ -139,7 +157,7 @@ RSpec.describe "plugins/rigor-activejob" do
     it "still counts the positional arguments next to keywords" do
       err = arity_errors("MixedJob.perform_later(1, 2, force: true)\n").first
       expect(err).not_to be_nil
-      expect(err.message).to include("got 3")
+      expect(err.message).to include("expects 1 argument(s), got 2")
     end
 
     it "declines a call with a `*splat` argument when `#perform` takes keywords" do
@@ -158,6 +176,36 @@ RSpec.describe "plugins/rigor-activejob" do
 
     it "still reports a surplus keyword group on a positional-only `#perform`" do
       expect(arity_errors("PositionalJob.perform_later('a', name: 'alice')\n")).not_to be_empty
+    end
+
+    it "treats `**nil` as taking no keywords, so the keyword group still counts as a positional argument" do
+      expect(arity_errors("NilKwJob.perform_later(k: 1)\n")).not_to be_empty
+    end
+
+    it "accepts the keyword group as the positional hash of `perform(h = nil, **nil)`" do
+      expect(arity_errors("NilKwOptJob.perform_later(k: 1)\n")).to be_empty
+    end
+
+    it "widens a redeclared job's keyword acceptance (`def perform(a)` + `def perform(**kw)`)" do
+      expect(arity_errors("SplitJob.perform_later(1, k: 1)\n")).to be_empty
+    end
+
+    it "counts only the positional arguments in the message of a keyword-taking job" do
+      err = arity_errors("RangeKwJob.perform_later(1, 2, 3, k: 3)\n").first
+      expect(err).not_to be_nil
+      expect(err.message).to include("expects 1..2 argument(s), got 3")
+    end
+
+    it "accepts any arity for `def perform(...)`" do
+      expect(arity_errors("ForwardJob.perform_later(1, 2, 3, k: 1)\nForwardJob.perform_later\n")).to be_empty
+    end
+
+    it "declines a `*splat` argument on a job without keywords" do
+      expect(arity_errors("def go(list) = TwoJob.perform_later(*list)\n")).to be_empty
+    end
+
+    it "declines a `**opts` argument to a job without keywords (it may be empty)" do
+      expect(arity_errors("def go(opts) = NoArgsJob.perform_later(**opts)\n")).to be_empty
     end
   end
 

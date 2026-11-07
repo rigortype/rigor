@@ -207,12 +207,19 @@ module Rigor
             kw.name if kw.is_a?(Prism::RequiredKeywordParameterNode)
           end
 
+          keyword_rest = parameters.keyword_rest
+          # `...` lives in `keyword_rest` and forwards every argument, so it widens the envelope; `**nil`
+          # also lives there but declares that NO keywords are taken (ActiveJob then hands them over as a
+          # positional hash, exactly like a method with no keyword parameters).
+          forwards_all = keyword_rest.is_a?(Prism::ForwardingParameterNode)
+          takes_keywords = !(parameters.keywords || []).empty? || keyword_rest.is_a?(Prism::KeywordRestParameterNode)
+
           JobIndex::Entry.new(
             class_name: class_name,
             min_arity: required_count,
-            max_arity: rest_present ? Float::INFINITY : required_count + optional_count,
+            max_arity: rest_present || forwards_all ? Float::INFINITY : required_count + optional_count,
             keyword_required: keyword_required.map(&:to_sym),
-            accepts_keywords: !(parameters.keywords || []).empty? || !parameters.keyword_rest.nil?
+            accepts_keywords: takes_keywords || forwards_all
           )
         end
       end

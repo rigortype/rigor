@@ -55,10 +55,23 @@ module Rigor
           )
         end
 
+        # Ruby binds a trailing `k: v` / `**opts` group to keyword parameters, never to positional ones, so
+        # when `#perform` takes keywords the group is not counted (the message's "got N" is then the
+        # positional count too). A job without keyword parameters keeps counting the group as one positional
+        # argument — `NoArgsJob.perform_later(name: 1)` raises at runtime. A `Hash` literal / local stays
+        # positional either way (Ruby 3 does not convert it).
+        #
+        # The call is declined (no report) when its shape is unknown: a `*splat` argument may supply any
+        # number of positionals (or a trailing keyword group), and a `**opts` argument to a job without
+        # keywords may be empty and then pass nothing at all.
         def arity_violation(call_node, entry)
           args = call_node.arguments&.arguments || []
-          actual = args.size
-          return nil if entry.accepts_keywords && keyword_binding_unclear?(args, entry)
+          return nil if args.any?(Prism::SplatNode)
+
+          keyword_group = args.last.is_a?(Prism::KeywordHashNode) ? args.last : nil
+          return nil if keyword_group && !entry.accepts_keywords && keyword_group.elements.any?(Prism::AssocSplatNode)
+
+          actual = entry.accepts_keywords && keyword_group ? args.size - 1 : args.size
           return nil if entry.accepts?(actual)
 
           Violation.new(
@@ -66,18 +79,6 @@ module Rigor
             rule: "wrong-arity",
             message: "`#{entry.class_name}.#{call_node.name}` expects #{entry.arity_label} argument(s), got #{actual}"
           )
-        end
-
-        # Ruby binds a trailing `k: v` / `**opts` group to keyword parameters, never to positional ones, so
-        # when `#perform` takes keywords the group is not counted. The call is also declined (no report) when
-        # a `*splat` argument could itself carry that trailing group. A `Hash` literal / local stays
-        # positional (Ruby 3 does not convert it), and a job without keyword parameters keeps counting the
-        # group as one positional argument — `NoArgsJob.perform_later(name: 1)` raises at runtime.
-        def keyword_binding_unclear?(args, entry)
-          return true if args.any?(Prism::SplatNode)
-
-          positional = args.last.is_a?(Prism::KeywordHashNode) ? args.size - 1 : args.size
-          entry.accepts?(positional)
         end
 
         # Renders a constant-path receiver as a String. Mirrors the helpers in rigor-activerecord /

@@ -816,6 +816,19 @@ RSpec.describe "plugins/rigor-rails-routes" do
                                     signature_paths: ["sig"])).to be_empty
     end
 
+    it "declines inside a class-body block, whose self the engine cannot name" do
+      files = {
+        "app/libs/message.rb" => <<~RUBY
+          class Message
+            included do
+              missing_thing_url
+            end
+          end
+        RUBY
+      }
+      expect(unknown_helpers(files, paths: ["app/libs/message.rb"])).to be_empty
+    end
+
     it "still reports a `_path` name with no route and no method in a class with attr_readers" do
       files = {
         "app/libs/message.rb" => <<~RUBY

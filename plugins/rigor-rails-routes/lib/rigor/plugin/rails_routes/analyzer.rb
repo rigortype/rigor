@@ -192,7 +192,9 @@ module Rigor
             return inner[0...def_index].any?(Prism::SingletonClassNode) ? [:singleton] : [:instance]
           end
           return BOTH_KINDS if inner.any? { |n| block_scope?(n) }
-          return BOTH_KINDS if inner.any? { |n| n.is_a?(Prism::SingletonClassNode) && !n.expression.is_a?(Prism::SelfNode) }
+          if inner.any? { |n| n.is_a?(Prism::SingletonClassNode) && !n.expression.is_a?(Prism::SelfNode) }
+            return BOTH_KINDS
+          end
 
           [:singleton]
         end

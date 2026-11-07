@@ -834,9 +834,9 @@ plugins/rigor-pundit/lib/rigor/plugin/pundit/policy_discoverer.rb:
 plugins/rigor-rails-routes/lib/rigor/plugin/rails_routes/analyzer.rb:
   computes: the enclosing class or module names and the instance or singleton self of a receiverless call site
   producers:
-    Rigor::Plugin::RailsRoutes::Analyzer#call_site_selves: 'a per-call-site read for a decline-only check (#2948); it caches nothing, feeds no declaration fact, and derives no declaration context'
+    Rigor::Plugin::RailsRoutes::Analyzer#call_site: 'a per-call-site read for a decline-only check (#2948); it caches nothing, feeds no declaration fact, and derives no declaration context'
     Rigor::Plugin::RailsRoutes::Analyzer#owner_names: 'a per-call-site read for a decline-only check (#2948); it caches nothing, feeds no declaration fact, and derives no declaration context'
-    Rigor::Plugin::RailsRoutes::Analyzer#self_kind: 'a per-call-site read for a decline-only check (#2948); it caches nothing, feeds no declaration fact, and derives no declaration context'
+    Rigor::Plugin::RailsRoutes::Analyzer#self_kinds: 'a per-call-site read for a decline-only check (#2948); it caches nothing, feeds no declaration fact, and derives no declaration context'
 plugins/rigor-rails-routes/lib/rigor/plugin/rails_routes/grape_api_discoverer.rb:
   computes: the Grape API classes and their superclasses
   producers:

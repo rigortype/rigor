@@ -485,12 +485,15 @@ RSpec.describe "plugins/rigor-actionpack" do
             Rigor.dump_type(params[:user].permit(:name))
             Rigor.dump_type(params[:user].require(:name))
             Rigor.dump_type(params[:user].to_h)
+            Rigor.dump_type(params[:tags].permit!)
           end
         end
       RUBY
       with_demo(source) do |result|
         dumps = result.diagnostics.select { |d| d.rule == "dump.type" }.map(&:message)
-        expect(dumps.size).to eq(3)
+        expect(dumps.size).to eq(4)
+        expect(dumps[3]).to include("ActionController::Parameters")
+        expect(dumps[3]).not_to include("Dynamic[")
         # `permit` off a carrier can only raise or return a real Parameters (#2947): the plain nominal.
         expect(dumps[0]).to include("ActionController::Parameters")
         expect(dumps[0]).not_to include("Dynamic[")

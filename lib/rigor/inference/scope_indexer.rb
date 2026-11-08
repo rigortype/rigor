@@ -575,12 +575,13 @@ module Rigor
                          read_before_write, init_writes, method_assign_effects)
         accumulator.delete(CONSTANT_IVAR_VALUES)
         reflective_opaque = accumulator.delete(REFLECTIVE_OPAQUE_CLASSES)
+        singleton_writes = accumulator.delete(SINGLETON_IVAR_WRITES)
         exempt_class_body_writes!(init_writes, accumulator.delete(DEFINE_METHOD_WRITES) || {})
         merge_held_ivar_writes!(accumulator)
         record_aliased_ivar_mutations!(root, mutated_ivars)
         widen_mutated_ivar_entries!(accumulator, mutated_ivars)
         # #2170 — an ancestor's writes as this file's census types them, before its read-before-write `nil`.
-        writes = accumulator.transform_values(&:dup)
+        writes = instance_side_writes(accumulator, singleton_writes)
         contribute_read_before_write_nil!(accumulator, read_before_write, init_writes)
         make_reflective_classes_gradual!(accumulator, reflective_opaque)
         # #2079 / #2170 — another file's writes, and the chain's modules' and superclasses', join existing entries.
@@ -590,6 +591,17 @@ module Rigor
         # #1406 — an RBS `@x: T` or `attr_* x: T` declaration replaces the census's join of the writes.
         DeclaredIvarTypes.apply!(accumulator, default_scope) if declared_ivar_types
         accumulator.transform_values(&:freeze).freeze
+      end
+
+      # #2170 — a copy of the census entries for {IvarContributions} to join as an ancestor's own. #2931 — an ivar a
+      # singleton-side `def` of the class writes is left out: its entry joins that write, which runs on the module or
+      # class object and never on an includer's instance, so the join reads the file's instance-side census entries
+      # for it, as another file's reader does.
+      def instance_side_writes(accumulator, singleton_writes)
+        accumulator.to_h do |class_name, entries|
+          skipped = singleton_writes&.[](class_name)
+          [class_name, skipped ? entries.except(*skipped) : entries.dup]
+        end
       end
 
       # Folds the class-body writes {#collect_class_body_ivar_writes} held under {CLASS_BODY_WRITES} into the
@@ -1110,6 +1122,10 @@ module Rigor
         declared = DeclaredParamWrites.collect(def_node, class_name, body_scope) unless singleton
         gather_ivar_writes(def_node.body, body_scope, class_name, accumulator,
                            EMPTY_GUARDED_IVARS, mutated_ivars, dead_writes, declared)
+        if singleton
+          singleton_written = (accumulator[SINGLETON_IVAR_WRITES] ||= {})[class_name] ||= Set.new
+          define_method_written_ivars(def_node.body, singleton_written)
+        end
 
         # B2.3 — collect per-method evidence for the read-before- write nil contribution. The accumulator-level decision
         # ("is this ivar truly read-before-write across the class lifetime?") is finalised at
@@ -1439,26 +1455,16 @@ module Rigor
       private_constant :IVAR_BARRIER_NODES
 
       # Issue #2490 — yields the children of `node` a census walk for `class_name` descends into: all of them, or only
-      # those {#foreign_self_children} keeps. A nil `class_name` keeps them all.
-      def each_census_child(node, class_name, &)
-        outside = class_name && foreign_self_children(node, class_name)
-        return outside.each(&) if outside
+      # those {CensusForeignBlock.census_children} keeps when `node` runs code whose `self` is another object. A nil
+      # `class_name` keeps them all. A reentered `def` (#2941) is yielded as itself, so a walk that stops at a `def`
+      # skips it; `def_bodies:` yields its body instead, for a walk that counts its writes.
+      def each_census_child(node, class_name, def_bodies: false, &)
+        outside = class_name && CensusForeignBlock.census_children(node, class_name)
+        return node.rigor_each_child(&) unless outside
 
-        node.rigor_each_child(&)
-      end
-
-      # Issue #2490 — the children of `node` still to walk for `class_name`'s census when `node` runs code whose
-      # `self` is another object, or nil for an ordinary node: a {CensusForeignBlock} call keeps its receiver and
-      # arguments, and a `class << obj` its expression; both keep the `define_method` blocks nested in them that run
-      # on a `class_name` instance again ({CensusForeignBlock.reentry_blocks}).
-      def foreign_self_children(node, class_name)
-        case node
-        when Prism::SingletonClassNode
-          [node.expression, *CensusForeignBlock.reentry_blocks(node, class_name)]
-        when Prism::CallNode
-          return nil unless CensusForeignBlock.foreign?(node, class_name)
-
-          [node.receiver, node.arguments, *CensusForeignBlock.reentry_blocks(node, class_name)].compact
+        outside.each do |child|
+          child = child.body if def_bodies && child.is_a?(Prism::DefNode)
+          yield child if child
         end
       end
 
@@ -1507,8 +1513,9 @@ module Rigor
           return
         end
 
-        # #2490 — a block or `class <<` body whose `self` is another object writes that object's ivars.
-        each_census_child(node, class_name) do |c|
+        # #2490 — a block or `class <<` body whose `self` is another object writes that object's ivars. #2941 — a `def`
+        # in it that runs on a `class_name` instance again counts its writes.
+        each_census_child(node, class_name, def_bodies: true) do |c|
           gather_ivar_writes(c, scope, class_name, accumulator, guarded_ivars, mutated_ivars, dead_writes, declared)
         end
       end
@@ -2296,7 +2303,11 @@ module Rigor
       REFLECTIVE_OPAQUE_CLASSES = :reflective_opaque_classes
       # The census's {ConstantIvarValue}, which {#record_ivar_write} reads.
       CONSTANT_IVAR_VALUES = :constant_ivar_values
-      private_constant :DEFINE_METHOD_WRITES, :CLASS_BODY_WRITES, :REFLECTIVE_OPAQUE_CLASSES, :CONSTANT_IVAR_VALUES
+      # Issue #2931 — per class, the ivars a singleton-side `def` (`def self.x`) of it writes, which the census files
+      # under the class too (#1958).
+      SINGLETON_IVAR_WRITES = :singleton_ivar_writes
+      private_constant :DEFINE_METHOD_WRITES, :CLASS_BODY_WRITES, :REFLECTIVE_OPAQUE_CLASSES, :CONSTANT_IVAR_VALUES,
+                       :SINGLETON_IVAR_WRITES
 
       # Unions `type` into the class-ivar accumulator for `(class_name, ivar_name)`. Shared by the single-write and
       # multi-write (parallel-assignment) collectors.

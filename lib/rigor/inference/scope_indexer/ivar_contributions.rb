@@ -85,17 +85,23 @@ module Rigor
               Analysis::DependencyRecorder.read_name(:own_write_type, "#{owner}##{ivar}")
             end
             by_path = table.dig(owner, ivar) || EMPTY
-            # This file's census of an ancestor counts only an ivar an instance body of it writes here: the census
-            # also holds a `def self.` write of a module (#1958), which runs on the module object.
+            # This file's census of an ancestor counts only an ivar an instance body of it writes here. `writes` leaves
+            # out an ivar a `def self.` of the ancestor also writes (the census files that write under it, #1958, and it
+            # runs on the module object); this file's census entries for it join instead, as in another file (#2931).
             own = writes.dig(owner, ivar) if owner != class_name && by_path.key?(path)
             types << own if own
-            by_path.each do |value_path, values|
-              next if value_path == path
-
-              values.each { |value| types << value_type(value) }
-            end
+            add_entry_types(types, by_path, own || owner == class_name ? path : nil)
           end
           types.empty? ? nil : Type::Combinator.union(*types)
+        end
+
+        # Each census entry's value type, except those of `skipped_path` (the file whose census already holds them).
+        def add_entry_types(types, by_path, skipped_path)
+          by_path.each do |value_path, values|
+            next if value_path == skipped_path
+
+            values.each { |value| types << value_type(value) }
+          end
         end
 
         # A String literal joins as `String`, not its `Constant`: a write elsewhere cannot see an in-place mutation of
@@ -143,7 +149,8 @@ module Rigor
           end
           table
         end
-        private_class_method :chain_owners, :contributed, :value_type, :canonical, :table, :build_table
+        private_class_method :chain_owners, :contributed, :add_entry_types, :value_type, :canonical, :table,
+                             :build_table
       end
     end
   end

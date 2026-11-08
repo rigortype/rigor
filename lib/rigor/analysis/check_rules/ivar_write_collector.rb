@@ -6,6 +6,7 @@ require_relative "rule_walk"
 require_relative "../../scope/resolution_chain"
 require_relative "../../source/constant_path"
 require_relative "../../source/node_children"
+require_relative "../../inference/census_foreign_block"
 
 module Rigor
   module Analysis
@@ -28,6 +29,9 @@ module Rigor
       #   doesn't yet model.
       # - Nested classes / modules / defs inside a method body are barriers, mirroring the indexer's
       #   `IVAR_BARRIER_NODES` policy.
+      # - Issue #2943: a write directly in a block or `class << obj` body whose `self` is provably not an instance
+      #   of the class (`Other.new.instance_eval { @r = 1 }`), by the class-ivar census's rule
+      #   ({Inference::CensusForeignBlock}).
       class IvarWriteCollector
         BARRIER_NODES = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode].freeze
         private_constant :BARRIER_NODES
@@ -168,7 +172,13 @@ module Rigor
           record_write(node, class_name, method_name) if node.is_a?(Prism::InstanceVariableWriteNode)
           return if BARRIER_NODES.any? { |klass| node.is_a?(klass) }
 
-          node.rigor_each_child { |child| gather_writes(child, class_name, method_name) }
+          # #2943 — a block or `class <<` body whose `self` is provably another object writes that object's ivars, as
+          # the class-ivar census reads it ({Inference::CensusForeignBlock}); a `define_method` block nested in it that
+          # runs on an instance again still counts. A `def` it reenters stays a barrier here.
+          children = Inference::CensusForeignBlock.census_children(node, class_name)
+          return node.rigor_each_child { |child| gather_writes(child, class_name, method_name) } unless children
+
+          children.each { |child| gather_writes(child, class_name, method_name) }
         end
 
         def record_write(node, class_name, method_name)

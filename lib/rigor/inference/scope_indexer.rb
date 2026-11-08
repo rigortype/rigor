@@ -4258,7 +4258,7 @@ module Rigor
               census_scan(node.superclass, qualified_prefix, methods_acc)
             end
             record_declaration_facts(node, child_prefix, methods_acc.at(node)) unless child_cref
-            record_concern_class_methods(node, child_prefix, methods_acc) unless child_cref
+            record_concern_class_methods(node, child_prefix, methods_acc, def_nodes_acc) unless child_cref
             body_prefix = child_cref ? [] : child_prefix
             if node.body
               walk_methods_and_def_nodes(node.body, body_prefix, false, methods_acc, def_nodes_acc,
@@ -5062,6 +5062,12 @@ module Rigor
       # `ClassMethods` on every includer's singleton chain, which no `extend` edge of the includer records. The module
       # takes a `[ENVELOPE_HOOK_EXTEND_KIND, "ClassMethods"]` entry per constant extended on the hook's parameter, as
       # written, so `call.undefined-method` can resolve an includer's class-body macro calls against it.
+      #
+      # Issue #1592 — the entry also names the hook (`[ENVELOPE_HOOK_EXTEND_KIND, "ClassMethods", :included]`), so the
+      # includer's singleton resolution chain draws the module only for the edge whose hook runs. An `extend` on the
+      # parameter the chain cannot place as a fact (not a direct statement of the hook body, or with an argument that is
+      # not a constant), a `base.send(:extend, …)` and a `base.singleton_class.include` / `prepend` take a
+      # `[ENVELOPE_HOOK_EXTEND_OPEN_KIND, hook]` entry instead of, or beside, the named one.
       def record_hook_extends(def_node, qualified_prefix, tables, side)
         return unless side == :singleton && HOOK_EXTEND_DEFS.include?(def_node.name) && !qualified_prefix.empty?
 
@@ -5069,22 +5075,67 @@ module Rigor
         return unless param.is_a?(Prism::RequiredParameterNode)
 
         owner = qualified_prefix.join("::")
+        direct = hook_body_statements(def_node.body)
         Source::NodeWalker.each(def_node.body) do |node|
-          next unless node.is_a?(Prism::CallNode) && node.name == :extend
-          next unless node.receiver.is_a?(Prism::LocalVariableReadNode) && node.receiver.name == param.name
+          next unless node.is_a?(Prism::CallNode)
 
-          record_hook_extend_arguments(node, owner, tables)
+          if node.name == :extend && hook_param_receiver?(node.receiver, param.name)
+            complete = record_hook_extend_arguments(node, owner, tables, def_node.name)
+            record_hook_extend_open(owner, tables, def_node.name) unless complete && direct.include?(node)
+          elsif hook_singleton_reshape?(node, param.name)
+            record_hook_extend_open(owner, tables, def_node.name)
+          end
         end
       end
 
-      def record_hook_extend_arguments(node, owner, tables)
-        (node.arguments&.arguments || []).each do |argument|
-          written = Source::ConstantPath.qualified_name_or_nil(argument)
-          next if written.nil?
+      def hook_param_receiver?(receiver, name)
+        receiver.is_a?(Prism::LocalVariableReadNode) && receiver.name == name
+      end
 
-          key = [Scope::DiscoveryIndex::ENVELOPE_HOOK_EXTEND_KIND, written]
+      # A hook-body call that mixes into the parameter's singleton class without a plain `base.extend(…)`:
+      # `base.send(:extend, M)` (or `__send__` / `public_send`) and `base.singleton_class.include(M)` / `prepend(M)`.
+      def hook_singleton_reshape?(node, name)
+        receiver = node.receiver
+        if HOOK_SEND_CALLS.include?(node.name)
+          send_extend?(node) && hook_param_receiver?(receiver, name)
+        else
+          %i[include prepend].include?(node.name) && receiver.is_a?(Prism::CallNode) &&
+            receiver.name == :singleton_class && hook_param_receiver?(receiver.receiver, name)
+        end
+      end
+
+      # `send(:extend, …)`, `__send__` or `public_send`, on whatever receiver.
+      def send_extend?(node)
+        first = node.arguments&.arguments&.first
+        HOOK_SEND_CALLS.include?(node.name) && first.is_a?(Prism::SymbolNode) && first.unescaped == "extend"
+      end
+
+      HOOK_SEND_CALLS = %i[send __send__ public_send].freeze
+      private_constant :HOOK_SEND_CALLS
+
+      # The direct statements of a hook body, identity-compared: an endless `def` has its one expression.
+      def hook_body_statements(body)
+        statements = body.is_a?(Prism::StatementsNode) ? body.body : [body].compact
+        Set.new.compare_by_identity.merge(statements)
+      end
+
+      # Records each constant argument as written and answers whether every argument was one.
+      def record_hook_extend_arguments(node, owner, tables, hook)
+        arguments = node.arguments&.arguments || []
+        complete = !arguments.empty?
+        arguments.each do |argument|
+          written = Source::ConstantPath.qualified_name_or_nil(argument)
+          next complete = false if written.nil?
+
+          key = [Scope::DiscoveryIndex::ENVELOPE_HOOK_EXTEND_KIND, written, hook]
           record_envelope(tables.envelopes, owner, key, Source::ParameterEnvelope::OPAQUE)
         end
+        complete
+      end
+
+      def record_hook_extend_open(owner, tables, hook)
+        key = [Scope::DiscoveryIndex::ENVELOPE_HOOK_EXTEND_OPEN_KIND, hook]
+        record_envelope(tables.envelopes, owner, key, Source::ParameterEnvelope::OPAQUE)
       end
 
       HOOK_EXTEND_DEFS = %i[included prepended].to_set.freeze
@@ -5098,7 +5149,10 @@ module Rigor
       # reader resolves and reads it. The walk keeps recording the same `def` on the module itself as before. A call on
       # `self` in an `included do … end` or `prepended do … end` block takes a
       # `[ENVELOPE_HOOK_BODY_CALL_KIND, hook, name]` entry, since Ruby runs that block in the includer's class body.
-      def record_concern_class_methods(node, child_prefix, methods_acc)
+      #
+      # Issue #1592 — the `def` node is filed on `Owner::ClassMethods` too, so the includer's singleton resolution chain,
+      # which holds that module, answers a class-side call with the `def`'s own return type.
+      def record_concern_class_methods(node, child_prefix, methods_acc, def_nodes_acc)
         return unless node.is_a?(Prism::ModuleNode) && concern_body?(node.body, child_prefix)
 
         owner = child_prefix.join("::")
@@ -5111,14 +5165,27 @@ module Rigor
           if statement.name == :class_methods
             each_class_methods_def(statement.block.body) do |def_node|
               record_def_method(def_node, class_methods_prefix, false, methods_acc.at(def_node))
+              record_def_node(def_node, class_methods_prefix, false, def_nodes_acc)
               record_def_body_evidence(def_node, class_methods_prefix, methods_acc, :instance)
             end
           elsif CONCERN_HOOK_BLOCKS.include?(statement.name)
-            each_self_call(statement.block.body) do |call|
-              entry = [Scope::DiscoveryIndex::ENVELOPE_HOOK_BODY_CALL_KIND, statement.name, call.name]
-              record_envelope(methods_acc.at(call).envelopes, owner, entry, Source::ParameterEnvelope::OPAQUE)
-            end
+            record_concern_hook_block(statement, owner, methods_acc)
           end
+        end
+      end
+
+      # Issue #1592 — an `extend` on `self` in the block extends the includer as `base.extend` in a hook does, so it
+      # records the same entries, named by the block's hook ({#record_hook_extends}).
+      def record_concern_hook_block(statement, owner, methods_acc)
+        direct = hook_body_statements(statement.block.body)
+        each_self_call(statement.block.body) do |call|
+          tables = methods_acc.at(call)
+          entry = [Scope::DiscoveryIndex::ENVELOPE_HOOK_BODY_CALL_KIND, statement.name, call.name]
+          record_envelope(tables.envelopes, owner, entry, Source::ParameterEnvelope::OPAQUE)
+          next unless call.name == :extend || send_extend?(call)
+
+          complete = call.name == :extend && record_hook_extend_arguments(call, owner, tables, statement.name)
+          record_hook_extend_open(owner, tables, statement.name) unless complete && direct.include?(call)
         end
       end
 

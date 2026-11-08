@@ -1,0 +1,3 @@
+- **[plugin:activerecord]** A `decimal` column reads as an `Integer` at scale 0 and as a `BigDecimal` at a non-zero literal scale, not as a `Float`, so correct calls on it no longer report `call.undefined-method`; thank you @takayamaki! ([#2967](https://github.com/rigortype/rigor/pull/2967))
+  - The `db/schema.rb` DSL reads `t.decimal` and `t.column ..., :decimal` by their literal `scale:`, and `db/structure.sql` reads `numeric(p, s)` and `decimal(p, s)` by `s`.
+  - A decimal with no scale, or a non-literal one, stays untyped, because the database adapter decides its class.

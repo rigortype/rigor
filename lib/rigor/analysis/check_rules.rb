@@ -1095,7 +1095,7 @@ module Rigor
           chain.record(scope) if Analysis::DependencyRecorder.active?
           chain.level_classes.compact.flat_map do |klass|
             mixins = scope.includes_of(klass)
-            prepends = scope.discovery.discovered_prepends[klass] || EMPTY_HOOK_EDGES
+            prepends = scope.prepends_of(klass)
             mixins.uniq.filter_map do |raw|
               mixin = declared_constant(scope, klass, raw)
               next unless mixin
@@ -1107,9 +1107,6 @@ module Rigor
             end
           end
         end
-
-        EMPTY_HOOK_EDGES = [].freeze
-        private_constant :EMPTY_HOOK_EDGES
 
         def hook_extension_defines?(scope, mixin, definers)
           hook_extends(scope, mixin).any? do |written, lookup|

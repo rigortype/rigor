@@ -45,10 +45,12 @@ require_relative "../../support/ancestry_walker_scan"
 #   position.
 # The allow-list: `file#method` => the reason it may keep walking.
 ALLOWED_ANCESTRY_WALKERS = {
-  "lib/rigor/analysis/check_rules.rb#hook_extended_macro_defines?" =>
-    "issue #2975: Ruby runs an `included` / `prepended` hook for the direct includer only, and the chain's levels " \
-    "flatten each class's transitive mixins, so it reads each level class's own mixin list one hop, never further, " \
-    "taking the superclass chain from `Scope::ResolutionChain#level_classes`; a union for withholding",
+  "lib/rigor/analysis/check_rules.rb#direct_hook_mixins" =>
+    "issues #2975 and #2986: Ruby runs an `included` / `prepended` hook, and a concern's `included do` / " \
+    "`prepended do` block, for the direct includer or prepender only, and the chain's levels flatten each class's " \
+    "transitive mixins and do not keep the edge, so it reads each level class's own mixin and prepend lists one " \
+    "hop, never further, taking the superclass chain from `Scope::ResolutionChain#level_classes`; a union for " \
+    "withholding",
   "lib/rigor/analysis/check_rules.rb#method_defined_on_known_subclass?" =>
     "descendant walk over the inverted superclass table: any subclass defining the name withholds " \
     "`call.self-undefined-method`; order-independent",

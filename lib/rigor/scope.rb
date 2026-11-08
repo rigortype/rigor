@@ -2057,6 +2057,14 @@ module Rigor
       @discovery.discovered_includes[class_name.to_s] || []
     end
 
+    # Issue #2986 — the modules `class_name` prepends, as written, in search order: the prepended part of
+    # {#includes_of}, which lists them ahead of the included ones. An ActiveSupport::Concern's `prepended do … end`
+    # block runs for a prepend edge only, and its `included do … end` block for an include edge only.
+    def prepends_of(class_name)
+      record_class_dependency(class_name) if Analysis::DependencyRecorder.active?
+      @discovery.discovered_prepends[class_name.to_s] || EMPTY_PREPENDS
+    end
+
     # Issue #898 — the module names `extend`ed onto `class_name`'s SINGLETON, as written, gathered up the
     # as-written superclass chain because a singleton class inherits its superclass's singleton class
     # (`class Base; extend Comparable; end; class Widget < Base; end` leaves `Widget.is_a?(Comparable)`

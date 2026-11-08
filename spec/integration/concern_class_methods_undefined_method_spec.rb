@@ -69,8 +69,9 @@ RSpec.describe "ActiveSupport::Concern class_methods macros and call.undefined-m
   end
 
   it "opens the includer when an included block calls the macro" do
-    source = "module Conc13\n  extend ActiveSupport::Concern\n  class_methods do\n    def my_c(*n) = #{definer_body}\n  " \
-             "end\n  included do\n    my_c :c13\n  end\nend\nclass C13\n  include Conc13\nend\n"
+    source = "module Conc13\n  extend ActiveSupport::Concern\n  class_methods do\n    " \
+             "def my_c(*n) = #{definer_body}\n  end\n  included do\n    my_c :c13\n  end\nend\n" \
+             "class C13\n  include Conc13\nend\n"
     write_project(source, %w[C13.new.c13])
     expect(undefined_messages).to be_empty
   end

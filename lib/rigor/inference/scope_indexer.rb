@@ -1457,9 +1457,10 @@ module Rigor
       # Issue #2490 — yields the children of `node` a census walk for `class_name` descends into: all of them, or only
       # those {CensusForeignBlock.census_children} keeps when `node` runs code whose `self` is another object. A nil
       # `class_name` keeps them all. A reentered `def` (#2941) is yielded as itself, so a walk that stops at a `def`
-      # skips it; `def_bodies:` yields its body instead, for a walk that counts its writes.
-      def each_census_child(node, class_name, def_bodies: false, &)
-        outside = class_name && CensusForeignBlock.census_children(node, class_name)
+      # skips it; `def_bodies:` yields its body instead, for a walk that counts its writes. `reentry: false` (a
+      # singleton-side `def`) keeps none of the reentered code.
+      def each_census_child(node, class_name, def_bodies: false, reentry: true, &)
+        outside = class_name && CensusForeignBlock.census_children(node, class_name, reentry: reentry)
         return node.rigor_each_child(&) unless outside
 
         outside.each do |child|
@@ -1515,7 +1516,8 @@ module Rigor
 
         # #2490 — a block or `class <<` body whose `self` is another object writes that object's ivars. #2941 — a `def`
         # in it that runs on a `class_name` instance again counts its writes.
-        each_census_child(node, class_name, def_bodies: true) do |c|
+        # The reentry is for code that runs on an instance again, so a singleton-side `def` takes none.
+        each_census_child(node, class_name, def_bodies: true, reentry: !scope.self_type.is_a?(Type::Singleton)) do |c|
           gather_ivar_writes(c, scope, class_name, accumulator, guarded_ivars, mutated_ivars, dead_writes, declared)
         end
       end

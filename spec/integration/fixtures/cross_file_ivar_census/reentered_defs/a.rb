@@ -194,3 +194,185 @@ class InitEvalDef
   def initialize = self.class.class_eval { def set = (@x = "a") }
   def typed = assert_type("\"a\"?", @x)
 end
+
+# Review round 1: a `class_eval` receiver rooted at another constant or a literal is another module, so its `def` and
+# `define_method` define that module's methods: Ruby 4.0.5 raises on `get` after `poke` and any `set` they allow.
+class EvalOtherSingleton
+  def initialize = (@x = nil)
+  def get = @x.upcase # FIRES call.undefined-method
+  def poke = Other.singleton_class.class_eval { def set = (@x = "a") }
+end
+
+class EvalOtherNewClass
+  def initialize = (@x = nil)
+  def get = @x.upcase # FIRES call.undefined-method
+  def poke = Other.new.class.class_eval { def set = (@x = "a") }
+end
+
+class EvalOtherNewSingleton
+  def initialize = (@x = nil)
+  def get = @x.upcase # FIRES call.undefined-method
+  def poke = Other.new.singleton_class.class_eval { def set = (@x = "a") }
+end
+
+class EvalLiteralClass
+  def initialize = (@x = nil)
+  def get = @x.upcase # FIRES call.undefined-method
+  def poke = "s".class.class_eval { def set = (@x = "a") }
+end
+
+class EvalLiteralSingleton
+  def initialize = (@x = nil)
+  def get = @x.upcase # FIRES call.undefined-method
+  def poke = [1].singleton_class.class_eval { def set = (@x = "a") }
+end
+
+class EvalOtherClass
+  def initialize = (@x = nil)
+  def get = @x.upcase # FIRES call.undefined-method
+  def poke = Other.class.class_eval { def set = (@x = "a") }
+end
+
+class EvalOtherDup
+  def initialize = (@x = nil)
+  def get = @x.upcase # FIRES call.undefined-method
+  def poke = Other.dup.class_eval { def set = (@x = "a") }
+end
+
+# `Other.superclass` is `Object`, an ancestor of the class, so its `set` runs on an instance: Ruby 4.0.5 returns "A"
+# from `k.poke; k.set; k.get`.
+class EvalOtherSuperclass
+  def initialize = (@x = nil)
+  def get = @x.upcase
+  def poke = Other.superclass.class_eval { def set = (@x = "a") }
+end
+
+class DefineOtherSingleton
+  def initialize = (@x = nil)
+  def get = @x.upcase # FIRES call.undefined-method
+  def poke = Other.singleton_class.class_eval { define_method(:set) { @x = "a" } }
+end
+
+class DefineLiteralClass
+  def initialize = (@x = nil)
+  def get = @x.upcase # FIRES call.undefined-method
+  def poke = "s".class.class_eval { define_method(:set) { @x = "a" } }
+end
+
+# In a singleton-side `def`, `self.class` is `Class` and `singleton_class` the class's metaclass: Ruby 4.0.5 raises on
+# `get` after `k.class.poke; k.class.set`.
+class SingletonSideClassEval
+  def initialize = (@x = nil)
+  def get = @x.upcase # FIRES call.undefined-method
+  def self.poke = singleton_class.class_eval { def set = (@x = "a") }
+end
+
+class SingletonSideDefine
+  def initialize = (@x = nil)
+  def get = @x.upcase # FIRES call.undefined-method
+  def self.poke = singleton_class.class_eval { define_method(:set) { @x = "a" } }
+end
+
+# A `def` in a `class << self` body inside an instance method is a singleton method of the instance: Ruby 4.0.5
+# returns "A" from `k.poke; k.set; k.get`. On another class's new object it is that object's: `get` raises.
+class SingletonBodyDef
+  def initialize = (@x = nil)
+  def get = @x.upcase
+  def poke
+    class << self
+      def set = (@x = "a")
+    end
+  end
+end
+
+class SingletonOtherNewDef
+  def initialize = (@x = nil)
+  def get = @x.upcase # FIRES call.undefined-method
+  def poke
+    class << Other.new
+      def set = (@x = "a")
+    end
+  end
+end
+
+# The pokes of these classes are in b.rb.
+class CrossEvalOtherSingleton
+  def initialize = (@x = nil)
+  def get = @x.upcase # FIRES call.undefined-method
+end
+
+class CrossEvalOtherNewClass
+  def initialize = (@x = nil)
+  def get = @x.upcase # FIRES call.undefined-method
+end
+
+class CrossEvalOtherNewSingleton
+  def initialize = (@x = nil)
+  def get = @x.upcase # FIRES call.undefined-method
+end
+
+class CrossEvalLiteralClass
+  def initialize = (@x = nil)
+  def get = @x.upcase # FIRES call.undefined-method
+end
+
+class CrossEvalLiteralSingleton
+  def initialize = (@x = nil)
+  def get = @x.upcase # FIRES call.undefined-method
+end
+
+class CrossEvalOtherClass
+  def initialize = (@x = nil)
+  def get = @x.upcase # FIRES call.undefined-method
+end
+
+class CrossEvalOtherDup
+  def initialize = (@x = nil)
+  def get = @x.upcase # FIRES call.undefined-method
+end
+
+class CrossEvalOtherSuperclass
+  def initialize = (@x = nil)
+  def get = @x.upcase
+end
+
+class CrossDefineOtherSingleton
+  def initialize = (@x = nil)
+  def get = @x.upcase # FIRES call.undefined-method
+end
+
+class CrossSingletonSideClassEval
+  def initialize = (@x = nil)
+  def get = @x.upcase # FIRES call.undefined-method
+end
+
+class CrossSingletonBodyDef
+  def initialize = (@x = nil)
+  def get = @x.upcase
+end
+
+class CrossSingletonOtherNewDef
+  def initialize = (@x = nil)
+  def get = @x.upcase # FIRES call.undefined-method
+end
+
+# A receiver nothing types may name the class: Ruby 4.0.5 returns "A" from `k.poke; k.set; k.get`.
+class CallEvalDef
+  def initialize = (@x = nil)
+  def get = @x.upcase
+  def klass = self.class
+  def poke = klass.class_eval { def set = (@x = "a") }
+end
+
+class IvarEvalDef
+  def initialize = (@x = nil; @mod = self.class)
+  def get = @x.upcase
+  def poke = @mod.class_eval { def set = (@x = "a") }
+end
+
+# The poke of this class is in b.rb.
+class CrossCallEvalDef
+  def initialize = (@x = nil)
+  def get = @x.upcase
+  def klass = self.class
+end

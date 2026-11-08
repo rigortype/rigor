@@ -164,9 +164,10 @@ module Rigor
       # non-constant, or a call the walk cannot record), so the chain may hold a module it does not list.
       def wildcard_mixin? = @marks.any? { |mark| mark.listed.include?(Relevance::WILDCARD) }
 
-      # Issue #2991 — true when a class on the chain mixes in a module no name spells (`include(*MODS)`, `include
-      # helper`, a hook's `base.include M`): the chain's SET of modules is unknown, not only its order. Every such mark
-      # is also a {#wildcard_mixin?} one; `self.include M` or `include M; prepend M` taints the order alone.
+      # Issue #2991 — true when a class on the chain mixes in a module the tables do not record under any name
+      # (`include(*MODS)`, `include helper`, a hook's `base.include M`, an unrecorded `self.include M`): the chain's SET
+      # of modules is unknown, not only its order. Every such mark is also a {#wildcard_mixin?} one; `include M;
+      # prepend M` taints the order alone.
       def unnamed_mixin? = @marks.any? { |mark| mark.listed.include?(Relevance::UNNAMED) }
 
       # The ONE decision every first-definer reader makes: does `answer`, read off this chain, stand, or does

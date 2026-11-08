@@ -1,14 +1,15 @@
 # frozen_string_literal: true
 
-# Issue #2991 — a splatted `include(*MODS)` / `prepend(*MODS)`, or any other mixin call the walk cannot name the
-# module of, means every name on the class's instance side may come from that module: `call.undefined-method` must
-# not fire on the class, nor on a subclass at any depth. `Scope::ResolutionChain` marks such a chain
-# (`unnamed_mixin?`), and the rule reads that mark. A mixin whose order alone is unknown (`self.include M1`,
-# `include M1; prepend M1`, the `wildcard_mixin?` mark) names its module and must keep reporting. `sig/` declares every
-# class so the rule runs. `Sup` defines a method of its own, so it is a project
-# entry on its subclasses' chains, not an external one (#2094), which already stands down on another route. Every
-# row's Ruby behaviour was witnessed on Ruby 4.0.5: each quiet call returns 1, and each reported call raises
-# `NoMethodError`. The literal-include row is a must-still-fire guard.
+# Issue #2991 — a splatted `include(*MODS)` / `prepend(*MODS)`, or any other mixin call the walk records no module
+# for, means every name on the class's instance side may come from that module: `call.undefined-method` must not
+# fire on the class, nor on a subclass at any depth. `Scope::ResolutionChain` marks such a chain (`unnamed_mixin?`),
+# and the rule reads that mark. `self.include M1` and a receiverless `send(:include, M1)` are such calls until the
+# walk records them. A mixin whose order alone is unknown (`include M1; prepend M1`, an opaque eval that mixes nothing
+# into its own `self`, the `wildcard_mixin?` mark) has its modules recorded and must keep reporting. `sig/` declares
+# every class so the rule runs. `Sup` defines a method of its own, so it is a project entry on its subclasses'
+# chains, not an external one (#2094), which already stands down on another route. Every row's Ruby behaviour was
+# witnessed on Ruby 4.0.5: each quiet call returns 1, and each reported call raises `NoMethodError`. The
+# literal-include row is a must-still-fire guard.
 
 require "spec_helper"
 require "fileutils"
@@ -100,12 +101,6 @@ RSpec.describe "a class whose instance-side chain holds a splatted mixin (#2991)
   end
 
   describe "a mixin whose order alone is unknown" do
-    it "still fires on a subclass of `self.include M1`" do
-      source = "#{mods}class SI\n  self.include M1\n  def t = 1\nend\nclass SISub < SI\n  def u = self.m2\nend\n"
-      expect(undefined_messages({ "a.rb" => source }, "class SI\nend\nclass SISub < SI\nend\n"))
-        .to eq(["undefined method `m2' for SISub"])
-    end
-
     it "still fires on `include M1; prepend M1`" do
       source = "#{mods}class IP\n  include M1\n  prepend M1\n  def w = self.m2\nend\n"
       expect(undefined_messages({ "a.rb" => source }, "class IP\nend\n")).to eq(["undefined method `m2' for IP"])
@@ -114,6 +109,31 @@ RSpec.describe "a class whose instance-side chain holds a splatted mixin (#2991)
     it "still fires beside an opaque `instance_exec` whose block prepends onto an Array" do
       source = "class AP\n  def go(o) = o.instance_exec { @a = []; @a.prepend(1) }\n  def w = self.m2\nend\n"
       expect(undefined_messages({ "a.rb" => source }, "class AP\nend\n")).to eq(["undefined method `m2' for AP"])
+    end
+
+    it "still fires beside `x.singleton_class.class_eval { include M1 }`, which mixes into a singleton" do
+      source = "#{mods}class S3\n  def go(x) = x.singleton_class.class_eval { include M1 }\n  def w = self.m2\nend\n"
+      expect(undefined_messages({ "a.rb" => source }, "class S3\nend\n")).to eq(["undefined method `m2' for S3"])
+    end
+
+    it "still fires beside `Object.new.instance_eval { extend M1 }`, which mixes into that object" do
+      source = "#{mods}class S2\n  def go = Object.new.instance_eval { extend M1 }\n  def w = self.m2\nend\n"
+      expect(undefined_messages({ "a.rb" => source }, "class S2\nend\n")).to eq(["undefined method `m2' for S2"])
+    end
+  end
+
+  describe "a mixin call the walk does not record, until it does" do
+    {
+      "A" => "  self.include M1\n",
+      "B" => "  self.send(:include, M1)\n",
+      "C" => "  public_send(:include, M1)\n",
+      "D" => "  __send__(:prepend, M1)\n",
+      "F" => "  def self.setup = send(:include, M1)\n"
+    }.each do |name, call|
+      it "does not fire on `#{call.strip}` for the module's own method" do
+        source = "#{mods}class #{name}\n#{call}  def t = self.m1\nend\n"
+        expect(undefined_messages({ "a.rb" => source }, "class #{name}\nend\n")).to be_empty
+      end
     end
   end
 

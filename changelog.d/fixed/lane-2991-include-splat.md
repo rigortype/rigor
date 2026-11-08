@@ -1,5 +1,6 @@
-- **[check]** `call.undefined-method` no longer fires on a class, or on its subclasses, when its instance side mixes in a module the source does not name by a constant. ([#2993](https://github.com/rigortype/rigor/pull/2993))
+- **[check]** `call.undefined-method` no longer fires on a class, or on its subclasses, when its instance side mixes in a module Rigor does not record. ([#2993](https://github.com/rigortype/rigor/pull/2993))
   - The shapes covered are `include(*MODS)`, `prepend(*MODS)`, `send(:include, *MODS)`, `include helper`, `include M1, helper`, `k.class_eval { include M }`, and an `extended` hook's `base.include(M)`.
+  - Until Rigor records them, `self.include M` and a receiverless `send(:include, M)`, `public_send` or `__send__` are covered as well.
   - `Other.include(*MODS)` affects only `Other`.
-  - A mixin whose module is named still reports. This covers `self.include M`, `send(:include, M)` and `include M; prepend M`.
+  - `include M; prepend M` still reports, because both modules are recorded.
   - Calls on the class object still report. A splatted `extend(*MODS)` affects only the class object, as before.

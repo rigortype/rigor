@@ -25,12 +25,13 @@ module Rigor
       # leaves the edges the tables did record looking positioned. So it taints the whole owner side with the
       # {WILDCARD} name instead: an owner side that lists {WILDCARD} has no known order at all.
       #
-      # Issue #2991 — {WILDCARD} says only that the ORDER is unknown; most of those calls still mix in modules the
-      # source names (`self.include M`, `send(:include, M)`, `include M; prepend M`). Where the walk cannot name the
-      # module at all — an argument that is not a constant (`include helper`, `include(*MODS)`, `include M, h`), a
-      # hook parameter's receiver (`base.include M`, `base.class_eval { include M }`), or an opaque eval whose block
-      # mixes into its own `self` — the side also lists {UNNAMED}, always beside {WILDCARD}: the SET of modules is
-      # unknown too.
+      # Issue #2991 — {WILDCARD} says only that the ORDER is unknown: `include M; prepend M`, an edge recorded where its
+      # position is not a fact, and an opaque eval whose block mixes nothing into its own `self` all set it while every
+      # module is recorded. Where the walk recorded no module under any name, the instance side also lists {UNNAMED},
+      # always beside {WILDCARD}, because its SET of modules is unknown too. That covers every instance-side mixin call
+      # it could not record (`include helper`, `include(*MODS)`, `base.include M`, and `self.include M` and a
+      # receiverless `send(:include, M)` until they are recorded), a name beside one it cannot name (`include M, h`),
+      # and an opaque eval whose block mixes into its own `self`.
       #
       # The value is `{owner => {include: [names], extend: [names]}}`. `:include` is the instance side
       # (`include` and `prepend`), `:extend` the singleton side (`extend`, and `include` / `prepend` inside

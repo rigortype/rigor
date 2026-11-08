@@ -7520,21 +7520,18 @@ module Rigor
         return if effects.empty?
         return if instance_mixin_recorded?(node, view, qualified_prefix, current_class, accumulator)
 
-        # A mixin call the tables cannot hold still reshapes the ancestry: taint the whole owner side.
-        unnamed = unnamed_mixin_call?(node, view, accumulator)
+        # A mixin call the tables cannot hold still reshapes the ancestry: taint the whole owner side. Issue #2991 — it
+        # recorded no module under any name (`include(*MODS)`, `include helper`, `base.include M`, and, until they are
+        # recorded, `self.include M` and a receiverless `send(:include, M)`), so the instance side's SET is unknown too.
+        unnamed = instance_mixin_call?(node, kind)
         effects.each { |owner, side| accumulator.taint(owner, side, unnamed: unnamed && side == :include) }
       end
 
-      # Issue #2991 — whether an unrecorded mixin call mixes in a module the walk cannot name: an argument that is
-      # not a constant (`include helper`, `include(*MODS)`), or an `include` / `prepend` on a hook parameter itself
-      # (`base.include M`), whose class records nothing. `self.include M` and `send(:include, M)` name their module,
-      # so they leave only the order unknown. The caller applies it to the instance side alone.
-      def unnamed_mixin_call?(node, view, accumulator)
-        return true if view[1].any? { |arg| Source::ConstantPath.qualified_name(arg).nil? }
-
-        receiver = node.receiver
-        INSTANCE_MIXIN_NAMES.include?(view.first) && receiver.is_a?(Prism::LocalVariableReadNode) &&
-          accumulator.hook_local?(receiver.name)
+      # Issue #2991 — whether an unrecorded mixin call mixes into an instance side: an `include` / `prepend` whose
+      # receiver is not a `singleton_class` call. A hook's `base.extend M` or `base.singleton_class.include M` still
+      # taints the enclosing class's instance side (it may be the includer), but mixes nothing into it.
+      def instance_mixin_call?(node, kind)
+        INSTANCE_MIXIN_NAMES.include?(kind) && !singleton_class_eval_receiver?(node.receiver)
       end
 
       # Records the instance-side edges of a call {#mixin_call_recorded?} accepts. False when it recorded
@@ -8172,7 +8169,7 @@ module Rigor
         return if singleton_class_rewrite_tainted?(node, qualified_prefix, current_class, accumulator,
                                                    in_singleton: in_singleton)
 
-        kind, arguments, via_send = mixin_call_view(node)
+        kind, _arguments, via_send = mixin_call_view(node)
         return if kind.nil?
 
         effects = mixin_effects(node, kind, qualified_prefix, current_class, accumulator, in_singleton: in_singleton)
@@ -8181,7 +8178,9 @@ module Rigor
         return if !via_send && singleton_mixin_recorded?(node, kind, qualified_prefix, current_class, accumulator,
                                                          in_singleton)
 
-        unnamed = unnamed_mixin_call?(node, [kind, arguments], accumulator)
+        # Issue #2991 — as in {#record_mixin_call}: an unrecorded instance-side call (a hook's `base.include M` written
+        # in `class << self`) leaves the set unknown.
+        unnamed = instance_mixin_call?(node, kind)
         effects.each { |owner, side| accumulator.taint(owner, side, unnamed: unnamed && side == :include) }
       end
 

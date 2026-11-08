@@ -1563,9 +1563,10 @@ module Rigor
         # A constant the environment does not know is read off the receiver's OWN includes only. Issue #2991 — a
         # mixin no name spells (`include(*MODS)`, `include helper`, a hook's `base.include M`) opens the receiver when
         # it sits anywhere on its instance-side chain, its own level or an ancestor's: the chain marks it
-        # (`ResolutionChain#unnamed_mixin?`), and any name may come from the unlisted module. A mixin whose ORDER
-        # alone is unknown (`self.include M`, `include M; prepend M`) names its module, so it opens nothing. A
-        # class-object receiver reads its singleton chain instead ({#singleton_mixin_may_answer?}).
+        # (`ResolutionChain#unnamed_mixin?`), and any name may come from the unlisted module. So does an unrecorded
+        # `self.include M` or receiverless `send(:include, M)`, until the walk records them. A mixin whose ORDER alone
+        # is unknown (`include M; prepend M`) has every module recorded, so it opens nothing. A class-object receiver
+        # reads its singleton chain instead ({#singleton_mixin_may_answer?}).
         def unknown_mixin_includer?(class_name, scope, kind)
           includes = scope.includes_of(class_name)
           return true if includes.any? { |raw| !known_mixin?(raw, class_name, scope) }

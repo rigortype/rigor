@@ -158,7 +158,8 @@ module Rigor
           keys.none?(&:nil?) && keys.uniq.size == keys.size
         end
 
-        # A decimal key reads as Integer at scale 0 (`Type::DecimalWithoutScale`) and BigDecimal otherwise.
+        # A decimal key stays untyped, because its class depends on the scale: `Type::DecimalWithoutScale`
+        # at scale 0, `Type::Decimal` otherwise.
         def primary_key_ruby_type(type)
           type == :decimal ? "Object" : SchemaTable.ruby_type_for(type)
         end

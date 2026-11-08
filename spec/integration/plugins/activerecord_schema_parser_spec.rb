@@ -188,6 +188,15 @@ RSpec.describe "plugins/rigor-activerecord SchemaParser" do
       expect(table.column("prices", "whole").ruby_type).to eq("Integer")
     end
 
+    it "reads a decimal at a negative scale as a BigDecimal, not a Float" do
+      table = parse(<<~RUBY)
+        create_table "prices" do |t|
+          t.decimal "rounded", precision: 10, scale: -2
+        end
+      RUBY
+      expect(table.column("prices", "rounded").ruby_type).to eq("BigDecimal")
+    end
+
     it "reads a decimal at a non-zero scale as a BigDecimal, not a Float" do
       table = parse(<<~RUBY)
         create_table "prices" do |t|

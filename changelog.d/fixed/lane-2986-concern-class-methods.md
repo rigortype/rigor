@@ -1,0 +1,2 @@
+- **[check]** `call.undefined-method` no longer fires on methods a class macro defines under a computed name when the macro comes from an `ActiveSupport::Concern`'s `class_methods do … end` block, called in the includer's class body or in the concern's `included do … end` block. ([#2989](https://github.com/rigortype/rigor/pull/2989))
+  - A concern included through another concern is not read yet, so a macro from it still reports.

@@ -16,7 +16,7 @@ mixin.
 
 ## Options and trade-offs
 
-- Make the `:discovered` walk answer `maybe` on a wildcard chain, as it does on an open-names mark. Plugins would
+- Make the `:discovered` walk answer `maybe` on an unnamed-mixin chain, as it does on an open-names mark. Plugins would
   then stand down where the module may define the name. But the activerecord implicit-self column tier
   (`implicit_self_instance_member_type`) would then decline on such a model. The engine's own top-level-`def` veto
   (#618, `ExpressionTyper#instance_self_answers?`) does not read the mark. So a top-level `def title = nil` would

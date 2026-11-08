@@ -3,9 +3,10 @@
 # Issue #2991 — a splatted `include(*MODS)` / `prepend(*MODS)` mixes in modules the tables cannot name, so every
 # name on the class's instance side may come from one of them: `call.undefined-method` must not fire on the class,
 # nor on a subclass at any depth. `Scope::ResolutionChain` marks such a chain (`wildcard_mixin?`), and the rule
-# reads that mark. `sig/` declares every class so the rule runs, and `Sup` defines a method of its own so that it is a
-# project entry on its subclasses' chains rather than an external one (#2094), which stands down on another route. Every row's Ruby behaviour was witnessed on
-# Ruby 4.0.5: each quiet call returns 1, and each reported call raises `NoMethodError`.
+# reads that mark. `sig/` declares every class so the rule runs. `Sup` defines a method of its own, so it is a project
+# entry on its subclasses' chains, not an external one (#2094), which already stands down on another route. Every
+# row's Ruby behaviour was witnessed on Ruby 4.0.5: each quiet call returns 1, and each reported call raises
+# `NoMethodError`. The literal-include row is a must-still-fire guard.
 
 require "spec_helper"
 require "fileutils"

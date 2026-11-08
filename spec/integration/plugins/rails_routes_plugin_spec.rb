@@ -1064,6 +1064,13 @@ RSpec.describe "plugins/rigor-rails-routes" do
           .to eq(%w[t1_url t2_url t3_url].map { |n| "no route helper `#{n}`" })
       end
 
+      # Ruby raises `NameError` for a String that is not a constant name, so the block keeps no name and the plugin
+      # declines there. This row fails if the plugin's copy of the constant-name pattern is loosened.
+      it "declines in an unassigned block whose String is not a constant name" do
+        files = { "app/libs/l.rb" => "Struct.new(\"named\", :l_url) do\n  def go = [l_url, t5_url]\nend\n" }
+        expect(unknown_helpers(files, paths: ["app/libs/l.rb"])).to be_empty
+      end
+
       # The unassigned block's own `def own_url` is `Struct::Named`'s too, so the reopening sees it.
       it "credits them on Struct::Named and on the constant, read from a reopening in another file" do
         reopen = <<~RUBY

@@ -5,6 +5,7 @@ require "did_you_mean"
 require_relative "config_path"
 require_relative "environment/rbs_collection_discovery"
 require_relative "flow_contribution/conflict"
+require_relative "library_probe"
 require_relative "signature_path_audit"
 # ADR-87 WD4 — only the pure rule-id table (`ALL_RULES` / `RULE_FAMILIES`) is needed, so require the light
 # `rule_ids.rb` rather than the engine-pulling `check_rules.rb`; keeps `config_audit` (loaded by every check)
@@ -145,7 +146,7 @@ module Rigor
               lockfile.map { |name| [:rbs_collection_library, "rbs_collection.lock.yaml: stdlib entry", name] }
       return [] if named.empty?
 
-      available = library_probe
+      available = LibraryProbe.predicate
       named.reject { |_, _, lib| available.call(lib) }.map do |kind, source, lib|
         message = "#{source} #{lib.inspect} is not an available RBS library (no signatures loaded from it)"
         Warning.new(kind: kind, message: message, fields: { "name" => lib })
@@ -153,53 +154,6 @@ module Rigor
     rescue StandardError
       []
     end
-
-    # Issue #2961 — the CLI has not loaded `rbs` when this audit runs, and loading it costs ~90 ms on the
-    # warm boot-slim path. Returns a predicate answering what `RBS::EnvironmentLoader#has_library?` answers
-    # for `version: nil`: the real loader when `rbs` is already loaded, otherwise a filesystem probe of the
-    # same two sources — a gem's `sig/` directory, and a release-versioned directory under the bundled rbs
-    # gem's `stdlib/<name>/`. A probe that cannot place the rbs gem answers true (never warns when unsure).
-    def self.library_probe
-      if defined?(::RBS::EnvironmentLoader)
-        return ->(lib) { ::RBS::EnvironmentLoader.new.has_library?(library: lib, version: nil) }
-      end
-
-      stdlib = rbs_stdlib_root
-      return ->(_lib) { true } if stdlib.nil?
-
-      ->(lib) { gem_sig_dir?(lib) || stdlib_library?(stdlib, lib) }
-    end
-    private_class_method :library_probe
-
-    def self.rbs_stdlib_root
-      dir = File.join(Gem::Specification.find_by_name("rbs").gem_dir, "stdlib")
-      File.directory?(dir) ? dir : nil
-    rescue Gem::LoadError
-      nil
-    end
-    private_class_method :rbs_stdlib_root
-
-    def self.gem_sig_dir?(name)
-      File.directory?(File.join(Gem::Specification.find_by_name(name).gem_dir, "sig"))
-    rescue Gem::MissingSpecError
-      false
-    rescue Gem::LoadError
-      true
-    end
-    private_class_method :gem_sig_dir?
-
-    # `Repository#add` registers each child of `stdlib/`; a library counts when one child directory is a
-    # non-prerelease version (`Repository::GemRBS#load!`).
-    def self.stdlib_library?(stdlib, name)
-      return false if name.include?("/") || name.include?("\0")
-
-      Dir.children(File.join(stdlib, name)).any? do |child|
-        Gem::Version.correct?(child) && !Gem::Version.create(child).prerelease?
-      end
-    rescue SystemCallError
-      false
-    end
-    private_class_method :stdlib_library?
 
     # `disable:` tokens that reach no row ({.disable_token_warning}) and `severity_overrides:` keys
     # that reach none ({.override_key_warning}).

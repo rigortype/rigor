@@ -1064,7 +1064,7 @@ module Rigor
           chain = Scope::ResolutionChain.for(scope, name.to_s, :instance, :methods)
           chain.record(scope) if Analysis::DependencyRecorder.active?
           chain.level_classes.compact.any? do |klass|
-            (scope.discovered_includes[klass] || []).any? do |raw|
+            scope.includes_of(klass).any? do |raw|
               mixin = declared_constant(scope, klass, raw)
               mixin && hook_extends(scope, mixin).any? do |extended|
                 target = declared_constant(scope, mixin, extended)

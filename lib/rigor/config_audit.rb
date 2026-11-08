@@ -152,19 +152,12 @@ module Rigor
               lockfile.map { |name| [:rbs_collection_library, "rbs_collection.lock.yaml: stdlib entry", name] }
       return [] if named.empty?
 
-      available = LibraryProbe.predicate
-      unavailable = named.reject { |_, _, lib| available.call(lib) }
-      return [] if unavailable.empty?
-
-      # Issue #2987 — nor is a name whose own `sig/` the bundle loaded. Read only once a name is otherwise
-      # unavailable, so the common case (every name resolves) never touches the lockfile.
-      bundled = Environment::BundleSigDiscovery.loaded_names(
-        bundle_path: configuration.bundler_bundle_path, lockfile_path: configuration.bundler_lockfile,
-        project_root: project_root, auto_detect: configuration.bundler_auto_detect
-      )
+      unavailable = LibraryProbe.predicate.then { |has| named.reject { |_, _, lib| has.call(lib) } }
+      # Issue #2987 — nor is a name whose own `sig/` the bundle loaded; read only once a name is unavailable.
+      bundled = unavailable.empty? ? [] : Environment::BundleSigDiscovery.loaded_names(configuration, project_root)
       unavailable.reject { |kind, _, lib| kind == :library && bundled.include?(lib) }.map do |kind, source, lib|
-        message = "#{source} #{lib.inspect} is not an available RBS library (no signatures loaded from it)"
-        Warning.new(kind: kind, message: message, fields: { "name" => lib })
+        Warning.new(kind: kind, fields: { "name" => lib },
+                    message: "#{source} #{lib.inspect} is not an available RBS library (no signatures loaded from it)")
       end
     rescue StandardError
       []

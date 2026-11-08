@@ -138,6 +138,17 @@ module Rigor
         sig_dirs.filter_map { |dir| locked_name_of(dir, locked_gems, names) }.uniq
       end
 
+      # Issue #2987 — the locked gem names whose own `sig/` {.discover} loads for a configuration's bundle and
+      # lockfile: a pure file read ({LockfileResolver}), so the `libraries:` audit can ask without loading `rbs`.
+      def self.loaded_names(configuration, project_root)
+        auto_detect = configuration.bundler_auto_detect
+        locked = LockfileResolver.locked_gems(lockfile_path: configuration.bundler_lockfile,
+                                              project_root: project_root, auto_detect: auto_detect)
+        dirs = discover(bundle_path: configuration.bundler_bundle_path, project_root: project_root,
+                        auto_detect: auto_detect, locked_gems: locked.empty? ? nil : locked)
+        locked_names_of(dirs, locked)
+      end
+
       # `{name => LockedGem}` → `{canonical bundler gem directory basename => name}`. Pure-Ruby gems install as
       # `<name>-<version>`; platform-specific gems install as `<name>-<version>-<platform>` (e.g.
       # `ffi-1.17.4-aarch64-linux-gnu`). Lockfile platform `"ruby"` is the pure-Ruby case; any other value is

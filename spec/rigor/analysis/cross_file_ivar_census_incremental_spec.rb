@@ -114,4 +114,31 @@ RSpec.describe "cross-file ivar census — incremental" do
       baseline: []
     )
   end
+  # Issue #2983 — a `class_eval` rooted at an alias constant files its code under the alias, which the reader joins
+  # through the `[:binds_class, …]` entry: rebinding the alias in its own file re-checks the reader.
+  it "re-checks the reader when the alias a class_eval is rooted at is rebound in another file" do
+    poke = "class E\n  def poke = AliasE.new.class.class_eval { define_method(:set) { @x = \"a\" } }\nend\n"
+    expect_steps(
+      { "b.rb" => "class Other; end\nAliasE = E\n", "c.rb" => poke },
+      [
+        [{ "b.rb" => "class Other; end\nAliasE = Other\n" }, true, [["a.rb", 3]]],
+        [{ "b.rb" => "class Other; end\nAliasE = E\n" }, true, []]
+      ],
+      baseline: []
+    )
+  end
+
+  # Issue #2983 — an included module with no method of its own is still on the chain the reader joins, so a
+  # `module_eval` on it is the class's write until another file drops the include.
+  it "re-checks the reader when another file drops the include of a module_eval'd module" do
+    expect_steps(
+      { "b.rb" => "module M; end\nclass E\n  include M\nend\n",
+        "c.rb" => "class E\n  def poke = M.module_eval { def set = (@x = \"a\") }\nend\n" },
+      [
+        [{ "b.rb" => "module M; end\nclass E\nend\n" }, true, [["a.rb", 3]]],
+        [{ "b.rb" => "module M; end\nclass E\n  include M\nend\n" }, true, []]
+      ],
+      baseline: []
+    )
+  end
 end

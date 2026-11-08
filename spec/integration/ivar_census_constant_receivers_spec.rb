@@ -1,0 +1,124 @@
+# frozen_string_literal: true
+
+require "spec_helper"
+
+# Issue #2983 — a `class_eval`-family block whose receiver is rooted at a constant other than the class's own spelling
+# defines its `def` / `define_method` on that constant's module. When the constant names an ancestor of the class, an
+# alias of it or one of its instances, the method runs on the class's instances and its `@x` write is theirs; the
+# class-ivar census joins it in the same file and from another file alike. Each case is its own project, so one shape's
+# write cannot reach another's reader. The reader is `K#get = @x.upcase` after `initialize` sets `@x = nil`: Ruby
+# 4.0.5 returns "A" from `k.poke; k.set; k.get` in every quiet case and raises NoMethodError on nil in every
+# reporting one.
+RSpec.describe "ivar census: constant-rooted class_eval receivers (#2983)", type: :runner do
+  reader_body = "  def initialize = (@x = nil)\n  def get = @x.upcase\n"
+  definers = { "def" => %q(def set = (@x = "a")), "define_method" => %q(define_method(:set) { @x = "a" }) }.freeze
+
+  define_method(:reader_body) { reader_body }
+  define_method(:definers) { definers }
+
+  def reported(files)
+    analyze(files: files).diagnostics.select { |d| d.rule.to_s == "call.undefined-method" }
+                         .map { |d| [File.basename(d.path), d.line] }.sort
+  end
+
+  # `setup` precedes the class, `header` follows `class K`, `after` follows the class (an alias or instance
+  # constant), and `poke` is the receiver the block's `class_eval` is sent to. Single-file puts the poke in the
+  # reader's file; cross-file puts it, with `after`, in a reopening in `b.rb`.
+  def files_for(shape, definer, cross:)
+    poke = "  def poke = #{shape.fetch(:poke)}.#{shape.fetch(:eval, 'class_eval')} { #{definers.fetch(definer)} }\n"
+    head = "#{shape[:setup]}class K#{shape[:header]}\n#{reader_body}"
+    after = shape[:after] ? "#{shape[:after]}\n" : ""
+    return { "a.rb" => "#{head}end\n#{after}class K\n#{poke}end\n" } unless cross
+
+    { "a.rb" => "#{head}end\n", "b.rb" => "#{after}class K\n#{poke}end\n" }
+  end
+
+  quiet = {
+    "a superclass" => { setup: "class Anc; end\n", header: " < Anc", poke: "Anc" },
+    "an included module" => { setup: "module M; end\n", header: "\n  include M", poke: "M", eval: "module_eval" },
+    "an instance constant's class" => { after: "INST = K.new", poke: "INST.class" },
+    "an instance constant's singleton class" => { after: "INST = K.new", poke: "INST.singleton_class" },
+    "an alias's new instance's class" => { after: "AliasK = K", poke: "AliasK.new.class" },
+    "Object" => { poke: "Object" },
+    "BasicObject" => { poke: "BasicObject" },
+    "Kernel" => { poke: "Kernel", eval: "module_eval" },
+    # Guards: a container literal or a block may hold the class's instance (`[self].first`), and a String spelling a
+    # constant may be resolved to the class (`String#constantize` below, as ActiveSupport's).
+    "a container literal's element" => { poke: "[self].first.class" },
+    "a literal's block call" => { poke: '"s".then { self }.class' },
+    "a constant-spelling String" => {
+      after: "class String\n  def constantize = Object.const_get(self)\nend", poke: '"K".constantize'
+    }
+  }.freeze
+
+  reporting = {
+    "an unrelated class" => { setup: "class Other; end\n", poke: "Other" },
+    "an unrelated instance constant's class" => { setup: "class Other; end\nOTHER = Other.new\n", poke: "OTHER.class" },
+    "an unrelated alias" => { setup: "class Other; end\nAliasOther = Other\n", poke: "AliasOther.new.class" }
+  }.freeze
+
+  [false, true].each do |cross|
+    layout = cross ? "cross-file" : "single-file"
+    definers.each_key do |definer|
+      quiet.each do |label, shape|
+        it "credits #{label}'s #{definer} write to the class (#{layout})" do
+          expect(reported(files_for(shape, definer, cross: cross))).to eq([])
+        end
+      end
+
+      reporting.each do |label, shape|
+        it "keeps reporting for #{label}'s #{definer} write (#{layout})" do
+          line = shape.fetch(:setup).lines.size + 3
+          expect(reported(files_for(shape, definer, cross: cross))).to eq([["a.rb", line]])
+        end
+      end
+    end
+  end
+
+  # Item 2: a chain rooted at a scalar literal names a core class whatever blockless calls it goes through, so the
+  # write is `String`'s and `@x` stays nil: Ruby 4.0.5 returns "none" from `k.poke; "s".set; k.label`.
+  definers.each_key do |definer|
+    [false, true].each do |cross|
+      it "reads a literal-rooted chain through a non-preserving call as foreign (#{definer}, " \
+         "#{cross ? 'cross-file' : 'single-file'})" do
+        body = definers.fetch(definer).sub('"a"', "1")
+        poke = "class K\n  def poke = \"s\".upcase.class.class_eval { #{body} }\nend\n"
+        source = "class K\n  def initialize = (@x = nil)\n  def label = (@x.nil? ? \"none\" : @x.upcase)\nend\n"
+        files = cross ? { "a.rb" => source, "b.rb" => poke } : { "a.rb" => source + poke }
+        expect(reported(files)).to eq([])
+      end
+    end
+  end
+
+  # Item 3: an `Object.class_eval` in another class's body, or at the top level, defines a method every object runs.
+  %w[Object BasicObject Kernel].each do |root|
+    eval_call = root == "Kernel" ? "module_eval" : "class_eval"
+    {
+      "another class's body" => "class Host\n  def poke = #{root}.#{eval_call} { def set = (@x = \"a\") }\nend\n",
+      "the top level" => "#{root}.#{eval_call} { def set = (@x = \"a\") }\n"
+    }.each do |where, writer|
+      it "credits #{root}.#{eval_call} in #{where} of another file" do
+        expect(reported({ "a.rb" => "class K\n#{reader_body}end\n", "b.rb" => writer })).to eq([])
+      end
+    end
+  end
+
+  # Item 4: a String `class_eval` whose receiver may be the class runs code the census cannot read, so every ivar of
+  # the class widens; one on an unrelated constant widens that constant's ivars only.
+  {
+    "self.class" => [],
+    "K" => [],
+    "Other" => [["a.rb", 4]]
+  }.each do |receiver, expected|
+    ["def set = (@x = 'a')", "define_method(:set) { @x = 'a' }"].each do |code|
+      [false, true].each do |cross|
+        it "reads #{receiver}.class_eval(#{code.inspect}) (#{cross ? 'cross-file' : 'single-file'})" do
+          poke = "class K\n  def poke = #{receiver}.class_eval(#{code.inspect})\nend\n"
+          source = "class Other; end\nclass K\n#{reader_body}end\n"
+          files = cross ? { "a.rb" => source, "b.rb" => poke } : { "a.rb" => source + poke }
+          expect(reported(files)).to eq(expected)
+        end
+      end
+    end
+  end
+end

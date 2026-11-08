@@ -4,6 +4,8 @@ require_relative "../../analysis/dependency_recorder"
 require_relative "../../typing_state"
 require_relative "../../memo_audit"
 require_relative "../../type"
+require_relative "../census_foreign_block"
+require_relative "../ivar_writer_census"
 
 module Rigor
   module Inference
@@ -36,7 +38,10 @@ module Rigor
           reason: "the contribution table of one census; keyed on the census's identity"
         )
         EMPTY = {}.freeze
-        private_constant :TABLE, :EMPTY
+        NONE = [].freeze
+        BINDINGS = :bindings
+        ANCESTOR_ROOTS = CensusForeignBlock::ANCESTOR_ROOTS.to_a.freeze
+        private_constant :TABLE, :EMPTY, :NONE, :BINDINGS, :ANCESTOR_ROOTS
 
         module_function
 
@@ -50,9 +55,11 @@ module Rigor
           accumulator.each do |class_name, entries|
             next unless class_name.is_a?(String) && !entries.empty?
 
-            owners = chain_owners(scope, class_name)
+            owners = chain_owners(scope, class_name, table)
+            any = any_ivar_types(owners, table)
             entries.each_key do |ivar|
               joined = contributed(owners, class_name, ivar, table, writes, path)
+              joined = joined ? Type::Combinator.union(joined, any) : any if any
               entries[ivar] = Type::Combinator.union(entries[ivar], joined) if joined
             end
           end
@@ -62,19 +69,49 @@ module Rigor
         # A module's chain holds the modules it includes or prepends (#2487): each is on the chain of every class that
         # includes the module, so its writes land on every object a read in the module's own methods sees. `extend`
         # is no instance chain entry, for a module as for a class.
-        def chain_owners(scope, class_name)
-          chain = Scope::ResolutionChain.for(scope, class_name, :instance, :methods)
+        #
+        # Issue #2983 — the chain is read under the `:constants` flavor, so a project class or module with no method of
+        # its own (`class Anc; end`, whose writer a `class_eval` installs) is an owner too. {ANCESTOR_ROOTS}
+        # (`Object`, `BasicObject`, `Kernel`) follow, as every instance has them; and each owner's alias and instance
+        # constants (`[:binds_class, …]` entries), under which a `class_eval` rooted at one files its code.
+        def chain_owners(scope, class_name, table)
+          names = [class_name, *ancestor_names(scope, class_name), *ANCESTOR_ROOTS].uniq
+          bindings = table[BINDINGS] || EMPTY
+          bound = names.flat_map do |name|
+            segment = name.split("::").last
+            if Analysis::DependencyRecorder.active?
+              Analysis::DependencyRecorder.read_name(:binds_class, segment)
+            end
+            bindings[segment] || NONE
+          end
+          (names + bound).uniq
+        end
+
+        def ancestor_names(scope, class_name)
+          chain = Scope::ResolutionChain.for(scope, class_name, :instance, :constants)
           # A guard: the class body's own `include` / `<` resolution already files these edges; kept so the read
           # states its own dependency.
           chain.record(scope) if Analysis::DependencyRecorder.active?
-          ancestors = chain.entries.filter_map do |entry|
+          chain.entries.filter_map do |entry|
             # An external entry has no name, so `filter_map` drops it. The side check is a guard: an instance chain
             # holds only instance-side entries.
             entry.name if entry.side == :instance && entry.name != class_name
           end
-          [class_name, *ancestors.uniq]
         rescue StandardError
-          [class_name]
+          NONE
+        end
+
+        # Issue #2983 — what the owners' string `class_eval`s contribute to every ivar (`[:own_write_type, owner, :*,
+        # :dynamic]`), from every file, this one included: the per-file census reads no String either.
+        def any_ivar_types(owners, table)
+          types = []
+          owners.each do |owner|
+            if Analysis::DependencyRecorder.active?
+              Analysis::DependencyRecorder.read_name(:own_write_type, "#{owner}##{IvarWriterCensus::ANY_IVAR}")
+            end
+            add_entry_types(types, table.dig(owner, IvarWriterCensus::ANY_IVAR) || EMPTY, nil)
+          end
+          types.empty? ? nil : Type::Combinator.union(*types)
         end
 
         # The union of what the owners contribute to `ivar`, or nil for nothing.
@@ -138,10 +175,16 @@ module Rigor
           table
         end
 
+        # Issue #2983 — `table[BINDINGS]` is `{ class last segment => [constant name, ...] }` over the census's
+        # `[:binds_class, …]` entries; no class is named by a Symbol.
         def build_table(census)
           table = {}
           canonical_paths = {}
           census.each do |entry|
+            if entry[0] == :binds_class
+              ((table[BINDINGS] ||= {})[entry[1]] ||= []) << entry[2]
+              next
+            end
             next unless entry.size == 5 && entry[0] == :own_write_type
 
             by_path = ((table[entry[1]] ||= {})[entry[2]] ||= {})
@@ -149,7 +192,7 @@ module Rigor
           end
           table
         end
-        private_class_method :chain_owners, :contributed, :add_entry_types, :value_type, :canonical, :table,
+        private_class_method :chain_owners, :ancestor_names, :any_ivar_types, :contributed, :add_entry_types, :value_type, :canonical, :table,
                              :build_table
       end
     end

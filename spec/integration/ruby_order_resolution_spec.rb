@@ -787,10 +787,9 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
       end
     end
 
-    # flip this when #1592 is fixed: Ruby prints "X" for `K.bar`, so the diagnostic is a false positive. Neither
-    # the chain nor master's walk files a hook-driven edge under the includer; modelling `included do` /
-    # `class_methods do` belongs to a follow-up ADR.
-    it "still types a read through a concern's `included do extend X end` from master's order" do
+    # #1592: Ruby prints "X" for `K.bar`. The includer's singleton chain holds the module the concern's `included`
+    # block extends it with, after the class object and ahead of Base's.
+    it "types a read through a concern's `included do extend X end` from the module it extends" do
       source = <<~RUBY
         #{prelude}module C
           extend ActiveSupport::Concern
@@ -801,11 +800,11 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
         class K < Base; include C; end
         K.bar.upcase
       RUBY
-      expect(diagnostics_for(source)).to eq(control + [[12, "call.undefined-method"]])
+      expect(diagnostics_for(source)).to eq(control)
     end
 
-    # flip this when #1592 is fixed: Ruby prints "X" for `K.bar`; same shape as the concern above.
-    it "still types a read through a `self.included(base)` hook that extends the includer from master's order" do
+    # #1592: Ruby prints "X" for `K.bar`; same shape as the concern above.
+    it "types a read through a `self.included(base)` hook from the module it extends the includer with" do
       source = <<~RUBY
         #{prelude}module H
           def self.included(base) = base.extend(X)
@@ -813,7 +812,7 @@ RSpec.describe "resolution in Ruby's ancestor order (#1567, #1568, #1570, #1571)
         class K < Base; include H; end
         K.bar.upcase
       RUBY
-      expect(diagnostics_for(source)).to eq(control + [[9, "call.undefined-method"]])
+      expect(diagnostics_for(source)).to eq(control)
     end
   end
 

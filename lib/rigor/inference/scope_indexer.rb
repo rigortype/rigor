@@ -5077,14 +5077,16 @@ module Rigor
         owner = qualified_prefix.join("::")
         direct = hook_body_statements(def_node.body)
         Source::NodeWalker.each(def_node.body) do |node|
-          next unless node.is_a?(Prism::CallNode)
+          record_hook_body_call(node, param.name, direct, owner, tables, def_node.name) if node.is_a?(Prism::CallNode)
+        end
+      end
 
-          if node.name == :extend && hook_param_receiver?(node.receiver, param.name)
-            complete = record_hook_extend_arguments(node, owner, tables, def_node.name)
-            record_hook_extend_open(owner, tables, def_node.name) unless complete && direct.include?(node)
-          elsif hook_singleton_reshape?(node, param.name)
-            record_hook_extend_open(owner, tables, def_node.name)
-          end
+      def record_hook_body_call(node, param, direct, owner, tables, hook)
+        if node.name == :extend && hook_param_receiver?(node.receiver, param)
+          complete = record_hook_extend_arguments(node, owner, tables, hook)
+          record_hook_extend_open(owner, tables, hook) unless complete && direct.include?(node)
+        elsif hook_singleton_reshape?(node, param)
+          record_hook_extend_open(owner, tables, hook)
         end
       end
 
@@ -5150,8 +5152,8 @@ module Rigor
       # `self` in an `included do … end` or `prepended do … end` block takes a
       # `[ENVELOPE_HOOK_BODY_CALL_KIND, hook, name]` entry, since Ruby runs that block in the includer's class body.
       #
-      # Issue #1592 — the `def` node is filed on `Owner::ClassMethods` too, so the includer's singleton resolution chain,
-      # which holds that module, answers a class-side call with the `def`'s own return type.
+      # Issue #1592 — the `def` node is filed on `Owner::ClassMethods` too, so the includer's singleton resolution
+      # chain, which holds that module, answers a class-side call with the `def`'s own return type.
       def record_concern_class_methods(node, child_prefix, methods_acc, def_nodes_acc)
         return unless node.is_a?(Prism::ModuleNode) && concern_body?(node.body, child_prefix)
 

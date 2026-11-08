@@ -51,7 +51,7 @@ RSpec.describe "incremental edges for a hook-extended singleton module (#1592)",
 
   # Writes `files`, runs once, rewrites `lib/near.rb` to `after`, and expects the warm run to equal a cold one.
   def expect_toggle(files, before:, after:, first:, second:)
-    write("sig/types.rbs", SIG)
+    write("sig/types.rbs", sig_source)
     files.merge("lib/near.rb" => before).each { |path, source| write(path, source) }
     paths = (files.keys + ["lib/near.rb"]).sort
     expect(incremental_rows(paths)).to eq([first, false])
@@ -62,7 +62,7 @@ RSpec.describe "incremental edges for a hook-extended singleton module (#1592)",
     expect(cold_rows).to eq(second)
   end
 
-  SIG = "module Ct\nend\nmodule X\nend\nclass Base\nend\nclass Kt < Base\nend\n"
+  def sig_source = "module Ct\nend\nmodule X\nend\nclass Base\nend\nclass Kt < Base\nend\n"
 
   let(:files) do
     { "lib/base.rb" => "class Base\n  def self.bar = 1\nend\nmodule X\n  def bar = \"X\"\nend\n",

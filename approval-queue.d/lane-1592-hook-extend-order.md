@@ -3,7 +3,7 @@
 - **PR:** pending
 - **Issue:** [#1592](https://github.com/rigortype/rigor/issues/1592)
 - **Class:** open-choice
-- **Precedent:** [ADR-24](https://github.com/rigortype/rigor/blob/master/docs/adr/24-self-method-call-resolution.md)
+- **Precedent:** [ADR-24](../docs/adr/24-self-method-call-resolution.md)
 - **Decided:** 2026-11-09
 
 ## Background

@@ -1188,19 +1188,11 @@ module Rigor
           includes = @discovery.discovered_includes[name] || EMPTY
           return NO_HOOKS if includes.empty?
 
-          prepends = @discovery.discovered_prepends[name] || EMPTY
           listed = @discovery.unpositioned_mixins[name]&.dig(:include) || EMPTY
-          concern = concern?(name)
           hooked = []
           open = false
           ordered = true
-          includes.uniq.each do |raw|
-            mixin = @resolver.resolve_declared(name, raw)
-            next if mixin.nil? || (concern && concern?(mixin))
-
-            hooks = []
-            hooks << :prepended if prepends.include?(raw)
-            hooks << :included if includes.count(raw) > prepends.count(raw)
+          each_hooked_mixin(name, includes) do |raw, mixin, hooks|
             pairs, mixin_open, mixin_ordered = hook_targets(mixin, hooks)
             open ||= mixin_open
             next if pairs.empty?
@@ -1211,6 +1203,22 @@ module Rigor
           # Two files' includes run in load order.
           ordered &&= hooked.size < 2 || !multi_file?(name)
           [hooked.freeze, open, ordered].freeze
+        end
+
+        # Yields each direct mixin of `name`, nearest first, as `[spelling, resolved, hooks]`: the hooks its edges
+        # run, `:included` for an `include` and `:prepended` for a `prepend`.
+        def each_hooked_mixin(name, includes)
+          prepends = @discovery.discovered_prepends[name] || EMPTY
+          concern = concern?(name)
+          includes.uniq.each do |raw|
+            mixin = @resolver.resolve_declared(name, raw)
+            next if mixin.nil? || (concern && concern?(mixin))
+
+            hooks = []
+            hooks << :prepended if prepends.include?(raw)
+            hooks << :included if includes.count(raw) > prepends.count(raw)
+            yield raw, mixin, hooks
+          end
         end
 
         NO_HOOKS = [EMPTY, false, true].freeze

@@ -3,7 +3,7 @@
 - **PR:** pending
 - **Issue:** [#1592](https://github.com/rigortype/rigor/issues/1592)
 - **Class:** open-choice
-- **Precedent:** [ADR-119](https://github.com/rigortype/rigor/blob/master/docs/adr/119-discovery-fact-certainty.md)
+- **Precedent:** [ADR-119](../docs/adr/119-discovery-fact-certainty.md)
 - **Decided:** 2026-11-09
 
 ## Background

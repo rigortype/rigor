@@ -124,7 +124,7 @@ module Rigor
         # Notes the edges `node` recorded for `owner` on `side`. `complete` is false when an argument named
         # nothing the walk could record, which leaves the recorded names' neighbours unknown.
         def note(node, owner, side, targets, complete:)
-          return taint(owner, side, unnamed: true) unless complete
+          return taint(owner, side, unnamed: side == :include) unless complete
           return if node.receiver.nil? && direct?(node)
 
           add(owner, side, targets)

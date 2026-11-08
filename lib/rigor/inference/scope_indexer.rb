@@ -7522,17 +7522,19 @@ module Rigor
 
         # A mixin call the tables cannot hold still reshapes the ancestry: taint the whole owner side.
         unnamed = unnamed_mixin_call?(node, view, accumulator)
-        effects.each { |owner, side| accumulator.taint(owner, side, unnamed: unnamed) }
+        effects.each { |owner, side| accumulator.taint(owner, side, unnamed: unnamed && side == :include) }
       end
 
       # Issue #2991 — whether an unrecorded mixin call mixes in a module the walk cannot name: an argument that is
-      # not a constant (`include helper`, `include(*MODS)`), or a hook parameter's receiver (`base.include M`), whose
-      # class records nothing. `self.include M` and `send(:include, M)` name their module, so they leave only the
-      # order unknown.
+      # not a constant (`include helper`, `include(*MODS)`), or an `include` / `prepend` on a hook parameter itself
+      # (`base.include M`), whose class records nothing. `self.include M` and `send(:include, M)` name their module,
+      # so they leave only the order unknown. The caller applies it to the instance side alone.
       def unnamed_mixin_call?(node, view, accumulator)
         return true if view[1].any? { |arg| Source::ConstantPath.qualified_name(arg).nil? }
 
-        !node.receiver.nil? && hook_receiver?(node.receiver, accumulator)
+        receiver = node.receiver
+        INSTANCE_MIXIN_NAMES.include?(view.first) && receiver.is_a?(Prism::LocalVariableReadNode) &&
+          accumulator.hook_local?(receiver.name)
       end
 
       # Records the instance-side edges of a call {#mixin_call_recorded?} accepts. False when it recorded
@@ -7614,8 +7616,9 @@ module Rigor
       end
 
       HOOK_DEFS = %i[included extended prepended inherited].freeze
+      INSTANCE_MIXIN_NAMES = %i[include prepend].freeze
       MIXIN_EVAL_CALLS = %i[class_eval module_eval class_exec module_exec instance_eval instance_exec].freeze
-      private_constant :HOOK_DEFS, :MIXIN_EVAL_CALLS
+      private_constant :HOOK_DEFS, :MIXIN_EVAL_CALLS, :INSTANCE_MIXIN_NAMES
 
       # The parameter names of a `def included(base)`-style hook (a hook is written `def self.included`, or
       # `def included` inside `class << self`), else nil.
@@ -7668,9 +7671,6 @@ module Rigor
         node.rigor_each_child { |child| found ||= block_mixes_in?(child) }
         found
       end
-
-      INSTANCE_MIXIN_NAMES = %i[include prepend].freeze
-      private_constant :INSTANCE_MIXIN_NAMES
 
       # A receiverless or `self.` `include` / `prepend` (or its `send` spelling) anywhere in `node`.
       def block_mixes_into_self?(node)
@@ -8182,7 +8182,7 @@ module Rigor
                                                          in_singleton)
 
         unnamed = unnamed_mixin_call?(node, [kind, arguments], accumulator)
-        effects.each { |owner, side| accumulator.taint(owner, side, unnamed: unnamed) }
+        effects.each { |owner, side| accumulator.taint(owner, side, unnamed: unnamed && side == :include) }
       end
 
       # Issue #1752 — a call that rewrites a singleton class reached through `singleton_class` (`singleton_class.

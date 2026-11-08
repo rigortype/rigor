@@ -9,7 +9,6 @@ module Rigor
   module LibraryProbe
     module_function
 
-    # @return [#call] lib name -> Boolean
     def predicate
       if defined?(::RBS::EnvironmentLoader)
         return ->(lib) { ::RBS::EnvironmentLoader.new.has_library?(library: lib, version: nil) }

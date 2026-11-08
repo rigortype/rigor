@@ -86,6 +86,32 @@ RSpec.describe "Computed definers and call.undefined-method (#2901)" do
       write_project(source, %w[Fac.new.f InDef.new.g])
       expect(undefined_messages).to eq(["undefined method `f' for Fac", "undefined method `g' for InDef"])
     end
+
+    it "does not read a define_method in a define_method block, which runs on an instance" do
+      source = "class Wrap\n  def self.my_attr(*n) = define_method(:wrap) { n.each { |x| define_method(x) { x } } }\n" \
+               "  my_attr :w\nend\n"
+      write_project(source, %w[Wrap.new.w])
+      expect(undefined_messages).to eq(["undefined method `w' for Wrap"])
+    end
+
+    it "does not read a define_method on another receiver, in another receiver's class_eval, or in a nested def" do
+      source = "class Helper\nend\n" \
+               "class Recv\n  def self.my_attr(*n) = n.each { |x| Helper.define_method(x) { x } }\n  my_attr :r\nend\n" \
+               "class Ev\n  def self.my_attr(*n) = Helper.class_eval { n.each { |x| define_method(x) { x } } }\n" \
+               "  my_attr :v\nend\n" \
+               "class NestDef\n  def self.my_attr(*n)\n    def helper(x) = define_method(x) { x }\n  end\n" \
+               "  my_attr :nd\nend\n"
+      write_project(source, %w[Recv.new.r Ev.new.v NestDef.new.nd])
+      expect(undefined_messages).to eq(["undefined method `nd' for NestDef", "undefined method `r' for Recv",
+                                        "undefined method `v' for Ev"].sort)
+    end
+
+    it "does not read a macro written as another object's singleton method" do
+      source = "class Other3\nend\nclass Host3\n  def self.my_attr(*n) = n\n" \
+               "  def Other3.my_attr(*n) = n.each { |x| define_method(x) { x } }\n  my_attr :h\nend\n"
+      write_project(source, %w[Host3.new.h])
+      expect(undefined_messages).to eq(["undefined method `h' for Host3"])
+    end
   end
 
   describe "define_method on a constant receiver" do

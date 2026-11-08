@@ -1048,9 +1048,9 @@ module Rigor
           end
         end
 
+        # A macro's owner holds the macro's `def`, so it is never an external entry.
         def macro_entry_defines?(scope, entry, definer)
-          names = entry.external? ? entry.candidates : [entry.name]
-          names.any? { |name| scope.parameter_envelopes_of(name).key?(definer) }
+          !entry.external? && scope.parameter_envelopes_of(entry.name).key?(definer)
         end
 
         # Issue #1722 — a `method_missing`, or a project mixin, on one of the class's RBS ancestors

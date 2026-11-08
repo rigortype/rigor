@@ -9451,11 +9451,9 @@ module Rigor
           constant_receiver_candidates(receiver, qualified_prefix).each do |name|
             record_surface_mark(accumulator, name, Scope::DiscoveryIndex::ENVELOPE_OPEN_INSTANCE_NAMES_MARK)
           end
-          return
+        elsif receiver.nil? || receiver.is_a?(Prism::SelfNode)
+          record_surface_mark(accumulator, qualified_prefix.join("::"), open_names_mark(in_singleton_class))
         end
-        return unless receiver.nil? || receiver.is_a?(Prism::SelfNode)
-
-        record_surface_mark(accumulator, qualified_prefix.join("::"), open_names_mark(in_singleton_class))
       end
 
       # The side's open-names mark a computed definer on `self` records: the singleton side in a `class << self` body.

@@ -1600,6 +1600,9 @@ module Rigor
         return nil if pool_mode? || !@collect_stats || @analyzed_files.empty?
 
         own, pinned = signature_rows
+        # Issue #2987 — the bundle's `sig/` listing is identified by the gems' directory, outside the project, so a
+        # `pinned` row: the write guard passes over it where it would refuse an `owned` one it cannot stat.
+        pinned = Cache::Descriptor.new(files: pinned.files, globs: (pinned.globs + bundle_sig_glob_entries).uniq)
         BaselineRows.new(
           owned: Cache::Descriptor.new(
             files: own.files + kind_entries(signature_root_candidates) +

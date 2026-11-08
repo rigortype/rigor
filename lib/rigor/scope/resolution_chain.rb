@@ -1024,7 +1024,7 @@ module Rigor
           super_start = names.reduce(boundary[1]) do |start, owner|
             includes = @discovery.discovered_includes[owner] || EMPTY
             prepends = @discovery.discovered_prepends[owner] || EMPTY
-            include_all(entries, owner, includes, prepends, depth, [boundary[0], start])
+            include_all(entries, owner, includes, prepends, depth, [boundary[0] + names.size - 1, start])
           end
           finish(entries, name, super_lin, super_start)
         end
@@ -1036,7 +1036,8 @@ module Rigor
           super_lin = superclass_lin(name, :singleton, depth)
           entries.concat(super_lin[0])
           super_start = names.reduce(names.size) do |start, owner|
-            include_all(entries, owner, @discovery.discovered_extends[owner] || EMPTY, EMPTY, depth, [0, start])
+            include_all(entries, owner, @discovery.discovered_extends[owner] || EMPTY, EMPTY, depth,
+                        [names.size - 1, start])
           end
           finish(entries, name, super_lin, super_start)
         end
@@ -1045,7 +1046,8 @@ module Rigor
         # (`K = Struct.new("Named", …)` makes `K` and `Struct::Named` one class). The chain of either name heads with
         # both entries, so a reader asks each name's own tables where Ruby asks the one class's; nothing is copied
         # between the names. Only the direct binding counts: two `Struct.new("Named", …)` writes make two classes in
-        # Ruby, and neither constant reaches the other's tables through `Struct::Named`. The superclass edge stays
+        # Ruby, and neither constant reaches the other's tables through `Struct::Named`. Both names head the chain, ahead
+        # of every module either one includes, as the one class heads its own ancestors. The superclass edge stays
         # `name`'s own: a Struct's class has none the tables record, under either name.
         def same_class(name)
           twins = DiscoveryIndex.same_class_names(@discovery.discovered_parameter_envelopes[name])

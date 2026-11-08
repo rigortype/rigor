@@ -83,6 +83,57 @@ RSpec.describe "Struct.new with a class-name String: one class under two names (
               "undefined method `zz3' for Struct::Named2"])
   end
 
+  # A mixin edge under either name is the class's: on Ruby 4.0.5 every call below runs. Rows are instance calls
+  # through `self.` that `call.undefined-method` reads, and `Reflection.project_method_defined` for the singleton
+  # side, where the rule reports no project class object's missing method.
+  describe "mixin edges under either name" do
+    mixins = <<~RUBY
+      N = Struct.new("Named2", :n_url)
+      module Mx; def mx_x = 1; end
+      module Px; def px_x = 1; end
+      module Ex; def ex_x = 1; end
+      module Fx; def fx_x = 1; end
+      class Struct::Named2
+        include Mx
+        extend Ex
+        def go4 = self.px_x
+      end
+      class N
+        prepend Px
+        extend Fx
+        def go6 = self.mx_x
+      end
+    RUBY
+
+    it "reads an include on Struct::Named and a prepend on the constant from the other name" do
+      expect(undefined_messages({ "n.rb" => mixins })).to be_empty
+    end
+
+    # `include(*MODS)` names no module, so the class may hold one the tables do not list; the chain of the other name
+    # carries that mark too, and lists both names ahead of the mixins (`Struct::Named2.ancestors` begins
+    # `[Struct::Named2, Zm]` on Ruby 4.0.5).
+    it "carries an unrecordable include on Struct::Named onto the constant's chain" do
+      source = "N = Struct.new(\"Named2\", :n_url)\nmodule Zm; def zz_x = 1; end\nMODS = [Zm]\n" \
+               "class Struct::Named2\n  include(*MODS)\nend\nclass N\n  include Zm\nend\n"
+      root = Prism.parse(source).value
+      scope = Rigor::Inference::ScopeIndexer.index(root, default_scope: Rigor::Scope.empty)[root]
+      chain = Rigor::Scope::ResolutionChain.for(scope, "N", :instance, :methods)
+      expect([chain.wildcard_mixin?, chain.entries.first(3).map(&:name)]).to eq([true, %w[N Struct::Named2 Zm]])
+    end
+
+    it "reads an extend under either name on the other name's singleton side, for both walks" do
+      root = Prism.parse(mixins).value
+      scope = Rigor::Inference::ScopeIndexer.index(root, default_scope: Rigor::Scope.empty)[root]
+      answers = [%w[N ex_x], %w[Struct::Named2 fx_x], %w[N zz_x]].flat_map do |class_name, method_name|
+        %i[def discovered].map do |source|
+          Rigor::Reflection.project_method_defined(class_name, method_name, kind: :singleton, source: source,
+                                                                            scope: scope).to_s
+        end
+      end
+      expect(answers).to eq(%w[yes yes yes yes no no])
+    end
+  end
+
   describe "the same-class entries the indexer records" do
     def same_class_names(source, name)
       root = Prism.parse(source).value

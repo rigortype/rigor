@@ -1182,6 +1182,17 @@ RSpec.describe "plugins/rigor-rails-routes" do
           .to eq(%w[t1_url t2_url t3_url t4_url t5_url t6_url].map { |n| "no route helper `#{n}`" })
       end
 
+      # The class-object side: a `def self.` in the block is `Struct::Sing`'s singleton method, and one in a
+      # `class Struct::Sing` reopening is `S`'s.
+      it "reads a singleton method under either name from the other's class-object side" do
+        files = {
+          "app/libs/s.rb" => "S = Struct.new(\"Sing\", :a) do\n  def self.blk_url = 1\n  def self.u = [ro_url, t7_url]\nend\n",
+          "app/libs/r.rb" => "class Struct::Sing\n  def self.ro_url = 1\n  def self.t = [blk_url, t8_url]\nend\n"
+        }
+        expect(unknown_helpers(files, paths: %w[app/libs/s.rb app/libs/r.rb]).sort)
+          .to eq(["no route helper `t7_url`", "no route helper `t8_url`"])
+      end
+
       # Two `Struct.new("Same", …)` writes make two classes in Ruby (the second warns and rebinds `Struct::Same`), so
       # neither constant reads the other's block: on Ruby 4.0.5 each `go` raises NameError.
       it "does not bind two constants that name the same Struct to each other" do

@@ -4668,8 +4668,10 @@ module Rigor
         # defined LATER under that name would change the answer; `DefinerResolution` files the negative class
         # edge of each external entry it tests.
         def overridden_ancestors_start(scope, class_name)
-          own = Scope::ResolutionChain.for(scope, class_name.to_s, :instance, :methods).index_of(class_name.to_s)
-          own && (own + 1)
+          # Issue #2979 — past the entries of the names bound to the same class (`K = Struct.new("Named", …)`):
+          # a `def` there redefines the class's method rather than overriding an ancestor's.
+          chain = Scope::ResolutionChain.for(scope, class_name.to_s, :instance, :methods)
+          chain.ancestors_start(scope, class_name.to_s)
         end
 
         # `[defining_class, visibility]` for the nearest user-source ancestor that defines an instance

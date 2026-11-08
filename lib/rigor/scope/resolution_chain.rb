@@ -518,6 +518,25 @@ module Rigor
         @entries.index { |entry| entry.name == name && entry.side == side }
       end
 
+      # Issue #2979 — the position of the first entry after `name`'s own that is a true ancestor of it, or nil when
+      # `name` has no entry on `side`. The entries of the names bound to the same class object
+      # (`K = Struct.new("Named", …)`) follow `name`'s own directly, and a `def` under one of them is a redefinition
+      # of the class's method, not an override, so a reader of "the entries after the class" starts past them.
+      def ancestors_start(scope, name, side = @side)
+        own = index_of(name, side)
+        return nil if own.nil?
+
+        twins = DiscoveryIndex.same_class_names(scope.discovery.discovered_parameter_envelopes[name])
+        start = own + 1
+        start += 1 while twins_entry?(@entries[start], twins, side)
+        start
+      end
+
+      def twins_entry?(entry, twins, side)
+        !twins.empty? && !entry.nil? && entry.side == side && twins.include?(entry.name)
+      end
+      private :twins_entry?
+
       # A LEVEL is one superclass step: the class (or its singleton) with the modules inserted around it,
       # before the next superclass's entries begin. `level_classes[k]` is that class, or nil for a level that
       # is an external superclass. Only COMPLETE levels are counted — a level the {LIMIT} cut in half is not.
@@ -1008,35 +1027,76 @@ module Rigor
         end
 
         def compute_instance(name, depth)
-          names = same_class(name)
-          names.each do |owner|
-            # `discovered_includes` already carries the prepended names, so it counts every instance-side edge once.
-            mark_unsettled(owner, :include, (@discovery.discovered_includes[owner] || EMPTY).size)
-            @frames.last.add_marks(mark_for(owner, :extend_hook, WILDCARD_LIST, false)) if extend_hook_taint?(owner)
-          end
-          entries = names.map { |owner| project_entry(owner, :instance) }
+          twins = same_class_twins(name)
+          mark_instance_node(name, :include)
+          twins.each { |owner| mark_instance_node(owner, :include) }
+          return same_class_instance(name, twins, depth) unless twins.empty?
+
+          entries = [project_entry(name, :instance)]
           super_lin = superclass_lin(name, :instance, depth)
           entries.concat(super_lin[0])
-          super_start = insert_instance_mixins(entries, names, depth)
+          prepends = @discovery.discovered_prepends[name] || EMPTY
+          boundary = prepend_all(entries, name, prepends, depth)
+          includes = @discovery.discovered_includes[name] || EMPTY
+          super_start = include_all(entries, name, includes, prepends, depth, boundary)
           finish(entries, name, super_lin, super_start)
         end
 
-        # Every name's prepends ahead of the class, then every name's includes after the LAST name, so both names stay
-        # ahead of every module either one includes. Returns where the superclass's entries begin.
-        def insert_instance_mixins(entries, names, depth)
+        def compute_singleton(name, depth)
+          twins = same_class_twins(name)
+          mark_unsettled(name, :extend, (@discovery.discovered_extends[name] || EMPTY).size)
+          twins.each { |owner| mark_unsettled(owner, :extend, (@discovery.discovered_extends[owner] || EMPTY).size) }
+          return same_class_singleton(name, twins, depth) unless twins.empty?
+
+          entries = [project_entry(name, :singleton)]
+          super_lin = superclass_lin(name, :singleton, depth)
+          entries.concat(super_lin[0])
+          extends = @discovery.discovered_extends[name] || EMPTY
+          super_start = include_all(entries, name, extends, EMPTY, depth, [0, 1])
+          finish(entries, name, super_lin, super_start)
+        end
+
+        # The instance-side marks of one node; `kind` is the side's mixin kind, `:include`. `discovered_includes`
+        # already carries the prepended names, so it counts every instance-side edge once.
+        def mark_instance_node(name, kind)
+          mark_unsettled(name, kind, (@discovery.discovered_includes[name] || EMPTY).size)
+          @frames.last.add_marks(mark_for(name, :extend_hook, WILDCARD_LIST, false)) if extend_hook_taint?(name)
+        end
+
+        # Issue #2979 — the names `name`'s envelope bucket binds to the same class object (`K = Struct.new("Named",
+        # …)` makes `K` and `Struct::Named` one class), without `name`; empty, and allocating nothing, for nearly every
+        # class. The chain of either name heads with every name's entry, so a reader asks each name's own tables where
+        # Ruby asks the one class's; nothing is copied between the names. Only the direct binding counts: two
+        # `Struct.new("Named", …)` writes make two classes in Ruby, and neither constant reaches the other's tables
+        # through `Struct::Named`. {ResolutionChain#ancestors_start} tells a reader where the true ancestors begin.
+        def same_class_twins(name)
+          twins = DiscoveryIndex.same_class_names(@discovery.discovered_parameter_envelopes[name])
+          twins.include?(name) ? twins - [name] : twins
+        end
+
+        # The instance side of a class with twins: every name's prepends ahead of the class, then every name's
+        # includes after the LAST name, so the names stay ahead of every module either one includes, as the one class
+        # heads its own ancestors. The superclass edge stays `name`'s own: a Struct's class has none the tables
+        # record, under either name.
+        def same_class_instance(name, twins, depth)
+          names = [name, *twins].uniq
+          entries = names.map { |owner| project_entry(owner, :instance) }
+          super_lin = superclass_lin(name, :instance, depth)
+          entries.concat(super_lin[0])
           boundary = [0, names.size]
           names.each do |owner|
             boundary = prepend_all(entries, owner, @discovery.discovered_prepends[owner] || EMPTY, depth, boundary)
           end
-          names.reduce(boundary[1]) do |start, owner|
+          super_start = names.reduce(boundary[1]) do |start, owner|
             include_all(entries, owner, @discovery.discovered_includes[owner] || EMPTY,
                         @discovery.discovered_prepends[owner] || EMPTY, depth, [boundary[0] + names.size - 1, start])
           end
+          finish(entries, name, super_lin, super_start)
         end
 
-        def compute_singleton(name, depth)
-          names = same_class(name)
-          names.each { |owner| mark_unsettled(owner, :extend, (@discovery.discovered_extends[owner] || EMPTY).size) }
+        # The singleton twin of {#same_class_instance}: every name's class-object entry, then every name's extends.
+        def same_class_singleton(name, twins, depth)
+          names = [name, *twins].uniq
           entries = names.map { |owner| project_entry(owner, :singleton) }
           super_lin = superclass_lin(name, :singleton, depth)
           entries.concat(super_lin[0])
@@ -1045,18 +1105,6 @@ module Rigor
                         [names.size - 1, start])
           end
           finish(entries, name, super_lin, super_start)
-        end
-
-        # Issue #2979 — `name` followed by every name its envelope bucket binds to the same class object
-        # (`K = Struct.new("Named", …)` makes `K` and `Struct::Named` one class). The chain of either name heads with
-        # both entries, so a reader asks each name's own tables where Ruby asks the one class's; nothing is copied
-        # between the names. Only the direct binding counts: two `Struct.new("Named", …)` writes make two classes in
-        # Ruby, and neither constant reaches the other's tables through `Struct::Named`. Both names head the chain,
-        # ahead of every module either one includes, as the one class heads its own ancestors. The superclass edge
-        # stays `name`'s own: a Struct's class has none the tables record, under either name.
-        def same_class(name)
-          twins = DiscoveryIndex.same_class_names(@discovery.discovered_parameter_envelopes[name])
-          twins.empty? ? [name] : [name, *twins].uniq
         end
 
         # Marks the node being computed unsettled when the order of its mixin edges on `kind` is not a fact
@@ -1094,6 +1142,10 @@ module Rigor
         def new_mark(name, kind, listed, multi)
           [ResolutionChain::Mark.new(name, kind, listed.nil? ? EMPTY : listed.to_a.freeze, multi)].freeze
         end
+
+        # The `[origin, super_start]` of a one-name chain: the class at 0, its superclass's entries from 1.
+        CLASS_FIRST = [0, 1].freeze
+        private_constant :CLASS_FIRST
 
         WILDCARD_LIST = ["*"].freeze # Relevance::WILDCARD, which loads after this file
         private_constant :WILDCARD_LIST
@@ -1153,7 +1205,7 @@ module Rigor
         # module's own includes may have run before or after), and the tables record `include M; prepend M`
         # exactly as a plain `prepend M`. A direct prepend of the module itself is always inserted, in Ruby and
         # here, so it forks nothing.
-        def prepend_all(entries, owner, prepends, depth, boundary)
+        def prepend_all(entries, owner, prepends, depth, boundary = CLASS_FIRST)
           origin, super_start = boundary
           # The table holds every statement, nearest first: a same-owner repeat is a no-op in Ruby (the first
           # statement wins), so it is dropped here rather than met as a fork.

@@ -123,7 +123,8 @@ module Rigor
         git = sig_dirs.select { |dir| git_sourced_layout?(dir) }.map { |dir| gem_name_from_sig_path(dir) }
         locked_gems.each_value.filter_map do |locked|
           name = locked.name
-          name if git.include?(name) && locked.git_source || !(expected_gem_dirs({ name => locked }) & dirs).empty?
+          git_hit = git.include?(name) && locked.git_source
+          name if git_hit || expected_gem_dirs({ name => locked }).intersect?(dirs)
         end
       end
 

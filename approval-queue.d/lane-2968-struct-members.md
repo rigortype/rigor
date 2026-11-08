@@ -46,10 +46,17 @@ subclass. A `define_method("#{r}?")` loop in `ApplicationController` opens its i
 `*_url` typo in any controller below it is reported. The review measured no drift on redmine (1865/1865 findings)
 or mastodon (2785/2785).
 
+The cost of the new veto arm (`ExpressionTyper#instance_self_answers?`, reached from the engine-wide
+implicit-self top-level-`def` dispatch): on any class whose instance chain carries an open-names mark
+(`attr_accessor(*X)`, a splatted `Struct.new(*F) { }`), a project top-level `def` no longer binds at an
+implicit-self call. There `helper_nil.upcase` loses a true NoMethodError report, and `helper_x` reads
+`Dynamic[top]`. An A/B of that arm alone showed no corpus drift: redmine 1865/1865, mastodon 2785/2785.
+
 ## To undo
 
 Drop the `Scope::DiscoveryIndex.open_names_on_chain?` call from `lib/rigor/reflection/project_method.rb` (keep
-the veto's call in `ExpressionTyper#instance_self_answers?`, which is right on its own), and restore the "maybe exactly where
+the veto's call in `ExpressionTyper#instance_self_answers?`; an A/B of that arm alone showed no corpus drift,
+redmine 1865/1865, mastodon 2785/2785), and restore the "maybe exactly where
 truncated" wording in `docs/internal-spec/reflection.md` and `public-api.md`. The rails-routes splat rows in
 `spec/integration/plugins/rails_routes_plugin_spec.rb` would then report again, unless the plugin reads the
 marks itself.

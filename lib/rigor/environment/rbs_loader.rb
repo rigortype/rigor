@@ -1553,7 +1553,8 @@ module Rigor
         # add self-contained declarations) and stay unconditional.
         LIBRARY_SUPPLEMENT_CORE_OVERLAYS = {
           "resolv.rbs" => "resolv",
-          "string_scanner.rbs" => "strscan"
+          "string_scanner.rbs" => "strscan",
+          "bigdecimal.rbs" => "bigdecimal"
         }.freeze
         private_constant :LIBRARY_SUPPLEMENT_CORE_OVERLAYS
 

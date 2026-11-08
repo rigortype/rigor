@@ -46,6 +46,14 @@ RSpec.describe "core overlay — BigDecimal precision readers (#2969)" do
     end
   end
 
+  # Review of #2973 (minor): the overlay is gated on the bigdecimal library (`LIBRARY_SUPPLEMENT_CORE_OVERLAYS`), so
+  # a loader that does not load it gets no `BigDecimal` from the file. Ungated, it opened a phantom class.
+  it "declares no BigDecimal when the bigdecimal library is not loaded" do
+    loader = Rigor::Environment::RbsLoader.new(libraries: [])
+
+    expect(loader.instance_definition("BigDecimal")).to be_nil
+  end
+
   # The guard that the overlay is not a blanket "BigDecimal answers anything": a method no source declares
   # still reports, so a typo on a BigDecimal receiver is not silenced by the new rows.
   it "still reports a method BigDecimal does not declare" do

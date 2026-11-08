@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "fileutils"
 require "tmpdir"
 
 # Issue #2969 — `NumericWithFormat#to_fs` / `#to_formatted_s` on Integer, Float and BigDecimal.
@@ -32,13 +33,22 @@ RSpec.describe "ADR-72 ActiveSupport overlay — NumericWithFormat#to_fs (#2969)
     LOCK
   end
 
-  def run_source(source, lock: true)
+  # `project_sig` is RBS text written to a project `sig/` directory and named as `signature_paths:`, the way a
+  # project working around #2969 would declare `Integer#to_fs` itself.
+  def run_source(source, lock: true, project_sig: nil)
     Dir.mktmpdir("rigor-as-overlay-numeric-") do |dir|
       File.write(File.join(dir, "Gemfile.lock"), gemfile_lock) if lock
       File.write(File.join(dir, "code.rb"), source)
+      signature_paths = []
+      if project_sig
+        FileUtils.mkdir_p(File.join(dir, "sig"))
+        File.write(File.join(dir, "sig", "project.rbs"), project_sig)
+        signature_paths = [File.join(dir, "sig")]
+      end
       Dir.chdir(dir) do
         configuration = Rigor::Configuration.new(
           "paths" => [File.join(dir, "code.rb")],
+          "signature_paths" => signature_paths,
           "bundler" => { "lockfile" => "Gemfile.lock", "auto_detect" => true }
         )
         guarded_run(Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil))
@@ -96,5 +106,36 @@ RSpec.describe "ADR-72 ActiveSupport overlay — NumericWithFormat#to_fs (#2969)
     RUBY
 
     expect(undefined_methods(result).join).to include("to_fs")
+  end
+
+  # Review of #2973 (severe): ActiveSupport calls `options.symbolize_keys`, so a String-keyed Hash is a valid
+  # options argument. The earlier `Hash[Symbol, untyped]` reported `call.argument-type-mismatch` on it.
+  it "accepts a String-keyed options Hash, which ActiveSupport symbolizes itself" do
+    result = run_source(<<~RUBY)
+      opts = { "precision" => 2 }
+      Rigor.dump_type(1.to_fs(:rounded, opts))
+      Rigor.dump_type(1.5.to_fs(:percentage, { "precision" => 1 }))
+    RUBY
+
+    expect(call_rules(result)).to be_empty
+    expect(dumps(result)).to eq(%w[String String])
+  end
+
+  # Review of #2973 (moderate): a project `sig/` that declares `Integer#to_fs` itself is the natural workaround
+  # for #2969. The overlay declared `to_fs` directly on Integer, so that pair was a `DuplicatedMethodDefinitionError`
+  # and Integer collapsed to `Dynamic[top]`, losing `1.nope`. Declaring the methods on the module that Integer
+  # includes lets the project's own declaration win.
+  it "keeps Integer typed and reporting when a project sig declares Integer#to_fs itself" do
+    result = run_source(<<~RUBY, project_sig: <<~RBS)
+      Rigor.dump_type(1.to_fs(:delimited))
+      1.nope
+    RUBY
+      class Integer
+        def to_fs: (*untyped) -> String
+      end
+    RBS
+
+    expect(dumps(result)).to eq(["String"])
+    expect(undefined_methods(result).join).to include("nope")
   end
 end

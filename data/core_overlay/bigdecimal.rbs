@@ -11,6 +11,10 @@
 # Their documented results: `precision -> integer` (decimal digits), `scale -> integer`,
 # `precision_scale -> [integer, integer]`, and `n_significant_digits -> integer`.
 #
+# bigdecimal is a bundled gem, not a default library, so this file is gated on it
+# (`Rigor::Environment::RbsLoader::LIBRARY_SUPPLEMENT_CORE_OVERLAYS`). Without the library the file would
+# open a phantom `BigDecimal` that nothing else declares.
+#
 # The methods sit on a module the class includes, not as direct `def`s, so a later rbs or a project
 # `sig/` that declares one of them directly overrides it instead of raising
 # `DuplicatedMethodDefinitionError` (the same shape as `process.rbs` and `ruby41_core_overlay`).

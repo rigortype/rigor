@@ -1010,7 +1010,9 @@ RSpec.describe "plugins/rigor-rails-routes" do
             define_method(:avatar_url) { "https://example.com/a.png" }
             alias_method :home_path, :root_thing
             alias site_url root_thing
-            Pair = Struct.new(:base_url)
+            Pair = Struct.new(:base_url) do
+              def go = base_url
+            end
 
             def call = [avatar_url, home_path, site_url]
           end
@@ -1061,6 +1063,37 @@ RSpec.describe "plugins/rigor-rails-routes" do
       }
       expect(unknown_helpers(files, paths: ["app/libs/dyn.rb"]))
         .to eq(["no route helper `typo_url`", "no route helper `rec_typo_url`"])
+    end
+
+    it "resolves a Struct/Data block under a nested or compact owner, a path write and a rooted receiver" do
+      files = {
+        "app/libs/nested.rb" => <<~RUBY
+          module A
+            class B
+              P = Struct.new(:m_url) do
+                def go = [m_url, t1_url]
+              end
+            end
+          end
+
+          class A::C
+            Q = Data.define(:q_path) do
+              def go = [q_path, t2_path]
+            end
+          end
+
+          module Outer; end
+          Outer::R = Struct.new(:r_url) do
+            def go = [r_url, t3_url]
+          end
+
+          S = ::Struct.new(:s_url) do
+            def go = [s_url, t4_url]
+          end
+        RUBY
+      }
+      expect(unknown_helpers(files, paths: ["app/libs/nested.rb"]).sort)
+        .to eq(%w[t1_url t2_path t3_url t4_url].map { |n| "no route helper `#{n}`" })
     end
 
     it "still reports a `_path` name with no route and no method in a class with attr_readers" do

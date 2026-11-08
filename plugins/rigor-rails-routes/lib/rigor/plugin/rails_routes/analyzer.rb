@@ -185,30 +185,41 @@ module Rigor
 
         # The call site of a node inside the block of `Struct.new(...) { }` / `Data.define(...) { }`, which is the
         # body of a class the constructor creates: `self` is that class, not the lexical `class` around it (or
-        # none). A constant write names it (`Point = Struct.new(:x) do … end`, nested under the lexical owner),
-        # and the engine knows its members; an unassigned block has no name to ask about, so it declines
-        # (`names` empty). nil when the node is not in such a block below its lexical owner.
+        # none). A plain constant write (`Point = …`, `Outer::Point = …`, nested under the lexical owner) names it,
+        # and the engine knows its members. Everything else declines (`names` empty): an unassigned block, `P ||= …`,
+        # `… end.freeze`, a dynamic path. nil when the node is not in such a block below its lexical owner.
         def member_class_site(ancestors, owner_index)
           index = ancestors.rindex { |n| member_class_call?(n) && ancestors[ancestors.index(n) + 1].equal?(n.block) }
           return nil if index.nil? || (owner_index && index < owner_index)
 
           kinds = self_kinds(ancestors[(index + 1)..])
-          written = ancestors[index - 1] if index.positive?
-          unless written.is_a?(Prism::ConstantWriteNode) && written.value.equal?(ancestors[index])
-            return CallSite.new(names: [], module_owner: false, kinds: kinds)
-          end
-
-          prefixes = owner_index ? owner_names(ancestors, owner_index) : [""]
-          return CallSite.new(names: [], module_owner: false, kinds: kinds) if prefixes.empty?
-
-          names = prefixes.map { |prefix| prefix.empty? ? written.name.to_s : "#{prefix}::#{written.name}" }
+          names = index.positive? ? written_class_names(ancestors, owner_index, ancestors[index - 1], ancestors[index]) : []
           CallSite.new(names: names, module_owner: false, kinds: kinds)
         end
 
+        def written_class_names(ancestors, owner_index, written, call)
+          local =
+            case written
+            when Prism::ConstantWriteNode then written.value.equal?(call) ? written.name.to_s : nil
+            when Prism::ConstantPathWriteNode then written.value.equal?(call) ? declared_name(written.target) : nil
+            end
+          return [] if local.nil?
+          return [local.delete_prefix("::")] if local.start_with?("::")
+
+          prefixes = owner_index ? owner_names(ancestors, owner_index) : [""]
+          prefixes.map { |prefix| prefix.empty? ? local : "#{prefix}::#{local}" }
+        end
+
         def member_class_call?(node)
-          node.is_a?(Prism::CallNode) && node.block.is_a?(Prism::BlockNode) &&
-            node.receiver.is_a?(Prism::ConstantReadNode) &&
-            MEMBER_CLASS_CONSTRUCTORS[node.receiver.name] == node.name
+          return false unless node.is_a?(Prism::CallNode) && node.block.is_a?(Prism::BlockNode)
+
+          receiver = node.receiver
+          receiver_name =
+            case receiver
+            when Prism::ConstantReadNode then receiver.name
+            when Prism::ConstantPathNode then receiver.parent.nil? ? receiver.name : nil
+            end
+          !receiver_name.nil? && MEMBER_CLASS_CONSTRUCTORS[receiver_name] == node.name
         end
 
         # The kinds `self` may be for a node under the nodes between its owner and itself. The nearest `def`

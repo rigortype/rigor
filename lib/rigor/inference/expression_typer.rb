@@ -1768,8 +1768,11 @@ module Rigor
         return true if scope.discovered_method_through_ancestors?(class_name, method_name, :instance)
         return true if meta_member?(class_name, method_name)
         return true if resolve_user_def_through_ancestors(class_name, method_name)
+        return true if rbs_ancestor_answers?(class_name, method_name)
 
-        rbs_ancestor_answers?(class_name, method_name)
+        # Issue #2968 — a class on the chain defines methods under names no table holds (`attr_accessor(*FLAGS)`, a
+        # splatted `Struct.new(*FIELDS)`), so the name may be one of them, ahead of the top-level `def`.
+        Scope::DiscoveryIndex.open_names_on_chain?(scope, class_name, :instance)
       end
 
       # The RBS arm of {#instance_self_answers?}. A project class is usually absent from the RBS

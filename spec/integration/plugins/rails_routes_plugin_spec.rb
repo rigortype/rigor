@@ -1003,6 +1003,112 @@ RSpec.describe "plugins/rigor-rails-routes" do
       expect(unknown_helpers(files, paths: ["app/libs/child.rb"], signature_paths: ["sig"])).to be_empty
     end
 
+    # Issue #2968 — three Struct shapes the engine answered "not defined" for. Every quiet row was run on Ruby 4.0.5.
+    describe "a Struct or Data with splatted members, a class-name String, or a reopening in another file" do
+      let(:splat) do
+        <<~RUBY
+          F = %i[sp_url]
+          P = Struct.new(*F) do
+            def go = sp_url
+          end
+          PK = Struct.new(*F, keyword_init: true) do
+            def go = sp_url
+          end
+          module A
+            class B
+              PN = Struct.new(*F) { def go = sp_url }
+            end
+          end
+          DS = Data.define(*F) do
+            def go = sp_url
+          end
+        RUBY
+      end
+
+      let(:named) do
+        <<~RUBY
+          Struct.new("Named", :m_url) do
+            def go = [m_url, t1_url]
+            def own_url = 1
+          end
+          N = Struct.new("Named2", :n_url, keyword_init: true) do
+            def go = [n_url, t2_url]
+          end
+          module Outer
+            NN = Struct.new("Named3", :o_url) { def go = [o_url, t3_url] }
+          end
+        RUBY
+      end
+
+      it "stays quiet on a member of a splatted member list, keyword_init: and nested included" do
+        expect(unknown_helpers({ "app/libs/s.rb" => splat }, paths: ["app/libs/s.rb"])).to be_empty
+      end
+
+      it "stays quiet on a member of a splatted member list read from a reopening in another file" do
+        files = { "app/libs/s.rb" => splat,
+                  "app/libs/r.rb" => "class P\n  def go3 = sp3_url\nend\nclass DS\n  def go3 = ds3_url\nend\n" }
+        expect(unknown_helpers(files, paths: %w[app/libs/s.rb app/libs/r.rb])).to be_empty
+      end
+
+      it "still reports a name on the class-object side of a splatted Struct, in its block and in a reopening" do
+        files = {
+          "app/libs/s.rb" => "F = %i[sp_url]\nP = Struct.new(*F) do\n  def self.go = typo_url\nend\n",
+          "app/libs/r.rb" => "class P\n  def self.go4 = sp4_url\nend\n"
+        }
+        expect(unknown_helpers(files, paths: %w[app/libs/s.rb app/libs/r.rb]).sort)
+          .to eq(["no route helper `sp4_url`", "no route helper `typo_url`"])
+      end
+
+      it "credits the members after a class-name String, and still reports an unknown name beside them" do
+        expect(unknown_helpers({ "app/libs/n.rb" => named }, paths: ["app/libs/n.rb"]).sort)
+          .to eq(%w[t1_url t2_url t3_url].map { |n| "no route helper `#{n}`" })
+      end
+
+      # Ruby raises `NameError` for a String that is not a constant name, so the block keeps no name and the plugin
+      # declines there. This row fails if the plugin's copy of the constant-name pattern is loosened.
+      it "declines in an unassigned block whose String is not a constant name" do
+        files = { "app/libs/l.rb" => "Struct.new(\"named\", :l_url) do\n  def go = [l_url, t5_url]\nend\n" }
+        expect(unknown_helpers(files, paths: ["app/libs/l.rb"])).to be_empty
+      end
+
+      # The unassigned block's own `def own_url` is `Struct::Named`'s too, so the reopening sees it.
+      it "credits them on Struct::Named and on the constant, read from a reopening in another file" do
+        reopen = <<~RUBY
+          class Struct::Named
+            def go3 = [m_url, own_url, t4_url]
+          end
+          class N
+            def go3 = n_url
+          end
+          class Struct::Named2
+            def go3 = n_url
+          end
+        RUBY
+        files = { "app/libs/n.rb" => named, "app/libs/r.rb" => reopen }
+        expect(unknown_helpers(files, paths: %w[app/libs/n.rb app/libs/r.rb]).sort)
+          .to eq(%w[t1_url t2_url t3_url t4_url].map { |n| "no route helper `#{n}`" })
+      end
+
+      # Guard: this shape was already quiet on master. Both file orders are run, since file order is not load order.
+      %w[a.rb z.rb].each do |reopen_file|
+        it "merges a reopening of a Struct or Data constant in #{reopen_file}, and still reports an unknown name" do
+          files = {
+            "app/libs/m.rb" => <<~RUBY,
+              R2 = Struct.new(:a) do
+                def go = [ey_url, t1_url]
+              end
+              D2 = Data.define(:a) do
+                def go = [dy_url, t2_url]
+              end
+            RUBY
+            "app/libs/#{reopen_file}" => "class R2; attr_reader :ey_url; end\nclass D2; attr_reader :dy_url; end\n"
+          }
+          expect(unknown_helpers(files, paths: ["app/libs/m.rb", "app/libs/#{reopen_file}"]).sort)
+            .to eq(["no route helper `t1_url`", "no route helper `t2_url`"])
+        end
+      end
+    end
+
     it "stays quiet on names made by define_method, alias_method, alias, Struct and Data" do
       files = {
         "app/libs/notifier.rb" => <<~RUBY

@@ -1,0 +1,4 @@
+- **[check]** `call.undefined-method` and rails-routes' `unknown-helper` no longer fire on a Struct whose members are splatted or follow a class-name String. ([#2977](https://github.com/rigortype/rigor/pull/2977))
+  - `P = Struct.new(*FIELDS)` and `Data.define(*FIELDS)` now read as a class. Before, `P.new(1)` reported `undefined method 'new' for Struct`. The member list is unknown, so no instance-side name on the class is reported as missing.
+  - `Struct.new("Named", :a)` credits `:a` as a member, on the assigned constant and on `Struct::Named`. An unassigned `Struct.new("Named", :a) do … end` block belongs to `Struct::Named`, so a `class Struct::Named` reopening in another file sees its methods.
+  - `Rigor::Reflection.project_method_defined` answers `maybe` for a class whose methods are defined under names no table holds. Besides the splatted Struct, this covers `attr_accessor(*NAMES)` and `define_method` under a computed name.

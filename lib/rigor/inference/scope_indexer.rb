@@ -4859,17 +4859,27 @@ module Rigor
       # (#590). Their bodies are entered as class bodies, so a member read inside one dispatches on the struct's
       # own class and must find the reader there: a member that shadows a `Kernel` private (`lambda`) otherwise
       # falls through to `Kernel#lambda`, and `lambda.upcase` reports an undefined method on `Proc` — a wrong-type
-      # diagnostic on correct code. No-op for `Class.new` / `Module.new` and for a factory whose members are not
-      # literal Symbols (nothing to register).
+      # diagnostic on correct code. No-op for `Class.new` / `Module.new`. A splatted member list registers its literal
+      # members and opens the instance side ({#record_meta_member_names}).
       def record_meta_members(factory_call, qualified_prefix, accumulator, allow_outer_block: true)
         factory_call = resolve_meta_factory_call(factory_call, allow_outer_block: allow_outer_block)
         return unless factory_call
 
-        members = meta_member_names(factory_call)
-        return if members.empty?
+        # Issue #2968 — `K = Struct.new("Named", :a)` makes one class under two names, `K` and `Struct::Named`; the
+        # members are credited on both.
+        named = AnonymousMetaClass.struct_class_name(factory_call) if struct_new_call?(factory_call)
+        [qualified_prefix.join("::"), named].compact.uniq.each do |class_name|
+          record_meta_member_names(factory_call, class_name, accumulator)
+        end
+      end
 
-        class_name = qualified_prefix.join("::")
-        members.each { |member| record_method(accumulator, class_name, member, :instance) }
+      # Issue #2968 — a splatted member list (`Struct.new(*FIELDS)`) names members this walk cannot read, so the
+      # instance side opens: no name is provably missing there.
+      def record_meta_member_names(factory_call, class_name, accumulator)
+        if meta_members_open?(factory_call)
+          record_surface_mark(accumulator, class_name, Scope::DiscoveryIndex::ENVELOPE_OPEN_INSTANCE_NAMES_MARK)
+        end
+        meta_member_names(factory_call).each { |member| record_method(accumulator, class_name, member, :instance) }
       end
 
       # Unwinds nested single-parent `Class.new(...)` calls to a root `Struct.new(...)` / `Data.define(...)`.
@@ -4900,14 +4910,24 @@ module Rigor
         data_define_call?(call_node) || struct_new_call?(call_node)
       end
 
-      # The Symbol member names of a `Data.define(*Symbol)` / `Struct.new(*Symbol [, keyword_init:])` call. For
-      # `Struct.new` the trailing `keyword_init:` hash is stripped by {#struct_new_positionals}; a leading
-      # String class name is NOT stripped, so `Struct.new("Name", :a) do` registers no members and the body
-      # is entered under the anonymous name (consistent between passes). `Data.define` args are all Symbols.
+      # The literal Symbol member names of a `Data.define` / `Struct.new` call ({#meta_member_positionals}). A splatted
+      # argument contributes none; {#meta_members_open?} says the list is then incomplete.
       def meta_member_names(call_node)
+        meta_member_positionals(call_node).filter_map { |arg| arg.unescaped.to_sym if arg.is_a?(Prism::SymbolNode) }
+      end
+
+      # Issue #2968 — whether a `Data.define` / `Struct.new` call's member list holds a splat, so its members are not
+      # all literal and the reader set is unknown. A layout table or a closed reader set must not be built from it.
+      def meta_members_open?(call_node)
+        meta_member_positionals(call_node).any?(Prism::SplatNode)
+      end
+
+      # The member arguments of a `Data.define` / `Struct.new` call. For `Struct.new` the trailing `keyword_init:` hash
+      # is stripped ({#struct_new_positionals}). A leading class-name String (`Struct.new("Named", :a)`) is neither a
+      # Symbol nor a splat, so it is no member and does not open the list.
+      def meta_member_positionals(call_node)
         raw = call_node.arguments&.arguments || []
-        symbols = struct_new_call?(call_node) ? (struct_new_positionals(raw) || []) : raw
-        symbols.filter_map { |arg| arg.unescaped.to_sym if arg.is_a?(Prism::SymbolNode) }
+        struct_new_call?(call_node) ? struct_new_positionals(raw) : raw
       end
 
       def record_def_method(def_node, qualified_prefix, in_singleton_class, accumulator)
@@ -6902,6 +6922,7 @@ module Rigor
       def record_data_member_layout(accumulator, qualified_parts, expr, allow_outer_block: true)
         expr = resolve_meta_factory_call(expr, allow_outer_block: allow_outer_block)
         return unless expr && data_define_call?(expr)
+        return if meta_members_open?(expr)
 
         members = meta_member_names(expr)
         return if members.empty?
@@ -7024,6 +7045,7 @@ module Rigor
       def record_struct_member_layout(accumulator, qualified_parts, expr, allow_outer_block: true)
         expr = resolve_meta_factory_call(expr, allow_outer_block: allow_outer_block)
         return unless expr && struct_new_call?(expr)
+        return if meta_members_open?(expr)
 
         members = meta_member_names(expr)
         return if members.empty?
@@ -12020,20 +12042,25 @@ module Rigor
 
       # Recognises `Data.define(*Symbol)` and `Data.define(*Symbol) do ... end` at constant-write rvalue position. The
       # receiver MUST be the bare `Data` constant (or `::Data`); other receivers (a local variable, a method call
-      # return) are rejected because their identity is not statically known.
+      # return) are rejected because their identity is not statically known. Issue #2968 — a splatted member list
+      # (`Data.define(*FIELDS)`) still creates the class; {#meta_members_open?} marks its members unknown.
       def data_define_call?(node)
         return false unless node.is_a?(Prism::CallNode)
         return false unless node.name == :define
         return false unless meta_constant_receiver?(node.receiver, :Data)
 
         args = node.arguments&.arguments || []
-        args.all?(Prism::SymbolNode)
+        args.all? { |arg| meta_member_argument?(arg) }
       end
 
       # Recognises `Struct.new(*Symbol)` and `Struct.new(*Symbol, keyword_init: <expr>)` at constant-write rvalue
       # position. A trailing `KeywordHashNode` (the `keyword_init: ...` form) is accepted but does not contribute to
       # member discovery; every other argument MUST be a `Prism::SymbolNode`. At least one Symbol member is required —
       # `Struct.new()` is a degenerate form callers don't typically use.
+      #
+      # Issue #2968 — a leading String (`Struct.new("Named", :a)`, the class `Struct::Named`) and a splatted member list
+      # (`Struct.new(*FIELDS)`) create the class just the same. {#meta_member_positionals} drops the String;
+      # {#meta_members_open?} marks a splatted list's members unknown.
       def struct_new_call?(node)
         return false unless meta_call_with_name?(node, :Struct, :new)
 
@@ -12041,7 +12068,12 @@ module Rigor
         positional = struct_new_positionals(args)
         return false if positional.nil? || positional.empty?
 
-        positional.all?(Prism::SymbolNode)
+        positional = positional.drop(1) if positional.first.is_a?(Prism::StringNode)
+        positional.all? { |arg| meta_member_argument?(arg) }
+      end
+
+      def meta_member_argument?(arg)
+        arg.is_a?(Prism::SymbolNode) || arg.is_a?(Prism::SplatNode)
       end
 
       # Recognises `Module.new` and `Module.new(&block)` / `Module.new do ... end` at constant-write rvalue position.

@@ -211,4 +211,40 @@ RSpec.describe Rigor::Reflection, ".project_method_defined" do
       expect { answer(scope, "Child", :plain, kind: :instance, source: :any) }.to raise_error(ArgumentError, /source/)
     end
   end
+
+  # Issue #2968 — a class whose side carries an open-names mark defines methods under names no table holds, so the
+  # discovery walk answers `maybe` there instead of `no`.
+  describe "an open side" do
+    let(:open_scope) do
+      scope_for(<<~RUBY)
+        F = %i[sp_url]
+        P = Struct.new(*F)
+        class PChild < P
+        end
+        N = Struct.new("Named", :n_url)
+        class Acc
+          attr_accessor(*F)
+        end
+      RUBY
+    end
+
+    it "answers maybe for any instance name on a Struct with splatted members, and on its subclass" do
+      expect(answer(open_scope, "P", :sp_url, kind: :instance, source: :either)).to eq(Rigor::Trinary.maybe)
+      expect(answer(open_scope, "PChild", :anything, kind: :instance, source: :discovered)).to eq(Rigor::Trinary.maybe)
+    end
+
+    it "answers no on the class-object side of a Struct with splatted members" do
+      expect(answer(open_scope, "P", :sp_url, kind: :singleton, source: :either)).to eq(Rigor::Trinary.no)
+    end
+
+    it "answers maybe for an attr_accessor with a splatted name list" do
+      expect(answer(open_scope, "Acc", :sp_url, kind: :instance, source: :either)).to eq(Rigor::Trinary.maybe)
+    end
+
+    it "answers yes for a member after a class-name String, on the constant and on Struct::Named" do
+      expect(answer(open_scope, "N", :n_url, kind: :instance, source: :either)).to eq(Rigor::Trinary.yes)
+      expect(answer(open_scope, "Struct::Named", :n_url, kind: :instance, source: :either)).to eq(Rigor::Trinary.yes)
+      expect(answer(open_scope, "N", :other_url, kind: :instance, source: :either)).to eq(Rigor::Trinary.no)
+    end
+  end
 end

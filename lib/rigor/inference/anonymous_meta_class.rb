@@ -62,10 +62,28 @@ module Rigor
         receiver_name = block_form_receiver(node)
         return nil if receiver_name.nil?
 
+        named = struct_class_name(node) if receiver_name == :Struct
+        return named if named
+
         location = node.location
         key = [source_path, location.start_line, location.start_column].compact.join(":")
         Type::AnonymousClassName.build(receiver_name, key)
       end
+
+      # Issue #2968 — `Struct.new("Named", :a)` names its class `Struct::Named`: a leading String argument that spells a
+      # constant (Ruby raises `NameError` for any other) is the class's name under `Struct`, so a block body is that
+      # class's and a reopening `class Struct::Named` in another file meets the same table entry. Nil for any other
+      # first argument. `node` is a `Struct.new` call.
+      def struct_class_name(node)
+        first = node.arguments&.arguments&.first
+        return nil unless first.is_a?(Prism::StringNode)
+
+        name = first.unescaped
+        "Struct::#{name}" if name.match?(STRUCT_CLASS_NAME)
+      end
+
+      STRUCT_CLASS_NAME = /\A[A-Z][A-Za-z0-9_]*\z/
+      private_constant :STRUCT_CLASS_NAME
 
       # The bare-constant receiver's name (`Class`, `::Class`), or nil for every other receiver shape.
       def literal_constant_name(node)

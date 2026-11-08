@@ -2962,10 +2962,11 @@ RSpec.describe "plugins/rigor-activerecord" do
         plugin.instance_variable_set(:@model_index, index)
 
         call_node = Prism.parse("status").value.statements.body.first
-        scope = Object.new
-        scope.define_singleton_method(:self_type) { Rigor::Type::Combinator.nominal_of("Post") }
-        scope.define_singleton_method(:environment) { nil }
-        scope.define_singleton_method(:discovered_method_through_ancestors?) { |_c, _m, _k| false }
+        # A real scope with no `status` definer: #2968's open-side read walks the model's chain, which a stub that
+        # answers only `discovered_method_through_ancestors?` cannot.
+        root = Prism.parse("class Post\nend\n").value
+        scope = Rigor::Inference::ScopeIndexer.index(root, default_scope: Rigor::Scope.empty)[root]
+                                              .with_self_type(Rigor::Type::Combinator.nominal_of("Post"))
         type = plugin.dynamic_return_type(
           call_node: call_node, scope: scope,
           receiver_type: Rigor::Type::Combinator.untyped
@@ -4798,6 +4799,29 @@ RSpec.describe "plugins/rigor-activerecord" do
       expect(contribution.call("class Post\nend\n")).to eq(Rigor::Type::Combinator.untyped)
       expect(contribution.call("#{cut_modules}class ApplicationRecord\nend\nclass Post < ApplicationRecord\n" \
                                "#{cut_includes}\nend\n")).to be_nil
+    end
+  end
+
+  # Issue #2968 (review of #2977) — `Reflection.project_method_defined` answers `maybe` on a model whose instance side
+  # is open (`attr_accessor(*FLAGS)`), so the implicit-self column tier declines there. The engine's own veto on a
+  # top-level `def` of the same name must read the open side too, or the top-level `def title = nil` binds and
+  # `title.upcase` reports on `nil`.
+  describe "an implicit-self column read on a model with an open instance side" do
+    def undefined_on(post_body)
+      models = DEFAULT_MODELS.merge("app/models/post.rb" => "class Post < ApplicationRecord\n#{post_body}end\n",
+                                    "lib/top.rb" => "def title = nil\n")
+      paths = %w[app/models/post.rb lib/top.rb]
+      result = run_plugin(source: "", files: models.merge("db/schema.rb" => DEFAULT_SCHEMA), paths: paths)
+      result.diagnostics.select { |d| d.qualified_rule == "call.undefined-method" }.map(&:message)
+    end
+
+    it "does not bind a top-level def of the column's name" do
+      body = "  FLAGS = %i[pinned]\n  attr_accessor(*FLAGS)\n  def shout = title.upcase\n"
+      expect(undefined_on(body)).to be_empty
+    end
+
+    it "does not bind it without the open side either (control)" do
+      expect(undefined_on("  def shout = title.upcase\n")).to be_empty
     end
   end
 end

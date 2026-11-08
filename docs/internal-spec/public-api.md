@@ -116,8 +116,9 @@ pins instance and singleton method sets for:
   `rbs_class_known?`, `singleton_definition`, `singleton_for_name`, `singleton_method_definition`.
   `project_method_defined(class_name, method_name, kind:, source:, scope:)`
   (ADR-128 WD1) is the ancestor question plugins used to ask through two
-  `Scope` walks: it answers a `Rigor::Trinary`, and `maybe` exactly where
-  the walk's ancestor budget ran out before it found a definer. See
+  `Scope` walks: it answers a `Rigor::Trinary`, and `maybe` where
+  the walk's ancestor budget ran out before it found a definer, or (`:discovered`, `:either`) where a class on
+  the chain defines methods under names no table holds. See
   [`reflection.md`](reflection.md) § "Source-side discoveries".
   `rbs_method_defined(class_name, method_name, kind:, scope:)` asks the
   same question of RBS through the project's ancestry, and

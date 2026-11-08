@@ -127,8 +127,14 @@ module Rigor
 
     # The discovery walk answers `true` both for a definer and for a cut chain, so a `true` on a cut chain is
     # settled by searching the chain's entries for a definer, as the walk does.
+    #
+    # Issue #2968 — where the walk finds none, a class on the chain whose side is open (an open-names mark: a
+    # splatted `Struct.new(*FIELDS)`, `attr_accessor(*NAMES)`, a `define_method` under a computed name) answers
+    # `maybe`: it defines methods under names no table holds.
     def project_discovered_defined(class_name, method_name, kind, scope)
-      return Trinary.no unless scope.discovered_method_through_ancestors?(class_name, method_name, kind)
+      unless scope.discovered_method_through_ancestors?(class_name, method_name, kind)
+        return Scope::DiscoveryIndex.open_names_on_chain?(scope, class_name, kind) ? Trinary.maybe : Trinary.no
+      end
       # A shortcut, not a decision: on an untruncated chain the search below finds the same definer.
       return Trinary.yes unless project_chain_truncated?(class_name, kind, scope)
 

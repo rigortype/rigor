@@ -133,6 +133,8 @@ RSpec.describe "singleton-side mixins a hook adds (#1592)" do
       "a hook's conditional extend" => "module Hu\n  def self.included(base)\n    base.extend(X) if base.name\n  end\nend\n",
       "a hook's send(:extend)" => "module Hu\n  def self.included(base) = base.send(:extend, X)\nend\n",
       "a hook's singleton_class.include" => "module Hu\n  def self.included(base) = base.singleton_class.include(X)\nend\n",
+      "an included block's conditional extend" =>
+        "module Hu\n  extend ActiveSupport::Concern\n  def own = 1\n  included do\n    extend X if name\n  end\nend\n",
       "an included block's extend of a computed module" =>
         "module Hu\n  extend ActiveSupport::Concern\n  def own = 1\n  included do\n    extend(Object.const_get(:X))\n  end\nend\n"
     }.each do |label, hook|

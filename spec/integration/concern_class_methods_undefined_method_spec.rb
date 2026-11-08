@@ -196,6 +196,8 @@ RSpec.describe "ActiveSupport::Concern class_methods macros and call.undefined-m
 
   # Each `def` here defines on another module than `ClassMethods`, or not until something calls it. The concern
   # defines a method of its own here, as in the namespace row: a concern with none already opens its includer (#2094).
+  # The `def self.` row is a guard: the def's receiver gives it the singleton side in the recorders it shares with
+  # every `def`, and no line of the concern read decides it.
   describe "a def a class_methods block does not define on ClassMethods" do
     {
       "a def self. method" => "def self.my_c(*n) = DEF",

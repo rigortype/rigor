@@ -1901,11 +1901,14 @@ module Rigor
       #
       # Issue #2422 — followed by the members a deferred file that did load left out because another source
       # declares them ({.deferred_member_standdowns}), one row each.
+      #
+      # Issue #2974 — a gem overlay's rows are left out: the overlay is Rigor's own default, deferred so it stands
+      # down to any source that declares the same thing, and that is not news to report (#2470's reasoning).
       def signature_standdowns
         @state[:signature_standdowns] ||= (
           self.class.deferred_standdowns(env, @deferred_signature_paths) +
           self.class.deferred_member_standdowns(env, @deferred_signature_paths)
-        ).freeze
+        ).reject { |row| self.class.under_gem_overlay_root?(row.first) }.freeze
       end
 
       # Issue #1713 — what stood down from each {RequiredFeatures}-gated vendored directory this loader's library

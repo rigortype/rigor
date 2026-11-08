@@ -22,7 +22,10 @@ module Rigor
     #   whose kind (class or module) contradicts another source's, stands down on its own, where adding it would
     #   have raised `RBS::DuplicatedDeclarationError` and dropped the plugin's whole file;
     # - a class header's superclass clause another source already gives the class one stands down (#2439), where two
-    #   different clauses would have raised `RBS::SuperclassMismatchError`; the plugin's declaration reopens the class.
+    #   different clauses would have raised `RBS::SuperclassMismatchError`; the plugin's declaration reopens the class;
+    # - an `include`, `extend` or `prepend` of a module this file declares but that stood down whole, or that another
+    #   source declares as a class, stands down too (#2974), where keeping it would have raised `NoMixinFoundError` or
+    #   `MixinClassError` for the class that mixes it in (`Integer`, for the overlay's `ActiveSupport::NumericWithFormat`).
     #
     # A declaration with nothing taken comes back as the same object, so a file with no collision loads as it
     # stands. {.standdown_rows} reads what stood down back off the built environment, so a warm run off the env
@@ -33,27 +36,29 @@ module Rigor
       # @param own — the buffer names that are the project's own sources: its `signature_paths:` files (not the
       #   collection or gem directories also on that list) and its inline RBS.
       def plan(decls, env, own, namespace = nil)
-        planned = decls.filter_map { |decl| plan_declaration(decl, env, own, namespace) }
+        mixins = MixinGate.new(env, decls)
+        planned = decls.filter_map { |decl| plan_declaration(decl, env, own, namespace, mixins) }
         same?(planned, decls) ? decls : planned
       end
 
-      def plan_declaration(decl, env, own, namespace)
+      def plan_declaration(decl, env, own, namespace, mixins)
         name = GatedSignaturePlan.qualify(namespace, declared_name(decl))
         if GatedSignaturePlan.type_declaration?(decl)
           return nil if kind_clash?(env, decl, name)
 
-          return plan_type(decl, env, own, name)
+          return plan_type(decl, env, own, name, mixins)
         end
         declared_elsewhere(env, decl, name) ? nil : decl
       end
 
-      def plan_type(decl, env, own, name)
+      def plan_type(decl, env, own, name, mixins)
         others = GatedSignaturePlan.other_declarations(env, name)
         taken = GatedSignaturePlan.declared_keys(others)
         external = others.reject { |other| own.include?(buffer_of(other)) }
         defined = GatedSignaturePlan.declared_keys(external) | definition_keys(external)
         members = decl.members.filter_map do |member|
-          next plan_declaration(member, env, own, name) if declaration?(member)
+          next plan_declaration(member, env, own, name, mixins) if declaration?(member)
+          next nil if mixins.drop?(member, name)
           next member if taken.empty?
 
           composed(member, defined) || GatedSignaturePlan.untaken(member, taken)
@@ -138,6 +143,62 @@ module Rigor
 
       def buffer_of(decl)
         RbsLoader.declaration_buffer_name(decl)
+      end
+
+      # Issue #2974 — which of a deferred file's mixins name a module that will not be there as a module: one the file
+      # itself declares, inside a type that stood down whole on a kind clash (the project's `class ActiveSupport` takes
+      # the overlay's `module ActiveSupport` and the `NumericWithFormat` in it), or one another source declares as a
+      # class. A mixin of a module the file does not declare, which some other source may supply, is left alone.
+      class MixinGate
+        MIXINS = [::RBS::AST::Members::Include, ::RBS::AST::Members::Extend, ::RBS::AST::Members::Prepend].freeze
+
+        def initialize(env, decls)
+          @env = env
+          @declared = Set.new
+          @dropped = Set.new
+          decls.each { |decl| collect(decl, nil, false) }
+        end
+
+        # `namespace` is the absolute name, without the leading `::`, of the type `member` is written in.
+        def drop?(member, namespace)
+          return false unless MIXINS.any? { |klass| member.is_a?(klass) } && member.name.class?
+
+          target = resolve(member.name, namespace)
+          return false if target.nil?
+
+          first = GatedSignaturePlan.other_declarations(@env, target).first
+          return first.is_a?(::RBS::AST::Declarations::Class) unless first.nil?
+
+          @dropped.include?(target)
+        end
+
+        private
+
+        def collect(decl, namespace, inside_dropped)
+          return unless GatedSignaturePlan.type_declaration?(decl)
+
+          name = GatedSignaturePlan.qualify(namespace, decl.name)
+          dropped = inside_dropped || DeferredSignaturePlan.kind_clash?(@env, decl, name)
+          @declared << name
+          @dropped << name if dropped
+          decl.members.each { |member| collect(member, name, dropped) }
+        end
+
+        # The first lexical candidate for `type_name` written inside `namespace` that this file or the env declares,
+        # as RBS resolves a relative name outward from the innermost scope.
+        def resolve(type_name, namespace)
+          candidates(type_name, namespace).find do |name|
+            @declared.include?(name) || !GatedSignaturePlan.other_declarations(@env, name).empty?
+          end
+        end
+
+        def candidates(type_name, namespace)
+          text = type_name.to_s
+          return [text.delete_prefix("::")] if type_name.absolute?
+
+          scopes = namespace.to_s.split("::")
+          scopes.size.downto(0).map { |depth| [*scopes.first(depth), text].join("::") }
+        end
       end
 
       # One {.standdown_rows} walk over a deferred file: the built env, the file's buffer name, the rows so far, and

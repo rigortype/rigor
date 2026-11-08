@@ -292,6 +292,31 @@ module Rigor
         !(key.is_a?(Array) && MACRO_KINDS.include?(key.first))
       end
 
+      # Issue #2968 — the open-names marks of one side: {ENVELOPE_OPEN_NAMES_MARK} and the side's own twin.
+      OPEN_NAMES_MARKS = {
+        instance: [ENVELOPE_OPEN_NAMES_MARK, ENVELOPE_OPEN_INSTANCE_NAMES_MARK].freeze,
+        singleton: [ENVELOPE_OPEN_NAMES_MARK, ENVELOPE_OPEN_SINGLETON_NAMES_MARK].freeze
+      }.freeze
+      private_constant :OPEN_NAMES_MARKS
+
+      # Issue #2968 — whether an entry of `class_name`'s `kind` chain carries that side's open-names mark: a splatted
+      # `Struct.new(*FIELDS)`, `attr_accessor(*NAMES)`, a `define_method` under a computed name, so the side defines
+      # methods no table names. A project class with no `def` of its own is an external entry (#2094), so its candidate
+      # names are asked too. Read by `Reflection.project_method_defined` and by the implicit-self top-level-`def` veto
+      # (`ExpressionTyper#instance_self_answers?`), beside `call.undefined-method`'s own reader.
+      def self.open_names_on_chain?(scope, class_name, kind)
+        marks = OPEN_NAMES_MARKS.fetch(kind)
+        chain = ResolutionChain.for(scope, class_name.to_s, kind, :methods)
+        found = chain.search(scope) do |entry|
+          names = entry.external? ? entry.candidates : [entry.name]
+          names.any? do |name|
+            bucket = scope.parameter_envelopes_of(name)
+            marks.any? { |mark| bucket.key?(mark) }
+          end
+        end
+        !found.nil?
+      end
+
       # Whether an envelope bucket says the project rewrites the class's method table beyond its literal names: a
       # dynamic rewrite, or a refinement.
       def self.rewritten_surface?(bucket)

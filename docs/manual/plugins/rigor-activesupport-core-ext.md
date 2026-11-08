@@ -53,8 +53,9 @@ Roughly the top ~40 selectors plus their close neighbours, across:
   `TrueClass` / `FalseClass`).
 - **Integer / Float** — Duration multipliers (`#days`, `#hours`,
   `#minutes`, …) and Bytes multipliers (`#megabytes`, `#gigabytes`, …).
-- **Integer / Float / BigDecimal** — `#to_fs` / `#to_formatted_s` (`NumericWithFormat`: a Symbol format, an Integer radix or a String format, and the
-  no-argument `to_s` form).
+- **Integer / Float / BigDecimal** — `#to_fs` / `#to_formatted_s`
+  (`NumericWithFormat`: a Symbol format, an Integer radix or a String
+  format, and the no-argument `to_s` form).
 - **String** — inflections (`#underscore`, `#camelize`, `#classify`,
   `#constantize`, `#pluralize`, …), filters (`#squish`, `#truncate`),
   `#html_safe`, `#starts_with?` / `#ends_with?` (also on **Symbol**),

@@ -456,7 +456,9 @@ module Rigor
       # `foogem`) is dropped by the loader's `has_library?` filter, so it declares nothing to double-declare
       # against; it stays out of the skip set so the collection's copy still loads.
       def collection_skip_gem_names(library_names)
-        extra = library_names.reject { |name| DEFAULT_LIBRARIES.include?(name) || RequiredFeatures.feature_of_token(name) }
+        extra = library_names.reject do |name|
+          DEFAULT_LIBRARIES.include?(name) || RequiredFeatures.feature_of_token(name)
+        end
         unavailable = extra.empty? ? [] : extra.reject(&LibraryProbe.predicate)
         (library_names - unavailable) + RbsLoader.vendored_gem_names.reject { |name| RequiredFeatures.gated_dir?(name) }
       end

@@ -1,0 +1,4 @@
+- **[inference]** The instance-ivar census and `def.ivar-write-mismatch` now agree with Ruby on more code that changes `self`, so a method defined from an instance method no longer reports a call on `nil` and a write to another object's ivar no longer reports a mismatch. ([#2980](https://github.com/rigortype/rigor/pull/2980))
+  - A `def` inside `self.class.class_eval { … }` (and `class_exec`, `module_eval`, `module_exec`, `singleton_class.class_eval` or an untyped receiver) counts as a write of the class's ivar; one inside `Other.class_eval` or `Class.new.class_eval` does not.
+  - `def.ivar-write-mismatch` no longer compares a write in a block whose `self` is provably another object, such as `Other.new.instance_eval { @r = 1 }`.
+  - A module's `def self.x = (@s = 1)` no longer widens the ivar of a class or module that includes it when both sit in the same file, so the answer matches the one when they sit in different files.

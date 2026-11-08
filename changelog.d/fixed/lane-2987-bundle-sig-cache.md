@@ -1,0 +1,2 @@
+- **[cache]** A warm run no longer serves a stale result when a bundle gem gains or loses its own `sig/` directory while no analysed file changes. ([#2988](https://github.com/rigortype/rigor/pull/2988))
+  - The run cache now records the bundle's `sig/` listing, so the warm run matches `--no-cache`.

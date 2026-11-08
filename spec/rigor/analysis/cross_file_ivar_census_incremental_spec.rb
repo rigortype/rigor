@@ -143,12 +143,12 @@ RSpec.describe "cross-file ivar census — incremental" do
     )
   end
   # Issue #2983 — a String `class_eval` records a write of every ivar (`:*`) of the class, which the reader joins.
-  it "re-checks the reader when another file drops a String class_eval" do
+  it "re-checks the reader when another file moves a String class_eval to an unrelated class" do
     expect_steps(
-      { "b.rb" => "class E\n  def poke = self.class.class_eval(\"def set = (@x = 'a')\")\nend\n" },
+      { "b.rb" => "class Other; end\nclass E\n  def poke = self.class.class_eval(\"1\")\nend\n" },
       [
-        [{ "b.rb" => "class E\n  def poke = nil\nend\n" }, true, [["a.rb", 3]]],
-        [{ "b.rb" => "class E\n  def poke = self.class.class_eval(\"def set = (@x = 'a')\")\nend\n" }, true, []]
+        [{ "b.rb" => "class Other; end\nclass E\n  def poke = Other.class_eval(\"1\")\nend\n" }, true, [["a.rb", 3]]],
+        [{ "b.rb" => "class Other; end\nclass E\n  def poke = self.class.class_eval(\"1\")\nend\n" }, true, []]
       ],
       baseline: []
     )

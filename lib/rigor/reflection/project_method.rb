@@ -150,7 +150,6 @@ module Rigor
     end
     private_class_method :project_discovered_defined
 
-
     # A singleton-side entry reads the singleton table; a module on the singleton chain answers with its
     # INSTANCE methods; on the instance chain the caller's kind stands (`Scope#kind_for`).
     def discovered_entry_kind(entry, kind)

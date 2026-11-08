@@ -2962,10 +2962,11 @@ RSpec.describe "plugins/rigor-activerecord" do
         plugin.instance_variable_set(:@model_index, index)
 
         call_node = Prism.parse("status").value.statements.body.first
-        scope = Object.new
-        scope.define_singleton_method(:self_type) { Rigor::Type::Combinator.nominal_of("Post") }
-        scope.define_singleton_method(:environment) { nil }
-        scope.define_singleton_method(:discovered_method_through_ancestors?) { |_c, _m, _k| false }
+        # A real scope with no `status` definer: #2968's open-side read walks the model's chain, which a stub that
+        # answers only `discovered_method_through_ancestors?` cannot.
+        root = Prism.parse("class Post\nend\n").value
+        scope = Rigor::Inference::ScopeIndexer.index(root, default_scope: Rigor::Scope.empty)[root]
+                                              .with_self_type(Rigor::Type::Combinator.nominal_of("Post"))
         type = plugin.dynamic_return_type(
           call_node: call_node, scope: scope,
           receiver_type: Rigor::Type::Combinator.untyped
@@ -4800,6 +4801,7 @@ RSpec.describe "plugins/rigor-activerecord" do
                                "#{cut_includes}\nend\n")).to be_nil
     end
   end
+
   # Issue #2968 (review of #2977) — `Reflection.project_method_defined` answers `maybe` on a model whose instance side
   # is open (`attr_accessor(*FLAGS)`), so the implicit-self column tier declines there. The engine's own veto on a
   # top-level `def` of the same name must read the open side too, or the top-level `def title = nil` binds and

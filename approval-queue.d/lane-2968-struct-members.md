@@ -31,13 +31,25 @@ mark, not only the new Struct one.
 ## Decision
 
 The first option. It matches what `call.undefined-method` does through `open_names_through_ancestors?` (#2972),
-so the two engine answers agree. The marks only ever turn a `no` into a `maybe`, never a `yes` into anything
-else. #2972's computed-macro resolution (a body call that resolves to a class macro) is not read here: that
+so the two engine answers agree. The marks turn a `no` into a `maybe` and never change a `yes`. That does not by
+itself make every plugin quieter: a plugin that declines on `maybe` can hand the call back to a tier that answers
+worse. The review found one. rigor-activerecord's implicit-self column tier declined on a model with
+`attr_accessor(*FLAGS)`, and the engine's top-level-`def` veto (`ExpressionTyper#instance_self_answers?`) did not
+read open marks, so a project's `def title = nil` bound and `title.upcase` reported on `nil`. The veto now reads the
+same marks (`Scope::DiscoveryIndex.open_names_on_chain?`, shared with this reader), and
+`spec/integration/plugins/activerecord_plugin_spec.rb` pins that row. Other plugins' decline paths were not audited
+one by one. #2972's computed-macro resolution (a body call that resolves to a class macro) is not read here: that
 reader lives in `CheckRules`, and #2968 did not need it.
+
+The cost on rails-routes' `unknown-helper`: one computed definer on a base class turns the check off for every
+subclass. A `define_method("#{r}?")` loop in `ApplicationController` opens its instance side, so no `*_path` /
+`*_url` typo in any controller below it is reported. The review measured no drift on redmine (1865/1865 findings)
+or mastodon (2785/2785).
 
 ## To undo
 
-Drop `open_names_on_chain?` from `lib/rigor/reflection/project_method.rb` and restore the "maybe exactly where
+Drop the `Scope::DiscoveryIndex.open_names_on_chain?` call from `lib/rigor/reflection/project_method.rb` (keep
+the veto's call in `ExpressionTyper#instance_self_answers?`, which is right on its own), and restore the "maybe exactly where
 truncated" wording in `docs/internal-spec/reflection.md` and `public-api.md`. The rails-routes splat rows in
 `spec/integration/plugins/rails_routes_plugin_spec.rb` would then report again, unless the plugin reads the
 marks itself.

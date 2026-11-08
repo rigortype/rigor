@@ -53,6 +53,7 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
     source = <<~RUBY
       require "bigdecimal"
       Rigor.dump_type(1.to_fs(:delimited))
+      Rigor.dump_type(1.5.to_fs(:percentage))
       Rigor.dump_type(1.5.to_formatted_s(:percentage))
       Rigor.dump_type(BigDecimal("1.5").to_fs)
     RUBY
@@ -60,7 +61,7 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
 
     expect(result.diagnostics.map(&:qualified_rule).grep(/\Acall\./)).to be_empty
     expect(result.diagnostics.select { |d| d.qualified_rule == "dump.type" }.map { |d| d.message })
-      .to eq(["dump_type: String", "dump_type: String", "dump_type: String"])
+      .to eq(Array.new(4, "dump_type: String"))
   end
 
   it "declares the GitLab-surfaced String / Object / Date / ERB extensions in its RBS bundle" do

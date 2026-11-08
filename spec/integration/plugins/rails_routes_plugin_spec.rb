@@ -1186,7 +1186,8 @@ RSpec.describe "plugins/rigor-rails-routes" do
       # `class Struct::Sing` reopening is `S`'s.
       it "reads a singleton method under either name from the other's class-object side" do
         files = {
-          "app/libs/s.rb" => "S = Struct.new(\"Sing\", :a) do\n  def self.blk_url = 1\n  def self.u = [ro_url, t7_url]\nend\n",
+          "app/libs/s.rb" => "S = Struct.new(\"Sing\", :a) do\n  def self.blk_url = 1\n  " \
+                             "def self.u = [ro_url, t7_url]\nend\n",
           "app/libs/r.rb" => "class Struct::Sing\n  def self.ro_url = 1\n  def self.t = [blk_url, t8_url]\nend\n"
         }
         expect(unknown_helpers(files, paths: %w[app/libs/s.rb app/libs/r.rb]).sort)

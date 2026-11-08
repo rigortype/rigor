@@ -4,6 +4,7 @@ require "did_you_mean"
 
 require_relative "config_path"
 require_relative "environment/rbs_collection_discovery"
+require_relative "environment/required_features"
 require_relative "flow_contribution/conflict"
 require_relative "library_probe"
 require_relative "signature_path_audit"
@@ -133,9 +134,11 @@ module Rigor
 
     # `libraries:` entries RBS does not recognise, and — issue #2946 — `source: { type: stdlib }` entries of
     # the run's `rbs_collection.lock.yaml`, which load as libraries too ({Environment::BaseLibraries.resolve}). Uses the
-    # same `RBS::EnvironmentLoader#has_library?` guard the loader filters through
-    # ({Environment::RbsLoader} `build_env_for`), so a flagged name is exactly one the loader
-    # skipped; the `rbs` CLI warns on the same lockfile entry (`Collection::Sources::Stdlib#manifest_of`).
+    # same `RBS::EnvironmentLoader#has_library?` answer the loader filters through
+    # ({Environment::RbsLoader} `library_loader`), so a flagged name is one the loader skipped. A
+    # {Environment::RequiredFeatures::VENDORED_DIRS} name (`prime`) is not audited: the loader loads it
+    # from `data/vendored_gem_sigs/` before it asks `has_library?`. The `rbs` CLI warns on the same
+    # lockfile entry (`Collection::Sources::Stdlib#manifest_of`).
     # Fails soft: if RBS itself raises, no warning rather than a crash.
     def self.library_warnings(configuration, project_root = Dir.pwd)
       lockfile = Environment::RbsCollectionDiscovery.stdlib_library_names(
@@ -144,6 +147,7 @@ module Rigor
       )
       named = Array(configuration.libraries).map { |lib| [:library, "libraries:", lib.to_s] } +
               lockfile.map { |name| [:rbs_collection_library, "rbs_collection.lock.yaml: stdlib entry", name] }
+      named.reject! { |_, _, lib| Environment::RequiredFeatures::VENDORED_DIRS.key?(lib) }
       return [] if named.empty?
 
       available = LibraryProbe.predicate

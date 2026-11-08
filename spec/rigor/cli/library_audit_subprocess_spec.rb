@@ -21,18 +21,21 @@ RSpec.describe "library audit warnings from a fresh CLI process" do
 
   attr_reader :dir
 
-  # Returns [stdout + stderr, the environment_loader.rb path if rbs loaded it, else ""].
-  def check_run(config)
+  # Returns [stdout + stderr, the environment_loader.rb path if rbs loaded it (else ""), exit status].
+  def check_run(config, command: "check")
     File.write(File.join(dir, ".rigor.yml"), "severity_profile: balanced\n#{config}")
     marker = File.join(dir, "rbs_loaded.txt")
     preload = File.join(dir, "probe.rb")
     File.write(preload, <<~RUBY)
       at_exit { File.write(#{marker.inspect}, $LOADED_FEATURES.grep(%r{/gems/rbs-[^/]+/lib/rbs/environment_loader\\.rb\\z}).join(",")) }
     RUBY
-    out, err, = Open3.capture3("bundle", "exec", "ruby", "-r", preload, exe,
-                               "check", "--no-ci-detect", "--no-stats", "--no-baseline", "lib",
-                               chdir: dir, stdin_data: "")
-    ["#{out}#{err}", File.read(marker)]
+    out, err, status = Open3.capture3("bundle", "exec", "ruby", "-r", preload, exe, *cli_args(command),
+                                      chdir: dir, stdin_data: "")
+    ["#{out}#{err}", File.read(marker), status.exitstatus]
+  end
+
+  def cli_args(command)
+    command == "check" ? %w[check --no-ci-detect --no-stats --no-baseline lib] : [command]
   end
 
   def write_stdlib_lockfile(*names)
@@ -55,9 +58,18 @@ RSpec.describe "library audit warnings from a fresh CLI process" do
 
   it "does not warn about real stdlib libraries, from either source" do
     write_stdlib_lockfile("ripper")
-    output, = check_run("libraries: [json]\n")
+    output, = check_run("libraries: [json, rbs]\n") # rbs ships its own sig/
 
     expect(output).not_to include("is not an available RBS library")
+  end
+
+  it "does not audit a vendored library name (prime), and doctor exits 0" do
+    output, = check_run("libraries: [prime]\n")
+    expect(output).not_to include("is not an available RBS library")
+
+    output, _, status = check_run("libraries: [prime]\n", command: "doctor")
+    expect(output).not_to include("is not an available RBS library")
+    expect(status).to eq(0)
   end
 
   it "keeps rbs unloaded on a warm run-cache hit" do

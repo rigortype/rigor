@@ -1,0 +1,3 @@
+- **[config]** The warning for an unknown `libraries:` entry (and for an unknown `rbs_collection.lock.yaml` stdlib entry) now prints from `rigor check` and `rigor doctor`. ([#2961](https://github.com/rigortype/rigor/issues/2961), [#2970](https://github.com/rigortype/rigor/pull/2970))
+  - It was silently dropped because `rbs` was not loaded when the audit ran.
+  - The audit checks the library against the bundled rbs gem's `stdlib/` and gems' `sig/` directories without loading `rbs`, so a warm cached run stays as fast as before.

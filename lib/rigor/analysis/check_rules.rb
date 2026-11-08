@@ -1044,23 +1044,28 @@ module Rigor
         # of the class itself opens nothing. A macro patched onto `Module` (or `Class`, `Object`, `Kernel`,
         # `BasicObject`) as an instance method is on every class object's singleton chain past its own classes.
         def computed_definer_called?(scope, name, bucket)
-          bucket.each_key.any? do |key|
-            next false unless key.is_a?(Array) && key.first == Scope::DiscoveryIndex::ENVELOPE_BODY_CALL_KIND
-
-            chain = Scope::ResolutionChain.for(scope, name.to_s, :singleton, :methods)
-            !chain.search(scope) { |entry| macro_entry_defines?(scope, entry, key.last) }.nil? ||
-              universal_macro_defines?(scope, key.last) || hook_extended_macro_defines?(scope, name, key.last)
+          macros = bucket.each_key.filter_map do |key|
+            key.last if key.is_a?(Array) && key.first == Scope::DiscoveryIndex::ENVELOPE_BODY_CALL_KIND
           end
+          return false if macros.empty?
+
+          chain = Scope::ResolutionChain.for(scope, name.to_s, :singleton, :methods)
+          found = macros.any? do |macro|
+            !chain.search(scope) { |entry| macro_entry_defines?(scope, entry, macro) }.nil? ||
+              universal_macro_defines?(scope, macro)
+          end
+          found || hook_extended_macro_defines?(scope, name, macros)
         end
 
         # Issue #2975 — a module that a class on `name`'s superclass chain includes or prepends directly, and whose
         # `included` / `prepended` hook extends its includer with a module (`def self.included(base) =
         # base.extend(ClassMethods)`), puts that module's instance methods on `name`'s singleton chain, which records no
         # edge for it. Ruby runs the hook for the direct includer only, so a module included through another module does
-        # not count. Each mixin and each extended constant resolves to the first candidate the project declares, the
-        # innermost cref first, whether or not RBS declares the modules.
-        def hook_extended_macro_defines?(scope, name, macro)
-          definer = [Scope::DiscoveryIndex::ENVELOPE_COMPUTED_DEFINER_KIND, :instance, macro]
+        # not count; the chain's levels flatten a class's transitive mixins, so each level class's own mixin list is
+        # read, one hop, never followed further. Each mixin and each extended constant resolves to the first candidate
+        # the project declares, the innermost cref first, whether or not RBS declares the modules.
+        def hook_extended_macro_defines?(scope, name, macros)
+          definers = macros.map { |macro| [Scope::DiscoveryIndex::ENVELOPE_COMPUTED_DEFINER_KIND, :instance, macro] }
           chain = Scope::ResolutionChain.for(scope, name.to_s, :instance, :methods)
           chain.record(scope) if Analysis::DependencyRecorder.active?
           chain.level_classes.compact.any? do |klass|
@@ -1068,7 +1073,7 @@ module Rigor
               mixin = declared_constant(scope, klass, raw)
               mixin && hook_extends(scope, mixin).any? do |extended|
                 target = declared_constant(scope, mixin, extended)
-                target && scope.parameter_envelopes_of(target).key?(definer)
+                target && definers.any? { |definer| scope.parameter_envelopes_of(target).key?(definer) }
               end
             end
           end

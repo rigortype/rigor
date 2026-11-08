@@ -4536,7 +4536,7 @@ module Rigor
       BODY_CALL_EXCLUDED = %i[
         define_method define_singleton_method alias_method attr_reader attr_writer attr_accessor include extend prepend
         private public protected module_function private_class_method public_class_method private_constant
-        public_constant require require_relative autoload
+        public_constant require require_relative autoload autoload_relative
       ].to_set.freeze
       private_constant :BODY_CALL_EXCLUDED
 

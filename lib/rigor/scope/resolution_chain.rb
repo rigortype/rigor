@@ -1009,26 +1009,29 @@ module Rigor
 
         def compute_instance(name, depth)
           names = same_class(name)
-          names.each { |owner| mark_instance_unsettled(owner) }
+          names.each do |owner|
+            # `discovered_includes` already carries the prepended names, so it counts every instance-side edge once.
+            mark_unsettled(owner, :include, (@discovery.discovered_includes[owner] || EMPTY).size)
+            @frames.last.add_marks(mark_for(owner, :extend_hook, WILDCARD_LIST, false)) if extend_hook_taint?(owner)
+          end
           entries = names.map { |owner| project_entry(owner, :instance) }
           super_lin = superclass_lin(name, :instance, depth)
           entries.concat(super_lin[0])
+          super_start = insert_instance_mixins(entries, names, depth)
+          finish(entries, name, super_lin, super_start)
+        end
+
+        # Every name's prepends ahead of the class, then every name's includes after the LAST name, so both names stay
+        # ahead of every module either one includes. Returns where the superclass's entries begin.
+        def insert_instance_mixins(entries, names, depth)
           boundary = [0, names.size]
           names.each do |owner|
             boundary = prepend_all(entries, owner, @discovery.discovered_prepends[owner] || EMPTY, depth, boundary)
           end
-          # The includes go after the last name, so both names stay ahead of every module either one includes.
-          super_start = names.reduce(boundary[1]) do |start, owner|
+          names.reduce(boundary[1]) do |start, owner|
             include_all(entries, owner, @discovery.discovered_includes[owner] || EMPTY,
                         @discovery.discovered_prepends[owner] || EMPTY, depth, [boundary[0] + names.size - 1, start])
           end
-          finish(entries, name, super_lin, super_start)
-        end
-
-        def mark_instance_unsettled(name)
-          # `discovered_includes` already carries the prepended names, so it counts every instance-side edge once.
-          mark_unsettled(name, :include, (@discovery.discovered_includes[name] || EMPTY).size)
-          @frames.last.add_marks(mark_for(name, :extend_hook, WILDCARD_LIST, false)) if extend_hook_taint?(name)
         end
 
         def compute_singleton(name, depth)

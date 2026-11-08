@@ -1,6 +1,6 @@
 # Reflection.project_method_defined does not yet read the splatted-mixin mark, which waits for the #618 veto to read it too
 
-- **PR:** [#0](https://github.com/rigortype/rigor/pull/0)
+- **PR:** [#2993](https://github.com/rigortype/rigor/pull/2993)
 - **Issue:** [#2991](https://github.com/rigortype/rigor/issues/2991)
 - **Class:** scope
 - **Precedent:** none — sets one

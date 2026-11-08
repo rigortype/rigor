@@ -1,0 +1,3 @@
+- **[check]** `call.undefined-method` no longer fires on a class that has a splatted `include(*MODS)` or `prepend(*MODS)`, or on its subclasses. ([#2993](https://github.com/rigortype/rigor/pull/2993))
+  - The modules in the splat cannot be named statically, so any instance method may come from one of them.
+  - Calls on the class object still report. A splatted `extend(*MODS)` opens only the class object, as before.

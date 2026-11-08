@@ -4999,6 +4999,8 @@ module Rigor
       def record_def_body_evidence(def_node, qualified_prefix, tables, side)
         return if def_node.body.nil?
 
+        side = :singleton if def_node.receiver
+
         definer = false
         Source::NodeWalker.each(def_node.body) do |node|
           if node.is_a?(Prism::SingletonClassNode)
@@ -5017,7 +5019,40 @@ module Rigor
           end
         end
         record_computed_definer(def_node, qualified_prefix, tables, side) if definer
+        record_hook_extends(def_node, qualified_prefix, tables, side)
       end
+
+      # Issue #2975 — an ActiveSupport::Concern-style hook, `def self.included(base) = base.extend(ClassMethods)`, puts
+      # `ClassMethods` on every includer's singleton chain, which no `extend` edge of the includer records. The module
+      # takes a `[ENVELOPE_HOOK_EXTEND_KIND, "ClassMethods"]` entry per constant extended on the hook's parameter, as
+      # written, so `call.undefined-method` can resolve an includer's class-body macro calls against it.
+      def record_hook_extends(def_node, qualified_prefix, tables, side)
+        return unless side == :singleton && HOOK_EXTEND_DEFS.include?(def_node.name) && !qualified_prefix.empty?
+
+        param = def_node.parameters&.requireds&.first
+        return unless param.is_a?(Prism::RequiredParameterNode)
+
+        owner = qualified_prefix.join("::")
+        Source::NodeWalker.each(def_node.body) do |node|
+          next unless node.is_a?(Prism::CallNode) && node.name == :extend
+          next unless node.receiver.is_a?(Prism::LocalVariableReadNode) && node.receiver.name == param.name
+
+          record_hook_extend_arguments(node, owner, tables)
+        end
+      end
+
+      def record_hook_extend_arguments(node, owner, tables)
+        (node.arguments&.arguments || []).each do |argument|
+          written = Source::ConstantPath.qualified_name_or_nil(argument)
+          next if written.nil?
+
+          key = [Scope::DiscoveryIndex::ENVELOPE_HOOK_EXTEND_KIND, written]
+          record_envelope(tables.envelopes, owner, key, Source::ParameterEnvelope::OPAQUE)
+        end
+      end
+
+      HOOK_EXTEND_DEFS = %i[included prepended].to_set.freeze
+      private_constant :HOOK_EXTEND_DEFS
 
       # Issue #2901 — a method whose body runs a `define_method` on its own `self` with a computed name, directly or in
       # a block that keeps `self` (`def self.my_attr(*n) = n.each { |x| define_method(x) {} }`), is a class macro: a
@@ -5034,7 +5069,6 @@ module Rigor
         return unless def_node.receiver.nil? || def_node.receiver.is_a?(Prism::SelfNode)
         return unless runs_computed_self_definer?(def_node.body)
 
-        side = :singleton if def_node.receiver
         key = [Scope::DiscoveryIndex::ENVELOPE_COMPUTED_DEFINER_KIND, side, def_node.name]
         record_envelope(tables.envelopes, qualified_prefix.join("::"), key, Source::ParameterEnvelope::OPAQUE)
       end

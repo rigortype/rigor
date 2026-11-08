@@ -262,7 +262,8 @@ module Rigor
       # Issue #2901 — a class-body macro call or computed definer can be filed on a class another file declares
       # (`X.class_eval { my_attr :a }`), so they diff as marks too.
       ENTRY_MARK_KINDS = [Scope::DiscoveryIndex::ENVELOPE_REMOVED_KIND, Scope::DiscoveryIndex::ENVELOPE_BODY_CALL_KIND,
-                          Scope::DiscoveryIndex::ENVELOPE_COMPUTED_DEFINER_KIND].freeze
+                          Scope::DiscoveryIndex::ENVELOPE_COMPUTED_DEFINER_KIND,
+                          Scope::DiscoveryIndex::ENVELOPE_HOOK_EXTEND_KIND].freeze
       private_constant :ENTRY_MARK_KINDS
 
       # Issue #1661 — the names of the classes and modules whose unpositioned mixin edges

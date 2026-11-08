@@ -198,6 +198,17 @@ RSpec.describe "class marks — incremental" do
       it_behaves_like "a mark-only file", reported_without_mark: [["use.rb", 1]]
     end
 
+    describe "an included hook that extends the includer with a macro module" do
+      let(:base) do
+        { "cn.rb" => "module Cn\n  module ClassMethods\n    def my_c(*n) = #{definer}\n  end\nend\n",
+          "cn.rbs" => "module Cn\nend\n", "cu.rb" => "class Cu\n  include Cn\n  my_c :foo\nend\n",
+          "cu.rbs" => "class Cu\nend\n", "use.rb" => "Cu.new.foo\n" }
+      end
+      let(:mark) { "module Cn\n  def self.included(base) = base.extend(ClassMethods)\nend\n" }
+
+      it_behaves_like "a mark-only file", reported_without_mark: [["use.rb", 1]]
+    end
+
     describe "a literal define_method on a constant receiver" do
       let(:base) { { "ot.rb" => "class Ot\nend\n", "ot.rbs" => "class Ot\nend\n", "use.rb" => "Ot.new.foo\n" } }
       let(:mark) { "class OtHost\n  Ot.define_method(:foo) { 1 }\nend\n" }

@@ -468,6 +468,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#receiver_extend_recorded?: writes one receiver-form `Const.extend(M)` call into the extend accumulator under the class the constant receiver names (#2094), as instance_mixin_recorded? does for `Const.include(M)`; it computes no declaration context
     Rigor::Inference::ScopeIndexer#record_file_positions: grandfathered
     Rigor::Inference::ScopeIndexer#record_global_write: grandfathered
+    Rigor::Inference::ScopeIndexer#record_hook_extends: 'issue #2975, files each constant a self.included(base) or self.prepended(base) hook passes to base.extend, as written, under the module prefix the walk passes in, for call.undefined-method''s macro reader; it reads only the hook''s own name, side and first parameter, and decides no owner or side'
     Rigor::Inference::ScopeIndexer#record_ivar_and_write: grandfathered
     Rigor::Inference::ScopeIndexer#record_ivar_mutator_call: grandfathered
     Rigor::Inference::ScopeIndexer#record_ivar_operator_write: grandfathered

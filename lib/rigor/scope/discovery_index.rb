@@ -269,7 +269,11 @@ module Rigor
       # chain, to a computed definer. Neither entry names a member, so neither declares a surface.
       ENVELOPE_COMPUTED_DEFINER_KIND = :computed_definer
       ENVELOPE_BODY_CALL_KIND = :body_call
-      MACRO_KINDS = [ENVELOPE_BODY_CALL_KIND, ENVELOPE_COMPUTED_DEFINER_KIND].freeze
+      # Issue #2975 — `[ENVELOPE_HOOK_EXTEND_KIND, "ClassMethods"]` says the module's `self.included(base)` (or
+      # `self.prepended(base)`) hook runs `base.extend(ClassMethods)`, the constant as written: an includer's
+      # singleton chain then reaches `ClassMethods`, whose computed definers its body calls may resolve to.
+      ENVELOPE_HOOK_EXTEND_KIND = :hook_extend
+      MACRO_KINDS = [ENVELOPE_BODY_CALL_KIND, ENVELOPE_COMPUTED_DEFINER_KIND, ENVELOPE_HOOK_EXTEND_KIND].freeze
       private_constant :MACRO_KINDS
 
       # Issue #1820 — whether an envelope bucket says the project declares, or rewrites, the name's method table: a

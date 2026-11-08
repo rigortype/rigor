@@ -1049,7 +1049,39 @@ module Rigor
 
             chain = Scope::ResolutionChain.for(scope, name.to_s, :singleton, :methods)
             !chain.search(scope) { |entry| macro_entry_defines?(scope, entry, key.last) }.nil? ||
-              universal_macro_defines?(scope, key.last)
+              universal_macro_defines?(scope, key.last) || hook_extended_macro_defines?(scope, name, key.last)
+          end
+        end
+
+        # Issue #2975 — a module on `name`'s instance chain whose `included` hook extends its includer with a module
+        # (`def self.included(base) = base.extend(ClassMethods)`) puts that module's instance methods on `name`'s
+        # singleton chain, which records no edge for it. Each constant such a hook extends is resolved from the hook's
+        # module, as an `extend` there would be, whether or not RBS declares either module.
+        def hook_extended_macro_defines?(scope, name, macro)
+          definer = [Scope::DiscoveryIndex::ENVELOPE_COMPUTED_DEFINER_KIND, :instance, macro]
+          chain = Scope::ResolutionChain.for(scope, name.to_s, :instance, :methods)
+          found = chain.search(scope) do |entry|
+            (entry.external? ? entry.candidates : [entry.name]).any? do |owner|
+              hook_extends(scope, owner).any? do |raw|
+                hook_constant_candidates(scope, owner, raw).any? do |candidate|
+                  scope.parameter_envelopes_of(candidate).key?(definer)
+                end
+              end
+            end
+          end
+          !found.nil?
+        end
+
+        # The hook's body has the module itself as its innermost cref, which `ancestor_name_candidates` (written for a
+        # header, whose cref is the enclosing namespace) leaves out, so `Owner::Raw` comes first.
+        def hook_constant_candidates(scope, owner, raw)
+          candidates = scope.ancestor_name_candidates(owner, raw)
+          raw.start_with?("::") ? candidates : ["#{owner}::#{raw}", *candidates]
+        end
+
+        def hook_extends(scope, owner)
+          scope.parameter_envelopes_of(owner).each_key.filter_map do |key|
+            key.last if key.is_a?(Array) && key.first == Scope::DiscoveryIndex::ENVELOPE_HOOK_EXTEND_KIND
           end
         end
 

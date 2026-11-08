@@ -15,11 +15,15 @@ require "rigor/analysis/runner"
 require "rigor/configuration"
 
 RSpec.describe "Literal definers and further class macros, and call.undefined-method (#2975)" do
-  def write_project(source, calls, extra_files: {})
+  # Every top-level class and module the sources write gets an empty `sig/` declaration (core ones excepted), unless
+  # `sig:` gives the declarations.
+  def write_project(source, calls, extra_files: {}, sig: nil)
     FileUtils.mkdir_p("lib")
     FileUtils.mkdir_p("sig")
-    classes = ([source] + extra_files.values).flat_map { |body| body.scan(/^class (\w+)/).flatten }.uniq - ["Module"]
-    File.write(File.join("sig", "types.rbs"), classes.map { |name| "class #{name}\nend\n" }.join)
+    declared = ([source] + extra_files.values).flat_map { |body| body.scan(/^(class|module) (\w+)/) }.uniq
+    declared = declared.reject { |_, name| %w[Module Class Object Kernel BasicObject].include?(name) }
+    sig ||= declared.map { |kind, name| "#{kind} #{name}\nend\n" }.join
+    File.write(File.join("sig", "types.rbs"), sig)
     File.write(File.join("lib", "defs.rb"), source)
     extra_files.each { |name, body| File.write(File.join("lib", name), body) }
     File.write(File.join("lib", "caller.rb"), "def run\n#{calls.map { |c| "  #{c}" }.join("\n")}\nend\n")
@@ -97,6 +101,11 @@ RSpec.describe "Literal definers and further class macros, and call.undefined-me
                                         "undefined method `om' for singleton(Host2)"])
     end
 
+    it "records on the constant's class from the top level" do
+      write_project("class Top\nend\nTop.define_method(:tl) { 1 }\n", %w[Top.new.tl Top.new.zz])
+      expect(undefined_messages).to eq(["undefined method `zz' for Top"])
+    end
+
     it "keeps the name on the enclosing class for a receiver that may be self" do
       write_project("class Maybe\n  [self].each { |k| k.define_method(:ks) { 1 } }\nend\n", %w[Maybe.new.ks])
       expect(undefined_messages).to be_empty
@@ -138,29 +147,58 @@ RSpec.describe "Literal definers and further class macros, and call.undefined-me
     end
 
     # Guard: no definer entry is recorded for a macro that defines nothing; this pins the reporting side.
+    it "reads a macro patched onto Object, Kernel or Class the same way" do
+      patches = "class Object\n  def my_o_attr(*n) = #{definer_body}\nend\n" \
+                "module Kernel\n  def my_k_attr(*n) = #{definer_body}\nend\n" \
+                "class Class\n  def my_cl_attr(*n) = #{definer_body}\nend\n"
+      write_project("class Ob\n  my_o_attr :ob\nend\nclass Ke\n  my_k_attr :ke\nend\nclass Cl\n  my_cl_attr :cl\nend\n",
+                    %w[Ob.new.ob Ke.new.ke Cl.new.cl], extra_files: { "patch.rb" => patches })
+      expect(undefined_messages).to be_empty
+    end
+
+    it "opens a class for a macro patched onto BasicObject" do
+      write_project("class Bo\n  my_b_attr :bo\nend\n", %w[Bo.new.bo],
+                    extra_files: { "patch.rb" => "class BasicObject\n  def my_b_attr(*n) = #{definer_body}\nend\n" })
+      expect(undefined_messages).to be_empty
+    end
+
     it "does not open a class that only calls a Module macro defining nothing" do
       write_project("class Module\n  def my_mod_attr(*n) = n\nend\nclass Mp3\n  my_mod_attr :mr\nend\n", %w[Mp3.new.mr])
       expect(undefined_messages).to eq(["undefined method `mr' for Mp3"])
     end
   end
 
-  # Guard: an ActiveSupport::Concern-style `self.included(base) = base.extend(ClassMethods)` hook already opens its
-  # includers on every name (#2094's hook rule), before and after #2975; these rows pin the Ruby answer.
+  # The concern module has a `sig/` declaration in every row: without one, #2094's hook rule already opens an
+  # includer on every name.
   describe "a macro an included hook extends onto the class" do
     let(:concern) do
       "module Cn\n  def self.included(base) = base.extend(ClassMethods)\n  module ClassMethods\n    " \
         "def my_c_attr(*n) = #{definer_body}\n  end\nend\n"
     end
 
-    it "is silent on the includer" do
+    it "opens the instance side of the includer" do
       write_project("#{concern}class Cu\n  include Cn\n  my_c_attr :cu\nend\n", %w[Cu.new.cu])
       expect(undefined_messages).to be_empty
     end
 
-    it "is silent on an includer in another file" do
+    it "opens an includer in another file" do
       write_project("class Cu2\n  include Cn\n  my_c_attr :cv\nend\n", %w[Cu2.new.cv],
                     extra_files: { "cn.rb" => concern })
       expect(undefined_messages).to be_empty
+    end
+
+    it "opens the includer when the sig declares the hook and the nested ClassMethods" do
+      sig = "module Cn\n  def self.included: (untyped base) -> void\n  module ClassMethods\n    " \
+            "def my_c_attr: (*Symbol n) -> Array[Symbol]\n  end\nend\nclass Cu3\n  include Cn\nend\n"
+      write_project("#{concern}class Cu3\n  include Cn\n  my_c_attr :cw\nend\n", %w[Cu3.new.cw], sig: sig)
+      expect(undefined_messages).to be_empty
+    end
+
+    it "does not open an includer whose hook extends a module that defines nothing" do
+      quiet = "module Cq\n  def self.included(base) = base.extend(ClassMethods)\n  module ClassMethods\n    " \
+              "def my_c_attr(*n) = n\n  end\nend\n"
+      write_project("#{quiet}class Cu4\n  include Cq\n  my_c_attr :cx\nend\n", %w[Cu4.new.cx])
+      expect(undefined_messages).to eq(["undefined method `cx' for Cu4"])
     end
   end
 
@@ -187,6 +225,15 @@ RSpec.describe "Literal definers and further class macros, and call.undefined-me
     end
   end
 
+  describe "a singleton_class.class_eval inside a class << self body" do
+    it "does not read its def as the class's macro, since it defines on the singleton's own singleton" do
+      source = "class ScS\n  def self.my_x(*n) = n\n  class << self\n    singleton_class.class_eval { " \
+               "def my_x(*n) = #{definer_body} }\n  end\n  my_x :y\nend\n"
+      write_project(source, %w[ScS.new.y])
+      expect(undefined_messages).to eq(["undefined method `y' for ScS"])
+    end
+  end
+
   describe "a mixin of Module.new whose body runs a computed define_method" do
     let(:macro) { "def self.my_inc(*n) = include(Module.new { #{definer_body} })" }
 
@@ -205,6 +252,13 @@ RSpec.describe "Literal definers and further class macros, and call.undefined-me
       write_project("class IncBody\n  include(Module.new { %i[ib].each { |x| define_method(x) { x } } })\nend\n",
                     %w[IncBody.new.ib IncBody.zz])
       expect(undefined_messages).to eq(["undefined method `zz' for singleton(IncBody)"])
+    end
+
+    it "opens the instance side for a prepend of such a Module.new, in a macro or the class body" do
+      source = "class Pre\n  def self.my_pre(*n) = prepend(Module.new { #{definer_body} })\n  my_pre :pr\nend\n" \
+               "class PreBody\n  prepend(Module.new { %i[pb].each { |x| define_method(x) { x } } })\nend\n"
+      write_project(source, %w[Pre.new.pr PreBody.new.pb])
+      expect(undefined_messages).to be_empty
     end
 
     it "does not open a class for a Module.new that defines nothing" do

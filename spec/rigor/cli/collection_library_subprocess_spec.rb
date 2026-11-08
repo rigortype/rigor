@@ -58,28 +58,48 @@ RSpec.describe "collection gem listed in libraries: (subprocess)" do
   end
 
   context "when the gem ships its own sig/ in the bundle and also has a collection entry" do
-    before do
-      sig = File.join(dir, "bundle", "ruby", "4.0.0", "gems", "bargem-1.0", "sig")
+    def install_gem(gem_dir, name, bundle_rbs:, collection_rbs:)
+      sig = File.join(dir, "bundle", "ruby", "4.0.0", "gems", gem_dir, "sig")
       FileUtils.mkdir_p(sig)
-      FileUtils.mkdir_p(File.join(dir, ".gem_rbs_collection", "bargem", "1.0"))
-      rbs = "class Bar\n  def baz: () -> Integer\nend\n"
-      File.write(File.join(sig, "bargem.rbs"), rbs)
-      File.write(File.join(dir, ".gem_rbs_collection", "bargem", "1.0", "bargem.rbs"), rbs)
+      FileUtils.mkdir_p(File.join(dir, ".gem_rbs_collection", name, "1.0"))
+      File.write(File.join(sig, "#{name}.rbs"), bundle_rbs)
+      File.write(File.join(dir, ".gem_rbs_collection", name, "1.0", "#{name}.rbs"), collection_rbs)
       File.write(File.join(dir, "rbs_collection.lock.yaml"),
-                 "---\npath: .gem_rbs_collection\ngems:\n- name: bargem\n  version: '1.0'\n  source:\n    type: git\n")
+                 "---\npath: .gem_rbs_collection\ngems:\n- name: #{name}\n  version: '1.0'\n  source:\n    type: git\n")
       File.write(File.join(dir, "Gemfile.lock"),
-                 "GEM\n  remote: https://rubygems.org/\n  specs:\n    bargem (1.0)\n\n" \
-                 "PLATFORMS\n  ruby\n\nDEPENDENCIES\n  bargem\n")
-      File.write(File.join(dir, "lib", "a.rb"), "Bar.new.baz.no_such\n")
+                 "GEM\n  remote: https://rubygems.org/\n  specs:\n    #{name} (1.0)\n\n" \
+                 "PLATFORMS\n  ruby\n\nDEPENDENCIES\n  #{name}\n")
     end
 
-    ["[bargem]", "[]"].each do |libs|
-      it "types the gem's own signature once with libraries: #{libs}" do
-        output = check_run(libs, extra: "bundler:\n  bundle_path: bundle\n")
+    let(:bundler) { "bundler:\n  bundle_path: bundle\n" }
+    let(:same) { "class Bar\n  def baz: () -> Integer\nend\n" }
 
-        expect(output).to include("undefined method `no_such' for Integer")
-        expect(output).not_to match(/build failed|DuplicatedMethodDefinition/i)
-      end
+    it "types the gem's own signature once with libraries: [bargem]" do
+      install_gem("bargem-1.0", "bargem", bundle_rbs: same, collection_rbs: same)
+      File.write(File.join(dir, "lib", "a.rb"), "Bar.new.baz.no_such\n")
+      output = check_run("[bargem]", extra: bundler)
+
+      expect(output).to include("undefined method `no_such' for Integer")
+      expect(output).not_to match(/build failed|DuplicatedMethodDefinition/i)
+    end
+
+    it "does not truncate a gem name holding -<digit> (foo-2fa)" do
+      install_gem("foo-2fa-1.0", "foo-2fa", bundle_rbs: same, collection_rbs: same)
+      File.write(File.join(dir, "lib", "a.rb"), "Bar.new.baz.no_such\n")
+      output = check_run("[foo-2fa]", extra: bundler)
+
+      expect(output).to include("undefined method `no_such' for Integer")
+      expect(output).not_to match(/build failed|DuplicatedMethodDefinition/i)
+    end
+
+    it "keeps both halves of a class split across bundle sig/ and collection with libraries: []" do
+      install_gem("bargem-1.0", "bargem", bundle_rbs: "class Bar\n  def a: () -> Integer\nend\n",
+                                          collection_rbs: "class Bar\n  def b: () -> Integer\nend\n")
+      File.write(File.join(dir, "lib", "a.rb"), "Bar.new.b.no_b\n")
+      output = check_run("[]", extra: bundler)
+
+      expect(output).to include("no_b' for Integer")
+      expect(output).not_to include("undefined method `b'")
     end
   end
 

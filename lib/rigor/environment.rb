@@ -334,8 +334,6 @@ module Rigor
         # and the `data/vendored_gem_sigs/` bundle (`redis`, `nokogiri`, `pg`, …). `skip_gem_names:` passes
         # both sets so the collection copy doesn't double-declare against rigor's bundled RBS (the
         # `RBS::DuplicatedDeclarationError` hazard).
-        # Issue #2971 — plus every gem whose own `sig/` the bundle discovery loaded (`gem_sig_paths`): a gem's own
-        # signatures win over its collection copy, whatever `libraries:` says, or the two double-declare.
         # Issue #1700 — plus the gated vendored directories this run's source activates ({#feature_tokens}).
         # Issue #2946 — plus the lockfile's `source: { type: stdlib }` entries, as libraries ({BaseLibraries.resolve}).
         merged_libraries = (BaseLibraries.resolve(libraries, rbs_collection_lockfile: rbs_collection_lockfile,
@@ -346,8 +344,9 @@ module Rigor
         # double-declare the project's `sig/`.
         project_gems = ProjectPathGems.names(locked, paths: paths, root: root, exclude_patterns: exclude_patterns,
                                                      exclude_base: exclude_base || root)
-        skip_gem_names = collection_skip_gem_names(merged_libraries) + project_gems.to_a +
-                         gem_sig_paths.map { |dir| BundleSigDiscovery.gem_name_from_sig_path(Pathname.new(dir)) }
+        # Issue #2971 — the locked gems whose own `sig/` the bundle discovery loaded.
+        bundle_sig_gems = BundleSigDiscovery.locked_names_of(gem_sig_paths.map { |dir| Pathname.new(dir) }, locked)
+        skip_gem_names = collection_skip_gem_names(merged_libraries, bundle_sig_gems) + project_gems.to_a
         collection_paths = RbsCollectionDiscovery.discover(
           lockfile_path: rbs_collection_lockfile,
           project_root: root,
@@ -455,12 +454,12 @@ module Rigor
       # vendored directory except a `RequiredFeatures`-gated one. A gated directory stands down for any other
       # copy of its declarations (`GatedSignatureGuard`), so the collection's copy is kept and wins.
       #
-      # Issue #2971 — a `libraries:` name that is not an RBS library (a collection-installed gem such as
-      # `foogem`) is dropped by the loader's `has_library?` filter, so it declares nothing to double-declare
-      # against; it stays out of the skip set so the collection's copy still loads.
-      def collection_skip_gem_names(library_names)
+      # Issue #2971 — a `libraries:` name that is neither an RBS library nor a gem whose own `sig/` the bundle
+      # loaded (`foogem`, collection-installed) is dropped by the loader's `has_library?` filter, so it declares
+      # nothing to double-declare against; it stays out of the skip set so the collection's copy still loads.
+      def collection_skip_gem_names(library_names, bundle_sig_gems = [])
         extra = library_names.reject do |name|
-          DEFAULT_LIBRARIES.include?(name) || RequiredFeatures.feature_of_token(name)
+          DEFAULT_LIBRARIES.include?(name) || RequiredFeatures.feature_of_token(name) || bundle_sig_gems.include?(name)
         end
         unavailable = extra.empty? ? [] : extra.reject(&LibraryProbe.predicate)
         (library_names - unavailable) + RbsLoader.vendored_gem_names.reject { |name| RequiredFeatures.gated_dir?(name) }

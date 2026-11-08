@@ -14,7 +14,7 @@ require "spec_helper"
 require "tmpdir"
 require "fileutils"
 
-%w[rigor-activesupport-core-ext rigor-ac-library-rb].each do |plugin|
+%w[rigor-activesupport-core-ext rigor-ac-library-rb rigor-rbs-inline].each do |plugin|
   lib = File.expand_path("../../../plugins/#{plugin}/lib", __dir__)
   $LOAD_PATH.unshift(lib) unless $LOAD_PATH.include?(lib)
   require plugin
@@ -22,10 +22,13 @@ end
 
 # Re-registers what an earlier spec file's `Rigor::Plugin.unregister!` cleared; see the twin constant in
 # `gem_overlay_stand_down_spec.rb` for why the `require` above is not enough.
+AS_MEMBER_STAND_DOWN_PLUGINS = {
+  "rigor-ac-library-rb" => Rigor::Plugin::AcLibraryRb,
+  "rigor-rbs-inline" => Rigor::Plugin::RbsInline,
+  "rigor-activesupport-core-ext" => Rigor::Plugin::ActivesupportCoreExt
+}.freeze
 AS_MEMBER_STAND_DOWN_PLUGIN_REQUIRER = lambda do |name|
-  Rigor::Plugin.register(
-    name == "rigor-ac-library-rb" ? Rigor::Plugin::AcLibraryRb : Rigor::Plugin::ActivesupportCoreExt
-  )
+  AS_MEMBER_STAND_DOWN_PLUGINS.each { |gem, plugin| Rigor::Plugin.register(plugin) if name.to_s.include?(gem) }
   true
 end
 
@@ -48,11 +51,8 @@ RSpec.describe "issue #2974 gem-overlay member stand-down" do
     LOCK
   end
 
-  def write_project(dir, project_rbs)
-    FileUtils.mkdir_p(File.join(dir, "sig"))
-    File.write(File.join(dir, "Gemfile.lock"), gemfile_lock)
-    File.write(File.join(dir, "sig", "workaround.rbs"), project_rbs) if project_rbs
-    File.write(File.join(dir, "code.rb"), <<~RUBY)
+  def default_code
+    <<~RUBY
       Rigor.dump_type(1.ordinalize)
       Rigor.dump_type(1.to_fs)
       Rigor.dump_type(1.5.to_fs)
@@ -62,9 +62,16 @@ RSpec.describe "issue #2974 gem-overlay member stand-down" do
     RUBY
   end
 
-  def run_project(project_rbs, plugins: [])
+  def write_project(dir, project_rbs, code)
+    FileUtils.mkdir_p(File.join(dir, "sig"))
+    File.write(File.join(dir, "Gemfile.lock"), gemfile_lock)
+    File.write(File.join(dir, "sig", "workaround.rbs"), project_rbs) if project_rbs
+    File.write(File.join(dir, "code.rb"), code)
+  end
+
+  def run_project(project_rbs, plugins: [], code: default_code)
     Dir.mktmpdir("rigor-overlay-member-stand-down-") do |dir|
-      write_project(dir, project_rbs)
+      write_project(dir, project_rbs, code)
       Dir.chdir(dir) do
         configuration = Rigor::Configuration.new(
           "paths" => [File.join(dir, "code.rb")],
@@ -171,6 +178,29 @@ RSpec.describe "issue #2974 gem-overlay member stand-down" do
 
     expect(standdown_rows(result)).to be_empty
     expect_typed(result, %w[Symbol String String String String])
+  end
+
+  # An inline annotation is the project's own declaration too: it binds over the overlay's, and the body is checked
+  # against it rather than against the overlay's `String`.
+  it "binds a rigor-rbs-inline annotation on a method the overlay declares" do
+    entry = { "gem" => "rigor-rbs-inline", "id" => Rigor::Plugin::RbsInline.manifest.id }
+    code = <<~RUBY
+      # rbs_inline: enabled
+
+      class Integer
+        #: () -> Symbol
+        def ordinalize = :first
+      end
+
+      Rigor.dump_type(1.ordinalize)
+      1.nope
+    RUBY
+    result = run_project(nil, plugins: [entry], code: code)
+
+    expect(build_failures(result)).to be_empty
+    expect(dumps(result)).to eq(["Symbol"])
+    expect(result.diagnostics.map(&:rule)).not_to include("def.return-type-mismatch")
+    expect(undefined_methods(result)).to eq(["nope"])
   end
 
   # Guard: with nothing redeclared, the overlay's own declarations bind, as before.

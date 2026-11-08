@@ -75,8 +75,8 @@ module RbsEnvMemo
       value
     end
 
-    def digest(libraries, signature_paths, virtual_rbs, deferred_signature_paths = [], project_signature_paths = [],
-               core_root = nil)
+    def digest(libraries, signature_paths, virtual_rbs, deferred_signature_paths = [], project_signature_paths = [], # rubocop:disable Metrics/ParameterLists
+               core_root = nil, subordinate_signature_paths = [])
       parts = ["lib\0#{Array(libraries).map(&:to_s).sort.join(',')}"]
       # Issue #2517 — a selected core replaces the gem's, so its files are inputs like the signature paths'.
       signature_files(core_root).each { |path| parts << "core\0#{path}\0#{file_digest(path)}" } if core_root
@@ -87,6 +87,8 @@ module RbsEnvMemo
       # Issue #2422 — and which are the project's own: a deferred member stands down to those, and composes with
       # any other source.
       parts << "project\0#{path_list(project_signature_paths)}"
+      # Issue #2978 — and which stand down member by member to the rest of the signature paths.
+      parts << "subordinate\0#{path_list(subordinate_signature_paths)}"
 
       Array(signature_paths).map(&:to_s).sort.each do |root|
         signature_files(root).each { |path| parts << "sig\0#{path}\0#{file_digest(path)}" }
@@ -141,12 +143,12 @@ module RbsEnvMemo
   # Prepended onto the loader's singleton so it wraps `build_env_for` for every caller, including
   # `Cache::RbsEnvironment.compute` on a cache miss.
   module Interception
-    def build_env_for(libraries:, signature_paths:, virtual_rbs: [], deferred_signature_paths: [],
-                      project_signature_paths: [], core_root: nil)
+    def build_env_for(libraries:, signature_paths:, virtual_rbs: [], deferred_signature_paths: [], # rubocop:disable Metrics/ParameterLists
+                      project_signature_paths: [], core_root: nil, subordinate_signature_paths: [])
       return super unless RbsEnvMemo.enabled?
 
       key = RbsEnvMemo.digest(libraries, signature_paths, virtual_rbs, deferred_signature_paths,
-                              project_signature_paths, core_root)
+                              project_signature_paths, core_root, subordinate_signature_paths)
       cached = RbsEnvMemo.fetch(key)
       return cached if cached
 

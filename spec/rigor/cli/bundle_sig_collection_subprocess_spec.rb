@@ -68,6 +68,17 @@ RSpec.describe "bundle sig/ beside its rbs collection copy (subprocess)" do
     end
   end
 
+  it "drops the copy's mixin of a module the gem's sig/ declares as a class" do
+    install_gem("bargem", bundle_rbs: "#{gem_a}class Helper\nend\n",
+                          collection_rbs: "module Helper\nend\nclass Bar\n  include Helper\n  def b: () -> Integer\nend\n")
+    File.write(File.join(dir, "lib", "a.rb"), "Bar.new.a.no_a\nBar.new.b.no_b\nBar.new.zz\n")
+    output = check_run("[]")
+
+    expect(output).not_to match(/build failed|MixinClass/i)
+    expect(output).to include("undefined method `no_a' for Integer").and include("undefined method `no_b' for Integer")
+    expect(output).to include("undefined method `zz'")
+  end
+
   it "does not report a gem whose name holds -<digit> (foo-2fa) as missing RBS when it ships sig/" do
     install_gem("foo-2fa", bundle_rbs: gem_a)
     File.write(File.join(dir, "lib", "a.rb"), "Bar.new.a.no_a\n")

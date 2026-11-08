@@ -2008,6 +2008,28 @@ RSpec.describe Rigor::Environment::RbsLoader do
       expect(definition.methods.keys).to include(:a, :c)
     end
 
+    # Issue #2978 — a variable the gem's `sig/` declares binds the gem's type; one only the copy declares is kept.
+    it "stands down a subordinate file's variables the gem's sig/ declares, and keeps the rest" do
+      gem_dir = File.join(tmpdir, "gem_sig")
+      copy_dir = File.join(tmpdir, "copy")
+      FileUtils.mkdir_p([gem_dir, copy_dir])
+      File.write(File.join(gem_dir, "bar.rbs"),
+                 "class Bar\n  @x: String\n  self.@y: String\n  @@c: String\n  attr_reader r: String\nend\n")
+      File.write(File.join(copy_dir, "bar.rbs"),
+                 "class Bar\n  @x: Integer\n  @z: Integer\n  self.@y: Integer\n  @@c: Integer\n  @r: Integer\nend\n")
+      loader = described_class.new(signature_paths: [gem_dir, copy_dir], subordinate_signature_paths: [copy_dir])
+      allow(loader).to receive(:warn)
+      instance = loader.instance_definition("Bar")
+      singleton = loader.singleton_definition("Bar")
+      types = ->(vars) { vars.transform_values { |var| var.type.to_s } }
+
+      expect(types.call(instance.instance_variables)).to eq(
+        :@x => "::String", :@z => "::Integer", :@r => "::String"
+      )
+      expect(types.call(singleton.instance_variables)).to eq(:@y => "::String")
+      expect(types.call(instance.class_variables)).to eq(:@@c => "::String")
+    end
+
     # `def x: ... | ...` is filed under `overloads`, not `originals`, so rbs composes it with an existing
     # declaration instead of raising — the one shape upstream sanctions for having both.
     it "keeps an overloading inline member, which rbs composes rather than duplicates" do

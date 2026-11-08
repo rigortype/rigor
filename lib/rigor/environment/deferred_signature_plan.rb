@@ -88,13 +88,22 @@ module Rigor
         kind && [member.name, kind]
       end
 
+      # The variable keys `decls` declare, an attribute's implied instance variable included (`attr_reader x: String`
+      # declares `@x` unless written `attr_reader x(): String`).
       def variable_keys(decls)
         decls.each_with_object(Set.new) do |decl, keys|
           decl.members.each do |member|
-            key = variable_key(member)
+            key = variable_key(member) || attribute_variable_key(member)
             keys << key if key
           end
         end
+      end
+
+      def attribute_variable_key(member)
+        return nil unless member.is_a?(::RBS::AST::Members::Attribute) && member.ivar_name != false
+
+        [member.ivar_name || :"@#{member.name}",
+         member.kind == :singleton ? :class_instance_variable : :instance_variable]
       end
 
       # Issue #2439 — true when `decl` is a class with a superclass clause and another source (`others`) already

@@ -1010,9 +1010,7 @@ RSpec.describe "plugins/rigor-rails-routes" do
             define_method(:avatar_url) { "https://example.com/a.png" }
             alias_method :home_path, :root_thing
             alias site_url root_thing
-            Pair = Struct.new(:base_url) do
-              def go = base_url
-            end
+            Pair = Struct.new(:base_url) { def go = base_url }
 
             def call = [avatar_url, home_path, site_url]
           end

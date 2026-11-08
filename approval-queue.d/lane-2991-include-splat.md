@@ -1,4 +1,4 @@
-# Reflection.project_method_defined does not yet read the splatted-mixin mark, which waits for the #618 veto to read it too
+# Reflection.project_method_defined does not yet read the unnamed-mixin mark, which waits for the #618 veto to read it too
 
 - **PR:** [#2993](https://github.com/rigortype/rigor/pull/2993)
 - **Issue:** [#2991](https://github.com/rigortype/rigor/issues/2991)
@@ -9,7 +9,7 @@
 ## Background
 
 Issue #2991 opens `call.undefined-method` on the instance side of a class whose instance-side chain holds a
-splatted `include(*MODS)` or `prepend(*MODS)` (`Scope::ResolutionChain#wildcard_mixin?`). The brief asked whether
+splatted `include(*MODS)` or `prepend(*MODS)` (`Scope::ResolutionChain#unnamed_mixin?`). The brief asked whether
 the plugin facade `Reflection.project_method_defined` should read the same mark. It does not today: it answers
 `maybe` for an open-names mark (#2968, via #2977), and `no` for a class whose only route to the name is a splatted
 mixin.
@@ -35,6 +35,6 @@ activerecord plugin specs pass unchanged.
 
 ## To undo
 
-Add `|| Scope::ResolutionChain.for(scope, class_name.to_s, kind, :methods).wildcard_mixin?` beside
+Add `|| Scope::ResolutionChain.for(scope, class_name.to_s, kind, :methods).unnamed_mixin?` beside
 `open_names_on_chain?` in `Reflection.project_discovered_defined`. Add the same read to
 `ExpressionTyper#instance_self_answers?` in the same change. Add rows for both.

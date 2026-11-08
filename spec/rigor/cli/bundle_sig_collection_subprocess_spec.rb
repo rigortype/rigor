@@ -120,7 +120,8 @@ RSpec.describe "bundle sig/ beside its rbs collection copy (subprocess)" do
   it "still warns about an rbs_collection.lock.yaml stdlib entry even when a bundle sig/ shares its name" do
     install_gem("foo-2fa", bundle_rbs: gem_a)
     File.write(File.join(dir, "rbs_collection.lock.yaml"),
-               "---\npath: .gem_rbs_collection\ngems:\n- name: foo-2fa\n  version: '1.0'\n  source:\n    type: stdlib\n")
+               "---\npath: .gem_rbs_collection\ngems:\n- name: foo-2fa\n  version: '1.0'\n  " \
+               "source:\n    type: stdlib\n")
     File.write(File.join(dir, "lib", "a.rb"), "x = 1\n")
 
     expect(check_run("[]")).to include("stdlib entry \"foo-2fa\" is not an available RBS library")
@@ -148,8 +149,8 @@ RSpec.describe "bundle sig/ beside its rbs collection copy (subprocess)" do
       File.write(File.join(dir, "lib", "a.rb"), "Bar.new.a.no_a\n")
     end
 
-    ["", "--incremental"].each do |mode|
-      flags = mode.empty? ? [] : [mode]
+    [[], ["--incremental"]].each do |flags|
+      mode = flags.join
 
       it "re-analyses when the gem gains sig/ #{mode}" do
         expect(check_run("[]", *flags)).to include("undefined method `no_a' for String")

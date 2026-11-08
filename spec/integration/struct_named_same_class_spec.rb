@@ -91,7 +91,8 @@ RSpec.describe "Struct.new with a class-name String: one class under two names (
       N = Struct.new("Named2", :n_url)
       module Mx; def mx_x = 1; end
       module Px; def px_x = 1; end
-      module Ex; def ex_x = 1; end
+      module Ey; def ey_x = 1; end
+      module Ex; include Ey; def ex_x = 1; end
       module Fx; def fx_x = 1; end
       class Struct::Named2
         include Mx
@@ -121,16 +122,18 @@ RSpec.describe "Struct.new with a class-name String: one class under two names (
       expect([chain.wildcard_mixin?, chain.entries.first(3).map(&:name)]).to eq([true, %w[N Struct::Named2 Zm]])
     end
 
+    # The indexer folds an extended module's own `def`s into the extender's singleton table, so `Ey`, which `Ex`
+    # includes, is the one only the chain's extend edge reaches.
     it "reads an extend under either name on the other name's singleton side, for both walks" do
       root = Prism.parse(mixins).value
       scope = Rigor::Inference::ScopeIndexer.index(root, default_scope: Rigor::Scope.empty)[root]
-      answers = [%w[N ex_x], %w[Struct::Named2 fx_x], %w[N zz_x]].flat_map do |class_name, method_name|
+      answers = [%w[N ex_x], %w[N ey_x], %w[Struct::Named2 fx_x], %w[N zz_x]].flat_map do |class_name, method_name|
         %i[def discovered].map do |source|
           Rigor::Reflection.project_method_defined(class_name, method_name, kind: :singleton, source: source,
                                                                             scope: scope).to_s
         end
       end
-      expect(answers).to eq(%w[yes yes yes yes no no])
+      expect(answers).to eq(%w[yes yes yes yes yes yes no no])
     end
   end
 

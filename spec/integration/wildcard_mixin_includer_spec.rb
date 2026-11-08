@@ -53,7 +53,8 @@ RSpec.describe "a class whose instance-side chain holds a splatted mixin (#2991)
   end
 
   it "does not fire on its sub-subclass" do
-    source = "#{mods}class Sup\n  include(*MODS)\n  def t = 1\nend\nclass Sub < Sup\nend\nclass Sub2 < Sub\n  def v = self.m1\nend\n"
+    source = "#{mods}class Sup\n  include(*MODS)\n  def t = 1\nend\n" \
+             "class Sub < Sup\nend\nclass Sub2 < Sub\n  def v = self.m1\nend\n"
     expect(undefined_messages({ "a.rb" => source }, hierarchy_sig)).to be_empty
   end
 

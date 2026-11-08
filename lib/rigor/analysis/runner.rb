@@ -1683,7 +1683,8 @@ module Rigor
         end
       end
       private :plugin_boundary_rows, :producer_watch_glob_entries, :kind_entries, :root_presence_entries,
-              :analysis_reads_attributed?, :signature_root_candidates, :discovery_glob_entries, :bundle_sig_glob_entries,
+              :analysis_reads_attributed?, :signature_root_candidates, :discovery_glob_entries,
+              :bundle_sig_glob_entries,
               :unanalysed_pre_eval_entries, :signature_rows, :within?
 
       # Issue #684 — the project files this run DISCOVERED but did not analyse. A widened run's diagnostics

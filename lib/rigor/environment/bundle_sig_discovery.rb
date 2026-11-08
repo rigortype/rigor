@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
-require "pathname"
 require "yaml"
 
 require_relative "../config_path"
 require_relative "../rooted_glob"
+require_relative "lockfile_resolver"
 
 module Rigor
   class Environment

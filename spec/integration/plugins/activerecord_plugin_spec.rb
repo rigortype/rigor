@@ -1336,6 +1336,48 @@ RSpec.describe "plugins/rigor-activerecord" do
     end
   end
 
+  describe "a decimal column's reader follows its scale (#2964)" do
+    # The reporter's repro: a scale-0 decimal reads as an Integer and a scale-2 decimal as a BigDecimal, so the
+    # Integer and BigDecimal calls on them are correct and must report nothing. A column with no scale stays untyped.
+    let(:schema) { <<~SCHEMA }
+      ActiveRecord::Schema[8.1].define(version: 1) do
+        create_table "prices" do |t|
+          t.decimal "whole", precision: 20, scale: 0
+          t.decimal "fractional", precision: 10, scale: 2
+          t.decimal "amount", precision: 10
+        end
+      end
+    SCHEMA
+    let(:models) do
+      {
+        "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+        "app/models/price.rb" => "class Price < ApplicationRecord\nend\n"
+      }
+    end
+
+    def price_diagnostics(source)
+      run_ar(source, schema: schema, models: models).diagnostics
+    end
+
+    it "reads the scale-0 reader as an Integer and the scale-2 reader as a BigDecimal" do
+      source = <<~RUBY
+        Rigor.dump_type(Price.find(1).whole)
+        Rigor.dump_type(Price.find(1).fractional)
+        Rigor.dump_type(Price.find(1).amount)
+      RUBY
+      dumped = price_diagnostics(source).select { |d| d.qualified_rule == "dump.type" }.map(&:message)
+      expect(dumped).to eq(["dump_type: Integer", "dump_type: BigDecimal", "dump_type: Dynamic[top]"])
+    end
+
+    it "reports no call.undefined-method on correct Integer and BigDecimal calls" do
+      source = <<~RUBY
+        Price.find(1).whole.even?
+        Price.find(1).fractional.exponent
+      RUBY
+      expect(price_diagnostics(source).select { |d| d.rule == "call.undefined-method" }).to be_empty
+    end
+  end
+
   describe "dynamic_return / #dynamic_return_type return-type contribution (v0.1.2)" do
     # The plugin's `Model.find(id)` rule contributes `Nominal[Model]` so chained call sites resolve through the
     # analyzer's normal dispatch — without the contribution the RBS-level untyped return would let any chained

@@ -158,9 +158,20 @@ module Rigor
           keys.none?(&:nil?) && keys.uniq.size == keys.size
         end
 
-        # A decimal key reads as Integer at scale 0 (`Type::DecimalWithoutScale`) and BigDecimal otherwise.
+        # A decimal key stays untyped, because its class depends on the scale: `Type::DecimalWithoutScale`
+        # at scale 0, `Type::Decimal` otherwise.
         def primary_key_ruby_type(type)
           type == :decimal ? "Object" : SchemaTable.ruby_type_for(type)
+        end
+
+        # A `decimal` column's class follows its literal `scale:`. Any other type takes its SchemaTable mapping.
+        # A call this parser does not read completely may still hold a different scale, so it reads untyped.
+        def column_ruby_type(type, call_node)
+          return SchemaTable.ruby_type_for(type) unless type == :decimal
+          return "Object" unless keywords_read?(call_keywords(call_node))
+
+          scale = keyword_value(call_node, :scale)
+          SchemaTable.decimal_ruby_type(scale.is_a?(Prism::IntegerNode) ? scale.value : nil)
         end
 
         def literal_name(node)
@@ -229,7 +240,7 @@ module Rigor
           SchemaTable::Column.new(
             name: name,
             type: type,
-            ruby_type: SchemaTable.ruby_type_for(type),
+            ruby_type: column_ruby_type(type, call_node),
             array: keyword_true?(call_node, :array)
           )
         end
@@ -272,7 +283,7 @@ module Rigor
           SchemaTable::Column.new(
             name: name,
             type: type_sym,
-            ruby_type: SchemaTable.ruby_type_for(type_sym),
+            ruby_type: column_ruby_type(type_sym, call_node),
             array: keyword_true?(call_node, :array)
           )
         end

@@ -121,4 +121,14 @@ RSpec.describe "ivar census: constant-rooted class_eval receivers (#2983)", type
       end
     end
   end
+
+  # A String `class_eval` on the implicit receiver in the class body evals in the class itself.
+  [false, true].each do |cross|
+    it "reads a class-body class_eval(String) (#{cross ? 'cross-file' : 'single-file'})" do
+      poke = "class K\n  class_eval(\"def set = (@x = 'a')\")\nend\n"
+      source = "class K\n#{reader_body}end\n"
+      files = cross ? { "a.rb" => source, "b.rb" => poke } : { "a.rb" => source + poke }
+      expect(reported(files)).to eq([])
+    end
+  end
 end

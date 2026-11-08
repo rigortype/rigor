@@ -77,7 +77,8 @@ module Rigor
       # reconstructs {.config_entries} without loading a plugin, so an entry there that it cannot rebuild
       # would turn the warm fast lane into a permanent miss on every project that enables a bundled plugin.
       def self.env_only_config_entries(loader)
-        [deferred_signature_paths_entry(loader), project_signature_paths_entry(loader), core_root_entry(loader)].compact
+        [deferred_signature_paths_entry(loader), project_signature_paths_entry(loader), core_root_entry(loader),
+         subordinate_signature_paths_entry(loader)].compact
       end
 
       # Issue #2517 — which directory the env loaded core from. The selected core's files are digested by
@@ -141,6 +142,23 @@ module Rigor
       end
 
       private_class_method :deferred_signature_paths_entry
+
+      # Issue #2978 — which of the loader's `signature_paths:` stand down member by member to the rest (a bundle gem's
+      # collection copy behind its own `sig/`) changes the env built from byte-identical files, as the deferred
+      # partition does. Absent when there is none, so every other project keeps its key.
+      def self.subordinate_signature_paths_entry(loader)
+        return nil unless loader.respond_to?(:subordinate_signature_paths)
+
+        subordinate = Array(loader.subordinate_signature_paths).map(&:to_s).sort
+        return nil if subordinate.empty?
+
+        Descriptor::ConfigEntry.new(
+          key: "rbs.subordinate_signature_paths",
+          value_hash: Digest::SHA256.hexdigest(subordinate.join("\n"))
+        )
+      end
+
+      private_class_method :subordinate_signature_paths_entry
 
       # Public (ADR-87 WD4) so the boot-slimming run-cache probe reconstructs the identical `gems` +
       # `rbs.libraries` key slots the runner writes, from the config-derived library list, without a loader.

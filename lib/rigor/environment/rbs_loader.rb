@@ -126,9 +126,12 @@ module Rigor
         #   with it as an overload unless that source is the project's own ({DeferredSignaturePlan}).
         # @param core_root — issue #2517 — a validated {CoreRoot} directory loaded in place of the `rbs` gem's
         #   `core/`, or nil for the default core.
+        # @param subordinate_signature_paths — issue #2978 — the subset of `signature_paths` that loads right after
+        #   the other `signature_paths` files and stands down member by member to them ({.add_project_signatures}).
         def build_env_for(libraries:, signature_paths:, virtual_rbs: [], deferred_signature_paths: [],
-                          project_signature_paths: [], core_root: nil)
-          inputs = [signature_paths, virtual_rbs, deferred_signature_paths, project_signature_paths]
+                          project_signature_paths: [], core_root: nil, subordinate_signature_paths: [])
+          inputs = [signature_paths, virtual_rbs, deferred_signature_paths, project_signature_paths,
+                    subordinate_signature_paths]
           with_core_root(core_root) { build_env_from(libraries, inputs) }
         end
 
@@ -235,8 +238,9 @@ module Rigor
         # One {.build_env_attempt} round, which also returns its {VendoredSignaturePlan}.
         #
         # @param vendored_excluded — signature files the vendored plan is made without.
-        def planned_env_attempt(libraries, signature_paths, virtual_rbs, deferred_signature_paths,
-                                project_signature_paths = [], gated_plan: nil, vendored_excluded: Set.new)
+        def planned_env_attempt(libraries, signature_paths, virtual_rbs, deferred_signature_paths, # rubocop:disable Metrics/ParameterLists
+                                project_signature_paths = [], subordinate_signature_paths = [], gated_plan: nil,
+                                vendored_excluded: Set.new)
           libraries = libraries_without_shadowed_bigdecimal_math(libraries)
           rbs_loader, loaded_libraries = library_loader(libraries)
           gated_dirs = loadable_gated_dirs(libraries, loaded_libraries)
@@ -257,7 +261,8 @@ module Rigor
           # inline-vs-`.rbs` consistency rule, and stand down to an inline member like to any other source.
           consistency = member_consistency_for(undeferred_files, virtual_rbs)
           add_project_signatures(env, signature_paths, deferred_signature_paths,
-                                 standdowns: consistency.signature_standdowns)
+                                 standdowns: consistency.signature_standdowns,
+                                 subordinate_paths: subordinate_signature_paths)
           gated_plan&.shells&.each { |source| add_parsed_decls(env, *source) }
           # Issue #928 — the capability-role catalog goes in AFTER the project's own signatures, per
           # declaration, so a project that already declares one of these interface names keeps its own
@@ -673,9 +678,15 @@ module Rigor
         # @param standdowns — issue #1075 — `{signature_path => Set[[class, method, kind]]}`, the members an
         #   inline declaration displaced because it was the more precise side of a consistent pair
         #   ({MemberConsistency::Resolution#signature_standdowns}). They are removed before the file is added.
-        def add_project_signatures(env, signature_paths, deferred_paths = [], standdowns: {})
-          deferred = project_sig_files(deferred_paths)
-          (project_sig_files(signature_paths) - deferred).sort.each do |file|
+        # @param subordinate_paths — issue #2978 — the subset loaded after the rest, planned against them as a deferred
+        #   file is ({.add_deferred_signatures}) with every one of them as `own`: a member any of them declares stands
+        #   down from the subordinate file instead of failing the class's definition build. A gem's `rbs collection`
+        #   copy sits behind the gem's own `sig/` this way, so `Bar#a` in both binds the gem's, and `Bar#b` in the
+        #   copy alone still loads.
+        def add_project_signatures(env, signature_paths, deferred_paths = [], standdowns: {}, subordinate_paths: [])
+          subordinate = project_sig_files(subordinate_paths) - project_sig_files(deferred_paths)
+          eager = project_sig_files(signature_paths) - project_sig_files(deferred_paths) - subordinate
+          eager.sort.each do |file|
             parsed = parse_signature_file(file)
             next if parsed.nil? # quarantined (unparseable) or unreadable — skip so the env survives
 
@@ -683,6 +694,7 @@ module Rigor
             strip_members!(decls, standdowns[file]) if standdowns.key?(file)
             add_project_parsed_decls(env, buffer, directives, decls)
           end
+          add_deferred_signatures(env, subordinate, eager, standdowns: standdowns)
         end
 
         # Issue #777 — add one project signature transactionally. `RBS::Environment#add_source` appends to
@@ -728,12 +740,15 @@ module Rigor
         # source's `def` as an overload continuation, or stands down when the other source is the project's own
         # (`own`, buffer names) or cannot be continued; a colliding declaration stands down on its own; the rest
         # of the file loads. {.deferred_member_standdowns} reads what stood down back off the built env.
-        def add_deferred_signatures(env, deferred_files, own = Set.new)
+        #
+        # @param standdowns — issue #2978 — {.add_project_signatures}' members to remove before a file is planned.
+        def add_deferred_signatures(env, deferred_files, own = Set.new, standdowns: {})
           deferred_files.sort.each do |file|
             parsed = parse_signature_file(file)
             next if parsed.nil?
 
             buffer, directives, decls = parsed
+            strip_members!(decls, standdowns[file]) if standdowns.key?(file)
             next if generic_arity_conflict(env, decls)
 
             add_project_parsed_decls(env, buffer, directives, DeferredSignaturePlan.plan(decls, env, own))
@@ -1801,7 +1816,7 @@ module Rigor
       end
 
       attr_reader :libraries, :signature_paths, :cache_store, :virtual_rbs, :deferred_signature_paths,
-                  :project_signature_paths, :core_root
+                  :project_signature_paths, :core_root, :subordinate_signature_paths
 
       # @param libraries — stdlib library names to load on top of core (e.g.,
       #   `["pathname", "json"]`). Empty by default. Each entry MUST correspond to a directory under the
@@ -1824,17 +1839,17 @@ module Rigor
       #   a miss — a list it cannot read is a stand-down that runs only on a `--no-cache` build.
       # @param core_root — issue #2517 — a directory loaded in place of the `rbs` gem's `core/`, or nil (the
       #   default) for that core. Validated here, so a bad selection fails at construction ({CoreRoot.validate!}).
+      # @param subordinate_signature_paths — issue #2978 — the subset of `signature_paths:` that stands down member by
+      #   member to the rest of it (a bundle gem's `rbs collection` copy, behind the gem's own `sig/`).
       def initialize(libraries: [], signature_paths: [], cache_store: nil, virtual_rbs: [], # rubocop:disable Metrics/ParameterLists
-                     deferred_signature_paths: [], project_signature_paths: [], required_features: [], core_root: nil)
+                     deferred_signature_paths: [], project_signature_paths: [], required_features: [], core_root: nil,
+                     subordinate_signature_paths: [])
         @core_root = core_root.nil? ? nil : CoreRoot.validate!(core_root)
         CoreRoot.reject_overlap!(@core_root, project_signature_paths) if @core_root
         @libraries = libraries.map(&:to_s).freeze
         @signature_paths = signature_paths.map { |p| Pathname(p) }.freeze
         assign_reopen_inputs(project_signature_paths, required_features)
-        # Issue #610 — the subset of `signature_paths:` a bundled PLUGIN contributed. Loaded last and
-        # allowed to stand down against a colliding generic arity ({.add_deferred_signatures}). Every entry
-        # is also in `@signature_paths`, so the env cache descriptor already digests these files.
-        @deferred_signature_paths = deferred_signature_paths.map { |p| Pathname(p) }.freeze
+        assign_partition(deferred_signature_paths, subordinate_signature_paths)
         @cache_store = cache_store
         @virtual_rbs = virtual_rbs.map { |name, content| [name.to_s.dup.freeze, content.to_s.dup.freeze].freeze }.freeze
         # Per-loader memoization bucket. Held as a single mutable Hash so the loader instance itself can be
@@ -2033,6 +2048,15 @@ module Rigor
       # Issue #2174 — the subset of `signature_paths:` the user configured (every entry is also in
       # `@signature_paths`), and the features the project's source requires: read only by
       # {#ruby_library_reopen?}.
+      # Issue #610 — the subset of `signature_paths:` a bundled PLUGIN contributed. Loaded last and allowed to stand
+      # down against a colliding generic arity ({.add_deferred_signatures}). Issue #2978 — and the subset that stands
+      # down member by member to the rest. Every entry of either is also in `@signature_paths`, so the env cache
+      # descriptor already digests these files.
+      def assign_partition(deferred_signature_paths, subordinate_signature_paths)
+        @deferred_signature_paths = deferred_signature_paths.map { |p| Pathname(p) }.freeze
+        @subordinate_signature_paths = subordinate_signature_paths.map { |p| Pathname(p) }.freeze
+      end
+
       def assign_reopen_inputs(project_signature_paths, required_features)
         @project_signature_paths = project_signature_paths.map { |p| Pathname(p) }.freeze
         @required_features = required_features.map { |feature| feature.to_s.dup.freeze }.freeze
@@ -3506,7 +3530,8 @@ module Rigor
           virtual_rbs: @virtual_rbs,
           deferred_signature_paths: @deferred_signature_paths,
           project_signature_paths: @project_signature_paths,
-          core_root: @core_root
+          core_root: @core_root,
+          subordinate_signature_paths: @subordinate_signature_paths
         )
       end
 

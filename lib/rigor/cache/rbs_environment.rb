@@ -36,7 +36,9 @@ module Rigor
             loader.respond_to?(:deferred_signature_paths) ? loader.deferred_signature_paths : [],
           project_signature_paths:
             loader.respond_to?(:project_signature_paths) ? loader.project_signature_paths : [],
-          core_root: loader.respond_to?(:core_root) ? loader.core_root : nil
+          core_root: loader.respond_to?(:core_root) ? loader.core_root : nil,
+          subordinate_signature_paths:
+            loader.respond_to?(:subordinate_signature_paths) ? loader.subordinate_signature_paths : []
         )
       end
 

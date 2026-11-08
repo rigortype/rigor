@@ -48,7 +48,7 @@ module Rigor
       def self.classify(locked_gems:, default_libraries:,
                         bundle_sig_paths:, rbs_collection_paths:)
         default_set = default_libraries.to_set
-        bundle_names = extract_gem_names_from_bundle_paths(bundle_sig_paths)
+        bundle_names = extract_gem_names_from_bundle_paths(bundle_sig_paths, locked_gems)
         collection_names = extract_gem_names_from_collection_paths(rbs_collection_paths)
 
         locked_gems.each_value.map do |locked|
@@ -73,11 +73,11 @@ module Rigor
         coverage_rows.select { |row| row.source == :missing }
       end
 
-      def self.extract_gem_names_from_bundle_paths(paths)
-        paths.each_with_object(Set.new) do |path, set|
-          pathname = path.is_a?(Pathname) ? path : Pathname.new(path)
-          set << BundleSigDiscovery.gem_name_from_sig_path(pathname)
-        end
+      # Issue #2978 — each path's gem name as the locked entry it matches ({BundleSigDiscovery.locked_names_of}), not
+      # a parse of its directory name, which reads `foo-2fa-1.0` as `foo` and reported `foo-2fa` as missing RBS.
+      def self.extract_gem_names_from_bundle_paths(paths, locked_gems)
+        pathnames = paths.map { |path| path.is_a?(Pathname) ? path : Pathname.new(path) }
+        BundleSigDiscovery.locked_names_of(pathnames, locked_gems).to_set
       end
       private_class_method :extract_gem_names_from_bundle_paths
 

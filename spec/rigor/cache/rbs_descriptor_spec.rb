@@ -97,13 +97,19 @@ RSpec.describe Rigor::Cache::RbsDescriptor do
     # unless `project_signature_paths` names the project's directory, when it stands down.
     let(:project_sig_dir) do
       sig_dir("project_sig", "collide.rbs", "class DigestGateCollide\nend\n",
-              "member.rbs" => "class DigestGateMember\n  def m: () -> Integer\nend\n")
+              "member.rbs" => "class DigestGateMember\n  def m: () -> Integer\nend\n",
+              "copy.rbs" => "class DigestGateCopy\n  def c: () -> Integer\nend\n")
     end
     let(:plugin_sig_dir) do
       sig_dir("plugin_sig", "collide.rbs", "class DigestGateCollide[Elem]\nend\n",
               "member.rbs" => "class DigestGateMember\n  def m: () -> String\nend\n")
     end
     let(:extra_sig_dir) { sig_dir("extra_sig", "extra.rbs", "class DigestGateExtra\nend\n") }
+    # Issue #2978 — a gem's collection copy redeclaring `DigestGateCopy#c`: eager, both copies load; subordinate,
+    # the copy's `c` stands down to the project's.
+    let(:collection_sig_dir) do
+      sig_dir("collection_sig", "copy.rbs", "class DigestGateCopy\n  def c: () -> Symbol\nend\n")
+    end
     # Issue #2517 — a selected core: the gem's own plus one class, so the env builds and still reads apart.
     let(:core_dir) do
       path = File.join(tmpdir, "core")
@@ -138,12 +144,13 @@ RSpec.describe Rigor::Cache::RbsDescriptor do
     def loader_variations
       {
         libraries: [[], ["pathname"]],
-        signature_paths: [[project_sig_dir, plugin_sig_dir],
-                          [project_sig_dir, plugin_sig_dir, extra_sig_dir]],
+        signature_paths: [[project_sig_dir, plugin_sig_dir, collection_sig_dir],
+                          [project_sig_dir, plugin_sig_dir, collection_sig_dir, extra_sig_dir]],
         virtual_rbs: [[], [["digest_gate_virtual.rbs", "class DigestGateVirtual\nend\n"]]],
         deferred_signature_paths: [[plugin_sig_dir], []],
         project_signature_paths: [[], [project_sig_dir]],
-        core_root: [nil, core_dir]
+        core_root: [nil, core_dir],
+        subordinate_signature_paths: [[], [collection_sig_dir]]
       }
     end
 

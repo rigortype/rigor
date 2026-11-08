@@ -1,0 +1,3 @@
+- **[environment]** A gem that ships its own `sig/` and also has an `rbs collection` copy no longer collapses its classes to `Dynamic[top]` when both declare the same method. ([#2985](https://github.com/rigortype/rigor/pull/2985))
+  - Each method the gem's `sig/` declares stands down from the collection copy, and the rest of the copy still loads, with `libraries: []` and with the gem named under `libraries:`. A method only the copy declares no longer reports `call.undefined-method`.
+  - A gem whose name holds `-<digit>` (`foo-2fa`) and ships `sig/` is no longer listed by `rbs.coverage.missing-gem`.

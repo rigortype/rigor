@@ -47,6 +47,25 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
     expect(undefined).to be_empty
   end
 
+  # Issue #2969. `NumericWithFormat#to_fs` on Integer, Float and BigDecimal, with the plugin enabled: the plugin
+  # is the authoring home, so its own rows answer the same selectors the auto-applied overlay does.
+  it "types to_fs and to_formatted_s on Integer, Float and BigDecimal" do
+    source = <<~RUBY
+      require "bigdecimal"
+      Rigor.dump_type(1.to_fs(:delimited))
+      Rigor.dump_type(1.5.to_fs(:percentage))
+      Rigor.dump_type(1.5.to_formatted_s(:percentage))
+      opts = { "precision" => 2 }
+      Rigor.dump_type(1.to_fs(:rounded, opts))
+      Rigor.dump_type(BigDecimal("1.5").to_fs)
+    RUBY
+    result = run_plugin(source: source)
+
+    expect(result.diagnostics.map(&:qualified_rule).grep(/\Acall\./)).to be_empty
+    expect(result.diagnostics.select { |d| d.qualified_rule == "dump.type" }.map(&:message))
+      .to eq(Array.new(5, "dump_type: String"))
+  end
+
   it "declares the GitLab-surfaced String / Object / Date / ERB extensions in its RBS bundle" do
     # `upcase_first` / `remove` / `in?` fired `undefined-method` on GitLab once AR typed real String
     # columns; `titlecase` / `dasherize` / `advance` / `all_day` / `Date#to_time(form)` /

@@ -15,6 +15,9 @@ in-place extensions to Ruby's built-in classes:
 
 - `Integer` / `Float` — Duration multipliers (`#days`, `#hours`,
   `#minutes`, …) and Bytes multipliers (`#megabytes`, `#gigabytes`, …)
+- `Integer` / `Float` / `BigDecimal` — `#to_fs` / `#to_formatted_s`
+  (`NumericWithFormat`: a Symbol format, an Integer radix or a String
+  format, and the no-argument `to_s` form)
 - `ActiveSupport::Duration` — the reader surface: `#to_i` / `#in_seconds`,
   `#to_f`, `#in_minutes` / `#in_hours` / `#in_days` / `#in_weeks` /
   `#in_months` / `#in_years`, `#iso8601`, `#parts`. NOT `#ago` /

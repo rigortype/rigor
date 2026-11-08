@@ -1,0 +1,4 @@
+- **[plugin:activesupport-core-ext]** `to_fs` / `to_formatted_s` on Integer, Float and BigDecimal no longer report `call.undefined-method` on correct calls, once ActiveSupport is locked. ([#2973](https://github.com/rigortype/rigor/pull/2973))
+  - Both are declared on `ActiveSupport::NumericWithFormat`, included into the three classes, so a project `sig/` that declares `Integer#to_fs` itself still wins instead of collapsing Integer.
+  - The options argument accepts any Hash, including one with String keys.
+  - With no activesupport lock they still report, as before.

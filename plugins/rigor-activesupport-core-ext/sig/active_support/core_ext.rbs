@@ -605,6 +605,35 @@ class Float
 end
 
 # ---------------------------------------------------------------
+# NumericWithFormat — ActiveSupport's `core_ext/numeric/conversions`, included into Integer, Float and
+# BigDecimal. Declared on the module and included, not as a `def` on each class, so a project `sig/` that
+# declares `Integer#to_fs` itself overrides it instead of raising `DuplicatedMethodDefinitionError` (the
+# `process.rbs` shape). Not pure: the Symbol formats read `I18n` for their locale. An Integer or String
+# format is `to_s(format)`, and no format is `to_s`, so every form answers a String. `options` is any
+# Hash-like value: ActiveSupport calls `symbolize_keys` on it, so String keys and a HashWithIndifferentAccess
+# are both valid.
+# ---------------------------------------------------------------
+
+module ActiveSupport
+  module NumericWithFormat
+    def to_fs: (?(Symbol | Integer | String | nil) format, ?Hash[untyped, untyped]? options) -> String
+    def to_formatted_s: (?(Symbol | Integer | String | nil) format, ?Hash[untyped, untyped]? options) -> String
+  end
+end
+
+class Integer
+  include ActiveSupport::NumericWithFormat
+end
+
+class Float
+  include ActiveSupport::NumericWithFormat
+end
+
+class BigDecimal
+  include ActiveSupport::NumericWithFormat
+end
+
+# ---------------------------------------------------------------
 # ActiveSupport::Duration — issue #632
 # ---------------------------------------------------------------
 

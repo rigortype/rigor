@@ -9,12 +9,14 @@
 require "spec_helper"
 require "fileutils"
 require "tmpdir"
+require "prism"
 
 require "rigor/analysis/runner"
 require "rigor/analysis/incremental_session"
 require "rigor/cache/store"
 require "rigor/cache/incremental_snapshot"
 require "rigor/configuration"
+require "rigor/inference/scope_indexer"
 
 RSpec.describe "attr members declared through self. or send (#2097)", type: :runner do
   around do |example|
@@ -107,13 +109,13 @@ RSpec.describe "attr members declared through self. or send (#2097)", type: :run
       .to eq([["lib/use.rb", 2], ["lib/use.rb", 3], ["lib/use.rb", 4]])
   end
 
-  # Guard: a name `send` passes as a variable is not one discovery can read, and with a sig the call reports
-  # before and after #2097 alike.
+  # Guard: a name `send` passes as a variable is not one discovery can read, so it records no member. Issue #2901
+  # opens the class for it instead (Ruby defines `foo`), so `Box.new.foo` no longer reports; the member table is
+  # what this row pins.
   it "records nothing for a non-literal name passed through send" do
-    write("sig/box.rbs", sig)
-    write("lib/box.rb", box("name = :foo", "send(:attr_accessor, name)"))
-    write("lib/use.rb", "Box.new.foo\n")
-    expect(cold_rows).to eq([["lib/use.rb", 1, "`foo'"]])
+    source = box("name = :foo", "send(:attr_accessor, name)")
+    members = Rigor::Inference::ScopeIndexer.build_methods_and_def_nodes(Prism.parse(source).value).fetch(0)
+    expect(members.fetch("Box").keys).to eq([:initialize])
   end
 
   it "reads the declaration across files with two workers" do

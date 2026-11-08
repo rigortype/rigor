@@ -4508,7 +4508,55 @@ module Rigor
         record_forwardable_methods(node, qualified_prefix, in_singleton_class, methods_acc)
         record_alias_method_call(node, qualified_prefix, in_singleton_class, methods_acc)
         record_surface_evidence(node, qualified_prefix, methods_acc)
+        record_self_definer_call(node, qualified_prefix, in_singleton_class, methods_acc)
         AnonymousMetaClass.name_for(node, source_path)
+      end
+
+      # Issue #2901 — the class-body calls on `self` that open the class to `call.undefined-method` without a name
+      # this walk can read: `send(:define_method, m)` (the instance side, or the singleton side in a `class << self`
+      # body), `define_singleton_method(m)` (the singleton side, outside `class << self`, where it would define on the
+      # singleton's own singleton), and a call of any other name, filed as a
+      # {Scope::DiscoveryIndex::ENVELOPE_BODY_CALL_KIND} entry for the reader to resolve against the class's macros.
+      def record_self_definer_call(node, qualified_prefix, in_singleton_class, accumulator)
+        return if qualified_prefix.empty? || !(node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode))
+
+        class_name = qualified_prefix.join("::")
+        if node.name == :define_singleton_method
+          record_open_singleton_definer(node, class_name, in_singleton_class, accumulator)
+        elsif SURFACE_SEND_CALLS.include?(node.name)
+          record_sent_define_method(node, class_name, in_singleton_class, accumulator)
+        elsif !in_singleton_class && !BODY_CALL_EXCLUDED.include?(node.name)
+          key = [Scope::DiscoveryIndex::ENVELOPE_BODY_CALL_KIND, node.name]
+          record_envelope(accumulator.envelopes, class_name, key, Source::ParameterEnvelope::OPAQUE)
+        end
+      end
+
+      # The class-body calls this walk reads as definers of their own, or that core's `Module` answers: a project
+      # macro of one of these names is not looked for.
+      BODY_CALL_EXCLUDED = %i[
+        define_method define_singleton_method alias_method attr_reader attr_writer attr_accessor include extend prepend
+        private public protected module_function private_class_method public_class_method private_constant
+        public_constant require require_relative autoload autoload_relative
+      ].to_set.freeze
+      private_constant :BODY_CALL_EXCLUDED
+
+      def record_open_singleton_definer(node, class_name, in_singleton_class, accumulator)
+        return if in_singleton_class || !computed_first_name?(node.arguments&.arguments)
+
+        record_surface_mark(accumulator, class_name, Scope::DiscoveryIndex::ENVELOPE_OPEN_SINGLETON_NAMES_MARK)
+      end
+
+      def record_sent_define_method(node, class_name, in_singleton_class, accumulator)
+        arguments = node.arguments&.arguments
+        return unless arguments && literal_method_name(arguments.first) == :define_method
+        return unless computed_first_name?(arguments.drop(1))
+
+        record_surface_mark(accumulator, class_name, open_names_mark(in_singleton_class))
+      end
+
+      # Whether a definer's argument list starts with a name that is not a Symbol or String literal.
+      def computed_first_name?(arguments)
+        !arguments.nil? && !arguments.empty? && literal_method_name(arguments.first).nil?
       end
 
       # The `alias_method :new, :old` CallNode twin of {#record_alias_method} (#533): the NEW name joins
@@ -4879,6 +4927,7 @@ module Rigor
       def record_def_body_evidence(def_node, qualified_prefix, tables)
         return if def_node.body.nil?
 
+        definer = false
         Source::NodeWalker.each(def_node.body) do |node|
           if node.is_a?(Prism::SingletonClassNode)
             record_singleton_body_prepends(node, qualified_prefix, tables)
@@ -4889,12 +4938,64 @@ module Rigor
           if node.name == :extend
             record_object_extension(node, qualified_prefix, tables)
           elsif SURFACE_EVAL_CALLS.include?(node.name) || SURFACE_NAMING_CALLS.include?(node.name)
+            definer ||= computed_self_define_method?(node)
             record_body_rewrite(node, qualified_prefix, tables)
           else
             record_singleton_prepend(node, qualified_prefix, tables, self_ok: true)
           end
         end
+        record_computed_definer(def_node, qualified_prefix, tables) if definer
       end
+
+      # Issue #2901 — a method whose body runs a `define_method` on its own `self` with a computed name, directly or in
+      # a block that keeps `self` (`def self.my_attr(*n) = n.each { |x| define_method(x) {} }`), is a class macro: a
+      # class body that calls it gains members no table names. The method takes a
+      # `[ENVELOPE_COMPUTED_DEFINER_KIND, name]` entry, which `call.undefined-method` resolves a class's body calls
+      # against. A `def Other.x` (another object's method) records none, and neither does a `define_method` inside a
+      # nested `def`, a class body or a block that rebinds `self` ({#rebinds_self_block?}).
+      def record_computed_definer(def_node, qualified_prefix, tables)
+        return if qualified_prefix.empty?
+        return unless def_node.receiver.nil? || def_node.receiver.is_a?(Prism::SelfNode)
+        return unless runs_computed_self_definer?(def_node.body)
+
+        key = [Scope::DiscoveryIndex::ENVELOPE_COMPUTED_DEFINER_KIND, def_node.name]
+        record_envelope(tables.envelopes, qualified_prefix.join("::"), key, Source::ParameterEnvelope::OPAQUE)
+      end
+
+      def computed_self_define_method?(node)
+        node.name == :define_method && (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode)) &&
+          computed_first_name?(node.arguments&.arguments)
+      end
+
+      def runs_computed_self_definer?(node)
+        case node
+        when Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode
+          return false
+        when Prism::CallNode
+          return true if computed_self_define_method?(node)
+          if rebinds_self_block?(node)
+            return [node.receiver, node.arguments].any? do |part|
+              runs_computed_self_definer?(part)
+            end
+          end
+        end
+        return false unless node.is_a?(Prism::Node)
+
+        node.rigor_each_child { |child| return true if runs_computed_self_definer?(child) }
+        false
+      end
+
+      # A call whose block runs with another `self`: a class factory (`Class.new { }`), a definer's own body
+      # (`define_method(:x) { }` runs on an instance), or an eval on a receiver other than `self`.
+      def rebinds_self_block?(node)
+        return false unless node.block.is_a?(Prism::BlockNode)
+        return true if meta_new_constant_rvalue?(node) || SELF_DEFINER_BLOCK_CALLS.include?(node.name)
+
+        RECEIVER_EVAL_CALLS.include?(node.name) && !(node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode))
+      end
+
+      SELF_DEFINER_BLOCK_CALLS = %i[define_method define_singleton_method].freeze
+      private_constant :SELF_DEFINER_BLOCK_CALLS
 
       # Issue #1820 — `obj.singleton_class.prepend(M)`, or `prepend M` in a `class << obj` body, puts `M` ahead of
       # `obj`'s class even when the class already includes it (`prepend` re-inserts it; `extend` would not), so
@@ -9327,25 +9428,41 @@ module Rigor
 
         first_arg = call_node.arguments.arguments.first
         method_name = literal_method_name(first_arg)
-        class_name = qualified_prefix.join("::")
-        return record_open_define_method(call_node, class_name, in_singleton_class, accumulator) if method_name.nil?
+        if method_name.nil?
+          return record_open_define_method(call_node, qualified_prefix, in_singleton_class,
+                                           accumulator)
+        end
 
-        record_method(accumulator, class_name, method_name, in_singleton_class ? :singleton : :instance)
+        record_method(accumulator, qualified_prefix.join("::"), method_name,
+                      in_singleton_class ? :singleton : :instance)
       end
 
       # Issue #2793 — a `define_method` on `self` whose name is not a literal defines a method this walk cannot name,
       # on the side and owner a literal one would record under (the walk's placement: a `Class.new { }` or
       # `Struct.new { }` body is its own class's, an eval body its receiver's, a `class << self` body the singleton
       # side), so that side reads as open to `call.undefined-method`.
-      def record_open_define_method(call_node, class_name, in_singleton_class, accumulator)
-        return unless call_node.receiver.nil? || call_node.receiver.is_a?(Prism::SelfNode)
+      #
+      # Issue #2901 — on a constant receiver (`Other.define_method(m)`) it defines instance methods of that constant's
+      # class, whichever side the call sits on: each class the constant can denote from here opens its instance side
+      # ({#constant_receiver_candidates}), and the enclosing class does not. Any other receiver opens nothing.
+      def record_open_define_method(call_node, qualified_prefix, in_singleton_class, accumulator)
+        receiver = call_node.receiver
+        if receiver.is_a?(Prism::ConstantReadNode) || receiver.is_a?(Prism::ConstantPathNode)
+          constant_receiver_candidates(receiver, qualified_prefix).each do |name|
+            record_surface_mark(accumulator, name, Scope::DiscoveryIndex::ENVELOPE_OPEN_INSTANCE_NAMES_MARK)
+          end
+        elsif receiver.nil? || receiver.is_a?(Prism::SelfNode)
+          record_surface_mark(accumulator, qualified_prefix.join("::"), open_names_mark(in_singleton_class))
+        end
+      end
 
-        mark = if in_singleton_class
-                 Scope::DiscoveryIndex::ENVELOPE_OPEN_SINGLETON_NAMES_MARK
-               else
-                 Scope::DiscoveryIndex::ENVELOPE_OPEN_INSTANCE_NAMES_MARK
-               end
-        record_surface_mark(accumulator, class_name, mark)
+      # The side's open-names mark a computed definer on `self` records: the singleton side in a `class << self` body.
+      def open_names_mark(in_singleton_class)
+        if in_singleton_class
+          Scope::DiscoveryIndex::ENVELOPE_OPEN_SINGLETON_NAMES_MARK
+        else
+          Scope::DiscoveryIndex::ENVELOPE_OPEN_INSTANCE_NAMES_MARK
+        end
       end
 
       # The `attr_*` accessor macros that introduce methods Rigor must treat as source-declared. Without this, a class
@@ -9369,6 +9486,19 @@ module Rigor
           record_method(accumulator, class_name, base, kind) if reader
           record_method(accumulator, class_name, :"#{base}=", kind) if writer
         end
+        return unless attr_macro_computed?(call_node)
+
+        # Issue #2901 — `attr_accessor(*NAMES)` defines members this walk cannot name, so its side opens.
+        record_surface_mark(accumulator, class_name, open_names_mark(in_singleton_class))
+      end
+
+      # Whether an `attr_*` call ({#attr_macro}) passes a name argument that is not a Symbol or String literal.
+      def attr_macro_computed?(call_node)
+        arguments = call_node.arguments&.arguments
+        return false if arguments.nil?
+
+        arguments = arguments.drop(1) if SURFACE_SEND_CALLS.include?(call_node.name)
+        arguments.any? { |arg| literal_method_name(arg).nil? }
       end
 
       # Yields each name an `attr_*` call declares ({#attr_macro}): a Symbol or String literal argument. A

@@ -142,6 +142,14 @@ RSpec.describe Rigor::Analysis::Incremental do
         .to eq(Set[["Comparable", extended], ["String", %i[removed center]]])
     end
 
+    # Issue #2901.
+    it "reports a class-macro body call and a computed definer entry that moved" do
+      after = [{ "Mac" => { %i[body_call my_attr] => :opaque, %i[computed_definer my_attr] => :opaque } }]
+
+      expect(described_class.changed_class_marks([], after))
+        .to eq(Set[["Mac", %i[body_call my_attr]], ["Mac", %i[computed_definer my_attr]]])
+    end
+
     # Guard: the union diff, which no line removal on its own breaks.
     it "reports nothing when a mark moves between two touched files" do
       expect(described_class.changed_class_marks([{ "C" => { extended => :opaque } }, nil],

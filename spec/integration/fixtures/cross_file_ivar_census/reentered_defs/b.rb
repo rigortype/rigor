@@ -73,3 +73,11 @@ end
 class CrossCallEvalDef
   def poke = klass.class_eval { def set = (@x = "a") }
 end
+
+class CrossRound2ParamClass
+  def poke(o) = o.class.class_eval { define_method(:set) { @x = "a" } }
+end
+
+class CrossRound2BaseClass
+  def poke = self.class.base_class.class_eval { def set = (@x = "a") }
+end

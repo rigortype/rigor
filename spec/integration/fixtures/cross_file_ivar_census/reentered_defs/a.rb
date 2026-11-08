@@ -376,3 +376,173 @@ class CrossCallEvalDef
   def get = @x.upcase
   def klass = self.class
 end
+
+# Review round 2: a receiver no constant or literal roots may name the class, so its `def` and `define_method` count:
+# Ruby 4.0.5 returns "A" from each `get` after the call named in the class's comment and `k.set`.
+# k.poke(k)
+class Round2ParamClassDef
+  def initialize = (@x = nil)
+  def get = @x.upcase
+  def poke(o) = o.class.class_eval { def set = (@x = "a") }
+end
+
+# k.poke(k)
+class Round2ParamClassDefine
+  def initialize = (@x = nil)
+  def get = @x.upcase
+  def poke(o) = o.class.class_eval { define_method(:set) { @x = "a" } }
+end
+
+# k.poke(k)
+class Round2ParamSingletonDef
+  def initialize = (@x = nil)
+  def get = @x.upcase
+  def poke(o) = o.singleton_class.class_eval { def set = (@x = "a") }
+end
+
+# k.poke(k)
+class Round2ParamSingletonDefine
+  def initialize = (@x = nil)
+  def get = @x.upcase
+  def poke(o) = o.singleton_class.class_eval { define_method(:set) { @x = "a" } }
+end
+
+# k.poke
+class Round2IvarClassDef
+  def initialize = (@x = nil; @obj = self)
+  def get = @x.upcase
+  def poke = @obj.class.class_eval { def set = (@x = "a") }
+end
+
+# k.poke
+class Round2IvarClassDefine
+  def initialize = (@x = nil; @obj = self)
+  def get = @x.upcase
+  def poke = @obj.class.class_eval { define_method(:set) { @x = "a" } }
+end
+
+# k.poke
+class Round2CallClassDef
+  def initialize = (@x = nil)
+  def get = @x.upcase
+  def poke = obj.class.class_eval { def set = (@x = "a") }
+  def obj = self
+end
+
+# k.poke
+class Round2CallClassDefine
+  def initialize = (@x = nil)
+  def get = @x.upcase
+  def poke = obj.class.class_eval { define_method(:set) { @x = "a" } }
+  def obj = self
+end
+
+# k.poke
+class Round2LocalClassDef
+  def initialize = (@x = nil)
+  def get = @x.upcase
+  def poke
+    k = self
+    k.class.class_eval { def set = (@x = "a") }
+  end
+end
+
+# k.poke
+class Round2LocalClassDefine
+  def initialize = (@x = nil)
+  def get = @x.upcase
+  def poke
+    k = self
+    k.class.class_eval { define_method(:set) { @x = "a" } }
+  end
+end
+
+# k.poke
+class Round2BaseClassDef
+  def initialize = (@x = nil)
+  def get = @x.upcase
+  def poke = self.class.base_class.class_eval { def set = (@x = "a") }
+  def self.base_class = self
+end
+
+# k.poke
+class Round2BaseClassDefine
+  def initialize = (@x = nil)
+  def get = @x.upcase
+  def poke = self.class.base_class.class_eval { define_method(:set) { @x = "a" } }
+  def self.base_class = self
+end
+
+# k.poke
+class Round2ClassItselfDef
+  def initialize = (@x = nil)
+  def get = @x.upcase
+  def poke = self.class.itself.class_eval { def set = (@x = "a") }
+end
+
+# k.poke
+class Round2ClassItselfDefine
+  def initialize = (@x = nil)
+  def get = @x.upcase
+  def poke = self.class.itself.class_eval { define_method(:set) { @x = "a" } }
+end
+
+# k.poke
+class Round2ParenClassDef
+  def initialize = (@x = nil)
+  def get = @x.upcase
+  def poke = (self.class).class_eval { def set = (@x = "a") }
+end
+
+# k.poke
+class Round2ParenClassDefine
+  def initialize = (@x = nil)
+  def get = @x.upcase
+  def poke = (self.class).class_eval { define_method(:set) { @x = "a" } }
+end
+
+# `Object` and `Kernel` are ancestors of every class, so a method defined on them runs on an instance: Ruby 4.0.5
+# returns "A" from `k.poke; k.set; k.get`.
+class Round2ObjectEval
+  def initialize = (@x = nil)
+  def get = @x.upcase
+  def poke = Object.class_eval { def set = (@x = "a") }
+end
+
+class Round2KernelEval
+  def initialize = (@x = nil)
+  def get = @x.upcase
+  def poke = Kernel.module_eval { define_method(:set) { @x = "a" } }
+end
+
+# The pokes of these classes are in b.rb.
+class CrossRound2ParamClass
+  def initialize = (@x = nil)
+  def get = @x.upcase
+end
+
+class CrossRound2BaseClass
+  def initialize = (@x = nil)
+  def get = @x.upcase
+  def self.base_class = self
+end
+
+# A parenthesized foreign receiver, `.class` on a class object (`Class`), and a chain rooted at a literal are other
+# modules: Ruby 4.0.5 raises on `get` after `poke` and any `set` they allow.
+class Round2ParenOther
+  def initialize = (@x = nil)
+  def get = @x.upcase # FIRES call.undefined-method
+  def poke = (Other.singleton_class).class_eval { def set = (@x = "a") }
+end
+
+class Round2ClassOfClass
+  def initialize = (@x = nil)
+  def get = @x.upcase # FIRES call.undefined-method
+  def poke = self.class.class.class_eval { def set = (@x = "a") }
+end
+
+class Round2LiteralChain
+  def initialize = (@x = nil)
+  def get = @x.upcase # FIRES call.undefined-method
+  def poke = [1].first.class.class_eval { def set = (@x = "a") }
+end

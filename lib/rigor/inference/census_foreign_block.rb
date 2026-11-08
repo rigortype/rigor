@@ -38,6 +38,8 @@ module Rigor
                   Prism::NilNode, Prism::TrueNode, Prism::FalseNode, Prism::LambdaNode].freeze
       # The calls that answer a module of their receiver.
       MODULE_OF_INSTANCE = %i[class singleton_class].to_set.freeze
+      # The constants naming a module every class has among its ancestors, whose methods an instance runs.
+      ANCESTOR_ROOTS = %w[Object BasicObject Kernel].to_set.freeze
       BARRIERS = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
       NONE = [].freeze
       # Every name {.foreign?} can answer true for, so any other call returns at one Set probe.
@@ -101,7 +103,7 @@ module Rigor
       end
 
       # The code inside barred code whose `self` may again be an instance of `class_name`, in a `class_eval`-family
-      # block whose module may be `class_name` or the singleton class of one of its instances ({.own_module?}) or in
+      # block whose module may be `class_name` or the singleton class of one of its instances ({.foreign_module?}) or in
       # a `class << obj` body on an operand {.provably_other?} does not name:
       #
       # - a `define_method` block on the implicit or `self` receiver, called directly or through `send` /
@@ -116,7 +118,7 @@ module Rigor
           case node
           when Prism::SingletonClassNode then node.body unless provably_other?(node.expression, class_name)
           when Prism::CallNode
-            node.block.body if MODULE_EVALS.include?(node.name) && own_module?(node.receiver, class_name)
+            node.block.body if MODULE_EVALS.include?(node.name) && !foreign_module?(node.receiver, class_name)
           end
         return NONE if body.nil?
 
@@ -125,32 +127,48 @@ module Rigor
         found
       end
 
-      # A `class_eval` receiver whose module may be `class_name`, an ancestor of it or an instance's singleton class,
-      # read from inside an instance body: `self.class`, `singleton_class` (also on `itself`), a constant spelling
-      # `class_name`, a `superclass` call (`Other.superclass` is `Object`), and a receiver nothing types (a local, an
-      # instance variable, a no-argument method call on the implicit or `self` receiver). Every other receiver is
-      # taken as another module, every chain rooted at another constant or a literal among them
-      # (`Other.singleton_class`, `Other.new.class`, `"s".class`, `Other.dup`). The rule is syntactic: a constant
-      # naming an ancestor of the class (`Object.class_eval`) reads as another module too.
-      def own_module?(receiver, class_name)
+      # A `class_eval` receiver whose module is provably neither `class_name`, an ancestor of it nor an instance's
+      # singleton class, read from inside an instance body. A receiver chain is foreign only when it is:
+      #
+      # - rooted at a constant other than `class_name`'s own spelling and {ANCESTOR_ROOTS} (`Other.class_eval`,
+      #   `Other.dup`), a `X.new` or `Class.new` on such a constant among them, or rooted at a literal;
+      # - `.class` / `.singleton_class` on a receiver {.provably_other?} names (`Other.new.class`, `"s".class`,
+      #   `self.class.class`).
+      #
+      # A `superclass` call may answer an ancestor (`Other.superclass` is `Object`), and every other receiver
+      # (`self.class`, `singleton_class`, a parameter's `o.class`, `self.class.base_class`) may name `class_name`, so
+      # they keep the credit. Parentheses are looked through. The rule is syntactic: a constant naming another
+      # ancestor of the class (`Base.class_eval` with `K < Base`) reads as foreign.
+      def foreign_module?(receiver, class_name)
+        receiver = unwrap(receiver)
         case receiver
-        when Prism::ConstantReadNode, Prism::ConstantPathNode then own_class?(receiver, class_name)
-        when Prism::LocalVariableReadNode, Prism::InstanceVariableReadNode then true
-        when Prism::CallNode
-          return false unless receiver.arguments.nil? && receiver.block.nil?
-          return instance_self?(receiver.receiver) if MODULE_OF_INSTANCE.include?(receiver.name)
-          return true if receiver.name == :superclass
-
-          self_node?(receiver.receiver)
-        else false
+        when Prism::ConstantReadNode, Prism::ConstantPathNode
+          foreign_constant?(receiver, class_name) && !ANCESTOR_ROOTS.include?(receiver.slice.delete_prefix("::"))
+        when Prism::CallNode then foreign_module_call?(receiver, class_name)
+        else LITERALS.any? { |klass| receiver.is_a?(klass) }
         end
       end
 
-      # The implicit or `self` receiver, or `itself` on it.
-      def instance_self?(node)
-        return true if self_node?(node)
+      def foreign_module_call?(call, class_name)
+        return false if call.name == :superclass
+        if MODULE_OF_INSTANCE.include?(call.name) && call.arguments.nil? &&
+           provably_other?(unwrap(call.receiver), class_name)
+          return true
+        end
 
-        node.is_a?(Prism::CallNode) && node.name == :itself && self_node?(node.receiver) && node.arguments.nil?
+        foreign_module?(call.receiver, class_name)
+      end
+
+      # `node` with any parentheses around a single expression looked through.
+      def unwrap(node)
+        while node.is_a?(Prism::ParenthesesNode)
+          body = node.body
+          body = body.body.first if body.is_a?(Prism::StatementsNode) && body.body.size == 1
+          break if body.nil? || body.is_a?(Prism::StatementsNode)
+
+          node = body
+        end
+        node
       end
 
       def collect_define_method_blocks(node, found)

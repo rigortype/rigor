@@ -2,5 +2,5 @@
   - The shapes covered are `include(*MODS)`, `prepend(*MODS)`, `send(:include, *MODS)`, `include helper`, `include M1, helper`, `k.class_eval { include M }`, and an `extended` hook's `base.include(M)`.
   - Until Rigor records them, `self.include M` and a receiverless `send(:include, M)`, `public_send` or `__send__` are covered as well.
   - `Other.include(*MODS)` affects only `Other`.
-  - `include M; prepend M` still reports, because both modules are recorded.
+  - `include M; prepend M` still reports, because its module is recorded.
   - Calls on the class object still report. A splatted `extend(*MODS)` affects only the class object, as before.

@@ -1,0 +1,2 @@
+- **[environment]** A project `sig/` that redeclares a method Rigor's ActiveSupport overlay also declares, such as `Integer#ordinalize` or `ActiveSupport::NumericWithFormat#to_fs`, no longer collapses that class to `Dynamic[top]`. ([#2981](https://github.com/rigortype/rigor/pull/2981))
+  - The overlay's copy of each such method stands down and the project's declaration is used; `1.nope` reports again.

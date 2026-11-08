@@ -33,13 +33,16 @@ How far the chain follows it:
 ## Decision
 
 The envelope entry. `ResolutionChain::Builder` heads either name's chain with both names' entries, folds in both
-names' prepends, includes and extends, and keeps the superclass edge of the name asked about. The binding is direct
-only: two `Struct.new("Same", …)` writes are not bound to each other. The A/B shows +0.13% allocations.
+names' prepends, includes and extends, and keeps the superclass edge of the name asked about. A class with no bound
+name takes the original single-name path, so the A/B shows +0.00% allocations (+2,962). The override rules start past
+both names (`ResolutionChain#ancestors_start`), because a `def` under the other name is a redefinition, not an
+override. The binding is direct only: two `Struct.new("Same", …)` writes are not bound to each other.
 
 ## To undo
 
-Drop `record_struct_same_class` from `ScopeIndexer`, `same_class` from `ResolutionChain::Builder` (restoring
-`compute_instance` and `compute_singleton` to the single-name form), `ENVELOPE_SAME_CLASS_KIND` from `DiscoveryIndex`
+Drop `record_struct_same_class` from `ScopeIndexer`, the twin path from `ResolutionChain::Builder`
+(`same_class_twins`, `same_class_instance`, `same_class_singleton`), `ResolutionChain#ancestors_start` and its use in
+`CheckRules#overridden_ancestors_start`, `ENVELOPE_SAME_CLASS_KIND` from `DiscoveryIndex`
 and `Incremental::ENTRY_MARK_KINDS`, and the #2979 sentence in `docs/internal-spec/inference-engine.md`. The specs
 in `spec/integration/struct_named_same_class_spec.rb`, `spec/rigor/analysis/struct_same_class_incremental_spec.rb`
 and the #2979 rows of `rails_routes_plugin_spec.rb` would then report again.

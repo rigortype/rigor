@@ -1,3 +1,6 @@
-- **[plugin:activesupport-core-ext]** `to_fs` / `to_formatted_s` on Integer, Float and BigDecimal no longer report `call.undefined-method`, and `BigDecimal#precision`, `#scale`, `#precision_scale` and `#n_significant_digits` no longer do either. ([#2969](https://github.com/rigortype/rigor/issues/2969))
-  - The `to_fs` rows are declared in the core-ext plugin and in its auto-applied ActiveSupport overlay, so they answer whenever `activesupport` is locked; with no lock they still report.
-  - The four BigDecimal readers are declared in a Rigor core overlay that loads with no plugin, because rbs 4.2 and the bigdecimal gem's own `sig/` both omit them.
+- **[plugin:activesupport-core-ext]** `to_fs` / `to_formatted_s` on Integer, Float and BigDecimal no longer report `call.undefined-method` or an argument mismatch on correct calls, once ActiveSupport is locked. ([#2973](https://github.com/rigortype/rigor/pull/2973))
+  - Both are declared on `ActiveSupport::NumericWithFormat`, included into the three classes, so a project `sig/` that declares `Integer#to_fs` itself still wins instead of collapsing Integer.
+  - The options argument accepts any Hash, including one with String keys.
+  - With no activesupport lock they still report, as before.
+- **[rbs]** `BigDecimal#precision`, `#scale`, `#precision_scale` and `#n_significant_digits` no longer report `call.undefined-method`. ([#2973](https://github.com/rigortype/rigor/pull/2973))
+  - rbs 4.2 and the bigdecimal gem's own signatures both omit them, so Rigor declares them in a core overlay that loads whenever the bigdecimal library does, with no plugin needed.

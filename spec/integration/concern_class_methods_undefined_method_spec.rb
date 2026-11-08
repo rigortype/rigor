@@ -172,7 +172,7 @@ RSpec.describe "ActiveSupport::Concern class_methods macros and call.undefined-m
     end
 
     it "is the top-level ClassMethods when the concern has none" do
-      source = "module ClassMethods\n  def my_c(*n) = #{definer_body}\nend\nmodule Ct\n  extend ActiveSupport::Concern\n" \
+      source = "module ClassMethods\n  def my_c(*n) = #{definer_body}\nend\nmodule Ct\n  extend ActiveSupport::Concern\n  def ct_own = 1\n" \
                "end\nclass Ctc\n  include Ct\n  my_c :ct\nend\n"
       write_project(source, %w[Ctc.new.ct])
       expect(undefined_messages).to be_empty

@@ -1003,6 +1003,66 @@ RSpec.describe "plugins/rigor-rails-routes" do
       expect(unknown_helpers(files, paths: ["app/libs/child.rb"], signature_paths: ["sig"])).to be_empty
     end
 
+    it "stays quiet on names made by define_method, alias_method, alias, Struct and Data" do
+      files = {
+        "app/libs/notifier.rb" => <<~RUBY
+          class Notifier
+            define_method(:avatar_url) { "https://example.com/a.png" }
+            alias_method :home_path, :root_thing
+            alias site_url root_thing
+            Pair = Struct.new(:base_url)
+
+            def call = [avatar_url, home_path, site_url]
+          end
+
+          class Endpoint < Struct.new(:origin_url)
+            def go = origin_url
+          end
+
+          class Target < Data.define(:target_path)
+            def go = target_path
+          end
+
+          Endpoint2 = Struct.new(:block_url) do
+            def go = block_url
+          end
+
+          Point = Data.define(:point_path) do
+            def go = point_path
+          end
+        RUBY
+      }
+      expect(unknown_helpers(files, paths: ["app/libs/notifier.rb"])).to be_empty
+    end
+
+    it "stays quiet on a definer in another file or an included module" do
+      files = {
+        "app/libs/part.rb" => "class Split\n  define_method(:other_url) { 1 }\nend\n",
+        "app/libs/mixin.rb" => "module Mix\n  define_method(:mixed_url) { 1 }\nend\n",
+        "app/libs/split.rb" => "class Split\n  include Mix\n  def go = [other_url, mixed_url]\nend\n"
+      }
+      expect(unknown_helpers(files, paths: %w[app/libs/part.rb app/libs/mixin.rb app/libs/split.rb])).to be_empty
+    end
+
+    it "still reports an unknown name beside definers, including inside a Struct block" do
+      files = {
+        "app/libs/dyn.rb" => <<~RUBY
+          class Dyn
+            define_method(:ok_url) { 1 }
+            alias_method :al_path, :ok_url
+
+            def go = [ok_url, al_path, typo_url]
+          end
+
+          Rec = Struct.new(:member_url) do
+            def go = [member_url, rec_typo_url]
+          end
+        RUBY
+      }
+      expect(unknown_helpers(files, paths: ["app/libs/dyn.rb"]))
+        .to eq(["no route helper `typo_url`", "no route helper `rec_typo_url`"])
+    end
+
     it "still reports a `_path` name with no route and no method in a class with attr_readers" do
       files = {
         "app/libs/message.rb" => <<~RUBY

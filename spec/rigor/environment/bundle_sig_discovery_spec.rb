@@ -326,6 +326,19 @@ RSpec.describe Rigor::Environment::BundleSigDiscovery do
       )
       expect(result).to eq([])
     end
+
+    # Issue #2978 — the skip set is matched against the locked name, not a parse of the directory name, which reads
+    # `time-2fa-1.0` as the skipped `time`.
+    it "matches skip_gems against the locked name of a gem whose name holds -<digit>" do
+      bundle = File.join(tmpdir, "bundle")
+      make_bundle_layout(bundle, ["time-2fa", "1.0", "4.0.0"])
+      locked = { "time-2fa" => locked_gem_klass.new(name: "time-2fa", version: "1.0", platform: "ruby") }
+      result = described_class.discover(
+        bundle_path: bundle, project_root: tmpdir, auto_detect: false, locked_gems: locked
+      )
+      expect(result.map { |p| p.parent.basename.to_s }).to eq(["time-2fa-1.0"])
+      expect(described_class.locked_names_of(result, locked)).to eq(["time-2fa"])
+    end
   end
 
   describe "platform-suffixed gem dirs" do

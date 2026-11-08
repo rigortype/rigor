@@ -2,5 +2,3 @@
   - Both are declared on `ActiveSupport::NumericWithFormat`, included into the three classes, so a project `sig/` that declares `Integer#to_fs` itself still wins instead of collapsing Integer.
   - The options argument accepts any Hash, including one with String keys.
   - With no activesupport lock they still report, as before.
-- **[rbs]** `BigDecimal#precision`, `#scale`, `#precision_scale` and `#n_significant_digits` no longer report `call.undefined-method`. ([#2973](https://github.com/rigortype/rigor/pull/2973))
-  - rbs 4.2 and the bigdecimal gem's own signatures both omit them, so Rigor declares them in a core overlay that loads whenever the bigdecimal library does, with no plugin needed.

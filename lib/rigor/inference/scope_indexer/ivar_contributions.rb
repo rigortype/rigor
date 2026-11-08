@@ -104,8 +104,8 @@ module Rigor
         def any_ivar_types(owners, table)
           types = []
           owners.each do |owner|
-            # A guard: a String `class_eval` also marks its module open in the discovery index, whose edge re-checks the
-            # reader when one comes or goes; kept so the read states its own dependency.
+            # A guard: a String `class_eval` also gives its module the discovery index's dynamic mark, whose edge
+            # re-checks the reader when one comes or goes; kept so the read states its own dependency.
             if Analysis::DependencyRecorder.active?
               Analysis::DependencyRecorder.read_name(:own_write_type, "#{owner}##{IvarWriterCensus::ANY_IVAR}")
             end

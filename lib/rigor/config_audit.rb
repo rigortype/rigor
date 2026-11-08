@@ -5,6 +5,7 @@ require "did_you_mean"
 require_relative "config_path"
 require_relative "environment/rbs_collection_discovery"
 require_relative "flow_contribution/conflict"
+require_relative "library_probe"
 require_relative "signature_path_audit"
 # ADR-87 WD4 — only the pure rule-id table (`ALL_RULES` / `RULE_FAMILIES`) is needed, so require the light
 # `rule_ids.rb` rather than the engine-pulling `check_rules.rb`; keeps `config_audit` (loaded by every check)
@@ -132,21 +133,24 @@ module Rigor
 
     # `libraries:` entries RBS does not recognise, and — issue #2946 — `source: { type: stdlib }` entries of
     # the run's `rbs_collection.lock.yaml`, which load as libraries too ({Environment::BaseLibraries.resolve}). Uses the
-    # same `RBS::EnvironmentLoader#has_library?` guard the loader filters through
-    # ({Environment::RbsLoader} `build_env_for`), so a flagged name is exactly one the loader
-    # skipped; the `rbs` CLI warns on the same lockfile entry (`Collection::Sources::Stdlib#manifest_of`).
+    # same `RBS::EnvironmentLoader#has_library?` answer the loader filters through
+    # ({Environment::RbsLoader} `library_loader`), so a flagged name is one the loader skipped. A
+    # {Environment::RequiredFeatures::VENDORED_DIRS} name (`prime`) under `libraries:` is not audited: the
+    # configuration turns it into a vendored feature token the loader never asks `has_library?` about. A
+    # lockfile entry of that name is not a token, so it is still audited. The `rbs` CLI warns on the same
+    # lockfile entry (`Collection::Sources::Stdlib#manifest_of`).
     # Fails soft: if RBS itself raises, no warning rather than a crash.
     def self.library_warnings(configuration, project_root = Dir.pwd)
       lockfile = Environment::RbsCollectionDiscovery.stdlib_library_names(
         lockfile_path: configuration.rbs_collection_lockfile, project_root: project_root,
         auto_detect: configuration.rbs_collection_auto_detect
       )
-      named = Array(configuration.libraries).map { |lib| [:library, "libraries:", lib.to_s] } +
+      named = LibraryProbe.auditable(configuration.libraries).map { |lib| [:library, "libraries:", lib] } +
               lockfile.map { |name| [:rbs_collection_library, "rbs_collection.lock.yaml: stdlib entry", name] }
       return [] if named.empty?
 
-      loader = ::RBS::EnvironmentLoader.new
-      named.reject { |_, _, lib| loader.has_library?(library: lib, version: nil) }.map do |kind, source, lib|
+      available = LibraryProbe.predicate
+      named.reject { |_, _, lib| available.call(lib) }.map do |kind, source, lib|
         message = "#{source} #{lib.inspect} is not an available RBS library (no signatures loaded from it)"
         Warning.new(kind: kind, message: message, fields: { "name" => lib })
       end

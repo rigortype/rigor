@@ -995,7 +995,7 @@ module Rigor
                                                             call_node: call_node)
           return true if module_mixin_receiver?(receiver_type, scope)
           return true if mixin_self_class_receiver?(call_node, scope)
-          return true if unknown_mixin_includer?(class_name, scope, kind)
+          return true if unknown_mixin_includer?(class_name, scope, kind, call_node.name)
           return true if object_mixin_may_define?(receiver_type, class_name, call_node.name, scope)
           return true if ancestry_declares_method?(scope, class_name, call_node.name, kind)
           return true if open_names_through_ancestors?(scope, class_name, kind)
@@ -1561,18 +1561,32 @@ module Rigor
         # `dependency_recorder_spec` caught it here exactly as it caught #723's walk.
         #
         # A constant the environment does not know is read off the receiver's OWN includes only. Issue #2991 — a
-        # mixin no name spells (`include(*MODS)`, `include helper`, a hook's `base.include M`) opens the receiver when
-        # it sits anywhere on its instance-side chain, its own level or an ancestor's: the chain marks it
-        # (`ResolutionChain#unnamed_mixin?`), and any name may come from the unlisted module. So does an unrecorded
-        # `self.include M` or receiverless `send(:include, M)`, until the walk records them. A mixin whose ORDER alone
-        # is unknown (`include M; prepend M`) has every module recorded, so it opens nothing. A class-object receiver
-        # reads its singleton chain instead ({#singleton_mixin_may_answer?}).
-        def unknown_mixin_includer?(class_name, scope, kind)
+        # mixin no name spells (`include(*MODS)`, `include helper`) opens the receiver when it sits anywhere on its
+        # instance-side chain, its own level or an ancestor's: the chain marks it (`ResolutionChain#unnamed_mixin?`),
+        # and any name may come from the unlisted module. An unrecorded `self.include M`, receiverless
+        # `send(:include, M)` or hook's `base.include M` records `M` under no table but lists it on the chain
+        # (`ResolutionChain#listed_mixins`), so the receiver opens when such a module may define `method_name` (or is
+        # one the environment does not know), until the walk records them. A mixin whose ORDER alone is unknown
+        # (`include M; prepend M`) has every module recorded, so it opens nothing. A class-object receiver reads its
+        # singleton chain instead ({#singleton_mixin_may_answer?}).
+        def unknown_mixin_includer?(class_name, scope, kind, method_name)
           includes = scope.includes_of(class_name)
           return true if includes.any? { |raw| !known_mixin?(raw, class_name, scope) }
           return false if kind == :singleton
 
-          Scope::ResolutionChain.for(scope, class_name.to_s, :instance, :methods).unnamed_mixin?
+          chain = Scope::ResolutionChain.for(scope, class_name.to_s, :instance, :methods)
+          return true if chain.unnamed_mixin?
+
+          chain.listed_mixins.any? { |owner, raw| listed_mixin_may_define?(scope, owner, raw, method_name) }
+        end
+
+        def listed_mixin_may_define?(scope, owner, raw, method_name)
+          return true unless known_mixin?(raw, owner, scope)
+
+          scope.ancestor_name_candidates(owner, raw).any? do |candidate|
+            scope.discovered_method_through_ancestors?(candidate, method_name, :instance) ||
+              !Rigor::Reflection.instance_method_definition(candidate, method_name, scope: scope).nil?
+          end
         end
 
         def known_mixin?(raw_name, class_name, scope)

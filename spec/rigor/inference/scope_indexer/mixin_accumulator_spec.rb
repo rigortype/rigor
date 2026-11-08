@@ -237,21 +237,21 @@ RSpec.describe Rigor::Inference::ScopeIndexer::MixinAccumulator do
       expect(index_of(source).fetch(:extends).fetch("C", [])).not_to include("B")
     end
 
-    # Issue #2991 — an `include` / `prepend` on the hook parameter itself also lists "?" on the instance side: the
-    # includer gains a module no table records under it.
+    # Issue #2991 — an `include` / `prepend` on the hook parameter itself also lists its constant argument on the
+    # instance side: the includer gains a module no table records under it.
     it "taints the enclosing class for a call on a hook parameter", :aggregate_failures do
       both = { "Concern" => { include: ["*"], extend: ["*"] } }
-      unnamed = { "Concern" => { include: ["*", "?"], extend: ["*"] } }
+      named = { "Concern" => { include: ["*", "X"], extend: ["*"] } }
       {
-        "def self.included(base)\n    base.include X\n  end" => unnamed,
+        "def self.included(base)\n    base.include X\n  end" => named,
         "def self.included(base)\n    base.extend X\n  end" => both,
-        "def self.included(base)\n    base.prepend X\n  end" => unnamed,
+        "def self.included(base)\n    base.prepend X\n  end" => named,
         "def self.included(base)\n    base.singleton_class.include X\n  end" => both,
-        "def self.extended(base)\n    base.send(:include, X)\n  end" => unnamed,
-        "def self.prepended(base)\n    base.include X\n  end" => unnamed,
-        "def self.inherited(sub)\n    sub.include X\n  end" => unnamed,
-        "def self.included(base = nil)\n    base.include X\n  end" => unnamed,
-        "class << self\n    def included(base)\n      base.include X\n    end\n  end" => unnamed
+        "def self.extended(base)\n    base.send(:include, X)\n  end" => named,
+        "def self.prepended(base)\n    base.include X\n  end" => named,
+        "def self.inherited(sub)\n    sub.include X\n  end" => named,
+        "def self.included(base = nil)\n    base.include X\n  end" => named,
+        "class << self\n    def included(base)\n      base.include X\n    end\n  end" => named
       }.each do |hook, expected|
         expect(unpositioned("module Concern\n  #{hook}\nend\n")).to eq(expected), hook
       end

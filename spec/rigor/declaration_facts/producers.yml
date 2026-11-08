@@ -403,7 +403,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#gather_cvar_writes: grandfathered
     Rigor::Inference::ScopeIndexer#gather_global_writes: grandfathered
     Rigor::Inference::ScopeIndexer#gather_ivar_writes: grandfathered
-    Rigor::Inference::ScopeIndexer#instance_mixin_call?: 'issue #2991, reads whether an unrecorded mixin call is an include / prepend on a receiver other than a singleton_class call; it reads a call''s shape and decides no owner or side'
+    Rigor::Inference::ScopeIndexer#taint_unrecorded_mixin: 'issue #2991, taints the sides an unrecorded mixin call reshapes, on the owners {#mixin_effects} already resolved, listing the unnamed marker or the constant arguments on the :include side; it reads a call''s shape and derives no declaration context'
     Rigor::Inference::ScopeIndexer#instance_mixin_recorded?: writes one instance-side mixin call into the include/prepend accumulator under the owner the walk passes in; it computes no declaration context
     Rigor::Inference::ScopeIndexer#ivar_write_targets: grandfathered
     Rigor::Inference::ScopeIndexer#loose_constant_segments: A6 (#1749), the last segments of the constants a file binds by `||=`, a literal `const_set` or any write in a `class << …` body, for whether a `refine` target names a class the constant census cannot; it reads each singleton class body only for the constants it writes and decides no declaration context

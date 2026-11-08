@@ -7520,18 +7520,28 @@ module Rigor
         return if effects.empty?
         return if instance_mixin_recorded?(node, view, qualified_prefix, current_class, accumulator)
 
-        # A mixin call the tables cannot hold still reshapes the ancestry: taint the whole owner side. Issue #2991 — it
-        # recorded no module under any name (`include(*MODS)`, `include helper`, `base.include M`, and, until they are
-        # recorded, `self.include M` and a receiverless `send(:include, M)`), so the instance side's SET is unknown too.
-        unnamed = instance_mixin_call?(node, kind)
-        effects.each { |owner, side| accumulator.taint(owner, side, unnamed: unnamed && side == :include) }
+        # A mixin call the tables cannot hold still reshapes the ancestry: taint the whole owner side.
+        taint_unrecorded_mixin(node, kind, view[1], effects, accumulator)
       end
 
-      # Issue #2991 — whether an unrecorded mixin call mixes into an instance side: an `include` / `prepend` whose
-      # receiver is not a `singleton_class` call. A hook's `base.extend M` or `base.singleton_class.include M` still
-      # taints the enclosing class's instance side (it may be the includer), but mixes nothing into it.
-      def instance_mixin_call?(node, kind)
-        INSTANCE_MIXIN_NAMES.include?(kind) && !singleton_class_eval_receiver?(node.receiver)
+      # Issue #2991 — an unrecorded `include` / `prepend` that reaches the instance side (its receiver is not a
+      # `singleton_class` call) leaves that side's module SET unknown when an argument is not a constant
+      # (`include(*MODS)`, `include helper`), which lists {MixinAccumulator::UNNAMED}. When every argument is a constant
+      # (`self.include M`, a receiverless `send(:include, M)`, a hook's `base.include M`) the set is known but no table
+      # records it under the owner, so the names are listed after the wildcard for the reader to ask. A
+      # `Module.new { … }` argument keeps its #2975 reading and lists nothing. A hook's `base.extend M` or
+      # `base.singleton_class.include M` taints the instance side's order alone: it mixes nothing into it.
+      def taint_unrecorded_mixin(node, kind, arguments, effects, accumulator)
+        unnamed = false
+        names = nil
+        if INSTANCE_MIXIN_NAMES.include?(kind) && !singleton_class_eval_receiver?(node.receiver)
+          names = arguments.filter_map { |arg| Source::ConstantPath.qualified_name(arg) }
+          unnamed = arguments.any? { |arg| Source::ConstantPath.qualified_name(arg).nil? && !module_new_call?(arg) }
+        end
+        effects.each do |owner, side|
+          instance = side == :include
+          accumulator.taint(owner, side, unnamed: unnamed && instance, names: instance && !unnamed ? names : nil)
+        end
       end
 
       # Records the instance-side edges of a call {#mixin_call_recorded?} accepts. False when it recorded
@@ -8169,7 +8179,7 @@ module Rigor
         return if singleton_class_rewrite_tainted?(node, qualified_prefix, current_class, accumulator,
                                                    in_singleton: in_singleton)
 
-        kind, _arguments, via_send = mixin_call_view(node)
+        kind, arguments, via_send = mixin_call_view(node)
         return if kind.nil?
 
         effects = mixin_effects(node, kind, qualified_prefix, current_class, accumulator, in_singleton: in_singleton)
@@ -8179,9 +8189,8 @@ module Rigor
                                                          in_singleton)
 
         # Issue #2991 — as in {#record_mixin_call}: an unrecorded instance-side call (a hook's `base.include M` written
-        # in `class << self`) leaves the set unknown.
-        unnamed = instance_mixin_call?(node, kind)
-        effects.each { |owner, side| accumulator.taint(owner, side, unnamed: unnamed && side == :include) }
+        # in `class << self`) lists its names, or the unnamed marker.
+        taint_unrecorded_mixin(node, kind, arguments, effects, accumulator)
       end
 
       # Issue #1752 — a call that rewrites a singleton class reached through `singleton_class` (`singleton_class.

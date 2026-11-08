@@ -12,7 +12,7 @@ The fix records a second marker, `"?"`, beside the `"*"` taint on a mixin side, 
 the module. `spec/rigor/declaration_facts/producers_spec.rb` flags any method that spells a mixin side or kind
 (`:include`, `%i[include prepend]`) as a possible declaration producer. Four methods now do that:
 
-- `ScopeIndexer#instance_mixin_call?` and `#block_mixes_into_self?` are new.
+- `ScopeIndexer#taint_unrecorded_mixin` and `#block_mixes_into_self?` are new.
 - `MixinAccumulator#note` now passes `side == :include`.
 - `ResolutionChain::Builder#extend_hook_taint` replaces `extend_hook_taint?` and reads the extended module's
   `:include` list.

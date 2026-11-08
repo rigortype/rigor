@@ -1,15 +1,16 @@
 # frozen_string_literal: true
 
-# Issue #2991 — a splatted `include(*MODS)` / `prepend(*MODS)`, or any other mixin call the walk records no module
-# for, means every name on the class's instance side may come from that module: `call.undefined-method` must not
+# Issue #2991 — a splatted `include(*MODS)` / `prepend(*MODS)`, or any other mixin call whose module no constant
+# names, means every name on the class's instance side may come from that module: `call.undefined-method` must not
 # fire on the class, nor on a subclass at any depth. `Scope::ResolutionChain` marks such a chain (`unnamed_mixin?`),
-# and the rule reads that mark. `self.include M1` and a receiverless `send(:include, M1)` are such calls until the
-# walk records them. A mixin whose order alone is unknown (`include M1; prepend M1`, an opaque eval that mixes nothing
-# into its own `self`, the `wildcard_mixin?` mark) has its modules recorded and must keep reporting. `sig/` declares
-# every class so the rule runs. `Sup` defines a method of its own, so it is a project entry on its subclasses'
-# chains, not an external one (#2094), which already stands down on another route. Every row's Ruby behaviour was
-# witnessed on Ruby 4.0.5: each quiet call returns 1, and each reported call raises `NoMethodError`. The
-# literal-include row is a must-still-fire guard.
+# and the rule reads that mark. `self.include M1` and a receiverless `send(:include, M1)` record no module either,
+# until the walk records them, so the chain lists their constants (`listed_mixins`) and the rule asks those for the
+# called name. A mixin whose order alone is unknown (`include M1; prepend M1`, an opaque eval that mixes nothing into
+# its own `self`, the `wildcard_mixin?` mark) has its modules recorded and must keep reporting. `sig/` declares every
+# class so the rule runs. `Sup` defines a method of its own, so it is a project entry on its subclasses' chains, not
+# an external one (#2094), which already stands down on another route. Every row's Ruby behaviour was witnessed on
+# Ruby 4.0.5: each quiet call returns 1, and each reported call raises `NoMethodError`. The literal-include row is a
+# must-still-fire guard.
 
 require "spec_helper"
 require "fileutils"
@@ -101,6 +102,17 @@ RSpec.describe "a class whose instance-side chain holds a splatted mixin (#2991)
   end
 
   describe "a mixin whose order alone is unknown" do
+    it "still fires on a subclass of `self.include M1` for a method M1 does not define" do
+      source = "#{mods}class SI\n  self.include M1\n  def t = 1\nend\nclass SISub < SI\n  def u = self.m2\nend\n"
+      expect(undefined_messages({ "a.rb" => source }, "class SI\nend\nclass SISub < SI\nend\n"))
+        .to eq(["undefined method `m2' for SISub"])
+    end
+
+    it "still fires on a receiverless `send(:include, Comparable)` for a method Comparable does not define" do
+      source = "class SndC\n  send(:include, Comparable)\n  def w = self.zz\nend\n"
+      expect(undefined_messages({ "a.rb" => source }, "class SndC\nend\n")).to eq(["undefined method `zz' for SndC"])
+    end
+
     it "still fires on `include M1; prepend M1`" do
       source = "#{mods}class IP\n  include M1\n  prepend M1\n  def w = self.m2\nend\n"
       expect(undefined_messages({ "a.rb" => source }, "class IP\nend\n")).to eq(["undefined method `m2' for IP"])

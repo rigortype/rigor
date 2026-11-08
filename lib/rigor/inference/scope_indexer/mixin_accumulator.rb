@@ -27,11 +27,13 @@ module Rigor
       #
       # Issue #2991 — {WILDCARD} says only that the ORDER is unknown: `include M; prepend M`, an edge recorded where its
       # position is not a fact, and an opaque eval whose block mixes nothing into its own `self` all set it while every
-      # module is recorded. Where the walk recorded no module under any name, the instance side also lists {UNNAMED},
-      # always beside {WILDCARD}, because its SET of modules is unknown too. That covers every instance-side mixin call
-      # it could not record (`include helper`, `include(*MODS)`, `base.include M`, and `self.include M` and a
-      # receiverless `send(:include, M)` until they are recorded), a name beside one it cannot name (`include M, h`),
-      # and an opaque eval whose block mixes into its own `self`.
+      # module is recorded. Where the walk recorded no module under any name, the instance side also lists
+      # {UNNAMED}, always beside {WILDCARD}, because its SET of modules is unknown too. That covers an instance-side
+      # mixin call it could not record whose argument is not a constant (`include helper`, `include(*MODS)`; a
+      # `Module.new { … }` argument keeps its #2975 reading), a name beside one it cannot name (`include M, h`), and
+      # an opaque eval whose block mixes into its own `self`. An unrecorded call whose arguments are all constants
+      # (`self.include M`, a receiverless `send(:include, M)`, a hook's `base.include M`) lists those names after
+      # {WILDCARD} instead: the set is known, but no table records it under the owner.
       #
       # The value is `{owner => {include: [names], extend: [names]}}`. `:include` is the instance side
       # (`include` and `prepend`), `:extend` the singleton side (`extend`, and `include` / `prepend` inside
@@ -132,8 +134,11 @@ module Rigor
         end
 
         # Names `owner`'s `side` as having no known order; `unnamed` also as holding a module no name spells.
-        def taint(owner, side, unnamed: false)
+        # `names` are the constants an unrecorded call mixed in (`self.include M`, #2991), listed after {WILDCARD}
+        # so a reader can ask them for a method the tables do not record under the owner.
+        def taint(owner, side, unnamed: false, names: nil)
           add(owner, side, unnamed ? UNNAMED_LIST : WILDCARD_LIST)
+          add(owner, side, names) if names && !names.empty?
         end
 
         # `{owner => {side => [names]}}`, frozen, each list de-duplicated.

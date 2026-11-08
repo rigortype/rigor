@@ -170,6 +170,18 @@ module Rigor
       # prepend M` taints the order alone.
       def unnamed_mixin? = @marks.any? { |mark| mark.listed.include?(Relevance::UNNAMED) }
 
+      # Issue #2991 — `[[node, raw], …]`: the module names the chain's marks list beside the wildcard, each with the
+      # class or module it was written on. An unrecorded `self.include M` or receiverless `send(:include, M)` lists `M`
+      # here and in no include table, so a reader that asks the tables for a method also asks these.
+      def listed_mixins
+        @memo[:listed_mixins] ||= @marks.flat_map do |mark|
+          mark.listed.filter_map { |raw| [mark.node, raw] unless MARKERS.include?(raw) }
+        end.uniq.freeze
+      end
+
+      MARKERS = ["*", "?"].freeze # Relevance::WILDCARD and Relevance::UNNAMED
+      private_constant :MARKERS
+
       # The ONE decision every first-definer reader makes: does `answer`, read off this chain, stand, or does
       # the reader answer what the walk this chain replaced answered ({MasterOrder})? Returns `:chain` or
       # `:master`.
@@ -1154,27 +1166,23 @@ module Rigor
         CLASS_FIRST = [0, 1].freeze
         private_constant :CLASS_FIRST
 
-        WILDCARD_LIST = ["*"].freeze # Relevance::WILDCARD, which loads after this file
-        UNNAMED_LIST = ["*", "?"].freeze # with Relevance::UNNAMED
-        private_constant :WILDCARD_LIST, :UNNAMED_LIST
-
         # #1730 — whether a module `name` extends has a hook that may mix into `name`'s instance side or its
         # includers' ({ResolutionChain.extend_reshapes_instance?}). Ruby runs it at the `extend`, so the mixin is
         # not a fact of the tables and `name`'s instance side is unpositioned. A spelling no project module
         # answers taints nothing: the project cannot see its hooks.
         #
-        # The mark's list: nil when no extended module taints, else {UNNAMED_LIST} when one of the hooks' modules
-        # mixes in a module no name spells (#2991), {WILDCARD_LIST} when they only leave the order unknown.
+        # The mark's list: nil when no extended module taints, else the union of those modules' own `:include` lists,
+        # each holding `"*"`, so the `"?"` marker and the names an unrecorded hook call mixed in (#2991) carry over.
         def extend_hook_taint(name)
           found = nil
           (@discovery.discovered_extends[name] || EMPTY).each do |raw|
             resolved = @resolver.resolve_one(name, raw)
             next if resolved.nil? || !ResolutionChain.extend_reshapes_instance?(@scope, resolved)
-            return UNNAMED_LIST if @discovery.unpositioned_mixins[resolved]&.dig(:include)&.include?(UNNAMED_LIST.last)
 
-            found = WILDCARD_LIST
+            listed = @discovery.unpositioned_mixins[resolved][:include]
+            found = found ? (found | listed) : listed
           end
-          found
+          found&.frozen? ? found : found&.dup&.freeze
         end
 
         def multi_file?(name)

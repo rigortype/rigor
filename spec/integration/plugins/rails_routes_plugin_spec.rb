@@ -1094,6 +1094,26 @@ RSpec.describe "plugins/rigor-rails-routes" do
         .to eq(%w[t1_url t2_path t3_url t4_url].map { |n| "no route helper `#{n}`" })
     end
 
+    it "resolves a Struct block written through a rooted or foreign-owner path inside a class" do
+      files = {
+        "app/libs/paths.rb" => <<~RUBY
+          module Outer; end
+
+          class Foo
+            ::R = Struct.new(:r_url) do
+              def go = [r_url, t1_url]
+            end
+
+            Outer::W = Struct.new(:w_url) do
+              def go = [w_url, t2_url]
+            end
+          end
+        RUBY
+      }
+      expect(unknown_helpers(files, paths: ["app/libs/paths.rb"]).sort)
+        .to eq(%w[t1_url t2_url].map { |n| "no route helper `#{n}`" })
+    end
+
     it "still reports a `_path` name with no route and no method in a class with attr_readers" do
       files = {
         "app/libs/message.rb" => <<~RUBY

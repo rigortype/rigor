@@ -207,7 +207,9 @@ module Rigor
           return [local.delete_prefix("::")] if local.start_with?("::")
 
           prefixes = owner_index ? owner_names(ancestors, owner_index) : [""]
-          prefixes.map { |prefix| prefix.empty? ? local : "#{prefix}::#{local}" }
+          nested = prefixes.map { |prefix| prefix.empty? ? local : "#{prefix}::#{local}" }
+          # `Outer::R = …` resolves `Outer` lexically or at the root, as a compact `class Foo::Bar` does.
+          written.is_a?(Prism::ConstantPathWriteNode) ? (nested + [local]).uniq : nested
         end
 
         def member_class_call?(node)

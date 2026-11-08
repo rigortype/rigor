@@ -112,6 +112,22 @@ module Rigor
         end
       end
 
+      # Issue #2971 — the locked gem names `sig_dirs` (a {.discover} result) belong to, keyed the way {.discover}
+      # filters: a rubygems-layout directory by `<name>-<version>[-<platform>]` against the locked variants, a git
+      # layout by a git-sourced locked entry of that name. Unlike {.gem_name_from_sig_path} it never truncates a
+      # name that holds a `-<digit>` (`foo-2fa-1.0` is `foo-2fa`, not `foo`).
+      def self.locked_names_of(sig_dirs, locked_gems)
+        return [] if locked_gems.nil? || locked_gems.empty?
+
+        dirs = sig_dirs.reject { |dir| git_sourced_layout?(dir) }.to_set { |dir| dir.parent.basename.to_s }
+        git = sig_dirs.select { |dir| git_sourced_layout?(dir) }.map { |dir| gem_name_from_sig_path(dir) }
+        locked_gems.each_value.filter_map do |locked|
+          name = locked.name
+          git_hit = git.include?(name) && locked.git_source
+          name if git_hit || expected_gem_dirs({ name => locked }).intersect?(dirs)
+        end
+      end
+
       # `{name => LockedGem}` → set of canonical bundler gem directory basenames. Pure-Ruby gems install as
       # `<name>-<version>`; platform-specific gems install as `<name>-<version>-<platform>` (e.g.
       # `ffi-1.17.4-aarch64-linux-gnu`). Lockfile platform `"ruby"` is the pure-Ruby case; any other value is

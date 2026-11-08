@@ -102,6 +102,22 @@ module Rigor
         end.uniq
       end
 
+      # Issue #2971 — the `name` of every lockfile entry that is NOT a `stdlib` source and whose
+      # `<root>/<name>/<version>/` directory exists: the gems whose signatures come from the collection ({.discover}).
+      # The `libraries:` audit uses it so a name the collection provides is not reported as an unknown RBS library.
+      # A pure file read, like {.stdlib_library_names}.
+      def self.collection_gem_names(lockfile_path:, project_root: Dir.pwd, auto_detect: true)
+        resolved = resolve_lockfile_path(lockfile_path: lockfile_path, project_root: project_root,
+                                         auto_detect: auto_detect)
+        return [] if resolved.nil?
+
+        data = read_lockfile_yaml(resolved)
+        return [] if data.nil?
+
+        collection_root = resolve_collection_root(resolved, data)
+        gem_paths_from(collection_root, data, Set.new).map { |dir| dir.parent.basename.to_s }.uniq
+      end
+
       # Returns the resolved lockfile path (`Pathname`) or `nil` when neither explicit nor auto-detect
       # produces one. Public so the stats banner can surface what rigor found.
       def self.resolve_lockfile_path(lockfile_path:, project_root: Dir.pwd, auto_detect: true)

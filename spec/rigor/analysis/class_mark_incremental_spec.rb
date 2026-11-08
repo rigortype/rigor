@@ -171,6 +171,41 @@ RSpec.describe "class marks — incremental" do
     it_behaves_like "a mark-only file", reported_without_mark: [["use.rb", 1]]
   end
 
+  # Issue #2975 — definers in a file of their own: a computed-definer macro patched onto `Module`, one a
+  # `singleton_class.class_eval` body defines, and a literal `Other.define_method(:x)` from a file that does not
+  # declare `Other`.
+  describe "a further class macro or literal definer in another file" do
+    def configuration(dir) = Rigor::Configuration.new("paths" => [dir], "signature_paths" => [dir])
+    def shared_environment = nil
+
+    def definer = "n.each { |x| define_method(x) { x } }"
+
+    describe "a macro patched onto Module" do
+      let(:base) do
+        { "mp.rb" => "class Mp\n  my_mod_attr :foo\nend\n", "mp.rbs" => "class Mp\nend\n", "use.rb" => "Mp.new.foo\n" }
+      end
+      let(:mark) { "class Module\n  def my_mod_attr(*n) = #{definer}\nend\n" }
+
+      it_behaves_like "a mark-only file", reported_without_mark: [["use.rb", 1]]
+    end
+
+    describe "a macro a singleton_class.class_eval body defines" do
+      let(:base) do
+        { "sc.rb" => "class Sc\n  my_sc :foo\nend\n", "sc.rbs" => "class Sc\nend\n", "use.rb" => "Sc.new.foo\n" }
+      end
+      let(:mark) { "class Sc\n  singleton_class.class_eval { def my_sc(*n) = #{definer} }\nend\n" }
+
+      it_behaves_like "a mark-only file", reported_without_mark: [["use.rb", 1]]
+    end
+
+    describe "a literal define_method on a constant receiver" do
+      let(:base) { { "ot.rb" => "class Ot\nend\n", "ot.rbs" => "class Ot\nend\n", "use.rb" => "Ot.new.foo\n" } }
+      let(:mark) { "class OtHost\n  Ot.define_method(:foo) { 1 }\nend\n" }
+
+      it_behaves_like "a mark-only file", reported_without_mark: [["use.rb", 1]]
+    end
+  end
+
   # Issue #1833 — a dynamic mark on a NAMESPACE CANDIDATE of the superclass written in a `class Sub < Foo` header.
   # Inside `module N`, the walker records `module N; Foo.send(:define_method, …); end` on BOTH `N::Foo` and `Foo`,
   # and the `:arity` resolver resolves `Foo` to `N::Foo` first because its bucket now `declares_surface?`. `N::Foo`

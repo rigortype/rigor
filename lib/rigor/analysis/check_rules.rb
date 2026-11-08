@@ -1038,19 +1038,36 @@ module Rigor
         # superclass's or an extended module's, which runs `define_method` under a name no table holds. The first
         # entry on that chain carrying the macro's definer entry answers; a closer override that defines nothing is
         # not looked for, so it leaves the class open.
+        #
+        # Issue #2975 — the definer entry carries its side: the class's own singleton entry answers with a singleton
+        # method (`def self.my_attr`), an extended module's entry with an instance method, so an instance `def my_attr`
+        # of the class itself opens nothing. A macro patched onto `Module` (or `Class`, `Object`, `Kernel`,
+        # `BasicObject`) as an instance method is on every class object's singleton chain past its own classes.
         def computed_definer_called?(scope, name, bucket)
           bucket.each_key.any? do |key|
             next false unless key.is_a?(Array) && key.first == Scope::DiscoveryIndex::ENVELOPE_BODY_CALL_KIND
 
-            definer = [Scope::DiscoveryIndex::ENVELOPE_COMPUTED_DEFINER_KIND, key.last]
             chain = Scope::ResolutionChain.for(scope, name.to_s, :singleton, :methods)
-            !chain.search(scope) { |entry| macro_entry_defines?(scope, entry, definer) }.nil?
+            !chain.search(scope) { |entry| macro_entry_defines?(scope, entry, key.last) }.nil? ||
+              universal_macro_defines?(scope, key.last)
           end
         end
 
         # A macro's owner holds the macro's `def`, so it is never an external entry.
-        def macro_entry_defines?(scope, entry, definer)
-          !entry.external? && scope.parameter_envelopes_of(entry.name).key?(definer)
+        def macro_entry_defines?(scope, entry, macro)
+          !entry.external? &&
+            scope.parameter_envelopes_of(entry.name).key?([Scope::DiscoveryIndex::ENVELOPE_COMPUTED_DEFINER_KIND,
+                                                           entry.side, macro])
+        end
+
+        # The classes past a class object's own singleton chain, whose instance methods it answers. A module's chain
+        # does not reach `Class`, but a module body calling a `Class` macro raises as it loads, so it is not told apart.
+        UNIVERSAL_MACRO_OWNERS = %w[Class Module Object Kernel BasicObject].freeze
+        private_constant :UNIVERSAL_MACRO_OWNERS
+
+        def universal_macro_defines?(scope, macro)
+          definer = [Scope::DiscoveryIndex::ENVELOPE_COMPUTED_DEFINER_KIND, :instance, macro]
+          UNIVERSAL_MACRO_OWNERS.any? { |owner| scope.parameter_envelopes_of(owner).key?(definer) }
         end
 
         # Issue #1722 — a `method_missing`, or a project mixin, on one of the class's RBS ancestors

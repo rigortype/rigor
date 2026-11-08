@@ -1,0 +1,3 @@
+- **[check]** `call.undefined-method` and rails-routes' `unknown-helper` no longer fire across the two names of `K = Struct.new("Named", …)`. ([#2990](https://github.com/rigortype/rigor/pull/2990))
+  - In Ruby `K` and `Struct::Named` are one class, so a method defined in the block, in a `class K` reopening or in a `class Struct::Named` reopening is now found under either name, mixins included.
+  - Two `Struct.new("Named", …)` writes still make two separate classes for the constants.

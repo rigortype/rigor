@@ -1030,7 +1030,7 @@ module Rigor
                 (side == :instance && computed_definer_called?(scope, name, bucket))
             end
           end
-          !found.nil?
+          !found.nil? || (side == :instance && hook_block_macro_defines?(scope, class_name))
         end
 
         # Issue #2901 — the body of `name` calls, on `self`, a method its singleton chain resolves to a computed
@@ -1063,19 +1063,57 @@ module Rigor
         # edge for it. Ruby runs the hook for the direct includer only, so a module included through another module does
         # not count; the chain's levels flatten a class's transitive mixins, so each level class's own mixin list is
         # read, one hop, never followed further. Each mixin and each extended constant resolves to the first candidate
-        # the project declares, the innermost cref first, whether or not RBS declares the modules.
+        # the project declares, the innermost cref first, whether or not RBS declares the modules; a concern's
+        # `ClassMethods` resolves as `const_get` does instead (#2986).
         def hook_extended_macro_defines?(scope, name, macros)
-          definers = macros.map { |macro| [Scope::DiscoveryIndex::ENVELOPE_COMPUTED_DEFINER_KIND, :instance, macro] }
+          definers = macro_definers(macros)
+          direct_hook_mixins(scope, name).any? { |mixin, _edges| hook_extension_defines?(scope, mixin, definers) }
+        end
+
+        # Issue #2986 — an ActiveSupport::Concern's `included do … end` block runs in the class body of a class that
+        # includes the concern directly, and its `prepended do … end` block in one that prepends it, so a macro call
+        # in the block is read as that class's own, against the module the concern extends it with. A call in the
+        # concern's own module body is no includer's: Ruby raises there as the module loads.
+        def hook_block_macro_defines?(scope, class_name)
+          direct_hook_mixins(scope, class_name).any? do |mixin, edges|
+            macros = scope.parameter_envelopes_of(mixin).each_key.filter_map do |key|
+              key[2] if key.is_a?(Array) && key.first == Scope::DiscoveryIndex::ENVELOPE_HOOK_BODY_CALL_KIND &&
+                        edges.include?(key[1])
+            end
+            !macros.empty? && hook_extension_defines?(scope, mixin, macro_definers(macros))
+          end
+        end
+
+        def macro_definers(macros)
+          macros.map { |macro| [Scope::DiscoveryIndex::ENVELOPE_COMPUTED_DEFINER_KIND, :instance, macro] }
+        end
+
+        # Each module a class on `name`'s superclass chain includes or prepends directly, resolved, with the hook
+        # blocks its edges run: `:included` for an `include`, `:prepended` for a `prepend`.
+        def direct_hook_mixins(scope, name)
           chain = Scope::ResolutionChain.for(scope, name.to_s, :instance, :methods)
           chain.record(scope) if Analysis::DependencyRecorder.active?
-          chain.level_classes.compact.any? do |klass|
-            scope.includes_of(klass).any? do |raw|
+          chain.level_classes.compact.flat_map do |klass|
+            mixins = scope.includes_of(klass)
+            prepends = scope.prepends_of(klass)
+            mixins.uniq.filter_map do |raw|
               mixin = declared_constant(scope, klass, raw)
-              mixin && hook_extends(scope, mixin).any? do |extended|
-                target = declared_constant(scope, mixin, extended)
-                target && definers.any? { |definer| scope.parameter_envelopes_of(target).key?(definer) }
-              end
+              next unless mixin
+
+              edges = []
+              edges << :prepended if prepends.include?(raw)
+              edges << :included if mixins.count(raw) > prepends.count(raw)
+              [mixin, edges]
             end
+          end
+        end
+
+        def hook_extension_defines?(scope, mixin, definers)
+          hook_extends(scope, mixin).any? do |written, lookup|
+            target = if lookup == :const_get then const_get_constant(scope, mixin, written)
+                     else declared_constant(scope, mixin, written)
+                     end
+            target && definers.any? { |definer| scope.parameter_envelopes_of(target).key?(definer) }
           end
         end
 
@@ -1087,9 +1125,21 @@ module Rigor
           candidates.find { |candidate| scope.known_user_class?(candidate) }
         end
 
+        # Issue #2986 — `owner.const_get(raw)`, as `Concern#append_features` looks `ClassMethods` up: `owner` and its
+        # ancestors, then `Object`, never the namespaces enclosing `owner`.
+        def const_get_constant(scope, owner, raw)
+          chain = Scope::ResolutionChain.for(scope, owner, :instance, :methods)
+          found = chain.search(scope) do |entry|
+            names = entry.external? ? entry.candidates : [entry.name]
+            names.map { |name| "#{name}::#{raw}" }.find { |candidate| scope.known_user_class?(candidate) }
+          end
+          found || (raw if scope.known_user_class?(raw))
+        end
+
+        # The `[written, lookup]` pairs of a module's hook-extend entries; `lookup` is `:const_get` for a concern's.
         def hook_extends(scope, owner)
           scope.parameter_envelopes_of(owner).each_key.filter_map do |key|
-            key.last if key.is_a?(Array) && key.first == Scope::DiscoveryIndex::ENVELOPE_HOOK_EXTEND_KIND
+            key[1, 2] if key.is_a?(Array) && key.first == Scope::DiscoveryIndex::ENVELOPE_HOOK_EXTEND_KIND
           end
         end
 

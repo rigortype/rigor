@@ -370,6 +370,7 @@ module Rigor
     def data_member_layout: (String | Symbol class_name) -> Array[Symbol]?
     def struct_member_layout: (String | Symbol class_name) -> { members: Array[Symbol], keyword_init: bool }?
     def includes_of: (String | Symbol class_name) -> Array[String]
+    def prepends_of: (String | Symbol class_name) -> Array[String]
     # sig-gen gap: #2302 — `names = []` grown by `concat` reads `Array[untyped]`, so the element type is
     # hand-written, matching {#includes_of}.
     def singleton_extends_of: (String | Symbol class_name) -> Array[String]

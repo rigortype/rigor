@@ -272,13 +272,21 @@ module Rigor
       # Issue #2975 — `[ENVELOPE_HOOK_EXTEND_KIND, "ClassMethods"]` says the module's `self.included(base)` (or
       # `self.prepended(base)`) hook runs `base.extend(ClassMethods)`, the constant as written: an includer's
       # singleton chain then reaches `ClassMethods`, whose computed definers its body calls may resolve to.
+      #
+      # Issue #2986 — an `extend ActiveSupport::Concern` module records `[ENVELOPE_HOOK_EXTEND_KIND, "ClassMethods",
+      # :const_get]`: `Concern#append_features` extends its includer with `const_get(:ClassMethods)`, which searches the
+      # module, its ancestors and `Object`, not the lexical scope. A `[ENVELOPE_HOOK_BODY_CALL_KIND, hook, name]` entry
+      # says its `included do … end` (`hook` `:included`) or `prepended do … end` (`:prepended`) block calls `name` on
+      # `self`, which Ruby runs in the class body of a class that includes (or prepends) the module directly. It is
+      # filed only on the module whose body the walk is in, so it is not one of `Incremental`'s diffed class-mark kinds.
       ENVELOPE_HOOK_EXTEND_KIND = :hook_extend
+      ENVELOPE_HOOK_BODY_CALL_KIND = :hook_body_call
       # Issue #2979 — `[ENVELOPE_SAME_CLASS_KIND, "Struct::Named"]` on `K`'s bucket, and its mirror on
       # `Struct::Named`'s, say that `K = Struct.new("Named", …)` binds both constants to one class object: the method
       # chain of either name reads the other's tables at its own position ({.same_class_names}). It names no member.
       ENVELOPE_SAME_CLASS_KIND = :same_class
       MACRO_KINDS = [ENVELOPE_BODY_CALL_KIND, ENVELOPE_COMPUTED_DEFINER_KIND, ENVELOPE_HOOK_EXTEND_KIND,
-                     ENVELOPE_SAME_CLASS_KIND].freeze
+                     ENVELOPE_HOOK_BODY_CALL_KIND, ENVELOPE_SAME_CLASS_KIND].freeze
       private_constant :MACRO_KINDS
 
       NO_NAMES = [].freeze

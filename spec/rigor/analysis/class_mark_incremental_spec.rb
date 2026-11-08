@@ -209,6 +209,22 @@ RSpec.describe "class marks — incremental" do
       it_behaves_like "a mark-only file", reported_without_mark: [["use.rb", 1]]
     end
 
+    # Issue #2986 — guard: the mark file adds only a hook-body-call entry (the base file's concern already records the
+    # hook-extend entry, which the reopening's `extend` records again unchanged). The entry is not a diffed class mark:
+    # it is only ever filed on the module whose own body the file opens, so the class edge on that module re-checks
+    # the consumer, and this row passes without it.
+    describe "a concern's included block that calls a class_methods macro" do
+      let(:base) do
+        { "cn.rb" => "module Cn2\n  extend ActiveSupport::Concern\n  class_methods do\n    " \
+                     "def my_c(*n) = #{definer}\n  end\nend\n",
+          "cn.rbs" => "module Cn2\nend\n", "cu.rb" => "class Cu2\n  include Cn2\nend\n",
+          "cu.rbs" => "class Cu2\nend\n", "use.rb" => "Cu2.new.foo\n" }
+      end
+      let(:mark) { "module Cn2\n  extend ActiveSupport::Concern\n  included do\n    my_c :foo\n  end\nend\n" }
+
+      it_behaves_like "a mark-only file", reported_without_mark: [["use.rb", 1]]
+    end
+
     describe "a literal define_method on a constant receiver" do
       let(:base) { { "ot.rb" => "class Ot\nend\n", "ot.rbs" => "class Ot\nend\n", "use.rb" => "Ot.new.foo\n" } }
       let(:mark) { "class OtHost\n  Ot.define_method(:foo) { 1 }\nend\n" }

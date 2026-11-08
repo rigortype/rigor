@@ -194,6 +194,9 @@ RSpec.describe "singleton-side mixins a hook adds (#1592)" do
       "an included block's extend nested in a block" =>
         "module Hu\n  extend ActiveSupport::Concern\n  def own = 1\n  included do\n    [1].each { extend X }\n  " \
         "end\nend\n",
+      "an included block's class << self include" =>
+        "module Hu\n  extend ActiveSupport::Concern\n  def own = 1\n  included do\n    class << self\n      include X\n    " \
+        "end\n  end\nend\n",
       "a hook's class_eval block on the includer" =>
         "module Hu\n  def self.included(base) = base.class_eval { extend X }\nend\n",
       "an included block's conditional extend" =>

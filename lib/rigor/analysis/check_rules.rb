@@ -995,7 +995,7 @@ module Rigor
                                                             call_node: call_node)
           return true if module_mixin_receiver?(receiver_type, scope)
           return true if mixin_self_class_receiver?(call_node, scope)
-          return true if unknown_mixin_includer?(class_name, scope)
+          return true if unknown_mixin_includer?(class_name, scope, kind)
           return true if object_mixin_may_define?(receiver_type, class_name, call_node.name, scope)
           return true if ancestry_declares_method?(scope, class_name, call_node.name, kind)
           return true if open_names_through_ancestors?(scope, class_name, kind)
@@ -1560,13 +1560,17 @@ module Rigor
         # answers, that never reaches a verdict — depend on `Widget`'s declaring file.
         # `dependency_recorder_spec` caught it here exactly as it caught #723's walk.
         #
-        # The receiver's OWN includes only. A project ancestor's unknown include makes the surface just as
-        # unknown; walking the chain is a deliberate deferral rather than an oversight.
-        def unknown_mixin_includer?(class_name, scope)
+        # A constant the environment does not know is read off the receiver's OWN includes only. Issue #2991 — a
+        # mixin the tables cannot name at all (`include(*MODS)`, `prepend(*MODS)`, a hook's `base.include x`) opens
+        # the receiver when it sits anywhere on its instance-side chain, its own level or an ancestor's: the chain
+        # marks it (`ResolutionChain#wildcard_mixin?`), and any name may come from the unlisted module. A class-object
+        # receiver reads its singleton chain instead ({#singleton_mixin_may_answer?}), so `extend(*MODS)` opens only it.
+        def unknown_mixin_includer?(class_name, scope, kind)
           includes = scope.includes_of(class_name)
-          return false if includes.empty?
+          return true if includes.any? { |raw| !known_mixin?(raw, class_name, scope) }
+          return false if kind == :singleton
 
-          includes.any? { |raw| !known_mixin?(raw, class_name, scope) }
+          Scope::ResolutionChain.for(scope, class_name.to_s, :instance, :methods).wildcard_mixin?
         end
 
         def known_mixin?(raw_name, class_name, scope)

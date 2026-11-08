@@ -1988,6 +1988,26 @@ RSpec.describe Rigor::Environment::RbsLoader do
       expect(records(build_loader([]))).to be_empty
     end
 
+    # Issue #2978 — a subordinate file (a gem's collection copy) still takes part in the #1075 rule: its `untyped`
+    # `Bar#b` stands down to the more precise inline `b` before the file is planned, as an eager file's would.
+    it "strips a subordinate file's member the inline side won before planning it" do
+      gem_dir = File.join(tmpdir, "gem_sig")
+      copy_dir = File.join(tmpdir, "copy")
+      FileUtils.mkdir_p([gem_dir, copy_dir])
+      File.write(File.join(gem_dir, "bar.rbs"), "class Bar\n  def a: () -> Integer\nend\n")
+      File.write(File.join(copy_dir, "bar.rbs"), "class Bar\n  def b: () -> untyped\n  def c: () -> Integer\nend\n")
+      loader = described_class.new(
+        signature_paths: [gem_dir, copy_dir], subordinate_signature_paths: [copy_dir],
+        virtual_rbs: [["virtual:rbs-inline:/app/lib/bar.rb", "class Bar\n  def b: () -> ::Integer\nend\n"]]
+      )
+      allow(loader).to receive(:warn)
+      definition = loader.instance_definition("Bar")
+
+      expect(definition).not_to be_nil
+      expect(method_types(definition, :b)).to eq(["() -> ::Integer"])
+      expect(definition.methods.keys).to include(:a, :c)
+    end
+
     # `def x: ... | ...` is filed under `overloads`, not `originals`, so rbs composes it with an existing
     # declaration instead of raising — the one shape upstream sanctions for having both.
     it "keeps an overloading inline member, which rbs composes rather than duplicates" do

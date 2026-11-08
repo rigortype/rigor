@@ -25,7 +25,9 @@ module Rigor
     #   different clauses would have raised `RBS::SuperclassMismatchError`; the plugin's declaration reopens the class;
     # - an `include`, `extend` or `prepend` of a module this file declares but that stood down whole, or that another
     #   source declares as a class, stands down too (#2974), where keeping it would have raised `NoMixinFoundError` or
-    #   `MixinClassError` for the class that mixes it in (`Integer`, for the overlay's `ActiveSupport::NumericWithFormat`).
+    #   `MixinClassError` for the class that mixes it in (`Integer`, for the overlay's `ActiveSupport::NumericWithFormat`);
+    # - an instance, class-instance or class variable another source declares on the type stands down (#2978), where
+    #   two declarations of it would have raised `InstanceVariableDuplicationError` or its twins for the class.
     #
     # A declaration with nothing taken comes back as the same object, so a file with no collision loads as it
     # stands. {.standdown_rows} reads what stood down back off the built environment, so a warm run off the env
@@ -54,11 +56,12 @@ module Rigor
       def plan_type(decl, env, own, name, mixins)
         others = GatedSignaturePlan.other_declarations(env, name)
         taken = GatedSignaturePlan.declared_keys(others)
+        variables = variable_keys(others)
         external = others.reject { |other| own.include?(buffer_of(other)) }
         defined = GatedSignaturePlan.declared_keys(external) | definition_keys(external)
         members = decl.members.filter_map do |member|
           next plan_declaration(member, env, own, name, mixins) if declaration?(member)
-          next nil if mixins.drop?(member, name)
+          next nil if mixins.drop?(member, name) || variables.include?(variable_key(member))
           next member if taken.empty?
 
           composed(member, defined) || GatedSignaturePlan.untaken(member, taken)
@@ -67,6 +70,31 @@ module Rigor
         return decl if same?(members, decl.members) && !drop
 
         GatedSignaturePlan.rebuild(decl, members: members, drop_super_class: drop)
+      end
+
+      # Issue #2978 — an instance, class-instance or class variable another source declares on the type stands down:
+      # RBS raises `InstanceVariableDuplicationError` (or its class-instance and class-variable twins) for two
+      # declarations of one, and the class reads `Dynamic[top]`. Keyed by name and kind, not type: the other source's
+      # declaration binds either way.
+      VARIABLE_MEMBERS = {
+        ::RBS::AST::Members::InstanceVariable => :instance_variable,
+        ::RBS::AST::Members::ClassInstanceVariable => :class_instance_variable,
+        ::RBS::AST::Members::ClassVariable => :class_variable
+      }.freeze
+
+      # `[name, kind]` for a variable member, else nil.
+      def variable_key(member)
+        kind = VARIABLE_MEMBERS[member.class]
+        kind && [member.name, kind]
+      end
+
+      def variable_keys(decls)
+        decls.each_with_object(Set.new) do |decl, keys|
+          decl.members.each do |member|
+            key = variable_key(member)
+            keys << key if key
+          end
+        end
       end
 
       # Issue #2439 — true when `decl` is a class with a superclass clause and another source (`others`) already

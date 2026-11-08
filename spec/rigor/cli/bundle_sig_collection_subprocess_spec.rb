@@ -10,6 +10,8 @@ require "fileutils"
 # as a subprocess, as collection_library_subprocess_spec does.
 RSpec.describe "bundle sig/ beside its rbs collection copy (subprocess)" do
   let(:exe) { File.join(File.expand_path("../../..", __dir__), "exe", "rigor") }
+  # The loader's "N RBS class definition(s) failed to build" warning, or the error class it names.
+  let(:build_warning) { /failed to build|build failed|Duplicat|MixinClass/i }
   let(:gem_a) { "class Bar\n  def a: () -> Integer\nend\n" }
 
   around do |example|
@@ -57,7 +59,7 @@ RSpec.describe "bundle sig/ beside its rbs collection copy (subprocess)" do
                    "#{members.map { |m| "Bar.new.#{m}.no_#{m}\n" }.join}Bar.new.zz\n")
         output = check_run(libraries)
 
-        expect(output).not_to match(/build failed|Duplicated/i)
+        expect(output).not_to match(build_warning)
         # The gem's own `Bar#a` binds (`-> Integer`), not the collection's `-> String`.
         members.each do |m|
           expect(output).to include("undefined method `no_#{m}' for Integer")
@@ -68,13 +70,29 @@ RSpec.describe "bundle sig/ beside its rbs collection copy (subprocess)" do
     end
   end
 
+  # A variable both copies declare: RBS raises `InstanceVariableDuplicationError` (`@x`) or
+  # `ClassInstanceVariableDuplicationError` (`self.@y`) for two declarations of one.
+  { "@x" => "@x: Integer", "self.@y" => "self.@y: Integer" }.each do |label, variable|
+    %w[[] [bargem]].each do |libraries|
+      it "stands down a #{label} both copies declare under libraries: #{libraries}" do
+        install_gem("bargem", bundle_rbs: "class Bar\n  #{variable}\n  def a: () -> Integer\nend\n",
+                              collection_rbs: "class Bar\n  #{variable}\n  def b: () -> Integer\nend\n")
+        File.write(File.join(dir, "lib", "a.rb"), "Bar.new.a.no_a\nBar.new.zz\n")
+        output = check_run(libraries)
+
+        expect(output).not_to match(build_warning)
+        expect(output).to include("undefined method `no_a' for Integer").and include("undefined method `zz'")
+      end
+    end
+  end
+
   it "drops the copy's mixin of a module the gem's sig/ declares as a class" do
     copy = "module Helper\nend\nclass Bar\n  include Helper\n  def b: () -> Integer\nend\n"
     install_gem("bargem", bundle_rbs: "#{gem_a}class Helper\nend\n", collection_rbs: copy)
     File.write(File.join(dir, "lib", "a.rb"), "Bar.new.a.no_a\nBar.new.b.no_b\nBar.new.zz\n")
     output = check_run("[]")
 
-    expect(output).not_to match(/build failed|MixinClass/i)
+    expect(output).not_to match(build_warning)
     expect(output).to include("undefined method `no_a' for Integer")
       .and include("undefined method `no_b' for Integer")
     expect(output).to include("undefined method `zz'")

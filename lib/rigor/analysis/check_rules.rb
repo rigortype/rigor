@@ -1583,8 +1583,12 @@ module Rigor
         # A listed module the project declares (in any file) answers any name: its surface may be open in ways a
         # method lookup does not see (a computed `define_method`, its own unrecorded mixins, `method_missing`), as an
         # unnamed mixin is. So does one the environment does not know. Only a module with no project declaration
-        # (`Comparable`) is asked RBS for `method_name`.
+        # (`Comparable`) is asked RBS for `method_name`. A name the owner's include table records (an unpositioned
+        # `Integer.include(Ext)` lists its module too) is the ordinary lookup's, which the later probes run, so it opens
+        # only when the environment does not know it.
         def listed_mixin_may_define?(scope, owner, raw, method_name)
+          return !known_mixin?(raw, owner, scope) if scope.includes_of(owner).include?(raw)
+
           candidates = scope.ancestor_name_candidates(owner, raw)
           return true if candidates.any? { |candidate| scope.discovered_classes.key?(candidate) }
           return true unless known_mixin?(raw, owner, scope)

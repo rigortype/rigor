@@ -31,8 +31,8 @@ module Rigor
       # {UNNAMED}, always beside {WILDCARD}, because its SET of modules is unknown too. That covers an instance-side
       # mixin call it could not record whose argument is not a constant (`include helper`, `include(*MODS)`; a
       # `Module.new { … }` argument keeps its #2975 reading), a name beside one it cannot name (`include M, h`), and
-      # an opaque eval whose block mixes into its own `self`. An unrecorded call whose arguments are all constants
-      # (`self.include M`, a receiverless `send(:include, M)`, a hook's `base.include M`) lists those names after
+      # an opaque eval whose block mixes into its own `self`, and a hook's `base.include M`. An unrecorded call whose
+      # arguments are all constants (`self.include M`, a receiverless `send(:include, M)`) lists those names after
       # {WILDCARD} instead: the set is known, but no table records it under the owner.
       #
       # The value is `{owner => {include: [names], extend: [names]}}`. `:include` is the instance side

@@ -7526,22 +7526,30 @@ module Rigor
 
       # Issue #2991 — an unrecorded `include` / `prepend` that reaches the instance side (its receiver is not a
       # `singleton_class` call) leaves that side's module SET unknown when an argument is not a constant
-      # (`include(*MODS)`, `include helper`), which lists {MixinAccumulator::UNNAMED}. When every argument is a constant
-      # (`self.include M`, a receiverless `send(:include, M)`, a hook's `base.include M`) the set is known but no table
-      # records it under the owner, so the names are listed after the wildcard for the reader to ask. A
-      # `Module.new { … }` argument keeps its #2975 reading and lists nothing. A hook's `base.extend M` or
-      # `base.singleton_class.include M` taints the instance side's order alone: it mixes nothing into it.
+      # (`include(*MODS)`, `include helper`) or the receiver is a hook parameter (`base.include M`), which lists
+      # {MixinAccumulator::UNNAMED}. When every argument is a constant (`self.include M`, a receiverless
+      # `send(:include, M)`) the set is known but no table records it under the owner, so the names are listed after
+      # the wildcard for the reader to ask. A `Module.new { … }` argument keeps its #2975 reading and lists nothing. A
+      # hook's `base.extend M` or `base.singleton_class.include M` taints the instance side's order alone: it mixes
+      # nothing into it.
       def taint_unrecorded_mixin(node, kind, arguments, effects, accumulator)
         unnamed = false
         names = nil
         if INSTANCE_MIXIN_NAMES.include?(kind) && !singleton_class_eval_receiver?(node.receiver)
           names = arguments.filter_map { |arg| Source::ConstantPath.qualified_name(arg) }
-          unnamed = arguments.any? { |arg| Source::ConstantPath.qualified_name(arg).nil? && !module_new_call?(arg) }
+          unnamed = hook_parameter_receiver?(node.receiver, accumulator) ||
+                    arguments.any? { |arg| Source::ConstantPath.qualified_name(arg).nil? && !module_new_call?(arg) }
         end
         effects.each do |owner, side|
           instance = side == :include
           accumulator.taint(owner, side, unnamed: unnamed && instance, names: instance && !unnamed ? names : nil)
         end
+      end
+
+      # A hook parameter itself (`base` in `def self.included(base)`): its class is the includer, which the walk cannot
+      # name, so a mixin on it is read as unnamed rather than by its constant (#2991).
+      def hook_parameter_receiver?(receiver, accumulator)
+        receiver.is_a?(Prism::LocalVariableReadNode) && accumulator.hook_local?(receiver.name)
       end
 
       # Records the instance-side edges of a call {#mixin_call_recorded?} accepts. False when it recorded

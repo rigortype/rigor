@@ -1563,12 +1563,12 @@ module Rigor
         # A constant the environment does not know is read off the receiver's OWN includes only. Issue #2991 — a
         # mixin no name spells (`include(*MODS)`, `include helper`) opens the receiver when it sits anywhere on its
         # instance-side chain, its own level or an ancestor's: the chain marks it (`ResolutionChain#unnamed_mixin?`),
-        # and any name may come from the unlisted module. An unrecorded `self.include M`, receiverless
-        # `send(:include, M)` or hook's `base.include M` records `M` under no table but lists it on the chain
-        # (`ResolutionChain#listed_mixins`), so the receiver opens when such a module may define `method_name` (or is
-        # one the environment does not know), until the walk records them. A mixin whose ORDER alone is unknown
-        # (`include M; prepend M`) has every module recorded, so it opens nothing. A class-object receiver reads its
-        # singleton chain instead ({#singleton_mixin_may_answer?}).
+        # and any name may come from the unlisted module (a hook's `base.include M` is read so too). An unrecorded
+        # `self.include M` or receiverless `send(:include, M)` records `M` under no table but lists it on the chain
+        # (`ResolutionChain#listed_mixins`), until the walk records them (#2995): the receiver opens for any name when
+        # `M` is a project module or one the environment does not know, and otherwise when RBS gives `M` the method.
+        # A mixin whose ORDER alone is unknown (`include M; prepend M`) has its module recorded, so it opens nothing.
+        # A class-object receiver reads its singleton chain instead ({#singleton_mixin_may_answer?}).
         def unknown_mixin_includer?(class_name, scope, kind, method_name)
           includes = scope.includes_of(class_name)
           return true if includes.any? { |raw| !known_mixin?(raw, class_name, scope) }
@@ -1580,12 +1580,17 @@ module Rigor
           chain.listed_mixins.any? { |owner, raw| listed_mixin_may_define?(scope, owner, raw, method_name) }
         end
 
+        # A listed module the project declares (in any file) answers any name: its surface may be open in ways a
+        # method lookup does not see (a computed `define_method`, its own unrecorded mixins, `method_missing`), as an
+        # unnamed mixin is. So does one the environment does not know. Only a module with no project declaration
+        # (`Comparable`) is asked RBS for `method_name`.
         def listed_mixin_may_define?(scope, owner, raw, method_name)
+          candidates = scope.ancestor_name_candidates(owner, raw)
+          return true if candidates.any? { |candidate| scope.discovered_classes.key?(candidate) }
           return true unless known_mixin?(raw, owner, scope)
 
-          scope.ancestor_name_candidates(owner, raw).any? do |candidate|
-            scope.discovered_method_through_ancestors?(candidate, method_name, :instance) ||
-              !Rigor::Reflection.instance_method_definition(candidate, method_name, scope: scope).nil?
+          candidates.any? do |candidate|
+            !Rigor::Reflection.instance_method_definition(candidate, method_name, scope: scope).nil?
           end
         end
 

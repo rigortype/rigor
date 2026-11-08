@@ -1171,19 +1171,24 @@ module Rigor
         # not a fact of the tables and `name`'s instance side is unpositioned. A spelling no project module
         # answers taints nothing: the project cannot see its hooks.
         #
-        # The mark's list: nil when no extended module taints, else the union of those modules' own `:include` lists,
-        # each holding `"*"`, so the `"?"` marker and the names an unrecorded hook call mixed in (#2991) carry over.
+        # The mark's list: nil when no extended module taints, else {UNNAMED_LIST} when one of those modules lists `"?"`
+        # (#2991), {WILDCARD_LIST} otherwise. Only the marker carries over: a name such a module lists is spelled
+        # relative to that module, not to the extender.
         def extend_hook_taint(name)
           found = nil
           (@discovery.discovered_extends[name] || EMPTY).each do |raw|
             resolved = @resolver.resolve_one(name, raw)
             next if resolved.nil? || !ResolutionChain.extend_reshapes_instance?(@scope, resolved)
+            return UNNAMED_LIST if @discovery.unpositioned_mixins[resolved][:include].include?(UNNAMED_LIST.last)
 
-            listed = @discovery.unpositioned_mixins[resolved][:include]
-            found = found ? (found | listed) : listed
+            found = WILDCARD_LIST
           end
-          found&.frozen? ? found : found&.dup&.freeze
+          found
         end
+
+        WILDCARD_LIST = ["*"].freeze # Relevance::WILDCARD, which loads after this file
+        UNNAMED_LIST = ["*", "?"].freeze # with Relevance::UNNAMED
+        private_constant :WILDCARD_LIST, :UNNAMED_LIST
 
         def multi_file?(name)
           sites = @discovery.discovered_class_sources[name]

@@ -4,9 +4,10 @@
 # names, means every name on the class's instance side may come from that module: `call.undefined-method` must not
 # fire on the class, nor on a subclass at any depth. `Scope::ResolutionChain` marks such a chain (`unnamed_mixin?`),
 # and the rule reads that mark. `self.include M1` and a receiverless `send(:include, M1)` record no module either,
-# until the walk records them, so the chain lists their constants (`listed_mixins`) and the rule asks those for the
-# called name. A mixin whose order alone is unknown (`include M1; prepend M1`, an opaque eval that mixes nothing into
-# its own `self`, the `wildcard_mixin?` mark) has its modules recorded and must keep reporting. `sig/` declares every
+# until the walk records them (#2995), so the chain lists their constants (`listed_mixins`): a project module
+# there opens every name, and a module with no project declaration (`Comparable`) is asked RBS for the called
+# name. A mixin whose order alone is unknown (`include M1; prepend M1`, an opaque eval that mixes nothing into its
+# own `self`, the `wildcard_mixin?` mark) has its module recorded and must keep reporting. `sig/` declares every
 # class so the rule runs. `Sup` defines a method of its own, so it is a project entry on its subclasses' chains, not
 # an external one (#2094), which already stands down on another route. Every row's Ruby behaviour was witnessed on
 # Ruby 4.0.5: each quiet call returns 1, and each reported call raises `NoMethodError`. The literal-include row is a
@@ -102,12 +103,6 @@ RSpec.describe "a class whose instance-side chain holds a splatted mixin (#2991)
   end
 
   describe "a mixin whose order alone is unknown" do
-    it "still fires on a subclass of `self.include M1` for a method M1 does not define" do
-      source = "#{mods}class SI\n  self.include M1\n  def t = 1\nend\nclass SISub < SI\n  def u = self.m2\nend\n"
-      expect(undefined_messages({ "a.rb" => source }, "class SI\nend\nclass SISub < SI\nend\n"))
-        .to eq(["undefined method `m2' for SISub"])
-    end
-
     it "still fires on a receiverless `send(:include, Comparable)` for a method Comparable does not define" do
       source = "class SndC\n  send(:include, Comparable)\n  def w = self.zz\nend\n"
       expect(undefined_messages({ "a.rb" => source }, "class SndC\nend\n")).to eq(["undefined method `zz' for SndC"])
@@ -135,6 +130,25 @@ RSpec.describe "a class whose instance-side chain holds a splatted mixin (#2991)
   end
 
   describe "a mixin call the walk does not record, until it does" do
+    # A listed project module answers any name, so a subclass of `self.include M1` calling `m2`, which M1 does not
+    # define, stays quiet too: the accepted cost until #2995 records the call.
+    it "does not fire on a subclass of `self.include M1`, even for a method M1 does not define (#2995)" do
+      source = "#{mods}class SI\n  self.include M1\n  def t = 1\nend\nclass SISub < SI\n  def u = self.m2\nend\n"
+      expect(undefined_messages({ "a.rb" => source }, "class SI\nend\nclass SISub < SI\nend\n")).to be_empty
+    end
+
+    it "does not fire on `self.include MQ` where MQ runs `include(*MODS)`" do
+      source = "module M2\n  def m2 = 1\nend\nMODS = [M2]\nmodule MQ\n  include(*MODS)\nend\n" \
+               "class Q\n  self.include MQ\n  def w = self.m2\nend\n"
+      expect(undefined_messages({ "a.rb" => source }, "class Q\nend\n")).to be_empty
+    end
+
+    it "does not fire on `send(:include, MR)` where MR runs a computed define_method" do
+      source = "module MR\n  %i[dm].each { |x| define_method(x) { 1 } }\nend\n" \
+               "class R\n  send(:include, MR)\n  def w = self.dm\nend\n"
+      expect(undefined_messages({ "a.rb" => source }, "class R\nend\n")).to be_empty
+    end
+
     {
       "A" => "  self.include M1\n",
       "B" => "  self.send(:include, M1)\n",
@@ -145,6 +159,11 @@ RSpec.describe "a class whose instance-side chain holds a splatted mixin (#2991)
       it "does not fire on `#{call.strip}` for the module's own method" do
         source = "#{mods}class #{name}\n#{call}  def t = self.m1\nend\n"
         expect(undefined_messages({ "a.rb" => source }, "class #{name}\nend\n")).to be_empty
+      end
+
+      it "does not fire on `#{call.strip}` with the module in another file" do
+        files = { "m.rb" => mods, "a.rb" => "class #{name}\n#{call}  def t = self.m1\nend\n" }
+        expect(undefined_messages(files, "class #{name}\nend\n")).to be_empty
       end
     end
   end
@@ -198,6 +217,13 @@ RSpec.describe "a class whose instance-side chain holds a splatted mixin (#2991)
       source = "#{mods}module SH\n  class << self\n    def included(base) = base.include(M1)\n  end\nend\n" \
                "class SK\n  include SH\n  def t = 1\nend\nclass SKSub < SK\n  def u = self.m1\nend\n"
       expect(undefined_messages({ "a.rb" => source }, "class SK\nend\nclass SKSub < SK\nend\n")).to be_empty
+    end
+
+    it "does not fire on a class extending a module whose hook includes a constant shadowed in its namespace" do
+      source = "module Helper\n  def other = 1\nend\nmodule Outer\n  module Helper\n    def h = 1\n  end\n  " \
+               "module Ext\n    def self.extended(b) = b.include(Helper)\n  end\nend\n" \
+               "class EA\n  extend Outer::Ext\n  def t = self.h\nend\n"
+      expect(undefined_messages({ "a.rb" => source }, "class EA\nend\n")).to be_empty
     end
 
     it "opens the receiver of `Other.include(*MODS)`, not the class it is written in" do

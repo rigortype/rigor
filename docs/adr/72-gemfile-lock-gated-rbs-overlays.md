@@ -114,6 +114,8 @@ defeats the test anyway. The vendored copy keeps the collision report
 instead of a guess, and how loud that report should be is
 [#696](https://github.com/rigortype/rigor/issues/696).
 
+> **Update (2026-11-08, [#2974](https://github.com/rigortype/rigor/issues/2974)):** the overlay now loads with the plugins' deferred signature files, so a copy in the project's `sig/` no longer collapses the class: each member both declare stands down member by member and the project's binds.
+
 Lockfile resolution piggybacks on `bundler.auto_detect` (default
 **true**), so the fix is on by default for any project with a
 `Gemfile.lock` next to its root and needs no configuration.

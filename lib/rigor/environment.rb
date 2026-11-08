@@ -394,7 +394,10 @@ module Rigor
           # Issue #610 — the plugin-contributed subset is loaded LAST and may stand down against a colliding
           # generic arity. Only the bundled plugins' own `sig/` is deferred: the user's `signature_paths:`,
           # the bundle walk and `rbs collection install` all stay authoritative.
-          deferred_signature_paths: plugin_sig_paths,
+          # Issue #2974 — the ADR-72 gem overlays are Rigor-shipped too, and deferred with them: an overlay member
+          # the project's `sig/` also declares (`Integer#ordinalize`, `ActiveSupport::NumericWithFormat#to_fs`)
+          # stands down member by member (#2422) instead of failing the class's definition build.
+          deferred_signature_paths: plugin_sig_paths + overlay_paths,
           project_signature_paths: resolved_paths,
           required_features: required_features || RequiredFeatures.scan(source_files, sig_paths: resolved_paths),
           core_root: core_root

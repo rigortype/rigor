@@ -155,7 +155,8 @@ module Rigor
     # candidate names are asked too. The marks are read here, not in a constant: this file loads before `Scope`.
     def open_names_on_chain?(class_name, kind, scope)
       index = Scope::DiscoveryIndex
-      side_mark = kind == :singleton ? index::ENVELOPE_OPEN_SINGLETON_NAMES_MARK : index::ENVELOPE_OPEN_INSTANCE_NAMES_MARK
+      side_mark =
+        kind == :singleton ? index::ENVELOPE_OPEN_SINGLETON_NAMES_MARK : index::ENVELOPE_OPEN_INSTANCE_NAMES_MARK
       marks = [index::ENVELOPE_OPEN_NAMES_MARK, side_mark]
       chain = Scope::ResolutionChain.for(scope, class_name.to_s, kind, :methods)
       found = chain.search(scope) do |entry|

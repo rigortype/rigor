@@ -1025,24 +1025,6 @@ RSpec.describe "plugins/rigor-rails-routes" do
         RUBY
       end
 
-      it "stays quiet on a member of a splatted member list, keyword_init: and nested included" do
-        expect(unknown_helpers({ "app/libs/s.rb" => splat }, paths: ["app/libs/s.rb"])).to be_empty
-      end
-
-      it "stays quiet on a member of a splatted member list read from a reopening in another file" do
-        files = { "app/libs/s.rb" => splat, "app/libs/r.rb" => "class P\n  def go3 = sp3_url\nend\nclass DS\n  def go3 = ds3_url\nend\n" }
-        expect(unknown_helpers(files, paths: %w[app/libs/s.rb app/libs/r.rb])).to be_empty
-      end
-
-      it "still reports a name on the class-object side of a splatted Struct, in its block and in a reopening" do
-        files = {
-          "app/libs/s.rb" => "F = %i[sp_url]\nP = Struct.new(*F) do\n  def self.go = typo_url\nend\n",
-          "app/libs/r.rb" => "class P\n  def self.go4 = sp4_url\nend\n"
-        }
-        expect(unknown_helpers(files, paths: %w[app/libs/s.rb app/libs/r.rb]).sort)
-          .to eq(["no route helper `sp4_url`", "no route helper `typo_url`"])
-      end
-
       let(:named) do
         <<~RUBY
           Struct.new("Named", :m_url) do
@@ -1055,6 +1037,25 @@ RSpec.describe "plugins/rigor-rails-routes" do
             NN = Struct.new("Named3", :o_url) { def go = [o_url, t3_url] }
           end
         RUBY
+      end
+
+      it "stays quiet on a member of a splatted member list, keyword_init: and nested included" do
+        expect(unknown_helpers({ "app/libs/s.rb" => splat }, paths: ["app/libs/s.rb"])).to be_empty
+      end
+
+      it "stays quiet on a member of a splatted member list read from a reopening in another file" do
+        files = { "app/libs/s.rb" => splat,
+                  "app/libs/r.rb" => "class P\n  def go3 = sp3_url\nend\nclass DS\n  def go3 = ds3_url\nend\n" }
+        expect(unknown_helpers(files, paths: %w[app/libs/s.rb app/libs/r.rb])).to be_empty
+      end
+
+      it "still reports a name on the class-object side of a splatted Struct, in its block and in a reopening" do
+        files = {
+          "app/libs/s.rb" => "F = %i[sp_url]\nP = Struct.new(*F) do\n  def self.go = typo_url\nend\n",
+          "app/libs/r.rb" => "class P\n  def self.go4 = sp4_url\nend\n"
+        }
+        expect(unknown_helpers(files, paths: %w[app/libs/s.rb app/libs/r.rb]).sort)
+          .to eq(["no route helper `sp4_url`", "no route helper `typo_url`"])
       end
 
       it "credits the members after a class-name String, and still reports an unknown name beside them" do

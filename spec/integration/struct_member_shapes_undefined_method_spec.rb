@@ -27,7 +27,8 @@ RSpec.describe "Struct and Data member shapes and call.undefined-method (#2968)"
   end
 
   def undefined_messages
-    configuration = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS.merge("paths" => %w[lib], "signature_paths" => %w[sig], "workers" => 0))
+    settings = { "paths" => %w[lib], "signature_paths" => %w[sig], "workers" => 0 }
+    configuration = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS.merge(settings))
     result = guarded_run(Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil), %w[lib])
     result.diagnostics.select { |d| d.qualified_rule == "call.undefined-method" }.map(&:message).sort
   end
@@ -36,31 +37,35 @@ RSpec.describe "Struct and Data member shapes and call.undefined-method (#2968)"
     Dir.mktmpdir("rigor-struct-member-shapes-") { |dir| Dir.chdir(dir) { example.run } }
   end
 
-  splat = <<~RUBY
-    F = %i[sp_url]
-    P = Struct.new(*F) do
-      def go = sp_url
-    end
-    PK = Struct.new(*F, keyword_init: true)
-    module A
-      class B
-        PN = Struct.new(*F)
+  let(:splat) do
+    <<~RUBY
+      F = %i[sp_url]
+      P = Struct.new(*F) do
+        def go = sp_url
       end
-    end
-    DS = Data.define(*F)
-  RUBY
-  splat_calls = %w[P.new(1).sp_url PK.new(sp_url:\ 1).sp_url A::B::PN.new(1).sp_url DS.new(sp_url:\ 1).sp_url]
+      PK = Struct.new(*F, keyword_init: true)
+      module A
+        class B
+          PN = Struct.new(*F)
+        end
+      end
+      DS = Data.define(*F)
+    RUBY
+  end
+  let(:splat_calls) { ["P.new(1).sp_url", "PK.new(sp_url: 1).sp_url", "A::B::PN.new(1).sp_url", "DS.new(sp_url: 1).sp_url"] }
 
-  named = <<~RUBY
-    N = Struct.new("Named", :n_url) do
-      def go = n_url
-    end
-    NK = Struct.new("NamedK", :k_url, keyword_init: true)
-    module Outer
-      NN = Struct.new("Named3", :o_url)
-    end
-  RUBY
-  named_calls = %w[N.new(1).n_url NK.new(k_url:\ 1).k_url Outer::NN.new(1).o_url]
+  let(:named) do
+    <<~RUBY
+      N = Struct.new("Named", :n_url) do
+        def go = n_url
+      end
+      NK = Struct.new("NamedK", :k_url, keyword_init: true)
+      module Outer
+        NN = Struct.new("Named3", :o_url)
+      end
+    RUBY
+  end
+  let(:named_calls) { ["N.new(1).n_url", "NK.new(k_url: 1).k_url", "Outer::NN.new(1).o_url"] }
 
   [true, false].each do |in_file|
     where = in_file ? "in the defining file" : "from another file"

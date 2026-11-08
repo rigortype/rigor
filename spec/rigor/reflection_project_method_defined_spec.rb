@@ -211,6 +211,7 @@ RSpec.describe Rigor::Reflection, ".project_method_defined" do
       expect { answer(scope, "Child", :plain, kind: :instance, source: :any) }.to raise_error(ArgumentError, /source/)
     end
   end
+
   # Issue #2968 — a class whose side carries an open-names mark defines methods under names no table holds, so the
   # discovery walk answers `maybe` there instead of `no`.
   describe "an open side" do

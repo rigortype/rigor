@@ -55,7 +55,7 @@ RSpec.describe "ADR-72 ActiveSupport overlay — NumericWithFormat#to_fs (#2969)
   end
 
   def undefined_methods(result)
-    result.diagnostics.select { |d| d.rule == "call.undefined-method" }.map { |d| d.message }
+    result.diagnostics.select { |d| d.rule == "call.undefined-method" }.map(&:message)
   end
 
   # Every receiver class and both selectors, and every argument form the source accepts: no format (`to_s`),

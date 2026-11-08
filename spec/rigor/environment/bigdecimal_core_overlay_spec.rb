@@ -54,7 +54,7 @@ RSpec.describe "core overlay — BigDecimal precision readers (#2969)" do
       BigDecimal("12.50").precison
     RUBY
 
-    expect(result.diagnostics.select { |d| d.qualified_rule == "call.undefined-method" }.map { |d| d.message })
+    expect(result.diagnostics.select { |d| d.qualified_rule == "call.undefined-method" }.map(&:message))
       .to include(a_string_including("precison"))
   end
 end

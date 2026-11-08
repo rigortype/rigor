@@ -1,0 +1,3 @@
+- **[plugin:activesupport-core-ext]** `to_fs` / `to_formatted_s` on Integer, Float and BigDecimal no longer report `call.undefined-method`, and `BigDecimal#precision`, `#scale`, `#precision_scale` and `#n_significant_digits` no longer do either. ([#2969](https://github.com/rigortype/rigor/issues/2969))
+  - The `to_fs` rows are declared in the core-ext plugin and in its auto-applied ActiveSupport overlay, so they answer whenever `activesupport` is locked; with no lock they still report.
+  - The four BigDecimal readers are declared in a Rigor core overlay that loads with no plugin, because rbs 4.2 and the bigdecimal gem's own `sig/` both omit them.

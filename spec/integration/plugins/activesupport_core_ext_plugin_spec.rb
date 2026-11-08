@@ -60,7 +60,7 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
     result = run_plugin(source: source)
 
     expect(result.diagnostics.map(&:qualified_rule).grep(/\Acall\./)).to be_empty
-    expect(result.diagnostics.select { |d| d.qualified_rule == "dump.type" }.map { |d| d.message })
+    expect(result.diagnostics.select { |d| d.qualified_rule == "dump.type" }.map(&:message))
       .to eq(Array.new(4, "dump_type: String"))
   end
 

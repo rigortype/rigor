@@ -94,23 +94,34 @@ module Rigor
         # directly to the project's `signature_paths:` — which already works today and needs no discovery.
         all = (RootedGlob.glob(resolved, "ruby/*/gems/*/sig") +
                RootedGlob.glob(resolved, "ruby/*/bundler/gems/*/sig")).map { |d| Pathname.new(d) }
-        filtered = all.reject { |sig_dir| skip_gems.include?(gem_name_from_sig_path(sig_dir)) }
-        return filtered if locked_gems.nil? || locked_gems.empty?
+        if locked_gems.nil? || locked_gems.empty?
+          return all.reject { |sig_dir| skip_gems.include?(gem_name_from_sig_path(sig_dir)) }
+        end
 
-        expected_dirs = expected_gem_dirs(locked_gems)
-        filtered.select do |sig_dir|
-          if git_sourced_layout?(sig_dir)
-            # A git install's directory carries no version, so the lockfile filter can only check the gem NAME.
-            # Name alone is not enough: a gem that moved from `git:` to a released version keeps its stale
-            # `bundler/gems/` checkout until `bundle clean`, under a name the lockfile still lists. `locked_gems`
-            # must say this name is CURRENTLY git-sourced, not merely present.
-            locked = locked_gems[gem_name_from_sig_path(sig_dir)]
-            !!locked&.git_source
-          else
-            expected_dirs.include?(sig_dir.parent.basename.to_s)
-          end
+        # Issue #2978 — with a lockfile, a directory's gem name is the locked entry it matches, not a parse of the
+        # directory name, which reads `foo-2fa-1.0` as `foo`.
+        names = locked_dir_names(locked_gems)
+        all.select do |sig_dir|
+          name = locked_name_of(sig_dir, locked_gems, names)
+          name && !skip_gems.include?(name)
         end
       end
+
+      # The locked gem name `sig_dir` belongs to, or nil when it matches no locked entry. A git install's directory
+      # carries no version, so only the gem NAME can be checked. Name alone is not enough: a gem that moved from
+      # `git:` to a released version keeps its stale `bundler/gems/` checkout until `bundle clean`, under a name the
+      # lockfile still lists, so `locked_gems` must say this name is CURRENTLY git-sourced, not merely present.
+      #
+      # @param names — {.locked_dir_names} of `locked_gems`.
+      def self.locked_name_of(sig_dir, locked_gems, names)
+        if git_sourced_layout?(sig_dir)
+          name = gem_name_from_sig_path(sig_dir)
+          locked_gems[name]&.git_source ? name : nil
+        else
+          names[sig_dir.parent.basename.to_s]
+        end
+      end
+      private_class_method :locked_name_of
 
       # Issue #2971 — the locked gem names `sig_dirs` (a {.discover} result) belong to, keyed the way {.discover}
       # filters: a rubygems-layout directory by `<name>-<version>[-<platform>]` against the locked variants, a git
@@ -119,34 +130,27 @@ module Rigor
       def self.locked_names_of(sig_dirs, locked_gems)
         return [] if locked_gems.nil? || locked_gems.empty?
 
-        dirs = sig_dirs.reject { |dir| git_sourced_layout?(dir) }.to_set { |dir| dir.parent.basename.to_s }
-        git = sig_dirs.select { |dir| git_sourced_layout?(dir) }.map { |dir| gem_name_from_sig_path(dir) }
-        locked_gems.each_value.filter_map do |locked|
-          name = locked.name
-          git_hit = git.include?(name) && locked.git_source
-          name if git_hit || expected_gem_dirs({ name => locked }).intersect?(dirs)
-        end
+        names = locked_dir_names(locked_gems)
+        sig_dirs.filter_map { |dir| locked_name_of(dir, locked_gems, names) }.uniq
       end
 
-      # `{name => LockedGem}` → set of canonical bundler gem directory basenames. Pure-Ruby gems install as
+      # `{name => LockedGem}` → `{canonical bundler gem directory basename => name}`. Pure-Ruby gems install as
       # `<name>-<version>`; platform-specific gems install as `<name>-<version>-<platform>` (e.g.
       # `ffi-1.17.4-aarch64-linux-gnu`). Lockfile platform `"ruby"` is the pure-Ruby case; any other value is
       # treated as a platform tag. Every locked variant contributes a directory (#1844): the set only selects
       # among directories that are actually installed, so admitting another platform's name costs nothing,
-      # while dropping the host's would discard its `sig/`.
-      def self.expected_gem_dirs(locked_gems)
-        locked_gems.each_value.with_object(Set.new) do |locked, set|
+      # while dropping the host's would discard its `sig/`. Issue #2978 — the name comes from the lockfile, so a name
+      # holding `-<digit>` is read whole.
+      def self.locked_dir_names(locked_gems)
+        locked_gems.each_value.with_object({}) do |locked, names|
           locked.variants.each do |version, platform|
             base = "#{locked.name}-#{version}"
-            set << if platform == "ruby" || platform.empty?
-                     base
-                   else
-                     "#{base}-#{platform}"
-                   end
+            dir = platform == "ruby" || platform.empty? ? base : "#{base}-#{platform}"
+            names[dir] = locked.name
           end
         end
       end
-      private_class_method :expected_gem_dirs
+      private_class_method :locked_dir_names
 
       # `<bundle>/ruby/X.Y.Z/gems/<name>-<ver>/sig` → `<name>`, or
       # `<bundle>/ruby/X.Y.Z/bundler/gems/<repo>-<12-hex-revision>/sig` → `<repo>`. The two bundler-install
@@ -161,8 +165,8 @@ module Rigor
       #   different repo name, a monorepo). Strip the fixed-width hex suffix instead; best-effort only, since
       #   the true gem name isn't recoverable from the filesystem without running Bundler.
       #
-      # Public so the O4 Layer 3 slice-3 coverage report (`RbsCoverageReport`) can classify discovered bundle
-      # sigs against locked gem names without re-running discovery.
+      # Only for a directory no lockfile names: with one, {.locked_names_of} reads the name off the locked entry
+      # instead (issue #2978), since a name holding `-<digit>` (`foo-2fa-1.0`) truncates here to `foo`.
       def self.gem_name_from_sig_path(sig_dir)
         gem_dir = sig_dir.parent.basename.to_s
         if git_sourced_layout?(sig_dir)

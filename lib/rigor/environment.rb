@@ -344,15 +344,15 @@ module Rigor
         # double-declare the project's `sig/`.
         project_gems = ProjectPathGems.names(locked, paths: paths, root: root, exclude_patterns: exclude_patterns,
                                                      exclude_base: exclude_base || root)
-        # Issue #2971 — the locked gems whose own `sig/` the bundle discovery loaded.
-        bundle_sig_gems = BundleSigDiscovery.locked_names_of(gem_sig_paths.map { |dir| Pathname.new(dir) }, locked)
-        skip_gem_names = collection_skip_gem_names(merged_libraries, bundle_sig_gems) + project_gems.to_a
+        skip_gem_names = collection_skip_gem_names(merged_libraries) + project_gems.to_a
         collection_paths = RbsCollectionDiscovery.discover(
           lockfile_path: rbs_collection_lockfile,
           project_root: root,
           auto_detect: rbs_collection_auto_detect,
           skip_gem_names: skip_gem_names
         ).map(&:to_s)
+        # Issue #2978 — the collection copies of the locked gems whose own `sig/` the bundle discovery loaded.
+        behind_gem_sig_paths = collection_paths_behind_gem_sigs(collection_paths, gem_sig_paths, locked)
         # ADR-25 — RBS signature directories contributed by loaded plugins via their manifest
         # `signature_paths:`. Resolved to absolute dirs by `Plugin::Base#signature_paths`; additive, ranked
         # below the user's explicit `signature_paths:` and above the opportunistic bundle / collection
@@ -399,6 +399,9 @@ module Rigor
           # stands down member by member (#2422) instead of failing the class's definition build.
           deferred_signature_paths: plugin_sig_paths + overlay_paths,
           project_signature_paths: resolved_paths,
+          # Issue #2978 — a gem's collection copy loads behind the gem's own `sig/`: each member that `sig/` (or any
+          # other eagerly loaded signature file) declares stands down from the copy (#2422), and the rest loads.
+          subordinate_signature_paths: behind_gem_sig_paths,
           required_features: required_features || RequiredFeatures.scan(source_files, sig_paths: resolved_paths),
           core_root: core_root
         )
@@ -457,15 +460,25 @@ module Rigor
       # vendored directory except a `RequiredFeatures`-gated one. A gated directory stands down for any other
       # copy of its declarations (`GatedSignatureGuard`), so the collection's copy is kept and wins.
       #
-      # Issue #2971 — a `libraries:` name that is neither an RBS library nor a gem whose own `sig/` the bundle
-      # loaded (`foogem`, collection-installed) is dropped by the loader's `has_library?` filter, so it declares
-      # nothing to double-declare against; it stays out of the skip set so the collection's copy still loads.
-      def collection_skip_gem_names(library_names, bundle_sig_gems = [])
+      # Issue #2971 — a `libraries:` name that is not an RBS library (`foogem`, collection-installed) is dropped by
+      # the loader's `has_library?` filter, so it declares nothing to double-declare against; it stays out of the
+      # skip set so the collection's copy still loads. Issue #2978 — that holds for a gem whose own `sig/` the bundle
+      # loaded too: its collection copy loads behind that `sig/` ({.collection_paths_behind_gem_sigs}).
+      def collection_skip_gem_names(library_names)
         extra = library_names.reject do |name|
-          DEFAULT_LIBRARIES.include?(name) || RequiredFeatures.feature_of_token(name) || bundle_sig_gems.include?(name)
+          DEFAULT_LIBRARIES.include?(name) || RequiredFeatures.feature_of_token(name)
         end
         unavailable = extra.empty? ? [] : extra.reject(&LibraryProbe.predicate)
         (library_names - unavailable) + RbsLoader.vendored_gem_names.reject { |name| RequiredFeatures.gated_dir?(name) }
+      end
+
+      # Issue #2978 — the `collection_paths` (`<collection>/<name>/<version>/`) of the locked gems whose own `sig/` is
+      # among `gem_sig_paths` ({BundleSigDiscovery.locked_names_of}, keyed by name and version).
+      def collection_paths_behind_gem_sigs(collection_paths, gem_sig_paths, locked)
+        return [] if collection_paths.empty? || gem_sig_paths.empty?
+
+        names = BundleSigDiscovery.locked_names_of(gem_sig_paths.map { |dir| Pathname.new(dir) }, locked).to_set
+        collection_paths.select { |path| names.include?(Pathname.new(path).parent.basename.to_s) }
       end
 
       def default_signature_paths(root)

@@ -63,6 +63,13 @@ RSpec.describe "library audit warnings from a fresh CLI process" do
     expect(output).not_to include("is not an available RBS library")
   end
 
+  it "still audits a lockfile stdlib entry named like a vendored library (prime)" do
+    write_stdlib_lockfile("prime")
+    output, = check_run("libraries: []\n")
+
+    expect(output).to include("rbs_collection.lock.yaml").and include("prime")
+  end
+
   it "does not audit a vendored library name (prime), and doctor exits 0" do
     output, = check_run("libraries: [prime]\n")
     expect(output).not_to include("is not an available RBS library")

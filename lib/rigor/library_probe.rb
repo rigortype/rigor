@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "environment/required_features"
+
 module Rigor
   # Issue #2961 — answers what `RBS::EnvironmentLoader#has_library?(version: nil)` answers, for the
   # {ConfigAudit} library warnings. The CLI has not loaded `rbs` when that audit runs, and loading it costs
@@ -18,6 +20,12 @@ module Rigor
       return ->(_lib) { true } if stdlib.nil?
 
       ->(lib) { gem_sig_dir?(lib) || stdlib_library?(stdlib, lib) }
+    end
+
+    # The `libraries:` names worth auditing: a vendored feature name (`prime`) becomes a vendored feature token
+    # that the loader never asks `has_library?` about, so it is not an RBS library name to check.
+    def auditable(libraries)
+      Array(libraries).map(&:to_s) - Environment::RequiredFeatures::VENDORED_DIRS.keys
     end
 
     def stdlib_root

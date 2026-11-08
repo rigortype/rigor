@@ -145,7 +145,13 @@ module Rigor
         lockfile_path: configuration.rbs_collection_lockfile, project_root: project_root,
         auto_detect: configuration.rbs_collection_auto_detect
       )
-      named = LibraryProbe.auditable(configuration.libraries).map { |lib| [:library, "libraries:", lib] } +
+      # Issue #2971 — a `libraries:` name the collection lockfile provides loads from the collection, not as an
+      # RBS library, so it is not an unknown library.
+      provided = Environment::RbsCollectionDiscovery.collection_gem_names(
+        lockfile_path: configuration.rbs_collection_lockfile, project_root: project_root,
+        auto_detect: configuration.rbs_collection_auto_detect
+      )
+      named = (LibraryProbe.auditable(configuration.libraries) - provided).map { |lib| [:library, "libraries:", lib] } +
               lockfile.map { |name| [:rbs_collection_library, "rbs_collection.lock.yaml: stdlib entry", name] }
       return [] if named.empty?
 

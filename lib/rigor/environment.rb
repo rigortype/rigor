@@ -16,6 +16,7 @@ require_relative "environment/bundle_sig_discovery"
 require_relative "environment/lockfile_resolver"
 require_relative "environment/installed_gem_set"
 require_relative "environment/rbs_collection_discovery"
+require_relative "library_probe"
 require_relative "environment/project_path_gems"
 require_relative "environment/source_rbs_synthesis"
 require_relative "plugin/isolation"
@@ -450,8 +451,14 @@ module Rigor
       # The gem names an `rbs collection` copy must not double-declare against: the library list and every
       # vendored directory except a `RequiredFeatures`-gated one. A gated directory stands down for any other
       # copy of its declarations (`GatedSignatureGuard`), so the collection's copy is kept and wins.
+      #
+      # Issue #2971 — a `libraries:` name that is not an RBS library (a collection-installed gem such as
+      # `foogem`) is dropped by the loader's `has_library?` filter, so it declares nothing to double-declare
+      # against; it stays out of the skip set so the collection's copy still loads.
       def collection_skip_gem_names(library_names)
-        library_names + RbsLoader.vendored_gem_names.reject { |name| RequiredFeatures.gated_dir?(name) }
+        extra = library_names.reject { |name| DEFAULT_LIBRARIES.include?(name) || RequiredFeatures.feature_of_token(name) }
+        unavailable = extra.empty? ? [] : extra.reject(&LibraryProbe.predicate)
+        (library_names - unavailable) + RbsLoader.vendored_gem_names.reject { |name| RequiredFeatures.gated_dir?(name) }
       end
 
       def default_signature_paths(root)

@@ -3,6 +3,8 @@
 require "did_you_mean"
 
 require_relative "config_path"
+require_relative "environment/bundle_sig_discovery"
+require_relative "environment/lockfile_resolver"
 require_relative "environment/rbs_collection_discovery"
 require_relative "flow_contribution/conflict"
 require_relative "library_probe"
@@ -152,13 +154,34 @@ module Rigor
       return [] if named.empty?
 
       available = LibraryProbe.predicate
-      named.reject { |_, _, lib| available.call(lib) }.map do |kind, source, lib|
+      unavailable = named.reject { |_, _, lib| available.call(lib) }
+      return [] if unavailable.empty?
+
+      # Issue #2987 — nor is a name whose own `sig/` the bundle loaded. Read only once a name is otherwise
+      # unavailable, so the common case (every name resolves) never touches the lockfile.
+      bundled = bundle_sig_gem_names(configuration, project_root)
+      unavailable.reject { |kind, _, lib| kind == :library && bundled.include?(lib) }.map do |kind, source, lib|
         message = "#{source} #{lib.inspect} is not an available RBS library (no signatures loaded from it)"
         Warning.new(kind: kind, message: message, fields: { "name" => lib })
       end
     rescue StandardError
       []
     end
+
+    # Issue #2987 — the locked gems whose own `sig/` the bundle discovery loads, read the way the environment reads
+    # them (the lockfile plus the bundle path) and without loading `rbs`.
+    def self.bundle_sig_gem_names(configuration, project_root)
+      locked = Environment::LockfileResolver.locked_gems(
+        lockfile_path: configuration.bundler_lockfile, project_root: project_root,
+        auto_detect: configuration.bundler_auto_detect
+      )
+      dirs = Environment::BundleSigDiscovery.discover(
+        bundle_path: configuration.bundler_bundle_path, project_root: project_root,
+        auto_detect: configuration.bundler_auto_detect, locked_gems: locked.empty? ? nil : locked
+      )
+      Environment::BundleSigDiscovery.locked_names_of(dirs, locked)
+    end
+    private_class_method :bundle_sig_gem_names
 
     # `disable:` tokens that reach no row ({.disable_token_warning}) and `severity_overrides:` keys
     # that reach none ({.override_key_warning}).

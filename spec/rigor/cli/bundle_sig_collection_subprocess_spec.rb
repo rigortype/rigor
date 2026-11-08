@@ -39,11 +39,11 @@ RSpec.describe "bundle sig/ beside its rbs collection copy (subprocess)" do
                "---\npath: .gem_rbs_collection\ngems:\n- name: #{name}\n  version: '1.0'\n  source:\n    type: git\n")
   end
 
-  def check_run(libraries)
+  def check_run(libraries, *flags)
     File.write(File.join(dir, ".rigor.yml"),
                "severity_profile: balanced\nlibraries: #{libraries}\nbundler:\n  bundle_path: bundle\n")
     out, err, = Open3.capture3("bundle", "exec", "ruby", exe, "check", "--no-ci-detect", "--no-stats",
-                               "--no-baseline", "lib", chdir: dir, stdin_data: "")
+                               "--no-baseline", *flags, "lib", chdir: dir, stdin_data: "")
     "#{out}#{err}"
   end
 
@@ -105,5 +105,80 @@ RSpec.describe "bundle sig/ beside its rbs collection copy (subprocess)" do
 
     expect(output).to include("undefined method `no_a' for Integer")
     expect(output).not_to include("no RBS available")
+  end
+
+  # #2987 — a libraries: name whose bundle sig/ loaded is not an unknown RBS library.
+  it "does not warn that a bundle-sig gem named under libraries: is not an available RBS library" do
+    install_gem("foo-2fa", bundle_rbs: gem_a)
+    File.write(File.join(dir, "lib", "a.rb"), "Bar.new.a.no_a\n")
+    output = check_run("[foo-2fa]")
+
+    expect(output).to include("undefined method `no_a' for Integer")
+    expect(output).not_to include("is not an available RBS library")
+  end
+
+  it "still warns about a libraries: name nothing provides" do
+    install_gem("foo-2fa", bundle_rbs: gem_a)
+    File.write(File.join(dir, "lib", "a.rb"), "Bar.new.a.no_a\n")
+
+    expect(check_run("[foo-2fa, no_such_lib]")).to include("no_such_lib").and include("is not an available RBS library")
+  end
+
+  # #2987 — a gem gaining or losing its own sig/ while no analysed file changes: the warm run must answer as a
+  # fresh --no-cache run does.
+  describe "run cache across a bundle gem gaining or losing sig/" do
+    let(:copy) { "class Bar\n  def a: () -> String\nend\n" }
+    let(:gem_sig) { File.join(dir, "bundle", "ruby", "4.0.0", "gems", "bargem-1.0", "sig") }
+
+    def stash_sig = FileUtils.mv(gem_sig, "#{gem_sig}.off")
+    def restore_sig = FileUtils.mv("#{gem_sig}.off", gem_sig)
+
+    before do
+      install_gem("bargem", bundle_rbs: gem_a, collection_rbs: copy)
+      stash_sig
+      File.write(File.join(dir, "lib", "a.rb"), "Bar.new.a.no_a\n")
+    end
+
+    it "re-analyses when the gem gains sig/" do
+      expect(check_run("[]")).to include("undefined method `no_a' for String")
+      restore_sig
+
+      warm = check_run("[]")
+      expect(warm).to include("undefined method `no_a' for Integer")
+      expect(warm).to eq(check_run("[]", "--no-cache"))
+    end
+
+    it "re-analyses when the gem loses sig/" do
+      restore_sig
+      expect(check_run("[]")).to include("undefined method `no_a' for Integer")
+      stash_sig
+
+      warm = check_run("[]")
+      expect(warm).to include("undefined method `no_a' for String")
+      expect(warm).to eq(check_run("[]", "--no-cache"))
+    end
+
+    # A warm HIT is served without the inference engine in $LOADED_FEATURES (run_cache_probe_spec); a MISS loads it.
+    def engine_loaded?
+      marker = File.join(dir, "engine_features.txt")
+      File.write(File.join(dir, "probe.rb"),
+                 "at_exit { File.write(#{marker.inspect}, $LOADED_FEATURES.grep(%r{/rigor/inference/}).size.to_s) }\n")
+      File.write(File.join(dir, ".rigor.yml"),
+                 "severity_profile: balanced\nlibraries: []\nbundler:\n  bundle_path: bundle\n")
+      Open3.capture3("bundle", "exec", "ruby", "-r", File.join(dir, "probe.rb"), exe, "check", "--no-ci-detect",
+                     "--no-stats", "--no-baseline", "lib", chdir: dir, stdin_data: "")
+      File.read(marker).to_i.positive?
+    end
+
+    it "stays a hit when nothing changes" do
+      expect(engine_loaded?).to be(true)
+      expect(engine_loaded?).to be(false)
+    end
+
+    it "is a miss, not a hit, once the gem gains sig/" do
+      expect(engine_loaded?).to be(true)
+      restore_sig
+      expect(engine_loaded?).to be(true)
+    end
   end
 end

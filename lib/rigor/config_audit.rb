@@ -160,7 +160,9 @@ module Rigor
     # same two sources — a gem's `sig/` directory, and a release-versioned directory under the bundled rbs
     # gem's `stdlib/<name>/`. A probe that cannot place the rbs gem answers true (never warns when unsure).
     def self.library_probe
-      return ->(lib) { ::RBS::EnvironmentLoader.new.has_library?(library: lib, version: nil) } if defined?(::RBS::EnvironmentLoader)
+      if defined?(::RBS::EnvironmentLoader)
+        return ->(lib) { ::RBS::EnvironmentLoader.new.has_library?(library: lib, version: nil) }
+      end
 
       stdlib = rbs_stdlib_root
       return ->(_lib) { true } if stdlib.nil?

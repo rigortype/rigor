@@ -21,7 +21,7 @@ RSpec.describe "library audit warnings from a fresh CLI process" do
 
   attr_reader :dir
 
-  # Returns [stdout + stderr, the rbs/environment_loader.rb path if loaded, else ""]; rbs/version.rb alone loads elsewhere.
+  # Returns [stdout + stderr, the environment_loader.rb path if rbs loaded it, else ""].
   def check_run(config)
     File.write(File.join(dir, ".rigor.yml"), "severity_profile: balanced\n#{config}")
     marker = File.join(dir, "rbs_loaded.txt")

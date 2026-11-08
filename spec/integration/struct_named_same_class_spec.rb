@@ -98,11 +98,13 @@ RSpec.describe "Struct.new with a class-name String: one class under two names (
     end
 
     # Ruby raises NameError for `Struct.new("lower", :a)` ("identifier lower needs to be constant"), so it names no
-    # `Struct::` class; and under `Class.new(Struct.new("Named", :a))` the constant is a subclass, not the class.
-    it "binds nothing for a String that is not a constant name, or a wrapped factory" do
-      source = "L = Struct.new(\"lower\", :a)\nW = Class.new(Struct.new(\"Wrapped\", :a))\n"
-      expect([same_class_names(source, "L"), same_class_names(source, "W"), same_class_names(source, "Struct::Wrapped")])
-        .to eq([[], [], []])
+    # `Struct::` class; under `Class.new(Struct.new("Named", :a))` the constant is a subclass, not the class; and a
+    # receiver other than `Struct` makes no `Struct::` class at all.
+    it "binds nothing for a String that is not a constant name, a wrapped factory, or another receiver" do
+      source = "L = Struct.new(\"lower\", :a)\nW = Class.new(Struct.new(\"Wrapped\", :a))\n" \
+               "O = Other.new(\"Oth\", :a)\n"
+      expect(%w[L W Struct::Wrapped O Struct::Oth].map { |name| same_class_names(source, name) })
+        .to eq([[], [], [], [], []])
     end
   end
 end

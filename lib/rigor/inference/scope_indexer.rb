@@ -4496,8 +4496,6 @@ module Rigor
         return if child_prefix.nil? || child_prefix.empty?
 
         class_name = child_prefix.join("::")
-        return if class_name == named
-
         kind = Scope::DiscoveryIndex::ENVELOPE_SAME_CLASS_KIND
         record_envelope(tables.envelopes, class_name, [kind, named], Source::ParameterEnvelope::OPAQUE)
         record_envelope(tables.envelopes, named, [kind, class_name], Source::ParameterEnvelope::OPAQUE)

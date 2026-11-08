@@ -1015,7 +1015,7 @@ module Rigor
             @frames.last.add_marks(mark_for(owner, :extend_hook, WILDCARD_LIST, false)) if extend_hook_taint?(owner)
           end
           entries = names.map { |owner| project_entry(owner, :instance) }
-          super_lin = superclass_lin(superclass_owner(names), :instance, depth)
+          super_lin = superclass_lin(name, :instance, depth)
           entries.concat(super_lin[0])
           boundary = [0, names.size]
           names.each do |owner|
@@ -1033,7 +1033,7 @@ module Rigor
           names = same_class(name)
           names.each { |owner| mark_unsettled(owner, :extend, (@discovery.discovered_extends[owner] || EMPTY).size) }
           entries = names.map { |owner| project_entry(owner, :singleton) }
-          super_lin = superclass_lin(superclass_owner(names), :singleton, depth)
+          super_lin = superclass_lin(name, :singleton, depth)
           entries.concat(super_lin[0])
           super_start = names.reduce(names.size) do |start, owner|
             include_all(entries, owner, @discovery.discovered_extends[owner] || EMPTY, EMPTY, depth, [0, start])
@@ -1045,17 +1045,11 @@ module Rigor
         # (`K = Struct.new("Named", …)` makes `K` and `Struct::Named` one class). The chain of either name heads with
         # both entries, so a reader asks each name's own tables where Ruby asks the one class's; nothing is copied
         # between the names. Only the direct binding counts: two `Struct.new("Named", …)` writes make two classes in
-        # Ruby, and neither constant reaches the other's tables through `Struct::Named`.
+        # Ruby, and neither constant reaches the other's tables through `Struct::Named`. The superclass edge stays
+        # `name`'s own: a Struct's class has none the tables record, under either name.
         def same_class(name)
           twins = DiscoveryIndex.same_class_names(@discovery.discovered_parameter_envelopes[name])
           twins.empty? ? [name] : [name, *twins].uniq
-        end
-
-        # The name whose superclass edge the merged class takes: the first that records one, else `name` itself.
-        def superclass_owner(names)
-          return names.first if names.size == 1
-
-          names.find { |owner| @discovery.discovered_superclasses.key?(owner) } || names.first
         end
 
         # Marks the node being computed unsettled when the order of its mixin edges on `kind` is not a fact

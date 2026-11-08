@@ -60,7 +60,7 @@ module Rigor
       :contested_discovered_parameter_envelopes
     )
 
-    class DiscoveryIndex
+    class DiscoveryIndex # rubocop:disable Metrics/ClassLength -- the envelope kinds and marks are one constant each
       # Issue #2330 — identity as a hash key. `Data` hashes and compares structurally, which over these project-sized
       # tables is both costly and wrong for a per-thread memo keyed by "this very index" (an `ObjectSpace::WeakKeyMap`
       # holds the memo while the index lives and drops it with it). `==` stays structural.
@@ -259,6 +259,17 @@ module Rigor
       # for an instance receiver and the singleton mark for the class object, each beside the sideless mark.
       ENVELOPE_OPEN_INSTANCE_NAMES_MARK = :"<open-instance-names>"
       ENVELOPE_OPEN_SINGLETON_NAMES_MARK = :"<open-singleton-names>"
+      # Issue #2901 — the two halves of a class macro that defines methods under computed names. A
+      # `[ENVELOPE_COMPUTED_DEFINER_KIND, name]` entry says the class or module's own method `name` runs a
+      # `define_method` on its `self` whose name is not a literal (`def self.my_attr(*n) = n.each { |x|
+      # define_method(x) {} }`, or a module's instance method an `extend` makes a class macro). A
+      # `[ENVELOPE_BODY_CALL_KIND, name]` entry says the class body calls `name` on `self` (`my_attr :foo`).
+      # `call.undefined-method` reads a class as instance-open when a body call of it resolves, on its singleton
+      # chain, to a computed definer. Neither entry names a member, so neither declares a surface.
+      ENVELOPE_COMPUTED_DEFINER_KIND = :computed_definer
+      ENVELOPE_BODY_CALL_KIND = :body_call
+      MACRO_KINDS = [ENVELOPE_BODY_CALL_KIND, ENVELOPE_COMPUTED_DEFINER_KIND].freeze
+      private_constant :MACRO_KINDS
 
       # Issue #1820 — whether an envelope bucket says the project declares, or rewrites, the name's method table: a
       # per-method entry, the {ENVELOPE_MODULE_MARK} a `module` declaration records, or the {ENVELOPE_DYNAMIC_MARK}
@@ -270,7 +281,15 @@ module Rigor
       private_constant :DECLARING_MARKS
 
       def self.declares_surface?(bucket)
-        !bucket.nil? && bucket.any? { |key, _| !key.is_a?(Symbol) || DECLARING_MARKS.include?(key) }
+        !bucket.nil? && bucket.any? { |key, _| declaring_key?(key) }
+      end
+
+      # Issue #2901 — a per-method entry declares a member; the two macro entries ({ENVELOPE_BODY_CALL_KIND},
+      # {ENVELOPE_COMPUTED_DEFINER_KIND}) do not.
+      def self.declaring_key?(key)
+        return DECLARING_MARKS.include?(key) if key.is_a?(Symbol)
+
+        !(key.is_a?(Array) && MACRO_KINDS.include?(key.first))
       end
 
       # Whether an envelope bucket says the project rewrites the class's method table beyond its literal names: a

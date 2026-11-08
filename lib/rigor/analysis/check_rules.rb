@@ -1026,10 +1026,31 @@ module Rigor
             names = entry.external? ? entry.candidates : [entry.name]
             names.any? do |name|
               bucket = scope.parameter_envelopes_of(name)
-              marks.any? { |mark| bucket.key?(mark) }
+              marks.any? { |mark| bucket.key?(mark) } ||
+                (side == :instance && computed_definer_called?(scope, name, bucket))
             end
           end
           !found.nil?
+        end
+
+        # Issue #2901 — the body of `name` calls, on `self`, a method its singleton chain resolves to a computed
+        # definer (`Scope::DiscoveryIndex::ENVELOPE_COMPUTED_DEFINER_KIND`): a class macro of its own, a
+        # superclass's or an extended module's, which runs `define_method` under a name no table holds. The first
+        # entry on that chain carrying the macro's definer entry answers; a closer override that defines nothing is
+        # not looked for, so it leaves the class open.
+        def computed_definer_called?(scope, name, bucket)
+          bucket.each_key.any? do |key|
+            next false unless key.is_a?(Array) && key.first == Scope::DiscoveryIndex::ENVELOPE_BODY_CALL_KIND
+
+            definer = [Scope::DiscoveryIndex::ENVELOPE_COMPUTED_DEFINER_KIND, key.last]
+            chain = Scope::ResolutionChain.for(scope, name.to_s, :singleton, :methods)
+            !chain.search(scope) { |entry| macro_entry_defines?(scope, entry, definer) }.nil?
+          end
+        end
+
+        def macro_entry_defines?(scope, entry, definer)
+          names = entry.external? ? entry.candidates : [entry.name]
+          names.any? { |name| scope.parameter_envelopes_of(name).key?(definer) }
         end
 
         # Issue #1722 — a `method_missing`, or a project mixin, on one of the class's RBS ancestors

@@ -1029,6 +1029,7 @@ RSpec.describe "plugins/rigor-rails-routes" do
         <<~RUBY
           Struct.new("Named", :m_url) do
             def go = [m_url, t1_url]
+            def own_url = 1
           end
           N = Struct.new("Named2", :n_url, keyword_init: true) do
             def go = [n_url, t2_url]
@@ -1063,10 +1064,11 @@ RSpec.describe "plugins/rigor-rails-routes" do
           .to eq(%w[t1_url t2_url t3_url].map { |n| "no route helper `#{n}`" })
       end
 
+      # The unassigned block's own `def own_url` is `Struct::Named`'s too, so the reopening sees it.
       it "credits them on Struct::Named and on the constant, read from a reopening in another file" do
         reopen = <<~RUBY
           class Struct::Named
-            def go3 = [m_url, t4_url]
+            def go3 = [m_url, own_url, t4_url]
           end
           class N
             def go3 = n_url

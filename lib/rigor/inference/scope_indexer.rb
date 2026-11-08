@@ -4923,14 +4923,11 @@ module Rigor
       end
 
       # The member arguments of a `Data.define` / `Struct.new` call. For `Struct.new` the trailing `keyword_init:` hash
-      # is stripped ({#struct_new_positionals}), and so is a leading String: `Struct.new("Named", :a)` names the class
-      # `Struct::Named`, and `:a` is still a member.
+      # is stripped ({#struct_new_positionals}). A leading class-name String (`Struct.new("Named", :a)`) is neither a
+      # Symbol nor a splat, so it is no member and does not open the list.
       def meta_member_positionals(call_node)
         raw = call_node.arguments&.arguments || []
-        return raw unless struct_new_call?(call_node)
-
-        positional = struct_new_positionals(raw)
-        positional.first.is_a?(Prism::StringNode) ? positional.drop(1) : positional
+        struct_new_call?(call_node) ? struct_new_positionals(raw) : raw
       end
 
       def record_def_method(def_node, qualified_prefix, in_singleton_class, accumulator)

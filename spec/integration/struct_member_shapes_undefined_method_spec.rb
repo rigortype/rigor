@@ -89,4 +89,12 @@ RSpec.describe "Struct and Data member shapes and call.undefined-method (#2968)"
     write_project("#{splat}#{named}class Q\nend\n", %w[Q.new.zz P.new(1).zz N.new(1).zz], in_file: false)
     expect(undefined_messages).to eq(["undefined method `zz' for Q"])
   end
+
+  # A splatted list's literal members are not all its members, so neither member-layout table may record the class:
+  # a layout of `[:a]` alone made `M.new(1, 2)` decline to `Dynamic` instead of `M`.
+  it "records no member layout for a member list with a splat" do
+    root = Prism.parse("F = %i[b]\nM = Struct.new(:a, *F)\nD = Data.define(:a, *F)\n").value
+    scope = Rigor::Inference::ScopeIndexer.index(root, default_scope: Rigor::Scope.empty)[root]
+    expect([scope.struct_member_layout("M"), scope.data_member_layout("D")]).to eq([nil, nil])
+  end
 end

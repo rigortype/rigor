@@ -117,6 +117,7 @@ RSpec.describe "Literal definers and further class macros, and call.undefined-me
       expect(undefined_messages).to be_empty
     end
 
+    # Guard: the declaration walk does not enter a method body, so this holds without #2975; it pins the Ruby answer.
     it "does not count a definer in a method nothing calls" do
       write_project("class Later\n  def self.later = send(:define_method, :lm) { 1 }\nend\n", %w[Later.new.lm])
       expect(undefined_messages).to eq(["undefined method `lm' for Later"])
@@ -136,6 +137,7 @@ RSpec.describe "Literal definers and further class macros, and call.undefined-me
       expect(undefined_messages).to be_empty
     end
 
+    # Guard: no definer entry is recorded for a macro that defines nothing; this pins the reporting side.
     it "does not open a class that only calls a Module macro defining nothing" do
       write_project("class Module\n  def my_mod_attr(*n) = n\nend\nclass Mp3\n  my_mod_attr :mr\nend\n", %w[Mp3.new.mr])
       expect(undefined_messages).to eq(["undefined method `mr' for Mp3"])
@@ -176,6 +178,7 @@ RSpec.describe "Literal definers and further class macros, and call.undefined-me
       expect(undefined_messages).to be_empty
     end
 
+    # Guard: the definer entry is filed per owner, so a sibling's same-named macro stays closed; it pins that.
     it "does not open a class whose singleton_class macro of the same name, in a sibling file, defines nothing" do
       macro = "class Sc3\n  singleton_class.class_eval { def my_sc_attr(*n) = #{definer_body} }\n  my_sc_attr :a\nend\n"
       sib = "class Sib\n  singleton_class.class_eval { def my_sc_attr(*n) = n }\n  my_sc_attr :sib\nend\n"

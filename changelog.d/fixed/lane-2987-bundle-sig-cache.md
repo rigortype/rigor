@@ -1,2 +1,2 @@
-- **[cache]** A warm run no longer serves a stale result when a bundle gem gains or loses its own `sig/` directory while no analysed file changes. ([#2988](https://github.com/rigortype/rigor/pull/2988))
-  - The run cache now records the bundle's `sig/` listing, so the warm run matches `--no-cache`.
+- **[cache]** A warm run, plain or `--incremental`, no longer serves a stale result when a bundle gem gains or loses its own `sig/` directory, or when a `.rbs` inside one is edited, while no analysed file changes. ([#2988](https://github.com/rigortype/rigor/pull/2988))
+  - The run cache records the bundle's `sig/` listing and the `--incremental` snapshot fingerprint covers the gems' `sig/` contents, so the warm run matches `--no-cache`. The language server's session key shares that fingerprint.

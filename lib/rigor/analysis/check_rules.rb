@@ -1064,18 +1064,27 @@ module Rigor
         # not count; the chain's levels flatten a class's transitive mixins, so each level class's own mixin list is
         # read, one hop, never followed further. Each mixin and each extended constant resolves to the first candidate
         # the project declares, the innermost cref first, whether or not RBS declares the modules.
+        #
+        # Issue #2986 — `name` may be such a mixin itself: a concern's `included do … end` block runs in the includer's
+        # class body, so a macro call there resolves against the module the concern extends its includer with.
         def hook_extended_macro_defines?(scope, name, macros)
           definers = macros.map { |macro| [Scope::DiscoveryIndex::ENVELOPE_COMPUTED_DEFINER_KIND, :instance, macro] }
+          return true if hook_extension_defines?(scope, name.to_s, definers)
+
           chain = Scope::ResolutionChain.for(scope, name.to_s, :instance, :methods)
           chain.record(scope) if Analysis::DependencyRecorder.active?
           chain.level_classes.compact.any? do |klass|
             scope.includes_of(klass).any? do |raw|
               mixin = declared_constant(scope, klass, raw)
-              mixin && hook_extends(scope, mixin).any? do |extended|
-                target = declared_constant(scope, mixin, extended)
-                target && definers.any? { |definer| scope.parameter_envelopes_of(target).key?(definer) }
-              end
+              mixin && hook_extension_defines?(scope, mixin, definers)
             end
+          end
+        end
+
+        def hook_extension_defines?(scope, mixin, definers)
+          hook_extends(scope, mixin).any? do |extended|
+            target = declared_constant(scope, mixin, extended)
+            target && definers.any? { |definer| scope.parameter_envelopes_of(target).key?(definer) }
           end
         end
 

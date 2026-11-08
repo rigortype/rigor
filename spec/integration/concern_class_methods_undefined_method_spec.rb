@@ -97,12 +97,122 @@ RSpec.describe "ActiveSupport::Concern class_methods macros and call.undefined-m
     expect(undefined_messages).to eq(["undefined method `c16' for C16"])
   end
 
-  # Known limit: Concern collects a concern included into another concern as a dependency and extends the final
-  # includer with its `ClassMethods` too; the reader reads the direct includer's own mixins only, so this still reports.
-  it "does not yet read a concern included through another concern" do
+  # Concern#append_features extends the includer with `Outer18.const_get(:ClassMethods)`, which finds the included
+  # concern's `ClassMethods` through `Outer18`'s ancestors.
+  it "reads a concern included into another concern that has no ClassMethods of its own" do
     source = "#{concern('Conc17')}module Outer17\n  extend ActiveSupport::Concern\n  include Conc17\nend\n" \
              "class C17\n  include Outer17\n  my_c :c17\nend\n"
     write_project(source, %w[C17.new.c17])
-    expect(undefined_messages).to eq(["undefined method `c17' for C17"])
+    expect(undefined_messages).to be_empty
+  end
+
+  # Known limit: Concern also collects an included concern as a dependency of the final includer and extends it with
+  # that concern's `ClassMethods`; the reader follows `const_get(:ClassMethods)` only, which stops at the outer
+  # concern's own `ClassMethods`, so this still reports.
+  it "does not yet read a dependency concern when the outer concern has its own ClassMethods" do
+    source = "#{concern('Conc18')}#{concern('Outer18', body: 'n').sub("module Outer18\n", "module Outer18\n  include Conc18\n")}" \
+             "class C18\n  include Outer18\n  my_c :c18\nend\n"
+    write_project(source, %w[C18.new.c18])
+    expect(undefined_messages).to eq(["undefined method `c18' for C18"])
+  end
+
+  # The `included` and `prepended` blocks run only for their own edge. In the rows that report, a superclass's
+  # `my_c`, which defines nothing, lets the class body run in Ruby.
+  def hook_concern(name, hook)
+    "module #{name}\n  extend ActiveSupport::Concern\n  class_methods do\n    def my_c(*n) = #{definer_body}\n  end\n" \
+      "  #{hook} do\n    my_c :#{name.downcase}\n  end\nend\n"
+  end
+
+  def quiet_base(name) = "class #{name}\n  def self.my_c(*n) = n\nend\n"
+
+  it "opens a prepending class when a prepended block calls the macro" do
+    write_project("#{hook_concern('Hp1', 'prepended')}class Hp1c\n  prepend Hp1\nend\n", %w[Hp1c.new.hp1])
+    expect(undefined_messages).to be_empty
+  end
+
+  it "does not read an included block for a prepending class" do
+    write_project("#{hook_concern('Hp2', 'included')}class Hp2c\n  prepend Hp2\nend\n", %w[Hp2c.new.hp2])
+    expect(undefined_messages).to eq(["undefined method `hp2' for Hp2c"])
+  end
+
+  it "does not read a prepended block for an including class" do
+    write_project("#{hook_concern('Hp3', 'prepended')}class Hp3c\n  include Hp3\nend\n", %w[Hp3c.new.hp3])
+    expect(undefined_messages).to eq(["undefined method `hp3' for Hp3c"])
+  end
+
+  it "reads a self.-receiver macro call in an included block" do
+    source = hook_concern("Hp6", "included").sub("    my_c :hp6", "    self.my_c :hp6")
+    write_project("#{source}class Hp6c\n  include Hp6\nend\n", %w[Hp6c.new.hp6])
+    expect(undefined_messages).to be_empty
+  end
+
+  # The call runs in an instance method the block defines, on an instance, and only when that method is called.
+  it "does not read a macro call in a def of an included block" do
+    source = hook_concern("Hp5", "included").sub("    my_c :hp5", "    def later = my_c(:hp5)")
+    write_project("#{source}class Hp5c\n  include Hp5\nend\n", %w[Hp5c.new.hp5])
+    expect(undefined_messages).to eq(["undefined method `hp5' for Hp5c"])
+  end
+
+  # The concern's own `my_c` here defines nothing, so its body call loads; Ruby never runs it for the includer.
+  it "does not read a macro call in the concern's own module body" do
+    source = "module Hp4\n  extend ActiveSupport::Concern\n  def self.my_c(*n) = n\n  class_methods do\n    " \
+             "def my_c(*n) = #{definer_body}\n  end\n  my_c :hp4\nend\nclass Hp4c\n  include Hp4\nend\n"
+    write_project(source, %w[Hp4c.new.hp4])
+    expect(undefined_messages).to eq(["undefined method `hp4' for Hp4c"])
+  end
+
+  describe "the ClassMethods a concern extends its includer with" do
+    it "is not looked up in the namespace enclosing the concern" do
+      source = "module Nj\n  module ClassMethods\n    def my_c(*n) = #{definer_body}\n  end\n  module Co\n    " \
+               "extend ActiveSupport::Concern\n    def co = 1\n  end\nend\n#{quiet_base('Bj')}class Cj < Bj\n  include Nj::Co\n  " \
+               "my_c :cj\nend\n"
+      sig = "module Nj\n  module ClassMethods\n  end\n  module Co\n  end\nend\nclass Bj\nend\nclass Cj < Bj\nend\n"
+      write_project(source, %w[Cj.new.cj], sig: sig)
+      expect(undefined_messages).to eq(["undefined method `cj' for Cj"])
+    end
+
+    it "is the top-level ClassMethods when the concern has none" do
+      source = "module ClassMethods\n  def my_c(*n) = #{definer_body}\nend\nmodule Ct\n  extend ActiveSupport::Concern\n" \
+               "end\nclass Ctc\n  include Ct\n  my_c :ct\nend\n"
+      write_project(source, %w[Ctc.new.ct])
+      expect(undefined_messages).to be_empty
+    end
+
+    it "is an explicit module ClassMethods of a concern that defines methods of its own" do
+      source = "module Ra\n  extend ActiveSupport::Concern\n  def ra = 1\n  module ClassMethods\n    " \
+               "def my_c(*n) = #{definer_body}\n  end\nend\nclass Ka\n  include Ra\n  my_c :ka\nend\n"
+      write_project(source, %w[Ka.new.ka])
+      expect(undefined_messages).to be_empty
+    end
+
+    # Guard: the control for the explicit ClassMethods row.
+    it "does not open the includer when that explicit ClassMethods macro defines nothing" do
+      source = "module Rb\n  extend ActiveSupport::Concern\n  def rb = 1\n  module ClassMethods\n    " \
+               "def my_c(*n) = n\n  end\nend\nclass Kb\n  include Rb\n  my_c :kb\nend\n"
+      write_project(source, %w[Kb.new.kb])
+      expect(undefined_messages).to eq(["undefined method `kb' for Kb"])
+    end
+  end
+
+  # Each `def` here defines on another module than `ClassMethods`, or not until something calls it. The concern
+  # defines a method of its own here, as in the namespace row: a concern with none already opens its includer (#2094).
+  describe "a def a class_methods block does not define on ClassMethods" do
+    {
+      "a def self. method" => "def self.my_c(*n) = DEF",
+      "a def in a nested class" => "class Inner\n      def my_c(*n) = DEF\n    end",
+      "a def in a nested module" => "module InnerM\n      def my_c(*n) = DEF\n    end",
+      "a def in a class << self body" => "class << self\n      def my_c(*n) = DEF\n    end",
+      "a def in a Module.new block" => "Module.new do\n      def my_c(*n) = DEF\n    end",
+      "a def in a lambda" => "@later = -> { def my_c(*n) = DEF }"
+    }.each_with_index do |(label, body), index|
+      it "does not open the includer for #{label}" do
+        name = "Nd#{index}"
+        source = "module #{name}\n  extend ActiveSupport::Concern\n  def own = 1\n  class_methods do\n    " \
+                 "#{body.gsub('DEF', definer_body)}\n  end\nend\n#{quiet_base("B#{name}")}" \
+                 "class C#{name} < B#{name}\n  include #{name}\n  my_c :x#{index}\nend\n"
+        write_project(source, ["C#{name}.new.x#{index}"])
+        expect(undefined_messages).to eq(["undefined method `x#{index}' for C#{name}"])
+      end
+    end
   end
 end

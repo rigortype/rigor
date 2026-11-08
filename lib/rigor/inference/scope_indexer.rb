@@ -5078,29 +5078,39 @@ module Rigor
       private_constant :HOOK_EXTEND_DEFS
 
       # Issue #2986 — a module whose body runs `extend ActiveSupport::Concern` has `Concern#append_features` (or
-      # `prepend_features`) extend each direct includer with its `ClassMethods`, as #2975's hook does, so the module
-      # takes the same `[ENVELOPE_HOOK_EXTEND_KIND, "ClassMethods"]` entry. A `class_methods do … end` block of that
-      # body is a `module_eval` of `Owner::ClassMethods`: each `def` in it is also recorded on that module, with its
-      # body's evidence (a computed definer's entry among it), so the hook reader resolves and reads it. The walk
-      # keeps recording the same `def` on the module itself as before.
+      # `prepend_features`) extend each direct includer with `const_get(:ClassMethods)`, as #2975's hook does with its
+      # constant, so the module takes a `[ENVELOPE_HOOK_EXTEND_KIND, "ClassMethods", :const_get]` entry. A
+      # `class_methods do … end` block of that body is a `module_eval` of `Owner::ClassMethods`: each `def` in it is
+      # also recorded on that module, with its body's evidence (a computed definer's entry among it), so the hook
+      # reader resolves and reads it. The walk keeps recording the same `def` on the module itself as before. A call on
+      # `self` in an `included do … end` or `prepended do … end` block takes a
+      # `[ENVELOPE_HOOK_BODY_CALL_KIND, hook, name]` entry, since Ruby runs that block in the includer's class body.
       def record_concern_class_methods(node, child_prefix, methods_acc)
         return unless node.is_a?(Prism::ModuleNode) && concern_body?(node.body, child_prefix)
 
         owner = child_prefix.join("::")
-        key = [Scope::DiscoveryIndex::ENVELOPE_HOOK_EXTEND_KIND, "ClassMethods"]
+        key = [Scope::DiscoveryIndex::ENVELOPE_HOOK_EXTEND_KIND, "ClassMethods", :const_get]
         record_envelope(methods_acc.at(node).envelopes, owner, key, Source::ParameterEnvelope::OPAQUE)
         class_methods_prefix = [*child_prefix, "ClassMethods"]
         node.body.body.each do |statement|
-          next unless class_methods_block?(statement)
+          next unless block_statement?(statement)
 
-          each_class_methods_def(statement.block.body) do |def_node|
-            next if def_node.receiver
-
-            record_def_method(def_node, class_methods_prefix, false, methods_acc.at(def_node))
-            record_def_body_evidence(def_node, class_methods_prefix, methods_acc, :instance)
+          if statement.name == :class_methods
+            each_class_methods_def(statement.block.body) do |def_node|
+              record_def_method(def_node, class_methods_prefix, false, methods_acc.at(def_node))
+              record_def_body_evidence(def_node, class_methods_prefix, methods_acc, :instance)
+            end
+          elsif CONCERN_HOOK_BLOCKS.include?(statement.name)
+            each_self_call(statement.block.body) do |call|
+              entry = [Scope::DiscoveryIndex::ENVELOPE_HOOK_BODY_CALL_KIND, statement.name, call.name]
+              record_envelope(methods_acc.at(call).envelopes, owner, entry, Source::ParameterEnvelope::OPAQUE)
+            end
           end
         end
       end
+
+      CONCERN_HOOK_BLOCKS = %i[included prepended].to_set.freeze
+      private_constant :CONCERN_HOOK_BLOCKS
 
       # Whether a module body runs `extend ActiveSupport::Concern` as one of its own statements (`extend Concern`
       # in a module nested in `module ActiveSupport`).
@@ -5117,22 +5127,37 @@ module Rigor
         end
       end
 
-      def class_methods_block?(node)
-        node.is_a?(Prism::CallNode) && node.receiver.nil? && node.name == :class_methods &&
-          node.arguments.nil? && node.block.is_a?(Prism::BlockNode)
+      # A receiverless block call (`class_methods do … end`, `included do … end`). Concern's methods take no
+      # positional argument here (`class_methods` raises on one), so arguments are not looked at.
+      def block_statement?(node)
+        node.is_a?(Prism::CallNode) && node.receiver.nil? && node.block.is_a?(Prism::BlockNode)
       end
 
       # The `def`s a `class_methods` block body writes, directly or wrapped in a call (`private def x`), not those in
-      # a nested `def`, class, module or block body.
+      # a nested `def`, class, module, singleton-class, block or lambda body, which define elsewhere or later.
       def each_class_methods_def(node, &)
         case node
         when Prism::DefNode then yield node
-        when nil, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode, Prism::BlockNode,
-             Prism::LambdaNode
-          nil
-        else node.rigor_each_child { |child| each_class_methods_def(child, &) }
+        when *CONCERN_BLOCK_STOPS then nil
+        else node&.rigor_each_child { |child| each_class_methods_def(child, &) }
         end
       end
+
+      # The calls on `self` (no receiver, or `self.`) an `included` / `prepended` block body makes, not those in a
+      # nested `def`, class, module, singleton-class, block or lambda body.
+      def each_self_call(node, &)
+        case node
+        when *CONCERN_BLOCK_STOPS then nil
+        when Prism::CallNode
+          yield node if node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode)
+          node.rigor_each_child { |child| each_self_call(child, &) }
+        else node&.rigor_each_child { |child| each_self_call(child, &) }
+        end
+      end
+
+      CONCERN_BLOCK_STOPS = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode,
+                             Prism::BlockNode, Prism::LambdaNode].freeze
+      private_constant :CONCERN_BLOCK_STOPS
 
       # Issue #2901 — a method whose body runs a `define_method` on its own `self` with a computed name, directly or in
       # a block that keeps `self` (`def self.my_attr(*n) = n.each { |x| define_method(x) {} }`), is a class macro: a

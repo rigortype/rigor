@@ -44,7 +44,7 @@ RSpec.describe "bundle sig/ beside its rbs collection copy (subprocess)" do
                "severity_profile: balanced\nlibraries: #{libraries}\nbundler:\n  bundle_path: bundle\n")
     out, err, = Open3.capture3("bundle", "exec", "ruby", exe, "check", "--no-ci-detect", "--no-stats",
                                "--no-baseline", *flags, "lib", chdir: dir, stdin_data: "")
-    "#{out}#{err}"
+    "#{out}#{err}".gsub(/^rigor: --incremental[^\n]*\n/, "")
   end
 
   {
@@ -117,6 +117,15 @@ RSpec.describe "bundle sig/ beside its rbs collection copy (subprocess)" do
     expect(output).not_to include("is not an available RBS library")
   end
 
+  it "still warns about an rbs_collection.lock.yaml stdlib entry even when a bundle sig/ shares its name" do
+    install_gem("foo-2fa", bundle_rbs: gem_a)
+    File.write(File.join(dir, "rbs_collection.lock.yaml"),
+               "---\npath: .gem_rbs_collection\ngems:\n- name: foo-2fa\n  version: '1.0'\n  source:\n    type: stdlib\n")
+    File.write(File.join(dir, "lib", "a.rb"), "x = 1\n")
+
+    expect(check_run("[]")).to include("stdlib entry \"foo-2fa\" is not an available RBS library")
+  end
+
   it "still warns about a libraries: name nothing provides" do
     install_gem("foo-2fa", bundle_rbs: gem_a)
     File.write(File.join(dir, "lib", "a.rb"), "Bar.new.a.no_a\n")
@@ -139,23 +148,38 @@ RSpec.describe "bundle sig/ beside its rbs collection copy (subprocess)" do
       File.write(File.join(dir, "lib", "a.rb"), "Bar.new.a.no_a\n")
     end
 
-    it "re-analyses when the gem gains sig/" do
-      expect(check_run("[]")).to include("undefined method `no_a' for String")
-      restore_sig
+    ["", "--incremental"].each do |mode|
+      flags = mode.empty? ? [] : [mode]
 
-      warm = check_run("[]")
-      expect(warm).to include("undefined method `no_a' for Integer")
-      expect(warm).to eq(check_run("[]", "--no-cache"))
-    end
+      it "re-analyses when the gem gains sig/ #{mode}" do
+        expect(check_run("[]", *flags)).to include("undefined method `no_a' for String")
+        restore_sig
 
-    it "re-analyses when the gem loses sig/" do
-      restore_sig
-      expect(check_run("[]")).to include("undefined method `no_a' for Integer")
-      stash_sig
+        warm = check_run("[]", *flags)
+        expect(warm).to include("undefined method `no_a' for Integer")
+        expect(check_run("[]", *flags)).to eq(warm)
+        expect(warm).to eq(check_run("[]", "--no-cache"))
+      end
 
-      warm = check_run("[]")
-      expect(warm).to include("undefined method `no_a' for String")
-      expect(warm).to eq(check_run("[]", "--no-cache"))
+      it "re-analyses when the gem loses sig/ #{mode}" do
+        restore_sig
+        expect(check_run("[]", *flags)).to include("undefined method `no_a' for Integer")
+        stash_sig
+
+        warm = check_run("[]", *flags)
+        expect(warm).to include("undefined method `no_a' for String")
+        expect(warm).to eq(check_run("[]", "--no-cache"))
+      end
+
+      it "re-analyses when a .rbs inside the gem's sig/ is edited #{mode}" do
+        restore_sig
+        expect(check_run("[]", *flags)).to include("undefined method `no_a' for Integer")
+        File.write(File.join(gem_sig, "bargem.rbs"), "class Bar\n  def a: () -> Symbol\nend\n")
+
+        warm = check_run("[]", *flags)
+        expect(warm).to include("undefined method `no_a' for Symbol")
+        expect(warm).to eq(check_run("[]", "--no-cache"))
+      end
     end
 
     # A warm HIT is served without the inference engine in $LOADED_FEATURES (run_cache_probe_spec); a MISS loads it.

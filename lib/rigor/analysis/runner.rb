@@ -1605,7 +1605,7 @@ module Rigor
             files: own.files + kind_entries(signature_root_candidates) +
                    discovery_file_entries({ files: files }) + required_missing_entries +
                    unanalysed_pre_eval_entries(files),
-            globs: (own.globs + discovery_glob_entries + bundle_sig_glob_entries).uniq
+            globs: (own.globs + discovery_glob_entries).uniq
           ),
           pinned: pinned
         )

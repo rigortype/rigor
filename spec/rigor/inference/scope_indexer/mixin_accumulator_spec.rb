@@ -237,20 +237,23 @@ RSpec.describe Rigor::Inference::ScopeIndexer::MixinAccumulator do
       expect(index_of(source).fetch(:extends).fetch("C", [])).not_to include("B")
     end
 
+    # Issue #2991 — an `include` / `prepend` on the hook parameter itself also lists "?" on the instance side: the
+    # includer gains a module no table records under it.
     it "taints the enclosing class for a call on a hook parameter", :aggregate_failures do
       both = { "Concern" => { include: ["*"], extend: ["*"] } }
-      [
-        "def self.included(base)\n    base.include X\n  end",
-        "def self.included(base)\n    base.extend X\n  end",
-        "def self.included(base)\n    base.prepend X\n  end",
-        "def self.included(base)\n    base.singleton_class.include X\n  end",
-        "def self.extended(base)\n    base.send(:include, X)\n  end",
-        "def self.prepended(base)\n    base.include X\n  end",
-        "def self.inherited(sub)\n    sub.include X\n  end",
-        "def self.included(base = nil)\n    base.include X\n  end",
-        "class << self\n    def included(base)\n      base.include X\n    end\n  end"
-      ].each do |hook|
-        expect(unpositioned("module Concern\n  #{hook}\nend\n")).to eq(both), hook
+      unnamed = { "Concern" => { include: ["*", "?"], extend: ["*"] } }
+      {
+        "def self.included(base)\n    base.include X\n  end" => unnamed,
+        "def self.included(base)\n    base.extend X\n  end" => both,
+        "def self.included(base)\n    base.prepend X\n  end" => unnamed,
+        "def self.included(base)\n    base.singleton_class.include X\n  end" => both,
+        "def self.extended(base)\n    base.send(:include, X)\n  end" => unnamed,
+        "def self.prepended(base)\n    base.include X\n  end" => unnamed,
+        "def self.inherited(sub)\n    sub.include X\n  end" => unnamed,
+        "def self.included(base = nil)\n    base.include X\n  end" => unnamed,
+        "class << self\n    def included(base)\n      base.include X\n    end\n  end" => unnamed
+      }.each do |hook, expected|
+        expect(unpositioned("module Concern\n  #{hook}\nend\n")).to eq(expected), hook
       end
     end
 
@@ -258,14 +261,14 @@ RSpec.describe Rigor::Inference::ScopeIndexer::MixinAccumulator do
       %w[class_eval module_eval class_exec module_exec instance_eval].each do |verb|
         source = "module Concern\n  def self.included(base)\n    base.#{verb} { include X }\n  end\nend\n"
 
-        expect(unpositioned(source)).to eq("Concern" => { include: ["*"], extend: ["*"] }), verb
+        expect(unpositioned(source)).to eq("Concern" => { include: ["*", "?"], extend: ["*"] }), verb
       end
     end
 
     it "taints the enclosing class for an opaque eval block that mixes a module in, outside a hook" do
       source = "class C\n  include A\n  def m(mod)\n    mod.module_eval { include B }\n  end\nend\n"
 
-      expect(unpositioned(source)).to eq("C" => { include: ["*"], extend: ["*"] })
+      expect(unpositioned(source)).to eq("C" => { include: ["*", "?"], extend: ["*"] })
     end
 
     it "does not taint for an opaque eval block that mixes nothing in", :aggregate_failures do

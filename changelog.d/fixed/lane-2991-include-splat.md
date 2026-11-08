@@ -1,0 +1,6 @@
+- **[check]** `call.undefined-method` no longer fires on a class, or on its subclasses, when its instance side mixes in a module Rigor does not record. ([#2993](https://github.com/rigortype/rigor/pull/2993))
+  - Any name is accepted after `include(*MODS)`, `prepend(*MODS)`, `send(:include, *MODS)`, `include helper`, `include M1, helper`, `k.class_eval { include M }`, and a hook's `base.include(M)`, including through an `extended` hook.
+  - Until Rigor records them, `self.include M` and a receiverless `send(:include, M)`, `public_send` or `__send__` are covered as well. Any name is accepted when `M` is a project module. For a module the project does not declare, such as `Comparable`, only the names its RBS defines are accepted.
+  - `Other.include(*MODS)` affects only `Other`.
+  - `include M; prepend M` still reports, because its module is recorded.
+  - Calls on the class object still report. A splatted `extend(*MODS)` affects only the class object, as before.

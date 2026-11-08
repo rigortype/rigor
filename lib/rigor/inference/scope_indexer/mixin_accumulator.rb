@@ -25,6 +25,16 @@ module Rigor
       # leaves the edges the tables did record looking positioned. So it taints the whole owner side with the
       # {WILDCARD} name instead: an owner side that lists {WILDCARD} has no known order at all.
       #
+      # Issue #2991 — {WILDCARD} says only that the ORDER is unknown: `include M; prepend M`, an edge recorded where its
+      # position is not a fact, and an opaque eval whose block mixes nothing into its own `self` all set it while every
+      # module is recorded. Where the walk recorded no module under any name, the instance side also lists
+      # {UNNAMED}, always beside {WILDCARD}, because its SET of modules is unknown too. That covers an instance-side
+      # mixin call it could not record whose argument is not a constant (`include helper`, `include(*MODS)`; a
+      # `Module.new { … }` argument keeps its #2975 reading), a name beside one it cannot name (`include M, h`), and
+      # an opaque eval whose block mixes into its own `self`, and a hook's `base.include M`. An unrecorded call whose
+      # arguments are all constants (`self.include M`, a receiverless `send(:include, M)`) lists those names after
+      # {WILDCARD} instead: the set is known, but no table records it under the owner.
+      #
       # The value is `{owner => {include: [names], extend: [names]}}`. `:include` is the instance side
       # (`include` and `prepend`), `:extend` the singleton side (`extend`, and `include` / `prepend` inside
       # `class << self`), so an unknown `extend` never taints a class's instance ancestry.
@@ -33,6 +43,11 @@ module Rigor
       class MixinAccumulator < Hash
         # The name an owner side lists when a mixin call the walk could not record was written on it.
         WILDCARD = "*"
+        # The name an owner side also lists when such a call mixes in a module the walk cannot name (#2991).
+        UNNAMED = "?"
+        UNNAMED_LIST = [WILDCARD, UNNAMED].freeze
+        WILDCARD_LIST = [WILDCARD].freeze
+        private_constant :UNNAMED_LIST, :WILDCARD_LIST
 
         # What {#unpositioned} answers when nothing was noted: one shared frozen table, so the common file
         # allocates none.
@@ -112,15 +127,18 @@ module Rigor
         # Notes the edges `node` recorded for `owner` on `side`. `complete` is false when an argument named
         # nothing the walk could record, which leaves the recorded names' neighbours unknown.
         def note(node, owner, side, targets, complete:)
-          return taint(owner, side) unless complete
+          return taint(owner, side, unnamed: side == :include) unless complete
           return if node.receiver.nil? && direct?(node)
 
           add(owner, side, targets)
         end
 
-        # Names `owner`'s `side` as having no known order.
-        def taint(owner, side)
-          add(owner, side, [WILDCARD])
+        # Names `owner`'s `side` as having no known order; `unnamed` also as holding a module no name spells.
+        # `names` are the constants an unrecorded call mixed in (`self.include M`, #2991), listed after {WILDCARD}
+        # so a reader can ask them for a method the tables do not record under the owner.
+        def taint(owner, side, unnamed: false, names: nil)
+          add(owner, side, unnamed ? UNNAMED_LIST : WILDCARD_LIST)
+          add(owner, side, names) if names && !names.empty?
         end
 
         # `{owner => {side => [names]}}`, frozen, each list de-duplicated.

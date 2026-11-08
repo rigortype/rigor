@@ -7521,7 +7521,35 @@ module Rigor
         return if instance_mixin_recorded?(node, view, qualified_prefix, current_class, accumulator)
 
         # A mixin call the tables cannot hold still reshapes the ancestry: taint the whole owner side.
-        effects.each { |owner, side| accumulator.taint(owner, side) }
+        taint_unrecorded_mixin(node, kind, view[1], effects, accumulator)
+      end
+
+      # Issue #2991 — an unrecorded `include` / `prepend` that reaches the instance side (its receiver is not a
+      # `singleton_class` call) leaves that side's module SET unknown when an argument is not a constant
+      # (`include(*MODS)`, `include helper`) or the receiver is a hook parameter (`base.include M`), which lists
+      # {MixinAccumulator::UNNAMED}. When every argument is a constant (`self.include M`, a receiverless
+      # `send(:include, M)`) the set is known but no table records it under the owner, so the names are listed after
+      # the wildcard for the reader to ask. A `Module.new { … }` argument keeps its #2975 reading and lists nothing. A
+      # hook's `base.extend M` or `base.singleton_class.include M` taints the instance side's order alone: it mixes
+      # nothing into it.
+      def taint_unrecorded_mixin(node, kind, arguments, effects, accumulator)
+        unnamed = false
+        names = nil
+        if INSTANCE_MIXIN_NAMES.include?(kind) && !singleton_class_eval_receiver?(node.receiver)
+          names = arguments.filter_map { |arg| Source::ConstantPath.qualified_name(arg) }
+          unnamed = hook_parameter_receiver?(node.receiver, accumulator) ||
+                    arguments.any? { |arg| Source::ConstantPath.qualified_name(arg).nil? && !module_new_call?(arg) }
+        end
+        effects.each do |owner, side|
+          instance = side == :include
+          accumulator.taint(owner, side, unnamed: unnamed && instance, names: instance && !unnamed ? names : nil)
+        end
+      end
+
+      # A hook parameter itself (`base` in `def self.included(base)`): its class is the includer, which the walk cannot
+      # name, so a mixin on it is read as unnamed rather than by its constant (#2991).
+      def hook_parameter_receiver?(receiver, accumulator)
+        receiver.is_a?(Prism::LocalVariableReadNode) && accumulator.hook_local?(receiver.name)
       end
 
       # Records the instance-side edges of a call {#mixin_call_recorded?} accepts. False when it recorded
@@ -7603,8 +7631,9 @@ module Rigor
       end
 
       HOOK_DEFS = %i[included extended prepended inherited].freeze
+      INSTANCE_MIXIN_NAMES = %i[include prepend].freeze
       MIXIN_EVAL_CALLS = %i[class_eval module_eval class_exec module_exec instance_eval instance_exec].freeze
-      private_constant :HOOK_DEFS, :MIXIN_EVAL_CALLS
+      private_constant :HOOK_DEFS, :MIXIN_EVAL_CALLS, :INSTANCE_MIXIN_NAMES
 
       # The parameter names of a `def included(base)`-style hook (a hook is written `def self.included`, or
       # `def included` inside `class << self`), else nil.
@@ -7639,9 +7668,14 @@ module Rigor
         receiver = node.receiver
         return if receiver.nil? || receiver.is_a?(Prism::SelfNode)
         return if Source::ConstantPath.qualified_name_or_nil(receiver)
-        return unless hook_receiver?(receiver, accumulator) || block_mixes_in?(node.block)
 
-        accumulator.taint(current_class, :include)
+        hook = hook_receiver?(receiver, accumulator)
+        return unless hook || block_mixes_in?(node.block)
+
+        # Issue #2991 — the set is unknown only where the block may mix into the class itself: a hook's `base`, or a
+        # receiverless `include` / `prepend` in the block of a receiver other than a `singleton_class`.
+        unnamed = hook || (!singleton_class_eval_receiver?(receiver) && block_mixes_into_self?(node.block))
+        accumulator.taint(current_class, :include, unnamed: unnamed)
         accumulator.taint(current_class, :extend)
       end
 
@@ -7651,6 +7685,22 @@ module Rigor
         found = false
         node.rigor_each_child { |child| found ||= block_mixes_in?(child) }
         found
+      end
+
+      # A receiverless or `self.` `include` / `prepend` (or its `send` spelling) anywhere in `node`.
+      def block_mixes_into_self?(node)
+        if node.is_a?(Prism::CallNode) && (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode))
+          view = mixin_call_view(node)
+          return true if view && INSTANCE_MIXIN_NAMES.include?(view.first)
+        end
+
+        found = false
+        node.rigor_each_child { |child| found ||= block_mixes_into_self?(child) }
+        found
+      end
+
+      def singleton_class_eval_receiver?(receiver)
+        receiver.is_a?(Prism::CallNode) && receiver.name == :singleton_class
       end
 
       def singleton_class_receiver?(receiver)
@@ -8137,7 +8187,7 @@ module Rigor
         return if singleton_class_rewrite_tainted?(node, qualified_prefix, current_class, accumulator,
                                                    in_singleton: in_singleton)
 
-        kind, _arguments, via_send = mixin_call_view(node)
+        kind, arguments, via_send = mixin_call_view(node)
         return if kind.nil?
 
         effects = mixin_effects(node, kind, qualified_prefix, current_class, accumulator, in_singleton: in_singleton)
@@ -8146,7 +8196,9 @@ module Rigor
         return if !via_send && singleton_mixin_recorded?(node, kind, qualified_prefix, current_class, accumulator,
                                                          in_singleton)
 
-        effects.each { |owner, side| accumulator.taint(owner, side) }
+        # Issue #2991 — as in {#record_mixin_call}: an unrecorded instance-side call (a hook's `base.include M` written
+        # in `class << self`) lists its names, or the unnamed marker.
+        taint_unrecorded_mixin(node, kind, arguments, effects, accumulator)
       end
 
       # Issue #1752 — a call that rewrites a singleton class reached through `singleton_class` (`singleton_class.

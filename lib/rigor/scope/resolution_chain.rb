@@ -164,6 +164,24 @@ module Rigor
       # non-constant, or a call the walk cannot record), so the chain may hold a module it does not list.
       def wildcard_mixin? = @marks.any? { |mark| mark.listed.include?(Relevance::WILDCARD) }
 
+      # Issue #2991 — true when a class on the chain mixes in a module the tables do not record under any name
+      # (`include(*MODS)`, `include helper`, a hook's `base.include M`, an unrecorded `self.include M`): the chain's SET
+      # of modules is unknown, not only its order. Every such mark is also a {#wildcard_mixin?} one; `include M;
+      # prepend M` taints the order alone.
+      def unnamed_mixin? = @marks.any? { |mark| mark.listed.include?(Relevance::UNNAMED) }
+
+      # Issue #2991 — `[[node, raw], …]`: the module names the chain's marks list beside the wildcard, each with the
+      # class or module it was written on. An unrecorded `self.include M` or receiverless `send(:include, M)` lists `M`
+      # here and in no include table, so a reader that asks the tables for a method also asks these.
+      def listed_mixins
+        @memo[:listed_mixins] ||= @marks.flat_map do |mark|
+          mark.listed.filter_map { |raw| [mark.node, raw] unless MARKERS.include?(raw) }
+        end.uniq.freeze
+      end
+
+      MARKERS = ["*", "?"].freeze # Relevance::WILDCARD and Relevance::UNNAMED
+      private_constant :MARKERS
+
       # The ONE decision every first-definer reader makes: does `answer`, read off this chain, stand, or does
       # the reader answer what the walk this chain replaced answered ({MasterOrder})? Returns `:chain` or
       # `:master`.
@@ -347,7 +365,7 @@ module Rigor
       end
       private :record_hooks
 
-      # #1730 — the edges of the {Builder#extend_hook_taint?} decision: an instance chain's project entries may carry
+      # #1730 — the edges of the {Builder#extend_hook_taint} decision: an instance chain's project entries may carry
       # a `"*"` mark because a module one of them `extend`s has a hook that mixes into the extender, and the
       # module is often declared in a file the chain records nothing of. Each such module the decision read files
       # its class edges (an edit to its hook moves its declaration signature) and the negative method edges of
@@ -442,7 +460,7 @@ module Rigor
       end
 
       # `[[spelling, resolved name or nil, candidate names], …]`: every module the project entries of an instance chain
-      # `extend`, as {Builder#extend_hook_taint?} resolved them.
+      # `extend`, as {Builder#extend_hook_taint} resolved them.
       def self.extend_targets(scope, flavor, entries)
         resolver = resolver_for(scope, flavor)
         extends = scope.discovery.discovered_extends
@@ -1060,7 +1078,8 @@ module Rigor
         # already carries the prepended names, so it counts every instance-side edge once.
         def mark_instance_node(name, kind)
           mark_unsettled(name, kind, (@discovery.discovered_includes[name] || EMPTY).size)
-          @frames.last.add_marks(mark_for(name, :extend_hook, WILDCARD_LIST, false)) if extend_hook_taint?(name)
+          hook = extend_hook_taint(name)
+          @frames.last.add_marks(mark_for(name, :extend_hook, hook, false)) if hook
         end
 
         # Issue #2979 — the names `name`'s envelope bucket binds to the same class object (`K = Struct.new("Named",
@@ -1147,19 +1166,29 @@ module Rigor
         CLASS_FIRST = [0, 1].freeze
         private_constant :CLASS_FIRST
 
-        WILDCARD_LIST = ["*"].freeze # Relevance::WILDCARD, which loads after this file
-        private_constant :WILDCARD_LIST
-
         # #1730 — whether a module `name` extends has a hook that may mix into `name`'s instance side or its
         # includers' ({ResolutionChain.extend_reshapes_instance?}). Ruby runs it at the `extend`, so the mixin is
         # not a fact of the tables and `name`'s instance side is unpositioned. A spelling no project module
         # answers taints nothing: the project cannot see its hooks.
-        def extend_hook_taint?(name)
-          (@discovery.discovered_extends[name] || EMPTY).any? do |raw|
+        #
+        # The mark's list: nil when no extended module taints, else {UNNAMED_LIST} when one of those modules lists `"?"`
+        # (#2991), {WILDCARD_LIST} otherwise. Only the marker carries over: a name such a module lists is spelled
+        # relative to that module, not to the extender.
+        def extend_hook_taint(name)
+          found = nil
+          (@discovery.discovered_extends[name] || EMPTY).each do |raw|
             resolved = @resolver.resolve_one(name, raw)
-            !resolved.nil? && ResolutionChain.extend_reshapes_instance?(@scope, resolved)
+            next if resolved.nil? || !ResolutionChain.extend_reshapes_instance?(@scope, resolved)
+            return UNNAMED_LIST if @discovery.unpositioned_mixins[resolved][:include].include?(UNNAMED_LIST.last)
+
+            found = WILDCARD_LIST
           end
+          found
         end
+
+        WILDCARD_LIST = ["*"].freeze # Relevance::WILDCARD, which loads after this file
+        UNNAMED_LIST = ["*", "?"].freeze # with Relevance::UNNAMED
+        private_constant :WILDCARD_LIST, :UNNAMED_LIST
 
         def multi_file?(name)
           sites = @discovery.discovered_class_sources[name]

@@ -324,6 +324,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#apply_visibility_argument: 'issues #1911 and #1633, one argument of the grandfathered apply_visibility_call split out to hold its size: a wrapped def or attr_* call takes the call''s visibility, a literal name is applied, anything else is walked contested; the owner is the caller''s qualified prefix and it derives no context'
     Rigor::Inference::ScopeIndexer#apply_visibility_call: grandfathered
     Rigor::Inference::ScopeIndexer#block_mixes_in?: scans an eval block for a mixin call; it answers a question and derives no declaration context
+    Rigor::Inference::ScopeIndexer#block_mixes_into_self?: 'issue #2991, scans an opaque eval block for a receiverless or self. include / prepend; it answers a question and derives no declaration context'
     Rigor::Inference::ScopeIndexer#build_method_visibility_tables: the grandfathered visibility walk's entry point, moved from build_discovered_method_visibilities (now a projection of it) so the walk also returns ADR-119 WD3's contested visibility slots; it starts the walk at the top level with the same default and adds no context of its own
     Rigor::Inference::ScopeIndexer#census_scan: ADR-121 WD7's census over a def or refine body the method walk does not descend; a nested def, class, module or singleton class only moves the module a `refine` there is charged to to the wildcard, so it derives no declaration context
     Rigor::Inference::ScopeIndexer#class_method_visibility_parts: 'issue #1984, the private_class_method / public_class_method twin of visibility_call_parts; it maps the call name to its visibility in the walk''s own spellings (receiverless, self., send) and derives no context'
@@ -402,6 +403,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#gather_cvar_writes: grandfathered
     Rigor::Inference::ScopeIndexer#gather_global_writes: grandfathered
     Rigor::Inference::ScopeIndexer#gather_ivar_writes: grandfathered
+    Rigor::Inference::ScopeIndexer#taint_unrecorded_mixin: 'issue #2991, taints the sides an unrecorded mixin call reshapes, on the owners {#mixin_effects} already resolved, listing the unnamed marker or the constant arguments on the :include side; it reads a call''s shape and derives no declaration context'
     Rigor::Inference::ScopeIndexer#instance_mixin_recorded?: writes one instance-side mixin call into the include/prepend accumulator under the owner the walk passes in; it computes no declaration context
     Rigor::Inference::ScopeIndexer#ivar_write_targets: grandfathered
     Rigor::Inference::ScopeIndexer#loose_constant_segments: A6 (#1749), the last segments of the constants a file binds by `||=`, a literal `const_set` or any write in a `class << …` body, for whether a `refine` target names a class the constant census cannot; it reads each singleton class body only for the constants it writes and decides no declaration context
@@ -623,6 +625,7 @@ lib/rigor/inference/scope_indexer/mixin_accumulator.rb:
   producers:
     Rigor::Inference::ScopeIndexer::MixinAccumulator: holds the walks' per-owner mixin lists and the unpositioned edges; the owner is resolved by the walk that fills it
     Rigor::Inference::ScopeIndexer::MixinAccumulator#direct_body: marks the statements of a body the caller already judged direct; it resolves no declaration context
+    Rigor::Inference::ScopeIndexer::MixinAccumulator#note: notes the edges a walk already recorded for an owner and side the walk resolved, tainting the side when an argument named nothing; it resolves no declaration context
 lib/rigor/inference/scope_indexer/superclasses_collector.rb:
   computes: each class's superclass and header nesting, as a collector on the shared declaration walk
   producers:
@@ -714,6 +717,7 @@ lib/rigor/scope/resolution_chain.rb:
     Rigor::Scope::ResolutionChain.extend_reshapes_instance?: a consumer, not a declaration producer; it reads whether an extended module lists `"*"` on its :include side and defines an extend-time hook (#1730), and writes no table
     Rigor::Scope::ResolutionChain::Builder#compute_instance: a consumer, not a declaration producer; it reads `unpositioned_mixins` on the :include side to mark a chain unsettled, and reads the tables raw by design (ADR-24)
     Rigor::Scope::ResolutionChain::Builder#compute_singleton: the singleton-side twin, reading the :extend side
+    Rigor::Scope::ResolutionChain::Builder#extend_hook_taint: 'a consumer, not a declaration producer; it reads whether a module the node extends lists `"*"` (and `"?"`, #2991) on its :include side, through extend_reshapes_instance? (#1730), and writes no table'
 lib/rigor/scope/resolution_chain/relevance.rb:
   computes: whether a mark on a chain is discharged for one method name, from the closure of the module it names (ADR-119 WD2)
   producers:

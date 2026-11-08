@@ -1,0 +1,29 @@
+# Rigor core overlay — supplemental core signatures.
+#
+# --- BigDecimal precision readers (issue #2969) ---
+#
+# rbs 4.2 ships `stdlib/bigdecimal/0/big_decimal.rbs` without `precision`, `scale`,
+# `precision_scale` or `n_significant_digits`, and the bigdecimal gem's own `sig/` (4.1.3)
+# omits them too, so `BigDecimal("1.5").precision` reported `call.undefined-method` on correct code.
+#
+# Upstream: bigdecimal 4.1.3 `ext/bigdecimal/bigdecimal.c` registers the four readers as instance
+# methods (`rb_define_method(rb_cBigDecimal, "precision", ...)`, and likewise for the other three).
+# Their documented results: `precision -> integer` (decimal digits), `scale -> integer`,
+# `precision_scale -> [integer, integer]`, and `n_significant_digits -> integer`.
+#
+# The methods sit on a module the class includes, not as direct `def`s, so a later rbs or a project
+# `sig/` that declares one of them directly overrides it instead of raising
+# `DuplicatedMethodDefinitionError` (the same shape as `process.rbs` and `ruby41_core_overlay`).
+
+module RigorCoreOverlay
+  module BigDecimalPrecision
+    def precision: () -> Integer
+    def scale: () -> Integer
+    def precision_scale: () -> [Integer, Integer]
+    def n_significant_digits: () -> Integer
+  end
+end
+
+class BigDecimal
+  include RigorCoreOverlay::BigDecimalPrecision
+end

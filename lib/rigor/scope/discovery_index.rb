@@ -260,15 +260,20 @@ module Rigor
       ENVELOPE_OPEN_INSTANCE_NAMES_MARK = :"<open-instance-names>"
       ENVELOPE_OPEN_SINGLETON_NAMES_MARK = :"<open-singleton-names>"
       # Issue #2901 — the two halves of a class macro that defines methods under computed names. A
-      # `[ENVELOPE_COMPUTED_DEFINER_KIND, name]` entry says the class or module's own method `name` runs a
-      # `define_method` on its `self` whose name is not a literal (`def self.my_attr(*n) = n.each { |x|
-      # define_method(x) {} }`, or a module's instance method an `extend` makes a class macro). A
+      # `[ENVELOPE_COMPUTED_DEFINER_KIND, side, name]` entry says the class or module's own method `name`, on `side`
+      # (`:singleton` or `:instance`, #2975), runs a `define_method` on its `self` whose name is not a literal
+      # (`def self.my_attr(*n) = n.each { |x| define_method(x) {} }`, or a module's instance method an `extend` makes a
+      # class macro). A
       # `[ENVELOPE_BODY_CALL_KIND, name]` entry says the class body calls `name` on `self` (`my_attr :foo`).
       # `call.undefined-method` reads a class as instance-open when a body call of it resolves, on its singleton
       # chain, to a computed definer. Neither entry names a member, so neither declares a surface.
       ENVELOPE_COMPUTED_DEFINER_KIND = :computed_definer
       ENVELOPE_BODY_CALL_KIND = :body_call
-      MACRO_KINDS = [ENVELOPE_BODY_CALL_KIND, ENVELOPE_COMPUTED_DEFINER_KIND].freeze
+      # Issue #2975 — `[ENVELOPE_HOOK_EXTEND_KIND, "ClassMethods"]` says the module's `self.included(base)` (or
+      # `self.prepended(base)`) hook runs `base.extend(ClassMethods)`, the constant as written: an includer's
+      # singleton chain then reaches `ClassMethods`, whose computed definers its body calls may resolve to.
+      ENVELOPE_HOOK_EXTEND_KIND = :hook_extend
+      MACRO_KINDS = [ENVELOPE_BODY_CALL_KIND, ENVELOPE_COMPUTED_DEFINER_KIND, ENVELOPE_HOOK_EXTEND_KIND].freeze
       private_constant :MACRO_KINDS
 
       # Issue #1820 — whether an envelope bucket says the project declares, or rewrites, the name's method table: a

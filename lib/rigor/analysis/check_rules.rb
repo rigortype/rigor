@@ -1038,19 +1038,76 @@ module Rigor
         # superclass's or an extended module's, which runs `define_method` under a name no table holds. The first
         # entry on that chain carrying the macro's definer entry answers; a closer override that defines nothing is
         # not looked for, so it leaves the class open.
+        #
+        # Issue #2975 — the definer entry carries its side: the class's own singleton entry answers with a singleton
+        # method (`def self.my_attr`), an extended module's entry with an instance method, so an instance `def my_attr`
+        # of the class itself opens nothing. A macro patched onto `Module` (or `Class`, `Object`, `Kernel`,
+        # `BasicObject`) as an instance method is on every class object's singleton chain past its own classes.
         def computed_definer_called?(scope, name, bucket)
-          bucket.each_key.any? do |key|
-            next false unless key.is_a?(Array) && key.first == Scope::DiscoveryIndex::ENVELOPE_BODY_CALL_KIND
+          macros = bucket.each_key.filter_map do |key|
+            key.last if key.is_a?(Array) && key.first == Scope::DiscoveryIndex::ENVELOPE_BODY_CALL_KIND
+          end
+          return false if macros.empty?
 
-            definer = [Scope::DiscoveryIndex::ENVELOPE_COMPUTED_DEFINER_KIND, key.last]
-            chain = Scope::ResolutionChain.for(scope, name.to_s, :singleton, :methods)
-            !chain.search(scope) { |entry| macro_entry_defines?(scope, entry, definer) }.nil?
+          chain = Scope::ResolutionChain.for(scope, name.to_s, :singleton, :methods)
+          found = macros.any? do |macro|
+            !chain.search(scope) { |entry| macro_entry_defines?(scope, entry, macro) }.nil? ||
+              universal_macro_defines?(scope, macro)
+          end
+          found || hook_extended_macro_defines?(scope, name, macros)
+        end
+
+        # Issue #2975 — a module that a class on `name`'s superclass chain includes or prepends directly, and whose
+        # `included` / `prepended` hook extends its includer with a module (`def self.included(base) =
+        # base.extend(ClassMethods)`), puts that module's instance methods on `name`'s singleton chain, which records no
+        # edge for it. Ruby runs the hook for the direct includer only, so a module included through another module does
+        # not count; the chain's levels flatten a class's transitive mixins, so each level class's own mixin list is
+        # read, one hop, never followed further. Each mixin and each extended constant resolves to the first candidate
+        # the project declares, the innermost cref first, whether or not RBS declares the modules.
+        def hook_extended_macro_defines?(scope, name, macros)
+          definers = macros.map { |macro| [Scope::DiscoveryIndex::ENVELOPE_COMPUTED_DEFINER_KIND, :instance, macro] }
+          chain = Scope::ResolutionChain.for(scope, name.to_s, :instance, :methods)
+          chain.record(scope) if Analysis::DependencyRecorder.active?
+          chain.level_classes.compact.any? do |klass|
+            scope.includes_of(klass).any? do |raw|
+              mixin = declared_constant(scope, klass, raw)
+              mixin && hook_extends(scope, mixin).any? do |extended|
+                target = declared_constant(scope, mixin, extended)
+                target && definers.any? { |definer| scope.parameter_envelopes_of(target).key?(definer) }
+              end
+            end
+          end
+        end
+
+        # The constant `raw`, written in `owner`'s body, as the first candidate the project declares: `Owner::Raw`
+        # first, since `owner` is the innermost cref there, then the enclosing namespaces. Nil when none is declared.
+        def declared_constant(scope, owner, raw)
+          candidates = scope.ancestor_name_candidates(owner, raw)
+          candidates = ["#{owner}::#{raw}", *candidates] unless raw.start_with?("::")
+          candidates.find { |candidate| scope.known_user_class?(candidate) }
+        end
+
+        def hook_extends(scope, owner)
+          scope.parameter_envelopes_of(owner).each_key.filter_map do |key|
+            key.last if key.is_a?(Array) && key.first == Scope::DiscoveryIndex::ENVELOPE_HOOK_EXTEND_KIND
           end
         end
 
         # A macro's owner holds the macro's `def`, so it is never an external entry.
-        def macro_entry_defines?(scope, entry, definer)
-          !entry.external? && scope.parameter_envelopes_of(entry.name).key?(definer)
+        def macro_entry_defines?(scope, entry, macro)
+          !entry.external? &&
+            scope.parameter_envelopes_of(entry.name).key?([Scope::DiscoveryIndex::ENVELOPE_COMPUTED_DEFINER_KIND,
+                                                           entry.side, macro])
+        end
+
+        # The classes past a class object's own singleton chain, whose instance methods it answers. A module's chain
+        # does not reach `Class`, but a module body calling a `Class` macro raises as it loads, so it is not told apart.
+        UNIVERSAL_MACRO_OWNERS = %w[Class Module Object Kernel BasicObject].freeze
+        private_constant :UNIVERSAL_MACRO_OWNERS
+
+        def universal_macro_defines?(scope, macro)
+          definer = [Scope::DiscoveryIndex::ENVELOPE_COMPUTED_DEFINER_KIND, :instance, macro]
+          UNIVERSAL_MACRO_OWNERS.any? { |owner| scope.parameter_envelopes_of(owner).key?(definer) }
         end
 
         # Issue #1722 — a `method_missing`, or a project mixin, on one of the class's RBS ancestors

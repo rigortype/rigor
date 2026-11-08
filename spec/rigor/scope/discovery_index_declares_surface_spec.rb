@@ -11,7 +11,7 @@ RSpec.describe Rigor::Scope::DiscoveryIndex do
 
     # Issue #2901 — a class-body call on `self`, or a method that runs a computed `define_method`, names no member.
     it "does not read a class-macro body call or computed definer entry as declaring" do
-      bucket = { %i[body_call my_attr] => :opaque, %i[computed_definer my_attr] => :opaque,
+      bucket = { %i[body_call my_attr] => :opaque, %i[computed_definer singleton my_attr] => :opaque,
                  described_class::ENVELOPE_REFINED_MARK => :opaque }
 
       expect(described_class.declares_surface?(bucket)).to be(false)

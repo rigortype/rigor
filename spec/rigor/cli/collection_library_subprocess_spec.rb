@@ -26,8 +26,8 @@ RSpec.describe "collection gem listed in libraries: (subprocess)" do
 
   attr_reader :dir
 
-  def check_run(libraries)
-    File.write(File.join(dir, ".rigor.yml"), "severity_profile: balanced\nlibraries: #{libraries}\n")
+  def check_run(libraries, extra: "")
+    File.write(File.join(dir, ".rigor.yml"), "severity_profile: balanced\nlibraries: #{libraries}\n#{extra}")
     out, err, = Open3.capture3("bundle", "exec", "ruby", exe, "check", "--no-ci-detect", "--no-stats",
                                "--no-baseline", "lib", chdir: dir, stdin_data: "")
     "#{out}#{err}"
@@ -48,6 +48,38 @@ RSpec.describe "collection gem listed in libraries: (subprocess)" do
 
     expect(output).to include("no_such_lib").and include("is not an available RBS library")
     expect(output).not_to include("\"foogem\" is not")
+  end
+
+  it "still warns for a listed gem whose collection directory is missing" do
+    FileUtils.rm_rf(File.join(dir, ".gem_rbs_collection"))
+    output = check_run("[foogem]")
+
+    expect(output).to include("foogem").and include("is not an available RBS library")
+  end
+
+  context "when the gem ships its own sig/ in the bundle and also has a collection entry" do
+    before do
+      sig = File.join(dir, "bundle", "ruby", "4.0.0", "gems", "bargem-1.0", "sig")
+      FileUtils.mkdir_p(sig)
+      FileUtils.mkdir_p(File.join(dir, ".gem_rbs_collection", "bargem", "1.0"))
+      rbs = "class Bar\n  def baz: () -> Integer\nend\n"
+      File.write(File.join(sig, "bargem.rbs"), rbs)
+      File.write(File.join(dir, ".gem_rbs_collection", "bargem", "1.0", "bargem.rbs"), rbs)
+      File.write(File.join(dir, "rbs_collection.lock.yaml"),
+                 "---\npath: .gem_rbs_collection\ngems:\n- name: bargem\n  version: '1.0'\n  source:\n    type: git\n")
+      File.write(File.join(dir, "Gemfile.lock"),
+                 "GEM\n  remote: https://rubygems.org/\n  specs:\n    bargem (1.0)\n\nPLATFORMS\n  ruby\n\nDEPENDENCIES\n  bargem\n")
+      File.write(File.join(dir, "lib", "a.rb"), "Bar.new.baz.no_such\n")
+    end
+
+    ["[bargem]", "[]"].each do |libs|
+      it "types the gem's own signature once with libraries: #{libs}" do
+        output = check_run(libs, extra: "bundler:\n  bundle_path: bundle\n")
+
+        expect(output).to include("undefined method `no_such' for Integer")
+        expect(output).not_to match(/build failed|DuplicatedMethodDefinition/i)
+      end
+    end
   end
 
   it "behaves as before with libraries: []" do

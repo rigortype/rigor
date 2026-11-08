@@ -68,7 +68,8 @@ RSpec.describe "collection gem listed in libraries: (subprocess)" do
       File.write(File.join(dir, "rbs_collection.lock.yaml"),
                  "---\npath: .gem_rbs_collection\ngems:\n- name: bargem\n  version: '1.0'\n  source:\n    type: git\n")
       File.write(File.join(dir, "Gemfile.lock"),
-                 "GEM\n  remote: https://rubygems.org/\n  specs:\n    bargem (1.0)\n\nPLATFORMS\n  ruby\n\nDEPENDENCIES\n  bargem\n")
+                 "GEM\n  remote: https://rubygems.org/\n  specs:\n    bargem (1.0)\n\n" \
+                 "PLATFORMS\n  ruby\n\nDEPENDENCIES\n  bargem\n")
       File.write(File.join(dir, "lib", "a.rb"), "Bar.new.baz.no_such\n")
     end
 

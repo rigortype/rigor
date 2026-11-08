@@ -23,7 +23,8 @@ module Rigor
     # `class << obj` inside an instance body is one more barred body; the callers bar it themselves, since it is no
     # call. Only a barred body's own statements are dropped: a `define_method` block nested in a `class_eval` or
     # `class << obj` body whose module may be `K` or an instance's singleton class runs on a `K` instance and still
-    # counts ({.reentry_blocks}).
+    # counts, and so does a receiver-less `def` nested in either (#2941, {.reentry_blocks}).
+    # `def.ivar-write-mismatch`'s collector reads the same rule (#2943, {.census_children}).
     module CensusForeignBlock
       INSTANCE_EVALS = %i[instance_eval instance_exec].to_set.freeze
       MODULE_EVALS = %i[class_eval module_eval class_exec module_exec].to_set.freeze
@@ -35,6 +36,12 @@ module Rigor
       LITERALS = [Prism::StringNode, Prism::InterpolatedStringNode, Prism::SymbolNode, Prism::IntegerNode,
                   Prism::FloatNode, Prism::ArrayNode, Prism::HashNode, Prism::RangeNode, Prism::RegularExpressionNode,
                   Prism::NilNode, Prism::TrueNode, Prism::FalseNode, Prism::LambdaNode].freeze
+      # The calls that answer a module of their receiver.
+      MODULE_OF_INSTANCE = %i[class singleton_class].to_set.freeze
+      # The constants naming a module every class has among its ancestors, whose methods an instance runs.
+      ANCESTOR_ROOTS = %w[Object BasicObject Kernel].to_set.freeze
+      # The calls whose answer is foreign when their receiver is: the object itself, a copy, a new instance, its class.
+      FOREIGN_PRESERVING = %i[new allocate dup clone itself class singleton_class].to_set.freeze
       BARRIERS = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
       NONE = [].freeze
       # Every name {.foreign?} can answer true for, so any other call returns at one Set probe.
@@ -77,20 +84,43 @@ module Rigor
         (node.is_a?(Prism::ConstantReadNode) || node.is_a?(Prism::ConstantPathNode)) && !own_class?(node, class_name)
       end
 
-      # The `define_method` blocks inside barred code whose `self` may again be an instance of `class_name`: a
-      # `define_method` on the implicit or `self` receiver, called directly or through `send` / `public_send` /
-      # `__send__` with the literal name, in a `class_eval`-family block or a `class << obj` body whose module may be
-      # `class_name` or the singleton class of one of its instances. Only a module provably not one of those bars
-      # them: a `class_eval` on a constant not spelling `class_name`, and a `class << X` on a constant or a literal,
-      # whose `define_method` defines methods of `X` itself. Ruby runs every other one on a `K` instance (a `K` method,
-      # or a singleton method of the instance), so its writes are `K`'s; an untyped receiver keeps the credit, as
-      # {.foreign?} keeps it for `instance_eval`.
+      # The children of `node` a census walk for `class_name` still descends into when `node` runs code whose `self`
+      # is another object, or nil for an ordinary node: a {.foreign?} call keeps its receiver and arguments, and a
+      # `class << obj` body its expression; both keep the code nested in them that runs on a `class_name` instance
+      # again ({.reentry_blocks}) unless `reentry` is false, as it is in a singleton-side `def`, whose `self.class`
+      # and `singleton_class` are no module of an instance. A reentered `def` comes back as the {Prism::DefNode},
+      # which a walk that stops at a `def` skips and the class-ivar census walks into (#2941).
+      def census_children(node, class_name, reentry: true)
+        case node
+        when Prism::SingletonClassNode
+          return [node.expression] unless reentry
+
+          [node.expression, *reentry_blocks(node, class_name)]
+        when Prism::CallNode
+          return nil unless foreign?(node, class_name)
+          return [node.receiver, node.arguments].compact unless reentry
+
+          [node.receiver, node.arguments, *reentry_blocks(node, class_name)].compact
+        end
+      end
+
+      # The code inside barred code whose `self` may again be an instance of `class_name`, in a `class_eval`-family
+      # block whose module may be `class_name` or the singleton class of one of its instances ({.foreign_module?}) or in
+      # a `class << obj` body on an operand {.provably_other?} does not name:
+      #
+      # - a `define_method` block on the implicit or `self` receiver, called directly or through `send` /
+      #   `public_send` / `__send__` with the literal name;
+      # - a receiver-less `def` (#2941), which defines an instance method of that module, or a singleton method of
+      #   the `class << obj` operand, just as the `define_method` does.
+      #
+      # Ruby runs each on a `K` instance (a `K` method, or a singleton method of the instance), so its writes are
+      # `K`'s; an untyped receiver keeps the credit, as {.foreign?} keeps it for `instance_eval`.
       def reentry_blocks(node, class_name)
         body =
           case node
-          when Prism::SingletonClassNode then node.body unless singleton_of_other?(node.expression)
+          when Prism::SingletonClassNode then node.body unless provably_other?(node.expression, class_name)
           when Prism::CallNode
-            node.block.body if MODULE_EVALS.include?(node.name) && !foreign_constant?(node.receiver, class_name)
+            node.block.body if MODULE_EVALS.include?(node.name) && !foreign_module?(node.receiver, class_name)
           end
         return NONE if body.nil?
 
@@ -99,15 +129,58 @@ module Rigor
         found
       end
 
-      # A `class << X` operand whose singleton's methods run on `X` itself, never on an instance: a constant (a class
-      # object or a constant value) or a literal.
-      def singleton_of_other?(expression)
-        expression.is_a?(Prism::ConstantReadNode) || expression.is_a?(Prism::ConstantPathNode) ||
-          LITERALS.any? { |klass| expression.is_a?(klass) }
+      # A `class_eval` receiver whose module is provably neither `class_name`, an ancestor of it nor an instance's
+      # singleton class, read from inside an instance body. A receiver chain is foreign only when it is:
+      #
+      # - rooted at a constant other than `class_name`'s own spelling and {ANCESTOR_ROOTS} (`Other.class_eval`,
+      #   `Other.dup`), a `X.new` or `Class.new` on such a constant among them, or rooted at a literal, through
+      #   {FOREIGN_PRESERVING} calls only;
+      # - `.class` / `.singleton_class` on a receiver {.provably_other?} names (`Other.new.class`, `"s".class`,
+      #   `self.class.class`).
+      #
+      # A `superclass` call may answer an ancestor (`Other.superclass` is `Object`), a `const_get` or registry call may
+      # answer the class (`Other.const_get(:K)`), and every other receiver
+      # (`self.class`, `singleton_class`, a parameter's `o.class`, `self.class.base_class`) may name `class_name`, so
+      # they keep the credit. Parentheses are looked through. The rule is syntactic: a constant naming another
+      # ancestor of the class (`Base.class_eval` with `K < Base`) reads as foreign.
+      def foreign_module?(receiver, class_name)
+        receiver = unwrap(receiver)
+        case receiver
+        when Prism::ConstantReadNode, Prism::ConstantPathNode
+          foreign_constant?(receiver, class_name) && !ANCESTOR_ROOTS.include?(receiver.slice.delete_prefix("::"))
+        when Prism::CallNode then foreign_module_call?(receiver, class_name)
+        else LITERALS.any? { |klass| receiver.is_a?(klass) }
+        end
+      end
+
+      # A call in the chain keeps it foreign only when it answers its receiver's own object, a copy, a new instance
+      # or its class ({FOREIGN_PRESERVING}); any other call (`const_get`, a registry's `fetch`, `superclass`) may
+      # answer the class, so the receiver may be it.
+      def foreign_module_call?(call, class_name)
+        if MODULE_OF_INSTANCE.include?(call.name) && call.arguments.nil? &&
+           provably_other?(unwrap(call.receiver), class_name)
+          return true
+        end
+        return false unless FOREIGN_PRESERVING.include?(call.name)
+
+        foreign_module?(call.receiver, class_name)
+      end
+
+      # `node` with any parentheses around a single expression looked through.
+      def unwrap(node)
+        while node.is_a?(Prism::ParenthesesNode)
+          body = node.body
+          body = body.body.first if body.is_a?(Prism::StatementsNode) && body.body.size == 1
+          break if body.nil? || body.is_a?(Prism::StatementsNode)
+
+          node = body
+        end
+        node
       end
 
       def collect_define_method_blocks(node, found)
         return unless node.is_a?(Prism::Node)
+        return found << node if node.is_a?(Prism::DefNode) && node.receiver.nil?
         return if BARRIERS.any? { |klass| node.is_a?(klass) }
 
         if node.is_a?(Prism::CallNode)

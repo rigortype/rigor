@@ -127,8 +127,14 @@ module Rigor
 
     # The discovery walk answers `true` both for a definer and for a cut chain, so a `true` on a cut chain is
     # settled by searching the chain's entries for a definer, as the walk does.
+    #
+    # Issue #2968 — where the walk finds none, a class on the chain whose side is open (an open-names mark: a
+    # splatted `Struct.new(*FIELDS)`, `attr_accessor(*NAMES)`, a `define_method` under a computed name) answers
+    # `maybe`: it defines methods under names no table holds.
     def project_discovered_defined(class_name, method_name, kind, scope)
-      return Trinary.no unless scope.discovered_method_through_ancestors?(class_name, method_name, kind)
+      unless scope.discovered_method_through_ancestors?(class_name, method_name, kind)
+        return open_names_on_chain?(class_name, kind, scope) ? Trinary.maybe : Trinary.no
+      end
       # A shortcut, not a decision: on an untruncated chain the search below finds the same definer.
       return Trinary.yes unless project_chain_truncated?(class_name, kind, scope)
 
@@ -143,6 +149,24 @@ module Rigor
       found ? Trinary.yes : Trinary.maybe
     end
     private_class_method :project_discovered_defined
+
+    # The marks `call.undefined-method` reads as an open side (`CheckRules#open_names_through_ancestors?`), on the
+    # entries of the same chain. A project class with no `def` of its own is an external entry (#2094), so its
+    # candidate names are asked too. The marks are read here, not in a constant: this file loads before `Scope`.
+    def open_names_on_chain?(class_name, kind, scope)
+      index = Scope::DiscoveryIndex
+      side_mark = kind == :singleton ? index::ENVELOPE_OPEN_SINGLETON_NAMES_MARK : index::ENVELOPE_OPEN_INSTANCE_NAMES_MARK
+      marks = [index::ENVELOPE_OPEN_NAMES_MARK, side_mark]
+      chain = Scope::ResolutionChain.for(scope, class_name.to_s, kind, :methods)
+      found = chain.search(scope) do |entry|
+        chain_entry_names(entry).any? do |name|
+          bucket = scope.parameter_envelopes_of(name)
+          marks.any? { |mark| bucket.key?(mark) }
+        end
+      end
+      !found.nil?
+    end
+    private_class_method :open_names_on_chain?
 
     # A singleton-side entry reads the singleton table; a module on the singleton chain answers with its
     # INSTANCE methods; on the instance chain the caller's kind stands (`Scope#kind_for`).

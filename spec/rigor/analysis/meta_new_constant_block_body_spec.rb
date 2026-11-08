@@ -451,13 +451,14 @@ RSpec.describe "meta-new block body at constant-write position" do
       expect(scope.discovered_method?(name, :text, :instance)).to be(true)
     end
 
-    # A body the ScopeIndexer's stricter argument check does not key by the constant (`Struct.new(*names)`) is
-    # registered under the anonymous name, and the walk must enter it under that same name — the two passes agree
-    # because the walk asks the ScopeIndexer's own recognition instead of re-spelling it.
-    it "enters a splat-member constant body under the anonymous name the ScopeIndexer used" do
+    # A body the ScopeIndexer's stricter argument check does not key by the constant (`Struct.new(name)`, a member
+    # argument that is neither a Symbol literal nor a splat) is registered under the anonymous name, and the walk must
+    # enter it under that same name — the two passes agree because the walk asks the ScopeIndexer's own recognition
+    # instead of re-spelling it. Issue #2968 moved the splat form (`Struct.new(*names)`) to the constant: see below.
+    it "enters a computed-member constant body under the anonymous name the ScopeIndexer used" do
       index, program = index_and_program(<<~RUBY)
         names = [:text]
-        Line = Struct.new(*names) do
+        Line = Struct.new(names.first) do
           def shout
             1
           end
@@ -469,6 +470,23 @@ RSpec.describe "meta-new block body at constant-write position" do
 
       expect(index[def_node.body].self_type).to eq(Rigor::Type::Combinator.nominal_of(name))
       expect(index[write].discovered_method?(name, :shout, :instance)).to be(true)
+    end
+
+    # Issue #2968 — a splatted member list still creates the class the constant names, so the body is keyed by it.
+    it "enters a splat-member constant body under the constant" do
+      index, program = index_and_program(<<~RUBY)
+        names = [:text]
+        Line = Struct.new(*names) do
+          def shout
+            1
+          end
+        end
+      RUBY
+      write = program.statements.body[1]
+      def_node = write.value.block.body.body.first
+
+      expect(index[def_node.body].self_type).to eq(Rigor::Type::Combinator.nominal_of("Line"))
+      expect(index[write].discovered_method?("Line", :shout, :instance)).to be(true)
     end
 
     # Issue #963 item 3 — the identity half. The spellings below name the class exactly as the plain write

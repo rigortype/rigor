@@ -194,7 +194,17 @@ module Rigor
 
           kinds = self_kinds(ancestors[(index + 1)..])
           names = index.positive? ? written_class_names(ancestors, owner_index, ancestors[index - 1], ancestors[index]) : []
+          names = struct_class_names(ancestors[index]) if names.empty?
           CallSite.new(names: names, module_owner: false, kinds: kinds)
+        end
+
+        # Issue #2968 — `Struct.new("Named", :a) { }` names its class `Struct::Named` without a constant write.
+        def struct_class_names(call)
+          first = call.arguments&.arguments&.first
+          return [] unless call.name == :new && first.is_a?(Prism::StringNode)
+
+          name = first.unescaped
+          name.match?(/\A[A-Z][A-Za-z0-9_]*\z/) ? ["Struct::#{name}"] : []
         end
 
         def written_class_names(ancestors, owner_index, written, call)

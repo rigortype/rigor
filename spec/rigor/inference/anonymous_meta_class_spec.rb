@@ -62,5 +62,14 @@ RSpec.describe Rigor::Inference::AnonymousMetaClass do
     it "returns nil for a call it does not recognise" do
       expect(described_class.name_for(call_node("Class.new"), "lib/a.rb")).to be_nil
     end
+
+    # Issue #2968 — Ruby names `Struct.new("Named", :a)` `Struct::Named`; a String that is not a constant name raises
+    # `NameError` there, and keeps the synthetic name here.
+    it "names a Struct block form with a leading class-name String Struct::<name>" do
+      expect(described_class.name_for(call_node('Struct.new("Named", :a) do; end'), "lib/a.rb")).to eq("Struct::Named")
+      expect(described_class.name_for(call_node('Struct.new("named", :a) do; end'), "lib/a.rb"))
+        .to eq("#<Struct:lib/a.rb:1:0>")
+      expect(described_class.name_for(call_node('Data.define("Named") do; end'), "lib/a.rb")).to eq("#<Data:lib/a.rb:1:0>")
+    end
   end
 end

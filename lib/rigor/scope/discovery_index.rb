@@ -277,8 +277,8 @@ module Rigor
       # :const_get]`: `Concern#append_features` extends its includer with `const_get(:ClassMethods)`, which searches the
       # module, its ancestors and `Object`, not the lexical scope. A `[ENVELOPE_HOOK_BODY_CALL_KIND, hook, name]` entry
       # says its `included do … end` (`hook` `:included`) or `prepended do … end` (`:prepended`) block calls `name` on
-      # `self`, which Ruby runs in the class body of a class that includes (or prepends) the module directly. It is filed
-      # only on the module whose body the walk is in, so it is not one of `Incremental`'s diffed class-mark kinds.
+      # `self`, which Ruby runs in the class body of a class that includes (or prepends) the module directly. It is
+      # filed only on the module whose body the walk is in, so it is not one of `Incremental`'s diffed class-mark kinds.
       ENVELOPE_HOOK_EXTEND_KIND = :hook_extend
       ENVELOPE_HOOK_BODY_CALL_KIND = :hook_body_call
       # Issue #2979 — `[ENVELOPE_SAME_CLASS_KIND, "Struct::Named"]` on `K`'s bucket, and its mirror on

@@ -1053,30 +1053,33 @@ module Rigor
           end
         end
 
-        # Issue #2975 — a module on `name`'s instance chain whose `included` hook extends its includer with a module
-        # (`def self.included(base) = base.extend(ClassMethods)`) puts that module's instance methods on `name`'s
-        # singleton chain, which records no edge for it. Each constant such a hook extends is resolved from the hook's
-        # module, as an `extend` there would be, whether or not RBS declares either module.
+        # Issue #2975 — a module that a class on `name`'s superclass chain includes or prepends directly, and whose
+        # `included` / `prepended` hook extends its includer with a module (`def self.included(base) =
+        # base.extend(ClassMethods)`), puts that module's instance methods on `name`'s singleton chain, which records no
+        # edge for it. Ruby runs the hook for the direct includer only, so a module included through another module does
+        # not count. Each mixin and each extended constant resolves to the first candidate the project declares, the
+        # innermost cref first, whether or not RBS declares the modules.
         def hook_extended_macro_defines?(scope, name, macro)
           definer = [Scope::DiscoveryIndex::ENVELOPE_COMPUTED_DEFINER_KIND, :instance, macro]
           chain = Scope::ResolutionChain.for(scope, name.to_s, :instance, :methods)
-          found = chain.search(scope) do |entry|
-            (entry.external? ? entry.candidates : [entry.name]).any? do |owner|
-              hook_extends(scope, owner).any? do |raw|
-                hook_constant_candidates(scope, owner, raw).any? do |candidate|
-                  scope.parameter_envelopes_of(candidate).key?(definer)
-                end
+          chain.record(scope) if Analysis::DependencyRecorder.active?
+          chain.level_classes.compact.any? do |klass|
+            (scope.discovered_includes[klass] || []).any? do |raw|
+              mixin = declared_constant(scope, klass, raw)
+              mixin && hook_extends(scope, mixin).any? do |extended|
+                target = declared_constant(scope, mixin, extended)
+                target && scope.parameter_envelopes_of(target).key?(definer)
               end
             end
           end
-          !found.nil?
         end
 
-        # The hook's body has the module itself as its innermost cref, which `ancestor_name_candidates` (written for a
-        # header, whose cref is the enclosing namespace) leaves out, so `Owner::Raw` comes first.
-        def hook_constant_candidates(scope, owner, raw)
+        # The constant `raw`, written in `owner`'s body, as the first candidate the project declares: `Owner::Raw`
+        # first, since `owner` is the innermost cref there, then the enclosing namespaces. Nil when none is declared.
+        def declared_constant(scope, owner, raw)
           candidates = scope.ancestor_name_candidates(owner, raw)
-          raw.start_with?("::") ? candidates : ["#{owner}::#{raw}", *candidates]
+          candidates = ["#{owner}::#{raw}", *candidates] unless raw.start_with?("::")
+          candidates.find { |candidate| scope.known_user_class?(candidate) }
         end
 
         def hook_extends(scope, owner)

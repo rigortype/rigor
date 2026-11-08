@@ -194,6 +194,47 @@ RSpec.describe "Literal definers and further class macros, and call.undefined-me
       expect(undefined_messages).to be_empty
     end
 
+    def hook_module(name, hook: "def self.included(base) = base.extend(ClassMethods)", defines: true)
+      body = defines ? definer_body : "n"
+      "module #{name}\n  #{hook}\n  module ClassMethods\n    def my_c(*n) = #{body}\n  end\nend\n"
+    end
+
+    it "resolves the extended constant to the hook module's own nested module before a top-level one" do
+      top = "module ClassMethods\n  def my_c(*n) = #{definer_body}\nend\n"
+      write_project("#{top}#{hook_module('Conc2', defines: false)}class C2\n  include Conc2\n  my_c :c2\nend\n",
+                    %w[C2.new.c2])
+      expect(undefined_messages).to eq(["undefined method `c2' for C2"])
+    end
+
+    it "reads the hook of a module the class includes directly, and not one included through another module" do
+      source = "#{hook_module('Conc6')}module Outer6\n  include Conc6\nend\n" \
+               "class C6\n  include Outer6\n  def self.my_c(*n) = n\n  my_c :c6\nend\n" \
+               "class C6b\n  include Conc6\n  my_c :c6b\nend\n"
+      write_project(source, %w[C6.new.c6 C6b.new.c6b])
+      expect(undefined_messages).to eq(["undefined method `c6' for C6"])
+    end
+
+    it "does not read an instance-side included method, which is no hook" do
+      source = "#{hook_module('Ci', hook: 'def included(base) = base.extend(ClassMethods)')}" \
+               "class Cui\n  include Ci\n  def self.my_c(*n) = n\n  my_c :ci\nend\n"
+      write_project(source, %w[Cui.new.ci])
+      expect(undefined_messages).to eq(["undefined method `ci' for Cui"])
+    end
+
+    it "does not read an extend on something other than the hook's parameter" do
+      source = "#{hook_module('Co', hook: 'def self.included(base) = Object.new.extend(ClassMethods)')}" \
+               "class Cuo\n  include Co\n  def self.my_c(*n) = n\n  my_c :co\nend\n"
+      write_project(source, %w[Cuo.new.co])
+      expect(undefined_messages).to eq(["undefined method `co' for Cuo"])
+    end
+
+    it "reads a prepended hook the same way" do
+      source = "#{hook_module('Cp', hook: 'def self.prepended(base) = base.extend(ClassMethods)')}" \
+               "class Cup\n  prepend Cp\n  my_c :cp\nend\n"
+      write_project(source, %w[Cup.new.cp])
+      expect(undefined_messages).to be_empty
+    end
+
     # Guard: pins the reporting side; no removed line of the hook reader makes it pass for the wrong reason.
     it "does not open an includer whose hook extends a module that defines nothing" do
       quiet = "module Cq\n  def self.included(base) = base.extend(ClassMethods)\n  module ClassMethods\n    " \

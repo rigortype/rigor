@@ -40,6 +40,8 @@ module Rigor
       MODULE_OF_INSTANCE = %i[class singleton_class].to_set.freeze
       # The constants naming a module every class has among its ancestors, whose methods an instance runs.
       ANCESTOR_ROOTS = %w[Object BasicObject Kernel].to_set.freeze
+      # The calls whose answer is foreign when their receiver is: the object itself, a copy, a new instance, its class.
+      FOREIGN_PRESERVING = %i[new allocate dup clone itself class singleton_class].to_set.freeze
       BARRIERS = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
       NONE = [].freeze
       # Every name {.foreign?} can answer true for, so any other call returns at one Set probe.
@@ -131,11 +133,13 @@ module Rigor
       # singleton class, read from inside an instance body. A receiver chain is foreign only when it is:
       #
       # - rooted at a constant other than `class_name`'s own spelling and {ANCESTOR_ROOTS} (`Other.class_eval`,
-      #   `Other.dup`), a `X.new` or `Class.new` on such a constant among them, or rooted at a literal;
+      #   `Other.dup`), a `X.new` or `Class.new` on such a constant among them, or rooted at a literal, through
+      #   {FOREIGN_PRESERVING} calls only;
       # - `.class` / `.singleton_class` on a receiver {.provably_other?} names (`Other.new.class`, `"s".class`,
       #   `self.class.class`).
       #
-      # A `superclass` call may answer an ancestor (`Other.superclass` is `Object`), and every other receiver
+      # A `superclass` call may answer an ancestor (`Other.superclass` is `Object`), a `const_get` or registry call may
+      # answer the class (`Other.const_get(:K)`), and every other receiver
       # (`self.class`, `singleton_class`, a parameter's `o.class`, `self.class.base_class`) may name `class_name`, so
       # they keep the credit. Parentheses are looked through. The rule is syntactic: a constant naming another
       # ancestor of the class (`Base.class_eval` with `K < Base`) reads as foreign.
@@ -149,12 +153,15 @@ module Rigor
         end
       end
 
+      # A call in the chain keeps it foreign only when it answers its receiver's own object, a copy, a new instance
+      # or its class ({FOREIGN_PRESERVING}); any other call (`const_get`, a registry's `fetch`, `superclass`) may
+      # answer the class, so the receiver may be it.
       def foreign_module_call?(call, class_name)
-        return false if call.name == :superclass
         if MODULE_OF_INSTANCE.include?(call.name) && call.arguments.nil? &&
            provably_other?(unwrap(call.receiver), class_name)
           return true
         end
+        return false unless FOREIGN_PRESERVING.include?(call.name)
 
         foreign_module?(call.receiver, class_name)
       end

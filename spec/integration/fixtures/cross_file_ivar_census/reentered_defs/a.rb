@@ -527,7 +527,7 @@ class CrossRound2BaseClass
   def self.base_class = self
 end
 
-# A parenthesized foreign receiver, `.class` on a class object (`Class`), and a chain rooted at a literal are other
+# A parenthesized foreign receiver, `.class` on a class object (`Class`), and a copy of a literal's class are other
 # modules: Ruby 4.0.5 raises on `get` after `poke` and any `set` they allow.
 class Round2ParenOther
   def initialize = (@x = nil)
@@ -544,5 +544,35 @@ end
 class Round2LiteralChain
   def initialize = (@x = nil)
   def get = @x.upcase # FIRES call.undefined-method
-  def poke = [1].first.class.class_eval { def set = (@x = "a") }
+  def poke = "s".dup.class.class_eval { def set = (@x = "a") }
+end
+
+# Review round 3: a call outside the copy-and-class calls may answer the class (`const_get`, a registry), so the
+# receiver may be it: Ruby 4.0.5 returns "A" from `k.poke; k.set; k.get`.
+module Round3Registry
+  def self.fetch(name) = Object.const_get(name)
+end
+
+class Round3ConstGetDef
+  def initialize = (@x = nil)
+  def get = @x.upcase
+  def poke = Other.const_get(:Round3ConstGetDef).class_eval { def set = (@x = "a") }
+end
+
+class Round3ConstGetDefine
+  def initialize = (@x = nil)
+  def get = @x.upcase
+  def poke = Other.const_get(:Round3ConstGetDefine).class_eval { define_method(:set) { @x = "a" } }
+end
+
+class Round3RegistryDef
+  def initialize = (@x = nil)
+  def get = @x.upcase
+  def poke = Round3Registry.fetch(:Round3RegistryDef).class_eval { def set = (@x = "a") }
+end
+
+class Round3RegistryDefine
+  def initialize = (@x = nil)
+  def get = @x.upcase
+  def poke = Round3Registry.fetch(:Round3RegistryDefine).class_eval { define_method(:set) { @x = "a" } }
 end

@@ -15,40 +15,43 @@ require "rigor/analysis/runner"
 require "rigor/configuration"
 
 RSpec.describe "Struct.new with a class-name String: one class under two names (#2979)" do
-  defs = <<~RUBY
-    N = Struct.new("Named2", :n_url) do
-      def own_url = 1
-    end
-    NK = Struct.new("NamedK", :k_url, keyword_init: true) do
-      def own_k = 1
-    end
-    class N
-      def from_k = 1
-    end
-  RUBY
+  let(:defs) do
+    <<~RUBY
+      N = Struct.new("Named2", :n_url) do
+        def own_url = 1
+      end
+      NK = Struct.new("NamedK", :k_url, keyword_init: true) do
+        def own_k = 1
+      end
+      class N
+        def from_k = 1
+      end
+    RUBY
+  end
 
-  reopen = <<~RUBY
-    class Struct::Named2
-      def extra_url = 1
-      def go2 = [self.own_url, self.from_k]
-    end
-    class Struct::NamedK
-      def extra_k = 1
-      def go2 = self.own_k
-    end
-    class N
-      def go3 = self.extra_url
-    end
-    class NK
-      def go3 = self.extra_k
-    end
-    def run
-      [Struct::Named2.new(1).own_url, Struct::Named2.new(1).from_k, Struct::NamedK.new(k_url: 1).own_k]
-    end
-  RUBY
+  let(:reopen) do
+    <<~RUBY
+      class Struct::Named2
+        def extra_url = 1
+        def go2 = [self.own_url, self.from_k]
+      end
+      class Struct::NamedK
+        def extra_k = 1
+        def go2 = self.own_k
+      end
+      class N
+        def go3 = self.extra_url
+      end
+      class NK
+        def go3 = self.extra_k
+      end
+      def run
+        [Struct::Named2.new(1).own_url, Struct::Named2.new(1).from_k, Struct::NamedK.new(k_url: 1).own_k]
+      end
+    RUBY
+  end
 
-  sig = "class N\nend\nclass NK\nend\nclass Struct::Named2\nend\nclass Struct::NamedK\nend\n"
-  let(:sig_source) { sig }
+  let(:sig_source) { "class N\nend\nclass NK\nend\nclass Struct::Named2\nend\nclass Struct::NamedK\nend\n" }
 
   def undefined_messages(files)
     FileUtils.mkdir_p("lib")
@@ -67,10 +70,10 @@ RSpec.describe "Struct.new with a class-name String: one class under two names (
 
   # File order is not load order: the reopening file sorts before and after the defining one, and the whole program
   # in one file is the third order.
-  { "a reopening file sorted first" => { "n.rb" => defs, "a.rb" => reopen },
-    "a reopening file sorted last" => { "n.rb" => defs, "z.rb" => reopen },
-    "one file" => { "n.rb" => "#{defs}#{reopen}" } }.each do |where, files|
+  { "a reopening file sorted first" => "a.rb", "a reopening file sorted last" => "z.rb", "one file" => nil }
+    .each do |where, reopen_file|
     it "reads a method under either name from the other, keyword_init: included, with #{where}" do
+      files = reopen_file ? { "n.rb" => defs, reopen_file => reopen } : { "n.rb" => "#{defs}#{reopen}" }
       expect(undefined_messages(files)).to be_empty
     end
   end
@@ -87,24 +90,26 @@ RSpec.describe "Struct.new with a class-name String: one class under two names (
   # through `self.` that `call.undefined-method` reads, and `Reflection.project_method_defined` for the singleton
   # side, where the rule reports no project class object's missing method.
   describe "mixin edges under either name" do
-    mixins = <<~RUBY
-      N = Struct.new("Named2", :n_url)
-      module Mx; def mx_x = 1; end
-      module Px; def px_x = 1; end
-      module Ey; def ey_x = 1; end
-      module Ex; include Ey; def ex_x = 1; end
-      module Fx; def fx_x = 1; end
-      class Struct::Named2
-        include Mx
-        extend Ex
-        def go4 = self.px_x
-      end
-      class N
-        prepend Px
-        extend Fx
-        def go6 = self.mx_x
-      end
-    RUBY
+    let(:mixins) do
+      <<~RUBY
+        N = Struct.new("Named2", :n_url)
+        module Mx; def mx_x = 1; end
+        module Px; def px_x = 1; end
+        module Ey; def ey_x = 1; end
+        module Ex; include Ey; def ex_x = 1; end
+        module Fx; def fx_x = 1; end
+        class Struct::Named2
+          include Mx
+          extend Ex
+          def go4 = self.px_x
+        end
+        class N
+          prepend Px
+          extend Fx
+          def go6 = self.mx_x
+        end
+      RUBY
+    end
 
     it "reads an include on Struct::Named and a prepend on the constant from the other name" do
       expect(undefined_messages({ "n.rb" => mixins })).to be_empty

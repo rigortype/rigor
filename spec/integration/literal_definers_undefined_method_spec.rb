@@ -194,6 +194,7 @@ RSpec.describe "Literal definers and further class macros, and call.undefined-me
       expect(undefined_messages).to be_empty
     end
 
+    # Guard: pins the reporting side; no removed line of the hook reader makes it pass for the wrong reason.
     it "does not open an includer whose hook extends a module that defines nothing" do
       quiet = "module Cq\n  def self.included(base) = base.extend(ClassMethods)\n  module ClassMethods\n    " \
               "def my_c_attr(*n) = n\n  end\nend\n"

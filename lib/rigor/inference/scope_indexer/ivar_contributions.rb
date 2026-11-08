@@ -79,9 +79,7 @@ module Rigor
           bindings = table[BINDINGS] || EMPTY
           bound = names.flat_map do |name|
             segment = name.split("::").last
-            if Analysis::DependencyRecorder.active?
-              Analysis::DependencyRecorder.read_name(:binds_class, segment)
-            end
+            Analysis::DependencyRecorder.read_name(:binds_class, segment) if Analysis::DependencyRecorder.active?
             bindings[segment] || NONE
           end
           (names + bound).uniq
@@ -192,8 +190,8 @@ module Rigor
           end
           table
         end
-        private_class_method :chain_owners, :ancestor_names, :any_ivar_types, :contributed, :add_entry_types, :value_type, :canonical, :table,
-                             :build_table
+        private_class_method :chain_owners, :ancestor_names, :any_ivar_types, :contributed, :add_entry_types,
+                             :value_type, :canonical, :table, :build_table
       end
     end
   end

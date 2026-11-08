@@ -144,28 +144,14 @@ module Rigor
       # written ({CensusForeignBlock.root_constant}). A class whose census joins the constant's entries, an ancestor's,
       # an alias's or an instance constant's ({ScopeIndexer::IvarContributions}), then sees the write.
       def remember_root_constant(node, instance)
-        return unless CensusForeignBlock::MODULE_EVALS.include?(node.name)
-        return unless CensusForeignBlock.foreign_module?(node.receiver, owner_name(instance))
-
-        root = CensusForeignBlock.root_constant(node.receiver)
-        return if root.nil?
-
-        CensusForeignBlock.module_eval_blocks(node).each { |block| remember(block.location, root) }
+        root, blocks = CensusForeignBlock.rooted_reentry(node, owner_name(instance))
+        blocks&.each { |block| remember(block.location, root) }
       end
 
       # Issue #2983 — `C = K` or `C = K.new` (`.allocate`) records `[:binds_class, "K", "C"]`, the last segment of
       # the class as written and the constant's own name, so a class's census also joins the entries filed under an
       # alias or an instance constant of it (`AliasK.class_eval { … }`, `INST.class.class_eval { … }`).
-      def record_binding(node)
-        value = CensusForeignBlock.unwrap(node.value)
-        if value.is_a?(Prism::CallNode) && CensusForeignBlock::CONSTRUCTORS.include?(value.name) && value.block.nil?
-          value = value.receiver
-        end
-        return unless value.is_a?(Prism::ConstantReadNode) || value.is_a?(Prism::ConstantPathNode)
-
-        name = node.is_a?(Prism::ConstantWriteNode) ? node.name.to_s : node.target.slice.split("::").last
-        @census << [:binds_class, value.slice.split("::").last, name].freeze
-      end
+      def record_binding(node) = CensusForeignBlock.binding_entry(node)&.then { @census << it }
 
       # Issue #2983 — `class_eval` / `module_eval` given a String runs code the census cannot read, which may define
       # a method writing any ivar: a {DYNAMIC} write of {ANY_IVAR} is recorded for the module the receiver may be. That

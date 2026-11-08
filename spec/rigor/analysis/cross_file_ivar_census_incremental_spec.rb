@@ -114,6 +114,7 @@ RSpec.describe "cross-file ivar census — incremental" do
       baseline: []
     )
   end
+
   # Issue #2983 — a `class_eval` rooted at an alias constant files its code under the alias, which the reader joins
   # through the `[:binds_class, …]` entry: rebinding the alias in its own file re-checks the reader.
   it "re-checks the reader when the alias a class_eval is rooted at is rebound in another file" do

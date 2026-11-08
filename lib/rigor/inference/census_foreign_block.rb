@@ -206,12 +206,30 @@ module Rigor
         node.slice.delete_prefix("::")
       end
 
-      # The `define_method` blocks and receiver-less `def`s a `class_eval`-family block holds ({.reentry_blocks}),
-      # whatever its receiver.
-      def module_eval_blocks(node)
+      # Issue #2983 — for a constant write `C = K` or `C = K.new` / `K.allocate`, the census entry `[:binds_class, "K",
+      # "C"]`, the last segment of `K` as written and the constant's own name, else nil: `C` is an alias or an instance
+      # of `K`.
+      def binding_entry(node)
+        value = unwrap(node.value)
+        value = value.receiver if value.is_a?(Prism::CallNode) && CONSTRUCTORS.include?(value.name) && value.block.nil?
+        return unless value.is_a?(Prism::ConstantReadNode) || value.is_a?(Prism::ConstantPathNode)
+
+        name = node.is_a?(Prism::ConstantWriteNode) ? node.name.to_s : node.target.slice.split("::").last
+        [:binds_class, value.slice.split("::").last, name].freeze
+      end
+
+      # For a barred `class_eval`-family block whose receiver {.foreign_module?} takes as another module and whose
+      # chain is rooted at a constant ({.root_constant}), that constant and the code in the block that runs on its
+      # module's instances, as {.reentry_blocks} collects it; else nil.
+      def rooted_reentry(node, class_name)
+        return unless MODULE_EVALS.include?(node.name) && foreign_module?(node.receiver, class_name)
+
+        root = root_constant(node.receiver)
+        return if root.nil?
+
         found = []
         collect_define_method_blocks(node.block.body, found)
-        found
+        [root, found]
       end
 
       # `node` with any parentheses around a single expression looked through.

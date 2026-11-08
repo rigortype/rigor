@@ -10,11 +10,11 @@ require "spec_helper"
 # 4.0.5 returns "A" from `k.poke; k.set; k.get` in every quiet case and raises NoMethodError on nil in every
 # reporting one.
 RSpec.describe "ivar census: constant-rooted class_eval receivers (#2983)", type: :runner do
-  reader_body = "  def initialize = (@x = nil)\n  def get = @x.upcase\n"
-  definers = { "def" => %q(def set = (@x = "a")), "define_method" => %q(define_method(:set) { @x = "a" }) }.freeze
+  def self.reader_body = "  def initialize = (@x = nil)\n  def get = @x.upcase\n"
+  def self.definers = { "def" => 'def set = (@x = "a")', "define_method" => 'define_method(:set) { @x = "a" }' }
 
-  define_method(:reader_body) { reader_body }
-  define_method(:definers) { definers }
+  def reader_body = self.class.reader_body
+  def definers = self.class.definers
 
   def reported(files)
     analyze(files: files).diagnostics.select { |d| d.rule.to_s == "call.undefined-method" }

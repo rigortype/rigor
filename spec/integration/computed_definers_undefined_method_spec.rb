@@ -115,8 +115,8 @@ RSpec.describe "Computed definers and call.undefined-method (#2901)" do
       expect(undefined_messages).to eq(["undefined method `h' for Host3"])
     end
 
-    # Guard: the walk does not place an `extend` in a `class << self` body on the class's singleton chain, so this row
-    # holds without the body-call recorder's `class << self` exclusion as well.
+    # Guard: this row also holds without the body-call recorder's `class << self` exclusion (the mutation survives), so
+    # it pins the Ruby answer, not that line.
     it "does not open the instance side for a macro called in a class << self body, which defines on the singleton" do
       macros = "module Macros\n  #{macro.sub('self.', '')}\nend\n"
       write_project("class Meta\n  class << self\n    extend Macros\n    my_attr :z\n  end\nend\n", %w[Meta.new.z],

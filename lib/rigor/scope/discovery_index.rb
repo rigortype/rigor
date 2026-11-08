@@ -273,8 +273,28 @@ module Rigor
       # `self.prepended(base)`) hook runs `base.extend(ClassMethods)`, the constant as written: an includer's
       # singleton chain then reaches `ClassMethods`, whose computed definers its body calls may resolve to.
       ENVELOPE_HOOK_EXTEND_KIND = :hook_extend
-      MACRO_KINDS = [ENVELOPE_BODY_CALL_KIND, ENVELOPE_COMPUTED_DEFINER_KIND, ENVELOPE_HOOK_EXTEND_KIND].freeze
+      # Issue #2979 — `[ENVELOPE_SAME_CLASS_KIND, "Struct::Named"]` on `K`'s bucket, and its mirror on
+      # `Struct::Named`'s, say that `K = Struct.new("Named", …)` binds both constants to one class object: the method
+      # chain of either name reads the other's tables at its own position ({.same_class_names}). It names no member.
+      ENVELOPE_SAME_CLASS_KIND = :same_class
+      MACRO_KINDS = [ENVELOPE_BODY_CALL_KIND, ENVELOPE_COMPUTED_DEFINER_KIND, ENVELOPE_HOOK_EXTEND_KIND,
+                     ENVELOPE_SAME_CLASS_KIND].freeze
       private_constant :MACRO_KINDS
+
+      NO_NAMES = [].freeze
+      private_constant :NO_NAMES
+
+      # Issue #2979 — the other names an envelope bucket says its class object is bound to
+      # ({ENVELOPE_SAME_CLASS_KIND}), in recording order; empty for nearly every bucket, and allocates nothing then.
+      def self.same_class_names(bucket)
+        return NO_NAMES if bucket.nil?
+
+        names = nil
+        bucket.each_key do |key|
+          (names ||= []) << key.last if key.is_a?(Array) && key.first == ENVELOPE_SAME_CLASS_KIND
+        end
+        names || NO_NAMES
+      end
 
       # Issue #1820 — whether an envelope bucket says the project declares, or rewrites, the name's method table: a
       # per-method entry, the {ENVELOPE_MODULE_MARK} a `module` declaration records, or the {ENVELOPE_DYNAMIC_MARK}

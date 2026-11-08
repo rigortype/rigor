@@ -1008,27 +1008,54 @@ module Rigor
         end
 
         def compute_instance(name, depth)
-          # `discovered_includes` already carries the prepended names, so it counts every instance-side edge once.
-          mark_unsettled(name, :include, (@discovery.discovered_includes[name] || EMPTY).size)
-          @frames.last.add_marks(mark_for(name, :extend_hook, WILDCARD_LIST, false)) if extend_hook_taint?(name)
-          entries = [project_entry(name, :instance)]
-          super_lin = superclass_lin(name, :instance, depth)
+          names = same_class(name)
+          names.each do |owner|
+            # `discovered_includes` already carries the prepended names, so it counts every instance-side edge once.
+            mark_unsettled(owner, :include, (@discovery.discovered_includes[owner] || EMPTY).size)
+            @frames.last.add_marks(mark_for(owner, :extend_hook, WILDCARD_LIST, false)) if extend_hook_taint?(owner)
+          end
+          entries = names.map { |owner| project_entry(owner, :instance) }
+          super_lin = superclass_lin(superclass_owner(names), :instance, depth)
           entries.concat(super_lin[0])
-          prepends = @discovery.discovered_prepends[name] || EMPTY
-          boundary = prepend_all(entries, name, prepends, depth)
-          includes = @discovery.discovered_includes[name] || EMPTY
-          super_start = include_all(entries, name, includes, prepends, depth, boundary)
+          boundary = [0, names.size]
+          names.each do |owner|
+            boundary = prepend_all(entries, owner, @discovery.discovered_prepends[owner] || EMPTY, depth, boundary)
+          end
+          super_start = names.reduce(boundary[1]) do |start, owner|
+            includes = @discovery.discovered_includes[owner] || EMPTY
+            prepends = @discovery.discovered_prepends[owner] || EMPTY
+            include_all(entries, owner, includes, prepends, depth, [boundary[0], start])
+          end
           finish(entries, name, super_lin, super_start)
         end
 
         def compute_singleton(name, depth)
-          mark_unsettled(name, :extend, (@discovery.discovered_extends[name] || EMPTY).size)
-          entries = [project_entry(name, :singleton)]
-          super_lin = superclass_lin(name, :singleton, depth)
+          names = same_class(name)
+          names.each { |owner| mark_unsettled(owner, :extend, (@discovery.discovered_extends[owner] || EMPTY).size) }
+          entries = names.map { |owner| project_entry(owner, :singleton) }
+          super_lin = superclass_lin(superclass_owner(names), :singleton, depth)
           entries.concat(super_lin[0])
-          extends = @discovery.discovered_extends[name] || EMPTY
-          super_start = include_all(entries, name, extends, EMPTY, depth, [0, 1])
+          super_start = names.reduce(names.size) do |start, owner|
+            include_all(entries, owner, @discovery.discovered_extends[owner] || EMPTY, EMPTY, depth, [0, start])
+          end
           finish(entries, name, super_lin, super_start)
+        end
+
+        # Issue #2979 — `name` followed by every name its envelope bucket binds to the same class object
+        # (`K = Struct.new("Named", …)` makes `K` and `Struct::Named` one class). The chain of either name heads with
+        # both entries, so a reader asks each name's own tables where Ruby asks the one class's; nothing is copied
+        # between the names. Only the direct binding counts: two `Struct.new("Named", …)` writes make two classes in
+        # Ruby, and neither constant reaches the other's tables through `Struct::Named`.
+        def same_class(name)
+          twins = DiscoveryIndex.same_class_names(@discovery.discovered_parameter_envelopes[name])
+          twins.empty? ? [name] : [name, *twins].uniq
+        end
+
+        # The name whose superclass edge the merged class takes: the first that records one, else `name` itself.
+        def superclass_owner(names)
+          return names.first if names.size == 1
+
+          names.find { |owner| @discovery.discovered_superclasses.key?(owner) } || names.first
         end
 
         # Marks the node being computed unsettled when the order of its mixin edges on `kind` is not a fact
@@ -1125,9 +1152,8 @@ module Rigor
         # module's own includes may have run before or after), and the tables record `include M; prepend M`
         # exactly as a plain `prepend M`. A direct prepend of the module itself is always inserted, in Ruby and
         # here, so it forks nothing.
-        def prepend_all(entries, owner, prepends, depth)
-          origin = 0
-          super_start = 1
+        def prepend_all(entries, owner, prepends, depth, boundary)
+          origin, super_start = boundary
           # The table holds every statement, nearest first: a same-owner repeat is a no-op in Ruby (the first
           # statement wins), so it is dropped here rather than met as a fork.
           prepends.reverse.uniq.each do |raw|

@@ -1109,6 +1109,62 @@ RSpec.describe "plugins/rigor-rails-routes" do
       end
     end
 
+    # Issue #2979 — `K = Struct.new("Named", …)` binds `K` and `Struct::Named` to one class (`K.equal?(Struct::Named)`
+    # on Ruby 4.0.5), so a method defined under either name — in the block, or in a reopening under either name — is
+    # the other name's too. Every quiet name below runs on Ruby 4.0.5; `t*_url` is defined nowhere.
+    describe "a Struct.new with a class-name String, assigned to a constant" do
+      let(:defs) do
+        <<~RUBY
+          N = Struct.new("Named2", :n_url) do
+            def go = [n_url, extra_url, k_url, t1_url]
+            def own_url = 1
+          end
+          NK = Struct.new("NamedK", :nk_url, keyword_init: true) do
+            def go = [nk_url, kx_url, t2_url]
+          end
+          class N
+            def from_k = 1
+          end
+        RUBY
+      end
+
+      let(:reopen) do
+        <<~RUBY
+          class Struct::Named2
+            def extra_url = 1
+            def go2 = [own_url, from_k, t3_url]
+          end
+          class Struct::NamedK
+            def kx_url = 2
+          end
+          class N
+            def k_url = 3
+            def go3 = [extra_url, own_url, t4_url]
+          end
+        RUBY
+      end
+
+      # File order is not load order, so the reopening file sorts both before and after the defining one.
+      %w[a.rb z.rb].each do |reopen_file|
+        it "reads block methods and reopenings under either name from the other, reopening in #{reopen_file}" do
+          files = { "app/libs/n.rb" => defs, "app/libs/#{reopen_file}" => reopen }
+          expect(unknown_helpers(files, paths: ["app/libs/n.rb", "app/libs/#{reopen_file}"]).sort)
+            .to eq(%w[t1_url t2_url t3_url t4_url].map { |n| "no route helper `#{n}`" })
+        end
+      end
+
+      # Two `Struct.new("Same", …)` writes make two classes in Ruby (the second warns and rebinds `Struct::Same`), so
+      # neither constant reads the other's block: on Ruby 4.0.5 each `go` raises NameError.
+      it "does not bind two constants that name the same Struct to each other" do
+        files = {
+          "app/libs/a.rb" => "A1 = Struct.new(\"Same\", :a) do\n  def a_url = 1\n  def go = b_url\nend\n",
+          "app/libs/b.rb" => "B1 = Struct.new(\"Same\", :b) do\n  def b_url = 1\n  def go = a_url\nend\n"
+        }
+        expect(unknown_helpers(files, paths: %w[app/libs/a.rb app/libs/b.rb]).sort)
+          .to eq(["no route helper `a_url`", "no route helper `b_url`"])
+      end
+    end
+
     it "stays quiet on names made by define_method, alias_method, alias, Struct and Data" do
       files = {
         "app/libs/notifier.rb" => <<~RUBY

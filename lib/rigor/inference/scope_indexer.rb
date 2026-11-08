@@ -4282,6 +4282,7 @@ module Rigor
         when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode, Prism::ConstantOrWriteNode,
              Prism::ConstantPathOrWriteNode
           record_meta_superclass(node, qualified_prefix, def_owner_prefix, methods_acc.at(node))
+          record_struct_same_class(node, qualified_prefix, def_owner_prefix, methods_acc.at(node))
           if (split = meta_new_block_split(node, qualified_prefix, def_owner_prefix, singleton_cref))
             enclosing, body, body_self = split
             # A meta-new block rebinds only `self` — `Module.nesting` stays lexical — so
@@ -4477,6 +4478,29 @@ module Rigor
         return if child_prefix.nil? || child_prefix.empty?
 
         record_surface_mark(tables, child_prefix.join("::"), Scope::DiscoveryIndex::ENVELOPE_META_SUPERCLASS_MARK)
+      end
+
+      # Issue #2979 — `K = Struct.new("Named", :a)`, with or without a block, binds `K` and `Struct::Named` to one class
+      # object, so each name's bucket takes a `[ENVELOPE_SAME_CLASS_KIND, other]` entry and the method chain of either
+      # reads the other's tables (`Scope::ResolutionChain`). Only the bare factory call qualifies: under a wrapping
+      # `Class.new(Struct.new("Named", :a))` the constant names a SUBCLASS of `Struct::Named`, which already reaches it
+      # as an ancestor only one way.
+      def record_struct_same_class(node, qualified_prefix, self_base, tables)
+        rvalue = meta_new_rvalue(node)
+        return unless struct_new_call?(rvalue)
+
+        named = AnonymousMetaClass.struct_class_name(rvalue)
+        return if named.nil?
+
+        child_prefix = meta_new_child_prefix(node, qualified_prefix, self_base)
+        return if child_prefix.nil? || child_prefix.empty?
+
+        class_name = child_prefix.join("::")
+        return if class_name == named
+
+        kind = Scope::DiscoveryIndex::ENVELOPE_SAME_CLASS_KIND
+        record_envelope(tables.envelopes, class_name, [kind, named], Source::ParameterEnvelope::OPAQUE)
+        record_envelope(tables.envelopes, named, [kind, class_name], Source::ParameterEnvelope::OPAQUE)
       end
 
       def record_meta_new_facts(rvalue, child_prefix, tables)

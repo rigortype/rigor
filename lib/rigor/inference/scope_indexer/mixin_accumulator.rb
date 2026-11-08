@@ -25,6 +25,13 @@ module Rigor
       # leaves the edges the tables did record looking positioned. So it taints the whole owner side with the
       # {WILDCARD} name instead: an owner side that lists {WILDCARD} has no known order at all.
       #
+      # Issue #2991 — {WILDCARD} says only that the ORDER is unknown; most of those calls still mix in modules the
+      # source names (`self.include M`, `send(:include, M)`, `include M; prepend M`). Where the walk cannot name the
+      # module at all — an argument that is not a constant (`include helper`, `include(*MODS)`, `include M, h`), a
+      # hook parameter's receiver (`base.include M`, `base.class_eval { include M }`), or an opaque eval whose block
+      # mixes into its own `self` — the side also lists {UNNAMED}, always beside {WILDCARD}: the SET of modules is
+      # unknown too.
+      #
       # The value is `{owner => {include: [names], extend: [names]}}`. `:include` is the instance side
       # (`include` and `prepend`), `:extend` the singleton side (`extend`, and `include` / `prepend` inside
       # `class << self`), so an unknown `extend` never taints a class's instance ancestry.
@@ -33,6 +40,11 @@ module Rigor
       class MixinAccumulator < Hash
         # The name an owner side lists when a mixin call the walk could not record was written on it.
         WILDCARD = "*"
+        # The name an owner side also lists when such a call mixes in a module the walk cannot name (#2991).
+        UNNAMED = "?"
+        UNNAMED_LIST = [WILDCARD, UNNAMED].freeze
+        WILDCARD_LIST = [WILDCARD].freeze
+        private_constant :UNNAMED_LIST, :WILDCARD_LIST
 
         # What {#unpositioned} answers when nothing was noted: one shared frozen table, so the common file
         # allocates none.
@@ -112,15 +124,15 @@ module Rigor
         # Notes the edges `node` recorded for `owner` on `side`. `complete` is false when an argument named
         # nothing the walk could record, which leaves the recorded names' neighbours unknown.
         def note(node, owner, side, targets, complete:)
-          return taint(owner, side) unless complete
+          return taint(owner, side, unnamed: true) unless complete
           return if node.receiver.nil? && direct?(node)
 
           add(owner, side, targets)
         end
 
-        # Names `owner`'s `side` as having no known order.
-        def taint(owner, side)
-          add(owner, side, [WILDCARD])
+        # Names `owner`'s `side` as having no known order; `unnamed` also as holding a module no name spells.
+        def taint(owner, side, unnamed: false)
+          add(owner, side, unnamed ? UNNAMED_LIST : WILDCARD_LIST)
         end
 
         # `{owner => {side => [names]}}`, frozen, each list de-duplicated.

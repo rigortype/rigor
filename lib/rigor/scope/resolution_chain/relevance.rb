@@ -27,6 +27,8 @@ module Rigor
       # segment of its spelling, so a new file declaring the module re-checks the consumer.
       module Relevance
         WILDCARD = "*"
+        # Issue #2991 — listed beside {WILDCARD} when the side mixes in a module no name spells.
+        UNNAMED = "?"
 
         # The singleton hooks Ruby calls while a module enters (or is asked to enter) another's ancestry. A module
         # that defines one can add methods to the includer, extender or prepender with nothing the tables record

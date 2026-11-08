@@ -1,9 +1,11 @@
 # frozen_string_literal: true
 
-# Issue #2991 — a splatted `include(*MODS)` / `prepend(*MODS)` mixes in modules the tables cannot name, so every
-# name on the class's instance side may come from one of them: `call.undefined-method` must not fire on the class,
-# nor on a subclass at any depth. `Scope::ResolutionChain` marks such a chain (`wildcard_mixin?`), and the rule
-# reads that mark. `sig/` declares every class so the rule runs. `Sup` defines a method of its own, so it is a project
+# Issue #2991 — a splatted `include(*MODS)` / `prepend(*MODS)`, or any other mixin call the walk cannot name the
+# module of, means every name on the class's instance side may come from that module: `call.undefined-method` must
+# not fire on the class, nor on a subclass at any depth. `Scope::ResolutionChain` marks such a chain
+# (`unnamed_mixin?`), and the rule reads that mark. A mixin whose order alone is unknown (`self.include M1`,
+# `include M1; prepend M1`, the `wildcard_mixin?` mark) names its module and must keep reporting. `sig/` declares every
+# class so the rule runs. `Sup` defines a method of its own, so it is a project
 # entry on its subclasses' chains, not an external one (#2094), which already stands down on another route. Every
 # row's Ruby behaviour was witnessed on Ruby 4.0.5: each quiet call returns 1, and each reported call raises
 # `NoMethodError`. The literal-include row is a must-still-fire guard.
@@ -95,5 +97,74 @@ RSpec.describe "a class whose instance-side chain holds a splatted mixin (#2991)
       end
     RUBY
     expect(undefined_messages({ "a.rb" => source }, "class Ext\nend\n")).to eq(["undefined method `e1' for Ext"])
+  end
+
+  describe "a mixin whose order alone is unknown" do
+    it "still fires on a subclass of `self.include M1`" do
+      source = "#{mods}class SI\n  self.include M1\n  def t = 1\nend\nclass SISub < SI\n  def u = self.m2\nend\n"
+      expect(undefined_messages({ "a.rb" => source }, "class SI\nend\nclass SISub < SI\nend\n"))
+        .to eq(["undefined method `m2' for SISub"])
+    end
+
+    it "still fires on `include M1; prepend M1`" do
+      source = "#{mods}class IP\n  include M1\n  prepend M1\n  def w = self.m2\nend\n"
+      expect(undefined_messages({ "a.rb" => source }, "class IP\nend\n")).to eq(["undefined method `m2' for IP"])
+    end
+
+    it "still fires beside an opaque `instance_exec` whose block prepends onto an Array" do
+      source = "class AP\n  def go(o) = o.instance_exec { @a = []; @a.prepend(1) }\n  def w = self.m2\nend\n"
+      expect(undefined_messages({ "a.rb" => source }, "class AP\nend\n")).to eq(["undefined method `m2' for AP"])
+    end
+  end
+
+  describe "a mixin no name spells" do
+    it "does not fire on a subclass of `include helper`" do
+      source = "#{mods}class HS\n  def self.helper = M1\n  include helper\n  def t = 1\nend\n" \
+               "class HSub < HS\n  def u = self.m1\nend\n"
+      expect(undefined_messages({ "a.rb" => source }, "class HS\nend\nclass HSub < HS\nend\n")).to be_empty
+    end
+
+    it "does not fire on a subclass of `send(:include, *MODS)`" do
+      source = "#{mods}class SS\n  send(:include, *MODS)\n  def t = 1\nend\nclass SSub < SS\n  def u = self.m1\nend\n"
+      expect(undefined_messages({ "a.rb" => source }, "class SS\nend\nclass SSub < SS\nend\n")).to be_empty
+    end
+
+    it "does not fire on a subclass of a class whose included hook runs `base.include`" do
+      source = "#{mods}module H\n  def self.included(base) = base.include(M1)\nend\n" \
+               "class HK\n  include H\n  def t = 1\nend\nclass HKSub < HK\n  def u = self.m1\nend\n"
+      expect(undefined_messages({ "a.rb" => source }, "class HK\nend\nclass HKSub < HK\nend\n")).to be_empty
+    end
+
+    it "does not fire on a subclass of `include M1, h`" do
+      source = "#{mods}class O1\n  def self.h = Comparable\n  include M1, h\n  def t = 1\nend\n" \
+               "class O1Sub < O1\n  def u = self.m1\nend\n"
+      expect(undefined_messages({ "a.rb" => source }, "class O1\nend\nclass O1Sub < O1\nend\n")).to be_empty
+    end
+
+    it "does not fire on a subclass of a class whose method runs `k.class_eval { include M1 }`" do
+      source = "#{mods}class O4\n  def self.go(k) = k.class_eval { include M1 }\n  def t = 1\nend\n" \
+               "class O4Sub < O4\n  def u = self.m1\nend\nO4.go(O4)\n"
+      expect(undefined_messages({ "a.rb" => source }, "class O4\nend\nclass O4Sub < O4\nend\n")).to be_empty
+    end
+
+    it "does not fire on a subclass of a class that extends a module whose extended hook runs `base.include`" do
+      source = "#{mods}module EH\n  def self.extended(base) = base.include(M1)\nend\n" \
+               "class EX\n  extend EH\n  def t = 1\nend\nclass EXSub < EX\n  def u = self.m1\nend\n"
+      expect(undefined_messages({ "a.rb" => source }, "class EX\nend\nclass EXSub < EX\nend\n")).to be_empty
+    end
+
+    it "does not fire on a subclass of a class whose `class << self` included hook runs `base.include`" do
+      source = "#{mods}module SH\n  class << self\n    def included(base) = base.include(M1)\n  end\nend\n" \
+               "class SK\n  include SH\n  def t = 1\nend\nclass SKSub < SK\n  def u = self.m1\nend\n"
+      expect(undefined_messages({ "a.rb" => source }, "class SK\nend\nclass SKSub < SK\nend\n")).to be_empty
+    end
+
+    it "opens the receiver of `Other.include(*MODS)`, not the class it is written in" do
+      source = "#{mods}class Other\n  def t = 1\nend\n" \
+               "class Inc\n  Other.include(*MODS)\n  def t = 1\n  def v = self.m1\nend\n" \
+               "class OSub < Other\n  def u = self.m1\nend\n"
+      sig = "class Other\nend\nclass Inc\nend\nclass OSub < Other\nend\n"
+      expect(undefined_messages({ "a.rb" => source }, sig)).to eq(["undefined method `m1' for Inc"])
+    end
   end
 end

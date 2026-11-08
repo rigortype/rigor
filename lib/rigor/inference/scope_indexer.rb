@@ -7521,7 +7521,18 @@ module Rigor
         return if instance_mixin_recorded?(node, view, qualified_prefix, current_class, accumulator)
 
         # A mixin call the tables cannot hold still reshapes the ancestry: taint the whole owner side.
-        effects.each { |owner, side| accumulator.taint(owner, side) }
+        unnamed = unnamed_mixin_call?(node, view, accumulator)
+        effects.each { |owner, side| accumulator.taint(owner, side, unnamed: unnamed) }
+      end
+
+      # Issue #2991 — whether an unrecorded mixin call mixes in a module the walk cannot name: an argument that is
+      # not a constant (`include helper`, `include(*MODS)`), or a hook parameter's receiver (`base.include M`), whose
+      # class records nothing. `self.include M` and `send(:include, M)` name their module, so they leave only the
+      # order unknown.
+      def unnamed_mixin_call?(node, view, accumulator)
+        return true if view[1].any? { |arg| Source::ConstantPath.qualified_name(arg).nil? }
+
+        !node.receiver.nil? && hook_receiver?(node.receiver, accumulator)
       end
 
       # Records the instance-side edges of a call {#mixin_call_recorded?} accepts. False when it recorded
@@ -7639,9 +7650,14 @@ module Rigor
         receiver = node.receiver
         return if receiver.nil? || receiver.is_a?(Prism::SelfNode)
         return if Source::ConstantPath.qualified_name_or_nil(receiver)
-        return unless hook_receiver?(receiver, accumulator) || block_mixes_in?(node.block)
 
-        accumulator.taint(current_class, :include)
+        hook = hook_receiver?(receiver, accumulator)
+        return unless hook || block_mixes_in?(node.block)
+
+        # Issue #2991 — the set is unknown only where the block may mix into the class itself: a hook's `base`, or a
+        # receiverless `include` / `prepend` in the block of a receiver other than a `singleton_class`.
+        unnamed = hook || (!singleton_class_eval_receiver?(receiver) && block_mixes_into_self?(node.block))
+        accumulator.taint(current_class, :include, unnamed: unnamed)
         accumulator.taint(current_class, :extend)
       end
 
@@ -7651,6 +7667,25 @@ module Rigor
         found = false
         node.rigor_each_child { |child| found ||= block_mixes_in?(child) }
         found
+      end
+
+      INSTANCE_MIXIN_NAMES = %i[include prepend].freeze
+      private_constant :INSTANCE_MIXIN_NAMES
+
+      # A receiverless or `self.` `include` / `prepend` (or its `send` spelling) anywhere in `node`.
+      def block_mixes_into_self?(node)
+        if node.is_a?(Prism::CallNode) && (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode))
+          view = mixin_call_view(node)
+          return true if view && INSTANCE_MIXIN_NAMES.include?(view.first)
+        end
+
+        found = false
+        node.rigor_each_child { |child| found ||= block_mixes_into_self?(child) }
+        found
+      end
+
+      def singleton_class_eval_receiver?(receiver)
+        receiver.is_a?(Prism::CallNode) && receiver.name == :singleton_class
       end
 
       def singleton_class_receiver?(receiver)
@@ -8137,7 +8172,7 @@ module Rigor
         return if singleton_class_rewrite_tainted?(node, qualified_prefix, current_class, accumulator,
                                                    in_singleton: in_singleton)
 
-        kind, _arguments, via_send = mixin_call_view(node)
+        kind, arguments, via_send = mixin_call_view(node)
         return if kind.nil?
 
         effects = mixin_effects(node, kind, qualified_prefix, current_class, accumulator, in_singleton: in_singleton)
@@ -8146,7 +8181,8 @@ module Rigor
         return if !via_send && singleton_mixin_recorded?(node, kind, qualified_prefix, current_class, accumulator,
                                                          in_singleton)
 
-        effects.each { |owner, side| accumulator.taint(owner, side) }
+        unnamed = unnamed_mixin_call?(node, [kind, arguments], accumulator)
+        effects.each { |owner, side| accumulator.taint(owner, side, unnamed: unnamed) }
       end
 
       # Issue #1752 — a call that rewrites a singleton class reached through `singleton_class` (`singleton_class.

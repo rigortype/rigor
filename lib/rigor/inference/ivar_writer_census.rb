@@ -32,6 +32,10 @@ module Rigor
     #   entry under `E`, and an `E.define_method` block is an instance body of `E` ({ReceiverWriterCall}). The
     #   class-ivar census of a file joins another file's entries, and those of the modules and superclasses on the
     #   class's chain, into the ivars it already holds ({ScopeIndexer::IvarContributions}).
+    #   Issue #2983: a barred `class_eval`-family block on a receiver rooted at another constant files the code in it
+    #   that runs on an instance under that constant ({#remember_root_constant}), a String `class_eval` records a
+    #   {DYNAMIC} write of {ANY_IVAR} ({#record_string_eval}), and a constant write `C = K` / `C = K.new` records
+    #   `[:binds_class, "K", "C"]` ({#record_binding}), so the join can take `C`'s entries for `K`.
     class IvarWriterCensus
       SEND_CALLS = %i[send __send__ public_send].to_set.freeze
       # The methods a `send` reaching which is an open-world writer.

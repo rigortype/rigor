@@ -23,13 +23,17 @@ RSpec.describe "singleton-side mixins a hook adds (#1592)" do
     Dir.mktmpdir("rigor-singleton-hook-extend-") { |dir| Dir.chdir(dir) { example.run } }
   end
 
-  def write_project(concern, includer, calls)
+  # `extra` maps more `lib/` file names to their source; `sig` replaces the generated declarations.
+  def write_project(concern, includer, calls, extra: {}, sig: nil)
     FileUtils.mkdir_p("lib")
     FileUtils.mkdir_p("sig")
-    declared = [concern, includer].flat_map { |body| body.scan(/^\s*(class|module) ([\w:]+( < \w+)?)/) }.uniq
-    File.write(File.join("sig", "types.rbs"), declared.map { |kind, name| "#{kind} #{name}\nend\n" }.join)
+    sources = [concern, includer, *extra.values]
+    declared = sources.flat_map { |body| body.scan(/^\s*(class|module) ([\w:]+( < \w+)?)/) }.uniq
+    sig ||= declared.map { |kind, name| "#{kind} #{name}\nend\n" }.join
+    File.write(File.join("sig", "types.rbs"), sig)
     File.write(File.join("lib", "concern.rb"), concern)
     File.write(File.join("lib", "includer.rb"), includer)
+    extra.each { |name, body| File.write(File.join("lib", name), body) }
     File.write(File.join("lib", "use.rb"), "def run\n#{calls.map { |c| "  #{c}" }.join("\n")}\nend\n")
   end
 
@@ -93,7 +97,7 @@ RSpec.describe "singleton-side mixins a hook adds (#1592)" do
   end
 
   describe "a hook's extend on a subclass of a Base with same-named class methods" do
-    def x_module = "module X\n  def bar = \"X\"\nend\n"
+    def x_module = "module X\n  def bar = \"X\"\nend\nmodule Y\n  def bar = \"Y\"\nend\n"
 
     it "answers the module an included block extends" do
       write_project("#{x_module}#{concern('Cx', "  included do\n    extend X\n  end\n")}",
@@ -114,6 +118,50 @@ RSpec.describe "singleton-side mixins a hook adds (#1592)" do
       expect(undefined_messages).to eq(["undefined method `zork' for \"X\""] * 2)
     end
 
+    # Ruby answers "Y", the later extend. The tables keep no order between one hook's two modules, so a name both
+    # define declines and one only the superclass defines still answers.
+    it "declines a name two modules of one hook both define" do
+      hook = "module Hy\n  def self.included(base)\n    base.extend(X)\n    base.extend(Y)\n  end\nend\n"
+      write_project("#{x_module}#{hook}", "#{base_class}class Ky < Base\n  include Hy\nend\n",
+                    ["Ky.bar.zork", "Ky.baz.zork"])
+      expect(undefined_messages).to eq(["undefined method `zork' for 2"])
+    end
+
+    # A `raise` guard leaves the extend placed: past it, the extend runs.
+    it "answers a hook's extend after a raise guard" do
+      hook = "module Hr\n  def self.included(base)\n    raise \"no\" unless base\n    base.extend(X)\n  end\nend\n"
+      write_project("#{x_module}#{hook}", "#{base_class}class Kr < Base\n  include Hr\nend\n", ["Kr.bar.zork"])
+      expect(undefined_messages).to eq(["undefined method `zork' for \"X\""])
+    end
+
+    # Ruby answers 1: the include names the nearer `Ac::Mc`, which RBS declares and the source does not, so the
+    # top-level `Mc`'s hook never runs.
+    it "does not read the hook of a farther module when a nearer one exists only in RBS" do
+      source = "#{x_module}module Mc\n  def self.included(base) = base.extend(X)\nend\n"
+      includer = "#{base_class}module Ac\n  class Kc < Base\n    include Mc\n  end\nend\n"
+      sig = "module X\nend\nmodule Y\nend\nmodule Mc\nend\nclass Base\nend\nmodule Ac\n  module Mc\n  end\n  " \
+            "class Kc < Base\n  end\nend\n"
+      write_project(source, includer, ["Ac::Kc.bar.zork"], sig: sig)
+      expect(undefined_messages).to eq(["undefined method `zork' for 1"])
+    end
+
+    # Ruby keeps whichever definition loaded last, which the tables cannot tell: the read declines.
+    it "declines a hook a second file redefines" do
+      write_project("#{x_module}module Me\n  def self.included(base) = base.extend(X)\nend\n",
+                    "#{base_class}class Km < Base\n  include Me\nend\n", ["Km.bar.even?"],
+                    extra: { "redefine.rb" => "module Me\n  def self.included(base) = nil\nend\n" })
+      expect(undefined_messages).to be_empty
+    end
+
+    # Ruby runs two files' includes in load order: the class's two concerns have no known order.
+    it "declines when a class reopened in two files includes a concern in each" do
+      two = "#{concern('Ca', "  class_methods do\n    def bar = :a\n  end\n")}" \
+            "#{concern('Cb', "  class_methods do\n    def bar = :b\n  end\n")}"
+      write_project(two, "#{base_class}class Kw < Base\n  include Ca\nend\n", ["Kw.bar.zork"],
+                    extra: { "reopen.rb" => "class Kw\n  include Cb\nend\n" })
+      expect(undefined_messages).to be_empty
+    end
+
     # Ruby runs a `self.prepended` hook, and a `prepended do … end` block, only for a prepend.
     it "does not read a prepended hook for an including class" do
       write_project("#{x_module}module Hp\n  def self.prepended(base) = base.extend(X)\nend\n",
@@ -127,7 +175,9 @@ RSpec.describe "singleton-side mixins a hook adds (#1592)" do
       expect(undefined_messages).to eq(["undefined method `zork' for \"X\""])
     end
 
-    # The block's extend may not run, or names a module no table can: the read declines rather than answering Base's.
+    # The block's extend may not run, or names a module no table can: the read declines rather than answering either
+    # Base's 1 or X's "X", so neither `upcase` nor `even?` reports, whichever Ruby runs. `baz`, which only Base
+    # defines, declines too: the unnamed module may define it.
     {
       "a hook's extend of a computed module" =>
         "module Hu\n  def self.included(base) = base.extend(const_get(:X))\nend\n",
@@ -136,6 +186,16 @@ RSpec.describe "singleton-side mixins a hook adds (#1592)" do
       "a hook's send(:extend)" => "module Hu\n  def self.included(base) = base.send(:extend, X)\nend\n",
       "a hook's singleton_class.include" =>
         "module Hu\n  def self.included(base) = base.singleton_class.include(X)\nend\n",
+      "a hook's extend after an early return" =>
+        "module Hu\n  def self.included(base)\n    return unless base < String\n    base.extend(X)\n  end\nend\n",
+      "an included block's extend after an early next" =>
+        "module Hu\n  extend ActiveSupport::Concern\n  def own = 1\n  included do\n    next unless false\n    " \
+        "extend X\n  end\nend\n",
+      "an included block's extend nested in a block" =>
+        "module Hu\n  extend ActiveSupport::Concern\n  def own = 1\n  included do\n    [1].each { extend X }\n  " \
+        "end\nend\n",
+      "a hook's class_eval block on the includer" =>
+        "module Hu\n  def self.included(base) = base.class_eval { extend X }\nend\n",
       "an included block's conditional extend" =>
         "module Hu\n  extend ActiveSupport::Concern\n  def own = 1\n  included do\n    extend X if name\n  end\nend\n",
       "an included block's extend of a computed module" =>
@@ -144,9 +204,29 @@ RSpec.describe "singleton-side mixins a hook adds (#1592)" do
     }.each do |label, hook|
       it "declines for #{label}" do
         write_project("#{x_module}#{hook}", "#{base_class}class Ku < Base\n  include Hu\nend\n",
-                      ["Ku.bar.upcase", "Ku.baz.zork"])
+                      ["Ku.bar.upcase", "Ku.bar.even?", "Ku.baz.zork"])
         expect(undefined_messages).to be_empty
       end
+    end
+  end
+
+  # `Concern#prepend_features` prepends `ClassMethods` to the class object's singleton, ahead of its own `def self.`:
+  # `Kp.singleton_class.ancestors` starts `[Cp::ClassMethods, #<Class:Kp>]`.
+  it "puts a prepended concern's ClassMethods ahead of the class object" do
+    write_project(concern("Cp", "  def own = 1\n  class_methods do\n    def foo = \"s\"\n  end\n"),
+                  "class Kp\n  def self.foo = 1\n  prepend Cp\nend\n", ["Kp.foo.zork"])
+    expect(undefined_messages).to eq(["undefined method `zork' for \"s\""])
+  end
+
+  # Ruby raises NoMethodError: `private` in the block makes `priv` a private method of the class object.
+  # The read withholds, so the result is `Dynamic`.
+  {
+    "a class_methods block" => "  class_methods do\n    private\n    def priv = 2\n  end\n",
+    "an explicit ClassMethods" => "  module ClassMethods\n    private\n    def priv = 2\n  end\n"
+  }.each do |label, body|
+    it "does not answer a private method of #{label}" do
+      write_project(concern("Cv", "  def own = 1\n#{body}"), "class Kpv\n  include Cv\nend\n", ["Kpv.priv.zork"])
+      expect(undefined_messages).to be_empty
     end
   end
 

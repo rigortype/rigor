@@ -5064,47 +5064,103 @@ module Rigor
       # written, so `call.undefined-method` can resolve an includer's class-body macro calls against it.
       #
       # Issue #1592 — the entry also names the hook (`[ENVELOPE_HOOK_EXTEND_KIND, "ClassMethods", :included]`), so the
-      # includer's singleton resolution chain draws the module only for the edge whose hook runs. An `extend` on the
-      # parameter the chain cannot place as a fact (not a direct statement of the hook body, or with an argument that is
-      # not a constant), a `base.send(:extend, …)` and a `base.singleton_class.include` / `prepend` take a
-      # `[ENVELOPE_HOOK_EXTEND_OPEN_KIND, hook]` entry instead of, or beside, the named one.
+      # includer's singleton resolution chain draws the module only for the edge whose hook runs. Only a direct
+      # statement of the hook body with constant arguments and no `return` / `next` / `break` in an earlier
+      # statement is a fact the chain can place. Any other extend of the parameter anywhere in the body (nested,
+      # conditional, after an early exit, or with an argument that is not a constant), a `base.send(:extend, …)`, a
+      # `base.singleton_class.include` / `prepend` and a `class_eval`-family block on the parameter take a
+      # `[ENVELOPE_HOOK_EXTEND_OPEN_KIND, hook]` entry instead of, or beside, the named one. Each definition also takes
+      # a `[ENVELOPE_HOOK_DEF_KIND, hook, source]` entry, so a module that defines the hook twice (in two files, or
+      # twice in one) is read as open: which definition Ruby keeps is load order.
       def record_hook_extends(def_node, qualified_prefix, tables, side)
         return unless side == :singleton && HOOK_EXTEND_DEFS.include?(def_node.name) && !qualified_prefix.empty?
 
+        owner = qualified_prefix.join("::")
+        hook = def_node.name
+        def_key = [Scope::DiscoveryIndex::ENVELOPE_HOOK_DEF_KIND, hook, def_node.slice]
+        record_envelope(tables.envelopes, owner, def_key, Source::ParameterEnvelope::OPAQUE)
         param = def_node.parameters&.requireds&.first
         return unless param.is_a?(Prism::RequiredParameterNode)
 
-        owner = qualified_prefix.join("::")
-        direct = hook_body_statements(def_node.body)
-        Source::NodeWalker.each(def_node.body) do |node|
-          record_hook_body_call(node, param.name, direct, owner, tables, def_node.name) if node.is_a?(Prism::CallNode)
+        target = ->(call) { hook_param_receiver?(call.receiver, param.name) }
+        scan_hook_body(def_node.body, target, owner, tables, hook) do |node|
+          hook_singleton_reshape?(node, param.name)
         end
       end
 
-      def record_hook_body_call(node, param, direct, owner, tables, hook)
-        if node.name == :extend && hook_param_receiver?(node.receiver, param)
-          complete = record_hook_extend_arguments(node, owner, tables, hook)
-          record_hook_extend_open(owner, tables, hook) unless complete && direct.include?(node)
-        elsif hook_singleton_reshape?(node, param)
-          record_hook_extend_open(owner, tables, hook)
+      # The shared walk of a hook body or a concern's hook block: `target` says whether a call's receiver is the
+      # includer, the block says whether a call reshapes the includer's singleton some other way.
+      def scan_hook_body(body, target, owner, tables, hook)
+        placeable = placeable_hook_statements(body)
+        Source::NodeWalker.each(body) do |node|
+          if node.is_a?(Prism::CallNode) && node.name == :extend && target.call(node)
+            complete = record_hook_extend_arguments(node, owner, tables, hook)
+            record_hook_extend_open(owner, tables, hook) unless complete && placeable.include?(node)
+          elsif (node.is_a?(Prism::CallNode) && yield(node)) || singleton_mixin_body?(node)
+            record_hook_extend_open(owner, tables, hook)
+          end
         end
       end
+
+      # The direct statements of a body that run unless an earlier statement raised: those before the first
+      # statement holding a `return`, `next` or `break` anywhere in it. An endless `def` has its one expression.
+      def placeable_hook_statements(body)
+        statements = body.is_a?(Prism::StatementsNode) ? body.body : [body].compact
+        placeable = Set.new.compare_by_identity
+        statements.each do |statement|
+          break if exits_early?(statement)
+
+          placeable << statement
+        end
+        placeable
+      end
+
+      def exits_early?(node)
+        found = false
+        Source::NodeWalker.each(node) do |child|
+          found ||= HOOK_EXITS.any? { |kind| child.is_a?(kind) }
+        end
+        found
+      end
+
+      HOOK_EXITS = [Prism::ReturnNode, Prism::NextNode, Prism::BreakNode].freeze
+      private_constant :HOOK_EXITS
+
+      # A `class << self` body that mixes in, anywhere under a hook body or block.
+      def singleton_mixin_body?(node)
+        return false unless node.is_a?(Prism::SingletonClassNode) && node.expression.is_a?(Prism::SelfNode)
+
+        found = false
+        Source::NodeWalker.each(node.body) do |child|
+          found ||= child.is_a?(Prism::CallNode) && MIXIN_SELF_CALLS.include?(child.name) && child.receiver.nil?
+        end
+        found
+      end
+
+      MIXIN_SELF_CALLS = %i[include prepend extend].freeze
+      private_constant :MIXIN_SELF_CALLS
 
       def hook_param_receiver?(receiver, name)
         receiver.is_a?(Prism::LocalVariableReadNode) && receiver.name == name
       end
 
-      # A hook-body call that mixes into the parameter's singleton class without a plain `base.extend(…)`:
-      # `base.send(:extend, M)` (or `__send__` / `public_send`) and `base.singleton_class.include(M)` / `prepend(M)`.
+      # A hook-body call that may mix into the parameter's singleton class without a plain `base.extend(…)`:
+      # `base.send(:extend, M)` (or `__send__` / `public_send`), `base.singleton_class.include(M)` / `prepend(M)`, and a
+      # `class_eval` / `instance_eval` / `module_eval`-family call on the parameter, whose block runs with it as `self`.
       def hook_singleton_reshape?(node, name)
         receiver = node.receiver
         if HOOK_SEND_CALLS.include?(node.name)
           send_extend?(node) && hook_param_receiver?(receiver, name)
+        elsif HOOK_EVAL_CALLS.include?(node.name)
+          hook_param_receiver?(receiver, name)
         else
           %i[include prepend].include?(node.name) && receiver.is_a?(Prism::CallNode) &&
             receiver.name == :singleton_class && hook_param_receiver?(receiver.receiver, name)
         end
       end
+
+      HOOK_EVAL_CALLS = %i[class_eval class_exec module_eval module_exec instance_eval instance_exec].freeze
+      private_constant :HOOK_EVAL_CALLS
 
       # `send(:extend, …)`, `__send__` or `public_send`, on whatever receiver.
       def send_extend?(node)
@@ -5114,12 +5170,6 @@ module Rigor
 
       HOOK_SEND_CALLS = %i[send __send__ public_send].freeze
       private_constant :HOOK_SEND_CALLS
-
-      # The direct statements of a hook body, identity-compared: an endless `def` has its one expression.
-      def hook_body_statements(body)
-        statements = body.is_a?(Prism::StatementsNode) ? body.body : [body].compact
-        Set.new.compare_by_identity.merge(statements)
-      end
 
       # Records each constant argument as written and answers whether every argument was one.
       def record_hook_extend_arguments(node, owner, tables, hook)
@@ -5177,18 +5227,18 @@ module Rigor
       end
 
       # Issue #1592 — an `extend` on `self` in the block extends the includer as `base.extend` in a hook does, so it
-      # records the same entries, named by the block's hook ({#record_hook_extends}).
+      # records the same entries, named by the block's hook ({#record_hook_extends}), and any `extend` nested in the
+      # block, a `class << self` mixin or a `send(:extend, …)` there is open.
       def record_concern_hook_block(statement, owner, methods_acc)
-        direct = hook_body_statements(statement.block.body)
-        each_self_call(statement.block.body) do |call|
-          tables = methods_acc.at(call)
+        body = statement.block.body
+        each_self_call(body) do |call|
           entry = [Scope::DiscoveryIndex::ENVELOPE_HOOK_BODY_CALL_KIND, statement.name, call.name]
-          record_envelope(tables.envelopes, owner, entry, Source::ParameterEnvelope::OPAQUE)
-          next unless call.name == :extend || send_extend?(call)
-
-          complete = call.name == :extend && record_hook_extend_arguments(call, owner, tables, statement.name)
-          record_hook_extend_open(owner, tables, statement.name) unless complete && direct.include?(call)
+          record_envelope(methods_acc.at(call).envelopes, owner, entry, Source::ParameterEnvelope::OPAQUE)
         end
+        return if body.nil?
+
+        target = ->(call) { call.receiver.nil? || call.receiver.is_a?(Prism::SelfNode) }
+        scan_hook_body(body, target, owner, methods_acc.at(statement), statement.name) { |call| send_extend?(call) }
       end
 
       CONCERN_HOOK_BLOCKS = %i[included prepended].to_set.freeze

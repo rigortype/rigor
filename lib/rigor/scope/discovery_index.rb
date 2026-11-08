@@ -288,13 +288,18 @@ module Rigor
       # `extend` that is not a direct statement of the hook body, or whose argument is not a constant).
       ENVELOPE_HOOK_EXTEND_KIND = :hook_extend
       ENVELOPE_HOOK_EXTEND_OPEN_KIND = :hook_extend_open
+      # Issue #1592 — `[ENVELOPE_HOOK_DEF_KIND, hook, source]`: one definition of the module's `self.included` /
+      # `self.prepended` hook, by its source text. Two entries for one hook mean the hook is defined twice, and which
+      # definition Ruby keeps is load order.
+      ENVELOPE_HOOK_DEF_KIND = :hook_def
       ENVELOPE_HOOK_BODY_CALL_KIND = :hook_body_call
       # Issue #2979 — `[ENVELOPE_SAME_CLASS_KIND, "Struct::Named"]` on `K`'s bucket, and its mirror on
       # `Struct::Named`'s, say that `K = Struct.new("Named", …)` binds both constants to one class object: the method
       # chain of either name reads the other's tables at its own position ({.same_class_names}). It names no member.
       ENVELOPE_SAME_CLASS_KIND = :same_class
       MACRO_KINDS = [ENVELOPE_BODY_CALL_KIND, ENVELOPE_COMPUTED_DEFINER_KIND, ENVELOPE_HOOK_EXTEND_KIND,
-                     ENVELOPE_HOOK_EXTEND_OPEN_KIND, ENVELOPE_HOOK_BODY_CALL_KIND, ENVELOPE_SAME_CLASS_KIND].freeze
+                     ENVELOPE_HOOK_EXTEND_OPEN_KIND, ENVELOPE_HOOK_DEF_KIND, ENVELOPE_HOOK_BODY_CALL_KIND,
+                     ENVELOPE_SAME_CLASS_KIND].freeze
       private_constant :MACRO_KINDS
 
       NO_NAMES = [].freeze

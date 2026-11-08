@@ -13,6 +13,7 @@ require "rigor/analysis/incremental_session"
 require "rigor/cache/store"
 require "rigor/cache/incremental_snapshot"
 require "rigor/configuration"
+require "rigor/protection/discovery_seed"
 
 RSpec.describe "incremental edges for a hook-extended singleton module (#1592)", type: :runner do
   around do |example|
@@ -106,5 +107,34 @@ RSpec.describe "incremental edges for a hook-extended singleton module (#1592)",
     expect_toggle(files.merge(hook), before: "",
                                      after: "module Ct\n  module ClassMethods\n    def bar = :cm\n  end\nend\n",
                                      first: [], second: reported(":cm"))
+  end
+
+  # Ruby keeps whichever definition loaded last, so with two the read declines.
+  describe "a second file that redefines the hook" do
+    let(:hooked) { files.merge("lib/ct.rb" => "module Ct\n  def self.included(base) = base.extend(X)\nend\n") }
+    let(:redefinition) { "module Ct\n  def self.included(base) = nil\nend\n" }
+
+    it "re-checks the call when the redefinition appears" do
+      expect_toggle(hooked, before: "", after: redefinition, first: reported('"X"'), second: [])
+    end
+
+    it "re-checks the call when the redefinition goes" do
+      expect_toggle(hooked, before: redefinition, after: "", first: [], second: reported('"X"'))
+    end
+  end
+
+  # The edges a singleton read files for the includer's direct mixin, which the chain's own entries do not name:
+  # the mixin's declaring file, and the negative `mark:` and `class:` edges on its last segment.
+  it "files the mixin's class edge and its mark: and class: edges on a singleton read" do
+    write("sig/types.rbs", sig_source)
+    hooked = files.merge("lib/ct.rb" => concern("  class_methods do\n    def bar = :cm\n  end\n"))
+    hooked.each { |path, source| write(path, source) }
+    tables = Rigor::Protection::DiscoverySeed.discovery_tables(Dir["lib/*.rb"].map { |path| File.expand_path(path) })
+    scope = Rigor::Scope.empty.then { |base| base.with_discovery(base.discovery.with(**tables)) }
+    record = Rigor::Analysis::DependencyRecorder.record_for(File.expand_path("lib/use.rb")) do
+      Rigor::Scope::ResolutionChain.for(scope, "Kt", :singleton, :methods).search(scope) { nil }
+    end
+    expect(record.sources.map { |path| File.basename(path) }).to include("ct.rb")
+    expect(record.missing).to include("mark:Ct", "class:Ct")
   end
 end

@@ -2876,7 +2876,28 @@ module Rigor
         found = [nil, nil] if owner && SingletonExternalAhead.withhold?(scope, class_name, method_name, owner)
         found = [nil, nil] if found.last && dynamic_singleton_definer_ahead?(class_name, method_name, found.last)
         found = [nil, nil] if found.last && singleton_hook_order_split?(class_name, method_name)
+        found = [nil, nil] if found.last && hidden_hook_definer?(class_name, method_name, found.last)
         found
+      end
+
+      # Issue #1592 — a module a hook extends the class with may define the name private (`class_methods do private;
+      # def x`), which Ruby refuses on an explicit receiver. The visibility rule does not reach that module, so the
+      # typing read withholds rather than answer a call Ruby raises on. A module the class `extend`s itself is left to
+      # that rule. A `class_methods` block's visibility is recorded on the concern, so `Owner::ClassMethods` reads it
+      # there.
+      def hidden_hook_definer?(class_name, method_name, owner)
+        visibility = scope.discovered_method_visibility(owner, method_name)
+        visibility ||= scope.discovered_method_visibility(owner.delete_suffix("::ClassMethods"), method_name) if
+          owner.end_with?("::ClassMethods")
+        return false if visibility.nil? || visibility == :public
+
+        chain = Scope::ResolutionChain.for(scope, class_name.to_s, :singleton, :methods)
+        return false unless chain.entries.any? { |entry| entry.name == owner && entry.side == :instance }
+
+        scope.singleton_extends_of(class_name).none? do |raw|
+          written = raw.delete_prefix("::")
+          owner == written || owner.end_with?("::#{written}")
+        end
       end
 
       # Issue #1592 — whether to withhold `method_name`'s class-side answer: a class object on the chain has

@@ -1,0 +1,2 @@
+- **[config]** A gem installed by `rbs collection install` and also named under `libraries:` keeps its collection signatures, and the `libraries:` audit no longer calls it an unknown RBS library. ([#2971](https://github.com/rigortype/rigor/issues/2971), [#2976](https://github.com/rigortype/rigor/pull/2976))
+  - The collection copy used to be skipped because the `libraries:` name was treated as already loaded, while rbs itself had no library of that name.

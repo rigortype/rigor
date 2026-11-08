@@ -129,15 +129,16 @@ RSpec.describe "a class whose instance-side chain holds a splatted mixin (#2991)
       expect(undefined_messages({ "a.rb" => source }, "class SS\nend\nclass SSub < SS\nend\n")).to be_empty
     end
 
+    # A guard, not a pin: a module that defines an `included` hook already opens its includers (`Relevance::HOOKS`).
     it "does not fire on a subclass of a class whose included hook runs `base.include`" do
       source = "#{mods}module H\n  def self.included(base) = base.include(M1)\nend\n" \
                "class HK\n  include H\n  def t = 1\nend\nclass HKSub < HK\n  def u = self.m1\nend\n"
       expect(undefined_messages({ "a.rb" => source }, "class HK\nend\nclass HKSub < HK\nend\n")).to be_empty
     end
 
-    it "does not fire on a subclass of `include M1, h`" do
-      source = "#{mods}class O1\n  def self.h = Comparable\n  include M1, h\n  def t = 1\nend\n" \
-               "class O1Sub < O1\n  def u = self.m1\nend\n"
+    it "does not fire on a subclass of `include M1, h`, for a method only `h` provides" do
+      source = "#{mods}module M2\n  def m2 = 1\nend\nclass O1\n  def self.h = M2\n  include M1, h\n  def t = 1\nend\n" \
+               "class O1Sub < O1\n  def u = self.m2\nend\n"
       expect(undefined_messages({ "a.rb" => source }, "class O1\nend\nclass O1Sub < O1\nend\n")).to be_empty
     end
 
@@ -153,6 +154,14 @@ RSpec.describe "a class whose instance-side chain holds a splatted mixin (#2991)
       expect(undefined_messages({ "a.rb" => source }, "class EX\nend\nclass EXSub < EX\nend\n")).to be_empty
     end
 
+    it "does not fire on a subclass of a class that extends a module whose `class << self` extended hook runs " \
+       "`base.include`" do
+      source = "#{mods}module SE\n  class << self\n    def extended(base) = base.include(M1)\n  end\nend\n" \
+               "class SX\n  extend SE\n  def t = 1\nend\nclass SXSub < SX\n  def u = self.m1\nend\n"
+      expect(undefined_messages({ "a.rb" => source }, "class SX\nend\nclass SXSub < SX\nend\n")).to be_empty
+    end
+
+    # A guard, not a pin: a module that defines an `included` hook already opens its includers (`Relevance::HOOKS`).
     it "does not fire on a subclass of a class whose `class << self` included hook runs `base.include`" do
       source = "#{mods}module SH\n  class << self\n    def included(base) = base.include(M1)\n  end\nend\n" \
                "class SK\n  include SH\n  def t = 1\nend\nclass SKSub < SK\n  def u = self.m1\nend\n"

@@ -97,8 +97,11 @@ RSpec.describe "ActiveSupport::Concern class_methods macros and call.undefined-m
     expect(undefined_messages).to eq(["undefined method `c16' for C16"])
   end
 
-  # Concern#append_features extends the includer with `Outer18.const_get(:ClassMethods)`, which finds the included
-  # concern's `ClassMethods` through `Outer18`'s ancestors.
+  # In Ruby, `Conc17.append_features(Outer17)` returns false and records `Conc17` as a dependency of `Outer17`, so
+  # `Conc17` never joins `Outer17`'s ancestors; `Outer17.append_features(C17)` includes `Conc17` into `C17`, and
+  # `Conc17`'s own `append_features` extends `C17` with `Conc17::ClassMethods`. The reader reaches the same module
+  # through its `const_get` lookup along `Outer17`'s recorded includes, which agrees while `Outer17` has no
+  # `ClassMethods` of its own (the next row is the case where it has one).
   it "reads a concern included into another concern that has no ClassMethods of its own" do
     source = "#{concern('Conc17')}module Outer17\n  extend ActiveSupport::Concern\n  include Conc17\nend\n" \
              "class C17\n  include Outer17\n  my_c :c17\nend\n"

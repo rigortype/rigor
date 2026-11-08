@@ -156,6 +156,21 @@ RSpec.describe "class marks — incremental" do
     end
   end
 
+  # Issue #2901 — a class-macro call filed on a class by a file that does not declare it (`Mac.class_eval { … }`):
+  # `call.undefined-method` reads the body-call entry, which diffs as a class mark.
+  describe "a class-macro call written in another file's class_eval" do
+    def configuration(dir) = Rigor::Configuration.new("paths" => [dir], "signature_paths" => [dir])
+    def shared_environment = nil
+
+    let(:base) do
+      { "mac.rb" => "class Mac\n  def self.my_attr(*n) = n.each { |x| define_method(x) { x } }\nend\n",
+        "mac.rbs" => "class Mac\nend\n", "use.rb" => "Mac.new.foo\n" }
+    end
+    let(:mark) { "Mac.class_eval { my_attr :foo }\n" }
+
+    it_behaves_like "a mark-only file", reported_without_mark: [["use.rb", 1]]
+  end
+
   # Issue #1833 — a dynamic mark on a NAMESPACE CANDIDATE of the superclass written in a `class Sub < Foo` header.
   # Inside `module N`, the walker records `module N; Foo.send(:define_method, …); end` on BOTH `N::Foo` and `Foo`,
   # and the `:arity` resolver resolves `Foo` to `N::Foo` first because its bucket now `declares_surface?`. `N::Foo`

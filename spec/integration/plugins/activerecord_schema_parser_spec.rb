@@ -177,4 +177,58 @@ RSpec.describe "plugins/rigor-activerecord SchemaParser" do
       expect(table.column("items", "code").ruby_type).to eq("String")
     end
   end
+
+  describe "a decimal column's class follows its scale" do
+    it "reads a decimal at scale 0 as an Integer, as DecimalWithoutScale does" do
+      table = parse(<<~RUBY)
+        create_table "prices" do |t|
+          t.decimal "whole", precision: 20, scale: 0
+        end
+      RUBY
+      expect(table.column("prices", "whole").ruby_type).to eq("Integer")
+    end
+
+    it "reads a decimal at a non-zero scale as a BigDecimal, not a Float" do
+      table = parse(<<~RUBY)
+        create_table "prices" do |t|
+          t.decimal "fractional", precision: 10, scale: 2
+        end
+      RUBY
+      expect(table.column("prices", "fractional").ruby_type).to eq("BigDecimal")
+    end
+
+    it "leaves a decimal with no scale untyped, because the adapter decides it" do
+      table = parse(<<~RUBY)
+        create_table "prices" do |t|
+          t.decimal "amount", precision: 10
+        end
+      RUBY
+      expect(table.column("prices", "amount").ruby_type).to eq("Object")
+    end
+
+    it "leaves a decimal with a non-literal scale untyped" do
+      table = parse(<<~RUBY)
+        create_table "prices" do |t|
+          t.decimal "amount", precision: 10, scale: SCALE
+        end
+      RUBY
+      expect(table.column("prices", "amount").ruby_type).to eq("Object")
+    end
+
+    it "reads the scale of a generic t.column decimal the same way" do
+      table = parse(<<~RUBY)
+        create_table "prices" do |t|
+          t.column "whole", :decimal, precision: 20, scale: 0
+          t.column "fractional", :decimal, precision: 10, scale: 2
+        end
+      RUBY
+      expect(table.column("prices", "whole").ruby_type).to eq("Integer")
+      expect(table.column("prices", "fractional").ruby_type).to eq("BigDecimal")
+    end
+
+    it "leaves a decimal untyped when a splat may carry the scale" do
+      table = parse(%(create_table "prices" do |t|\n  t.decimal "amount", scale: 0, **OPTIONS\nend\n))
+      expect(table.column("prices", "amount").ruby_type).to eq("Object")
+    end
+  end
 end

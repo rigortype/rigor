@@ -34,9 +34,20 @@ RSpec.describe "plugins/rigor-activerecord StructureSqlParser" do
     expect(cols).to eq(
       "id" => "Integer", "count" => "Integer", "size" => "Integer",
       "name" => "String", "body" => "String", "active" => "bool",
-      "price" => "Float", "ratio" => "Float", "created_at" => "Time",
+      "price" => "BigDecimal", "ratio" => "Float", "created_at" => "Time",
       "published_on" => "Date", "payload" => "Object", "token" => "String"
     )
+  end
+
+  it "types a numeric by its scale: Integer at scale 0, BigDecimal at a non-zero scale" do
+    table = parse("CREATE TABLE prices (\n  whole numeric(20,0) NOT NULL,\n  fractional decimal(10,2)\n);\n")
+    expect(table.column("prices", "whole").ruby_type).to eq("Integer")
+    expect(table.column("prices", "fractional").ruby_type).to eq("BigDecimal")
+  end
+
+  it "leaves a numeric with no literal scale untyped, never Float" do
+    table = parse("CREATE TABLE prices (\n  bare numeric,\n  precision_only numeric(10),\n  money_col money\n);\n")
+    expect(table.columns_for("prices").map(&:ruby_type)).to eq(%w[Object Object Object])
   end
 
   it "flags Postgres array columns and keeps the element type" do

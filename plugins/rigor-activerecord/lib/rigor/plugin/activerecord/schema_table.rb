@@ -9,9 +9,10 @@ module Rigor
       #
       # The mapping from Rails column types to Ruby class names is deliberately conservative —
       # `:string`/`:text` → `String`, `:integer`/`:bigint` → `Integer`, `:boolean` → `bool`,
-      # `:datetime`/`:timestamp` → `Time`, `:date` → `Date`, `:decimal`/`:float` → `Float`. Exotic types
-      # (json, jsonb, ltree, hstore, custom) fall back to `Object` so the plugin stays silent rather than
-      # guessing.
+      # `:datetime`/`:timestamp` → `Time`, `:date` → `Date`, `:float` → `Float`. A `:decimal` column's class
+      # follows its scale, so it is typed by {.decimal_ruby_type} from the parser that reads the scale, and
+      # reads `Object` here. Exotic types (json, jsonb, ltree, hstore, custom) fall back to `Object` so the
+      # plugin stays silent rather than guessing.
       class SchemaTable
         Column = Struct.new(:name, :type, :ruby_type, :array, keyword_init: true) do
           def to_h = { name: name, type: type, ruby_type: ruby_type, array: array }
@@ -27,7 +28,7 @@ module Rigor
           integer: "Integer",
           bigint: "Integer",
           float: "Float",
-          decimal: "Float",
+          decimal: "Object",
           boolean: "bool",
           datetime: "Time",
           timestamp: "Time",
@@ -82,6 +83,17 @@ module Rigor
         # the analyzer treats that as "do not narrow" (silent on unknowns).
         def self.ruby_type_for(column_type)
           RUBY_TYPE_MAPPING.fetch(column_type.to_sym, "Object")
+        end
+
+        # Maps a `decimal` column's scale to its Ruby class. Rails registers `Type::DecimalWithoutScale`
+        # (an Integer) at scale 0 and `Type::Decimal` (a BigDecimal) at any other scale. An absent or
+        # non-literal scale (`nil`) is left to the adapter, which decides it, so it reads as `Object`.
+        def self.decimal_ruby_type(scale)
+          case scale
+          when 0 then "Integer"
+          when Integer then "BigDecimal"
+          else "Object"
+          end
         end
       end
     end

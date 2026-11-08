@@ -138,21 +138,23 @@ module Rigor
         end
 
         def build_column(name, rest)
-          type_str, array = extract_type(rest)
+          type_str, array, scale = extract_type(rest)
           return nil if type_str.empty?
 
           rails_type = PG_TYPE_TO_RAILS.fetch(type_str, type_str.to_sym)
+          ruby_type = rails_type == :decimal ? SchemaTable.decimal_ruby_type(scale) : SchemaTable.ruby_type_for(rails_type)
           SchemaTable::Column.new(
             name: name,
             type: rails_type,
-            ruby_type: SchemaTable.ruby_type_for(rails_type),
+            ruby_type: ruby_type,
             array: array
           )
         end
 
         # The type is every token before the first uppercase-initial token (a column modifier such as
         # `NOT`, `NULL`, `DEFAULT`, `GENERATED`, `COLLATE`). A trailing `[]` marks a Postgres array column;
-        # a `(length[,scale])` specifier is dropped. Returns `[normalized_type, array?]`.
+        # a `(length[,scale])` specifier is dropped. Returns `[normalized_type, array?, scale]`, where `scale` is
+        # the literal second number of a `(precision, scale)` specifier, or nil when there is none.
         def extract_type(rest)
           type_tokens = []
           rest.split(/\s+/).each do |token|
@@ -162,8 +164,9 @@ module Rigor
           end
           type_str = type_tokens.join(" ")
           array = type_str.include?("[]")
+          scale = type_str[/\(\s*\d+\s*,\s*(\d+)\s*\)/, 1]&.to_i
           type_str = type_str.gsub("[]", "").gsub(/\([0-9,\s]*\)/, "").strip.downcase
-          [type_str, array]
+          [type_str, array, scale]
         end
       end
     end

@@ -1110,7 +1110,9 @@ module Rigor
 
         def hook_extension_defines?(scope, mixin, definers)
           hook_extends(scope, mixin).any? do |written, lookup|
-            target = lookup == :const_get ? const_get_constant(scope, mixin, written) : declared_constant(scope, mixin, written)
+            target = if lookup == :const_get then const_get_constant(scope, mixin, written)
+                     else declared_constant(scope, mixin, written)
+                     end
             target && definers.any? { |definer| scope.parameter_envelopes_of(target).key?(definer) }
           end
         end

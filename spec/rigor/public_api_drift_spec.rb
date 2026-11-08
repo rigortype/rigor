@@ -163,6 +163,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     parameter_envelopes_of(req:class_name)
     plugin_typed_call?(req:node)
     plugin_typed_calls()
+    prepends_of(req:class_name)
     program_globals()
     project_method_name?(req:method_name)
     published_constant?(req:name)

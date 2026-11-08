@@ -110,19 +110,19 @@ RSpec.describe "ActiveSupport::Concern class_methods macros and call.undefined-m
   # that concern's `ClassMethods`; the reader follows `const_get(:ClassMethods)` only, which stops at the outer
   # concern's own `ClassMethods`, so this still reports.
   it "does not yet read a dependency concern when the outer concern has its own ClassMethods" do
-    source = "#{concern('Conc18')}#{concern('Outer18', body: 'n').sub("module Outer18\n", "module Outer18\n  include Conc18\n")}" \
-             "class C18\n  include Outer18\n  my_c :c18\nend\n"
+    outer = concern("Outer18", body: "n").sub("module Outer18\n", "module Outer18\n  include Conc18\n")
+    source = "#{concern('Conc18')}#{outer}class C18\n  include Outer18\n  my_c :c18\nend\n"
     write_project(source, %w[C18.new.c18])
     expect(undefined_messages).to eq(["undefined method `c18' for C18"])
   end
 
-  # The `included` and `prepended` blocks run only for their own edge. In the rows that report, a superclass's
-  # `my_c`, which defines nothing, lets the class body run in Ruby.
+  # The `included` and `prepended` blocks run only for their own edge.
   def hook_concern(name, hook)
-    "module #{name}\n  extend ActiveSupport::Concern\n  class_methods do\n    def my_c(*n) = #{definer_body}\n  end\n" \
-      "  #{hook} do\n    my_c :#{name.downcase}\n  end\nend\n"
+    "module #{name}\n  extend ActiveSupport::Concern\n  class_methods do\n    " \
+      "def my_c(*n) = #{definer_body}\n  end\n  #{hook} do\n    my_c :#{name.downcase}\n  end\nend\n"
   end
 
+  # A superclass whose `my_c` defines nothing, so a reporting row's class body runs in Ruby.
   def quiet_base(name) = "class #{name}\n  def self.my_c(*n) = n\nend\n"
 
   it "opens a prepending class when a prepended block calls the macro" do
@@ -164,16 +164,17 @@ RSpec.describe "ActiveSupport::Concern class_methods macros and call.undefined-m
   describe "the ClassMethods a concern extends its includer with" do
     it "is not looked up in the namespace enclosing the concern" do
       source = "module Nj\n  module ClassMethods\n    def my_c(*n) = #{definer_body}\n  end\n  module Co\n    " \
-               "extend ActiveSupport::Concern\n    def co = 1\n  end\nend\n#{quiet_base('Bj')}class Cj < Bj\n  include Nj::Co\n  " \
-               "my_c :cj\nend\n"
+               "extend ActiveSupport::Concern\n    def co = 1\n  end\nend\n" \
+               "#{quiet_base('Bj')}class Cj < Bj\n  include Nj::Co\n  my_c :cj\nend\n"
       sig = "module Nj\n  module ClassMethods\n  end\n  module Co\n  end\nend\nclass Bj\nend\nclass Cj < Bj\nend\n"
       write_project(source, %w[Cj.new.cj], sig: sig)
       expect(undefined_messages).to eq(["undefined method `cj' for Cj"])
     end
 
     it "is the top-level ClassMethods when the concern has none" do
-      source = "module ClassMethods\n  def my_c(*n) = #{definer_body}\nend\nmodule Ct\n  extend ActiveSupport::Concern\n  def ct_own = 1\n" \
-               "end\nclass Ctc\n  include Ct\n  my_c :ct\nend\n"
+      source = "module ClassMethods\n  def my_c(*n) = #{definer_body}\nend\n" \
+               "module Ct\n  extend ActiveSupport::Concern\n  def ct_own = 1\nend\n" \
+               "class Ctc\n  include Ct\n  my_c :ct\nend\n"
       write_project(source, %w[Ctc.new.ct])
       expect(undefined_messages).to be_empty
     end

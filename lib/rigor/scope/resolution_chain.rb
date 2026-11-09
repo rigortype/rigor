@@ -275,9 +275,9 @@ module Rigor
       # (`class << self; prepend P`), ahead of everything the class object's level holds, which no class edge of the
       # declaring files sees. So each class object the search passes, and one that answers, also files the name edge
       # `mark:<last segment>` ({#record_prepend_regions}), which `IncrementalSession#mark_affected` fires when a
-      # `[ENVELOPE_SINGLETON_PREPEND_KIND, …]` entry (a diffed class mark) appears on or vanishes from the class, and not
-      # on a plain reopening. A class object behind the answer is filed through {#settle}'s filing, and so is every one
-      # on a read that finds nothing.
+      # `[ENVELOPE_SINGLETON_PREPEND_KIND, …]` entry (a diffed class mark) appears on or vanishes from the class, and
+      # not on a plain reopening. A class object behind the answer is filed through {#settle}'s filing, and so is every
+      # one on a read that finds nothing.
       def search(scope, start = 0, stop = nil, side: nil)
         recording = Analysis::DependencyRecorder.active?
         stop ||= @entries.size

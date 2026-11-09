@@ -2886,8 +2886,7 @@ module Rigor
         found = [nil, nil] if owner && SingletonExternalAhead.withhold?(scope, class_name, method_name, owner)
         found = [nil, nil] if found.last && dynamic_singleton_definer_ahead?(class_name, method_name, found.last)
         found = [nil, nil] if found.last && singleton_hook_order_split?(class_name, method_name)
-        found = [nil, nil] if found.last && singleton_prepend_split?(class_name, method_name, found)
-        found = [nil, nil] if found.last && unnamed_singleton_mixin_split?(class_name, method_name)
+        found = [nil, nil] if found.last && singleton_mixin_split?(class_name, method_name, found)
         found = [nil, nil] if found.last && hidden_hook_split?(class_name, method_name, found.last)
         found
       end
@@ -2938,6 +2937,13 @@ module Rigor
         return answer != positioned_singleton_definer(retro, method_name) if retro
 
         answer != positioned_singleton_definer(chain, method_name, copies: true)
+      end
+
+      # Issues #2998 and #3020 — whether a singleton-side mixin of a class object on the chain may answer ahead of
+      # `found`: a named prepend master's order does not place, or a module no table names.
+      def singleton_mixin_split?(class_name, method_name, found)
+        singleton_prepend_split?(class_name, method_name, found) ||
+          unnamed_singleton_mixin_split?(class_name, method_name)
       end
 
       # Issue #2998 — whether to withhold the class-side answer `found` on a chain whose class objects have

@@ -1452,7 +1452,7 @@ module Rigor
         # #979 — the signature ROOTS' listings, one glob row each. `rbs_descriptor.files` covers only the
         # `.rbs` files that existed while the run read them, so without these a signature file written after
         # the run left the slot validating fresh and the warm run answered without it.
-        globs = rbs_descriptor.globs + template_unit_glob_entries + discovery_glob_entries
+        globs = rbs_descriptor.globs + template_unit_glob_entries + discovery_glob_entries + bundle_sig_glob_entries
         boundary = plugin_boundary_rows
         entries.concat(boundary.files)
         globs.concat(boundary.globs).concat(producer_watch_glob_entries)
@@ -1600,6 +1600,9 @@ module Rigor
         return nil if pool_mode? || !@collect_stats || @analyzed_files.empty?
 
         own, pinned = signature_rows
+        # Issue #2987 — the bundle's `sig/` listing is identified by the gems' directory, outside the project, so a
+        # `pinned` row: the write guard passes over it where it would refuse an `owned` one it cannot stat.
+        pinned = Cache::Descriptor.new(files: pinned.files, globs: (pinned.globs + bundle_sig_glob_entries).uniq)
         BaselineRows.new(
           owned: Cache::Descriptor.new(
             files: own.files + kind_entries(signature_root_candidates) +
@@ -1648,6 +1651,22 @@ module Rigor
         end
       end
 
+      # Issue #2987 — one names-mode listing row per bundle `sig/` layout ({Environment::BundleSigDiscovery.discover}'s
+      # two globs). The signature rows list only the directories the loader read, so a gem that GAINS a `sig/`
+      # (or loses it) while its version and lock entry stand still sits in none of them, and the run-result
+      # slot kept serving the environment built without (or with) it.
+      def bundle_sig_glob_entries
+        root = Environment::BundleSigDiscovery.resolve_bundle_path(
+          bundle_path: @configuration.bundler_bundle_path, project_root: Dir.pwd,
+          auto_detect: @configuration.bundler_auto_detect
+        )
+        return [] if root.nil?
+
+        Environment::BundleSigDiscovery::SIG_GLOBS.map do |pattern|
+          Cache::Descriptor::GlobEntry.compute(root: root.to_s, pattern: pattern, mode: :names)
+        end
+      end
+
       def unanalysed_pre_eval_entries(files)
         analysed = files.to_set { |path| File.absolute_path(path) }
         outside = @configuration.pre_eval.reject { |path| analysed.include?(File.absolute_path(path)) }
@@ -1668,6 +1687,7 @@ module Rigor
       end
       private :plugin_boundary_rows, :producer_watch_glob_entries, :kind_entries, :root_presence_entries,
               :analysis_reads_attributed?, :signature_root_candidates, :discovery_glob_entries,
+              :bundle_sig_glob_entries,
               :unanalysed_pre_eval_entries, :signature_rows, :within?
 
       # Issue #684 — the project files this run DISCOVERED but did not analyse. A widened run's diagnostics

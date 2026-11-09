@@ -4,6 +4,7 @@ require "yaml"
 
 require_relative "../config_path"
 require_relative "../rooted_glob"
+require_relative "lockfile_resolver"
 
 module Rigor
   class Environment
@@ -49,6 +50,10 @@ module Rigor
         "bundler", "rubygems"
       ].freeze
 
+      # The two bundle layouts {.discover} walks, relative to the resolved bundle root. Also the listing rows the
+      # run cache records (issue #2987), so a gem gaining or losing `sig/` invalidates it.
+      SIG_GLOBS = %w[ruby/*/gems/*/sig ruby/*/bundler/gems/*/sig].freeze
+
       # @param bundle_path — explicit path to the bundler install root. When `nil`,
       #   falls back to `auto_detect` if `auto_detect:` is true.
       # @param project_root — resolution base for relative `bundle_path:` and the auto-detect search.
@@ -92,8 +97,7 @@ module Rigor
         # all (`Bundler::Source::Path#path` is the user's own `path:` directory, used in place), so there is
         # no bundle-relative location to walk. A `path:`-sourced gem's `sig/` is only reachable by adding it
         # directly to the project's `signature_paths:` — which already works today and needs no discovery.
-        all = (RootedGlob.glob(resolved, "ruby/*/gems/*/sig") +
-               RootedGlob.glob(resolved, "ruby/*/bundler/gems/*/sig")).map { |d| Pathname.new(d) }
+        all = SIG_GLOBS.flat_map { |pattern| RootedGlob.glob(resolved, pattern) }.map { |d| Pathname.new(d) }
         if locked_gems.nil? || locked_gems.empty?
           return all.reject { |sig_dir| skip_gems.include?(gem_name_from_sig_path(sig_dir)) }
         end
@@ -132,6 +136,17 @@ module Rigor
 
         names = locked_dir_names(locked_gems)
         sig_dirs.filter_map { |dir| locked_name_of(dir, locked_gems, names) }.uniq
+      end
+
+      # Issue #2987 — the locked gem names whose own `sig/` {.discover} loads for a configuration's bundle and
+      # lockfile: a pure file read ({LockfileResolver}), so the `libraries:` audit can ask without loading `rbs`.
+      def self.loaded_names(configuration, project_root)
+        auto_detect = configuration.bundler_auto_detect
+        locked = LockfileResolver.locked_gems(lockfile_path: configuration.bundler_lockfile,
+                                              project_root: project_root, auto_detect: auto_detect)
+        dirs = discover(bundle_path: configuration.bundler_bundle_path, project_root: project_root,
+                        auto_detect: auto_detect, locked_gems: locked.empty? ? nil : locked)
+        locked_names_of(dirs, locked)
       end
 
       # `{name => LockedGem}` → `{canonical bundler gem directory basename => name}`. Pure-Ruby gems install as

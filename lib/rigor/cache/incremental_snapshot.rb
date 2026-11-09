@@ -333,7 +333,7 @@ module Rigor
           "sig:#{digest_signature_paths(project_sig_roots(configuration))}",
           "pre_eval:#{digest_pre_eval(configuration.pre_eval)}"
         ]
-        parts.concat(core_root_parts(configuration))
+        parts.concat(extra_signature_parts(configuration))
         parts.concat(dependency_source_parts(configuration))
         identity = EngineSource.process_identity
         parts << "engine-source:#{identity}" if identity
@@ -360,11 +360,33 @@ module Rigor
       # Issue #2517 — a selected core is read like the project's own `sig/`, so an edit in place to one of its files
       # must drop the snapshot (and the language server's session, which keys on this fingerprint). No part for the
       # default core, so every other project's fingerprint is as it was.
+      def self.extra_signature_parts(configuration)
+        core_root_parts(configuration) + bundle_sig_parts(configuration)
+      end
+      private_class_method :extra_signature_parts
+
       def self.core_root_parts(configuration)
         core_root = configuration.core_root
         core_root.nil? ? [] : ["core:#{digest_signature_paths([core_root])}"]
       end
       private_class_method :core_root_parts
+
+      # Issue #2987 — the bundle gems' own `sig/` directories the environment loads: which gems have one and what
+      # their `.rbs` files hold. The lockfile digest above covers a gem's version, not a `sig/` appearing under an
+      # unchanged version, nor an edit in place to one. Shared with the language server's session key. No part for a
+      # project whose bundle holds none, so its fingerprint is as it was.
+      def self.bundle_sig_parts(configuration)
+        locked = Environment::LockfileResolver.locked_gems(
+          lockfile_path: configuration.bundler_lockfile, project_root: Dir.pwd,
+          auto_detect: configuration.bundler_auto_detect
+        )
+        dirs = Environment::BundleSigDiscovery.discover(
+          bundle_path: configuration.bundler_bundle_path, project_root: Dir.pwd,
+          auto_detect: configuration.bundler_auto_detect, locked_gems: locked.empty? ? nil : locked
+        ).map(&:to_s).sort
+        dirs.empty? ? [] : ["bundle-sig:#{dirs.join("\n")}:#{digest_signature_paths(dirs)}"]
+      end
+      private_class_method :bundle_sig_parts
 
       def self.required_features(configuration, roots)
         files = Analysis::PathExpansion.ruby_files(roots, configuration.exclude_patterns,

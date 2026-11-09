@@ -254,6 +254,29 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(outcome(row(candidates, "Restricted", :format))).to eq("def format: (*untyped) -> bot")
     end
 
+    it "keeps a method whose every branch raises, though it calls an overridden method" do
+      path = write_fixture("lib/finder.rb", <<~RUBY)
+        class Finder
+          def label = "finder"
+
+          def not_found!(ids)
+            if ids.nil?
+              raise ArgumentError, "no \#{label}"
+            else
+              raise ArgumentError, "some \#{label}"
+            end
+          end
+        end
+        class UserFinder < Finder
+          def label = "user"
+        end
+      RUBY
+
+      candidates = run_over([path])
+
+      expect(outcome(row(candidates, "Finder", :not_found!))).to eq("def not_found!: (untyped) -> bot")
+    end
+
     it "keeps a raise-only method that is not abstract-shaped and nothing overrides" do
       path = write_fixture("lib/guard.rb", <<~RUBY)
         class Guard

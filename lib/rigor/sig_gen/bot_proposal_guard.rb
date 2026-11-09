@@ -17,9 +17,9 @@ module Rigor
     #   by a class that includes the method's module, or by a module that comes earlier in some class's ancestors.
     # - `:abstract_method` — the body ends in an abstract-style raise: `NotImplementedError`, an error class named
     #   `Abstract…` / `NotImplemented…`, or a message that asks for an implementation or an override.
-    # - `:template_method` — the body does not end in a direct `raise` / `fail` / `throw` / `exit` / `abort`, and it
-    #   calls a method that is overridden or abstract in the analysed code, directly or through a chain of
-    #   self-dispatched calls. Its `bot` may come from the base body of that call.
+    # - `:template_method` — the body does not end in a direct `raise` / `fail` / `throw` / `exit` / `abort` on every
+    #   branch, and it calls a method that is overridden or abstract in the analysed code, directly or through a
+    #   chain of self-dispatched calls. Its `bot` may come from the base body of that call.
     #
     # The reading is over the project's discovery tables, by name. The ancestor names are not resolved precisely: a
     # `superclass` or `include` token stands for every class its lexical nesting could mean, and a call matches any
@@ -156,9 +156,25 @@ module Rigor
         end
       end
 
-      def ends_in_terminator?(node)
-        last = statements(node).last
-        last.is_a?(Prism::CallNode) && last.receiver.nil? && TERMINATORS.include?(last.name)
+      def ends_in_terminator?(node) = terminates?(statements(node).last)
+
+      # Whether `node` ends in a receiverless terminator on every path through it: the call itself, or an
+      # `if` / `unless` / `case` whose every branch, the `else` included, ends in one.
+      def terminates?(node)
+        case node
+        when Prism::CallNode then node.receiver.nil? && TERMINATORS.include?(node.name)
+        when Prism::StatementsNode then terminates?(node.body.last)
+        when Prism::ParenthesesNode then terminates?(node.body)
+        when Prism::ElseNode then terminates?(node.statements)
+        when Prism::IfNode then terminates?(node.statements) && terminates?(node.subsequent)
+        when Prism::UnlessNode then terminates?(node.statements) && terminates?(node.else_clause)
+        when Prism::CaseNode then case_terminates?(node)
+        else false
+        end
+      end
+
+      def case_terminates?(node)
+        node.conditions.all? { |branch| terminates?(branch.statements) } && terminates?(node.else_clause)
       end
 
       def abstract_body?(node)

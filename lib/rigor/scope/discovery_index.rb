@@ -303,6 +303,9 @@ module Rigor
       # block is ActiveSupport's only when some body of the module records the concern entry; a reader takes the
       # gated hook as the plain one then, and as no hook otherwise ({ResolutionChain.effective_hook}).
       CONCERN_BLOCK_HOOKS = { included: :concern_included, prepended: :concern_prepended }.freeze
+      # Issue #3005 — the last segment of the module a concern block's `def self.x`s are filed on (`Owner::<included>`),
+      # and the spelling its hook-extend entry names.
+      HOOK_BLOCK_SEGMENTS = %w[<included> <prepended>].freeze
       # Issue #2979 — `[ENVELOPE_SAME_CLASS_KIND, "Struct::Named"]` on `K`'s bucket, and its mirror on
       # `Struct::Named`'s, say that `K = Struct.new("Named", …)` binds both constants to one class object: the method
       # chain of either name reads the other's tables at its own position ({.same_class_names}). It names no member.

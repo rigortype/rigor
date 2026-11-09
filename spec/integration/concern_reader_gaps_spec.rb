@@ -36,15 +36,17 @@ RSpec.describe "concern reader gaps (#3005)" do
     File.write(File.join("lib", "use.rb"), "def run\n#{calls.map { |c| "  #{c}" }.join("\n")}\nend\n")
   end
 
-  def undefined_messages
+  def undefined_messages = messages("call.undefined-method")
+
+  def messages(rule)
     configuration = Rigor::Configuration.new(
       Rigor::Configuration::DEFAULTS.merge("paths" => %w[lib], "signature_paths" => %w[sig], "workers" => 0)
     )
     result = guarded_run(Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil), %w[lib])
-    result.diagnostics.select { |d| d.qualified_rule == "call.undefined-method" }.map(&:message).sort
+    result.diagnostics.select { |d| d.qualified_rule == rule }.map(&:message).sort
   end
 
-  def base_source = "class Base\n  def self.bar = 1\nend\nmodule Xq\n  def bar = \"X\"\nend\n"
+  def base_source = "class Base\n  def self.bar = 1\nend\nmodule Xq\n  def bar = \"X\"\n  def made = \"X\"\nend\n"
 
   def concern(name, body = "") = "module #{name}\n  extend ActiveSupport::Concern\n  def own = 1\n#{body}end\n"
 
@@ -183,6 +185,48 @@ RSpec.describe "concern reader gaps (#3005)" do
       write_project({ "a_cd.rb" => concern("Cd", macro),
                       "k.rb" => "class Kd\n  include Cd\n  my_attr :foo\nend\n" }, ["Kd.new.foo.zork"])
       expect(undefined_messages).to be_empty
+    end
+
+    # Ruby answers "X" and :blk: the block's `def self.made` sits on `Ke` itself, ahead of the `Xq#made` it extends
+    # `Ke` with, so the two have a known order.
+    it "answers both the block's extend and its def" do
+      body = block("included", "    extend Xq\n    def self.made = :blk\n")
+      write_project({ "a_cd.rb" => concern("Cd", body), "k.rb" => includer("Ke", "Cd") },
+                    ["Ke.bar.zork", "Ke.made.zork"])
+      expect(undefined_messages).to eq(["undefined method `zork' for \"X\"", "undefined method `zork' for :blk"])
+    end
+
+    # The includer's own `def self.made` and the block's replace each other in the order the `def` and the
+    # `include` run, which the tables do not hold. Ruby answers :blk when the `def` comes first, for the class and its
+    # subclass, and 1 when it comes last; the read withholds both ways, so the call types `Dynamic`.
+    describe "an includer's own def self.x of the block's name" do
+      let(:blocked) { concern("Cd", block("included", "    def self.made = :blk\n")) }
+
+      it "withholds the own def written ahead of the include, for the class and a subclass" do
+        write_project({ "a_cd.rb" => blocked,
+                        "k.rb" => "class Kb\n  def self.made = 1\n  include Cd\nend\nclass Sb < Kb\nend\n" },
+                      ["Kb.made.zork", "Sb.made.zork"])
+        expect(undefined_messages).to be_empty
+      end
+
+      it "withholds the own def written after the include" do
+        write_project({ "a_cd.rb" => blocked, "k.rb" => "class Kb\n  include Cd\n  def self.made = 1\nend\n" },
+                      ["Kb.made.zork"])
+        expect(undefined_messages).to be_empty
+      end
+
+      # Ruby answers :blk: the block's zero-parameter `made` replaced the own one-parameter `made`.
+      it "does not check the call against the own def's arity" do
+        write_project({ "a_cd.rb" => blocked, "k.rb" => "class Kb\n  def self.made(a) = a\n  include Cd\nend\n" },
+                      ["Kb.made"])
+        expect(messages("call.wrong-arity")).to be_empty
+      end
+
+      it "still checks an own def the block does not define" do
+        write_project({ "a_cd.rb" => blocked,
+                        "k.rb" => "class Kb\n  def self.other(a) = a\n  include Cd\nend\n" }, ["Kb.other"])
+        expect(messages("call.wrong-arity").size).to eq(1)
+      end
     end
 
     it "still reports a class-side name no module or class provides" do

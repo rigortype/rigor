@@ -892,7 +892,9 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
         expect(singleton(scope_for(source), "C", :x)).to eq("X")
       end
 
-      it "pins an own def trusted against its own level's U2 hook (wrong: Ruby calls the hook's)" do
+      # Issue #3005 — closed for a concern block's `def self.x`: the block's module on the level defines the name, so
+      # the own def is tested and the concern level declines.
+      it "declines an own def against its own level's concern-block def (Ruby calls the hook's)" do
         source = <<~RUBY
           module Concern
             extend ActiveSupport::Concern
@@ -903,7 +905,7 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
           class C; def self.x = :own; include Concern; end
         RUBY
         expect(ruby_singleton(source, "C", :x, prelude: concern_shim)).to eq([%w[#<Class:C>], "#<Class:C>", ":hook"])
-        expect(singleton(scope_for(source), "C", :x)).to eq("C")
+        expect(singleton(scope_for(source), "C", :x)).to eq(:unknown)
       end
 
       it "pins a superclass that only extends: two forks, so even an own def declines" do

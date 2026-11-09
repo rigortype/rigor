@@ -4282,7 +4282,7 @@ module Rigor
           if !node.expression.is_a?(Prism::SelfNode) || tables.in_block?(node)
             record_singleton_body_prepends(node, qualified_prefix, tables)
           end
-          record_constant_singleton_prepends(node, qualified_prefix, tables) if constant_singleton_class?(node)
+          record_constant_singleton_prepends(node, qualified_prefix, tables)
           walk_methods_and_def_nodes(node.expression, qualified_prefix, in_singleton_class,
                                      methods_acc, def_nodes_acc, source_path, def_owner_prefix,
                                      singleton_cref: singleton_cref,
@@ -5052,9 +5052,7 @@ module Rigor
         Source::NodeWalker.each(def_node.body) do |node|
           if node.is_a?(Prism::SingletonClassNode)
             record_singleton_body_prepends(node, qualified_prefix, tables)
-            if constant_singleton_class?(node)
-              record_constant_singleton_prepends(node, qualified_prefix, tables, owner: true)
-            end
+            record_constant_singleton_prepends(node, qualified_prefix, tables, owner: true)
             next
           end
           next unless node.is_a?(Prism::CallNode)
@@ -5705,6 +5703,8 @@ module Rigor
       # extends walk records the matching edges, unpositioned ({#record_constant_singleton_candidates}). In a method
       # body, which the methods walk does not enter, `owner:` files them under the owner too.
       def record_constant_singleton_prepends(node, qualified_prefix, tables, owner: false)
+        return unless constant_singleton_class?(node)
+
         resolved, others = constant_singleton_owners(node, qualified_prefix)
         others = [resolved, *others] if owner
         return if others.empty? || node.body.nil?

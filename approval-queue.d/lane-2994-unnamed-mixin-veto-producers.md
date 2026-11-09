@@ -1,6 +1,6 @@
 # Builder#lists_unnamed? is listed in producers.yml as a consumer, not a producer
 
-- **PR:** [#2994](https://github.com/rigortype/rigor/issues/2994)
+- **PR:** [#3011](https://github.com/rigortype/rigor/pull/3011)
 - **Issue:** [#2994](https://github.com/rigortype/rigor/issues/2994)
 - **Class:** gate-row
 - **Precedent:** [#1735](https://github.com/rigortype/rigor/pull/1735)

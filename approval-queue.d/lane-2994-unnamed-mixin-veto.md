@@ -1,6 +1,6 @@
 # A class that mixes in a module no table names opens its class object's existence read, not only its typing read
 
-- **PR:** [#2994](https://github.com/rigortype/rigor/issues/2994)
+- **PR:** [#3011](https://github.com/rigortype/rigor/pull/3011)
 - **Issue:** [#2994](https://github.com/rigortype/rigor/issues/2994)
 - **Class:** open-choice
 - **Precedent:** none — sets one

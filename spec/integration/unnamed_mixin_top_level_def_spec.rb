@@ -45,7 +45,8 @@ RSpec.describe "a top-level def and a class-object read beside a mixin no name s
     end
 
     it "does not bind it when the top-level def, the modules and the class sit in other files" do
-      files = { "top.rb" => top, "mods.rb" => mods, "sup.rb" => "class Sup\n  include(*MODS)\n  def t = m1.upcase\nend\n" }
+      files = { "top.rb" => top, "mods.rb" => mods,
+                "sup.rb" => "class Sup\n  include(*MODS)\n  def t = m1.upcase\nend\n" }
       expect(undefined_messages(files)).to be_empty
     end
 

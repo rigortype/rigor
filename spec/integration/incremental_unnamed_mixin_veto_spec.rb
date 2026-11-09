@@ -14,7 +14,8 @@ require "rigor/cache/store"
 require "rigor/cache/incremental_snapshot"
 require "rigor/configuration"
 
-RSpec.describe "incremental edges for a top-level def and a class-object read beside `include(*MODS)` (#2994)", type: :runner do
+RSpec.describe "incremental edges for a top-level def and a class-object read by `include(*MODS)` (#2994)",
+               type: :runner do
   around do |example|
     Dir.mktmpdir("rigor-unnamed-mixin-veto-edge-") { |dir| Dir.chdir(dir) { example.run } }
   end

@@ -1387,12 +1387,12 @@ module Rigor
         end
 
         # Issue #2994 — whether a module no table names may be mixed into `name`'s instance side by a call whose target
-        # is `name` itself, so that its `included` / `prepended` hook runs with `name` as `base` and may extend the class
-        # object with anything: `name` lists {Relevance::UNNAMED} on its own instance side (`include(*MODS)`, `include
-        # helper`), or a module it includes does (a hook's `base.include(*MODS)`; that module's own `include(*MODS)` is
-        # read so too). A superclass's own mark is read when its singleton chain is built. The entries this reads are
-        # the class's own sites and its direct mixins', which a singleton chain's readers file already. An extended
-        # module's hook that splats a module in already declines the read on another route.
+        # is `name` itself, so that its `included` / `prepended` hook runs with `name` as `base` and may extend the
+        # class object with anything: `name` lists {Relevance::UNNAMED} on its own instance side (`include(*MODS)`,
+        # `include helper`), or a module it includes does (a hook's `base.include(*MODS)`; that module's own
+        # `include(*MODS)` is read so too). A superclass's own mark is read when its singleton chain is built. The
+        # entries this reads are the class's own sites and its direct mixins', which a singleton chain's readers file
+        # already. An extended module's hook that splats a module in already declines the read on another route.
         def unnamed_instance_mixin?(name)
           return true if lists_unnamed?(name)
 

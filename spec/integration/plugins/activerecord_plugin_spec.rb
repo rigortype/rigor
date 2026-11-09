@@ -4825,8 +4825,8 @@ RSpec.describe "plugins/rigor-activerecord" do
     end
   end
 
-  # Issue #2994 — `Reflection.project_method_defined` answers `maybe` on a model whose instance side mixes in a module no
-  # table names (`include(*MODS)`), so the implicit-self column tier declines there, and the #618 veto reads the same
+  # Issue #2994 — `Reflection.project_method_defined` answers `maybe` on a model whose instance side mixes in a module
+  # no table names (`include(*MODS)`), so the implicit-self column tier declines there, and the #618 veto reads the same
   # mark, so the top-level `def title = nil` does not bind either. Witnessed on Ruby 4.0.5 with activerecord 8.1.3 and
   # sqlite3: `Post.new(title: "x").shout` returns "X" under `include(*MODS)` and under `include M1`.
   describe "an implicit-self column read on a model that splats a module in" do

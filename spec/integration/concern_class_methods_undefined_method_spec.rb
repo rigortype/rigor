@@ -282,6 +282,8 @@ RSpec.describe "ActiveSupport::Concern class_methods macros and call.undefined-m
     {
       "a lambda" => "@later = lambda { my_c :DEF }",
       "a Proc.new" => "@later = Proc.new { my_c :DEF }",
+      "a Kernel.lambda" => "@later = Kernel.lambda { my_c :DEF }",
+      "a Kernel.proc" => "@later = ::Kernel.proc { my_c :DEF }",
       "an on_load hook" => "ActiveSupport.on_load(:never_loaded) { my_c :DEF }"
     }.each_with_index do |(label, call), index|
       it "does not read a macro call in #{label} block" do
@@ -298,6 +300,20 @@ RSpec.describe "ActiveSupport::Concern class_methods macros and call.undefined-m
       write_project("#{base}class Kcb < Bcb\n  include Rcb\nend\n", %w[Kcb.new.cb],
                     extra_files: { "rcb.rb" => block_concern("Rcb", included: "after_save { my_c :cb }") })
       expect(undefined_messages).to eq(["undefined method `cb' for Kcb"])
+    end
+
+    # Issue #3000 — a project macro named like a callback that yields at once runs its block on the includer as the
+    # included block runs; only a framework callback macro's name stops the walk.
+    {
+      "after_foo" => "def self.after_foo = yield",
+      "around_load" => "def self.around_load = yield"
+    }.each_with_index do |(macro, definition), index|
+      it "reads a macro call in the block of a project macro named #{macro}" do
+        name = "Pm#{index}"
+        write_project("class K#{name}\n  #{definition}\n  include #{name}\nend\n", ["K#{name}.new.p#{index}"],
+                      extra_files: { "pm#{index}.rb" => block_concern(name, included: "#{macro} { my_c :p#{index} }") })
+        expect(undefined_messages).to be_empty
+      end
     end
 
     {

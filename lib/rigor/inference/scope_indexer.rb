@@ -5457,27 +5457,48 @@ module Rigor
       # Whether a call's block may run on the includer while the hook block runs. Every block may, since leaving one
       # out would report the macro's names, except one that rebinds `self` ({#rebinds_self_block?}) and the calls
       # known to keep a block for later: a receiverless `lambda` / `proc` and `Proc.new`, which run it only when
-      # called; `on_load` on any receiver, which runs it when a framework component loads; and a receiverless
-      # `before_*` / `after_*` / `around_*` callback macro (`after_save { }`), which runs it on an instance.
+      # called, and `Kernel.lambda` / `Kernel.proc`; `on_load` on any receiver, which runs it when a framework
+      # component loads; and a receiverless framework callback macro (`after_save { }`), which runs it on an instance.
+      #
+      # Issue #3000 — the callback stop is a list of the Rails callback macros, not a `before_` / `after_` /
+      # `around_` prefix: a project macro so named may yield at once (`def self.after_foo = yield`), and entering a
+      # block that runs later only loses a report.
       def self_call_block?(node)
         return false if rebinds_self_block?(node)
         return false if node.name == :on_load
 
         receiver = node.receiver
         if receiver.nil?
-          !DEFERRED_BLOCK_CALLS.include?(node.name) && !CALLBACK_MACRO.match?(node.name)
+          !DEFERRED_BLOCK_CALLS.include?(node.name) && !CALLBACK_MACROS.include?(node.name)
+        elsif DEFERRED_BLOCK_CALLS.include?(node.name)
+          !constant_named?(receiver, "Kernel")
         else
-          !(node.name == :new && proc_constant?(receiver))
+          !(node.name == :new && constant_named?(receiver, "Proc"))
         end
       end
 
-      def proc_constant?(node)
-        Source::ConstantPath.qualified_name_or_nil(node)&.delete_prefix("::") == "Proc"
+      def constant_named?(node, name)
+        Source::ConstantPath.qualified_name_or_nil(node)&.delete_prefix("::") == name
       end
 
       DEFERRED_BLOCK_CALLS = %i[lambda proc].freeze
-      CALLBACK_MACRO = /\A(?:before|after|around)_/
-      private_constant :DEFERRED_BLOCK_CALLS, :CALLBACK_MACRO
+      # The callback macros of ActiveModel (validations), ActiveRecord (`Callbacks::CALLBACKS`, transactions),
+      # ActiveJob (callbacks, `after_discard`), AbstractController, ActionMailer and ActionCable (channel, connection),
+      # read from Rails 8.1.3.
+      CALLBACK_MACROS = %i[
+        before_validation after_validation
+        after_initialize after_find after_touch
+        before_save around_save after_save before_create around_create after_create
+        before_update around_update after_update before_destroy around_destroy after_destroy
+        before_commit after_commit after_rollback
+        after_save_commit after_create_commit after_update_commit after_destroy_commit
+        before_perform around_perform after_perform before_enqueue around_enqueue after_enqueue after_discard
+        before_action around_action after_action
+        before_deliver around_deliver after_deliver
+        before_subscribe after_subscribe before_unsubscribe after_unsubscribe
+        before_command around_command after_command
+      ].to_set.freeze
+      private_constant :DEFERRED_BLOCK_CALLS, :CALLBACK_MACROS
 
       CONCERN_BLOCK_STOPS = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode,
                              Prism::BlockNode, Prism::LambdaNode].freeze

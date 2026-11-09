@@ -62,6 +62,11 @@ RSpec.describe "singleton methods on a constant's object, eval and replacing def
       expect(cold_rows).to eq([])
     end
 
+    it "reports through an empty class_eval block" do
+      write("lib/obj.rb", "OBJ = Object.new\nOBJ.singleton_class.class_eval {}\nOBJ.nope\n")
+      expect(cold_rows).to eq([["lib/obj.rb", 3, "`nope' for Object"]])
+    end
+
     it "stays silent on a class_eval def written in another file" do
       write("lib/use.rb", "OBJ = Object.new\nOBJ.sc\nOBJ.nope\n")
       write("lib/def.rb", "OBJ.singleton_class.class_eval { def sc = 1 }\n")

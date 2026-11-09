@@ -58,10 +58,11 @@ module Rigor
           path = canonical(path)
 
           table = table(scope.discovered_global_write_census)
-          resolution = resolution(scope, table)
+          resolution = nil
           accumulator.each do |class_name, entries|
             next unless class_name.is_a?(String) && !entries.empty?
 
+            resolution ||= memoized_resolution(scope, table)
             owners = chain_owners(scope, class_name, resolution)
             any = any_ivar_types(owners, table)
             entries.each_key do |ivar|
@@ -135,7 +136,7 @@ module Rigor
           aliases = {}
           (table[CANDIDATE_KEYS] || NONE).each do |key|
             resolved = resolve(scope, key.delete_prefix(OBJECT_MARK), constants)
-            next if key.start_with?(OBJECT_MARK) && !instances.include?(resolved)
+            next if key.start_with?(OBJECT_MARK) && (!instances.include?(resolved) || module?(scope, resolved))
 
             (aliases[resolved] ||= []) << key
           end
@@ -148,6 +149,31 @@ module Rigor
             constants.include?(name) || scope.discovered_classes.key?(name) ||
               scope.discovered_superclasses.key?(name) || scope.discovered_includes.key?(name) || declared?(scope, name)
           end || candidates.last
+        end
+
+        # Review round 3 of #3001 — {.resolution} for `table`, computed once per run: it reads only the census and the
+        # project-wide declaration tables and signatures, which no file changes within a run. The value rides the
+        # {TABLE} slot beside the table it was computed from, keyed on the discovery index it read.
+        def memoized_resolution(scope, table)
+          slot = TypingState.current[TABLE]
+          return resolution(scope, table) unless slot && slot[1].equal?(table)
+
+          discovery = scope.discovery
+          cached = slot[2]
+          return cached[1] if cached && cached[0].equal?(discovery)
+
+          value = resolution(scope, table)
+          slot[2] = [discovery, value]
+          value
+        end
+
+        # Review round 3 of #3001 — whether `name` is a class or module the project or a signature declares, whose
+        # `.class` / `.singleton_class` no instance of it runs, whatever a constructor binding says.
+        def module?(scope, name)
+          scope.discovered_classes.key?(name) || scope.discovered_superclasses.key?(name) ||
+            scope.discovered_includes.key?(name) || scope.environment&.rbs_loader&.class_known?(name) || false
+        rescue StandardError
+          true
         end
 
         # Whether a loaded signature declares `name` as a class, module or constant.
@@ -260,8 +286,8 @@ module Rigor
         end
 
         private_class_method :chain_owners, :ancestor_names, :basic_object_edge?, :resolution, :resolve, :declared?,
-                             :any_ivar_types, :contributed, :add_entry_types, :value_type, :canonical, :table,
-                             :build_table, :owner_slot
+                             :memoized_resolution, :module?, :any_ivar_types, :contributed, :add_entry_types,
+                             :value_type, :canonical, :table, :build_table, :owner_slot
       end
     end
   end

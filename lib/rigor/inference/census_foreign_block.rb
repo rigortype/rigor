@@ -247,6 +247,12 @@ module Rigor
         nesting.size.downto(0).map { |depth| [*nesting.first(depth), spelling].join("::") }.join(CANDIDATE_SEPARATOR)
       end
 
+      # Review round 3 of #3001 — whether `call` is `Class.new`, `Module.new`, `Struct.new` or `Data.define` on the
+      # bare constant, whose answer is a class.
+      def meta_new?(call)
+        !AnonymousMetaClass::META_NEW_SELECTORS[AnonymousMetaClass.literal_constant_name(call.receiver)].nil?
+      end
+
       # Issue #2983 — for a constant write `C = K` or `C = K.new` / `K.allocate` under the lexical `nesting`, the
       # census entry `[:binds_class, key, name, kind]`: `K`'s {.candidate_key}, `C`'s qualified name (a path write's
       # as written) and `:instance` for a constructor or `:alias`, else nil. `C` is an alias or an instance of the
@@ -254,6 +260,9 @@ module Rigor
       def binding_entry(node, nesting)
         value = unwrap(node.value)
         instance = value.is_a?(Prism::CallNode) && CONSTRUCTORS.include?(value.name) && value.block.nil?
+        # Review round 3 of #3001: `Struct.new(:a)`, `Class.new(Base)` and `Module.new` answer a class, not an instance.
+        return if instance && meta_new?(value)
+
         value = value.receiver if instance
         return unless value.is_a?(Prism::ConstantReadNode) || value.is_a?(Prism::ConstantPathNode)
 

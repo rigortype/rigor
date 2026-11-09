@@ -186,6 +186,16 @@ RSpec.describe "ivar census: constant-rooted class_eval receivers (#2983)", type
     "a new instance's class's singleton class credits no instance" =>
       ["class Other\n#{narrowing}end\n",
        "class K\n  def poke = Other.new.class.singleton_class.class_eval { %s }\nend\n", 1, []],
+    # Review round 3: `Struct.new` and `Class.new` answer a class, so a constant they bind is no instance binding.
+    "a Struct.new constant's singleton class credits no instance" =>
+      ["Pt = Struct.new(:a)\nclass Pt\n#{narrowing}end\n",
+       "class Poker\n  def poke = Pt.singleton_class.class_eval { %s }\nend\n", 1, []],
+    "a Struct.new constant's class credits no instance" =>
+      ["Pt = Struct.new(:a)\nclass Pt\n#{narrowing}end\n",
+       "class Poker\n  def poke = Pt.class.class_eval { %s }\nend\n", 1, []],
+    "a Class.new constant's singleton class credits no instance" =>
+      ["class Base; end\nCn = Class.new(Base)\nclass Cn\n#{narrowing}end\n",
+       "class Poker\n  def poke = Cn.singleton_class.class_eval { %s }\nend\n", 1, []],
     "a rooted instance constant's class takes the write" =>
       ["class K\n#{plain}end\nINST = K.new\n", "class K\n  def poke = ::INST.class.class_eval { %s }\nend\n", '"a"',
        []],

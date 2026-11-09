@@ -118,7 +118,7 @@ pins instance and singleton method sets for:
   (ADR-128 WD1) is the ancestor question plugins used to ask through two
   `Scope` walks: it answers a `Rigor::Trinary`, and `maybe` where
   the walk's ancestor budget ran out before it found a definer, or (`:discovered`, `:either`) where a class on
-  the chain defines methods under names no table holds. See
+  the chain defines methods under names no table holds, or (`kind: :instance`) mixes in a module no table names. See
   [`reflection.md`](reflection.md) § "Source-side discoveries".
   `rbs_method_defined(class_name, method_name, kind:, scope:)` asks the
   same question of RBS through the project's ancestry, and

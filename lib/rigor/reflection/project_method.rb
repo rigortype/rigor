@@ -130,10 +130,13 @@ module Rigor
     #
     # Issue #2968 — where the walk finds none, a class on the chain whose side is open (an open-names mark: a
     # splatted `Struct.new(*FIELDS)`, `attr_accessor(*NAMES)`, a `define_method` under a computed name) answers
-    # `maybe`: it defines methods under names no table holds.
+    # `maybe`: it defines methods under names no table holds. Issue #2994 — so does an instance side whose chain mixes
+    # in a module no table names (`include(*MODS)`, `ResolutionChain#unnamed_mixin?`); the #618 top-level-`def` veto
+    # (`ExpressionTyper#instance_self_answers?`) reads the same mark, so a plugin that stands down here does not hand
+    # the call to a top-level `def`.
     def project_discovered_defined(class_name, method_name, kind, scope)
       unless scope.discovered_method_through_ancestors?(class_name, method_name, kind)
-        return Scope::DiscoveryIndex.open_names_on_chain?(scope, class_name, kind) ? Trinary.maybe : Trinary.no
+        return open_side?(class_name, kind, scope) ? Trinary.maybe : Trinary.no
       end
       # A shortcut, not a decision: on an untruncated chain the search below finds the same definer.
       return Trinary.yes unless project_chain_truncated?(class_name, kind, scope)
@@ -149,6 +152,13 @@ module Rigor
       found ? Trinary.yes : Trinary.maybe
     end
     private_class_method :project_discovered_defined
+
+    def open_side?(class_name, kind, scope)
+      return true if Scope::DiscoveryIndex.open_names_on_chain?(scope, class_name, kind)
+
+      kind == :instance && Scope::DiscoveryIndex.unnamed_mixin_on_chain?(scope, class_name)
+    end
+    private_class_method :open_side?
 
     # A singleton-side entry reads the singleton table; a module on the singleton chain answers with its
     # INSTANCE methods; on the instance chain the caller's kind stands (`Scope#kind_for`).

@@ -7945,11 +7945,25 @@ module Rigor
       # owner (`self.include M` and a receiverless `send(:include, M)` included), so none reaches here with a module
       # the tables do not hold. The extends walk's taint of `Const.include M` inside `class << self` is the one
       # constant-argument call that does, and the include walk records that edge under `Const`.
+      #
+      # Issue #2994 — the singleton side lists {MixinAccumulator::UNNAMED} too when an unrecorded call reaching it has
+      # an argument that is not a constant: `extend(*EMODS)`, `extend helper`, `include(*MODS)` inside `class << self`,
+      # or a `self` argument. A hook parameter's `base.extend(*X)` extends the includer, not the module the hook is
+      # written in, so it leaves that module's singleton side unnamed-free.
       def taint_unrecorded_mixin(node, kind, arguments, effects, accumulator)
+        opaque = arguments.any? { |arg| opaque_mixin_argument?(arg) }
+        hook = hook_parameter_receiver?(node.receiver, accumulator)
         unnamed = INSTANCE_MIXIN_NAMES.include?(kind) && !singleton_class_eval_receiver?(node.receiver) &&
-                  (hook_parameter_receiver?(node.receiver, accumulator) ||
-                   arguments.any? { |arg| Source::ConstantPath.qualified_name(arg).nil? && !module_new_call?(arg) })
-        effects.each { |owner, side| accumulator.taint(owner, side, unnamed: unnamed && side == :include) }
+                  (hook || opaque)
+        effects.each do |owner, side|
+          accumulator.taint(owner, side, unnamed: side == :include ? unnamed : opaque && !hook)
+        end
+      end
+
+      # A `self` argument counts as opaque, as the instance side reads it: a `Target.send(:extend, self)` written in a
+      # module body reaches here with the module no table records under `Target`.
+      def opaque_mixin_argument?(arg)
+        Source::ConstantPath.qualified_name(arg).nil? && !module_new_call?(arg)
       end
 
       # A hook parameter itself (`base` in `def self.included(base)`): its class is the includer, which the walk cannot
@@ -8638,8 +8652,15 @@ module Rigor
           return true
         end
 
-        accumulator.taint(owner, :extend)
+        # Issue #2994 — an `include` / `prepend` whose argument names no module (`singleton_class.include(*MODS)`)
+        # leaves the owner's singleton set unknown, as {#taint_unrecorded_mixin} reads an `extend(*EMODS)`.
+        accumulator.taint(owner, :extend, unnamed: unnamed_singleton_include?(node))
         true
+      end
+
+      def unnamed_singleton_include?(node)
+        INSTANCE_MIXIN_NAMES.include?(node.name) &&
+          (node.arguments&.arguments || []).any? { |arg| opaque_mixin_argument?(arg) }
       end
 
       # Issue #2094 — `Float.singleton_class.include(Ext)` (or `prepend`, which the extend table cannot order, so the

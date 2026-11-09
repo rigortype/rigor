@@ -3,4 +3,4 @@
   - Until Rigor records them, `self.include M` and a receiverless `send(:include, M)`, `public_send` or `__send__` are covered as well. Any name is accepted when `M` is a project module. For a module the project does not declare, such as `Comparable`, only the names its RBS defines are accepted.
   - `Other.include(*MODS)` affects only `Other`.
   - `include M; prepend M` still reports, because its module is recorded.
-  - Calls on the class object still report. A splatted `extend(*MODS)` affects only the class object, as before.
+  - A splatted `extend(*MODS)` affects only the class object, as before.

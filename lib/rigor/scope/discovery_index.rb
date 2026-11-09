@@ -374,6 +374,26 @@ module Rigor
         !found.nil?
       end
 
+      # Issue #2994 — whether `class_name`'s instance-side chain mixes in a module no table names
+      # (`ResolutionChain#unnamed_mixin?`: `include(*MODS)`, `include helper`, a hook's `base.include`). A project class
+      # with no `def` of its own is an external entry (#2094) whose ancestry the chain does not walk, so each of its
+      # candidate names that the project declares is asked on its own chain. Read beside {.open_names_on_chain?} by
+      # `Reflection.project_method_defined` and by the implicit-self top-level-`def` veto.
+      def self.unnamed_mixin_on_chain?(scope, class_name)
+        chain = ResolutionChain.for(scope, class_name.to_s, :instance, :methods)
+        return true if chain.unnamed_mixin?
+
+        found = chain.search(scope) do |entry|
+          next false unless entry.external?
+
+          entry.candidates.any? do |name|
+            scope.discovered_classes.key?(name) &&
+              ResolutionChain.for(scope, name, :instance, :methods).unnamed_mixin?
+          end
+        end
+        !found.nil?
+      end
+
       # Whether an envelope bucket says the project rewrites the class's method table beyond its literal names: a
       # dynamic rewrite, or a refinement.
       def self.rewritten_surface?(bucket)

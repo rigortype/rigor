@@ -1772,7 +1772,11 @@ module Rigor
 
         # Issue #2968 — a class on the chain defines methods under names no table holds (`attr_accessor(*FLAGS)`, a
         # splatted `Struct.new(*FIELDS)`), so the name may be one of them, ahead of the top-level `def`.
-        Scope::DiscoveryIndex.open_names_on_chain?(scope, class_name, :instance)
+        return true if Scope::DiscoveryIndex.open_names_on_chain?(scope, class_name, :instance)
+
+        # Issue #2994 — a class on the chain mixes in a module no table names (`include(*MODS)`, `include helper`), so
+        # the name may be that module's, ahead of the top-level `def`.
+        Scope::DiscoveryIndex.unnamed_mixin_on_chain?(scope, class_name)
       end
 
       # The RBS arm of {#instance_self_answers?}. A project class is usually absent from the RBS
@@ -1799,7 +1803,13 @@ module Rigor
         return true if scope.discovered_method_through_ancestors?(class_name, method_name, :singleton)
         return true unless scope.singleton_def_through_ancestors(class_name, method_name).first.nil?
 
-        rbs_declared_on_class?(safe_rbs_method_definition(class_name, method_name, :singleton), class_name)
+        declared = safe_rbs_method_definition(class_name, method_name, :singleton)
+        return true if rbs_declared_on_class?(declared, class_name)
+
+        # Issue #2994 — a class object on the chain that a module no table names may extend through a hook (the
+        # `:include_hook` open mark of a class with `include(*MODS)`), a class that `extend(*EMODS)`s, or an extended
+        # module whose own module set is unknown, may answer any name ahead of the top-level `def`.
+        Scope::ResolutionChain.for(scope, class_name.to_s, :singleton, :methods).unnamed_mixin?
       end
 
       # A `Struct.new(:a, :b)` / `Data.define(:a, :b)` member accessor. The layouts are a discovery table of

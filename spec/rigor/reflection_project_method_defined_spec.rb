@@ -247,4 +247,38 @@ RSpec.describe Rigor::Reflection, ".project_method_defined" do
       expect(answer(open_scope, "N", :other_url, kind: :instance, source: :either)).to eq(Rigor::Trinary.no)
     end
   end
+
+  # Issue #2994 — an instance side whose chain mixes in a module no table names (`include(*MODS)`) may define any name,
+  # so the discovery walk answers `maybe` there; the class-object side and a literal include keep `no`.
+  describe "an instance side with an unnamed mixin" do
+    let(:unnamed_scope) do
+      scope_for(<<~RUBY)
+        module M1
+          def m1 = 1
+        end
+        MODS = [M1]
+        class Spl
+          include(*MODS)
+          def own = 1
+        end
+        class SplChild < Spl
+        end
+        class Lit
+          include M1
+          def own = 1
+        end
+      RUBY
+    end
+
+    it "answers maybe for any instance name on the class and on its subclass" do
+      expect(answer(unnamed_scope, "Spl", :anything, kind: :instance, source: :either)).to eq(Rigor::Trinary.maybe)
+      expect(answer(unnamed_scope, "SplChild", :anything, kind: :instance, source: :discovered))
+        .to eq(Rigor::Trinary.maybe)
+    end
+
+    it "answers no on the class-object side, and on a literal include (control)" do
+      expect(answer(unnamed_scope, "Spl", :anything, kind: :singleton, source: :either)).to eq(Rigor::Trinary.no)
+      expect(answer(unnamed_scope, "Lit", :anything, kind: :instance, source: :either)).to eq(Rigor::Trinary.no)
+    end
+  end
 end

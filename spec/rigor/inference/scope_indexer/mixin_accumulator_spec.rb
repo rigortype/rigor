@@ -177,8 +177,9 @@ RSpec.describe Rigor::Inference::ScopeIndexer::MixinAccumulator do
       expect(unpositioned("class C\n  include A\n  [1].each { extend M if X }\nend\n")).to eq("C" => { extend: ["M"] })
     end
 
+    # Issue #2994 — the argument names no module, so the singleton side also lists the unnamed marker.
     it "taints the extend side of an iterator extend whose argument cannot be named" do
-      expect(unpositioned("class C\n  [1].each { |m| extend m }\nend\n")).to eq("C" => wild(:extend))
+      expect(unpositioned("class C\n  [1].each { |m| extend m }\nend\n")).to eq("C" => { extend: ["*", "?"] })
     end
 
     it "keeps a `Class.new` block on its own class, not the enclosing one" do
@@ -285,6 +286,14 @@ RSpec.describe Rigor::Inference::ScopeIndexer::MixinAccumulator do
       expect(unpositioned(source).fetch("C").fetch(:extend)).to eq(["B"])
     end
 
+    # Issue #2994 — a singleton-side call whose module set is unknown lists the unnamed marker beside the wildcard.
+    it "lists the unnamed marker on the extend side for a name it cannot spell", :aggregate_failures do
+      expect(unpositioned("class C\n  extend M, h\nend\n")).to eq("C" => { extend: ["*", "?"] })
+      expect(unpositioned("class C\n  singleton_class.include(*MODS)\nend\n")).to eq("C" => { extend: ["*", "?"] })
+      literal = unpositioned("class C\n  singleton_class.include B\nend\n")
+      expect(literal.fetch("C", {}).fetch(:extend, [])).not_to include("?")
+    end
+
     it "taints, rather than records, `singleton_class.include B` inside `class << self`" do
       source = "class C\n  class << self\n    singleton_class.include B\n  end\nend\n"
 
@@ -302,6 +311,8 @@ RSpec.describe Rigor::Inference::ScopeIndexer::MixinAccumulator do
         "def self.included(base)\n    base.extend X\n  end" => both,
         "def self.included(base)\n    base.prepend X\n  end" => unnamed,
         "def self.included(base)\n    base.singleton_class.include X\n  end" => both,
+        # Issue #2994 — a splatted `base.extend` extends the includer, not `Concern`, so its singleton side stays "*".
+        "def self.included(base)\n    base.extend(*XS)\n  end" => both,
         "def self.extended(base)\n    base.send(:include, X)\n  end" => unnamed,
         "def self.prepended(base)\n    base.include X\n  end" => unnamed,
         "def self.inherited(sub)\n    sub.include X\n  end" => unnamed,

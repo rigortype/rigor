@@ -179,6 +179,30 @@ RSpec.describe "a class whose instance-side chain holds a splatted mixin (#2991)
       end
     end
 
+    # A top-level `self.include M1`, a receiverless or `self.` `send(:include, M1)` and `__send__(:include, M1)` are
+    # `main.include`, which mixes M1 into `Object` as a bare top-level `include M1` does (#1697). Ruby 4.0.5 returns 1
+    # for `W.new.t` after each, and raises `NoMethodError` for `m2`.
+    ["self.include M1", "send(:include, M1)", "self.send(:include, M1)", "__send__(:include, M1)"].each do |call|
+      it "does not fire on another file's class after a top-level `#{call}`" do
+        files = { "m.rb" => "#{mods}#{call}\n", "w.rb" => "class W\n  def t = self.m1\nend\n" }
+        expect(undefined_messages(files, "class W\nend\n")).to be_empty
+      end
+
+      it "fires after a top-level `#{call}` for a method M1 does not define" do
+        files = { "m.rb" => "#{mods}#{call}\n", "w.rb" => "class W\n  def w = self.m2\nend\n" }
+        expect(undefined_messages(files, "class W\nend\n")).to eq(["undefined method `m2' for W"])
+      end
+    end
+
+    # Guards: none of these is `main.include`. `main`'s `include` is private, so `public_send` raises; `extend` reaches `main`'s singleton alone, and `main`
+    # has no `prepend`. Ruby 4.0.5 raises `NoMethodError` for `W.new.t` after each `extend` spelling.
+    ["public_send(:include, M1)", "self.extend M1", "send(:extend, M1)", "self.prepend M1"].each do |call|
+      it "fires on another file's class after a top-level `#{call}`, which mixes nothing into Object" do
+        files = { "m.rb" => "#{mods}#{call}\n", "w.rb" => "class W\n  def t = self.m1\nend\n" }
+        expect(undefined_messages(files, "class W\nend\n")).to eq(["undefined method `m1' for W"])
+      end
+    end
+
     # Guards, not pins of this change: master reported these too. The singleton side was already open to any name on a
     # class that extends a module (`extends_answer?`), and `self.extend M1` must leave the instance side closed.
     ["self.extend M1", "send(:extend, M1)"].each do |call|

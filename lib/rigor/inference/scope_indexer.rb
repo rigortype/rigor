@@ -8118,9 +8118,13 @@ module Rigor
       # its `self` may not be `main` (a `describe do include M end` or `class_exec` block rebinds it, while
       # `[1].each do include M end` does not, and the walk cannot tell them apart), and it may not run. `main`
       # has no `prepend`, and a top-level `extend M` reaches `main`'s singleton alone, so neither is recorded.
+      #
+      # Issue #2995 — `self.include M`, a receiverless or `self.` `send(:include, M)` and its `__send__` twin are the
+      # same `main.include`. `public_send(:include, M)` is not: `main`'s `include` is private, so it raises.
       def toplevel_include_owner(node, qualified_prefix, current_class, accumulator)
         return nil unless current_class.nil? && qualified_prefix.empty?
-        return nil unless node.receiver.nil? && node.name == :include
+        return nil unless lexical_self_receiver?(node.receiver) && node.name != :public_send
+        return nil unless mixin_call_view(node)&.first == :include
 
         accumulator.program_statement?(node) ? ObjectMixins::TOPLEVEL_INCLUDE_KEY : nil
       end

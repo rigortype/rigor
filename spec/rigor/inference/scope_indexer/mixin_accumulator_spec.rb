@@ -280,6 +280,48 @@ RSpec.describe Rigor::Inference::ScopeIndexer::MixinAccumulator do
       end
     end
 
+    # Issue #3010 — `class << C` records its body's mixins on `C`'s extend side, positioned only as a direct statement
+    # of a file that declares `C`.
+    describe "a class << Const body" do
+      it "records the body's include and prepend, positioned, after the file's own declaration" do
+        source = "class C\n  extend E\nend\nclass << C\n  include A\n  prepend B\nend\n"
+
+        expect(unpositioned(source)).to eq({})
+        expect(index_of(source).fetch(:extends)).to include("C" => %w[B A E])
+      end
+
+      {
+        "a file that does not declare the class" => "class << C\n  prepend B\nend\n",
+        "a conditional" => "class C\nend\nclass << C\n  prepend B if $c\nend\n",
+        "a method body" => "class C\nend\ndef s\n  class << C\n    prepend B\n  end\nend\n"
+      }.each do |label, source|
+        it "keeps the prepend in #{label} unpositioned" do
+          expect(unpositioned(source)).to eq("C" => { extend: ["B"] })
+        end
+      end
+
+      # Inside `module A`, `C` names `A::C` once that class exists; the file declares neither.
+      it "records the prepend, unpositioned, on every class the constant may name" do
+        source = "module A\n  class << C\n    prepend B\n  end\nend\n"
+
+        expect(unpositioned(source)).to eq("A::C" => { extend: ["B"] }, "C" => { extend: ["B"] })
+      end
+
+      it "positions it on the nested class the file declares" do
+        source = "module A\n  class C\n  end\n  class << C\n    prepend B\n  end\nend\n"
+
+        expect(unpositioned(source)).to eq({})
+        expect(index_of(source).fetch(:extends)).to include("A::C" => ["B"])
+      end
+
+      # Issue #2994's marker: the module set is unknown on each class the constant may name.
+      it "lists the unnamed marker for a prepend whose argument names no module", :aggregate_failures do
+        expect(unpositioned("class C\nend\nclass << C\n  prepend(*MODS)\nend\n")).to eq("C" => { extend: ["*", "?"] })
+        expect(unpositioned("module A\n  class << C\n    prepend(*MODS)\n  end\nend\n"))
+          .to eq("A::C" => { extend: ["*", "?"] }, "C" => { extend: ["*", "?"] })
+      end
+    end
+
     it "keeps a conditional `singleton_class.prepend B` unpositioned" do
       source = "class C\n  singleton_class.prepend B if $c\nend\n"
 

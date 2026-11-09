@@ -11195,7 +11195,7 @@ module Rigor
       # class. Shared with {#accumulate_extend_lists}' shape deliberately — the two tables answer the
       # `prepend` question on the two sides of the class object, and both fold nearest-first.
       def accumulate_prepend_lists(target, additions)
-        additions.each { |cn, mods| target[cn] = (mods + (target[cn] || [])).freeze }
+        additions.each { |cn, mods| target[cn] = (mods + (target[cn] || [])) }
       end
 
       # ADR-85 WD2 — converts a file's live single-file index + its class table into a Marshal-clean seed

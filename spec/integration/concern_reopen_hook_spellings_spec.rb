@@ -100,6 +100,16 @@ RSpec.describe "reopened concern class_methods and hook spellings (#2997)" do
       expect(undefined_messages).to eq(["undefined method `zork' for 1"])
     end
 
+    # Ruby raises NoMethodError: `Kx` has no `my_attr`, so the guarded call defines nothing. Read as `Cx`'s
+    # `ClassMethods`, the block's computed definer would open `Kx`.
+    it "does not read its defs as the macros of the concern's includer" do
+      macro = files.merge("b_nm.rb" => "module Nm2\n  extend Dsl\n  class_methods do\n    " \
+                                       "def my_attr(n) = define_method(n) { 1 }\n  end\nend\n",
+                          "k.rb" => "class Kx\n  include Cx\n  my_attr :foo if name.nil?\nend\n")
+      write_project(macro, ["Kx.new.foo"])
+      expect(undefined_messages).to eq(["undefined method `foo' for Kx"])
+    end
+
     it "does not answer it for a direct includer" do
       write_project(files.merge("k.rb" => "#{base_class}class Kn < Base\n  include Nm2\nend\n"), ["Kn.bar.zork"])
       expect(undefined_messages).to eq(["undefined method `zork' for 1"])

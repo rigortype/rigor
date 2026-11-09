@@ -154,4 +154,20 @@ RSpec.describe "cross-file ivar census — incremental" do
       baseline: []
     )
   end
+
+  # Review round 1 of #3001 — a namespaced binding's class is a candidate key, and its dependency key is the last
+  # segment of the class, as the reader files it.
+  it "re-checks a namespaced reader when the namespaced alias a class_eval is rooted at is rebound" do
+    reader = "module N\n  class E\n    def initialize = (@x = nil)\n    def get = @x.upcase\n  end\nend\n"
+    body = "AliasE.new.class.class_eval { define_method(:set) { @x = \"a\" } }"
+    poke = "module N\n  class E\n    def poke = #{body}\n  end\nend\n"
+    expect_steps(
+      { "a.rb" => reader, "b.rb" => "module N\n  class Other; end\n  AliasE = E\nend\n", "c.rb" => poke },
+      [
+        [{ "b.rb" => "module N\n  class Other; end\n  AliasE = Other\nend\n" }, true, [["a.rb", 4]]],
+        [{ "b.rb" => "module N\n  class Other; end\n  AliasE = E\nend\n" }, true, []]
+      ],
+      baseline: []
+    )
+  end
 end

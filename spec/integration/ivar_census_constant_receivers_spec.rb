@@ -156,6 +156,9 @@ RSpec.describe "ivar census: constant-rooted class_eval receivers (#2983)", type
     "a namespaced binding written in the namespace binds the class it resolves to" =>
       ["module Ns1\n  class K\n#{plain}  end\nend\n",
        "module Ns1\n  INST = K.new\n  class K\n    def poke = INST.class.class_eval { %s }\n  end\nend\n", '"a"', []],
+    "a top-level constant of the same name ignores a namespaced binding" =>
+      ["class Plain\n#{narrowing}end\nINST = Plain.new\n",
+       "module Ns1\n  INST = K.new\n  class K\n    def poke = INST.class.class_eval { %s }\n  end\nend\n", 1, []],
     "a BasicObject subclass takes BasicObject.class_eval" =>
       ["class BO < BasicObject\n#{plain}end\n",
        "class Host\n  def poke = BasicObject.class_eval { %s }\nend\n", '"a"', []],

@@ -1,0 +1,3 @@
+- **[sig-gen]** `rigor sig-gen` no longer proposes `-> bot` for an abstract method or for a method that subclasses or including classes override. ([#3037](https://github.com/rigortype/rigor/pull/3037))
+  - Such a proposal is skipped as `sig.skipped.overridden-bot` (the analysed code overrides the method, signed or not), `sig.skipped.abstract-method` (a `NotImplementedError` or "please implement" body) or `sig.skipped.template-method` (the `bot` may come only from calling an overridden or abstract method).
+  - A final `bot`, such as a `throw` or a raise that nothing overrides, is still proposed.

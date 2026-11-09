@@ -110,13 +110,24 @@ RSpec.describe "incremental edges for a hook-extended singleton module (#1592)",
   end
 
   # Issue #2992 — `Ct` includes the concern `Dt`, a dependency whose `ClassMethods` reaches `Kt`; `Dt` is declared
-  # only in `near.rb`, which no entry of `Kt`'s chain names until it has a `class_methods` block.
+  # only in `near.rb`, which no entry of `Kt`'s chain names until it has a `class_methods` block. Guards, with the
+  # next row: the edges the chain and the typing read already file re-check the call, and no line of the dependency
+  # read is needed for it.
   it "re-checks the call when a dependency concern's file gains a class_methods def" do
     dependency = "module Dt\n  extend ActiveSupport::Concern\n  def dt_own = 1\n%send\n"
     outer = { "lib/ct.rb" => concern("  include Dt\n") }
     expect_toggle(files.merge(outer), before: format(dependency, ""),
                                       after: format(dependency, "  class_methods do\n    def bar = :cm\n  end\n"),
                                       first: reported(1), second: reported(":cm"))
+  end
+
+  it "re-checks the call when a file reopening a dependency concern adds a class_methods def" do
+    dependency = "module Dt\n  extend ActiveSupport::Concern\n  def dt_own = 1\nend\n"
+    reopened = files.merge("lib/ct.rb" => concern("  include Dt\n"), "lib/dt.rb" => dependency)
+    expect_toggle(reopened, before: "",
+                            after: "module Dt\n  extend ActiveSupport::Concern\n  class_methods do\n    " \
+                                   "def bar = :cm\n  end\nend\n",
+                            first: reported(1), second: reported(":cm"))
   end
 
   # Ruby keeps whichever definition loaded last, so with two the read declines.

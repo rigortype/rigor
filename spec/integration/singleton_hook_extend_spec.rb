@@ -400,10 +400,14 @@ RSpec.describe "singleton-side mixins a hook adds (#1592)" do
         expect(chain_names(source, "Kp")).to eq(%w[Od::ClassMethods Cd::ClassMethods Kp Base])
       end
 
-      # Ruby's `On.const_get(:ClassMethods)` does not reach `Cd`, which is no ancestor of `On`.
+      # Ruby's `On.const_get(:ClassMethods)` does not reach `Cd`, which is no ancestor of `On`. Met twice, the module
+      # would be listed once but count a fork, which settles the chain to master.
       it "lists the dependency's ClassMethods once when the outer concern has none" do
         source = "#{concerns}class Kn < Base\n  include On\nend\n"
         expect(chain_names(source, "Kn")).to eq(%w[Kn Cd::ClassMethods Base])
+        root = Prism.parse(source).value
+        scope = Rigor::Inference::ScopeIndexer.index(root, default_scope: Rigor::Scope.empty)[root]
+        expect(Rigor::Scope::ResolutionChain.for(scope, "Kn", :singleton, :methods).forks).to eq(0)
       end
     end
 

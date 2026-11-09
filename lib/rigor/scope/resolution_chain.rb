@@ -448,10 +448,8 @@ module Rigor
             mixin = resolver.resolve_declared(klass, raw)
             next out << [:spelling, raw].freeze if mixin.nil?
 
-            [mixin, *concern_dependencies(discovery, resolver, mixin)].each do |member|
-              out << [:mixin, member].freeze
-              hook_extend_keys(discovery, member).each { |key| out << [:spelling, key[1]].freeze }
-            end
+            out << [:mixin, mixin].freeze
+            hook_extend_keys(discovery, mixin).each { |key| out << [:spelling, key[1]].freeze }
           end
         end.uniq.freeze
       end

@@ -326,6 +326,15 @@ RSpec.describe "singleton-side mixins a hook adds (#1592)" do
     expect(undefined_messages).to be_empty
   end
 
+  # Two files of the outer concern add their dependencies in load order.
+  it "declines between dependencies the outer concern includes in two files" do
+    write_project(concern("Ca7", "  class_methods do\n    def bar = :a\n  end\n"), "class Kl7\n  include Ol7\nend\n",
+                  ["Kl7.bar.zork"], extra: { "cb7.rb" => concern("Cb7", "  class_methods do\n    def bar = :b\n  end\n"),
+                                             "ol7a.rb" => concern("Ol7", "  include Ca7\n"),
+                                             "ol7b.rb" => concern("Ol7", "  include Cb7\n") })
+    expect(undefined_messages).to be_empty
+  end
+
   # The tables keep `extend` and `include` statements apart, so a class with both has two orders for them: the read
   # stands where both give one answer, and declines where they differ.
   describe "a class that also extends a module of its own" do

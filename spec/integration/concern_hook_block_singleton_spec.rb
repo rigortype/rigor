@@ -95,6 +95,17 @@ RSpec.describe "concern hook block singleton defs (#3015)" do
       expect(undefined_messages).to be_empty
     end
 
+    # Ruby raises NoMethodError on both: `class << Xo` defines on `Xo`, and a `def self.x` in a `class << self`
+    # body defines on the singleton class's own singleton class.
+    it "reads no def of a class << other body, nor a def self.x in a class << self body" do
+      body = block("included", "    class << Xo\n      def z = 1\n    end\n" \
+                               "#{singleton_class_body("      def self.deep = 9\n")}")
+      write_project({ "a_xo.rb" => "module Xo\nend\n", "b_cq.rb" => concern("Cq", body),
+                      "k.rb" => includer("Kq", "Cq") }, ["Kq.z", "Kq.deep"], members: { "Kq" => member })
+      expect(undefined_messages).to eq(["undefined method `deep' for singleton(Kq)",
+                                        "undefined method `z' for singleton(Kq)"])
+    end
+
     # Ruby raises NoMethodError on `Kv.made` (private method) and answers 7 to `Kv.send(:made)`. The module records no
     # visibility, so the body is read as opening the includer's class side: neither call reports.
     it "opens the includer's class side for a class << self body with a visibility call" do
@@ -117,17 +128,20 @@ RSpec.describe "concern hook block singleton defs (#3015)" do
 
     # `Cd`'s class side is open (its `extend ActiveSupport::Concern`), so the call rows above cannot show the def is
     # no longer `Cd`'s; the one-file discovery tables do. Each `def` the block writes on `self`'s singleton class is
-    # missing from `Cd`'s method, singleton-def and visibility tables, and kept on `Cd::<included>` (#3005).
+    # missing from `Cd`'s method, singleton-def and visibility tables, and kept on `Cd::<included>` (#3005); a class
+    # the block opens keeps its own (Ruby answers 2 to `Cd::Inner.y`).
     it "leaves the block's singleton defs out of the concern's own tables" do
-      body = block("included", "    def self.made = 3\n#{singleton_class_body("      def other = 4\n")}") +
+      inner = "    class Inner\n      def self.y = 2\n    end\n"
+      body = block("included", "    def self.made = 3\n#{singleton_class_body("      def other = 4\n")}#{inner}") +
              block("class_methods", "    def self.cm = 5\n#{singleton_class_body("      def cm2 = 6\n")}")
       root = Prism.parse("#{concern('Cd', body)}module Cd\n  def self.mine = 7\nend\n").value
       scope = Rigor::Inference::ScopeIndexer.index(root, default_scope: Rigor::Scope.empty)[root]
       singleton = %i[made other cm cm2 mine].select { |name| scope.discovered_methods["Cd"][name] == :singleton }
       nodes = %i[made other cm cm2 mine].select { |name| scope.singleton_def_for("Cd", name) }
       visible = scope.discovery.discovered_method_visibilities["Cd"].keys.grep(Array).map(&:last)
-      expect([singleton, nodes, visible, scope.discovered_methods["Cd::<included>"]])
-        .to eq([%i[mine], %i[mine], %i[mine], { made: :instance, other: :instance }])
+      kept = [scope.discovered_methods["Cd::Inner"], scope.singleton_def_for("Cd::Inner", :y)&.name]
+      expect([singleton, nodes, visible, scope.discovered_methods["Cd::<included>"], kept])
+        .to eq([%i[mine], %i[mine], %i[mine], { made: :instance, other: :instance }, [{ y: :singleton }, :y]])
     end
 
     # Ruby answers 8: `Cn`'s own `included` instance_evals the block on `Cn`, so the def is `Cn`'s own. The def in a

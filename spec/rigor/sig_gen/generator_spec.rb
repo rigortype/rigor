@@ -147,14 +147,18 @@ RSpec.describe Rigor::SigGen::Generator do
       generator(paths: [path]).run.map { |c| [c.class_name, c.method_name, c.kind] }
     end
 
-    it "omits the block's def self.x and keeps the module's own and the block's instance def" do
-      expect(kinds(<<~RUBY)).to eq([["Cd", :inst, :instance], ["Cd", :own, :singleton]])
+    # Ruby answers 2 to `Cd::Inner.y`: a class the block opens is lexical, and its `def self.y` is its own.
+    it "omits the block's def self.x and keeps the module's own, the block's instance def and a nested class's" do
+      expect(kinds(<<~RUBY)).to eq([["Cd", :inst, :instance], ["Cd::Inner", :y, :singleton], ["Cd", :own, :singleton]])
         module Cd
           extend ActiveSupport::Concern
 
           included do
             def self.made = 3
             def inst = 1
+            class Inner
+              def self.y = 2
+            end
           end
 
           def self.own = 2

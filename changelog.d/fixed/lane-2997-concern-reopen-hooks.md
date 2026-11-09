@@ -1,0 +1,4 @@
+- **[check]** `call.undefined-method` no longer fires on a class-side call to a method that a concern's reopening defines in a `class_methods do … end` block, or that a module's `define_singleton_method(:included)` hook extends its includer with. ([#3003](https://github.com/rigortype/rigor/pull/3003))
+  - A `class_methods` block is read in every body of a module that some file declares an `ActiveSupport::Concern`, not only in the body that runs the `extend`.
+  - `define_singleton_method(:included) { |base| base.extend(M) }` written in the module body is read as `def self.included(base)` is, and so is a `def included(base)` in a `class << self` body.
+  - The call types `Dynamic` where the hook is defined some other way that might define it, such as under a computed name, nested in a block, or through `send` or `singleton_class.define_method`, and where the hook is defined twice.

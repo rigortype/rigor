@@ -1,6 +1,6 @@
 # The concern self-call walk stops at a named list of Rails callback macros, not at a callback-shaped name
 
-- **PR:** none
+- **PR:** [#3008](https://github.com/rigortype/rigor/pull/3008)
 - **Issue:** [#3000](https://github.com/rigortype/rigor/issues/3000)
 - **Class:** open-choice
 - **Precedent:** [#2999](https://github.com/rigortype/rigor/pull/2999)

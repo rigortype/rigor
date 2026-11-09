@@ -1,0 +1,4 @@
+- **[check]** A concern's `included` block now gives its includer the methods of a `class << self` body there, and `rigor sig-gen` no longer writes a `def self.x` from such a block on the concern itself. ([#3025](https://github.com/rigortype/rigor/pull/3025))
+  - `class << self; def x; end` in an `included` or `prepended` block is answered on the includer, as a `def self.x` there is, so `call.undefined-method` no longer fires on it.
+  - A `class << self` body there with a `private` or other visibility call leaves the includer's class methods unchecked.
+  - A `def self.x` or `class << self` def in a concern's `included`, `prepended` or `class_methods` block is no longer read as the concern's own class method, in a body that runs `extend ActiveSupport::Concern` itself.

@@ -194,8 +194,9 @@ RSpec.describe "a class whose instance-side chain holds a splatted mixin (#2991)
       end
     end
 
-    # Guards: none of these is `main.include`. `main`'s `include` is private, so `public_send` raises; `extend` reaches `main`'s singleton alone, and `main`
-    # has no `prepend`. Ruby 4.0.5 raises `NoMethodError` for `W.new.t` after each `extend` spelling.
+    # Guards: none of these is `main.include`. `main`'s `include` is private, so `public_send` raises; `extend`
+    # reaches `main`'s singleton alone, and `main` has no `prepend`. Ruby 4.0.5 raises `NoMethodError` for `W.new.t`
+    # after each `extend` spelling.
     ["public_send(:include, M1)", "self.extend M1", "send(:extend, M1)", "self.prepend M1"].each do |call|
       it "fires on another file's class after a top-level `#{call}`, which mixes nothing into Object" do
         files = { "m.rb" => "#{mods}#{call}\n", "w.rb" => "class W\n  def t = self.m1\nend\n" }

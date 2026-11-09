@@ -10113,8 +10113,7 @@ module Rigor
         return if def_receiver_targets_lexical_self?(receiver, owner_prefix)
 
         constant_receiver_candidates(receiver, qualified_prefix).each do |name|
-          record_envelope(tables.envelopes, name, [:singleton, node.name], Source::ParameterEnvelope::OPAQUE)
-          contest_envelope(tables, name, [:singleton, node.name]) unless tables.certain
+          record_object_singleton(tables, name, node.name)
         end
       end
 
@@ -10136,16 +10135,29 @@ module Rigor
 
         candidates.product(names) do |owner, name|
           record_envelope(tables.envelopes, owner, [:singleton, name], Source::ParameterEnvelope::OPAQUE)
+          record_envelope(tables.envelopes, owner, [Scope::DiscoveryIndex::ENVELOPE_OBJECT_SINGLETON_KIND, name],
+                          Source::ParameterEnvelope::OPAQUE)
         end
+      end
+
+      # A `def Const.x` written outside `Const`'s body, or one in a `Const.singleton_class.class_eval` block: the opaque
+      # `[:singleton, x]` envelope, contested unless certain, and the
+      # {Scope::DiscoveryIndex::ENVELOPE_OBJECT_SINGLETON_KIND} entry the class-object path reads (#3018).
+      def record_object_singleton(tables, owner, method_name)
+        record_envelope(tables.envelopes, owner, [:singleton, method_name], Source::ParameterEnvelope::OPAQUE)
+        contest_envelope(tables, owner, [:singleton, method_name]) unless tables.certain
+        record_envelope(tables.envelopes, owner, [Scope::DiscoveryIndex::ENVELOPE_OBJECT_SINGLETON_KIND, method_name],
+                        Source::ParameterEnvelope::OPAQUE)
       end
 
       # Issue #3018 — `Const.singleton_class.class_eval { def x … }` (or `module_eval` / `class_exec` / `module_exec`)
       # defines `x` on `Const`'s object, as `def Const.x` does, and is filed as {#record_foreign_singleton_def} files
-      # that def: an opaque singleton envelope on every name the constant can denote. The eval-body walk files these
-      # defs under no owner, since the receiver is a call. Every receiverless `def` in the block counts, nested ones
-      # included, except under a `class` / `module` / `class <<` body, which opens another definee. `instance_eval`
-      # on the singleton class is not filed: its defs land on the singleton class's own singleton (Ruby 4.0.5 raises
-      # NoMethodError on `Const.x` there).
+      # that def ({#record_object_singleton}) on every name the constant can denote. The eval-body walk files these
+      # defs under no owner, since the receiver is a call. Every receiverless `def` in the block counts, one under a
+      # conditional included, as {#each_refinement_def} yields them: not one under a `class` / `module` / `class <<`
+      # body, which opens another definee, nor one inside another `def`, which installs only when that runs.
+      # `instance_eval` on the singleton class is not filed: its defs land on the singleton class's own singleton (Ruby
+      # 4.0.5 raises NoMethodError on `Const.x` there).
       def record_constant_singleton_eval_defs(node, qualified_prefix, tables)
         return unless CLASS_EVAL_BLOCK_CALLS.include?(node.name)
 
@@ -10159,24 +10171,9 @@ module Rigor
         return if body.nil?
 
         candidates = constant_receiver_candidates(object, qualified_prefix)
-        each_eval_body_def(body) do |def_node|
-          candidates.each do |owner|
-            record_envelope(tables.envelopes, owner, [:singleton, def_node.name], Source::ParameterEnvelope::OPAQUE)
-            contest_envelope(tables, owner, [:singleton, def_node.name]) unless tables.certain
-          end
+        each_refinement_def(body) do |def_node|
+          candidates.each { |owner| record_object_singleton(tables, owner, def_node.name) }
         end
-      end
-
-      # The receiverless `def`s under an eval block body, not descending into a body that opens another definee.
-      def each_eval_body_def(node, &)
-        case node
-        when Prism::DefNode
-          yield node if node.receiver.nil?
-        when Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode
-          return
-        end
-
-        node.rigor_each_child { |child| each_eval_body_def(child, &) }
       end
 
       def record_self_surface_evidence(node, qualified_prefix, tables)

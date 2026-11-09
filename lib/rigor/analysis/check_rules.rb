@@ -1036,13 +1036,15 @@ module Rigor
         end
 
         # Issue #3018 — a class object's singleton method that `def Foo.x`, `Foo.define_singleton_method(:x)` or a
-        # `Foo.singleton_class.class_eval` def defines outside `Foo`'s body records no `:singleton` row, only the
-        # opaque `[:singleton, x]` envelope {Inference::SingletonObjectConstant} reads for a plain object. The
-        # class-object path reads it on every entry of the singleton chain, so a subclass inherits it.
+        # `Foo.singleton_class.class_eval` def defines outside `Foo`'s body records no `:singleton` row, only an
+        # envelope entry. The class-object path reads the definer's own entry
+        # (`Scope::DiscoveryIndex::ENVELOPE_OBJECT_SINGLETON_KIND`) on every entry of the singleton chain, so a
+        # subclass inherits it. It does not read the opaque `[:singleton, x]` entry beside it, which a name-rewriting
+        # class-body macro (`my_attr :x`) files too without defining `x` on the class object.
         def foreign_singleton_through_ancestors?(scope, class_name, method_name, kind)
           return false unless kind == :singleton
 
-          key = [:singleton, method_name.to_sym]
+          key = [Scope::DiscoveryIndex::ENVELOPE_OBJECT_SINGLETON_KIND, method_name.to_sym]
           chain = Scope::ResolutionChain.for(scope, class_name.to_s, :singleton, :methods)
           found = chain.search(scope) do |entry|
             names = entry.external? ? entry.candidates : [entry.name]

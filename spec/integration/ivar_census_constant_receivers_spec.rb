@@ -187,7 +187,8 @@ RSpec.describe "ivar census: constant-rooted class_eval receivers (#2983)", type
       ["class Other\n#{narrowing}end\n",
        "class K\n  def poke = Other.new.class.singleton_class.class_eval { %s }\nend\n", 1, []],
     "a rooted instance constant's class takes the write" =>
-      ["class K\n#{plain}end\nINST = K.new\n", "class K\n  def poke = ::INST.class.class_eval { %s }\nend\n", '"a"', []],
+      ["class K\n#{plain}end\nINST = K.new\n", "class K\n  def poke = ::INST.class.class_eval { %s }\nend\n", '"a"',
+       []],
     "a copied class constant's singleton class credits no instance" =>
       ["class Other\n#{narrowing}end\n", "class K\n  def poke = Other.dup.singleton_class.class_eval { %s }\nend\n", 1,
        []]

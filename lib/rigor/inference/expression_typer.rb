@@ -1807,8 +1807,8 @@ module Rigor
         return true if rbs_declared_on_class?(declared, class_name)
 
         # Issue #2994 — a class object on the chain that a module no table names may extend through a hook (the
-        # `:include_hook` open mark of a class with `include(*MODS)`), or an extended module whose own module set is
-        # unknown, may answer any name ahead of the top-level `def`.
+        # `:include_hook` open mark of a class with `include(*MODS)`), a class that `extend(*EMODS)`s, or an extended
+        # module whose own module set is unknown, may answer any name ahead of the top-level `def`.
         Scope::ResolutionChain.for(scope, class_name.to_s, :singleton, :methods).unnamed_mixin?
       end
 

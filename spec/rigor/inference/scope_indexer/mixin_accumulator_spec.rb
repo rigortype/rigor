@@ -303,6 +303,8 @@ RSpec.describe Rigor::Inference::ScopeIndexer::MixinAccumulator do
         "def self.included(base)\n    base.extend X\n  end" => both,
         "def self.included(base)\n    base.prepend X\n  end" => unnamed,
         "def self.included(base)\n    base.singleton_class.include X\n  end" => both,
+        # Issue #2994 — a splatted `base.extend` extends the includer, not `Concern`, so its singleton side stays "*".
+        "def self.included(base)\n    base.extend(*XS)\n  end" => both,
         "def self.extended(base)\n    base.send(:include, X)\n  end" => unnamed,
         "def self.prepended(base)\n    base.include X\n  end" => unnamed,
         "def self.inherited(sub)\n    sub.include X\n  end" => unnamed,

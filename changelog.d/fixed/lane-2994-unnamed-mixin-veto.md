@@ -4,4 +4,5 @@
   - On the class object, `K.bar` no longer answers the superclass's `bar`, because an `included` hook of a module in the splat may extend `K`.
   - For the same reason, `call.undefined-method` no longer reports a call on that class object.
   - A bare `bar` in the class body, in its `def self.` methods or in a subclass's no longer binds to a top-level `def bar` either.
-  - A class with only literal includes reads as before.
+  - The same holds after `extend(*EMODS)` for a bare call in the class body, in its `def self.` methods or in a subclass's.
+  - A class with only literal includes or extends reads as before.

@@ -1381,9 +1381,7 @@ module Rigor
           bucket = @discovery.discovered_parameter_envelopes[name]
           return EMPTY if bucket.nil?
 
-          if bucket.key?(UNNAMED_PREPEND_KEY)
-            @frames.last.add_marks(mark_for(name, :unnamed_prepend, nil, false))
-          end
+          @frames.last.add_marks(mark_for(name, :unnamed_prepend, nil, false)) if bucket.key?(UNNAMED_PREPEND_KEY)
           return EMPTY if own.empty?
 
           prepends = own.select { |raw| bucket.key?([DiscoveryIndex::ENVELOPE_SINGLETON_PREPEND_KIND, raw]) }

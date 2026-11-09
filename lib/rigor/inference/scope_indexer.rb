@@ -5204,7 +5204,7 @@ module Rigor
       # read as {#record_hook_extends} reads the `def` (a `[ENVELOPE_HOOK_DEF_KIND, hook, source]` entry, and the
       # block body scanned with its first parameter as the includer). (`class << self; def included(base)` already
       # reaches {#record_hook_extends} as a singleton `def`.) Any other call that may define a hook takes a
-      # `[ENVELOPE_HOOK_EXTEND_OPEN_KIND, hook]` entry, for both hooks when the name is not a literal: one nested in
+      # `[ENVELOPE_HOOK_EXTEND_OPEN_KIND, hook]` entry, for each hook a non-literal name may spell: one nested in
       # a block, method or condition, one without a block of one plain parameter, `send(:define_singleton_method,
       # …)`, `singleton_class.define_method(…)`, and `define_method` in the body of `class << self`.
       def record_hook_definer_calls(node, child_prefix, methods_acc)

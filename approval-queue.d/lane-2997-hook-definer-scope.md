@@ -12,7 +12,7 @@ Issue #2997 asked for the `class << self; def included` and `define_singleton_me
 
 ## Options and trade-offs
 
-- Read only a direct statement of the module body that has one literal hook name and a literal block with a plain first parameter. Any other call that may define the hook goes open, for both hooks when the name is computed:
+- Read only a direct statement of the module body that has one literal hook name and a literal block with a plain first parameter. Any other call that may define the hook goes open, for each hook a computed name may spell (an interpolated name such as `"is_#{n}"`, whose literal start no hook name has, defines none):
   - a `define_singleton_method` nested in a block, condition or singleton `def`;
   - a block argument, a numbered or `it` parameter, or a second argument;
   - `send(:define_singleton_method, …)`;

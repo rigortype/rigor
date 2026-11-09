@@ -120,12 +120,13 @@ RSpec.describe "reopened concern class_methods and hook spellings (#2997)" do
   # side stays as it was: Ruby answers 1 and raises on `nope`.
   {
     "a class << self define_method" =>
-      "module M8\n  class << self\n    %w[a b].each { |n| define_method(\"is_#{'#{n}'}\") { true } }\n  end\nend\n",
+      "module M8\n  class << self\n    %w[a b].each { |n| define_method(\"is_\#{n}\") { true } }\n  end\nend\n",
     "a define_singleton_method" =>
-      "module M8\n  %w[a b].each { |n| define_singleton_method(\"is_#{'#{n}'}\") { true } }\nend\n"
+      "module M8\n  %w[a b].each { |n| define_singleton_method(\"is_\#{n}\") { true } }\nend\n"
   }.each do |label, source|
     it "reads no hook from #{label} with an is_ prefix" do
-      write_project({ "a_m8.rb" => source, "k.rb" => "#{base_class}class K8 < Base\n  include M8\n  def own = 1\nend\n" },
+      includer = "#{base_class}class K8 < Base\n  include M8\n  def own = 1\nend\n"
+      write_project({ "a_m8.rb" => source, "k.rb" => includer },
                     ["K8.bar.zork", "K8.nope"], members: { "K8" => "  def own: () -> Integer\n" })
       expect(undefined_messages).to eq(["undefined method `nope' for singleton(K8)", "undefined method `zork' for 1"])
     end
@@ -200,7 +201,7 @@ RSpec.describe "reopened concern class_methods and hook spellings (#2997)" do
       "a computed hook name" =>
         "module Hu\n  name = :included\n  define_singleton_method(name) { |base| base.extend(X) }\nend\n",
       "an interpolated name that may still spell included" =>
-        "module Hu\n  x = \"luded\"\n  define_singleton_method(\"inc#{'#{x}'}\") { |base| base.extend(X) }\nend\n",
+        "module Hu\n  x = \"luded\"\n  define_singleton_method(\"inc\#{x}\") { |base| base.extend(X) }\nend\n",
       "a define_singleton_method nested in a block" =>
         "module Hu\n  [1].each { define_singleton_method(:included) { |base| base.extend(X) } }\nend\n",
       "a define_singleton_method in a singleton method" =>

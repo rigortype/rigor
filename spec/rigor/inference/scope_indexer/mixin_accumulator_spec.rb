@@ -307,6 +307,31 @@ RSpec.describe Rigor::Inference::ScopeIndexer::MixinAccumulator do
         expect(unpositioned(source)).to eq("A::C" => { extend: ["B"] }, "C" => { extend: ["B"] })
       end
 
+      # The file declares the top-level `C` only; `A::C` from another file would be the one Ruby reaches.
+      it "keeps the prepend unpositioned where a more-nested name is left beside the declared one" do
+        source = "class C\nend\nmodule A\n  class << C\n    prepend B\n  end\nend\n"
+
+        expect(unpositioned(source)).to eq("A::C" => { extend: ["B"] }, "C" => { extend: ["B"] })
+      end
+
+      # `class << C` inside `class C` is read as `class << self`, and `::C` names the top-level class.
+      {
+        "inside the class's own body" => ["class C\n  class << C\n    prepend B\n  end\nend\n", "C"],
+        "with a rooted constant" => ["class C\nend\nclass << ::C\n  prepend B\nend\n", "C"]
+      }.each do |label, (source, owner)|
+        it "positions the prepend #{label}" do
+          expect(unpositioned(source)).to eq({})
+          expect(index_of(source).fetch(:extends)).to include(owner => ["B"])
+        end
+      end
+
+      # A `prepend` in a `def` of the body runs on the class object's own ancestry, not on its singleton class.
+      it "records no candidate edge for a prepend in a def of the body" do
+        source = "module A\n  class << C\n    def x\n      prepend B\n    end\n  end\nend\n"
+
+        expect(unpositioned(source)).not_to include("A::C")
+      end
+
       it "positions it on the nested class the file declares" do
         source = "module A\n  class C\n  end\n  class << C\n    prepend B\n  end\nend\n"
 

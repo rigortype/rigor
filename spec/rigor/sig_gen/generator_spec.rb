@@ -3294,4 +3294,111 @@ end
       expect(captured[:source_files]).to eq([path])
     end
   end
+
+  # Issue #3035 — a file `require`d only under `RUBY_ENGINE` / `RUBY_PLATFORM` / `defined?(…)` is not
+  # an ordinary definition: stackprof's `truffleruby.rb` re-implements `StackProf.run` / `.results` as
+  # raising stubs for an engine MRI never loads, and sig-gen proposed `-> bot` for the C extension's
+  # real methods.
+  describe "#run on a file required only under a platform guard (#3035)" do
+    it "skips the `bot` a raising stub under a RUBY_ENGINE guard would propose" do
+      entry = write_fixture("lib/backend.rb", <<~RUBY)
+        if RUBY_ENGINE == "truffleruby"
+          require_relative "backend/truffleruby"
+        end
+      RUBY
+      stub_file = write_fixture("lib/backend/truffleruby.rb", <<~RUBY)
+        module Backend
+          class << self
+            def run
+              raise "unsupported engine"
+            end
+          end
+        end
+      RUBY
+
+      candidates = generator(paths: [entry, stub_file]).run
+      run = candidates.find { |c| c.method_name == :run }
+
+      expect(run.classification).to eq(Rigor::SigGen::Classification::SKIPPED)
+      expect(run.skip_reason).to eq(:platform_guarded)
+      expect(run.to_h[:skip_reason]).to eq("sig.skipped.platform-guarded")
+    end
+
+    it "skips the same stub when the require sits under `defined?`" do
+      entry = write_fixture("lib/backend.rb", <<~RUBY)
+        require_relative "backend/truffleruby" if defined?(TruffleRuby)
+      RUBY
+      stub_file = write_fixture("lib/backend/truffleruby.rb", <<~RUBY)
+        module Backend
+          def self.run = raise("unsupported engine")
+        end
+      RUBY
+
+      candidates = generator(paths: [entry, stub_file]).run
+      run = candidates.find { |c| c.method_name == :run }
+
+      expect(run.classification).to eq(Rigor::SigGen::Classification::SKIPPED)
+      expect(run.skip_reason).to eq(:platform_guarded)
+    end
+
+    it "yields a method another file also provides to that file's proposal" do
+      entry = write_fixture("lib/prof.rb", <<~RUBY)
+        if RUBY_PLATFORM =~ /jruby/
+          require_relative "prof/jruby"
+        end
+
+        module Prof
+          def self.run = "main"
+        end
+      RUBY
+      fallback = write_fixture("lib/prof/jruby.rb", <<~RUBY)
+        module Prof
+          def self.run = "jruby"
+        end
+      RUBY
+
+      candidates = generator(paths: [entry, fallback]).run
+      by_path = candidates.select { |c| c.method_name == :run }.to_h { |c| [c.path, c] }
+
+      expect(by_path[fallback].classification).to eq(Rigor::SigGen::Classification::SKIPPED)
+      expect(by_path[fallback].skip_reason).to eq(:platform_guarded)
+      expect(Rigor::SigGen::Classification::EMITTABLE).to include(by_path[entry].classification)
+    end
+
+    it "still proposes `bot` for a raising method an unguarded require reaches" do
+      entry = write_fixture("lib/backend.rb", <<~RUBY)
+        require_relative "backend/plain"
+      RUBY
+      plain = write_fixture("lib/backend/plain.rb", <<~RUBY)
+        module Backend
+          def self.run = raise("boom")
+        end
+      RUBY
+
+      candidates = generator(paths: [entry, plain]).run
+      run = candidates.find { |c| c.method_name == :run }
+
+      expect(Rigor::SigGen::Classification::EMITTABLE).to include(run.classification)
+      expect(run.rbs).to include("-> bot")
+    end
+
+    it "reads a file a guarded AND an unguarded require both reach as ordinary" do
+      guarded = write_fixture("lib/entry_a.rb", <<~RUBY)
+        require_relative "shared" if RUBY_ENGINE == "truffleruby"
+      RUBY
+      unguarded = write_fixture("lib/entry_b.rb", <<~RUBY)
+        require_relative "shared"
+      RUBY
+      shared = write_fixture("lib/shared.rb", <<~RUBY)
+        module Shared
+          def self.run = raise("boom")
+        end
+      RUBY
+
+      candidates = generator(paths: [guarded, unguarded, shared]).run
+      run = candidates.find { |c| c.method_name == :run }
+
+      expect(Rigor::SigGen::Classification::EMITTABLE).to include(run.classification)
+    end
+  end
 end

@@ -164,6 +164,32 @@ The `sig.skipped.*` reasons are:
   inline and in `sig/`, and the two disagree. A refusal:
   `--write` and `--check` exit `1`. See
   [Methods declared inline](#methods-declared-inline).
+- `sig.skipped.overridden-bot` — the method's body never
+  returns (its inferred return is `bot`), and the analysed
+  code defines the method again, with `def` or
+  `define_method`: in a subclass, signed or not, in a class
+  that includes the method's module, in a module included
+  later or prepended, or as an extending class's own
+  singleton method. `bot` would describe only the base body
+  the overrides replace. A class left with nothing to write
+  because of this is still written as an empty class, so its
+  subclasses keep their signatures, unless your `sig/` or a
+  gem's signatures already declare it.
+- `sig.skipped.abstract-method` — the method's inferred return
+  is `bot` from an abstract-style raise: `NotImplementedError`,
+  an error class named `Abstract…` or `NotImplemented…`, or a
+  message that asks for the method to be implemented or
+  overridden, or to define it by name ("please define
+  about"; not "you must define a block"). The
+  implementations may live outside the analysed code, as in a
+  plugin gem, so no `bot` is proposed.
+- `sig.skipped.template-method` — the method's inferred return
+  is `bot`, its body does not end in a direct `raise`, `fail`,
+  `throw`, `exit` or `abort`, and it calls a method the
+  analysed code overrides or declares abstract, directly or
+  through self-dispatched calls. The call is matched by name,
+  whatever the receiver. A `bot` that ends in a direct
+  `throw` or a raise nothing overrides is still proposed.
 - `sig.skipped.top-level-def` — a plain top-level `def`, which
   defines a private `Object` method. sig-gen lists it (file,
   method name and this reason in `--format=json`) but writes no

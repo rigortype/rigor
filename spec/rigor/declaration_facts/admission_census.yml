@@ -80,6 +80,7 @@ members:
     - lib/rigor/inference/block_call_timing.rb
     - lib/rigor/inference/refined_dispatch/constructed_class.rb
     - lib/rigor/lens/run.rb
+    - lib/rigor/sig_gen/bot_proposal_guard.rb
     copies:
     - lib/rigor/inference/project_seed_tables.rb
   discovered_def_nodes:
@@ -96,6 +97,7 @@ members:
     - lib/rigor/inference/self_call_ivar_writes.rb
     - lib/rigor/inference/void_tail_summary.rb
     - lib/rigor/scope/resolution_chain.rb
+    - lib/rigor/sig_gen/bot_proposal_guard.rb
     copies:
     - lib/rigor/inference/definer_resolution.rb
     - lib/rigor/inference/project_seed_tables.rb
@@ -134,6 +136,9 @@ members:
       - identity
       lib/rigor/scope/resolution_chain.rb:
       - existence
+      lib/rigor/sig_gen/bot_proposal_guard.rb:
+      - existence
+      - identity
   discovered_def_nestings:
     reads:
     - lib/rigor/analysis/runner.rb
@@ -151,6 +156,7 @@ members:
     - lib/rigor/inference/method_dispatcher/process_folding.rb
     - lib/rigor/inference/parameter_inference_collector.rb
     - lib/rigor/scope/resolution_chain.rb
+    - lib/rigor/sig_gen/bot_proposal_guard.rb
     copies:
     - lib/rigor/inference/definer_resolution.rb
     - lib/rigor/inference/project_seed_tables.rb
@@ -183,6 +189,9 @@ members:
       - existence
       lib/rigor/inference/definer_resolution.rb:
       - consults_contested
+      lib/rigor/sig_gen/bot_proposal_guard.rb:
+      - existence
+      - identity
   discovered_def_sources:
     reads:
     - lib/rigor/analysis/incremental_session.rb
@@ -276,6 +285,7 @@ members:
     - lib/rigor/inference/refined_dispatch/own_method.rb
     - lib/rigor/reflection/constant_ancestors.rb
     - lib/rigor/scope/resolution_chain.rb
+    - lib/rigor/sig_gen/bot_proposal_guard.rb
     copies:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/project_seed_tables.rb
@@ -326,6 +336,7 @@ members:
     - lib/rigor/reflection/constant_ancestors.rb
     - lib/rigor/scope/resolution_chain.rb
     - lib/rigor/scope/resolution_chain/relevance.rb
+    - lib/rigor/sig_gen/bot_proposal_guard.rb
     copies:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/project_seed_tables.rb
@@ -335,6 +346,7 @@ members:
     - lib/rigor/inference/refined_dispatch.rb
     - lib/rigor/inference/refined_dispatch/constructed_class.rb
     - lib/rigor/scope/resolution_chain.rb
+    - lib/rigor/sig_gen/bot_proposal_guard.rb
     copies:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/project_seed_tables.rb
@@ -350,6 +362,7 @@ members:
     - lib/rigor/inference/singleton_hook_decline.rb
     - lib/rigor/scope/resolution_chain.rb
     - lib/rigor/scope/resolution_chain/relevance.rb
+    - lib/rigor/sig_gen/bot_proposal_guard.rb
     copies:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/project_seed_tables.rb

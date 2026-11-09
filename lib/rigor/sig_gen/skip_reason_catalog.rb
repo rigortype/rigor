@@ -149,6 +149,38 @@ module Rigor
           next_step: "Generate signatures for the overriding subclass too — widen the `sig-gen` path set to " \
                      "cover it — and the parent's declaration becomes safe to emit."
         ),
+        "sig.skipped.overridden-bot" => Entry.new(
+          id: "sig.skipped.overridden-bot",
+          summary: "The method's body never returns, and the analysed code overrides the method.",
+          explanation: "The inferred return is `bot`, but the analysed code defines the method again, with `def` " \
+                       "or `define_method`: a subclass (signed or not), a class that includes the method's module, " \
+                       "a module included later or prepended, or an extending class's own singleton method. " \
+                       "`bot` describes only the base body the overrides replace, and every override returns a " \
+                       "value, so the declaration would contradict each of them (#3029).",
+          next_step: "Declare the return every implementation shares (often `untyped` or the overrides' common " \
+                     "type) by hand in `sig/`."
+        ),
+        "sig.skipped.abstract-method" => Entry.new(
+          id: "sig.skipped.abstract-method",
+          summary: "The method is abstract: its body only raises an error asking for an implementation.",
+          explanation: "The body ends in `raise NotImplementedError`, in an error class named `Abstract...` or " \
+                       "`NotImplemented...`, or in a raise whose message asks for the method to be implemented, " \
+                       "defined or overridden. Its inferred return is `bot`, but the method is meant to be " \
+                       "replaced, and the replacements may live outside the analysed code, as in a plugin gem " \
+                       "(#3029).",
+          next_step: "Declare the return the implementations must provide by hand in `sig/`."
+        ),
+        "sig.skipped.template-method" => Entry.new(
+          id: "sig.skipped.template-method",
+          summary: "The method's `bot` return may come only from calling an overridden or abstract method.",
+          explanation: "The inferred return is `bot`, and the body does not end in a direct `raise`, `fail`, " \
+                       "`throw`, `exit` or `abort`. It calls a method the analysed code overrides or declares " \
+                       "abstract, directly or through a chain of self-dispatched calls, so the `bot` may be only " \
+                       "the base body of that call, which an override replaces at run time. The call is matched " \
+                       "by name, whatever its receiver (#3029).",
+          next_step: "Declare the return by hand in `sig/`, usually the return the overridden hook's " \
+                     "implementations share."
+        ),
         "sig.skipped.top-level-def" => Entry.new(
           id: "sig.skipped.top-level-def",
           summary: "A top-level `def` defines a private `Object` method, and sig-gen writes no signature for it.",

@@ -17,6 +17,7 @@ require_relative "../inference/def_return_typer"
 require_relative "../inference/scope_indexer"
 require_relative "../inference/project_seed_tables"
 require_relative "../inference/module_function_state"
+require_relative "bot_proposal_guard"
 require_relative "../inference/rbs_type_translator"
 require_relative "alias_index"
 require_relative "meta_class_shape"
@@ -182,9 +183,13 @@ module Rigor
         candidates = Inference::MethodDispatcher::RbsDispatch.without_interface_dispatch do
           resolved.flat_map { |path| analyse_file(path, @environment) }
         end
-        demoted = demote_overridden_base_methods(
-          demote_unresolvable_superclasses(
-            demote_generic_reopenings(demote_inline_generic_classes(resolve_superclass_spellings(candidates)))
+        demoted = shelter_withheld_classes(
+          demote_overridden_base_methods(
+            demote_bot_proposals(
+              demote_unresolvable_superclasses(
+                demote_generic_reopenings(demote_inline_generic_classes(resolve_superclass_spellings(candidates)))
+              )
+            )
           )
         )
         # Again after the override demotion: a demoted method can leave its file with nothing to write, and a class
@@ -392,6 +397,79 @@ module Rigor
           next candidate unless overridden.include?([candidate.class_name, candidate.method_name])
 
           demoted_candidate(candidate, :overridden_by_unsigned_subclass)
+        end
+      end
+
+      # Issue #3029 — an emittable `-> bot` proposal for an overridden, abstract or template method is skipped
+      # ({BotProposalGuard}). It runs before {#demote_overridden_base_methods}, so a subclass's `bot` override this
+      # skips counts there as an override that is not emitted, and its parent's declaration is held back too.
+      def demote_bot_proposals(candidates)
+        guard = nil
+        candidates.map do |candidate|
+          next candidate unless Classification::EMITTABLE.include?(candidate.classification)
+          next candidate if candidate.classification == Classification::INLINE_OVERWRITE
+          next candidate unless candidate.inferred_return.is_a?(Type::Bot)
+
+          guard ||= BotProposalGuard.new(project_tables)
+          reason = guard.reason_for(candidate)
+          reason ? demoted_candidate(candidate, reason) : candidate
+        end
+      end
+
+      # The reasons that withhold a member because of what its class's subclasses or callees do, not because the class
+      # itself cannot be declared.
+      WITHHELD_FOR_OVERRIDES = %i[overridden_bot abstract_method template_method overridden_by_unsigned_subclass].freeze
+      private_constant :WITHHELD_FOR_OVERRIDES
+
+      # Issue #3029 — a class whose members {#demote_bot_proposals} or {#demote_overridden_base_methods} withheld,
+      # leaving it nothing to emit, is still declared, as a class shell, so its subclasses keep their proposals.
+      # Without it an all-abstract base has nothing to write, {#demote_unresolvable_superclasses} finds no
+      # declaration for it, and every subclass proposal is skipped as `unresolvable-superclass`. The shell rides on
+      # each file that declares one of its subclasses, so it reaches disk wherever a subclass's members do. The writer
+      # spells its header with the run's recorded superclass and namespace kinds. A class the file already declares
+      # makes the shell a no-op, and one the loaded RBS declares gets none ({#wholly_withheld_classes}). A class whose
+      # own superclass chain is unresolvable is already skipped as `unresolvable-superclass` when this pass runs, so
+      # it is never withheld here and gets no shell.
+      def shelter_withheld_classes(candidates)
+        withheld = wholly_withheld_classes(candidates)
+        return candidates if withheld.empty?
+
+        shells_by_path = withheld_shell_paths(candidates, withheld)
+        candidates.map do |candidate|
+          extra = shells_by_path.fetch(candidate.path, nil)
+          next candidate if extra.nil?
+
+          shells = (candidate.class_shells + extra.to_a).uniq
+          shells.size == candidate.class_shells.size ? candidate : candidate.with_class_shells(shells)
+        end
+      end
+
+      # The classes to shelter: a withheld member and nothing to emit, and no declaration in the loaded RBS (`sig/`,
+      # the collection, gems). A declared class needs no shell for its subclasses' headers to resolve, and a shell
+      # spelling the source's superclass could contradict the declaration's (`RBS::SuperclassMismatchError`).
+      def wholly_withheld_classes(candidates)
+        by_class = candidates.select(&:class_name).group_by(&:class_name)
+        by_class.each_with_object(Set.new) do |(name, rows), acc|
+          next unless rows.any? { |c| WITHHELD_FOR_OVERRIDES.include?(c.skip_reason) }
+          next if rows.any? { |c| Classification::EMITTABLE.include?(c.classification) }
+          next if class_known?(name)
+
+          acc << name
+        end
+      end
+
+      # `{ path => Set[class name] }`: the files each withheld class's shell rides on, which are the files of every
+      # candidate whose class descends from it, however far down.
+      def withheld_shell_paths(candidates, withheld)
+        superclasses = candidates.each_with_object({}) do |candidate, acc|
+          (candidate.class_superclasses || {}).each { |name, sup| acc[name] = bare_superclass_name(sup) }
+        end
+        candidates.each_with_object(Hash.new { |h, k| h[k] = Set.new }) do |candidate, acc|
+          next if candidate.class_name.nil?
+
+          each_ancestor(candidate.class_name, superclasses) do |ancestor|
+            acc[candidate.path] << ancestor if withheld.include?(ancestor)
+          end
         end
       end
 

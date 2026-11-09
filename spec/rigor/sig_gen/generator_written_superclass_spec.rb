@@ -341,4 +341,42 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(validation_errors).to be_empty
     end
   end
+
+  # Issue #3029 — a base whose every member the bot guard withholds is still declared as a class shell on its
+  # subclasses' files, and only when no loaded RBS declares it: a shell spelling the source's superclass beside a
+  # `sig/` declaration with another one fails the definition build (`RBS::SuperclassMismatchError`).
+  describe "a base class whose members are all withheld" do
+    it "writes a shell so the subclass's declaration loads" do
+      run_generator(
+        "lib/a.rb" => in_lib("class Names < StandardError", "  def label = raise(NotImplementedError)", "end",
+                             "class Sub < Names", "  def label = \"x\"", "end")
+      )
+
+      expect(sig("a")).to include("class Names < ::StandardError", "class Sub < ::Lib::Names")
+      expect(validation_errors).to be_empty
+    end
+
+    it "writes no shell for a base sig/ declares with a generic superclass" do
+      run_generator(
+        "lib/a.rb" => in_lib("class Names < Array", "  def label = raise(NotImplementedError)", "end",
+                             "class Sub < Names", "  def label = \"x\"", "end"),
+        "sig/base.rbs" => in_lib("class Names < Array[String]", "end")
+      )
+
+      expect(sig("a")).not_to include("class Names")
+      expect(sig("a")).to include("def label: () -> \"x\"")
+      expect(validation_errors).to be_empty
+    end
+
+    it "writes no shell for a base sig/ declares with another superclass" do
+      run_generator(
+        "lib/a.rb" => in_lib("class Names < StandardError", "  def label = raise(NotImplementedError)", "end",
+                             "class Sub < Names", "  def label = \"x\"", "end"),
+        "sig/base.rbs" => in_lib("class Names < Exception", "end")
+      )
+
+      expect(sig("a")).not_to include("class Names")
+      expect(validation_errors).to be_empty
+    end
+  end
 end

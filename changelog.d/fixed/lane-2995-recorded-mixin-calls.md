@@ -3,3 +3,4 @@
   - The same holds for `self.prepend M`, `self.extend M`, and `send`, `public_send` or `__send__` with `:include`, `:prepend` or `:extend`, with or without `self.`.
   - Such a call in a method body, such as `def self.setup = send(:include, M)`, counts as a bare `include M` there does, whether or not the method is called.
   - A concern's `self.include Dep` after `extend ActiveSupport::Concern` takes `Dep` as a dependency, as `include Dep` does.
+  - A top-level `self.include M`, `send(:include, M)` or `__send__(:include, M)` mixes `M` into `Object`, as a top-level `include M` does.

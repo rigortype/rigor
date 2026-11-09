@@ -14,7 +14,10 @@ require "spec_helper"
 require "fileutils"
 require "tmpdir"
 
+require "stringio"
+
 require "rigor/analysis/runner"
+require "rigor/cli/type_of_command"
 require "rigor/configuration"
 
 RSpec.describe "concern hook block singleton defs (#3015)" do
@@ -142,6 +145,18 @@ RSpec.describe "concern hook block singleton defs (#3015)" do
       kept = [scope.discovered_methods["Cd::Inner"], scope.singleton_def_for("Cd::Inner", :y)&.name]
       expect([singleton, nodes, visible, scope.discovered_methods["Cd::<included>"], kept])
         .to eq([%i[mine], %i[mine], %i[mine], { made: :instance, other: :instance }, [{ y: :singleton }, :y]])
+    end
+
+    # Ruby answers :hook: the block's `x`, defined when `include` runs, replaced the own one. The order is not in the
+    # tables, so the read withholds. `rigor type-of` with no snapshot types the file alone; `Concern` holds no def
+    # of its own there, and still reaches `C`'s chain by its concern entry.
+    it "withholds an own def self.x the block may replace in a one-file type-of probe" do
+      File.write("a.rb", "module Concern\n  extend ActiveSupport::Concern\n" \
+                         "#{block('included', "    def self.x = :hook\n")}end\n" \
+                         "class C; def self.x = :own; include Concern; end\nv = C.x\n")
+      out = StringIO.new
+      Rigor::CLI::TypeOfCommand.new(argv: ["a.rb:8:1"], out: out, err: StringIO.new).run
+      expect(out.string.lines.grep(/\Atype:/).first.to_s.sub("type:", "").strip).to eq("Dynamic[top]")
     end
 
     # Ruby answers 8: `Cn`'s own `included` instance_evals the block on `Cn`, so the def is `Cn`'s own. The def in a

@@ -910,9 +910,14 @@ module Rigor
         # hooks (`included do extend M end`) is no project class under any flavor, yet its hooks run.
         # The search stops at the first candidate that exists in any form: one RBS or a gem declares and the project's
         # source does not has no hooks the tables know, so it answers nil.
+        #
+        # Issue #3015 — a module whose bucket holds the concern entry counts too: its body runs `extend
+        # ActiveSupport::Concern`, so the project declares it. A one-file index has no `discovered_class_sources`, and
+        # would otherwise drop a concern whose only defs sit in its blocks from an includer's chain.
         def resolve_declared(owner, raw)
           candidates(owner, raw).each do |candidate|
-            return candidate if project?(candidate) || @discovery.discovered_class_sources.key?(candidate)
+            return candidate if project?(candidate) || @discovery.discovered_class_sources.key?(candidate) ||
+                                @discovery.discovered_parameter_envelopes[candidate]&.key?(CONCERN_KEY)
             return nil if rbs_known?(candidate)
           end
           nil

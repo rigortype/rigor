@@ -705,9 +705,14 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
         expect(singleton(scope_for(source), "C", :x)).to eq(:unknown)
       end
 
-      it "is Known for an own def" do
+      # Wrong-safe remainder: Ruby answers the own def, but the hook's `extend Y` sits on `D`'s level, ahead of
+      # nothing the tables can order against the own `def`, and the read declines over the project tables. Issue
+      # #3015 — the one-file index used to drop the hook-only `Concern` from `D`'s chain (it has no
+      # `discovered_class_sources`) and answer "D"; it now places `Concern` by its concern entry and declines too.
+      it "declines an own def, in a one-file index as over the project tables" do
         expect(ruby_singleton(source, "D", :x, prelude: concern_shim)).to eq([%w[#<Class:D> Y X], "#<Class:D>", ":own"])
-        expect(singleton(scope_for(source), "D", :x)).to eq("D")
+        expect([singleton(scope_for(source), "D", :x), singleton(project_scope("a.rb" => source), "D", :x)])
+          .to eq(%i[unknown unknown])
       end
     end
 
@@ -893,9 +898,9 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
       end
 
       # Issue #3005 — closed for a concern block's `def self.x`: the block's module on the level defines the name, so
-      # the own def is tested and the concern level declines. Issue #3015 — read over the project tables: the block's
-      # `def` is no longer `Concern`'s own, so the one-file index, which knows `Concern` only by its tables, no longer
-      # places it on `C`'s chain, where the project pre-pass does.
+      # the own def is tested and the concern level declines. Issue #3015 — the block's `def` is no longer
+      # `Concern`'s own, so `Concern` holds no def at all; it still reaches `C`'s chain by its concern entry, in a
+      # one-file index (the scope `rigor type-of` builds without a snapshot) and over the project tables alike.
       it "declines an own def against its own level's concern-block def (Ruby calls the hook's)" do
         source = <<~RUBY
           module Concern
@@ -907,7 +912,8 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
           class C; def self.x = :own; include Concern; end
         RUBY
         expect(ruby_singleton(source, "C", :x, prelude: concern_shim)).to eq([%w[#<Class:C>], "#<Class:C>", ":hook"])
-        expect(singleton(project_scope("a.rb" => source), "C", :x)).to eq(:unknown)
+        expect([singleton(scope_for(source), "C", :x), singleton(project_scope("a.rb" => source), "C", :x)])
+          .to eq(%i[unknown unknown])
       end
 
       it "pins a superclass that only extends: two forks, so even an own def declines" do

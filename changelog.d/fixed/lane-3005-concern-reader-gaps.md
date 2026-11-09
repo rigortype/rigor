@@ -1,0 +1,5 @@
+- **[check]** `call.undefined-method` no longer fires on a class-side call that a concern provides through a reopening's `included` block, a `def self.x` in an `included` block, or a `self.extend ActiveSupport::Concern`. ([#3014](https://github.com/rigortype/rigor/pull/3014))
+  - An `included` or `prepended` block in a reopening without the `extend` is read when some file declares the module a concern. Any other module's `included` block, such as a non-ActiveSupport DSL, contributes nothing.
+  - A `def self.x` in a concern's `included` or `prepended` block is answered on the includer, ahead of the concern's `ClassMethods` and the superclass.
+  - `self.extend ActiveSupport::Concern` and its `send(:extend, …)` spellings make a concern, for plugin DSL replays in `included` blocks too.
+  - A warm `--incremental` run now drops a `call.wrong-arity` report that a cold run declines once a new file's body-level `send` reopens an RBS-known module such as `Comparable`.

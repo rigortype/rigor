@@ -5215,17 +5215,23 @@ module Rigor
         each_hook_definer(node.body, false) do |call, hooks|
           tables = methods_acc.at(call)
           param = readable_hook_parameter(call) if direct.any? { |statement| statement.equal?(call) }
-          next hooks.each { |hook| record_hook_extend_open(owner, tables, hook) } if param.nil?
-
-          hook = hooks.first
-          def_key = [Scope::DiscoveryIndex::ENVELOPE_HOOK_DEF_KIND, hook, call.slice.split.join(" ")]
-          record_envelope(tables.envelopes, owner, def_key, Source::ParameterEnvelope::OPAQUE)
-          body = call.block.body
-          next if body.nil?
-
-          target = ->(extend_call) { hook_param_receiver?(extend_call.receiver, param.name) }
-          scan_hook_body(body, target, owner, tables, hook) { |inner| hook_singleton_reshape?(inner, param.name) }
+          if param
+            record_hook_block(call, param, owner, tables, hooks.first)
+          else
+            hooks.each { |hook| record_hook_extend_open(owner, tables, hook) }
+          end
         end
+      end
+
+      # The entries of one readable `define_singleton_method(:hook) { |base| … }`.
+      def record_hook_block(call, param, owner, tables, hook)
+        def_key = [Scope::DiscoveryIndex::ENVELOPE_HOOK_DEF_KIND, hook, call.slice.split.join(" ")]
+        record_envelope(tables.envelopes, owner, def_key, Source::ParameterEnvelope::OPAQUE)
+        body = call.block&.body
+        return if body.nil?
+
+        target = ->(extend_call) { hook_param_receiver?(extend_call.receiver, param.name) }
+        scan_hook_body(body, target, owner, tables, hook) { |inner| hook_singleton_reshape?(inner, param.name) }
       end
 
       # Yields each call under a module body that may define the module's `included` / `prepended`, with the hooks
@@ -5251,20 +5257,24 @@ module Rigor
 
       # The hooks a call may define on the module whose body runs it, or nil for a call that defines none.
       def hook_definer_names(node, in_singleton)
-        arguments = node.arguments&.arguments || []
-        name_node =
-          if HOOK_SEND_CALLS.include?(node.name) && self_receiver?(node.receiver)
-            definer = literal_method_name(arguments.first)
-            arguments[1] if definer == :define_singleton_method || (in_singleton && definer == :define_method)
-          elsif singleton_definer_call?(node, in_singleton)
-            arguments.first
-          end
+        name_node = hook_definer_name_node(node, in_singleton)
         return nil if name_node.nil?
 
         name = literal_method_name(name_node)
         return HOOK_EXTEND_DEFS.to_a if name.nil?
 
         HOOK_EXTEND_DEFS.include?(name) ? [name] : nil
+      end
+
+      # The argument naming the method a call that may define a singleton method of the module defines, or nil.
+      def hook_definer_name_node(node, in_singleton)
+        arguments = node.arguments&.arguments || []
+        if HOOK_SEND_CALLS.include?(node.name) && self_receiver?(node.receiver)
+          definer = literal_method_name(arguments.first)
+          arguments[1] if definer == :define_singleton_method || (in_singleton && definer == :define_method)
+        elsif singleton_definer_call?(node, in_singleton)
+          arguments.first
+        end
       end
 
       def singleton_definer_call?(node, in_singleton)
@@ -5319,19 +5329,22 @@ module Rigor
           record_envelope(methods_acc.at(node).envelopes, owner, key, Source::ParameterEnvelope::OPAQUE)
           record_concern_dependencies(node.body.body, child_prefix, owner, methods_acc)
         end
-        class_methods_prefix = [*child_prefix, "ClassMethods"]
         node.body.body.each do |statement|
-          next unless block_statement?(statement)
+          next unless statement.is_a?(Prism::CallNode) && block_statement?(statement)
 
           if statement.name == :class_methods
-            each_class_methods_def(statement.block.body) do |def_node|
-              record_def_method(def_node, class_methods_prefix, false, methods_acc.at(def_node))
-              record_def_node(def_node, class_methods_prefix, false, def_nodes_acc)
-              record_def_body_evidence(def_node, class_methods_prefix, methods_acc, :instance)
-            end
+            record_class_methods_block(statement, [*child_prefix, "ClassMethods"], methods_acc, def_nodes_acc)
           elsif concern && CONCERN_HOOK_BLOCKS.include?(statement.name)
             record_concern_hook_block(statement, owner, methods_acc)
           end
+        end
+      end
+
+      def record_class_methods_block(statement, class_methods_prefix, methods_acc, def_nodes_acc)
+        each_class_methods_def(statement.block&.body) do |def_node|
+          record_def_method(def_node, class_methods_prefix, false, methods_acc.at(def_node))
+          record_def_node(def_node, class_methods_prefix, false, def_nodes_acc)
+          record_def_body_evidence(def_node, class_methods_prefix, methods_acc, :instance)
         end
       end
 
@@ -8964,7 +8977,8 @@ module Rigor
         return unless node.is_a?(Prism::ModuleNode) && node.body.is_a?(Prism::StatementsNode)
 
         node.body.body.each do |statement|
-          next unless block_statement?(statement) && statement.name == :class_methods && statement.block.body
+          next unless statement.is_a?(Prism::CallNode) && block_statement?(statement) &&
+                      statement.name == :class_methods && statement.block.body
 
           accumulator.body do
             walk_method_visibilities(statement.block.body, [*child_prefix, "ClassMethods"], false, :public, accumulator)

@@ -44,6 +44,10 @@ Review round 1 tightened the owners so a credit reaches only the class the recei
 are recorded as candidate keys, the qualifications their lexical nesting allows, nearest first. The join resolves each
 key to the first candidate the project declares or binds, as Ruby's constant lookup does.
 
+Review round 2 added two refinements. A candidate a loaded signature declares counts as existing, so a nearer
+constant only RBS knows credits no project class. A `.class` or `.singleton_class` of the root constant's own value
+credits only an instance binding, and one of a class object credits nothing.
+
 ## To undo
 
 Revert `remember_root_constant`, `record_binding` and `record_string_eval` in `IvarWriterCensus`, the owner widening in

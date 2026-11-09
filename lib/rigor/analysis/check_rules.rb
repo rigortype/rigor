@@ -999,6 +999,7 @@ module Rigor
           return true if object_mixin_may_define?(receiver_type, class_name, call_node.name, scope)
           return true if ancestry_declares_method?(scope, class_name, call_node.name, kind)
           return true if open_names_through_ancestors?(scope, class_name, kind)
+          return true if foreign_singleton_through_ancestors?(scope, class_name, call_node.name, kind)
 
           rbs_ancestor_may_answer?(class_name, call_node.name, scope, kind)
         end
@@ -1030,6 +1031,22 @@ module Rigor
                 (side == :instance && (computed_definer_called?(scope, name, bucket) ||
                                        hook_block_macro_defines?(scope, name)))
             end
+          end
+          !found.nil?
+        end
+
+        # Issue #3018 — a class object's singleton method that `def Foo.x`, `Foo.define_singleton_method(:x)` or a
+        # `Foo.singleton_class.class_eval` def defines outside `Foo`'s body records no `:singleton` row, only the
+        # opaque `[:singleton, x]` envelope {Inference::SingletonObjectConstant} reads for a plain object. The
+        # class-object path reads it on every entry of the singleton chain, so a subclass inherits it.
+        def foreign_singleton_through_ancestors?(scope, class_name, method_name, kind)
+          return false unless kind == :singleton
+
+          key = [:singleton, method_name.to_sym]
+          chain = Scope::ResolutionChain.for(scope, class_name.to_s, :singleton, :methods)
+          found = chain.search(scope) do |entry|
+            names = entry.external? ? entry.candidates : [entry.name]
+            names.any? { |name| scope.parameter_envelopes_of(name).key?(key) }
           end
           !found.nil?
         end

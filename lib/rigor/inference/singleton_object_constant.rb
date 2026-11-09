@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../source/constant_path"
+require_relative "../source/parameter_envelope"
 
 module Rigor
   module Inference
@@ -64,13 +65,28 @@ module Rigor
 
       # The `Prism::DefNode` for `method_name` in the constant's singleton body, or nil. The inference tier's
       # entry point.
+      #
+      # Issue #3018 — nil too when another definer of the name on the constant may replace that def: a `def Const.x`,
+      # a `Const.define_singleton_method(:x)` or a `singleton_class.class_eval` def joins an opaque envelope into the
+      # name's `[:singleton, x]` slot, and a computed `define_singleton_method` files the open-names mark. The body
+      # def's own contribution is its parameter envelope, never opaque, so a lone body def keeps its typed answer.
+      # Declined whatever the source order, since a two-file project has none.
       def def_node_for(call_node, receiver_type, method_name, scope)
         return nil if scope.nil?
 
         name = receiver_constant_name(call_node, receiver_type)
         return nil if name.nil?
 
-        scope.singleton_def_for(name, method_name)
+        def_node = scope.singleton_def_for(name, method_name)
+        return nil if def_node.nil? || replaceable?(scope, name, method_name)
+
+        def_node
+      end
+
+      def replaceable?(scope, name, method_name)
+        bucket = scope.parameter_envelopes_of(name)
+        Source::ParameterEnvelope.opaque?(bucket[[:singleton, method_name.to_sym]]) ||
+          bucket.key?(Scope::DiscoveryIndex::ENVELOPE_OPEN_SINGLETON_NAMES_MARK)
       end
     end
   end

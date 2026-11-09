@@ -148,6 +148,36 @@ RSpec.describe "incremental edges for a hook-extended singleton module (#1592)",
                                       first: reported(1), second: reported(":cm"))
   end
 
+  # Issue #2997 — a reopening's `class_methods` block is read whether or not the reopening repeats the `extend`;
+  # whether `Ct` is a concern, and so whether `Kt` draws on `Ct::ClassMethods`, is the declaring file's.
+  describe "a reopening's class_methods block when the declaring file changes" do
+    let(:reopened) { files.merge("lib/ct.rb" => "module Ct\n  class_methods do\n    def bar = :cm\n  end\nend\n") }
+    let(:plain) { "module Ct\n  def own = 1\nend\n" }
+
+    it "re-checks the call when the declaring file gains the extend" do
+      expect_toggle(reopened, before: plain, after: concern(""), first: reported(1), second: reported(":cm"))
+    end
+
+    it "re-checks the call when the declaring file loses the extend" do
+      expect_toggle(reopened, before: concern(""), after: plain, first: reported(":cm"), second: reported(1))
+    end
+  end
+
+  # Issue #2997 — a hook defined by `class << self` or `define_singleton_method` is read as `def self.included` is.
+  describe "a hook whose spelling switches" do
+    let(:dsm) { "module Ct\n  define_singleton_method(:included) { |base| base.extend(X) }\nend\n" }
+
+    it "re-checks the call when class << self; def included gives way to define_singleton_method" do
+      singleton = "module Ct\n  class << self\n    def included(base) = nil\n  end\nend\n"
+      expect_toggle(files, before: singleton, after: dsm, first: reported(1), second: reported('"X"'))
+    end
+
+    it "re-checks the call when the define_singleton_method's name becomes computed" do
+      computed = "module Ct\n  name = :included\n  define_singleton_method(name) { |base| base.extend(X) }\nend\n"
+      expect_toggle(files, before: dsm, after: computed, first: reported('"X"'), second: [])
+    end
+  end
+
   # Ruby keeps whichever definition loaded last, so with two the read declines.
   describe "a second file that redefines the hook" do
     let(:hooked) { files.merge("lib/ct.rb" => "module Ct\n  def self.included(base) = base.extend(X)\nend\n") }

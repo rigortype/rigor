@@ -5360,8 +5360,8 @@ module Rigor
 
       # Issue #2992 — `Concern#append_features` (or `prepend_features`) of a concern `include`d (or `prepend`ed) into a
       # module that has already run `extend ActiveSupport::Concern` records it as a dependency of that module and
-      # includes nothing; the module's final includer includes it. Only a constant argument of a receiverless
-      # `include` / `prepend` written as a statement of the body AFTER the body's own `extend` is provably such a
+      # includes nothing; the module's final includer includes it. Only a constant argument of an `include` /
+      # `prepend` on the module's own `self` ({#concern_dependency_arguments}) written as a statement of the body AFTER the body's own `extend` is provably such a
       # dependency: one written ahead of it, or in a reopening without it, may run first and is an ordinary include.
       # Each such constant takes a `[ENVELOPE_CONCERN_DEPENDENCY_KIND, written]` entry; whether it names a concern is
       # the reader's question. One statement's constants are recorded last first: `include A, B` runs
@@ -7909,12 +7909,23 @@ module Rigor
         receiver.is_a?(Prism::LocalVariableReadNode) && accumulator.hook_local?(receiver.name)
       end
 
-      # Records the instance-side edges of a call {#mixin_call_recorded?} accepts. False when it recorded
-      # nothing — the caller then taints the owner instead. `view` is {#mixin_call_view}'s, so
-      # `Integer.send(:include, Ext)` records `Ext` as `Integer.include(Ext)` does (issue #1722).
+      # Records the instance-side edges of an `include` / `prepend` call. False when it recorded nothing — the caller
+      # then taints the owner instead. `view` is {#mixin_call_view}'s, so `Integer.send(:include, Ext)` records `Ext` as
+      # `Integer.include(Ext)` does (issue #1722).
+      #
+      # A receiverless `include` / `prepend` needs an enclosing declaration to file the edge under, and the RECEIVER
+      # form (`Base.prepend(Loud)`, issue #1123; `Integer.include(Ext)` and `Integer.send(:include, Ext)`, issue
+      # #1722) files it under the class the receiver names. A receiver-form edge is unpositioned wherever it is written
+      # ({MixinAccumulator#note}), so a reader that depends on ORDER declines on it, while the set-shaped readers
+      # (undefined-method suppression, arity, visibility) see the module as they see an in-body `include`.
+      #
+      # Issue #2995 — `self.include M`, `self.prepend M` and a receiverless or `self.` `send` / `public_send` /
+      # `__send__(:include | :prepend, M)` are the same call on the same `self` as a bare `include M`, so they file
+      # the edge under the enclosing class as it does, positioned where it would be ({MixinAccumulator#note}). The
+      # walk names that `self` exactly where it names a bare `include`'s: `current_class` is nil wherever it cannot.
       def instance_mixin_recorded?(node, view, qualified_prefix, current_class, accumulator)
         kind, arguments, = view
-        return false unless mixin_call_recorded?(node, kind, current_class)
+        return false unless mixin_call_recorded?(kind)
 
         targets = arguments.filter_map { |arg| Source::ConstantPath.qualified_name(arg) }
         return false if targets.empty?
@@ -8091,23 +8102,8 @@ module Rigor
         list.unshift(*(prepend ? targets : targets.reject { |target| list.include?(target) }))
       end
 
-      # Whether a mixin call contributes to the tables at all: a receiverless `include` / `prepend` needs an
-      # enclosing declaration to file the edge under, and the RECEIVER form (`Base.prepend(Loud)`, issue #1123;
-      # `Integer.include(Ext)` and `Integer.send(:include, Ext)`, issue #1722) files it under the class the
-      # receiver names. A receiver-form edge is unpositioned wherever it is written ({MixinAccumulator#note}), so
-      # a reader that depends on ORDER declines on it, while the set-shaped readers (undefined-method
-      # suppression, arity, visibility) see the module as they see an in-body `include`.
-      #
-      # Issue #2995 — `self.include M`, `self.prepend M` and a receiverless or `self.` `send` / `public_send` /
-      # `__send__(:include | :prepend, M)` are the same call on the same `self` as a bare `include M`, so they file
-      # the edge under the enclosing class as it does, positioned where it would be ({MixinAccumulator#note}). The
-      # walk names that `self` exactly where it names a bare `include`'s: `current_class` is nil wherever it cannot.
-      def mixin_call_recorded?(node, kind, current_class)
-        return false unless MIXIN_CALL_NAMES.include?(kind)
-        return !current_class.nil? if lexical_self_receiver?(node.receiver)
-
-        true
-      end
+      # Whether a mixin call's kind reaches the instance-side tables: `include` and `prepend`.
+      def mixin_call_recorded?(kind) = MIXIN_CALL_NAMES.include?(kind)
 
       # Issue #1697 — a receiverless `include M` written as a statement of the file's own top level is
       # `main.include`, which is `Object.include`: it mixes M into `Object`. It is recorded under its own

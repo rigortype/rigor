@@ -103,6 +103,16 @@ RSpec.describe "concern reader gaps (#3005)" do
       expect(undefined_messages).to be_empty
     end
 
+    # Ruby raises NoMethodError: `Kn3` has no `my_attr`, so the guarded call defines nothing. Read as the includer's
+    # extend, the reopening's `Mx` would open `Kn3` to any name.
+    it "does not read the extend of a module no file declares a concern as the includer's macros" do
+      dsl = "module Mx\n  def my_attr(n) = define_method(n) { 1 }\nend\n" \
+            "module Cn3\n  def self.included(base = nil, &) = nil\nend\n"
+      write_project({ "a_cn.rb" => dsl, "b_reopen.rb" => reopening("Cn3", "included", "    extend Mx\n"),
+                      "k.rb" => "class Kn3\n  include Cn3\n  my_attr :foo if name.nil?\nend\n" }, ["Kn3.new.foo"])
+      expect(undefined_messages).to eq(["undefined method `foo' for Kn3"])
+    end
+
     # Ruby raises NoMethodError: `Cn2`'s own `included` takes the block, so neither the extend nor the macro runs.
     it "does not read a macro call in the block of a module no file declares a concern" do
       dsl = "module Mx\n  def my_attr(n) = define_method(n) { 1 }\nend\n" \
@@ -158,6 +168,13 @@ RSpec.describe "concern reader gaps (#3005)" do
       write_project({ "a_cd.rb" => concern("Cd", body), "k.rb" => includer("Kd", "Cd", edge: "prepend") },
                     ["Kd.bar.zork"])
       expect(undefined_messages).to eq(["undefined method `zork' for :cm"])
+    end
+
+    # Ruby answers 1: a receiverless `def` in the block defines an instance method of the includer.
+    it "leaves a receiverless def of the block off the class side" do
+      write_project({ "a_cd.rb" => concern("Cd", block("included", "    def bar = :inst\n")),
+                      "k.rb" => includer("Kd", "Cd") }, ["Kd.bar.zork"])
+      expect(undefined_messages).to eq(["undefined method `zork' for 1"])
     end
 
     # Ruby answers 1: the macro the block defines on `Kd`'s singleton class defines `foo`.
@@ -218,11 +235,11 @@ RSpec.describe "concern reader gaps (#3005)" do
       expect(undefined_messages).to eq(["undefined method `zork' for singleton(Ks)"])
     end
 
-    # Ruby answers 1: the `send` extends `Cs` from another module's body, and never runs, so `Cs` is no concern and
-    # its `class_methods` is `Ot`'s DSL, not Concern's.
-    it "does not read a module extended with Concern from another body" do
-      other = "module Cs\n  def self.class_methods(&) = nil\n#{class_methods}end\n" \
-              "module Ot\n  Cs.send(:extend, ActiveSupport::Concern) if false\nend\n"
+    # Ruby answers 1: `Cs`'s body extends `Ot` with Concern, not `Cs` itself, so `Cs` is no concern and its
+    # `class_methods` is its own DSL.
+    it "does not read a module whose body extends another module with Concern" do
+      other = "module Ot\nend\nmodule Cs\n  def self.class_methods(&) = nil\n  Ot.send(:extend, ActiveSupport::Concern)\n" \
+              "  Ot.extend ActiveSupport::Concern\n#{class_methods}end\n"
       write_project({ "a_cs.rb" => other, "k.rb" => includer("Ks", "Cs") }, ["Ks.bar.zork"])
       expect(undefined_messages).to eq(["undefined method `zork' for 1"])
     end

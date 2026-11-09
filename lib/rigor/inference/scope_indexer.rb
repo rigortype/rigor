@@ -5464,8 +5464,7 @@ module Rigor
       # Issue #3005 — `self.extend ActiveSupport::Concern` and a receiverless or `self.` `send` / `public_send` /
       # `__send__(:extend, ActiveSupport::Concern)` run the same `extend` on the module ({#mixin_call_view}).
       def concern_extend?(statement, child_prefix)
-        return false unless statement.is_a?(Prism::CallNode) && statement.block.nil? &&
-                            lexical_self_receiver?(statement.receiver)
+        return false unless statement.is_a?(Prism::CallNode) && lexical_self_receiver?(statement.receiver)
 
         kind, arguments, = mixin_call_view(statement)
         return false unless kind == :extend

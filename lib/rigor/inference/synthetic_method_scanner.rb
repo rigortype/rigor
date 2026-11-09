@@ -383,7 +383,7 @@ module Rigor
 
       # The modules an `extend` statement on the module's own `self` names, or nil for any other statement.
       def concern_extend_arguments(stmt)
-        return nil unless stmt.is_a?(Prism::CallNode) && stmt.block.nil?
+        return nil unless stmt.is_a?(Prism::CallNode)
         return nil unless stmt.receiver.nil? || stmt.receiver.is_a?(Prism::SelfNode)
 
         args = stmt.arguments&.arguments || []

@@ -8654,7 +8654,7 @@ module Rigor
 
         # Issue #2994 — an `include` / `prepend` whose argument names no module (`singleton_class.include(*MODS)`)
         # leaves the owner's singleton set unknown, as {#taint_unrecorded_mixin} reads an `extend(*EMODS)`.
-        accumulator.taint(owner, :extend, unnamed: !up_level && unnamed_singleton_include?(node))
+        accumulator.taint(owner, :extend, unnamed: unnamed_singleton_include?(node))
         true
       end
 

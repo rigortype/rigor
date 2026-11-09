@@ -1040,8 +1040,8 @@ module Rigor
         # envelope entry. The class-object path reads the definer's own entry
         # (`Scope::DiscoveryIndex::ENVELOPE_OBJECT_SINGLETON_KIND`) on the chain's class-object entries, the class and
         # its superclasses, so a subclass inherits it. An extended module's entry is instance-side: `extend M` adds
-        # `M`'s instance methods, not a `def M.x`. It does not read the opaque `[:singleton, x]` entry beside it, which a name-rewriting
-        # class-body macro (`my_attr :x`) files too without defining `x` on the class object.
+        # `M`'s instance methods, not a `def M.x`. It does not read the opaque `[:singleton, x]` entry beside it, which
+        # a name-rewriting class-body macro (`my_attr :x`) files too without defining `x` on the class object.
         def foreign_singleton_through_ancestors?(scope, class_name, method_name, kind)
           return false unless kind == :singleton
 

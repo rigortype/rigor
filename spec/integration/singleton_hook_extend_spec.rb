@@ -173,6 +173,14 @@ RSpec.describe "singleton-side mixins a hook adds (#1592)" do
       expect(undefined_messages).to be_empty
     end
 
+    # Two copies of one definition, apart only in whitespace, leave one hook whichever loads last.
+    it "answers a hook a second file repeats with other whitespace" do
+      write_project("#{x_module}module Mw\n  def self.included(base) = base.extend(X)\nend\n",
+                    "#{base_class}class Kmw < Base\n  include Mw\nend\n", ["Kmw.bar.zork"],
+                    extra: { "repeat.rb" => "module Mw\n  def  self.included(base)  =  base.extend(X)\nend\n" })
+      expect(undefined_messages).to eq(["undefined method `zork' for \"X\""])
+    end
+
     # Ruby runs two files' includes in load order: the class's two concerns have no known order.
     it "declines when a class reopened in two files includes a concern in each" do
       two = "#{concern('Ca', "  class_methods do\n    def bar = :a\n  end\n")}" \

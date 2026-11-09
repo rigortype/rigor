@@ -83,14 +83,14 @@ module Rigor
         @class_names ||= (@instance_defs.keys + @singleton_defs.keys + @superclasses.keys + @includes.keys).uniq
       end
 
-      # The class's ancestors, nearest first: itself, its included modules (the last `include` first), then its
-      # superclass's.
+      # The class's ancestors, nearest first: itself, its included modules (the includes table already keeps them
+      # last `include` first), then its superclass's.
       def instance_ancestors(class_name, visiting = Set.new)
         @instance_ancestors ||= {}
         return @instance_ancestors[class_name] if @instance_ancestors.key?(class_name)
         return [] unless visiting.add?(class_name)
 
-        mixins = Array(@includes[class_name]).reverse.flat_map { |token| resolutions(token, class_name) }
+        mixins = Array(@includes[class_name]).flat_map { |token| resolutions(token, class_name) }
         parents = mixins + superclass_resolutions(class_name)
         @instance_ancestors[class_name] =
           ([class_name] + parents.flat_map { |parent| instance_ancestors(parent, visiting) }).uniq

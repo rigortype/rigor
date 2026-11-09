@@ -8175,11 +8175,15 @@ module Rigor
       # walk that types a call reaches it: what Ruby reaches first for a name such an include supplies
       # depends on more than the chain shows (a block that rebinds `self`, an `extend` or a singleton `def`
       # on `main`), so only the diagnostic silences read it (`Inference::ObjectMixins`), and typing is
-      # issue #1715's. Only a direct program statement counts.
-      # The same call inside a top-level block, a method body or a conditional stays unrecorded, as before:
-      # its `self` may not be `main` (a `describe do include M end` or `class_exec` block rebinds it, while
-      # `[1].each do include M end` does not, and the walk cannot tell them apart), and it may not run. `main`
-      # has no `prepend`, and a top-level `extend M` reaches `main`'s singleton alone, so neither is recorded.
+      # issue #1715's. `main` has no `prepend`, and a top-level `extend M` reaches `main`'s singleton alone, so
+      # neither is recorded.
+      #
+      # Issue #3007 — the call counts wherever {MixinAccumulator::MainSelfCalls} takes its `self` to be `main`: a
+      # program statement, or a call under top-level control flow (`if`, `begin`, `case`, …) or in a top-level
+      # `def` body. Such a call may not run, so its edge is in the set with no position ({MixinAccumulator#note}),
+      # as ADR-119 WD7 records an `include` in a method body. The same call inside a top-level block stays
+      # unrecorded: its `self` may not be `main` (a `describe do include M end` or `class_exec` block rebinds it,
+      # while `[1].each do include M end` does not, and the walk cannot tell them apart).
       #
       # Issue #2995 — `self.include M`, a receiverless or `self.` `send(:include, M)` and its `__send__` twin are the
       # same `main.include`. `public_send(:include, M)` is not: `main`'s `include` is private, so it raises.

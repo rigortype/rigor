@@ -328,13 +328,16 @@ Comparable.helper
     expect(rules(result)).to eq([["lib/main.rb", 3, "call.undefined-method"]])
   end
 
+  # Issue #3007 — a core iterator that keeps `self` (`[1].each`, `tap`, `loop`) is entered, and Ruby returns 1 for
+  # `helper` after `[1].each do include Helpers end`; nested_toplevel_include_spec.rb pins that. A block that rebinds
+  # `self`, as `Class.new` does, stays unrecorded, and Ruby 4.0.5 raises `NameError` for `helper` after it.
   it "does not record an include written inside a top-level block, whose self may not be main" do
     result = run_project("lib/main.rb" => <<~RUBY)
       module Helpers
         def helper = 1
       end
 
-      [1].each do
+      Class.new do
         include Helpers
       end
       helper

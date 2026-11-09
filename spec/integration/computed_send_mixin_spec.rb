@@ -79,6 +79,8 @@ RSpec.describe "a class body's computed-name `send` read as a mixin (#3006)" do
     undefined_messages({ "a.rb" => source }, "class P\nend\nmodule Con\nend\n")
   end
 
+  # Guard: a concern's `included do` block already opens its includer without this reading, so the row passes with or
+  # without the class-body block reach; it pins that the computed `send` there keeps the includer open.
   it "does not fire on a class including a concern whose `included do` block runs a computed `send`" do
     con = "  extend ActiveSupport::Concern\n  included do\n    k = :include\n    send(k, M1)\n  end\n"
     expect(check_includer(con, "  def t = self.m1\n")).to be_empty

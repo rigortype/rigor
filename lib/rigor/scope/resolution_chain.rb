@@ -550,6 +550,19 @@ module Rigor
         concern_bucket?(discovery, owner) || discovery.discovered_classes.key?(candidate)
       end
 
+      GATED_HOOKS = DiscoveryIndex::CONCERN_BLOCK_HOOKS.invert.freeze
+      private_constant :GATED_HOOKS
+
+      # Issue #3005 — the hook an entry of `owner`'s bucket naming `hook` runs on: a gated concern-block hook
+      # ({DiscoveryIndex::CONCERN_BLOCK_HOOKS}) is its plain hook when `owner` is a concern and nil otherwise; any
+      # other hook is itself.
+      def self.effective_hook(discovery, owner, hook)
+        plain = GATED_HOOKS[hook]
+        return hook if plain.nil?
+
+        concern_bucket?(discovery, owner) ? plain : nil
+      end
+
       HOOK_KEY_SLOTS = {
         DiscoveryIndex::ENVELOPE_HOOK_EXTEND_KIND => 2, DiscoveryIndex::ENVELOPE_HOOK_EXTEND_OPEN_KIND => 1,
         DiscoveryIndex::ENVELOPE_HOOK_DEF_KIND => 1
@@ -1458,7 +1471,7 @@ module Rigor
           open = false
           defs = Hash.new(0)
           (@discovery.discovered_parameter_envelopes[mixin] || EMPTY_BUCKET).each_key do |key|
-            next unless hooks.include?(ResolutionChain.hook_of(key))
+            next unless hooks.include?(ResolutionChain.effective_hook(@discovery, mixin, ResolutionChain.hook_of(key)))
 
             case key.first
             when DiscoveryIndex::ENVELOPE_HOOK_EXTEND_KIND then named << key[1]

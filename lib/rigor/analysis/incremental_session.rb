@@ -1394,6 +1394,11 @@ module Rigor
       # (`ResolutionChain#record_hooks`), so a new file that taints `Comparable` with `include(*MODS)` re-checks the
       # readers of a chain through it. It is not `mark:`, which a plain reopening of a module moves (the bucket's
       # module mark) and which would re-check every reader of `Kernel` on any `module Kernel` reopening.
+      #
+      # Issue #3005 — a moved {Scope::DiscoveryIndex::ENVELOPE_DYNAMIC_MARK} fires the owner's `mixin:` keys too: a new
+      # file whose body-level `send(:then)` marks an external `Comparable` makes a reader of a chain through it decline,
+      # and that reader filed `mixin:Comparable`, not `mark:Comparable`. The mark moves only with such a call, not on a
+      # plain reopening.
       def mark_affected(paths, summary)
         def_index = summary && summary[:def_index]
         before = paths.map { |path| @seed_bundles.dig(path, :parameter_envelopes) }
@@ -1401,7 +1406,7 @@ module Rigor
         tainted = Incremental.changed_unpositioned_owners(
           paths.map { |path| @seed_bundles.dig(path, :unpositioned_mixins) },
           [def_index && def_index[:unpositioned_mixins]]
-        )
+        ) | dynamic_owners(moved)
         return Set.new if moved.empty? && tainted.empty?
 
         keys = moved.map { |(class_name, _mark)| "mark:#{class_name.split('::').last}" }.uniq
@@ -1410,6 +1415,11 @@ module Rigor
         meta = Scope::DiscoveryIndex::ENVELOPE_META_SUPERCLASS_MARK
         keys << "mark:*" if moved.any? { |(_class_name, mark)| mark == extended || mark == meta }
         Incremental.negative_closure(keys, @negative_dependents)
+      end
+
+      def dynamic_owners(moved)
+        dynamic = Scope::DiscoveryIndex::ENVELOPE_DYNAMIC_MARK
+        moved.filter_map { |(class_name, mark)| class_name if mark == dynamic }
       end
 
       # Issue #1661 — the `mixin:` keys an owner of a moved unpositioned edge fires. The table keys a receiver-form

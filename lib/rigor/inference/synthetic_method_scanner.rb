@@ -323,20 +323,28 @@ module Rigor
       # - `class_methods do ... end` blocks are NOT yet handled —
       #   singleton-level emission is out of scope per the slice-3
       #   floor framing.
+      #
+      # Issue #3005 — the `included do` blocks of every body of a module some body extends with Concern are read: a
+      # reopening that does not repeat the `extend` runs its block on a module that is already a concern (loaded
+      # first, its `included do` raises, so no running program has the includer without the calls). A module no
+      # body extends with Concern contributes nothing.
       CONCERN_NAME = "ActiveSupport::Concern"
 
       def build_concern_index(asts)
-        index = {}
+        bodies = Hash.new { |hash, name| hash[name] = [] }
         asts.each_value do |ast|
           next if ast.nil?
 
           walk_module_decls(ast, []) do |module_name, body|
-            next if module_name.nil? || body.nil?
-            next unless concern_module_body?(body)
-
-            deferred_calls = collect_included_do_calls(body)
-            index[module_name] = deferred_calls.freeze if deferred_calls.any?
+            bodies[module_name] << body unless module_name.nil? || body.nil?
           end
+        end
+        index = {}
+        bodies.each do |module_name, list|
+          next unless list.any? { |body| concern_module_body?(body) }
+
+          deferred_calls = list.flat_map { |body| collect_included_do_calls(body) }
+          index[module_name] = deferred_calls.freeze if deferred_calls.any?
         end
         index.freeze
       end
@@ -359,16 +367,32 @@ module Rigor
       end
 
       # Recognises a module body that begins with (or contains at top level) an `extend ActiveSupport::Concern`
-      # statement.
+      # statement. Issue #3005 — `self.extend` and a receiverless or `self.` `send` / `public_send` /
+      # `__send__(:extend, …)` are the same call.
       def concern_module_body?(body)
         return false unless body.respond_to?(:body)
 
         body.body.any? do |stmt|
-          next false unless stmt.is_a?(Prism::CallNode) && stmt.receiver.nil? && stmt.name == :extend
-
-          args = stmt.arguments&.arguments || []
-          args.any? { |arg| const_name_string(arg) == CONCERN_NAME }
+          args = concern_extend_arguments(stmt)
+          args&.any? { |arg| const_name_string(arg) == CONCERN_NAME }
         end
+      end
+
+      CONCERN_SEND_CALLS = %i[send public_send __send__].freeze
+      private_constant :CONCERN_SEND_CALLS
+
+      # The modules an `extend` statement on the module's own `self` names, or nil for any other statement.
+      def concern_extend_arguments(stmt)
+        return nil unless stmt.is_a?(Prism::CallNode) && stmt.block.nil?
+        return nil unless stmt.receiver.nil? || stmt.receiver.is_a?(Prism::SelfNode)
+
+        args = stmt.arguments&.arguments || []
+        return args if stmt.name == :extend
+        return nil unless CONCERN_SEND_CALLS.include?(stmt.name)
+
+        name = args.first
+        sent = name.unescaped if name.is_a?(Prism::SymbolNode) || name.is_a?(Prism::StringNode)
+        sent == "extend" ? args.drop(1) : nil
       end
 
       def collect_included_do_calls(body)

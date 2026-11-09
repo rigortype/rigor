@@ -298,6 +298,11 @@ module Rigor
       # ActiveSupport includes into the module's final includer instead. Filed only on the module whose body the walk
       # is in, as the hook-body-call entry is.
       ENVELOPE_CONCERN_DEPENDENCY_KIND = :concern_dependency
+      # Issue #3005 — the hook a hook-extend, open or hook-body-call entry names when it comes from an `included do …
+      # end` / `prepended do … end` block in a body that does not run `extend ActiveSupport::Concern` itself. The
+      # block is ActiveSupport's only when some body of the module records the concern entry; a reader takes the
+      # gated hook as the plain one then, and as no hook otherwise ({ResolutionChain.effective_hook}).
+      CONCERN_BLOCK_HOOKS = { included: :concern_included, prepended: :concern_prepended }.freeze
       # Issue #2979 — `[ENVELOPE_SAME_CLASS_KIND, "Struct::Named"]` on `K`'s bucket, and its mirror on
       # `Struct::Named`'s, say that `K = Struct.new("Named", …)` binds both constants to one class object: the method
       # chain of either name reads the other's tables at its own position ({.same_class_names}). It names no member.

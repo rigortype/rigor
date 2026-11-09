@@ -29,7 +29,7 @@ RSpec.describe "Declaration producers" do
   let(:snapshot) { File.join(__dir__, "producers.yml") }
   # The closed grandfathered list. Lower it when an entry goes; never raise it for a new producer.
   let(:grandfathered_pin) do
-    { count: 367, digest: "67a2c0cbc4caf6a04c9a3f31fe736e2dfc512f039a9366f0cf7dea3280079a89" }
+    { count: 366, digest: "882cefc43358f4206d76a9f01b4d38fb2203b9923af9a9ac7f41a95ead0f39ab" }
   end
 
   define_method(:found) do |parsed = DeclarationFactSources.parsed_under|

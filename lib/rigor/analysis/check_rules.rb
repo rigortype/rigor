@@ -1087,7 +1087,7 @@ module Rigor
           own_mixin_edges(scope, owner, deferred: true).any? do |mixin, edges|
             macros = scope.parameter_envelopes_of(mixin).each_key.filter_map do |key|
               key[2] if key.is_a?(Array) && key.first == Scope::DiscoveryIndex::ENVELOPE_HOOK_BODY_CALL_KIND &&
-                        edges.include?(key[1])
+                        edges.include?(Scope::ResolutionChain.effective_hook(scope.discovery, mixin, key[1]))
             end
             !macros.empty? && hook_extension_defines?(scope, mixin, macro_definers(macros))
           end
@@ -1203,9 +1203,13 @@ module Rigor
         end
 
         # The `[written, lookup]` pairs of a module's hook-extend entries; `lookup` is `:const_get` for a concern's.
+        # Issue #3005 — a gated concern-block entry counts only for a concern `owner`.
         def hook_extends(scope, owner)
           scope.parameter_envelopes_of(owner).each_key.filter_map do |key|
-            key[1, 2] if key.is_a?(Array) && key.first == Scope::DiscoveryIndex::ENVELOPE_HOOK_EXTEND_KIND
+            next unless key.is_a?(Array) && key.first == Scope::DiscoveryIndex::ENVELOPE_HOOK_EXTEND_KIND
+            next unless Scope::ResolutionChain.effective_hook(scope.discovery, owner, key[2])
+
+            key[1, 2]
           end
         end
 

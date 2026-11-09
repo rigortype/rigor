@@ -514,6 +514,35 @@ RSpec.describe Rigor::Inference::SyntheticMethodScanner do
       expect(index.lookup_instance("Address", :audited_at)).to be_empty
     end
 
+    # Issue #3005 — `self.extend` and `send(:extend, …)` make a concern as a bare `extend` does.
+    ["self.extend ActiveSupport::Concern", "send(:extend, ActiveSupport::Concern)"].each do |line|
+      it "replays an included-do DSL call of a concern written #{line.split.first}" do
+        registry = Rigor::Plugin::Registry.new(plugins: [dry_struct_plugin.new(services: services)])
+        _, paths = write_files(
+          "audited.rb" => "module Audited\n  #{line}\n  included do\n    attribute :audited_at, T\n  end\nend\n",
+          "address.rb" => "class Address < Dry::Struct\n  include Audited\nend\n"
+        )
+        index = described_class.scan(plugin_registry: registry, paths: paths, environment: stub_environment_for)
+        expect(index.lookup_instance("Address", :audited_at).size).to eq(1)
+      end
+    end
+
+    # Issue #3005 — a reopening that does not repeat the `extend` runs its block on a module that is already a
+    # concern, and a module no body extends with Concern contributes nothing.
+    it "replays an included-do DSL call of a concern's reopening" do
+      registry = Rigor::Plugin::Registry.new(plugins: [dry_struct_plugin.new(services: services)])
+      _, paths = write_files(
+        "audited.rb" => "module Audited\n  extend ActiveSupport::Concern\n  included do\n    " \
+                        "attribute :a1, T\n  end\nend\n",
+        "audited_ext.rb" => "module Audited\n  included do\n    attribute :a2, T\n  end\nend\n",
+        "plain.rb" => "module Plain\n  def self.included(base = nil, &) = nil\nend\n",
+        "plain_ext.rb" => "module Plain\n  included do\n    attribute :p1, T\n  end\nend\n",
+        "address.rb" => "class Address < Dry::Struct\n  include Audited\n  include Plain\nend\n"
+      )
+      index = described_class.scan(plugin_registry: registry, paths: paths, environment: stub_environment_for)
+      expect(%i[a1 a2 p1].map { |name| index.lookup_instance("Address", name).size }).to eq([1, 1, 0])
+    end
+
     it "skips concerns with no included-do DSL calls" do
       registry = Rigor::Plugin::Registry.new(plugins: [dry_struct_plugin.new(services: services)])
       _, paths = write_files(

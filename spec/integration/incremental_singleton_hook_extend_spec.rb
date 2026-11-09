@@ -163,6 +163,35 @@ RSpec.describe "incremental edges for a hook-extended singleton module (#1592)",
     end
   end
 
+  # Issue #3005 — a reopening's `included` block is read whether or not the reopening repeats the `extend`, under a
+  # hook that counts only while some file declares the module a concern; a `def self.x` in it defines on the includer.
+  # Ruby runs the block only for an `include` that runs after it, so the includer and the call load last here.
+  describe "a reopening's included block without the extend" do
+    let(:late) do
+      { "lib/base.rb" => files["lib/base.rb"], "lib/x_kt.rb" => files["lib/kt.rb"], "lib/y_use.rb" => "Kt.bar.zork\n" }
+    end
+
+    def late_reported(type) = [["lib/y_use.rb", 1, "undefined method `zork' for #{type}"]]
+
+    it "re-checks the call when the reopening file appears with an extend" do
+      expect_toggle(late.merge("lib/ct.rb" => concern("")),
+                    before: "", after: "module Ct\n  included do\n    extend X\n  end\nend\n",
+                    first: late_reported(1), second: late_reported('"X"'))
+    end
+
+    it "re-checks the call when the reopening file appears with a def self.x" do
+      expect_toggle(late.merge("lib/ct.rb" => concern("")),
+                    before: "", after: "module Ct\n  included do\n    def self.bar = :blk\n  end\nend\n",
+                    first: late_reported(1), second: late_reported(":blk"))
+    end
+
+    it "re-checks the call when the declaring file loses the extend" do
+      reopened = late.merge("lib/r_ct.rb" => "module Ct\n  included do\n    extend X\n  end\nend\n")
+      expect_toggle(reopened, before: concern(""), after: "module Ct\n  def own = 1\nend\n",
+                              first: late_reported('"X"'), second: late_reported(1))
+    end
+  end
+
   # Issue #2997 — a hook defined by `class << self` or `define_singleton_method` is read as `def self.included` is.
   describe "a hook whose spelling switches" do
     let(:dsm) { "module Ct\n  define_singleton_method(:included) { |base| base.extend(X) }\nend\n" }

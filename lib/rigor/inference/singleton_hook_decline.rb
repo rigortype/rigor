@@ -37,7 +37,8 @@ module Rigor
     # Known remainders, pinned in `spec/integration/definer_resolution_witness_spec.rb`: `class << self; prepend
     # P` is recorded as an `extend` (the chain places `P` after the singleton, so an own `def self.x` is trusted
     # against it); a concern is capable for every name; an own `def self.x` is trusted against its own level's
-    # U2 hooks and same-class redefinitions; a `class Class; def inherited` monkeypatch is unseen; and a
+    # U2 hooks and same-class redefinitions, except a concern block's `def self.x` of the same name (#3005, which
+    # the read tests); a `class Class; def inherited` monkeypatch is unseen; and a
     # superclass that only `extend`s adds two forks, so every read on its subclasses declines.
     module SingletonHookDecline
       WILDCARD = "*"
@@ -65,7 +66,8 @@ module Rigor
         entry = chain.entries[index]
         # A singleton project entry on a singleton chain is always a level's class entry.
         own = !entry.external? && entry.side == :singleton && def_head(scope, entry.name, method_name) == entry.name
-        own ? index : index + 1
+        # Issue #3005 — an own `def self.x` that a concern block's `def self.x` on its level may replace is tested.
+        own && !chain.hook_block_rival?(scope, index, method_name) ? index : index + 1
       end
 
       # What a class entry's answer is when its `def` was written in another module's body: `:copy` when that

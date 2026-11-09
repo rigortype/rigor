@@ -550,6 +550,37 @@ module Rigor
         concern_bucket?(discovery, owner) || discovery.discovered_classes.key?(candidate)
       end
 
+      # Issue #3005 — whether `name` is a module a concern block's `def self.x`s are filed on (`Owner::<included>`).
+      def self.hook_block_module?(name)
+        DiscoveryIndex::HOOK_BLOCK_SEGMENTS.any? { |segment| name.end_with?("::#{segment}") }
+      end
+
+      # Issue #3005 — whether a hook-block module on the level of the class object at `index` defines `method_name`:
+      # Ruby defines it on that class object itself when the block runs, so it and the class's own `def self.x`
+      # replace each other in an order the tables do not hold (the `include` against the `def`).
+      def hook_block_rival?(scope, index, method_name)
+        level = @level_starts.rindex { |start| start <= index }
+        return false if level.nil? || level >= level_count
+
+        level_entries(level).any? do |entry|
+          !entry.external? && entry.side == :instance && ResolutionChain.hook_block_module?(entry.name) &&
+            !scope.user_def_for(entry.name, method_name).nil?
+        end
+      end
+
+      GATED_HOOKS = DiscoveryIndex::CONCERN_BLOCK_HOOKS.invert.freeze
+      private_constant :GATED_HOOKS
+
+      # Issue #3005 — the hook an entry of `owner`'s bucket naming `hook` runs on: a gated concern-block hook
+      # ({DiscoveryIndex::CONCERN_BLOCK_HOOKS}) is its plain hook when `owner` is a concern and nil otherwise; any
+      # other hook is itself.
+      def self.effective_hook(discovery, owner, hook)
+        plain = GATED_HOOKS[hook]
+        return hook if plain.nil?
+
+        concern_bucket?(discovery, owner) ? plain : nil
+      end
+
       HOOK_KEY_SLOTS = {
         DiscoveryIndex::ENVELOPE_HOOK_EXTEND_KIND => 2, DiscoveryIndex::ENVELOPE_HOOK_EXTEND_OPEN_KIND => 1,
         DiscoveryIndex::ENVELOPE_HOOK_DEF_KIND => 1
@@ -1466,9 +1497,14 @@ module Rigor
 
         # One mixin's hook-extended modules for the edges `hooks` runs, as {#hook_extensions} answers them.
         # A hook defined twice (`ENVELOPE_HOOK_DEF_KIND`) is open: which definition Ruby keeps is load order.
+        #
+        # Issue #3005 — a hook block's `def self.x`s (`<included>`) sit on the class object itself, ahead of every
+        # module the block extends it with, so that module goes first and does not make the order unknown.
         def hook_targets(mixin, hooks)
           named, open = hook_keys(mixin, hooks)
-          targets = HookPlan.new(named.map { |raw| hook_target_pair(mixin, raw) }, [], open, named.size <= 1)
+          blocks, modules = named.partition { |raw| DiscoveryIndex::HOOK_BLOCK_SEGMENTS.include?(raw) }
+          pairs = (blocks + modules).map { |raw| hook_target_pair(mixin, raw) }
+          targets = HookPlan.new(pairs, [], open, modules.size <= 1)
           found = concern?(mixin) && const_get_target(mixin, "ClassMethods")
           (hooks.include?(:prepended) ? targets.prepends : targets.extends) << [mixin, "::#{found}"] if found
           targets
@@ -1481,7 +1517,7 @@ module Rigor
           open = false
           defs = Hash.new(0)
           (@discovery.discovered_parameter_envelopes[mixin] || EMPTY_BUCKET).each_key do |key|
-            next unless hooks.include?(ResolutionChain.hook_of(key))
+            next unless hooks.include?(ResolutionChain.effective_hook(@discovery, mixin, ResolutionChain.hook_of(key)))
 
             case key.first
             when DiscoveryIndex::ENVELOPE_HOOK_EXTEND_KIND then named << key[1]

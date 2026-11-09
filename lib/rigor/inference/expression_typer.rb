@@ -2887,8 +2887,23 @@ module Rigor
         found = [nil, nil] if found.last && dynamic_singleton_definer_ahead?(class_name, method_name, found.last)
         found = [nil, nil] if found.last && singleton_hook_order_split?(class_name, method_name)
         found = [nil, nil] if found.last && singleton_prepend_split?(class_name, method_name, found)
-        found = [nil, nil] if found.last && hidden_hook_definer?(class_name, method_name, found.last)
+        found = [nil, nil] if found.last && hidden_hook_split?(class_name, method_name, found.last)
         found
+      end
+
+      # The hook-placed definers a found singleton `def` may not be the one Ruby calls through.
+      def hidden_hook_split?(class_name, method_name, owner)
+        hidden_hook_definer?(class_name, method_name, owner) || hook_block_rival?(class_name, method_name, owner)
+      end
+
+      # Issue #3005 — a class object's own `def self.x` and a `def self.x` a concern's `included` block defines on it
+      # replace each other in the order the `def` and the `include` run, which the tables do not hold, so the typing
+      # read withholds when the answer is a class object's own `def` and its level's hook-block module defines the
+      # name too.
+      def hook_block_rival?(class_name, method_name, owner)
+        chain = Scope::ResolutionChain.for(scope, class_name.to_s, :singleton, :methods)
+        index = chain.entries.index { |entry| !entry.external? && entry.side == :singleton && entry.name == owner }
+        !index.nil? && chain.hook_block_rival?(scope, index, method_name)
       end
 
       # Issue #1592 — a module a hook extends the class with may define the name private (`class_methods do private;

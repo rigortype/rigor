@@ -5038,10 +5038,14 @@ module Rigor
       # `def decorate(obj) = obj.extend(Decorator)`. A class-body macro records the same evidence in
       # {#record_surface_evidence}; `send` is left out here because inside a body it is an ordinary call far
       # more often than a definition.
-      def record_def_body_evidence(def_node, qualified_prefix, tables, side)
+      # The side a `def`'s body evidence is filed on: a `def self.x`'s singleton side, unless the caller files it as an
+      # instance method elsewhere (`receiver_side: false`, #3005's `Owner::<included>`).
+      def evidence_side(def_node, side, receiver_side) = receiver_side && def_node.receiver ? :singleton : side
+
+      def record_def_body_evidence(def_node, qualified_prefix, tables, side, receiver_side: true)
         return if def_node.body.nil?
 
-        side = :singleton if def_node.receiver
+        side = evidence_side(def_node, side, receiver_side)
 
         definer = false
         Source::NodeWalker.each(def_node.body) do |node|
@@ -5347,10 +5351,38 @@ module Rigor
 
           if statement.name == :class_methods
             record_class_methods_block(statement, [*child_prefix, "ClassMethods"], methods_acc, def_nodes_acc)
-          elsif concern && CONCERN_HOOK_BLOCKS.include?(statement.name)
-            record_concern_hook_block(statement, owner, methods_acc)
+          elsif CONCERN_HOOK_BLOCKS.include?(statement.name)
+            hook = concern ? statement.name : Scope::DiscoveryIndex::CONCERN_BLOCK_HOOKS.fetch(statement.name)
+            record_concern_hook_block(statement, hook, owner, methods_acc)
+            record_hook_block_singleton_defs(statement, hook, child_prefix, methods_acc, def_nodes_acc)
           end
         end
+      end
+
+      # Issue #3005 — a `def self.x` in an `included do … end` (or `prepended do … end`) block defines `x` on the
+      # includer's singleton class, since Ruby runs the block in the includer's class body. Each such `def` is filed
+      # as an instance method of the module's `Owner::<included>` (`<prepended>`), a name no program can spell, and
+      # the module takes a `[ENVELOPE_HOOK_EXTEND_KIND, "<included>", hook]` entry, so the includer's singleton
+      # resolution chain holds that module where the hook's own extends go: after the includer's singleton and any
+      # module prepended to it, ahead of the concern's `ClassMethods`.
+      def record_hook_block_singleton_defs(statement, hook, child_prefix, methods_acc, def_nodes_acc)
+        segment = "<#{statement.name}>"
+        prefix = [*child_prefix, segment]
+        name = prefix.join("::")
+        found = false
+        each_class_methods_def(statement.block.body) do |def_node|
+          next unless def_node.receiver.is_a?(Prism::SelfNode)
+
+          found = true
+          record_method(methods_acc.at(def_node), name, def_node.name, :instance, Source::ParameterEnvelope.of(def_node))
+          (def_nodes_acc[name] ||= {})[def_node.name] = def_node
+          record_def_body_evidence(def_node, prefix, methods_acc, :instance, receiver_side: false)
+        end
+        return unless found
+
+        key = [Scope::DiscoveryIndex::ENVELOPE_HOOK_EXTEND_KIND, segment, hook]
+        record_envelope(methods_acc.at(statement).envelopes, child_prefix.join("::"), key,
+                        Source::ParameterEnvelope::OPAQUE)
       end
 
       def record_class_methods_block(statement, class_methods_prefix, methods_acc, def_nodes_acc)
@@ -5401,16 +5433,20 @@ module Rigor
       # Issue #1592 — an `extend` on `self` in the block extends the includer as `base.extend` in a hook does, so it
       # records the same entries, named by the block's hook ({#record_hook_extends}), and any `extend` nested in the
       # block, a `class << self` mixin or a `send(:extend, …)` there is open.
-      def record_concern_hook_block(statement, owner, methods_acc)
+      #
+      # Issue #3005 — read in every body of the module, as a `class_methods` block is: in a body that does not run
+      # `extend ActiveSupport::Concern` itself the entries name the block's gated hook
+      # ({Scope::DiscoveryIndex::CONCERN_BLOCK_HOOKS}), which a reader takes as the plain hook only for a concern.
+      def record_concern_hook_block(statement, hook, owner, methods_acc)
         body = statement.block.body
         each_self_call(body) do |call|
-          entry = [Scope::DiscoveryIndex::ENVELOPE_HOOK_BODY_CALL_KIND, statement.name, call.name]
+          entry = [Scope::DiscoveryIndex::ENVELOPE_HOOK_BODY_CALL_KIND, hook, call.name]
           record_envelope(methods_acc.at(call).envelopes, owner, entry, Source::ParameterEnvelope::OPAQUE)
         end
         return if body.nil?
 
         target = ->(call) { call.receiver.nil? || call.receiver.is_a?(Prism::SelfNode) }
-        scan_hook_body(body, target, owner, methods_acc.at(statement), statement.name) { |call| send_extend?(call) }
+        scan_hook_body(body, target, owner, methods_acc.at(statement), hook) { |call| send_extend?(call) }
       end
 
       CONCERN_HOOK_BLOCKS = %i[included prepended].to_set.freeze
@@ -5424,10 +5460,16 @@ module Rigor
         body.body.any? { |statement| concern_extend?(statement, child_prefix) }
       end
 
+      #
+      # Issue #3005 — `self.extend ActiveSupport::Concern` and a receiverless or `self.` `send` / `public_send` /
+      # `__send__(:extend, ActiveSupport::Concern)` run the same `extend` on the module ({#mixin_call_view}).
       def concern_extend?(statement, child_prefix)
-        return false unless statement.is_a?(Prism::CallNode) && statement.name == :extend && statement.receiver.nil?
+        return false unless statement.is_a?(Prism::CallNode) && lexical_self_receiver?(statement.receiver)
 
-        (statement.arguments&.arguments || []).any? do |argument|
+        kind, arguments, = mixin_call_view(statement)
+        return false unless kind == :extend
+
+        arguments.any? do |argument|
           written = Source::ConstantPath.qualified_name_or_nil(argument)&.delete_prefix("::")
           written == "ActiveSupport::Concern" || (written == "Concern" && child_prefix.first == "ActiveSupport")
         end

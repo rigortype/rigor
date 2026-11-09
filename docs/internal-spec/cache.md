@@ -1269,7 +1269,12 @@ The same producer (`IncrementalSession#mark_affected`) diffs the
 `unpositioned_mixins` tables of the changed, added and removed files
 between their seed bundles and the recheck scan
 (`Incremental.changed_unpositioned_owners`) and fires the key for every
-class or module whose unpositioned edges moved. The table keys a
+class or module whose unpositioned edges moved, and, since
+[#3005](https://github.com/rigortype/rigor/issues/3005), for every class or
+module whose `<dynamic>` mark (`DiscoveryIndex::ENVELOPE_DYNAMIC_MARK`)
+moved: a new file with a body-level `send(:then)` in `module Comparable`
+makes a reader of a chain through it decline as a taint does, and that mark
+moves only with such a call, not on a plain reopening. The table keys a
 receiver-form owner by the spelling written (`class File;
 Constants.include(*MODS); end` lands under `Constants`) and carries no
 nesting, so an owner fires its own key and every recorded `mixin:` key

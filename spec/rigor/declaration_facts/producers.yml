@@ -154,6 +154,7 @@ lib/rigor/inference/expression_typer.rb:
   computes: the type a class or module expression evaluates to, and the barrier around a re-typed callee body
   producers:
     Rigor::Inference::ExpressionTyper: grandfathered
+    Rigor::Inference::ExpressionTyper#hidden_hook_definer?: 'a consumer, not a declaration producer (#1592); it reads the recorded visibility of the module a hook extends the class with, and the class''s own extends through Scope#singleton_extends_of, to withhold a class-side answer Ruby refuses, and writes no table'
     Rigor::Inference::ExpressionTyper#prefix_statement_jump_free?: grandfathered
     Rigor::Inference::ExpressionTyper#untraced_type_of: grandfathered
     Rigor::Inference::ExpressionTyper#yield_reachable?: grandfathered
@@ -403,6 +404,9 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#gather_cvar_writes: grandfathered
     Rigor::Inference::ScopeIndexer#gather_global_writes: grandfathered
     Rigor::Inference::ScopeIndexer#gather_ivar_writes: grandfathered
+    Rigor::Inference::ScopeIndexer#hook_singleton_reshape?: 'issue #1592, whether a call in a self.included(base) or self.prepended(base) hook body mixes into the parameter''s singleton class other than through a plain base.extend (base.send(:extend, M), base.singleton_class.include M); it reads the call''s shape and the hook''s parameter name and derives no declaration context'
+    Rigor::Inference::ScopeIndexer#scan_hook_body: 'issue #2975, issue #1592, the shared walk of a self.included(base) / self.prepended(base) hook body and of a concern''s included or prepended block (record_hook_extends and record_concern_hook_block call it), files each constant a self.included(base) or self.prepended(base) hook passes to base.extend, as written and with the hook''s name (#1592), and the open entry for an extend it cannot place (nested, conditional, after an early exit, not a constant) or another singleton mixin of the includer, under the module prefix the walk passes in, for call.undefined-method''s macro reader and the singleton resolution chain; it reads only the hook''s own name, side and first parameter, and decides no owner or side'
+    Rigor::Inference::ScopeIndexer#singleton_mixin_body?: 'issue #1592, whether a class << self body under a hook body or block mixes in with include, prepend or extend, which opens the hook; it reads the node''s shape and derives no declaration context'
     Rigor::Inference::ScopeIndexer#taint_unrecorded_mixin: 'issue #2991, taints the sides an unrecorded mixin call reshapes, on the owners {#mixin_effects} already resolved, listing the unnamed marker or the constant arguments on the :include side; it reads a call''s shape and derives no declaration context'
     Rigor::Inference::ScopeIndexer#instance_mixin_recorded?: writes one instance-side mixin call into the include/prepend accumulator under the owner the walk passes in; it computes no declaration context
     Rigor::Inference::ScopeIndexer#ivar_write_targets: grandfathered
@@ -454,7 +458,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#record_collected_method_def: grandfathered
     Rigor::Inference::ScopeIndexer#record_compact_header: grandfathered
     Rigor::Inference::ScopeIndexer#record_compound_ivar_write: grandfathered
-    Rigor::Inference::ScopeIndexer#record_concern_class_methods: 'issue #2986, files a concern module''s hook-extend entry for its ClassMethods and records each def of its class_methods blocks on Owner::ClassMethods, the module ActiveSupport evaluates that block in, and files the hook-body-call entry of each call on self in its included or prepended blocks, under the module prefix the walk passes in; the instance side is the side those defs have there, and it derives no other context'
+    Rigor::Inference::ScopeIndexer#record_concern_class_methods: 'issue #2986, files a concern module''s hook-extend entry for its ClassMethods and records each def of its class_methods blocks (and, #1592, its def node) on Owner::ClassMethods, the module ActiveSupport evaluates that block in, and files the hook-body-call entry of each call on self in its included or prepended blocks, under the module prefix the walk passes in; the instance side is the side those defs have there, and it derives no other context'
     Rigor::Inference::ScopeIndexer#record_constant_class_method_calls: 'issue #1984, records a `K.public_class_method(:x)` (or `send` of it) as K''s public singleton slot and contests K''s singleton slots for a call on `K.singleton_class`, on each class constant_receiver_candidates gives for K; it derives no context'
     Rigor::Inference::ScopeIndexer#record_constant_write: grandfathered
     Rigor::Inference::ScopeIndexer#record_cvar_write: grandfathered
@@ -474,7 +478,6 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#receiver_extend_recorded?: writes one receiver-form `Const.extend(M)` call into the extend accumulator under the class the constant receiver names (#2094), as instance_mixin_recorded? does for `Const.include(M)`; it computes no declaration context
     Rigor::Inference::ScopeIndexer#record_file_positions: grandfathered
     Rigor::Inference::ScopeIndexer#record_global_write: grandfathered
-    Rigor::Inference::ScopeIndexer#record_hook_extends: 'issue #2975, files each constant a self.included(base) or self.prepended(base) hook passes to base.extend, as written, under the module prefix the walk passes in, for call.undefined-method''s macro reader; it reads only the hook''s own name, side and first parameter, and decides no owner or side'
     Rigor::Inference::ScopeIndexer#record_ivar_and_write: grandfathered
     Rigor::Inference::ScopeIndexer#record_ivar_mutator_call: grandfathered
     Rigor::Inference::ScopeIndexer#record_ivar_operator_write: grandfathered
@@ -518,6 +521,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#walk_class_extends: grandfathered
     Rigor::Inference::ScopeIndexer#walk_class_includes: grandfathered
     Rigor::Inference::ScopeIndexer#walk_class_ivars: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_class_methods_visibilities: 'issue #1592, walks a concern''s class_methods block for visibility under Owner::ClassMethods, the module ActiveSupport evaluates that block in, starting public; the owner is the concern prefix the walk passes in, and it derives no other context'
     Rigor::Inference::ScopeIndexer#walk_class_superclasses: grandfathered
     Rigor::Inference::ScopeIndexer#walk_conditional_ivar_writes: grandfathered
     Rigor::Inference::ScopeIndexer#walk_constant_write_census: grandfathered
@@ -718,6 +722,7 @@ lib/rigor/scope/resolution_chain.rb:
     Rigor::Scope::ResolutionChain::Builder#compute_instance: a consumer, not a declaration producer; it reads `unpositioned_mixins` on the :include side to mark a chain unsettled, and reads the tables raw by design (ADR-24)
     Rigor::Scope::ResolutionChain::Builder#compute_singleton: the singleton-side twin, reading the :extend side
     Rigor::Scope::ResolutionChain::Builder#extend_hook_taint: 'a consumer, not a declaration producer; it reads whether a module the node extends lists `"*"` (and `"?"`, #2991) on its :include side, through extend_reshapes_instance? (#1730), and writes no table'
+    Rigor::Scope::ResolutionChain::Builder#hook_extensions: 'a consumer, not a declaration producer (#1592); it reads the hook-extend entries of each module a class includes or prepends directly, the concern key on both, and the class''s unpositioned :include side, to place the hooks'' modules on the singleton chain, and writes no table'
 lib/rigor/scope/resolution_chain/relevance.rb:
   computes: whether a mark on a chain is discharged for one method name, from the closure of the module it names (ADR-119 WD2)
   producers:

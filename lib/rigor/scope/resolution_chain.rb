@@ -105,8 +105,14 @@ module Rigor
       # the multi-file rule fired (two or more files declare it and it has two or more edges on that side).
       # Interned per `[node, kind]` in the flavor's bucket, so equal marks are one object. Kind `:extend_hook`
       # (#1730, listing `"*"`) marks a node a module it extends may mix into through a hook; it is not an order mark
-      # ({#order_marks}).
+      # ({#order_marks}). Kind `:include_hook` (#1592, listing `"*"` and `"?"`) marks a class object a module it
+      # includes or prepends may extend, through a hook, with a module no table names; nor is it. Kind `:hook_order`
+      # (#1592, listing nothing) marks a class object whose own `extend`s and hook-extended modules have no known
+      # order between them: the fork it counts already settles the chain, and the mark tells the typing read why.
       Mark = Data.define(:node, :kind, :listed, :multi_file)
+
+      # The mark kinds that are not order marks.
+      HOOK_MARK_KINDS = %i[extend_hook include_hook hook_order].freeze
 
       NO_MARKS = [].freeze
 
@@ -157,7 +163,7 @@ module Rigor
       # those readers to master's order would answer a constant lookup breadth-first, which is wrong for the
       # #1567 shape on every class that extends such a module.
       def order_marks
-        @memo[:order_marks] ||= @marks.reject { |mark| mark.kind == :extend_hook }.freeze
+        @memo[:order_marks] ||= @marks.reject { |mark| HOOK_MARK_KINDS.include?(mark.kind) }.freeze
       end
 
       # True when a class on the chain records a mixin the tables cannot name (`"*"`: an `include` of a
@@ -169,6 +175,19 @@ module Rigor
       # of modules is unknown, not only its order. Every such mark is also a {#wildcard_mixin?} one; `include M;
       # prepend M` taints the order alone.
       def unnamed_mixin? = @marks.any? { |mark| mark.listed.include?(Relevance::UNNAMED) }
+
+      # Issue #1592 — whether a class object on the chain has hook-extended modules whose order against its own
+      # `extend`s, or among themselves, is not a fact ({Builder#singleton_mixins}).
+      def hook_order_marked? = @marks.any? { |mark| mark.kind == :hook_order }
+
+      # The chain's retro world ({#settle}), or nil when it has none.
+      def retro_world = @retro
+
+      # Issue #1592 — the class objects on a singleton chain that a module they include or prepend may extend, through
+      # a hook, with a module no table names: that module sits right after the class object's own entry.
+      def hook_open_nodes
+        @memo[:hook_open_nodes] ||= @marks.filter_map { |mark| mark.node if mark.kind == :include_hook }.freeze
+      end
 
       # Issue #2991 — `[[node, raw], …]`: the module names the chain's marks list beside the wildcard, each with the
       # class or module it was written on. An unrecorded `self.include M` or receiverless `send(:include, M)` lists `M`
@@ -256,6 +275,7 @@ module Rigor
         if recording
           record_head(scope, start, side)
           record_extend_hooks(scope)
+          record_include_hooks(scope)
         end
         index = start
         while index < stop
@@ -277,6 +297,7 @@ module Rigor
         ResolutionChain.record_class(scope, @root)
         (stop || @entries.size).times { |index| ResolutionChain.record_entry(scope, @entries[index], side) }
         record_extend_hooks(scope)
+        record_include_hooks(scope)
       end
 
       # Issue #2689 — the negative edge a method-walk MISS owes each EXTERNAL entry: `class:<last segment>` of the name
@@ -319,6 +340,7 @@ module Rigor
         Analysis::DependencyRecorder.file_chain_once(self, start, scope.discovery) { file_beyond(scope, start) }
         record_hooks(scope)
         record_extend_hooks(scope)
+        record_include_hooks(scope)
       end
       private :record_beyond
 
@@ -391,6 +413,66 @@ module Rigor
         end
       end
       private :record_extend_hooks
+
+      # #1592 — the edges of the {Builder#hook_extensions} read: a singleton chain draws, for every class on it, the
+      # modules that class's direct mixins' hooks extend it with, and the mixins are declared in files the chain's own
+      # entries record nothing of. Each resolved mixin files its class edges and the negative `mark:` edge on its name,
+      # which an edit adding or dropping a hook-extend entry fires; every mixin, and every module a hook extends by
+      # name, files the negative class edge on its last segment, which a NEW file declaring or reopening it fires.
+      # Filed once per consumer and chain.
+      def record_include_hooks(scope)
+        return unless @side == :singleton
+
+        edges = (@memo[:include_hook_edges] ||= ResolutionChain.include_hook_edges(scope, @flavor, @level_classes))
+        return if edges.empty?
+
+        Analysis::DependencyRecorder.file_chain_once(self, :include_hooks, scope.discovery) do
+          edges.each do |kind, name|
+            ResolutionChain.record_class(scope, name) if kind == :mixin
+            Analysis::DependencyRecorder.read_last_segment(:mark, name) if kind == :mixin
+            Analysis::DependencyRecorder.read_last_segment(:class, name)
+          end
+        end
+      end
+      private :record_include_hooks
+
+      # `[[:mixin, resolved name] | [:spelling, raw], …]`: the direct mixins of every class on a singleton chain, and
+      # the modules the resolved ones' hooks extend by name ({Builder#hook_extensions}).
+      def self.include_hook_edges(scope, flavor, classes)
+        resolver = resolver_for(scope, flavor)
+        discovery = scope.discovery
+        classes.each_with_object([]) do |klass, out|
+          next if klass.nil?
+
+          (discovery.discovered_includes[klass] || EMPTY_NAMES).uniq.each do |raw|
+            mixin = resolver.resolve_declared(klass, raw)
+            next out << [:spelling, raw].freeze if mixin.nil?
+
+            out << [:mixin, mixin].freeze
+            hook_extend_keys(discovery, mixin).each { |key| out << [:spelling, key[1]].freeze }
+          end
+        end.uniq.freeze
+      end
+
+      HOOK_KEY_SLOTS = {
+        DiscoveryIndex::ENVELOPE_HOOK_EXTEND_KIND => 2, DiscoveryIndex::ENVELOPE_HOOK_EXTEND_OPEN_KIND => 1,
+        DiscoveryIndex::ENVELOPE_HOOK_DEF_KIND => 1
+      }.freeze
+      private_constant :HOOK_KEY_SLOTS
+
+      # The hook a hook-extend, open or def envelope key names (`:const_get` for a concern's), or nil for another key.
+      def self.hook_of(key)
+        slot = key.is_a?(Array) ? HOOK_KEY_SLOTS[key.first] : nil
+        slot && key[slot]
+      end
+
+      # The `[ENVELOPE_HOOK_EXTEND_KIND, written, hook]` keys of a module's envelope bucket, in recording order.
+      def self.hook_extend_keys(discovery, name)
+        bucket = discovery.discovered_parameter_envelopes[name]
+        return EMPTY_NAMES if bucket.nil?
+
+        bucket.each_key.select { |key| key.is_a?(Array) && key.first == DiscoveryIndex::ENVELOPE_HOOK_EXTEND_KIND }
+      end
 
       # The hooks that let a module `extend`ed onto N reshape N's INSTANCE side (#1730): its singleton `extended` /
       # `extend_object` run against N at the `extend` and may mix into N; its instance `included` /
@@ -697,7 +779,22 @@ module Rigor
           resolved.is_a?(String) ? resolved : nil
         end
 
+        # Issue #1592 — {#resolve_one}, or else the first candidate the project declares at all: a module holding only
+        # hooks (`included do extend M end`) is no project class under any flavor, yet its hooks run.
+        # The search stops at the first candidate that exists in any form: one RBS or a gem declares and the project's
+        # source does not has no hooks the tables know, so it answers nil.
+        def resolve_declared(owner, raw)
+          candidates(owner, raw).each do |candidate|
+            return candidate if project?(candidate) || @discovery.discovered_class_sources.key?(candidate)
+            return nil if rbs_known?(candidate)
+          end
+          nil
+        end
+
         def candidates(owner, raw) = @scope.ancestor_name_candidates(owner, raw)
+
+        # Whether `name`, already qualified, is a project class under this flavor.
+        def project_name?(name) = project?(name)
 
         private
 
@@ -707,6 +804,12 @@ module Rigor
 
           alternatives = @scope.ambiguous_ancestor_resolutions(owner, raw)
           alternatives.empty? ? nil : alternatives
+        end
+
+        def rbs_known?(name)
+          Rigor::Reflection.rbs_class_known?(name, scope: @scope)
+        rescue StandardError
+          false
         end
 
         def project?(name)
@@ -927,7 +1030,7 @@ module Rigor
         # The chain for `root`, carrying its retro world when the skip rule skipped anything on the way.
         def chain(root, side)
           entries, starts, classes, forks, marks, retro_ok = lin_for(root, side)
-          order_marked = marks.any? { |mark| mark.kind != :extend_hook }
+          order_marked = marks.any? { |mark| !HOOK_MARK_KINDS.include?(mark.kind) }
           retro = build_retro(root, side) if forks == 1 && retro_ok && !order_marked && !@retro
           cut_at = cut_position(entries)
           return whole_chain(root, side, entries, starts, classes, [forks, marks], retro) if cut_at.nil?
@@ -1069,9 +1172,165 @@ module Rigor
           entries = [project_entry(name, :singleton)]
           super_lin = superclass_lin(name, :singleton, depth)
           entries.concat(super_lin[0])
-          extends = @discovery.discovered_extends[name] || EMPTY
-          super_start = include_all(entries, name, extends, EMPTY, depth, [0, 1])
+          extends, prepends = singleton_mixins(name, @discovery.discovered_extends[name] || EMPTY)
+          boundary = prepends.empty? ? CLASS_FIRST : prepend_all(entries, name, prepends, depth)
+          super_start = include_all(entries, name, extends, EMPTY, depth, boundary)
           finish(entries, name, super_lin, super_start)
+        end
+
+        # #1592 — the class's own `extend`s and the modules its direct mixins' hooks extend it with
+        # ({#hook_extensions}), nearest first. Ruby inserts each where its statement ran, and the tables keep the
+        # `extend` and `include` statements apart, so with both kinds present the two blocks' order is a fork: the
+        # chain puts the own `extend`s nearer (the usual layout writes them after the `include`s) and the retro world
+        # the hooks' modules, and a reader that the two worlds answer alike stands, since then only one block can
+        # answer the name. An order the hooks do not fix, or an include whose own position is not a fact, is two
+        # forks, which settle to master. Answers `[extends, prepends]`: a concern's `ClassMethods` on a prepend edge is
+        # prepended to the class object (`Concern#prepend_features` runs `base.singleton_class.prepend`), so it sits
+        # ahead of the class object's own entry.
+        #
+        # The extends table also holds a `class << self; prepend P`, so with a hook's prepends present a module of the
+        # class's own may sit ahead of them in Ruby: that is one fork more, and its retro world prepends the own
+        # `extend`s ahead of the hook's prepends.
+        def singleton_mixins(name, extends)
+          plan = hook_extensions(name)
+          @frames.last.add_marks(mark_for(name, :include_hook, UNNAMED_LIST, false)) if plan.open
+          fork_hook_order(name, 2) unless plan.ordered || (plan.extends.empty? && plan.prepends.empty?)
+          extends, prepends = order_hook_prepends(name, extends, plan.prepends)
+          hooked = plan.extends
+          return [extends, prepends] if hooked.empty?
+          return [hooked, prepends] if extends.empty?
+
+          fork_hook_order(name, 1)
+          [@retro ? hooked + extends : extends + hooked, prepends]
+        end
+
+        # `[extends, prepends]` once the hook's prepends are placed against the class's own `extend`s.
+        def order_hook_prepends(name, extends, prepends)
+          return [extends, prepends] if prepends.empty? || extends.empty?
+
+          fork_hook_order(name, 1)
+          @retro ? [EMPTY, extends + prepends] : [extends, prepends]
+        end
+
+        def fork_hook_order(name, weight)
+          @frames.last.forks += weight
+          @frames.last.add_marks(mark_for(name, :hook_order, nil, false))
+        end
+
+        # The {HookPlan} for a class: the `[owner, spelling]` pairs of the modules the hooks of its direct
+        # mixins extend it with, nearest first (a later include's ahead of an earlier one's, and within one mixin the
+        # hook's own extends ahead of a concern's `ClassMethods`, which `append_features` extends before the
+        # `included` block runs); the concern `ClassMethods` its prepend edges prepend to its singleton; whether one of
+        # those hooks may extend it with a module no entry names; and whether the order is a fact. A concern includer
+        # gets nothing from a concern: `Concern#append_features` records it as a dependency instead (#2992).
+        def hook_extensions(name)
+          includes = @discovery.discovered_includes[name] || EMPTY
+          return NO_HOOKS if includes.empty?
+
+          listed = @discovery.unpositioned_mixins[name]&.dig(:include) || EMPTY
+          plan = HookPlan.new([], [], false, true)
+          each_hooked_mixin(name, includes) do |raw, mixin, hooks|
+            unpositioned = listed.include?(raw) || listed.include?(WILDCARD_LIST.first)
+            merge_targets(plan, hook_targets(mixin, hooks), unpositioned)
+          end
+          # Two files' includes run in load order.
+          plan.ordered &&= plan.extends.size + plan.prepends.size < 2 || !multi_file?(name)
+          plan
+        end
+
+        # Adds one mixin's targets to the class's plan; an include whose own position is not a fact (`unpositioned`)
+        # leaves its modules' order unknown.
+        def merge_targets(plan, targets, unpositioned)
+          plan.open ||= targets.open
+          return if targets.extends.empty? && targets.prepends.empty?
+
+          plan.ordered &&= targets.ordered && !unpositioned
+          plan.extends.concat(targets.extends)
+          plan.prepends.concat(targets.prepends)
+        end
+
+        HookPlan = Struct.new(:extends, :prepends, :open, :ordered)
+        private_constant :HookPlan
+
+        # Yields each direct mixin of `name`, nearest first, as `[spelling, resolved, hooks]`: the hooks its edges
+        # run, `:included` for an `include` and `:prepended` for a `prepend`.
+        def each_hooked_mixin(name, includes)
+          prepends = @discovery.discovered_prepends[name] || EMPTY
+          concern = concern?(name)
+          includes.uniq.each do |raw|
+            mixin = @resolver.resolve_declared(name, raw)
+            next if mixin.nil? || (concern && concern?(mixin))
+
+            hooks = []
+            hooks << :prepended if prepends.include?(raw)
+            hooks << :included if includes.count(raw) > prepends.count(raw)
+            yield raw, mixin, hooks
+          end
+        end
+
+        NO_HOOKS = HookPlan.new(EMPTY, EMPTY, false, true).freeze
+        private_constant :NO_HOOKS
+
+        def concern?(name)
+          bucket = @discovery.discovered_parameter_envelopes[name]
+          !bucket.nil? && bucket.key?(CONCERN_KEY)
+        end
+
+        CONCERN_KEY = [DiscoveryIndex::ENVELOPE_HOOK_EXTEND_KIND, "ClassMethods", :const_get].freeze
+        private_constant :CONCERN_KEY
+
+        # One mixin's hook-extended modules for the edges `hooks` runs, as {#hook_extensions} answers them.
+        # A hook defined twice (`ENVELOPE_HOOK_DEF_KIND`) is open: which definition Ruby keeps is load order.
+        def hook_targets(mixin, hooks)
+          named, open = hook_keys(mixin, hooks)
+          targets = HookPlan.new(named.map { |raw| hook_target_pair(mixin, raw) }, [], open, named.size <= 1)
+          found = concern?(mixin) && const_get_target(mixin, "ClassMethods")
+          (hooks.include?(:prepended) ? targets.prepends : targets.extends) << [mixin, "::#{found}"] if found
+          targets
+        end
+
+        # `[named, open]`: the spellings the mixin's hooks for `hooks` extend with, and whether one of them is open
+        # or defined twice.
+        def hook_keys(mixin, hooks)
+          named = []
+          open = false
+          defs = Hash.new(0)
+          (@discovery.discovered_parameter_envelopes[mixin] || EMPTY_BUCKET).each_key do |key|
+            next unless hooks.include?(ResolutionChain.hook_of(key))
+
+            case key.first
+            when DiscoveryIndex::ENVELOPE_HOOK_EXTEND_KIND then named << key[1]
+            when DiscoveryIndex::ENVELOPE_HOOK_EXTEND_OPEN_KIND then open = true
+            else defs[key[1]] += 1
+            end
+          end
+          [named.uniq, open || defs.each_value.any? { |count| count > 1 }]
+        end
+
+        EMPTY_BUCKET = {}.freeze
+        private_constant :EMPTY_BUCKET
+
+        # The module a hook's constant names, written in the mixin's body: `Mixin::Raw` first (the mixin is the
+        # innermost cref there), then the names its header's nesting gives. A name no project module answers stays
+        # the mixin's spelling, an external entry.
+        def hook_target_pair(mixin, raw)
+          own = "#{mixin}::#{raw}"
+          return [mixin, "::#{own}"] if !raw.start_with?("::") && @resolver.project_name?(own)
+
+          [mixin, raw]
+        end
+
+        # `mixin.const_get(raw)`, as `Concern#append_features` looks `ClassMethods` up: `Name::Raw` for each entry of
+        # the mixin's own instance chain, then a top-level `Raw`; nil when no project module answers, which Concern
+        # then does not extend.
+        def const_get_target(mixin, raw)
+          chain = ResolutionChain.for(@scope, mixin, :instance, @flavor)
+          chain.entries.each do |entry|
+            names = entry.external? ? entry.candidates : [entry.name]
+            found = names.map { |owner| "#{owner}::#{raw}" }.find { |candidate| @resolver.project_name?(candidate) }
+            return found if found
+          end
+          @resolver.project_name?(raw) ? raw : nil
         end
 
         # The instance-side marks of one node; `kind` is the side's mixin kind, `:include`. `discovered_includes`
@@ -1239,8 +1498,10 @@ module Rigor
           # The table holds every statement, nearest first: a same-owner repeat is a no-op in Ruby (the first
           # statement wins), so it is dropped here rather than met as a fork.
           prepends.reverse.uniq.each do |raw|
-            modules = Array(resolve(owner, raw))
-            each_mixin_chain(owner, raw, depth) do |sub|
+            # A hook's module comes as `[owner, spelling]`, as in {#include_all}.
+            from, raw = raw.is_a?(Array) ? raw : [owner, raw]
+            modules = Array(resolve(from, raw))
+            each_mixin_chain(from, raw, depth) do |sub|
               point = -1
               sub.each do |entry|
                 found = entries.index(entry)
@@ -1271,7 +1532,9 @@ module Rigor
           mixins.reverse_each do |raw|
             next if skip.include?(raw)
 
-            each_mixin_chain(owner, raw, depth) do |sub|
+            # A hook's module comes as `[owner, spelling]`: the mixin whose body wrote it resolves it.
+            from, raw = raw.is_a?(Array) ? raw : [owner, raw]
+            each_mixin_chain(from, raw, depth) do |sub|
               point = origin
               sub.each_with_index do |entry, index|
                 found = @retro ? nil : entries.index(entry)

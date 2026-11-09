@@ -279,14 +279,27 @@ module Rigor
       # says its `included do … end` (`hook` `:included`) or `prepended do … end` (`:prepended`) block calls `name` on
       # `self`, which Ruby runs in the class body of a class that includes (or prepends) the module directly. It is
       # filed only on the module whose body the walk is in, so it is not one of `Incremental`'s diffed class-mark kinds.
+      #
+      # Issue #1592 — a hook's own entry names the hook as its third element (`[ENVELOPE_HOOK_EXTEND_KIND, "M",
+      # :included]`, `:prepended` for `self.prepended` or a `prepended do … end` block), and an `extend` on `self` in a
+      # concern's `included do … end` / `prepended do … end` block records one too. The includer's singleton resolution
+      # chain inserts each such module for the edge its hook runs on. A `[ENVELOPE_HOOK_EXTEND_OPEN_KIND, hook]` entry
+      # says that hook may extend its includer with a module no entry names, or one it may not extend at all (an
+      # `extend` that is not a direct statement of the hook body, or whose argument is not a constant).
       ENVELOPE_HOOK_EXTEND_KIND = :hook_extend
+      ENVELOPE_HOOK_EXTEND_OPEN_KIND = :hook_extend_open
+      # Issue #1592 — `[ENVELOPE_HOOK_DEF_KIND, hook, source]`: one definition of the module's `self.included` /
+      # `self.prepended` hook, by its source text. Two entries for one hook mean the hook is defined twice, and which
+      # definition Ruby keeps is load order.
+      ENVELOPE_HOOK_DEF_KIND = :hook_def
       ENVELOPE_HOOK_BODY_CALL_KIND = :hook_body_call
       # Issue #2979 — `[ENVELOPE_SAME_CLASS_KIND, "Struct::Named"]` on `K`'s bucket, and its mirror on
       # `Struct::Named`'s, say that `K = Struct.new("Named", …)` binds both constants to one class object: the method
       # chain of either name reads the other's tables at its own position ({.same_class_names}). It names no member.
       ENVELOPE_SAME_CLASS_KIND = :same_class
       MACRO_KINDS = [ENVELOPE_BODY_CALL_KIND, ENVELOPE_COMPUTED_DEFINER_KIND, ENVELOPE_HOOK_EXTEND_KIND,
-                     ENVELOPE_HOOK_BODY_CALL_KIND, ENVELOPE_SAME_CLASS_KIND].freeze
+                     ENVELOPE_HOOK_EXTEND_OPEN_KIND, ENVELOPE_HOOK_DEF_KIND, ENVELOPE_HOOK_BODY_CALL_KIND,
+                     ENVELOPE_SAME_CLASS_KIND].freeze
       private_constant :MACRO_KINDS
 
       NO_NAMES = [].freeze

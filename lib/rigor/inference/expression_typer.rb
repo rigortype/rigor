@@ -2875,7 +2875,68 @@ module Rigor
         owner = found.last
         found = [nil, nil] if owner && SingletonExternalAhead.withhold?(scope, class_name, method_name, owner)
         found = [nil, nil] if found.last && dynamic_singleton_definer_ahead?(class_name, method_name, found.last)
+        found = [nil, nil] if found.last && singleton_hook_order_split?(class_name, method_name)
+        found = [nil, nil] if found.last && hidden_hook_definer?(class_name, method_name, found.last)
         found
+      end
+
+      # Issue #1592 — a module a hook extends the class with may define the name private (`class_methods do private;
+      # def x`), which Ruby refuses on an explicit receiver. The visibility rule does not reach that module, so the
+      # typing read withholds rather than answer a call Ruby raises on. A module the class `extend`s itself is left to
+      # that rule.
+      def hidden_hook_definer?(class_name, method_name, owner)
+        visibility = scope.discovered_method_visibility(owner, method_name)
+        return false if visibility.nil? || visibility == :public
+
+        chain = Scope::ResolutionChain.for(scope, class_name.to_s, :singleton, :methods)
+        return false unless chain.entries.any? { |entry| entry.name == owner && entry.side == :instance }
+
+        scope.singleton_extends_of(class_name).none? do |raw|
+          written = raw.delete_prefix("::")
+          owner == written || owner.end_with?("::#{written}")
+        end
+      end
+
+      # Issue #1592 — whether to withhold `method_name`'s class-side answer: a class object on the chain has
+      # hook-extended modules whose order against its own `extend`s is not a fact, and the orders give different
+      # definers (the retro world's against the chain's, or, with no retro world, the class objects' alone against
+      # the chain's). A `def` the extends fold copied onto a class object is read where Ruby finds it, at the extended
+      # module's own entry, since the copy sits ahead of every module in both orders.
+      def singleton_hook_order_split?(class_name, method_name)
+        chain = Scope::ResolutionChain.for(scope, class_name.to_s, :singleton, :methods)
+        return false unless chain.hook_order_marked?
+
+        answer = positioned_singleton_definer(chain, method_name)
+        retro = chain.retro_world
+        return answer != positioned_singleton_definer(retro, method_name) if retro
+
+        answer != positioned_singleton_definer(chain, method_name, copies: true)
+      end
+
+      # The owner of the first `def` of the name along the chain: a fold copy is skipped, or with `copies:` read as
+      # its module's, on the class objects alone (the answer master gives).
+      def positioned_singleton_definer(chain, method_name, copies: false)
+        chain.search(scope, side: copies ? :singleton : nil) do |entry|
+          next if entry.external?
+
+          name = entry.name
+          if entry.side == :singleton
+            node = scope.singleton_def_for(name, method_name)
+            next nil if node.nil?
+
+            head = singleton_copy_head(name, node)
+            copies ? head : (name if head == name)
+          elsif scope.user_def_for(name, method_name)
+            name
+          end
+        end
+      end
+
+      # The module a receiverless singleton `def` was written in when the extends fold copied it onto `owner`, else
+      # `owner`.
+      def singleton_copy_head(owner, node)
+        head = node.receiver.nil? ? scope.discovery.recorded_def_nesting(node)&.first : nil
+        head.nil? ? owner : head
       end
 
       SINGLETON_WILDCARD_SLOT = %i[singleton *].freeze
@@ -2903,6 +2964,8 @@ module Rigor
           next if entry.external?
           return false if entry.name == owner.to_s
           return true if entry_defines_without_def?(entry, name)
+          # Issue #1592 — a hook of a module the class includes may have extended it with a module no table names.
+          return true if entry.side == :singleton && chain.hook_open_nodes.include?(entry.name)
         end
         false
       end

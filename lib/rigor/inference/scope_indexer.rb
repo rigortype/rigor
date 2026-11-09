@@ -4258,7 +4258,7 @@ module Rigor
               census_scan(node.superclass, qualified_prefix, methods_acc)
             end
             record_declaration_facts(node, child_prefix, methods_acc.at(node)) unless child_cref
-            record_concern_class_methods(node, child_prefix, methods_acc) unless child_cref
+            record_concern_class_methods(node, child_prefix, methods_acc, def_nodes_acc) unless child_cref
             body_prefix = child_cref ? [] : child_prefix
             if node.body
               walk_methods_and_def_nodes(node.body, body_prefix, false, methods_acc, def_nodes_acc,
@@ -5062,29 +5062,135 @@ module Rigor
       # `ClassMethods` on every includer's singleton chain, which no `extend` edge of the includer records. The module
       # takes a `[ENVELOPE_HOOK_EXTEND_KIND, "ClassMethods"]` entry per constant extended on the hook's parameter, as
       # written, so `call.undefined-method` can resolve an includer's class-body macro calls against it.
+      #
+      # Issue #1592 — the entry also names the hook (`[ENVELOPE_HOOK_EXTEND_KIND, "ClassMethods", :included]`), so the
+      # includer's singleton resolution chain draws the module only for the edge whose hook runs. Only a direct
+      # statement of the hook body with constant arguments and no `return` / `next` / `break` in an earlier
+      # statement is a fact the chain can place. Any other extend of the parameter anywhere in the body (nested,
+      # conditional, after an early exit, or with an argument that is not a constant), a `base.send(:extend, …)`, a
+      # `base.singleton_class.include` / `prepend` and a `class_eval`-family block on the parameter take a
+      # `[ENVELOPE_HOOK_EXTEND_OPEN_KIND, hook]` entry instead of, or beside, the named one. Each definition also takes
+      # a `[ENVELOPE_HOOK_DEF_KIND, hook, source]` entry, so a module that defines the hook twice (in two files, or
+      # twice in one) is read as open: which definition Ruby keeps is load order.
       def record_hook_extends(def_node, qualified_prefix, tables, side)
         return unless side == :singleton && HOOK_EXTEND_DEFS.include?(def_node.name) && !qualified_prefix.empty?
 
+        owner = qualified_prefix.join("::")
+        hook = def_node.name
+        def_key = [Scope::DiscoveryIndex::ENVELOPE_HOOK_DEF_KIND, hook, def_node.slice.split.join(" ")]
+        record_envelope(tables.envelopes, owner, def_key, Source::ParameterEnvelope::OPAQUE)
         param = def_node.parameters&.requireds&.first
         return unless param.is_a?(Prism::RequiredParameterNode)
 
-        owner = qualified_prefix.join("::")
-        Source::NodeWalker.each(def_node.body) do |node|
-          next unless node.is_a?(Prism::CallNode) && node.name == :extend
-          next unless node.receiver.is_a?(Prism::LocalVariableReadNode) && node.receiver.name == param.name
-
-          record_hook_extend_arguments(node, owner, tables)
+        target = ->(call) { hook_param_receiver?(call.receiver, param.name) }
+        scan_hook_body(def_node.body, target, owner, tables, hook) do |node|
+          hook_singleton_reshape?(node, param.name)
         end
       end
 
-      def record_hook_extend_arguments(node, owner, tables)
-        (node.arguments&.arguments || []).each do |argument|
-          written = Source::ConstantPath.qualified_name_or_nil(argument)
-          next if written.nil?
+      # The shared walk of a hook body or a concern's hook block: `target` says whether a call's receiver is the
+      # includer, the block says whether a call reshapes the includer's singleton some other way.
+      def scan_hook_body(body, target, owner, tables, hook)
+        placeable = placeable_hook_statements(body)
+        Source::NodeWalker.each(body) do |node|
+          if node.is_a?(Prism::CallNode) && node.name == :extend && target.call(node)
+            complete = record_hook_extend_arguments(node, owner, tables, hook)
+            record_hook_extend_open(owner, tables, hook) unless complete && placeable.include?(node)
+          elsif (node.is_a?(Prism::CallNode) && yield(node)) || singleton_mixin_body?(node)
+            record_hook_extend_open(owner, tables, hook)
+          end
+        end
+      end
 
-          key = [Scope::DiscoveryIndex::ENVELOPE_HOOK_EXTEND_KIND, written]
+      # The direct statements of a body that run unless an earlier statement raised: those before the first
+      # statement holding a `return`, `next` or `break` anywhere in it. An endless `def` has its one expression.
+      def placeable_hook_statements(body)
+        statements = body.is_a?(Prism::StatementsNode) ? body.body : [body].compact
+        placeable = Set.new.compare_by_identity
+        statements.each do |statement|
+          break if exits_early?(statement)
+
+          placeable << statement
+        end
+        placeable
+      end
+
+      # A `next` or `break` inside a block or lambda leaves only that block, and a lambda's `return` only the lambda;
+      # a `return` inside a block leaves the hook.
+      def exits_early?(node, in_block: false)
+        case node
+        when Prism::ReturnNode then true
+        when Prism::NextNode, Prism::BreakNode then !in_block
+        when Prism::LambdaNode then false
+        else
+          inner = in_block || node.is_a?(Prism::BlockNode)
+          node.rigor_each_child { |child| return true if exits_early?(child, in_block: inner) }
+          false
+        end
+      end
+
+      # A `class << self` body that mixes in, anywhere under a hook body or block.
+      def singleton_mixin_body?(node)
+        return false unless node.is_a?(Prism::SingletonClassNode) && node.expression.is_a?(Prism::SelfNode)
+
+        found = false
+        Source::NodeWalker.each(node.body) do |child|
+          found ||= child.is_a?(Prism::CallNode) && MIXIN_SELF_CALLS.include?(child.name) && child.receiver.nil?
+        end
+        found
+      end
+
+      MIXIN_SELF_CALLS = %i[include prepend extend].freeze
+      private_constant :MIXIN_SELF_CALLS
+
+      def hook_param_receiver?(receiver, name)
+        receiver.is_a?(Prism::LocalVariableReadNode) && receiver.name == name
+      end
+
+      # A hook-body call that may mix into the parameter's singleton class without a plain `base.extend(…)`:
+      # `base.send(:extend, M)` (or `__send__` / `public_send`), `base.singleton_class.include(M)` / `prepend(M)`, and a
+      # `class_eval` / `instance_eval` / `module_eval`-family call on the parameter, whose block runs with it as `self`.
+      def hook_singleton_reshape?(node, name)
+        receiver = node.receiver
+        if HOOK_SEND_CALLS.include?(node.name)
+          send_extend?(node) && hook_param_receiver?(receiver, name)
+        elsif HOOK_EVAL_CALLS.include?(node.name)
+          hook_param_receiver?(receiver, name)
+        else
+          %i[include prepend].include?(node.name) && receiver.is_a?(Prism::CallNode) &&
+            receiver.name == :singleton_class && hook_param_receiver?(receiver.receiver, name)
+        end
+      end
+
+      HOOK_EVAL_CALLS = %i[class_eval class_exec module_eval module_exec instance_eval instance_exec].freeze
+      private_constant :HOOK_EVAL_CALLS
+
+      # `send(:extend, …)`, `__send__` or `public_send`, on whatever receiver.
+      def send_extend?(node)
+        first = node.arguments&.arguments&.first
+        HOOK_SEND_CALLS.include?(node.name) && first.is_a?(Prism::SymbolNode) && first.unescaped == "extend"
+      end
+
+      HOOK_SEND_CALLS = %i[send __send__ public_send].freeze
+      private_constant :HOOK_SEND_CALLS
+
+      # Records each constant argument as written and answers whether every argument was one.
+      def record_hook_extend_arguments(node, owner, tables, hook)
+        arguments = node.arguments&.arguments || []
+        complete = !arguments.empty?
+        arguments.each do |argument|
+          written = Source::ConstantPath.qualified_name_or_nil(argument)
+          next complete = false if written.nil?
+
+          key = [Scope::DiscoveryIndex::ENVELOPE_HOOK_EXTEND_KIND, written, hook]
           record_envelope(tables.envelopes, owner, key, Source::ParameterEnvelope::OPAQUE)
         end
+        complete
+      end
+
+      def record_hook_extend_open(owner, tables, hook)
+        key = [Scope::DiscoveryIndex::ENVELOPE_HOOK_EXTEND_OPEN_KIND, hook]
+        record_envelope(tables.envelopes, owner, key, Source::ParameterEnvelope::OPAQUE)
       end
 
       HOOK_EXTEND_DEFS = %i[included prepended].to_set.freeze
@@ -5098,7 +5204,10 @@ module Rigor
       # reader resolves and reads it. The walk keeps recording the same `def` on the module itself as before. A call on
       # `self` in an `included do … end` or `prepended do … end` block takes a
       # `[ENVELOPE_HOOK_BODY_CALL_KIND, hook, name]` entry, since Ruby runs that block in the includer's class body.
-      def record_concern_class_methods(node, child_prefix, methods_acc)
+      #
+      # Issue #1592 — the `def` node is filed on `Owner::ClassMethods` too, so the includer's singleton resolution
+      # chain, which holds that module, answers a class-side call with the `def`'s own return type.
+      def record_concern_class_methods(node, child_prefix, methods_acc, def_nodes_acc)
         return unless node.is_a?(Prism::ModuleNode) && concern_body?(node.body, child_prefix)
 
         owner = child_prefix.join("::")
@@ -5111,15 +5220,28 @@ module Rigor
           if statement.name == :class_methods
             each_class_methods_def(statement.block.body) do |def_node|
               record_def_method(def_node, class_methods_prefix, false, methods_acc.at(def_node))
+              record_def_node(def_node, class_methods_prefix, false, def_nodes_acc)
               record_def_body_evidence(def_node, class_methods_prefix, methods_acc, :instance)
             end
           elsif CONCERN_HOOK_BLOCKS.include?(statement.name)
-            each_self_call(statement.block.body) do |call|
-              entry = [Scope::DiscoveryIndex::ENVELOPE_HOOK_BODY_CALL_KIND, statement.name, call.name]
-              record_envelope(methods_acc.at(call).envelopes, owner, entry, Source::ParameterEnvelope::OPAQUE)
-            end
+            record_concern_hook_block(statement, owner, methods_acc)
           end
         end
+      end
+
+      # Issue #1592 — an `extend` on `self` in the block extends the includer as `base.extend` in a hook does, so it
+      # records the same entries, named by the block's hook ({#record_hook_extends}), and any `extend` nested in the
+      # block, a `class << self` mixin or a `send(:extend, …)` there is open.
+      def record_concern_hook_block(statement, owner, methods_acc)
+        body = statement.block.body
+        each_self_call(body) do |call|
+          entry = [Scope::DiscoveryIndex::ENVELOPE_HOOK_BODY_CALL_KIND, statement.name, call.name]
+          record_envelope(methods_acc.at(call).envelopes, owner, entry, Source::ParameterEnvelope::OPAQUE)
+        end
+        return if body.nil?
+
+        target = ->(call) { call.receiver.nil? || call.receiver.is_a?(Prism::SelfNode) }
+        scan_hook_body(body, target, owner, methods_acc.at(statement), statement.name) { |call| send_extend?(call) }
       end
 
       CONCERN_HOOK_BLOCKS = %i[included prepended].to_set.freeze
@@ -8668,6 +8790,20 @@ module Rigor
         VISIBILITY_TOGGLES.include?(name) ? [name, arguments] : nil
       end
 
+      # Issue #1592 — a concern's `class_methods do … end` block is a `module_eval` of `Owner::ClassMethods`, whose
+      # visibility starts public: its `def`s' visibilities are recorded on that module too, as its `def`s are.
+      def walk_class_methods_visibilities(node, child_prefix, accumulator)
+        return unless node.is_a?(Prism::ModuleNode) && concern_body?(node.body, child_prefix)
+
+        node.body.body.each do |statement|
+          next unless block_statement?(statement) && statement.name == :class_methods && statement.block.body
+
+          accumulator.body do
+            walk_method_visibilities(statement.block.body, [*child_prefix, "ClassMethods"], false, :public, accumulator)
+          end
+        end
+      end
+
       # rubocop:disable-next Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity, Metrics/AbcSize
       def walk_method_visibilities(node, qualified_prefix, in_singleton_class, current_visibility, accumulator, # rubocop:disable Metrics/ParameterLists
                                    def_owner_prefix = nil, singleton_cref: false,
@@ -8691,6 +8827,7 @@ module Rigor
                 walk_method_visibilities(node.body, body_prefix, false, :public,
                                          accumulator, nil, singleton_cref: child_cref)
               end
+              walk_class_methods_visibilities(node, child_prefix, accumulator) unless child_cref
             end
             return current_visibility
           end

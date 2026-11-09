@@ -1,0 +1,5 @@
+- **[check]** `call.undefined-method` no longer fires on a class-side call to a method that a module the class includes extends it with through a hook. ([#2996](https://github.com/rigortype/rigor/pull/2996))
+  - The hook can be an `ActiveSupport::Concern`'s `class_methods do … end` block or `module ClassMethods`, an `extend` in its `included do … end` block (`prepended do … end` for a prepending class), or a `self.included(base) = base.extend(M)` hook.
+  - The call types from the module's method, ahead of a same-named class method of the superclass, as Ruby resolves it.
+  - A prepended concern's `ClassMethods` answers ahead of the class's own class methods.
+  - The call types `Dynamic` where those modules' order against the class's own `extend`s changes the answer, where the hook may extend with a module no constant names or may skip its `extend`, and where the module's method is private.

@@ -1,9 +1,9 @@
 # The concern self-call walk stops at a named list of Rails callback macros, not at a callback-shaped name
 
-- **PR:** (this lane's PR)
+- **PR:** none
 - **Issue:** [#3000](https://github.com/rigortype/rigor/issues/3000)
 - **Class:** open-choice
-- **Precedent:** `Effects::FrameworkUnits`' named callback lists; AGENTS.md "false positives outrank" rule
+- **Precedent:** [#2999](https://github.com/rigortype/rigor/pull/2999)
 - **Decided:** 2026-11-09
 
 ## Background
@@ -23,7 +23,8 @@ definer there and reported `undefined method`.
 ## Decision
 
 The list (`ScopeIndexer::CALLBACK_MACROS`), read from Rails 8.1.3's ActiveModel, ActiveRecord, ActiveJob,
-AbstractController, ActionMailer and ActionCable callback definitions. A name it misses is entered.
+AbstractController, ActionMailer and ActionCable callback definitions. A name it misses is entered. This keeps #2999's named stops (`on_load`, `Proc.new`)
+and the repository rule that a lost report is cheaper than a false positive.
 
 ## To undo
 

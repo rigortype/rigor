@@ -50,6 +50,9 @@ module Rigor
       CONSTANT_SPELLING = /\A(?:::)?[A-Z]\w*(?:::[A-Z]\w*)*\z/
       # Separates the qualifications of a {.candidate_key}; no constant name holds it.
       CANDIDATE_SEPARATOR = "|"
+      # Marks a candidate key whose code runs on the constant's own value's module ({.root_constant}).
+      OBJECT_MARK = "@"
+      COPIES = %i[dup clone itself].to_set.freeze
       BARRIERS = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
       NONE = [].freeze
       # Every name {.foreign?} can answer true for, so any other call returns at one Set probe.
@@ -200,13 +203,38 @@ module Rigor
       # so the code a barred block reenters runs on the constant's instances or on the object it holds; the
       # cross-file census files it under the key, and a class whose census joins the constant the key resolves to (an
       # ancestor, an alias, an instance constant of it) sees the write.
+      #
+      # Review round 2 of #3001 — a `.class` or `.singleton_class` taken of the constant's own value (`INST.class`,
+      # `X.singleton_class`, through `dup` / `clone` / `itself`) names the module of that object, which is a class
+      # instance only when the constant binds one; the key then carries {OBJECT_MARK}, and the join credits it only
+      # when the constant resolves to an instance binding (`INST = K.new`). One taken of a class object (`X.class` of a
+      # `.class`, `X.new.class.singleton_class`) names `Class` or a metaclass, whose methods no instance runs: nil.
       def root_constant(receiver, nesting)
         node = unwrap(receiver)
-        node = unwrap(node.receiver) while node.is_a?(Prism::CallNode) && FOREIGN_PRESERVING.include?(node.name)
-        return unless node.is_a?(Prism::ConstantReadNode) || node.is_a?(Prism::ConstantPathNode)
+        object = false
+        while node.is_a?(Prism::CallNode) && FOREIGN_PRESERVING.include?(node.name)
+          inner = unwrap(node.receiver)
+          if MODULE_OF_INSTANCE.include?(node.name)
+            value = through_copies(inner)
+            return if value.is_a?(Prism::CallNode) && MODULE_OF_INSTANCE.include?(value.name)
 
-        candidate_key(node.slice, nesting)
+            object = true if constant_node?(value)
+          end
+          node = inner
+        end
+        return unless constant_node?(node)
+
+        key = candidate_key(node.slice, nesting)
+        object ? "#{OBJECT_MARK}#{key}" : key
       end
+
+      # `node` with `dup`, `clone` and `itself` calls looked through: the object they answer has the same class.
+      def through_copies(node)
+        node = unwrap(node.receiver) while node.is_a?(Prism::CallNode) && COPIES.include?(node.name)
+        node
+      end
+
+      def constant_node?(node) = node.is_a?(Prism::ConstantReadNode) || node.is_a?(Prism::ConstantPathNode)
 
       # Review round 1 of #3001 — the qualifications a constant spelled `spelling` may have under the lexical
       # `nesting` (the enclosing class and module names), nearest first as Ruby's lookup tries them, joined by
@@ -220,15 +248,18 @@ module Rigor
       end
 
       # Issue #2983 — for a constant write `C = K` or `C = K.new` / `K.allocate` under the lexical `nesting`, the
-      # census entry `[:binds_class, key, name]`: `K`'s {.candidate_key} and `C`'s qualified name (a path write's
-      # as written), else nil. `C` is an alias or an instance of the class `K` resolves to.
+      # census entry `[:binds_class, key, name, kind]`: `K`'s {.candidate_key}, `C`'s qualified name (a path write's
+      # as written) and `:instance` for a constructor or `:alias`, else nil. `C` is an alias or an instance of the
+      # class `K` resolves to.
       def binding_entry(node, nesting)
         value = unwrap(node.value)
-        value = value.receiver if value.is_a?(Prism::CallNode) && CONSTRUCTORS.include?(value.name) && value.block.nil?
-        return unless value.is_a?(Prism::ConstantReadNode) || value.is_a?(Prism::ConstantPathNode)
+        instance = value.is_a?(Prism::CallNode) && CONSTRUCTORS.include?(value.name) && value.block.nil?
+        value = value.receiver if instance
+        return unless constant_node?(value)
 
         name = node.is_a?(Prism::ConstantWriteNode) ? [*nesting, node.name].join("::") : node.target.slice
-        [:binds_class, candidate_key(value.slice, nesting), name.delete_prefix("::")].freeze
+        [:binds_class, candidate_key(value.slice, nesting), name.delete_prefix("::"),
+         instance ? :instance : :alias].freeze
       end
 
       # Issue #2983 — the module a String `class_eval` / `module_eval` may define methods on, for

@@ -16,9 +16,9 @@ RSpec.describe "ivar census: constant-rooted class_eval receivers (#2983)", type
   def reader_body = self.class.reader_body
   def definers = self.class.definers
 
-  def reported(files)
-    analyze(files: files).diagnostics.select { |d| d.rule.to_s == "call.undefined-method" }
-                         .map { |d| [File.basename(d.path), d.line] }.sort
+  def reported(files, sig: {})
+    analyze(files: files, sig: sig).diagnostics.select { |d| d.rule.to_s == "call.undefined-method" }
+                                   .map { |d| [File.basename(d.path), d.line] }.sort
   end
 
   # `setup` precedes the class, `header` follows `class K`, `after` follows the class (an alias or instance
@@ -167,14 +167,35 @@ RSpec.describe "ivar census: constant-rooted class_eval receivers (#2983)", type
        "module N\n  class Anc; end\n  class K < Anc\n    def poke = Anc.class_eval { %s }\n  end\nend\n", 1, []],
     "a namespaced class takes the root its nesting resolves" =>
       ["module N\n  class Anc; end\n  class K < Anc\n#{plain}  end\nend\n",
-       "module N\n  class K\n    def poke = Anc.class_eval { %s }\n  end\nend\n", '"a"', []]
-  }.each do |label, (reader, writer, value, expected)|
+       "module N\n  class K\n    def poke = Anc.class_eval { %s }\n  end\nend\n", '"a"', []],
+    # Review round 2: a nearer candidate only a signature declares is the constant Ruby finds, so the top-level
+    # project `Anc` takes nothing; without the signature it is `Anc` and its subclass raises on 1.
+    "a nearer candidate only a signature declares shadows a top-level project class" =>
+      ["class Anc; end\nclass TopK < Anc\n#{narrowing}end\n",
+       "module N\n  class K\n    def poke = Anc.class_eval { %s }\n  end\nend\n", 1, [],
+       { "n.rbs" => "module N\n  class Anc\n  end\nend\n" }],
+    "the top-level project class takes the write when no signature declares a nearer one" =>
+      ["class Anc; end\nclass TopK < Anc\n#{narrowing}end\n",
+       "module N\n  class K\n    def poke = Anc.class_eval { %s }\n  end\nend\n", 1, [["a.rb", 4]]],
+    # Review round 2: the singleton class of a class object, `Class`, and a class object's metaclass hold methods no
+    # instance runs, so the class's own `@x` stays nil.
+    "a class constant's singleton class credits no instance" =>
+      ["class Other\n#{narrowing}end\n", "class K\n  def poke = Other.singleton_class.class_eval { %s }\nend\n", 1, []],
+    "a class constant's class credits no instance" =>
+      ["class Other\n#{narrowing}end\n", "class K\n  def poke = Other.class.class_eval { %s }\nend\n", 1, []],
+    "a new instance's class's singleton class credits no instance" =>
+      ["class Other\n#{narrowing}end\n",
+       "class K\n  def poke = Other.new.class.singleton_class.class_eval { %s }\nend\n", 1, []],
+    "a copied class constant's singleton class credits no instance" =>
+      ["class Other\n#{narrowing}end\n", "class K\n  def poke = Other.dup.singleton_class.class_eval { %s }\nend\n", 1,
+       []]
+  }.each do |label, (reader, writer, value, expected, sig)|
     definers.each do |definer, code|
       [false, true].each do |cross|
         it "#{label} (#{definer}, #{cross ? 'cross-file' : 'single-file'})" do
           poke = format(writer, code.sub('"a"', value.to_s))
           files = cross ? { "a.rb" => reader, "b.rb" => poke } : { "a.rb" => reader + poke }
-          expect(reported(files)).to eq(expected)
+          expect(reported(files, sig: sig || {})).to eq(expected)
         end
       end
     end

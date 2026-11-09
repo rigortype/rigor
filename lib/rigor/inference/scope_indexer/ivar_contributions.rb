@@ -45,7 +45,9 @@ module Rigor
         # The one implicit root a class whose superclass chain stops at `BasicObject` keeps.
         BASIC_ROOTS = %w[BasicObject].freeze
         SEPARATOR = CensusForeignBlock::CANDIDATE_SEPARATOR
-        private_constant :TABLE, :EMPTY, :NONE, :BINDINGS, :CANDIDATE_KEYS, :ANCESTOR_ROOTS, :BASIC_ROOTS, :SEPARATOR
+        OBJECT_MARK = CensusForeignBlock::OBJECT_MARK
+        private_constant :TABLE, :EMPTY, :NONE, :BINDINGS, :CANDIDATE_KEYS, :ANCESTOR_ROOTS, :BASIC_ROOTS, :SEPARATOR,
+                         :OBJECT_MARK
 
         module_function
 
@@ -120,13 +122,23 @@ module Rigor
         # to its last (top-level) spelling, as Ruby's lexical lookup finds the nearest. Answers `[aliases, bound]`:
         # `{ resolved owner => [candidate key, ...] }` over the census's owners, and `{ resolved class => [bound
         # constant, ...] }` over its `[:binds_class, …]` entries.
+        #
+        # Review round 2: a candidate a signature declares (`sig/`, a gem's RBS) counts as existing too, so a nearer
+        # `N::Anc` only RBS knows wins over a top-level project `Anc` and credits no project class; and a key carrying
+        # {OBJECT_MARK} joins only when it resolves to an instance binding.
         def resolution(scope, table)
           bindings = table[BINDINGS] || NONE
-          constants = bindings.to_set(&:last)
+          constants = bindings.to_set { |_, name, _| name }
+          instances = bindings.filter_map { |_, name, kind| name if kind == :instance }.to_set
           bound = {}
-          bindings.each { |key, name| (bound[resolve(scope, key, constants)] ||= []) << name }
+          bindings.each { |key, name, _| (bound[resolve(scope, key, constants)] ||= []) << name }
           aliases = {}
-          (table[CANDIDATE_KEYS] || NONE).each { |key| (aliases[resolve(scope, key, constants)] ||= []) << key }
+          (table[CANDIDATE_KEYS] || NONE).each do |key|
+            resolved = resolve(scope, key.delete_prefix(OBJECT_MARK), constants)
+            next if key.start_with?(OBJECT_MARK) && !instances.include?(resolved)
+
+            (aliases[resolved] ||= []) << key
+          end
           [aliases, bound]
         end
 
@@ -134,8 +146,18 @@ module Rigor
           candidates = key.split(SEPARATOR)
           candidates.find do |name|
             constants.include?(name) || scope.discovered_classes.key?(name) ||
-              scope.discovered_superclasses.key?(name) || scope.discovered_includes.key?(name)
+              scope.discovered_superclasses.key?(name) || scope.discovered_includes.key?(name) || declared?(scope, name)
           end || candidates.last
+        end
+
+        # Whether a loaded signature declares `name` as a class, module or constant.
+        def declared?(scope, name)
+          loader = scope.environment&.rbs_loader
+          return false if loader.nil?
+
+          loader.class_known?(name) || !loader.constant_declaration(name).nil?
+        rescue StandardError
+          false
         end
 
         # Issue #2983 — what the owners' string `class_eval`s contribute to every ivar (`[:own_write_type, owner, :*,
@@ -214,13 +236,14 @@ module Rigor
           table
         end
 
-        # Issue #2983 — `table[BINDINGS]` lists `[class candidate key, constant name]` over the census's `[:binds_class,
-        # …]` entries, and `table[CANDIDATE_KEYS]` the owners that are candidate keys; no class is named by a Symbol.
+        # Issue #2983 — `table[BINDINGS]` lists `[class candidate key, constant name, kind]` over the census's
+        # `[:binds_class, …]` entries, and `table[CANDIDATE_KEYS]` the owners that are candidate keys; no class is named
+        # by a Symbol.
         def build_table(census)
           table = {}
           canonical_paths = {}
           census.each do |entry|
-            next (table[BINDINGS] ||= []) << [entry[1], entry[2]] if entry[0] == :binds_class
+            next (table[BINDINGS] ||= []) << entry.drop(1) if entry[0] == :binds_class
             next unless entry.size == 5 && entry[0] == :own_write_type
 
             by_path = (owner_slot(table, entry[1])[entry[2]] ||= {})
@@ -231,12 +254,12 @@ module Rigor
 
         def owner_slot(table, owner)
           table[owner] ||= begin
-            (table[CANDIDATE_KEYS] ||= []) << owner if owner.include?(SEPARATOR)
+            (table[CANDIDATE_KEYS] ||= []) << owner if owner.include?(SEPARATOR) || owner.start_with?(OBJECT_MARK)
             {}
           end
         end
 
-        private_class_method :chain_owners, :ancestor_names, :basic_object_edge?, :resolution, :resolve,
+        private_class_method :chain_owners, :ancestor_names, :basic_object_edge?, :resolution, :resolve, :declared?,
                              :any_ivar_types, :contributed, :add_entry_types, :value_type, :canonical, :table,
                              :build_table, :owner_slot
       end

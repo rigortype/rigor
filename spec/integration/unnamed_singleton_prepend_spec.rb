@@ -46,7 +46,8 @@ RSpec.describe "an unnamed singleton-side prepend of the class's own (#3020)" do
 
   def zork(type) = "undefined method `zork' for #{type}"
 
-  # Ruby answers :a for each: `Ya` sits ahead of `#<Class:Kt>`.
+  # Ruby answers :a for each: `Ya` sits ahead of `#<Class:Kt>`. The `send` row is a guard: master declined that
+  # spelling before #3020, on another route.
   {
     "class << self; prepend(*MODS)" => "class << self\n    prepend(*MODS)\n  end",
     "singleton_class.prepend(*MODS)" => "singleton_class.prepend(*MODS)",

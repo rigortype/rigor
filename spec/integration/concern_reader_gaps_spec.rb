@@ -238,8 +238,8 @@ RSpec.describe "concern reader gaps (#3005)" do
     # Ruby answers 1: `Cs`'s body extends `Ot` with Concern, not `Cs` itself, so `Cs` is no concern and its
     # `class_methods` is its own DSL.
     it "does not read a module whose body extends another module with Concern" do
-      other = "module Ot\nend\nmodule Cs\n  def self.class_methods(&) = nil\n  Ot.send(:extend, ActiveSupport::Concern)\n" \
-              "  Ot.extend ActiveSupport::Concern\n#{class_methods}end\n"
+      extends = "  Ot.send(:extend, ActiveSupport::Concern)\n  Ot.extend ActiveSupport::Concern\n"
+      other = "module Ot\nend\nmodule Cs\n  def self.class_methods(&) = nil\n#{extends}#{class_methods}end\n"
       write_project({ "a_cs.rb" => other, "k.rb" => includer("Ks", "Cs") }, ["Ks.bar.zork"])
       expect(undefined_messages).to eq(["undefined method `zork' for 1"])
     end

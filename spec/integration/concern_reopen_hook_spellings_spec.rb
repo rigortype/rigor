@@ -93,6 +93,9 @@ RSpec.describe "reopened concern class_methods and hook spellings (#2997)" do
                       "k.rb" => "#{base_class}class Ku < Base\n  include Hu\nend\n" }, calls)
     end
 
+    # The `class << self` rows are guards: a `def` in that body already reached #2996's hook read as a singleton
+    # `def`, and the issue's report of it did not reproduce on this branch's base. So is the declining row for
+    # `def self.included and then class << self; def included`.
     {
       "define_singleton_method(:included) with a block" =>
         "module Hu\n  define_singleton_method(:included) { |base| base.extend(X) }\nend\n",

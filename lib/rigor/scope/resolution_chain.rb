@@ -189,18 +189,6 @@ module Rigor
         @memo[:hook_open_nodes] ||= @marks.filter_map { |mark| mark.node if mark.kind == :include_hook }.freeze
       end
 
-      # Issue #2991 — `[[node, raw], …]`: the module names the chain's marks list beside the wildcard, each with the
-      # class or module it was written on. An unrecorded `self.include M` or receiverless `send(:include, M)` lists `M`
-      # here and in no include table, so a reader that asks the tables for a method also asks these.
-      def listed_mixins
-        @memo[:listed_mixins] ||= @marks.flat_map do |mark|
-          mark.listed.filter_map { |raw| [mark.node, raw] unless MARKERS.include?(raw) }
-        end.uniq.freeze
-      end
-
-      MARKERS = ["*", "?"].freeze # Relevance::WILDCARD and Relevance::UNNAMED
-      private_constant :MARKERS
-
       # The ONE decision every first-definer reader makes: does `answer`, read off this chain, stand, or does
       # the reader answer what the walk this chain replaced answered ({MasterOrder})? Returns `:chain` or
       # `:master`.

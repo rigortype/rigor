@@ -198,14 +198,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer::MixinAccumulator do
       "include helper" => :include,
       "include(*MODS)" => :include,
       "include A, helper" => :include,
-      "send(:include, B)" => :include,
-      "public_send(:include, B)" => :include,
-      "__send__(:prepend, B)" => :include,
-      "self.include B" => :include,
-      "self.prepend B" => :include,
       "include(Module.new { include B })" => :include,
-      "send(:extend, B)" => :extend,
-      "self.extend B" => :extend,
       "extend helper" => :extend
     }.each do |statement, side|
       it "taints the #{side} side of the owner for `#{statement}`" do
@@ -216,6 +209,51 @@ RSpec.describe Rigor::Inference::ScopeIndexer::MixinAccumulator do
         expect(table.keys - [side]).to eq([]) unless statement.include?("A, helper")
         expect(index_of(source).fetch(:includes)).to include("C" => include("A"))
       end
+    end
+
+    # Issue #2995 — `self.include B` and a receiverless or `self.` `send(:include, B)` are the same call on the same
+    # `self` as `include B`: each records its module under the class, positioned where the bare call would be, in the
+    # include table and (for `prepend`) the prepend table, or in the extend table for `extend`. Ruby 4.0.5 puts `B` in
+    # `C.ancestors` (or `C.singleton_class.ancestors`) at the same place for every spelling.
+    {
+      "self.include B" => [:includes, %w[B A]],
+      "send(:include, B)" => [:includes, %w[B A]],
+      "self.send(:include, B)" => [:includes, %w[B A]],
+      "public_send(:include, B)" => [:includes, %w[B A]],
+      "self.prepend B" => [:prepends, ["B"]],
+      "__send__(:prepend, B)" => [:prepends, ["B"]],
+      "self.extend B" => [:extends, %w[B E]],
+      "send(:extend, B)" => [:extends, %w[B E]],
+      "self.__send__(:extend, B)" => [:extends, %w[B E]]
+    }.each do |statement, (table, recorded)|
+      it "records `#{statement}` on the class, positioned" do
+        source = "class C\n  include A\n  extend E\n  #{statement}\nend\n"
+
+        expect(unpositioned(source)).to eq({})
+        expect(index_of(source).fetch(table)).to eq("C" => recorded)
+      end
+    end
+
+    it "records `self.include B` and `send(:prepend, B)` inside `class << self` on the extend side" do
+      source = "class C\n  class << self\n    self.include B\n    send(:prepend, D)\n  end\nend\n"
+
+      expect(unpositioned(source)).to eq({})
+      expect(index_of(source).fetch(:extends)).to eq("C" => %w[D B])
+    end
+
+    # The call runs only when `setup` does, so the edge is recorded as a bare `include B` there is: in the set, with
+    # no position.
+    it "records `send(:include, B)` in a method body unpositioned" do
+      source = "class C\n  include A\n  def self.setup = send(:include, B)\nend\n"
+
+      expect(unpositioned(source)).to eq("C" => { include: ["B"] })
+      expect(index_of(source).fetch(:includes)).to eq("C" => %w[B A])
+    end
+
+    it "keeps `Const.send(:extend, B)` a taint" do
+      source = "class K; end\nclass C\n  K.send(:extend, B)\nend\n"
+
+      expect(unpositioned(source)).to eq("K" => wild(:extend))
     end
 
     # Issue #2094 — the constant-receiver and `singleton_class` forms record their module on the extend side,

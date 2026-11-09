@@ -399,8 +399,9 @@ module Rigor
           default_scope.discovered_includes.merge(file[:includes]) do |_class, cross_file, per_file|
             (per_file + cross_file).uniq
           end,
+          # ADR-129 G4 — each merged list is frozen as the per-file walk's lists are ({#freeze_mixin_lists}).
           default_scope.discovered_prepends.merge(file[:prepends]) do |_class, cross_file, per_file|
-            (per_file + cross_file).uniq
+            (per_file + cross_file).uniq.freeze
           end,
           file[:unpositioned]
         ]
@@ -5360,9 +5361,10 @@ module Rigor
 
       # Issue #2992 — `Concern#append_features` (or `prepend_features`) of a concern `include`d (or `prepend`ed) into a
       # module that has already run `extend ActiveSupport::Concern` records it as a dependency of that module and
-      # includes nothing; the module's final includer includes it. Only a constant argument of a receiverless
-      # `include` / `prepend` written as a statement of the body AFTER the body's own `extend` is provably such a
-      # dependency: one written ahead of it, or in a reopening without it, may run first and is an ordinary include.
+      # includes nothing; the module's final includer includes it. Only a constant argument of an `include` /
+      # `prepend` on the module's own `self` ({#concern_dependency_arguments}) written as a statement of the body
+      # AFTER the body's own `extend` is provably such a dependency: one written ahead of it, or in a reopening
+      # without it, may run first and is an ordinary include.
       # Each such constant takes a `[ENVELOPE_CONCERN_DEPENDENCY_KIND, written]` entry; whether it names a concern is
       # the reader's question. One statement's constants are recorded last first: `include A, B` runs
       # `B.append_features` first, so the dependencies list it ahead, and a reader that reverses the entries to put a
@@ -5370,10 +5372,10 @@ module Rigor
       def record_concern_dependencies(statements, child_prefix, owner, methods_acc)
         extend_at = statements.index { |statement| concern_extend?(statement, child_prefix) }
         statements.drop(extend_at + 1).each do |statement|
-          next unless statement.is_a?(Prism::CallNode) && statement.receiver.nil? &&
-                      MIXIN_CALL_NAMES.include?(statement.name) && statement.block.nil?
+          arguments = concern_dependency_arguments(statement)
+          next if arguments.nil?
 
-          (statement.arguments&.arguments || []).reverse_each do |argument|
+          arguments.reverse_each do |argument|
             written = Source::ConstantPath.qualified_name_or_nil(argument)
             next if written.nil?
 
@@ -5381,6 +5383,17 @@ module Rigor
             record_envelope(methods_acc.at(statement).envelopes, owner, key, Source::ParameterEnvelope::OPAQUE)
           end
         end
+      end
+
+      # The arguments of a statement that `include`s or `prepend`s on the module's own `self`, or nil. Issue #2995 —
+      # `self.include Dep` and a receiverless or `self.` `send(:include, Dep)` run the same `append_features` as a
+      # bare `include Dep`, and the include walk records them as it does.
+      def concern_dependency_arguments(statement)
+        return nil unless statement.is_a?(Prism::CallNode) && statement.block.nil? &&
+                          lexical_self_receiver?(statement.receiver)
+
+        kind, arguments, = mixin_call_view(statement)
+        arguments if MIXIN_CALL_NAMES.include?(kind)
       end
 
       # Issue #1592 — an `extend` on `self` in the block extends the includer as `base.extend` in a hook does, so it
@@ -7878,23 +7891,18 @@ module Rigor
       # Issue #2991 — an unrecorded `include` / `prepend` that reaches the instance side (its receiver is not a
       # `singleton_class` call) leaves that side's module SET unknown when an argument is not a constant
       # (`include(*MODS)`, `include helper`) or the receiver is a hook parameter (`base.include M`), which lists
-      # {MixinAccumulator::UNNAMED}. When every argument is a constant (`self.include M`, a receiverless
-      # `send(:include, M)`) the set is known but no table records it under the owner, so the names are listed after
-      # the wildcard for the reader to ask. A `Module.new { … }` argument keeps its #2975 reading and lists nothing. A
-      # hook's `base.extend M` or `base.singleton_class.include M` taints the instance side's order alone: it mixes
-      # nothing into it.
+      # {MixinAccumulator::UNNAMED}. A `Module.new { … }` argument keeps its #2975 reading. A hook's `base.extend M` or
+      # `base.singleton_class.include M` taints the instance side's order alone: it mixes nothing into it.
+      #
+      # Issue #2995 — an instance-side call whose arguments are all constants is recorded wherever the walk names its
+      # owner (`self.include M` and a receiverless `send(:include, M)` included), so none reaches here with a module
+      # the tables do not hold. The extends walk's taint of `Const.include M` inside `class << self` is the one
+      # constant-argument call that does, and the include walk records that edge under `Const`.
       def taint_unrecorded_mixin(node, kind, arguments, effects, accumulator)
-        unnamed = false
-        names = nil
-        if INSTANCE_MIXIN_NAMES.include?(kind) && !singleton_class_eval_receiver?(node.receiver)
-          names = arguments.filter_map { |arg| Source::ConstantPath.qualified_name(arg) }
-          unnamed = hook_parameter_receiver?(node.receiver, accumulator) ||
-                    arguments.any? { |arg| Source::ConstantPath.qualified_name(arg).nil? && !module_new_call?(arg) }
-        end
-        effects.each do |owner, side|
-          instance = side == :include
-          accumulator.taint(owner, side, unnamed: unnamed && instance, names: instance && !unnamed ? names : nil)
-        end
+        unnamed = INSTANCE_MIXIN_NAMES.include?(kind) && !singleton_class_eval_receiver?(node.receiver) &&
+                  (hook_parameter_receiver?(node.receiver, accumulator) ||
+                   arguments.any? { |arg| Source::ConstantPath.qualified_name(arg).nil? && !module_new_call?(arg) })
+        effects.each { |owner, side| accumulator.taint(owner, side, unnamed: unnamed && side == :include) }
       end
 
       # A hook parameter itself (`base` in `def self.included(base)`): its class is the includer, which the walk cannot
@@ -7903,17 +7911,28 @@ module Rigor
         receiver.is_a?(Prism::LocalVariableReadNode) && accumulator.hook_local?(receiver.name)
       end
 
-      # Records the instance-side edges of a call {#mixin_call_recorded?} accepts. False when it recorded
-      # nothing — the caller then taints the owner instead. `view` is {#mixin_call_view}'s, so
-      # `Integer.send(:include, Ext)` records `Ext` as `Integer.include(Ext)` does (issue #1722).
+      # Records the instance-side edges of an `include` / `prepend` call. False when it recorded nothing — the caller
+      # then taints the owner instead. `view` is {#mixin_call_view}'s, so `Integer.send(:include, Ext)` records `Ext` as
+      # `Integer.include(Ext)` does (issue #1722).
+      #
+      # A receiverless `include` / `prepend` needs an enclosing declaration to file the edge under, and the RECEIVER
+      # form (`Base.prepend(Loud)`, issue #1123; `Integer.include(Ext)` and `Integer.send(:include, Ext)`, issue
+      # #1722) files it under the class the receiver names. A receiver-form edge is unpositioned wherever it is written
+      # ({MixinAccumulator#note}), so a reader that depends on ORDER declines on it, while the set-shaped readers
+      # (undefined-method suppression, arity, visibility) see the module as they see an in-body `include`.
+      #
+      # Issue #2995 — `self.include M`, `self.prepend M` and a receiverless or `self.` `send` / `public_send` /
+      # `__send__(:include | :prepend, M)` are the same call on the same `self` as a bare `include M`, so they file
+      # the edge under the enclosing class as it does, positioned where it would be ({MixinAccumulator#note}). The
+      # walk names that `self` exactly where it names a bare `include`'s: `current_class` is nil wherever it cannot.
       def instance_mixin_recorded?(node, view, qualified_prefix, current_class, accumulator)
-        kind, arguments, via_send = view
-        return false unless mixin_call_recorded?(node, kind, via_send, current_class)
+        kind, arguments, = view
+        return false unless mixin_call_recorded?(kind)
 
         targets = arguments.filter_map { |arg| Source::ConstantPath.qualified_name(arg) }
         return false if targets.empty?
 
-        owner = node.receiver.nil? ? current_class : prepend_call_receiver(node, qualified_prefix)
+        owner = lexical_self_receiver?(node.receiver) ? current_class : prepend_call_receiver(node, qualified_prefix)
         return false if owner.nil?
 
         write_mixin_targets(accumulator, owner, targets, prepend: kind == :prepend)
@@ -8085,19 +8104,8 @@ module Rigor
         list.unshift(*(prepend ? targets : targets.reject { |target| list.include?(target) }))
       end
 
-      # Whether a mixin call contributes to the tables at all: a receiverless `include` / `prepend` needs an
-      # enclosing declaration to file the edge under, and the RECEIVER form (`Base.prepend(Loud)`, issue #1123;
-      # `Integer.include(Ext)` and `Integer.send(:include, Ext)`, issue #1722) files it under the class the
-      # receiver names. A receiver-form edge is unpositioned wherever it is written ({MixinAccumulator#note}), so
-      # a reader that depends on ORDER declines on it, while the set-shaped readers (undefined-method
-      # suppression, arity, visibility) see the module as they see an in-body `include`. A receiverless `send`
-      # stays a taint: the walk does not resolve its `self`.
-      def mixin_call_recorded?(node, kind, via_send, current_class)
-        return false unless MIXIN_CALL_NAMES.include?(kind)
-        return !via_send && !current_class.nil? if node.receiver.nil?
-
-        true
-      end
+      # Whether a mixin call's kind reaches the instance-side tables: `include` and `prepend`.
+      def mixin_call_recorded?(kind) = MIXIN_CALL_NAMES.include?(kind)
 
       # Issue #1697 — a receiverless `include M` written as a statement of the file's own top level is
       # `main.include`, which is `Object.include`: it mixes M into `Object`. It is recorded under its own
@@ -8111,9 +8119,13 @@ module Rigor
       # its `self` may not be `main` (a `describe do include M end` or `class_exec` block rebinds it, while
       # `[1].each do include M end` does not, and the walk cannot tell them apart), and it may not run. `main`
       # has no `prepend`, and a top-level `extend M` reaches `main`'s singleton alone, so neither is recorded.
+      #
+      # Issue #2995 — `self.include M`, a receiverless or `self.` `send(:include, M)` and its `__send__` twin are the
+      # same `main.include`. `public_send(:include, M)` is not: `main`'s `include` is private, so it raises.
       def toplevel_include_owner(node, qualified_prefix, current_class, accumulator)
         return nil unless current_class.nil? && qualified_prefix.empty?
-        return nil unless node.receiver.nil? && node.name == :include
+        return nil unless lexical_self_receiver?(node.receiver) && node.name != :public_send
+        return nil unless mixin_call_view(node)&.first == :include
 
         accumulator.program_statement?(node) ? ObjectMixins::TOPLEVEL_INCLUDE_KEY : nil
       end
@@ -8544,8 +8556,9 @@ module Rigor
         effects = mixin_effects(node, kind, qualified_prefix, current_class, accumulator, in_singleton: in_singleton)
                   .select { |_owner, side| side == :extend || in_singleton }
         return if effects.empty?
-        return if !via_send && singleton_mixin_recorded?(node, kind, qualified_prefix, current_class, accumulator,
-                                                         in_singleton)
+        # A `send` spelling is recorded only on the lexical `self` (#2995); `Const.send(:extend, M)` stays a taint.
+        return if (!via_send || lexical_self_receiver?(node.receiver)) &&
+                  singleton_mixin_recorded?(node, kind, qualified_prefix, current_class, accumulator, in_singleton)
 
         # Issue #2991 — as in {#record_mixin_call}: an unrecorded instance-side call (a hook's `base.include M` written
         # in `class << self`) lists its names, or the unnamed marker.
@@ -8653,10 +8666,12 @@ module Rigor
         accumulator.note(node, current_class, :extend, [current_class], complete: true)
       end
 
-      # Records the singleton-side edges of a receiverless `extend` (or, inside `class << self`, `include` /
-      # `prepend`). False when it recorded nothing.
+      # Records the singleton-side edges of a receiverless or `self.` `extend` (or, inside `class << self`,
+      # `include` / `prepend`), and of their `send` spellings (#2995). False when it recorded nothing.
       def singleton_mixin_recorded?(node, kind, qualified_prefix, current_class, accumulator, in_singleton)
-        return receiver_extend_recorded?(node, kind, qualified_prefix, accumulator) if node.receiver
+        unless lexical_self_receiver?(node.receiver)
+          return receiver_extend_recorded?(node, kind, qualified_prefix, accumulator)
+        end
         return false unless current_class
         return false unless in_singleton ? MIXIN_CALL_NAMES.include?(kind) : kind == :extend
 
@@ -8682,9 +8697,11 @@ module Rigor
       # (`extend A; extend B` → singleton ancestors `[B, A]`) while the arguments of a single
       # `extend A, B` keep call order (`[A, B]`). Prepending each call's argument list preserves both,
       # and consumers iterating the list forward read the same order the singleton ancestry searches.
+      #
+      # The arguments are {#mixin_call_view}'s, so a `send(:extend, M)` (#2995) reads `M` and not its name literal.
       def record_extend_targets(node, current_class, accumulator)
         targets = []
-        arguments = node.arguments&.arguments || []
+        arguments = mixin_call_view(node)[1]
         arguments.each do |arg|
           target = arg.is_a?(Prism::SelfNode) ? current_class : Source::ConstantPath.qualified_name(arg)
           targets << target if target
@@ -9770,19 +9787,30 @@ module Rigor
         SURFACE_MIXIN_CALLS.include?(node.name) || SURFACE_MIXIN_HELPER.match?(node.name.to_s)
       end
 
+      # Issue #2995 — a `send` / `public_send` / `__send__` of `:include`, `:prepend` or `:extend` is that mixin call,
+      # which the mixin walk records as the bare call, so it is judged by its own arguments as the bare call is.
       def dynamic_surface_call?(node)
-        return true if SURFACE_EVAL_CALLS.include?(node.name) || SURFACE_SEND_CALLS.include?(node.name)
+        return true if SURFACE_EVAL_CALLS.include?(node.name)
+
+        if SURFACE_SEND_CALLS.include?(node.name)
+          kind, arguments, = mixin_call_view(node)
+          return kind.nil? || dynamic_mixin_arguments?(arguments)
+        end
 
         arguments = node.arguments&.arguments || []
         if SURFACE_NAMING_CALLS.include?(node.name)
           arguments.empty? || literal_method_name(arguments.first).nil?
         elsif surface_mixin_call?(node)
-          arguments.any? do |argument|
-            !(argument.is_a?(Prism::ConstantReadNode) || argument.is_a?(Prism::ConstantPathNode) ||
-              argument.is_a?(Prism::SelfNode))
-          end
+          dynamic_mixin_arguments?(arguments)
         else
           false
+        end
+      end
+
+      def dynamic_mixin_arguments?(arguments)
+        arguments.any? do |argument|
+          !(argument.is_a?(Prism::ConstantReadNode) || argument.is_a?(Prism::ConstantPathNode) ||
+            argument.is_a?(Prism::SelfNode))
         end
       end
 

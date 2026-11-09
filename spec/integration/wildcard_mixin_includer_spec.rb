@@ -3,11 +3,10 @@
 # Issue #2991 — a splatted `include(*MODS)` / `prepend(*MODS)`, or any other mixin call whose module no constant
 # names, means every name on the class's instance side may come from that module: `call.undefined-method` must not
 # fire on the class, nor on a subclass at any depth. `Scope::ResolutionChain` marks such a chain (`unnamed_mixin?`),
-# and the rule reads that mark. `self.include M1` and a receiverless `send(:include, M1)` record no module either,
-# until the walk records them (#2995), so the chain lists their constants (`listed_mixins`): a project module
-# there opens every name, and a module with no project declaration (`Comparable`) is asked RBS for the called
-# name. A mixin whose order alone is unknown (`include M1; prepend M1`, an opaque eval that mixes nothing into its
-# own `self`, the `wildcard_mixin?` mark) has its module recorded and must keep reporting. `sig/` declares every
+# and the rule reads that mark. `self.include M1` and a receiverless `send(:include, M1)` record their module as
+# `include M1` does (#2995), so they open nothing: the ordinary lookup reads `M1`. A mixin whose order alone is
+# unknown (`include M1; prepend M1`, an opaque eval that mixes nothing into its own `self`, the `wildcard_mixin?` mark)
+# has its module recorded and must keep reporting. `sig/` declares every
 # class so the rule runs. `Sup` defines a method of its own, so it is a project entry on its subclasses' chains, not
 # an external one (#2094), which already stands down on another route. Every row's Ruby behaviour was witnessed on
 # Ruby 4.0.5: each quiet call returns 1, and each reported call raises `NoMethodError`. The literal-include row is a
@@ -129,12 +128,14 @@ RSpec.describe "a class whose instance-side chain holds a splatted mixin (#2991)
     end
   end
 
-  describe "a mixin call the walk does not record, until it does" do
-    # A listed project module answers any name, so a subclass of `self.include M1` calling `m2`, which M1 does not
-    # define, stays quiet too: the accepted cost until #2995 records the call.
-    it "does not fire on a subclass of `self.include M1`, even for a method M1 does not define (#2995)" do
+  # Issue #2995 — each spelling is recorded as `include M1` (or `prepend M1`) is. `F` includes `M1` only when `setup`
+  # runs; the walk records that edge as it records a bare `include M1` in a method body, in the set with no position,
+  # so `m1` stays quiet whether or not `setup` is called, and `m2`, which neither `F` nor `M1` provides, reports.
+  describe "a mixin call on the class's own self" do
+    it "fires on a subclass of `self.include M1` for a method M1 does not define" do
       source = "#{mods}class SI\n  self.include M1\n  def t = 1\nend\nclass SISub < SI\n  def u = self.m2\nend\n"
-      expect(undefined_messages({ "a.rb" => source }, "class SI\nend\nclass SISub < SI\nend\n")).to be_empty
+      expect(undefined_messages({ "a.rb" => source }, "class SI\nend\nclass SISub < SI\nend\n"))
+        .to eq(["undefined method `m2' for SISub"])
     end
 
     it "does not fire on `self.include MQ` where MQ runs `include(*MODS)`" do
@@ -164,6 +165,51 @@ RSpec.describe "a class whose instance-side chain holds a splatted mixin (#2991)
       it "does not fire on `#{call.strip}` with the module in another file" do
         files = { "m.rb" => mods, "a.rb" => "class #{name}\n#{call}  def t = self.m1\nend\n" }
         expect(undefined_messages(files, "class #{name}\nend\n")).to be_empty
+      end
+
+      it "fires on `#{call.strip}` for a method neither the class nor the module provides" do
+        source = "#{mods}class #{name}\n#{call}  def t = self.m1\n  def w = self.m2\nend\n"
+        expect(undefined_messages({ "a.rb" => source }, "class #{name}\nend\n"))
+          .to eq(["undefined method `m2' for #{name}"])
+      end
+
+      it "fires on `#{call.strip}` for such a method with the module in another file" do
+        files = { "m.rb" => mods, "a.rb" => "class #{name}\n#{call}  def w = self.m2\nend\n" }
+        expect(undefined_messages(files, "class #{name}\nend\n")).to eq(["undefined method `m2' for #{name}"])
+      end
+    end
+
+    # A top-level `self.include M1`, a receiverless or `self.` `send(:include, M1)` and `__send__(:include, M1)` are
+    # `main.include`, which mixes M1 into `Object` as a bare top-level `include M1` does (#1697). Ruby 4.0.5 returns 1
+    # for `W.new.t` after each, and raises `NoMethodError` for `m2`.
+    ["self.include M1", "send(:include, M1)", "self.send(:include, M1)", "__send__(:include, M1)"].each do |call|
+      it "does not fire on another file's class after a top-level `#{call}`" do
+        files = { "m.rb" => "#{mods}#{call}\n", "w.rb" => "class W\n  def t = self.m1\nend\n" }
+        expect(undefined_messages(files, "class W\nend\n")).to be_empty
+      end
+
+      it "fires after a top-level `#{call}` for a method M1 does not define" do
+        files = { "m.rb" => "#{mods}#{call}\n", "w.rb" => "class W\n  def w = self.m2\nend\n" }
+        expect(undefined_messages(files, "class W\nend\n")).to eq(["undefined method `m2' for W"])
+      end
+    end
+
+    # Guards: none of these is `main.include`. `main`'s `include` is private, so `public_send` raises; `extend`
+    # reaches `main`'s singleton alone, and `main` has no `prepend`. Ruby 4.0.5 raises `NoMethodError` for `W.new.t`
+    # after each `extend` spelling.
+    ["public_send(:include, M1)", "self.extend M1", "send(:extend, M1)", "self.prepend M1"].each do |call|
+      it "fires on another file's class after a top-level `#{call}`, which mixes nothing into Object" do
+        files = { "m.rb" => "#{mods}#{call}\n", "w.rb" => "class W\n  def t = self.m1\nend\n" }
+        expect(undefined_messages(files, "class W\nend\n")).to eq(["undefined method `m1' for W"])
+      end
+    end
+
+    # Guards, not pins of this change: master reported these too. The singleton side was already open to any name on a
+    # class that extends a module (`extends_answer?`), and `self.extend M1` must leave the instance side closed.
+    ["self.extend M1", "send(:extend, M1)"].each do |call|
+      it "fires on an instance of a class that runs `#{call}`, whose instance side it leaves closed" do
+        source = "#{mods}class EX\n  #{call}\n  def self.s = self.m1\n  def i = self.m1\nend\n"
+        expect(undefined_messages({ "a.rb" => source }, "class EX\nend\n")).to eq(["undefined method `m1' for EX"])
       end
     end
   end

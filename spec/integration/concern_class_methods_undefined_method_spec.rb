@@ -119,6 +119,17 @@ RSpec.describe "ActiveSupport::Concern class_methods macros and call.undefined-m
     expect(undefined_messages).to be_empty
   end
 
+  # Issue #2995 — `self.include Conc` and a receiverless `send(:include, Conc)` run the same `append_features`, so
+  # the dependency is read as it is for `include Conc`.
+  ["self.include Conc18s", "send(:include, Conc18s)"].each do |call|
+    it "reads a dependency concern the outer concern takes with `#{call}`" do
+      outer = concern("Outer18s", body: "n").sub("Concern\n", "Concern\n  #{call}\n").sub("my_c(*n) = n", "other = 1")
+      write_project("class C18s\n  include Outer18s\n  my_c :c18s\nend\n", %w[C18s.new.c18s],
+                    extra_files: { "conc18s.rb" => concern("Conc18s"), "outer18s.rb" => outer })
+      expect(undefined_messages).to be_empty
+    end
+  end
+
   # Known limit: here `Outer18b::ClassMethods#my_c` is nearer and defines nothing, so Ruby raises at `C18b.new.c18b`;
   # the reader looks for a definer anywhere on the singleton chain, not for the nearest `my_c` (#2901's rule).
   it "does not look past the nearer my_c of the outer concern's own ClassMethods" do

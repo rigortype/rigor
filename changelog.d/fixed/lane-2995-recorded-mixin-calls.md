@@ -1,0 +1,6 @@
+- **[check]** Rigor now records `self.include M` and a receiverless `send(:include, M)` as it records `include M`. ([#3004](https://github.com/rigortype/rigor/pull/3004))
+  - `call.undefined-method` no longer reports a method of `M` on the class, and still reports a method that neither the class nor `M` provides.
+  - The same holds for `self.prepend M`, `self.extend M`, and `send`, `public_send` or `__send__` with `:include`, `:prepend` or `:extend`, with or without `self.`.
+  - Such a call in a method body, such as `def self.setup = send(:include, M)`, counts as a bare `include M` there does, whether or not the method is called.
+  - A concern's `self.include Dep` after `extend ActiveSupport::Concern` takes `Dep` as a dependency, as `include Dep` does.
+  - A top-level `self.include M`, `send(:include, M)` or `__send__(:include, M)` mixes `M` into `Object`, as a top-level `include M` does.

@@ -316,10 +316,13 @@ RSpec.describe "singleton-side mixins a hook adds (#1592)" do
   describe "a concern included into a concern" do
     let(:dep) { concern("Dv", "  class_methods do\n    def v = \"s\"\n  end\n") }
     let(:own) { "  class_methods do\n    def own = 1\n  end\n" }
-    let(:includer) { "class Base\n  def self.v = 1\nend\nclass Kv < Base\n  include Ov\nend\nclass Pv < Base\n  prepend Ov\nend\n" }
+    let(:includer) do
+      "class Base\n  def self.v = 1\nend\nclass Kv < Base\n  include Ov\nend\nclass Pv < Base\n  prepend Ov\nend\n"
+    end
 
     it "answers the dependency's ClassMethods for an include after the extend" do
-      write_project(dep, includer, ["Kv.v.zork", "Pv.v.zork"], extra: { "ov.rb" => concern("Ov", "  include Dv\n#{own}") })
+      write_project(dep, includer, ["Kv.v.zork", "Pv.v.zork"],
+                    extra: { "ov.rb" => concern("Ov", "  include Dv\n#{own}") })
       expect(undefined_messages).to eq(["undefined method `zork' for \"s\"", "undefined method `zork' for \"s\""])
     end
 

@@ -142,6 +142,7 @@ RSpec.describe "cross-file ivar census — incremental" do
       baseline: []
     )
   end
+
   # Issue #2983 — a String `class_eval` records a write of every ivar (`:*`) of the class, which the reader joins.
   it "re-checks the reader when another file moves a String class_eval to an unrelated class" do
     expect_steps(

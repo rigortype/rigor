@@ -8433,14 +8433,45 @@ module Rigor
 
       # `[owner, others]` for a `class << Const`: the class the constant resolves to from the lexical scope
       # ({#singleton_class_prefix}, where the body's `def`s record), and the other names it can denote from there
-      # ({#constant_receiver_candidates}), empty when the owner is the innermost of them or the enclosing class
-      # itself (`class << Foo` inside `class Foo`, which {#singleton_class_prefix} reads as `class << self`).
+      # ({#constant_receiver_candidates}). `others` is empty when the constant can denote one name only, when it names
+      # the enclosing class itself (`class << Foo` inside `class Foo`, which {#singleton_class_prefix} reads as
+      # `class << self`), or when the owner is the innermost candidate and the file declares it ahead of the `class <<`
+      # ({#declared_before?}): Ruby resolves the constant when the statement runs, so a nested class the file declares
+      # later does not exist yet there.
       def constant_singleton_owners(node, qualified_prefix)
         owner = singleton_class_prefix(node, nil, qualified_prefix).join("::")
         candidates = constant_receiver_candidates(node.expression, qualified_prefix)
-        return [owner, EMPTY_PREFIX] if candidates.first == owner || qualified_prefix.join("::") == owner
+        return [owner, EMPTY_PREFIX] if candidates.size == 1 || qualified_prefix.join("::") == owner
+        return [owner, EMPTY_PREFIX] if candidates.first == owner && declared_before?(node, owner)
 
         [owner, candidates - [owner]]
+      end
+
+      # Issue #3010 — whether `node`'s file declares `name` (a `class` / `module` declaration or a bare constant
+      # write) at a statement that starts ahead of `node`. Asked only where a `class << Const` has a nested candidate
+      # the file declares, so it re-parses the file rather than keep a table every file would pay for.
+      def declared_before?(node, name)
+        source = node.location.send(:source).source
+        declaration_before?(Prism.parse(source).value, EMPTY_PREFIX, name, node.location.start_offset)
+      end
+
+      def declaration_before?(node, prefix, name, limit)
+        return false unless node.is_a?(Prism::Node) && node.location.start_offset < limit
+
+        case node
+        when Prism::ClassNode, Prism::ModuleNode
+          child = Source::ConstantPath.declaration_prefix(prefix, node.constant_path)
+          return false if child.nil?
+          return true if child.join("::") == name
+
+          return declaration_before?(node.body, child, name, limit)
+        when Prism::ConstantWriteNode
+          return true if (prefix + [node.name.to_s]).join("::") == name
+        when Prism::DefNode, Prism::SingletonClassNode
+          return false
+        end
+        node.rigor_each_child { |child| return true if declaration_before?(child, prefix, name, limit) }
+        false
       end
 
       # The receiverless or `self.` `prepend` calls (direct or `send` spelling) of a `class <<` body, outside any

@@ -333,6 +333,13 @@ RSpec.describe Rigor::Inference::ScopeIndexer::MixinAccumulator do
         expect(unpositioned(source)).not_to include("A::C")
       end
 
+      # Ruby resolves `C` when the `class <<` runs, before the file declares `A::C`.
+      it "keeps the prepend unpositioned on every candidate when the nested class is declared after it" do
+        source = "class C\nend\nmodule A\n  class << C\n    prepend B\n  end\n  class C\n  end\nend\n"
+
+        expect(unpositioned(source)).to eq("A::C" => { extend: ["B"] }, "C" => { extend: ["B"] })
+      end
+
       it "positions it on the nested class the file declares" do
         source = "module A\n  class C\n  end\n  class << C\n    prepend B\n  end\nend\n"
 

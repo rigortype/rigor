@@ -18,7 +18,10 @@ constant that may name more than one class (`module Admin; class << User`).
 - Position only when the `class <<` is the statement right after `class Const ... end`. This is the narrowest test.
   It declines on a harmless statement in between, such as a second class declaration.
 - Position when the `class <<` is a direct statement (top level, or directly in a direct body) of a file that declares
-  the class, and the constant resolves to its innermost candidate or to the enclosing class. Within one file,
+  the class, and the constant can denote one name only, names the enclosing class, or names its innermost candidate,
+  which the file declares at a statement ahead of the `class <<`. Ruby resolves the constant when the statement runs,
+  so a nested class the file declares only later (`module Admin; class << User; …; end; class User; end; end`) does
+  not exist yet; the review of the first head found that case placed on the wrong class. Within one file,
   statement order is load order, and the multi-file rule already declines when another file also writes the class's
   edges.
 - Position nowhere. This always declines, and the single-file witness in the issue would not answer.

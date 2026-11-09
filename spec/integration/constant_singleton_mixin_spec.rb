@@ -120,6 +120,23 @@ RSpec.describe "a class << Const singleton mixin (#3010)" do
       expect(undefined_messages).to be_empty
     end
 
+    # Ruby resolves `User` when the `class <<` runs, before the file declares `Admin::User`: Ruby answers :y and 2.
+    it "declines on both classes when the nested class is declared after the class <<" do
+      write_project("class User < Base\n  def self.foo = 1\nend\n" \
+                    "module Admin\n  class << User\n    prepend Y\n  end\n  " \
+                    "class User < Base\n    def self.foo = 2\n  end\nend\n",
+                    ["User.foo.zork", "Admin::User.foo.zork"])
+      expect(undefined_messages).to be_empty
+    end
+
+    # Another file declares `Admin::User` first, and this one reopens it after the `class <<`: Ruby answers 1 and :y.
+    it "declines when another file declares the nested class and this one reopens it later" do
+      write_project(classes, ["User.foo.zork", "Admin::User.foo.zork"],
+                    extra: { "admin.rb" => "module Admin\n  class << User\n    prepend Y\n  end\n  " \
+                                           "class User < Base\n  end\nend\n" })
+      expect(undefined_messages).to be_empty
+    end
+
     # The file declares `Admin::User` before the `class <<`, so the constant names it: Ruby answers 1 and :y.
     it "answers the prepend on the nested class its own file declares" do
       write_project("class User < Base\n  def self.foo = 1\nend\n" \

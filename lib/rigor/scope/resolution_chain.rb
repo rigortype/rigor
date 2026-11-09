@@ -1292,7 +1292,9 @@ module Rigor
         # ahead of it, so only two prepends can trade places ({#order_prepends}).
         def singleton_mixins(name, extends, own_prepends)
           plan = hook_extensions(name)
-          @frames.last.add_marks(mark_for(name, :include_hook, UNNAMED_LIST, false)) if plan.open
+          if plan.open || unnamed_instance_mixin?(name)
+            @frames.last.add_marks(mark_for(name, :include_hook, UNNAMED_LIST, false))
+          end
           fork_hook_order(name, 2) unless plan.ordered || (plan.extends.empty? && plan.prepends.empty?)
           prepends = order_prepends(name, own_prepends, plan.prepends)
           hooked = plan.extends
@@ -1382,6 +1384,28 @@ module Rigor
           plan.ordered &&= targets.ordered && !unpositioned
           plan.extends.concat(targets.extends)
           plan.prepends.concat(targets.prepends)
+        end
+
+        # Issue #2994 — whether a module no table names may be mixed into `name`'s instance side by a call whose target
+        # is `name` itself, so that its `included` / `prepended` hook runs with `name` as `base` and may extend the class
+        # object with anything: `name` lists {Relevance::UNNAMED} on its own instance side (`include(*MODS)`, `include
+        # helper`), a module it extends has a hook that does (`base.include(*MODS)`, {#extend_hook_taint}), or a module
+        # it includes does (a hook's `base.include(*MODS)`; that module's own `include(*MODS)` is read so too). A
+        # superclass's own mark is read when its singleton chain is built. The entries this reads are the class's own
+        # sites, its extends' and its direct mixins', which a singleton chain's readers file already.
+        def unnamed_instance_mixin?(name)
+          return true if lists_unnamed?(name)
+          return true if extend_hook_taint(name).equal?(UNNAMED_LIST)
+
+          (@discovery.discovered_includes[name] || EMPTY).uniq.any? do |raw|
+            mixin = @resolver.resolve_declared(name, raw)
+            !mixin.nil? && lists_unnamed?(mixin)
+          end
+        end
+
+        def lists_unnamed?(name)
+          listed = @discovery.unpositioned_mixins[name]&.dig(:include)
+          !listed.nil? && listed.include?(UNNAMED_LIST.last)
         end
 
         HookPlan = Struct.new(:extends, :prepends, :open, :ordered)

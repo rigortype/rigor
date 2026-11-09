@@ -78,8 +78,16 @@ RSpec.describe "a class whose instance-side chain holds a splatted mixin (#2991)
     expect(undefined_messages({ "a.rb" => source }, "class Lit\nend\n")).to eq(["undefined method `m2' for Lit"])
   end
 
-  it "still fires on the class object of a splatted include, whose singleton side it leaves closed" do
+  # Issue #2994 — the `included` hook of a module in the splat runs with `Sup` as `base` and may extend it with any
+  # module, so the class object carries the `:include_hook` open mark and its side opens too. Before #2994 this row
+  # pinned a report; a hookless literal include keeps it (the next row).
+  it "does not fire on the class object of a splatted include, whose modules' hooks may extend it" do
     source = "#{mods}class Sup\n  include(*MODS)\n  def t = 1\nend\nclass Probe\n  def self.q = Sup.m1\nend\n"
+    expect(undefined_messages({ "a.rb" => source }, "class Sup\nend\nclass Probe\nend\n")).to be_empty
+  end
+
+  it "still fires on the class object of a literal include of a module with no hook" do
+    source = "#{mods}class Sup\n  include M1\n  def t = 1\nend\nclass Probe\n  def self.q = Sup.m1\nend\n"
     expect(undefined_messages({ "a.rb" => source }, "class Sup\nend\nclass Probe\nend\n"))
       .to eq(["undefined method `m1' for singleton(Sup)"])
   end

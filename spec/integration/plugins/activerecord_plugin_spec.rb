@@ -4824,4 +4824,27 @@ RSpec.describe "plugins/rigor-activerecord" do
       expect(undefined_on("  def shout = title.upcase\n")).to be_empty
     end
   end
+
+  # Issue #2994 — `Reflection.project_method_defined` answers `maybe` on a model whose instance side mixes in a module no
+  # table names (`include(*MODS)`), so the implicit-self column tier declines there, and the #618 veto reads the same
+  # mark, so the top-level `def title = nil` does not bind either. Witnessed on Ruby 4.0.5 with activerecord 8.1.3 and
+  # sqlite3: `Post.new(title: "x").shout` returns "X" under `include(*MODS)` and under `include M1`.
+  describe "an implicit-self column read on a model that splats a module in" do
+    def undefined_on(post_body)
+      models = DEFAULT_MODELS.merge("app/models/post.rb" => "class Post < ApplicationRecord\n#{post_body}end\n",
+                                    "lib/mods.rb" => "module M1\n  def m1 = 1\nend\nMODS = [M1]\n",
+                                    "lib/top.rb" => "def title = nil\n")
+      paths = %w[app/models/post.rb lib/mods.rb lib/top.rb]
+      result = run_plugin(source: "", files: models.merge("db/schema.rb" => DEFAULT_SCHEMA), paths: paths)
+      result.diagnostics.select { |d| d.qualified_rule == "call.undefined-method" }.map(&:message)
+    end
+
+    it "does not bind a top-level def of the column's name" do
+      expect(undefined_on("  include(*MODS)\n  def shout = title.upcase\n")).to be_empty
+    end
+
+    it "does not bind it beside a literal include either (control)" do
+      expect(undefined_on("  include M1\n  def shout = title.upcase\n")).to be_empty
+    end
+  end
 end

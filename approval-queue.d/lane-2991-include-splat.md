@@ -33,6 +33,9 @@ Leave both, and file the pair. The facade change alone regresses a plugin tier, 
 issue. `call.undefined-method` reads the mark directly. No plugin answer changes in this PR. The rails-routes and
 activerecord plugin specs pass unchanged.
 
+Follow-up: [#2994](https://github.com/rigortype/rigor/issues/2994) makes both changes together. The note above that
+`Reflection.project_method_defined` stays unchanged no longer holds once that lands.
+
 ## To undo
 
 Add `|| Scope::ResolutionChain.for(scope, class_name.to_s, kind, :methods).unnamed_mixin?` beside

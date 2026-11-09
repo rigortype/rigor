@@ -1772,7 +1772,11 @@ module Rigor
 
         # Issue #2968 — a class on the chain defines methods under names no table holds (`attr_accessor(*FLAGS)`, a
         # splatted `Struct.new(*FIELDS)`), so the name may be one of them, ahead of the top-level `def`.
-        Scope::DiscoveryIndex.open_names_on_chain?(scope, class_name, :instance)
+        return true if Scope::DiscoveryIndex.open_names_on_chain?(scope, class_name, :instance)
+
+        # Issue #2994 — a class on the chain mixes in a module no table names (`include(*MODS)`, `include helper`), so
+        # the name may be that module's, ahead of the top-level `def`.
+        Scope::DiscoveryIndex.unnamed_mixin_on_chain?(scope, class_name)
       end
 
       # The RBS arm of {#instance_self_answers?}. A project class is usually absent from the RBS

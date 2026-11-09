@@ -729,6 +729,7 @@ lib/rigor/scope/resolution_chain.rb:
     Rigor::Scope::ResolutionChain::Builder#compute_singleton: the singleton-side twin, reading the :extend side
     Rigor::Scope::ResolutionChain::Builder#extend_hook_taint: 'a consumer, not a declaration producer; it reads whether a module the node extends lists `"*"` (and `"?"`, #2991) on its :include side, through extend_reshapes_instance? (#1730), and writes no table'
     Rigor::Scope::ResolutionChain::Builder#hook_extensions: 'a consumer, not a declaration producer (#1592); it reads the hook-extend entries of each module a class includes or prepends directly, the concern key on both, and the class''s unpositioned :include side, to place the hooks'' modules on the singleton chain, and writes no table'
+    Rigor::Scope::ResolutionChain::Builder#lists_unnamed?: 'a consumer, not a declaration producer; it reads whether a class or module lists `"?"` on its unpositioned :include side, to give a class object the :include_hook open mark (#2994), and writes no table'
     Rigor::Scope::ResolutionChain::Builder#own_prepends_ordered?: 'a consumer, not a declaration producer (#2998); it reads whether a class is declared in two files or lists an unpositioned :extend edge, to decide whether its own singleton prepends have a known order, and writes no table'
 lib/rigor/scope/resolution_chain/relevance.rb:
   computes: whether a mark on a chain is discharged for one method name, from the closure of the module it names (ADR-119 WD2)

@@ -99,7 +99,7 @@ RSpec.describe "a top-level include under control flow mixes into Object (#3007)
   # Guards: each keeps reporting. `public_send` raises (`main`'s `include` is private), `self.extend` /
   # `send(:extend)` reach `main`'s singleton alone, `main` has no `prepend`, `class << self` includes into `main`'s
   # singleton, `def OBJ.setup` runs with `OBJ` as `self`, `instance_exec` on a literal runs with the literal as `self`
-  # (and raises), and a `Class.new` block, a `describe` block or an `each` on an object the walk cannot type (here
+  # (and raises), and a `Class.new` block, a `describe` block, a receiverless `each` or an `each` on an object the walk cannot type (here
   # each `class_exec`s its block, as RSpec's `describe` does) rebinds `self`. Ruby 4.0.5 raises `NoMethodError` for
   # `W.new.t` after each.
   {
@@ -110,6 +110,7 @@ RSpec.describe "a top-level include under control flow mixes into Object (#3007)
     "a describe block" => "def describe(*, &block) = Class.new.class_exec(&block)\ndescribe \"x\" do\n  include M1\nend\n",
     "a Class.new block" => "Class.new { include M1 }\n",
     "an instance_exec block on a literal" => "begin\n  [1].instance_exec { include M1 }\nrescue NoMethodError\nend\n",
+    "a receiverless each block" => "def each(&block) = Class.new.class_exec(&block)\neach { include M1 }\n",
     "an each block on a non-literal receiver" =>
       "class Grp\n  def each(&block) = Class.new.class_exec(&block)\nend\nGrp.new.each { include M1 }\n",
     "class << self in if" => "if ENV[\"PATH\"]\n  class << self\n    include M1\n  end\nend\n",

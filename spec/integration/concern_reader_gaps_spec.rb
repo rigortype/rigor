@@ -222,11 +222,14 @@ RSpec.describe "concern reader gaps (#3005)" do
         expect(messages("call.wrong-arity")).to be_empty
       end
 
-      # Ruby raises ArgumentError: the own `bar` is ahead of the `Xq#bar` the class extends itself with.
-      it "still checks an own def the block does not define, beside an extended module that does" do
-        write_project({ "a_cd.rb" => blocked,
-                        "k.rb" => "class Kb\n  extend Xq\n  def self.bar(a) = a\n  include Cd\nend\n" }, ["Kb.bar"])
-        expect(messages("call.wrong-arity").size).to eq(1)
+      # Ruby answers "own": the own `bar` is ahead of the concern's `ClassMethods#bar`, and the block defines only
+      # `made`.
+      it "still answers an own def the block does not define, beside a ClassMethods def that does" do
+        both = concern("Cd", block("class_methods", "    def bar = 1\n") +
+                             block("included", "    def self.made = :blk\n"))
+        write_project({ "a_cd.rb" => both, "k.rb" => "class Kb\n  def self.bar = \"own\"\n  include Cd\nend\n" },
+                      ["Kb.bar.zork"])
+        expect(undefined_messages).to eq(["undefined method `zork' for \"own\""])
       end
     end
 

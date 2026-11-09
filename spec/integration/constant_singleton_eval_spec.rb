@@ -140,6 +140,15 @@ RSpec.describe "singleton methods on a constant's object, eval and replacing def
       expect(cold_rows).to eq([["lib/foo.rb", 7, "`nope' for singleton(Bar)"]])
     end
 
+    # An extended module contributes its instance methods, not its own singleton methods: `Foo.im` runs, `Foo.mx`
+    # raises, and `M.mx` runs.
+    it "still reports a name an extended module defines only on its own object" do
+      write("sig/m.rbs", "module M\n  def im: () -> Integer\nend\nclass Ext\n  extend M\nend\n")
+      write("lib/foo.rb", "module M\n  def im = 1\nend\ndef M.mx = 1\nclass Ext\n  extend M\nend\n" \
+                          "Ext.im\nExt.mx\nM.mx\n")
+      expect(cold_rows).to eq([["lib/foo.rb", 9, "`mx' for singleton(Ext)"]])
+    end
+
     # The entry is singleton-side evidence: an instance of the class does not answer the class object's method.
     it "still reports an instance call to a name defined only on the class object" do
       write("lib/foo.rb", "class Foo; end\ndef Foo.y = 1\nFoo.new.y\n")

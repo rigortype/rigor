@@ -1038,15 +1038,16 @@ module Rigor
         # Issue #3018 — a class object's singleton method that `def Foo.x`, `Foo.define_singleton_method(:x)` or a
         # `Foo.singleton_class.class_eval` def defines outside `Foo`'s body records no `:singleton` row, only an
         # envelope entry. The class-object path reads the definer's own entry
-        # (`Scope::DiscoveryIndex::ENVELOPE_OBJECT_SINGLETON_KIND`) on every entry of the singleton chain, so a
-        # subclass inherits it. It does not read the opaque `[:singleton, x]` entry beside it, which a name-rewriting
+        # (`Scope::DiscoveryIndex::ENVELOPE_OBJECT_SINGLETON_KIND`) on the chain's class-object entries, the class and
+        # its superclasses, so a subclass inherits it. An extended module's entry is instance-side: `extend M` adds
+        # `M`'s instance methods, not a `def M.x`. It does not read the opaque `[:singleton, x]` entry beside it, which a name-rewriting
         # class-body macro (`my_attr :x`) files too without defining `x` on the class object.
         def foreign_singleton_through_ancestors?(scope, class_name, method_name, kind)
           return false unless kind == :singleton
 
           key = [Scope::DiscoveryIndex::ENVELOPE_OBJECT_SINGLETON_KIND, method_name.to_sym]
           chain = Scope::ResolutionChain.for(scope, class_name.to_s, :singleton, :methods)
-          found = chain.search(scope) do |entry|
+          found = chain.search(scope, side: :singleton) do |entry|
             names = entry.external? ? entry.candidates : [entry.name]
             names.any? { |name| scope.parameter_envelopes_of(name).key?(key) }
           end

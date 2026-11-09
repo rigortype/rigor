@@ -8441,6 +8441,7 @@ module Rigor
       def constant_singleton_owners(node, qualified_prefix)
         owner = singleton_class_prefix(node, nil, qualified_prefix).join("::")
         candidates = constant_receiver_candidates(node.expression, qualified_prefix)
+        # One candidate needs no re-parse: whichever statement declares it, the constant can name nothing else.
         return [owner, EMPTY_PREFIX] if candidates.size == 1 || qualified_prefix.join("::") == owner
         return [owner, EMPTY_PREFIX] if candidates.first == owner && declared_before?(node, owner)
 
@@ -8468,6 +8469,7 @@ module Rigor
         when Prism::ConstantWriteNode
           return true if (prefix + [node.name.to_s]).join("::") == name
         when Prism::DefNode, Prism::SingletonClassNode
+          # A `def` body declares no constant, and a `class <<` body's are the singleton class's.
           return false
         end
         node.rigor_each_child { |child| return true if declaration_before?(child, prefix, name, limit) }

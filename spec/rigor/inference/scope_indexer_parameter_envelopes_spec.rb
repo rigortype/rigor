@@ -90,6 +90,31 @@ RSpec.describe "ScopeIndexer parameter envelopes (#992)" do
     expect(table.fetch("C")).to eq(%i[instance f] => [0, 0, false])
   end
 
+  # Issue #2995 — a `send` of `include` / `prepend` / `extend` with constant (or `self`) arguments is the mixin call
+  # the mixin walk records, so it marks nothing, as the bare call does; any other `send` still marks the class.
+  it "marks a class's send of a mixin only where the bare mixin call would be marked" do
+    table = envelopes(<<~RUBY)
+      class A
+        send(:include, M)
+        self.public_send(:prepend, M)
+        __send__(:extend, M, self)
+      end
+      class B
+        send(:include, helper)
+      end
+      class C
+        send(:define_method, :x) { 1 }
+      end
+      class D
+        send(name, M)
+      end
+    RUBY
+    expect(table.fetch("A", {})).not_to include(dynamic_mark)
+    expect(table.fetch("B")).to include(dynamic_mark => opaque)
+    expect(table.fetch("C")).to include(dynamic_mark => opaque)
+    expect(table.fetch("D")).to include(dynamic_mark => opaque)
+  end
+
   # Issue #1749 — a `refine X do … end` in a module's singleton method refines X for the module, so X is marked refined
   # (every name its spelling can denote) as one in the module's body marks it; a computed target and an instance method
   # name no class, and a plain class's method has no `refine` (#1689).

@@ -95,7 +95,8 @@ RSpec.describe "unrecordable mixins — incremental" do
     "an include of a method call" => ->(mod) { "module #{mod}; def self.pick = P; include(pick); end\n" },
     "a conditional receiver-form include" => ->(mod) { "x = P\n#{mod}.include(x) if ENV[\"X\"]\n" },
     "an include inside a loop" => ->(mod) { "module #{mod}; [P].each { |m| include m }; end\n" },
-    "an include sent by name" => ->(mod) { "module #{mod}; send(:include, P); end\n" },
+    # Issue #2995 — `send(:include, P)` is recorded as `include P` is, so only a non-constant argument taints.
+    "an include sent by name" => ->(mod) { "module #{mod}; send(:include, P.itself); end\n" },
     "an instance included hook" => ->(mod) { "module #{mod}; def included(base) = base.prepend(P); end\n" },
     # A named edge in a block, unpositioned but no `"*"`, in a file that declares nothing: it moves no envelope mark,
     # so only the `mixin:` key re-checks the reader.

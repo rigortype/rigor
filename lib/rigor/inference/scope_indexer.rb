@@ -9782,19 +9782,30 @@ module Rigor
         SURFACE_MIXIN_CALLS.include?(node.name) || SURFACE_MIXIN_HELPER.match?(node.name.to_s)
       end
 
+      # Issue #2995 — a `send` / `public_send` / `__send__` of `:include`, `:prepend` or `:extend` is that mixin call,
+      # which the mixin walk records as the bare call, so it is judged by its own arguments as the bare call is.
       def dynamic_surface_call?(node)
-        return true if SURFACE_EVAL_CALLS.include?(node.name) || SURFACE_SEND_CALLS.include?(node.name)
+        return true if SURFACE_EVAL_CALLS.include?(node.name)
+
+        if SURFACE_SEND_CALLS.include?(node.name)
+          kind, arguments, = mixin_call_view(node)
+          return kind.nil? || dynamic_mixin_arguments?(arguments)
+        end
 
         arguments = node.arguments&.arguments || []
         if SURFACE_NAMING_CALLS.include?(node.name)
           arguments.empty? || literal_method_name(arguments.first).nil?
         elsif surface_mixin_call?(node)
-          arguments.any? do |argument|
-            !(argument.is_a?(Prism::ConstantReadNode) || argument.is_a?(Prism::ConstantPathNode) ||
-              argument.is_a?(Prism::SelfNode))
-          end
+          dynamic_mixin_arguments?(arguments)
         else
           false
+        end
+      end
+
+      def dynamic_mixin_arguments?(arguments)
+        arguments.any? do |argument|
+          !(argument.is_a?(Prism::ConstantReadNode) || argument.is_a?(Prism::ConstantPathNode) ||
+            argument.is_a?(Prism::SelfNode))
         end
       end
 

@@ -136,6 +136,12 @@ RSpec.describe "singleton methods on a constant's object, eval and replacing def
       expect(cold_rows).to eq([["lib/foo.rb", 7, "`nope' for singleton(Bar)"]])
     end
 
+    # The entry is singleton-side evidence: an instance of the class does not answer the class object's method.
+    it "still reports an instance call to a name defined only on the class object" do
+      write("lib/foo.rb", "class Foo; end\ndef Foo.y = 1\nFoo.new.y\n")
+      expect(cold_rows).to eq([["lib/foo.rb", 3, "`y' for Foo"]])
+    end
+
     # The envelope is on the superclass's name: a definer on the subclass does not reach the superclass.
     it "still reports on the superclass a name only the subclass defines" do
       write("lib/foo.rb", "class Foo; end\nclass Bar < Foo; end\ndef Bar.y = 1\nBar.y\nFoo.y\n")

@@ -83,6 +83,18 @@ RSpec.describe "a top-level def and a class-object read beside a mixin no name s
       expect(undefined_messages(files)).to be_empty
     end
 
+    it "declines it on a class that extends a module whose extended hook splats the module in" do
+      source = "#{hooked}module E\n  def self.extended(base) = base.include(*MODS)\nend\n" \
+               "class K < Base\n  extend E\nend\nK.bar.upcase\n"
+      expect(undefined_messages("a.rb" => source)).to be_empty
+    end
+
+    it "declines it on a class that includes a module whose included hook splats the module in" do
+      source = "#{hooked}module H\n  def self.included(base) = base.include(*MODS)\nend\n" \
+               "class K < Base\n  include H\nend\nK.bar.upcase\n"
+      expect(undefined_messages("a.rb" => source)).to be_empty
+    end
+
     it "still answers the superclass's method beside a literal include of a module with no hook (control)" do
       source = "#{hooked}module M2\nend\nclass K2 < Base\n  include M2\nend\nK2.bar.upcase\n"
       expect(undefined_messages("a.rb" => source)).to eq(["undefined method `upcase' for 1"])

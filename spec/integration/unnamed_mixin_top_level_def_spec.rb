@@ -107,6 +107,25 @@ RSpec.describe "a top-level def and a class-object read beside a mixin no name s
       expect(undefined_messages("a.rb" => source)).to be_empty
     end
 
+    it "does not bind it after `singleton_class.include(*MODS)`, in one file and in two" do
+      defs = "def bar = nil\nmodule X\n  def bar = \"x\"\nend\nMODS = [X]\n"
+      klass = "class K2\n  singleton_class.include(*MODS)\n  V = bar.upcase\nend\n"
+      expect(undefined_messages("a.rb" => "#{defs}#{klass}")).to be_empty
+      expect(undefined_messages("a.rb" => defs, "k2.rb" => klass)).to be_empty
+    end
+
+    it "does not bind it after `extend Comparable, h`, a constant beside a module no name spells" do
+      source = "def e1 = nil\nmodule E1\n  def e1 = \"x\"\nend\n" \
+               "class C\n  h = E1\n  extend Comparable, h\n  V = e1.upcase\nend\n"
+      expect(undefined_messages("a.rb" => source)).to be_empty
+    end
+
+    it "does not bind it in a class a module body extends with `self` through `send`" do
+      source = "def e1 = nil\nclass Target\nend\nmodule M\n  def e1 = \"x\"\n  Target.send(:extend, self)\nend\n" \
+               "class Target\n  V = e1.upcase\nend\n"
+      expect(undefined_messages("a.rb" => source)).to be_empty
+    end
+
     it "still binds it on the instance side, which `extend` does not reach" do
       source = "#{defs}class C\n  extend(*EMODS)\n  def t = e1.upcase\nend\n"
       expect(undefined_messages("a.rb" => source)).to eq(["undefined method `upcase' for nil"])

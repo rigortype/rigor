@@ -43,8 +43,8 @@ order-only taint leaves every module recorded, and the existing walks answer it.
 Fix round 2 lists `"?"` on the `:extend` side too, for an unrecorded `extend` or `class << self` include whose
 arguments name no constant (`extend(*EMODS)`). Only the singleton veto reads `"?"` off a singleton chain:
 `call.undefined-method`'s `unknown_mixin_includer?`, `Reflection`'s `open_side?` and `extend_hook_taint` read the instance
-chain or the `:include` side, so none of them widens. `extend M, helper` keeps the order-only taint, because
-`MixinAccumulator#note` is unchanged; a #1592 row for `[1].each { |m| extend m }` now expects `["*", "?"]`.
+chain or the `:include` side, so none of them widens. Fix round 3 extends the marker to `extend M, helper` (`MixinAccumulator#note`), to `singleton_class.include(*MODS)`,
+and to a `self` argument that reaches the taint (`Target.send(:extend, self)` in a module body); a #1592 row for `[1].each { |m| extend m }` now expects `["*", "?"]`.
 
 `Reflection.project_method_defined`'s `maybe` is pinned by its unit row alone. rigor-activerecord's implicit-self column
 tier answers `untyped`, and a declined call dispatches to `Dynamic`, so no diagnostic tells the two apart. The veto

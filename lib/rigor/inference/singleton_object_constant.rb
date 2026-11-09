@@ -53,8 +53,13 @@ module Rigor
       # constant can denote from the def site. That envelope is the evidence the method exists on the constant's
       # object. The read records the constant's class edge, and that edge's file set holds every file writing such a
       # def or call, so adding or removing one re-checks the call.
+      #
+      # A computed `Const.define_singleton_method(name)` may define any name, so the singleton side's open-names mark it
+      # files declines every call through the constant.
       def foreign_singleton?(scope, name, method_name)
-        scope.parameter_envelopes_of(name).key?([:singleton, method_name.to_sym])
+        bucket = scope.parameter_envelopes_of(name)
+        bucket.key?([:singleton, method_name.to_sym]) ||
+          bucket.key?(Scope::DiscoveryIndex::ENVELOPE_OPEN_SINGLETON_NAMES_MARK)
       end
 
       # The `Prism::DefNode` for `method_name` in the constant's singleton body, or nil. The inference tier's

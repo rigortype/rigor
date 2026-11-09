@@ -69,10 +69,19 @@ RSpec.describe "singleton methods defined on a constant's object (#3016)", type:
     expect(cold_rows).to eq([["lib/obj.rb", 6, "`nope'"]])
   end
 
-  # A computed name proves nothing about which name exists; this change files none.
-  it "still reports through a define_singleton_method with a computed name" do
-    write("lib/obj.rb", "OBJ = Object.new\nname = :each\nOBJ.define_singleton_method(name) { 1 }\nOBJ.each\n")
-    expect(cold_rows).to eq([["lib/obj.rb", 4, "`each'"]])
+  # A computed name may define any name on the object, so every call through the constant is quiet, `OBJ.nope`
+  # included: Ruby runs `OBJ.each` here, and which names exist depends on the value of `name`.
+  it "stays silent on every call through a define_singleton_method with a computed name" do
+    write("lib/obj.rb", "OBJ = Object.new\nname = :each\nOBJ.define_singleton_method(name) { 1 }\nOBJ.each\nOBJ.nope\n")
+    expect(cold_rows).to eq([])
+  end
+
+  # The open set is the computed definer's alone: a literal one, a `def OBJ.x` and a non-defining rewrite such as
+  # `OBJ.send(:frozen?)` leave an undefined name reporting.
+  it "still reports a name beside a literal definer, a def and a send" do
+    write("lib/obj.rb", "OBJ = Object.new\ndef OBJ.each = 1\nOBJ.define_singleton_method(:other) { 2 }\n" \
+                        "OBJ.send(:frozen?)\nOBJ.each\nOBJ.other\nOBJ.nope\n")
+    expect(cold_rows).to eq([["lib/obj.rb", 7, "`nope'"]])
   end
 
   it "stays silent on a def OBJ.x whose object's class the sig declares without it" do
@@ -104,7 +113,8 @@ RSpec.describe "singleton methods defined on a constant's object (#3016)", type:
 
     {
       "def OBJ.x" => "def OBJ.each = 1\n",
-      "define_singleton_method" => "OBJ.define_singleton_method(:each) { 1 }\n"
+      "define_singleton_method" => "OBJ.define_singleton_method(:each) { 1 }\n",
+      "computed define_singleton_method" => "name = :each\nOBJ.define_singleton_method(name) { 1 }\n"
     }.each do |spelling, definition|
       it "silences the call when a file with a #{spelling} is added, and reports it again when it is removed" do
         write("lib/use.rb", "OBJ = Object.new\nOBJ.each\n")

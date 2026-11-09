@@ -63,7 +63,7 @@ RSpec.describe "incremental edges for a hook-extended singleton module (#1592)",
     expect(cold_rows).to eq(second)
   end
 
-  def sig_source = "module Ct\nend\nmodule X\nend\nclass Base\nend\nclass Kt < Base\nend\n"
+  def sig_source = "module Ct\nend\nmodule Dt\nend\nmodule X\nend\nclass Base\nend\nclass Kt < Base\nend\n"
 
   let(:files) do
     { "lib/base.rb" => "class Base\n  def self.bar = 1\nend\nmodule X\n  def bar = \"X\"\nend\n",
@@ -107,6 +107,45 @@ RSpec.describe "incremental edges for a hook-extended singleton module (#1592)",
     expect_toggle(files.merge(hook), before: "",
                                      after: "module Ct\n  module ClassMethods\n    def bar = :cm\n  end\nend\n",
                                      first: [], second: reported(":cm"))
+  end
+
+  # Issue #2992 — `Ct` includes the concern `Dt`, a dependency whose `ClassMethods` reaches `Kt`; `Dt` is declared
+  # only in `near.rb`, which no entry of `Kt`'s chain names until it has a `class_methods` block. Guards, with the
+  # next row: the edges the chain and the typing read already file re-check the call, and no line of the dependency
+  # read is needed for it.
+  it "re-checks the call when a dependency concern's file gains a class_methods def" do
+    dependency = "module Dt\n  extend ActiveSupport::Concern\n  def dt_own = 1\n%send\n"
+    outer = { "lib/ct.rb" => concern("  include Dt\n") }
+    expect_toggle(files.merge(outer), before: format(dependency, ""),
+                                      after: format(dependency, "  class_methods do\n    def bar = :cm\n  end\n"),
+                                      first: reported(1), second: reported(":cm"))
+  end
+
+  it "re-checks the call when a file reopening a dependency concern adds a class_methods def" do
+    dependency = "module Dt\n  extend ActiveSupport::Concern\n  def dt_own = 1\nend\n"
+    reopened = files.merge("lib/ct.rb" => concern("  include Dt\n"), "lib/dt.rb" => dependency)
+    expect_toggle(reopened, before: "",
+                            after: "module Dt\n  extend ActiveSupport::Concern\n  class_methods do\n    " \
+                                   "def bar = :cm\n  end\nend\n",
+                            first: reported(1), second: reported(":cm"))
+  end
+
+  # `Dt`'s hook extends with another spelling than `ClassMethods`, which only the dependency's own edges name.
+  it "re-checks the call when a dependency concern's file gains an included block's extend" do
+    dependency = "module Dt\n  extend ActiveSupport::Concern\n  def dt_own = 1\n%send\n"
+    outer = { "lib/ct.rb" => concern("  include Dt\n") }
+    expect_toggle(files.merge(outer), before: format(dependency, ""),
+                                      after: format(dependency, "  included do\n    extend X\n  end\n"),
+                                      first: reported(1), second: reported('"X"'))
+  end
+
+  # `Dt` turns into a concern, and with it into a dependency of `Ct`, whose `ClassMethods` then reaches `Kt`.
+  it "re-checks the call when an included module's file makes it a concern" do
+    dependency = "module Dt\n%s  def dt_own = 1\n  module ClassMethods\n    def bar = :cm\n  end\nend\n"
+    outer = { "lib/ct.rb" => concern("  include Dt\n  class_methods do\n    def other = 1\n  end\n") }
+    expect_toggle(files.merge(outer), before: format(dependency, ""),
+                                      after: format(dependency, "  extend ActiveSupport::Concern\n"),
+                                      first: reported(1), second: reported(":cm"))
   end
 
   # Ruby keeps whichever definition loaded last, so with two the read declines.

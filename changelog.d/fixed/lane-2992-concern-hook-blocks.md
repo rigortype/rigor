@@ -1,0 +1,4 @@
+- **[check]** `call.undefined-method` no longer fires on a method that a class macro defines under a computed name from an `ActiveSupport::Concern`'s `included do … end` or `prepended do … end` block when the concern reaches the class through a module or another concern. ([#2999](https://github.com/rigortype/rigor/pull/2999))
+  - The block is read for every class or module that includes or prepends the concern directly, so `module M; include Concern1; end` then `class K; include M; end` opens `K`.
+  - A concern included into another concern after that concern's `extend ActiveSupport::Concern` is read as ActiveSupport reads a dependency: its block runs in the outer concern's includer, on that includer's edge, and its `ClassMethods` answers that includer's class-side calls.
+  - A macro call inside a block that keeps `self` in the hook block, such as `[1].each { my_c :x }`, counts.

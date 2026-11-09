@@ -1027,10 +1027,11 @@ module Rigor
             names.any? do |name|
               bucket = scope.parameter_envelopes_of(name)
               marks.any? { |mark| bucket.key?(mark) } ||
-                (side == :instance && computed_definer_called?(scope, name, bucket))
+                (side == :instance && (computed_definer_called?(scope, name, bucket) ||
+                                       hook_block_macro_defines?(scope, name)))
             end
           end
-          !found.nil? || (side == :instance && hook_block_macro_defines?(scope, class_name))
+          !found.nil?
         end
 
         # Issue #2901 — the body of `name` calls, on `self`, a method its singleton chain resolves to a computed
@@ -1074,8 +1075,16 @@ module Rigor
         # includes the concern directly, and its `prepended do … end` block in one that prepends it, so a macro call
         # in the block is read as that class's own, against the module the concern extends it with. A call in the
         # concern's own module body is no includer's: Ruby raises there as the module loads.
-        def hook_block_macro_defines?(scope, class_name)
-          direct_hook_mixins(scope, class_name).any? do |mixin, edges|
+        #
+        # Issue #2992 — Ruby runs the block in every direct includer, a module included, so the read is made for each
+        # entry of the receiver's chain (`owner`) against that entry's own mixins, one hop. A concern included into a
+        # concern after its `extend ActiveSupport::Concern` runs no block there: `Concern#append_features` records it as
+        # a dependency, and the outer concern's final includer includes it, on that includer's own edge
+        # ({#with_concern_dependencies}). Only a mixin whose one `include` / `prepend` statement is such a dependency
+        # is left out of `owner`'s own read: one written ahead of the `extend`, or again in a reopening that may load
+        # first, is an ordinary include there.
+        def hook_block_macro_defines?(scope, owner)
+          own_mixin_edges(scope, owner, deferred: true).any? do |mixin, edges|
             macros = scope.parameter_envelopes_of(mixin).each_key.filter_map do |key|
               key[2] if key.is_a?(Array) && key.first == Scope::DiscoveryIndex::ENVELOPE_HOOK_BODY_CALL_KIND &&
                         edges.include?(key[1])
@@ -1089,23 +1098,58 @@ module Rigor
         end
 
         # Each module a class on `name`'s superclass chain includes or prepends directly, resolved, with the hook
-        # blocks its edges run: `:included` for an `include`, `:prepended` for a `prepend`.
+        # blocks its edges run: `:included` for an `include`, `:prepended` for a `prepend`; a concern's dependencies
+        # follow it on the same edges.
         def direct_hook_mixins(scope, name)
           chain = Scope::ResolutionChain.for(scope, name.to_s, :instance, :methods)
           chain.record(scope) if Analysis::DependencyRecorder.active?
-          chain.level_classes.compact.flat_map do |klass|
-            mixins = scope.includes_of(klass)
-            prepends = scope.prepends_of(klass)
-            mixins.uniq.filter_map do |raw|
-              mixin = declared_constant(scope, klass, raw)
-              next unless mixin
+          chain.level_classes.compact.flat_map { |klass| own_mixin_edges(scope, klass) }
+        end
 
-              edges = []
-              edges << :prepended if prepends.include?(raw)
-              edges << :included if mixins.count(raw) > prepends.count(raw)
-              [mixin, edges]
-            end
+        # The modules `owner` itself includes or prepends, as {#direct_hook_mixins} gives them. With `deferred:`, a
+        # provable dependency of a concern `owner` is left out ({#hook_block_macro_defines?}).
+        def own_mixin_edges(scope, owner, deferred: false)
+          mixins = scope.includes_of(owner)
+          prepends = scope.prepends_of(owner)
+          deferred_mixins = deferred ? deferred_dependencies(scope, owner, mixins) : NO_DEFERRED
+          mixins.uniq.flat_map do |raw|
+            mixin = declared_constant(scope, owner, raw)
+            next [] unless mixin
+
+            edges = []
+            edges << :prepended if prepends.include?(raw)
+            edges << :included if mixins.count(raw) > prepends.count(raw)
+            next [] if deferred_mixins.include?(raw)
+
+            with_concern_dependencies(scope, mixin).map { |member| [member, edges] }
           end
+        end
+
+        NO_DEFERRED = [].freeze
+        private_constant :NO_DEFERRED
+
+        # The spellings among `owner`'s mixins that name a concern dependency of `owner`, when `owner` is declared in
+        # one file: a reopening may write the same `include` without the `extend`, and load first.
+        def deferred_dependencies(scope, owner, mixins)
+          sites = scope.discovery.discovered_class_sources[owner.to_s]
+          return NO_DEFERRED if sites.nil? || sites.size > 1
+
+          resolver = Scope::ResolutionChain.resolver_for(scope, :methods)
+          dependencies = Scope::ResolutionChain.concern_dependencies(scope.discovery, resolver, owner)
+          return NO_DEFERRED if dependencies.empty?
+
+          Scope::ResolutionChain.dependency_spellings(scope.discovery, owner).select do |raw|
+            mixins.include?(raw) && dependencies.include?(resolver.resolve_declared(owner, raw))
+          end
+        end
+
+        # Issue #2992 — `mixin` and, when it is a concern, the concerns it includes or prepends, at any depth through
+        # concerns ({Scope::ResolutionChain.concern_dependencies}): `Concern#append_features` (or `prepend_features`)
+        # includes (or prepends) each of them into the final includer ahead of `mixin` itself, on the includer's own
+        # edge to `mixin`, whatever edge each was given. A reader files each one's sites as it reads its envelopes.
+        def with_concern_dependencies(scope, mixin)
+          resolver = Scope::ResolutionChain.resolver_for(scope, :methods)
+          [mixin, *Scope::ResolutionChain.concern_dependencies(scope.discovery, resolver, mixin)]
         end
 
         def hook_extension_defines?(scope, mixin, definers)
@@ -1113,8 +1157,26 @@ module Rigor
             target = if lookup == :const_get then const_get_constant(scope, mixin, written)
                      else declared_constant(scope, mixin, written)
                      end
+            record_hook_target_edges(scope, mixin, written, lookup) if Analysis::DependencyRecorder.active?
             target && definers.any? { |definer| scope.parameter_envelopes_of(target).key?(definer) }
           end
+        end
+
+        # Issue #2992 — the read depends on the extended module's files whether or not it resolved: an empty
+        # `module ClassMethods; end` is no project class yet, and the edit that gives it the definer makes it one. So
+        # every name the lookup tried files its declaring sites, and the constant's last segment its negative class
+        # edge, which a NEW file declaring it fires.
+        def record_hook_target_edges(scope, mixin, written, lookup)
+          candidates = if lookup == :const_get
+                         chain = Scope::ResolutionChain.for(scope, mixin, :instance, :methods)
+                         chain.entries.flat_map { |entry| entry.external? ? entry.candidates : [entry.name] }
+                              .map { |name| "#{name}::#{written}" } << written
+                       else
+                         own = written.start_with?("::") ? [] : ["#{mixin}::#{written}"]
+                         own + scope.ancestor_name_candidates(mixin, written)
+                       end
+          candidates.each { |candidate| Scope::ResolutionChain.record_class(scope, candidate.delete_prefix("::")) }
+          Analysis::DependencyRecorder.read_last_segment(:class, written)
         end
 
         # The constant `raw`, written in `owner`'s body, as the first candidate the project declares: `Owner::Raw`

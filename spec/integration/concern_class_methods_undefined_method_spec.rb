@@ -109,14 +109,23 @@ RSpec.describe "ActiveSupport::Concern class_methods macros and call.undefined-m
     expect(undefined_messages).to be_empty
   end
 
-  # Known limit: Concern also collects an included concern as a dependency of the final includer and extends it with
-  # that concern's `ClassMethods`; the reader follows `const_get(:ClassMethods)` only, which stops at the outer
-  # concern's own `ClassMethods`, so this still reports.
-  it "does not yet read a dependency concern when the outer concern has its own ClassMethods" do
-    outer = concern("Outer18", body: "n").sub("module Outer18\n", "module Outer18\n  include Conc18\n")
-    source = "#{concern('Conc18')}#{outer}class C18\n  include Outer18\n  my_c :c18\nend\n"
-    write_project(source, %w[C18.new.c18])
-    expect(undefined_messages).to eq(["undefined method `c18' for C18"])
+  # Issue #2992 — Concern also collects `Conc18` as a dependency of `C18` and extends `C18` with `Conc18::ClassMethods`
+  # ahead of `Outer18::ClassMethods`, so the macro is `Conc18`'s.
+  it "reads a dependency concern when the outer concern has its own ClassMethods" do
+    outer = concern("Outer18", body: "n").sub("Concern\n", "Concern\n  include Conc18\n")
+                                         .sub("my_c(*n) = n", "other = 1")
+    write_project("class C18\n  include Outer18\n  my_c :c18\nend\n", %w[C18.new.c18],
+                  extra_files: { "conc18.rb" => concern("Conc18"), "outer18.rb" => outer })
+    expect(undefined_messages).to be_empty
+  end
+
+  # Known limit: here `Outer18b::ClassMethods#my_c` is nearer and defines nothing, so Ruby raises at `C18b.new.c18b`;
+  # the reader looks for a definer anywhere on the singleton chain, not for the nearest `my_c` (#2901's rule).
+  it "does not look past the nearer my_c of the outer concern's own ClassMethods" do
+    outer = concern("Outer18b", body: "n").sub("Concern\n", "Concern\n  include Conc18b\n")
+    write_project("class C18b\n  include Outer18b\n  my_c :c18b\nend\n", %w[C18b.new.c18b],
+                  extra_files: { "conc18b.rb" => concern("Conc18b"), "outer18b.rb" => outer })
+    expect(undefined_messages).to be_empty
   end
 
   # The `included` and `prepended` blocks run only for their own edge.
@@ -162,6 +171,176 @@ RSpec.describe "ActiveSupport::Concern class_methods macros and call.undefined-m
              "def my_c(*n) = #{definer_body}\n  end\n  my_c :hp4\nend\nclass Hp4c\n  include Hp4\nend\n"
     write_project(source, %w[Hp4c.new.hp4])
     expect(undefined_messages).to eq(["undefined method `hp4' for Hp4c"])
+  end
+
+  # Issue #2992 — Ruby runs a concern's `included` / `prepended` block in every direct includer or prepender, a module
+  # included, and a concern included into a concern in the outer concern's final includer, on that includer's edge.
+  # Each concern is in its own file.
+  describe "a hook block in a direct includer other than the receiver's class" do
+    def block_concern(name, body: definer_body, **hooks)
+      blocks = hooks.map { |hook, call| "  #{hook} do\n    #{call}\n  end\n" }.join
+      "module #{name}\n  extend ActiveSupport::Concern\n  class_methods do\n    def my_c(*n) = #{body}\n  end\n" \
+        "#{blocks}end\n"
+    end
+
+    def outer(name, edge, inner) = "module #{name}\n  extend ActiveSupport::Concern\n  #{edge} #{inner}\nend\n"
+
+    it "reads an included block run in a module the class includes" do
+      write_project("module Me\n  include Re\nend\nclass Ke\n  include Me\nend\n", %w[Ke.new.e],
+                    extra_files: { "re.rb" => block_concern("Re", included: "my_c :e") })
+      expect(undefined_messages).to be_empty
+    end
+
+    it "reads a prepended block run in a module the class includes" do
+      write_project("module Mg\n  prepend Rg\nend\nclass Kg\n  include Mg\nend\n", %w[Kg.new.g],
+                    extra_files: { "rg.rb" => block_concern("Rg", prepended: "my_c :g") })
+      expect(undefined_messages).to be_empty
+    end
+
+    it "reads an included block run in a module the class prepends" do
+      write_project("module Mh\n  include Rh\nend\nclass Kh\n  prepend Mh\nend\n", %w[Kh.new.h],
+                    extra_files: { "rh.rb" => block_concern("Rh", included: "my_c :h") })
+      expect(undefined_messages).to be_empty
+    end
+
+    it "does not read a module's prepended block for the included edge it was given" do
+      write_project("module Mi\n  include Ri\nend\nclass Ki\n  include Mi\nend\n", %w[Ki.new.i],
+                    extra_files: { "ri.rb" => block_concern("Ri", prepended: "my_c :i") })
+      expect(undefined_messages).to eq(["undefined method `i' for Ki"])
+    end
+
+    it "reads a dependency concern's included block in the outer concern's includer" do
+      write_project("class Kw\n  include Ow\nend\n", %w[Kw.new.w],
+                    extra_files: { "cw.rb" => block_concern("Cw", included: "my_c :w"),
+                                   "ow.rb" => outer("Ow", "include", "Cw") })
+      expect(undefined_messages).to be_empty
+    end
+
+    it "reads a dependency of a dependency" do
+      write_project("class Kv\n  include Ov\nend\n", %w[Kv.new.v],
+                    extra_files: { "dv.rb" => block_concern("Dv", included: "my_c :v"),
+                                   "cv.rb" => outer("Cv", "include", "Dv"), "ov.rb" => outer("Ov", "include", "Cv") })
+      expect(undefined_messages).to be_empty
+    end
+
+    # The dependency runs on the final edge: `prepend Ox` prepends `Cx`, whatever edge `Ox` gave it.
+    it "reads a dependency's prepended block for a class that prepends the outer concern" do
+      write_project("class Kx\n  prepend Ox\nend\n", %w[Kx.new.x],
+                    extra_files: { "cx.rb" => block_concern("Cx", prepended: "my_c :x"),
+                                   "ox.rb" => outer("Ox", "include", "Cx") })
+      expect(undefined_messages).to be_empty
+    end
+
+    # `Cy` is included after `Oy`'s `extend ActiveSupport::Concern`, so it is a dependency and `prepend Oy` prepends it.
+    it "does not read a dependency's included block for a class that prepends the outer concern" do
+      write_project("class Ky\n  prepend Oy\nend\n", %w[Ky.new.y],
+                    extra_files: { "cy.rb" => block_concern("Cy", included: "my_c :y"),
+                                   "oy.rb" => outer("Oy", "include", "Cy") })
+      expect(undefined_messages).to eq(["undefined method `y' for Ky"])
+    end
+
+    # An `include` ahead of the `extend` (the next row) or in a reopening without it, which may load first, is an
+    # ordinary one, whose block runs in the outer concern on its own edge.
+    it "reads an included block of a concern included in a reopening of the outer concern" do
+      reopened = "module Or\n  include Cr\nend\n"
+      write_project("class Kr\n  prepend Or\nend\n", %w[Kr.new.r],
+                    extra_files: { "cr.rb" => block_concern("Cr", included: "my_c :r"), "or_a.rb" => reopened,
+                                   "or_b.rb" => "module Or\n  extend ActiveSupport::Concern\n  include Cr\nend\n" })
+      expect(undefined_messages).to be_empty
+    end
+
+    it "reads an included block of a concern included ahead of the outer concern's extend" do
+      oq = "module Oq\n  include Cq\n  extend ActiveSupport::Concern\nend\n"
+      write_project("class Kq\n  prepend Oq\nend\n", %w[Kq.new.q],
+                    extra_files: { "cq.rb" => block_concern("Cq", included: "my_c :q"), "oq.rb" => oq })
+      expect(undefined_messages).to be_empty
+    end
+
+    # Guard: the reporting control for the dependency rows.
+    it "does not open the includer when a dependency's macro defines nothing" do
+      write_project("class Kt\n  include Ot\nend\n", %w[Kt.new.t],
+                    extra_files: { "ct.rb" => block_concern("Ct", body: "n", included: "my_c :t"),
+                                   "ot.rb" => outer("Ot", "include", "Ct") })
+      expect(undefined_messages).to eq(["undefined method `t' for Kt"])
+    end
+
+    it "reads a macro call in a block that keeps self" do
+      write_project("class Kb\n  include Rb\nend\n", %w[Kb.new.b],
+                    extra_files: { "rb.rb" => block_concern("Rb", included: "[1].each { my_c :b }") })
+      expect(undefined_messages).to be_empty
+    end
+
+    # The block runs on an instance, and only when that method is called.
+    it "does not read a macro call in a define_method block" do
+      write_project("class Kd\n  include Rd\nend\n", %w[Kd.new.d],
+                    extra_files: { "rd.rb" => block_concern("Rd", included: "define_method(:later) { my_c :d }") })
+      expect(undefined_messages).to eq(["undefined method `d' for Kd"])
+    end
+
+    # Issue #2992 — a lambda's, a proc's and `on_load`'s blocks run later, if at all, not on the includer as the block
+    # runs.
+    {
+      "a lambda" => "@later = lambda { my_c :DEF }",
+      "a Proc.new" => "@later = Proc.new { my_c :DEF }",
+      "an on_load hook" => "ActiveSupport.on_load(:never_loaded) { my_c :DEF }"
+    }.each_with_index do |(label, call), index|
+      it "does not read a macro call in #{label} block" do
+        name = "Dl#{index}"
+        write_project("class K#{name}\n  include #{name}\nend\n", ["K#{name}.new.l#{index}"],
+                      extra_files: { "dl#{index}.rb" => block_concern(name, included: call.sub("DEF", "l#{index}")) })
+        expect(undefined_messages).to eq(["undefined method `l#{index}' for K#{name}"])
+      end
+    end
+
+    # `after_save` here is the base class's own, which keeps its block and never runs it.
+    it "does not read a macro call in a callback macro's block" do
+      base = "class Bcb\n  def self.after_save(&) = nil\nend\n"
+      write_project("#{base}class Kcb < Bcb\n  include Rcb\nend\n", %w[Kcb.new.cb],
+                    extra_files: { "rcb.rb" => block_concern("Rcb", included: "after_save { my_c :cb }") })
+      expect(undefined_messages).to eq(["undefined method `cb' for Kcb"])
+    end
+
+    {
+      "collect" => "%i[DEF].collect { |n| my_c n }",
+      "each_slice" => "%i[DEF].each_slice(1) { |ns| my_c(*ns) }",
+      "reverse_each" => "%i[DEF].reverse_each { |n| my_c n }",
+      "inject" => "%i[DEF].inject(0) { |acc, n| my_c n; acc }",
+      "each.with_index" => "%i[DEF].each.with_index { |n, _| my_c n }",
+      "find" => "%i[DEF].find { |n| my_c n; false }",
+      "loop" => "loop do\n      my_c :DEF\n      break\n    end"
+    }.each_with_index do |(label, call), index|
+      it "reads a macro call in a #{label} block" do
+        name = "Di#{index}"
+        write_project("class K#{name}\n  include #{name}\nend\n", ["K#{name}.new.i#{index}"],
+                      extra_files: { "di#{index}.rb" => block_concern(name, included: call.gsub("DEF", "i#{index}")) })
+        expect(undefined_messages).to be_empty
+      end
+    end
+
+    it "reads a macro call in an iterator block on a constant" do
+      write_project("NAMES = %i[n1].freeze\nclass Kn\n  include Rn\nend\n", %w[Kn.new.n1],
+                    extra_files: { "rn.rb" => block_concern("Rn", included: "NAMES.each { |n| my_c n }") })
+      expect(undefined_messages).to be_empty
+    end
+
+    # `extend` runs `extended`, not `included`.
+    it "does not read an included block for a class that only extends the concern" do
+      write_project("class Kz\n  extend Rz\nend\n", %w[Kz.new.z],
+                    extra_files: { "rz.rb" => block_concern("Rz", included: "my_c :z") })
+      expect(undefined_messages).to eq(["undefined method `z' for Kz"])
+    end
+
+    # `ClassMethods` of a dependency is on the class object's ancestry, not its instances'. Each concern defines a
+    # method of its own, as an empty concern opens its includer's instance side (#2094), and the dependency writes an
+    # explicit `module ClassMethods`, since the walk also records a `class_methods` def on the concern itself.
+    it "does not answer an instance-side call with a dependency's class method" do
+      cc = "module Cc\n  extend ActiveSupport::Concern\n  def own = 1\n  " \
+           "module ClassMethods\n    def build = 1\n  end\nend\n"
+      oc = outer("Oc", "include", "Cc").sub("  include", "  def own = 1\n  include")
+      write_project("class Kc\n  include Oc\nend\n", %w[Kc.new.build Kc.build.zork],
+                    extra_files: { "cc.rb" => cc, "oc.rb" => oc })
+      expect(undefined_messages).to eq(["undefined method `build' for Kc", "undefined method `zork' for 1"])
+    end
   end
 
   describe "the ClassMethods a concern extends its includer with" do

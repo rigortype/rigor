@@ -301,6 +301,91 @@ RSpec.describe "singleton-side mixins a hook adds (#1592)" do
     expect(undefined_messages).to eq(["undefined method `zork' for \"CM\"", "undefined method `zork' for \"baz\""])
   end
 
+  # Issue #2992 — each concern in its own file.
+  it "answers a class-side call with a dependency concern's class method" do
+    outer = concern("Od2", "  include Cd2\n  class_methods do\n    def other = :od\n  end\n")
+    write_project(concern("Cd2", "  class_methods do\n    def build = \"s\"\n  end\n"),
+                  "class Kd2\n  include Od2\nend\n", ["Kd2.build.upcase", "Kd2.build.zork", "Kd2.other.zork"],
+                  extra: { "outer.rb" => outer })
+    expect(undefined_messages).to eq(["undefined method `zork' for \"s\"", "undefined method `zork' for :od"])
+  end
+
+  # Issue #2992 — only an `include` after the outer concern's own `extend ActiveSupport::Concern` makes a dependency.
+  # One ahead of it, or in a reopening without it, is an ordinary include: `Dep`'s hook then extends `Outer` itself,
+  # and `K` answers `v` from `Base`.
+  describe "a concern included into a concern" do
+    let(:dep) { concern("Dv", "  class_methods do\n    def v = \"s\"\n  end\n") }
+    let(:own) { "  class_methods do\n    def own = 1\n  end\n" }
+    let(:includer) do
+      "class Base\n  def self.v = 1\nend\nclass Kv < Base\n  include Ov\nend\nclass Pv < Base\n  prepend Ov\nend\n"
+    end
+
+    it "answers the dependency's ClassMethods for an include after the extend" do
+      write_project(dep, includer, ["Kv.v.zork", "Pv.v.zork"],
+                    extra: { "ov.rb" => concern("Ov", "  include Dv\n#{own}") })
+      expect(undefined_messages).to eq(["undefined method `zork' for \"s\"", "undefined method `zork' for \"s\""])
+    end
+
+    it "does not answer it for an include ahead of the extend" do
+      outer = "module Ov\n  include Dv\n  extend ActiveSupport::Concern\n#{own}end\n"
+      write_project(dep, includer, ["Kv.v.zork", "Pv.v.zork"], extra: { "ov.rb" => outer })
+      expect(undefined_messages).to eq(["undefined method `zork' for 1", "undefined method `zork' for 1"])
+    end
+
+    # Ruby answers 1 when the reopening loads first and "s" when it loads after the `extend`, so the read declines.
+    it "declines for an include in a reopening without the extend" do
+      write_project(dep, includer, ["Kv.v.zork", "Pv.v.zork"],
+                    extra: { "ov_a.rb" => "module Ov\n  include Dv\nend\n", "ov_b.rb" => concern("Ov", own) })
+      expect(undefined_messages).to be_empty
+    end
+  end
+
+  def bar_methods(value) = "  class_methods do\n    def bar = :#{value}\n  end\n"
+
+  # `include Ca8; include Cb8` includes `Cb8` last, so its `ClassMethods` is nearer.
+  it "orders two included dependencies as the outer concern includes them" do
+    write_project(concern("Ca8", bar_methods(:a)), "class Kl8\n  include Ol8\nend\n", ["Kl8.bar.zork"],
+                  extra: { "cb8.rb" => concern("Cb8", bar_methods(:b)),
+                           "ol8.rb" => concern("Ol8", "  include Ca8\n  include Cb8\n") })
+    expect(undefined_messages).to eq(["undefined method `zork' for :b"])
+  end
+
+  # `Concern` puts a prepended dependency ahead of the included ones (Ruby answers :a), which the tables list the
+  # other way, so the read declines.
+  it "declines between dependencies when the outer concern prepends one" do
+    write_project(concern("Ca9", bar_methods(:a)), "class Kl9\n  include Ol9\nend\n", ["Kl9.bar.zork"],
+                  extra: { "cb9.rb" => concern("Cb9", bar_methods(:b)),
+                           "ol9.rb" => concern("Ol9", "  include Ca9\n  prepend Cb9\n") })
+    expect(undefined_messages).to be_empty
+  end
+
+  # `include Ca6, Cb6` runs `Cb6.append_features` first, so `Ca6` is included last and its `ClassMethods` is nearer.
+  { "Ca6, Cb6" => ":a", "Cb6, Ca6" => ":b" }.each do |arguments, nearer|
+    it "orders the dependencies of include #{arguments} as Ruby does" do
+      write_project(concern("Ca6", bar_methods(:a)), "class Kl6\n  include Ol6\nend\n", ["Kl6.bar.zork"],
+                    extra: { "cb6.rb" => concern("Cb6", bar_methods(:b)),
+                             "ol6.rb" => concern("Ol6", "  include #{arguments}\n") })
+      expect(undefined_messages).to eq(["undefined method `zork' for #{nearer}"])
+    end
+  end
+
+  # Ruby answers :b, `Concern#prepend_features` unshifting each into the dependencies; the prepend rule declines.
+  it "declines between the dependencies of prepend Ca5, Cb5" do
+    write_project(concern("Ca5", bar_methods(:a)), "class Kl5\n  include Ol5\nend\n", ["Kl5.bar.zork"],
+                  extra: { "cb5.rb" => concern("Cb5", bar_methods(:b)),
+                           "ol5.rb" => concern("Ol5", "  prepend Ca5, Cb5\n") })
+    expect(undefined_messages).to be_empty
+  end
+
+  # Two files of the outer concern add their dependencies in load order.
+  it "declines between dependencies the outer concern includes in two files" do
+    write_project(concern("Ca7", bar_methods(:a)), "class Kl7\n  include Ol7\nend\n", ["Kl7.bar.zork"],
+                  extra: { "cb7.rb" => concern("Cb7", bar_methods(:b)),
+                           "ol7a.rb" => concern("Ol7", "  include Ca7\n"),
+                           "ol7b.rb" => concern("Ol7", "  include Cb7\n") })
+    expect(undefined_messages).to be_empty
+  end
+
   # The tables keep `extend` and `include` statements apart, so a class with both has two orders for them: the read
   # stands where both give one answer, and declines where they differ.
   describe "a class that also extends a module of its own" do
@@ -339,12 +424,42 @@ RSpec.describe "singleton-side mixins a hook adds (#1592)" do
     end
 
     # `Concern#append_features` records a concern included into another concern as a dependency and extends
-    # nothing; the final includer's dependency read is #2992.
+    # nothing; the final includer reads the dependency (#2992, below).
     it "does not extend a concern that includes a concern" do
       source = "#{concern('Cd', "  class_methods do\n    def build = 1\n  end\n")}" \
                "#{concern('Od', "  include Cd\n")}module Pd\n  include Cd\nend\n"
       expect(chain_names(source, "Od")).to eq(%w[Od ActiveSupport::Concern])
       expect(chain_names(source, "Pd")).to eq(%w[Pd Cd::ClassMethods])
+    end
+
+    # Issue #2992 — `Od.append_features(K)` includes the dependency `Cd` into `K` first, so `Cd::ClassMethods` sits
+    # behind `Od::ClassMethods`; on a prepend edge both are prepended to the class object, `Od`'s last.
+    describe "a concern's dependency concern" do
+      let(:concerns) do
+        "#{concern('Cd', "  class_methods do\n    def build = 1\n  end\n")}" \
+          "#{concern('Od', "  include Cd\n  class_methods do\n    def other = 2\n  end\n")}" \
+          "#{concern('On', "  include Cd\n  def own = 1\n")}class Base\nend\n"
+      end
+
+      it "extends the final includer behind the outer concern's ClassMethods" do
+        source = "#{concerns}class Ki < Base\n  include Od\nend\n"
+        expect(chain_names(source, "Ki")).to eq(%w[Ki Od::ClassMethods Cd::ClassMethods Base])
+      end
+
+      it "prepends both to a class that prepends the outer concern" do
+        source = "#{concerns}class Kp < Base\n  prepend Od\nend\n"
+        expect(chain_names(source, "Kp")).to eq(%w[Od::ClassMethods Cd::ClassMethods Kp Base])
+      end
+
+      # Ruby's `On.const_get(:ClassMethods)` does not reach `Cd`, which is no ancestor of `On`. Met twice, the module
+      # would be listed once but count a fork, which settles the chain to master.
+      it "lists the dependency's ClassMethods once when the outer concern has none" do
+        source = "#{concerns}class Kn < Base\n  include On\nend\n"
+        expect(chain_names(source, "Kn")).to eq(%w[Kn Cd::ClassMethods Base])
+        root = Prism.parse(source).value
+        scope = Rigor::Inference::ScopeIndexer.index(root, default_scope: Rigor::Scope.empty)[root]
+        expect(Rigor::Scope::ResolutionChain.for(scope, "Kn", :singleton, :methods).forks).to eq(0)
+      end
     end
 
     it "puts a later include's modules ahead of an earlier one's" do

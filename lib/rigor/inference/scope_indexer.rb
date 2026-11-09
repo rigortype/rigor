@@ -8231,30 +8231,139 @@ module Rigor
       # `scope` — a parameter (the `def`'s or a block's, which may shadow it), a multiple or operator write, a pattern
       # or a regexp capture. Blocks share their scope's locals, so they are searched; a nested `def` or declaration
       # opens a scope of its own, so it is not.
+      #
+      # Issue #3024 — one block parameter is not opaque: as the FIRST parameter of `each` / `each_with_index` /
+      # `map` over a literal array (or a constant the same scope assigns a literal array), it holds each element in
+      # turn, so the elements are read as the candidate names ({#iterated_element_source}). An element that is not
+      # a name literal still means "may be anything".
       def local_send_names(argument, scope)
         return nil unless argument.is_a?(Prism::LocalVariableReadNode)
 
         names = []
         root = scope.is_a?(Prism::DefNode) ? scope.compact_child_nodes : [scope]
-        return nil unless collect_local_send_names(root, argument.name, names)
+        return nil unless collect_local_send_names(root, argument.name, names, root)
 
         names.empty? ? nil : names
       end
 
-      def collect_local_send_names(nodes, local, names)
+      def collect_local_send_names(nodes, local, names, scope_nodes)
         nodes.all? do |node|
           next true if LOCAL_SCOPE_BOUNDARIES.any? { |kind| node.is_a?(kind) }
 
-          if node.is_a?(Prism::LocalVariableWriteNode) && node.name == local
-            name = literal_send_name(node.value)
-            next false if name.nil?
+          iterated = iterated_element_names(node, local, scope_nodes)
+          next false if iterated == false
 
-            names << name
-          elsif local_binding?(node, local)
-            next false
+          if iterated
+            names.concat(iterated)
+            next collect_local_send_names(iterated_element_children(node), local, names, scope_nodes)
           end
-          collect_local_send_names(node.compact_child_nodes, local, names)
+
+          literal = local_send_name_literal(node, local)
+          next false if literal == :clash
+
+          names << literal if literal
+
+          collect_local_send_names(node.compact_child_nodes, local, names, scope_nodes)
         end
+      end
+
+      # Issue #3024 — the `each` / `each_with_index` / `map` arm of {#collect_local_send_names}: when `node` is
+      # such an iterator whose first block parameter is `local`, the iterated array's elements are `local`'s
+      # candidate names ({#iterated_element_source}), each read as {#literal_send_name}. False when an element
+      # may spell any name; nil when `node` is not that iterator, so the caller's plain-write and binding checks
+      # apply.
+      def iterated_element_names(node, local, scope_nodes)
+        elements = iterated_element_source(node, local, scope_nodes)
+        return if elements.nil?
+        return false if elements == :unknown
+
+        names = elements.map { |element| literal_send_name(element) }
+        return false if names.any?(&:nil?)
+
+        names
+      end
+
+      # The name literal a `local = :name` / `local = "name"` write binds `local` to for
+      # {#collect_local_send_names}, `:clash` when `node` binds `local` to anything else — a non-literal write,
+      # a target, an operator write, a parameter — or nil when `node` does not bind `local` at all.
+      def local_send_name_literal(node, local)
+        if node.is_a?(Prism::LocalVariableWriteNode) && node.name == local
+          name = literal_send_name(node.value)
+          return :clash if name.nil?
+
+          return name
+        end
+        :clash if local_binding?(node, local)
+      end
+
+      # Issue #3024 — the array elements `node` iterates when it is an `each` / `each_with_index` / `map` call
+      # whose FIRST block parameter is `local`: a literal `ArrayNode` receiver's elements, or a bare constant the
+      # same scope assigns a literal array exactly once ({#constant_array_elements}). `:unknown` when the call is
+      # such an iterator on `local` but its elements cannot be read — a non-literal receiver, or a constant that
+      # is unwritten, multiply written or not array-valued — so the parameter may hold anything; nil when `node`
+      # is not the iterator or `local` is not its first parameter.
+      def iterated_element_source(node, local, scope_nodes)
+        return unless node.is_a?(Prism::CallNode) && ARRAY_ITERATORS.include?(node.name)
+
+        block = node.block
+        return unless block.is_a?(Prism::BlockNode)
+        return unless iterated_first_parameter?(block, local)
+
+        iterated_receiver_elements(node.receiver, scope_nodes) || :unknown
+      end
+
+      # Whether `local` is the first parameter of `block` and no other parameter binds it too (`|m, m = x|` — the
+      # later binding wins, so the first is not the element).
+      def iterated_first_parameter?(block, local)
+        declared = block.parameters
+        return false unless declared.is_a?(Prism::BlockParametersNode)
+
+        parameters = declared.parameters
+        first = parameters&.requireds&.first
+        return false unless first.is_a?(Prism::RequiredParameterNode) && first.name == local
+
+        Source::NodeWalker.each(parameters).none? do |param|
+          !param.equal?(first) && local_binding?(param, local)
+        end
+      end
+
+      # The elements of the array `receiver` denotes for {#iterated_element_source}: a literal array's own, or a
+      # bare constant's when the same scope assigns it a literal array exactly once. Nil when it denotes anything
+      # else — a qualified or rooted constant, a local, a call — so the iterated value may be anything.
+      def iterated_receiver_elements(receiver, scope_nodes)
+        return receiver.elements if receiver.is_a?(Prism::ArrayNode)
+        return unless receiver.is_a?(Prism::ConstantReadNode)
+
+        constant_array_elements(receiver.name, scope_nodes)
+      end
+
+      # The elements of the literal array `name` is assigned in `nodes`' scope, or nil when it is written any
+      # other number of times or its value is not an array literal — the constant may then hold anything.
+      def constant_array_elements(name, nodes)
+        writes = constant_write_nodes(nodes, name)
+        return unless writes.one?
+
+        value = writes.first.value
+        value.elements if value.is_a?(Prism::ArrayNode)
+      end
+
+      # Every `NAME = …` write in `nodes`' scope — stopping where {#collect_local_send_names} stops, since a
+      # nested `def` or declaration binds its own constants — so {#constant_array_elements} can tell one
+      # literal-array assignment from none or several.
+      def constant_write_nodes(nodes, name)
+        nodes.flat_map do |node|
+          next [] if LOCAL_SCOPE_BOUNDARIES.any? { |kind| node.is_a?(kind) }
+
+          own = node.is_a?(Prism::ConstantWriteNode) && node.name == name ? [node] : []
+          own + constant_write_nodes(node.compact_child_nodes, name)
+        end
+      end
+
+      # The children of an iterator call {#iterated_element_source} matched, minus its block's parameters — the
+      # first is `local` bound to the elements and the rest bind other names — so the usual scan still sees every
+      # other binding of `local` in the receiver, arguments and body.
+      def iterated_element_children(node)
+        [node.receiver, node.arguments, node.block.body].compact
       end
 
       # The method name a `send` argument spells: a name literal's, or `""` — no mixin's — for an interpolation with a

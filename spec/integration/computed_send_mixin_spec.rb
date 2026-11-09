@@ -142,4 +142,62 @@ RSpec.describe "a class body's computed-name `send` read as a mixin (#3006)" do
         .to eq(["undefined method `nope' for H"])
     end
   end
+
+  # Issue #3024 — the first block parameter of `each` / `each_with_index` / `map` over a literal array (or a
+  # constant the class body assigns a literal array) holds each element in turn, so the elements are the
+  # candidate names: `[:before_save].each` names no mixin and stays closed, `[:include].each` still marks.
+  describe "a block parameter fed by a literal array (#3024)" do
+    it "still fires after `[:before_save, :after_save].each` — every element names no mixin" do
+      expect(check("  [:before_save, :after_save].each { |cb| send(cb, :x) }\n  def t = self.nope\n"))
+        .to eq(["undefined method `nope' for H"])
+    end
+
+    it "does not fire after `[:include].each`" do
+      expect(check("  [:include].each { |k| send(k, M1) }\n  def t = self.m1\n")).to be_empty
+    end
+
+    it "does not fire after `[:include].map`" do
+      expect(check("  [:include].map { |k| send(k, M1) }\n  def t = self.m1\n")).to be_empty
+    end
+
+    it "does not fire after `each_with_index` over `[:include]`" do
+      expect(check("  [:include].each_with_index { |k, i| send(k, M1) }\n  def t = self.m1\n")).to be_empty
+    end
+
+    it "still fires after `KINDS = [:before_save]`" do
+      expect(check("  KINDS = [:before_save]\n  KINDS.each { |k| send(k, M1) }\n  def t = self.m1\n"))
+        .to eq(["undefined method `m1' for H"])
+    end
+
+    it "does not fire after `KINDS = [:include]`" do
+      expect(check("  KINDS = [:include]\n  KINDS.each { |k| send(k, M1) }\n  def t = self.m1\n"))
+        .to be_empty
+    end
+
+    it "does not fire when an element is not a name literal" do
+      expect(check("  [:include, name].each { |k| send(k, M1) }\n  def t = self.m1\n")).to be_empty
+    end
+
+    it "does not fire when the iterated receiver is not a literal array or a same-scope constant" do
+      expect(check("  registry.each { |k| send(k, M1) }\n  def t = self.m1\n")).to be_empty
+    end
+
+    it "does not fire when the constant is written twice" do
+      expect(check("  KINDS = [:before_save]\n  KINDS = [:include]\n  KINDS.each { |k| send(k, M1) }\n  " \
+                   "def t = self.m1\n")).to be_empty
+    end
+
+    it "does not fire when the constant's value is not an array literal" do
+      expect(check("  KINDS = build_kinds\n  KINDS.each { |k| send(k, M1) }\n  def t = self.m1\n"))
+        .to be_empty
+    end
+
+    it "does not fire when a nested declaration writes the same constant name" do
+      # `Inner::KINDS` is not `H::KINDS`: the class body's `KINDS` is unwritten here, so the parameter may
+      # hold anything.
+      body = "  class Inner\n    KINDS = [:before_save]\n  end\n  " \
+             "KINDS.each { |k| send(k, M1) }\n  def t = self.m1\n"
+      expect(check(body)).to be_empty
+    end
+  end
 end

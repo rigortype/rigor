@@ -89,6 +89,30 @@ RSpec.describe "a top-level def and a class-object read beside a mixin no name s
     end
   end
 
+  describe "a bare call on a class that splats a module into its class object with `extend`" do
+    let(:defs) { "def e1 = nil\nmodule E1\n  def e1 = \"x\"\nend\nEMODS = [E1]\n" }
+    let(:klass) { "class C\n  extend(*EMODS)\n  V = e1.upcase\n  def self.s = e1.upcase\nend\n" }
+    let(:sub) { "class CSub < C\n  def self.s = e1.upcase\nend\n" }
+
+    it "does not bind the top-level def in a class-body constant, a `def self.`, or a subclass's `def self.`" do
+      expect(undefined_messages("a.rb" => "#{defs}#{klass}#{sub}")).to be_empty
+    end
+
+    it "does not bind it when the definitions, the class and the subclass sit in three files" do
+      expect(undefined_messages("a.rb" => defs, "c.rb" => klass, "csub.rb" => sub)).to be_empty
+    end
+
+    it "does not bind it beside a literal `extend E1` either (control)" do
+      source = "#{defs}class Lit\n  extend E1\n  V = e1.upcase\n  def self.s = e1.upcase\nend\n"
+      expect(undefined_messages("a.rb" => source)).to be_empty
+    end
+
+    it "still binds it on the instance side, which `extend` does not reach" do
+      source = "#{defs}class C\n  extend(*EMODS)\n  def t = e1.upcase\nend\n"
+      expect(undefined_messages("a.rb" => source)).to eq(["undefined method `upcase' for nil"])
+    end
+  end
+
   describe "the class-object side" do
     it "declines the superclass's method on a class that splats in a module whose hook extends it" do
       source = "#{hooked}class K < Base\n  include(*MODS)\nend\nK.bar.upcase\n"

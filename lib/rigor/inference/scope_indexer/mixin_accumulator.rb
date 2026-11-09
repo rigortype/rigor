@@ -32,7 +32,9 @@ module Rigor
       # mixin call it could not record whose argument is not a constant (`include helper`, `include(*MODS)`; a
       # `Module.new { … }` argument keeps its #2975 reading), a name beside one it cannot name (`include M, h`), and
       # an opaque eval whose block mixes into its own `self`, and a hook's `base.include M`. `self.include M` and a
-      # receiverless `send(:include, M)` are recorded as a bare `include M` is (#2995).
+      # receiverless `send(:include, M)` are recorded as a bare `include M` is (#2995). Issue #2994 — the singleton side
+      # lists {UNNAMED} the same way for an `extend` (or a `class << self` `include` / `prepend`) it could not record
+      # whose argument is not a constant (`extend(*EMODS)`, `extend M, h`).
       #
       # The value is `{owner => {include: [names], extend: [names]}}`. `:include` is the instance side
       # (`include` and `prepend`), `:extend` the singleton side (`extend`, and `include` / `prepend` inside
@@ -127,7 +129,7 @@ module Rigor
         # nothing the walk could record, which leaves the recorded names' neighbours unknown. `positioned` says a
         # receiver-form call runs where it is written, as a receiverless one does (`singleton_class.prepend P`, #2998).
         def note(node, owner, side, targets, complete:, positioned: false)
-          return taint(owner, side, unnamed: side == :include) unless complete
+          return taint(owner, side, unnamed: true) unless complete
           return if (positioned || node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode)) && direct?(node)
 
           add(owner, side, targets)

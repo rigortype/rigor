@@ -7945,11 +7945,23 @@ module Rigor
       # owner (`self.include M` and a receiverless `send(:include, M)` included), so none reaches here with a module
       # the tables do not hold. The extends walk's taint of `Const.include M` inside `class << self` is the one
       # constant-argument call that does, and the include walk records that edge under `Const`.
+      #
+      # Issue #2994 — the singleton side lists {MixinAccumulator::UNNAMED} too when an unrecorded call reaching it has
+      # an argument that is not a constant: `extend(*EMODS)`, `extend helper`, `include(*MODS)` inside `class << self`
+      # or on `singleton_class`. A hook parameter's `base.extend(*X)` extends the includer, not the module the hook is
+      # written in, so it leaves that module's singleton side unnamed-free.
       def taint_unrecorded_mixin(node, kind, arguments, effects, accumulator)
+        opaque = arguments.any? { |arg| opaque_mixin_argument?(arg) }
+        hook = hook_parameter_receiver?(node.receiver, accumulator)
         unnamed = INSTANCE_MIXIN_NAMES.include?(kind) && !singleton_class_eval_receiver?(node.receiver) &&
-                  (hook_parameter_receiver?(node.receiver, accumulator) ||
-                   arguments.any? { |arg| Source::ConstantPath.qualified_name(arg).nil? && !module_new_call?(arg) })
-        effects.each { |owner, side| accumulator.taint(owner, side, unnamed: unnamed && side == :include) }
+                  (hook || opaque)
+        effects.each do |owner, side|
+          accumulator.taint(owner, side, unnamed: side == :include ? unnamed : opaque && !hook)
+        end
+      end
+
+      def opaque_mixin_argument?(arg)
+        !arg.is_a?(Prism::SelfNode) && Source::ConstantPath.qualified_name(arg).nil? && !module_new_call?(arg)
       end
 
       # A hook parameter itself (`base` in `def self.included(base)`): its class is the includer, which the walk cannot

@@ -115,7 +115,7 @@ RSpec.describe "reopened concern class_methods and hook spellings (#2997)" do
       "module M8\n  %w[a b].each { |n| define_singleton_method(\"is_#{'#{n}'}\") { true } }\nend\n"
   }.each do |label, source|
     it "reads no hook from #{label} with an is_ prefix" do
-      write_project({ "m8.rb" => source, "k.rb" => "#{base_class}class K8 < Base\n  include M8\n  def own = 1\nend\n" },
+      write_project({ "a_m8.rb" => source, "k.rb" => "#{base_class}class K8 < Base\n  include M8\n  def own = 1\nend\n" },
                     ["K8.bar.zork", "K8.nope"], members: { "K8" => "  def own: () -> Integer\n" })
       expect(undefined_messages).to eq(["undefined method `nope' for singleton(K8)", "undefined method `zork' for 1"])
     end

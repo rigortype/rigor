@@ -4,7 +4,7 @@
 # (`class << self; prepend(*MODS); end`, `singleton_class.prepend(*MODS)`) may put any method ahead of the class
 # object's own `def self.` methods, so a class-side call that the class object or anything behind it answers is
 # declined rather than answered with the own def. An unnamed `extend` or `class << self` `include` sits behind the
-# class object, so its own def still answers.
+# class object, so its own def still answers, and a definer behind it (a superclass's `def self.`) is declined.
 #
 # Every row's Ruby behaviour was witnessed on Ruby 4.0.5. The modules sit in one file, the class in another and the
 # calls in a third; `sig/` declares every class and module, empty, so RBS answers no call. A call `.zork` on a result
@@ -17,18 +17,21 @@ require "tmpdir"
 require "rigor/analysis/runner"
 require "rigor/configuration"
 
-RSpec.describe "an unnamed singleton-side prepend of the class's own (#3020)" do
+RSpec.describe "an unnamed singleton-side mixin of the class's own (#3020)" do
   around do |example|
     Dir.mktmpdir("rigor-unnamed-singleton-prepend-") { |dir| Dir.chdir(dir) { example.run } }
   end
 
-  def write_project(includer, calls)
+  # `extra` maps more `lib/` file names to their source.
+  def write_project(includer, calls, extra: {})
     FileUtils.mkdir_p("lib")
     FileUtils.mkdir_p("sig")
-    declared = [modules, includer].flat_map { |body| body.scan(/^\s*(class|module) ([\w:]+( < \w+)?)/) }.uniq
+    sources = [modules, includer, *extra.values]
+    declared = sources.flat_map { |body| body.scan(/^\s*(class|module) ([\w:]+( < \w+)?)/) }.uniq
     File.write(File.join("sig", "types.rbs"), declared.map { |kind, name| "#{kind} #{name}\nend\n" }.join)
     File.write(File.join("lib", "modules.rb"), modules)
     File.write(File.join("lib", "includer.rb"), includer)
+    extra.each { |name, body| File.write(File.join("lib", name), body) }
     File.write(File.join("lib", "use.rb"), "def run\n#{calls.map { |c| "  #{c}" }.join("\n")}\nend\n")
   end
 
@@ -59,6 +62,12 @@ RSpec.describe "an unnamed singleton-side prepend of the class's own (#3020)" do
     end
   end
 
+  # Ruby answers :a: `class << Kt` after the class body opens the same singleton class (#3019).
+  it "declines rather than answer the class's own def past class << Kt; prepend(*MODS)" do
+    write_project("class Kt < Base\n  def self.foo = 1\nend\nclass << Kt\n  prepend(*MODS)\nend\n", ["Kt.foo.zork"])
+    expect(undefined_messages).to be_empty
+  end
+
   # Ruby answers :a for `Sub.foo` and :b for `Kt.bar`, past `Base.bar`; `Sub.baz` is Sub's own, ahead of Kt's level.
   it "declines on a subclass and past the superclass, and answers a subclass's own def" do
     write_project("class Kt < Base\n  def self.foo = 1\n  class << self\n    prepend(*MODS)\n  end\nend\n" \
@@ -79,5 +88,30 @@ RSpec.describe "an unnamed singleton-side prepend of the class's own (#3020)" do
                   "class Ki < Base\n  def self.foo = 1\n  class << self\n    include(*MODS)\n  end\nend\n",
                   ["Ke.foo.zork", "Ki.foo.zork"])
     expect(undefined_messages).to eq([zork(1)] * 2)
+  end
+
+  # An unnamed `extend` sits behind the class object's own singleton and ahead of its superclass's, so a superclass
+  # `def self.` is withheld. Ruby answers :b for each `bar`, 1 for `Ke.foo` and 3 for `Se.baz`.
+  describe "past an unnamed extend" do
+    let(:includer) do
+      "class Ke < Base\n  def self.foo = 1\n  extend(*MODS)\nend\nclass Se < Ke\n  def self.baz = 3\nend\n"
+    end
+
+    it "declines a superclass's def on the class and on a subclass, and answers their own defs" do
+      write_project(includer, ["Ke.bar.zork", "Se.bar.zork", "Ke.foo.zork", "Se.baz.zork"])
+      expect(undefined_messages).to eq([zork(1), zork(3)])
+    end
+
+    it "declines a superclass's def when a reopening in another file writes the extend" do
+      write_project("class Kr < Base\n  def self.foo = 1\nend\n", ["Kr.bar.zork", "Kr.foo.zork"],
+                    extra: { "reopen.rb" => "class Kr < Base\n  extend(*MODS)\nend\n" })
+      expect(undefined_messages).to eq([zork(1)])
+    end
+
+    # Ruby answers :b: a `class << self` `include` sits where an `extend` does.
+    it "declines a superclass's def past a class << self include" do
+      write_project("class Ki < Base\n  class << self\n    include(*MODS)\n  end\nend\n", ["Ki.bar.zork"])
+      expect(undefined_messages).to be_empty
+    end
   end
 end

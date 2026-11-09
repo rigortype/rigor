@@ -201,6 +201,15 @@ module Rigor
         @memo[:unnamed_prepend_nodes] ||= @marks.filter_map { |mark| mark.node if mark.kind == :unnamed_prepend }.freeze
       end
 
+      # Issue #3020 — the class objects on the chain whose own singleton side lists a module no table names
+      # (`extend(*MODS)`, `class << self; include(*MODS)`, `singleton_class.prepend(*MODS)`: the `:extend` order mark
+      # listing {Relevance::UNNAMED}).
+      def unnamed_extend_nodes
+        @memo[:unnamed_extend_nodes] ||= @marks.filter_map do |mark|
+          mark.node if mark.kind == :extend && mark.listed.include?(Relevance::UNNAMED)
+        end.freeze
+      end
+
       # The chain's retro world ({#settle}), or nil when it has none.
       def retro_world = @retro
 

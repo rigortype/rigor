@@ -2887,6 +2887,7 @@ module Rigor
         found = [nil, nil] if found.last && dynamic_singleton_definer_ahead?(class_name, method_name, found.last)
         found = [nil, nil] if found.last && singleton_hook_order_split?(class_name, method_name)
         found = [nil, nil] if found.last && singleton_prepend_split?(class_name, method_name, found)
+        found = [nil, nil] if found.last && unnamed_singleton_mixin_split?(class_name, method_name)
         found = [nil, nil] if found.last && hidden_hook_split?(class_name, method_name, found.last)
         found
       end
@@ -2944,17 +2945,11 @@ module Rigor
       # such prepend, so its definer may not be the one Ruby's order reaches first. A `def` the extends fold copied
       # onto a class object is compared as its module's. A definer from a prepend region whose order is not a fact
       # is withheld whichever order answers.
-      #
-      # Issue #3020 — a class object with a prepend of a module no table names (`class << self; prepend(*MODS)`) may
-      # answer any name from that module ahead of its own `def self.`, so a definer at or behind it is withheld too.
       def singleton_prepend_split?(class_name, method_name, found)
         chain = Scope::ResolutionChain.for(scope, class_name.to_s, :singleton, :methods)
-        unnamed = chain.unnamed_prepend_nodes
-        return false unless chain.singleton_prepend_marked? || !unnamed.empty?
+        return false unless chain.singleton_prepend_marked?
 
         answer = positioned_singleton_definer(chain, method_name)
-        return true if behind_unnamed_prepend?(chain, unnamed, answer)
-        return false unless chain.singleton_prepend_marked?
         return true if unordered_prepend_definer?(chain, answer)
 
         node, owner = found
@@ -2977,15 +2972,36 @@ module Rigor
         end
       end
 
-      # Whether `answer` sits at or behind the level of a class object in `nodes` (one with an unnamed singleton
-      # prepend), where that module may answer first: no entry ahead of that level is `answer`'s.
-      def behind_unnamed_prepend?(chain, nodes, answer)
-        nodes.any? do |node|
-          level = chain.level_classes.index(node)
-          next true if level.nil? || answer.nil?
+      # Issue #3020 — whether to withhold the class-side answer on a chain whose class objects mix a module no table
+      # names into their singleton side, which may define the name. A prepend (`class << self; prepend(*MODS)`) sits
+      # ahead of the class object's own `def self.`, so a definer at or behind that class object's level is withheld;
+      # an `extend(*MODS)` or a `class << self` `include(*MODS)` sits right behind it, so a definer behind the class
+      # object's own entry is withheld and its own `def self.` still answers.
+      def unnamed_singleton_mixin_split?(class_name, method_name)
+        chain = Scope::ResolutionChain.for(scope, class_name.to_s, :singleton, :methods)
+        prepends = chain.unnamed_prepend_nodes
+        extends = chain.unnamed_extend_nodes
+        return false if prepends.empty? && extends.empty?
 
-          chain.entries[0...chain.level_starts[level]].none? { |entry| entry.name == answer }
-        end
+        answer = positioned_singleton_definer(chain, method_name)
+        return true if answer.nil?
+
+        prepends.any? { |node| !answered_ahead?(chain, answer, level_start_of(chain, node)) } ||
+          extends.any? { |node| !answered_ahead?(chain, answer, own_singleton_index(chain, node)&.succ) }
+      end
+
+      # Whether `answer` owns an entry before `stop` (nil when the position is unknown: never).
+      def answered_ahead?(chain, answer, stop)
+        !stop.nil? && chain.entries[0...stop].any? { |entry| entry.name == answer }
+      end
+
+      def level_start_of(chain, node)
+        level = chain.level_classes.index(node)
+        level && chain.level_starts[level]
+      end
+
+      def own_singleton_index(chain, node)
+        chain.entries.index { |entry| entry.side == :singleton && entry.name == node }
       end
 
       # The owner of the first `def` of the name along the chain: a fold copy is skipped, or with `copies:` read as

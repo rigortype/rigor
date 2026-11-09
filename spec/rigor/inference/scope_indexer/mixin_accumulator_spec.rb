@@ -343,8 +343,8 @@ RSpec.describe Rigor::Inference::ScopeIndexer::MixinAccumulator do
       # A class declared in a `class << self` body is the singleton class's constant, not `A::C`: Ruby resolves `C` to
       # the top-level class here.
       it "does not count a same-named class in an earlier class << self body as declared ahead" do
-        source = "module A\n  class << self\n    class C\n    end\n  end\n  class << C\n    prepend B\n  end\n" \
-                 "  class C\n  end\nend\n"
+        source = "module A\n  class << self\n    class C\n    end\n  end\n  class << C\n    prepend B\n  end\n  " \
+                 "class C\n  end\nend\n"
 
         expect(unpositioned(source)).to eq("A::C" => { extend: ["B"] }, "C" => { extend: ["B"] })
       end

@@ -336,9 +336,9 @@ RSpec.describe "ActiveSupport::Concern class_methods macros and call.undefined-m
     it "reads a macro call in the block of a lambda method on a constant named Kernel in another namespace" do
       foo = "module Foo\n  module Kernel\n    def self.lambda = yield\n  end\nend\n"
       sig = "module Foo\n  module Kernel\n  end\nend\nclass Kfk\nend\nmodule Rfk\nend\n"
-      write_project("class Kfk\n  include Rfk\nend\n", %w[Kfk.new.fk], sig: sig,
-                    extra_files: { "foo.rb" => foo,
-                                   "rfk.rb" => block_concern("Rfk", included: "Foo::Kernel.lambda { my_c :fk }") })
+      rfk = block_concern("Rfk", included: "Foo::Kernel.lambda { my_c :fk }")
+      files = { "foo.rb" => foo, "rfk.rb" => rfk }
+      write_project("class Kfk\n  include Rfk\nend\n", %w[Kfk.new.fk], sig: sig, extra_files: files)
       expect(undefined_messages).to be_empty
     end
 

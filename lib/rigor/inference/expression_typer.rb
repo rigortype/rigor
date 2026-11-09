@@ -2944,11 +2944,17 @@ module Rigor
       # such prepend, so its definer may not be the one Ruby's order reaches first. A `def` the extends fold copied
       # onto a class object is compared as its module's. A definer from a prepend region whose order is not a fact
       # is withheld whichever order answers.
+      #
+      # Issue #3020 — a class object with a prepend of a module no table names (`class << self; prepend(*MODS)`) may
+      # answer any name from that module ahead of its own `def self.`, so a definer at or behind it is withheld too.
       def singleton_prepend_split?(class_name, method_name, found)
         chain = Scope::ResolutionChain.for(scope, class_name.to_s, :singleton, :methods)
-        return false unless chain.singleton_prepend_marked?
+        unnamed = chain.unnamed_prepend_nodes
+        return false unless chain.singleton_prepend_marked? || !unnamed.empty?
 
         answer = positioned_singleton_definer(chain, method_name)
+        return true if behind_unnamed_prepend?(chain, unnamed, answer)
+        return false unless chain.singleton_prepend_marked?
         return true if unordered_prepend_definer?(chain, answer)
 
         node, owner = found
@@ -2968,6 +2974,17 @@ module Rigor
           next true if own.nil?
 
           chain.entries[start...own].any? { |entry| entry.name == answer }
+        end
+      end
+
+      # Whether `answer` sits at or behind the level of a class object in `nodes` (one with an unnamed singleton
+      # prepend), where that module may answer first: no entry ahead of that level is `answer`'s.
+      def behind_unnamed_prepend?(chain, nodes, answer)
+        nodes.any? do |node|
+          level = chain.level_classes.index(node)
+          next true if level.nil? || answer.nil?
+
+          chain.entries[0...chain.level_starts[level]].none? { |entry| entry.name == answer }
         end
       end
 

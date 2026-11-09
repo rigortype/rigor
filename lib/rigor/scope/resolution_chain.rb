@@ -111,11 +111,13 @@ module Rigor
       # order between them: the fork it counts already settles the chain, and the mark tells the typing read why.
       # Kind `:singleton_prepend` (#2998, listing nothing) marks a class object with singleton-side prepends of its
       # own, which master's order does not place, and kind `:prepend_order` (#2998, listing nothing) one whose
-      # singleton-side prepends have no known order among themselves; neither is an order mark.
+      # singleton-side prepends have no known order among themselves; neither is an order mark. Kind `:unnamed_prepend`
+      # (#3020, listing nothing) marks a class object with a singleton-side prepend of a module no table names, which
+      # is not an order mark either.
       Mark = Data.define(:node, :kind, :listed, :multi_file)
 
       # The mark kinds that are not order marks.
-      HOOK_MARK_KINDS = %i[extend_hook include_hook hook_order singleton_prepend prepend_order].freeze
+      HOOK_MARK_KINDS = %i[extend_hook include_hook hook_order singleton_prepend prepend_order unnamed_prepend].freeze
 
       NO_MARKS = [].freeze
 
@@ -191,6 +193,12 @@ module Rigor
       # ({Builder#order_prepends}).
       def prepend_order_nodes
         @memo[:prepend_order_nodes] ||= @marks.filter_map { |mark| mark.node if mark.kind == :prepend_order }.freeze
+      end
+
+      # Issue #3020 — the class objects on the chain with a singleton-side prepend of a module no table names
+      # ({Builder#own_singleton_prepends}).
+      def unnamed_prepend_nodes
+        @memo[:unnamed_prepend_nodes] ||= @marks.filter_map { |mark| mark.node if mark.kind == :unnamed_prepend }.freeze
       end
 
       # The chain's retro world ({#settle}), or nil when it has none.
@@ -1365,9 +1373,18 @@ module Rigor
         # prepends' own: a later `prepend` sits ahead of an earlier one. A class with any takes the `:singleton_prepend`
         # mark, which tells the typing read that master's order, which knows no singleton prepend, may answer
         # otherwise.
+        #
+        # Issue #3020 — a prepend whose module no table names (`class << self; prepend(*MODS)`,
+        # `singleton_class.prepend(*MODS)`) files the `"?"` entry instead, which no edge spells: the class takes the
+        # `:unnamed_prepend` mark, and the typing read declines a definer at or behind the class object.
         def own_singleton_prepends(name, own)
-          bucket = own.empty? ? nil : @discovery.discovered_parameter_envelopes[name]
+          bucket = @discovery.discovered_parameter_envelopes[name]
           return EMPTY if bucket.nil?
+
+          if bucket.key?(UNNAMED_PREPEND_KEY)
+            @frames.last.add_marks(mark_for(name, :unnamed_prepend, nil, false))
+          end
+          return EMPTY if own.empty?
 
           prepends = own.select { |raw| bucket.key?([DiscoveryIndex::ENVELOPE_SINGLETON_PREPEND_KIND, raw]) }
           return EMPTY if prepends.empty?
@@ -1681,7 +1698,8 @@ module Rigor
 
         WILDCARD_LIST = ["*"].freeze # Relevance::WILDCARD, which loads after this file
         UNNAMED_LIST = ["*", "?"].freeze # with Relevance::UNNAMED
-        private_constant :WILDCARD_LIST, :UNNAMED_LIST
+        UNNAMED_PREPEND_KEY = [DiscoveryIndex::ENVELOPE_SINGLETON_PREPEND_KIND, "?"].freeze # with Relevance::UNNAMED
+        private_constant :WILDCARD_LIST, :UNNAMED_LIST, :UNNAMED_PREPEND_KEY
 
         def multi_file?(name)
           sites = @discovery.discovered_class_sources[name]

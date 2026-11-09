@@ -5077,7 +5077,7 @@ module Rigor
 
         owner = qualified_prefix.join("::")
         hook = def_node.name
-        def_key = [Scope::DiscoveryIndex::ENVELOPE_HOOK_DEF_KIND, hook, def_node.slice]
+        def_key = [Scope::DiscoveryIndex::ENVELOPE_HOOK_DEF_KIND, hook, def_node.slice.split.join(" ")]
         record_envelope(tables.envelopes, owner, def_key, Source::ParameterEnvelope::OPAQUE)
         param = def_node.parameters&.requireds&.first
         return unless param.is_a?(Prism::RequiredParameterNode)
@@ -5115,16 +5115,19 @@ module Rigor
         placeable
       end
 
-      def exits_early?(node)
-        found = false
-        Source::NodeWalker.each(node) do |child|
-          found ||= HOOK_EXITS.any? { |kind| child.is_a?(kind) }
+      # A `next` or `break` inside a block or lambda leaves only that block, and a lambda's `return` only the lambda;
+      # a `return` inside a block leaves the hook.
+      def exits_early?(node, in_block: false)
+        case node
+        when Prism::ReturnNode then true
+        when Prism::NextNode, Prism::BreakNode then !in_block
+        when Prism::LambdaNode then false
+        else
+          inner = in_block || node.is_a?(Prism::BlockNode)
+          node.rigor_each_child { |child| return true if exits_early?(child, in_block: inner) }
+          false
         end
-        found
       end
-
-      HOOK_EXITS = [Prism::ReturnNode, Prism::NextNode, Prism::BreakNode].freeze
-      private_constant :HOOK_EXITS
 
       # A `class << self` body that mixes in, anywhere under a hook body or block.
       def singleton_mixin_body?(node)
@@ -8787,6 +8790,20 @@ module Rigor
         VISIBILITY_TOGGLES.include?(name) ? [name, arguments] : nil
       end
 
+      # Issue #1592 — a concern's `class_methods do … end` block is a `module_eval` of `Owner::ClassMethods`, whose
+      # visibility starts public: its `def`s' visibilities are recorded on that module too, as its `def`s are.
+      def walk_class_methods_visibilities(node, child_prefix, accumulator)
+        return unless node.is_a?(Prism::ModuleNode) && concern_body?(node.body, child_prefix)
+
+        node.body.body.each do |statement|
+          next unless block_statement?(statement) && statement.name == :class_methods && statement.block.body
+
+          accumulator.body do
+            walk_method_visibilities(statement.block.body, [*child_prefix, "ClassMethods"], false, :public, accumulator)
+          end
+        end
+      end
+
       # rubocop:disable-next Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity, Metrics/AbcSize
       def walk_method_visibilities(node, qualified_prefix, in_singleton_class, current_visibility, accumulator, # rubocop:disable Metrics/ParameterLists
                                    def_owner_prefix = nil, singleton_cref: false,
@@ -8810,6 +8827,7 @@ module Rigor
                 walk_method_visibilities(node.body, body_prefix, false, :public,
                                          accumulator, nil, singleton_cref: child_cref)
               end
+              walk_class_methods_visibilities(node, child_prefix, accumulator) unless child_cref
             end
             return current_visibility
           end

@@ -127,6 +127,26 @@ RSpec.describe "singleton-side mixins a hook adds (#1592)" do
       expect(undefined_messages).to eq(["undefined method `zork' for 2"])
     end
 
+    # A `next` or `break` in a block, or a `return` in a lambda, leaves only that block: the extend still runs.
+    {
+      "a block's next" => "[1].each { |x| next if x }",
+      "a lambda's return" => "f = -> { return 1 }"
+    }.each do |label, guard|
+      it "answers a hook's extend after #{label}" do
+        hook = "module Hn\n  def self.included(base)\n    #{guard}\n    base.extend(X)\n  end\nend\n"
+        write_project("#{x_module}#{hook}", "#{base_class}class Kn < Base\n  include Hn\nend\n", ["Kn.bar.zork"])
+        expect(undefined_messages).to eq(["undefined method `zork' for \"X\""])
+      end
+    end
+
+    # A `return` in a block leaves the hook itself.
+    it "declines a hook's extend after a block's return" do
+      hook = "module Hn\n  def self.included(base)\n    [1].each { |x| return if x }\n    base.extend(X)\n  end\nend\n"
+      write_project("#{x_module}#{hook}", "#{base_class}class Kn < Base\n  include Hn\nend\n",
+                    ["Kn.bar.upcase", "Kn.bar.even?"])
+      expect(undefined_messages).to be_empty
+    end
+
     # A `raise` guard leaves the extend placed: past it, the extend runs.
     it "answers a hook's extend after a raise guard" do
       hook = "module Hr\n  def self.included(base)\n    raise \"no\" unless base\n    base.extend(X)\n  end\nend\n"
@@ -219,6 +239,36 @@ RSpec.describe "singleton-side mixins a hook adds (#1592)" do
     write_project(concern("Cp", "  def own = 1\n  class_methods do\n    def foo = \"s\"\n  end\n"),
                   "class Kp\n  def self.foo = 1\n  prepend Cp\nend\n", ["Kp.foo.zork"])
     expect(undefined_messages).to eq(["undefined method `zork' for \"s\""])
+  end
+
+  # `Concern#prepend_features` prepends `ClassMethods` when the `prepend` runs, and `class << self; prepend` its module
+  # when that statement runs: the later is nearer, and the tables keep the two apart. Ruby answers :y for the first
+  # class and "s" for the second, and the read declines both, as it does when a second file holds the singleton prepend.
+  describe "a prepended concern beside a singleton prepend of the class" do
+    let(:source) do
+      class_methods = "  def own = 1\n  class_methods do\n    def foo = \"s\"\n  end\n"
+      "module Ypt\n  def foo = :y\nend\n#{concern('Cpt', class_methods)}"
+    end
+
+    it "declines in either statement order" do
+      includer = "class Kpt\n  prepend Cpt\n  class << self\n    prepend Ypt\n  end\nend\n" \
+                 "class Kpu\n  class << self\n    prepend Ypt\n  end\n  prepend Cpt\nend\n"
+      write_project(source, includer, ["Kpt.foo.zork", "Kpu.foo.zork"])
+      expect(undefined_messages).to be_empty
+    end
+
+    it "declines when another file holds the singleton prepend" do
+      write_project(source, "class Kpt\n  prepend Cpt\nend\n", ["Kpt.foo.zork"],
+                    extra: { "reopen.rb" => "class Kpt\n  class << self\n    prepend Ypt\n  end\nend\n" })
+      expect(undefined_messages).to be_empty
+    end
+  end
+
+  # A `class_methods` def's visibility is its block's, not the concern's own instance method of the same name.
+  it "answers a public class_methods def beside a private instance method of the same name" do
+    body = "  class_methods do\n    def helper = 1\n  end\n  private\n  def helper = 2\n"
+    write_project(concern("Cic", body), "class Kic\n  include Cic\nend\n", ["Kic.helper.zork"])
+    expect(undefined_messages).to eq(["undefined method `zork' for 1"])
   end
 
   # Ruby raises NoMethodError: `private` in the block makes `priv` a private method of the class object.

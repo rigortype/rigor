@@ -521,6 +521,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#walk_class_extends: grandfathered
     Rigor::Inference::ScopeIndexer#walk_class_includes: grandfathered
     Rigor::Inference::ScopeIndexer#walk_class_ivars: grandfathered
+    Rigor::Inference::ScopeIndexer#walk_class_methods_visibilities: 'issue #1592, walks a concern''s class_methods block for visibility under Owner::ClassMethods, the module ActiveSupport evaluates that block in, starting public; the owner is the concern prefix the walk passes in, and it derives no other context'
     Rigor::Inference::ScopeIndexer#walk_class_superclasses: grandfathered
     Rigor::Inference::ScopeIndexer#walk_conditional_ivar_writes: grandfathered
     Rigor::Inference::ScopeIndexer#walk_constant_write_census: grandfathered

@@ -1187,17 +1187,29 @@ module Rigor
         # forks, which settle to master. Answers `[extends, prepends]`: a concern's `ClassMethods` on a prepend edge is
         # prepended to the class object (`Concern#prepend_features` runs `base.singleton_class.prepend`), so it sits
         # ahead of the class object's own entry.
+        #
+        # The extends table also holds a `class << self; prepend P`, so with a hook's prepends present a module of the
+        # class's own may sit ahead of them in Ruby: that is one fork more, and its retro world prepends the own
+        # `extend`s ahead of the hook's prepends.
         def singleton_mixins(name, extends)
           plan = hook_extensions(name)
           @frames.last.add_marks(mark_for(name, :include_hook, UNNAMED_LIST, false)) if plan.open
+          fork_hook_order(name, 2) unless plan.ordered || (plan.extends.empty? && plan.prepends.empty?)
+          extends, prepends = order_hook_prepends(name, extends, plan.prepends)
           hooked = plan.extends
-          return [extends, plan.prepends] if hooked.empty?
-
-          fork_hook_order(name, 2) unless plan.ordered
-          return [hooked, plan.prepends] if extends.empty?
+          return [extends, prepends] if hooked.empty?
+          return [hooked, prepends] if extends.empty?
 
           fork_hook_order(name, 1)
-          [@retro ? hooked + extends : extends + hooked, plan.prepends]
+          [@retro ? hooked + extends : extends + hooked, prepends]
+        end
+
+        # `[extends, prepends]` once the hook's prepends are placed against the class's own `extend`s.
+        def order_hook_prepends(name, extends, prepends)
+          return [extends, prepends] if prepends.empty? || extends.empty?
+
+          fork_hook_order(name, 1)
+          @retro ? [EMPTY, extends + prepends] : [extends, prepends]
         end
 
         def fork_hook_order(name, weight)

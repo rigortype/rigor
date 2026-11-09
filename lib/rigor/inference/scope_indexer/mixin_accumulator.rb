@@ -64,6 +64,7 @@ module Rigor
           @unpositioned = nil
           @hook_params = nil
           @body_blocks = nil
+          @program_body = nil
           @program = nil
         end
 
@@ -72,11 +73,17 @@ module Rigor
         def program_body(body)
           return unless body.is_a?(Prism::StatementsNode)
 
-          @program = Set.new.compare_by_identity.merge(body.body)
+          @program_body = body
         end
 
+        # Whether `node` is a call whose `self` is `main`'s as far as the walk can tell: a top-level statement, or
+        # a call reached from one through control flow alone (issue #3007), so a receiverless `include` there is
+        # `main.include`. The set is built on the first question, which only a top-level mixin call asks.
         def program_statement?(node)
-          !@program.nil? && @program.include?(node)
+          return false if @program_body.nil?
+
+          @program ||= MainSelfCalls.collect(@program_body)
+          @program.include?(node)
         end
 
         # Marks the statements of a body whose own position is a fact — the calls and declarations in them
@@ -155,6 +162,43 @@ module Rigor
         def add(owner, side, names)
           ((@unpositioned ||= {})[owner] ||= {})[side] = ((@unpositioned[owner][side] || []) + names)
         end
+      end
+
+      # Issue #3007 — the calls whose `self` is `main` as far as the mixin walk can tell: the file's top-level
+      # statements, and the calls reached from them through control flow alone (`if`, `unless`, `case`, `begin`,
+      # `rescue`, a loop, `&&` / `||`), or through the body of a top-level `def` or `def self.`, whose `include` the
+      # walk reads as ADR-119 WD7 reads one in a method body: a member of the set with no position. A block or a
+      # lambda is not entered: its `self` may not be `main` (a `describe do … end` or `class_exec` block rebinds it,
+      # while `[1].each do … end` does not, and the walk cannot tell them apart), and neither is a declaration,
+      # `class << self` or a `def` on another receiver, whose `self` is not `main`.
+      module MainSelfCalls
+        CONTROL_FLOW = [
+          Prism::StatementsNode, Prism::BeginNode, Prism::RescueNode, Prism::ElseNode, Prism::EnsureNode,
+          Prism::IfNode, Prism::UnlessNode, Prism::CaseNode, Prism::CaseMatchNode, Prism::WhenNode, Prism::InNode,
+          Prism::WhileNode, Prism::UntilNode, Prism::ForNode, Prism::ParenthesesNode, Prism::AndNode, Prism::OrNode,
+          Prism::RescueModifierNode
+        ].freeze
+        private_constant :CONTROL_FLOW
+
+        module_function
+
+        def collect(body)
+          calls = Set.new.compare_by_identity
+          visit(body, calls)
+          calls
+        end
+
+        def visit(node, calls)
+          case node
+          when Prism::CallNode
+            calls << node
+          when Prism::DefNode
+            visit(node.body, calls) if node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode)
+          when *CONTROL_FLOW
+            node.compact_child_nodes.each { |child| visit(child, calls) }
+          end
+        end
+        private_class_method :visit
       end
     end
   end

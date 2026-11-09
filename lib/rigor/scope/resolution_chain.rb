@@ -109,10 +109,13 @@ module Rigor
       # includes or prepends may extend, through a hook, with a module no table names; nor is it. Kind `:hook_order`
       # (#1592, listing nothing) marks a class object whose own `extend`s and hook-extended modules have no known
       # order between them: the fork it counts already settles the chain, and the mark tells the typing read why.
+      # Kind `:singleton_prepend` (#2998, listing nothing) marks a class object with singleton-side prepends of its
+      # own, which master's order does not place, and kind `:prepend_order` (#2998, listing nothing) one whose
+      # singleton-side prepends have no known order among themselves; neither is an order mark.
       Mark = Data.define(:node, :kind, :listed, :multi_file)
 
       # The mark kinds that are not order marks.
-      HOOK_MARK_KINDS = %i[extend_hook include_hook hook_order].freeze
+      HOOK_MARK_KINDS = %i[extend_hook include_hook hook_order singleton_prepend prepend_order].freeze
 
       NO_MARKS = [].freeze
 
@@ -179,6 +182,16 @@ module Rigor
       # Issue #1592 — whether a class object on the chain has hook-extended modules whose order against its own
       # `extend`s, or among themselves, is not a fact ({Builder#singleton_mixins}).
       def hook_order_marked? = @marks.any? { |mark| mark.kind == :hook_order }
+
+      # Issue #2998 — whether a class object on the chain has singleton-side prepends of its own
+      # ({Builder#own_singleton_prepends}), which master's order does not place.
+      def singleton_prepend_marked? = @marks.any? { |mark| mark.kind == :singleton_prepend }
+
+      # Issue #2998 — the class objects on the chain whose prepend region has no known order
+      # ({Builder#order_prepends}).
+      def prepend_order_nodes
+        @memo[:prepend_order_nodes] ||= @marks.filter_map { |mark| mark.node if mark.kind == :prepend_order }.freeze
+      end
 
       # The chain's retro world ({#settle}), or nil when it has none.
       def retro_world = @retro
@@ -257,6 +270,12 @@ module Rigor
       # it does not head the part searched (its prepends, or its own edges when the search starts past it,
       # placed the rest). The entry that answers records none of its own: its method edge is the caller's
       # `Scope#user_def_for`. A read that finds nothing has passed every entry.
+      #
+      # Issue #2998 — on a singleton chain a NEW file reopening a class object's class can prepend to its singleton
+      # (`class << self; prepend P`), ahead of everything the class object's level holds, which no class edge of the
+      # declaring files sees. So each class object the search passes, and one that answers, also files the negative
+      # class edge on its unqualified name ({#record_prepend_regions}). A class object behind the answer files it
+      # through {#settle}'s filing, and so does every one on a read that finds nothing.
       def search(scope, start = 0, stop = nil, side: nil)
         recording = Analysis::DependencyRecorder.active?
         stop ||= @entries.size
@@ -269,13 +288,29 @@ module Rigor
         while index < stop
           entry = @entries[index]
           answer = side.nil? || entry.side == side ? yield(entry) : nil
-          return answer if answer
+          if answer
+            record_prepend_regions(start, index) if recording
+            return answer
+          end
 
           ResolutionChain.record_entry(scope, entry, side) if recording
           index += 1
         end
         nil
       end
+
+      # The negative class edges of the class objects on a singleton chain from `start` through `last`.
+      def record_prepend_regions(start, last)
+        return unless @side == :singleton
+
+        (start..last).each do |index|
+          entry = @entries[index]
+          next unless entry.side == :singleton && !entry.external?
+
+          Analysis::DependencyRecorder.read_missing(:class, entry.last_segment)
+        end
+      end
+      private :record_prepend_regions
 
       # Records the ADR-46 class edge of the root and of every project entry ahead of `stop` (on `side`, when
       # given; every entry when `stop` is nil) — the dependency of a read that consulted those positions.
@@ -1224,14 +1259,17 @@ module Rigor
 
         def compute_singleton(name, depth)
           twins = same_class_twins(name)
-          mark_unsettled(name, :extend, (@discovery.discovered_extends[name] || EMPTY).size)
+          own = @discovery.discovered_extends[name] || EMPTY
+          own_prepends = own_singleton_prepends(name, own)
+          mark_unsettled(name, :extend, singleton_order_edges(own, own_prepends))
           twins.each { |owner| mark_unsettled(owner, :extend, (@discovery.discovered_extends[owner] || EMPTY).size) }
           return same_class_singleton(name, twins, depth) unless twins.empty?
 
           entries = [project_entry(name, :singleton)]
           super_lin = superclass_lin(name, :singleton, depth)
           entries.concat(super_lin[0])
-          extends, prepends = singleton_mixins(name, @discovery.discovered_extends[name] || EMPTY)
+          own_extends = own_prepends.empty? ? own : own - own_prepends
+          extends, prepends = singleton_mixins(name, own_extends, own_prepends)
           boundary = prepends.empty? ? CLASS_FIRST : prepend_all(entries, name, prepends, depth)
           super_start = include_all(entries, name, extends, EMPTY, depth, boundary)
           finish(entries, name, super_lin, super_start)
@@ -1247,14 +1285,14 @@ module Rigor
         # prepended to the class object (`Concern#prepend_features` runs `base.singleton_class.prepend`), so it sits
         # ahead of the class object's own entry.
         #
-        # The extends table also holds a `class << self; prepend P`, so with a hook's prepends present a module of the
-        # class's own may sit ahead of them in Ruby: that is one fork more, and its retro world prepends the own
-        # `extend`s ahead of the hook's prepends.
-        def singleton_mixins(name, extends)
+        # Issue #2998 — `own_prepends` are the class's own singleton-side prepends ({#own_singleton_prepends}), which
+        # sit ahead of the class object too. An `extend` always sits behind the class object and a prepend always
+        # ahead of it, so only two prepends can trade places ({#order_prepends}).
+        def singleton_mixins(name, extends, own_prepends)
           plan = hook_extensions(name)
           @frames.last.add_marks(mark_for(name, :include_hook, UNNAMED_LIST, false)) if plan.open
           fork_hook_order(name, 2) unless plan.ordered || (plan.extends.empty? && plan.prepends.empty?)
-          extends, prepends = order_hook_prepends(name, extends, plan.prepends)
+          prepends = order_prepends(name, own_prepends, plan.prepends)
           hooked = plan.extends
           return [extends, prepends] if hooked.empty?
           return [hooked, prepends] if extends.empty?
@@ -1263,12 +1301,47 @@ module Rigor
           [@retro ? hooked + extends : extends + hooked, prepends]
         end
 
-        # `[extends, prepends]` once the hook's prepends are placed against the class's own `extend`s.
-        def order_hook_prepends(name, extends, prepends)
-          return [extends, prepends] if prepends.empty? || extends.empty?
+        # The class object's prepends, nearest first, once its own are placed against its hooks'. Where their order
+        # is not a fact (own and hook prepends both, or two own ones from two files or with an edge whose position is
+        # not a fact), the chain counts two forks, which settle to master, and the class takes a `:prepend_order`
+        # mark: the typing read declines a definer from its prepend region, since neither order is Ruby's for sure.
+        def order_prepends(name, own, hooked)
+          return hooked if own.empty?
 
-          fork_hook_order(name, 1)
-          @retro ? [EMPTY, extends + prepends] : [extends, prepends]
+          if !hooked.empty? || (own.size > 1 && !own_prepends_ordered?(name))
+            @frames.last.forks += 2
+            @frames.last.add_marks(mark_for(name, :prepend_order, nil, false))
+          end
+          own + hooked
+        end
+
+        def own_prepends_ordered?(name)
+          !multi_file?(name) && (@discovery.unpositioned_mixins[name]&.dig(:extend) || EMPTY).empty?
+        end
+
+        # Issue #2998 — the spellings of `name`'s singleton edges (`discovered_extends`) that are prepends: a
+        # `class << self; prepend P` or a `singleton_class.prepend P` the walk filed as a
+        # `[ENVELOPE_SINGLETON_PREPEND_KIND, "P"]` entry. They keep the table's order, nearest first, which is the
+        # prepends' own: a later `prepend` sits ahead of an earlier one. A class with any takes the `:singleton_prepend`
+        # mark, which tells the typing read that master's order, which knows no singleton prepend, may answer
+        # otherwise.
+        def own_singleton_prepends(name, own)
+          bucket = own.empty? ? nil : @discovery.discovered_parameter_envelopes[name]
+          return EMPTY if bucket.nil?
+
+          prepends = own.select { |raw| bucket.key?([DiscoveryIndex::ENVELOPE_SINGLETON_PREPEND_KIND, raw]) }
+          return EMPTY if prepends.empty?
+
+          @frames.last.add_marks(mark_for(name, :singleton_prepend, nil, false))
+          prepends
+        end
+
+        # The edge count the multi-file rule weighs: a prepend sits ahead of the class object and an `extend` behind
+        # it whatever the load order, so only edges of one kind can trade places across files.
+        def singleton_order_edges(own, own_prepends)
+          return own.size if own_prepends.empty?
+
+          [own_prepends.size, own.size - own_prepends.size].max
         end
 
         def fork_hook_order(name, weight)

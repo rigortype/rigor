@@ -16,5 +16,12 @@ RSpec.describe Rigor::Scope::DiscoveryIndex do
 
       expect(described_class.declares_surface?(bucket)).to be(false)
     end
+
+    # Issue #2998 — a singleton-prepend entry says how an edge is mixed in and names no member.
+    it "does not read a singleton-prepend entry as declaring" do
+      bucket = { [described_class::ENVELOPE_SINGLETON_PREPEND_KIND, "Y"] => :opaque }
+
+      expect(described_class.declares_surface?(bucket)).to be(false)
+    end
   end
 end

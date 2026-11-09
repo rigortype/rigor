@@ -124,10 +124,11 @@ module Rigor
         end
 
         # Notes the edges `node` recorded for `owner` on `side`. `complete` is false when an argument named
-        # nothing the walk could record, which leaves the recorded names' neighbours unknown.
-        def note(node, owner, side, targets, complete:)
+        # nothing the walk could record, which leaves the recorded names' neighbours unknown. `positioned` says a
+        # receiver-form call runs where it is written, as a receiverless one does (`singleton_class.prepend P`, #2998).
+        def note(node, owner, side, targets, complete:, positioned: false)
           return taint(owner, side, unnamed: side == :include) unless complete
-          return if (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode)) && direct?(node)
+          return if (positioned || node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode)) && direct?(node)
 
           add(owner, side, targets)
         end

@@ -252,16 +252,9 @@ RSpec.describe "Module#prepend ancestor order (#1123)" do
     RUBY
   end
 
-  it "declines the singleton side: `class << self; prepend Mod` still answers the class's own def" do
-    # DECLINED, and recorded here rather than fixed: the singleton-side mixin walk folds a `class << self`
-    # body's `include` / `prepend` into the `extend` edge (issue #915), which records that the module is on
-    # the singleton but not WHERE in its MRO — so `class << self; prepend Mod; end` leaves `def self.speak`
-    # nearer than `Mod#speak`, and the instance-side ordering this change lands does not reach it. The
-    # table this change adds is instance-side only by construction (a `class << self` body records no
-    # `current_class`, the same rule that keeps it out of `discovered_includes`), so the decline is
-    # structural rather than an omission. This example pins that the instance-side ordering did not
-    # disturb the singleton one; a singleton-side prepend ordering is a separate change.
-    expect(dumps_for(<<~RUBY)).to eq(["dump_type: \"base\""])
+  # Issue #2998 — the singleton side orders a `class << self` prepend too: `Loud` sits ahead of `def self.speak`.
+  it "answers the singleton side's `class << self; prepend Mod` ahead of the class's own def" do
+    expect(dumps_for(<<~RUBY)).to eq(["dump_type: \"LOUD\""])
       module Loud
         def speak = "LOUD"
       end

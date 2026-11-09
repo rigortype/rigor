@@ -811,12 +811,11 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
 
     # The rule's known remainders, pinned at today's answer: FLIP each when its fix lands.
     describe "remainders" do
-      # The extends table records `class << self; prepend P` as an `extend`, so the chain places P after the
-      # singleton and trusts C's own def; Ruby calls P#foo.
-      it "pins `class << self; prepend P` read past an own def (wrong: Ruby calls P)" do
+      # Issue #2998 — flipped: the chain places a `class << self; prepend P` ahead of the singleton, as Ruby does.
+      it "reads `class << self; prepend P` ahead of an own def" do
         source = "module P; def foo = :p; end\nclass C; class << self; prepend P; end; def self.foo = :own; end\n"
         expect(ruby_singleton(source, "C", :foo)).to eq([%w[P #<Class:C>], "P", ":p"])
-        expect(singleton(scope_for(source), "C", :foo)).to eq("C")
+        expect(singleton(scope_for(source), "C", :foo)).to eq("P")
       end
 
       it "pins a concern as capable for every name (Unknown where Ruby calls X)" do

@@ -302,9 +302,15 @@ module Rigor
       # `Struct::Named`'s, say that `K = Struct.new("Named", …)` binds both constants to one class object: the method
       # chain of either name reads the other's tables at its own position ({.same_class_names}). It names no member.
       ENVELOPE_SAME_CLASS_KIND = :same_class
+      # Issue #2998 — `[ENVELOPE_SINGLETON_PREPEND_KIND, "P"]` on `K`'s bucket says one of `K`'s `discovered_extends`
+      # entries spelt `"P"` is a prepend to `K`'s singleton class (`class << self; prepend P; end`,
+      # `singleton_class.prepend P`, `singleton_class.send(:prepend, P)` in `K`'s body), which sits ahead of the class
+      # object's own methods where an `extend` sits behind them. The singleton resolution chain reads it.
+      ENVELOPE_SINGLETON_PREPEND_KIND = :singleton_prepend
       MACRO_KINDS = [ENVELOPE_BODY_CALL_KIND, ENVELOPE_COMPUTED_DEFINER_KIND, ENVELOPE_HOOK_EXTEND_KIND,
                      ENVELOPE_HOOK_EXTEND_OPEN_KIND, ENVELOPE_HOOK_DEF_KIND, ENVELOPE_HOOK_BODY_CALL_KIND,
-                     ENVELOPE_CONCERN_DEPENDENCY_KIND, ENVELOPE_SAME_CLASS_KIND].freeze
+                     ENVELOPE_CONCERN_DEPENDENCY_KIND, ENVELOPE_SAME_CLASS_KIND,
+                     ENVELOPE_SINGLETON_PREPEND_KIND].freeze
       private_constant :MACRO_KINDS
 
       NO_NAMES = [].freeze

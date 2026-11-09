@@ -1,0 +1,5 @@
+- **[inference]** A class-side call now types from the module a class prepends to its own singleton class, ahead of the class's own class method. ([#3009](https://github.com/rigortype/rigor/pull/3009))
+  - The prepend can be written `class << self; prepend M; end`, `singleton_class.prepend M` or `singleton_class.send(:prepend, M)`, in the class's body or in a file reopening it.
+  - Subclasses resolve the call the same way, and an `extend` of the class still sits behind its own class methods.
+  - The call types `Dynamic` where two such prepends, or one beside a prepended `ActiveSupport::Concern`, have no known order and the module that answers is one of them.
+  - A prepend written on a constant's `singleton_class` (`K.singleton_class.prepend M`) runs wherever the call runs, so a call it could answer types `Dynamic`.

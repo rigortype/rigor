@@ -206,4 +206,74 @@ RSpec.describe "incremental edges for a hook-extended singleton module (#1592)",
     expect(record.sources.map { |path| File.basename(path) }).to include("ct.rb")
     expect(record.missing).to include("mark:Ct", "class:Ct")
   end
+
+  # Issue #2998 — a reopening in another file prepends `X` to `Kt`'s singleton class, ahead of its own `def self.bar`
+  # (an `extend X` would sit behind it); the warm run must follow the prepend line in and out of that file.
+  describe "a singleton prepend in a file reopening the class" do
+    let(:plain) { files.merge("lib/kt.rb" => "class Kt < Base\n  def self.bar = 1\nend\n") }
+    let(:prepended) { "class Kt < Base\n  class << self\n    prepend X\n  end\nend\n" }
+
+    it "re-checks the call when the reopening gains the prepend" do
+      expect_toggle(plain, before: "class Kt < Base\nend\n", after: prepended,
+                           first: reported(1), second: reported('"X"'))
+    end
+
+    it "re-checks the call when the reopening loses the prepend" do
+      expect_toggle(plain, before: prepended, after: "class Kt < Base\nend\n",
+                           first: reported('"X"'), second: reported(1))
+    end
+
+    # A NEW file that reopens `Kt` to prepend `X` re-checks a read that stopped at `Kt`'s own def, on `Kt` and on its
+    # subclass `St`, in both spellings; removing the file again re-checks it back.
+    {
+      "class << self" => "class Kt < Base\n  class << self\n    prepend X\n  end\nend\n",
+      "singleton_class.prepend" => "class Kt < Base\n  singleton_class.prepend X\nend\n"
+    }.each do |label, source|
+      it "re-checks the call when a new file adds a #{label} prepend, and when it goes" do
+        write("sig/types.rbs", "#{sig_source}class St < Kt\nend\n")
+        files = plain.merge("lib/st.rb" => "class St < Kt\nend\n", "lib/use.rb" => "Kt.bar.zork\nSt.bar.zork\n")
+        files.each { |path, body| write(path, body) }
+        paths = %w[lib]
+        both = ->(type) { [1, 2].map { |line| ["lib/use.rb", line, "undefined method `zork' for #{type}"] } }
+        expect(incremental_rows(paths)).to eq([both.call(1), false])
+
+        write("lib/near.rb", source)
+        expect(incremental_rows(paths)).to eq([both.call('"X"'), true])
+        expect(cold_rows).to eq(both.call('"X"'))
+
+        File.delete("lib/near.rb")
+        expect(incremental_rows(paths)).to eq([both.call(1), true])
+        expect(cold_rows).to eq(both.call(1))
+      end
+    end
+    # `Kt` already prepends `Y`, which answers ahead of `Kt`'s own entry; a NEW file prepending `X` makes two prepends
+    # from two files, whose order is load order, so the cold read declines and the warm one must too. Guard: the
+    # settle verdict's filing past the answer already names `Kt`.
+    it "re-checks a call a prepended module answers when a new file adds a second prepend" do
+      prepend_y = "module Y\n  def bar = \"Y\"\nend\n" \
+                  "class Kt < Base\n  def self.bar = 1\n  class << self\n    prepend Y\n  end\nend\n"
+      write("sig/types.rbs", "#{sig_source}module Y\nend\n")
+      files.merge("lib/kt.rb" => prepend_y).each { |path, body| write(path, body) }
+      expect(incremental_rows(%w[lib])).to eq([reported('"Y"'), false])
+
+      write("lib/near.rb", "class Kt < Base\n  class << self\n    prepend X\n  end\nend\n")
+      expect(incremental_rows(%w[lib])).to eq([[], true])
+      expect(cold_rows).to eq([])
+    end
+
+    # The NEW file prepends to the subclass, whose entry the read of `St.bar` passes before `Kt`'s own def answers.
+    it "re-checks a subclass's call when a new file prepends to the subclass" do
+      write("sig/types.rbs", "#{sig_source}class St < Kt\nend\n")
+      files = plain.merge("lib/st.rb" => "class St < Kt\nend\n", "lib/use.rb" => "Kt.bar.zork\nSt.bar.zork\n")
+      files.each { |path, body| write(path, body) }
+      row = ->(line, type) { ["lib/use.rb", line, "undefined method `zork' for #{type}"] }
+      expect(incremental_rows(%w[lib])).to eq([[row.call(1, 1), row.call(2, 1)], false])
+
+      # `Kt.bar` goes unreported once `near.rb` reopens `St`, on the base engine too; the row compares the warm run with
+      # the cold one.
+      write("lib/near.rb", "class St < Kt\n  class << self\n    prepend X\n  end\nend\n")
+      expect(incremental_rows(%w[lib])).to eq([[row.call(2, '"X"')], true])
+      expect(cold_rows).to eq([row.call(2, '"X"')])
+    end
+  end
 end

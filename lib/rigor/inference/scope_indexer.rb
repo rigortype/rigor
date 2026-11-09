@@ -4385,6 +4385,8 @@ module Rigor
           tables = methods_acc.at(node)
           record_singleton_prepend(node, qualified_prefix, tables,
                                    self_ok: node.name == :prepend && tables.in_block?(node))
+          own_prefix = def_owner_prefix&.empty? || defs_singleton == :unnameable ? EMPTY_PREFIX : owner_prefix
+          record_own_singleton_prepend(node, [own_prefix, qualified_prefix], in_singleton_class, tables)
           # Issue #1120 — a refine body's defs go to the refinement table and nowhere else.
           if (target = methods_acc.refine_target_of(node))
             return record_literal_target_refine(node, target, qualified_prefix, owner_prefix, methods_acc)
@@ -5597,6 +5599,51 @@ module Rigor
         singleton = singleton_body && (receiver.nil? || receiver.is_a?(Prism::SelfNode))
         singleton ||= singleton_class_call?(receiver, self_ok)
         record_object_extension(node, qualified_prefix, tables) if singleton
+      end
+
+      # Issue #2998 — a prepend to the class object's own singleton class, `prepend P` in a `class << self` body or
+      # `singleton_class.prepend P` / `singleton_class.send(:prepend, P)` in the class body, files a
+      # `[ENVELOPE_SINGLETON_PREPEND_KIND, "P"]` entry per constant argument, as the extends walk spells it, under the
+      # owner the walk passes in. The extends walk records the same edge in `discovered_extends`, and the singleton
+      # resolution chain reads the entries that match one of those edges as prepends.
+      #
+      # A constant receiver's `Const.singleton_class.prepend P` (or its `send` spelling) files the entry on every name
+      # the constant can denote from the call site, as {#record_body_rewrite} marks it; the extends walk records that
+      # edge unpositioned, so the chain's reading of it is master's and the typing read declines where they differ.
+      # `prefixes` is `[owner_prefix, qualified_prefix]`: the class `self` names (empty where it names none) and the
+      # lexical prefix a constant resolves against.
+      def record_own_singleton_prepend(node, prefixes, in_singleton_class, tables)
+        kind, arguments, = mixin_call_view(node)
+        return unless kind == :prepend
+
+        owners = singleton_prepend_owners(node.receiver, *prefixes, in_singleton_class)
+        arguments.each do |argument|
+          name = Source::ConstantPath.qualified_name(argument)
+          next unless name
+
+          key = [Scope::DiscoveryIndex::ENVELOPE_SINGLETON_PREPEND_KIND, name]
+          owners.each { |owner| record_envelope(tables.envelopes, owner, key, Source::ParameterEnvelope::OPAQUE) }
+        end
+      end
+
+      # The classes whose singleton a prepend call on `receiver` reaches: the enclosing class for `prepend` in its
+      # `class << self` body or `singleton_class.prepend` on a bare or `self.` receiver, and every name a constant
+      # receiver's `Const.singleton_class` can denote.
+      def singleton_prepend_owners(receiver, owner_prefix, qualified_prefix, in_singleton_class)
+        own = owner_prefix.empty? ? EMPTY_PREFIX : [owner_prefix.join("::")]
+        return own if in_singleton_class && lexical_self_receiver?(receiver)
+        return EMPTY_PREFIX unless singleton_class_of_receiver?(receiver)
+
+        object = receiver.receiver
+        return in_singleton_class ? EMPTY_PREFIX : own if lexical_self_receiver?(object)
+        return EMPTY_PREFIX unless object.is_a?(Prism::ConstantReadNode) || object.is_a?(Prism::ConstantPathNode)
+
+        constant_receiver_candidates(object, qualified_prefix)
+      end
+
+      # A bare or `self.` receiver's `singleton_class` call: `singleton_class` or `self.singleton_class`.
+      def self_singleton_class?(receiver)
+        singleton_class_of_receiver?(receiver) && lexical_self_receiver?(receiver.receiver)
       end
 
       def singleton_class_call?(receiver, self_ok)
@@ -8586,7 +8633,10 @@ module Rigor
         # Inside `class << self` a bare `singleton_class` is the singleton's own singleton, one level up from the
         # owner's extend side, so that call stays a taint.
         up_level = in_singleton && lexical_self_receiver?(receiver.receiver)
-        return true if !up_level && singleton_class_include_recorded?(node, owner, accumulator)
+        if !up_level && singleton_class_include_recorded?(node, owner, accumulator)
+          record_prepend_candidates(node, receiver.receiver, qualified_prefix, owner, accumulator)
+          return true
+        end
 
         accumulator.taint(owner, :extend)
         true
@@ -8596,13 +8646,33 @@ module Rigor
       # edge is unpositioned as every receiver-form edge is) puts `Ext` on the singleton side as `Float.extend(Ext)`
       # does, the fold #915 gives `class << self; include M`. A `send` spelling or an argument that is not a constant
       # stays a taint.
+      #
+      # Issue #2998 — a prepend, spelt directly or as `send(:prepend, P)`, is recorded, and the methods walk files it as
+      # a singleton prepend ({#record_own_singleton_prepend}). One on the enclosing class's own `singleton_class` (a
+      # bare or `self.` receiver) runs where it is written, as `prepend P` in `class << self` does, so a direct
+      # statement of the body is positioned; a constant receiver's stays unpositioned.
       def singleton_class_include_recorded?(node, owner, accumulator)
-        return false unless %i[include prepend].include?(node.name)
-
-        arguments = node.arguments&.arguments || []
+        kind, sent, = mixin_call_view(node)
+        prepend = kind == :prepend
+        arguments = prepend ? sent : node.arguments&.arguments || []
+        return false unless prepend || node.name == :include
         return false if arguments.empty? || arguments.any? { |arg| Source::ConstantPath.qualified_name(arg).nil? }
 
-        !record_extend_targets(node, owner, accumulator).empty?
+        positioned = prepend && lexical_self_receiver?(node.receiver.receiver)
+        !record_extend_targets(node, owner, accumulator, positioned: positioned).empty?
+      end
+
+      # Issue #2998 — a constant receiver's `Const.singleton_class.prepend P` also records the edge, unpositioned, under
+      # every other name the constant can denote from the call site, the names the methods walk files its
+      # singleton-prepend entry under ({#singleton_prepend_owners}): which class Ruby reaches is not a fact here, so
+      # each candidate's typing read declines where the prepend could answer.
+      def record_prepend_candidates(node, object, qualified_prefix, owner, accumulator)
+        return unless mixin_call_view(node)&.first == :prepend
+        return unless object.is_a?(Prism::ConstantReadNode) || object.is_a?(Prism::ConstantPathNode)
+
+        (constant_receiver_candidates(object, qualified_prefix) - [owner]).each do |candidate|
+          record_extend_targets(node, candidate, accumulator)
+        end
       end
 
       # A bare or `self.` receiver: the lexical `self`.
@@ -8699,7 +8769,8 @@ module Rigor
       # and consumers iterating the list forward read the same order the singleton ancestry searches.
       #
       # The arguments are {#mixin_call_view}'s, so a `send(:extend, M)` (#2995) reads `M` and not its name literal.
-      def record_extend_targets(node, current_class, accumulator)
+      # `positioned` says a receiver-form call still runs where it is written ({#singleton_class_include_recorded?}).
+      def record_extend_targets(node, current_class, accumulator, positioned: false)
         targets = []
         arguments = mixin_call_view(node)[1]
         arguments.each do |arg|
@@ -8715,7 +8786,8 @@ module Rigor
         # unpositioned and the chain settles to the readers' own answer.
         accumulator.taint(current_class, :extend) if targets.any? { |target| list.include?(target) }
         list.unshift(*targets)
-        accumulator.note(node, current_class, :extend, targets, complete: targets.size == arguments.size)
+        accumulator.note(node, current_class, :extend, targets, complete: targets.size == arguments.size,
+                                                                positioned: positioned)
         targets
       end
 

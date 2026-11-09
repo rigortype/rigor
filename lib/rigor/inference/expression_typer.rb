@@ -2876,6 +2876,7 @@ module Rigor
         found = [nil, nil] if owner && SingletonExternalAhead.withhold?(scope, class_name, method_name, owner)
         found = [nil, nil] if found.last && dynamic_singleton_definer_ahead?(class_name, method_name, found.last)
         found = [nil, nil] if found.last && singleton_hook_order_split?(class_name, method_name)
+        found = [nil, nil] if found.last && singleton_prepend_split?(class_name, method_name, found)
         found = [nil, nil] if found.last && hidden_hook_definer?(class_name, method_name, found.last)
         found
       end
@@ -2911,6 +2912,38 @@ module Rigor
         return answer != positioned_singleton_definer(retro, method_name) if retro
 
         answer != positioned_singleton_definer(chain, method_name, copies: true)
+      end
+
+      # Issue #2998 — whether to withhold the class-side answer `found` on a chain whose class objects have
+      # singleton-side prepends of their own: master's order, which a chain that does not stand answers, places no
+      # such prepend, so its definer may not be the one Ruby's order reaches first. A `def` the extends fold copied
+      # onto a class object is compared as its module's. A definer from a prepend region whose order is not a fact
+      # is withheld whichever order answers.
+      def singleton_prepend_split?(class_name, method_name, found)
+        chain = Scope::ResolutionChain.for(scope, class_name.to_s, :singleton, :methods)
+        return false unless chain.singleton_prepend_marked?
+
+        answer = positioned_singleton_definer(chain, method_name)
+        return true if unordered_prepend_definer?(chain, answer)
+
+        node, owner = found
+        head = scope.singleton_def_for(owner, method_name).equal?(node) ? singleton_copy_head(owner, node) : owner
+        head != answer
+      end
+
+      # Whether `answer` is a module in the prepend region of a class object on the chain whose prepends have no known
+      # order: the entries between the start of that class's level and its own entry.
+      def unordered_prepend_definer?(chain, answer)
+        chain.prepend_order_nodes.any? do |node|
+          level = chain.level_classes.index(node)
+          next true if level.nil?
+
+          start = chain.level_starts[level]
+          own = chain.entries.index { |entry| entry.side == :singleton && entry.name == node }
+          next true if own.nil?
+
+          chain.entries[start...own].any? { |entry| entry.name == answer }
+        end
       end
 
       # The owner of the first `def` of the name along the chain: a fold copy is skipped, or with `copies:` read as

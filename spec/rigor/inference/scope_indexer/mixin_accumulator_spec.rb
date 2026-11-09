@@ -258,7 +258,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer::MixinAccumulator do
 
     # Issue #2094 — the constant-receiver and `singleton_class` forms record their module on the extend side,
     # unpositioned, rather than tainting it.
-    ["C.extend(B)", "singleton_class.include B", "self.singleton_class.prepend B"].each do |statement|
+    ["C.extend(B)", "singleton_class.include B", "C.singleton_class.prepend B"].each do |statement|
       it "records `#{statement}` on the extend side, unpositioned" do
         source = "class C\n  include A\n  extend E\n  #{statement}\nend\n"
         table = unpositioned(source).fetch("C")
@@ -266,6 +266,23 @@ RSpec.describe Rigor::Inference::ScopeIndexer::MixinAccumulator do
         expect(table.fetch(:extend)).to eq(["B"])
         expect(index_of(source).fetch(:extends)).to include("C" => include("B", "E"))
       end
+    end
+
+    # Issue #2998 — a prepend on the class's own `singleton_class` runs where it is written, as `class << self;
+    # prepend B` does, so a direct statement records it positioned, the `send` spelling included.
+    ["self.singleton_class.prepend B", "singleton_class.send(:prepend, B)"].each do |statement|
+      it "records `#{statement}` on the extend side, positioned" do
+        source = "class C\n  include A\n  extend E\n  #{statement}\nend\n"
+
+        expect(unpositioned(source)["C"]).to be_nil
+        expect(index_of(source).fetch(:extends)).to include("C" => %w[B E])
+      end
+    end
+
+    it "keeps a conditional `singleton_class.prepend B` unpositioned" do
+      source = "class C\n  singleton_class.prepend B if $c\nend\n"
+
+      expect(unpositioned(source).fetch("C").fetch(:extend)).to eq(["B"])
     end
 
     it "taints, rather than records, `singleton_class.include B` inside `class << self`" do

@@ -1,0 +1,3 @@
+- **[check]** A computed-name `send` fed by the first block parameter of `each`, `each_with_index` or `map` over a literal array now reads the array's elements as the candidate method names. ([#3040](https://github.com/rigortype/rigor/pull/3040))
+  - `[:before_save, :after_save].each { |cb| send(cb, :x) }` opens nothing, so `call.undefined-method` still reports there.
+  - `[:include].each` and `KINDS = [:include]` still count as a mixin of a module no name spells; a non-literal element or receiver still opens the class.

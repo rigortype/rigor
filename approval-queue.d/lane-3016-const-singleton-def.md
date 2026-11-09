@@ -24,11 +24,15 @@ either typing the call as the def's return or declining it, and asked to follow 
 
 ## Decision
 
-Decline through the envelope, and file a literal-name envelope for `define_singleton_method`. A computed name files
-nothing, so that call still reports. This follows #339, which scopes the recovery to recorded names so that an
-undefined name still fires.
+Decline through the envelope, and file a literal-name envelope for `define_singleton_method`. This follows #339, which
+scopes the recovery to recorded names so that an undefined name still fires. A computed name files the singleton
+side's open-names mark on the constant instead, as a computed `define_method` on a constant files the instance side's
+(#2968). Every call through that constant is then withheld, `OBJ.nope` included, since the computed name may be any
+name. The dynamic mark is not read: every constant-receiver rewrite files it, `OBJ.send(:frozen?)` included.
 
 ## To undo
 
 Remove `SingletonObjectConstant.foreign_singleton?` and `ScopeIndexer#record_constant_singleton_definer`, along with
-their rows in `spec/integration/constant_singleton_def_spec.rb`. Nothing else reads the new envelope.
+their rows in `spec/integration/constant_singleton_def_spec.rb`. The singleton open-names mark on a constant is also
+read by `call.undefined-method`'s chain walk when the constant names a class, which then declines every
+singleton call on it.

@@ -1080,8 +1080,8 @@ module Rigor
         # entry of the receiver's chain (`owner`) against that entry's own mixins, one hop. A concern included into a
         # concern after its `extend ActiveSupport::Concern` runs no block there: `Concern#append_features` records it as
         # a dependency, and the outer concern's final includer includes it, on that includer's own edge
-        # ({#with_concern_dependencies}). An `include` written ahead of the `extend`, or in a reopening that loads first,
-        # is an ordinary one, and the tables keep neither order, so both readings are made and either answers.
+        # ({#with_concern_dependencies}). An `include` written ahead of the `extend`, or in a reopening that loads
+        # first, is an ordinary one, and the tables keep neither order, so both readings are made and either answers.
         def hook_block_macro_defines?(scope, owner)
           own_mixin_edges(scope, owner).any? do |mixin, edges|
             macros = scope.parameter_envelopes_of(mixin).each_key.filter_map do |key|

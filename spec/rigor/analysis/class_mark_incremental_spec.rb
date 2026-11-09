@@ -237,7 +237,8 @@ RSpec.describe "class marks — incremental" do
                     "cn.rbs" => "module Cn3\nend\nmodule ClassMethods\nend\n",
                     "cu.rb" => "class Cu3\n  include Cn3\n  my_c :foo\nend\n", "cu.rbs" => "class Cu3\nend\n",
                     "use.rb" => "Cu3.new.foo\n" }
-          baseline, warm, cold = warm_and_cold(files, "cm.rb" => "module ClassMethods\n  def my_c(*n) = #{definer}\nend\n")
+          macro = "module ClassMethods\n  def my_c(*n) = #{definer}\nend\n"
+          baseline, warm, cold = warm_and_cold(files, "cm.rb" => macro)
 
           expect(baseline).to eq([["use.rb", 1]])
           expect(cold).to eq([])

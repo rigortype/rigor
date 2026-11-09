@@ -304,34 +304,37 @@ RSpec.describe "singleton-side mixins a hook adds (#1592)" do
   # Issue #2992 — each concern in its own file.
   it "answers a class-side call with a dependency concern's class method" do
     outer = concern("Od2", "  include Cd2\n  class_methods do\n    def other = :od\n  end\n")
-    write_project(concern("Cd2", "  class_methods do\n    def build = \"s\"\n  end\n"), "class Kd2\n  include Od2\nend\n",
-                  ["Kd2.build.upcase", "Kd2.build.zork", "Kd2.other.zork"], extra: { "outer.rb" => outer })
+    write_project(concern("Cd2", "  class_methods do\n    def build = \"s\"\n  end\n"),
+                  "class Kd2\n  include Od2\nend\n", ["Kd2.build.upcase", "Kd2.build.zork", "Kd2.other.zork"],
+                  extra: { "outer.rb" => outer })
     expect(undefined_messages).to eq(["undefined method `zork' for \"s\"", "undefined method `zork' for :od"])
   end
 
+  def bar_methods(value) = "  class_methods do\n    def bar = :#{value}\n  end\n"
+
   # `include Ca8; include Cb8` includes `Cb8` last, so its `ClassMethods` is nearer.
   it "orders two included dependencies as the outer concern includes them" do
-    write_project(concern("Ca8", "  class_methods do\n    def bar = :a\n  end\n"), "class Kl8\n  include Ol8\nend\n",
-                  ["Kl8.bar.zork"], extra: { "cb8.rb" => concern("Cb8", "  class_methods do\n    def bar = :b\n  end\n"),
-                                             "ol8.rb" => concern("Ol8", "  include Ca8\n  include Cb8\n") })
+    write_project(concern("Ca8", bar_methods(:a)), "class Kl8\n  include Ol8\nend\n", ["Kl8.bar.zork"],
+                  extra: { "cb8.rb" => concern("Cb8", bar_methods(:b)),
+                           "ol8.rb" => concern("Ol8", "  include Ca8\n  include Cb8\n") })
     expect(undefined_messages).to eq(["undefined method `zork' for :b"])
   end
 
   # `Concern` puts a prepended dependency ahead of the included ones (Ruby answers :a), which the tables list the
   # other way, so the read declines.
   it "declines between dependencies when the outer concern prepends one" do
-    write_project(concern("Ca9", "  class_methods do\n    def bar = :a\n  end\n"), "class Kl9\n  include Ol9\nend\n",
-                  ["Kl9.bar.zork"], extra: { "cb9.rb" => concern("Cb9", "  class_methods do\n    def bar = :b\n  end\n"),
-                                             "ol9.rb" => concern("Ol9", "  include Ca9\n  prepend Cb9\n") })
+    write_project(concern("Ca9", bar_methods(:a)), "class Kl9\n  include Ol9\nend\n", ["Kl9.bar.zork"],
+                  extra: { "cb9.rb" => concern("Cb9", bar_methods(:b)),
+                           "ol9.rb" => concern("Ol9", "  include Ca9\n  prepend Cb9\n") })
     expect(undefined_messages).to be_empty
   end
 
   # Two files of the outer concern add their dependencies in load order.
   it "declines between dependencies the outer concern includes in two files" do
-    write_project(concern("Ca7", "  class_methods do\n    def bar = :a\n  end\n"), "class Kl7\n  include Ol7\nend\n",
-                  ["Kl7.bar.zork"], extra: { "cb7.rb" => concern("Cb7", "  class_methods do\n    def bar = :b\n  end\n"),
-                                             "ol7a.rb" => concern("Ol7", "  include Ca7\n"),
-                                             "ol7b.rb" => concern("Ol7", "  include Cb7\n") })
+    write_project(concern("Ca7", bar_methods(:a)), "class Kl7\n  include Ol7\nend\n", ["Kl7.bar.zork"],
+                  extra: { "cb7.rb" => concern("Cb7", bar_methods(:b)),
+                           "ol7a.rb" => concern("Ol7", "  include Ca7\n"),
+                           "ol7b.rb" => concern("Ol7", "  include Cb7\n") })
     expect(undefined_messages).to be_empty
   end
 

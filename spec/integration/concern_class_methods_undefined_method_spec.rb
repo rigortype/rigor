@@ -112,7 +112,8 @@ RSpec.describe "ActiveSupport::Concern class_methods macros and call.undefined-m
   # Issue #2992 — Concern also collects `Conc18` as a dependency of `C18` and extends `C18` with `Conc18::ClassMethods`
   # ahead of `Outer18::ClassMethods`, so the macro is `Conc18`'s.
   it "reads a dependency concern when the outer concern has its own ClassMethods" do
-    outer = concern("Outer18", body: "n").sub("Concern\n", "Concern\n  include Conc18\n").sub("my_c(*n) = n", "other = 1")
+    outer = concern("Outer18", body: "n").sub("Concern\n", "Concern\n  include Conc18\n")
+                                         .sub("my_c(*n) = n", "other = 1")
     write_project("class C18\n  include Outer18\n  my_c :c18\nend\n", %w[C18.new.c18],
                   extra_files: { "conc18.rb" => concern("Conc18"), "outer18.rb" => outer })
     expect(undefined_messages).to be_empty
@@ -279,7 +280,8 @@ RSpec.describe "ActiveSupport::Concern class_methods macros and call.undefined-m
     # method of its own, as an empty concern opens its includer's instance side (#2094), and the dependency writes an
     # explicit `module ClassMethods`, since the walk also records a `class_methods` def on the concern itself.
     it "does not answer an instance-side call with a dependency's class method" do
-      cc = "module Cc\n  extend ActiveSupport::Concern\n  def own = 1\n  module ClassMethods\n    def build = 1\n  end\nend\n"
+      cc = "module Cc\n  extend ActiveSupport::Concern\n  def own = 1\n  " \
+           "module ClassMethods\n    def build = 1\n  end\nend\n"
       oc = outer("Oc", "include", "Cc").sub("  include", "  def own = 1\n  include")
       write_project("class Kc\n  include Oc\nend\n", %w[Kc.new.build Kc.build.zork],
                     extra_files: { "cc.rb" => cc, "oc.rb" => oc })

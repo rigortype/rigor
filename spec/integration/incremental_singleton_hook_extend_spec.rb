@@ -305,4 +305,46 @@ RSpec.describe "incremental edges for a hook-extended singleton module (#1592)",
       expect(cold_rows).to eq([row.call(2, '"X"')])
     end
   end
+
+  # Issue #3010 — `class << Kt; prepend X; end` puts `X` ahead of `Kt`'s own `def self.bar` (Ruby answers "X" on `Kt`
+  # and on its subclass `St`). In a file that does not declare `Kt` the edge's position is not a fact, so the read
+  # declines; the warm run must follow the prepend line in and out of a NEW such file, and of `Kt`'s own file.
+  describe "a class << Const prepend" do
+    let(:shovel) { "class << Kt\n  prepend X\nend\n" }
+    let(:project) do
+      files.merge("lib/kt.rb" => "class Kt < Base\n  def self.bar = 1\nend\n", "lib/st.rb" => "class St < Kt\nend\n",
+                  "lib/use.rb" => "Kt.bar.zork\nSt.bar.zork\n")
+    end
+
+    def both(type) = [1, 2].map { |line| ["lib/use.rb", line, "undefined method `zork' for #{type}"] }
+
+    before do
+      write("sig/types.rbs", "#{sig_source}class St < Kt\nend\n")
+      project.each { |path, body| write(path, body) }
+    end
+
+    it "re-checks the calls when a new file adds the prepend, and when it goes" do
+      expect(incremental_rows(%w[lib])).to eq([both(1), false])
+
+      write("lib/near.rb", shovel)
+      expect(incremental_rows(%w[lib])).to eq([[], true])
+      expect(cold_rows).to eq([])
+
+      File.delete("lib/near.rb")
+      expect(incremental_rows(%w[lib])).to eq([both(1), true])
+      expect(cold_rows).to eq(both(1))
+    end
+
+    it "re-checks the calls when the class's own file gains the prepend, and when it loses it" do
+      expect(incremental_rows(%w[lib])).to eq([both(1), false])
+
+      write("lib/kt.rb", "#{project.fetch('lib/kt.rb')}#{shovel}")
+      expect(incremental_rows(%w[lib])).to eq([both('"X"'), true])
+      expect(cold_rows).to eq(both('"X"'))
+
+      write("lib/kt.rb", project.fetch("lib/kt.rb"))
+      expect(incremental_rows(%w[lib])).to eq([both(1), true])
+      expect(cold_rows).to eq(both(1))
+    end
+  end
 end

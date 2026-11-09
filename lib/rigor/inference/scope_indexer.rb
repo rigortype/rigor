@@ -4282,6 +4282,7 @@ module Rigor
           if !node.expression.is_a?(Prism::SelfNode) || tables.in_block?(node)
             record_singleton_body_prepends(node, qualified_prefix, tables)
           end
+          record_constant_singleton_prepends(node, qualified_prefix, tables)
           walk_methods_and_def_nodes(node.expression, qualified_prefix, in_singleton_class,
                                      methods_acc, def_nodes_acc, source_path, def_owner_prefix,
                                      singleton_cref: singleton_cref,
@@ -5051,6 +5052,7 @@ module Rigor
         Source::NodeWalker.each(def_node.body) do |node|
           if node.is_a?(Prism::SingletonClassNode)
             record_singleton_body_prepends(node, qualified_prefix, tables)
+            record_constant_singleton_prepends(node, qualified_prefix, tables, owner: true)
             next
           end
           next unless node.is_a?(Prism::CallNode)
@@ -5694,6 +5696,28 @@ module Rigor
 
         object = receiver.receiver
         self_ok || !(object.nil? || object.is_a?(Prism::SelfNode))
+      end
+
+      # Issue #3010 — the singleton-prepend entries of a `class << Const` body's prepends on the other names the
+      # constant can denote ({#constant_singleton_owners}); the body's own walk files them under the owner. The
+      # extends walk records the matching edges, unpositioned ({#record_constant_singleton_candidates}). In a method
+      # body, which the methods walk does not enter, `owner:` files them under the owner too.
+      def record_constant_singleton_prepends(node, qualified_prefix, tables, owner: false)
+        return unless constant_singleton_class?(node)
+
+        resolved, others = constant_singleton_owners(node, qualified_prefix)
+        others = [resolved, *others] if owner
+        return if others.empty? || node.body.nil?
+
+        each_singleton_body_prepend(node.body) do |call|
+          mixin_call_view(call)[1].each do |argument|
+            name = Source::ConstantPath.qualified_name(argument)
+            next unless name
+
+            key = [Scope::DiscoveryIndex::ENVELOPE_SINGLETON_PREPEND_KIND, name]
+            others.each { |owner| record_envelope(tables.envelopes, owner, key, Source::ParameterEnvelope::OPAQUE) }
+          end
+        end
       end
 
       def record_singleton_body_prepends(node, qualified_prefix, tables)
@@ -8294,8 +8318,8 @@ module Rigor
                                           singleton_cref)
         when Prism::SingletonClassNode
           # Issue #915 — `class << self` opens the enclosing declaration's OWN singleton, so an `include`
-          # written in it is the same singleton ancestor an `extend` in the class body would add. Only the
-          # `self` form is followed: `class << obj` names something this walk cannot resolve to a class.
+          # written in it is the same singleton ancestor an `extend` in the class body would add. Issue #3010 —
+          # `class << Const` is followed too; `class << obj` names something this walk cannot resolve to a class.
           # Nested declarations inside the body take the `ClassNode` branch above and reset the flag with
           # their own owner, so the marker cannot leak past the singleton body it belongs to.
           return walk_extends_singleton_class(node, qualified_prefix, current_class, accumulator,
@@ -8348,7 +8372,8 @@ module Rigor
 
       # The `class <<` arm of {#walk_class_extends}: the expression evaluates in the enclosing
       # context while the body is the singleton's — `class << self` keeps the enclosing owner
-      # (its `include` is the singleton ancestor #915 folds), other operands walk ownerless.
+      # (its `include` is the singleton ancestor #915 folds), `class << Const` takes the class the
+      # constant names (#3010), other operands walk ownerless.
       # `self` inside is the singleton — `self::` receivers decline — and the lexical cref
       # below is unnameable in every case.
       def walk_extends_singleton_class(node, qualified_prefix, current_class, accumulator,
@@ -8357,6 +8382,7 @@ module Rigor
                            in_singleton: in_singleton, singleton_self: singleton_self,
                            singleton_cref: singleton_cref)
         return unless node.body
+        return walk_extends_constant_singleton(node, qualified_prefix, accumulator) if constant_singleton_class?(node)
 
         # `class << self` keeps the owner only at the FIRST level — nested inside a
         # singleton body, `self` IS the singleton and `class << self` opens the
@@ -8366,6 +8392,101 @@ module Rigor
         walk_class_extends(node.body, qualified_prefix, opens_self ? current_class : nil,
                            accumulator, in_singleton: opens_self,
                                         singleton_self: true, singleton_cref: true)
+      end
+
+      # Issue #3010 — `class << Const` opens the class object's own singleton class, so an `include` / `prepend` in its
+      # body is a singleton mixin on `Const`, as one in `class << self` inside `Const`'s body is. The body walks with
+      # the class `Const` resolves to from the lexical scope ({#constant_singleton_owners}, the class its `def`s record
+      # under) as owner. Its edges are positioned only where the order is a fact: the `class <<` is a direct statement
+      # of a file that declares that class, and no more-nested name the constant could denote is left. Anywhere else (a
+      # method body, a conditional, another file) they are unpositioned, and a prepend also records, unpositioned, on
+      # every other name the constant can denote ({#record_constant_singleton_candidates}), as #2998's
+      # `Const.singleton_class.prepend P` does.
+      def walk_extends_constant_singleton(node, qualified_prefix, accumulator)
+        owner, others = constant_singleton_owners(node, qualified_prefix)
+        if others.empty? && accumulator.direct?(node) && eval_file_declared_names(node).include?(owner)
+          accumulator.direct_body(node.body)
+        end
+        walk_class_extends(node.body, qualified_prefix, owner, accumulator,
+                           in_singleton: true, singleton_self: true, singleton_cref: true)
+        record_constant_singleton_candidates(node.body, others, accumulator)
+      end
+
+      # Each candidate class past the owner takes the body's prepends unpositioned; an argument that names no module
+      # (`prepend(*MODS)`) leaves its singleton set unknown, as {#taint_unrecorded_mixin} reads it on the owner.
+      def record_constant_singleton_candidates(body, candidates, accumulator)
+        return if candidates.empty?
+
+        each_singleton_body_prepend(body) do |call|
+          candidates.each do |candidate|
+            next unless record_extend_targets(call, candidate, accumulator).empty?
+
+            accumulator.taint(candidate, :extend, unnamed: true)
+          end
+        end
+      end
+
+      # A `class << Const` whose operand is a constant read (`class << Foo = expr` opens an object's singleton).
+      def constant_singleton_class?(node)
+        node.expression.is_a?(Prism::ConstantReadNode) || node.expression.is_a?(Prism::ConstantPathNode)
+      end
+
+      # `[owner, others]` for a `class << Const`: the class the constant resolves to from the lexical scope
+      # ({#singleton_class_prefix}, where the body's `def`s record), and the other names it can denote from there
+      # ({#constant_receiver_candidates}). `others` is empty when the constant can denote one name only, when it names
+      # the enclosing class itself (`class << Foo` inside `class Foo`, which {#singleton_class_prefix} reads as
+      # `class << self`), or when the owner is the innermost candidate and the file declares it ahead of the `class <<`
+      # ({#declared_before?}): Ruby resolves the constant when the statement runs, so a nested class the file declares
+      # later does not exist yet there.
+      def constant_singleton_owners(node, qualified_prefix)
+        owner = singleton_class_prefix(node, nil, qualified_prefix).join("::")
+        candidates = constant_receiver_candidates(node.expression, qualified_prefix)
+        # One candidate needs no re-parse: whichever statement declares it, the constant can name nothing else.
+        return [owner, EMPTY_PREFIX] if candidates.size == 1 || qualified_prefix.join("::") == owner
+        return [owner, EMPTY_PREFIX] if candidates.first == owner && declared_before?(node, owner)
+
+        [owner, candidates - [owner]]
+      end
+
+      # Issue #3010 — whether `node`'s file declares `name` (a `class` / `module` declaration or a bare constant
+      # write) at a statement that starts ahead of `node`. Asked only where a `class << Const` has a nested candidate
+      # the file declares, so it re-parses the file rather than keep a table every file would pay for.
+      def declared_before?(node, name)
+        source = node.location.send(:source).source
+        declaration_before?(Prism.parse(source).value, EMPTY_PREFIX, name, node.location.start_offset)
+      end
+
+      def declaration_before?(node, prefix, name, limit)
+        return false unless node.is_a?(Prism::Node) && node.location.start_offset < limit
+
+        case node
+        when Prism::ClassNode, Prism::ModuleNode
+          child = Source::ConstantPath.declaration_prefix(prefix, node.constant_path)
+          return false if child.nil?
+          return true if child.join("::") == name
+
+          return declaration_before?(node.body, child, name, limit)
+        when Prism::ConstantWriteNode
+          return true if (prefix + [node.name.to_s]).join("::") == name
+        when Prism::DefNode, Prism::SingletonClassNode
+          # A `def` body declares no constant, and a `class <<` body's are the singleton class's.
+          return false
+        end
+        node.rigor_each_child { |child| return true if declaration_before?(child, prefix, name, limit) }
+        false
+      end
+
+      # The receiverless or `self.` `prepend` calls (direct or `send` spelling) of a `class <<` body, outside any
+      # nested `def` or declaration body.
+      def each_singleton_body_prepend(node, &)
+        return unless node.is_a?(Prism::Node)
+        return if CODE_BODY_NODES.any? { |klass| node.is_a?(klass) }
+
+        if node.is_a?(Prism::CallNode) && lexical_self_receiver?(node.receiver) &&
+           mixin_call_view(node)&.first == :prepend
+          yield node
+        end
+        node.rigor_each_child { |child| each_singleton_body_prepend(child, &) }
       end
 
       # The declaration arm of {#walk_class_extends}: under an unnameable cref a bare/`self::`

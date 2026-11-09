@@ -1,0 +1,4 @@
+- **[inference]** A class-side call now types from a module that `class << Const; prepend M; end` puts ahead of the class's own class method. ([#3019](https://github.com/rigortype/rigor/pull/3019))
+  - `class << Const; include M; end` now puts `M` on the class object's singleton side too, behind its own class methods and ahead of the superclass's.
+  - Subclasses resolve the call the same way.
+  - The call types `Dynamic` where the order of the prepend is not known: a `class << Const` in a file that does not declare the class, in a method body, under a conditional, or one whose constant may name more than one class.

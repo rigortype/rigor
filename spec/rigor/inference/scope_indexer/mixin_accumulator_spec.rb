@@ -280,6 +280,97 @@ RSpec.describe Rigor::Inference::ScopeIndexer::MixinAccumulator do
       end
     end
 
+    # Issue #3010 — `class << C` records its body's mixins on `C`'s extend side, positioned only as a direct statement
+    # of a file that declares `C`.
+    describe "a class << Const body" do
+      it "records the body's include and prepend, positioned, after the file's own declaration" do
+        source = "class C\n  extend E\nend\nclass << C\n  include A\n  prepend B\nend\n"
+
+        expect(unpositioned(source)).to eq({})
+        expect(index_of(source).fetch(:extends)).to include("C" => %w[B A E])
+      end
+
+      {
+        "a file that does not declare the class" => "class << C\n  prepend B\nend\n",
+        "a conditional" => "class C\nend\nclass << C\n  prepend B if $c\nend\n",
+        "a method body" => "class C\nend\ndef s\n  class << C\n    prepend B\n  end\nend\n"
+      }.each do |label, source|
+        it "keeps the prepend in #{label} unpositioned" do
+          expect(unpositioned(source)).to eq("C" => { extend: ["B"] })
+        end
+      end
+
+      # Inside `module A`, `C` names `A::C` once that class exists; the file declares neither.
+      it "records the prepend, unpositioned, on every class the constant may name" do
+        source = "module A\n  class << C\n    prepend B\n  end\nend\n"
+
+        expect(unpositioned(source)).to eq("A::C" => { extend: ["B"] }, "C" => { extend: ["B"] })
+      end
+
+      # The file declares the top-level `C` only; `A::C` from another file would be the one Ruby reaches.
+      it "keeps the prepend unpositioned where a more-nested name is left beside the declared one" do
+        source = "class C\nend\nmodule A\n  class << C\n    prepend B\n  end\nend\n"
+
+        expect(unpositioned(source)).to eq("A::C" => { extend: ["B"] }, "C" => { extend: ["B"] })
+      end
+
+      # `class << C` inside `class C` is read as `class << self`, and `::C` names the top-level class (a regression row:
+      # the rooted spelling already resolves to `C`).
+      {
+        "inside the class's own body" => ["class C\n  class << C\n    prepend B\n  end\nend\n", "C"],
+        "with a rooted constant" => ["class C\nend\nclass << ::C\n  prepend B\nend\n", "C"]
+      }.each do |label, (source, owner)|
+        it "positions the prepend #{label}" do
+          expect(unpositioned(source)).to eq({})
+          expect(index_of(source).fetch(:extends)).to include(owner => ["B"])
+        end
+      end
+
+      # A `prepend` in a `def` of the body runs on the class object's own ancestry, not on its singleton class.
+      it "records no candidate edge for a prepend in a def of the body" do
+        source = "module A\n  class << C\n    def x\n      prepend B\n    end\n  end\nend\n"
+
+        expect(unpositioned(source)).not_to include("A::C")
+      end
+
+      # Ruby resolves `C` when the `class <<` runs, before the file declares `A::C`.
+      it "keeps the prepend unpositioned on every candidate when the nested class is declared after it" do
+        source = "class C\nend\nmodule A\n  class << C\n    prepend B\n  end\n  class C\n  end\nend\n"
+
+        expect(unpositioned(source)).to eq("A::C" => { extend: ["B"] }, "C" => { extend: ["B"] })
+      end
+
+      # A class declared in a `class << self` body is the singleton class's constant, not `A::C`: Ruby resolves `C` to
+      # the top-level class here.
+      it "does not count a same-named class in an earlier class << self body as declared ahead" do
+        source = "module A\n  class << self\n    class C\n    end\n  end\n  class << C\n    prepend B\n  end\n  " \
+                 "class C\n  end\nend\n"
+
+        expect(unpositioned(source)).to eq("A::C" => { extend: ["B"] }, "C" => { extend: ["B"] })
+      end
+
+      it "positions it on a nested class an earlier constant write declares" do
+        source = "module A\n  C = Class.new\n  class << C\n    prepend B\n  end\nend\n"
+
+        expect(unpositioned(source)).to eq({})
+        expect(index_of(source).fetch(:extends)).to include("A::C" => ["B"])
+      end
+
+      it "positions it on the nested class the file declares" do
+        source = "module A\n  class C\n  end\n  class << C\n    prepend B\n  end\nend\n"
+
+        expect(unpositioned(source)).to eq({})
+        expect(index_of(source).fetch(:extends)).to include("A::C" => ["B"])
+      end
+
+      # Issue #2994's marker: the module set is unknown on each class the constant may name.
+      it "lists the unnamed marker for a prepend whose argument names no module", :aggregate_failures do
+        expect(unpositioned("class C\nend\nclass << C\n  prepend(*MODS)\nend\n")).to eq("C" => { extend: ["*", "?"] })
+        expect(unpositioned("module A\n  class << C\n    prepend(*MODS)\n  end\nend\n"))
+          .to eq("A::C" => { extend: ["*", "?"] }, "C" => { extend: ["*", "?"] })
+      end
+    end
+
     it "keeps a conditional `singleton_class.prepend B` unpositioned" do
       source = "class C\n  singleton_class.prepend B if $c\nend\n"
 

@@ -1188,12 +1188,16 @@ module Rigor
         end
 
         # Issue #2986 — `owner.const_get(raw)`, as `Concern#append_features` looks `ClassMethods` up: `owner` and its
-        # ancestors, then `Object`, never the namespaces enclosing `owner`.
+        # ancestors, then `Object`, never the namespaces enclosing `owner`. Issue #2997 — a `class_methods` block's
+        # `Name::ClassMethods` counts only for a concern `Name` ({Scope::ResolutionChain.const_get_candidate?}).
         def const_get_constant(scope, owner, raw)
           chain = Scope::ResolutionChain.for(scope, owner, :instance, :methods)
           found = chain.search(scope) do |entry|
             names = entry.external? ? entry.candidates : [entry.name]
-            names.map { |name| "#{name}::#{raw}" }.find { |candidate| scope.known_user_class?(candidate) }
+            names.map { |name| [name, "#{name}::#{raw}"] }.find do |name, candidate|
+              scope.known_user_class?(candidate) &&
+                Scope::ResolutionChain.const_get_candidate?(scope.discovery, name, candidate)
+            end&.last
           end
           found || (raw if scope.known_user_class?(raw))
         end

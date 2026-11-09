@@ -1,0 +1,4 @@
+- **[rigor check]** `call.undefined-method` no longer reports a class object's singleton method that `def Foo.x` or `Foo.define_singleton_method(:x)` defines outside the class body, or a constant's method defined in a `singleton_class.class_eval` block. ([#3027](https://github.com/rigortype/rigor/pull/3027))
+  - A subclass's class object answers its superclass's such methods; a name nothing defines still reports.
+  - A call through a constant is no longer typed from a `class << OBJ` body def when `def OBJ.x` or `OBJ.define_singleton_method(:x)` may replace it.
+  - A def in `OBJ.singleton_class.instance_eval` defines on the singleton class's own singleton, so a call to it through `OBJ` still reports.

@@ -261,6 +261,7 @@ module Rigor
         value = unwrap(node.value)
         instance = value.is_a?(Prism::CallNode) && CONSTRUCTORS.include?(value.name) && value.block.nil?
         # Review round 3 of #3001: `Struct.new(:a)`, `Class.new(Base)` and `Module.new` answer a class, not an instance.
+        # A guard beside `IvarContributions.module?`, which drops the same credit once the constant is a declared class.
         return if instance && meta_new?(value)
 
         value = value.receiver if instance

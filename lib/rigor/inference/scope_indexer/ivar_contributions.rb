@@ -168,7 +168,8 @@ module Rigor
         end
 
         # Review round 3 of #3001 — whether `name` is a class or module the project or a signature declares, whose
-        # `.class` / `.singleton_class` no instance of it runs, whatever a constructor binding says.
+        # `.class` / `.singleton_class` no instance of it runs, whatever a constructor binding says. A guard beside
+        # {CensusForeignBlock.binding_entry}'s meta-class check, which records no such binding to begin with.
         def module?(scope, name)
           scope.discovered_classes.key?(name) || scope.discovered_superclasses.key?(name) ||
             scope.discovered_includes.key?(name) || scope.environment&.rbs_loader&.class_known?(name) || false

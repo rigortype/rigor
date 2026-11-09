@@ -4258,7 +4258,10 @@ module Rigor
               census_scan(node.superclass, qualified_prefix, methods_acc)
             end
             record_declaration_facts(node, child_prefix, methods_acc.at(node)) unless child_cref
-            record_concern_class_methods(node, child_prefix, methods_acc, def_nodes_acc) unless child_cref
+            unless child_cref
+              record_concern_class_methods(node, child_prefix, methods_acc, def_nodes_acc)
+              record_hook_definer_calls(node, child_prefix, methods_acc)
+            end
             body_prefix = child_cref ? [] : child_prefix
             if node.body
               walk_methods_and_def_nodes(node.body, body_prefix, false, methods_acc, def_nodes_acc,
@@ -5196,6 +5199,99 @@ module Rigor
       HOOK_EXTEND_DEFS = %i[included prepended].to_set.freeze
       private_constant :HOOK_EXTEND_DEFS
 
+      # Issue #2997 — a module's `included` / `prepended` hook defined by a call rather than `def self.included`:
+      # `define_singleton_method(:included) { |base| base.extend(X) }` written as a statement of the module body is
+      # read as {#record_hook_extends} reads the `def` (a `[ENVELOPE_HOOK_DEF_KIND, hook, source]` entry, and the
+      # block body scanned with its first parameter as the includer). (`class << self; def included(base)` already
+      # reaches {#record_hook_extends} as a singleton `def`.) Any other call that may define a hook takes a
+      # `[ENVELOPE_HOOK_EXTEND_OPEN_KIND, hook]` entry, for both hooks when the name is not a literal: one nested in
+      # a block, method or condition, one without a block of one plain parameter, `send(:define_singleton_method,
+      # …)`, `singleton_class.define_method(…)`, and `define_method` in the body of `class << self`.
+      def record_hook_definer_calls(node, child_prefix, methods_acc)
+        return unless node.is_a?(Prism::ModuleNode) && node.body.is_a?(Prism::StatementsNode)
+
+        owner = child_prefix.join("::")
+        direct = node.body.body
+        each_hook_definer(node.body, false) do |call, hooks|
+          tables = methods_acc.at(call)
+          param = readable_hook_parameter(call) if direct.any? { |statement| statement.equal?(call) }
+          next hooks.each { |hook| record_hook_extend_open(owner, tables, hook) } if param.nil?
+
+          hook = hooks.first
+          def_key = [Scope::DiscoveryIndex::ENVELOPE_HOOK_DEF_KIND, hook, call.slice.split.join(" ")]
+          record_envelope(tables.envelopes, owner, def_key, Source::ParameterEnvelope::OPAQUE)
+          body = call.block.body
+          next if body.nil?
+
+          target = ->(extend_call) { hook_param_receiver?(extend_call.receiver, param.name) }
+          scan_hook_body(body, target, owner, tables, hook) { |inner| hook_singleton_reshape?(inner, param.name) }
+        end
+      end
+
+      # Yields each call under a module body that may define the module's `included` / `prepended`, with the hooks
+      # it may define. A nested class or module body has its own self, and so has an instance `def`'s body; in a
+      # `class << self` body `define_method` defines on the module and `define_singleton_method` on its singleton
+      # class, and in a singleton `def`'s body `self` is the module again.
+      def each_hook_definer(node, in_singleton, &)
+        case node
+        when Prism::ClassNode, Prism::ModuleNode then nil
+        when Prism::SingletonClassNode
+          each_hook_definer(node.expression, in_singleton, &)
+          each_hook_definer(node.body, !in_singleton && node.expression.is_a?(Prism::SelfNode), &)
+        when Prism::DefNode
+          each_hook_definer(node.body, false, &) if in_singleton || node.receiver.is_a?(Prism::SelfNode)
+        else
+          if node.is_a?(Prism::CallNode)
+            hooks = hook_definer_names(node, in_singleton)
+            yield node, hooks unless hooks.nil?
+          end
+          node&.rigor_each_child { |child| each_hook_definer(child, in_singleton, &) }
+        end
+      end
+
+      # The hooks a call may define on the module whose body runs it, or nil for a call that defines none.
+      def hook_definer_names(node, in_singleton)
+        arguments = node.arguments&.arguments || []
+        name_node =
+          if HOOK_SEND_CALLS.include?(node.name) && self_receiver?(node.receiver)
+            definer = literal_method_name(arguments.first)
+            arguments[1] if definer == :define_singleton_method || (in_singleton && definer == :define_method)
+          elsif singleton_definer_call?(node, in_singleton)
+            arguments.first
+          end
+        return nil if name_node.nil?
+
+        name = literal_method_name(name_node)
+        return HOOK_EXTEND_DEFS.to_a if name.nil?
+
+        HOOK_EXTEND_DEFS.include?(name) ? [name] : nil
+      end
+
+      def singleton_definer_call?(node, in_singleton)
+        receiver = node.receiver
+        case node.name
+        when :define_singleton_method then !in_singleton && self_receiver?(receiver)
+        when :define_method
+          (in_singleton && self_receiver?(receiver)) ||
+            (receiver.is_a?(Prism::CallNode) && receiver.name == :singleton_class && self_receiver?(receiver.receiver))
+        else false
+        end
+      end
+
+      def self_receiver?(receiver) = receiver.nil? || receiver.is_a?(Prism::SelfNode)
+
+      # The includer parameter of a `define_singleton_method(:hook) { |base| … }` the hook read can place: one literal
+      # hook name, a literal block, and a plain first parameter. Nil for any other shape.
+      def readable_hook_parameter(call)
+        arguments = call.arguments&.arguments || []
+        return nil unless call.name == :define_singleton_method && arguments.size == 1
+        return nil unless literal_method_name(arguments.first) && call.block.is_a?(Prism::BlockNode)
+
+        params = call.block.parameters
+        param = params.parameters&.requireds&.first if params.is_a?(Prism::BlockParametersNode)
+        param.is_a?(Prism::RequiredParameterNode) ? param : nil
+      end
+
       # Issue #2986 — a module whose body runs `extend ActiveSupport::Concern` has `Concern#append_features` (or
       # `prepend_features`) extend each direct includer with `const_get(:ClassMethods)`, as #2975's hook does with its
       # constant, so the module takes a `[ENVELOPE_HOOK_EXTEND_KIND, "ClassMethods", :const_get]` entry. A
@@ -5207,14 +5303,23 @@ module Rigor
       #
       # Issue #1592 — the `def` node is filed on `Owner::ClassMethods` too, so the includer's singleton resolution
       # chain, which holds that module, answers a class-side call with the `def`'s own return type.
+      #
+      # Issue #2997 — a `class_methods` block is read in every body of the module, not only one that runs `extend
+      # ActiveSupport::Concern` itself: a reopening in another file runs it on a module that is already a concern, and
+      # where it loads first Ruby raises `NoMethodError` at load, so no running program has the includer without the
+      # method. The module is a concern, and its includers draw on `Owner::ClassMethods`, only when some body records
+      # the concern entry.
       def record_concern_class_methods(node, child_prefix, methods_acc, def_nodes_acc)
-        return unless node.is_a?(Prism::ModuleNode) && concern_body?(node.body, child_prefix)
+        return unless node.is_a?(Prism::ModuleNode) && node.body.is_a?(Prism::StatementsNode)
 
+        concern = concern_body?(node.body, child_prefix)
         owner = child_prefix.join("::")
-        key = [Scope::DiscoveryIndex::ENVELOPE_HOOK_EXTEND_KIND, "ClassMethods", :const_get]
-        record_envelope(methods_acc.at(node).envelopes, owner, key, Source::ParameterEnvelope::OPAQUE)
+        if concern
+          key = [Scope::DiscoveryIndex::ENVELOPE_HOOK_EXTEND_KIND, "ClassMethods", :const_get]
+          record_envelope(methods_acc.at(node).envelopes, owner, key, Source::ParameterEnvelope::OPAQUE)
+          record_concern_dependencies(node.body.body, child_prefix, owner, methods_acc)
+        end
         class_methods_prefix = [*child_prefix, "ClassMethods"]
-        record_concern_dependencies(node.body.body, child_prefix, owner, methods_acc)
         node.body.body.each do |statement|
           next unless block_statement?(statement)
 
@@ -5224,7 +5329,7 @@ module Rigor
               record_def_node(def_node, class_methods_prefix, false, def_nodes_acc)
               record_def_body_evidence(def_node, class_methods_prefix, methods_acc, :instance)
             end
-          elsif CONCERN_HOOK_BLOCKS.include?(statement.name)
+          elsif concern && CONCERN_HOOK_BLOCKS.include?(statement.name)
             record_concern_hook_block(statement, owner, methods_acc)
           end
         end
@@ -8854,8 +8959,9 @@ module Rigor
 
       # Issue #1592 — a concern's `class_methods do … end` block is a `module_eval` of `Owner::ClassMethods`, whose
       # visibility starts public: its `def`s' visibilities are recorded on that module too, as its `def`s are.
+      # Issue #2997 — in every body of the module, as {#record_concern_class_methods} reads its `def`s.
       def walk_class_methods_visibilities(node, child_prefix, accumulator)
-        return unless node.is_a?(Prism::ModuleNode) && concern_body?(node.body, child_prefix)
+        return unless node.is_a?(Prism::ModuleNode) && node.body.is_a?(Prism::StatementsNode)
 
         node.body.body.each do |statement|
           next unless block_statement?(statement) && statement.name == :class_methods && statement.block.body

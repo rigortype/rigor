@@ -527,6 +527,19 @@ RSpec.describe Rigor::Inference::SyntheticMethodScanner do
       end
     end
 
+    # Issue #3005 — `send(:include, ActiveSupport::Concern)` mixes Concern's methods into the module's instances and
+    # does not make the module a concern: Ruby raises at the `included do`.
+    it "does not replay the block of a module that sends include of Concern" do
+      registry = Rigor::Plugin::Registry.new(plugins: [dry_struct_plugin.new(services: services)])
+      _, paths = write_files(
+        "audited.rb" => "module Audited\n  send(:include, ActiveSupport::Concern)\n  included do\n    " \
+                        "attribute :audited_at, T\n  end\nend\n",
+        "address.rb" => "class Address < Dry::Struct\n  include Audited\nend\n"
+      )
+      index = described_class.scan(plugin_registry: registry, paths: paths, environment: stub_environment_for)
+      expect(index.lookup_instance("Address", :audited_at)).to be_empty
+    end
+
     # Issue #3005 — a reopening that does not repeat the `extend` runs its block on a module that is already a
     # concern, and a module no body extends with Concern contributes nothing.
     it "replays an included-do DSL call of a concern's reopening" do

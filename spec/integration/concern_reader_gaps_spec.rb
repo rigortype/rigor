@@ -229,6 +229,14 @@ RSpec.describe "concern reader gaps (#3005)" do
       end
     end
 
+    # Ruby answers 1: `send(:include, …)` mixes Concern's methods into the module's instances, so `Cs` is no concern
+    # and its `class_methods` is its own DSL.
+    it "does not read a module that sends include of Concern" do
+      own = "module Cs\n  def self.class_methods(&) = nil\n  send(:include, ActiveSupport::Concern)\n#{class_methods}end\n"
+      write_project({ "a_cs.rb" => own, "k.rb" => includer("Ks", "Cs") }, ["Ks.bar.zork"])
+      expect(undefined_messages).to eq(["undefined method `zork' for 1"])
+    end
+
     it "still reports a class-side name no module or class provides" do
       write_project({ "a_cs.rb" => "module Cs\n  self.extend ActiveSupport::Concern\n#{class_methods}end\n",
                       "k.rb" => includer("Ks", "Cs") }, ["Ks.zork"], members: { "Ks" => member })

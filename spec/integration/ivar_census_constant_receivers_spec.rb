@@ -151,7 +151,14 @@ RSpec.describe "ivar census: constant-rooted class_eval receivers (#2983)", type
        "module Ns1\n  class K\n    def poke = INST.class.class_eval { %s }\n  end\nend\nINST = Ns1::K.new\n", 1, []],
     "the bound namespaced class takes an instance constant's binding" =>
       ["module Ns1\n  class K\n#{plain}  end\nend\n",
-       "module Ns1\n  class K\n    def poke = INST.class.class_eval { %s }\n  end\nend\nINST = Ns1::K.new\n", '"a"', []],
+       "module Ns1\n  class K\n    def poke = INST.class.class_eval { %s }\n  end\nend\nINST = Ns1::K.new\n",
+       '"a"', []],
+    "a namespaced binding written in the namespace binds the class it resolves to" =>
+      ["module Ns1\n  class K\n#{plain}  end\nend\n",
+       "module Ns1\n  INST = K.new\n  class K\n    def poke = INST.class.class_eval { %s }\n  end\nend\n", '"a"', []],
+    "a BasicObject subclass takes BasicObject.class_eval" =>
+      ["class BO < BasicObject\n#{plain}end\n",
+       "class Host\n  def poke = BasicObject.class_eval { %s }\nend\n", '"a"', []],
     "a top-level class whose superclass shares the root's last name ignores it" =>
       ["class Anc; end\nclass TopK < ::Anc\n#{narrowing}end\n",
        "module N\n  class Anc; end\n  class K < Anc\n    def poke = Anc.class_eval { %s }\n  end\nend\n", 1, []],

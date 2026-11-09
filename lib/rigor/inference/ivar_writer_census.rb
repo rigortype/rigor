@@ -146,8 +146,9 @@ module Rigor
 
       # Issue #2983 — the code a barred `class_eval`-family block on a receiver rooted at another constant reenters
       # (`Anc.class_eval`, `INST.class.class_eval`, `AliasK.new.class.class_eval`), remembered under that constant's
-      # candidate key ({CensusForeignBlock.root_constant}), in place of the host walk's as-written owner. A class whose census joins the constant's entries, an ancestor's,
-      # an alias's or an instance constant's ({ScopeIndexer::IvarContributions}), then sees the write.
+      # candidate key ({CensusForeignBlock.root_constant}), in place of the host walk's as-written owner. A class
+      # whose census joins the entries of the constant the key resolves to, an ancestor's, an alias's or an instance
+      # constant's ({ScopeIndexer::IvarContributions}), then sees the write.
       def remember_root_constant(node, instance)
         root, blocks = CensusForeignBlock.rooted_reentry(node, owner_name(instance))
         blocks&.each { |block| remember(block.location, root) }
@@ -158,9 +159,12 @@ module Rigor
       def remember_host(node, owner) = (remember(node.location, owner) if owner && !@rooted.include?(node))
 
       # Issue #2983 — `C = K` or `C = K.new` (`.allocate`) records `[:binds_class, key, "C"]`, `K`'s candidate key and
-      # `C`'s qualified name ({CensusForeignBlock.binding_entry}), so a class's census also joins the entries filed under
-      # an alias or an instance constant of it (`AliasK.class_eval { … }`, `INST.class.class_eval { … }`).
-      def record_binding(node, owner) = CensusForeignBlock.binding_entry(node, nesting(owner))&.then { @census << it }
+      # `C`'s qualified name ({CensusForeignBlock.binding_entry}), so a class's census also joins the entries filed
+      # under an alias or an instance constant of it (`AliasK.class_eval { … }`, `INST.class.class_eval { … }`).
+      def record_binding(node, owner)
+        entry = CensusForeignBlock.binding_entry(node, nesting(owner))
+        @census << entry if entry
+      end
 
       # The lexical class and module names `owner` spells: the host walk's prefix Array, or a resolved name.
       def nesting(owner) = owner.nil? ? NO_ARGUMENTS : owner_name(owner).split("::")

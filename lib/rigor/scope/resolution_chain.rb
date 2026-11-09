@@ -448,11 +448,42 @@ module Rigor
             mixin = resolver.resolve_declared(klass, raw)
             next out << [:spelling, raw].freeze if mixin.nil?
 
-            out << [:mixin, mixin].freeze
-            hook_extend_keys(discovery, mixin).each { |key| out << [:spelling, key[1]].freeze }
+            [mixin, *concern_dependencies(discovery, resolver, mixin)].each do |member|
+              out << [:mixin, member].freeze
+              hook_extend_keys(discovery, member).each { |key| out << [:spelling, key[1]].freeze }
+            end
           end
         end.uniq.freeze
       end
+
+      # Issue #2992 — the concerns a concern `mixin` includes or prepends, at any depth through concerns, nearest
+      # first, without `mixin`: `Concern#append_features` records each as a dependency of `mixin` and includes it
+      # into `mixin`'s final includer, so the includer's singleton chain gains what each one's hooks extend it with.
+      # Empty when `mixin` is no concern. A dependency the walk meets twice is listed once, at its nearest place.
+      def self.concern_dependencies(discovery, resolver, mixin, seen = [mixin])
+        return EMPTY_NAMES unless concern_bucket?(discovery, mixin)
+
+        out = []
+        (discovery.discovered_includes[mixin] || EMPTY_NAMES).uniq.each do |raw|
+          dependency = resolver.resolve_declared(mixin, raw)
+          next if dependency.nil? || seen.include?(dependency) || !concern_bucket?(discovery, dependency)
+
+          seen << dependency
+          out << dependency
+          out.concat(concern_dependencies(discovery, resolver, dependency, seen))
+        end
+        out
+      end
+
+      # The entry an `extend ActiveSupport::Concern` module records ({Inference::ScopeIndexer}).
+      CONCERN_KEY = [DiscoveryIndex::ENVELOPE_HOOK_EXTEND_KIND, "ClassMethods", :const_get].freeze
+      private_constant :CONCERN_KEY
+
+      def self.concern_bucket?(discovery, name)
+        bucket = discovery.discovered_parameter_envelopes[name]
+        !bucket.nil? && bucket.key?(CONCERN_KEY)
+      end
+      private_class_method :concern_bucket?
 
       HOOK_KEY_SLOTS = {
         DiscoveryIndex::ENVELOPE_HOOK_EXTEND_KIND => 2, DiscoveryIndex::ENVELOPE_HOOK_EXTEND_OPEN_KIND => 1,
@@ -1229,8 +1260,8 @@ module Rigor
 
           listed = @discovery.unpositioned_mixins[name]&.dig(:include) || EMPTY
           plan = HookPlan.new([], [], false, true)
-          each_hooked_mixin(name, includes) do |raw, mixin, hooks|
-            unpositioned = listed.include?(raw) || listed.include?(WILDCARD_LIST.first)
+          each_hooked_mixin(name, includes) do |raw, mixin, hooks, loose|
+            unpositioned = loose || listed.include?(raw) || listed.include?(WILDCARD_LIST.first)
             merge_targets(plan, hook_targets(mixin, hooks), unpositioned)
           end
           # Two files' includes run in load order.
@@ -1254,6 +1285,12 @@ module Rigor
 
         # Yields each direct mixin of `name`, nearest first, as `[spelling, resolved, hooks]`: the hooks its edges
         # run, `:included` for an `include` and `:prepended` for a `prepend`.
+        #
+        # Issue #2992 — a concern mixin's dependencies follow it, each on the same edge
+        # ({ResolutionChain.concern_dependencies}): `Concern#append_features` includes them into `name` ahead of the
+        # concern itself, so their modules sit farther than the concern's. `spelling` is the mixin's for each, and
+        # `loose` says a dependency's place is not a fact: `Concern` puts a prepended dependency ahead of the included
+        # ones, which the tables list the other way, and two files of the concern add theirs in load order.
         def each_hooked_mixin(name, includes)
           prepends = @discovery.discovered_prepends[name] || EMPTY
           concern = concern?(name)
@@ -1264,8 +1301,16 @@ module Rigor
             hooks = []
             hooks << :prepended if prepends.include?(raw)
             hooks << :included if includes.count(raw) > prepends.count(raw)
-            yield raw, mixin, hooks
+            yield raw, mixin, hooks, false
+            dependencies = ResolutionChain.concern_dependencies(@discovery, @resolver, mixin)
+            loose = dependencies.size > 1 && dependencies.any? { |member| loose_dependencies?(member, mixin) }
+            dependencies.each { |dependency| yield raw, dependency, hooks, loose }
           end
+        end
+
+        # Whether the concern `owner` or its dependency `member` prepends a module or is declared in two files.
+        def loose_dependencies?(member, owner)
+          [member, owner].any? { |name| multi_file?(name) || !(@discovery.discovered_prepends[name] || EMPTY).empty? }
         end
 
         NO_HOOKS = HookPlan.new(EMPTY, EMPTY, false, true).freeze
@@ -1275,9 +1320,6 @@ module Rigor
           bucket = @discovery.discovered_parameter_envelopes[name]
           !bucket.nil? && bucket.key?(CONCERN_KEY)
         end
-
-        CONCERN_KEY = [DiscoveryIndex::ENVELOPE_HOOK_EXTEND_KIND, "ClassMethods", :const_get].freeze
-        private_constant :CONCERN_KEY
 
         # One mixin's hook-extended modules for the edges `hooks` runs, as {#hook_extensions} answers them.
         # A hook defined twice (`ENVELOPE_HOOK_DEF_KIND`) is open: which definition Ruby keeps is load order.
@@ -1323,9 +1365,15 @@ module Rigor
         # `mixin.const_get(raw)`, as `Concern#append_features` looks `ClassMethods` up: `Name::Raw` for each entry of
         # the mixin's own instance chain, then a top-level `Raw`; nil when no project module answers, which Concern
         # then does not extend.
+        #
+        # Issue #2992 — a concern the mixin depends on is no ancestor of it ({ResolutionChain.concern_dependencies}),
+        # so its `ClassMethods` is not found here: it reaches the includer as that dependency's own.
         def const_get_target(mixin, raw)
           chain = ResolutionChain.for(@scope, mixin, :instance, @flavor)
+          dependencies = ResolutionChain.concern_dependencies(@discovery, @resolver, mixin)
           chain.entries.each do |entry|
+            next if dependencies.include?(entry.name)
+
             names = entry.external? ? entry.candidates : [entry.name]
             found = names.map { |owner| "#{owner}::#{raw}" }.find { |candidate| @resolver.project_name?(candidate) }
             return found if found

@@ -225,6 +225,27 @@ RSpec.describe "class marks — incremental" do
       it_behaves_like "a mark-only file", reported_without_mark: [["use.rb", 1]]
     end
 
+    # Issue #2992 — the module the hook extends with is declared empty in a file of its own, so it is no project class
+    # until that file's edit gives it the macro; the includer's call must be re-checked on that edit.
+    describe "a hook-extend target whose own file gains the macro" do
+      {
+        "a concern's const_get(:ClassMethods)" => "module Cn3\n  extend ActiveSupport::Concern\n  def own = 1\nend\n",
+        "a self.included hook" => "module Cn3\n  def self.included(base) = base.extend(ClassMethods)\nend\n"
+      }.each do |label, hook|
+        it "re-checks the includer's call for #{label}" do
+          files = { "cn.rb" => hook, "cm.rb" => "module ClassMethods\nend\n",
+                    "cn.rbs" => "module Cn3\nend\nmodule ClassMethods\nend\n",
+                    "cu.rb" => "class Cu3\n  include Cn3\n  my_c :foo\nend\n", "cu.rbs" => "class Cu3\nend\n",
+                    "use.rb" => "Cu3.new.foo\n" }
+          baseline, warm, cold = warm_and_cold(files, "cm.rb" => "module ClassMethods\n  def my_c(*n) = #{definer}\nend\n")
+
+          expect(baseline).to eq([["use.rb", 1]])
+          expect(cold).to eq([])
+          expect(warm).to eq(cold)
+        end
+      end
+    end
+
     describe "a literal define_method on a constant receiver" do
       let(:base) { { "ot.rb" => "class Ot\nend\n", "ot.rbs" => "class Ot\nend\n", "use.rb" => "Ot.new.foo\n" } }
       let(:mark) { "class OtHost\n  Ot.define_method(:foo) { 1 }\nend\n" }

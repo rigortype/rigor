@@ -301,6 +301,14 @@ RSpec.describe "singleton-side mixins a hook adds (#1592)" do
     expect(undefined_messages).to eq(["undefined method `zork' for \"CM\"", "undefined method `zork' for \"baz\""])
   end
 
+  # Issue #2992 — each concern in its own file.
+  it "answers a class-side call with a dependency concern's class method" do
+    outer = concern("Od2", "  include Cd2\n  class_methods do\n    def other = :od\n  end\n")
+    write_project(concern("Cd2", "  class_methods do\n    def build = \"s\"\n  end\n"), "class Kd2\n  include Od2\nend\n",
+                  ["Kd2.build.upcase", "Kd2.build.zork", "Kd2.other.zork"], extra: { "outer.rb" => outer })
+    expect(undefined_messages).to eq(["undefined method `zork' for \"s\"", "undefined method `zork' for :od"])
+  end
+
   # The tables keep `extend` and `include` statements apart, so a class with both has two orders for them: the read
   # stands where both give one answer, and declines where they differ.
   describe "a class that also extends a module of its own" do
@@ -339,12 +347,38 @@ RSpec.describe "singleton-side mixins a hook adds (#1592)" do
     end
 
     # `Concern#append_features` records a concern included into another concern as a dependency and extends
-    # nothing; the final includer's dependency read is #2992.
+    # nothing; the final includer reads the dependency (#2992, below).
     it "does not extend a concern that includes a concern" do
       source = "#{concern('Cd', "  class_methods do\n    def build = 1\n  end\n")}" \
                "#{concern('Od', "  include Cd\n")}module Pd\n  include Cd\nend\n"
       expect(chain_names(source, "Od")).to eq(%w[Od ActiveSupport::Concern])
       expect(chain_names(source, "Pd")).to eq(%w[Pd Cd::ClassMethods])
+    end
+
+    # Issue #2992 — `Od.append_features(K)` includes the dependency `Cd` into `K` first, so `Cd::ClassMethods` sits
+    # behind `Od::ClassMethods`; on a prepend edge both are prepended to the class object, `Od`'s last.
+    describe "a concern's dependency concern" do
+      let(:concerns) do
+        "#{concern('Cd', "  class_methods do\n    def build = 1\n  end\n")}" \
+          "#{concern('Od', "  include Cd\n  class_methods do\n    def other = 2\n  end\n")}" \
+          "#{concern('On', "  include Cd\n  def own = 1\n")}class Base\nend\n"
+      end
+
+      it "extends the final includer behind the outer concern's ClassMethods" do
+        source = "#{concerns}class Ki < Base\n  include Od\nend\n"
+        expect(chain_names(source, "Ki")).to eq(%w[Ki Od::ClassMethods Cd::ClassMethods Base])
+      end
+
+      it "prepends both to a class that prepends the outer concern" do
+        source = "#{concerns}class Kp < Base\n  prepend Od\nend\n"
+        expect(chain_names(source, "Kp")).to eq(%w[Od::ClassMethods Cd::ClassMethods Kp Base])
+      end
+
+      # Ruby's `On.const_get(:ClassMethods)` does not reach `Cd`, which is no ancestor of `On`.
+      it "lists the dependency's ClassMethods once when the outer concern has none" do
+        source = "#{concerns}class Kn < Base\n  include On\nend\n"
+        expect(chain_names(source, "Kn")).to eq(%w[Kn Cd::ClassMethods Base])
+      end
     end
 
     it "puts a later include's modules ahead of an earlier one's" do

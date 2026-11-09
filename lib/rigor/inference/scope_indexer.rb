@@ -5279,20 +5279,29 @@ module Rigor
       end
 
       # The calls on `self` (no receiver, or `self.`) an `included` / `prepended` block body makes, not those in a
-      # nested `def`, class, module, singleton-class, block or lambda body.
+      # nested `def`, class, module, singleton-class or lambda body.
+      #
+      # Issue #2992 — a block that keeps `self` (`[1].each { my_c :x }`) runs its calls on the includer too, so the
+      # walk enters it, as {#runs_computed_self_definer?} does. A block that rebinds `self` ({#rebinds_self_block?})
+      # stays out; its call's receiver and arguments are still read.
       def each_self_call(node, &)
         case node
-        when *CONCERN_BLOCK_STOPS then nil
+        when *SELF_CALL_STOPS then nil
         when Prism::CallNode
           yield node if node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode)
-          node.rigor_each_child { |child| each_self_call(child, &) }
+          if rebinds_self_block?(node)
+            [node.receiver, node.arguments].each { |part| each_self_call(part, &) }
+          else
+            node.rigor_each_child { |child| each_self_call(child, &) }
+          end
         else node&.rigor_each_child { |child| each_self_call(child, &) }
         end
       end
 
       CONCERN_BLOCK_STOPS = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode,
                              Prism::BlockNode, Prism::LambdaNode].freeze
-      private_constant :CONCERN_BLOCK_STOPS
+      SELF_CALL_STOPS = (CONCERN_BLOCK_STOPS - [Prism::BlockNode]).freeze
+      private_constant :CONCERN_BLOCK_STOPS, :SELF_CALL_STOPS
 
       # Issue #2901 — a method whose body runs a `define_method` on its own `self` with a computed name, directly or in
       # a block that keeps `self` (`def self.my_attr(*n) = n.each { |x| define_method(x) {} }`), is a class macro: a

@@ -4,8 +4,9 @@
 # names, means every name on the class's instance side may come from that module: `call.undefined-method` must not
 # fire on the class, nor on a subclass at any depth. `Scope::ResolutionChain` marks such a chain (`unnamed_mixin?`),
 # and the rule reads that mark. `self.include M1` and a receiverless `send(:include, M1)` record their module as
-# `include M1` does (#2995), so they open nothing: the ordinary lookup reads `M1`. A mixin whose order alone is unknown (`include M1; prepend M1`, an opaque eval that mixes nothing into its
-# own `self`, the `wildcard_mixin?` mark) has its module recorded and must keep reporting. `sig/` declares every
+# `include M1` does (#2995), so they open nothing: the ordinary lookup reads `M1`. A mixin whose order alone is
+# unknown (`include M1; prepend M1`, an opaque eval that mixes nothing into its own `self`, the `wildcard_mixin?` mark)
+# has its module recorded and must keep reporting. `sig/` declares every
 # class so the rule runs. `Sup` defines a method of its own, so it is a project entry on its subclasses' chains, not
 # an external one (#2094), which already stands down on another route. Every row's Ruby behaviour was witnessed on
 # Ruby 4.0.5: each quiet call returns 1, and each reported call raises `NoMethodError`. The literal-include row is a

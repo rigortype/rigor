@@ -216,15 +216,15 @@ RSpec.describe Rigor::Inference::ScopeIndexer::MixinAccumulator do
     # include table and (for `prepend`) the prepend table, or in the extend table for `extend`. Ruby 4.0.5 puts `B` in
     # `C.ancestors` (or `C.singleton_class.ancestors`) at the same place for every spelling.
     {
-      "self.include B" => [:includes, ["B", "A"]],
-      "send(:include, B)" => [:includes, ["B", "A"]],
-      "self.send(:include, B)" => [:includes, ["B", "A"]],
-      "public_send(:include, B)" => [:includes, ["B", "A"]],
+      "self.include B" => [:includes, %w[B A]],
+      "send(:include, B)" => [:includes, %w[B A]],
+      "self.send(:include, B)" => [:includes, %w[B A]],
+      "public_send(:include, B)" => [:includes, %w[B A]],
       "self.prepend B" => [:prepends, ["B"]],
       "__send__(:prepend, B)" => [:prepends, ["B"]],
-      "self.extend B" => [:extends, ["B", "E"]],
-      "send(:extend, B)" => [:extends, ["B", "E"]],
-      "self.__send__(:extend, B)" => [:extends, ["B", "E"]]
+      "self.extend B" => [:extends, %w[B E]],
+      "send(:extend, B)" => [:extends, %w[B E]],
+      "self.__send__(:extend, B)" => [:extends, %w[B E]]
     }.each do |statement, (table, recorded)|
       it "records `#{statement}` on the class, positioned" do
         source = "class C\n  include A\n  extend E\n  #{statement}\nend\n"

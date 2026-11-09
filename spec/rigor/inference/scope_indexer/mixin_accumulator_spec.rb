@@ -507,4 +507,34 @@ RSpec.describe Rigor::Inference::ScopeIndexer::MixinAccumulator do
       expect(signature("class C\n\n  include A\n  include B\nend\n")).to eq(base)
     end
   end
+
+  # Issue #3006 — a class-body `send` with a computed name and a further argument lists the unnamed marker on each
+  # side the name may reach: the instance side for `include` / `prepend`, the singleton side for `extend`, and
+  # inside `class << self` the singleton side for `include` / `prepend` alone.
+  context "with a class-body computed-name `send` (#3006)" do
+    it "lists the unnamed marker on the side each name may reach", :aggregate_failures do
+      unnamed = ["*", "?"]
+      { "k = :include\n  send(k, M)" => { include: unnamed },
+        "k = :prepend\n  public_send(k, M)" => { include: unnamed },
+        "k = :extend\n  __send__(k, M)" => { extend: unnamed },
+        "send(name.to_sym, M)" => { include: unnamed, extend: unnamed },
+        "class << self\n    k = :include\n    send(k, M)\n  end" => { extend: unnamed },
+        "class << self\n    k = :extend\n    send(k, M)\n  end" => nil }.each do |body, sides|
+        expected = sides ? { "C" => sides } : {}
+        expect(unpositioned("class C\n  #{body}\nend\n")).to eq(expected), body
+      end
+    end
+
+    it "lists it for a computed `send` in a second class of the file" do
+      source = "class A\n  send(a.to_sym, M)\nend\nclass B\n  send(b.to_sym, M)\nend\n"
+      expect(unpositioned(source).keys).to eq(%w[A B])
+    end
+
+    it "does not list it for a literal non-mixin name, or a local bound in a nested `def`", :aggregate_failures do
+      ["send(:attr_reader, :x)",
+       "m = :attr_reader\n  send(m, :x)\n  def self.k\n    m = :include\n  end"].each do |body|
+        expect(unpositioned("class C\n  #{body}\nend\n")).to eq({}), body
+      end
+    end
+  end
 end

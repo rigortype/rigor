@@ -66,6 +66,9 @@ module Rigor
           @body_blocks = nil
           @program_body = nil
           @program = nil
+          @class_bodies = nil
+          @class_body_calls = nil
+          @class_bodies_read = 0
         end
 
         # Marks the file's own top-level statements: a receiverless `include` among them is `main.include`,
@@ -84,6 +87,27 @@ module Rigor
 
           @program ||= MainSelfCalls.collect(@program_body)
           @program.include?(node)
+        end
+
+        # Issue #3006 — registers a class or module body (or its `class << self` body), whose calls
+        # {#class_body_scope} answers for.
+        def class_body(body)
+          (@class_bodies ||= []) << body if body
+        end
+
+        # The node whose locals a call written in a registered class body reads — the body itself, or the `def self.`
+        # it sits in — or nil when the call is not one whose `self` is that body's class as far as {MainSelfCalls}
+        # can tell (an instance `def`, a block that may rebind `self`, a nested declaration). Built on the first
+        # question, which only a computed-name `send` asks, and extended with the bodies registered since.
+        def class_body_scope(node)
+          return nil if @class_bodies.nil?
+
+          @class_body_calls ||= {}.compare_by_identity
+          while @class_bodies_read < @class_bodies.size
+            @class_body_calls.merge!(MainSelfCalls.collect(@class_bodies[@class_bodies_read], instance_defs: false))
+            @class_bodies_read += 1
+          end
+          @class_body_calls[node]
         end
 
         # Marks the statements of a body whose own position is a fact — the calls and declarations in them
@@ -191,23 +215,27 @@ module Rigor
 
         module_function
 
-        def collect(body)
-          calls = Set.new.compare_by_identity
-          visit(body, calls)
+        # `{call => scope}`: each call and the node whose locals it reads, `body` or the `def` it sits in. Issue #3006 —
+        # a class body's calls are collected the same way with `instance_defs: false`: an instance `def`'s `self` is
+        # an instance, not the class, while a `def self.`'s is the class.
+        def collect(body, instance_defs: true)
+          calls = {}.compare_by_identity
+          visit(body, calls, body, instance_defs)
           calls
         end
 
-        def visit(node, calls)
+        def visit(node, calls, scope, instance_defs)
           case node
           when Prism::CallNode
-            calls << node
-            visit(node.receiver, calls)
-            visit(node.arguments, calls)
-            visit(node.block.body, calls) if self_keeping_block?(node)
+            calls[node] = scope
+            visit(node.receiver, calls, scope, instance_defs)
+            visit(node.arguments, calls, scope, instance_defs)
+            visit(node.block.body, calls, scope, instance_defs) if self_keeping_block?(node)
           when Prism::DefNode
-            visit(node.body, calls) if node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode)
+            visit(node.body, calls, node, instance_defs) if (instance_defs && node.receiver.nil?) ||
+                                                            node.receiver.is_a?(Prism::SelfNode)
           when *CONTROL_FLOW
-            node.compact_child_nodes.each { |child| visit(child, calls) }
+            node.compact_child_nodes.each { |child| visit(child, calls, scope, instance_defs) }
           end
         end
         private_class_method :visit

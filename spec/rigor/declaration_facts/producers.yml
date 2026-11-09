@@ -358,6 +358,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#collect_eval_method_defs?: grandfathered
     Rigor::Inference::ScopeIndexer#collect_explicit_return_ivars: grandfathered
     Rigor::Inference::ScopeIndexer#collect_initializer_block_ivars: grandfathered
+    Rigor::Inference::ScopeIndexer#collect_local_send_names: 'issue #3006, a consumer, not a declaration producer; it collects the name literals a local of a class-body `send` is bound to, stopping at a nested `def` or declaration (a new local scope), and records no table and derives no owner or side'
     Rigor::Inference::ScopeIndexer#collect_meta_new_constant_decls?: grandfathered
     Rigor::Inference::ScopeIndexer#collect_meta_new_method_defs?: grandfathered
     Rigor::Inference::ScopeIndexer#collect_mixin_names: grandfathered
@@ -407,6 +408,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#gather_global_writes: grandfathered
     Rigor::Inference::ScopeIndexer#gather_ivar_writes: grandfathered
     Rigor::Inference::ScopeIndexer#hook_singleton_reshape?: 'issue #1592, whether a call in a self.included(base) or self.prepended(base) hook body mixes into the parameter''s singleton class other than through a plain base.extend (base.send(:extend, M), base.singleton_class.include M); it reads the call''s shape and the hook''s parameter name and derives no declaration context'
+    Rigor::Inference::ScopeIndexer#literal_send_name: 'issue #3006, a consumer, not a declaration producer; it reads the method name a `send` argument spells, or rules out every mixin name for an interpolation, and derives no declaration context'
     Rigor::Inference::ScopeIndexer#record_class_methods_block: 'issue #2997, split out of record_concern_class_methods: records each def of one class_methods block (and its def node and body evidence) on Owner::ClassMethods, the prefix its caller passes in, on the instance side those defs have there; it derives no other context'
     Rigor::Inference::ScopeIndexer#record_hook_block_singleton_defs: 'issue #3005, records each def self.x an included or prepended block body writes (each_class_methods_def''s stops) as an instance method, with its def node and body evidence, of Owner::<included> or Owner::<prepended>, a name no program spells, and files the module''s hook-extend entry naming that segment and the hook its caller passes in (gated in a body without the extend), under the module prefix the walk passes in, for the includer''s singleton resolution chain; it decides no other owner or side'
     Rigor::Inference::ScopeIndexer#record_hook_definer_calls: 'issue #2997, files a module''s hook-def and hook-extend entries for a define_singleton_method(:included) block written as a statement of its body, and the open entry for any other call each_hook_definer yields, under the module prefix the walk passes in, for call.undefined-method''s macro reader and the singleton resolution chain; it decides no owner or side'

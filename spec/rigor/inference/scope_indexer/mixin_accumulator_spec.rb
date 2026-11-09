@@ -269,25 +269,31 @@ RSpec.describe Rigor::Inference::ScopeIndexer::MixinAccumulator do
       end
     end
 
-
-        expect(index_of(source).fetch(:extends)).to include("C" => %w[B E])
-        expect(unpositioned(source)["C"]).to be_nil
-        source = "class C\n  include A\n  extend E\n  #{statement}\nend\n"
-      end
-      expect(literal.fetch("C", {}).fetch(:extend, [])).not_to include("?")
-      expect(unpositioned("class C\n  extend M, h\nend\n")).to eq("C" => { extend: ["*", "?"] })
-      expect(unpositioned("class C\n  singleton_class.include(*MODS)\nend\n")).to eq("C" => { extend: ["*", "?"] })
-      expect(unpositioned(source).fetch("C").fetch(:extend)).to eq(["B"])
-      it "records `#{statement}` on the extend side, positioned" do
-      literal = unpositioned("class C\n  singleton_class.include B\nend\n")
-      source = "class C\n  singleton_class.prepend B if $c\nend\n"
-    # Issue #2994 — a singleton-side call whose module set is unknown lists the unnamed marker beside the wildcard.
     # Issue #2998 — a prepend on the class's own `singleton_class` runs where it is written, as `class << self;
     # prepend B` does, so a direct statement records it positioned, the `send` spelling included.
     ["self.singleton_class.prepend B", "singleton_class.send(:prepend, B)"].each do |statement|
+      it "records `#{statement}` on the extend side, positioned" do
+        source = "class C\n  include A\n  extend E\n  #{statement}\nend\n"
+
+        expect(unpositioned(source)["C"]).to be_nil
+        expect(index_of(source).fetch(:extends)).to include("C" => %w[B E])
+      end
     end
+
     it "keeps a conditional `singleton_class.prepend B` unpositioned" do
+      source = "class C\n  singleton_class.prepend B if $c\nend\n"
+
+      expect(unpositioned(source).fetch("C").fetch(:extend)).to eq(["B"])
+    end
+
+    # Issue #2994 — a singleton-side call whose module set is unknown lists the unnamed marker beside the wildcard.
     it "lists the unnamed marker on the extend side for a name it cannot spell", :aggregate_failures do
+      expect(unpositioned("class C\n  extend M, h\nend\n")).to eq("C" => { extend: ["*", "?"] })
+      expect(unpositioned("class C\n  singleton_class.include(*MODS)\nend\n")).to eq("C" => { extend: ["*", "?"] })
+      literal = unpositioned("class C\n  singleton_class.include B\nend\n")
+      expect(literal.fetch("C", {}).fetch(:extend, [])).not_to include("?")
+    end
+
     it "taints, rather than records, `singleton_class.include B` inside `class << self`" do
       source = "class C\n  class << self\n    singleton_class.include B\n  end\nend\n"
 

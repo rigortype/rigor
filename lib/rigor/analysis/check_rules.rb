@@ -1123,14 +1123,10 @@ module Rigor
         # Issue #2992 — `mixin` and, when it is a concern, the concerns it includes or prepends, at any depth through
         # concerns ({Scope::ResolutionChain.concern_dependencies}): `Concern#append_features` (or `prepend_features`)
         # includes (or prepends) each of them into the final includer ahead of `mixin` itself, on the includer's own
-        # edge to `mixin`, whatever edge each was given. Each dependency files its declaring sites.
+        # edge to `mixin`, whatever edge each was given. A reader files each one's sites as it reads its envelopes.
         def with_concern_dependencies(scope, mixin)
           resolver = Scope::ResolutionChain.resolver_for(scope, :methods)
-          dependencies = Scope::ResolutionChain.concern_dependencies(scope.discovery, resolver, mixin)
-          if Analysis::DependencyRecorder.active?
-            dependencies.each { |dependency| Scope::ResolutionChain.record_class(scope, dependency) }
-          end
-          [mixin, *dependencies]
+          [mixin, *Scope::ResolutionChain.concern_dependencies(scope.discovery, resolver, mixin)]
         end
 
         def hook_extension_defines?(scope, mixin, definers)
@@ -1170,14 +1166,9 @@ module Rigor
 
         # Issue #2986 — `owner.const_get(raw)`, as `Concern#append_features` looks `ClassMethods` up: `owner` and its
         # ancestors, then `Object`, never the namespaces enclosing `owner`.
-        #
-        # Issue #2992 — a concern `owner` depends on is no ancestor of it ({#with_concern_dependencies}).
         def const_get_constant(scope, owner, raw)
           chain = Scope::ResolutionChain.for(scope, owner, :instance, :methods)
-          dependencies = with_concern_dependencies(scope, owner).drop(1)
           found = chain.search(scope) do |entry|
-            next if dependencies.include?(entry.name)
-
             names = entry.external? ? entry.candidates : [entry.name]
             names.map { |name| "#{name}::#{raw}" }.find { |candidate| scope.known_user_class?(candidate) }
           end

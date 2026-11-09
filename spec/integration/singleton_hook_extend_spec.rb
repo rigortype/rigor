@@ -309,6 +309,23 @@ RSpec.describe "singleton-side mixins a hook adds (#1592)" do
     expect(undefined_messages).to eq(["undefined method `zork' for \"s\"", "undefined method `zork' for :od"])
   end
 
+  # `include Ca8; include Cb8` includes `Cb8` last, so its `ClassMethods` is nearer.
+  it "orders two included dependencies as the outer concern includes them" do
+    write_project(concern("Ca8", "  class_methods do\n    def bar = :a\n  end\n"), "class Kl8\n  include Ol8\nend\n",
+                  ["Kl8.bar.zork"], extra: { "cb8.rb" => concern("Cb8", "  class_methods do\n    def bar = :b\n  end\n"),
+                                             "ol8.rb" => concern("Ol8", "  include Ca8\n  include Cb8\n") })
+    expect(undefined_messages).to eq(["undefined method `zork' for :b"])
+  end
+
+  # `Concern` puts a prepended dependency ahead of the included ones (Ruby answers :a), which the tables list the
+  # other way, so the read declines.
+  it "declines between dependencies when the outer concern prepends one" do
+    write_project(concern("Ca9", "  class_methods do\n    def bar = :a\n  end\n"), "class Kl9\n  include Ol9\nend\n",
+                  ["Kl9.bar.zork"], extra: { "cb9.rb" => concern("Cb9", "  class_methods do\n    def bar = :b\n  end\n"),
+                                             "ol9.rb" => concern("Ol9", "  include Ca9\n  prepend Cb9\n") })
+    expect(undefined_messages).to be_empty
+  end
+
   # The tables keep `extend` and `include` statements apart, so a class with both has two orders for them: the read
   # stands where both give one answer, and declines where they differ.
   describe "a class that also extends a module of its own" do

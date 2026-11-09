@@ -1,0 +1,3 @@
+- **[rigor check]** `call.undefined-method` no longer reports a call through a constant holding a plain object to a method that `def OBJ.x` or `OBJ.define_singleton_method(:x)` defines on it. ([#3017](https://github.com/rigortype/rigor/pull/3017))
+  - The call is withheld from the report, not typed from the def; a name nothing defines on the constant still reports.
+  - A `define_singleton_method` with a computed name may define any name, so every call through that constant is withheld.

@@ -9842,6 +9842,7 @@ module Rigor
           constant_receiver_candidates(receiver, qualified_prefix).each do |name|
             record_surface_mark(tables, name, Scope::DiscoveryIndex::ENVELOPE_DYNAMIC_MARK)
           end
+          record_constant_singleton_definer(node, receiver, qualified_prefix, tables)
         elsif singleton_class_of_receiver?(receiver) && singleton_class_named_call?(node)
           record_singleton_class_names(node, receiver.receiver, qualified_prefix, tables)
         end
@@ -9878,6 +9879,27 @@ module Rigor
         constant_receiver_candidates(receiver, qualified_prefix).each do |name|
           record_envelope(tables.envelopes, name, [:singleton, node.name], Source::ParameterEnvelope::OPAQUE)
           contest_envelope(tables, name, [:singleton, node.name]) unless tables.certain
+        end
+      end
+
+      # Issue #3016 — `Const.define_singleton_method(:x) { … }` with a literal name defines `x` on `Const`'s object, and
+      # is filed as {#record_foreign_singleton_def} files `def Const.x`: an opaque singleton envelope on every name the
+      # constant can denote. A computed name may define any name, so it marks each candidate with the singleton side's
+      # open-names mark instead, as a computed `define_method` on a constant marks the instance side.
+      def record_constant_singleton_definer(node, receiver, qualified_prefix, tables)
+        names = define_singleton_method_names(node)
+        return if names.nil?
+
+        candidates = constant_receiver_candidates(receiver, qualified_prefix)
+        if names == :all
+          candidates.each do |owner|
+            record_surface_mark(tables, owner, Scope::DiscoveryIndex::ENVELOPE_OPEN_SINGLETON_NAMES_MARK)
+          end
+          return
+        end
+
+        candidates.product(names) do |owner, name|
+          record_envelope(tables.envelopes, owner, [:singleton, name], Source::ParameterEnvelope::OPAQUE)
         end
       end
 

@@ -138,6 +138,70 @@ RSpec.describe Rigor::SigGen::Generator do
     end
   end
 
+  # Issue #3015 — Ruby runs a concern's `included do … end` / `prepended do … end` block in the includer's class
+  # body, so a `def self.x` or a `class << self` def there defines `x` on the includer's singleton class, not on the
+  # concern's: with activesupport 8.1.4, `Concern.made` raises NoMethodError. Neither is written on the module.
+  describe "#run on a concern's included or prepended block (#3015)" do
+    def kinds(source)
+      path = write_fixture("lib/concern.rb", source)
+      generator(paths: [path]).run.map { |c| [c.class_name, c.method_name, c.kind] }
+    end
+
+    # Ruby answers 2 to `Cd::Inner.y`: a class the block opens is lexical, and its `def self.y` is its own.
+    it "omits the block's def self.x and keeps the module's own, the block's instance def and a nested class's" do
+      expect(kinds(<<~RUBY)).to eq([["Cd", :inst, :instance], ["Cd::Inner", :y, :singleton], ["Cd", :own, :singleton]])
+        module Cd
+          extend ActiveSupport::Concern
+
+          included do
+            def self.made = 3
+            def inst = 1
+            class Inner
+              def self.y = 2
+            end
+          end
+
+          def self.own = 2
+        end
+      RUBY
+    end
+
+    it "omits the defs of a class << self body in an included or prepended block" do
+      expect(kinds(<<~RUBY)).to eq([["Ce", :own, :singleton]])
+        module Ce
+          extend ActiveSupport::Concern
+
+          included do
+            class << self
+              def made = 4
+            end
+          end
+
+          prepended do
+            class << self
+              def other = 5
+            end
+          end
+
+          def self.own = 2
+        end
+      RUBY
+    end
+
+    # Ruby answers 8: `Cn`'s own `included` instance_evals the block on `Cn`, so the def is `Cn`'s.
+    it "keeps the def self.x of a module that does not extend Concern" do
+      expect(kinds(<<~RUBY)).to eq([["Cn", :included, :singleton], ["Cn", :made, :singleton]])
+        module Cn
+          def self.included(base = nil, &blk) = blk ? instance_eval(&blk) : super
+
+          included do
+            def self.made = 8
+          end
+        end
+      RUBY
+    end
+  end
+
   describe "#run on a fresh class without RBS" do
     it "classifies a literal-returning def as new-method with the inferred return" do
       path = write_fixture("lib/widget.rb", "class Widget\n  def n\n    42\n  end\nend\n")

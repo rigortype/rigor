@@ -866,6 +866,8 @@ module Rigor
         @in_effect_refinements = nil
         out = []
         @block_depth = 0
+        @hook_blocks = {}.compare_by_identity
+        @hook_block_prefixes = []
         @certain_bodies = Set.new.compare_by_identity
         @certain_definers = Set.new.compare_by_identity
         mark_certain_body(root.statements)
@@ -915,10 +917,28 @@ module Rigor
         in_block = node.is_a?(Prism::BlockNode) || node.is_a?(Prism::LambdaNode) ||
                    node.is_a?(Prism::SingletonClassNode)
         @block_depth += 1 if in_block
+        hook_block = @hook_blocks.key?(node)
+        @hook_block_prefixes.push(prefix) if hook_block
         node.rigor_each_child do |child|
           walk_defs(child, prefix, in_singleton_class, module_function_active, out)
         end
+        @hook_block_prefixes.pop if hook_block
         @block_depth -= 1 if in_block
+      end
+
+      # Issue #3015 — the `included do … end` / `prepended do … end` statements of a body that runs `extend
+      # ActiveSupport::Concern`: Ruby runs the block in the includer's class body, so a `def self.x` or `class << self`
+      # def there is the includer's singleton method, not the module's, and {#collect_def_node} leaves it out.
+      def mark_hook_blocks(namespace_node, prefix)
+        body = namespace_node.body
+        return unless namespace_node.is_a?(Prism::ModuleNode) && Inference::ScopeIndexer.concern_body?(body, prefix)
+
+        body.body.each do |statement|
+          next unless statement.is_a?(Prism::CallNode) && statement.receiver.nil? &&
+                      %i[included prepended].include?(statement.name) && statement.block.is_a?(Prism::BlockNode)
+
+          @hook_blocks[statement] = true
+        end
       end
 
       # [#722](https://github.com/rigortype/rigor/issues/722) residue 3 — the qualified name is built by
@@ -1120,6 +1140,7 @@ module Rigor
         return if namespace_node.body.nil?
 
         mark_certain_body(namespace_node.body)
+        mark_hook_blocks(namespace_node, prefix)
         walk_defs(namespace_node.body, prefix, false, false, out)
       end
 
@@ -1159,6 +1180,8 @@ module Rigor
         end
 
         kind = node.receiver.is_a?(Prism::SelfNode) || in_singleton_class ? :singleton : :instance
+        return if kind == :singleton && @hook_block_prefixes.last == prefix
+
         class_name = prefix.join("::")
         if Inference::ModuleFunctionState.sig_gen_module_function?(module_function_active, kind)
           @module_function_methods << node

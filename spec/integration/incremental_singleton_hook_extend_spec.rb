@@ -90,6 +90,13 @@ RSpec.describe "incremental edges for a hook-extended singleton module (#1592)",
                          first: reported(1), second: reported('"X"'))
   end
 
+  # Issue #3015 — a `class << self` def in the block defines on the includer as a `def self.x` there does.
+  it "re-checks the call when the concern's file gains an included block's class << self def" do
+    singleton = "  included do\n    class << self\n      def bar = :blk\n    end\n  end\n"
+    expect_toggle(files, before: concern(""), after: concern(singleton),
+                         first: reported(1), second: reported(":blk"))
+  end
+
   # The reopening repeats `extend ActiveSupport::Concern`: the walk reads a `class_methods` block only in a body that
   # runs it.
   it "re-checks the call when a file reopening the concern adds a class_methods def" do

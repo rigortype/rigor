@@ -3575,6 +3575,31 @@ module Rigor
          tables.siblings]
       end
 
+      # Issue #3015 — the bodies of a concern's `included` / `prepended` / `class_methods` blocks, each with the prefix
+      # of the module whose body writes it ({ScopeIndexer#concern_hook_blocks}). Ruby runs such a block on the includer
+      # (or on `Owner::ClassMethods`), so a `def self.x` or `class << self` def in it is not the module's own singleton
+      # method, and the walks that file one ask {#hook_block?} first. Mixed into an accumulator with a
+      # `hook_block_spans` slot.
+      module HookBlockSpans
+        def mark_hook_blocks(blocks, owner)
+          blocks.each do |block|
+            (self.hook_block_spans ||= []) << [block.location.start_offset, block.location.end_offset, owner]
+          end
+        end
+
+        # Whether `node` sits in a block marked for the module `owner` (a prefix).
+        def hook_block?(node, owner)
+          offset = node.location.start_offset
+          !hook_block_spans.nil? &&
+            hook_block_spans.any? { |start, stop, marked| offset >= start && offset < stop && marked == owner }
+        end
+
+        # Whether `def_node` is a `def self.x` in a block marked for the module `owner`.
+        def hook_block_self_def?(def_node, owner)
+          def_node.receiver.is_a?(Prism::SelfNode) && hook_block?(def_node, owner)
+        end
+      end
+
       # The accumulator {#walk_methods_and_def_nodes} threads: the existence table and its issue #992
       # envelope twin, which only {#record_method} and {#record_surface_mark} write, and the issue #1120
       # refinement table, which only {#record_refinement_defs} writes. That last one stays nil until a
@@ -3597,7 +3622,9 @@ module Rigor
       MethodTables = Struct.new(:existence, :envelopes, :refinements, :certainty, :certain, :possible,
                                 :contested_envelopes, :contested_def_nodes, :root, :in_effect, :census,
                                 :refine_text, :literal_seen, :source_bytes, :loose_constants, :block_spans,
-                                :definer_history, :forwardable_extends) do
+                                :definer_history, :forwardable_extends, :hook_block_spans) do
+        include HookBlockSpans
+
         # Issue #2006 — records, in walk order, that a definer other than an alias wrote the instance method `name`
         # of `class_name` at `node`: `def_node` for a `def`, nil for a `define_method(:x)` or an `attr_*` reader or
         # writer, and whether the write is {#certain}. {ScopeIndexer#apply_alias_def_nodes} reads the history to copy
@@ -4260,6 +4287,7 @@ module Rigor
             end
             record_declaration_facts(node, child_prefix, methods_acc.at(node)) unless child_cref
             unless child_cref
+              methods_acc.mark_hook_blocks(concern_hook_blocks(node, child_prefix), child_prefix)
               record_concern_class_methods(node, child_prefix, methods_acc, def_nodes_acc)
               record_hook_definer_calls(node, child_prefix, methods_acc)
             end
@@ -4287,7 +4315,7 @@ module Rigor
                                      methods_acc, def_nodes_acc, source_path, def_owner_prefix,
                                      singleton_cref: singleton_cref,
                                      defs_singleton: defs_singleton)
-          if node.body
+          if node.body && !hook_block_singleton?(node, in_singleton_class, owner_prefix, methods_acc)
             # The body's lexical cref is unnameable AND its qualified prefix stays the
             # ENCLOSING lexical one — `class C3::CD` below `class <<` resolves `C3`
             # lexically, never against the singleton's name. `singleton_prefix` rides
@@ -4343,6 +4371,8 @@ module Rigor
             node.rigor_each_child { |child| census_scan(child, qualified_prefix, methods_acc) }
           end
           record_foreign_singleton_def(node, qualified_prefix, owner_prefix, methods_acc.at(node))
+          return if methods_acc.hook_block_self_def?(node, owner_prefix)
+
           unless def_owner_prefix&.empty? || defs_singleton == :unnameable ||
                  (singleton_cref && owner_prefix.empty?)
             singleton_def = in_singleton_class || defs_singleton
@@ -5367,24 +5397,60 @@ module Rigor
       # the module takes a `[ENVELOPE_HOOK_EXTEND_KIND, "<included>", hook]` entry, so the includer's singleton
       # resolution chain holds that module where the hook's own extends go: after the includer's singleton and any
       # module prepended to it, ahead of the concern's `ClassMethods`.
+      #
+      # Issue #3015 — a receiverless `def` written as a statement of a `class << self` body in the block (found with
+      # {#each_class_methods_def}'s stops) is filed the same way. A `class << self` body with a statement-level
+      # visibility call (`private`, `private :x`, `private def x`) may make a `def` non-public, which the module does
+      # not record, so it files none of its `def`s and opens the hook instead ({#record_hook_extend_open}).
       def record_hook_block_singleton_defs(statement, hook, child_prefix, methods_acc, def_nodes_acc)
         segment = "<#{statement.name}>"
         prefix = [*child_prefix, segment]
         name = prefix.join("::")
-        found = false
-        each_class_methods_def(statement.block.body) do |def_node|
-          next unless def_node.receiver.is_a?(Prism::SelfNode)
+        owner = child_prefix.join("::")
+        defs = hook_block_singleton_defs(statement.block.body, owner, hook, methods_acc)
+        return if defs.empty?
 
-          found = true
+        defs.each do |def_node|
           record_method(methods_acc.at(def_node), name, def_node.name, :instance, Source::ParameterEnvelope.of(def_node))
           (def_nodes_acc[name] ||= {})[def_node.name] = def_node
           record_def_body_evidence(def_node, prefix, methods_acc, :instance, receiver_side: false)
         end
-        return unless found
-
         key = [Scope::DiscoveryIndex::ENVELOPE_HOOK_EXTEND_KIND, segment, hook]
-        record_envelope(methods_acc.at(statement).envelopes, child_prefix.join("::"), key,
-                        Source::ParameterEnvelope::OPAQUE)
+        record_envelope(methods_acc.at(statement).envelopes, owner, key, Source::ParameterEnvelope::OPAQUE)
+      end
+
+      # The `def`s {#record_hook_block_singleton_defs} files, opening the hook of `owner` for each `class << self` body
+      # with a visibility call.
+      def hook_block_singleton_defs(body, owner, hook, methods_acc)
+        defs = []
+        each_class_methods_def(body) { |def_node| defs << def_node if def_node.receiver.is_a?(Prism::SelfNode) }
+        each_hook_block_singleton_class(body) do |singleton|
+          statements = statements_of(singleton.body)
+          if statements.any? { |child| singleton_body_visibility_call?(child) }
+            record_hook_extend_open(owner, methods_acc.at(singleton), hook)
+          else
+            statements.each { |child| defs << child if child.is_a?(Prism::DefNode) && child.receiver.nil? }
+          end
+        end
+        defs
+      end
+
+      # Issue #3015 — the `class << self` bodies of an `included` / `prepended` block, with {#each_class_methods_def}'s
+      # stops.
+      def each_hook_block_singleton_class(node, &)
+        case node
+        when Prism::SingletonClassNode then yield node if node.expression.is_a?(Prism::SelfNode)
+        when *CONCERN_BLOCK_STOPS then nil
+        else node&.rigor_each_child { |child| each_hook_block_singleton_class(child, &) }
+        end
+      end
+
+      SINGLETON_BODY_VISIBILITY_CALLS = %i[private protected public private_class_method public_class_method].freeze
+      private_constant :SINGLETON_BODY_VISIBILITY_CALLS
+
+      def singleton_body_visibility_call?(statement)
+        statement.is_a?(Prism::CallNode) && statement.receiver.nil? &&
+          SINGLETON_BODY_VISIBILITY_CALLS.include?(statement.name)
       end
 
       def record_class_methods_block(statement, class_methods_prefix, methods_acc, def_nodes_acc)
@@ -5452,7 +5518,26 @@ module Rigor
       end
 
       CONCERN_HOOK_BLOCKS = %i[included prepended].to_set.freeze
-      private_constant :CONCERN_HOOK_BLOCKS
+      HOOK_BLOCK_CALLS = (CONCERN_HOOK_BLOCKS | [:class_methods]).freeze
+
+      # Issue #3015 — the blocks of the `included` / `prepended` / `class_methods` statements of a module body that
+      # runs `extend ActiveSupport::Concern` itself; none for any other body, whose `included` may be its own DSL. A
+      # reopening without the `extend` is not read.
+      def concern_hook_blocks(node, child_prefix)
+        return [] unless node.is_a?(Prism::ModuleNode) && concern_body?(node.body, child_prefix)
+
+        node.body.body.filter_map do |statement|
+          statement.block if block_statement?(statement) && HOOK_BLOCK_CALLS.include?(statement.name)
+        end
+      end
+
+      # Issue #3015 — whether `node` is a `class << self` in a block {HookBlockSpans#mark_hook_blocks} marked for the
+      # module the walk is in: the defs of its body are not the module's own singleton methods, and the walks do not
+      # file them there.
+      def hook_block_singleton?(node, in_singleton_class, owner_prefix, accumulator)
+        !in_singleton_class && node.expression.is_a?(Prism::SelfNode) && accumulator.hook_block?(node, owner_prefix)
+      end
+      private_constant :CONCERN_HOOK_BLOCKS, :HOOK_BLOCK_CALLS
 
       # Whether a module body runs `extend ActiveSupport::Concern` as one of its own statements (`extend Concern`
       # in a module nested in `module ActiveSupport`).
@@ -5918,6 +6003,10 @@ module Rigor
       # The singleton walk's accumulator: the `{class => {name => DefNode}}` table, plus the contested slots, which
       # follow each slot's writer ({#follow_slot_writer}'s rule).
       class SingletonDefTable < Hash
+        include HookBlockSpans
+
+        attr_accessor :hook_block_spans
+
         # Issue #1936 — contests the slots of `names` (every slot of `class_name` for `:all`) that an earlier write
         # filled: a later non-`def` definer replaced the `def` they hold. The slot keeps the `def`, as
         # {ScopeIndexer#supersede_def_nodes} keeps the instance one, and a later write clears the contest.
@@ -6650,7 +6739,7 @@ module Rigor
       # `module_function` toggle threads correctly across the body's *sibling* statements (a child-by-child recursion
       # would reset it). At the top level / inside an arbitrary node there is no `module_function` state to carry, so
       # descent is a plain per-child walk.
-      def walk_singleton_def_nodes(node, qualified_prefix, in_singleton_class, accumulator, # rubocop:disable Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
+      def walk_singleton_def_nodes(node, qualified_prefix, in_singleton_class, accumulator, # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
                                    def_owner_prefix = nil, singleton_cref: false,
                                    defs_singleton: false)
         return unless node.is_a?(Prism::Node)
@@ -6674,6 +6763,7 @@ module Rigor
             # ownerless like `class << <non-constant>`; nameable headers re-anchor.
             child_cref = unnameable_decl?(node, self_decl, singleton_cref)
             body_prefix = child_cref ? [] : child_prefix
+            accumulator.mark_hook_blocks(concern_hook_blocks(node, child_prefix), child_prefix) unless child_cref
             if node.body
               walk_singleton_body(node.body, body_prefix, false, accumulator, nil,
                                   singleton_cref: child_cref)
@@ -6689,7 +6779,8 @@ module Rigor
           walk_singleton_def_nodes(node.expression, qualified_prefix, in_singleton_class,
                                    accumulator, def_owner_prefix, singleton_cref: singleton_cref,
                                                                   defs_singleton: defs_singleton)
-          if node.body
+          if node.body && !hook_block_singleton?(node, in_singleton_class, def_owner_prefix || qualified_prefix,
+                                                 accumulator)
             walk_singleton_body(node.body, qualified_prefix, true, accumulator, singleton_prefix,
                                 singleton_cref: true)
           end
@@ -6701,9 +6792,11 @@ module Rigor
         when Prism::DefNode
           # `:unnameable` is the `class <<` + `instance_eval` definee — the singleton's own
           # singleton — which this table cannot name either.
+          owner = def_owner_prefix || qualified_prefix
+          return if accumulator.hook_block_self_def?(node, owner)
+
           unless defs_singleton == :unnameable
-            record_singleton_def_node(node, def_owner_prefix || qualified_prefix,
-                                      in_singleton_class || defs_singleton, false, accumulator)
+            record_singleton_def_node(node, owner, in_singleton_class || defs_singleton, false, accumulator)
           end
           return
         end
@@ -9275,6 +9368,10 @@ module Rigor
       # written directly in the body settles the default again. A named target does not read the running default,
       # so a toggle does not contest it. A certain write clears the slot's contest.
       class VisibilityTable < Hash
+        include HookBlockSpans
+
+        attr_accessor :hook_block_spans
+
         # The bare toggles the walk has met so far; a body's statement loop compares it around each child.
         attr_accessor :toggles
         # Whether the running default of the body being walked rests on an uncertain toggle.
@@ -9431,6 +9528,7 @@ module Rigor
             # ownerless; nameable headers re-anchor at a real cref.
             child_cref = unnameable_decl?(node, self_decl, singleton_cref)
             body_prefix = child_cref ? [] : child_prefix
+            accumulator.mark_hook_blocks(concern_hook_blocks(node, child_prefix), child_prefix) unless child_cref
             if node.body
               accumulator.body do
                 walk_method_visibilities(node.body, body_prefix, false, :public,
@@ -9465,6 +9563,8 @@ module Rigor
             return current_visibility
           end
         when Prism::DefNode
+          return current_visibility if accumulator.hook_block_self_def?(node, owner_prefix)
+
           contest_foreign_singleton_visibility(node, qualified_prefix, owner_prefix, in_singleton_class, accumulator)
           record_def_visibility(node, owner_prefix, visibility_side(in_singleton_class, defs_singleton),
                                 current_visibility, accumulator)
@@ -9575,6 +9675,7 @@ module Rigor
                                  singleton_cref: singleton_cref,
                                  defs_singleton: defs_singleton)
         return unless node.body
+        return if hook_block_singleton?(node, in_singleton_class, def_owner_prefix || qualified_prefix, accumulator)
 
         accumulator.body do
           walk_method_visibilities(node.body, qualified_prefix, true, :public, accumulator,

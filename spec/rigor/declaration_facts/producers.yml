@@ -736,6 +736,7 @@ lib/rigor/reflection/declaration_collectors.rb:
 lib/rigor/scope/resolution_chain.rb:
   computes: the ancestor order of a project class or module from the mixin tables, and whether that order is a fact
   producers:
+    Rigor::Scope::ResolutionChain#unnamed_extend_nodes: 'a consumer, not a declaration producer (#3020); it reads which class objects on a built chain carry the :extend order mark listing `"?"`, for the typing read to withhold a definer behind them, and writes no table'
     Rigor::Scope::ResolutionChain.extend_reshapes_instance?: a consumer, not a declaration producer; it reads whether an extended module lists `"*"` on its :include side and defines an extend-time hook (#1730), and writes no table
     Rigor::Scope::ResolutionChain::Builder#compute_instance: a consumer, not a declaration producer; it reads `unpositioned_mixins` on the :include side to mark a chain unsettled, and reads the tables raw by design (ADR-24)
     Rigor::Scope::ResolutionChain::Builder#compute_singleton: the singleton-side twin, reading the :extend side

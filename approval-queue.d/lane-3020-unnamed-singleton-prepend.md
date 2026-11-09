@@ -30,7 +30,12 @@ The third option. It separates prepend from extend and include at the walk that 
 declines (the safe direction) only where the unnamed module could answer first, and a reopening that adds the prepend
 diffs as the same singleton-prepend class mark #3009 already fires incremental edges on.
 
+Fix round 1 extends the read to an unnamed `extend(*MODS)` or `class << self; include(*MODS)`: their module sits right
+behind the class object's own singleton and ahead of its superclass's, so a definer behind the class object's own entry
+is withheld and the own `def self.` still answers. It reads the `:extend` order mark listing `"?"` that #3011 already
+gives such classes, and both checks now live in `ExpressionTyper#unnamed_singleton_mixin_split?`.
+
 ## To undo
 
 Drop the `"?"` entry in `ScopeIndexer#record_own_singleton_prepend`, the `:unnamed_prepend` mark in
-`ResolutionChain::Builder#own_singleton_prepends`, and `ExpressionTyper#behind_unnamed_prepend?`.
+`ResolutionChain::Builder#own_singleton_prepends`, and `ExpressionTyper#unnamed_singleton_mixin_split?` (with `ResolutionChain#unnamed_extend_nodes`).

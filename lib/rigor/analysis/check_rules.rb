@@ -18,6 +18,7 @@ require_relative "check_rules/declaration_sourced_guard"
 require_relative "check_rules/published_constant_guard"
 require_relative "check_rules/dead_version_guard_arms"
 require_relative "check_rules/rule_walk"
+require_relative "check_rules/always_raises_shield"
 require_relative "check_rules/always_truthy_condition_collector"
 require_relative "check_rules/unreachable_clause_collector"
 require_relative "check_rules/shadowed_rescue_collector"
@@ -158,10 +159,11 @@ module Rigor
       # (`diagnose`'s `Source::NodeWalker.each` `case`), now invoked by
       # {MainPassCollector} on the shared {RuleWalk}. Returns the
       # diagnostics for one node, in the same emission order as before.
-      def main_pass_node_diagnostics(path, node, scope_index, eval_ranges = nil, lexical_sites = nil)
+      def main_pass_node_diagnostics(path, node, scope_index, eval_ranges = nil, lexical_sites = nil,
+                                     raise_shield = nil)
         case node
         when Prism::CallNode
-          call_node_diagnostics(path, node, scope_index, eval_ranges, lexical_sites)
+          call_node_diagnostics(path, node, scope_index, eval_ranges, lexical_sites, raise_shield)
         when Prism::DefNode
           [
             refinement_aware_return_type_mismatch(path, node, scope_index, lexical_sites),
@@ -202,7 +204,10 @@ module Rigor
       def build_node_collectors(path, scope_index, root = nil, plugin_api_surface: false)
         eval_ranges = receiver_eval_block_ranges(root)
         lexical_sites = LexicalMethodSites.new(root, stamped_refinements(scope_index, root))
-        main_pass = ->(node) { main_pass_node_diagnostics(path, node, scope_index, eval_ranges, lexical_sites) }
+        raise_shield = root && AlwaysRaisesShield.new(root)
+        main_pass = lambda do |node|
+          main_pass_node_diagnostics(path, node, scope_index, eval_ranges, lexical_sites, raise_shield)
+        end
         collectors = {
           main_pass: MainPassCollector.new(main_pass),
           void_value_use: VoidValueUseCollector.new(scope_index),
@@ -293,8 +298,11 @@ module Rigor
         diagnostics = []
         eval_ranges = receiver_eval_block_ranges(root)
         lexical_sites = LexicalMethodSites.new(root, stamped_refinements(scope_index, root))
+        raise_shield = AlwaysRaisesShield.new(root)
         Source::NodeWalker.each(root) do |node|
-          diagnostics.concat(main_pass_node_diagnostics(path, node, scope_index, eval_ranges, lexical_sites))
+          diagnostics.concat(
+            main_pass_node_diagnostics(path, node, scope_index, eval_ranges, lexical_sites, raise_shield)
+          )
         end
         diagnostics
       end
@@ -316,7 +324,8 @@ module Rigor
 
       # Issue #2786 — the rules that type the call's receiver read it from one {CallFacts}, so the receiver chain is
       # typed once per call node rather than once per rule.
-      def call_node_diagnostics(path, node, scope_index, eval_ranges = nil, lexical_sites = nil)
+      def call_node_diagnostics(path, node, scope_index, eval_ranges = nil, lexical_sites = nil,
+                                raise_shield = nil)
         facts = CallFacts.new(node, scope_index)
         [
           undefined_method_diagnostic(path, node, facts, lexical_sites),
@@ -326,7 +335,7 @@ module Rigor
           nil_receiver_diagnostic(path, node, facts, lexical_sites),
           dump_type_diagnostic(path, node, scope_index),
           assert_type_diagnostic(path, node, scope_index),
-          always_raises_diagnostic(path, node, facts, lexical_sites),
+          always_raises_diagnostic(path, node, facts, lexical_sites, raise_shield),
           raise_non_exception_diagnostic(path, node, scope_index),
           visibility_mismatch_diagnostic(path, node, facts, lexical_sites)
         ].compact
@@ -2897,11 +2906,14 @@ module Rigor
         INTEGER_RAISING_OPERATORS = %i[/ % div modulo divmod].freeze
         private_constant :INTEGER_RAISING_OPERATORS
 
-        def always_raises_diagnostic(path, call_node, facts, lexical_sites = nil)
+        def always_raises_diagnostic(path, call_node, facts, lexical_sites = nil, raise_shield = nil)
           return nil unless integer_zero_division?(call_node, facts)
 
           # ADR-121 WD7 — a refinement of `Integer`'s operator (or one Rigor cannot read) in effect may not raise.
           return nil if refined_method_in_effect?("Integer", call_node, facts.scope, :instance, lexical_sites)
+
+          # Issue #3036 — a raise an enclosing `begin` / `def … rescue` catches flows to the handler.
+          return nil if raise_shield&.rescued?(call_node, facts.scope)
 
           build_always_raises_diagnostic(path, call_node)
         end

@@ -89,6 +89,18 @@ RSpec.describe "a singleton-side prepend of the class's own (#2998)" do
     end
   end
 
+  # Inside `module Admin`, `User` names `Admin::User` once that class exists, which the walk cannot tell from the
+  # call site: Ruby answers 1, :a, 0 and :a. Each candidate class declines rather than answer its own def, or a module
+  # the prepend may not have put on it.
+  it "declines on every class a constant receiver's prepend may name" do
+    classes = "class User < Base\n  def self.foo = 1\nend\nclass Plain < Base\nend\n" \
+              "module Admin\n  class User < Base\n    def self.foo = 2\n  end\n  class Plain < Base\n  end\nend\n"
+    write_project(classes, ["User.foo.zork", "Admin::User.foo.zork", "Plain.foo.zork", "Admin::Plain.foo.zork"],
+                  extra: { "admin.rb" => "module Admin\n  User.singleton_class.prepend Y\n  " \
+                                         "Plain.singleton_class.prepend Y\nend\n" })
+    expect(undefined_messages).to be_empty
+  end
+
   # Ruby inserts a later prepend ahead of an earlier one.
   it "answers the later of two prepends in one file" do
     write_project("class K2 < Base\n  def self.foo = 1\n  class << self\n    prepend Y\n    prepend Z\n  end\nend\n",

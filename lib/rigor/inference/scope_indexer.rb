@@ -8633,7 +8633,10 @@ module Rigor
         # Inside `class << self` a bare `singleton_class` is the singleton's own singleton, one level up from the
         # owner's extend side, so that call stays a taint.
         up_level = in_singleton && lexical_self_receiver?(receiver.receiver)
-        return true if !up_level && singleton_class_include_recorded?(node, owner, accumulator)
+        if !up_level && singleton_class_include_recorded?(node, owner, accumulator)
+          record_prepend_candidates(node, receiver.receiver, qualified_prefix, owner, accumulator)
+          return true
+        end
 
         accumulator.taint(owner, :extend)
         true
@@ -8657,6 +8660,19 @@ module Rigor
 
         positioned = prepend && lexical_self_receiver?(node.receiver.receiver)
         !record_extend_targets(node, owner, accumulator, positioned: positioned).empty?
+      end
+
+      # Issue #2998 — a constant receiver's `Const.singleton_class.prepend P` also records the edge, unpositioned, under
+      # every other name the constant can denote from the call site, the names the methods walk files its
+      # singleton-prepend entry under ({#singleton_prepend_owners}): which class Ruby reaches is not a fact here, so
+      # each candidate's typing read declines where the prepend could answer.
+      def record_prepend_candidates(node, object, qualified_prefix, owner, accumulator)
+        return unless mixin_call_view(node)&.first == :prepend
+        return unless object.is_a?(Prism::ConstantReadNode) || object.is_a?(Prism::ConstantPathNode)
+
+        (constant_receiver_candidates(object, qualified_prefix) - [owner]).each do |candidate|
+          record_extend_targets(node, candidate, accumulator)
+        end
       end
 
       # A bare or `self.` receiver: the lexical `self`.

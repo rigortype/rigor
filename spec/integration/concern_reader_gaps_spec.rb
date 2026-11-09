@@ -222,9 +222,10 @@ RSpec.describe "concern reader gaps (#3005)" do
         expect(messages("call.wrong-arity")).to be_empty
       end
 
-      it "still checks an own def the block does not define" do
+      # Ruby raises ArgumentError: the own `bar` is ahead of the `Xq#bar` the class extends itself with.
+      it "still checks an own def the block does not define, beside an extended module that does" do
         write_project({ "a_cd.rb" => blocked,
-                        "k.rb" => "class Kb\n  def self.other(a) = a\n  include Cd\nend\n" }, ["Kb.other"])
+                        "k.rb" => "class Kb\n  extend Xq\n  def self.bar(a) = a\n  include Cd\nend\n" }, ["Kb.bar"])
         expect(messages("call.wrong-arity").size).to eq(1)
       end
     end

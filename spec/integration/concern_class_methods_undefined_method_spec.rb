@@ -292,6 +292,31 @@ RSpec.describe "ActiveSupport::Concern class_methods macros and call.undefined-m
       end
     end
 
+    # `after_save` here is the base class's own, which keeps its block and never runs it.
+    it "does not read a macro call in a callback macro's block" do
+      base = "class Bcb\n  def self.after_save(&) = nil\nend\n"
+      write_project("#{base}class Kcb < Bcb\n  include Rcb\nend\n", %w[Kcb.new.cb],
+                    extra_files: { "rcb.rb" => block_concern("Rcb", included: "after_save { my_c :cb }") })
+      expect(undefined_messages).to eq(["undefined method `cb' for Kcb"])
+    end
+
+    {
+      "collect" => "%i[DEF].collect { |n| my_c n }",
+      "each_slice" => "%i[DEF].each_slice(1) { |ns| my_c(*ns) }",
+      "reverse_each" => "%i[DEF].reverse_each { |n| my_c n }",
+      "inject" => "%i[DEF].inject(0) { |acc, n| my_c n; acc }",
+      "each.with_index" => "%i[DEF].each.with_index { |n, _| my_c n }",
+      "find" => "%i[DEF].find { |n| my_c n; false }",
+      "loop" => "loop do\n      my_c :DEF\n      break\n    end"
+    }.each_with_index do |(label, call), index|
+      it "reads a macro call in a #{label} block" do
+        name = "Di#{index}"
+        write_project("class K#{name}\n  include #{name}\nend\n", ["K#{name}.new.i#{index}"],
+                      extra_files: { "di#{index}.rb" => block_concern(name, included: call.gsub("DEF", "i#{index}")) })
+        expect(undefined_messages).to be_empty
+      end
+    end
+
     it "reads a macro call in an iterator block on a constant" do
       write_project("NAMES = %i[n1].freeze\nclass Kn\n  include Rn\nend\n", %w[Kn.new.n1],
                     extra_files: { "rn.rb" => block_concern("Rn", included: "NAMES.each { |n| my_c n }") })

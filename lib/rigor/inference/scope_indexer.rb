@@ -5236,14 +5236,16 @@ module Rigor
       # `include` / `prepend` written as a statement of the body AFTER the body's own `extend` is provably such a
       # dependency: one written ahead of it, or in a reopening without it, may run first and is an ordinary include.
       # Each such constant takes a `[ENVELOPE_CONCERN_DEPENDENCY_KIND, written]` entry; whether it names a concern is
-      # the reader's question.
+      # the reader's question. One statement's constants are recorded last first: `include A, B` runs
+      # `B.append_features` first, so the dependencies list it ahead, and a reader that reverses the entries to put a
+      # later statement's nearer keeps one statement's in argument order, as Ruby searches them.
       def record_concern_dependencies(statements, child_prefix, owner, methods_acc)
         extend_at = statements.index { |statement| concern_extend?(statement, child_prefix) }
         statements.drop(extend_at + 1).each do |statement|
           next unless statement.is_a?(Prism::CallNode) && statement.receiver.nil? &&
                       MIXIN_CALL_NAMES.include?(statement.name) && statement.block.nil?
 
-          (statement.arguments&.arguments || []).each do |argument|
+          (statement.arguments&.arguments || []).reverse_each do |argument|
             written = Source::ConstantPath.qualified_name_or_nil(argument)
             next if written.nil?
 
@@ -5324,22 +5326,30 @@ module Rigor
         end
       end
 
-      # Whether a call's block runs on the includer while the hook block runs: not one that rebinds `self`
-      # ({#rebinds_self_block?}), not a receiverless `lambda` / `proc`, whose block runs only when called, and, on a
-      # receiver other than `self`, only an iterator's (`Proc.new { }` and `ActiveSupport.on_load(:x) { }` defer it).
+      # Whether a call's block may run on the includer while the hook block runs. Every block may, since leaving one
+      # out would report the macro's names, except one that rebinds `self` ({#rebinds_self_block?}) and the calls
+      # known to keep a block for later: a receiverless `lambda` / `proc` and `Proc.new`, which run it only when
+      # called; `on_load` on any receiver, which runs it when a framework component loads; and a receiverless
+      # `before_*` / `after_*` / `around_*` callback macro (`after_save { }`), which runs it on an instance.
       def self_call_block?(node)
         return false if rebinds_self_block?(node)
+        return false if node.name == :on_load
 
         receiver = node.receiver
-        return !DEFERRED_BLOCK_CALLS.include?(node.name) if receiver.nil?
+        if receiver.nil?
+          !DEFERRED_BLOCK_CALLS.include?(node.name) && !CALLBACK_MACRO.match?(node.name)
+        else
+          !(node.name == :new && proc_constant?(receiver))
+        end
+      end
 
-        receiver.is_a?(Prism::SelfNode) || SELF_CALL_ITERATORS.include?(node.name)
+      def proc_constant?(node)
+        Source::ConstantPath.qualified_name_or_nil(node)&.delete_prefix("::") == "Proc"
       end
 
       DEFERRED_BLOCK_CALLS = %i[lambda proc].freeze
-      SELF_CALL_ITERATORS = %i[each each_with_index each_with_object each_pair each_key each_value map flat_map
-                               filter_map select reject times upto downto step tap then].to_set.freeze
-      private_constant :DEFERRED_BLOCK_CALLS, :SELF_CALL_ITERATORS
+      CALLBACK_MACRO = /\A(?:before|after|around)_/
+      private_constant :DEFERRED_BLOCK_CALLS, :CALLBACK_MACRO
 
       CONCERN_BLOCK_STOPS = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode,
                              Prism::BlockNode, Prism::LambdaNode].freeze

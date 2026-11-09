@@ -359,6 +359,24 @@ RSpec.describe "singleton-side mixins a hook adds (#1592)" do
     expect(undefined_messages).to be_empty
   end
 
+  # `include Ca6, Cb6` runs `Cb6.append_features` first, so `Ca6` is included last and its `ClassMethods` is nearer.
+  { "Ca6, Cb6" => ":a", "Cb6, Ca6" => ":b" }.each do |arguments, nearer|
+    it "orders the dependencies of include #{arguments} as Ruby does" do
+      write_project(concern("Ca6", bar_methods(:a)), "class Kl6\n  include Ol6\nend\n", ["Kl6.bar.zork"],
+                    extra: { "cb6.rb" => concern("Cb6", bar_methods(:b)),
+                             "ol6.rb" => concern("Ol6", "  include #{arguments}\n") })
+      expect(undefined_messages).to eq(["undefined method `zork' for #{nearer}"])
+    end
+  end
+
+  # Ruby answers :b, `Concern#prepend_features` unshifting each into the dependencies; the prepend rule declines.
+  it "declines between the dependencies of prepend Ca5, Cb5" do
+    write_project(concern("Ca5", bar_methods(:a)), "class Kl5\n  include Ol5\nend\n", ["Kl5.bar.zork"],
+                  extra: { "cb5.rb" => concern("Cb5", bar_methods(:b)),
+                           "ol5.rb" => concern("Ol5", "  prepend Ca5, Cb5\n") })
+    expect(undefined_messages).to be_empty
+  end
+
   # Two files of the outer concern add their dependencies in load order.
   it "declines between dependencies the outer concern includes in two files" do
     write_project(concern("Ca7", bar_methods(:a)), "class Kl7\n  include Ol7\nend\n", ["Kl7.bar.zork"],

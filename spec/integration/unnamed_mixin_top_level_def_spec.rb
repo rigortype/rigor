@@ -67,6 +67,28 @@ RSpec.describe "a top-level def and a class-object read beside a mixin no name s
     end
   end
 
+  describe "a bare call on the class object, beside a top-level def" do
+    let(:defs) do
+      "def bar = nil\nmodule X\n  def bar = \"x\"\nend\n" \
+        "module H\n  def self.included(base) = base.extend(X)\nend\nMODS = [H]\n"
+    end
+    let(:klass) { "class K\n  include(*MODS)\n  V = bar.upcase\n  def self.s = bar.upcase\nend\n" }
+    let(:sub) { "class KSub < K\n  def self.s = bar.upcase\nend\n" }
+
+    it "does not bind it in a class-body constant, a `def self.`, or a subclass's `def self.`" do
+      expect(undefined_messages("a.rb" => "#{defs}#{klass}#{sub}")).to be_empty
+    end
+
+    it "does not bind it when the definitions, the class and the subclass sit in three files" do
+      expect(undefined_messages("a.rb" => defs, "k.rb" => klass, "ksub.rb" => sub)).to be_empty
+    end
+
+    it "still binds it on a class with no such mixin (control)" do
+      source = "#{defs}class Bare\n  include Comparable\n  def self.s = bar.upcase\nend\n"
+      expect(undefined_messages("a.rb" => source)).to eq(["undefined method `upcase' for nil"])
+    end
+  end
+
   describe "the class-object side" do
     it "declines the superclass's method on a class that splats in a module whose hook extends it" do
       source = "#{hooked}class K < Base\n  include(*MODS)\nend\nK.bar.upcase\n"

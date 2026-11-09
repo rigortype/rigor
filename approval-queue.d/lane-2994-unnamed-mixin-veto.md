@@ -35,6 +35,15 @@ reads a hook it cannot place. The #2993 row is rewritten to stay quiet, and a ne
 literal include. The mark is also given when a module the class includes lists `"?"` on its own instance side. The second case also covers that module's own
 `include(*MODS)`, whose hooks run with the module as `base`, not the class. That over-approximation only declines.
 
+The singleton half of the #618 veto (`ExpressionTyper#singleton_self_answers?`) reads the same mark through
+`ResolutionChain#unnamed_mixin?` on the singleton chain, so a bare `bar` in such a class body, in its `def self.` or in a
+subclass's does not bind a top-level `def bar` either. It reads `unnamed_mixin?`, not `wildcard_mixin?`: an
+order-only taint leaves every module recorded, and the existing walks answer it.
+
+`Reflection.project_method_defined`'s `maybe` is pinned by its unit row alone. rigor-activerecord's implicit-self column
+tier answers `untyped`, and a declined call dispatches to `Dynamic`, so no diagnostic tells the two apart. The veto
+carries the visible behaviour, and the facade change serves plugins in general.
+
 ## To undo
 
 In `ResolutionChain::Builder#singleton_mixins`, drop `|| unnamed_instance_mixin?(name)`, or narrow

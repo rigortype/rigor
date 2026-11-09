@@ -48,6 +48,9 @@ Review round 2 added two refinements. A candidate a loaded signature declares co
 constant only RBS knows credits no project class. A `.class` or `.singleton_class` of the root constant's own value
 credits only an instance binding, and one of a class object credits nothing.
 
+Review round 3 only drops credits. `Struct.new`, `Class.new` and `Module.new` record no binding, since they answer a
+class. A marked key whose constant is a declared class or module credits nothing.
+
 ## To undo
 
 Revert `remember_root_constant`, `record_binding` and `record_string_eval` in `IvarWriterCensus`, the owner widening in

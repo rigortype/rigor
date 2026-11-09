@@ -5361,8 +5361,9 @@ module Rigor
       # Issue #2992 — `Concern#append_features` (or `prepend_features`) of a concern `include`d (or `prepend`ed) into a
       # module that has already run `extend ActiveSupport::Concern` records it as a dependency of that module and
       # includes nothing; the module's final includer includes it. Only a constant argument of an `include` /
-      # `prepend` on the module's own `self` ({#concern_dependency_arguments}) written as a statement of the body AFTER the body's own `extend` is provably such a
-      # dependency: one written ahead of it, or in a reopening without it, may run first and is an ordinary include.
+      # `prepend` on the module's own `self` ({#concern_dependency_arguments}) written as a statement of the body
+      # AFTER the body's own `extend` is provably such a dependency: one written ahead of it, or in a reopening
+      # without it, may run first and is an ordinary include.
       # Each such constant takes a `[ENVELOPE_CONCERN_DEPENDENCY_KIND, written]` entry; whether it names a concern is
       # the reader's question. One statement's constants are recorded last first: `include A, B` runs
       # `B.append_features` first, so the dependencies list it ahead, and a reader that reverses the entries to put a

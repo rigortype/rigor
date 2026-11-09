@@ -313,4 +313,224 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(outcome(row(candidates, "Guard", :refuse!))).to eq("def refuse!: () -> bot")
     end
   end
+
+  describe "a class whose every member is withheld" do
+    it "still declares the class, so a subclass keeps its proposals" do
+      path = write_fixture("lib/base.rb", <<~RUBY)
+        class Base
+          def name = raise(NotImplementedError)
+        end
+        class Sub < Base
+          def name = "x"
+          def size = 3
+        end
+      RUBY
+
+      candidates = run_over([path])
+
+      expect(outcome(row(candidates, "Base", :name))).to eq(:overridden_bot)
+      expect(outcome(row(candidates, "Sub", :name))).to eq('def name: () -> "x"')
+      expect(outcome(row(candidates, "Sub", :size))).to eq("def size: () -> 3")
+      expect(row(candidates, "Sub", :size).class_shells).to include("Base")
+    end
+
+    it "still declares the class when nothing overrides its abstract method" do
+      path = write_fixture("lib/base.rb", <<~RUBY)
+        class Base
+          def name = raise(NotImplementedError)
+        end
+        class Sub < Base
+          def size = 3
+        end
+      RUBY
+
+      candidates = run_over([path])
+
+      expect(outcome(row(candidates, "Base", :name))).to eq(:abstract_method)
+      expect(outcome(row(candidates, "Sub", :size))).to eq("def size: () -> 3")
+    end
+
+    it "rides the shell on a subclass's file when the base is alone in its own" do
+      base = write_fixture("lib/base.rb", "class Base\n  def name = raise(NotImplementedError)\nend\n")
+      sub = write_fixture("lib/sub.rb", "class Sub < Base\n  def size = 3\nend\n")
+
+      candidates = run_over([base, sub])
+
+      expect(outcome(row(candidates, "Sub", :size))).to eq("def size: () -> 3")
+      expect(row(candidates, "Sub", :size).class_shells).to include("Base")
+    end
+
+    it "declares every withheld ancestor on a grandchild's file" do
+      base = write_fixture("lib/base.rb", "class Base\n  def name = raise(NotImplementedError)\nend\n")
+      mid = write_fixture("lib/mid.rb", "class Mid < Base\n  def kind = raise(NotImplementedError)\nend\n")
+      leaf = write_fixture("lib/leaf.rb", "class Leaf < Mid\n  def size = 3\nend\n")
+
+      candidates = run_over([base, mid, leaf])
+
+      expect(outcome(row(candidates, "Leaf", :size))).to eq("def size: () -> 3")
+      expect(row(candidates, "Leaf", :size).class_shells).to include("Base", "Mid")
+    end
+
+    it "shelters a base the #744 guard withheld, too" do
+      path = write_fixture("lib/fmt.rb", <<~RUBY)
+        class Base
+          def target_class = nil
+        end
+        class RecordList < Base
+          def target_class
+            @cache ||= compute_something
+          end
+          def size = 3
+        end
+      RUBY
+
+      candidates = run_over([path])
+
+      expect(outcome(row(candidates, "Base", :target_class))).to eq(:overridden_by_unsigned_subclass)
+      expect(outcome(row(candidates, "RecordList", :size))).to eq("def size: () -> 3")
+    end
+
+    it "takes the shell off again when the base's own superclass is unresolvable" do
+      path = write_fixture("lib/base.rb", <<~RUBY)
+        class Base < Nowhere::Known
+          def name = raise(NotImplementedError)
+        end
+        class Sub < Base
+          def size = 3
+        end
+      RUBY
+
+      candidates = run_over([path])
+
+      expect(outcome(row(candidates, "Sub", :size))).to eq(:unresolvable_superclass)
+      expect(candidates.flat_map(&:class_shells)).not_to include("Base")
+    end
+  end
+
+  describe "overrides the def tables alone do not show" do
+    it "skips a base method a subclass redefines with define_method" do
+      path = write_fixture("lib/base.rb", <<~RUBY)
+        class Base
+          def name = raise(ArgumentError, "unsupported")
+        end
+        class Sub < Base
+          define_method(:name) { "sub" }
+        end
+      RUBY
+
+      candidates = run_over([path])
+
+      expect(outcome(row(candidates, "Base", :name))).to eq(:overridden_bot)
+    end
+
+    it "skips a module method that an extending class's own singleton method shadows" do
+      path = write_fixture("lib/helpers.rb", <<~RUBY)
+        module Helpers
+          def label = raise(ArgumentError, "unsupported")
+        end
+        class Widget
+          extend Helpers
+          def self.label = "widget"
+        end
+      RUBY
+
+      candidates = run_over([path])
+
+      expect(outcome(row(candidates, "Helpers", :label))).to eq(:overridden_bot)
+    end
+
+    it "skips a class's own method that a prepended module shadows" do
+      path = write_fixture("lib/widget.rb", <<~RUBY)
+        module Loud
+          def label = "LOUD"
+        end
+        class Widget
+          prepend Loud
+          def label = raise(ArgumentError, "unsupported")
+        end
+      RUBY
+
+      candidates = run_over([path])
+
+      expect(outcome(row(candidates, "Widget", :label))).to eq(:overridden_bot)
+    end
+  end
+
+  describe "the order of the readings" do
+    it "reports an unsigned override whose own proposal is withheld as overridden-bot, ahead of #744" do
+      path = write_fixture("lib/base.rb", <<~RUBY)
+        class Base
+          def target = raise(ArgumentError, "unsupported")
+        end
+        class Sub < Base
+          def target
+            @cache ||= compute_something
+          end
+        end
+      RUBY
+
+      candidates = run_over([path])
+
+      expect(outcome(row(candidates, "Base", :target))).to eq(:overridden_bot)
+    end
+
+    it "skips a template method whose hook is abstract and has no visible override" do
+      path = write_fixture("lib/source.rb", <<~RUBY)
+        class Source
+          def get_info(code) = load_info(code)
+          def load_info(code) = raise(NotImplementedError)
+        end
+      RUBY
+
+      candidates = run_over([path])
+
+      expect(outcome(row(candidates, "Source", :get_info))).to eq(:template_method)
+    end
+
+    it "does not read a call in a nested def as the method's own" do
+      path = write_fixture("lib/setup.rb", <<~RUBY)
+        class Setup
+          def run
+            def helper = load_info
+            fail_now
+          end
+          def fail_now = raise(ArgumentError, "no")
+          def load_info = raise(ArgumentError, "load_info")
+        end
+        class Custom < Setup
+          def load_info = "info"
+        end
+      RUBY
+
+      candidates = run_over([path])
+
+      expect(outcome(row(candidates, "Setup", :run))).to eq("def run: () -> bot")
+    end
+  end
+
+  describe "the abstract-message heuristic" do
+    it "reads a message asking to define the method as abstract" do
+      path = write_fixture("lib/plugin.rb", <<~RUBY)
+        class Plugin
+          def about = raise(ArgumentError, "Please define about")
+        end
+      RUBY
+
+      expect(outcome(row(run_over([path]), "Plugin", :about))).to eq(:abstract_method)
+    end
+
+    it "keeps a message that only mentions a subclass or an override" do
+      path = write_fixture("lib/check.rb", <<~RUBY)
+        class Check
+          def kind! = raise(TypeError, "subclass of Foo expected")
+          def frozen! = raise(FrozenError, "cannot override frozen config")
+        end
+      RUBY
+
+      candidates = run_over([path])
+
+      expect(outcome(row(candidates, "Check", :kind!))).to eq("def kind!: () -> bot")
+      expect(outcome(row(candidates, "Check", :frozen!))).to eq("def frozen!: () -> bot")
+    end
+  end
 end

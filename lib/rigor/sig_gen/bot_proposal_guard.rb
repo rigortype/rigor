@@ -13,31 +13,43 @@ module Rigor
     # proposal cannot see an override outside the analysed code. Three readings skip a `bot` proposal, checked in
     # this order:
     #
-    # - `:overridden_bot` — the method is overridden somewhere in the analysed code: by a subclass, signed or not,
-    #   by a class that includes the method's module, or by a module that comes earlier in some class's ancestors.
+    # - `:overridden_bot` — the method is overridden somewhere in the analysed code, by a `def` or a definer the
+    #   methods table records (`define_method`): by a subclass, signed or not, by a class that includes the method's
+    #   module, by a module included later or prepended, or, for a module method, by an extending class's own
+    #   singleton method.
     # - `:abstract_method` — the body ends in an abstract-style raise: `NotImplementedError`, an error class named
-    #   `Abstract…` / `NotImplemented…`, or a message that asks for an implementation or an override.
+    #   `Abstract…` / `NotImplemented…`, or a message that asks for the method to be implemented, defined or
+    #   overridden.
     # - `:template_method` — the body does not end in a direct `raise` / `fail` / `throw` / `exit` / `abort` on every
     #   branch, and it calls a method that is overridden or abstract in the analysed code, directly or through a
     #   chain of self-dispatched calls. Its `bot` may come from the base body of that call.
     #
     # The reading is over the project's discovery tables, by name. The ancestor names are not resolved precisely: a
-    # `superclass` or `include` token stands for every class its lexical nesting could mean, and a call matches any
-    # method of its name whatever the receiver. Both over-approximations only skip more `bot` proposals, which is
-    # the safe direction for a proposal (ADR-5).
+    # `superclass`, `include`, `prepend` or `extend` token stands for every class its lexical nesting could mean,
+    # and a call matches any method of its name whatever the receiver. Both over-approximations only skip more `bot`
+    # proposals, which is the safe direction for a proposal (ADR-5).
     class BotProposalGuard
       TERMINATORS = %i[raise fail throw exit exit! abort].freeze
       RAISERS = %i[raise fail].freeze
       ABSTRACT_ERROR = /NotImplemented|\AAbstract/
-      ABSTRACT_MESSAGE = /implement|abstract|overrid|subclass/i
+      # "not implemented", "please implement", "abstract method", "subclasses must define", "must be overridden",
+      # "please define `about`". Not "subclass of Foo expected" or "cannot override a frozen config".
+      ABSTRACT_MESSAGE = /
+        implement | \babstract\b
+        | \bsubclass(?:es)?\s+(?:must|should|need|to|define|implement|override)
+        | \b(?:must|should|please|need\s+to|needs\s+to)\s+(?:be\s+)?(?:defin|overrid|implement)
+      /ix
       private_constant :TERMINATORS, :RAISERS, :ABSTRACT_ERROR, :ABSTRACT_MESSAGE
 
       # @param tables — the project's discovery tables ({Inference::ProjectSeedTables}).
       def initialize(tables)
         @instance_defs = tables[:discovered_def_nodes] || {}
         @singleton_defs = tables[:discovered_singleton_def_nodes] || {}
+        @method_definers = tables[:discovered_methods] || {}
         @superclasses = tables[:discovered_superclasses] || {}
         @includes = tables[:discovered_includes] || {}
+        @prepends = tables[:discovered_prepends] || {}
+        @extends = tables[:discovered_extends] || {}
       end
 
       # The skip reason for `candidate`, or nil when its proposal stands. Only an emittable `bot` return is read.
@@ -60,49 +72,71 @@ module Rigor
 
       def defs_for(kind) = kind == :singleton ? @singleton_defs : @instance_defs
 
-      # `[owner, method name, kind]` for every definition another one shadows in some class's ancestors.
+      # `[owner, method name, kind]` for every definition another one shadows in some class's ancestors, on the
+      # instance side and on the singleton side.
       def overridden
         @overridden ||= Set.new.tap do |acc|
-          collect_overridden(@instance_defs, :instance, acc) { |name| instance_ancestors(name) }
-          collect_overridden(@singleton_defs, :singleton, acc) { |name| singleton_ancestors(name) }
-        end
-      end
-
-      def collect_overridden(defs, kind, acc)
-        class_names.each do |class_name|
-          seen = Set.new
-          yield(class_name).each do |owner|
-            (defs[owner] || {}).each_key do |method_name|
-              acc << [owner, method_name, kind] unless seen.add?(method_name)
-            end
+          class_names.each do |class_name|
+            collect_overridden(instance_chain(class_name), acc)
+            collect_overridden(singleton_chain(class_name), acc)
           end
         end
       end
 
-      def class_names
-        @class_names ||= (@instance_defs.keys + @singleton_defs.keys + @superclasses.keys + @includes.keys).uniq
+      # `chain` is `[owner, kind]` pairs, nearest first. The first owner defining a name wins; every later one is
+      # overridden.
+      def collect_overridden(chain, acc)
+        seen = Set.new
+        chain.each do |owner, kind|
+          method_names(owner, kind).each do |method_name|
+            acc << [owner, method_name, kind] unless seen.add?(method_name)
+          end
+        end
       end
 
-      # The class's ancestors, nearest first: itself, its included modules (the includes table already keeps them
-      # last `include` first), then its superclass's.
+      # The names `owner` defines on `kind`'s side: by `def`, and by the definers the methods table records
+      # (`define_method`, `attr_*`, ...).
+      def method_names(owner, kind)
+        names = defs_for(kind).fetch(owner, {}).keys
+        (@method_definers[owner] || {}).each do |method_name, definer_kind|
+          names << method_name if definer_kind == kind || !%i[instance singleton].include?(definer_kind)
+        end
+        names.uniq
+      end
+
+      def class_names
+        @class_names ||= [@instance_defs, @singleton_defs, @method_definers, @superclasses, @includes, @prepends,
+                          @extends].flat_map(&:keys).uniq
+      end
+
+      def instance_chain(class_name) = instance_ancestors(class_name).map { |owner| [owner, :instance] }
+
+      # The singleton class's ancestors, nearest first: the class's own singleton methods, the instance methods of
+      # the modules it `extend`s, then its superclass's singleton chain.
+      def singleton_chain(class_name, visiting = Set.new)
+        return [] unless visiting.add?(class_name)
+
+        extended = mixin_resolutions(@extends, class_name).flat_map { |mod| instance_chain(mod) }
+        own = [[class_name, :singleton]] + extended
+        (own + superclass_resolutions(class_name).flat_map { |parent| singleton_chain(parent, visiting) }).uniq
+      end
+
+      # The class's ancestors, nearest first: its prepended modules, itself, its included modules, then its
+      # superclass's. The discovery tables keep each mixin list last-mixed-in first, as Ruby's ancestors do.
       def instance_ancestors(class_name, visiting = Set.new)
         @instance_ancestors ||= {}
         return @instance_ancestors[class_name] if @instance_ancestors.key?(class_name)
         return [] unless visiting.add?(class_name)
 
-        mixins = Array(@includes[class_name]).flat_map { |token| resolutions(token, class_name) }
-        parents = mixins + superclass_resolutions(class_name)
+        prepended = mixin_resolutions(@prepends, class_name)
+        parents = mixin_resolutions(@includes, class_name) + superclass_resolutions(class_name)
+        own = prepended.flat_map { |mod| instance_ancestors(mod, visiting) } + [class_name]
         @instance_ancestors[class_name] =
-          ([class_name] + parents.flat_map { |parent| instance_ancestors(parent, visiting) }).uniq
+          (own + parents.flat_map { |parent| instance_ancestors(parent, visiting) }).uniq
       end
 
-      def singleton_ancestors(class_name, visiting = Set.new)
-        @singleton_ancestors ||= {}
-        return @singleton_ancestors[class_name] if @singleton_ancestors.key?(class_name)
-        return [] unless visiting.add?(class_name)
-
-        @singleton_ancestors[class_name] =
-          ([class_name] + superclass_resolutions(class_name).flat_map { |p| singleton_ancestors(p, visiting) }).uniq
+      def mixin_resolutions(table, class_name)
+        Array(table[class_name]).flat_map { |token| resolutions(token, class_name) }
       end
 
       def superclass_resolutions(class_name)

@@ -152,8 +152,9 @@ module Rigor
         "sig.skipped.overridden-bot" => Entry.new(
           id: "sig.skipped.overridden-bot",
           summary: "The method's body never returns, and the analysed code overrides the method.",
-          explanation: "The inferred return is `bot`, but a subclass (signed or not), a class that includes the " \
-                       "method's module, or a module earlier in some class's ancestors defines the method again. " \
+          explanation: "The inferred return is `bot`, but the analysed code defines the method again, with `def` " \
+                       "or `define_method`: a subclass (signed or not), a class that includes the method's module, " \
+                       "a module included later or prepended, or an extending class's own singleton method. " \
                        "`bot` describes only the base body the overrides replace, and every override returns a " \
                        "value, so the declaration would contradict each of them (#3029).",
           next_step: "Declare the return every implementation shares (often `untyped` or the overrides' common " \
@@ -163,9 +164,10 @@ module Rigor
           id: "sig.skipped.abstract-method",
           summary: "The method is abstract: its body only raises an error asking for an implementation.",
           explanation: "The body ends in `raise NotImplementedError`, in an error class named `Abstract...` or " \
-                       "`NotImplemented...`, or in a raise whose message asks for an implementation or an " \
-                       "override. Its inferred return is `bot`, but the method is meant to be replaced, and the " \
-                       "replacements may live outside the analysed code, as in a plugin gem (#3029).",
+                       "`NotImplemented...`, or in a raise whose message asks for the method to be implemented, " \
+                       "defined or overridden. Its inferred return is `bot`, but the method is meant to be " \
+                       "replaced, and the replacements may live outside the analysed code, as in a plugin gem " \
+                       "(#3029).",
           next_step: "Declare the return the implementations must provide by hand in `sig/`."
         ),
         "sig.skipped.template-method" => Entry.new(

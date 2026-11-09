@@ -183,16 +183,19 @@ module Rigor
         candidates = Inference::MethodDispatcher::RbsDispatch.without_interface_dispatch do
           resolved.flat_map { |path| analyse_file(path, @environment) }
         end
-        demoted = demote_overridden_base_methods(
-          demote_bot_proposals(
-            demote_unresolvable_superclasses(
-              demote_generic_reopenings(demote_inline_generic_classes(resolve_superclass_spellings(candidates)))
+        demoted = shelter_withheld_classes(
+          demote_overridden_base_methods(
+            demote_bot_proposals(
+              demote_unresolvable_superclasses(
+                demote_generic_reopenings(demote_inline_generic_classes(resolve_superclass_spellings(candidates)))
+              )
             )
           )
         )
         # Again after the override demotion: a demoted method can leave its file with nothing to write, and a class
         # shell riding on that file then declares nothing a subclass elsewhere could rest on.
-        annotate_effects(stamp_generic_reopenings(demote_unresolvable_superclasses(demoted)))
+        resolved_tree = drop_unresolvable_shelters(demote_unresolvable_superclasses(demoted))
+        annotate_effects(stamp_generic_reopenings(resolved_tree))
       ensure
         RunScopedSlots.release
       end
@@ -411,6 +414,62 @@ module Rigor
           guard ||= BotProposalGuard.new(project_tables)
           reason = guard.reason_for(candidate)
           reason ? demoted_candidate(candidate, reason) : candidate
+        end
+      end
+
+      # The reasons that withhold a member because of what its class's subclasses or callees do, not because the class
+      # itself cannot be declared.
+      WITHHELD_FOR_OVERRIDES = %i[overridden_bot abstract_method template_method overridden_by_unsigned_subclass].freeze
+      private_constant :WITHHELD_FOR_OVERRIDES
+
+      # Issue #3029 — a class whose members {#demote_bot_proposals} or {#demote_overridden_base_methods} withheld is
+      # still declared, as a class shell, so its subclasses keep their proposals. Without it an all-abstract base has
+      # nothing to write, {#demote_unresolvable_superclasses} finds no declaration for it, and every subclass
+      # proposal is skipped as `unresolvable-superclass`. The shell rides on each file that declares one of its
+      # subclasses, so it reaches disk wherever a subclass's members do. The writer spells its header with the run's
+      # recorded superclass and namespace kinds. A class the file already declares makes the shell a no-op.
+      def shelter_withheld_classes(candidates)
+        @sheltered = Set.new
+        withheld = candidates.select { |c| WITHHELD_FOR_OVERRIDES.include?(c.skip_reason) }.filter_map(&:class_name)
+        return candidates if withheld.empty?
+
+        shells_by_path = withheld_shell_paths(candidates, withheld.to_set)
+        @sheltered = shells_by_path.values.reduce(Set.new, :|)
+        candidates.map do |candidate|
+          extra = shells_by_path.fetch(candidate.path, nil)
+          next candidate if extra.nil?
+
+          shells = (candidate.class_shells + extra.to_a).uniq
+          shells.size == candidate.class_shells.size ? candidate : candidate.with_class_shells(shells)
+        end
+      end
+
+      # A shell {#shelter_withheld_classes} added for a class whose own superclass chain turned out unresolvable is
+      # taken off again: written, its header would name a superclass nothing declares and collapse the class.
+      def drop_unresolvable_shelters(candidates)
+        return candidates if @sheltered.empty?
+
+        dropped = @sheltered.select { |name| unresolvable_for(name, @unresolvable_superclasses) }
+        return candidates if dropped.empty?
+
+        candidates.map do |candidate|
+          kept = candidate.class_shells - dropped
+          kept.size == candidate.class_shells.size ? candidate : candidate.with_class_shells(kept)
+        end
+      end
+
+      # `{ path => Set[class name] }`: the files each withheld class's shell rides on, which are the files of every
+      # candidate whose class descends from it, however far down.
+      def withheld_shell_paths(candidates, withheld)
+        superclasses = candidates.each_with_object({}) do |candidate, acc|
+          (candidate.class_superclasses || {}).each { |name, sup| acc[name] = bare_superclass_name(sup) }
+        end
+        candidates.each_with_object(Hash.new { |h, k| h[k] = Set.new }) do |candidate, acc|
+          next if candidate.class_name.nil?
+
+          each_ancestor(candidate.class_name, superclasses) do |ancestor|
+            acc[candidate.path] << ancestor if withheld.include?(ancestor)
+          end
         end
       end
 

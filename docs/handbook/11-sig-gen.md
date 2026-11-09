@@ -166,14 +166,19 @@ The `sig.skipped.*` reasons are:
   [Methods declared inline](#methods-declared-inline).
 - `sig.skipped.overridden-bot` — the method's body never
   returns (its inferred return is `bot`), and the analysed
-  code defines the method again: in a subclass, signed or
-  not, in a class that includes the method's module, or in a
-  module earlier in some class's ancestors. `bot` would
-  describe only the base body the overrides replace.
+  code defines the method again, with `def` or
+  `define_method`: in a subclass, signed or not, in a class
+  that includes the method's module, in a module included
+  later or prepended, or as an extending class's own
+  singleton method. `bot` would describe only the base body
+  the overrides replace. A class whose every method is
+  withheld this way is still written as an empty class, so
+  its subclasses keep their signatures.
 - `sig.skipped.abstract-method` — the method's inferred return
   is `bot` from an abstract-style raise: `NotImplementedError`,
   an error class named `Abstract…` or `NotImplemented…`, or a
-  message that asks for an implementation or an override. The
+  message that asks for the method to be implemented,
+  defined or overridden. The
   implementations may live outside the analysed code, as in a
   plugin gem, so no `bot` is proposed.
 - `sig.skipped.template-method` — the method's inferred return

@@ -8,17 +8,19 @@
 
 ## Background
 
-`SigGen::BotProposalGuard` reads `discovered_def_nodes`, `discovered_singleton_def_nodes`,
-`discovered_superclasses` and `discovered_includes` from the project's seed tables. It uses them to decide whether
+`SigGen::BotProposalGuard` reads `discovered_def_nodes`, `discovered_singleton_def_nodes`, `discovered_methods`,
+`discovered_superclasses`, `discovered_includes`, `discovered_prepends` and `discovered_extends` from the project's
+seed tables. It uses them to decide whether
 a `-> bot` proposal is overridden, abstract or a template method. Those are new raw reads, so
 `spec/rigor/declaration_facts/admission_census_spec.rb` stopped until they were recorded. The two def-node
 members have `contested_*` siblings, so each recorded read also needs a `justified:` kind.
 
 ## Options and trade-offs
 
-- Record `lib/rigor/sig_gen/bot_proposal_guard.rb` as a reader of the four members, justified as `existence` (is a
-  method of this name defined on this class) and `identity` (the def node whose body is read). This costs four
-  rows and two justifications.
+- Record `lib/rigor/sig_gen/bot_proposal_guard.rb` as a reader of the seven members. The two with `contested_*`
+  siblings are justified as `existence` (is a method of this name defined on this class) and `identity` (the def
+  node whose body is read). This costs seven rows and two justifications. `discovered_methods` already holds its
+  possible definers, so a possible `define_method` counts as an override, which only skips more.
 - Also consult `contested_discovered_def_nodes` (`consults_contested`). A possible definition would then count as
   an override too, and more `bot` proposals would be skipped. But that is one more raw read, and the issue did not
   ask for it.
@@ -34,6 +36,6 @@ does.
 
 ## To undo
 
-Remove the four `lib/rigor/sig_gen/bot_proposal_guard.rb` rows and the two `justified:` entries from
+Remove the seven `lib/rigor/sig_gen/bot_proposal_guard.rb` rows and the two `justified:` entries from
 `spec/rigor/declaration_facts/admission_census.yml`, together with the guard. To consult the contested sibling
 instead, add the read and change the justification to `consults_contested`.

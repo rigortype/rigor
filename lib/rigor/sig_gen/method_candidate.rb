@@ -108,6 +108,20 @@ module Rigor
         )
       end
 
+      # A copy carrying more class shells: a class whose every member a later pass withheld still has to be
+      # declared for its subclasses' headers (#3029).
+      def with_class_shells(class_shells)
+        self.class.new(
+          path: @path, class_name: @class_name, method_name: @method_name, kind: @kind,
+          classification: @classification, inferred_return: @inferred_return,
+          declared_return_rbs: @declared_return_rbs, rbs: @rbs, skip_reason: @skip_reason,
+          namespace_kinds: @namespace_kinds, class_shells: class_shells,
+          class_superclasses: @class_superclasses, annotations: @annotations, effect_reason: @effect_reason,
+          declared_rbs: @declared_rbs, declared_annotations: @declared_annotations,
+          class_type_params: @class_type_params
+        )
+      end
+
       def to_h
         {
           file: path,

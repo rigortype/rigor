@@ -80,6 +80,7 @@ members:
     - lib/rigor/inference/block_call_timing.rb
     - lib/rigor/inference/refined_dispatch/constructed_class.rb
     - lib/rigor/lens/run.rb
+    - lib/rigor/sig_gen/bot_proposal_guard.rb
     copies:
     - lib/rigor/inference/project_seed_tables.rb
   discovered_def_nodes:
@@ -345,6 +346,7 @@ members:
     - lib/rigor/inference/refined_dispatch.rb
     - lib/rigor/inference/refined_dispatch/constructed_class.rb
     - lib/rigor/scope/resolution_chain.rb
+    - lib/rigor/sig_gen/bot_proposal_guard.rb
     copies:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/project_seed_tables.rb
@@ -360,6 +362,7 @@ members:
     - lib/rigor/inference/singleton_hook_decline.rb
     - lib/rigor/scope/resolution_chain.rb
     - lib/rigor/scope/resolution_chain/relevance.rb
+    - lib/rigor/sig_gen/bot_proposal_guard.rb
     copies:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/project_seed_tables.rb

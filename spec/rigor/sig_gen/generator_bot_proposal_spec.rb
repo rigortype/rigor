@@ -124,6 +124,27 @@ RSpec.describe Rigor::SigGen::Generator do
     end
   end
 
+  describe "two included modules that define the same method" do
+    it "skips the earlier include's method, which the later include overrides" do
+      path = write_fixture("lib/adapter.rb", <<~RUBY)
+        module Raising
+          def quote(value) = raise(ArgumentError, "unsupported")
+        end
+        module Quoting
+          def quote(value) = value.to_s
+        end
+        class Adapter
+          include Raising
+          include Quoting
+        end
+      RUBY
+
+      candidates = run_over([path])
+
+      expect(outcome(row(candidates, "Raising", :quote))).to eq(:overridden_bot)
+    end
+  end
+
   describe "a bot that comes from dispatch to an overridden hook" do
     it "skips the template method that calls the hook through self" do
       base = write_fixture("lib/source.rb", <<~RUBY)

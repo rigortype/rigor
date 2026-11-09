@@ -83,6 +83,7 @@ RSpec.describe "a top-level def and a class-object read beside a mixin no name s
       expect(undefined_messages(files)).to be_empty
     end
 
+    # A guard, not a pin of this change: the read already declined on another route.
     it "declines it on a class that extends a module whose extended hook splats the module in" do
       source = "#{hooked}module E\n  def self.extended(base) = base.include(*MODS)\nend\n" \
                "class K < Base\n  extend E\nend\nK.bar.upcase\n"

@@ -32,8 +32,7 @@ row to stay green, and the two cannot both hold with #2996's mark.
 
 The first. False positives outrank lost reports (AGENTS.md), and the class object is then read the same way #2996
 reads a hook it cannot place. The #2993 row is rewritten to stay quiet, and a new row keeps the report for a hookless
-literal include. The mark is also given when a module the class extends has a hook that lists `"?"`, and when a module
-the class includes lists `"?"` on its own instance side. The second case also covers that module's own
+literal include. The mark is also given when a module the class includes lists `"?"` on its own instance side. The second case also covers that module's own
 `include(*MODS)`, whose hooks run with the module as `base`, not the class. That over-approximation only declines.
 
 ## To undo

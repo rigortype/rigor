@@ -1,0 +1,5 @@
+- **[inference]** A method defined by a `class_eval` or `module_eval` on an ancestor, on `Object` or `Kernel`, or with a String argument now counts as a write of the class's ivar, so a read of that ivar no longer reports a call on `nil`. ([#3001](https://github.com/rigortype/rigor/pull/3001))
+  - `Base.class_eval { def set = (@x = "a") }` with `class K < Base`, and `M.module_eval { … }` with `include M`, count in the file that makes the call and in every other file, also when `Base` or `M` has no method of its own.
+  - `Object.class_eval`, `BasicObject.class_eval` and `Kernel.module_eval` written in another file count for every class, as they already did in the same file.
+  - `INST.class.class_eval { … }` with `INST = K.new`, and `AliasK.new.class.class_eval { … }` with `AliasK = K`, count too.
+  - `self.class.class_eval("def set = (@x = 'a')")` widens every ivar of the class, since Rigor does not read the String.

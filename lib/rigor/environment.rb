@@ -50,6 +50,19 @@ module Rigor
     # `RbsCoverageReport` reports.
     GEM_OVERLAY_PLUGIN_IDS = { "activesupport" => "activesupport-core-ext" }.freeze
 
+    # Issue #2857 — the `RbsCoverageReport` sources each gem's bundled overlay may load under, when they
+    # differ from the ADR-72 `:missing` default every unlisted overlay keeps. `addressable` is the first
+    # exception: its overlay exists to CORRECT the `Addressable::URI.parse` signature `rbs collection`
+    # ships (`parse(nil)` returns nil; the collection declares `(String | URI) -> URI`), so it loads only
+    # under `:rbs_collection` coverage, where the deferred-signature plan composes it over the collection
+    # copy as an overload continuation. Under `:missing` coverage — no sigs at all — it stays unloaded:
+    # the overlay's partial `Addressable::URI` declaration would make every member it omits a false
+    # `call.undefined-method`, a worse answer than the `Dynamic` silence a sig-less gem already has.
+    # Frozen arrays, not Sets: `Ractor.shareable?` rejects a Set even frozen (ractor_readiness_spec).
+    GEM_OVERLAY_COVERAGE_SOURCES = { "addressable" => [:rbs_collection].freeze }.freeze
+    GEM_OVERLAY_DEFAULT_COVERAGE_SOURCES = [:missing].freeze
+    private_constant :GEM_OVERLAY_DEFAULT_COVERAGE_SOURCES
+
     attr_reader :class_registry, :rbs_loader, :plugin_registry, :dependency_source_index,
                 :reporters, :name_scope,
                 :synthetic_method_index, :project_patched_methods
@@ -516,10 +529,10 @@ module Rigor
           return unlocked_missing_gems(default_libraries, bundle_sig_paths, rbs_collection_paths, bundle_root)
         end
 
-        rows = missing_rows(locked, default_libraries, bundle_sig_paths, rbs_collection_paths)
+        coverage = coverage_rows(locked, default_libraries, bundle_sig_paths, rbs_collection_paths)
+        rows = coverage.select { |row| row.source == :missing }
         overlays = gem_overlay_paths(
-          missing_gem_names: rows.map(&:gem_name), plugin_registry: plugin_registry,
-          signature_paths: signature_paths
+          coverage: coverage, plugin_registry: plugin_registry, signature_paths: signature_paths
         )
         [index_entries(rows, locked), overlays]
       end
@@ -546,14 +559,20 @@ module Rigor
       end
 
       def missing_rows(gems, default_libraries, bundle_sig_paths, rbs_collection_paths)
+        coverage_rows(gems, default_libraries, bundle_sig_paths, rbs_collection_paths)
+          .select { |row| row.source == :missing }
+      end
+
+      def coverage_rows(gems, default_libraries, bundle_sig_paths, rbs_collection_paths)
         RbsCoverageReport.classify(
           locked_gems: gems, default_libraries: default_libraries,
           bundle_sig_paths: bundle_sig_paths, rbs_collection_paths: rbs_collection_paths
-        ).select { |row| row.source == :missing }
+        )
       end
 
       # ADR-72 — resolve the bundled RBS overlay directories to load for this project. A gem is eligible when
-      # it is classified `:missing` (see {missing_rows}) and its conflicting opt-in plugin twin (if
+      # its coverage row's source is one the gem's overlay may load under ({GEM_OVERLAY_COVERAGE_SOURCES};
+      # `:missing` for every overlay the map does not name) and its conflicting opt-in plugin twin (if
       # any) is NOT already reachable. Returns `[Pathname]`, deterministically ordered, or `[]` when no
       # eligible gem.
       #
@@ -567,18 +586,27 @@ module Rigor
       # all); `RbsLoader.bundled_overlay_twin_signatures_loaded?` answers the filesystem half, beside the
       # overlay-side answer to the same question, and carries the reasoning for why it asks what an entry
       # LOADS rather than what it looks like.
-      def gem_overlay_paths(missing_gem_names:, plugin_registry:, signature_paths: [])
-        return [] if missing_gem_names.empty?
+      def gem_overlay_paths(coverage:, plugin_registry:, signature_paths: [])
+        return [] if coverage.empty?
 
         loaded_ids = plugin_registry ? plugin_registry.ids.to_set : Set.new
-        eligible = missing_gem_names.reject do |gem_name|
-          plugin_id = GEM_OVERLAY_PLUGIN_IDS[gem_name]
-          next false unless plugin_id
+        eligible = coverage.filter_map do |row|
+          next unless overlay_coverage_source?(row.gem_name, row.source)
 
-          loaded_ids.include?(plugin_id) ||
-            RbsLoader.bundled_overlay_twin_signatures_loaded?(plugin_id, signature_paths)
-        end.sort
+          plugin_id = GEM_OVERLAY_PLUGIN_IDS[row.gem_name]
+          next if plugin_id &&
+                  (loaded_ids.include?(plugin_id) ||
+                   RbsLoader.bundled_overlay_twin_signatures_loaded?(plugin_id, signature_paths))
+
+          row.gem_name
+        end.uniq.sort
         RbsLoader.gem_overlay_sig_paths(eligible)
+      end
+
+      # Whether `source` — a `RbsCoverageReport` source — is one `gem_name`'s bundled overlay may load
+      # under: the gem's {GEM_OVERLAY_COVERAGE_SOURCES} entry when it has one, else ADR-72's `:missing`.
+      def overlay_coverage_source?(gem_name, source)
+        (GEM_OVERLAY_COVERAGE_SOURCES[gem_name] || GEM_OVERLAY_DEFAULT_COVERAGE_SOURCES).include?(source)
       end
 
       # ADR-32 WD4 + WD5 — for each project source file, invoke every plugin-registered synthesizer once and

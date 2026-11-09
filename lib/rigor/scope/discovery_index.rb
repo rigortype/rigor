@@ -315,6 +315,12 @@ module Rigor
       # `singleton_class.prepend P`, `singleton_class.send(:prepend, P)` in `K`'s body), which sits ahead of the class
       # object's own methods where an `extend` sits behind them. The singleton resolution chain reads it.
       ENVELOPE_SINGLETON_PREPEND_KIND = :singleton_prepend
+      # Issue #3018 — `[ENVELOPE_OBJECT_SINGLETON_KIND, name]` says a definer written on the constant's object from
+      # outside its body defines `name` there: `def K.name`, a literal `K.define_singleton_method(:name)`, or a `def
+      # name` in a `K.singleton_class.class_eval` block. Each also files the opaque `[:singleton, name]` entry, which
+      # name-rewriting class-body macros (`memoize :name`) file too; this entry is the one the class-object path of
+      # `call.undefined-method` reads as evidence the singleton method exists.
+      ENVELOPE_OBJECT_SINGLETON_KIND = :object_singleton
       MACRO_KINDS = [ENVELOPE_BODY_CALL_KIND, ENVELOPE_COMPUTED_DEFINER_KIND, ENVELOPE_HOOK_EXTEND_KIND,
                      ENVELOPE_HOOK_EXTEND_OPEN_KIND, ENVELOPE_HOOK_DEF_KIND, ENVELOPE_HOOK_BODY_CALL_KIND,
                      ENVELOPE_CONCERN_DEPENDENCY_KIND, ENVELOPE_SAME_CLASS_KIND,

@@ -2886,7 +2886,7 @@ module Rigor
         found = [nil, nil] if owner && SingletonExternalAhead.withhold?(scope, class_name, method_name, owner)
         found = [nil, nil] if found.last && dynamic_singleton_definer_ahead?(class_name, method_name, found.last)
         found = [nil, nil] if found.last && singleton_hook_order_split?(class_name, method_name)
-        found = [nil, nil] if found.last && singleton_prepend_split?(class_name, method_name, found)
+        found = [nil, nil] if found.last && singleton_mixin_split?(class_name, method_name, found)
         found = [nil, nil] if found.last && hidden_hook_split?(class_name, method_name, found.last)
         found
       end
@@ -2939,6 +2939,13 @@ module Rigor
         answer != positioned_singleton_definer(chain, method_name, copies: true)
       end
 
+      # Issues #2998 and #3020 — whether a singleton-side mixin of a class object on the chain may answer ahead of
+      # `found`: a named prepend master's order does not place, or a module no table names.
+      def singleton_mixin_split?(class_name, method_name, found)
+        singleton_prepend_split?(class_name, method_name, found) ||
+          unnamed_singleton_mixin_split?(class_name, method_name)
+      end
+
       # Issue #2998 — whether to withhold the class-side answer `found` on a chain whose class objects have
       # singleton-side prepends of their own: master's order, which a chain that does not stand answers, places no
       # such prepend, so its definer may not be the one Ruby's order reaches first. A `def` the extends fold copied
@@ -2969,6 +2976,37 @@ module Rigor
 
           chain.entries[start...own].any? { |entry| entry.name == answer }
         end
+      end
+
+      # Issue #3020 — whether to withhold the class-side answer on a chain whose class objects mix a module no table
+      # names into their singleton side, which may define the name. A prepend (`class << self; prepend(*MODS)`) sits
+      # ahead of the class object's own `def self.`, so a definer at or behind that class object's level is withheld;
+      # an `extend(*MODS)` or a `class << self` `include(*MODS)` sits right behind it, so a definer behind the class
+      # object's own entry is withheld and its own `def self.` still answers.
+      def unnamed_singleton_mixin_split?(class_name, method_name)
+        chain = Scope::ResolutionChain.for(scope, class_name.to_s, :singleton, :methods)
+        prepends = chain.unnamed_prepend_nodes
+        extends = chain.unnamed_extend_nodes
+        return false if prepends.empty? && extends.empty?
+
+        answer = positioned_singleton_definer(chain, method_name)
+        prepends.any? { |node| !answered_ahead?(chain, answer, level_start_of(chain, node)) } ||
+          extends.any? { |node| !answered_ahead?(chain, answer, own_singleton_index(chain, node)&.succ) }
+      end
+
+      # Whether `answer` owns an entry before `stop` (nil when the position is unknown: never). A nil `answer` (no class
+      # object's own def) owns none.
+      def answered_ahead?(chain, answer, stop)
+        !stop.nil? && chain.entries[0...stop].any? { |entry| entry.name == answer }
+      end
+
+      def level_start_of(chain, node)
+        level = chain.level_classes.index(node)
+        level && chain.level_starts[level]
+      end
+
+      def own_singleton_index(chain, node)
+        chain.entries.index { |entry| entry.side == :singleton && entry.name == node }
       end
 
       # The owner of the first `def` of the name along the chain: a fold copy is skipped, or with `copies:` read as

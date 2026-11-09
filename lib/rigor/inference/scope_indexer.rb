@@ -5742,6 +5742,10 @@ module Rigor
       # edge unpositioned, so the chain's reading of it is master's and the typing read declines where they differ.
       # `prefixes` is `[owner_prefix, qualified_prefix]`: the class `self` names (empty where it names none) and the
       # lexical prefix a constant resolves against.
+      #
+      # Issue #3020 — an argument that names no module (`prepend(*MODS)`, `prepend helper`; {#opaque_mixin_argument?})
+      # files `[ENVELOPE_SINGLETON_PREPEND_KIND, "?"]`: the extends walk lists that edge as {MixinAccumulator::UNNAMED},
+      # which cannot say a prepend from an `extend`, and the chain reads the entry as a prepend region it cannot name.
       def record_own_singleton_prepend(node, prefixes, in_singleton_class, tables)
         kind, arguments, = mixin_call_view(node)
         return unless kind == :prepend
@@ -5749,6 +5753,7 @@ module Rigor
         owners = singleton_prepend_owners(node.receiver, *prefixes, in_singleton_class)
         arguments.each do |argument|
           name = Source::ConstantPath.qualified_name(argument)
+          name ||= MixinAccumulator::UNNAMED if opaque_mixin_argument?(argument)
           next unless name
 
           key = [Scope::DiscoveryIndex::ENVELOPE_SINGLETON_PREPEND_KIND, name]

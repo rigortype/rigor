@@ -1,0 +1,4 @@
+- **[inference]** A class-side call no longer types from the class's own class method when the class prepends a module it splats in to its own singleton class, ahead of that method. ([#3026](https://github.com/rigortype/rigor/pull/3026))
+  - The prepend can be written `class << self; prepend(*MODS); end`, `singleton_class.prepend(*MODS)` or `singleton_class.send(:prepend, *MODS)` in the class body, or `class << Klass; prepend(*MODS); end` after it.
+  - The call types `Dynamic` on the class and on its subclasses, for a name the class or its superclasses define; a subclass's own class method still answers.
+  - An `extend(*MODS)` or `class << self; include(*MODS); end` sits behind the class's own class methods, so they still answer, and a superclass's class method behind it now types `Dynamic` too.

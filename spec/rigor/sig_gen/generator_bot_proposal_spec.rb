@@ -533,4 +533,53 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(outcome(row(candidates, "Check", :frozen!))).to eq("def frozen!: () -> bot")
     end
   end
+
+  describe "fix round 2 boundaries" do
+    it "writes no shell for a class with a member it still emits" do
+      path = write_fixture("lib/base.rb", <<~RUBY)
+        class Base
+          def name = raise(NotImplementedError)
+          def size = 1
+        end
+        class Sub < Base
+          def name = "x"
+        end
+      RUBY
+
+      candidates = run_over([path])
+
+      expect(outcome(row(candidates, "Base", :size))).to eq("def size: () -> 1")
+      expect(candidates.flat_map(&:class_shells)).not_to include("Base")
+    end
+
+    it "keeps a module method an extending class only inherits" do
+      path = write_fixture("lib/builder.rb", <<~RUBY)
+        module Builder
+          def build = raise(ArgumentError, "no")
+        end
+        class Factory
+          extend Builder
+        end
+      RUBY
+
+      candidates = run_over([path])
+
+      expect(outcome(row(candidates, "Builder", :build))).to eq("def build: () -> bot")
+    end
+
+    it "keeps a final raise that asks for something other than a method" do
+      path = write_fixture("lib/config.rb", <<~RUBY)
+        class Config
+          def block! = raise(ArgumentError, "you must define a block")
+          def save! = raise(ArgumentError, "You need to define a name before saving")
+          def env! = raise(KeyError, "please define FOO env var")
+        end
+      RUBY
+
+      candidates = run_over([path])
+
+      expect(%i[block! save! env!].map { |name| outcome(row(candidates, "Config", name)) })
+        .to eq(["def block!: () -> bot", "def save!: () -> bot", "def env!: () -> bot"])
+    end
+  end
 end

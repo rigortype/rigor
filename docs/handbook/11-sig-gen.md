@@ -171,14 +171,16 @@ The `sig.skipped.*` reasons are:
   that includes the method's module, in a module included
   later or prepended, or as an extending class's own
   singleton method. `bot` would describe only the base body
-  the overrides replace. A class whose every method is
-  withheld this way is still written as an empty class, so
-  its subclasses keep their signatures.
+  the overrides replace. A class left with nothing to write
+  because of this is still written as an empty class, so its
+  subclasses keep their signatures, unless your `sig/` or a
+  gem's signatures already declare it.
 - `sig.skipped.abstract-method` — the method's inferred return
   is `bot` from an abstract-style raise: `NotImplementedError`,
   an error class named `Abstract…` or `NotImplemented…`, or a
-  message that asks for the method to be implemented,
-  defined or overridden. The
+  message that asks for the method to be implemented or
+  overridden, or to define it by name ("please define
+  about"; not "you must define a block"). The
   implementations may live outside the analysed code, as in a
   plugin gem, so no `bot` is proposed.
 - `sig.skipped.template-method` — the method's inferred return

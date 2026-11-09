@@ -421,25 +421,40 @@ module Rigor
       WITHHELD_FOR_OVERRIDES = %i[overridden_bot abstract_method template_method overridden_by_unsigned_subclass].freeze
       private_constant :WITHHELD_FOR_OVERRIDES
 
-      # Issue #3029 — a class whose members {#demote_bot_proposals} or {#demote_overridden_base_methods} withheld is
-      # still declared, as a class shell, so its subclasses keep their proposals. Without it an all-abstract base has
-      # nothing to write, {#demote_unresolvable_superclasses} finds no declaration for it, and every subclass
-      # proposal is skipped as `unresolvable-superclass`. The shell rides on each file that declares one of its
-      # subclasses, so it reaches disk wherever a subclass's members do. The writer spells its header with the run's
-      # recorded superclass and namespace kinds. A class the file already declares makes the shell a no-op. A class
-      # whose own superclass chain is unresolvable is already skipped as `unresolvable-superclass` when this pass
-      # runs, so it is never withheld here and gets no shell.
+      # Issue #3029 — a class whose members {#demote_bot_proposals} or {#demote_overridden_base_methods} withheld,
+      # leaving it nothing to emit, is still declared, as a class shell, so its subclasses keep their proposals.
+      # Without it an all-abstract base has nothing to write, {#demote_unresolvable_superclasses} finds no
+      # declaration for it, and every subclass proposal is skipped as `unresolvable-superclass`. The shell rides on
+      # each file that declares one of its subclasses, so it reaches disk wherever a subclass's members do. The writer
+      # spells its header with the run's recorded superclass and namespace kinds. A class the file already declares
+      # makes the shell a no-op, and one the loaded RBS declares gets none ({#wholly_withheld_classes}). A class whose
+      # own superclass chain is unresolvable is already skipped as `unresolvable-superclass` when this pass runs, so
+      # it is never withheld here and gets no shell.
       def shelter_withheld_classes(candidates)
-        withheld = candidates.select { |c| WITHHELD_FOR_OVERRIDES.include?(c.skip_reason) }.filter_map(&:class_name)
+        withheld = wholly_withheld_classes(candidates)
         return candidates if withheld.empty?
 
-        shells_by_path = withheld_shell_paths(candidates, withheld.to_set)
+        shells_by_path = withheld_shell_paths(candidates, withheld)
         candidates.map do |candidate|
           extra = shells_by_path.fetch(candidate.path, nil)
           next candidate if extra.nil?
 
           shells = (candidate.class_shells + extra.to_a).uniq
           shells.size == candidate.class_shells.size ? candidate : candidate.with_class_shells(shells)
+        end
+      end
+
+      # The classes to shelter: a withheld member and nothing to emit, and no declaration in the loaded RBS (`sig/`,
+      # the collection, gems). A declared class needs no shell for its subclasses' headers to resolve, and a shell
+      # spelling the source's superclass could contradict the declaration's (`RBS::SuperclassMismatchError`).
+      def wholly_withheld_classes(candidates)
+        by_class = candidates.select(&:class_name).group_by(&:class_name)
+        by_class.each_with_object(Set.new) do |(name, rows), acc|
+          next unless rows.any? { |c| WITHHELD_FOR_OVERRIDES.include?(c.skip_reason) }
+          next if rows.any? { |c| Classification::EMITTABLE.include?(c.classification) }
+          next if class_known?(name)
+
+          acc << name
         end
       end
 

@@ -32,12 +32,16 @@ module Rigor
       TERMINATORS = %i[raise fail throw exit exit! abort].freeze
       RAISERS = %i[raise fail].freeze
       ABSTRACT_ERROR = /NotImplemented|\AAbstract/
-      # "not implemented", "please implement", "abstract method", "subclasses must define", "must be overridden",
-      # "please define `about`". Not "subclass of Foo expected" or "cannot override a frozen config".
+      # "not implemented", "please implement", "abstract method", "subclasses must define", "must be overridden", and
+      # "define" with a method-name-shaped object: "please define about", "must define #call", "define `rules`". Not
+      # "subclass of Foo expected", "cannot override a frozen config", "you must define a block" or "please define
+      # FOO env var".
       ABSTRACT_MESSAGE = /
         implement | \babstract\b
         | \bsubclass(?:es)?\s+(?:must|should|need|to|define|implement|override)
-        | \b(?:must|should|please|need\s+to|needs\s+to)\s+(?:be\s+)?(?:defin|overrid|implement)
+        | \b(?:must|should|please|need\s+to|needs\s+to)\s+(?:be\s+)?overrid
+        | \b(?:must|should|please|need\s+to|needs\s+to)\s+define\s+
+          (?:[#`'"]\w | (?-i:[a-z_]\w*[?!=]?)(?:\s*[`'"(]|\s*\z|\s+(?:method|in|on)\b))
       /ix
       private_constant :TERMINATORS, :RAISERS, :ABSTRACT_ERROR, :ABSTRACT_MESSAGE
 
@@ -97,8 +101,28 @@ module Rigor
       # The names `owner` defines on `kind`'s side: by `def`, and by the definers the methods table records
       # (`define_method`, `attr_*`, ...).
       def method_names(owner, kind)
-        names = defs_for(kind).fetch(owner, {}).keys
+        return singleton_method_names(owner) if kind == :singleton
+
+        own_method_names(owner, :instance, @instance_defs.fetch(owner, {}))
+      end
+
+      # Discovery copies an extended module's methods into the extender's singleton tables. A copy is the module's
+      # method, not the class's own, so it is left out: the def node is the module's own node, and a methods-table
+      # entry of a name an extended module defines cannot be told apart from its copy.
+      def singleton_method_names(owner)
+        modules = mixin_resolutions(@extends, owner)
+        copied = modules.flat_map { |mod| method_names(mod, :instance) }.to_set
+        defs = @singleton_defs.fetch(owner, {}).reject do |method_name, node|
+          modules.any? { |mod| node.equal?(@instance_defs.dig(mod, method_name)) }
+        end
+        own_method_names(owner, :singleton, defs, except: copied)
+      end
+
+      def own_method_names(owner, kind, defs, except: Set.new)
+        names = defs.keys
         (@method_definers[owner] || {}).each do |method_name, definer_kind|
+          next if except.include?(method_name)
+
           names << method_name if definer_kind == kind || !%i[instance singleton].include?(definer_kind)
         end
         names.uniq

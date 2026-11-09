@@ -222,7 +222,7 @@ module Rigor
           end
           node = inner
         end
-        return unless constant_node?(node)
+        return unless node.is_a?(Prism::ConstantReadNode) || node.is_a?(Prism::ConstantPathNode)
 
         key = candidate_key(node.slice, nesting)
         object ? "#{OBJECT_MARK}#{key}" : key
@@ -255,7 +255,7 @@ module Rigor
         value = unwrap(node.value)
         instance = value.is_a?(Prism::CallNode) && CONSTRUCTORS.include?(value.name) && value.block.nil?
         value = value.receiver if instance
-        return unless constant_node?(value)
+        return unless value.is_a?(Prism::ConstantReadNode) || value.is_a?(Prism::ConstantPathNode)
 
         name = node.is_a?(Prism::ConstantWriteNode) ? [*nesting, node.name].join("::") : node.target.slice
         [:binds_class, candidate_key(value.slice, nesting), name.delete_prefix("::"),

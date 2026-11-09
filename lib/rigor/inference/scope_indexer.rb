@@ -399,8 +399,9 @@ module Rigor
           default_scope.discovered_includes.merge(file[:includes]) do |_class, cross_file, per_file|
             (per_file + cross_file).uniq
           end,
+          # ADR-129 G4 — each merged list is frozen as the per-file walk's lists are ({#freeze_mixin_lists}).
           default_scope.discovered_prepends.merge(file[:prepends]) do |_class, cross_file, per_file|
-            (per_file + cross_file).uniq
+            (per_file + cross_file).uniq.freeze
           end,
           file[:unpositioned]
         ]
@@ -11194,7 +11195,7 @@ module Rigor
       # class. Shared with {#accumulate_extend_lists}' shape deliberately — the two tables answer the
       # `prepend` question on the two sides of the class object, and both fold nearest-first.
       def accumulate_prepend_lists(target, additions)
-        additions.each { |cn, mods| target[cn] = (mods + (target[cn] || [])) }
+        additions.each { |cn, mods| target[cn] = (mods + (target[cn] || [])).freeze }
       end
 
       # ADR-85 WD2 — converts a file's live single-file index + its class table into a Marshal-clean seed

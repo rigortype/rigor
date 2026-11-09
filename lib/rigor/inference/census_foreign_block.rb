@@ -42,6 +42,17 @@ module Rigor
       ANCESTOR_ROOTS = %w[Object BasicObject Kernel].to_set.freeze
       # The calls whose answer is foreign when their receiver is: the object itself, a copy, a new instance, its class.
       FOREIGN_PRESERVING = %i[new allocate dup clone itself class singleton_class].to_set.freeze
+      # Issue #2983 — the scalar literals, whose blockless calls answer no instance of a project class, unlike a
+      # container's (`[k].first`) or a lambda's.
+      SCALAR_LITERALS = (LITERALS - [Prism::ArrayNode, Prism::HashNode, Prism::LambdaNode]).freeze
+      # A String or Symbol literal that spells a constant path, which a call may resolve to the class
+      # (`"K".constantize`).
+      CONSTANT_SPELLING = /\A(?:::)?[A-Z]\w*(?:::[A-Z]\w*)*\z/
+      # Separates the qualifications of a {.candidate_key}; no constant name holds it.
+      CANDIDATE_SEPARATOR = "|"
+      # Marks a candidate key whose code runs on the constant's own value's module ({.root_constant}).
+      OBJECT_MARK = "@"
+      COPIES = %i[dup clone itself].to_set.freeze
       BARRIERS = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
       NONE = [].freeze
       # Every name {.foreign?} can answer true for, so any other call returns at one Set probe.
@@ -136,15 +147,21 @@ module Rigor
       #   `Other.dup`), a `X.new` or `Class.new` on such a constant among them, or rooted at a literal, through
       #   {FOREIGN_PRESERVING} calls only;
       # - `.class` / `.singleton_class` on a receiver {.provably_other?} names (`Other.new.class`, `"s".class`,
-      #   `self.class.class`).
+      #   `self.class.class`);
+      # - rooted at a scalar literal through blockless calls of any name (`"s".upcase.class`, #2983), unless the
+      #   literal is a String or Symbol that spells a constant (`"K".constantize`).
       #
       # A `superclass` call may answer an ancestor (`Other.superclass` is `Object`), a `const_get` or registry call may
       # answer the class (`Other.const_get(:K)`), and every other receiver
       # (`self.class`, `singleton_class`, a parameter's `o.class`, `self.class.base_class`) may name `class_name`, so
       # they keep the credit. Parentheses are looked through. The rule is syntactic: a constant naming another
-      # ancestor of the class (`Base.class_eval` with `K < Base`) reads as foreign.
+      # ancestor of the class (`Base.class_eval` with `K < Base`), an alias of it or one of its instances reads as
+      # foreign here, and the cross-file census files the barred block's code under that constant instead
+      # ({.root_constant}), whose entries the class's census joins (#2983).
       def foreign_module?(receiver, class_name)
         receiver = unwrap(receiver)
+        return true if scalar_literal_rooted?(receiver)
+
         case receiver
         when Prism::ConstantReadNode, Prism::ConstantPathNode
           foreign_constant?(receiver, class_name) && !ANCESTOR_ROOTS.include?(receiver.slice.delete_prefix("::"))
@@ -164,6 +181,121 @@ module Rigor
         return false unless FOREIGN_PRESERVING.include?(call.name)
 
         foreign_module?(call.receiver, class_name)
+      end
+
+      # Issue #2983 — whether `receiver` is a chain of blockless calls rooted at a scalar literal that spells no
+      # constant: whatever the calls are, Ruby's methods on such a literal answer no project class or its instance.
+      def scalar_literal_rooted?(receiver)
+        node = receiver
+        while node.is_a?(Prism::CallNode)
+          return false if node.block
+
+          node = unwrap(node.receiver)
+        end
+        return false if node.equal?(receiver) || SCALAR_LITERALS.none? { |klass| node.is_a?(klass) }
+
+        !((node.is_a?(Prism::StringNode) || node.is_a?(Prism::SymbolNode)) && CONSTANT_SPELLING.match?(node.unescaped))
+      end
+
+      # Issue #2983 — the constant a `class_eval` receiver chain is rooted at through {FOREIGN_PRESERVING} calls
+      # (`Anc`, `INST.class`, `AliasK.new.class`, `Other.singleton_class`), as its candidate key under `nesting`
+      # ({.candidate_key}), or nil. The module such a chain names is the constant's, its class's or its singleton's,
+      # so the code a barred block reenters runs on the constant's instances or on the object it holds; the
+      # cross-file census files it under the key, and a class whose census joins the constant the key resolves to (an
+      # ancestor, an alias, an instance constant of it) sees the write.
+      #
+      # Review round 2 of #3001 — a `.class` or `.singleton_class` taken of the constant's own value (`INST.class`,
+      # `X.singleton_class`, through `dup` / `clone` / `itself`) names the module of that object, which is a class
+      # instance only when the constant binds one; the key then carries {OBJECT_MARK}, and the join credits it only
+      # when the constant resolves to an instance binding (`INST = K.new`). One taken of a class object (`X.class` of a
+      # `.class`, `X.new.class.singleton_class`) names `Class` or a metaclass, whose methods no instance runs: nil.
+      def root_constant(receiver, nesting)
+        node = unwrap(receiver)
+        object = false
+        while node.is_a?(Prism::CallNode) && FOREIGN_PRESERVING.include?(node.name)
+          inner = unwrap(node.receiver)
+          if MODULE_OF_INSTANCE.include?(node.name)
+            value = through_copies(inner)
+            return if value.is_a?(Prism::CallNode) && MODULE_OF_INSTANCE.include?(value.name)
+
+            object = true if constant_node?(value)
+          end
+          node = inner
+        end
+        return unless node.is_a?(Prism::ConstantReadNode) || node.is_a?(Prism::ConstantPathNode)
+
+        key = candidate_key(node.slice, nesting)
+        object ? "#{OBJECT_MARK}#{key}" : key
+      end
+
+      # `node` with `dup`, `clone` and `itself` calls looked through: the object they answer has the same class.
+      def through_copies(node)
+        node = unwrap(node.receiver) while node.is_a?(Prism::CallNode) && COPIES.include?(node.name)
+        node
+      end
+
+      def constant_node?(node) = node.is_a?(Prism::ConstantReadNode) || node.is_a?(Prism::ConstantPathNode)
+
+      # Review round 1 of #3001 — the qualifications a constant spelled `spelling` may have under the lexical
+      # `nesting` (the enclosing class and module names), nearest first as Ruby's lookup tries them, joined by
+      # {CANDIDATE_SEPARATOR}: `Anc` under `N::K` is `"N::K::Anc|N::Anc|Anc"`. A rooted `::Anc`, or one at the top
+      # level, has the one candidate `"Anc"`. `ScopeIndexer::IvarContributions` resolves the key to the first
+      # candidate the project declares.
+      def candidate_key(spelling, nesting)
+        return spelling.delete_prefix("::") if spelling.start_with?("::") || nesting.empty?
+
+        nesting.size.downto(0).map { |depth| [*nesting.first(depth), spelling].join("::") }.join(CANDIDATE_SEPARATOR)
+      end
+
+      # Review round 3 of #3001 — whether `call` is `Class.new`, `Module.new`, `Struct.new` or `Data.define` on the
+      # bare constant, whose answer is a class.
+      def meta_new?(call)
+        !AnonymousMetaClass::META_NEW_SELECTORS[AnonymousMetaClass.literal_constant_name(call.receiver)].nil?
+      end
+
+      # Issue #2983 — for a constant write `C = K` or `C = K.new` / `K.allocate` under the lexical `nesting`, the
+      # census entry `[:binds_class, key, name, kind]`: `K`'s {.candidate_key}, `C`'s qualified name (a path write's
+      # as written) and `:instance` for a constructor or `:alias`, else nil. `C` is an alias or an instance of the
+      # class `K` resolves to.
+      def binding_entry(node, nesting)
+        value = unwrap(node.value)
+        instance = value.is_a?(Prism::CallNode) && CONSTRUCTORS.include?(value.name) && value.block.nil?
+        # Review round 3 of #3001: `Struct.new(:a)`, `Class.new(Base)` and `Module.new` answer a class, not an instance.
+        # A guard beside `IvarContributions.module?`, which drops the same credit once the constant is a declared class.
+        return if instance && meta_new?(value)
+
+        value = value.receiver if instance
+        return unless value.is_a?(Prism::ConstantReadNode) || value.is_a?(Prism::ConstantPathNode)
+
+        name = node.is_a?(Prism::ConstantWriteNode) ? [*nesting, node.name].join("::") : node.target.slice
+        [:binds_class, candidate_key(value.slice, nesting), name.delete_prefix("::"),
+         instance ? :instance : :alias].freeze
+      end
+
+      # Issue #2983 — the module a String `class_eval` / `module_eval` may define methods on, for
+      # `IvarWriterCensus#record_string_eval`: `owner`, the class owning a class body, for an implicit or `self`
+      # receiver there (one in an instance body raises); `instance`, the instance body's class, for a receiver
+      # {.foreign_module?} does not bar; otherwise the receiver chain's root constant ({.root_constant}); or nil.
+      def string_eval_target(node, instance, owner)
+        return (owner unless instance) if self_node?(node.receiver)
+        return instance if instance && !foreign_module?(node.receiver, instance)
+
+        nesting = instance || owner
+        root_constant(node.receiver, nesting ? nesting.split("::") : NONE)
+      end
+
+      # For a barred `class_eval`-family block whose receiver {.foreign_module?} takes as another module and whose
+      # chain is rooted at a constant ({.root_constant}), that constant's candidate key and the code in the block that
+      # runs on its module's instances, as {.reentry_blocks} collects it; else nil.
+      def rooted_reentry(node, class_name)
+        return unless MODULE_EVALS.include?(node.name) && foreign_module?(node.receiver, class_name)
+
+        root = root_constant(node.receiver, class_name.split("::"))
+        return if root.nil?
+
+        found = []
+        collect_define_method_blocks(node.block.body, found)
+        [root, found]
       end
 
       # `node` with any parentheses around a single expression looked through.

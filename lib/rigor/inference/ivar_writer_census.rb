@@ -32,6 +32,10 @@ module Rigor
     #   entry under `E`, and an `E.define_method` block is an instance body of `E` ({ReceiverWriterCall}). The
     #   class-ivar census of a file joins another file's entries, and those of the modules and superclasses on the
     #   class's chain, into the ivars it already holds ({ScopeIndexer::IvarContributions}).
+    #   Issue #2983: a barred `class_eval`-family block on a receiver rooted at another constant files the code in it
+    #   that runs on an instance under that constant's candidate key ({#remember_root_constant}), a String
+    #   `class_eval` records a {DYNAMIC} write of {ANY_IVAR} ({#record_string_eval}), and a constant write `C = K` /
+    #   `C = K.new` records `[:binds_class, key, "C"]` ({#record_binding}), so the join can take `C`'s entries for `K`.
     class IvarWriterCensus
       SEND_CALLS = %i[send __send__ public_send].to_set.freeze
       # The methods a `send` reaching which is an open-world writer.
@@ -46,6 +50,10 @@ module Rigor
       NO_ARGUMENTS = [].freeze
       # Issue #2079 — the coarse value of a write that is not a literal.
       DYNAMIC = :dynamic
+      # Issue #2983 — the ivar name of a write whose ivar no literal spells: a string `class_eval`'s code may write any.
+      ANY_IVAR = :*
+      # The `class_eval`-family calls that take code in a String.
+      STRING_EVALS = %i[class_eval module_eval].to_set.freeze
       # The writer declarations a class body records as a {DYNAMIC} write of each name it spells.
       WRITER_DECLARATIONS = %i[attr_writer attr_accessor].to_set.freeze
 
@@ -59,6 +67,7 @@ module Rigor
         @owner_names = {}.compare_by_identity
         @own_writes = {}
         @typed_writes = Set.new
+        @rooted = Set.new.compare_by_identity
       end
 
       # Fed each node of a pre-order descent. `owner` is the class whose body the node sits in, as its qualified name
@@ -67,7 +76,8 @@ module Rigor
       # writer call ({ReceiverWriterCall}) names, resolved by the host walk as it resolves a `class_eval` receiver.
       def visit(node, owner, receiver_owner = nil)
         case node
-        when Prism::DefNode then remember(node.location, owner) if owner && node.receiver.nil?
+        when Prism::DefNode then remember_host(node, owner) if node.receiver.nil?
+        when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode then record_binding(node, owner)
         when Prism::SingletonClassNode then visit_singleton_class(node)
         when Prism::CallNode
           bar_foreign_block(node)
@@ -131,6 +141,45 @@ module Rigor
 
         remember(node.block.location, nil)
         remember_reentry(node, instance)
+        remember_root_constant(node, instance)
+      end
+
+      # Issue #2983 — the code a barred `class_eval`-family block on a receiver rooted at another constant reenters
+      # (`Anc.class_eval`, `INST.class.class_eval`, `AliasK.new.class.class_eval`), remembered under that constant's
+      # candidate key ({CensusForeignBlock.root_constant}), in place of the host walk's as-written owner. A class
+      # whose census joins the entries of the constant the key resolves to, an ancestor's, an alias's or an instance
+      # constant's ({ScopeIndexer::IvarContributions}), then sees the write.
+      def remember_root_constant(node, instance)
+        root, blocks = CensusForeignBlock.rooted_reentry(node, owner_name(instance))
+        blocks&.each { |block| remember(block.location, root) }
+        @rooted.merge(blocks) if blocks
+      end
+
+      # The host walk's `owner` of a `def` or `define_method` block, unless {#remember_root_constant} filed it already.
+      def remember_host(node, owner) = (remember(node.location, owner) if owner && !@rooted.include?(node))
+
+      # Issue #2983 — `C = K` or `C = K.new` (`.allocate`) records `[:binds_class, key, "C"]`, `K`'s candidate key and
+      # `C`'s qualified name ({CensusForeignBlock.binding_entry}), so a class's census also joins the entries filed
+      # under an alias or an instance constant of it (`AliasK.class_eval { … }`, `INST.class.class_eval { … }`).
+      def record_binding(node, owner)
+        entry = CensusForeignBlock.binding_entry(node, nesting(owner))
+        @census << entry if entry
+      end
+
+      # The lexical class and module names `owner` spells: the host walk's prefix Array, or a resolved name.
+      def nesting(owner) = owner.nil? ? NO_ARGUMENTS : owner_name(owner).split("::")
+
+      # Issue #2983 — `class_eval` / `module_eval` given a String runs code the census cannot read, which may define
+      # a method writing any ivar: a {DYNAMIC} write of {ANY_IVAR} is recorded for the module the receiver may be. That
+      # is the class owning the body for an implicit or `self` receiver in a class body, the instance's class for a
+      # receiver in an instance body that {CensusForeignBlock.foreign_module?} does not bar, and otherwise the constant
+      # the receiver chain is rooted at.
+      def record_string_eval(node, owner)
+        return unless STRING_EVALS.include?(node.name) && node.block.nil? && node.arguments
+
+        instance = instance_owner(node) unless @instance_ranges.empty?
+        target = CensusForeignBlock.string_eval_target(node, owner_name(instance), owner_name(owner))
+        record_typed_write(target, ANY_IVAR, DYNAMIC) if target
       end
 
       # The `define_method` blocks in a barred body that run on the instance again, remembered after the bar so they
@@ -166,7 +215,8 @@ module Rigor
 
       def visit_call(node, owner)
         record_writer_declaration(node, owner)
-        remember(node.block.location, owner) if owner && define_method_block?(node)
+        record_string_eval(node, owner)
+        remember_host(node.block, owner) if define_method_block?(node)
         if self_receiver?(node) || own_singleton_class_call?(node)
           return if @instance_ranges.empty? || !(own_singleton_class_call?(node) || open_world?(node))
 

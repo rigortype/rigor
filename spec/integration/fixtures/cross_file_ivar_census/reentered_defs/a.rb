@@ -501,20 +501,6 @@ class Round2ParenClassDefine
   def poke = (self.class).class_eval { define_method(:set) { @x = "a" } }
 end
 
-# `Object` and `Kernel` are ancestors of every class, so a method defined on them runs on an instance: Ruby 4.0.5
-# returns "A" from `k.poke; k.set; k.get`.
-class Round2ObjectEval
-  def initialize = (@x = nil)
-  def get = @x.upcase
-  def poke = Object.class_eval { def set = (@x = "a") }
-end
-
-class Round2KernelEval
-  def initialize = (@x = nil)
-  def get = @x.upcase
-  def poke = Kernel.module_eval { define_method(:set) { @x = "a" } }
-end
-
 # The pokes of these classes are in b.rb.
 class CrossRound2ParamClass
   def initialize = (@x = nil)

@@ -29,8 +29,8 @@ module Rigor
     # - `[:main_mixin, name]` — a module a top-level `include`, `prepend` or `extend` mixes into `Object` (or
     #   `main`), as written. A module RBS does not know may carry any method, so it reaches every class.
     # - the instance-variable writer entries of {IvarWriterCensus} (issue #1154): `[:ivar_set, name]`,
-    #   `[:ivar_set_class, class_name]`, `[:own_write, class_name, name, path]` and, issue #2079,
-    #   `[:own_write_type, class_name, name, value, path]`.
+    #   `[:ivar_set_class, class_name]`, `[:own_write, class_name, name, path]`, issue #2079's
+    #   `[:own_write_type, class_name, name, value, path]` and issue #2983's `[:binds_class, class_key, constant]`.
     # - `[:global_writer, name, method]` — issue #2314: a write of the global `name` inside a method body, keyed by
     #   the `def`'s name (or the literal name a `define_method` block defines), or by nil inside a lambda or a block
     #   its call keeps to run later ({StoredBlockCall}). A write in a block its call runs at once belongs to the
@@ -87,7 +87,7 @@ module Rigor
       end
 
       # #1154 — the {IvarWriterCensus} entries of `census`, for the incremental diff and its readers.
-      IVAR_KINDS = %i[ivar_set ivar_set_class own_write own_write_type].to_set.freeze
+      IVAR_KINDS = %i[ivar_set ivar_set_class own_write own_write_type binds_class].to_set.freeze
 
       def ivar_set_entries(census) = census.select { |entry| IVAR_KINDS.include?(entry.first) }.to_set
 
@@ -97,6 +97,7 @@ module Rigor
         when :ivar_set then "ivar_set:#{entry[1]}"
         when :ivar_set_class then "ivar_set_class:#{entry[1]}"
         when :own_write_type then "own_write_type:#{entry[1]}##{entry[2]}"
+        when :binds_class then "binds_class:#{entry[1].split(CensusForeignBlock::CANDIDATE_SEPARATOR).last.split('::').last}"
         else "own_write:#{entry[1]}##{entry[2]}"
         end
       end

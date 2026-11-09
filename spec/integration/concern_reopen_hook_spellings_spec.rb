@@ -185,6 +185,16 @@ RSpec.describe "reopened concern class_methods and hook spellings (#2997)" do
       end
     end
 
+    # Ruby raises NoMethodError: `Hu.setup` never runs, so `Ku` has no `my_attr` and the guarded call defines nothing.
+    # A hook-named entry for `setup` would let the class-body macro reader find `X#my_attr` and open `Ku`.
+    it "does not read a define_singleton_method of another name as a macro's source" do
+      write_project({ "a_x.rb" => "module X\n  def my_attr(n) = define_method(n) { 1 }\nend\n",
+                      "hook.rb" => "module Hu\n  define_singleton_method(:setup) { |base| base.extend(X) }\n  " \
+                                   "def own = 1\nend\n",
+                      "k.rb" => "class Ku\n  include Hu\n  my_attr :foo if name.nil?\nend\n" }, ["Ku.new.foo"])
+      expect(undefined_messages).to eq(["undefined method `foo' for Ku"])
+    end
+
     it "reads a define_singleton_method(:prepended) hook for a prepending class" do
       write_project({ "a_x.rb" => x_module,
                       "hook.rb" => "module Hu\n  define_singleton_method(:prepended) { |base| base.extend(X) }\nend\n",

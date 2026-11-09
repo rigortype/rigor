@@ -10164,13 +10164,11 @@ module Rigor
         receiver = node.receiver
         return unless singleton_class_of_receiver?(receiver)
 
-        object = receiver.receiver
-        return unless object.is_a?(Prism::ConstantReadNode) || object.is_a?(Prism::ConstantPathNode)
-
         body = node.block.body
         return if body.nil?
 
-        candidates = constant_receiver_candidates(object, qualified_prefix)
+        # A bare, `self` or local receiver of `singleton_class` renders no constant, so it yields no candidate.
+        candidates = constant_receiver_candidates(receiver.receiver, qualified_prefix)
         each_refinement_def(body) do |def_node|
           candidates.each { |owner| record_object_singleton(tables, owner, def_node.name) }
         end

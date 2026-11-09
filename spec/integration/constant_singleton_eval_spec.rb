@@ -38,9 +38,8 @@ RSpec.describe "singleton methods on a constant's object, eval and replacing def
   end
 
   def rows(diagnostics)
-    diagnostics.select do |d|
-      d.rule == "call.undefined-method"
-    end.map { |d| [d.path, d.line, d.message[/`[^']+' for \S+/]] }
+    undefined = diagnostics.select { |d| d.rule == "call.undefined-method" }
+    undefined.map { |d| [d.path, d.line, d.message[/`[^']+' for \S+/]] }
   end
 
   def cold_rows
@@ -57,8 +56,8 @@ RSpec.describe "singleton methods on a constant's object, eval and replacing def
     end
 
     it "stays silent on a nested def in the block" do
-      write("lib/obj.rb", "OBJ = Object.new\nOBJ.singleton_class.class_eval do\n  if true\n    def sc = 1\n  end\nend\n" \
-                          "OBJ.sc\n")
+      write("lib/obj.rb", "OBJ = Object.new\nOBJ.singleton_class.class_eval do\n  if true\n    def sc = 1\n  " \
+                          "end\nend\nOBJ.sc\n")
       expect(cold_rows).to eq([])
     end
 

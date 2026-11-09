@@ -22,9 +22,12 @@ definer there and reported `undefined method`.
 
 ## Decision
 
-The list (`ScopeIndexer::CALLBACK_MACROS`), read from Rails 8.1.3's ActiveModel, ActiveRecord, ActiveJob,
-AbstractController, ActionMailer and ActionCable callback definitions. A name it misses is entered. This keeps #2999's named stops (`on_load`, `Proc.new`)
-and the repository rule that a lost report is cheaper than a false positive.
+The list (`ScopeIndexer::CALLBACK_MACROS`), read from the callback definitions in Rails 8.1.3: ActiveModel,
+ActiveRecord, ActiveJob, AbstractController (with its `prepend_` / `append_` forms), ActionMailer, ActionMailbox,
+ActionCable, ActiveSupport::CurrentAttributes and ActiveSupport::Reloader. A name it misses is entered. This keeps
+#2999's named stops (`on_load`, `Proc.new`) and the repository rule that a lost report is cheaper than a false
+positive. Only a `lambda` / `proc` whose receiver is written `Kernel` stops; any other receiver's method so named is
+entered.
 
 ## To undo
 

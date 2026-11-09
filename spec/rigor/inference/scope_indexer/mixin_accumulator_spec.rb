@@ -177,8 +177,9 @@ RSpec.describe Rigor::Inference::ScopeIndexer::MixinAccumulator do
       expect(unpositioned("class C\n  include A\n  [1].each { extend M if X }\nend\n")).to eq("C" => { extend: ["M"] })
     end
 
+    # Issue #2994 — the argument names no module, so the singleton side also lists the unnamed marker.
     it "taints the extend side of an iterator extend whose argument cannot be named" do
-      expect(unpositioned("class C\n  [1].each { |m| extend m }\nend\n")).to eq("C" => wild(:extend))
+      expect(unpositioned("class C\n  [1].each { |m| extend m }\nend\n")).to eq("C" => { extend: ["*", "?"] })
     end
 
     it "keeps a `Class.new` block on its own class, not the enclosing one" do

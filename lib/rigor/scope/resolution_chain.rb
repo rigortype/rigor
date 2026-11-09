@@ -1304,27 +1304,21 @@ module Rigor
         end
 
         # The class object's prepends, nearest first, once its own are placed against its hooks'. Where their order
-        # is not a fact (own and hook prepends both, two own ones from two files, or an own one whose position is not
-        # a fact), the chain counts two forks, which settle to master, and the class takes a `:prepend_order`
+        # is not a fact (own and hook prepends both, or two own ones from two files or with an edge whose position is
+        # not a fact), the chain counts two forks, which settle to master, and the class takes a `:prepend_order`
         # mark: the typing read declines a definer from its prepend region, since neither order is Ruby's for sure.
         def order_prepends(name, own, hooked)
           return hooked if own.empty?
 
-          if !hooked.empty? || !own_prepends_ordered?(name, own)
+          if !hooked.empty? || (own.size > 1 && !own_prepends_ordered?(name))
             @frames.last.forks += 2
             @frames.last.add_marks(mark_for(name, :prepend_order, nil, false))
           end
           own + hooked
         end
 
-        # A prepend whose position is not a fact (`Const.singleton_class.prepend P`, one under a condition) may run
-        # after a call, or name another class, so even alone its region has no known order; two from two files are
-        # ordered by load order.
-        def own_prepends_ordered?(name, own)
-          listed = @discovery.unpositioned_mixins[name]&.dig(:extend) || EMPTY
-          return false if listed.include?(WILDCARD_LIST.first) || own.any? { |raw| listed.include?(raw) }
-
-          own.size < 2 || !multi_file?(name)
+        def own_prepends_ordered?(name)
+          !multi_file?(name) && (@discovery.unpositioned_mixins[name]&.dig(:extend) || EMPTY).empty?
         end
 
         # Issue #2998 — the spellings of `name`'s singleton edges (`discovered_extends`) that are prepends: a

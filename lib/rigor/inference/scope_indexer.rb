@@ -8436,7 +8436,7 @@ module Rigor
       # ({#constant_receiver_candidates}), empty when the owner is the innermost of them or the enclosing class
       # itself (`class << Foo` inside `class Foo`, which {#singleton_class_prefix} reads as `class << self`).
       def constant_singleton_owners(node, qualified_prefix)
-        owner = singleton_class_prefix(node, nil, qualified_prefix).join("::").delete_prefix("::")
+        owner = singleton_class_prefix(node, nil, qualified_prefix).join("::")
         candidates = constant_receiver_candidates(node.expression, qualified_prefix)
         return [owner, EMPTY_PREFIX] if candidates.first == owner || qualified_prefix.join("::") == owner
 

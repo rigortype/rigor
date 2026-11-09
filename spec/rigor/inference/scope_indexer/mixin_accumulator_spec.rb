@@ -314,7 +314,8 @@ RSpec.describe Rigor::Inference::ScopeIndexer::MixinAccumulator do
         expect(unpositioned(source)).to eq("A::C" => { extend: ["B"] }, "C" => { extend: ["B"] })
       end
 
-      # `class << C` inside `class C` is read as `class << self`, and `::C` names the top-level class.
+      # `class << C` inside `class C` is read as `class << self`, and `::C` names the top-level class (a regression row:
+      # the rooted spelling already resolves to `C`).
       {
         "inside the class's own body" => ["class C\n  class << C\n    prepend B\n  end\nend\n", "C"],
         "with a rooted constant" => ["class C\nend\nclass << ::C\n  prepend B\nend\n", "C"]

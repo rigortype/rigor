@@ -31,9 +31,8 @@ module Rigor
       # {UNNAMED}, always beside {WILDCARD}, because its SET of modules is unknown too. That covers an instance-side
       # mixin call it could not record whose argument is not a constant (`include helper`, `include(*MODS)`; a
       # `Module.new { … }` argument keeps its #2975 reading), a name beside one it cannot name (`include M, h`), and
-      # an opaque eval whose block mixes into its own `self`, and a hook's `base.include M`. An unrecorded call whose
-      # arguments are all constants (`self.include M`, a receiverless `send(:include, M)`) lists those names after
-      # {WILDCARD} instead: the set is known, but no table records it under the owner.
+      # an opaque eval whose block mixes into its own `self`, and a hook's `base.include M`. `self.include M` and a
+      # receiverless `send(:include, M)` are recorded as a bare `include M` is (#2995).
       #
       # The value is `{owner => {include: [names], extend: [names]}}`. `:include` is the instance side
       # (`include` and `prepend`), `:extend` the singleton side (`extend`, and `include` / `prepend` inside
@@ -128,17 +127,14 @@ module Rigor
         # nothing the walk could record, which leaves the recorded names' neighbours unknown.
         def note(node, owner, side, targets, complete:)
           return taint(owner, side, unnamed: side == :include) unless complete
-          return if node.receiver.nil? && direct?(node)
+          return if (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode)) && direct?(node)
 
           add(owner, side, targets)
         end
 
         # Names `owner`'s `side` as having no known order; `unnamed` also as holding a module no name spells.
-        # `names` are the constants an unrecorded call mixed in (`self.include M`, #2991), listed after {WILDCARD}
-        # so a reader can ask them for a method the tables do not record under the owner.
-        def taint(owner, side, unnamed: false, names: nil)
+        def taint(owner, side, unnamed: false)
           add(owner, side, unnamed ? UNNAMED_LIST : WILDCARD_LIST)
-          add(owner, side, names) if names && !names.empty?
         end
 
         # `{owner => {side => [names]}}`, frozen, each list de-duplicated.

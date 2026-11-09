@@ -995,7 +995,7 @@ module Rigor
                                                             call_node: call_node)
           return true if module_mixin_receiver?(receiver_type, scope)
           return true if mixin_self_class_receiver?(call_node, scope)
-          return true if unknown_mixin_includer?(class_name, scope, kind, call_node.name)
+          return true if unknown_mixin_includer?(class_name, scope, kind)
           return true if object_mixin_may_define?(receiver_type, class_name, call_node.name, scope)
           return true if ancestry_declares_method?(scope, class_name, call_node.name, kind)
           return true if open_names_through_ancestors?(scope, class_name, kind)
@@ -1629,39 +1629,16 @@ module Rigor
         # A constant the environment does not know is read off the receiver's OWN includes only. Issue #2991 — a
         # mixin no name spells (`include(*MODS)`, `include helper`) opens the receiver when it sits anywhere on its
         # instance-side chain, its own level or an ancestor's: the chain marks it (`ResolutionChain#unnamed_mixin?`),
-        # and any name may come from the unlisted module (a hook's `base.include M` is read so too). An unrecorded
-        # `self.include M` or receiverless `send(:include, M)` records `M` under no table but lists it on the chain
-        # (`ResolutionChain#listed_mixins`), until the walk records them (#2995): the receiver opens for any name when
-        # `M` is a project module or one the environment does not know, and otherwise when RBS gives `M` the method.
-        # A mixin whose ORDER alone is unknown (`include M; prepend M`) has its module recorded, so it opens nothing.
-        # A class-object receiver reads its singleton chain instead ({#singleton_mixin_may_answer?}).
-        def unknown_mixin_includer?(class_name, scope, kind, method_name)
+        # and any name may come from the unlisted module (a hook's `base.include M` is read so too). `self.include M`
+        # and a receiverless `send(:include, M)` are recorded as `include M` is (#2995), so the ordinary lookup reads
+        # `M`. A mixin whose ORDER alone is unknown (`include M; prepend M`) has its module recorded, so it opens
+        # nothing. A class-object receiver reads its singleton chain instead ({#singleton_mixin_may_answer?}).
+        def unknown_mixin_includer?(class_name, scope, kind)
           includes = scope.includes_of(class_name)
           return true if includes.any? { |raw| !known_mixin?(raw, class_name, scope) }
           return false if kind == :singleton
 
-          chain = Scope::ResolutionChain.for(scope, class_name.to_s, :instance, :methods)
-          return true if chain.unnamed_mixin?
-
-          chain.listed_mixins.any? { |owner, raw| listed_mixin_may_define?(scope, owner, raw, method_name) }
-        end
-
-        # A listed module the project declares (in any file) answers any name: its surface may be open in ways a
-        # method lookup does not see (a computed `define_method`, its own unrecorded mixins, `method_missing`), as an
-        # unnamed mixin is. So does one the environment does not know. Only a module with no project declaration
-        # (`Comparable`) is asked RBS for `method_name`. A name the owner's include table records (an unpositioned
-        # `Integer.include(Ext)` lists its module too) is the ordinary lookup's, which the later probes run, so it opens
-        # only when the environment does not know it.
-        def listed_mixin_may_define?(scope, owner, raw, method_name)
-          return !known_mixin?(raw, owner, scope) if scope.includes_of(owner).include?(raw)
-
-          candidates = scope.ancestor_name_candidates(owner, raw)
-          return true if candidates.any? { |candidate| scope.discovered_classes.key?(candidate) }
-          return true unless known_mixin?(raw, owner, scope)
-
-          candidates.any? do |candidate|
-            !Rigor::Reflection.instance_method_definition(candidate, method_name, scope: scope).nil?
-          end
+          Scope::ResolutionChain.for(scope, class_name.to_s, :instance, :methods).unnamed_mixin?
         end
 
         def known_mixin?(raw_name, class_name, scope)

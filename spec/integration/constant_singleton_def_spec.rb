@@ -76,6 +76,14 @@ RSpec.describe "singleton methods defined on a constant's object (#3016)", type:
     expect(cold_rows).to eq([])
   end
 
+  # The mark files on the constant's name, which the class-side chain walk also reads when the constant names a class,
+  # as it reads a computed `define_singleton_method` written on `self` in the class body.
+  it "stays silent on a class constant's singleton call beside a computed define_singleton_method" do
+    write("sig/foo.rbs", "class Foo\nend\n")
+    write("lib/obj.rb", "class Foo\nend\nname = :a\nFoo.define_singleton_method(name) { 1 }\nFoo.zz\n")
+    expect(cold_rows).to eq([])
+  end
+
   # The open set is the computed definer's alone: a literal one, a `def OBJ.x` and a non-defining rewrite such as
   # `OBJ.send(:frozen?)` leave an undefined name reporting.
   it "still reports a name beside a literal definer, a def and a send" do

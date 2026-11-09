@@ -1,7 +1,9 @@
 # frozen_string_literal: true
 
 # Issue #3007 — a top-level `include M1` that is not itself a program statement is still `main.include` when only
-# control flow wraps it (`if`, `begin`, `unless`, `case`) or it sits in a top-level `def` body: it mixes M1 into
+# control flow wraps it (`if`, `begin`, `unless`, `case`), it sits in a value position (an assignment's value, a call's
+# argument), in a core iterator's block that keeps `self` (`[1].each`, `(1..2).each`, `3.times`, `tap`, `loop`), or
+# in a top-level `def` body: it mixes M1 into
 # `Object`, as a program-statement `include M1` does (#1697), in every spelling #2995 records (bare, `self.`, `send`).
 # Such an include may not run, so it is recorded in the set with no position, as ADR-119 WD7 records one in a method
 # body. A call on a class, or on a module's class object, to M1's method must not report `call.undefined-method`; a
@@ -60,7 +62,14 @@ RSpec.describe "a top-level include under control flow mixes into Object (#3007)
     "case" => ->(call) { "case ENV[\"PATH\"]\nwhen String\n  #{call}\nend\n" },
     "a modifier if" => ->(call) { "#{call} if ENV[\"PATH\"]\n" },
     "a top-level def" => ->(call) { "def setup\n  #{call}\nend\nsetup\n" },
-    "a top-level def self." => ->(call) { "def self.setup\n  #{call}\nend\nsetup\n" }
+    "a top-level def self." => ->(call) { "def self.setup\n  #{call}\nend\nsetup\n" },
+    "an Array literal's each block" => ->(call) { "[1].each do\n  #{call}\nend\n" },
+    "a Range literal's each block" => ->(call) { "(1..2).each { #{call} }\n" },
+    "an Integer's times block" => ->(call) { "3.times do\n  #{call}\nend\n" },
+    "a receiverless tap block" => ->(call) { "tap { #{call} }\n" },
+    "a loop block" => ->(call) { "loop do\n  #{call}\n  break\nend\n" },
+    "a local assignment's value" => ->(call) { "x = #{call}\n" },
+    "a call's argument" => ->(call) { "p(#{call})\n" }
   }.each do |wrapper, wrap|
     ["include M1", "self.include M1", "send(:include, M1)"].each do |call|
       it "does not fire after `#{call}` in #{wrapper}, in one file" do
@@ -83,17 +92,15 @@ RSpec.describe "a top-level include under control flow mixes into Object (#3007)
 
   # Guards: each keeps reporting. `public_send` raises (`main`'s `include` is private), `self.extend` /
   # `send(:extend)` reach `main`'s singleton alone, `main` has no `prepend`, `class << self` includes into `main`'s
-  # singleton, and `def OBJ.setup` runs with `OBJ` as `self`; Ruby 4.0.5 raises `NoMethodError` for `W.new.t` after
-  # each. The two block rows are a known limit, not Ruby's answer: `[1].each` keeps `main` as `self`, so Ruby returns
-  # 1, but the walk cannot tell such a block from one that rebinds `self` (`describe do … end`), and recording every
-  # top-level block's `include` would mix its module into `Object` for every spec file's example group (#1697).
+  # singleton, `def OBJ.setup` runs with `OBJ` as `self`, and a `Class.new` block or a `describe` block (here one that
+  # `class_exec`s it, as RSpec's does) rebinds `self`; Ruby 4.0.5 raises `NoMethodError` for `W.new.t` after each.
   {
     "public_send in if" => "if ENV[\"PATH\"]\n  public_send(:include, M1)\nend\n",
     "self.extend in if" => "if ENV[\"PATH\"]\n  self.extend M1\nend\n",
     "send(:extend) in begin" => "begin\n  send(:extend, M1)\nend\n",
     "self.prepend in begin" => "begin\n  self.prepend M1\nend\n",
-    "a block" => "[1].each do\n  include M1\nend\n",
-    "a block under if" => "if ENV[\"PATH\"]\n  [1].each { include M1 }\nend\n",
+    "a describe block" => "def describe(*, &block) = Class.new.class_exec(&block)\ndescribe \"x\" do\n  include M1\nend\n",
+    "a Class.new block" => "Class.new { include M1 }\n",
     "class << self in if" => "if ENV[\"PATH\"]\n  class << self\n    include M1\n  end\nend\n",
     "def on another receiver" => "OBJ = Object.new\ndef OBJ.setup\n  include M1\nend\n"
   }.each do |label, source|

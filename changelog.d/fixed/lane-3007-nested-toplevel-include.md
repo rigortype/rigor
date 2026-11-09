@@ -1,4 +1,4 @@
-- **[check]** A top-level `include M` under `if`, `unless`, `case`, `begin` or another control-flow construct, or in a top-level `def` body, now mixes `M` into `Object` as a top-level `include M` statement does. ([#3013](https://github.com/rigortype/rigor/pull/3013))
+- **[check]** A top-level `include M` under `if`, `begin` or another control-flow construct, in an assignment or argument, in a `[1].each`, `3.times`, `tap` or `loop` block, or in a top-level `def` body, now mixes `M` into `Object` as a top-level `include M` statement does. ([#3013](https://github.com/rigortype/rigor/pull/3013))
   - `call.undefined-method` no longer reports a method of `M` on a class or on a module's class object, and still reports a method `M` does not provide.
   - This covers `include M`, `self.include M` and `send(:include, M)`.
-  - An `include` inside a top-level block is still not counted.
+  - An `include` in another top-level block, such as `describe do … end` or `Class.new { … }`, is still not counted.

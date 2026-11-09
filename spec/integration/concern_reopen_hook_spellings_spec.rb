@@ -85,6 +85,42 @@ RSpec.describe "reopened concern class_methods and hook spellings (#2997)" do
     end
   end
 
+  # Issue #2997 — `Nm2`'s own `class_methods` (from `Dsl`) takes the block and defines nothing: `Nm2` is no concern,
+  # so Ruby has no `Nm2::ClassMethods` and `Cx.const_get(:ClassMethods)` does not find one through `Nm2`. Ruby
+  # answers 1 for both includers.
+  describe "a class_methods block of a module no file declares a concern, behind a concern" do
+    let(:files) do
+      { "a_dsl.rb" => "module Dsl\n  def class_methods(&b) = nil\nend\n",
+        "b_nm.rb" => "module Nm2\n  extend Dsl\n  class_methods do\n    def bar = \"phantom\"\n  end\nend\n",
+        "c_cx.rb" => "module Cx\n  extend ActiveSupport::Concern\n  include Nm2\n  def own = 1\nend\n" }
+    end
+
+    it "does not answer it through the concern's const_get" do
+      write_project(files.merge("k.rb" => "#{base_class}class Kx < Base\n  include Cx\nend\n"), ["Kx.bar.zork"])
+      expect(undefined_messages).to eq(["undefined method `zork' for 1"])
+    end
+
+    it "does not answer it for a direct includer" do
+      write_project(files.merge("k.rb" => "#{base_class}class Kn < Base\n  include Nm2\nend\n"), ["Kn.bar.zork"])
+      expect(undefined_messages).to eq(["undefined method `zork' for 1"])
+    end
+  end
+
+  # Issue #2997 — an interpolated name whose literal start no hook name has defines no hook, so the includer's class
+  # side stays as it was: Ruby answers 1 and raises on `nope`.
+  {
+    "a class << self define_method" =>
+      "module M8\n  class << self\n    %w[a b].each { |n| define_method(\"is_#{'#{n}'}\") { true } }\n  end\nend\n",
+    "a define_singleton_method" =>
+      "module M8\n  %w[a b].each { |n| define_singleton_method(\"is_#{'#{n}'}\") { true } }\nend\n"
+  }.each do |label, source|
+    it "reads no hook from #{label} with an is_ prefix" do
+      write_project({ "m8.rb" => source, "k.rb" => "#{base_class}class K8 < Base\n  include M8\n  def own = 1\nend\n" },
+                    ["K8.bar.zork", "K8.nope"], members: { "K8" => "  def own: () -> Integer\n" })
+      expect(undefined_messages).to eq(["undefined method `nope' for singleton(K8)", "undefined method `zork' for 1"])
+    end
+  end
+
   describe "a hook defined without def self." do
     def x_module = "module X\n  def bar = \"X\"\nend\n"
 
@@ -153,6 +189,8 @@ RSpec.describe "reopened concern class_methods and hook spellings (#2997)" do
     {
       "a computed hook name" =>
         "module Hu\n  name = :included\n  define_singleton_method(name) { |base| base.extend(X) }\nend\n",
+      "an interpolated name that may still spell included" =>
+        "module Hu\n  x = \"luded\"\n  define_singleton_method(\"inc#{'#{x}'}\") { |base| base.extend(X) }\nend\n",
       "a define_singleton_method nested in a block" =>
         "module Hu\n  [1].each { define_singleton_method(:included) { |base| base.extend(X) } }\nend\n",
       "a define_singleton_method in a singleton method" =>

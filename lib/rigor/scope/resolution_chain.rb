@@ -517,6 +517,14 @@ module Rigor
       end
       private_class_method :concern_bucket?
 
+      # Issue #2997 — whether `owner.const_get(raw)` may find the project's `candidate` (`"#{owner}::#{raw}"`): a
+      # `class_methods do … end` block's `def`s are filed on `Owner::ClassMethods` in every body of the module, but
+      # Ruby has that module only when `owner` is a concern, so one that no `module` declaration writes counts only
+      # for a concern `owner`.
+      def self.const_get_candidate?(discovery, owner, candidate)
+        concern_bucket?(discovery, owner) || discovery.discovered_classes.key?(candidate)
+      end
+
       HOOK_KEY_SLOTS = {
         DiscoveryIndex::ENVELOPE_HOOK_EXTEND_KIND => 2, DiscoveryIndex::ENVELOPE_HOOK_EXTEND_OPEN_KIND => 1,
         DiscoveryIndex::ENVELOPE_HOOK_DEF_KIND => 1
@@ -1424,7 +1432,9 @@ module Rigor
             next if dependencies.include?(entry.name)
 
             names = entry.external? ? entry.candidates : [entry.name]
-            found = names.map { |owner| "#{owner}::#{raw}" }.find { |candidate| @resolver.project_name?(candidate) }
+            found = names.map { |owner| [owner, "#{owner}::#{raw}"] }.find do |owner, candidate|
+              @resolver.project_name?(candidate) && ResolutionChain.const_get_candidate?(@discovery, owner, candidate)
+            end&.last
             return found if found
           end
           @resolver.project_name?(raw) ? raw : nil

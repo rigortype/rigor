@@ -5261,9 +5261,19 @@ module Rigor
         return nil if name_node.nil?
 
         name = literal_method_name(name_node)
-        return HOOK_EXTEND_DEFS.to_a if name.nil?
+        return HOOK_EXTEND_DEFS.include?(name) ? [name] : nil if name
 
-        HOOK_EXTEND_DEFS.include?(name) ? [name] : nil
+        hooks = HOOK_EXTEND_DEFS.select { |hook| hook.start_with?(literal_name_prefix(name_node)) }
+        hooks.empty? ? nil : hooks
+      end
+
+      # The literal text an interpolated name starts with (`"is_"` for `"is_#{n}"`), or `""` for a name computed any
+      # other way: only a hook whose name starts with it may be the one defined.
+      def literal_name_prefix(node)
+        return "" unless node.is_a?(Prism::InterpolatedSymbolNode) || node.is_a?(Prism::InterpolatedStringNode)
+
+        first = node.parts.first
+        first.is_a?(Prism::StringNode) ? first.unescaped : ""
       end
 
       # The argument naming the method a call that may define a singleton method of the module defines, or nil.

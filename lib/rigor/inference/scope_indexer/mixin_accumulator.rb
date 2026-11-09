@@ -217,7 +217,7 @@ module Rigor
 
         # `{call => scope}`: each call and the node whose locals it reads, `body` or the `def` it sits in. Issue #3006 —
         # a class body's calls are collected the same way with `instance_defs: false`: an instance `def`'s `self` is
-        # an instance, not the class, while a `def self.`'s is the class.
+        # an instance, not the class, while a `def self.`'s is the class, and every block is entered.
         def collect(body, instance_defs: true)
           calls = {}.compare_by_identity
           visit(body, calls, body, instance_defs)
@@ -230,7 +230,8 @@ module Rigor
             calls[node] = scope
             visit(node.receiver, calls, scope, instance_defs)
             visit(node.arguments, calls, scope, instance_defs)
-            visit(node.block.body, calls, scope, instance_defs) if self_keeping_block?(node)
+            entered = instance_defs ? self_keeping_block?(node) : any_block?(node)
+            visit(node.block.body, calls, scope, instance_defs) if entered
           when Prism::DefNode
             visit(node.body, calls, node, instance_defs) if (instance_defs && node.receiver.nil?) ||
                                                             node.receiver.is_a?(Prism::SelfNode)
@@ -239,6 +240,13 @@ module Rigor
           end
         end
         private_class_method :visit
+
+        # Issue #3006 — a class body's calls include those in any block written there (`KINDS.each { … }`, a concern's
+        # `included do … end`): a computed `send` in one may mix into the class, or into what the block's `self` is.
+        def any_block?(call)
+          call.block.is_a?(Prism::BlockNode)
+        end
+        private_class_method :any_block?
 
         def self_keeping_block?(call)
           return false unless call.block.is_a?(Prism::BlockNode) && SELF_KEEPING_ITERATORS.include?(call.name)

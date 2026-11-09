@@ -8055,26 +8055,43 @@ module Rigor
       # may be an `include`, `prepend` or `extend` the walk cannot record: it lists {MixinAccumulator::UNNAMED} on
       # `side` of the enclosing class when the name may be one of `kinds`. A name that is a local of the call's scope
       # bound only to name literals is read as those names ({#local_send_names}), so `m = :attr_reader; send(m, :x)`
-      # marks nothing.
-      def taint_computed_mixin_send(node, current_class, accumulator, kinds, side)
+      # marks nothing. A hook parameter's `base.send(meth, M)` is read wherever the hook is, as
+      # {#taint_unrecorded_mixin} reads `base.send(:include, M)`.
+      def taint_computed_mixin_send(node, current_class, accumulator, kinds, side, in_singleton: false)
         return unless current_class
 
-        name = computed_send_name(node)
+        name = computed_send_name(node, accumulator)
         return if name.nil?
 
         scope = accumulator.class_body_scope(node)
-        return if scope.nil?
+        hook = hook_parameter_receiver?(node.receiver, accumulator)
+        return if scope.nil? && !hook
 
-        names = local_send_names(name, scope)
+        names = scope && local_send_names(name, scope)
+        # Inside `class << self` the instance walk is ownerless, so this walk keeps the hook's instance-side taint too,
+        # as {#record_extend_call} does for `base.send(:include, M)`.
+        sides = in_singleton ? [side, :include] : [side]
+        return taint_computed_hook_send(current_class, accumulator, names, sides) if hook
         return if names&.none? { |literal| kinds.any? { |kind| kind.name == literal } }
 
         accumulator.taint(current_class, side, unnamed: true)
       end
 
-      # The name argument of a receiverless or `self.` `send`-family call that passes at least one further argument,
-      # when no literal spells it; else nil.
-      def computed_send_name(node)
-        return unless SEND_CALL_NAMES.include?(node.name) && lexical_self_receiver?(node.receiver)
+      # A hook parameter's computed `send`, read as {#taint_unrecorded_mixin} reads the literal one: it taints the
+      # enclosing module's `sides` when the name may be any mixin's, and lists the unnamed marker on the instance side
+      # alone, when the name may be `include` or `prepend`.
+      def taint_computed_hook_send(current_class, accumulator, names, sides)
+        return if names&.none? { |literal| MIXIN_KINDS.any? { |kind| kind.name == literal } }
+
+        instance = names.nil? || names.any? { |literal| INSTANCE_MIXIN_NAMES.any? { |kind| kind.name == literal } }
+        sides.each { |side| accumulator.taint(current_class, side, unnamed: side == :include && instance) }
+      end
+
+      # The name argument of a receiverless, `self.` or hook-parameter `send`-family call that passes at least one
+      # further argument, when no literal spells it; else nil.
+      def computed_send_name(node, accumulator)
+        return unless SEND_CALL_NAMES.include?(node.name)
+        return unless lexical_self_receiver?(node.receiver) || hook_parameter_receiver?(node.receiver, accumulator)
 
         arguments = node.arguments&.arguments
         return if arguments.nil? || arguments.size < 2
@@ -8754,7 +8771,7 @@ module Rigor
           # Inside `class << self` a computed `include` / `prepend` reaches the singleton side; an `extend` reaches the
           # singleton's own singleton, which nothing names.
           kinds = in_singleton ? INSTANCE_MIXIN_NAMES : EXTEND_MIXIN_NAMES
-          return taint_computed_mixin_send(node, current_class, accumulator, kinds, :extend)
+          return taint_computed_mixin_send(node, current_class, accumulator, kinds, :extend, in_singleton: in_singleton)
         end
 
         effects = mixin_effects(node, kind, qualified_prefix, current_class, accumulator, in_singleton: in_singleton)

@@ -64,6 +64,36 @@ RSpec.describe "a class body's computed-name `send` read as a mixin (#3006)" do
     expect(check("  m = :attr_reader\n  [:include].each { |m| send(m, M1) }\n  def t = self.m1\n")).to be_empty
   end
 
+  it "does not fire after a computed `send` in a block on a constant receiver" do
+    expect(check("  KINDS = [:include]\n  KINDS.each { |m| send(m, M1) }\n  def t = self.m1\n")).to be_empty
+  end
+
+  it "does not fire on a subclass in another file after a computed `send` in a block on a constant receiver" do
+    files = { "a.rb" => "#{mods}class H\n  KINDS = [:include]\n  KINDS.each { |m| send(m, M1) }\nend\n",
+              "b.rb" => "class Sub < H\n  def u = self.m1\nend\n" }
+    expect(undefined_messages(files, "class H\nend\nclass Sub < H\nend\n")).to be_empty
+  end
+
+  def check_includer(con_body, includer_body)
+    source = "#{mods}module Con\n#{con_body}end\nclass P\n  include Con\n#{includer_body}end\n"
+    undefined_messages({ "a.rb" => source }, "class P\nend\nmodule Con\nend\n")
+  end
+
+  it "does not fire on a class including a concern whose `included do` block runs a computed `send`" do
+    con = "  extend ActiveSupport::Concern\n  included do\n    k = :include\n    send(k, M1)\n  end\n"
+    expect(check_includer(con, "  def t = self.m1\n")).to be_empty
+  end
+
+  it "does not fire on a class including a module whose hook sends a computed name to its parameter" do
+    hook = "  def self.included(base)\n    meth = :include\n    base.send(meth, M1)\n  end\n"
+    expect(check_includer(hook, "  def t = self.m1\n")).to be_empty
+  end
+
+  it "still fires on a class including a module whose hook sends a non-mixin computed name to its parameter" do
+    hook = "  def self.included(base)\n    meth = :attr_reader\n    base.send(meth, :x)\n  end\n"
+    expect(check_includer(hook, "  def t = self.nope\n")).to eq(["undefined method `nope' for P"])
+  end
+
   it "does not fire on a subclass declared in another file" do
     files = { "a.rb" => "#{mods}class H\n  meth = :prepend\n  send(meth, M1)\nend\n",
               "b.rb" => "class Sub < H\n  def u = self.m1\nend\n" }

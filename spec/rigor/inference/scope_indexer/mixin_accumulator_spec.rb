@@ -530,6 +530,25 @@ RSpec.describe Rigor::Inference::ScopeIndexer::MixinAccumulator do
       expect(unpositioned(source).keys).to eq(%w[A B])
     end
 
+    it "lists it on a hook's module for a computed `send` to the hook parameter, as for a literal one",
+       :aggregate_failures do
+      hook = ->(body) { "module Con\n  def self.included(base)\n    #{body}\n  end\nend\n" }
+      expect(unpositioned(hook.call("meth = :include\n    base.send(meth, M)")))
+        .to eq("Con" => { include: ["*", "?"], extend: ["*"] })
+      expect(unpositioned(hook.call("meth = :extend\n    base.send(meth, M)")))
+        .to eq("Con" => { include: ["*"], extend: ["*"] })
+      expect(unpositioned(hook.call("meth = :attr_reader\n    base.send(meth, :x)"))).to eq({})
+      singleton = "module Con\n  class << self\n    def included(base)\n      meth = :include\n      " \
+                  "base.send(meth, M)\n    end\n  end\nend\n"
+      expect(unpositioned(singleton)).to eq("Con" => { extend: ["*"], include: ["*", "?"] })
+    end
+
+    # The extends walk does not enter a block on a receiver it cannot vouch runs (#1592), so only the instance side
+    # lists the marker; an unnamed instance-side module opens the class object too, through its `included` hook (#2994).
+    it "lists it for a computed `send` in a block on a constant receiver" do
+      expect(unpositioned("class C\n  KINDS.each { |m| send(m, M) }\nend\n")).to eq("C" => { include: ["*", "?"] })
+    end
+
     it "does not list it for a literal non-mixin name, or a local bound in a nested `def`", :aggregate_failures do
       ["send(:attr_reader, :x)",
        "m = :attr_reader\n  send(m, :x)\n  def self.k\n    m = :include\n  end"].each do |body|

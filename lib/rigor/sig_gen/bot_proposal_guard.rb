@@ -228,8 +228,7 @@ module Rigor
         @calls[node] ||= begin
           out = []
           stack = node.body ? [node.body] : []
-          until stack.empty?
-            current = stack.pop
+          while (current = stack.pop)
             next if current.is_a?(Prism::DefNode)
 
             out << current if current.is_a?(Prism::CallNode)

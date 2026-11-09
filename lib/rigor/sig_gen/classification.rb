@@ -48,6 +48,15 @@ module Rigor
         # Issue #744 — a project subclass overrides this method and its override is NOT emitted, so the
         # declaration would be inherited by a subclass it does not describe.
         overridden_by_unsigned_subclass: "sig.skipped.overridden-by-unsigned-subclass",
+        # #3029 — the inferred return is `bot` and the analysed code overrides the method (a subclass, signed or
+        # not, or a class or module that includes it), so `bot` describes only the base body the overrides replace.
+        overridden_bot: "sig.skipped.overridden-bot",
+        # #3029 — the inferred return is `bot` from an abstract-style raise (`NotImplementedError`, "please
+        # implement"), with no override in the analysed code. Implementations may live outside it.
+        abstract_method: "sig.skipped.abstract-method",
+        # #3029 — the inferred return is `bot` and the body calls an overridden or abstract method, directly or
+        # through self-dispatch, so the `bot` may be only that method's base body.
+        template_method: "sig.skipped.template-method",
         # ADR-112 WD4 — `sig_gen.inline_declared: skip` is set and the inline reader declares this member, so
         # a `sig/` copy would be a second declaration of it for a Steep that reads the inline annotations too.
         inline_declared: "sig.skipped.inline-declared",

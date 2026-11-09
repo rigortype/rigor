@@ -17,6 +17,7 @@ require_relative "../inference/def_return_typer"
 require_relative "../inference/scope_indexer"
 require_relative "../inference/project_seed_tables"
 require_relative "../inference/module_function_state"
+require_relative "bot_proposal_guard"
 require_relative "../inference/rbs_type_translator"
 require_relative "alias_index"
 require_relative "meta_class_shape"
@@ -183,8 +184,10 @@ module Rigor
           resolved.flat_map { |path| analyse_file(path, @environment) }
         end
         demoted = demote_overridden_base_methods(
-          demote_unresolvable_superclasses(
-            demote_generic_reopenings(demote_inline_generic_classes(resolve_superclass_spellings(candidates)))
+          demote_bot_proposals(
+            demote_unresolvable_superclasses(
+              demote_generic_reopenings(demote_inline_generic_classes(resolve_superclass_spellings(candidates)))
+            )
           )
         )
         # Again after the override demotion: a demoted method can leave its file with nothing to write, and a class
@@ -392,6 +395,22 @@ module Rigor
           next candidate unless overridden.include?([candidate.class_name, candidate.method_name])
 
           demoted_candidate(candidate, :overridden_by_unsigned_subclass)
+        end
+      end
+
+      # Issue #3029 — an emittable `-> bot` proposal for an overridden, abstract or template method is skipped
+      # ({BotProposalGuard}). It runs before {#demote_overridden_base_methods}, so a subclass's `bot` override this
+      # skips counts there as an override that is not emitted, and its parent's declaration is held back too.
+      def demote_bot_proposals(candidates)
+        guard = nil
+        candidates.map do |candidate|
+          next candidate unless Classification::EMITTABLE.include?(candidate.classification)
+          next candidate if candidate.classification == Classification::INLINE_OVERWRITE
+          next candidate unless candidate.inferred_return.is_a?(Type::Bot)
+
+          guard ||= BotProposalGuard.new(project_tables)
+          reason = guard.reason_for(candidate)
+          reason ? demoted_candidate(candidate, reason) : candidate
         end
       end
 

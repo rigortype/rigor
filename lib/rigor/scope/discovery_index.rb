@@ -293,13 +293,18 @@ module Rigor
       # definition Ruby keeps is load order.
       ENVELOPE_HOOK_DEF_KIND = :hook_def
       ENVELOPE_HOOK_BODY_CALL_KIND = :hook_body_call
+      # Issue #2992 — `[ENVELOPE_CONCERN_DEPENDENCY_KIND, "Dep"]`: the module's body runs `include Dep` (or `prepend
+      # Dep`) after its own `extend ActiveSupport::Concern`, so a concern `Dep` is a dependency of the module, which
+      # ActiveSupport includes into the module's final includer instead. Filed only on the module whose body the walk
+      # is in, as the hook-body-call entry is.
+      ENVELOPE_CONCERN_DEPENDENCY_KIND = :concern_dependency
       # Issue #2979 — `[ENVELOPE_SAME_CLASS_KIND, "Struct::Named"]` on `K`'s bucket, and its mirror on
       # `Struct::Named`'s, say that `K = Struct.new("Named", …)` binds both constants to one class object: the method
       # chain of either name reads the other's tables at its own position ({.same_class_names}). It names no member.
       ENVELOPE_SAME_CLASS_KIND = :same_class
       MACRO_KINDS = [ENVELOPE_BODY_CALL_KIND, ENVELOPE_COMPUTED_DEFINER_KIND, ENVELOPE_HOOK_EXTEND_KIND,
                      ENVELOPE_HOOK_EXTEND_OPEN_KIND, ENVELOPE_HOOK_DEF_KIND, ENVELOPE_HOOK_BODY_CALL_KIND,
-                     ENVELOPE_SAME_CLASS_KIND].freeze
+                     ENVELOPE_CONCERN_DEPENDENCY_KIND, ENVELOPE_SAME_CLASS_KIND].freeze
       private_constant :MACRO_KINDS
 
       NO_NAMES = [].freeze

@@ -5214,6 +5214,7 @@ module Rigor
         key = [Scope::DiscoveryIndex::ENVELOPE_HOOK_EXTEND_KIND, "ClassMethods", :const_get]
         record_envelope(methods_acc.at(node).envelopes, owner, key, Source::ParameterEnvelope::OPAQUE)
         class_methods_prefix = [*child_prefix, "ClassMethods"]
+        record_concern_dependencies(node.body.body, child_prefix, owner, methods_acc)
         node.body.body.each do |statement|
           next unless block_statement?(statement)
 
@@ -5225,6 +5226,29 @@ module Rigor
             end
           elsif CONCERN_HOOK_BLOCKS.include?(statement.name)
             record_concern_hook_block(statement, owner, methods_acc)
+          end
+        end
+      end
+
+      # Issue #2992 — `Concern#append_features` (or `prepend_features`) of a concern `include`d (or `prepend`ed) into a
+      # module that has already run `extend ActiveSupport::Concern` records it as a dependency of that module and
+      # includes nothing; the module's final includer includes it. Only a constant argument of a receiverless
+      # `include` / `prepend` written as a statement of the body AFTER the body's own `extend` is provably such a
+      # dependency: one written ahead of it, or in a reopening without it, may run first and is an ordinary include.
+      # Each such constant takes a `[ENVELOPE_CONCERN_DEPENDENCY_KIND, written]` entry; whether it names a concern is
+      # the reader's question.
+      def record_concern_dependencies(statements, child_prefix, owner, methods_acc)
+        extend_at = statements.index { |statement| concern_extend?(statement, child_prefix) }
+        statements.drop(extend_at + 1).each do |statement|
+          next unless statement.is_a?(Prism::CallNode) && statement.receiver.nil? &&
+                      MIXIN_CALL_NAMES.include?(statement.name) && statement.block.nil?
+
+          (statement.arguments&.arguments || []).each do |argument|
+            written = Source::ConstantPath.qualified_name_or_nil(argument)
+            next if written.nil?
+
+            key = [Scope::DiscoveryIndex::ENVELOPE_CONCERN_DEPENDENCY_KIND, written]
+            record_envelope(methods_acc.at(statement).envelopes, owner, key, Source::ParameterEnvelope::OPAQUE)
           end
         end
       end
@@ -5252,13 +5276,15 @@ module Rigor
       def concern_body?(body, child_prefix)
         return false unless body.is_a?(Prism::StatementsNode)
 
-        body.body.any? do |statement|
-          next false unless statement.is_a?(Prism::CallNode) && statement.name == :extend && statement.receiver.nil?
+        body.body.any? { |statement| concern_extend?(statement, child_prefix) }
+      end
 
-          (statement.arguments&.arguments || []).any? do |argument|
-            written = Source::ConstantPath.qualified_name_or_nil(argument)&.delete_prefix("::")
-            written == "ActiveSupport::Concern" || (written == "Concern" && child_prefix.first == "ActiveSupport")
-          end
+      def concern_extend?(statement, child_prefix)
+        return false unless statement.is_a?(Prism::CallNode) && statement.name == :extend && statement.receiver.nil?
+
+        (statement.arguments&.arguments || []).any? do |argument|
+          written = Source::ConstantPath.qualified_name_or_nil(argument)&.delete_prefix("::")
+          written == "ActiveSupport::Concern" || (written == "Concern" && child_prefix.first == "ActiveSupport")
         end
       end
 
@@ -5281,15 +5307,15 @@ module Rigor
       # The calls on `self` (no receiver, or `self.`) an `included` / `prepended` block body makes, not those in a
       # nested `def`, class, module, singleton-class or lambda body.
       #
-      # Issue #2992 — a block that keeps `self` (`[1].each { my_c :x }`) runs its calls on the includer too, so the
-      # walk enters it, as {#runs_computed_self_definer?} does. A block that rebinds `self` ({#rebinds_self_block?})
-      # stays out; its call's receiver and arguments are still read.
+      # Issue #2992 — a block that keeps `self` and runs as the block body runs (`[1].each { my_c :x }`) makes its
+      # calls on the includer too, so the walk enters it ({#self_call_block?}). Any other block stays out; its call's
+      # receiver and arguments are still read.
       def each_self_call(node, &)
         case node
         when *SELF_CALL_STOPS then nil
         when Prism::CallNode
           yield node if node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode)
-          if rebinds_self_block?(node)
+          if node.block.is_a?(Prism::BlockNode) && !self_call_block?(node)
             [node.receiver, node.arguments].each { |part| each_self_call(part, &) }
           else
             node.rigor_each_child { |child| each_self_call(child, &) }
@@ -5297,6 +5323,23 @@ module Rigor
         else node&.rigor_each_child { |child| each_self_call(child, &) }
         end
       end
+
+      # Whether a call's block runs on the includer while the hook block runs: not one that rebinds `self`
+      # ({#rebinds_self_block?}), not a receiverless `lambda` / `proc`, whose block runs only when called, and, on a
+      # receiver other than `self`, only an iterator's (`Proc.new { }` and `ActiveSupport.on_load(:x) { }` defer it).
+      def self_call_block?(node)
+        return false if rebinds_self_block?(node)
+
+        receiver = node.receiver
+        return !DEFERRED_BLOCK_CALLS.include?(node.name) if receiver.nil?
+
+        receiver.is_a?(Prism::SelfNode) || SELF_CALL_ITERATORS.include?(node.name)
+      end
+
+      DEFERRED_BLOCK_CALLS = %i[lambda proc].freeze
+      SELF_CALL_ITERATORS = %i[each each_with_index each_with_object each_pair each_key each_value map flat_map
+                               filter_map select reject times upto downto step tap then].to_set.freeze
+      private_constant :DEFERRED_BLOCK_CALLS, :SELF_CALL_ITERATORS
 
       CONCERN_BLOCK_STOPS = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode,
                              Prism::BlockNode, Prism::LambdaNode].freeze

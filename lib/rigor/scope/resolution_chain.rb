@@ -450,19 +450,53 @@ module Rigor
 
             out << [:mixin, mixin].freeze
             hook_extend_keys(discovery, mixin).each { |key| out << [:spelling, key[1]].freeze }
+            concern_dependency_edges(discovery, resolver, mixin, out)
           end
         end.uniq.freeze
       end
 
-      # Issue #2992 — the concerns a concern `mixin` includes or prepends, at any depth through concerns, nearest
-      # first, without `mixin`: `Concern#append_features` records each as a dependency of `mixin` and includes it
-      # into `mixin`'s final includer, so the includer's singleton chain gains what each one's hooks extend it with.
-      # Empty when `mixin` is no concern. A dependency the walk meets twice is listed once, at its nearest place.
+      # Issue #2992 — the edges of a concern mixin's dependency read ({.concern_dependencies}): every module its
+      # dependency entries name, a concern or not yet one (a file that adds `extend ActiveSupport::Concern` to it
+      # turns it into one), as a mixin, with the modules its hooks extend by name; a spelling no module answers files
+      # its negative class edge. A concern among them is followed further.
+      def self.concern_dependency_edges(discovery, resolver, mixin, out, seen = [mixin])
+        return unless concern_bucket?(discovery, mixin)
+
+        dependency_spellings(discovery, mixin).each do |raw|
+          dependency = resolver.resolve_declared(mixin, raw)
+          next out << [:spelling, raw].freeze if dependency.nil?
+          next if seen.include?(dependency)
+
+          seen << dependency
+          out << [:mixin, dependency].freeze
+          hook_extend_keys(discovery, dependency).each { |key| out << [:spelling, key[1]].freeze }
+          concern_dependency_edges(discovery, resolver, dependency, out, seen)
+        end
+      end
+      private_class_method :concern_dependency_edges
+
+      # The `[ENVELOPE_CONCERN_DEPENDENCY_KIND, written]` spellings of a module's bucket, nearest first (a later
+      # statement's ahead of an earlier one's).
+      def self.dependency_spellings(discovery, name)
+        bucket = discovery.discovered_parameter_envelopes[name]
+        return EMPTY_NAMES if bucket.nil?
+
+        bucket.each_key.filter_map do |key|
+          key[1] if key.is_a?(Array) && key.first == DiscoveryIndex::ENVELOPE_CONCERN_DEPENDENCY_KIND
+        end.reverse.uniq
+      end
+
+      # Issue #2992 — the concerns a concern `mixin` provably takes as dependencies (its
+      # `[ENVELOPE_CONCERN_DEPENDENCY_KIND, written]` entries: an `include` or `prepend` after its own `extend
+      # ActiveSupport::Concern`), at any depth through concerns, nearest first, without `mixin`:
+      # `Concern#append_features` records each as a dependency of `mixin` and includes it into `mixin`'s final
+      # includer, so the includer's singleton chain gains what each one's hooks extend it with. Empty when `mixin` is
+      # no concern. A dependency the walk meets twice is listed once, at its nearest place.
       def self.concern_dependencies(discovery, resolver, mixin, seen = [mixin])
         return EMPTY_NAMES unless concern_bucket?(discovery, mixin)
 
         out = []
-        (discovery.discovered_includes[mixin] || EMPTY_NAMES).uniq.each do |raw|
+        dependency_spellings(discovery, mixin).each do |raw|
           dependency = resolver.resolve_declared(mixin, raw)
           next if dependency.nil? || seen.include?(dependency) || !concern_bucket?(discovery, dependency)
 
@@ -1261,6 +1295,7 @@ module Rigor
           each_hooked_mixin(name, includes) do |raw, mixin, hooks, loose|
             unpositioned = loose || listed.include?(raw) || listed.include?(WILDCARD_LIST.first)
             merge_targets(plan, hook_targets(mixin, hooks), unpositioned)
+            plan.open ||= uncertain_dependencies?(mixin)
           end
           # Two files' includes run in load order.
           plan.ordered &&= plan.extends.size + plan.prepends.size < 2 || !multi_file?(name)
@@ -1303,6 +1338,22 @@ module Rigor
             dependencies = ResolutionChain.concern_dependencies(@discovery, @resolver, mixin)
             loose = dependencies.size > 1 && dependencies.any? { |member| loose_dependencies?(member, mixin) }
             dependencies.each { |dependency| yield raw, dependency, hooks, loose }
+          end
+        end
+
+        # Issue #2992 — whether a concern declared in two files includes a concern its dependency entries do not name:
+        # written in a reopening without the `extend ActiveSupport::Concern`, that `include` is a dependency when the
+        # reopening loads after the `extend` and an ordinary include of the concern itself when it loads first, so the
+        # includer may or may not be extended with that concern's modules.
+        def uncertain_dependencies?(mixin)
+          return false unless concern?(mixin) && multi_file?(mixin)
+
+          spellings = ResolutionChain.dependency_spellings(@discovery, mixin)
+          (@discovery.discovered_includes[mixin] || EMPTY).any? do |raw|
+            next false if spellings.include?(raw)
+
+            dependency = @resolver.resolve_declared(mixin, raw)
+            !dependency.nil? && concern?(dependency)
           end
         end
 

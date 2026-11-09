@@ -1080,10 +1080,11 @@ module Rigor
         # entry of the receiver's chain (`owner`) against that entry's own mixins, one hop. A concern included into a
         # concern after its `extend ActiveSupport::Concern` runs no block there: `Concern#append_features` records it as
         # a dependency, and the outer concern's final includer includes it, on that includer's own edge
-        # ({#with_concern_dependencies}). An `include` written ahead of the `extend`, or in a reopening that loads
-        # first, is an ordinary one, and the tables keep neither order, so both readings are made and either answers.
+        # ({#with_concern_dependencies}). Only a mixin whose one `include` / `prepend` statement is such a dependency
+        # is left out of `owner`'s own read: one written ahead of the `extend`, or again in a reopening that may load
+        # first, is an ordinary include there.
         def hook_block_macro_defines?(scope, owner)
-          own_mixin_edges(scope, owner).any? do |mixin, edges|
+          own_mixin_edges(scope, owner, deferred: true).any? do |mixin, edges|
             macros = scope.parameter_envelopes_of(mixin).each_key.filter_map do |key|
               key[2] if key.is_a?(Array) && key.first == Scope::DiscoveryIndex::ENVELOPE_HOOK_BODY_CALL_KIND &&
                         edges.include?(key[1])
@@ -1105,10 +1106,12 @@ module Rigor
           chain.level_classes.compact.flat_map { |klass| own_mixin_edges(scope, klass) }
         end
 
-        # The modules `owner` itself includes or prepends, as {#direct_hook_mixins} gives them.
-        def own_mixin_edges(scope, owner)
+        # The modules `owner` itself includes or prepends, as {#direct_hook_mixins} gives them. With `deferred:`, a
+        # provable dependency of a concern `owner` is left out ({#hook_block_macro_defines?}).
+        def own_mixin_edges(scope, owner, deferred: false)
           mixins = scope.includes_of(owner)
           prepends = scope.prepends_of(owner)
+          deferred_mixins = deferred ? deferred_dependencies(scope, owner, mixins) : NO_DEFERRED
           mixins.uniq.flat_map do |raw|
             mixin = declared_constant(scope, owner, raw)
             next [] unless mixin
@@ -1116,7 +1119,27 @@ module Rigor
             edges = []
             edges << :prepended if prepends.include?(raw)
             edges << :included if mixins.count(raw) > prepends.count(raw)
+            next [] if deferred_mixins.include?(raw)
+
             with_concern_dependencies(scope, mixin).map { |member| [member, edges] }
+          end
+        end
+
+        NO_DEFERRED = [].freeze
+        private_constant :NO_DEFERRED
+
+        # The spellings among `owner`'s mixins that name a concern dependency of `owner`, when `owner` is declared in
+        # one file: a reopening may write the same `include` without the `extend`, and load first.
+        def deferred_dependencies(scope, owner, mixins)
+          sites = scope.discovery.discovered_class_sources[owner.to_s]
+          return NO_DEFERRED if sites.nil? || sites.size > 1
+
+          resolver = Scope::ResolutionChain.resolver_for(scope, :methods)
+          dependencies = Scope::ResolutionChain.concern_dependencies(scope.discovery, resolver, owner)
+          return NO_DEFERRED if dependencies.empty?
+
+          Scope::ResolutionChain.dependency_spellings(scope.discovery, owner).select do |raw|
+            mixins.include?(raw) && dependencies.include?(resolver.resolve_declared(owner, raw))
           end
         end
 

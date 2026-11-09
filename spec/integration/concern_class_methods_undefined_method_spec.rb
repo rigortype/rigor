@@ -231,13 +231,21 @@ RSpec.describe "ActiveSupport::Concern class_methods macros and call.undefined-m
       expect(undefined_messages).to be_empty
     end
 
-    # Known limit: Ruby raises here, since `Cy` is a dependency and `prepend Oy` prepends it. An `include` written ahead
-    # of `extend ActiveSupport::Concern` (the next row) or in a reopening that loads first is an ordinary one, whose
-    # block runs on `Oy`'s own edge; the tables keep neither order, so the reader takes both edges.
-    it "reads a dependency's included block for a class that prepends the outer concern" do
+    # `Cy` is included after `Oy`'s `extend ActiveSupport::Concern`, so it is a dependency and `prepend Oy` prepends it.
+    it "does not read a dependency's included block for a class that prepends the outer concern" do
       write_project("class Ky\n  prepend Oy\nend\n", %w[Ky.new.y],
                     extra_files: { "cy.rb" => block_concern("Cy", included: "my_c :y"),
                                    "oy.rb" => outer("Oy", "include", "Cy") })
+      expect(undefined_messages).to eq(["undefined method `y' for Ky"])
+    end
+
+    # An `include` ahead of the `extend` (the next row) or in a reopening without it, which may load first, is an
+    # ordinary one, whose block runs in the outer concern on its own edge.
+    it "reads an included block of a concern included in a reopening of the outer concern" do
+      reopened = "module Or\n  include Cr\nend\n"
+      write_project("class Kr\n  prepend Or\nend\n", %w[Kr.new.r],
+                    extra_files: { "cr.rb" => block_concern("Cr", included: "my_c :r"), "or_a.rb" => reopened,
+                                   "or_b.rb" => "module Or\n  extend ActiveSupport::Concern\n  include Cr\nend\n" })
       expect(undefined_messages).to be_empty
     end
 
@@ -267,6 +275,27 @@ RSpec.describe "ActiveSupport::Concern class_methods macros and call.undefined-m
       write_project("class Kd\n  include Rd\nend\n", %w[Kd.new.d],
                     extra_files: { "rd.rb" => block_concern("Rd", included: "define_method(:later) { my_c :d }") })
       expect(undefined_messages).to eq(["undefined method `d' for Kd"])
+    end
+
+    # Issue #2992 — a lambda's, a proc's and `on_load`'s blocks run later, if at all, not on the includer as the block
+    # runs.
+    {
+      "a lambda" => "@later = lambda { my_c :DEF }",
+      "a Proc.new" => "@later = Proc.new { my_c :DEF }",
+      "an on_load hook" => "ActiveSupport.on_load(:never_loaded) { my_c :DEF }"
+    }.each_with_index do |(label, call), index|
+      it "does not read a macro call in #{label} block" do
+        name = "Dl#{index}"
+        write_project("class K#{name}\n  include #{name}\nend\n", ["K#{name}.new.l#{index}"],
+                      extra_files: { "dl#{index}.rb" => block_concern(name, included: call.sub("DEF", "l#{index}")) })
+        expect(undefined_messages).to eq(["undefined method `l#{index}' for K#{name}"])
+      end
+    end
+
+    it "reads a macro call in an iterator block on a constant" do
+      write_project("NAMES = %i[n1].freeze\nclass Kn\n  include Rn\nend\n", %w[Kn.new.n1],
+                    extra_files: { "rn.rb" => block_concern("Rn", included: "NAMES.each { |n| my_c n }") })
+      expect(undefined_messages).to be_empty
     end
 
     # `extend` runs `extended`, not `included`.

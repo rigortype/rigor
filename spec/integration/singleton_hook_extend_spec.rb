@@ -310,6 +310,33 @@ RSpec.describe "singleton-side mixins a hook adds (#1592)" do
     expect(undefined_messages).to eq(["undefined method `zork' for \"s\"", "undefined method `zork' for :od"])
   end
 
+  # Issue #2992 — only an `include` after the outer concern's own `extend ActiveSupport::Concern` makes a dependency.
+  # One ahead of it, or in a reopening without it, is an ordinary include: `Dep`'s hook then extends `Outer` itself,
+  # and `K` answers `v` from `Base`.
+  describe "a concern included into a concern" do
+    let(:dep) { concern("Dv", "  class_methods do\n    def v = \"s\"\n  end\n") }
+    let(:own) { "  class_methods do\n    def own = 1\n  end\n" }
+    let(:includer) { "class Base\n  def self.v = 1\nend\nclass Kv < Base\n  include Ov\nend\nclass Pv < Base\n  prepend Ov\nend\n" }
+
+    it "answers the dependency's ClassMethods for an include after the extend" do
+      write_project(dep, includer, ["Kv.v.zork", "Pv.v.zork"], extra: { "ov.rb" => concern("Ov", "  include Dv\n#{own}") })
+      expect(undefined_messages).to eq(["undefined method `zork' for \"s\"", "undefined method `zork' for \"s\""])
+    end
+
+    it "does not answer it for an include ahead of the extend" do
+      outer = "module Ov\n  include Dv\n  extend ActiveSupport::Concern\n#{own}end\n"
+      write_project(dep, includer, ["Kv.v.zork", "Pv.v.zork"], extra: { "ov.rb" => outer })
+      expect(undefined_messages).to eq(["undefined method `zork' for 1", "undefined method `zork' for 1"])
+    end
+
+    # Ruby answers 1 when the reopening loads first and "s" when it loads after the `extend`, so the read declines.
+    it "declines for an include in a reopening without the extend" do
+      write_project(dep, includer, ["Kv.v.zork", "Pv.v.zork"],
+                    extra: { "ov_a.rb" => "module Ov\n  include Dv\nend\n", "ov_b.rb" => concern("Ov", own) })
+      expect(undefined_messages).to be_empty
+    end
+  end
+
   def bar_methods(value) = "  class_methods do\n    def bar = :#{value}\n  end\n"
 
   # `include Ca8; include Cb8` includes `Cb8` last, so its `ClassMethods` is nearer.

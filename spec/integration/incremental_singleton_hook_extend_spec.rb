@@ -130,6 +130,24 @@ RSpec.describe "incremental edges for a hook-extended singleton module (#1592)",
                             first: reported(1), second: reported(":cm"))
   end
 
+  # `Dt`'s hook extends with another spelling than `ClassMethods`, which only the dependency's own edges name.
+  it "re-checks the call when a dependency concern's file gains an included block's extend" do
+    dependency = "module Dt\n  extend ActiveSupport::Concern\n  def dt_own = 1\n%send\n"
+    outer = { "lib/ct.rb" => concern("  include Dt\n") }
+    expect_toggle(files.merge(outer), before: format(dependency, ""),
+                                      after: format(dependency, "  included do\n    extend X\n  end\n"),
+                                      first: reported(1), second: reported('"X"'))
+  end
+
+  # `Dt` turns into a concern, and with it into a dependency of `Ct`, whose `ClassMethods` then reaches `Kt`.
+  it "re-checks the call when an included module's file makes it a concern" do
+    dependency = "module Dt\n%s  def dt_own = 1\n  module ClassMethods\n    def bar = :cm\n  end\nend\n"
+    outer = { "lib/ct.rb" => concern("  include Dt\n  class_methods do\n    def other = 1\n  end\n") }
+    expect_toggle(files.merge(outer), before: format(dependency, ""),
+                                      after: format(dependency, "  extend ActiveSupport::Concern\n"),
+                                      first: reported(1), second: reported(":cm"))
+  end
+
   # Ruby keeps whichever definition loaded last, so with two the read declines.
   describe "a second file that redefines the hook" do
     let(:hooked) { files.merge("lib/ct.rb" => "module Ct\n  def self.included(base) = base.extend(X)\nend\n") }

@@ -5483,8 +5483,9 @@ module Rigor
 
       DEFERRED_BLOCK_CALLS = %i[lambda proc].freeze
       # The callback macros of ActiveModel (validations), ActiveRecord (`Callbacks::CALLBACKS`, transactions),
-      # ActiveJob (callbacks, `after_discard`), AbstractController, ActionMailer and ActionCable (channel, connection),
-      # read from Rails 8.1.3.
+      # ActiveJob (callbacks, `after_discard`), AbstractController (with its `prepend_` / `append_` forms),
+      # ActionMailer, ActionMailbox, ActionCable (channel, connection), ActiveSupport::CurrentAttributes and
+      # ActiveSupport::Reloader, read from Rails 8.1.3.
       CALLBACK_MACROS = %i[
         before_validation after_validation
         after_initialize after_find after_touch
@@ -5494,6 +5495,10 @@ module Rigor
         after_save_commit after_create_commit after_update_commit after_destroy_commit
         before_perform around_perform after_perform before_enqueue around_enqueue after_enqueue after_discard
         before_action around_action after_action
+        prepend_before_action prepend_around_action prepend_after_action
+        append_before_action append_around_action append_after_action
+        before_processing around_processing after_processing
+        before_reset after_reset before_class_unload after_class_unload
         before_deliver around_deliver after_deliver
         before_subscribe after_subscribe before_unsubscribe after_unsubscribe
         before_command around_command after_command

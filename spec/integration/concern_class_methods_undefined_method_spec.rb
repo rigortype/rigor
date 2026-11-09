@@ -302,6 +302,14 @@ RSpec.describe "ActiveSupport::Concern class_methods macros and call.undefined-m
       expect(undefined_messages).to eq(["undefined method `cb' for Kcb"])
     end
 
+    # ActionMailbox's callback; the stub here keeps its block and never runs it.
+    it "does not read a macro call in another framework callback macro's block" do
+      base = "class Bbp\n  def self.before_processing(&) = nil\nend\n"
+      write_project("#{base}class Kbp < Bbp\n  include Rbp\nend\n", %w[Kbp.new.bp],
+                    extra_files: { "rbp.rb" => block_concern("Rbp", included: "before_processing { my_c :bp }") })
+      expect(undefined_messages).to eq(["undefined method `bp' for Kbp"])
+    end
+
     # Issue #3000 — a project macro named like a callback that yields at once runs its block on the includer as the
     # included block runs; only a framework callback macro's name stops the walk.
     {
@@ -314,6 +322,24 @@ RSpec.describe "ActiveSupport::Concern class_methods macros and call.undefined-m
                       extra_files: { "pm#{index}.rb" => block_concern(name, included: "#{macro} { my_c :p#{index} }") })
         expect(undefined_messages).to be_empty
       end
+    end
+
+    # Only `Kernel`'s `lambda` / `proc` keep the block; another receiver's method so named may yield at once.
+    it "reads a macro call in the block of a proc method on another receiver" do
+      write_project("class Kop\n  include Rop\nend\n", %w[Kop.new.op],
+                    extra_files: { "rop.rb" => block_concern(
+                      "Rop", included: "o = Object.new\n    def o.proc = yield\n    o.proc { my_c :op }"
+                    ) })
+      expect(undefined_messages).to be_empty
+    end
+
+    it "reads a macro call in the block of a lambda method on a constant named Kernel in another namespace" do
+      foo = "module Foo\n  module Kernel\n    def self.lambda = yield\n  end\nend\n"
+      sig = "module Foo\n  module Kernel\n  end\nend\nclass Kfk\nend\nmodule Rfk\nend\n"
+      write_project("class Kfk\n  include Rfk\nend\n", %w[Kfk.new.fk], sig: sig,
+                    extra_files: { "foo.rb" => foo,
+                                   "rfk.rb" => block_concern("Rfk", included: "Foo::Kernel.lambda { my_c :fk }") })
+      expect(undefined_messages).to be_empty
     end
 
     {

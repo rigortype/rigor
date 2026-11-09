@@ -1,0 +1,5 @@
+- **[check]** A `send`, `public_send` or `__send__` in a class body whose method name is computed now counts as a mixin of a module no name spells. ([#3021](https://github.com/rigortype/rigor/pull/3021))
+  - After `meth = :include; send(meth, M)` or `send(name.to_sym, M)`, `call.undefined-method` no longer reports a method of `M` on the class or its subclasses.
+  - A name that may be `extend` opens the class object the same way.
+  - The same holds for such a `send` in a block in the class body, and for `base.send(meth, M)` in a `self.included(base)` hook.
+  - A local bound only to names that are not `include`, `prepend` or `extend` (`m = :attr_reader; send(m, :x)`) opens nothing, and neither does a `send` with no argument after the name or one in an instance method.

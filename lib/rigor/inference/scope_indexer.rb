@@ -7892,6 +7892,7 @@ module Rigor
 
         _self_decl, child_prefix, child_cref = ctx
         accumulator.direct_body(node.body) if accumulator.direct?(node)
+        accumulator.class_body(node.body)
         walk_class_includes(node.body, child_cref ? [] : child_prefix,
                             child_cref ? nil : child_prefix.join("::"), accumulator,
                             singleton_cref: child_cref)
@@ -7988,7 +7989,8 @@ module Rigor
       def record_mixin_call(node, qualified_prefix, current_class, accumulator)
         taint_opaque_eval(node, current_class, accumulator)
         view = mixin_call_view(node)
-        return if view.nil? || view.first.nil?
+        return taint_computed_mixin_send(node, current_class, accumulator, INSTANCE_MIXIN_NAMES, :include) if view.nil?
+        return if view.first.nil?
 
         kind = view.first
         current_class ||= toplevel_include_owner(node, qualified_prefix, current_class, accumulator)
@@ -8069,7 +8071,112 @@ module Rigor
 
       MIXIN_KINDS = %i[include prepend extend].freeze
       SEND_CALL_NAMES = %i[send public_send __send__].freeze
-      private_constant :MIXIN_KINDS, :SEND_CALL_NAMES
+      EXTEND_MIXIN_NAMES = %i[extend].freeze
+      private_constant :MIXIN_KINDS, :SEND_CALL_NAMES, :EXTEND_MIXIN_NAMES
+
+      # Issue #3006 — a receiverless or `self.` `send` / `public_send` / `__send__` written in a class body
+      # ({MixinAccumulator#class_body_scope}) whose name is computed and which passes at least one further argument
+      # may be an `include`, `prepend` or `extend` the walk cannot record: it lists {MixinAccumulator::UNNAMED} on
+      # `side` of the enclosing class when the name may be one of `kinds`. A name that is a local of the call's scope
+      # bound only to name literals is read as those names ({#local_send_names}), so `m = :attr_reader; send(m, :x)`
+      # marks nothing. A hook parameter's `base.send(meth, M)` is read wherever the hook is, as
+      # {#taint_unrecorded_mixin} reads `base.send(:include, M)`.
+      def taint_computed_mixin_send(node, current_class, accumulator, kinds, side, in_singleton: false)
+        return unless current_class
+
+        name = computed_send_name(node, accumulator)
+        return if name.nil?
+
+        scope = accumulator.class_body_scope(node)
+        hook = hook_parameter_receiver?(node.receiver, accumulator)
+        return if scope.nil? && !hook
+
+        names = scope && local_send_names(name, scope)
+        # Inside `class << self` the instance walk is ownerless, so this walk keeps the hook's instance-side taint too,
+        # as {#record_extend_call} does for `base.send(:include, M)`.
+        sides = in_singleton ? [side, :include] : [side]
+        return taint_computed_hook_send(current_class, accumulator, names, sides) if hook
+        return if names&.none? { |literal| kinds.any? { |kind| kind.name == literal } }
+
+        accumulator.taint(current_class, side, unnamed: true)
+      end
+
+      # A hook parameter's computed `send`, read as {#taint_unrecorded_mixin} reads the literal one: it taints the
+      # enclosing module's `sides` when the name may be any mixin's, and lists the unnamed marker on the instance side
+      # alone, when the name may be `include` or `prepend`.
+      def taint_computed_hook_send(current_class, accumulator, names, sides)
+        return if names&.none? { |literal| MIXIN_KINDS.any? { |kind| kind.name == literal } }
+
+        instance = names.nil? || names.any? { |literal| INSTANCE_MIXIN_NAMES.any? { |kind| kind.name == literal } }
+        sides.each { |side| accumulator.taint(current_class, side, unnamed: side == :include && instance) }
+      end
+
+      # The name argument of a receiverless, `self.` or hook-parameter `send`-family call that passes at least one
+      # further argument, when no literal spells it; else nil.
+      def computed_send_name(node, accumulator)
+        return unless SEND_CALL_NAMES.include?(node.name)
+        return unless lexical_self_receiver?(node.receiver) || hook_parameter_receiver?(node.receiver, accumulator)
+
+        arguments = node.arguments&.arguments
+        return if arguments.nil? || arguments.size < 2
+
+        first = arguments.first
+        first unless literal_send_name(first)
+      end
+
+      LOCAL_SCOPE_BOUNDARIES = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
+      private_constant :LOCAL_SCOPE_BOUNDARIES
+
+      # The names a local `send` argument can hold: every literal a `local = :name` / `local = "name"` in `scope`
+      # writes, or nil when the argument is not a local, or when the local has no such write or any other binding in
+      # `scope` — a parameter (the `def`'s or a block's, which may shadow it), a multiple or operator write, a pattern
+      # or a regexp capture. Blocks share their scope's locals, so they are searched; a nested `def` or declaration
+      # opens a scope of its own, so it is not.
+      def local_send_names(argument, scope)
+        return nil unless argument.is_a?(Prism::LocalVariableReadNode)
+
+        names = []
+        root = scope.is_a?(Prism::DefNode) ? scope.compact_child_nodes : [scope]
+        return nil unless collect_local_send_names(root, argument.name, names)
+
+        names.empty? ? nil : names
+      end
+
+      def collect_local_send_names(nodes, local, names)
+        nodes.all? do |node|
+          next true if LOCAL_SCOPE_BOUNDARIES.any? { |kind| node.is_a?(kind) }
+
+          if node.is_a?(Prism::LocalVariableWriteNode) && node.name == local
+            name = literal_send_name(node.value)
+            next false if name.nil?
+
+            names << name
+          elsif local_binding?(node, local)
+            next false
+          end
+          collect_local_send_names(node.compact_child_nodes, local, names)
+        end
+      end
+
+      # The method name a `send` argument spells: a name literal's, or `""` — no mixin's — for an interpolation with a
+      # literal part no mixin name contains (`"#{name}_from_params"`). Nil when it may spell any name.
+      def literal_send_name(value)
+        return value.unescaped if value.is_a?(Prism::SymbolNode) || value.is_a?(Prism::StringNode)
+        return nil unless value.is_a?(Prism::InterpolatedStringNode) || value.is_a?(Prism::InterpolatedSymbolNode)
+
+        excluded = value.parts.any? do |part|
+          part.is_a?(Prism::StringNode) && MIXIN_KINDS.none? { |kind| kind.name.include?(part.unescaped) }
+        end
+        excluded ? "" : nil
+      end
+
+      # A node other than a plain write that binds `local`: a target, an operator write or a parameter.
+      def local_binding?(node, local)
+        return false if node.is_a?(Prism::LocalVariableReadNode) || !node.respond_to?(:name) || node.name != local
+
+        node.class.name.start_with?("Prism::LocalVariable") || node.class.name.end_with?("ParameterNode") ||
+          node.is_a?(Prism::BlockLocalVariableNode)
+      end
 
       # `[kind, arguments, via_send]` for a call that mixes modules in — `include` / `prepend` / `extend`, or
       # `send(:include, M)` and its `public_send` / `__send__` twins with a literal first argument — else nil.
@@ -8389,6 +8496,7 @@ module Rigor
         # singleton's own singleton (`#<Class:#<Class:C>>`), which nothing names.
         opens_self = node.expression.is_a?(Prism::SelfNode) && !in_singleton
         accumulator.direct_body(node.body) if opens_self && accumulator.direct?(node)
+        accumulator.class_body(node.body) if opens_self
         walk_class_extends(node.body, qualified_prefix, opens_self ? current_class : nil,
                            accumulator, in_singleton: opens_self,
                                         singleton_self: true, singleton_cref: true)
@@ -8502,6 +8610,7 @@ module Rigor
         child_cref = unnameable_decl?(node, self_decl, singleton_cref)
         accumulator.direct_body(node.body) if accumulator.direct?(node)
         accumulator.body_statements(node.body)
+        accumulator.class_body(node.body)
         walk_class_extends(node.body, child_cref ? [] : child_prefix,
                            child_cref ? nil : child_prefix.join("::"), accumulator,
                            singleton_cref: child_cref)
@@ -8779,7 +8888,12 @@ module Rigor
                                                    in_singleton: in_singleton)
 
         kind, arguments, via_send = mixin_call_view(node)
-        return if kind.nil?
+        if kind.nil?
+          # Inside `class << self` a computed `include` / `prepend` reaches the singleton side; an `extend` reaches the
+          # singleton's own singleton, which nothing names.
+          kinds = in_singleton ? INSTANCE_MIXIN_NAMES : EXTEND_MIXIN_NAMES
+          return taint_computed_mixin_send(node, current_class, accumulator, kinds, :extend, in_singleton: in_singleton)
+        end
 
         effects = mixin_effects(node, kind, qualified_prefix, current_class, accumulator, in_singleton: in_singleton)
                   .select { |_owner, side| side == :extend || in_singleton }

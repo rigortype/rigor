@@ -598,4 +598,53 @@ RSpec.describe Rigor::Inference::ScopeIndexer::MixinAccumulator do
       expect(signature("class C\n\n  include A\n  include B\nend\n")).to eq(base)
     end
   end
+
+  # Issue #3006 — a class-body `send` with a computed name and a further argument lists the unnamed marker on each
+  # side the name may reach: the instance side for `include` / `prepend`, the singleton side for `extend`, and
+  # inside `class << self` the singleton side for `include` / `prepend` alone.
+  context "with a class-body computed-name `send` (#3006)" do
+    it "lists the unnamed marker on the side each name may reach", :aggregate_failures do
+      unnamed = ["*", "?"]
+      { "k = :include\n  send(k, M)" => { include: unnamed },
+        "k = :prepend\n  public_send(k, M)" => { include: unnamed },
+        "k = :extend\n  __send__(k, M)" => { extend: unnamed },
+        "send(name.to_sym, M)" => { include: unnamed, extend: unnamed },
+        "class << self\n    k = :include\n    send(k, M)\n  end" => { extend: unnamed },
+        "class << self\n    k = :extend\n    send(k, M)\n  end" => nil }.each do |body, sides|
+        expected = sides ? { "C" => sides } : {}
+        expect(unpositioned("class C\n  #{body}\nend\n")).to eq(expected), body
+      end
+    end
+
+    it "lists it for a computed `send` in a second class of the file" do
+      source = "class A\n  send(a.to_sym, M)\nend\nclass B\n  send(b.to_sym, M)\nend\n"
+      expect(unpositioned(source).keys).to eq(%w[A B])
+    end
+
+    it "lists it on a hook's module for a computed `send` to the hook parameter, as for a literal one",
+       :aggregate_failures do
+      hook = ->(body) { "module Con\n  def self.included(base)\n    #{body}\n  end\nend\n" }
+      expect(unpositioned(hook.call("meth = :include\n    base.send(meth, M)")))
+        .to eq("Con" => { include: ["*", "?"], extend: ["*"] })
+      expect(unpositioned(hook.call("meth = :extend\n    base.send(meth, M)")))
+        .to eq("Con" => { include: ["*"], extend: ["*"] })
+      expect(unpositioned(hook.call("meth = :attr_reader\n    base.send(meth, :x)"))).to eq({})
+      singleton = "module Con\n  class << self\n    def included(base)\n      meth = :include\n      " \
+                  "base.send(meth, M)\n    end\n  end\nend\n"
+      expect(unpositioned(singleton)).to eq("Con" => { extend: ["*"], include: ["*", "?"] })
+    end
+
+    # The extends walk does not enter a block on a receiver it cannot vouch runs (#1592), so only the instance side
+    # lists the marker; an unnamed instance-side module opens the class object too, through its `included` hook (#2994).
+    it "lists it for a computed `send` in a block on a constant receiver" do
+      expect(unpositioned("class C\n  KINDS.each { |m| send(m, M) }\nend\n")).to eq("C" => { include: ["*", "?"] })
+    end
+
+    it "does not list it for a literal non-mixin name, or a local bound in a nested `def`", :aggregate_failures do
+      ["send(:attr_reader, :x)",
+       "m = :attr_reader\n  send(m, :x)\n  def self.k\n    m = :include\n  end"].each do |body|
+        expect(unpositioned("class C\n  #{body}\nend\n")).to eq({}), body
+      end
+    end
+  end
 end

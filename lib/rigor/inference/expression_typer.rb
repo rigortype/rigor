@@ -2984,13 +2984,12 @@ module Rigor
         return false if prepends.empty? && extends.empty?
 
         answer = positioned_singleton_definer(chain, method_name)
-        return true if answer.nil?
-
         prepends.any? { |node| !answered_ahead?(chain, answer, level_start_of(chain, node)) } ||
           extends.any? { |node| !answered_ahead?(chain, answer, own_singleton_index(chain, node)&.succ) }
       end
 
-      # Whether `answer` owns an entry before `stop` (nil when the position is unknown: never).
+      # Whether `answer` owns an entry before `stop` (nil when the position is unknown: never). A nil `answer` (no class
+      # object's own def) owns none.
       def answered_ahead?(chain, answer, stop)
         !stop.nil? && chain.entries[0...stop].any? { |entry| entry.name == answer }
       end

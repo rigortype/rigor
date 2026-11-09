@@ -48,6 +48,8 @@ module Rigor
       # A String or Symbol literal that spells a constant path, which a call may resolve to the class
       # (`"K".constantize`).
       CONSTANT_SPELLING = /\A(?:::)?[A-Z]\w*(?:::[A-Z]\w*)*\z/
+      # Separates the qualifications of a {.candidate_key}; no constant name holds it.
+      CANDIDATE_SEPARATOR = "|"
       BARRIERS = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
       NONE = [].freeze
       # Every name {.foreign?} can answer true for, so any other call returns at one Set probe.
@@ -192,39 +194,62 @@ module Rigor
         !((node.is_a?(Prism::StringNode) || node.is_a?(Prism::SymbolNode)) && CONSTANT_SPELLING.match?(node.unescaped))
       end
 
-      # Issue #2983 — the constant, as written, a `class_eval` receiver chain is rooted at through
-      # {FOREIGN_PRESERVING} calls (`Anc`, `INST.class`, `AliasK.new.class`, `Other.singleton_class`), or nil. The
-      # module such a chain names is the constant's, its class's or its singleton's, so the code a barred block
-      # reenters runs on the constant's instances or on the object it holds; the cross-file census files it under
-      # the constant, and a class whose census joins that constant's entries (an ancestor, an alias, an instance
-      # constant of it) sees the write.
-      def root_constant(receiver)
+      # Issue #2983 — the constant a `class_eval` receiver chain is rooted at through {FOREIGN_PRESERVING} calls
+      # (`Anc`, `INST.class`, `AliasK.new.class`, `Other.singleton_class`), as its candidate key under `nesting`
+      # ({.candidate_key}), or nil. The module such a chain names is the constant's, its class's or its singleton's,
+      # so the code a barred block reenters runs on the constant's instances or on the object it holds; the
+      # cross-file census files it under the key, and a class whose census joins the constant the key resolves to (an
+      # ancestor, an alias, an instance constant of it) sees the write.
+      def root_constant(receiver, nesting)
         node = unwrap(receiver)
         node = unwrap(node.receiver) while node.is_a?(Prism::CallNode) && FOREIGN_PRESERVING.include?(node.name)
         return unless node.is_a?(Prism::ConstantReadNode) || node.is_a?(Prism::ConstantPathNode)
 
-        node.slice.delete_prefix("::")
+        candidate_key(node.slice, nesting)
       end
 
-      # Issue #2983 — for a constant write `C = K` or `C = K.new` / `K.allocate`, the census entry `[:binds_class, "K",
-      # "C"]`, the last segment of `K` as written and the constant's own name, else nil: `C` is an alias or an instance
-      # of `K`.
-      def binding_entry(node)
+      # Review round 1 of #3001 — the qualifications a constant spelled `spelling` may have under the lexical
+      # `nesting` (the enclosing class and module names), nearest first as Ruby's lookup tries them, joined by
+      # {CANDIDATE_SEPARATOR}: `Anc` under `N::K` is `"N::K::Anc|N::Anc|Anc"`. A rooted `::Anc`, or one at the top
+      # level, has the one candidate `"Anc"`. `ScopeIndexer::IvarContributions` resolves the key to the first
+      # candidate the project declares.
+      def candidate_key(spelling, nesting)
+        return spelling.delete_prefix("::") if spelling.start_with?("::") || nesting.empty?
+
+        nesting.size.downto(0).map { |depth| [*nesting.first(depth), spelling].join("::") }.join(CANDIDATE_SEPARATOR)
+      end
+
+      # Issue #2983 — for a constant write `C = K` or `C = K.new` / `K.allocate` under the lexical `nesting`, the
+      # census entry `[:binds_class, key, name]`: `K`'s {.candidate_key} and `C`'s qualified name (a path write's
+      # as written), else nil. `C` is an alias or an instance of the class `K` resolves to.
+      def binding_entry(node, nesting)
         value = unwrap(node.value)
         value = value.receiver if value.is_a?(Prism::CallNode) && CONSTRUCTORS.include?(value.name) && value.block.nil?
         return unless value.is_a?(Prism::ConstantReadNode) || value.is_a?(Prism::ConstantPathNode)
 
-        name = node.is_a?(Prism::ConstantWriteNode) ? node.name.to_s : node.target.slice.split("::").last
-        [:binds_class, value.slice.split("::").last, name].freeze
+        name = node.is_a?(Prism::ConstantWriteNode) ? [*nesting, node.name].join("::") : node.target.slice
+        [:binds_class, candidate_key(value.slice, nesting), name.delete_prefix("::")].freeze
+      end
+
+      # Issue #2983 — the module a String `class_eval` / `module_eval` may define methods on, for
+      # `IvarWriterCensus#record_string_eval`: `owner`, the class owning a class body, for an implicit or `self`
+      # receiver there (one in an instance body raises); `instance`, the instance body's class, for a receiver
+      # {.foreign_module?} does not bar; otherwise the receiver chain's root constant ({.root_constant}); or nil.
+      def string_eval_target(node, instance, owner)
+        return (owner unless instance) if self_node?(node.receiver)
+        return instance if instance && !foreign_module?(node.receiver, instance)
+
+        nesting = instance || owner
+        root_constant(node.receiver, nesting ? nesting.split("::") : NONE)
       end
 
       # For a barred `class_eval`-family block whose receiver {.foreign_module?} takes as another module and whose
-      # chain is rooted at a constant ({.root_constant}), that constant and the code in the block that runs on its
-      # module's instances, as {.reentry_blocks} collects it; else nil.
+      # chain is rooted at a constant ({.root_constant}), that constant's candidate key and the code in the block that
+      # runs on its module's instances, as {.reentry_blocks} collects it; else nil.
       def rooted_reentry(node, class_name)
         return unless MODULE_EVALS.include?(node.name) && foreign_module?(node.receiver, class_name)
 
-        root = root_constant(node.receiver)
+        root = root_constant(node.receiver, class_name.split("::"))
         return if root.nil?
 
         found = []

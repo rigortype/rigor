@@ -36,7 +36,13 @@ what Ruby does, since the method lands on the constant's module and every instan
 rule narrows the brief's wording only where a literal's calls can answer an instance of the class. A String
 `class_eval` records a `:dynamic` write of every ivar (`:*`) for the module its receiver may be. The join unions it
 into each of the owner's ivars in both layouts, which makes those ivars `Dynamic[top]`-widened rather than reading the
-String.
+String. That is a precision cost: a String `class_eval` on `Object` or `Kernel` widens every ivar of every class that
+reaches `Object`.
+
+Review round 1 tightened the owners so a credit reaches only the class the receiver resolves to. `Object` and
+`Kernel` are not owners of a class whose superclass chain names `BasicObject`. A root constant and a binding's class
+are recorded as candidate keys, the qualifications their lexical nesting allows, nearest first. The join resolves each
+key to the first candidate the project declares or binds, as Ruby's constant lookup does.
 
 ## To undo
 

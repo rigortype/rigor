@@ -131,4 +131,42 @@ RSpec.describe "ivar census: constant-rooted class_eval receivers (#2983)", type
       expect(reported(files)).to eq([])
     end
   end
+  # Review round 1: a credit reaches only the class the receiver resolves to. `Object` and `Kernel` are no ancestors
+  # of a `BasicObject` subclass, a binding names the class its own lexical scope resolves, and a root constant
+  # resolves through the poke's lexical nesting, nearest first, as Ruby's constant lookup does. In each quiet case
+  # with a `label` reader, Ruby 4.0.5 returns "none" after every poke and `set` the code allows; in each `get` case it
+  # returns "A"; and the `Plain` reader raises NoMethodError on 1.
+  narrowing = "    def initialize = (@x = nil)\n    def label = (@x ? @x.upcase : \"none\")\n"
+  plain = "    def initialize = (@x = nil)\n    def get = @x.upcase\n"
+  {
+    "a BasicObject subclass ignores Object.class_eval" =>
+      ["class BO < BasicObject\n#{narrowing}end\n", "class Host\n  def poke = Object.class_eval { %s }\nend\n", 1, []],
+    "a BasicObject subclass ignores Kernel.module_eval" =>
+      ["class BO < BasicObject\n#{narrowing}end\n", "class Host\n  def poke = Kernel.module_eval { %s }\nend\n", 1, []],
+    "an Object subclass takes Object.class_eval" =>
+      ["class Plain\n#{narrowing}end\n", "class Host\n  def poke = Object.class_eval { %s }\nend\n", 1,
+       [["a.rb", 3]]],
+    "a same-named class in another namespace ignores an instance constant's binding" =>
+      ["module Ns2\n  class K\n#{narrowing}  end\nend\n",
+       "module Ns1\n  class K\n    def poke = INST.class.class_eval { %s }\n  end\nend\nINST = Ns1::K.new\n", 1, []],
+    "the bound namespaced class takes an instance constant's binding" =>
+      ["module Ns1\n  class K\n#{plain}  end\nend\n",
+       "module Ns1\n  class K\n    def poke = INST.class.class_eval { %s }\n  end\nend\nINST = Ns1::K.new\n", '"a"', []],
+    "a top-level class whose superclass shares the root's last name ignores it" =>
+      ["class Anc; end\nclass TopK < ::Anc\n#{narrowing}end\n",
+       "module N\n  class Anc; end\n  class K < Anc\n    def poke = Anc.class_eval { %s }\n  end\nend\n", 1, []],
+    "a namespaced class takes the root its nesting resolves" =>
+      ["module N\n  class Anc; end\n  class K < Anc\n#{plain}  end\nend\n",
+       "module N\n  class K\n    def poke = Anc.class_eval { %s }\n  end\nend\n", '"a"', []]
+  }.each do |label, (reader, writer, value, expected)|
+    definers.each do |definer, code|
+      [false, true].each do |cross|
+        it "#{label} (#{definer}, #{cross ? 'cross-file' : 'single-file'})" do
+          poke = format(writer, code.sub('"a"', value.to_s))
+          files = cross ? { "a.rb" => reader, "b.rb" => poke } : { "a.rb" => reader + poke }
+          expect(reported(files)).to eq(expected)
+        end
+      end
+    end
+  end
 end

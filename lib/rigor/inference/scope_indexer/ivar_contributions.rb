@@ -40,8 +40,12 @@ module Rigor
         EMPTY = {}.freeze
         NONE = [].freeze
         BINDINGS = :bindings
+        CANDIDATE_KEYS = :candidate_keys
         ANCESTOR_ROOTS = CensusForeignBlock::ANCESTOR_ROOTS.to_a.freeze
-        private_constant :TABLE, :EMPTY, :NONE, :BINDINGS, :ANCESTOR_ROOTS
+        # The one implicit root a class whose superclass chain stops at `BasicObject` keeps.
+        BASIC_ROOTS = %w[BasicObject].freeze
+        SEPARATOR = CensusForeignBlock::CANDIDATE_SEPARATOR
+        private_constant :TABLE, :EMPTY, :NONE, :BINDINGS, :CANDIDATE_KEYS, :ANCESTOR_ROOTS, :BASIC_ROOTS, :SEPARATOR
 
         module_function
 
@@ -52,10 +56,11 @@ module Rigor
           path = canonical(path)
 
           table = table(scope.discovered_global_write_census)
+          resolution = resolution(scope, table)
           accumulator.each do |class_name, entries|
             next unless class_name.is_a?(String) && !entries.empty?
 
-            owners = chain_owners(scope, class_name, table)
+            owners = chain_owners(scope, class_name, resolution)
             any = any_ivar_types(owners, table)
             entries.each_key do |ivar|
               joined = contributed(owners, class_name, ivar, table, writes, path)
@@ -72,31 +77,65 @@ module Rigor
         #
         # Issue #2983 — the chain is read under the `:constants` flavor, so a project class or module with no method of
         # its own (`class Anc; end`, whose writer a `class_eval` installs) is an owner too. {ANCESTOR_ROOTS}
-        # (`Object`, `BasicObject`, `Kernel`) follow, as every instance has them; and each owner's alias and instance
-        # constants (`[:binds_class, …]` entries), under which a `class_eval` rooted at one files its code.
-        def chain_owners(scope, class_name, table)
-          names = [class_name, *ancestor_names(scope, class_name), *ANCESTOR_ROOTS].uniq
-          bindings = table[BINDINGS] || EMPTY
-          bound = names.flat_map do |name|
+        # (`Object`, `BasicObject`, `Kernel`) follow, as every instance has them, except that a class whose superclass
+        # chain stops at `BasicObject` keeps `BasicObject` alone; then each owner's alias and instance constants
+        # (`[:binds_class, …]` entries), and every candidate key that resolves to an owner ({.resolution}), under which
+        # a `class_eval` rooted at that constant files its code.
+        def chain_owners(scope, class_name, resolution)
+          ancestors, reaches_object = ancestor_names(scope, class_name)
+          names = [class_name, *ancestors, *(reaches_object ? ANCESTOR_ROOTS : BASIC_ROOTS)].uniq
+          aliases, bound = resolution
+          bound_names = names.flat_map do |name|
             segment = name.split("::").last
             Analysis::DependencyRecorder.read_name(:binds_class, segment) if Analysis::DependencyRecorder.active?
-            bindings[segment] || NONE
+            bound[name] || NONE
           end
-          (names + bound).uniq
+          (names + bound_names).uniq.flat_map { |owner| [owner, *(aliases[owner] || NONE)] }.uniq
         end
 
+        # The project ancestors on `class_name`'s instance chain, and whether the chain reaches `Object`: false when a
+        # superclass edge names `BasicObject`, which has neither `Object` nor `Kernel` among its ancestors.
         def ancestor_names(scope, class_name)
           chain = Scope::ResolutionChain.for(scope, class_name, :instance, :constants)
           # A guard: the class body's own `include` / `<` resolution already files these edges; kept so the read
           # states its own dependency.
           chain.record(scope) if Analysis::DependencyRecorder.active?
-          chain.entries.filter_map do |entry|
+          names = chain.entries.filter_map do |entry|
             # An external entry has no name, so `filter_map` drops it. The side check is a guard: an instance chain
             # holds only instance-side entries.
             entry.name if entry.side == :instance && entry.name != class_name
           end
+          [names, chain.entries.none? { |entry| basic_object_edge?(entry) }]
         rescue StandardError
-          NONE
+          [NONE, true]
+        end
+
+        def basic_object_edge?(entry)
+          entry.external? && entry.superclass_edge &&
+            (entry.raw.to_s.delete_prefix("::") == "BasicObject" || entry.candidates.include?("BasicObject"))
+        end
+
+        # Review round 1 of #3001 — the candidate keys ({CensusForeignBlock.candidate_key}) resolved against the
+        # project: each to its first candidate the project declares as a class or module, or binds as a constant, else
+        # to its last (top-level) spelling, as Ruby's lexical lookup finds the nearest. Answers `[aliases, bound]`:
+        # `{ resolved owner => [candidate key, ...] }` over the census's owners, and `{ resolved class => [bound
+        # constant, ...] }` over its `[:binds_class, …]` entries.
+        def resolution(scope, table)
+          bindings = table[BINDINGS] || NONE
+          constants = bindings.to_set(&:last)
+          bound = {}
+          bindings.each { |key, name| (bound[resolve(scope, key, constants)] ||= []) << name }
+          aliases = {}
+          (table[CANDIDATE_KEYS] || NONE).each { |key| (aliases[resolve(scope, key, constants)] ||= []) << key }
+          [aliases, bound]
+        end
+
+        def resolve(scope, key, constants)
+          candidates = key.split(SEPARATOR)
+          candidates.find do |name|
+            constants.include?(name) || scope.discovered_classes.key?(name) ||
+              scope.discovered_superclasses.key?(name) || scope.discovered_includes.key?(name)
+          end || candidates.last
         end
 
         # Issue #2983 — what the owners' string `class_eval`s contribute to every ivar (`[:own_write_type, owner, :*,
@@ -175,25 +214,31 @@ module Rigor
           table
         end
 
-        # Issue #2983 — `table[BINDINGS]` is `{ class last segment => [constant name, ...] }` over the census's
-        # `[:binds_class, …]` entries; no class is named by a Symbol.
+        # Issue #2983 — `table[BINDINGS]` lists `[class candidate key, constant name]` over the census's `[:binds_class,
+        # …]` entries, and `table[CANDIDATE_KEYS]` the owners that are candidate keys; no class is named by a Symbol.
         def build_table(census)
           table = {}
           canonical_paths = {}
           census.each do |entry|
-            if entry[0] == :binds_class
-              ((table[BINDINGS] ||= {})[entry[1]] ||= []) << entry[2]
-              next
-            end
+            next (table[BINDINGS] ||= []) << [entry[1], entry[2]] if entry[0] == :binds_class
             next unless entry.size == 5 && entry[0] == :own_write_type
 
-            by_path = ((table[entry[1]] ||= {})[entry[2]] ||= {})
+            by_path = (owner_slot(table, entry[1])[entry[2]] ||= {})
             (by_path[canonical_paths[entry[4]] ||= canonical(entry[4])] ||= []) << entry[3]
           end
           table
         end
-        private_class_method :chain_owners, :ancestor_names, :any_ivar_types, :contributed, :add_entry_types,
-                             :value_type, :canonical, :table, :build_table
+
+        def owner_slot(table, owner)
+          table[owner] ||= begin
+            (table[CANDIDATE_KEYS] ||= []) << owner if owner.include?(SEPARATOR)
+            {}
+          end
+        end
+
+        private_class_method :chain_owners, :ancestor_names, :basic_object_edge?, :resolution, :resolve,
+                             :any_ivar_types, :contributed, :add_entry_types, :value_type, :canonical, :table,
+                             :build_table, :owner_slot
       end
     end
   end

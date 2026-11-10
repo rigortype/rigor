@@ -43,9 +43,10 @@ jobs:
       BUNDLE_VERSION: system
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           submodules: false
+          persist-credentials: false
 
       # `head` until ruby/setup-ruby lists a 4.1 preview (none as of 2026-10-10); `head` is the 4.1
       # development line until 4.1.0 ships in December 2026. After that it becomes 4.2-dev, and this
@@ -60,7 +61,7 @@ jobs:
       # users will have. BUNDLE_VERSION=system stops that Bundler re-executing the locked version.
       - name: Set up Ruby
         id: setup
-        uses: ruby/setup-ruby@v1
+        uses: ruby/setup-ruby@v1.336.0
         with:
           ruby-version: ${{ inputs.ruby || 'head' }}
           bundler: default
@@ -186,7 +187,7 @@ jobs:
 
       - name: Upload logs
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: ruby-next-logs
           path: |

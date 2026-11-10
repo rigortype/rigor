@@ -170,6 +170,35 @@ RSpec.describe "rbs collection RBS in a gem_rbs_collection _test/ directory" do
       expect(instance_types(rbs_loader, "Mygem", :run)).to eq(["() -> ::String"])
     end
 
+    # The dropped entry still counts as RBS for the gem: a locked gem with an ADR-72 overlay (activesupport) is
+    # not `:missing`, so its overlay stays unloaded as it would beside the lockfile copy.
+    it "still counts the gem as covered, so no gem overlay loads for it" do
+      write_gem("activesupport", { "activesupport.rbs" => "module ActiveSupport\nend\n" })
+      write_test_dir(%w[activesupport])
+      File.write(File.join(test_dir, "Gemfile.lock"), <<~LOCK)
+        GEM
+          remote: https://rubygems.org/
+          specs:
+            activesupport (1.0.0)
+
+        PLATFORMS
+          ruby
+
+        DEPENDENCIES
+          activesupport
+
+        BUNDLED WITH
+           2.6.0
+      LOCK
+      rbs_loader = Rigor::Environment.for_project(
+        root: test_dir, signature_paths: [File.join(@repo, "gems", "activesupport", "1.0")],
+        rbs_collection_auto_detect: true, bundler_auto_detect: true
+      ).rbs_loader
+
+      expect(collection_entry?(rbs_loader, "activesupport")).to be(false)
+      expect(rbs_loader.signature_paths.map(&:to_s).grep(%r{gem_overlay/activesupport})).to eq([])
+    end
+
     # The control: a signature root whose real path does not end in a locked `<name>/<version>`.
     it "keeps the lockfile copy beside a signature_paths: root that names no locked gem" do
       write_gems

@@ -839,7 +839,7 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
     # The class doc's constraint: "callers MUST NOT reorder the concatenation". One diagnostic per stream
     # (each with a distinguishable `rule`) proves both that every stream is actually invoked AND that the
     # documented order (`plugin_load, prepare, pre_eval, dependency_source, budget, config_conflict,
-    # rbs_coverage, rbs_inline_hint, expansion errors`) still holds — a `+` swapped for the wrong operand
+    # rbs_coverage, rbs_collection_setup_hint, rbs_inline_hint, expansion errors`) still holds — a `+` swapped for the wrong operand
     # (nil_inject/type_swap) would either drop a stream or shuffle this list.
     it "concatenates every pre-file stream in the documented order" do # rubocop:disable RSpec/ExampleLength
       registry = Rigor::Plugin::Registry.new(load_errors: [load_error("plugin load boom")])
@@ -859,6 +859,8 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
       )
       allow(Rigor::Environment::LockfileResolver).to receive(:locked_gems).and_return({})
       allow(Rigor::Configuration).to receive(:rbs_inline_library_resolvable?).and_return(true)
+      allow(Rigor::Environment::RbsCollectionDiscovery).to receive(:missing_lockfile_hint)
+        .and_return(:collection_config)
 
       aggregator = build_aggregator(
         configuration: configuration, registry: registry, dependency_source_index: index,
@@ -880,6 +882,7 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
       expect(rules).to eq(%w[
         load-error prepare-rule pre-eval.parse-error dynamic.dependency-source.gem-not-found
         dynamic.dependency-source.budget-exceeded dynamic.dependency-source.config-conflict
+        rbs.coverage.collection-not-installed
       ] + [nil])
     end
 

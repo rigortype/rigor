@@ -277,3 +277,206 @@ here, and leaving them out of core is a documented decision.
   `tmp/rigor_audit_374dcf6ae.jsonl`.
 - The stray `_test/.gem_rbs_collection/` dirs should be removed, or excluded from
   `signature_paths`, before the next run.
+
+## Lockfile-route re-run (after #3043)
+
+The same audit, re-run the evening of 2026-11-10 on master `adaf5c7cc` (the #3043 merge, which closed
+#3030). The collection checkout is unchanged: `8b20c86` plus the local marcel edits. Since
+`374dcf6ae`, master has also merged #3037 (#3029, abstract `bot`), #3039 (#3036,
+`flow.always-raises` in a handled `rescue`) and #3042 (#3035, platform-guarded files).
+
+### Method
+
+- **Per-dir setup.** Each of the 196 `_test/` dirs got `bin/test`'s setup without steep, run by the
+  mise Ruby 4.0.6 binary by absolute path with a scrubbed environment. The steps are: a `Gemfile`
+  with the gem at `~> <version>.0` plus `_test/metadata.yaml` `additional_gems`, then
+  `bundle lock --local`, then an `rbs_collection.yaml` with a `local` source at the checkout's
+  `gems/`, then `rbs collection install`. The setup renames `Gemfile` and `Gemfile.lock` to `.back`,
+  as `bin/test` does. When a step failed, the dir's files were removed, so it has no lockfile and
+  falls back to `signature_paths: [".."]`. The six dirs with leftovers from earlier `bin/test` runs
+  (actionmailer/8.1, cancancan/3.5, faraday 2.5 and 2.7, marcel/1.0, retryable/3.0) had them moved
+  aside first. faraday 2.5 and 2.7 then failed setup, so their stray `.gem_rbs_collection/` dirs
+  are gone, not regenerated. Setup took 21 s for all 196 dirs, run six at a time.
+- **Run.** Unchanged harness (`bin/rigor_audit_all`, which now writes the route-dependent
+  `.rigor.yml` and records `route`). One `nix develop` shell ran it with the shims from
+  "Method" above: `bundle exec` on the checkout, and `--no-cache` and `</dev/null` on every
+  `check`. It took 1,180 s (19.7 min). Output: `tmp/rigor_audit_adaf5c7cc_lock.jsonl` in the
+  collection checkout. The earlier JSONL files are kept.
+- **Routes.** 131 dirs used the lockfile and 65 fell back with `setup_failed`. Every failure came
+  from `bundle lock --local`; `rbs collection install` never failed. Grouped:
+
+| reason | dirs | examples |
+| --- | ---: | --- |
+| a dependency is not installed locally, or only a newer version is (Rails 6.0/7.0/7.1/8.0 lines, `mime-types-data`, `retriable`, `sorbet-runtime`, `rack ~> 2.0`, …) | 58 | carrierwave/3.0 (`ssrf_filter`), json-jwt/1.16, active_model_serializers/0.10, activerecord/8.0 (`activesupport 8.0.5.2`), faraday 2.5/2.7, sentry-ruby/5.2, protobuf/3.10.3 |
+| the gem itself is not installed at `~> <version>.0` | 5 | delayed_job/4.1, llhttp-ffi/0.5, mysql2/0.5, rack/2.2, ruby-odbc/0.999992 (also `gem not installed` for sig-gen, as before) |
+| an `additional_gems` entry is not installed | 2 | sinatra/4.0 (`sinatra-contrib`), activeadmin/3.3 (`devise` → `warden`) |
+
+Each fallback dir now also reports the new `rbs.coverage.collection-not-installed` info (65).
+
+One sig-gen run crashed: rubyXL/3.4 (lockfile route) hit a Ruby VM `[BUG] Segmentation fault` in the
+Flake Ruby 4.0.5, at `lib/rigor/inference/alias_mutation_floor.rb:258`. Two re-runs in the same
+setup passed (`skipped` 381, `new_method` 54). It is treated as transient. The JSONL row still reads
+`parse error`, and the sig-gen totals below leave rubyXL out of both sides.
+
+### `rigor check`, lockfile-route dirs (131) against the same dirs at `374dcf6ae`
+
+| | 374dcf6ae (`signature_paths: [".."]`) | adaf5c7cc (lockfile) | delta |
+| --- | ---: | ---: | ---: |
+| clean dirs | 87 | 117 | +30 |
+| errors | 18 in 10 gems | 16 in 6 gems | −2 |
+| warnings | 155 | 116 | −39 |
+| info | 5 | 0 | −5 |
+
+| rule | before | after |
+| --- | ---: | ---: |
+| `call.unresolved-toplevel` (warning) | 116 | 113 |
+| `rbs.coverage.definition-build-failed` (warning) | 32 | 0 |
+| `rbs.coverage.quarantined-signature` (warning) | 5 | 0 |
+| `rbs.coverage.synthesized-namespace` (info) | 5 | 0 |
+| `call.undefined-method` | 12 | 10 |
+| `call.argument-type-mismatch` | 4 | 4 |
+| `call.possible-nil-receiver` | 2 | 2 |
+| `flow.always-truthy-condition` (warning) | 2 | 2 |
+| `def.override-return-widened` (warning) | 0 | 1 |
+
+Fallback dirs (65): errors went from 10 to 9; sentry-ruby's `flow.always-raises` is gone (#3036,
+fixed by #3039). Warnings went from 45 to 44. Leaving out the new info, clean dirs went from 43 to
+45. Across all 196 dirs, ignoring the new info, clean dirs went from 130 to 162 and errors from 28
+to 25.
+
+**Did the harness gaps close?** Yes, wherever the lockfile route ran.
+
+- Missing-dependency errors: the 5 in lockfile dirs are gone (actionmailer, activejob, activerecord
+  and activestorage 8.1, and cancancan 3.5). The other 4 (active_model_serializers, carrierwave,
+  delayed_job, json-jwt) remain only because those dirs failed setup offline.
+- Build failures: every `rbs.coverage.definition-build-failed` in a lockfile dir is gone (32 → 0).
+  The 13 left across the batch all sit in fallback dirs, and all are `NoMixinFoundError` or
+  `NoSuperclassFoundError` for a dependency. That makes 25 of the 37 `NoMixin`/`NoSuperclass`
+  failures cleared; the other 12 are in dirs that failed setup. sinatra/4.0 is the 13th and new; see
+  below.
+- The 5 `quarantined-signature` warnings (csv, cgi, bigdecimal 3.1 and 4.0, yard) and the abbrev
+  and base64 duplicate-method warnings are gone too. That is the lockfile route's stdlib-name skip.
+  It does not fix #3034: csv still errors the same way, below.
+
+#### Every remaining error, classified
+
+Lockfile route, 16 errors:
+
+| site | count | class | issue |
+| --- | ---: | --- | --- |
+| concurrent-ruby/1.1 `promises.rb:13`, `:18`, `:68` | 3 | Rigor false positive: overload `maybe` for signature-only classes | #2844 |
+| concurrent-ruby/1.1 `promises.rb:82`, `:84` | 2 | Rigor false positive: type-parameter upper bound ignored | #3033 |
+| faker/2.23 `test.rb:49` | 1 | Rigor false positive: `A & class` read as `A` | #3032 |
+| stripe/13.0 `stripe.rb:9` | 1 | Rigor false positive: `A & _Iface` read as `A` | #3032 |
+| csv/3.3 `test.rb:19`, `:27` | 2 | Rigor false positive: `CSV.open` reads `IO?` | #3034 |
+| retryable/3.0 `test.rb:41,59,91,92` | 4 | real RBS bug (`type options`, every key required) | ruby/gem_rbs_collection#1126 |
+| marcel/1.0 `test.rb:33`, `:34`, `:35` | 3 | **new**: correct; an RBS gap in the uncommitted local edit | — |
+
+Fallback route, 9 errors:
+
+| site | count | class | issue |
+| --- | ---: | --- | --- |
+| protobuf/3.10.3 `enum.rb:9,10`, `messages.rb:18,19` | 4 | intentional `___error___` markers | — |
+| rack/2.2 `body_proxy.rb:8` | 1 | Steep `@type var` annotation, by design | — |
+| active_model_serializers, carrierwave, delayed_job, json-jwt | 4 | missing dependency RBS; these dirs failed setup offline | — (#3030 route works once set up) |
+
+**Errors new on the lockfile route.** There are three, all on marcel/1.0, and none is a false
+positive. `Marcel::Magic.by_extension`, `.by_path` and `.all_by_magic` are reported as undefined on
+`singleton(Marcel::Magic)`. The uncommitted local edit to `gems/marcel/1.0/_test/test.rb` calls
+them, but the working tree's `marcel.rbs` declares only `Magic.by_magic`. The gem does define all
+three (`marcel-1.0.4/lib/marcel/magic.rb:73,80,93`), so the RBS is incomplete, and Steep would
+report the same calls. At `374dcf6ae` the stray `.gem_rbs_collection/` copy made `Marcel::Magic`
+fail to build (`DuplicatedMethodDefinitionError`), so the class read as `Dynamic` and hid these
+calls.
+
+**A new warning, a Rigor false positive.** actioncable/8.1 `test.rb:32` reports
+`def.override-return-widened`: "widened from nil to top (overrides ApplicationCable::Channel#subscribed)".
+`ChatChannel#subscribed: () -> void` (`_test/test.rbs`) overrides a hook that
+`ApplicationCable::Channel` does not define. The parent signature is the RBS-only
+`ActionCable::Channel::Base#subscribed: () -> nil` (`actioncable-generated.rbs:189`), which the
+lockfile route now loads. Per diagnostic-policy.md and ADR-35, the rule covers only a project-defined
+ancestor, and RBS-only ancestors are deferred to #130. A project class in between lets the RBS-only
+signature through and attributes it to the project class. Minimal repro (`signature_paths: [sig]`):
+
+```rbs
+class Base;   def hook: () -> nil;  end   # RBS only, no Ruby source
+class Mid < Base; end                       # also in app.rb, no hook
+class Leaf < Mid;    def hook: () -> void; end   # fires: "overrides Mid#hook"
+class Direct < Base; def hook: () -> void; end   # silent (control)
+```
+
+This is unfiled; it relates to #130. A second question goes with it, for the fully project case
+(`PLeaf < PMid`, which also fires): whether `-> void` overriding `-> nil` should count as widening.
+`void` is the RBS idiom for a hook whose result nobody reads.
+
+**sinatra/4.0 is not an engine change.** It went from clean to a `NoMixinFoundError` on
+`Rack::Utils`, on the fallback route both times. Running `374dcf6ae` on today's tree produces the
+same warning, so the cause is in the tree, not the engine. Why the 11-10 run was clean was not
+recovered.
+
+### `sig-gen --diff`
+
+| classification | 374dcf6ae, lockfile dirs (130) | adaf5c7cc, same | delta | 374dcf6ae, fallback dirs (60) | adaf5c7cc, same | delta |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `new_method` | 22,065 | 21,326 | −739 | 5,452 | 5,452 | 0 |
+| `tighter_return` | 2,221 | 2,563 | +342 | 641 | 598 | −43 |
+| `skipped` | 78,400 | 77,775 | −625 | 19,831 | 19,865 | +34 |
+
+(130 = 131 lockfile dirs less rubyXL. 60 = 65 fallback dirs less the 5 `gem not installed`.)
+
+On the lockfile route the movement is dependency RBS taking effect. Classes whose superclass now
+resolves get evaluated: `sig.skipped.unresolvable-superclass` fell from 3,231 to 2,113 across the
+batch. Methods that a dependency's RBS already declares stop counting as `new_method`. The largest
+moves:
+
+| gem | `new_method` | `tighter_return` |
+| --- | ---: | ---: |
+| activerecord/8.1 | −261 | +46 |
+| activerecord/7.2 | −170 | +55 |
+| actionpack 7.2 / 8.1 | −32 / −57 | +50 / +48 |
+| railties/8.1 | −48 | +48 |
+| yard/0.9 | −78 | +27 |
+
+rubocop and rubocop-ast trade `skipped` for `new_method`. The 11-10 wrong proposals stand where
+#3029 did not reach them: mail `uri_parser` (#2950), railties `watchable_files -> []` and faraday
+`matches? -> [bool, {}]` (#3031).
+
+**`bot` dropped after #3037 (#3029): from 112 to 37** across all dirs. The new skip reasons
+account for it: `sig.skipped.overridden-bot` 297, `abstract-method` 72 and `template-method` 55.
+#3042 adds `platform-guarded` with 11 (parser 8, stackprof 3).
+`sig.skipped.overridden-by-unsigned-subclass` fell from 465 to 245. Every wrong `bot` in the 11-10
+sample is now skipped: tzinfo, rest-client, rails-html-sanitizer, lint_roller, the activerecord
+`SchemaStatements` methods and stackprof. A source check of 13 of the remaining 37 found deliberate
+raises or exits, all correct: `assigns`, `assert_template`, `_routes`,
+`CollectionProxy#prepend`, `Header#decoded`, `Type::Value#as_json`, `MissingRoute#path`,
+`Attribute::Null#with_value_from_database`, `ReadOnlyNullEncryptor#encrypt`, and others.
+Proposals that tighten a non-`untyped` declaration went from 21 to 13. `top` proposals went from 45
+to 54.
+
+### Updated gap ranking
+
+1. **#3030 is fixed (#3043) for any dir whose setup completes.** The remaining cost is
+   operational: offline, 65 of 196 dirs cannot lock, and they keep the 4 missing-dependency errors
+   and 12 `NoMixin`/`NoSuperclass` failures. No issue needed.
+2. **Overload `maybe` for signature-only classes**, #2844, open. It still causes 3 errors and
+   affects every overloaded collection API.
+3. **Empty literal carriers that later code fills**, #3031, open. The faraday and railties
+   proposals stand.
+4. **Intersections read as their first member**, #3032, open (faker, stripe).
+5. **Type-parameter upper bounds in overload selection**, #3033, open (concurrent-ruby, 2).
+6. **Default-gem collection RBS against stdlib**, #3034, open. The quarantine warning is gone on
+   the lockfile route, but `CSV.open` still reads `IO?`.
+7. **mail `uri_parser`**, #2950, open.
+8. **New, filed as #3046: `def.override-return-widened` reaches an RBS-only ancestor through a project
+   class that does not define the method** and names that class as the owner (actioncable). It
+   relates to #130. File it with the `void`-over-`nil` question.
+9. **New, recorded on #2850: an intermittent VM segfault in sig-gen** (rubyXL/3.4, Flake Ruby 4.0.5,
+   `alias_mutation_floor.rb:258`). It did not reproduce in two re-runs. Worth an issue only if it
+   recurs.
+
+Closed since the 11-10 ranking: #3029 (gap 1, `bot`), #3030 (gap 2), #3035 (gap 9) and #3036
+(gap 10).
+
+Unfiled, collection side: the sidekiq `Client#push -> String` RBS bug, still proposed as
+`perform_in -> String`, and marcel `Magic.by_extension`/`by_path`/`all_by_magic` missing from
+`marcel.rbs`, which the local edit exercises.

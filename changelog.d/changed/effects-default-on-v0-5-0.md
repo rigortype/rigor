@@ -1,0 +1,1 @@
+- **[effects]** The effects default-on flip that the 0.3.x notes scheduled for v0.4.0 moves to v0.5.0, and `effects-on-by-default` stays the opt-in preview until then ([#2342](https://github.com/rigortype/rigor/pull/2342)).

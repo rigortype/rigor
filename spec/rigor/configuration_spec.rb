@@ -1157,7 +1157,7 @@ RSpec.describe Rigor::Configuration do
     end
   end
 
-  # ADR-103 WD15 — the "effects-on-by-default" bleeding-edge preview of the v0.4.0 default. The shipped
+  # ADR-103 WD15 — the "effects-on-by-default" bleeding-edge preview of the v0.5.0 default. The shipped
   # feature id is used directly (not stubbed): these examples pin the coercion-path wiring, not the
   # registry's shape, which `spec/rigor/bleeding_edge_spec.rb` already covers. Every example constructs a
   # raw, non-`DEFAULTS`-merged hash so an absent `"effects"` key genuinely means "the file never wrote

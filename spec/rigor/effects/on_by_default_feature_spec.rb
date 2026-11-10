@@ -2,7 +2,7 @@
 
 require "rigor"
 
-# ADR-103 WD15 — the "effects-on-by-default" bleeding-edge preview of the v0.4.0 default, exercised end to
+# ADR-103 WD15 — the "effects-on-by-default" bleeding-edge preview of the v0.5.0 default, exercised end to
 # end over the same tracer fixture `spec/rigor/effects/tracer_collection_spec.rb` uses. This pins two
 # things the config-level spec (`spec/rigor/configuration_spec.rb`) cannot: that adopting the feature with
 # no `effects:` key really does make `rigor effects`' report non-empty, and that — because collection is

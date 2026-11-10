@@ -170,7 +170,7 @@ module Rigor
                  "kills — every surviving breakage there is one the analyzer reports nowhere at all, not one " \
                  "it reports in a caller."
       ),
-      # ADR-103 WD15 — the owner-ruled preview of the v0.4.0 default. `:behaviour` because it moves no rule's
+      # ADR-103 WD15 — the owner-ruled preview of the v0.5.0 default. `:behaviour` because it moves no rule's
       # severity; safe under the header comment's cache-identity rule for a reason specific to this feature
       # rather than the generic WD13 argument, so it is spelled out here: `effects:` collection is
       # OBSERVATIONAL (ADR-103 WD13) and the `effects:` block itself is deliberately absent from the

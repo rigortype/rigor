@@ -439,18 +439,18 @@ cache first".
 
 ### WD18 — Default-on moves from v0.4.0 to v0.5.0 (owner ruling, 2026-10-26)
 
-WD15 pinned the flip to **v0.4.0**. The repository is at v0.4.6 and the flip has not happened. The owner
+WD15 pinned the flip to **v0.4.0**. At the ruling the repository was at v0.4.6 and the flip has not happened. The owner
 rules that it lands at **v0.5.0** instead, because the user experience of default-on is not settled yet.
 
 What does not change: WD15's six preconditions and their WD16 resolutions, `effects: false` as the opt-out,
 and `effects-on-by-default` as the early-adoption preview.
 
-What is added: [#2339](https://github.com/rigortype/rigor/issues/2339) blocks the flip. The preview is the
+What is added: [#2339](https://github.com/rigortype/rigor/issues/2339) blocked the flip (fixed by [#2578](https://github.com/rigortype/rigor/pull/2578)). The preview is the
 documented way to adopt the default early, and `Configuration#with_bleeding_edge` did not re-derive
 `@effects`, so the `--bleeding-edge` CLI selector reported the feature active while collection stayed off.
 
-Every "v0.4.0" that names this flip now reads "v0.5.0": the header of this ADR, `lib/rigor/bleeding_edge.rb`,
-`docs/manual/02-cli-reference.md`, `docs/manual/19-effect-labels.md`, the four comments in
+Every "v0.4.0" that names this flip now reads "v0.5.0": the "before the flip" header of this ADR, `lib/rigor/bleeding_edge.rb`,
+`docs/manual/02-cli-reference.md`, `docs/manual/03-configuration.md`, `docs/manual/19-effect-labels.md`, the four comments in
 `docs/manual/ci-templates/`, and [#409](https://github.com/rigortype/rigor/issues/409)'s title. WD15's text
 stays as ruled, with a pointer to this section. Dated notes and released changelog sections keep the version
 they were written against.

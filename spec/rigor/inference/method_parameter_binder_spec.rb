@@ -210,6 +210,8 @@ RSpec.describe Rigor::Inference::MethodParameterBinder do
               def kw_rest: (path: String) -> void
                          | (**Float kw) -> void
               def posts_rest: (Integer x, *Symbol s, Float u, String t) -> void
+              def trail: (Integer x, ?String y, Symbol z, path: String) -> void
+              def f: (Integer x, ?String y, ?path: String) -> void
             end
           RBS
           project_env = Rigor::Environment.for_project(root: dir)
@@ -276,6 +278,17 @@ RSpec.describe Rigor::Inference::MethodParameterBinder do
           expect(binder.bind(def_node("def pos_kw(x, opts = {}); x; end"))).to eq(x: nominal("Integer"), opts: untyped)
           expect(binder.bind(def_node("def pos_kw(x, y); x; end"))).to eq(x: nominal("Integer"), y: untyped)
           expect(binder.bind(def_node("def rest_kw(*xs); xs; end"))).to eq(xs: untyped)
+        end
+      end
+
+      # #2777 — `trail(1, :z, path: "p")` puts the keywords' Hash in the post positional `c`, and `f(1, path: "p")`
+      # gives the optional `b` the Hash under an optional-only keyword declaration.
+      it "leaves a post positional and a slot past optional-only keywords Dynamic[Top]" do
+        with_shape_demo do |binder|
+          expect(binder.bind(def_node("def trail(a, b = nil, c); a; end")))
+            .to eq(a: nominal("Integer"), b: untyped, c: untyped)
+          expect(binder.bind(def_node("def f(a, b = ''); a; end")))
+            .to eq(a: nominal("Integer"), b: untyped)
         end
       end
 

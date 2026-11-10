@@ -61,14 +61,21 @@ documentation for code you do not own, the owner's explicit answer for code they
 accepts more — needs a **witness** that the case is real: a call shown, by RBS's own runtime type checker,
 to return or to need what the old declaration excludes; or the library's documentation. Rigor's findings
 locate these cases and name the exit to aim at, but they have false positives, so on their own they are
-a lead, not a witness. Making it *say more* — a narrower return, a narrower parameter, `void` replaced by
+a lead, not a witness. **A witness counts only once its negative control has failed**: break the
+declaration on purpose and confirm the same run reports a type error. RBS's checker silently skips
+some declarations (one on a module, implemented in an including class, is never checked), so a clean
+run means nothing until the broken one fails. Making it *say more* — a narrower return, a narrower parameter, `void` replaced by
 a value — needs a contract source. A `sig-gen` proposal counts only where the slot was undeclared or
 `untyped`.
 
-Four consequences come up on almost every run:
+Five consequences come up on almost every run:
 
 - **`void`, `boolish` and a deliberately wide nominal stand** unless the library documents a value.
   The body returning something is not documentation.
+- **A new declaration is where that choice is made.** A `sig-gen` proposal for an undeclared method
+  that is a literal (`-> 0`, `-> false`), an empty collection (`-> {}`), `nil`, or the incidental value of
+  a procedure's last statement becomes `void` (`bool` for a predicate) unless the documentation names
+  the value. Adopting it would create the contract the `void` rule protects.
 - **Reading the implementation finds candidates; it does not decide them.** The one exception is an
   undeclared or `untyped` parameter's structural need — an argument used only through `to_s` accepts
   `_ToS`. A *declared* parameter is a promise too; today's body is no reason to widen it.
@@ -91,6 +98,11 @@ are not: [`references/02-contract-rules.md`](references/02-contract-rules.md).
 An application whose wrong signature comes from a dependency's community RBS is the second row: fix it
 upstream, and keep a local override only until the fix is released.
 
+Either target may be a **new declaration set** rather than an audit: a gem with no RBS anywhere, or a
+new collection entry. Then there is nothing to compare against, the skeleton (mixins, attributes,
+aliases, metaprogrammed methods) does not come from `sig-gen`, and most decisions are about
+undocumented proven slots and blocks. The reference for the target has a "New declaration set" section.
+
 ## The loop
 
 1. **Find.** Collect candidates from Rigor and from the documentation, not from a read-through. How,
@@ -106,9 +118,12 @@ upstream, and keep a local override only until the fix is released.
 4. **Write.** Change the declaration. Prefer `rigor sig-gen` output verbatim where it applies; write by
    hand only what the evidence supports, and nothing beyond it.
 5. **Prove.** Run the target's gate. For every change that says less, keep the runtime witness: the
-   call fails RBS's type checker under the old declaration and passes under the new one. Add a use-site
-   test that exercises the new contract — a `nil` check on a newly optional return, a call with the
-   newly accepted argument.
+   call fails RBS's type checker under the old declaration and passes under the new one. Before trusting
+   any clean run — one witness or a whole test suite — run the declaration-mutation pass: break each
+   declaration in turn and list the ones no run notices. Those declarations are unchecked, whatever the
+   suite says. How: [`references/05-declaration-mutants.md`](references/05-declaration-mutants.md). Add
+   a use-site test that exercises the new contract — a `nil` check on a newly optional return, a call
+   with the newly accepted argument.
 6. **Explain.** Every change carries its evidence. Every Rigor finding and every candidate you
    deliberately left alone — above all a `void` whose body returns a value, and a Rigor finding no
    witness confirmed — carries its reason, so a reviewer can tell restraint from oversight.
@@ -116,7 +131,9 @@ upstream, and keep a local override only until the fix is released.
 ## Done when
 
 Every candidate from step 1, including every row Rigor reported, is changed with its cited evidence,
-left alone with its reason, or reported as an open question; the target's gate is green; and the write-up lists all three groups.
+left alone with its reason, or reported as an open question; the target's gate is green; every
+declaration the mutation pass left surviving is named in the write-up as unchecked at runtime; and the
+write-up lists all three groups.
 
 When the owner does not answer an open question, or the documentation cannot be found, stop there: leave
 those declarations as they are, finish and prove the changes the evidence did settle, and hand back the

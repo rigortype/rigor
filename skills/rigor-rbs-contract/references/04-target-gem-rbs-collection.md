@@ -110,6 +110,36 @@ request description, not a committed test: the collection's `_test/` code is che
 - Apply the same contract to every version directory whose code and documentation agree, and only to
   those.
 
+## New declaration set (a new entry)
+
+When the gem has no entry yet, there is nothing for Signals 1 and 2 to compare against, and three jobs
+take the place of the audit:
+
+1. **The skeleton.** `"$COLLECTION"/bin/init_new_gem NAME` creates the directory and `_test/`. Take the
+   module structure — classes, modules, `include` / `extend`, superclasses, `attr_*`, aliases,
+   constants, and methods that exist only through metaprogramming — from the loaded gem, because
+   `sig-gen` writes none of these:
+
+   ```sh
+   RUBYLIB="$GEM_DIR/lib" rbs prototype runtime -r FEATURE 'Namespace::*' > "$SCRATCH/skeleton.rbs"
+   ```
+
+   `-r` takes the gem's feature name (`rgl/adjacency`); `-R` means `require_relative`, and there is no
+   `-I`. rbs 4.2 marks the command deprecated (ruby/rbs#2841) but it still works. It loads the gem, so
+   the witness safety rule applies.
+2. **The types.** Run `rigor sig-gen --print` in `$SCRATCH` with an empty `sig/`, and take each
+   method's types from it under `02-contract-rules.md`: a literal, empty-collection, `nil` or
+   procedure-tail proposal becomes `void` or `bool` unless documented; blocks follow § "Blocks".
+3. **The contracts.** Fill what `sig-gen` skipped from the documentation, witness every `nil`, and leave
+   the rest `untyped`. A method that appears in the skeleton but in neither `sig-gen` list was silently
+   dropped (#3068); give it a disposition too.
+
+**A dependency without an entry.** When the new entry must reference a type from another gem — a mixin
+(`include Stream`), a superclass, a parameter type — and that gem has no entry either, the other entry
+comes first, in its own pull request, or the reference is dropped (with the methods it would have
+supplied declared directly). Say which in the description. Never ship a stub of another gem inside this
+entry.
+
 ## The gate
 
 1. Add or extend a test under `_test/` that exercises the contract you changed, as application code
@@ -121,6 +151,21 @@ request description, not a committed test: the collection's `_test/` code is che
 3. `rigor check` on `_test/` reports nothing new compared with before the change.
 4. Every change that says less has a witness that fails under the old declaration and passes under the
    new one, or a quote from that version's documentation, for each version you changed.
+5. The declaration-mutation pass ([`05-declaration-mutants.md`](05-declaration-mutants.md)) has run over
+   the entry with `_test/` and your witnesses as the command, and its survivors are listed in the
+   description.
+
+When `bin/test` cannot run — it needs the network to lock and install the collection — run the same
+three checks offline and say in the description that `bin/test` was not run. Offline there is no
+installed collection, so the Steepfile names the entry (`signature ".."`) and each dependency entry
+itself:
+
+```sh
+rbs -I "$COLLECTION/gems/NAME/X.Y" -I <each dependency entry> validate
+cd "$COLLECTION/gems/NAME/X.Y/_test"     # Steepfile: bin/test's generate_steepfile, plus signature ".." and each dependency entry
+steep check
+steep stats --format=csv                 # every row's "Untyped calls" must be 0, as bin/check-untyped-call.rb checks
+```
 
 ## The pull request
 
@@ -148,7 +193,7 @@ The signal that surfaced it — the Rigor command and the finding, or the docume
 
 ## Verification
 
-The witness for each change that says less: the call, and the runtime type checker's error under the old declaration (it passes under the new one). The test added, and the `bin/test gems/NAME/X.Y` result for each version.
+The witness for each change that says less: the call, and the runtime type checker's error under the old declaration (it passes under the new one). The declaration-mutation result (killed / survived) and every survivor, named as unchecked at runtime. The test added, and the `bin/test gems/NAME/X.Y` result for each version.
 ```
 
 Write each paragraph and list item on one line; GitHub renders a newline inside a paragraph as a line

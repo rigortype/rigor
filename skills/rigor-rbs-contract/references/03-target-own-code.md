@@ -63,9 +63,14 @@ YARD type is not, and `rigor-type-oracle` covers why.
    § "Signal 6") and a test or a use site now handles it; where you widened a parameter, a test now
    passes the newly accepted argument. The owner may accept a change without a witness — say so in the
    write-up — but a Rigor finding alone is never presented as proof.
-5. If the project has a test suite, run it once with `rbs/test/setup` and `RBS_TEST_TARGET` set to the
-   project's namespace. Every declaration the suite exercises is then checked against real values,
-   which catches what no static signal sees.
+5. If the project has a test suite, use it as the command for the declaration-mutation pass
+   ([`05-declaration-mutants.md`](05-declaration-mutants.md)): it runs the suite under `rbs/test/setup`
+   once per broken declaration. A killed mutant is a declaration the suite checks against real values,
+   which no static signal does; a survivor is one it does not check, however green the suite is. Report
+   the survivors to the owner.
+6. For a gem with no RBS yet, the skeleton and new-method rules in `04-target-gem-rbs-collection.md`
+   § "New declaration set" apply to its `sig/` as well; ship it with the gem rather than through the
+   collection.
 
 ## When the wrong signature belongs to a dependency
 

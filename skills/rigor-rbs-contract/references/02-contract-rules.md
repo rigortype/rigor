@@ -25,6 +25,15 @@ least of all for `void` → a value. Grade what you quote: a doc comment that st
 a unique Job ID. If middleware stops the job, nil will be returned instead") is strong; a README example
 that happens to use the value is weak. Say which kind you are citing.
 
+**The gem's own type annotations are documentation, and can be wrong.** A YARD `@return [Foo]` or
+`@param` in the gem's source is the author's statement, so you may read and quote it; `rigor-type-oracle`'s
+rule against bracketed YARD types governs what *you* write, not what you read. Grade a tag like any other
+documentation, and expect it to drift: on rgl 0.6.7, `Graph#reverse` is tagged
+`@return [DirectedAdjacencyGraph]` while its own prose says an undirected graph returns `self`, and the
+README's `remove_edge … #=> true` is stale (the call returns a `Set`). **When two pieces of the same
+version's documentation disagree, or a tag disagrees with Rigor's proof, a witness decides.** Quote
+both and cite the witness.
+
 ## Saying less
 
 | Change | Needs | Example |
@@ -63,6 +72,8 @@ an input the documentation allows, or a use the library's own callers make, is.
 | A narrower parameter | a contract source. Observed call sites (`sig-gen --params=observed`) show what callers pass today, not what the method accepts; widen literals before adopting them |
 | `void` or `boolish` → a value type | that version's documentation of the value. The body returning something is not documentation |
 | A deliberately wide nominal (`Numeric`, `Object`) → what the body returns | that version's documentation of the narrower value |
+| A new method whose `sig-gen` proposal is a literal (`-> 0`, `-> false`), an empty collection (`-> {}`, `-> []`), `nil`, or the incidental value of a procedure's last statement | nothing adopts it as is: write `void` (`bool` for a predicate) unless the documentation names the value. A literal default that subclasses override (`directed? -> false`, overridden with `true`) is a predicate: `bool` |
+| `instance` or `self` instead of the class `sig-gen` printed (a `new` in a singleton method, `self.class.new`, a method returning `self`) | the body's construction (`new` on the receiver's own class) plus documentation that subclasses get their own type. A witness cannot show it, because the checker accepts a subclass instance either way (#3069) |
 
 ## Replacing a wholly wrong declaration
 
@@ -76,6 +87,29 @@ as undeclared:
 2. Witness that the old declaration is wrong: one call whose result RBS's type checker rejects against
    the old type.
 3. Say in the write-up that the declaration was replaced, not widened or narrowed.
+
+## Blocks
+
+Most of a new declaration's work is in its parameters and blocks, and `sig-gen` does not always type
+blocks (#3067). Decide them in this order:
+
+- **Required or optional.** Optional (`?{ … }`) when every `yield` or `block.call` is guarded by
+  `block_given?` (or the block is passed on to a method whose declaration makes it optional); required
+  when one is unconditional. If the documentation says optional and the body uses the block
+  unconditionally, see "When the documented contract crashes" below.
+- **Block parameters** come from what is yielded, and from `:yields:` / `@yield` / `@yieldparam` in the
+  documentation.
+- **Block return** is `void` unless the method uses the value; `boolish` when it is used only for
+  truthiness (a filter or predicate block); a precise type only when the method's documented result
+  depends on it.
+
+## When the documented contract crashes
+
+Sometimes a witness shows the documentation promising more than the code delivers: rgl documents
+`depth_first_search`'s block as optional, and calling it without one raises `NoMethodError`. Keep the
+documented declaration — it is the contract — report the defect upstream, and put it under open
+questions in the write-up. Narrowing the declaration to what the code survives would be saying more
+without a contract source.
 
 ## Rules that come up on almost every run
 

@@ -146,4 +146,66 @@ RSpec.describe Rigor::Inference::CalleeMutationChain do
       expect(inside).to eq({})
     end
   end
+
+  # ADR-127 WD3, #2807 — `:close[stripes]`'s stored answer was computed from `:edges[stripes]`'s stored entry, so the
+  # stale entry is shared across the two memos. The hit's recomputation must bypass `:edges` to see the real
+  # hand-off; reading the stored entry back would make the recomputed answer agree with itself and pass.
+  describe "a stale census entry shared across two memos (#2807)" do
+    let(:source) do
+      <<~RUBY
+        class Mut
+          def run(acc)
+            stripes(acc)
+          end
+
+          def stripes(acc) = poke(acc)
+          def poke(acc) = (acc[0] = "x")
+        end
+      RUBY
+    end
+    let(:program) { Prism.parse(source).value }
+    let(:index) { Rigor::Inference::ScopeIndexer.index(program, default_scope: Rigor::Scope.empty) }
+    let(:call) do
+      found = nil
+      Rigor::Source::NodeWalker.each(program) { |n| found ||= n if n.is_a?(Prism::CallNode) && n.name == :stripes }
+      found
+    end
+    let(:stripes_def) do
+      found = nil
+      Rigor::Source::NodeWalker.each(program) { |n| found ||= n if n.is_a?(Prism::DefNode) && n.name == :stripes }
+      found
+    end
+
+    # Writes `value` where `resolved_census` keeps `kind`'s entry for `def_node`, as a key defect's stale entry sits.
+    def plant_census(kind, def_node, value)
+      evaluator = Rigor::Inference::StatementEvaluator.new(scope: index[call])
+      scope = evaluator.send(:scope)
+      table = Rigor::TypingState.current.weak_key_map(Rigor::TypingState.slot(:callee_resolved_census).index)
+      slot = (table[scope.discovery] ||= [{}, {}])
+      self_type = scope.self_type
+      by_class = (slot[self_type.is_a?(Rigor::Type::Singleton) ? 1 : 0][kind] ||= {})
+      by_def = (by_class[evaluator.send(:enclosing_class_name_for, self_type)] ||= {}.compare_by_identity)
+      by_def[def_node] = value
+    end
+
+    def floored_arguments
+      Rigor::Inference::StatementEvaluator.new(scope: index[call]).content_mutated_arguments(call)
+    end
+
+    it "is detected only because the recomputation bypasses the memos it reads" do
+      Rigor::Inference::MemoAudit.disable!
+      evaluator = Rigor::Inference::StatementEvaluator.new(scope: index[call])
+      # `:edges[stripes]` claims `stripes` hands `acc` to nothing; `:close[stripes]` holds the answer that stale
+      # entry produces, so the two stored entries agree with each other.
+      plant_census(:edges, stripes_def, [])
+      plant_census(:close, stripes_def, evaluator.send(:own_content_parameters, stripes_def))
+      expect(floored_arguments).to eq([])
+
+      Rigor::Inference::MemoAudit.enable!
+      expect { floored_arguments }.to raise_error(Rigor::Inference::MemoAudit::Mismatch, /:close/)
+    ensure
+      Rigor::Inference::MemoAudit.drain
+      Rigor::Inference::MemoAudit.disable!
+    end
+  end
 end

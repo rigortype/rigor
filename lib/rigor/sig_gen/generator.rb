@@ -679,7 +679,7 @@ module Rigor
           unresolvable = found
           current = candidates.map do |candidate|
             owner = unresolvable_for(candidate.class_name, unresolvable)
-            candidate = owner ? record_unresolvable_superclass(candidate, owner) : candidate
+            candidate = record_unresolvable_superclass(candidate, owner) if owner
             drop_unresolvable_shells(candidate, unresolvable)
           end
         end
@@ -690,7 +690,8 @@ module Rigor
       # leaves the shell, and the writer renders the container around it with the unresolvable superclass: the next
       # `check` fails `RBS::NoSuperclassFoundError`. A shell inside a demoted class goes with it, like a demoted
       # class's own members, and a demoted candidate sheds them too: a shell left on one would still count as emitted
-      # ({#declared_by_run}), so a written subclass of the dropped nested class would fail its build. Writing the container bare instead would make it RBS-known without its ancestry, which
+      # ({#declared_by_run}), so a written subclass of the dropped nested class would fail its build.
+      # Writing the container bare instead would make it RBS-known without its ancestry, which
       # a later run (or a path-subset run) would take for a resolvable superclass of its subclasses.
       def drop_unresolvable_shells(candidate, unresolvable)
         shells = (candidate.class_shells || []).to_a

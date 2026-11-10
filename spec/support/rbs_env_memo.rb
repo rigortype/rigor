@@ -143,7 +143,7 @@ module RbsEnvMemo
   # Prepended onto the loader's singleton so it wraps `build_env_for` for every caller, including
   # `Cache::RbsEnvironment.compute` on a cache miss.
   module Interception
-    def build_env_for(libraries:, signature_paths:, virtual_rbs: [], deferred_signature_paths: [],
+    def build_env_for(libraries:, signature_paths:, virtual_rbs: [], deferred_signature_paths: [], # rubocop:disable Metrics/ParameterLists
                       project_signature_paths: [], core_root: nil, subordinate_signature_paths: [],
                       collection_signature_paths: [])
       return super unless RbsEnvMemo.enabled?

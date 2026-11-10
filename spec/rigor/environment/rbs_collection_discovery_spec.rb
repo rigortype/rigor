@@ -387,7 +387,9 @@ RSpec.describe Rigor::Environment::RbsCollectionDiscovery do
 
   # Issue #3030 — a `signature_paths:` root whose real path ends in a collection entry's `<name>/<version>`.
   describe ".without_signature_path_copies" do
-    let(:collection) { [File.join(tmpdir, ".gem_rbs_collection", "mygem", "1.0"), File.join(tmpdir, ".gem_rbs_collection", "other", "1.0")] }
+    let(:collection) do
+      %w[mygem other].map { |name| File.join(tmpdir, ".gem_rbs_collection", name, "1.0") }
+    end
 
     it "drops the entry a root names by its real path, so `..` and a symlink count" do
       FileUtils.mkdir_p(File.join(tmpdir, "gems", "mygem", "1.0", "_test"))

@@ -839,8 +839,8 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
     # The class doc's constraint: "callers MUST NOT reorder the concatenation". One diagnostic per stream
     # (each with a distinguishable `rule`) proves both that every stream is actually invoked AND that the
     # documented order (`plugin_load, prepare, pre_eval, dependency_source, budget, config_conflict,
-    # rbs_coverage, rbs_collection_setup_hint, rbs_inline_hint, expansion errors`) still holds — a `+` swapped for the wrong operand
-    # (nil_inject/type_swap) would either drop a stream or shuffle this list.
+    # rbs_coverage, rbs_collection_setup_hint, rbs_inline_hint, expansion errors`) still holds — a `+`
+    # swapped for the wrong operand (nil_inject/type_swap) would either drop a stream or shuffle this list.
     it "concatenates every pre-file stream in the documented order" do # rubocop:disable RSpec/ExampleLength
       registry = Rigor::Plugin::Registry.new(load_errors: [load_error("plugin load boom")])
       index = Rigor::Analysis::DependencySourceInference::Index.new(

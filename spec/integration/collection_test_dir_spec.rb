@@ -28,7 +28,7 @@ RSpec.describe "rbs collection RBS in a gem_rbs_collection _test/ directory" do
           version: '1.0'
           source:
             type: local
-            path: "#{File.join(@repo, 'gems')}"
+            path: "#{File.join(repo, 'gems')}"
       YAML
     end
     "---\npath: \".gem_rbs_collection\"\ngems:\n#{entries.join("\n")}\n"
@@ -36,7 +36,7 @@ RSpec.describe "rbs collection RBS in a gem_rbs_collection _test/ directory" do
 
   def write_gem(name, files)
     files.each do |relative, rbs|
-      path = File.join(@repo, "gems", name, "1.0", relative)
+      path = File.join(repo, "gems", name, "1.0", relative)
       FileUtils.mkdir_p(File.dirname(path))
       File.write(path, rbs)
     end
@@ -50,7 +50,7 @@ RSpec.describe "rbs collection RBS in a gem_rbs_collection _test/ directory" do
     names.each do |name|
       FileUtils.mkdir_p(File.join(test_dir, ".gem_rbs_collection", name))
       installed = File.join(test_dir, ".gem_rbs_collection", name, "1.0")
-      source = File.join(@repo, "gems", name, "1.0")
+      source = File.join(repo, "gems", name, "1.0")
       next File.symlink(source, installed) unless copy.include?(name)
 
       # A `git` source copies the gem without its `_`-prefixed entries (`Sources::Git#cp_r`).
@@ -61,7 +61,7 @@ RSpec.describe "rbs collection RBS in a gem_rbs_collection _test/ directory" do
     end
   end
 
-  def test_dir = File.join(@repo, "gems", "mygem", "1.0", "_test")
+  def test_dir = File.join(repo, "gems", "mygem", "1.0", "_test")
 
   def loader(signature_paths: nil)
     Rigor::Environment.for_project(
@@ -77,12 +77,10 @@ RSpec.describe "rbs collection RBS in a gem_rbs_collection _test/ directory" do
     rbs_loader.signature_paths.any? { |path| path.to_s.end_with?(".gem_rbs_collection/#{name}/1.0") }
   end
 
-  around do |example|
-    Dir.mktmpdir("rigor-collection-test-dir-") do |dir|
-      @repo = File.realpath(dir)
-      Dir.chdir(@repo) { example.run }
-    end
-  end
+  # The real path, so the `/var` → `/private/var` symlink on macOS does not split one directory into two spellings.
+  let(:repo) { File.realpath(Dir.mktmpdir("rigor-collection-test-dir-")) }
+
+  after { FileUtils.rm_rf(repo) }
 
   describe "(a) a collected gem's _-prefixed directories" do
     # `helper`'s `_test/test.rbs` redeclares `Helper#call`, as rails-dom-testing's and activerecord's fixtures
@@ -162,7 +160,7 @@ RSpec.describe "rbs collection RBS in a gem_rbs_collection _test/ directory" do
     it "prefers the signature_paths: copy over a lockfile copy with other contents" do
       write_gems
       write_test_dir(%w[mygem other], copy: %w[mygem])
-      File.write(File.join(@repo, "gems", "mygem", "1.0", "mygem.rbs"), "class Mygem\n  def run: () -> String\nend\n")
+      File.write(File.join(repo, "gems", "mygem", "1.0", "mygem.rbs"), "class Mygem\n  def run: () -> String\nend\n")
 
       rbs_loader = loader(signature_paths: [File.join(test_dir, "..")])
 
@@ -191,7 +189,7 @@ RSpec.describe "rbs collection RBS in a gem_rbs_collection _test/ directory" do
            2.6.0
       LOCK
       rbs_loader = Rigor::Environment.for_project(
-        root: test_dir, signature_paths: [File.join(@repo, "gems", "activesupport", "1.0")],
+        root: test_dir, signature_paths: [File.join(repo, "gems", "activesupport", "1.0")],
         rbs_collection_auto_detect: true, bundler_auto_detect: true
       ).rbs_loader
 

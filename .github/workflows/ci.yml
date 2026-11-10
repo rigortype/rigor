@@ -299,7 +299,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Ruby ${{ matrix.ruby }}
-        uses: ruby/setup-ruby@v1.336.0
+        uses: ruby/setup-ruby@v1.338.0
         with:
           ruby-version: ${{ matrix.ruby }}
           bundler-cache: true
@@ -441,7 +441,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@v1.336.0
+        uses: ruby/setup-ruby@v1.338.0
         with:
           ruby-version: "4.0"
           bundler-cache: true
@@ -492,7 +492,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@v1.336.0
+        uses: ruby/setup-ruby@v1.338.0
         with:
           ruby-version: "4.0"
           bundler-cache: true
@@ -537,7 +537,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@v1.336.0
+        uses: ruby/setup-ruby@v1.338.0
         with:
           ruby-version: "4.0"
 
@@ -595,7 +595,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@v1.336.0
+        uses: ruby/setup-ruby@v1.338.0
         with:
           ruby-version: "4.0"
           bundler-cache: true
@@ -645,7 +645,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@v1.336.0
+        uses: ruby/setup-ruby@v1.338.0
         with:
           ruby-version: "4.0"
           bundler-cache: true
@@ -686,7 +686,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@v1.336.0
+        uses: ruby/setup-ruby@v1.338.0
         with:
           ruby-version: "4.0"
           bundler-cache: true
@@ -834,7 +834,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@v1.336.0
+        uses: ruby/setup-ruby@v1.338.0
         with:
           ruby-version: "4.0"
           bundler-cache: true
@@ -969,7 +969,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@v1.336.0
+        uses: ruby/setup-ruby@v1.338.0
         with:
           ruby-version: "4.0"
           bundler-cache: true
@@ -1004,7 +1004,7 @@ jobs:
           fetch-depth: 0
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@v1.336.0
+        uses: ruby/setup-ruby@v1.338.0
         with:
           ruby-version: "4.0"
           bundler-cache: true
@@ -1092,7 +1092,7 @@ jobs:
           fetch-depth: 0
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@v1.336.0
+        uses: ruby/setup-ruby@v1.338.0
         with:
           ruby-version: "4.0"
           bundler-cache: true

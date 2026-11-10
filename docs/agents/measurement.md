@@ -183,6 +183,14 @@ output looks right, but it acted on the wrong input or measured the wrong thing.
 - **`cmd | grep -q` under `pipefail` reports no match on large inputs**: grep exits at the first match,
   the producer dies of SIGPIPE (141), and the pipeline fails. Use `grep … >/dev/null` or `grep -c` so
   grep drains its input (#2150 hit this in `verify-changed`).
+- **`pgrep -f PATTERN` inside a wait loop matches the loop's own shell.** The agent's Bash tool runs
+  the whole command line under `zsh -c`, so `until ! pgrep -f "bin/lane-push"; do sleep 5; done` finds
+  its own process and never exits. On 2026-11-10, 16 such loops left behind by lanes and reviewers were
+  still polling 4 to 26 hours after the work they waited on had finished. The same applies to
+  `while pgrep -f "make verify-changed"`. Instead, wait on the command itself by running it in the
+  background and letting the harness notify you, poll for its output file, or use a pattern that cannot
+  match the loop's own text, such as `pgrep -f "[b]in/lane-push"`. Bound any loop with an iteration
+  cap.
 - **`rg -r` is `--replace`**, not recursive: `rg -rn PATTERN` rewrites every match to the literal `n`.
   rg is recursive by default.
 - **An unquoted heredoc runs every backtick span** in the script as a command, so a Python or Ruby

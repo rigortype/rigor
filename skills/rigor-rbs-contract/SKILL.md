@@ -63,8 +63,8 @@ to return or to need what the old declaration excludes; or the library's documen
 locate these cases and name the exit to aim at, but they have false positives, so on their own they are
 a lead, not a witness. **A witness counts only once its negative control has failed**: break the
 declaration on purpose and confirm the same run reports a type error. RBS's checker silently skips
-some declarations (one on a module, implemented in an including class, is never checked), so a clean
-run means nothing until the broken one fails. Making it *say more* — a narrower return, a narrower parameter, `void` replaced by
+some declarations (one inherited from a module or superclass by a class that defines the method itself
+is never checked), so a clean run means nothing until the broken one fails. Making it *say more* — a narrower return, a narrower parameter, `void` replaced by
 a value — needs a contract source. A `sig-gen` proposal counts only where the slot was undeclared or
 `untyped`.
 
@@ -120,8 +120,8 @@ undocumented proven slots and blocks. The reference for the target has a "New de
 5. **Prove.** Run the target's gate. For every change that says less, keep the runtime witness: the
    call fails RBS's type checker under the old declaration and passes under the new one. Before trusting
    any clean run — one witness or a whole test suite — run the declaration-mutation pass: break each
-   declaration in turn and list the ones no run notices. Those declarations are unchecked, whatever the
-   suite says. How: [`references/05-declaration-mutants.md`](references/05-declaration-mutants.md). Add
+   method's return in turn and list the ones no run notices. Those returns are unchecked, whatever the
+   suite says (parameters and attributes are not covered by the pass). How: [`references/05-declaration-mutants.md`](references/05-declaration-mutants.md). Add
    a use-site test that exercises the new contract — a `nil` check on a newly optional return, a call
    with the newly accepted argument.
 6. **Explain.** Every change carries its evidence. Every Rigor finding and every candidate you

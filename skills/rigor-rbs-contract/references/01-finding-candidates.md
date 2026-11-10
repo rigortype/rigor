@@ -160,16 +160,20 @@ fix and passes after it.
 
 **Run the negative control first.** Run every witness once under a declaration you have broken on
 purpose and confirm it reports the type error; only then does a clean run under the real declaration
-mean anything. The checker silently skips some declarations: one written on a module and implemented
-in an including class is never checked, so a witness that calls it exits 0 whatever the declaration
-says. On rgl, `remove_edge` declared `-> bool` on the module `MutableGraph` returned a `Set` and the run
-passed; redeclared on the class `DirectedAdjacencyGraph`, the same run raised `expected bool but
-returns Set[5]`.
+mean anything. The checker silently skips some declarations. It checks a method only against a
+declaration written on the same class or module that defines the method in Ruby. A declaration
+inherited from a module or superclass, applied to a method an including class or subclass defines or
+overrides, is skipped unless it carries `%a{rbs:test:target}`. So are methods of classes created
+without `class … end` (`Struct.new`, `Class.new`, `Data.define`) and of classes loaded before
+`rbs/test/setup`. A witness that calls a skipped method exits 0 whatever the declaration says. On rgl,
+`remove_edge` declared `-> bool` on the module `MutableGraph` (which defines an abstract version) and
+overridden in the class `DirectedAdjacencyGraph` returned a `Set` and the run passed; redeclared on the
+class, the same run raised `expected bool but returns Set[5]`.
 
 A run that raises nothing is not a witness the other way: it shows only that the inputs you tried
 behave. When no input you can justify produces the excluded value, the finding is "left unchanged — no
 witness", not a change. A whole test suite run under `rbs/test/setup` checks only the declarations its
-calls reach and the checker hooks; the declaration-mutation pass in
+calls reach and the checker does not skip; the declaration-mutation pass in
 [`05-declaration-mutants.md`](05-declaration-mutants.md) lists the ones it does not, which is the
 negative control for every declaration at once.
 

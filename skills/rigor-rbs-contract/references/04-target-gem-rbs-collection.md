@@ -115,17 +115,20 @@ request description, not a committed test: the collection's `_test/` code is che
 When the gem has no entry yet, there is nothing for Signals 1 and 2 to compare against, and three jobs
 take the place of the audit:
 
-1. **The skeleton.** `"$COLLECTION"/bin/init_new_gem NAME` creates the directory and `_test/`. Take the
+1. **The skeleton.** `"$COLLECTION"/bin/init_new_gem NAME` creates the directory and `_test/`. It
+   prompts on stdin for the version and then a GitHub account for `_reviewers.yaml`, so answer both
+   explicitly — `printf '0.6\n\n' | "$COLLECTION"/bin/init_new_gem NAME` — and leave the account empty
+   unless the user gives you one; never put their name in it on your own. Take the
    module structure — classes, modules, `include` / `extend`, superclasses, `attr_*`, aliases,
    constants, and methods that exist only through metaprogramming — from the loaded gem, because
    `sig-gen` writes none of these:
 
    ```sh
-   RUBYLIB="$GEM_DIR/lib" rbs prototype runtime -r FEATURE 'Namespace::*' > "$SCRATCH/skeleton.rbs"
+   RUBYLIB="$GEM_DIR/lib" rbs prototype runtime -r FEATURE Namespace 'Namespace::*' > "$SCRATCH/skeleton.rbs"
    ```
 
    `-r` takes the gem's feature name (`rgl/adjacency`); `-R` means `require_relative`, and there is no
-   `-I`. rbs 4.2 marks the command deprecated (ruby/rbs#2841) but it still works. It loads the gem, so
+   `-I`. Name the top-level module on its own as well as `Namespace::*`: the pattern alone excludes it. rbs 4.2 marks the command deprecated (ruby/rbs#2841) but it still works. It loads the gem, so
    the witness safety rule applies.
 2. **The types.** Run `rigor sig-gen --print` in `$SCRATCH` with an empty `sig/`, and take each
    method's types from it under `02-contract-rules.md`: a literal, empty-collection, `nil` or
@@ -160,8 +163,11 @@ three checks offline and say in the description that `bin/test` was not run. Off
 installed collection, so the Steepfile names the entry (`signature ".."`) and each dependency entry
 itself:
 
+Add `-r <library>` to `rbs` and a `library "<library>"` line to the Steepfile for each standard library
+`manifest.yaml` lists, which `bin/test` would otherwise install:
+
 ```sh
-rbs -I "$COLLECTION/gems/NAME/X.Y" -I <each dependency entry> validate
+rbs -r <each manifest library> -I "$COLLECTION/gems/NAME/X.Y" -I <each dependency entry> validate
 cd "$COLLECTION/gems/NAME/X.Y/_test"     # Steepfile: bin/test's generate_steepfile, plus signature ".." and each dependency entry
 steep check
 steep stats --format=csv                 # every row's "Untyped calls" must be 0, as bin/check-untyped-call.rb checks

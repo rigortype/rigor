@@ -97,6 +97,9 @@ blocks (#3067). Decide them in this order:
   `block_given?` (or the block is passed on to a method whose declaration makes it optional); required
   when one is unconditional. If the documentation says optional and the body uses the block
   unconditionally, see "When the documented contract crashes" below.
+- **Two overloads, not an optional block,** when the method returns something else without a block
+  (`return enum_for(__method__) unless block_given?`): `() { (T) -> void } -> self` and
+  `() -> Enumerator[T, self]`, rather than one optional block with a union return.
 - **Block parameters** come from what is yielded, and from `:yields:` / `@yield` / `@yieldparam` in the
   documentation.
 - **Block return** is `void` unless the method uses the value; `boolish` when it is used only for
@@ -107,8 +110,9 @@ blocks (#3067). Decide them in this order:
 
 Sometimes a witness shows the documentation promising more than the code delivers: rgl documents
 `depth_first_search`'s block as optional, and calling it without one raises `NoMethodError`. Keep the
-documented declaration — it is the contract — report the defect upstream, and put it under open
-questions in the write-up. Narrowing the declaration to what the code survives would be saying more
+documented declaration — it is the contract — note the defect as an upstream bug for the user to
+report (filing an issue on someone else's repository is outward-facing; do not do it unasked), and put
+it under open questions in the write-up. Narrowing the declaration to what the code survives would be saying more
 without a contract source.
 
 ## Rules that come up on almost every run

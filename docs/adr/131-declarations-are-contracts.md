@@ -172,18 +172,23 @@ in the pull request rather than committed, because the collection's `_test/` cod
 
 ### WD7 — A witness needs its negative control; declaration mutants supply it at scale
 
-RBS's runtime checker skips some declarations without saying so. On rgl, `remove_edge` declared
-`-> bool` on the module `MutableGraph` and implemented in the class `DirectedAdjacencyGraph` returned a
-`Set`, and the run exited 0; redeclared on the class, the same run raised `expected bool but returns
-Set[5]`. rgl's whole test suite had passed under the checker with that blind spot hiding a family of
-declarations. A clean run is therefore evidence only after the same run has failed under a declaration
+RBS's runtime checker skips some declarations without saying so: it checks a method only against a
+declaration on the same class or module that defines it in Ruby, so a declaration inherited from a
+module or superclass by a class that defines or overrides the method is skipped unless it carries
+`%a{rbs:test:target}` (`RBS::Test::Tester#skip_method?`). On rgl, `remove_edge` declared `-> bool` on
+the module `MutableGraph` and overridden in the class `DirectedAdjacencyGraph` returned a `Set`, and the
+run exited 0; redeclared on the class, the same run raised `expected bool but returns Set[5]`. rgl's
+test suite ran under the checker with that rule hiding a family of declarations. A clean run is therefore evidence only after the same run has failed under a declaration
 broken on purpose.
 
 The scalable form is the repository's own mutation idea (`tool/mutation`, ADR-62/63) turned on the
 declarations: replace each non-`void` return with `bot`, and each `T?` with `T`, one at a time, re-run
-the witnesses, and list the mutants no run notices. On the rgl draft, 61 mutants ran in about 70
-seconds; 8 survived, four of them the module-declared blind spot and one a `?` no witness reached. A
-survivor is not a defect; it is the limit of what the evidence covers, and the write-up names it. The
+the witnesses, and list the mutants no run notices. A mutant counts as killed only by a new type error
+naming the mutated method, and one that does not load is an error, never a survivor — a first version
+that compared whole error lines counted run-to-run noise as kills, and one that spliced byte offsets
+broke files with non-ASCII comments. On the rgl draft, 61 mutants ran in about 70 seconds: 55 killed,
+6 survived, three of them the skip rule, one a method nothing called, and one a `?` no witness reached.
+A survivor is not a defect; it is the limit of what the evidence covers, and the write-up names it. The
 skill carries the procedure and a short script in `references/05-declaration-mutants.md`; whether it
 becomes a `rigor` command is a follow-up ([#3072](https://github.com/rigortype/rigor/issues/3072)), because a command would be frozen public surface (ADR-50).
 

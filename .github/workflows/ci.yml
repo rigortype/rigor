@@ -3,10 +3,11 @@ name: CI
 on:
   push:
     branches: [master]
-    # A Markdown-only push (ADRs, notes, CHANGELOG, READMEs, skills) does
-    # not change analysable code, so skip the full suite for it. Mixed
-    # commits still run — paths-ignore only skips when EVERY changed file
-    # matches. Applied to `push` only: `pull_request` stays unfiltered at
+    # A Markdown- or shell-script-only push (ADRs, notes, CHANGELOG,
+    # READMEs, skills, the agent-harness and probe scripts) does not change
+    # analysable code and no spec runs a `.sh` file, so skip the full suite
+    # for it. Mixed commits still run — paths-ignore only skips when EVERY
+    # changed file matches. Applied to `push` only: `pull_request` stays unfiltered at
     # the trigger level, because a paths-filtered required check hangs
     # pending and blocks the merge. The equivalent PR-side skip is done
     # downstream by the `changes` job, which gates the code jobs on whether
@@ -14,6 +15,7 @@ on:
     # always reports.
     paths-ignore:
       - "**/*.md"
+      - "**/*.sh"
   pull_request:
   # The merge queue on master (ADR-123) runs this workflow on each queued
   # PR merged onto master and the entries ahead of it, and merges only when
@@ -81,7 +83,7 @@ jobs:
         id: tree
         run: echo "tree=$(git rev-parse --verify -q "$GITHUB_SHA^{tree}" || true)" >> "$GITHUB_OUTPUT"
 
-      - name: Detect non-Markdown changes
+      - name: Detect code changes (non-Markdown, non-shell)
         id: detect
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
@@ -171,12 +173,15 @@ jobs:
           fi
           echo "Changed files:"
           printf '%s\n' "$changed"
-          non_md=$(printf '%s\n' "$changed" | grep -vE '\.md$' || true)
-          if [ -n "$non_md" ]; then
-            echo "Non-Markdown files changed — running the full suite."
+          # `.sh` joins `.md` as a file the Ruby suite never reads: no spec,
+          # Makefile target or workflow runs one (checked 2026-11-10). If a
+          # spec ever starts exercising a shell script, drop it from here.
+          non_code=$(printf '%s\n' "$changed" | grep -vE '\.(md|sh)$' || true)
+          if [ -n "$non_code" ]; then
+            echo "Files other than Markdown and shell scripts changed — running the full suite."
             echo "code=true" >> "$GITHUB_OUTPUT"
           else
-            echo "Markdown-only PR — skipping the code suite."
+            echo "Markdown- and shell-script-only PR — skipping the code suite."
             echo "code=false" >> "$GITHUB_OUTPUT"
           fi
           if grep -qE "$nix_inputs" <<<"$changed"; then

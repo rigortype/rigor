@@ -58,6 +58,16 @@ module Rigor
         def register_binding_recognizer(name, &)
           binding_recognizers << BindingRecognizer.new(name, &)
         end
+
+        # Issue #1956 — the `ffi_catalog` producer reads {.binding_recognizers} inside a Ractor worker, so
+        # the Ractor coordinator shares the table along with the declarations {Base} shares. That freezes
+        # it: a recognizer registered after a Ractor pool started raises `FrozenError`.
+        def share_declarations_for_ractors!
+          super
+          Ractor.make_shareable(binding_recognizers)
+          nil
+        end
+        private :share_declarations_for_ractors!
       end
     end
 

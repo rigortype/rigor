@@ -975,4 +975,30 @@ RSpec.describe Rigor::Plugin::Base do
       expect(plugin.declared_members("User")).to eq([])
     end
   end
+
+  # Issue #1956 — the four declaration readers are memoised so the Ractor coordinator has one snapshot to
+  # make shareable. A declaration made after a read must still show up in the next read.
+  describe "declaration snapshots" do
+    it "includes a declaration made after the snapshot was first read" do
+      klass = Class.new(described_class) do
+        manifest(id: "demo", version: "0.1.0")
+        producer(:first) { |_params| nil }
+        node_rule(Prism::CallNode) { |_node, _scope, _path| [] }
+        dynamic_return(methods: [:first]) { |_call_node, _scope| nil }
+        narrowing_facts(methods: [:first]) { |_call_node, _scope| nil }
+      end
+      [klass.producers, klass.node_rules, klass.dynamic_returns, klass.narrowing_facts_rules]
+      klass.class_eval do
+        producer(:second) { |_params| nil }
+        node_rule(Prism::DefNode) { |_node, _scope, _path| [] }
+        dynamic_return(methods: [:second]) { |_call_node, _scope| nil }
+        narrowing_facts(methods: [:second]) { |_call_node, _scope| nil }
+      end
+
+      expect(klass.producers.keys).to eq(%i[first second])
+      expect(klass.node_rules.map { |rule| rule[:node_type] }).to eq([Prism::CallNode, Prism::DefNode])
+      expect(klass.dynamic_returns.map { |rule| rule[:methods] }).to eq([[:first], [:second]])
+      expect(klass.narrowing_facts_rules.map { |rule| rule[:methods] }).to eq([[:first], [:second]])
+    end
+  end
 end

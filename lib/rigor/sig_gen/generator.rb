@@ -768,8 +768,11 @@ module Rigor
         # The recorded spelling may carry the type arguments {#generic_superclass_spelling} added, and a rooted
         # token its `::` (#2459); the resolvability question is about the class, so it is asked of the bare name.
         base = bare_superclass_name(superclass)
-        return nil if Reflection.rbs_class_known?(base, environment: @environment)
-        return superclass unless emitted.include?(base)
+        # A class the source gives a superclass is not resolved just because the RBS env knows it: a demoted
+        # class's bare shell (#2715) is known but closed at Object, so the source chain keeps being walked.
+        known = Reflection.rbs_class_known?(base, environment: @environment)
+        return nil if known && superclasses[base].nil?
+        return superclass unless known || emitted.include?(base)
 
         unresolved_superclass_root(base, superclasses, emitted, seen)
       end

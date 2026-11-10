@@ -216,6 +216,25 @@ RSpec.describe Rigor::CLI::SigGenCommand do
       expect(content).not_to include("BaseRecord")
     end
 
+    # Run 1 writes the bare `class Query` shell, so the next run finds `Query` in the RBS environment. A
+    # subclass of it must still be demoted: `class IssueQuery < ::Query` would close its ancestry at Object and
+    # drop the external superclass's singleton methods from `check`.
+    it "still demotes a subclass of the demoted class once its bare shell is on disk" do
+      write("lib/issue_query.rb", <<~RUBY)
+        class IssueQuery < Query
+          def label(thing)
+            thing.name
+          end
+        end
+      RUBY
+
+      sig_gen_write
+      sig_gen_write
+
+      issue_sig = File.join(root, "sig/issue_query.rbs")
+      expect(File.exist?(issue_sig) ? File.read(issue_sig) : "").not_to include("< ::Query")
+    end
+
     it "leaves `rigor check` free of rbs.coverage.definition-build-failed" do
       sig_gen_write
 

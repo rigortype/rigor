@@ -216,6 +216,7 @@ module Rigor
           # `CONST = [...].freeze; CONST.any? { … }`; fixing it at the fold (not the rule) unblocks that
           # preservation.
           return nil unless context.block_type.nil?
+          return constant_set_first(context) if method_name == :first && receiver.is_a?(Type::Constant)
 
           handler = RECEIVER_HANDLERS[receiver.class]
           return nil unless handler
@@ -333,6 +334,30 @@ module Rigor
             members = constant.value.map { |v| Type::Combinator.constant_of(v) }
             SetFolding.typed_set(members + Inference::SetMutation.element_types(args.first)) ||
               Type::Combinator.nominal_of("Set", type_args: [Type::Combinator.untyped])
+          end
+
+          # Issue #2657 — `Set#first` (no argument) on a constant-folded Set held in a LOCAL that provably nobody else
+          # can reach. RBS alone answers `E?` over a constant receiver whose `E` is unbound, so `Set["r"].first` read
+          # `Dynamic[top]?`. The answer is the literal's first member (insertion order), `nil` for the empty set.
+          #
+          # What is proved: the receiver is a bare local read whose binding carries the `:synthesised` construction
+          # fact, which {Inference::ConstructionEscape} withholds from a local that is referenced inside any block or
+          # lambda, passed as an argument, held in a container or an alias, receives a call outside its reader /
+          # iterator / modelled-mutator lists (`method`, `instance_eval`, `send`, a project-defined name), or lives in a
+          # body that calls `binding` / `eval`; and the modelled mutators (`clear`, `delete`, `<<`, ...) widen the
+          # carrier off `Constant[Set]` at the call itself.
+          # What is NOT covered, and keeps the RBS answer: a receiver that is not a local (an ivar, a global, a
+          # constant, a call result, a literal), and whatever the escape scan itself does not see.
+          def constant_set_first(context)
+            constant = context.receiver
+            return nil unless context.args.nil? || context.args.empty?
+            return nil unless Inference::SetMutation.constant?(constant)
+
+            node = context.call_node&.receiver
+            return nil unless node.is_a?(Prism::LocalVariableReadNode)
+            return nil unless context.scope&.construction_fact?(node.name)
+
+            Type::Combinator.constant_of(constant.value.first)
           end
 
           # `Integer#to_s` / `Integer#inspect` (#993) on a bare `Nominal[Integer]` receiver, ahead of the

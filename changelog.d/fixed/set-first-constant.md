@@ -1,0 +1,2 @@
+- **[inference]** `Set#first` on a literal Set held in a local no longer reads `Dynamic[top]?`. ([#2912](https://github.com/rigortype/rigor/pull/2912))
+  - `s = Set["r"]; Sink.new.mode(s.first)` against `mode: ("r" | "w") -> void` reported `call.argument-type-mismatch`; `first` is now `"r"` while nothing else can reach the local, and reads as before once the local is captured by a block or passed on, and as `String?` once a modelled mutator runs.

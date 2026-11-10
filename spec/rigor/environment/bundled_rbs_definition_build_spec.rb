@@ -16,12 +16,13 @@ require "spec_helper"
 RSpec.describe "bundled RBS definition builds" do
   # The full bundled environment: `DEFAULT_LIBRARIES` (which is where the `rbs` gem — and therefore its
   # `sig/shims/bundler.rbs` and `sig/shims/rubygems.rbs` — enters) plus every `data/vendored_gem_sigs/`
-  # directory, plus the ADR-72 ActiveSupport overlay. The overlay is Gemfile.lock-gated in production, so it
-  # is passed explicitly here to exercise the `Time` / `DateTime` collisions too.
+  # directory, plus the ADR-72 ActiveSupport overlay and the #2857 Addressable overlay. The overlays are
+  # coverage-gated in production, so they are passed explicitly here to exercise the `Time` / `DateTime`
+  # collisions too — and to prove each overlay file builds standalone, collection copy or not.
   let(:env) do
     Rigor::Environment::RbsLoader.build_env_for(
       libraries: Rigor::Environment::DEFAULT_LIBRARIES,
-      signature_paths: Rigor::Environment::RbsLoader.gem_overlay_sig_paths(["activesupport"])
+      signature_paths: Rigor::Environment::RbsLoader.gem_overlay_sig_paths(%w[activesupport addressable])
     )
   end
 

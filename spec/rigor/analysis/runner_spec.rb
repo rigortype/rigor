@@ -690,6 +690,114 @@ RSpec.describe Rigor::Analysis::Runner do
       end
     end
 
+    # Issue #3041 review (P1) fixture — a collection project that loads the ADDRESSABLE overlay
+    # (`:rbs_collection` coverage per `GEM_OVERLAY_COVERAGE_SOURCES`) while activesupport sits on
+    # `:rbs_collection` coverage too, so the ADR-72 `:missing` default keeps ITS overlay unloaded —
+    # the exact split `gem_overlay_loaded?` must see through. The activesupport collection copy
+    # deliberately declares nothing: the project's own `sig/` owns `ActiveSupport::Duration`.
+    def write_addressable_collection_project(tmpdir) # rubocop:disable Metrics/MethodLength -- one linear fixture write per file
+      FileUtils.mkdir_p(File.join(tmpdir, "sig"))
+      File.write(File.join(tmpdir, "Gemfile.lock"), <<~LOCK)
+        GEM
+          remote: https://rubygems.org/
+          specs:
+            addressable (2.8.0)
+            activesupport (7.1.3)
+
+        PLATFORMS
+          ruby
+
+        DEPENDENCIES
+          addressable
+          activesupport
+
+        BUNDLED WITH
+           2.5.6
+      LOCK
+      FileUtils.mkdir_p(File.join(tmpdir, ".gem_rbs_collection", "addressable", "2.8"))
+      File.write(File.join(tmpdir, ".gem_rbs_collection", "addressable", "2.8", "addressable.rbs"), <<~RBS)
+        module Addressable
+          class URI
+            def self.parse: (String | URI uri) -> instance
+          end
+        end
+      RBS
+      FileUtils.mkdir_p(File.join(tmpdir, ".gem_rbs_collection", "activesupport", "7.1"))
+      File.write(File.join(tmpdir, ".gem_rbs_collection", "activesupport", "7.1", "activesupport.rbs"), <<~RBS)
+        module ActiveSupport
+        end
+      RBS
+      File.write(File.join(tmpdir, "rbs_collection.lock.yaml"), <<~YAML)
+        ---
+        path: ".gem_rbs_collection"
+        gems:
+        - name: addressable
+          version: 2.8
+          source:
+            type: git
+            name: ruby/gem_rbs_collection
+            remote: https://github.com/ruby/gem_rbs_collection.git
+            revision: abc
+            repo_dir: gems
+        - name: activesupport
+          version: 7.1
+          source:
+            type: git
+            name: ruby/gem_rbs_collection
+            remote: https://github.com/ruby/gem_rbs_collection.git
+            revision: abc
+            repo_dir: gems
+        gemfile_lock_path: Gemfile.lock
+      YAML
+      File.write(File.join(tmpdir, "sig", "duration.rbs"), <<~RBS)
+        module ActiveSupport
+          class Duration
+            def foo: () -> Integer
+          end
+        end
+      RBS
+    end
+
+    # Issue #3041 review (P1) — the same gate, one overlay over: #2857 added
+    # `data/gem_overlay/addressable/`, eligible under `:rbs_collection` coverage, so a collection
+    # project can load it while the activesupport overlay stays unloaded. `gem_overlay_loaded?` must
+    # key on the activesupport overlay specifically — "any `data/gem_overlay/` directory loaded"
+    # would let the addressable overlay silence `ActiveSupport::Duration#bar`, an ADR-26 false
+    # negative.
+    it "does NOT let a loaded addressable overlay protect ActiveSupport::Duration" do
+      Dir.mktmpdir("rigor-as-overlay-addressable-") do |tmpdir|
+        write_addressable_collection_project(tmpdir)
+        File.write(File.join(tmpdir, "code.rb"), "ActiveSupport::Duration.new.bar\n")
+
+        Dir.chdir(tmpdir) do
+          configuration = Rigor::Configuration.new(
+            "paths" => [File.join(tmpdir, "code.rb")],
+            "signature_paths" => [File.join(tmpdir, "sig")],
+            "bundler" => { "lockfile" => "Gemfile.lock", "auto_detect" => true },
+            "rbs_collection" => { "auto_detect" => true }
+          )
+          result = guarded_run(described_class.new(configuration: configuration, cache_store: nil))
+          undefined = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+
+          expect(undefined.map(&:method_name)).to eq(["bar"])
+
+          # Pin the loading split `gem_overlay_loaded?` keys on — `bar` firing is only
+          # meaningful while the addressable overlay IS in the run's signature paths and
+          # the activesupport overlay is NOT. A `WorkerSession` builds the same
+          # `Environment.for_project` axes `check` does for this configuration.
+          loaded = Rigor::Analysis::WorkerSession.new(
+            configuration: configuration, cache_store: nil
+          ).environment.rbs_loader.signature_paths.map(&:to_s)
+          addressable_overlay = Rigor::Environment::RbsLoader.gem_overlay_sig_paths(["addressable"]).map(&:to_s)
+          activesupport_overlay = Rigor::Environment::RbsLoader.gem_overlay_sig_paths(["activesupport"]).map(&:to_s)
+          expect(addressable_overlay).not_to be_empty
+          expect(activesupport_overlay).not_to be_empty
+          expect(loaded).to include(*addressable_overlay)
+          expect(loaded & activesupport_overlay).to be_empty
+        end
+      end
+    end
+
     it "emits `rbs.coverage.synthesized-namespace` :info when project RBS omits its namespace" do
       Dir.mktmpdir("rigor-synth-namespace-") do |tmpdir|
         FileUtils.mkdir_p(File.join(tmpdir, "sig"))

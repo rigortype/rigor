@@ -168,4 +168,121 @@ RSpec.describe Rigor::CLI::SigGenCommand do
       expect(rows).to all(eq(rows.first))
     end
   end
+
+  # #2715 — a class demoted for an unresolvable superclass can still wrap a nested declaration: the nested class's
+  # shell rides on a surviving sibling's candidate, so the container header kept the superclass and the next
+  # `check` failed the build with `RBS::NoSuperclassFoundError`. The container and what it wraps are not written
+  # at all: a bare `class Query` would make it RBS-known without its ancestry, and a later run would then write
+  # `class IssueQuery < ::Query`, dropping the external superclass's singleton methods from `check`.
+  describe "a demoted class wrapping a nested declaration" do
+    before do
+      write("lib/base_record.rb", <<~RUBY)
+        class BaseRecord
+          def call(thing)
+            thing.frobnicate
+          end
+        end
+      RUBY
+      write("lib/query.rb", <<~RUBY)
+        class QueryColumn
+          def initialize(name)
+            @name = name
+          end
+        end
+
+        class Query < BaseRecord
+          class QueryError < StandardError
+          end
+
+          def run(thing)
+            thing.go
+          end
+        end
+      RUBY
+      write("lib/issue_query.rb", "class IssueQuery < Query\n  def label = \"x\"\nend\n")
+    end
+
+    def sig_gen_write(path = "lib")
+      described_class.new(argv: ["--write", path, "--config=#{File.join(root, '.rigor.yml')}"],
+                          out: StringIO.new, err: StringIO.new).run
+    end
+
+    def sig_text
+      Dir.glob(File.join(root, "sig/**/*.rbs")).map { |f| File.read(f) }.join("\n")
+    end
+
+    it "writes neither the demoted container nor its nested class" do
+      sig_gen_write
+
+      expect(sig_text).to include("class QueryColumn")
+      expect(sig_text).not_to match(/Query\b(?!Column)/)
+    end
+
+    it "leaves `rigor check` free of rbs.coverage.definition-build-failed" do
+      sig_gen_write
+
+      configuration = Rigor::Configuration.load(File.join(root, ".rigor.yml"))
+      result = guarded_run(Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil), %w[lib])
+
+      expect(result.diagnostics.map(&:rule)).not_to include("rbs.coverage.definition-build-failed")
+    end
+
+    it "writes no `< ::Query` subclass on a second full run" do
+      2.times { sig_gen_write }
+
+      expect(sig_text).not_to include("Query <")
+    end
+
+    it "writes no `< ::Query` subclass on a run over a path subset after a full run" do
+      sig_gen_write
+      sig_gen_write("lib/issue_query.rb")
+
+      expect(sig_text).not_to include("IssueQuery")
+      expect(sig_text).not_to match(/Query\b(?!Column)/)
+    end
+
+    # The container carries no method of its own, so no candidate of it is demoted: only the nested class's shell
+    # could put it on disk.
+    it "also drops a demoted container that has no methods of its own" do
+      write("lib/query.rb", <<~RUBY)
+        class QueryColumn
+          def initialize(name)
+            @name = name
+          end
+        end
+
+        class Query < BaseRecord
+          class QueryError < StandardError
+          end
+        end
+      RUBY
+
+      sig_gen_write
+
+      expect(sig_text).not_to match(/Query\b(?!Column)/)
+    end
+
+    # The dropped nested class is no longer declared, so a written subclass of it would fail its own build.
+    it "demotes a subclass of the dropped nested class" do
+      write("lib/other.rb", "class Other < Query::QueryError\n  def b = 2\nend\n")
+
+      sig_gen_write
+
+      configuration = Rigor::Configuration.load(File.join(root, ".rigor.yml"))
+      result = guarded_run(Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil), %w[lib])
+
+      expect(sig_text).not_to include("Other")
+      expect(result.diagnostics.map(&:rule)).not_to include("rbs.coverage.definition-build-failed")
+    end
+
+    it "reports a demoted container that has no methods of its own" do
+      write("lib/query.rb", "class QueryColumn\n  def initialize(name) = @name = name\nend\n" \
+                            "class Query < BaseRecord\n  class QueryError < StandardError\n  end\nend\n")
+      err = StringIO.new
+      described_class.new(argv: ["--write", "lib", "--config=#{File.join(root, '.rigor.yml')}"],
+                          out: StringIO.new, err: err).run
+
+      expect(err.string).to include("  Query < BaseRecord\n")
+    end
+  end
 end

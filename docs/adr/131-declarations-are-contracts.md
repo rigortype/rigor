@@ -1,6 +1,6 @@
 # ADR-131 — Declarations are contracts: documented intent as an RBS authoring source
 
-Status: **Proposed, 2026-11-11.** Ships `skills/rigor-rbs-contract/` (body, four `references/`, an eval
+Status: **Accepted, 2026-11-11 — implemented by [#3061](https://github.com/rigortype/rigor/pull/3061).** Ships `skills/rigor-rbs-contract/` (body, four `references/`, an eval
 suite) and amends the `rigor-type-oracle` skill and its `AGENTS.md` fragment so the two agree. Nothing in
 the engine changes. Archetype: deliberative. Stakes: mid — guidance only and reversible in one docs PR,
 but it decides what agents write into adopting projects' `sig/` and into RBS sent to

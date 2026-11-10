@@ -60,6 +60,10 @@ git ls-tree --name-only origin/master approval-queue.d/   # README.md alone mean
 
 ## Branch: `release/x.y.z`
 
+Land the development work for this release on `master` through the normal
+contribution flow before preparing the release. A release branch starts from
+that work; local or unmerged development commits are not ready to release.
+
 Release work happens on a dedicated `release/x.y.z` branch, not directly on
 `master` ([ADR-50](../../../docs/adr/50-release-engineering-and-stability-strategy.md)).
 Cut it from an up-to-date `master`, in its own worktree:

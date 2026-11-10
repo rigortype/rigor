@@ -2710,9 +2710,12 @@ module Rigor
         # after it, or a rescue clause, may have set `$_` enters with it forgotten; a rescue clause runs after any
         # prefix of the body, and so reads it forgotten whenever the body may set it.
         entry = edge ? forget_guard_if_rebinds(LastLine.forget_if_set(scope, node), node) : scope
-        primary_type, primary_scope = eval_begin_primary_under(node, entry, edge: edge)
-        rescue_chain = collect_rescue_chain_results(node.rescue_clause, rescue_entry_scope(node, entry),
-                                                    edge: edge, writes: rescue_writes(node, edge))
+        rescue_entry = rescue_entry_scope(node, entry)
+        collector = begin_fact_collector(node, rescue_entry, edge)
+        primary_type, primary_scope = eval_begin_primary_under(node, entry, edge: edge, collector: collector)
+        rescue_chain = collect_rescue_chain_results(node.rescue_clause, rescue_entry,
+                                                    edge: edge, writes: rescue_writes(node, edge),
+                                                    raise_scopes: collector&.raise_scopes)
 
         # B2.1 — retry-edge widening. When a `retry` in the rescue chain targets this `begin`, control re-enters the
         # primary body carrying every rebind made before the retry: the arm's (`rescue; tries += 1; retry; end`), and
@@ -2877,6 +2880,65 @@ module Rigor
         forget_guard_if_rebinds(LastLine.forget_if_set(entry, node.statements), node.statements)
       end
 
+      # Issue #2691 — a rescue clause runs after any prefix of the `begin` body raised, so a fact the clause's
+      # entry scope holds for an indexed read (`h[:k]`) or a single-hop chain (`x.r`) survives into it only where
+      # EVERY scope the body can raise from still binds the identical type object. `raise_scopes` is that set —
+      # the post-scope of each statement of the body's frame and the scope it ends with
+      # ({#eval_begin_primary_under}'s collector) — not the fall-through exit alone: `eval_if` and kin discard a
+      # branch that terminates, so a write on `if c; @x.r = nil; raise; end` never reaches the exit scope.
+      # `equal?` keeps only an untouched fact: a re-narrowed or re-joined one is a new object and drops (the
+      # conservative side).
+      #
+      # The residual is a fact the body drops and then re-establishes as the identical (interned) type object:
+      # raise points after the re-establishment keep it, which is correct, and the only unsound window would be a
+      # raise point whose recorded scope still binds the object although the fact was invalidated and not yet
+      # re-established. No producer reaches that today — a rebind or a clause widening answers `Dynamic[top]`,
+      # never the fact's type ({ClauseWidening}), and a widened slot read floors to `Dynamic` rather than
+      # reinstalling the recorded object.
+      #
+      # The filter covers rescue entries only: an `ensure` clause enters from the scope past the `begin` — the
+      # join of the fall-through exits — so it keeps a fact a terminating-branch write voided, the pre-#2691
+      # hole left open because collecting raise points for every `ensure`-only `begin` costs a frame walk.
+      def clause_fact_scope(entry_scope, raise_scopes)
+        return entry_scope if entry_scope.indexed_narrowings.empty? && entry_scope.method_chain_narrowings.empty?
+
+        indexed = entry_scope.indexed_narrowings.reduce(entry_scope) do |acc, (key, type)|
+          if raise_scopes.all? { |point| point.indexed_narrowings[key].equal?(type) }
+            acc
+          else
+            acc.without_indexed_narrowing(key.receiver_kind, key.receiver_name, key.key)
+          end
+        end
+        indexed.method_chain_narrowings.reduce(indexed) do |acc, (key, type)|
+          if raise_scopes.all? { |point| point.method_chain_narrowings[key].equal?(type) }
+            acc
+          else
+            acc.without_method_chain_narrowing(key.receiver_kind, key.receiver_name, key.method_name)
+          end
+        end
+      end
+
+      # Issue #2691 — the {BodyRaiseScopes} {#eval_begin_primary_under} fills while evaluating `node`'s primary
+      # body, or nil when {#clause_fact_scope} has nothing to filter: no rescue clause, no body, or a `clause_entry`
+      # (the scope the chain enters with — `rescue_entry_scope`'s result, or the retry-widened entry under an
+      # edge) holding no indexed or method-chain fact. The frame walk is skipped unless a fact could drop, so a
+      # `begin` whose entry binds none pays nothing.
+      def begin_fact_collector(node, clause_entry, edge)
+        return nil unless node.rescue_clause && node.statements
+        return nil if clause_entry.indexed_narrowings.empty? && clause_entry.method_chain_narrowings.empty?
+
+        frame = edge ? edge.frame : primary_body_frame(node.statements)
+        BodyRaiseScopes.new(frame: frame, raise_scopes: [])
+      end
+
+      # The set {#walk_primary_frame} collects for a primary body — the nodes whose post-statement scopes are the
+      # body's raise points — without the write-name pass a retry edge also needs.
+      def primary_body_frame(statements)
+        frame = Set.new.compare_by_identity
+        walk_primary_frame(statements, true, frame, Set.new)
+        frame
+      end
+
       # Rescue arms that never fall through contribute neither a type fragment NOR a scope to the post-begin flow —
       # control left the `begin` via that arm. That is an arm ending in `return`, `next`, `break`, `raise`, `throw`,
       # `exit`, `abort` or `fail`, and one whose type is `bot` ({#branch_terminates?}): an arm ending in `retry`, or in
@@ -2927,13 +2989,23 @@ module Rigor
       # `edge`, when given, collects every scope the primary body could raise from: the scope after each statement of
       # its frame ({#record_raise_points}), and the scope it ends with. The else-clause is not among them: what it
       # raises is not rescued here.
-      def eval_begin_primary_under(node, entry_scope, edge: nil)
+      #
+      # `collector`, when given, is a {BodyRaiseScopes} the same recording fills for {#clause_fact_scope} — built
+      # only when the clause entry still holds an indexed or method-chain fact a raise-point write could
+      # invalidate ({#begin_fact_collector}). A retry `edge` collects the same scopes for its own widening; the
+      # collector is separate so each evaluation pass filters against exactly its own raise points.
+      #
+      # Returns `[type, scope]`: the construct's value and exit scope (the else-clause's when present). The scope the
+      # primary body alone ended with is recorded as a raise point before the `else` runs — the `else` runs only when
+      # nothing raised, so its effects are no raise point's.
+      def eval_begin_primary_under(node, entry_scope, edge: nil, collector: nil)
         body_type, body_scope =
           if node.statements
-            with_raise_frame(edge) { sub_eval(node.statements, entry_scope) }
+            with_raise_frame(edge, collector) { sub_eval(node.statements, entry_scope) }
           else
             [Type::Combinator.constant_of(nil), entry_scope]
           end
+        collector.raise_scopes << body_scope if collector
         edge.raise_scopes << body_scope if edge
 
         if node.else_clause
@@ -2957,6 +3029,13 @@ module Rigor
       end
       private_constant :RetryEdge
 
+      # Issue #2691 — the raise-point scopes one evaluation of a `begin` primary body collects for
+      # {#clause_fact_scope}: {RetryEdge}'s `frame` / `raise_scopes` pair without the retry bookkeeping, so
+      # {#record_raise_points} records into it exactly as into an edge. `frame` is the body's own frame — shared
+      # with the retry edge when one exists, since both walks collect the same nodes.
+      BodyRaiseScopes = Data.define(:frame, :raise_scopes)
+      private_constant :BodyRaiseScopes
+
       # The entry and edge one widening reads, whether it widens to the Nominal envelope or keeps literals, and, per
       # name, the rebinds it has already weighed: a statement-by-statement body shares one binding object across every
       # scope until the name is rebound, and weighing each copy again is what made a long body quadratic.
@@ -2965,8 +3044,9 @@ module Rigor
       end
       private_constant :RetryWidening
 
-      # The thread-local stack of the {RetryEdge}s whose primary body is being evaluated, innermost last, or nil. The
-      # frozen stack is the Frame; a statement's raise point recorded into an edge is a Resource touch
+      # The thread-local stack of the raise-point frames whose primary body is being evaluated, innermost last, or
+      # nil: a {RetryEdge} and/or a {BodyRaiseScopes}. The
+      # frozen stack is the Frame; a statement's raise point recorded into a frame is a Resource touch
       # ({#record_raise_points}).
       RETRY_FRAMES = TypingState.frame(
         :retry_frames,
@@ -3064,8 +3144,11 @@ module Rigor
       end
 
       def eval_begin_paths(node, entry, edge)
-        primary = eval_begin_primary_under(node, entry, edge: edge)
-        [*primary, collect_rescue_chain_results(node.rescue_clause, entry, edge: edge)]
+        collector = begin_fact_collector(node, entry, edge)
+        primary_type, primary_scope = eval_begin_primary_under(node, entry, edge: edge, collector: collector)
+        [primary_type, primary_scope,
+         collect_rescue_chain_results(node.rescue_clause, entry,
+                                      edge: edge, raise_scopes: collector&.raise_scopes)]
       end
 
       # B2.1 — the entry scope widened by what crosses the retry edge, or nil when nothing does. A local or ivar bound
@@ -3090,28 +3173,32 @@ module Rigor
         widened
       end
 
-      # Runs `block` with `edge` on top of the thread-local stack {#record_raise_points} reads.
-      def with_raise_frame(edge, &)
-        return yield unless edge
+      # Runs `block` with `frames` — a retry edge and/or a {BodyRaiseScopes}, nils skipped — on top of the
+      # thread-local stack {#record_raise_points} reads.
+      def with_raise_frame(first, second, &)
+        return yield if first.nil? && second.nil?
 
+        frames = first && second ? [first, second] : [first || second]
         state = TypingState.current
         previous = state[RETRY_FRAMES]
-        state.with(RETRY_FRAMES, (previous ? [*previous, edge] : [edge]).freeze, &)
+        state.with(RETRY_FRAMES, (previous ? previous + frames : frames).freeze, &)
       end
 
-      # The scope after each statement of a retrying primary body's frame is a point the body can raise from, the next
-      # statement's being the one after. Together they carry every rebind a retry can re-enter with, including one on a
-      # branch that then raises and so never reaches the body's exit scope (`if bad; tries += 1; raise; end`), and a
-      # write threaded into the raising call's own operands (`raise Retry.new(tries += 1) if flaky?`). A statement of a
-      # nested block or lambda body is not in the frame (a block parameter can shadow the counter); the block's effect
+      # The scope after each statement of a primary body's frame is a point the body can raise from, the next
+      # statement's being the one after — into every frame on the stack: a retrying begin's edge, which carries
+      # every rebind a retry can re-enter with, and a {BodyRaiseScopes}, which {#clause_fact_scope} intersects
+      # over. Both see a rebind on a branch that then raises and so never reaches the body's exit scope
+      # (`if bad; tries += 1; raise; end`), and a write threaded into the raising call's own operands
+      # (`raise Retry.new(tries += 1) if flaky?`). A statement of a nested block or lambda body is not in the
+      # frame (a block parameter can shadow the counter); the block's effect
       # on this frame shows in the post-scope of the statement holding it. Recording from the evaluator rather than
       # `on_enter` keeps a statement reached with the index recorder off (a threaded operand, a loop fixpoint pass).
       def record_raise_points(frames, stmt, stmt_scope)
-        frames.each do |edge|
-          next unless edge.frame.include?(stmt)
+        frames.each do |collector|
+          next unless collector.frame.include?(stmt)
 
           typing_state.touch(RETRY_FRAMES)
-          edge.raise_scopes << stmt_scope
+          collector.raise_scopes << stmt_scope
         end
       end
 
@@ -3269,7 +3356,14 @@ module Rigor
       # Issue #1231 — `writes` widens the scope each clause enters with ({#widen_clause_entry}) before its
       # reference is bound, so `rescue => e` still binds `e` to the exception. It is nil under a retry edge, which
       # already carries every scope the primary body raises from ({#widen_entry_for_retry}).
-      def collect_rescue_chain_results(rescue_node, entry_scope, edge: nil, writes: nil)
+      # `raise_scopes`, when given, is every scope the primary body can raise from — the post-scope of each
+      # statement of its frame and the scope it ends with ({#eval_begin_primary_under}'s collector): the rescue
+      # entry keeps only the indexed and method-chain facts every one of them still binds verbatim
+      # ({#clause_fact_scope}).
+      def collect_rescue_chain_results(rescue_node, entry_scope, edge: nil, writes: nil, raise_scopes: nil)
+        return [] if rescue_node.nil?
+
+        entry_scope = clause_fact_scope(entry_scope, raise_scopes) if raise_scopes
         on_enter = edge ? retry_scope_recorder(edge) : @on_enter
         results = []
         current = rescue_node
